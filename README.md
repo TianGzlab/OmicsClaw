@@ -2,23 +2,23 @@
   <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="400"/>
 
   <h3>🧬 OmicsClaw</h3>
-  <p><strong>Multi-omics analysis platform with 40+ specialized skills.</strong></p>
+  <p><strong>Multi-omics analysis platform with 50+ specialized skills.</strong></p>
   <p>Spatial transcriptomics • Single-cell • Genomics • Proteomics • Metabolomics</p>
   <p><em>Local-first. Skill-based. Natural language routing. Modular. Reproducible.</em></p>
 </div>
 
 # OmicsClaw
 
-> Multi-omics analysis platform with **40+ specialized skills** across spatial transcriptomics, single-cell, genomics, proteomics, and metabolomics. Command-line interface with natural language routing for complete analysis workflows.
+> Multi-omics analysis platform with **50+ specialized skills** across spatial transcriptomics, single-cell, genomics, proteomics, and metabolomics. Command-line interface with natural language routing for complete analysis workflows.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 **Key Features:**
-- 🧬 **40+ analysis skills** across 5 omics domains with unified CLI
+- 🧬 **50+ analysis skills** across 5 omics domains with unified CLI
 - 🔒 **Local-first processing** — your data never leaves your machine
-- 🎯 **Smart orchestration** — natural language query routing to appropriate skills
+- 🎯 **Smart orchestration** — natural language query routing with 3 modes (keyword/LLM/hybrid)
 - 📦 **Modular dependencies** — install only what you need
 - 🤖 **Bot integration** — Telegram and Feishu messaging interfaces
 - 🧪 **Demo mode** — try any skill instantly with synthetic data
@@ -27,7 +27,7 @@
 
 ```bash
 # Clone and setup
-git clone https://github.com/OmicsClaw/OmicsClaw.git
+git clone https://github.com/zhou-1314/OmicsClaw.git
 cd OmicsClaw
 
 # Create virtual environment (Python 3.11+ required)
@@ -38,7 +38,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
 
 # Try a demo
-python omicsclaw.py run preprocess --demo
+python omicsclaw.py run spatial-preprocessing --demo
 ```
 
 **Installation tiers:**
@@ -56,11 +56,11 @@ python omicsclaw.py run preprocess --demo
 
 | Domain | Skills | Key Capabilities |
 |--------|--------|------------------|
-| **Spatial Transcriptomics** | 16 | QC, clustering, cell typing, deconvolution, spatial statistics, ligand-receptor, velocity, trajectory |
-| **Single-Cell Omics** | 5 | Preprocessing, doublet detection, annotation, trajectory, batch integration |
-| **Genomics** | 8 | VCF operations, variant calling, alignment, annotation, structural variants, assembly, phasing |
-| **Proteomics** | 6 | MS QC, data import, peptide ID, quantification, differential abundance, PTM analysis |
-| **Metabolomics** | 5 | Peak detection, XCMS preprocessing, annotation, normalization, statistical analysis |
+| **Spatial Transcriptomics** | 15 | QC, clustering, cell typing, deconvolution, spatial statistics, ligand-receptor, velocity, trajectory |
+| **Single-Cell Omics** | 9 | Preprocessing, doublet detection, annotation, trajectory, batch integration, communication, DE, GRN, multiome |
+| **Genomics** | 10 | VCF operations, variant calling, alignment, annotation, structural variants, assembly, phasing, CNV, epigenomics |
+| **Proteomics** | 8 | MS QC, data import, peptide ID, quantification, differential abundance, PTM analysis, enrichment, structure |
+| **Metabolomics** | 8 | Peak detection, XCMS preprocessing, annotation, normalization, statistical analysis, differential, pathway, quantification |
 | **Orchestrator** | 1 | Natural language routing, multi-domain pipelines, file-type detection |
 
 **Platforms supported:** Visium, Xenium, MERFISH, Slide-seq, 10x scRNA-seq, Illumina/PacBio sequencing, LC-MS/MS
@@ -69,51 +69,51 @@ python omicsclaw.py run preprocess --demo
 
 ## Skills Overview
 
-### Spatial Transcriptomics (16 skills)
+### Spatial Transcriptomics (15 skills)
 
-**Foundation:** `preprocess` — QC, normalization, clustering, UMAP
-**Analysis:** `domains`, `annotate`, `deconv`, `statistics`, `genes`, `de`, `condition`
-**Advanced:** `communication`, `velocity`, `trajectory`, `enrichment`, `cnv`
-**Integration:** `integrate`, `register`
+**Foundation:** `spatial-preprocessing` — QC, normalization, clustering, UMAP
+**Analysis:** `spatial-domain-identification`, `spatial-cell-annotation`, `spatial-deconvolution`, `spatial-statistics`, `spatial-svg-detection`, `spatial-de`, `spatial-condition-comparison`
+**Advanced:** `spatial-cell-communication`, `spatial-velocity`, `spatial-trajectory`, `spatial-enrichment`, `spatial-cnv`
+**Integration:** `spatial-integration`, `spatial-registration`
 
 <details>
 <summary>View all spatial skills</summary>
 
 | Skill | Description | Key Methods |
 |-------|-------------|-------------|
-| `preprocess` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy, Squidpy |
-| `domains` | Tissue region / niche identification | SpaGCN, STAGATE, GraphST, Leiden |
-| `annotate` | Cell type annotation | Tangram, scANVI, CellAssign |
-| `deconv` | Cell type proportion estimation | CARD, Cell2Location, RCTD |
-| `statistics` | Spatial autocorrelation patterns | Moran's I, Geary's C, Ripley's K |
-| `genes` | Spatially variable genes | SpatialDE, SPARK-X |
-| `de` | Differential expression | Wilcoxon, t-test, PyDESeq2 |
-| `condition` | Condition comparison | Pseudobulk DESeq2 |
-| `communication` | Ligand-receptor interactions | LIANA+, CellPhoneDB |
-| `velocity` | RNA velocity / cellular dynamics | scVelo, VeloVI |
-| `trajectory` | Developmental trajectories | CellRank, Palantir, DPT |
-| `enrichment` | Pathway enrichment | GSEA, ORA, Enrichr |
-| `cnv` | Copy number variation | inferCNVpy, Numbat |
-| `integrate` | Multi-sample integration | Harmony, BBKNN, Scanorama |
-| `register` | Spatial registration | PASTE, STalign |
+| `spatial-preprocessing` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy, Squidpy |
+| `spatial-domain-identification` | Tissue region / niche identification | SpaGCN, STAGATE, GraphST, Leiden |
+| `spatial-cell-annotation` | Cell type annotation | Tangram, scANVI, CellAssign |
+| `spatial-deconvolution` | Cell type proportion estimation | CARD, Cell2Location, RCTD |
+| `spatial-statistics` | Spatial autocorrelation patterns | Moran's I, Geary's C, Ripley's K |
+| `spatial-svg-detection` | Spatially variable genes | SpatialDE, SPARK-X |
+| `spatial-de` | Differential expression | Wilcoxon, t-test, PyDESeq2 |
+| `spatial-condition-comparison` | Condition comparison | Pseudobulk DESeq2 |
+| `spatial-cell-communication` | Ligand-receptor interactions | LIANA+, CellPhoneDB |
+| `spatial-velocity` | RNA velocity / cellular dynamics | scVelo, VeloVI |
+| `spatial-trajectory` | Developmental trajectories | CellRank, Palantir, DPT |
+| `spatial-enrichment` | Pathway enrichment | GSEA, ORA, Enrichr |
+| `spatial-cnv` | Copy number variation | inferCNVpy, Numbat |
+| `spatial-integration` | Multi-sample integration | Harmony, BBKNN, Scanorama |
+| `spatial-registration` | Spatial registration | PASTE, STalign |
 
 </details>
 
-### Single-Cell Omics (5 skills)
+### Single-Cell Omics (9 skills)
 
-`sc-preprocess` • `sc-doublet` • `sc-trajectory` • `sc-annotate` • `sc-integrate`
+`sc-preprocessing` • `sc-doublet-detection` • `sc-trajectory` • `sc-cell-annotation` • `sc-batch-integration` • `sc-de` • `sc-grn` • `sc-cell-communication` • `sc-multiome`
 
-### Genomics (8 skills)
+### Genomics (10 skills)
 
-`vcf-ops` • `variant-call` • `genomics-qc` • `align` • `variant-annotate` • `sv-detect` • `assemble` • `phase`
+`genomics-vcf-operations` • `genomics-variant-calling` • `genomics-qc` • `genomics-alignment` • `genomics-variant-annotation` • `genomics-sv-detection` • `genomics-assembly` • `genomics-phasing` • `genomics-cnv-calling` • `genomics-epigenomics`
 
-### Proteomics (6 skills)
+### Proteomics (8 skills)
 
-`ms-qc` • `data-import` • `peptide-id` • `quantification` • `differential-abundance` • `ptm`
+`proteomics-ms-qc` • `proteomics-data-import` • `proteomics-identification` • `proteomics-quantification` • `proteomics-de` • `proteomics-ptm` • `proteomics-enrichment` • `proteomics-structural`
 
-### Metabolomics (5 skills)
+### Metabolomics (8 skills)
 
-`peak-detect` • `xcms-preprocess` • `metabolite-annotation` • `metabolite-normalization` • `metabolite-stats`
+`metabolomics-peak-detection` • `metabolomics-xcms-preprocessing` • `metabolomics-annotation` • `metabolomics-normalization` • `metabolomics-de` • `metabolomics-pathway-enrichment` • `metabolomics-statistics` • `metabolomics-quantification`
 
 ### Orchestrator (1 skill)
 
@@ -144,28 +144,33 @@ python omicsclaw.py run <skill> --input <file> --output <dir>
 **Spatial transcriptomics analysis:**
 ```bash
 # 1. Preprocess: QC, normalize, cluster
-python omicsclaw.py run preprocess --input data.h5ad --output results/preprocess
+python omicsclaw.py run spatial-preprocessing --input data.h5ad --output output/spatial-preprocess
 
 # 2. Identify tissue domains
-python omicsclaw.py run domains --input results/preprocess/processed.h5ad --output results/domains
+python omicsclaw.py run spatial-domain-identification --input output/spatial-preprocess/processed.h5ad --output output/spatial-domains
 
-# 3. Find marker genes
-python omicsclaw.py run de --input results/domains/processed.h5ad --output results/de
+# 3. Find svg genes
+python omicsclaw.py run spatial-svg-detection --input output/spatial-domains/processed.h5ad --output output/spatial-svg-detection
 
 # 4. Cell-cell communication
-python omicsclaw.py run communication --input results/preprocess/processed.h5ad --output results/comm
+python omicsclaw.py run spatial-cell-communication --input output/spatial-preprocess/processed.h5ad --output output/spatial-cell-cell-communication
 ```
 
 **Single-cell analysis:**
 ```bash
-python omicsclaw.py run sc-preprocess --input pbmc.h5ad --output results/sc-preprocess
-python omicsclaw.py run sc-doublet --input pbmc.h5ad --output results/sc-doublet
-python omicsclaw.py run sc-annotate --input results/sc-preprocess/processed.h5ad --output results/sc-annotate
+# 1. Preprocess: QC, normalize, cluster
+python omicsclaw.py run sc-preprocessing --input pbmc.h5ad --output output/sc-preprocess
+
+# 2. Doublet detection
+python omicsclaw.py run sc-doublet-detection --input pbmc.h5ad --output output/sc-doublet
+
+# 3. Cell annotation
+python omicsclaw.py run sc-cell-annotation --input output/sc-preprocess/processed.h5ad --output output/sc-annotate
 ```
 
 **Genomics:**
 ```bash
-python omicsclaw.py run vcf-ops --input variants.vcf.gz --output results/vcf-ops
+python omicsclaw.py run genomics-vcf-operations --input variants.vcf.gz --output output/vcf-ops
 ```
 
 ### Smart Orchestration
@@ -176,29 +181,47 @@ The orchestrator automatically routes queries and files to the right analysis:
 ```bash
 python omicsclaw.py run orchestrator \
   --query "find spatially variable genes" \
-  --input data.h5ad --output results
+  --input data.h5ad --output output
+```
+
+**Routing modes** (choose based on query complexity):
+```bash
+# Keyword mode (default) - fast pattern matching
+python omicsclaw.py run orchestrator \
+  --query "find spatially variable genes" \
+  --routing-mode keyword --output output
+
+# LLM mode - AI-powered semantic understanding
+python omicsclaw.py run orchestrator \
+  --query "I want to understand which genes show spatial patterns" \
+  --routing-mode llm --output output
+
+# Hybrid mode - combines keyword + LLM fallback
+python omicsclaw.py run orchestrator \
+  --query "analyze cell-cell interactions" \
+  --routing-mode hybrid --output output
 ```
 
 **File-type detection:**
 ```bash
 # Automatically detects file type and runs appropriate preprocessing
-python omicsclaw.py run orchestrator --input data.h5ad --output results
-python omicsclaw.py run orchestrator --input variants.vcf.gz --output results
+python omicsclaw.py run orchestrator --input data.h5ad --output output
+python omicsclaw.py run orchestrator --input variants.vcf.gz --output output
 ```
 
 **Named pipelines:**
 ```bash
 # Standard spatial: preprocess → domains → de → genes → statistics
-python omicsclaw.py run orchestrator --pipeline standard --input data.h5ad --output results
+python omicsclaw.py run orchestrator --pipeline standard --input data.h5ad --output output
 
 # Full spatial: adds communication + enrichment
-python omicsclaw.py run orchestrator --pipeline full --input data.h5ad --output results
+python omicsclaw.py run orchestrator --pipeline full --input data.h5ad --output output
 
 # Single-cell: sc-preprocess → sc-doublet → sc-annotate → sc-trajectory
-python omicsclaw.py run orchestrator --pipeline singlecell --input data.h5ad --output results
+python omicsclaw.py run orchestrator --pipeline singlecell --input data.h5ad --output output
 
 # Cancer analysis: preprocess → domains → de → cnv → enrichment
-python omicsclaw.py run orchestrator --pipeline cancer --input data.h5ad --output results
+python omicsclaw.py run orchestrator --pipeline cancer --input data.h5ad --output output
 ```
 
 ## Output Structure
@@ -233,11 +256,11 @@ OmicsClaw/
 │   ├── proteomics/           # Proteomics utilities
 │   └── metabolomics/         # Metabolomics utilities
 ├── skills/                   # Self-contained analysis modules
-│   ├── spatial/              # 16 spatial transcriptomics skills
-│   ├── singlecell/           # 5 single-cell omics skills
-│   ├── genomics/             # 8 genomics skills
-│   ├── proteomics/           # 6 proteomics skills
-│   ├── metabolomics/         # 5 metabolomics skills
+│   ├── spatial/              # 15 spatial transcriptomics skills
+│   ├── singlecell/           # 9 single-cell omics skills
+│   ├── genomics/             # 10 genomics skills
+│   ├── proteomics/           # 8 proteomics skills
+│   ├── metabolomics/         # 8 metabolomics skills
 │   └── orchestrator/         # Multi-domain routing
 ├── bot/                      # Telegram + Feishu messaging interfaces
 ├── docs/                     # Documentation (installation, methods, architecture)
@@ -269,7 +292,7 @@ python -m pytest skills/spatial/ -v
 python -m pytest skills/singlecell/ -v
 
 # Test single skill
-python -m pytest skills/spatial/preprocess/tests/ -v
+python -m pytest skills/spatial/spatial-preprocessing/tests/ -v
 
 # Run tests requiring full dependencies
 python -m pytest -m slow -v

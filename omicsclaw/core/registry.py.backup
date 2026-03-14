@@ -148,11 +148,10 @@ _HARDCODED_DOMAINS = {
 
 
 _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
-    "spatial-preprocessing": {
+    "preprocess": {
         "domain": "spatial",
-        "alias": "spatial-preprocessing",
-        "legacy_aliases": ["preprocess"],
-        "script": SKILLS_DIR / "spatial" / "spatial-preprocess" / "spatial_preprocess.py",
+        "alias": "preprocess",
+        "script": SKILLS_DIR / "spatial" / "preprocess" / "spatial_preprocess.py",
         "demo_args": ["--demo"],
         "description": "Spatial data QC, normalization, HVG, PCA/UMAP, Leiden clustering",
         "allowed_extra_flags": {
@@ -162,11 +161,10 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         },
         "saves_h5ad": True,
     },
-    "spatial-domain-identification": {
+    "domains": {
         "domain": "spatial",
-        "alias": "spatial-domain-identification",
-        "legacy_aliases": ["domains"],
-        "script": SKILLS_DIR / "spatial" / "spatial-domains" / "spatial_domains.py",
+        "alias": "domains",
+        "script": SKILLS_DIR / "spatial" / "domains" / "spatial_domains.py",
         "demo_args": ["--demo"],
         "description": "Tissue region/niche identification (Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY)",
         "allowed_extra_flags": {
@@ -175,11 +173,10 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         },
         "saves_h5ad": True,
     },
-    "spatial-cell-annotation": {
+    "annotate": {
         "domain": "spatial",
-        "alias": "spatial-cell-annotation",
-        "legacy_aliases": ["annotate"],
-        "script": SKILLS_DIR / "spatial" / "spatial-annotate" / "spatial_annotate.py",
+        "alias": "annotate",
+        "script": SKILLS_DIR / "spatial" / "annotate" / "spatial_annotate.py",
         "demo_args": ["--demo"],
         "description": "Cell type annotation (marker_based, Tangram, scANVI, CellAssign)",
         "allowed_extra_flags": {
@@ -189,22 +186,20 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-deconvolution": {
+    "deconv": {
         "domain": "spatial",
-        "alias": "spatial-deconvolution",
-        "legacy_aliases": ["deconv"],
-        "script": SKILLS_DIR / "spatial" / "spatial-deconv" / "spatial_deconv.py",
+        "alias": "deconv",
+        "script": SKILLS_DIR / "spatial" / "deconv" / "spatial_deconv.py",
         "demo_args": ["--demo"],
         "description": "Deconvolution — cell type proportions (NNLS, Cell2Location, RCTD, Tangram, CARD)",
         "allowed_extra_flags": {"--method", "--reference", "--cell-type-key", "--n-epochs"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-statistics": {
+    "statistics": {
         "domain": "spatial",
-        "alias": "spatial-statistics",
-        "legacy_aliases": ["statistics"],
-        "script": SKILLS_DIR / "spatial" / "spatial-statistics" / "spatial_statistics.py",
+        "alias": "statistics",
+        "script": SKILLS_DIR / "spatial" / "statistics" / "spatial_statistics.py",
         "demo_args": ["--demo"],
         "description": "Spatial statistics (Moran's I, Geary's C, Getis-Ord Gi*, Ripley, neighborhood enrichment, network properties)",
         "allowed_extra_flags": {
@@ -213,22 +208,20 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-svg-detection": {
+    "genes": {
         "domain": "spatial",
-        "alias": "spatial-svg-detection",
-        "legacy_aliases": ["genes"],
-        "script": SKILLS_DIR / "spatial" / "spatial-genes" / "spatial_genes.py",
+        "alias": "genes",
+        "script": SKILLS_DIR / "spatial" / "genes" / "spatial_genes.py",
         "demo_args": ["--demo"],
         "description": "Spatially variable genes (Moran's I, SpatialDE, SPARK-X, FlashS)",
         "allowed_extra_flags": {"--method", "--n-top-genes", "--fdr-threshold"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-de": {
+    "de": {
         "domain": "spatial",
-        "alias": "spatial-de",
-        "legacy_aliases": ["de"],
-        "script": SKILLS_DIR / "spatial" / "spatial-de" / "spatial_de.py",
+        "alias": "de",
+        "script": SKILLS_DIR / "spatial" / "de" / "spatial_de.py",
         "demo_args": ["--demo"],
         "description": "Differential expression (Wilcoxon, t-test, PyDESeq2 pseudobulk)",
         "allowed_extra_flags": {
@@ -237,11 +230,10 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-condition-comparison": {
+    "condition": {
         "domain": "spatial",
-        "alias": "spatial-condition-comparison",
-        "legacy_aliases": ["condition"],
-        "script": SKILLS_DIR / "spatial" / "spatial-condition" / "spatial_condition.py",
+        "alias": "condition",
+        "script": SKILLS_DIR / "spatial" / "condition" / "spatial_condition.py",
         "demo_args": ["--demo"],
         "description": "Condition comparison with pseudobulk DESeq2 statistics",
         "allowed_extra_flags": {
@@ -250,75 +242,68 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-cell-communication": {
+    "communication": {
         "domain": "spatial",
-        "alias": "spatial-cell-communication",
-        "legacy_aliases": ["communication"],
-        "script": SKILLS_DIR / "spatial" / "spatial-communication" / "spatial_communication.py",
+        "alias": "communication",
+        "script": SKILLS_DIR / "spatial" / "communication" / "spatial_communication.py",
         "demo_args": ["--demo"],
         "description": "Cell-cell communication (LIANA+, CellPhoneDB, FastCCC)",
         "allowed_extra_flags": {"--method", "--species", "--cell-type-key"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-velocity": {
+    "velocity": {
         "domain": "spatial",
-        "alias": "spatial-velocity",
-        "legacy_aliases": ["velocity"],
-        "script": SKILLS_DIR / "spatial" / "spatial-velocity" / "spatial_velocity.py",
+        "alias": "velocity",
+        "script": SKILLS_DIR / "spatial" / "velocity" / "spatial_velocity.py",
         "demo_args": ["--demo"],
         "description": "RNA velocity and cellular dynamics (scVelo, VeloVI)",
         "allowed_extra_flags": {"--method", "--mode"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-trajectory": {
+    "trajectory": {
         "domain": "spatial",
-        "alias": "spatial-trajectory",
-        "legacy_aliases": ["trajectory"],
-        "script": SKILLS_DIR / "spatial" / "spatial-trajectory" / "spatial_trajectory.py",
+        "alias": "trajectory",
+        "script": SKILLS_DIR / "spatial" / "trajectory" / "spatial_trajectory.py",
         "demo_args": ["--demo"],
         "description": "Trajectory inference (CellRank, Palantir, DPT)",
         "allowed_extra_flags": {"--method", "--root-cell", "--n-states"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-enrichment": {
+    "enrichment": {
         "domain": "spatial",
-        "alias": "spatial-enrichment",
-        "legacy_aliases": ["enrichment"],
-        "script": SKILLS_DIR / "spatial" / "spatial-enrichment" / "spatial_enrichment.py",
+        "alias": "enrichment",
+        "script": SKILLS_DIR / "spatial" / "enrichment" / "spatial_enrichment.py",
         "demo_args": ["--demo"],
         "description": "Pathway enrichment (GSEA, ORA, Enrichr, ssGSEA)",
         "allowed_extra_flags": {"--method", "--gene-set", "--species", "--source"},
         "requires_preprocessed": True,
     },
-    "spatial-cnv": {
+    "cnv": {
         "domain": "spatial",
-        "alias": "spatial-cnv",
-        "legacy_aliases": ["cnv"],
-        "script": SKILLS_DIR / "spatial" / "spatial-cnv" / "spatial_cnv.py",
+        "alias": "cnv",
+        "script": SKILLS_DIR / "spatial" / "cnv" / "spatial_cnv.py",
         "demo_args": ["--demo"],
         "description": "Copy number variation inference (inferCNVpy, Numbat)",
         "allowed_extra_flags": {"--method", "--reference-key"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    "spatial-integration": {
+    "integrate": {
         "domain": "spatial",
-        "alias": "spatial-integration",
-        "legacy_aliases": ["integrate"],
-        "script": SKILLS_DIR / "spatial" / "spatial-integrate" / "spatial_integrate.py",
+        "alias": "integrate",
+        "script": SKILLS_DIR / "spatial" / "integrate" / "spatial_integrate.py",
         "demo_args": ["--demo"],
         "description": "Multi-sample integration (Harmony, BBKNN, Scanorama, scVI)",
         "allowed_extra_flags": {"--method", "--batch-key"},
         "saves_h5ad": True,
     },
-    "spatial-registration": {
+    "register": {
         "domain": "spatial",
-        "alias": "spatial-registration",
-        "legacy_aliases": ["register"],
-        "script": SKILLS_DIR / "spatial" / "spatial-register" / "spatial_register.py",
+        "alias": "register",
+        "script": SKILLS_DIR / "spatial" / "register" / "spatial_register.py",
         "demo_args": ["--demo"],
         "description": "Spatial registration / slice alignment (PASTE, STalign)",
         "allowed_extra_flags": {"--method", "--reference-slice"},
@@ -337,11 +322,10 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # Single-cell domain
     # -----------------------------------------------------------------------
-    "sc-preprocessing": {
+    "sc-preprocess": {
         "domain": "singlecell",
-        "alias": "sc-preprocessing",
-        "legacy_aliases": ["sc-preprocess"],
-        "script": SKILLS_DIR / "singlecell" / "sc-preprocessing" / "sc_preprocess.py",
+        "alias": "sc-preprocess",
+        "script": SKILLS_DIR / "singlecell" / "preprocessing" / "sc_preprocess.py",
         "demo_args": ["--demo"],
         "description": "scRNA-seq QC, normalization, HVG, PCA/UMAP, Leiden clustering (Scanpy, Seurat, Pegasus)",
         "allowed_extra_flags": {
@@ -350,21 +334,19 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         },
         "saves_h5ad": True,
     },
-    "sc-doublet-detection": {
+    "sc-doublet": {
         "domain": "singlecell",
-        "alias": "sc-doublet-detection",
-        "legacy_aliases": ["sc-doublet"],
-        "script": SKILLS_DIR / "singlecell" / "sc-doublet-detection" / "sc_doublet.py",
+        "alias": "sc-doublet",
+        "script": SKILLS_DIR / "singlecell" / "doublet-detection" / "sc_doublet.py",
         "demo_args": ["--demo"],
         "description": "Doublet detection and removal (Scrublet, scDblFinder, DoubletFinder)",
         "allowed_extra_flags": {"--expected-doublet-rate", "--threshold"},
         "saves_h5ad": True,
     },
-    "sc-cell-annotation": {
+    "sc-annotate": {
         "domain": "singlecell",
-        "alias": "sc-cell-annotation",
-        "legacy_aliases": ["sc-annotate"],
-        "script": SKILLS_DIR / "singlecell" / "sc-cell-annotation" / "sc_annotate.py",
+        "alias": "sc-annotate",
+        "script": SKILLS_DIR / "singlecell" / "annotation" / "sc_annotate.py",
         "demo_args": ["--demo"],
         "description": "Cell type annotation (CellTypist, SingleR, scmap, GARNET, scANVI)",
         "allowed_extra_flags": {"--method", "--reference", "--species"},
@@ -373,17 +355,16 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-trajectory": {
         "domain": "singlecell",
         "alias": "sc-trajectory",
-        "script": SKILLS_DIR / "singlecell" / "sc-trajectory" / "sc_trajectory.py",
+        "script": SKILLS_DIR / "singlecell" / "trajectory" / "sc_trajectory.py",
         "demo_args": ["--demo"],
         "description": "Trajectory inference and pseudotime (Monocle3, Slingshot, CellRank, scVelo)",
         "allowed_extra_flags": {"--method", "--root-cluster"},
         "saves_h5ad": True,
     },
-    "sc-batch-integration": {
+    "sc-integrate": {
         "domain": "singlecell",
-        "alias": "sc-batch-integration",
-        "legacy_aliases": ["sc-integrate"],
-        "script": SKILLS_DIR / "singlecell" / "sc-batch-integration" / "sc_integrate.py",
+        "alias": "sc-integrate",
+        "script": SKILLS_DIR / "singlecell" / "batch-integration" / "sc_integrate.py",
         "demo_args": ["--demo"],
         "description": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN, Seurat CCA/RPCA)",
         "allowed_extra_flags": {"--method", "--batch-key"},
@@ -392,7 +373,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-de": {
         "domain": "singlecell",
         "alias": "sc-de",
-        "script": SKILLS_DIR / "singlecell" / "sc-de" / "sc_de.py",
+        "script": SKILLS_DIR / "singlecell" / "de" / "sc_de.py",
         "demo_args": ["--demo"],
         "description": "Differential expression analysis (Wilcoxon, MAST, pseudobulk PyDESeq2)",
         "allowed_extra_flags": {
@@ -404,18 +385,17 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-grn": {
         "domain": "singlecell",
         "alias": "sc-grn",
-        "script": SKILLS_DIR / "singlecell" / "sc-grn" / "sc_grn.py",
+        "script": SKILLS_DIR / "singlecell" / "grn" / "sc_grn.py",
         "demo_args": ["--demo"],
         "description": "Gene regulatory network inference (pySCENIC, CellOracle)",
         "allowed_extra_flags": {"--method", "--n-top-targets"},
         "requires_preprocessed": True,
         "saves_h5ad": False,
     },
-    "sc-cell-communication": {
+    "sc-communication": {
         "domain": "singlecell",
-        "alias": "sc-cell-communication",
-        "legacy_aliases": ["sc-communication"],
-        "script": SKILLS_DIR / "singlecell" / "sc-cell-communication" / "sc_communication.py",
+        "alias": "sc-communication",
+        "script": SKILLS_DIR / "singlecell" / "communication" / "sc_communication.py",
         "demo_args": ["--demo"],
         "description": "Cell-cell communication (CellPhoneDB, LIANA+, NicheNet)",
         "allowed_extra_flags": {"--method", "--species", "--cell-type-key", "--n-perms"},
@@ -425,7 +405,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-multiome": {
         "domain": "singlecell",
         "alias": "sc-multiome",
-        "script": SKILLS_DIR / "singlecell" / "sc-multiome" / "sc_multiome.py",
+        "script": SKILLS_DIR / "singlecell" / "multiome" / "sc_multiome.py",
         "demo_args": ["--demo"],
         "description": "Paired multi-omics integration — scRNA+scATAC, CITE-seq (WNN, MOFA+, scVI-tools)",
         "allowed_extra_flags": {"--method"},
@@ -437,97 +417,88 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "genomics-qc": {
         "domain": "genomics",
         "alias": "genomics-qc",
-        "script": SKILLS_DIR / "genomics" / "genomics-qc" / "genomics_qc.py",
+        "script": SKILLS_DIR / "genomics" / "qc" / "genomics_qc.py",
         "demo_args": ["--demo"],
         "description": "Sequencing reads QC and adapter trimming (FastQC, MultiQC, fastp, Trimmomatic)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "genomics-alignment": {
+    "align": {
         "domain": "genomics",
-        "alias": "genomics-alignment",
-        "legacy_aliases": ["align"],
-        "script": SKILLS_DIR / "genomics" / "genomics-alignment" / "genomics_alignment.py",
+        "alias": "align",
+        "script": SKILLS_DIR / "genomics" / "alignment" / "alignment.py",
         "demo_args": ["--demo"],
         "description": "Short/long read alignment to reference genome (BWA-MEM, Bowtie2, Minimap2)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-variant-calling": {
+    "variant-call": {
         "domain": "genomics",
-        "alias": "genomics-variant-calling",
-        "legacy_aliases": ["variant-call"],
-        "script": SKILLS_DIR / "genomics" / "genomics-variant-calling" / "genomics_variant_calling.py",
+        "alias": "variant-call",
+        "script": SKILLS_DIR / "genomics" / "variant-calling" / "variant_calling.py",
         "demo_args": ["--demo"],
         "description": "Germline/somatic variant calling — SNVs, Indels (GATK, DeepVariant, FreeBayes)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-sv-detection": {
+    "sv-detect": {
         "domain": "genomics",
-        "alias": "genomics-sv-detection",
-        "legacy_aliases": ["sv-detect"],
-        "script": SKILLS_DIR / "genomics" / "genomics-sv-detection" / "sv_detection.py",
+        "alias": "sv-detect",
+        "script": SKILLS_DIR / "genomics" / "structural-variants" / "sv_detection.py",
         "demo_args": ["--demo"],
         "description": "Structural variant calling (Manta, Lumpy, Delly, Sniffles)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-cnv-calling": {
+    "cnv-calling": {
         "domain": "genomics",
-        "alias": "genomics-cnv-calling",
-        "legacy_aliases": ["cnv-calling"],
-        "script": SKILLS_DIR / "genomics" / "genomics-cnv-calling" / "genomics_cnv_calling.py",
+        "alias": "cnv-calling",
+        "script": SKILLS_DIR / "genomics" / "cnv-calling" / "cnv_calling.py",
         "demo_args": ["--demo"],
         "description": "Copy number variation analysis (CNVkit, Control-FREEC, GATK gCNV)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-vcf-operations": {
+    "vcf-ops": {
         "domain": "genomics",
-        "alias": "genomics-vcf-operations",
-        "legacy_aliases": ["vcf-ops"],
-        "script": SKILLS_DIR / "genomics" / "genomics-vcf-operations" / "genomics_vcf_operations.py",
+        "alias": "vcf-ops",
+        "script": SKILLS_DIR / "genomics" / "vcf-operations" / "vcf_operations.py",
         "demo_args": ["--demo"],
         "description": "VCF manipulation, filtering, and merging (bcftools, GATK SelectVariants)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "genomics-variant-annotation": {
+    "variant-annotate": {
         "domain": "genomics",
-        "alias": "genomics-variant-annotation",
-        "legacy_aliases": ["variant-annotate"],
-        "script": SKILLS_DIR / "genomics" / "genomics-variant-annotation" / "variant_annotation.py",
+        "alias": "variant-annotate",
+        "script": SKILLS_DIR / "genomics" / "annotation" / "variant_annotation.py",
         "demo_args": ["--demo"],
         "description": "Variant annotation and functional effect prediction (VEP, snpEff, ANNOVAR)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-assembly": {
+    "assemble": {
         "domain": "genomics",
-        "alias": "genomics-assembly",
-        "legacy_aliases": ["assemble"],
-        "script": SKILLS_DIR / "genomics" / "genomics-assembly" / "genome_assembly.py",
+        "alias": "assemble",
+        "script": SKILLS_DIR / "genomics" / "assembly" / "genome_assembly.py",
         "demo_args": ["--demo"],
         "description": "De novo genome assembly (SPAdes, Megahit, Flye, Canu)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "genomics-epigenomics": {
+    "epigenomics": {
         "domain": "genomics",
-        "alias": "genomics-epigenomics",
-        "legacy_aliases": ["epigenomics"],
-        "script": SKILLS_DIR / "genomics" / "genomics-epigenomics" / "genomics_epigenomics.py",
+        "alias": "epigenomics",
+        "script": SKILLS_DIR / "genomics" / "epigenomics" / "epigenomics.py",
         "demo_args": ["--demo"],
         "description": "ChIP-seq/ATAC-seq peak calling and motif analysis (MACS2, Homer, pyGenomeTracks)",
         "allowed_extra_flags": {"--method", "--assay"},
         "saves_h5ad": False,
     },
-    "genomics-phasing": {
+    "phase": {
         "domain": "genomics",
-        "alias": "genomics-phasing",
-        "legacy_aliases": ["phase"],
-        "script": SKILLS_DIR / "genomics" / "genomics-phasing" / "genomics_phasing.py",
+        "alias": "phase",
+        "script": SKILLS_DIR / "genomics" / "phasing" / "phasing.py",
         "demo_args": ["--demo"],
         "description": "Haplotype phasing (WhatsHap, SHAPEIT, Eagle)",
         "allowed_extra_flags": {"--method"},
@@ -536,81 +507,73 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # Proteomics domain
     # -----------------------------------------------------------------------
-    "proteomics-ms-qc": {
+    "ms-qc": {
         "domain": "proteomics",
-        "alias": "proteomics-ms-qc",
-        "legacy_aliases": ["ms-qc"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-ms-qc" / "proteomics_ms_qc.py",
+        "alias": "ms-qc",
+        "script": SKILLS_DIR / "proteomics" / "ms-qc" / "ms_qc.py",
         "demo_args": ["--demo"],
         "description": "Mass spectrometry raw data quality control (PTXQC, rawTools, MSstatsQC)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "proteomics-identification": {
+    "peptide-id": {
         "domain": "proteomics",
-        "alias": "proteomics-identification",
-        "legacy_aliases": ["peptide-id"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-identification" / "proteomics_identification.py",
+        "alias": "peptide-id",
+        "script": SKILLS_DIR / "proteomics" / "peptide-id" / "peptide_id.py",
         "demo_args": ["--demo"],
         "description": "Database search for peptide/protein identification (MaxQuant, MS-GF+, Comet, Mascot)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "proteomics-quantification": {
+    "quantification": {
         "domain": "proteomics",
-        "alias": "proteomics-quantification",
-        "legacy_aliases": ["quantification"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-quantification" / "proteomics_quantification.py",
+        "alias": "quantification",
+        "script": SKILLS_DIR / "proteomics" / "quantification" / "quantification.py",
         "demo_args": ["--demo"],
         "description": "Protein/peptide quantification — LFQ, TMT, DIA (MaxQuant LFQ, DIA-NN, Spectronaut, Skyline)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "proteomics-de": {
+    "differential-abundance": {
         "domain": "proteomics",
-        "alias": "proteomics-de",
-        "legacy_aliases": ["differential-abundance"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-de" / "proteomics_de.py",
+        "alias": "differential-abundance",
+        "script": SKILLS_DIR / "proteomics" / "differential-abundance" / "differential_abundance.py",
         "demo_args": ["--demo"],
         "description": "Differential abundance testing (MSstats, limma, t-test)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "proteomics-ptm": {
+    "ptm": {
         "domain": "proteomics",
-        "alias": "proteomics-ptm",
-        "legacy_aliases": ["ptm"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-ptm" / "proteomics_ptm.py",
+        "alias": "ptm",
+        "script": SKILLS_DIR / "proteomics" / "ptm" / "ptm.py",
         "demo_args": ["--demo"],
         "description": "Post-translational modification site localization and scoring (ptmRS, PhosphoRS)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "proteomics-enrichment": {
+    "prot-enrichment": {
         "domain": "proteomics",
-        "alias": "proteomics-enrichment",
-        "legacy_aliases": ["prot-enrichment"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-enrichment" / "prot_enrichment.py",
+        "alias": "prot-enrichment",
+        "script": SKILLS_DIR / "proteomics" / "enrichment" / "prot_enrichment.py",
         "demo_args": ["--demo"],
         "description": "Pathway and functional enrichment analysis (STRING, DAVID, g:Profiler, Perseus)",
         "allowed_extra_flags": {"--method", "--species"},
         "saves_h5ad": False,
     },
-    "proteomics-structural": {
+    "struct-proteomics": {
         "domain": "proteomics",
-        "alias": "proteomics-structural",
-        "legacy_aliases": ["struct-proteomics"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-structural" / "struct_proteomics.py",
+        "alias": "struct-proteomics",
+        "script": SKILLS_DIR / "proteomics" / "struct" / "struct_proteomics.py",
         "demo_args": ["--demo"],
         "description": "Structural proteomics and cross-linking MS analysis (XlinkX, pLink, xiSEARCH)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "proteomics-data-import": {
+    "data-import": {
         "domain": "proteomics",
-        "alias": "proteomics-data-import",
-        "legacy_aliases": ["data-import"],
-        "script": SKILLS_DIR / "proteomics" / "proteomics-data-import" / "proteomics_data_import.py",
+        "alias": "data-import",
+        "script": SKILLS_DIR / "proteomics" / "data-import" / "data_import.py",
         "demo_args": ["--demo"],
         "description": "Import and convert proteomics data formats",
         "allowed_extra_flags": set(),
@@ -619,81 +582,73 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # Metabolomics domain
     # -----------------------------------------------------------------------
-    "metabolomics-xcms-preprocessing": {
+    "xcms-preprocess": {
         "domain": "metabolomics",
-        "alias": "metabolomics-xcms-preprocessing",
-        "legacy_aliases": ["xcms-preprocess"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-xcms-preprocessing" / "metabolomics_xcms_preprocessing.py",
+        "alias": "xcms-preprocess",
+        "script": SKILLS_DIR / "metabolomics" / "xcms-preprocess" / "xcms_preprocess.py",
         "demo_args": ["--demo"],
         "description": "LC-MS/GC-MS raw data QC and XCMS preprocessing",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "metabolomics-peak-detection": {
+    "peak-detect": {
         "domain": "metabolomics",
-        "alias": "metabolomics-peak-detection",
-        "legacy_aliases": ["peak-detect"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-peak-detection" / "peak_detect.py",
+        "alias": "peak-detect",
+        "script": SKILLS_DIR / "metabolomics" / "peak-detection" / "peak_detect.py",
         "demo_args": ["--demo"],
         "description": "Peak picking, feature detection, alignment and grouping (XCMS, MZmine 3, MS-DIAL)",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "metabolomics-annotation": {
+    "met-annotate": {
         "domain": "metabolomics",
-        "alias": "metabolomics-annotation",
-        "legacy_aliases": ["met-annotate"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-annotation" / "metabolomics_annotation.py",
+        "alias": "met-annotate",
+        "script": SKILLS_DIR / "metabolomics" / "annotation" / "annotation.py",
         "demo_args": ["--demo"],
         "description": "Metabolite annotation and structural identification (SIRIUS, CSI:FingerID, GNPS, MetFrag)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "metabolomics-quantification": {
+    "met-quantify": {
         "domain": "metabolomics",
-        "alias": "metabolomics-quantification",
-        "legacy_aliases": ["met-quantify"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-quantification" / "met_quantify.py",
+        "alias": "met-quantify",
+        "script": SKILLS_DIR / "metabolomics" / "quantify" / "met_quantify.py",
         "demo_args": ["--demo"],
         "description": "Feature quantification, missing value imputation, and normalization (NOREVA)",
         "allowed_extra_flags": {"--impute", "--normalize"},
         "saves_h5ad": False,
     },
-    "metabolomics-normalization": {
+    "met-normalize": {
         "domain": "metabolomics",
-        "alias": "metabolomics-normalization",
-        "legacy_aliases": ["met-normalize"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-normalization" / "metabolomics_normalization.py",
+        "alias": "met-normalize",
+        "script": SKILLS_DIR / "metabolomics" / "normalization" / "normalization.py",
         "demo_args": ["--demo"],
         "description": "Data normalization, scaling, and transformation",
         "allowed_extra_flags": set(),
         "saves_h5ad": False,
     },
-    "metabolomics-de": {
+    "met-diff": {
         "domain": "metabolomics",
-        "alias": "metabolomics-de",
-        "legacy_aliases": ["met-diff"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-de" / "met_diff.py",
+        "alias": "met-diff",
+        "script": SKILLS_DIR / "metabolomics" / "diff" / "met_diff.py",
         "demo_args": ["--demo"],
         "description": "Differential metabolite abundance — PCA, PLS-DA, univariate statistics (MetaboAnalystR, ropls)",
         "allowed_extra_flags": {"--group-a-prefix", "--group-b-prefix"},
         "saves_h5ad": False,
     },
-    "metabolomics-pathway-enrichment": {
+    "met-pathway": {
         "domain": "metabolomics",
-        "alias": "metabolomics-pathway-enrichment",
-        "legacy_aliases": ["met-pathway"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-pathway-enrichment" / "met_pathway.py",
+        "alias": "met-pathway",
+        "script": SKILLS_DIR / "metabolomics" / "pathway" / "met_pathway.py",
         "demo_args": ["--demo"],
         "description": "Metabolic pathway enrichment and mapping (mummichog, FELLA, MetaboAnalyst)",
         "allowed_extra_flags": {"--method"},
         "saves_h5ad": False,
     },
-    "metabolomics-statistics": {
+    "met-stat": {
         "domain": "metabolomics",
-        "alias": "metabolomics-statistics",
-        "legacy_aliases": ["met-stat"],
-        "script": SKILLS_DIR / "metabolomics" / "metabolomics-statistics" / "metabolomics_statistics.py",
+        "alias": "met-stat",
+        "script": SKILLS_DIR / "metabolomics" / "statistical-analysis" / "statistical_analysis.py",
         "demo_args": ["--demo"],
         "description": "Statistical analysis — PCA, PLS-DA, clustering, univariate tests",
         "allowed_extra_flags": set(),

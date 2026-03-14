@@ -1,4 +1,4 @@
-"""Tests for the spatial-orchestrator skill."""
+"""Tests for the orchestrator skill."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def tmp_output(tmp_path):
 
 
 def test_demo_mode(tmp_output):
-    """spatial-orchestrator --demo should run without error."""
+    """orchestrator --demo should run without error."""
     result = subprocess.run(
         [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
         capture_output=True,
@@ -202,7 +202,7 @@ def test_demo_result_json(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["skill"] == "spatial-orchestrator"
+    assert data["skill"] == "orchestrator"
     assert "summary" in data
     assert data["summary"]["total_skills"] > 0
     assert data["summary"]["total_keywords"] > 0

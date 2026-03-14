@@ -1,0 +1,51 @@
+{
+  "skill": "preprocess",
+  "version": "0.1.0",
+  "completed_at": "2026-03-14T09:19:39.930507+00:00",
+  "input_checksum": "sha256:6f1649330e3d9909f183fa68f2a7707fd2f29e73b769e41e482d497194285d70",
+  "summary": {
+    "n_cells_raw": 428,
+    "n_genes_raw": 25753,
+    "n_cells_filtered": 426,
+    "n_genes_filtered": 16056,
+    "n_hvg": 2000,
+    "n_clusters": 6,
+    "has_spatial": true,
+    "cluster_sizes": {
+      "2": 107,
+      "5": 98,
+      "1": 68,
+      "4": 58,
+      "3": 49,
+      "0": 46
+    }
+  },
+  "data": {
+    "params": {
+      "data_type": "generic",
+      "species": "human",
+      "min_genes": 200,
+      "min_cells": 3,
+      "max_mt_pct": 20.0,
+      "n_top_hvg": 2000,
+      "n_pcs": 50,
+      "n_neighbors": 15,
+      "leiden_resolution": 1.0
+    },
+    "n_cells_raw": 428,
+    "n_genes_raw": 25753,
+    "n_cells_filtered": 426,
+    "n_genes_filtered": 16056,
+    "n_hvg": 2000,
+    "n_clusters": 6,
+    "has_spatial": true,
+    "cluster_sizes": {
+      "2": 107,
+      "5": 98,
+      "1": 68,
+      "4": 58,
+      "3": 49,
+      "0": 46
+    }
+  }
+}
