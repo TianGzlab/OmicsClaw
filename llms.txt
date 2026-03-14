@@ -1,0 +1,176 @@
+# OmicsClaw — LLM-Friendly Project Summary
+
+## What is OmicsClaw?
+
+OmicsClaw is a **local-first, skill-based multi-omics analysis framework**. It provides specialized analysis skills covering spatial transcriptomics, single-cell omics, genomics, proteomics, metabolomics, and orchestration workflows.
+
+All processing happens locally. No genetic or spatial data leaves the machine.
+
+---
+
+## Key Concepts
+
+- **Skill**: A self-contained analysis module with a `SKILL.md` spec, a Python CLI script, and tests.
+- **AnnData (`.h5ad`)**: The universal file format for passing data between skills.
+- **SpatialSession**: A JSON state tracker for multi-skill workflows (stored in `profiles/`).
+- **omicsclaw.py**: The central CLI runner that registers skills, filters flags, and dispatches subprocesses.
+- **Orchestrator**: `spatial-orchestrator` routes natural-language queries or file extensions to the right skill.
+
+---
+
+## All 16 Skills
+
+| CLI Alias | Skill Directory | Purpose |
+|-----------|-----------------|---------|
+| `preprocess` | `skills/spatial-preprocess/` | QC, normalization, HVG, PCA, UMAP, clustering |
+| `domains` | `skills/spatial-domains/` | Tissue region / niche identification |
+| `annotate` | `skills/spatial-annotate/` | Cell type annotation |
+| `deconv` | `skills/spatial-deconv/` | Cell type proportion estimation |
+| `statistics` | `skills/spatial-statistics/` | Moran's I, Geary's C, Ripley's K, etc. |
+| `genes` | `skills/spatial-genes/` | Spatially variable genes |
+| `de` | `skills/spatial-de/` | Differential expression |
+| `condition` | `skills/spatial-condition/` | Pseudobulk condition comparison |
+| `communication` | `skills/spatial-communication/` | Ligand-receptor interactions |
+| `velocity` | `skills/spatial-velocity/` | RNA velocity / cellular dynamics |
+| `trajectory` | `skills/spatial-trajectory/` | Trajectory inference / pseudotime |
+| `enrichment` | `skills/spatial-enrichment/` | Pathway and gene set enrichment |
+| `cnv` | `skills/spatial-cnv/` | Copy number variation inference |
+| `integrate` | `skills/spatial-integrate/` | Multi-sample integration (Harmony, BBKNN, Scanorama) |
+| `register` | `skills/spatial-register/` | Spatial registration / slice alignment |
+| `orchestrator` | `skills/spatial-orchestrator/` | Query routing and pipeline execution |
+
+---
+
+## CLI Reference
+
+```bash
+# List all skills
+python omicsclaw.py list
+
+# Run a skill with data
+python omicsclaw.py run <skill> --input <data.h5ad> --output <dir>
+
+# Run demo mode (no data needed)
+python omicsclaw.py run <skill> --demo --output <dir>
+
+# Multi-sample integration
+python omicsclaw.py run integrate --input <data.h5ad> --batch-key <col> --output <dir>
+
+# Spatial registration
+python omicsclaw.py run register --input <data.h5ad> --slice-key <col> --output <dir>
+
+# Orchestrator: route a natural language query
+python omicsclaw.py run orchestrator --query "show spatially variable genes" --output <dir>
+
+# Orchestrator: route by file
+python omicsclaw.py run orchestrator --input <data.h5ad> --output <dir>
+
+# Orchestrator: run a named pipeline
+python omicsclaw.py run orchestrator --pipeline standard --input <data.h5ad> --output <dir>
+python omicsclaw.py run orchestrator --pipeline full --input <data.h5ad> --output <dir>
+
+# Orchestrator: list all skills with descriptions
+python omicsclaw.py run orchestrator --list-skills --output <dir>
+```
+
+---
+
+## Named Pipelines (Orchestrator)
+
+| Pipeline | Steps |
+|----------|-------|
+| `standard` | preprocess → domains → de → genes → statistics |
+| `full` | preprocess → domains → de → genes → statistics → communication → enrichment |
+| `multisample` | integrate → preprocess → domains → de → genes |
+| `velocity_trajectory` | preprocess → velocity → trajectory |
+| `cancer` | preprocess → domains → de → cnv → enrichment |
+
+---
+
+## Keyword Routing (Orchestrator)
+
+The orchestrator maps natural-language keywords to skills. Examples:
+
+| Query Fragment | Routes To |
+|---|---|
+| "qc", "quality control", "normalize" | `preprocess` |
+| "spatial domain", "tissue region", "niche" | `domains` |
+| "cell type", "marker gene", "annotate" | `annotate` |
+| "deconvolution", "cell proportion" | `deconv` |
+| "moran", "autocorrelation", "spatial statistics" | `statistics` |
+| "spatially variable", "SVG", "spatial pattern" | `genes` |
+| "differential expression", "DE genes" | `de` |
+| "condition", "pseudobulk", "DESeq2" | `condition` |
+| "communication", "ligand receptor", "LR" | `communication` |
+| "velocity", "scvelo", "RNA velocity" | `velocity` |
+| "trajectory", "pseudotime", "cellrank" | `trajectory` |
+| "enrichment", "GSEA", "pathway" | `enrichment` |
+| "CNV", "copy number" | `cnv` |
+| "integrate", "batch correction", "harmony" | `integrate` |
+| "register", "alignment", "multi-slice" | `register` |
+
+---
+
+## Output Structure
+
+Every skill writes to `--output`:
+
+```
+<output_dir>/
+├── report.md           # Human-readable Markdown report
+├── result.json         # Machine-readable findings (JSON)
+├── processed.h5ad      # Updated AnnData object
+├── figures/            # PNG/SVG plots
+├── tables/             # CSV result tables
+└── reproducibility/    # Version pins, run command
+```
+
+---
+
+## Shared Utilities
+
+Located in `omicsclaw/common/`:
+
+- `report.py`: `generate_report_header()`, `generate_report_footer()`, `write_result_json()`
+- `adata_utils.py`: `ensure_pca()`, `ensure_neighbors()`, `require_spatial_coords()`, `store_analysis_metadata()`
+- `viz_utils.py`: `save_figure()`
+- `dependency_manager.py`: `require("package")`, `is_available("package")`
+
+---
+
+## Testing
+
+```bash
+python -m pytest -v                  # All 16 skills (demo mode, no data needed)
+python -m pytest -k "preprocess" -v  # Single skill
+```
+
+All tests use `--demo` mode. Each skill has at minimum:
+- `test_demo_mode`: exits 0, output files created
+- `test_demo_report_content`: report contains expected keywords + disclaimer
+- `test_demo_result_json`: JSON parses, required keys present
+
+---
+
+## Safety
+
+1. All processing is local — data never leaves the machine
+2. Every report includes: *"OmicsClaw is a research and educational tool. It is not a medical device and does not provide clinical diagnoses."*
+3. Method parameters trace to published algorithms — no hallucinated thresholds
+4. `omicsclaw.py` enforces per-skill `allowed_extra_flags` whitelists
+
+---
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `omicsclaw.py` | CLI runner, SKILLS registry, security filter |
+| `skills/catalog.json` | Machine-readable skill index (auto-generated) |
+| `CLAUDE.md` | AI agent routing instructions for Claude |
+| `AGENTS.md` | AI coding agent guide (Codex, Cursor, Devin, etc.) |
+| `docs/architecture.md` | System architecture deep-dive |
+| `llms.txt` | This file — LLM-optimised summary |
+| `requirements.txt` | Core Python dependencies |
+| `pytest.ini` | Test path registration |
+| `Makefile` | `make test`, `make demo`, `make list`, `make catalog` |

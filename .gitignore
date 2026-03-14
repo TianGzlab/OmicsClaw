@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+*.env.local
+!.env.example
+
+# API keys and credentials
+*_key.txt
+*_secret.txt
+credentials.json
+token.json
+
+# OmicsClaw outputs (large, generated)
+output/
+sessions/
+
+# Superpowers (internal skills)
+superpowers/
+docs/superpowers/
+
+# User data (large, not committed)
+data/*
+!data/.gitkeep
+examples/*.h5ad
+examples/*.vcf.gz
+
+# Bot logs and audit
+bot/logs/
+bot/audit/
+*.jsonl
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+/tmp/
+*.tmp
+*.log
+*.bak
+
+# Large data files
+*.h5
+*.h5ad
+*.hdf5
+*.loom
+*.zarr/
+*.gz
+*.bz2
+*.zip
+*.tar.gz
+*.vcf
+*.bam
+*.sam
+*.fastq
+*.fq
+*.mzML
+*.mzXML
+
+# R
+*.Rhistory
+*.RData
+*.Rproj.user/
+
+# Benchmarks
+.benchmarks/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
