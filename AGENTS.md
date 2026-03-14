@@ -14,14 +14,14 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 cd /data1/TianLab/zhouwg/project/OmicsClaw
 pip install -r requirements.txt
 python omicsclaw.py list
-python omicsclaw.py run preprocess --demo
+python omicsclaw.py run spatial-preprocessing --demo
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `python omicsclaw.py list` | List all 35+ skills across 5 domains |
+| `python omicsclaw.py list` | List all 50+ skills across 5 domains |
 | `python omicsclaw.py run <skill> --demo` | Run a skill with demo data |
 | `python omicsclaw.py run <skill> --input <file> --output <dir>` | Run with user data |
 | `python -m pytest -v` | Run all tests |
@@ -40,24 +40,24 @@ OmicsClaw/
 │   ├── spatial/                # loader.py, adata_utils.py, viz_utils.py
 │   └── loaders/                # Unified data loading (load_omics_data)
 ├── skills/                     # Domain-organized skill directories
-│   ├── spatial/                # 16 spatial transcriptomics skills
-│   │   ├── preprocess/         # QC + normalization + embedding
-│   │   ├── domains/            # Tissue region identification
-│   │   ├── annotate/           # Cell type annotation
+│   ├── spatial/                # 15 spatial transcriptomics skills
+│   │   ├── spatial-preprocess/ # QC + normalization + embedding
+│   │   ├── spatial-domains/    # Tissue region identification
+│   │   ├── spatial-annotate/   # Cell type annotation
 │   │   └── ...
-│   ├── singlecell/             # 5 single-cell omics skills
-│   │   ├── preprocessing/      # scRNA-seq QC + normalization
-│   │   ├── doublet-detection/  # Doublet removal
+│   ├── singlecell/             # 9 single-cell omics skills
+│   │   ├── sc-preprocessing/   # scRNA-seq QC + normalization
+│   │   ├── sc-doublet-detection/ # Doublet removal
 │   │   └── ...
-│   ├── genomics/               # 8 genomics skills
-│   │   ├── vcf-ops/            # VCF operations
-│   │   ├── variant-calling/    # Variant calling
+│   ├── genomics/               # 10 genomics skills
+│   │   ├── genomics-vcf-ops/   # VCF operations
+│   │   ├── genomics-variant-calling/ # Variant calling
 │   │   └── ...
-│   ├── proteomics/             # 6 proteomics skills
-│   │   ├── ms-qc/              # MS quality control
-│   │   ├── peptide-id/         # Peptide identification
+│   ├── proteomics/             # 8 proteomics skills
+│   │   ├── proteomics-ms-qc/   # MS quality control
+│   │   ├── proteomics-peptide-id/ # Peptide identification
 │   │   └── ...
-│   ├── metabolomics/           # 5 metabolomics skills
+│   ├── metabolomics/           # 8 metabolomics skills
 │   │   ├── peak-detection/     # Peak detection
 │   │   ├── xcms-preprocess/    # XCMS preprocessing
 │   │   └── ...

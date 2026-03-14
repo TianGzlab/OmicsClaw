@@ -4,7 +4,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/OmicsClaw/OmicsClaw.git
+git clone https://github.com/zhou-1314/OmicsClaw.git
 cd OmicsClaw
 
 # Create virtual environment (Python 3.11+)

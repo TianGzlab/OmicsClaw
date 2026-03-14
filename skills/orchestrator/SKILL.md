@@ -1,0 +1,298 @@
+---
+name: orchestrator
+description: >-
+  Multi-omics query routing and pipeline orchestration across all OmicsClaw domains.
+  Routes natural language queries to the correct analysis skill across spatial transcriptomics,
+  single-cell omics, genomics, proteomics, and metabolomics.
+version: 1.0.0
+author: OmicsClaw Team
+license: MIT
+tags: [orchestrator, routing, pipeline, multi-omics]
+metadata:
+  omicsclaw:
+    domain: orchestrator
+    requires:
+      bins:
+        - python3
+      env: []
+      config: []
+    emoji: "🎯"
+    homepage: https://github.com/OmicsClaw/OmicsClaw
+    os: [macos, linux, windows]
+    install:
+      - kind: pip
+        package: scanpy
+        bins: []
+    trigger_keywords:
+      - which skill
+      - route query
+      - what should I run
+      - orchestrate
+      - pipeline
+      - which analysis
+---
+
+# 🎯 Multi-Omics Orchestrator
+
+You are the **OmicsClaw Orchestrator**, the meta-skill that routes user queries to the correct analysis skill across all omics domains. You never perform analysis yourself — you dispatch to the right specialist.
+
+## Why This Exists
+
+- **Without it**: Users must know exact skill names and CLI flags across 51 skills in 6 domains
+- **With it**: Natural language queries are automatically matched to the correct skill
+- **Why OmicsClaw**: Single unified entry point for all multi-omics analysis capabilities
+
+## Supported Domains
+
+OmicsClaw currently supports **51 skills across 6 domains**:
+
+1. **Spatial Transcriptomics** (15 skills) - `.h5ad`, `.h5`, `.zarr`, `.loom`
+2. **Single-Cell Omics** (9 skills) - `.h5ad`, `.h5`, `.loom`, `.mtx`
+3. **Genomics** (10 skills) - `.vcf`, `.bam`, `.cram`, `.fasta`, `.fastq`, `.bed`
+4. **Proteomics** (8 skills) - `.mzml`, `.mzxml`, `.csv`
+5. **Metabolomics** (8 skills) - `.mzml`, `.cdf`, `.csv`
+6. **Orchestrator** (1 skill) - `*` (all types)
+
+## Workflow
+
+1. **Detect Domain**: Identify omics domain from file extension or query keywords
+2. **Route Query**: Match query text to best skill within domain using keyword maps
+3. **Execute**: Dispatch to chosen analysis skill with appropriate parameters
+4. **Monitor**: Track execution status and collect results
+5. **Report**: Return structured output with skill name, confidence, and results
+
+## Core Capabilities
+
+### 1. Domain Detection
+
+Automatically detect the omics domain from:
+- **File extension**: `.h5ad` → spatial/singlecell, `.vcf` → genomics, `.mzml` → proteomics/metabolomics
+- **Query keywords**: "spatially variable" → spatial, "variant calling" → genomics
+
+### 2. Query Routing
+
+Match natural language queries to skills using domain-specific keyword maps with confidence scoring.
+
+**Three routing modes available:**
+
+1. **Keyword Mode (default)**: Fast pattern matching using curated keyword maps
+   - Matches query keywords to skill names
+   - Confidence based on keyword length and position
+   - No external dependencies, instant results
+   - Best for: Standard queries with clear keywords
+
+2. **LLM Mode**: AI-powered semantic understanding
+   - Uses language model to interpret query intent
+   - Considers skill descriptions and context
+   - Requires LLM API access
+   - Best for: Complex or ambiguous queries
+
+3. **Hybrid Mode**: Combines keyword and LLM approaches
+   - Falls back to LLM if keyword confidence is low
+   - Balances speed and accuracy
+   - Best for: Production systems with varied query types
+
+### 3. Pipeline Orchestration
+
+Execute multi-skill pipelines (e.g., preprocess → domains → de → genes → statistics).
+
+### 4. Skill Discovery
+
+List all available skills with status (ready/planned) and descriptions.
+
+## Routing Maps
+
+### Spatial Transcriptomics Keywords → Skills
+
+| Query Keywords | Skill | Description |
+|----------------|-------|-------------|
+| spatial domain, tissue region, niche | spatial-domain-identification | Tissue region/niche identification |
+| cell type annotation | spatial-cell-annotation | Cell type annotation |
+| deconvolution, cell proportion | spatial-deconvolution | Cell type deconvolution |
+| spatial statistics, moran, autocorrelation | spatial-statistics | Spatial statistics |
+| spatially variable gene | spatial-svg-detection | Spatially variable genes |
+| differential expression, marker genes | spatial-de | Differential expression |
+| condition comparison, pseudobulk | spatial-condition-comparison | Condition comparison |
+| ligand receptor, cell communication | spatial-cell-communication | Cell-cell communication |
+| rna velocity | spatial-velocity | RNA velocity |
+| trajectory, pseudotime | spatial-trajectory | Trajectory inference |
+| pathway enrichment, gsea | spatial-enrichment | Pathway enrichment |
+| cnv, copy number | spatial-cnv | Copy number variation |
+| batch correction, integration | spatial-integration | Multi-sample integration |
+| spatial registration, alignment | spatial-registration | Spatial registration |
+| preprocess, qc, normalization | spatial-preprocessing | Data preprocessing |
+
+### Single-Cell Omics Keywords → Skills
+
+| Query Keywords | Skill | Description |
+|----------------|-------|-------------|
+| single cell, scrna-seq | sc-preprocessing | scRNA-seq preprocessing |
+| doublet detection | sc-doublet-detection | Doublet detection |
+| trajectory, pseudotime | sc-trajectory | Trajectory inference |
+| cell type annotation | sc-cell-annotation | Cell type annotation |
+| integration, batch correction | sc-batch-integration | Batch correction |
+| differential expression | sc-de | Differential expression |
+| gene regulatory network, grn | sc-grn | Gene regulatory network |
+| cell communication | sc-cell-communication | Cell-cell communication |
+| multiome, multi-omics | sc-multiome | Multi-omics integration |
+
+### Genomics Keywords → Skills
+
+| Query Keywords | Skill | Description |
+|----------------|-------|-------------|
+| variant calling, snp | genomics-variant-calling | Variant calling |
+| structural variant, sv | genomics-sv-detection | Structural variant detection |
+| vcf operations | genomics-vcf-operations | VCF manipulation |
+| alignment, read alignment | genomics-alignment | Read alignment |
+| variant annotation | genomics-variant-annotation | Variant annotation |
+| assembly, genome assembly | genomics-assembly | Genome assembly |
+| phasing, haplotype | genomics-phasing | Haplotype phasing |
+| cnv calling | genomics-cnv-calling | CNV analysis |
+| quality control, fastq | genomics-qc | Sequencing QC |
+| epigenomics, chip-seq, atac-seq | genomics-epigenomics | Epigenomics analysis |
+
+### Proteomics Keywords → Skills
+
+| Query Keywords | Skill | Description |
+|----------------|-------|-------------|
+| mass spec qc, ms qc | proteomics-ms-qc | Mass spectrometry QC |
+| peptide identification | proteomics-identification | Peptide identification |
+| protein quantification | proteomics-quantification | Protein quantification |
+| differential abundance | proteomics-de | Differential abundance |
+| ptm, post-translational | proteomics-ptm | PTM analysis |
+| pathway enrichment | proteomics-enrichment | Pathway enrichment |
+| structural proteomics | proteomics-structural | Structural proteomics |
+| data import | proteomics-data-import | Data import |
+
+### Metabolomics Keywords → Skills
+
+| Query Keywords | Skill | Description |
+|----------------|-------|-------------|
+| peak detection | metabolomics-peak-detection | Peak detection |
+| xcms preprocessing | metabolomics-xcms-preprocessing | XCMS preprocessing |
+| metabolite annotation | metabolomics-annotation | Metabolite annotation |
+| normalization | metabolomics-normalization | Data normalization |
+| differential metabolite | metabolomics-de | Differential analysis |
+| pathway enrichment | metabolomics-pathway-enrichment | Pathway enrichment |
+| statistical analysis | metabolomics-statistics | Statistical analysis |
+| quantification | metabolomics-quantification | Feature quantification |
+
+## CLI Usage
+
+```bash
+# Route a natural language query (default: keyword mode)
+python skills/orchestrator/omics_orchestrator.py \
+  --query "find spatially variable genes" --output output/
+
+# Route by file type (auto-detect domain)
+python skills/orchestrator/omics_orchestrator.py \
+  --input data.h5ad --output output/
+
+# Specify routing mode: keyword (default), llm, or hybrid
+python skills/orchestrator/omics_orchestrator.py \
+  --query "find spatially variable genes" --output output/ --routing-mode keyword
+
+python skills/orchestrator/omics_orchestrator.py \
+  --query "find spatially variable genes" --output output/ --routing-mode llm
+
+python skills/orchestrator/omics_orchestrator.py \
+  --query "find spatially variable genes" --output output/ --routing-mode hybrid
+
+# Run demo to see routing across all domains
+python skills/orchestrator/omics_orchestrator.py --demo --output output/
+
+# Run demo with different routing modes
+python skills/orchestrator/omics_orchestrator.py --demo --output output/ --routing-mode llm
+
+# List all available skills
+python omicsclaw.py list
+
+# List skills in a specific domain
+python omicsclaw.py list --domain spatial
+```
+
+## Output Format
+
+The orchestrator returns structured JSON with:
+
+```json
+{
+  "query": "find spatially variable genes",
+  "detected_domain": "spatial",
+  "routed_skill": "spatial-svg-detection",
+  "confidence": 0.95,
+  "execution_status": "success",
+  "output_dir": "/path/to/output"
+}
+```
+
+## Examples
+
+**Example 1: Spatial query routing (keyword mode)**
+```bash
+python skills/orchestrator/omics_orchestrator.py \
+  --query "identify tissue regions in my spatial data" \
+  --output output/domains/
+# Routes to: spatial-domain-identification
+```
+
+**Example 2: Single-cell query routing (keyword mode)**
+```bash
+python skills/orchestrator/omics_orchestrator.py \
+  --query "detect doublets in single cell data" \
+  --output output/doublets/
+# Routes to: sc-doublet-detection
+```
+
+**Example 3: File-based routing**
+```bash
+python skills/orchestrator/omics_orchestrator.py \
+  --input data.vcf --output output/variants/
+# Detects domain: genomics
+# Routes to: genomics-vcf-operations
+```
+
+**Example 4: LLM-powered routing**
+```bash
+python skills/orchestrator/omics_orchestrator.py \
+  --query "I want to understand which genes show spatial patterns" \
+  --output output/svg/ --routing-mode llm
+# Uses LLM to interpret intent
+# Routes to: spatial-svg-detection
+```
+
+**Example 5: Hybrid routing**
+```bash
+python skills/orchestrator/omics_orchestrator.py \
+  --query "analyze cell-cell interactions in my tissue" \
+  --output output/comm/ --routing-mode hybrid
+# Tries keyword first, falls back to LLM if needed
+# Routes to: spatial-cell-communication
+```
+
+**Example 6: Demo mode with different routing**
+```bash
+# Keyword routing demo
+python skills/orchestrator/omics_orchestrator.py --demo --output output/demo_keyword/
+
+# LLM routing demo
+python skills/orchestrator/omics_orchestrator.py --demo --output output/demo_llm/ --routing-mode llm
+
+# Hybrid routing demo
+python skills/orchestrator/omics_orchestrator.py --demo --output output/demo_hybrid/ --routing-mode hybrid
+```
+
+## Integration with OmicsClaw
+
+The orchestrator is the primary entry point for the OmicsClaw bot interfaces (Telegram, Feishu) and can be invoked via:
+
+- **CLI**: `python omicsclaw.py run orchestrator --query "..."`
+- **Python API**: `from omicsclaw.routing.router import route_query_unified`
+- **Bot**: Natural language messages automatically routed through orchestrator
+
+## Notes
+
+- Default domain fallback is `spatial` if detection fails
+- Confidence scoring based on keyword match length and position
+- Supports both exact skill names and natural language queries
+- All 51 skills across 6 domains are accessible through this single interface

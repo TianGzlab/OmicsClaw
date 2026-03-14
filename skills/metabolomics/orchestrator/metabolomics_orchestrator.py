@@ -18,24 +18,24 @@ SKILL_NAME = "metabolomics-orchestrator"
 SKILL_VERSION = "0.1.0"
 
 KEYWORD_MAP: dict[str, str] = {
-    "peak detection": "peak-detect", "detect peaks": "peak-detect", "feature detection": "peak-detect",
-    "xcms": "xcms-preprocess", "preprocessing": "xcms-preprocess", "alignment": "xcms-preprocess",
-    "metabolite annotation": "met-annotate", "annotate metabolites": "met-annotate", "sirius": "met-annotate",
-    "normalization": "met-normalize", "normalize": "met-normalize", "scaling": "met-normalize",
-    "differential": "met-diff", "pls-da": "met-diff", "metaboanalyst": "met-diff",
-    "pathway": "met-pathway", "mummichog": "met-pathway", "pathway enrichment": "met-pathway",
-    "statistical": "met-stat", "pca": "met-stat", "clustering": "met-stat",
+    "peak detection": "metabolomics-peak-detection", "detect peaks": "metabolomics-peak-detection", "feature detection": "metabolomics-peak-detection",
+    "xcms": "metabolomics-xcms-preprocessing", "preprocessing": "metabolomics-xcms-preprocessing", "alignment": "metabolomics-xcms-preprocessing",
+    "metabolite annotation": "metabolomics-annotation", "annotate metabolites": "metabolomics-annotation", "sirius": "metabolomics-annotation",
+    "normalization": "metabolomics-normalization", "normalize": "metabolomics-normalization", "scaling": "metabolomics-normalization",
+    "differential": "metabolomics-de", "pls-da": "metabolomics-de", "metaboanalyst": "metabolomics-de",
+    "pathway": "metabolomics-pathway-enrichment", "mummichog": "metabolomics-pathway-enrichment", "pathway enrichment": "metabolomics-pathway-enrichment",
+    "statistical": "metabolomics-statistics", "pca": "metabolomics-statistics", "clustering": "metabolomics-statistics",
 }
 
 SKILL_DESCRIPTIONS: dict[str, str] = {
-    "xcms-preprocess": "LC-MS/GC-MS raw data QC and XCMS preprocessing",
-    "peak-detect": "Peak picking, feature detection, alignment and grouping (XCMS, MZmine 3)",
-    "met-annotate": "Metabolite annotation and structural identification (SIRIUS, CSI:FingerID, GNPS)",
-    "met-quantify": "Feature quantification, missing value imputation, and normalization",
-    "met-normalize": "Data normalization, scaling, and transformation",
-    "met-diff": "Differential metabolite abundance (MetaboAnalystR, ropls)",
-    "met-pathway": "Metabolic pathway enrichment and mapping (mummichog, FELLA)",
-    "met-stat": "Statistical analysis (PCA, PLS-DA, clustering, univariate tests)",
+    "metabolomics-xcms-preprocessing": "LC-MS/GC-MS raw data QC and XCMS preprocessing",
+    "metabolomics-peak-detection": "Peak picking, feature detection, alignment and grouping (XCMS, MZmine 3)",
+    "metabolomics-annotation": "Metabolite annotation and structural identification (SIRIUS, CSI:FingerID, GNPS)",
+    "metabolomics-quantification": "Feature quantification, missing value imputation, and normalization",
+    "metabolomics-normalization": "Data normalization, scaling, and transformation",
+    "metabolomics-de": "Differential metabolite abundance (MetaboAnalystR, ropls)",
+    "metabolomics-pathway-enrichment": "Metabolic pathway enrichment and mapping (mummichog, FELLA)",
+    "metabolomics-statistics": "Statistical analysis (PCA, PLS-DA, clustering, univariate tests)",
 }
 
 def route_query(query: str) -> dict:
@@ -49,7 +49,7 @@ def route_query(query: str) -> dict:
         confidence = min(1.0, scores[best_skill] / 20.0)
         matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
         return {"matched": True, "skill": best_skill, "confidence": round(confidence, 2), "matched_keywords": matched_kws}
-    return {"matched": False, "skill": "xcms-preprocess", "confidence": 0.0, "matched_keywords": [], "fallback_reason": "No keywords matched"}
+    return {"matched": False, "skill": "metabolomics-xcms-preprocessing", "confidence": 0.0, "matched_keywords": [], "fallback_reason": "No keywords matched"}
 
 def route_query_with_mode(query: str, routing_mode: str = "keyword") -> dict:
     """Route query using specified mode."""
