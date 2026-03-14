@@ -18,34 +18,26 @@ All processing happens locally. No genetic or spatial data leaves the machine.
 
 ---
 
-## All 50+ Skills (5 Omics Domains)
-
-### Spatial Transcriptomics (15 skills)
+## All 16 Skills
 
 | CLI Alias | Skill Directory | Purpose |
 |-----------|-----------------|---------|
-| `spatial-preprocessing` | `skills/spatial/spatial-preprocess/` | QC, normalization, HVG, PCA, UMAP, clustering |
-| `spatial-domain-identification` | `skills/spatial/spatial-domains/` | Tissue region / niche identification |
-| `spatial-cell-annotation` | `skills/spatial/spatial-annotate/` | Cell type annotation |
-| `spatial-deconvolution` | `skills/spatial/spatial-deconv/` | Cell type proportion estimation |
-| `spatial-statistics` | `skills/spatial/spatial-statistics/` | Moran's I, Geary's C, Ripley's K, etc. |
-| `spatial-svg-detection` | `skills/spatial/spatial-genes/` | Spatially variable genes |
-| `spatial-de` | `skills/spatial/spatial-de/` | Differential expression |
-| `spatial-condition-comparison` | `skills/spatial/spatial-condition/` | Pseudobulk condition comparison |
-| `spatial-cell-communication` | `skills/spatial/spatial-communication/` | Ligand-receptor interactions |
-| `spatial-velocity` | `skills/spatial/spatial-velocity/` | RNA velocity / cellular dynamics |
-| `spatial-trajectory` | `skills/spatial/spatial-trajectory/` | Trajectory inference / pseudotime |
-| `spatial-enrichment` | `skills/spatial/spatial-enrichment/` | Pathway and gene set enrichment |
-| `spatial-cnv` | `skills/spatial/spatial-cnv/` | Copy number variation inference |
-| `spatial-integration` | `skills/spatial/spatial-integrate/` | Multi-sample integration (Harmony, BBKNN, Scanorama) |
-| `spatial-registration` | `skills/spatial/spatial-register/` | Spatial registration / slice alignment |
-
-### Other Domains
-- **Single-Cell Omics**: 9 skills (sc-preprocessing, sc-doublet-detection, sc-cell-annotation, etc.)
-- **Genomics**: 10 skills (genomics-vcf-operations, genomics-variant-calling, etc.)
-- **Proteomics**: 8 skills (proteomics-ms-qc, proteomics-identification, etc.)
-- **Metabolomics**: 8 skills (metabolomics-peak-detection, metabolomics-xcms-preprocessing, etc.)
-- **Orchestrator**: 1 skill (orchestrator)
+| `preprocess` | `skills/spatial-preprocess/` | QC, normalization, HVG, PCA, UMAP, clustering |
+| `domains` | `skills/spatial-domains/` | Tissue region / niche identification |
+| `annotate` | `skills/spatial-annotate/` | Cell type annotation |
+| `deconv` | `skills/spatial-deconv/` | Cell type proportion estimation |
+| `statistics` | `skills/spatial-statistics/` | Moran's I, Geary's C, Ripley's K, etc. |
+| `genes` | `skills/spatial-genes/` | Spatially variable genes |
+| `de` | `skills/spatial-de/` | Differential expression |
+| `condition` | `skills/spatial-condition/` | Pseudobulk condition comparison |
+| `communication` | `skills/spatial-communication/` | Ligand-receptor interactions |
+| `velocity` | `skills/spatial-velocity/` | RNA velocity / cellular dynamics |
+| `trajectory` | `skills/spatial-trajectory/` | Trajectory inference / pseudotime |
+| `enrichment` | `skills/spatial-enrichment/` | Pathway and gene set enrichment |
+| `cnv` | `skills/spatial-cnv/` | Copy number variation inference |
+| `integrate` | `skills/spatial-integrate/` | Multi-sample integration (Harmony, BBKNN, Scanorama) |
+| `register` | `skills/spatial-register/` | Spatial registration / slice alignment |
+| `orchestrator` | `skills/spatial-orchestrator/` | Query routing and pipeline execution |
 
 ---
 
@@ -62,10 +54,10 @@ python omicsclaw.py run <skill> --input <data.h5ad> --output <dir>
 python omicsclaw.py run <skill> --demo --output <dir>
 
 # Multi-sample integration
-python omicsclaw.py run spatial-integration --input <data.h5ad> --batch-key <col> --output <dir>
+python omicsclaw.py run integrate --input <data.h5ad> --batch-key <col> --output <dir>
 
 # Spatial registration
-python omicsclaw.py run spatial-registration --input <data.h5ad> --slice-key <col> --output <dir>
+python omicsclaw.py run register --input <data.h5ad> --slice-key <col> --output <dir>
 
 # Orchestrator: route a natural language query
 python omicsclaw.py run orchestrator --query "show spatially variable genes" --output <dir>
@@ -87,11 +79,11 @@ python omicsclaw.py run orchestrator --list-skills --output <dir>
 
 | Pipeline | Steps |
 |----------|-------|
-| `standard` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection → spatial-statistics |
-| `full` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection → spatial-statistics → spatial-cell-communication → spatial-enrichment |
-| `multisample` | spatial-integration → spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection |
-| `velocity_trajectory` | spatial-preprocessing → spatial-velocity → spatial-trajectory |
-| `cancer` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-cnv → spatial-enrichment |
+| `standard` | preprocess → domains → de → genes → statistics |
+| `full` | preprocess → domains → de → genes → statistics → communication → enrichment |
+| `multisample` | integrate → preprocess → domains → de → genes |
+| `velocity_trajectory` | preprocess → velocity → trajectory |
+| `cancer` | preprocess → domains → de → cnv → enrichment |
 
 ---
 
@@ -101,21 +93,21 @@ The orchestrator maps natural-language keywords to skills. Examples:
 
 | Query Fragment | Routes To |
 |---|---|
-| "qc", "quality control", "normalize" | `spatial-preprocessing` |
-| "spatial domain", "tissue region", "niche" | `spatial-domain-identification` |
-| "cell type", "marker gene", "annotate" | `spatial-cell-annotation` |
-| "deconvolution", "cell proportion" | `spatial-deconvolution` |
-| "moran", "autocorrelation", "spatial statistics" | `spatial-statistics` |
-| "spatially variable", "SVG", "spatial pattern" | `spatial-svg-detection` |
-| "differential expression", "DE genes" | `spatial-de` |
-| "condition", "pseudobulk", "DESeq2" | `spatial-condition-comparison` |
-| "communication", "ligand receptor", "LR" | `spatial-cell-communication` |
-| "velocity", "scvelo", "RNA velocity" | `spatial-velocity` |
-| "trajectory", "pseudotime", "cellrank" | `spatial-trajectory` |
-| "enrichment", "GSEA", "pathway" | `spatial-enrichment` |
-| "CNV", "copy number" | `spatial-cnv` |
-| "integrate", "batch correction", "harmony" | `spatial-integration` |
-| "register", "alignment", "multi-slice" | `spatial-registration` |
+| "qc", "quality control", "normalize" | `preprocess` |
+| "spatial domain", "tissue region", "niche" | `domains` |
+| "cell type", "marker gene", "annotate" | `annotate` |
+| "deconvolution", "cell proportion" | `deconv` |
+| "moran", "autocorrelation", "spatial statistics" | `statistics` |
+| "spatially variable", "SVG", "spatial pattern" | `genes` |
+| "differential expression", "DE genes" | `de` |
+| "condition", "pseudobulk", "DESeq2" | `condition` |
+| "communication", "ligand receptor", "LR" | `communication` |
+| "velocity", "scvelo", "RNA velocity" | `velocity` |
+| "trajectory", "pseudotime", "cellrank" | `trajectory` |
+| "enrichment", "GSEA", "pathway" | `enrichment` |
+| "CNV", "copy number" | `cnv` |
+| "integrate", "batch correction", "harmony" | `integrate` |
+| "register", "alignment", "multi-slice" | `register` |
 
 ---
 
@@ -149,7 +141,7 @@ Located in `omicsclaw/common/`:
 ## Testing
 
 ```bash
-python -m pytest -v                  # All 50+ skills (demo mode, no data needed)
+python -m pytest -v                  # All 16 skills (demo mode, no data needed)
 python -m pytest -k "preprocess" -v  # Single skill
 ```
 

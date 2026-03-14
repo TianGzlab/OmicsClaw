@@ -64,25 +64,16 @@ def resolve_skill_alias(skill_name: str) -> str:
     """Resolve short alias to full domain:skill format.
 
     For backward compatibility, allows:
-    - 'preprocess' -> 'spatial-preprocessing' (legacy alias)
-    - 'spatial-preprocessing' -> 'spatial-preprocessing' (direct match)
+    - 'preprocess' -> 'preprocess' (direct match)
+    - 'spatial:preprocess' -> 'spatial:preprocess' (full format)
     """
-    # Direct match
     if skill_name in SKILLS:
         return skill_name
-
-    # Check legacy aliases
-    for skill_key, skill_info in SKILLS.items():
-        legacy_aliases = skill_info.get("legacy_aliases", [])
-        if skill_name in legacy_aliases:
-            return skill_key
-
-    # Domain:skill format
+    # Future: check for domain:skill format
     if ":" in skill_name:
         domain, skill = skill_name.split(":", 1)
         if skill in SKILLS:
             return skill
-
     return skill_name
 
 # ---------------------------------------------------------------------------
@@ -194,9 +185,6 @@ def run_skill(
     timeout: int = 600,
 ) -> dict:
     """Run a single skill via subprocess."""
-
-    # Resolve legacy aliases
-    skill_name = resolve_skill_alias(skill_name)
 
     # Handle pipeline alias
     if skill_name == "spatial-pipeline":

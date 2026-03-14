@@ -32,23 +32,23 @@ from omicsclaw.routing.router import route_query_unified
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "orchestrator"
+SKILL_NAME = "sc-orchestrator"
 SKILL_VERSION = "0.1.0"
 
 KEYWORD_MAP: dict[str, str] = {
     # Preprocessing
-    "preprocess": "sc-preprocessing",
-    "qc": "sc-preprocessing",
-    "quality control": "sc-preprocessing",
-    "normalize": "sc-preprocessing",
-    "clustering": "sc-preprocessing",
-    "scrna-seq": "sc-preprocessing",
-    "single cell": "sc-preprocessing",
+    "preprocess": "sc-preprocess",
+    "qc": "sc-preprocess",
+    "quality control": "sc-preprocess",
+    "normalize": "sc-preprocess",
+    "clustering": "sc-preprocess",
+    "scrna-seq": "sc-preprocess",
+    "single cell": "sc-preprocess",
     # Doublet detection
-    "doublet": "sc-doublet-detection",
-    "scrublet": "sc-doublet-detection",
-    "doubletfinder": "sc-doublet-detection",
-    "remove doublets": "sc-doublet-detection",
+    "doublet": "sc-doublet",
+    "scrublet": "sc-doublet",
+    "doubletfinder": "sc-doublet",
+    "remove doublets": "sc-doublet",
     # Trajectory
     "trajectory": "sc-trajectory",
     "pseudotime": "sc-trajectory",
@@ -56,17 +56,17 @@ KEYWORD_MAP: dict[str, str] = {
     "slingshot": "sc-trajectory",
     "cellrank": "sc-trajectory",
     # Annotation
-    "cell type": "sc-cell-annotation",
-    "annotation": "sc-cell-annotation",
-    "celltypist": "sc-cell-annotation",
-    "singler": "sc-cell-annotation",
-    "annotate": "sc-cell-annotation",
+    "cell type": "sc-annotate",
+    "annotation": "sc-annotate",
+    "celltypist": "sc-annotate",
+    "singler": "sc-annotate",
+    "annotate": "sc-annotate",
     # Integration
-    "integration": "sc-batch-integration",
-    "batch correction": "sc-batch-integration",
-    "harmony": "sc-batch-integration",
-    "scvi": "sc-batch-integration",
-    "integrate": "sc-batch-integration",
+    "integration": "sc-integrate",
+    "batch correction": "sc-integrate",
+    "harmony": "sc-integrate",
+    "scvi": "sc-integrate",
+    "integrate": "sc-integrate",
     # Differential expression
     "differential expression": "sc-de",
     "de analysis": "sc-de",
@@ -78,10 +78,10 @@ KEYWORD_MAP: dict[str, str] = {
     "scenic": "sc-grn",
     "celloracle": "sc-grn",
     # Communication
-    "cell communication": "sc-cell-communication",
-    "ligand receptor": "sc-cell-communication",
-    "cellphonedb": "sc-cell-communication",
-    "nichenet": "sc-cell-communication",
+    "cell communication": "sc-communication",
+    "ligand receptor": "sc-communication",
+    "cellphonedb": "sc-communication",
+    "nichenet": "sc-communication",
     # Multiome
     "multiome": "sc-multiome",
     "cite-seq": "sc-multiome",
@@ -90,14 +90,14 @@ KEYWORD_MAP: dict[str, str] = {
 }
 
 SKILL_DESCRIPTIONS: dict[str, str] = {
-    "sc-preprocessing": "scRNA-seq QC, normalization, HVG, PCA/UMAP, Leiden clustering",
-    "sc-doublet-detection": "Doublet detection and removal (Scrublet, scDblFinder, DoubletFinder)",
-    "sc-cell-annotation": "Cell type annotation (CellTypist, SingleR, scmap, GARNET, scANVI)",
+    "sc-preprocess": "scRNA-seq QC, normalization, HVG, PCA/UMAP, Leiden clustering",
+    "sc-doublet": "Doublet detection and removal (Scrublet, scDblFinder, DoubletFinder)",
+    "sc-annotate": "Cell type annotation (CellTypist, SingleR, scmap, GARNET, scANVI)",
     "sc-trajectory": "Trajectory inference and pseudotime (Monocle3, Slingshot, CellRank)",
-    "sc-batch-integration": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN)",
+    "sc-integrate": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN)",
     "sc-de": "Differential expression analysis (Wilcoxon, MAST, pseudobulk PyDESeq2)",
     "sc-grn": "Gene regulatory network inference (pySCENIC, CellOracle)",
-    "sc-cell-communication": "Cell-cell communication (CellPhoneDB, LIANA+, NicheNet)",
+    "sc-communication": "Cell-cell communication (CellPhoneDB, LIANA+, NicheNet)",
     "sc-multiome": "Paired multi-omics integration (WNN, MOFA+, scVI-tools)",
 }
 
@@ -217,13 +217,7 @@ def main():
     if args.query:
         result = route_query(args.query)
         logger.info(f"Routed to skill: {result['skill']} (confidence: {result['confidence']:.2f})")
-        write_result_json(
-            out_dir,
-            skill=SKILL_NAME,
-            version=SKILL_VERSION,
-            summary={"matched": result["matched"], "confidence": result["confidence"]},
-            data=result,
-        )
+        write_result_json(out_dir, skill_name=SKILL_NAME, status="success", data=result)
     else:
         logger.error("Either --query or --demo is required")
         sys.exit(1)

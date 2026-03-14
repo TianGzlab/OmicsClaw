@@ -18,24 +18,24 @@ SKILL_NAME = "proteomics-orchestrator"
 SKILL_VERSION = "0.1.0"
 
 KEYWORD_MAP: dict[str, str] = {
-    "mass spec": "proteomics-ms-qc", "ms qc": "proteomics-ms-qc", "quality control": "proteomics-ms-qc",
-    "peptide identification": "proteomics-identification", "identify peptides": "proteomics-identification", "maxquant": "proteomics-identification",
-    "protein quantification": "proteomics-quantification", "quantify proteins": "proteomics-quantification", "lfq": "proteomics-quantification",
-    "differential abundance": "proteomics-de", "differentially abundant": "proteomics-de",
-    "ptm": "proteomics-ptm", "post-translational": "proteomics-ptm", "phosphorylation": "proteomics-ptm",
-    "pathway enrichment": "proteomics-enrichment", "enrichment": "proteomics-enrichment", "string": "proteomics-enrichment",
-    "data import": "proteomics-data-import", "convert": "proteomics-data-import",
+    "mass spec": "ms-qc", "ms qc": "ms-qc", "quality control": "ms-qc",
+    "peptide identification": "peptide-id", "identify peptides": "peptide-id", "maxquant": "peptide-id",
+    "protein quantification": "quantification", "quantify proteins": "quantification", "lfq": "quantification",
+    "differential abundance": "differential-abundance", "differentially abundant": "differential-abundance",
+    "ptm": "ptm", "post-translational": "ptm", "phosphorylation": "ptm",
+    "pathway enrichment": "prot-enrichment", "enrichment": "prot-enrichment", "string": "prot-enrichment",
+    "data import": "data-import", "convert": "data-import",
 }
 
 SKILL_DESCRIPTIONS: dict[str, str] = {
-    "proteomics-ms-qc": "Mass spectrometry raw data quality control (PTXQC, rawTools, MSstatsQC)",
-    "proteomics-identification": "Database search for peptide/protein identification (MaxQuant, MS-GF+, Comet)",
-    "proteomics-quantification": "Protein/peptide quantification (MaxQuant LFQ, DIA-NN, Spectronaut)",
-    "proteomics-de": "Differential abundance testing (MSstats, limma, t-test)",
-    "proteomics-ptm": "Post-translational modification site localization (ptmRS, PhosphoRS)",
-    "proteomics-enrichment": "Pathway and functional enrichment analysis (STRING, DAVID, g:Profiler)",
-    "proteomics-structural": "Structural proteomics and cross-linking MS (XlinkX, pLink)",
-    "proteomics-data-import": "Import and convert proteomics data formats",
+    "ms-qc": "Mass spectrometry raw data quality control (PTXQC, rawTools, MSstatsQC)",
+    "peptide-id": "Database search for peptide/protein identification (MaxQuant, MS-GF+, Comet)",
+    "quantification": "Protein/peptide quantification (MaxQuant LFQ, DIA-NN, Spectronaut)",
+    "differential-abundance": "Differential abundance testing (MSstats, limma, t-test)",
+    "ptm": "Post-translational modification site localization (ptmRS, PhosphoRS)",
+    "prot-enrichment": "Pathway and functional enrichment analysis (STRING, DAVID, g:Profiler)",
+    "struct-proteomics": "Structural proteomics and cross-linking MS (XlinkX, pLink)",
+    "data-import": "Import and convert proteomics data formats",
 }
 
 def route_query(query: str) -> dict:
@@ -49,7 +49,7 @@ def route_query(query: str) -> dict:
         confidence = min(1.0, scores[best_skill] / 20.0)
         matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
         return {"matched": True, "skill": best_skill, "confidence": round(confidence, 2), "matched_keywords": matched_kws}
-    return {"matched": False, "skill": "proteomics-ms-qc", "confidence": 0.0, "matched_keywords": [], "fallback_reason": "No keywords matched"}
+    return {"matched": False, "skill": "ms-qc", "confidence": 0.0, "matched_keywords": [], "fallback_reason": "No keywords matched"}
 
 def route_query_with_mode(query: str, routing_mode: str = "keyword") -> dict:
     """Route query using specified mode."""
