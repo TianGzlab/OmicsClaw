@@ -71,10 +71,10 @@ python omicsclaw.py run spatial-preprocessing --demo
 
 ### Spatial Transcriptomics (15 skills)
 
-**Foundation:** `spatial-preprocessing` — QC, normalization, clustering, UMAP
-**Analysis:** `spatial-domain-identification`, `spatial-cell-annotation`, `spatial-deconvolution`, `spatial-statistics`, `spatial-svg-detection`, `spatial-de`, `spatial-condition-comparison`
-**Advanced:** `spatial-cell-communication`, `spatial-velocity`, `spatial-trajectory`, `spatial-enrichment`, `spatial-cnv`
-**Integration:** `spatial-integration`, `spatial-registration`
+- **Foundation:** `spatial-preprocessing` — QC, normalization, clustering, UMAP
+- **Analysis:** `spatial-domain-identification`, `spatial-cell-annotation`, `spatial-deconvolution`, `spatial-statistics`, `spatial-svg-detection`, `spatial-de`, `spatial-condition-comparison`
+- **Advanced:** `spatial-cell-communication`, `spatial-velocity`, `spatial-trajectory`, `spatial-enrichment`, `spatial-cnv`
+- **Integration:** `spatial-integration`, `spatial-registration`
 
 <details>
 <summary>View all spatial skills</summary>
