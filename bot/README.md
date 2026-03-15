@@ -99,13 +99,8 @@ OMICSCLAW_MODEL=deepseek-reasoner   # Use R1 instead of default V3
 #### Feishu
 
 1. Create an app at [Feishu Open Platform](https://open.feishu.cn/app)
-2. Enable **Bot** capability and configure permissions:
-   - `im:message` (send/receive messages)
-   - `im:message:send_as_bot`
-   - `im:resource` (download images/files)
-   - `im:chat` (read chat info)
-3. Enable **Long Connection** mode (no public URL needed)
-4. Set `FEISHU_APP_ID` and `FEISHU_APP_SECRET` in `.env`
+2. **CRITICAL**: See [bot/FEISHU_SETUP.md](./FEISHU_SETUP.md) for detailed instructions on configuring permissions (`im:message`, `im:resource`), subscribing to events, enabling Long Connection, and **Publishing a Version** (which is strictly required for receiving messages).
+3. Set `FEISHU_APP_ID` and `FEISHU_APP_SECRET` in `.env`
 
 ## Usage
 
