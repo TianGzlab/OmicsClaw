@@ -601,7 +601,7 @@ def get_demo_data() -> tuple:
                 "but it was not created."
             )
 
-        # Copy the preprocessed file to output for reference (optional, skipped here as handled in CLI)
+        adata = sc.read_h5ad(processed_path)
         return adata, None
 
 
