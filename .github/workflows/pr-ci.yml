@@ -1,0 +1,83 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  pr-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR Summary
+        run: |
+          echo "## Pull Request Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **PR** | #${{ github.event.pull_request.number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Author** | @${{ github.event.pull_request.user.login }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Title** | ${{ github.event.pull_request.title }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Base** | \`${{ github.event.pull_request.base.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Head** | \`${{ github.event.pull_request.head.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files changed" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          git diff --stat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  core-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install core dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy pandas scikit-learn matplotlib
+
+      - name: Test OmicsClaw CLI
+        run: python omicsclaw.py list
+
+  spatial-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install spatial dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run spatial preprocessing tests
+        run: python -m pytest skills/spatial/spatial-preprocess/tests/ -v
+
+      - name: Run spatial domain tests
+        run: python -m pytest skills/spatial/spatial-domains/tests/ -v
+
+      - name: Run spatial DE tests
+        run: python -m pytest skills/spatial/spatial-de/tests/ -v
+
+      - name: Run spatial statistics tests
+        run: python -m pytest skills/spatial/spatial-statistics/tests/ -v
+
+      - name: Run spatial SVG tests
+        run: python -m pytest skills/spatial/spatial-genes/tests/ -v
