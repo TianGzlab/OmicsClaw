@@ -503,6 +503,7 @@ async def _process_message_async(
     session_key: str,
     text: str,
     attachments: list[dict],
+    user_id: str = None,
 ):
     """Process a single message through the LLM tool loop."""
     # Build content blocks
@@ -548,7 +549,12 @@ async def _process_message_async(
 
         user_content = text
 
-    reply = await core.llm_tool_loop(session_key, user_content)
+    reply = await core.llm_tool_loop(
+        session_key,
+        user_content,
+        user_id=user_id,
+        platform="feishu"
+    )
 
     if core.pending_text:
         reply = "\n\n".join(core.pending_text)
@@ -622,7 +628,7 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
 
         try:
             reply = _run_async(
-                _process_message_async(chat_id, session_key, text, attachments),
+                _process_message_async(chat_id, session_key, text, attachments, sender_id),
                 timeout=300,
             )
         except Exception as e:

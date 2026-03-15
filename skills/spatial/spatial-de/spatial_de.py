@@ -589,7 +589,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Run spatial-preprocess --demo and load the resulting processed.h5ad."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(

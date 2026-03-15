@@ -232,7 +232,9 @@ async def cmd_demo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         reply = await core.llm_tool_loop(
             update.effective_chat.id,
-            f"Run the {skill} demo using the omicsclaw tool with mode='demo'."
+            f"Run the {skill} demo using the omicsclaw tool with mode='demo'.",
+            user_id=str(update.effective_user.id),
+            platform="telegram"
         )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
@@ -320,7 +322,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        reply = await core.llm_tool_loop(update.effective_chat.id, user_text)
+        reply = await core.llm_tool_loop(
+            update.effective_chat.id,
+            user_text,
+            user_id=str(update.effective_user.id),
+            platform="telegram"
+        )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
             core.pending_text.clear()
@@ -407,7 +414,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ),
             })
 
-        reply = await core.llm_tool_loop(update.effective_chat.id, content_blocks)
+        reply = await core.llm_tool_loop(
+            update.effective_chat.id,
+            content_blocks,
+            user_id=str(update.effective_user.id),
+            platform="telegram"
+        )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
             core.pending_text.clear()
@@ -500,7 +512,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"If unsure, use skill='auto'."
             )
 
-        reply = await core.llm_tool_loop(update.effective_chat.id, "\n\n".join(parts))
+        reply = await core.llm_tool_loop(
+            update.effective_chat.id,
+            "\n\n".join(parts),
+            user_id=str(update.effective_user.id),
+            platform="telegram"
+        )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
             core.pending_text.clear()

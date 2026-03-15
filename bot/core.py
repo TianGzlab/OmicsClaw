@@ -121,13 +121,101 @@ OMICSCLAW_MODEL: str = "deepseek-chat"
 LLM_PROVIDER_NAME: str = ""
 
 conversations: dict[int | str, list] = {}
-MAX_HISTORY = 20
+MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))  # Increased from 20, configurable
 
 received_files: dict[int | str, dict] = {}
 pending_media: dict[int | str, list[dict]] = {}
 pending_text: list[str] = []
 
 BOT_START_TIME = time.time()
+
+# Memory system (optional)
+memory_store = None
+session_manager = None
+
+
+# ---------------------------------------------------------------------------
+# Memory Auto-Capture Helpers
+# ---------------------------------------------------------------------------
+
+async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output_dir: Path, success: bool):
+    """Auto-capture analysis memory after skill execution."""
+    if not session_manager or not session_id:
+        return
+
+    try:
+        from bot.memory.models import AnalysisMemory
+
+        # Extract key parameters
+        method = args.get("method", "default")
+        input_path = args.get("file_path", "")
+
+        memory = AnalysisMemory(
+            source_dataset_id="",  # Will link later if needed
+            skill=skill,
+            method=method,
+            parameters={"input": input_path} if input_path else {},
+            output_path=str(output_dir) if output_dir else "",
+            status="completed" if success else "failed"
+        )
+
+        await memory_store.save_memory(session_id, memory)
+        logger.debug(f"Auto-captured analysis: {skill} ({method})")
+    except Exception as e:
+        logger.error(f"Auto-capture failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Session Manager
+# ---------------------------------------------------------------------------
+
+class SessionManager:
+    """Manages user sessions with memory persistence."""
+
+    def __init__(self, store):
+        self.store = store
+
+    async def get_or_create(self, user_id: str, platform: str, chat_id: str):
+        """Get existing session or create new one."""
+        session_id = f"{platform}:{user_id}:{chat_id}"
+        session = await self.store.get_session(session_id)
+        if not session:
+            session = await self.store.create_session(user_id, platform, chat_id)
+        else:
+            await self.store.update_session(session_id, {"last_activity": datetime.utcnow()})
+        return session
+
+    async def load_context(self, session_id: str) -> str:
+        """Load recent memories and format for LLM context."""
+        try:
+            # Get recent memories (limit to keep context small)
+            datasets = await self.store.get_memories(session_id, "dataset", limit=2)
+            analyses = await self.store.get_memories(session_id, "analysis", limit=3)
+            prefs = await self.store.get_memories(session_id, "preference", limit=5)
+
+            parts = []
+
+            # Dataset context
+            if datasets:
+                ds = datasets[0]
+                parts.append(f"**Current Dataset**: {ds.file_path} ({ds.platform or 'unknown'}, {ds.n_obs or '?'} obs, {ds.preprocessing_state})")
+
+            # Recent analyses
+            if analyses:
+                parts.append("**Recent Analyses**:")
+                for i, a in enumerate(analyses[:3], 1):
+                    parts.append(f"{i}. {a.skill} ({a.method}) - {a.status}")
+
+            # User preferences
+            if prefs:
+                parts.append("**User Preferences**:")
+                for p in prefs:
+                    parts.append(f"- {p.key}: {p.value}")
+
+            return "\n".join(parts) if parts else ""
+        except Exception as e:
+            logger.error(f"Failed to load memory context: {e}")
+            return ""
 
 
 def init(
@@ -141,7 +229,7 @@ def init(
     ``provider`` selects a preset (deepseek, gemini, openai, custom).
     Explicit ``base_url`` / ``model`` override the preset.
     """
-    global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME
+    global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
 
     resolved_url, resolved_model = resolve_provider(
         provider=provider,
@@ -160,6 +248,31 @@ def init(
         f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
         f"model={OMICSCLAW_MODEL}, base_url={resolved_url or '(default)'}"
     )
+
+    # Optional memory initialization
+    if os.getenv("OMICSCLAW_MEMORY_BACKEND") == "sqlite":
+        try:
+            from bot.memory import SQLiteBackend, SecureFieldEncryptor
+
+            db_path = os.getenv("OMICSCLAW_MEMORY_DB_PATH", "bot/data/memory.db")
+            encryption_key = os.getenv("OMICSCLAW_MEMORY_ENCRYPTION_KEY")
+
+            if not encryption_key:
+                import secrets
+                encryption_key = secrets.token_urlsafe(32)[:32].ljust(32, '0')
+                logger.warning("No encryption key set, using temporary key")
+
+            encryptor = SecureFieldEncryptor(encryption_key.encode()[:32])
+            store = SQLiteBackend(db_path, encryptor)
+            asyncio.create_task(store.initialize())
+
+            memory_store = store
+            session_manager = SessionManager(store)
+            logger.info("Memory system initialized")
+        except ImportError:
+            logger.warning("Memory dependencies not installed, skipping memory init")
+        except Exception as e:
+            logger.error(f"Memory init failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +317,7 @@ Operational constraints:
    - User: "对 /mnt/nas/exp1.mzML 做质量控制" → mode='path', file_path='/mnt/nas/exp1.mzML', skill='ms-qc'
 """
 
-def build_system_prompt() -> str:
+def build_system_prompt(memory_context: str = "") -> str:
     if SOUL_MD.exists():
         soul = SOUL_MD.read_text(encoding="utf-8")
         logger.info(f"Loaded SOUL.md ({{len(soul)}} chars)")
@@ -214,7 +327,11 @@ def build_system_prompt() -> str:
             "Help users analyse multi-omics data with clarity and rigour."
         )
         logger.warning("SOUL.md not found, using fallback prompt")
-    return f"{soul}\n\n{get_role_guardrails()}"
+
+    prompt = f"{soul}\n\n{get_role_guardrails()}"
+    if memory_context:
+        prompt += f"\n\n## Your Memory\n\n{memory_context}"
+    return prompt
 
 SYSTEM_PROMPT: str = ""
 
@@ -641,7 +758,7 @@ def discover_file(filename_or_pattern: str) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-async def execute_omicsclaw(args: dict) -> str:
+async def execute_omicsclaw(args: dict, session_id: str = None) -> str:
     """Execute an OmicsClaw skill via subprocess."""
     skill_key = args.get("skill", "auto")
     mode = args.get("mode", "demo")
@@ -836,6 +953,10 @@ async def execute_omicsclaw(args: dict) -> str:
             continue
         if not skip:
             keep_lines.append(line)
+
+    # Auto-capture analysis memory
+    if session_id:
+        await _auto_capture_analysis(session_id, skill_key, args, out_dir, True)
 
     return "\n".join(keep_lines).strip()
 
@@ -1386,7 +1507,7 @@ TOOL_EXECUTORS = {
     "get_file_size": execute_get_file_size,
 }
 
-MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable
 
 
 # ---------------------------------------------------------------------------
@@ -1394,7 +1515,7 @@ MAX_TOOL_ITERATIONS = 10
 # ---------------------------------------------------------------------------
 
 
-async def llm_tool_loop(chat_id: int | str, user_content: str | list) -> str:
+async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: str = None, platform: str = None) -> str:
     """
     Run the LLM tool-use loop:
     1. Append user message to history
@@ -1409,6 +1530,12 @@ async def llm_tool_loop(chat_id: int | str, user_content: str | list) -> str:
         if cmd == "/clear" or cmd == "/new":
             if chat_id in conversations:
                 del conversations[chat_id]
+
+            # Clear memory session if enabled
+            if session_manager and user_id and platform:
+                session_id = f"{platform}:{user_id}:{chat_id}"
+                await memory_store.delete_session(session_id)
+
             return "✓ New conversation started." if cmd == "/new" else "✓ Conversation history cleared."
 
         elif cmd == "/files":
@@ -1560,6 +1687,15 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
     if llm is None:
         return "Error: LLM client not initialised. Call core.init() first."
 
+    # Load memory context if session manager available
+    memory_context = ""
+    if session_manager and user_id and platform:
+        session_id = f"{platform}:{user_id}:{chat_id}"
+        memory_context = await session_manager.load_context(session_id)
+
+    # Build system prompt with memory context
+    system_prompt = build_system_prompt(memory_context) if memory_context else SYSTEM_PROMPT
+
     history = conversations.setdefault(chat_id, [])
 
     if isinstance(user_content, str):
@@ -1600,7 +1736,7 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
             response = await llm.chat.completions.create(
                 model=OMICSCLAW_MODEL,
                 max_tokens=8192,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
+                messages=[{"role": "system", "content": system_prompt}] + history,
                 tools=TOOLS,
             )
         except APIError as e:
@@ -1640,7 +1776,12 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
                 audit("tool_call", chat_id=str(chat_id), tool=func_name,
                       args_preview=json.dumps(func_args, default=str)[:300])
                 try:
-                    result = await executor(func_args)
+                    # Pass session_id to omicsclaw executor for auto-capture
+                    if func_name == "omicsclaw" and user_id and platform:
+                        session_id = f"{platform}:{user_id}:{chat_id}"
+                        result = await executor(func_args, session_id)
+                    else:
+                        result = await executor(func_args)
                 except Exception as tool_err:
                     logger.error(f"Tool {func_name} raised: {tool_err}", exc_info=True)
                     audit("tool_error", chat_id=str(chat_id), tool=func_name,
