@@ -189,7 +189,10 @@ Operational constraints:
    contains precise numerical data that must not be altered. You may add a brief
    intro line but never replace or condense the tool output.
 6. For uploaded data or visual evidence, suggest appropriate OmicsClaw analysis skills.
-7. For quick demos: say "run preprocess demo", "run ms-qc demo", etc.
+7. PDF UPLOAD SUPPORT: When user uploads a PDF file (scientific paper), automatically
+   call parse_literature tool to extract GEO accessions and metadata. The system
+   will detect uploaded PDFs automatically.
+8. For quick demos: say "run preprocess demo", "run ms-qc demo", etc.
    Use mode='demo' to run with built-in synthetic data.
 8. FILE PATH MODE (IMPORTANT): Omics data files are often too large to upload
    via messaging. When the user mentions a file path or filename, use mode='path'
@@ -328,6 +331,185 @@ def get_tools() -> list[dict]:
                         "destination_folder": {"type": "string", "description": "Output folder."},
                     },
                     "required": ["text", "filename"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "parse_literature",
+                "description": "Parse scientific literature (PDF, URL, DOI, PubMed ID) to extract GEO accessions and metadata, then download datasets. Use when user mentions a paper, sends a PDF, or provides a literature reference.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "input_type": {
+                            "type": "string",
+                            "enum": ["auto", "url", "doi", "pubmed", "file", "text"],
+                            "description": "Type of input (default: auto-detect)"
+                        },
+                        "input_value": {
+                            "type": "string",
+                            "description": "URL, DOI, PubMed ID, file path, or text content"
+                        },
+                        "auto_download": {
+                            "type": "boolean",
+                            "description": "Automatically download datasets (default: true)"
+                        }
+                    },
+                    "required": ["input_value"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_geo_metadata",
+                "description": "Fetch metadata for a specific GEO accession (GSE, GSM, or GPL). Use when user asks to fetch, query, or get information about a specific GEO ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "accession": {
+                            "type": "string",
+                            "description": "GEO accession ID (e.g., GSE204716, GSM123456)"
+                        },
+                        "download": {
+                            "type": "boolean",
+                            "description": "Download the dataset after fetching metadata (default: false)"
+                        }
+                    },
+                    "required": ["accession"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_directory",
+                "description": "List contents of a directory. Use when user wants to see files in a folder.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory path (default: current data directory)"}
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "inspect_file",
+                "description": "Display contents of a CSV, JSON, or TXT file. Use when user wants to view file contents.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to file"},
+                        "lines": {"type": "integer", "description": "Number of lines to show (default: 20)"}
+                    },
+                    "required": ["file_path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "download_file",
+                "description": "Download a file from a URL. Use when user provides a direct file URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "File URL"},
+                        "destination": {"type": "string", "description": "Destination path (optional)"}
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_json_file",
+                "description": "Create a JSON file from structured data. Use when user wants to save data as JSON.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "data": {"type": "object", "description": "Data to save as JSON"},
+                        "filename": {"type": "string", "description": "Filename (without extension)"},
+                        "destination": {"type": "string", "description": "Destination folder (optional)"}
+                    },
+                    "required": ["data", "filename"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_csv_file",
+                "description": "Create a CSV file from tabular data. Use when user wants to save data as CSV.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "data": {"type": "array", "description": "Array of row objects"},
+                        "filename": {"type": "string", "description": "Filename (without extension)"},
+                        "destination": {"type": "string", "description": "Destination folder (optional)"}
+                    },
+                    "required": ["data", "filename"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "make_directory",
+                "description": "Create a new directory. Use when user wants to create a folder.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory path to create"}
+                    },
+                    "required": ["path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "move_file",
+                "description": "Move or rename a file. Use when user wants to move or rename files.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string", "description": "Source file path"},
+                        "destination": {"type": "string", "description": "Destination path"}
+                    },
+                    "required": ["source", "destination"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "remove_file",
+                "description": "Delete a file or directory. Use when user wants to remove files/folders.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "File or directory path to remove"}
+                    },
+                    "required": ["path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_file_size",
+                "description": "Get file size in MB. Use when user asks about file size.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "File path"}
+                    },
+                    "required": ["file_path"],
                 },
             },
         },
@@ -785,6 +967,404 @@ async def execute_generate_audio(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# execute_parse_literature
+# ---------------------------------------------------------------------------
+
+
+async def execute_parse_literature(args: dict) -> str:
+    """Execute literature parsing skill."""
+    input_value = args.get("input_value", "")
+    input_type = args.get("input_type", "auto")
+    auto_download = args.get("auto_download", True)
+
+    # Check for uploaded PDF files
+    if not input_value:
+        for _cid, info in received_files.items():
+            file_path = info.get("path", "")
+            if file_path and Path(file_path).suffix.lower() == ".pdf":
+                input_value = file_path
+                input_type = "file"
+                logger.info(f"Detected uploaded PDF: {file_path}")
+                break
+
+    if not input_value:
+        return "Error: input_value is required."
+
+    # Output directory
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = OUTPUT_DIR / f"literature-parse_{ts}"
+
+    # Build command
+    lit_script = OMICSCLAW_DIR / "skills" / "literature" / "literature_parse.py"
+    if not lit_script.exists():
+        return "Error: literature parsing skill not found."
+
+    cmd = [PYTHON, str(lit_script)]
+    cmd.extend(["--input", input_value])
+    cmd.extend(["--input-type", input_type])
+    cmd.extend(["--output", str(out_dir)])
+    cmd.extend(["--data-dir", str(DATA_DIR)])
+
+    if not auto_download:
+        cmd.append("--no-download")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=180,
+        )
+        stdout_str = stdout_bytes.decode(errors="replace")
+        stderr_str = stderr_bytes.decode(errors="replace")
+    except asyncio.TimeoutError:
+        return "Literature parsing timed out after 180 seconds."
+    except Exception as e:
+        import traceback as _tb
+        return f"Literature parsing crashed:\n{_tb.format_exc()[-1500:]}"
+
+    if proc.returncode != 0:
+        err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        return f"Literature parsing failed (exit {proc.returncode}):\n{err}"
+
+    # Read report
+    report_file = out_dir / "report.md"
+    if report_file.exists():
+        return report_file.read_text(encoding="utf-8")
+    else:
+        return stdout_str if stdout_str else "Literature parsing completed but no report generated."
+
+
+# ---------------------------------------------------------------------------
+# execute_fetch_geo_metadata
+# ---------------------------------------------------------------------------
+
+
+async def execute_fetch_geo_metadata(args: dict) -> str:
+    """Fetch GEO metadata for a specific accession."""
+    accession = args.get("accession", "").strip().upper()
+    download = args.get("download", False)
+
+    if not accession:
+        return "Error: accession is required."
+
+    # Import downloader functions
+    sys.path.insert(0, str(OMICSCLAW_DIR / "skills" / "literature"))
+    try:
+        from core.downloader import fetch_geo_metadata, download_geo_dataset
+    except ImportError as e:
+        return f"Error importing GEO tools: {e}"
+
+    # Fetch metadata
+    try:
+        metadata = fetch_geo_metadata(accession)
+        if not metadata:
+            return f"Failed to fetch metadata for {accession}. Please check the accession ID."
+
+        # Format response
+        lines = [
+            f"# GEO Metadata: {accession}",
+            f"\n**Title**: {metadata.get('title', 'N/A')}",
+            f"\n**Organism**: {metadata.get('organism', 'N/A')}",
+            f"\n**Platform**: {metadata.get('platform', 'N/A')}",
+        ]
+
+        summary = metadata.get('summary', '')
+        if summary:
+            lines.append(f"\n**Summary**: {summary[:300]}{'...' if len(summary) > 300 else ''}")
+
+        samples = metadata.get('samples', [])
+        if samples:
+            lines.append(f"\n**Samples**: {len(samples)} samples")
+            lines.append(f"- {', '.join(samples[:5])}")
+            if len(samples) > 5:
+                lines.append(f"- ... and {len(samples) - 5} more")
+
+        # Download if requested
+        if download and accession.startswith('GSE'):
+            lines.append(f"\n## Downloading {accession}...")
+            result = download_geo_dataset(accession, DATA_DIR)
+            if result['status'] == 'success':
+                lines.append(f"\n✓ Downloaded {len(result['files'])} files to data/{accession}/")
+            else:
+                lines.append(f"\n✗ Download failed: {', '.join(result.get('errors', ['Unknown error']))}")
+
+        return '\n'.join(lines)
+
+    except Exception as e:
+        return f"Error fetching GEO metadata: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_list_directory
+# ---------------------------------------------------------------------------
+
+
+async def execute_list_directory(args: dict) -> str:
+    """List directory contents."""
+    path_arg = args.get("path", "")
+    target_path = Path(path_arg) if path_arg else DATA_DIR
+
+    if not target_path.is_absolute():
+        target_path = DATA_DIR / target_path
+
+    if not target_path.exists():
+        return f"Directory not found: {target_path}"
+
+    if not target_path.is_dir():
+        return f"Not a directory: {target_path}"
+
+    try:
+        items = []
+        for item in sorted(target_path.iterdir()):
+            if item.is_dir():
+                items.append(f"📁 {item.name}/")
+            else:
+                size = item.stat().st_size / (1024 * 1024)
+                items.append(f"📄 {item.name} ({size:.2f} MB)")
+
+        if not items:
+            return f"Empty directory: {target_path}"
+
+        return f"Contents of {target_path}:\n" + "\n".join(items[:50])
+    except Exception as e:
+        return f"Error listing directory: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_inspect_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_inspect_file(args: dict) -> str:
+    """Inspect file contents."""
+    file_path_arg = args.get("file_path", "")
+    lines_limit = args.get("lines", 20)
+
+    if not file_path_arg:
+        return "Error: file_path is required."
+
+    file_path = validate_input_path(file_path_arg)
+    if not file_path:
+        return f"File not found or not accessible: {file_path_arg}"
+
+    try:
+        suffix = file_path.suffix.lower()
+        content = file_path.read_text(encoding="utf-8")
+        lines = content.split("\n")
+
+        preview = "\n".join(lines[:lines_limit])
+        total = len(lines)
+
+        return f"File: {file_path.name}\nShowing {min(lines_limit, total)} of {total} lines:\n\n{preview}"
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_download_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_download_file(args: dict) -> str:
+    """Download file from URL."""
+    url = args.get("url", "")
+    dest_arg = args.get("destination", "")
+
+    if not url:
+        return "Error: url is required."
+
+    try:
+        filename = url.split("/")[-1] or "downloaded_file"
+        filename = sanitize_filename(filename)
+
+        dest_dir = resolve_dest(dest_arg) if dest_arg else DATA_DIR
+        dest_path = dest_dir / filename
+
+        response = requests.get(url, timeout=120, stream=True)
+        response.raise_for_status()
+
+        with open(dest_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        return f"Downloaded: {dest_path} ({size_mb:.2f} MB)"
+    except Exception as e:
+        return f"Download failed: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_create_json_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_create_json_file(args: dict) -> str:
+    """Create JSON file from data."""
+    data = args.get("data", {})
+    filename = args.get("filename", "")
+    dest_arg = args.get("destination", "")
+
+    if not filename:
+        return "Error: filename is required."
+
+    filename = sanitize_filename(filename)
+    if not filename.endswith(".json"):
+        filename += ".json"
+
+    dest_dir = resolve_dest(dest_arg) if dest_arg else DATA_DIR
+    filepath = dest_dir / filename
+
+    try:
+        filepath.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return f"JSON file created: {filepath}"
+    except Exception as e:
+        return f"Error creating JSON file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_create_csv_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_create_csv_file(args: dict) -> str:
+    """Create CSV file from tabular data."""
+    data = args.get("data", [])
+    filename = args.get("filename", "")
+    dest_arg = args.get("destination", "")
+
+    if not filename:
+        return "Error: filename is required."
+    if not data:
+        return "Error: data is required."
+
+    filename = sanitize_filename(filename)
+    if not filename.endswith(".csv"):
+        filename += ".csv"
+
+    dest_dir = resolve_dest(dest_arg) if dest_arg else DATA_DIR
+    filepath = dest_dir / filename
+
+    try:
+        import csv
+        with open(filepath, "w", newline="", encoding="utf-8") as f:
+            if isinstance(data[0], dict):
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            else:
+                writer = csv.writer(f)
+                writer.writerows(data)
+        return f"CSV file created: {filepath}"
+    except Exception as e:
+        return f"Error creating CSV file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_make_directory
+# ---------------------------------------------------------------------------
+
+
+async def execute_make_directory(args: dict) -> str:
+    """Create a new directory."""
+    path_arg = args.get("path", "")
+
+    if not path_arg:
+        return "Error: path is required."
+
+    target_path = Path(path_arg)
+    if not target_path.is_absolute():
+        target_path = DATA_DIR / target_path
+
+    try:
+        target_path.mkdir(parents=True, exist_ok=True)
+        return f"Directory created: {target_path}"
+    except Exception as e:
+        return f"Error creating directory: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_move_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_move_file(args: dict) -> str:
+    """Move or rename a file."""
+    source_arg = args.get("source", "")
+    dest_arg = args.get("destination", "")
+
+    if not source_arg or not dest_arg:
+        return "Error: source and destination are required."
+
+    source_path = validate_input_path(source_arg)
+    if not source_path:
+        return f"Source file not found: {source_arg}"
+
+    dest_path = Path(dest_arg)
+    if not dest_path.is_absolute():
+        dest_path = DATA_DIR / dest_path
+
+    try:
+        shutil.move(str(source_path), str(dest_path))
+        return f"Moved: {source_path} → {dest_path}"
+    except Exception as e:
+        return f"Error moving file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_remove_file
+# ---------------------------------------------------------------------------
+
+
+async def execute_remove_file(args: dict) -> str:
+    """Remove a file or directory."""
+    path_arg = args.get("path", "")
+
+    if not path_arg:
+        return "Error: path is required."
+
+    target_path = validate_input_path(path_arg)
+    if not target_path:
+        return f"Path not found: {path_arg}"
+
+    try:
+        if target_path.is_dir():
+            shutil.rmtree(target_path)
+            return f"Removed directory: {target_path}"
+        else:
+            target_path.unlink()
+            return f"Removed file: {target_path}"
+    except Exception as e:
+        return f"Error removing: {e}"
+
+
+# ---------------------------------------------------------------------------
+# execute_get_file_size
+# ---------------------------------------------------------------------------
+
+
+async def execute_get_file_size(args: dict) -> str:
+    """Get file size."""
+    file_path_arg = args.get("file_path", "")
+
+    if not file_path_arg:
+        return "Error: file_path is required."
+
+    file_path = validate_input_path(file_path_arg)
+    if not file_path:
+        return f"File not found: {file_path_arg}"
+
+    try:
+        size_bytes = file_path.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
+        return f"File: {file_path.name}\nSize: {size_mb:.2f} MB ({size_bytes:,} bytes)"
+    except Exception as e:
+        return f"Error getting file size: {e}"
+
+
+# ---------------------------------------------------------------------------
 # Tool executor registry
 # ---------------------------------------------------------------------------
 
@@ -793,6 +1373,17 @@ TOOL_EXECUTORS = {
     "save_file": execute_save_file,
     "write_file": execute_write_file,
     "generate_audio": execute_generate_audio,
+    "parse_literature": execute_parse_literature,
+    "fetch_geo_metadata": execute_fetch_geo_metadata,
+    "list_directory": execute_list_directory,
+    "inspect_file": execute_inspect_file,
+    "download_file": execute_download_file,
+    "create_json_file": execute_create_json_file,
+    "create_csv_file": execute_create_csv_file,
+    "make_directory": execute_make_directory,
+    "move_file": execute_move_file,
+    "remove_file": execute_remove_file,
+    "get_file_size": execute_get_file_size,
 }
 
 MAX_TOOL_ITERATIONS = 10
