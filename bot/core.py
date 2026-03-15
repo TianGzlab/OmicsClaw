@@ -121,7 +121,7 @@ OMICSCLAW_MODEL: str = "deepseek-chat"
 LLM_PROVIDER_NAME: str = ""
 
 conversations: dict[int | str, list] = {}
-MAX_HISTORY = 20
+MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))  # Increased from 20, configurable
 
 received_files: dict[int | str, dict] = {}
 pending_media: dict[int | str, list[dict]] = {}
@@ -1507,7 +1507,7 @@ TOOL_EXECUTORS = {
     "get_file_size": execute_get_file_size,
 }
 
-MAX_TOOL_ITERATIONS = 10
+MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable
 
 
 # ---------------------------------------------------------------------------
