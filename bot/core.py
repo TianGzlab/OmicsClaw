@@ -154,6 +154,38 @@ class SessionManager:
             await self.store.update_session(session_id, {"last_activity": datetime.utcnow()})
         return session
 
+    async def load_context(self, session_id: str) -> str:
+        """Load recent memories and format for LLM context."""
+        try:
+            # Get recent memories (limit to keep context small)
+            datasets = await self.store.get_memories(session_id, "dataset", limit=2)
+            analyses = await self.store.get_memories(session_id, "analysis", limit=3)
+            prefs = await self.store.get_memories(session_id, "preference", limit=5)
+
+            parts = []
+
+            # Dataset context
+            if datasets:
+                ds = datasets[0]
+                parts.append(f"**Current Dataset**: {ds.file_path} ({ds.platform or 'unknown'}, {ds.n_obs or '?'} obs, {ds.preprocessing_state})")
+
+            # Recent analyses
+            if analyses:
+                parts.append("**Recent Analyses**:")
+                for i, a in enumerate(analyses[:3], 1):
+                    parts.append(f"{i}. {a.skill} ({a.method}) - {a.status}")
+
+            # User preferences
+            if prefs:
+                parts.append("**User Preferences**:")
+                for p in prefs:
+                    parts.append(f"- {p.key}: {p.value}")
+
+            return "\n".join(parts) if parts else ""
+        except Exception as e:
+            logger.error(f"Failed to load memory context: {e}")
+            return ""
+
 
 def init(
     api_key: str,
@@ -254,7 +286,7 @@ Operational constraints:
    - User: "对 /mnt/nas/exp1.mzML 做质量控制" → mode='path', file_path='/mnt/nas/exp1.mzML', skill='ms-qc'
 """
 
-def build_system_prompt() -> str:
+def build_system_prompt(memory_context: str = "") -> str:
     if SOUL_MD.exists():
         soul = SOUL_MD.read_text(encoding="utf-8")
         logger.info(f"Loaded SOUL.md ({{len(soul)}} chars)")
@@ -264,7 +296,11 @@ def build_system_prompt() -> str:
             "Help users analyse multi-omics data with clarity and rigour."
         )
         logger.warning("SOUL.md not found, using fallback prompt")
-    return f"{soul}\n\n{get_role_guardrails()}"
+
+    prompt = f"{soul}\n\n{get_role_guardrails()}"
+    if memory_context:
+        prompt += f"\n\n## Your Memory\n\n{memory_context}"
+    return prompt
 
 SYSTEM_PROMPT: str = ""
 
@@ -1616,6 +1652,15 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
     if llm is None:
         return "Error: LLM client not initialised. Call core.init() first."
 
+    # Load memory context if session manager available
+    memory_context = ""
+    if session_manager and user_id and platform:
+        session_id = f"{platform}:{user_id}:{chat_id}"
+        memory_context = await session_manager.load_context(session_id)
+
+    # Build system prompt with memory context
+    system_prompt = build_system_prompt(memory_context) if memory_context else SYSTEM_PROMPT
+
     history = conversations.setdefault(chat_id, [])
 
     if isinstance(user_content, str):
@@ -1656,7 +1701,7 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
             response = await llm.chat.completions.create(
                 model=OMICSCLAW_MODEL,
                 max_tokens=8192,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
+                messages=[{"role": "system", "content": system_prompt}] + history,
                 tools=TOOLS,
             )
         except APIError as e:
