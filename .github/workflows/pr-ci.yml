@@ -51,6 +51,42 @@ jobs:
       - name: Test OmicsClaw CLI
         run: python omicsclaw.py list
 
+  memory-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install memory dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pydantic aiosqlite cryptography requests openai python-dotenv numpy pandas scikit-learn matplotlib PyYAML
+
+      - name: Run memory tests
+        run: python -m pytest tests/memory/ -v
+
+  bot-core-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bot core dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest openai python-dotenv pydantic numpy pandas scikit-learn matplotlib PyYAML
+
+      - name: Run bot core tests
+        run: python -m pytest tests/bot_tests/ -v
+
   spatial-test:
     runs-on: ubuntu-latest
     steps:
