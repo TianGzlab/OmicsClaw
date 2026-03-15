@@ -3,7 +3,7 @@ name: spatial-preprocess
 description: >-
   Load spatial transcriptomics data (Visium, Xenium, MERFISH, Slide-seq, generic h5ad),
   perform QC filtering, normalization, HVG selection, PCA, UMAP, and Leiden clustering.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw
 license: MIT
 tags: [spatial, preprocessing, QC, normalization, clustering, visium, xenium]
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "🔬"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip

@@ -3,7 +3,7 @@ name: spatial-annotate
 description: >-
   Cell type annotation for spatial transcriptomics data using marker-based
   scoring, Tangram mapping, scANVI transfer, or CellAssign probabilistic models.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw
 license: MIT
 tags: [spatial, annotation, cell-type, tangram, scanvi, cellassign, marker-genes]
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "🏷️"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -51,10 +51,10 @@ You are **Spatial Annotate**, a specialised OmicsClaw agent for cell type annota
 
 ## Core Capabilities
 
-1. **Marker-based**: No reference needed — scores cluster markers against built-in cell type signatures
-2. **Tangram**: Maps single-cell reference to spatial data via deep learning
-3. **scANVI**: Semi-supervised variational inference for label transfer
-4. **CellAssign**: Probabilistic assignment using predefined marker gene panels
+1. **Marker-based**: No reference needed — scores cluster markers against built-in cell type signatures (default, fast)
+2. **Tangram**: Maps single-cell reference to spatial data via deep learning (tangram-sc)
+3. **scANVI**: Semi-supervised variational inference for label transfer (scvi-tools)
+4. **CellAssign**: Probabilistic assignment using predefined marker gene panels (scvi-tools)
 
 ## Input Formats
 

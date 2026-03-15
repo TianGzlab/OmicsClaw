@@ -1,13 +1,13 @@
 ---
 name: spatial-genes
 description: >-
-  Find genes with spatially variable expression patterns using Moran's I
-  and SpatialDE. Identifies genes whose expression is non-randomly distributed
-  across tissue coordinates.
-version: 0.1.0
+  Find genes with spatially variable expression patterns using Moran's I,
+  SpatialDE, SPARK-X, or FlashS. Identifies genes whose expression is non-randomly
+  distributed across tissue coordinates.
+version: 0.2.0
 author: SpatialClaw
 license: MIT
-tags: [spatial, SVG, spatially-variable-genes, Moran, SpatialDE]
+tags: [spatial, SVG, spatially-variable-genes, morans, spatialde, sparkx, flashs]
 metadata:
   omicsclaw:
     domain: spatial
@@ -17,7 +17,7 @@ metadata:
       env: []
       config: []
     emoji: "🧭"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -50,9 +50,11 @@ You are **Spatial Genes**, the spatially variable gene (SVG) discovery skill for
 ## Core Capabilities
 
 1. **Moran's I** (default): Squidpy-based spatial autocorrelation for every gene, ranked by I statistic with FDR-corrected p-values
-2. **SpatialDE** (optional): Non-parametric test for spatially variable genes using Gaussian process regression
-3. **Top SVG visualization**: 2×2 spatial scatter grid of the top 4 spatially variable genes
-4. **Ranked table**: CSV of all tested genes sorted by spatial variability with statistics
+2. **SpatialDE**: Gaussian process regression via SpatialDE2 (identifies spatial patterns)
+3. **SPARK-X**: Non-parametric kernel test via SPARK-X in R (requires rpy2)
+4. **FlashS**: Randomized kernel approximation (Python native, fast on large datasets)
+5. **Top SVG visualization**: 2×2 spatial scatter grid of the top 4 spatially variable genes
+6. **Ranked table**: CSV of all tested genes sorted by spatial variability with statistics
 
 ## Input Formats
 
@@ -73,7 +75,7 @@ You are **Spatial Genes**, the spatially variable gene (SVG) discovery skill for
 ## CLI Reference
 
 ```bash
-# Standard usage (Moran's I)
+# Standard usage (Moran's I, default)
 python skills/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --output <report_dir>
 
@@ -81,14 +83,22 @@ python skills/spatial-genes/spatial_genes.py \
 python skills/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method morans --n-top-genes 30 --fdr-threshold 0.01 --output <dir>
 
-# SpatialDE method (requires SpatialDE package)
+# SpatialDE method
 python skills/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method spatialde --output <dir>
+
+# SPARK-X method (requires R + rpy2)
+python skills/spatial-genes/spatial_genes.py \
+  --input <processed.h5ad> --method sparkx --output <dir>
+
+# FlashS method (fast on large data)
+python skills/spatial-genes/spatial_genes.py \
+  --input <processed.h5ad> --method flashs --output <dir>
 
 # Demo mode
 python skills/spatial-genes/spatial_genes.py --demo --output /tmp/svg_demo
 
-# Via SpatialClaw runner
+# Via OmicsClaw runner
 python omicsclaw.py run spatial-svg-detection --input <file> --output <dir>
 python omicsclaw.py run spatial-svg-detection --demo
 ```
@@ -112,15 +122,29 @@ python omicsclaw.py run spatial-svg-detection --demo
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--method` | `morans` | `morans` or `spatialde` |
+| `--method` | `morans` | `morans`, `spatialde`, `sparkx`, or `flashs` |
 | `--n-top-genes` | `20` | Number of top SVGs to report |
 | `--fdr-threshold` | `0.05` | FDR-corrected p-value cutoff |
+| `--n-neighs` | `6` | Number of spatial neighbors for graph |
+| `--n-perms` | `100` | Number of permutations for p-value |
 
-### SpatialDE (optional)
+### SpatialDE
 
-1. **Dependency**: Requires `SpatialDE` package (`pip install SpatialDE`)
+1. **Dependency**: Requires `SpatialDE` package
 2. **Test**: Gaussian process regression comparing spatially-aware vs spatially-unaware models
-3. **Status**: Stub with dependency check — full implementation in future version
+3. **Output**: Genes ranked by likelihood ratio test
+
+### SPARK-X
+
+1. **Dependency**: Requires R + rpy2 + SPARK R package
+2. **Test**: Non-parametric kernel-based test
+3. **Advantage**: Robust to non-linear spatial patterns
+
+### FlashS
+
+1. **Dependency**: Python native (no R required)
+2. **Method**: Randomized kernel approximation
+3. **Advantage**: Fast on large datasets (>10k spots)
 
 ## Output Structure
 
@@ -148,7 +172,9 @@ output_dir/
 - `numpy`, `pandas` — numerics
 
 **Optional**:
-- `SpatialDE` — Gaussian process-based SVG detection (graceful degradation without it)
+- `SpatialDE` — Gaussian process-based SVG detection
+- `rpy2` + R package `SPARK` — SPARK-X kernel test
+- `flashs` — FlashS randomized kernel approximation
 
 ## Safety
 

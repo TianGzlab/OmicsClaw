@@ -2,7 +2,7 @@
 name: spatial-condition
 description: >-
   Experimental condition comparison using pseudobulk differential expression with proper multi-sample statistics.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw Team
 license: MIT
 tags: [spatial, condition, pseudobulk, DESeq2, differential expression]
@@ -15,7 +15,7 @@ metadata:
       env: []
       config: []
     emoji: "⚖️"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip

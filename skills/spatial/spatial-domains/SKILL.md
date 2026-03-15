@@ -2,11 +2,11 @@
 name: spatial-domains
 description: >-
   Identify tissue regions and spatial niches from preprocessed spatial transcriptomics
-  data using Leiden graph clustering, SpaGCN, STAGATE, or GraphST.
-version: 0.1.0
+  data using Leiden, Louvain, SpaGCN, STAGATE, GraphST, or BANKSY.
+version: 0.2.0
 author: SpatialClaw
 license: MIT
-tags: [spatial, domains, niche, tissue-region, clustering, leiden, spagcn, stagate]
+tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spagcn, stagate, graphst, banksy]
 metadata:
   omicsclaw:
     domain: spatial
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "🗺️"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -45,10 +45,15 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 
 ## Core Capabilities
 
-1. **Leiden spatial domains**: Fast graph-based clustering on the neighbor graph (default)
-2. **SpaGCN integration**: Spatially-aware graph convolutional clustering when SpaGCN is installed
-3. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
-4. **Domain summary statistics**: Cell counts and proportions per domain
+1. **Leiden spatial domains**: Fast graph-based clustering with spatial-weighted neighbors (default)
+2. **Louvain clustering**: Classic graph-based clustering (requires louvain package)
+3. **SpaGCN**: Spatial Graph Convolutional Network integrating histology
+4. **STAGATE**: Graph attention auto-encoder (requires PyTorch Geometric)
+5. **GraphST**: Self-supervised contrastive learning (requires PyTorch)
+6. **BANKSY**: Explicit spatial feature augmentation (interpretable)
+7. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
+8. **Domain summary statistics**: Cell counts and proportions per domain
+9. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
 
 ## Input Formats
 
@@ -69,22 +74,37 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 ## CLI Reference
 
 ```bash
-# Standard usage (Leiden, auto-resolution)
+# Standard usage (Leiden, default)
 python skills/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --output <report_dir>
 
-# Specify method and number of domains
+# Specify method and parameters
+python skills/spatial-domains/spatial_domains.py \
+  --input <preprocessed.h5ad> --method leiden --resolution 0.8 --spatial-weight 0.3 --output <dir>
+
+python skills/spatial-domains/spatial_domains.py \
+  --input <preprocessed.h5ad> --method louvain --resolution 1.0 --output <dir>
+
 python skills/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method spagcn --n-domains 7 --output <dir>
 
-# Custom Leiden resolution
 python skills/spatial-domains/spatial_domains.py \
-  --input <preprocessed.h5ad> --resolution 0.8 --output <dir>
+  --input <preprocessed.h5ad> --method stagate --n-domains 7 --rad-cutoff 50.0 --output <dir>
+
+python skills/spatial-domains/spatial_domains.py \
+  --input <preprocessed.h5ad> --method graphst --n-domains 7 --output <dir>
+
+python skills/spatial-domains/spatial_domains.py \
+  --input <preprocessed.h5ad> --method banksy --resolution 0.7 --lambda-param 0.2 --output <dir>
+
+# Apply spatial refinement
+python skills/spatial-domains/spatial_domains.py \
+  --input <preprocessed.h5ad> --method leiden --refine --output <dir>
 
 # Demo mode
 python skills/spatial-domains/spatial_domains.py --demo --output /tmp/domains_demo
 
-# Via SpatialClaw runner
+# Via OmicsClaw runner
 python omicsclaw.py run spatial-domain-identification --input <file> --output <dir>
 python omicsclaw.py run spatial-domain-identification --demo
 ```
@@ -93,24 +113,85 @@ python omicsclaw.py run spatial-domain-identification --demo
 
 ### Leiden (default)
 
-1. **Input**: Preprocessed AnnData with neighbor graph (from spatial-preprocess)
-2. **Clustering**: `sc.tl.leiden(resolution=resolution, flavor="igraph")`
-3. **Labels**: Stored in `adata.obs["spatial_domain"]`
+1. **Input**: Preprocessed AnnData with neighbor graph
+2. **Spatial weighting**: Combines expression-based and spatial neighbor graphs with configurable weight
+3. **Clustering**: `sc.tl.leiden(resolution=resolution, flavor="igraph")`
+4. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `resolution`: Controls granularity (default 1.0; higher = more domains)
+- `spatial_weight`: Weight of spatial graph (0.0-1.0, default 0.3)
+- `n_neighbors`: Number of neighbors for graph construction (default 15)
 
-### SpaGCN (optional)
+### Louvain
+
+1. **Input**: Preprocessed AnnData with neighbor graph
+2. **Clustering**: `sc.tl.louvain(resolution=resolution)`
+3. **Labels**: Stored in `adata.obs["spatial_domain"]`
+4. **Requires**: `pip install louvain`
+
+**Key parameters**:
+- `resolution`: Controls granularity (default 1.0)
+
+### SpaGCN
 
 1. **Input**: AnnData with spatial coordinates and expression matrix
-2. **Spatial graph**: Build adjacency from spatial coordinates + histology (if available)
+2. **Spatial graph**: Build adjacency from spatial coordinates
 3. **GCN clustering**: `SpaGCN.train()` with `n_domains` target clusters
-4. **Refinement**: Spatial-aware label refinement
+4. **Refinement**: Built-in spatial-aware label refinement
 5. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `n_domains`: Target number of spatial domains
 - Source: Hu et al., *Nature Methods* 2021
+
+### STAGATE
+
+1. **Input**: AnnData with spatial coordinates
+2. **Spatial network**: Build graph with radius cutoff
+3. **Graph attention**: Train attention auto-encoder on PyTorch
+4. **Clustering**: Gaussian Mixture Model on learned embeddings
+5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+
+**Key parameters**:
+- `n_domains`: Target number of domains
+- `rad_cutoff`: Radius for spatial network (default 50.0)
+- Source: Dong & Zhang, *Nature Communications* 2022
+
+### GraphST
+
+1. **Input**: AnnData with spatial coordinates
+2. **Contrastive learning**: Self-supervised graph neural network
+3. **Embedding**: PCA on learned representations
+4. **Clustering**: Gaussian Mixture Model
+5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+
+**Key parameters**:
+- `n_domains`: Target number of domains
+- Source: Long et al., *Nature Communications* 2023
+
+### BANKSY
+
+1. **Input**: AnnData with spatial coordinates
+2. **Feature augmentation**: Neighborhood-averaged expression + azimuthal Gabor filters
+3. **PCA**: Dimensionality reduction on augmented features
+4. **Clustering**: Leiden on BANKSY-augmented space
+5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+
+**Key parameters**:
+- `lambda_param`: Spatial regularization (default 0.2)
+- `resolution`: Leiden resolution (default 0.7)
+- `num_neighbours`: Neighbors for feature construction (default 15)
+
+### Spatial Refinement (optional)
+
+1. **KNN smoothing**: For each spot, find k nearest spatial neighbors
+2. **Majority vote**: Relabel if >threshold fraction of neighbors disagree
+3. **Conservative**: Only changes labels with strong spatial disagreement
+
+**Key parameters**:
+- `threshold`: Disagreement threshold (default 0.5)
+- `k`: Number of spatial neighbors (default 10)
 
 ## Example Queries
 
@@ -146,9 +227,11 @@ output_dir/
 - `numpy`, `pandas` — numerics
 
 **Optional**:
-- `SpaGCN` — spatially-aware graph convolutional clustering (graceful degradation without it)
-- `STAGATE_pyG` — graph attention auto-encoder domains (future)
-- `GraphST` — graph self-supervised contrastive learning (future)
+- `SpaGCN` — spatially-aware graph convolutional clustering
+- `STAGATE_pyG` — graph attention auto-encoder domains (requires PyTorch)
+- `GraphST` — graph self-supervised contrastive learning (requires PyTorch)
+- `banksy` — spatial feature augmentation
+- `louvain` — Louvain clustering algorithm
 
 ## Safety
 

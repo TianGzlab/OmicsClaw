@@ -2,7 +2,7 @@
 name: spatial-cnv
 description: >-
   Copy number variation inference from spatial transcriptomics expression data.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw Team
 license: MIT
 tags: [spatial, CNV, copy number, inferCNV, cancer]
@@ -15,7 +15,7 @@ metadata:
       env: []
       config: []
     emoji: "🧫"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -49,9 +49,9 @@ You are **Spatial CNV**, a specialised OmicsClaw agent for inferring copy number
 
 ## Core Capabilities
 
-1. **Expression-based CNV**: Infer CNV from smoothed expression across chromosomal windows
-2. **Built-in gene positions**: Curated human gene → chromosome arm mapping (~2000 genes)
-3. **Optional inferCNVpy**: When available, use the full inferCNVpy pipeline
+1. **inferCNVpy**: Expression-based CNV inference using inferCNVpy (default)
+2. **Numbat**: Haplotype-aware CNV analysis via R Numbat (requires rpy2 + R)
+3. **Built-in gene positions**: Curated human gene → chromosome arm mapping
 4. **Spatial CNV mapping**: Overlay CNV scores on spatial coordinates
 
 ## Input Formats
@@ -63,13 +63,24 @@ You are **Spatial CNV**, a specialised OmicsClaw agent for inferring copy number
 ## CLI Reference
 
 ```bash
+# inferCNVpy (default)
 python skills/spatial-cnv/spatial_cnv.py \
   --input <preprocessed.h5ad> --output <report_dir>
 
+# With reference cells
 python skills/spatial-cnv/spatial_cnv.py \
-  --input <data.h5ad> --output <dir> --reference-key normal_cells
+  --input <data.h5ad> --method infercnvpy --reference-key cell_type --reference-cat Normal --output <dir>
 
+# Numbat (R-based, haplotype-aware)
+python skills/spatial-cnv/spatial_cnv.py \
+  --input <data.h5ad> --method numbat --output <dir>
+
+# Demo mode
 python skills/spatial-cnv/spatial_cnv.py --demo --output /tmp/cnv_demo
+
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-cnv --input <file> --output <dir>
+python omicsclaw.py run spatial-cnv --demo
 ```
 
 ## Example Queries

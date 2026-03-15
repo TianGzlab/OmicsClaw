@@ -2,7 +2,7 @@
 name: spatial-velocity
 description: >-
   RNA velocity and cellular dynamics analysis for spatial transcriptomics data.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw Team
 license: MIT
 tags: [spatial, velocity, RNA velocity, scVelo, dynamics]
@@ -15,7 +15,7 @@ metadata:
       env: []
       config: []
     emoji: "🏎️"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -49,7 +49,7 @@ You are **Spatial Velocity**, a specialised OmicsClaw agent for RNA velocity ana
 
 ## Core Capabilities
 
-1. **scVelo stochastic**: Fast, robust velocity estimation for most datasets
+1. **scVelo stochastic**: Fast, robust velocity estimation (default)
 2. **scVelo deterministic**: Steady-state approximation of RNA kinetics
 3. **scVelo dynamical**: Full kinetic model with latent time (most accurate, slowest)
 4. **VELOVI**: Variational inference RNA velocity (requires scvi-tools)
@@ -66,13 +66,28 @@ You are **Spatial Velocity**, a specialised OmicsClaw agent for RNA velocity ana
 ## CLI Reference
 
 ```bash
+# Stochastic model (default)
 python skills/spatial-velocity/spatial_velocity.py \
   --input <data.h5ad> --output <report_dir>
 
+# Deterministic model
 python skills/spatial-velocity/spatial_velocity.py \
-  --input <data.h5ad> --output <dir> --method stochastic --mode dynamical
+  --input <data.h5ad> --method deterministic --output <dir>
 
+# Dynamical model (full kinetics)
+python skills/spatial-velocity/spatial_velocity.py \
+  --input <data.h5ad> --method dynamical --output <dir>
+
+# VELOVI (variational inference)
+python skills/spatial-velocity/spatial_velocity.py \
+  --input <data.h5ad> --method velovi --output <dir>
+
+# Demo mode
 python skills/spatial-velocity/spatial_velocity.py --demo --output /tmp/velo_demo
+
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-velocity --input <file> --output <dir>
+python omicsclaw.py run spatial-velocity --demo
 ```
 
 ## Example Queries

@@ -2,7 +2,7 @@
 name: spatial-integrate
 description: >-
   Multi-sample integration and batch correction for spatial transcriptomics data.
-version: 0.1.0
+version: 0.2.0
 author: SpatialClaw Team
 license: MIT
 tags: [spatial, integration, batch correction, Harmony, BBKNN, Scanorama]
@@ -15,7 +15,7 @@ metadata:
       env: []
       config: []
     emoji: "🔗"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip

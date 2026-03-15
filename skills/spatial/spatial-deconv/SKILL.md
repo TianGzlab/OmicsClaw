@@ -2,11 +2,11 @@
 name: spatial-deconv
 description: >-
   Cell type deconvolution for spatial transcriptomics — estimates per-spot
-  cell type proportions using NNLS, Cell2Location, RCTD, Tangram, or CARD.
-version: 0.1.0
+  cell type proportions using FlashDeconv, Cell2Location, RCTD, DestVI, Stereoscope, Tangram, SPOTlight, or CARD.
+version: 0.2.0
 author: SpatialClaw
 license: MIT
-tags: [spatial, deconvolution, cell-proportion, cell2location, rctd, tangram, card]
+tags: [spatial, deconvolution, cell-proportion, flashdeconv, cell2location, rctd, destvi, stereoscope, tangram, spotlight, card]
 metadata:
   omicsclaw:
     domain: spatial
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "🧩"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -51,11 +51,14 @@ You are **Spatial Deconv**, a specialised OmicsClaw agent for cell type deconvol
 
 ## Core Capabilities
 
-1. **NNLS**: Fast, dependency-free non-negative least squares baseline (default)
-2. **Cell2Location**: Bayesian deep learning with spatial priors (most accurate for Visium)
-3. **RCTD**: Robust R-based decomposition with doublet/multi modes
-4. **Tangram**: Deep learning mapping via tangram-sc
-5. **CARD**: Conditional auto-regressive model with spatial correlation (R-based)
+1. **FlashDeconv**: Ultra-fast O(N) sketching-based deconvolution (default, CPU, no GPU needed)
+2. **Cell2Location**: Bayesian deep learning with spatial priors (scvi-tools, GPU-accelerated)
+3. **RCTD**: Robust Cell Type Decomposition (R / spacexr)
+4. **DestVI**: Multi-resolution VAE deconvolution (scvi-tools, GPU-accelerated)
+5. **Stereoscope**: Two-stage probabilistic deconvolution (scvi-tools, GPU-accelerated)
+6. **Tangram**: Deep learning cell-to-spot mapping (tangram-sc, GPU-accelerated)
+7. **SPOTlight**: NMF-based deconvolution (R / SPOTlight)
+8. **CARD**: Conditional AutoRegressive Deconvolution with spatial correlation (R / CARD)
 
 ## Input Formats
 
@@ -67,16 +70,43 @@ You are **Spatial Deconv**, a specialised OmicsClaw agent for cell type deconvol
 ## CLI Reference
 
 ```bash
-# NNLS (default, fast)
+# FlashDeconv (default, ultra-fast)
 python skills/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <sc_ref.h5ad> --output <dir>
 
-# Cell2Location
+# Cell2Location (Bayesian, GPU-accelerated)
 python skills/spatial-deconv/spatial_deconv.py \
   --input <file> --method cell2location --reference <ref.h5ad> --output <dir>
 
+# RCTD (R-based, robust)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method rctd --reference <ref.h5ad> --output <dir>
+
+# DestVI (multi-resolution VAE)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method destvi --reference <ref.h5ad> --output <dir>
+
+# Stereoscope (two-stage probabilistic)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method stereoscope --reference <ref.h5ad> --output <dir>
+
+# Tangram (deep learning mapping)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method tangram --reference <ref.h5ad> --output <dir>
+
+# SPOTlight (NMF-based, R)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method spotlight --reference <ref.h5ad> --output <dir>
+
+# CARD (spatial correlation, R)
+python skills/spatial-deconv/spatial_deconv.py \
+  --input <file> --method card --reference <ref.h5ad> --output <dir>
+
 # Demo (synthetic proportions)
 python skills/spatial-deconv/spatial_deconv.py --demo --output /tmp/deconv_demo
+
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-deconvolution --input <file> --reference <ref> --output <dir>
 ```
 
 ## Example Queries
@@ -106,9 +136,11 @@ output_dir/
 **Required**: scanpy, anndata, numpy, pandas, scipy, matplotlib
 
 **Optional**:
+- `flashdeconv` — FlashDeconv ultra-fast sketching
 - `cell2location` + `scvi-tools` — Cell2Location Bayesian method
-- `tangram-sc` — Tangram mapping
-- `rpy2` + R packages `spacexr`, `CARD` — RCTD and CARD
+- `scvi-tools` + `torch` — DestVI and Stereoscope (GPU-accelerated)
+- `tangram-sc` — Tangram mapping (GPU-accelerated)
+- `rpy2` + R packages `spacexr`, `SPOTlight`, `CARD` — RCTD, SPOTlight, and CARD
 
 ## Safety
 

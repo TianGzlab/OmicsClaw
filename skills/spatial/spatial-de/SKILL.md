@@ -2,11 +2,11 @@
 name: spatial-de
 description: >-
   Differential expression analysis — find marker genes for clusters or compare two groups.
-  Supports Wilcoxon rank-sum and t-test methods with publication-ready figures and CSV tables.
-version: 0.1.0
+  Supports Wilcoxon rank-sum, t-test, and PyDESeq2 methods with publication-ready figures and CSV tables.
+version: 0.2.0
 author: SpatialClaw
 license: MIT
-tags: [spatial, differential-expression, markers, Wilcoxon]
+tags: [spatial, differential-expression, markers, wilcoxon, t-test, pydeseq2]
 metadata:
   omicsclaw:
     domain: spatial
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "🧬"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -45,11 +45,12 @@ You are **Spatial DE**, the differential expression and marker gene discovery sk
 
 ## Core Capabilities
 
-1. **Cluster-vs-rest markers**: Rank genes per cluster using Wilcoxon or t-test
+1. **Cluster-vs-rest markers**: Rank genes per cluster using Wilcoxon, t-test, or PyDESeq2
 2. **Two-group comparison**: Compare any two groups within a groupby column
-3. **Dot plot**: Top marker genes per cluster
-4. **Volcano plot**: Log2 fold-change vs. −log10 p-value for two-group comparisons
-5. **Marker table**: CSV of top N markers per cluster with scores, p-values, and log fold-changes
+3. **Multiple methods**: Wilcoxon (default, non-parametric), t-test (parametric, fast), PyDESeq2 (pseudobulk, gold standard)
+4. **Dot plot**: Top marker genes per cluster
+5. **Volcano plot**: Log2 fold-change vs. −log10 p-value for two-group comparisons
+6. **Marker table**: CSV of top N markers per cluster with scores, p-values, and log fold-changes
 
 ## Input Formats
 
@@ -71,26 +72,52 @@ You are **Spatial DE**, the differential expression and marker gene discovery sk
 ## CLI Reference
 
 ```bash
+# Cluster-vs-rest markers (default: Wilcoxon)
 python skills/spatial-de/spatial_de.py \
   --input <processed.h5ad> --output <report_dir>
 
+# Two-group comparison
 python skills/spatial-de/spatial_de.py \
   --input <processed.h5ad> --output <dir> --group1 0 --group2 1
 
+# Use t-test method
+python skills/spatial-de/spatial_de.py \
+  --input <file> --method t-test --output <dir>
+
+# Use PyDESeq2 for pseudobulk DE
+python skills/spatial-de/spatial_de.py \
+  --input <file> --method pydeseq2 --group1 0 --group2 1 --output <dir>
+
+# Demo mode
 python skills/spatial-de/spatial_de.py --demo --output /tmp/de_demo
 
-python omicsclaw.py run de --input <file> --output <dir>
-python omicsclaw.py run de --demo
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-de --input <file> --output <dir>
+python omicsclaw.py run spatial-de --demo
 ```
 
 ## Algorithm / Methodology
 
-1. **Cluster-vs-rest**: `sc.tl.rank_genes_groups(adata, groupby=groupby, method=method)`
-   - Wilcoxon rank-sum test (default): non-parametric, robust to non-normal distributions
-   - t-test: parametric alternative
-2. **Two-group comparison**: `sc.tl.rank_genes_groups(adata, groupby=groupby, groups=[group1], reference=group2, method=method)`
-3. **Marker extraction**: `sc.get.rank_genes_groups_df` to produce structured DataFrames
-4. **Volcano plot**: x-axis = log2 fold-change (`logfoldchanges`), y-axis = −log10(adjusted p-value)
+### Wilcoxon (default)
+1. **Cluster-vs-rest**: `sc.tl.rank_genes_groups(adata, groupby=groupby, method='wilcoxon')`
+2. **Non-parametric**: Robust to non-normal distributions
+3. **Fast**: Suitable for large datasets
+
+### t-test
+1. **Parametric**: `sc.tl.rank_genes_groups(adata, groupby=groupby, method='t-test')`
+2. **Welch's t-test**: Assumes normality, faster than Wilcoxon
+3. **Use case**: Quick exploratory analysis
+
+### PyDESeq2
+1. **Pseudobulk**: Aggregates counts per sample/replicate
+2. **Negative binomial GLM**: Gold standard for RNA-seq DE
+3. **Requires**: Sample-level replicates for proper statistical modeling
+4. **Use case**: Publication-quality DE with proper dispersion estimation
+
+### Common steps
+1. **Two-group comparison**: `sc.tl.rank_genes_groups(adata, groupby=groupby, groups=[group1], reference=group2, method=method)`
+2. **Marker extraction**: `sc.get.rank_genes_groups_df` to produce structured DataFrames
+3. **Volcano plot**: x-axis = log2 fold-change (`logfoldchanges`), y-axis = −log10(adjusted p-value)
 
 ## Example Queries
 
@@ -102,7 +129,7 @@ python omicsclaw.py run de --demo
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--groupby` | `leiden` | Column in `adata.obs` to group by |
-| `--method` | `wilcoxon` | Statistical test: `wilcoxon` or `t-test` |
+| `--method` | `wilcoxon` | Statistical test: `wilcoxon`, `t-test`, or `pydeseq2` |
 | `--n-top-genes` | `10` | Number of top markers per group |
 | `--group1` | (none) | First group for pairwise comparison |
 | `--group2` | (none) | Second group (reference) for pairwise comparison |
@@ -129,6 +156,9 @@ output_dir/
 ## Dependencies
 
 **Required**: scanpy >= 1.9, anndata >= 0.11, matplotlib, numpy, pandas
+
+**Optional**:
+- `pydeseq2` — PyDESeq2 pseudobulk differential expression
 
 ## Safety
 

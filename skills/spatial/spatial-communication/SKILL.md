@@ -1,11 +1,11 @@
 ---
 name: spatial-communication
 description: >-
-  Cell-cell communication analysis via ligand-receptor interaction scoring in spatial transcriptomics data.
-version: 0.1.0
+  Cell-cell communication analysis via ligand-receptor interaction scoring using LIANA, CellPhoneDB, FastCCC, or CellChat.
+version: 0.2.0
 author: SpatialClaw Team
 license: MIT
-tags: [spatial, communication, ligand-receptor, cell-cell interaction]
+tags: [spatial, communication, ligand-receptor, cell-cell-interaction, liana, cellphonedb, fastccc, cellchat]
 metadata:
   spatialclaw:
     requires:
@@ -14,7 +14,7 @@ metadata:
       env: []
       config: []
     emoji: "📡"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -41,10 +41,12 @@ You are **Spatial Communication**, a specialised SpatialClaw agent for cell-cell
 
 ## Core Capabilities
 
-1. **Ligand-receptor scoring**: Score L-R pairs across cell type combinations using permutation-based statistics
-2. **Spatial-aware filtering**: Restrict interactions to spatially proximal cell type pairs
-3. **Built-in L-R database**: Curated CellPhoneDB-style database for human/mouse, no external downloads required
-4. **Optional LIANA+ integration**: When `liana` is installed, leverage its multi-method consensus scoring
+1. **LIANA+**: Multi-method consensus ranking (default, combines multiple L-R methods)
+2. **CellPhoneDB**: Statistical permutation test for L-R interactions
+3. **FastCCC**: FFT-based communication (no permutation, fastest)
+4. **CellChat (R)**: CellChat via R (requires rpy2 + R CellChat package)
+5. **Spatial-aware filtering**: Restrict interactions to spatially proximal cell type pairs
+6. **Built-in L-R database**: Curated database for human/mouse
 
 ## Input Formats
 
@@ -63,13 +65,32 @@ You are **Spatial Communication**, a specialised SpatialClaw agent for cell-cell
 ## CLI Reference
 
 ```bash
+# LIANA+ (default, multi-method consensus)
 python skills/spatial-communication/spatial_communication.py \
   --input <preprocessed.h5ad> --output <report_dir>
 
+# CellPhoneDB method
 python skills/spatial-communication/spatial_communication.py \
-  --input <data.h5ad> --output <dir> --method liana --species human
+  --input <data.h5ad> --method cellphonedb --output <dir>
 
+# FastCCC (fastest, no permutation)
+python skills/spatial-communication/spatial_communication.py \
+  --input <data.h5ad> --method fastccc --output <dir>
+
+# CellChat via R
+python skills/spatial-communication/spatial_communication.py \
+  --input <data.h5ad> --method cellchat_r --output <dir>
+
+# Custom parameters
+python skills/spatial-communication/spatial_communication.py \
+  --input <data.h5ad> --method liana --cell-type-key cell_type --species human --output <dir>
+
+# Demo mode
 python skills/spatial-communication/spatial_communication.py --demo --output /tmp/comm_demo
+
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-cell-communication --input <file> --output <dir>
+python omicsclaw.py run spatial-cell-communication --demo
 ```
 
 ## Example Queries

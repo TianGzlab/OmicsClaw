@@ -1,12 +1,12 @@
 ---
 name: spatial-statistics
 description: >-
-  Spatial statistics and autocorrelation analysis — Moran's I, Ripley's functions,
-  neighborhood enrichment, and co-occurrence analysis for spatial transcriptomics data.
-version: 0.1.0
+  Comprehensive spatial statistics toolkit — cluster-level (neighborhood enrichment, Ripley, co-occurrence),
+  gene-level (Moran's I, Geary's C, local Moran, Getis-Ord), and network-level analysis.
+version: 0.2.0
 author: SpatialClaw
 license: MIT
-tags: [spatial, statistics, Moran, Ripley, neighborhood-enrichment]
+tags: [spatial, statistics, moran, geary, ripley, neighborhood-enrichment, getis-ord]
 metadata:
   omicsclaw:
     domain: spatial
@@ -16,7 +16,7 @@ metadata:
       env: []
       config: []
     emoji: "📊"
-    homepage: https://github.com/SpatialClaw/SpatialClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip
@@ -56,10 +56,21 @@ You are **Spatial Statistics**, the spatial autocorrelation and neighborhood ana
 
 ## Core Capabilities
 
-1. **Neighborhood enrichment**: Z-score matrix of cluster co-localisation (squidpy `nhood_enrichment`)
-2. **Ripley's L function**: Point-pattern analysis per cluster to detect clustering vs. dispersion
-3. **Co-occurrence**: Pairwise cluster co-occurrence ratios across distance intervals
-4. **Heatmap figure**: Publication-ready heatmap of the neighborhood enrichment z-score matrix
+**Cluster-level** (require --cluster-key):
+1. **Neighborhood enrichment**: Pairwise cluster co-localisation z-scores
+2. **Ripley's L function**: Point-pattern analysis per cluster
+3. **Co-occurrence**: Pairwise co-occurrence across distances
+
+**Gene-level** (require --genes or --n-top-genes):
+4. **Moran's I**: Global spatial autocorrelation per gene
+5. **Geary's C**: Global spatial autocorrelation (alternative to Moran)
+6. **Local Moran's I (LISA)**: Spatial hotspots per gene
+7. **Getis-Ord Gi***: Local hot/cold spot detection
+8. **Bivariate Moran**: Spatial cross-correlation between two genes
+
+**Network-level**:
+9. **Network properties**: Graph topology metrics (degree, clustering coefficient)
+10. **Spatial centrality**: Betweenness/closeness centrality per cluster
 
 ## Input Formats
 
@@ -80,27 +91,52 @@ You are **Spatial Statistics**, the spatial autocorrelation and neighborhood ana
 ## CLI Reference
 
 ```bash
-# Neighborhood enrichment (default)
+# Neighborhood enrichment (default, cluster-level)
 python skills/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --output <report_dir>
 
-# Ripley's L function
+# Ripley's L function (cluster-level)
 python skills/spatial-statistics/spatial_statistics.py \
-  --input <processed.h5ad> --output <dir> --analysis-type ripley
+  --input <processed.h5ad> --analysis-type ripley --output <dir>
 
-# Co-occurrence analysis
+# Co-occurrence analysis (cluster-level)
 python skills/spatial-statistics/spatial_statistics.py \
-  --input <processed.h5ad> --output <dir> --analysis-type co_occurrence
+  --input <processed.h5ad> --analysis-type co_occurrence --output <dir>
+
+# Moran's I (gene-level)
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type moran --genes "EPCAM,VIM,CD3D" --output <dir>
+
+# Geary's C (gene-level)
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type geary --n-top-genes 50 --output <dir>
+
+# Local Moran's I / LISA (gene-level hotspots)
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type local_moran --genes "EPCAM" --output <dir>
+
+# Getis-Ord Gi* (gene-level hot/cold spots)
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type getis_ord --genes "CD3D,CD8A" --output <dir>
+
+# Bivariate Moran (gene cross-correlation)
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type bivariate_moran --genes "EPCAM,VIM" --output <dir>
+
+# Network properties
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type network_properties --output <dir>
+
+# Spatial centrality
+python skills/spatial-statistics/spatial_statistics.py \
+  --input <processed.h5ad> --analysis-type spatial_centrality --cluster-key leiden --output <dir>
 
 # Demo mode
 python skills/spatial-statistics/spatial_statistics.py --demo --output /tmp/spatial_stats_demo
 
-# Custom cluster key
-python skills/spatial-statistics/spatial_statistics.py \
-  --input <processed.h5ad> --output <dir> --cluster-key cell_type
-
-python omicsclaw.py run stats --input <file> --output <dir>
-python omicsclaw.py run stats --demo
+# Via OmicsClaw runner
+python omicsclaw.py run spatial-statistics --input <file> --output <dir>
+python omicsclaw.py run spatial-statistics --demo
 ```
 
 ## Example Queries
@@ -110,25 +146,40 @@ python omicsclaw.py run stats --demo
 
 ## Algorithm / Methodology
 
-### Neighborhood Enrichment
+### Cluster-level analyses
 
-`squidpy.gr.nhood_enrichment(adata, cluster_key)` computes z-scores by permutation testing. For each pair of clusters (i, j), it counts how many times a cell of cluster i neighbours a cell of cluster j, compares to a permuted null, and returns a z-score matrix. Positive z-scores indicate enrichment (co-localisation), negative indicate depletion (avoidance).
+**Neighborhood Enrichment**: `squidpy.gr.nhood_enrichment(adata, cluster_key)` computes z-scores by permutation testing. Positive z-scores indicate enrichment (co-localisation), negative indicate depletion.
 
-### Ripley's L Function
+**Ripley's L Function**: `squidpy.gr.ripley(adata, cluster_key, mode="L")` computes Ripley's L statistic per cluster. L(r) > r indicates clustering at distance r; L(r) < r indicates regularity/dispersion.
 
-`squidpy.gr.ripley(adata, cluster_key, mode="L")` computes Ripley's L statistic per cluster. L(r) > r indicates clustering at distance r; L(r) < r indicates regularity/dispersion. Results include the L statistic curves per cluster across distance bins.
+**Co-occurrence**: `squidpy.gr.co_occurrence(adata, cluster_key)` measures pairwise cluster co-occurrence across spatial distance intervals.
 
-### Co-occurrence
+### Gene-level analyses
 
-`squidpy.gr.co_occurrence(adata, cluster_key)` measures pairwise cluster co-occurrence across spatial distance intervals, returning occurrence ratios relative to expected counts under spatial randomness.
+**Moran's I**: Global spatial autocorrelation. Range: −1 (dispersion) to +1 (clustering); 0 = random.
+
+**Geary's C**: Alternative autocorrelation measure. Range: 0 (clustering) to 2 (dispersion); 1 = random.
+
+**Local Moran's I (LISA)**: Identifies spatial hotspots (high-high) and coldspots (low-low) for individual genes.
+
+**Getis-Ord Gi***: Local hot/cold spot statistic. Positive Gi* = hotspot, negative = coldspot.
+
+**Bivariate Moran**: Spatial cross-correlation between two genes.
+
+### Network-level analyses
+
+**Network properties**: Degree distribution, clustering coefficient, path length from spatial graph.
+
+**Spatial centrality**: Betweenness and closeness centrality per cluster.
 
 ## Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--analysis-type` | `neighborhood_enrichment` | Analysis to run: `neighborhood_enrichment`, `ripley`, or `co_occurrence` |
-| `--cluster-key` | `leiden` | Column in `adata.obs` containing cluster labels |
-| `--feature` | (none) | Gene name for gene-level spatial statistics (future) |
+| `--analysis-type` | `neighborhood_enrichment` | Analysis type (see list above) |
+| `--cluster-key` | `leiden` | Column in `adata.obs` for cluster-level analyses |
+| `--genes` | (none) | Comma-separated gene names for gene-level analyses |
+| `--n-top-genes` | (none) | Number of top variable genes for gene-level analyses |
 
 ## Output Structure
 
