@@ -38,7 +38,7 @@ from omicsclaw.spatial.viz_utils import save_figure
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "preprocess"
+SKILL_NAME = "spatial-preprocess"
 SKILL_VERSION = "0.1.0"
 
 
