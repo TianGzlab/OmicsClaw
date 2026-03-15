@@ -2,70 +2,136 @@
   <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="400"/>
 
   <h3>🧬 OmicsClaw</h3>
-  <p><strong>Multi-omics analysis platform with 50+ specialized skills.</strong></p>
-  <p>Spatial transcriptomics • Single-cell • Genomics • Proteomics • Metabolomics</p>
-  <p><em>Local-first. Skill-based. Natural language routing. Modular. Reproducible.</em></p>
+  <p><strong>Your Persistent AI Research Partner for Multi-Omics Analysis</strong></p>
+  <p>Remembers your data • Learns your preferences • Resumes your workflows</p>
+  <p><em>Conversational. Memory-enabled. Local-first. Cross-platform.</em></p>
 </div>
 
 # OmicsClaw
 
-> Multi-omics analysis platform with **50+ specialized skills** across spatial transcriptomics, single-cell, genomics, proteomics, and metabolomics. Command-line interface with natural language routing for complete analysis workflows.
+> **AI research assistant that remembers.** OmicsClaw transforms multi-omics analysis from repetitive command execution into natural conversations with a persistent partner that tracks your datasets, learns your methods, and resumes interrupted workflows across sessions.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/zhou-1314/OmicsClaw/actions)
 
-**Key Features:**
-- 🧬 **50+ analysis skills** across 5 omics domains with unified CLI
-- 🔒 **Local-first processing** — your data never leaves your machine
-- 🎯 **Smart orchestration** — natural language query routing with 3 modes (keyword/LLM/hybrid)
-- 📦 **Modular dependencies** — install only what you need
-- 🤖 **Bot integration** — Telegram and Feishu messaging interfaces
-- 🧪 **Demo mode** — try any skill instantly with synthetic data
+## Why OmicsClaw?
+
+**Traditional tools make you repeat yourself.** Every session starts from zero: re-upload data, re-explain context, re-run preprocessing. OmicsClaw remembers.
+
+**Core Value:**
+- 🧠 **Memory system** — Remembers your datasets, analysis history, and preferences across sessions
+- 💬 **Conversational interface** — Chat with your data via Telegram/Feishu, no command-line needed
+- 🔄 **Workflow continuity** — Resume interrupted analyses, track lineage, avoid redundant computation
+- 🔒 **Privacy-first** — All processing local, memory stores metadata only (no raw data)
+- 🎯 **Smart routing** — Natural language → appropriate analysis automatically
+- 🧬 **Multi-omics coverage** — 50+ skills across spatial, single-cell, genomics, proteomics, metabolomics
+
+**What makes it different:**
+
+| Traditional Tools | OmicsClaw |
+|-------------------|-----------|
+| Re-upload data every session | Remembers file paths & metadata |
+| Forget analysis history | Tracks full lineage (preprocess → cluster → DE) |
+| Repeat parameters manually | Learns & applies your preferences |
+| CLI-only, steep learning curve | Chat interface + CLI |
+| Stateless execution | Persistent research partner |
+
+> 📖 **Deep dive:** See [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) for detailed comparison of memory vs. stateless workflows.
 
 ## Quick Start
+
+### Option 1: Chat Interface (Recommended)
 
 ```bash
 # Clone and setup
 git clone https://github.com/zhou-1314/OmicsClaw.git
 cd OmicsClaw
+pip install -e .
+pip install -r bot/requirements.txt
 
-# Create virtual environment (Python 3.11+ required)
-python3.11 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Configure (add your LLM API key)
+cp .env.example .env
+# Edit .env: set LLM_API_KEY and bot tokens
 
-# Install core dependencies
+# Start Telegram bot
+python bot/telegram_bot.py
+
+# Or start Feishu bot (no public IP needed)
+python bot/feishu_bot.py
+```
+
+> 📖 **Bot Configuration Guide:** See [bot/README.md](bot/README.md) for detailed step-by-step instructions on obtaining API keys and configuring `.env` for Telegram/Feishu bots.
+
+**Chat with your data:**
+```
+You: "Preprocess my Visium data"
+Bot: ✅ [Runs QC, normalization, clustering]
+     💾 [Remembers: visium_sample.h5ad, 5000 spots, normalized]
+
+[Next day]
+You: "Find spatial domains"
+Bot: 🧠 "Using your Visium data from yesterday (5000 spots, normalized).
+     Running domain detection..."
+```
+
+### Option 2: Command Line
+
+```bash
+# Install
 pip install -e .
 
-# Try a demo
+# Try a demo (no data needed)
 python omicsclaw.py run spatial-preprocessing --demo
+
+# Run with your data
+python omicsclaw.py run spatial-preprocessing --input data.h5ad --output results/
 ```
 
 **Installation tiers:**
-- `pip install -e .` — Core install, all skills work with built-in methods
+- `pip install -e .` — Core (works for all skills with built-in methods)
 - `pip install -e ".[spatial]"` — Add advanced spatial methods (SpaGCN, STAGATE)
-- `pip install -e ".[full]"` — All 50+ optional analysis methods
+- `pip install -e ".[full]"` — All 50+ optional methods
 
-> 💡 Missing dependencies? You'll get clear `ImportError` messages with install instructions.
+> 📚 **Documentation:** [INSTALLATION.md](docs/INSTALLATION.md) • [METHODS.md](docs/METHODS.md) • [MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)
 
-**See also:**
-- [docs/INSTALLATION.md](docs/INSTALLATION.md) — Complete installation guide
-- [docs/METHODS.md](docs/METHODS.md) — Algorithm reference and parameters
+## Memory System — The Core Differentiator
+
+OmicsClaw's memory system transforms it from a stateless tool into a persistent research partner.
+
+**What it remembers:**
+- 📁 **Datasets** — File paths, platforms (Visium/Xenium), dimensions, preprocessing state
+- 📊 **Analyses** — Methods used, parameters, execution time, lineage (parent → child)
+- ⚙️ **Preferences** — Your preferred clustering methods, plot styles, species defaults
+- 🧬 **Insights** — Biological annotations (cluster = "T cells", domain = "tumor boundary")
+- 🔬 **Project context** — Species, tissue type, disease model, research goals
+
+**Real-world impact:**
+
+| Without Memory | With Memory |
+|----------------|-------------|
+| Re-upload 2GB file every session | Zero re-uploads |
+| "Which dataset?" every time | "Using your Visium data from yesterday" |
+| Forget which parameters you used | "Applying leiden (resolution=0.8) as before" |
+| Cannot resume interrupted work | Pick up exactly where you left off |
+| No analysis lineage | Full tracking: preprocess → cluster → DE → enrichment |
+
+> 📖 **Full comparison:** [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) — Detailed scenarios, privacy model, technical architecture
 
 ## Supported Domains
 
 | Domain | Skills | Key Capabilities |
 |--------|--------|------------------|
-| **Spatial Transcriptomics** | 15 | QC, clustering, cell typing, deconvolution, spatial statistics, ligand-receptor, velocity, trajectory |
-| **Single-Cell Omics** | 9 | Preprocessing, doublet detection, annotation, trajectory, batch integration, communication, DE, GRN, multiome |
-| **Genomics** | 10 | VCF operations, variant calling, alignment, annotation, structural variants, assembly, phasing, CNV, epigenomics |
-| **Proteomics** | 8 | MS QC, data import, peptide ID, quantification, differential abundance, PTM analysis, enrichment, structure |
-| **Metabolomics** | 8 | Peak detection, XCMS preprocessing, annotation, normalization, statistical analysis, differential, pathway, quantification |
-| **Orchestrator** | 1 | Natural language routing, multi-domain pipelines, file-type detection |
+| **Spatial Transcriptomics** | 15 | QC, clustering, cell typing, deconvolution, spatial statistics, communication, velocity, trajectory |
+| **Single-Cell Omics** | 9 | Preprocessing, doublet detection, annotation, trajectory, batch integration, DE, GRN |
+| **Genomics** | 10 | Variant calling, alignment, annotation, structural variants, assembly, phasing, CNV |
+| **Proteomics** | 8 | MS QC, peptide ID, quantification, differential abundance, PTM analysis |
+| **Metabolomics** | 8 | Peak detection, XCMS preprocessing, annotation, normalization, statistical analysis |
 
-**Platforms supported:** Visium, Xenium, MERFISH, Slide-seq, 10x scRNA-seq, Illumina/PacBio sequencing, LC-MS/MS
+**Platforms:** Visium, Xenium, MERFISH, Slide-seq, 10x scRNA-seq, Illumina/PacBio, LC-MS/MS
 
-> **Roadmap:** Expanding to transcriptomics, epigenomics, metagenomics, immunomics, and multi-omics integration domains.
+> 📋 **Full skill catalog:** See [Skills Overview](#skills-overview) section below for complete list with methods
 
 ## Skills Overview
 
@@ -357,28 +423,9 @@ skills/<domain>/<skill>/
 
 Skills communicate via standardized formats (`.h5ad`, `.vcf`, `.mzML`) and can be chained into pipelines.
 
-## Testing
+## Bot Integration — Memory-Enabled Conversational Interface
 
-```bash
-# Run all tests (uses demo mode, no external data needed)
-make test
-
-# Test specific domain
-python -m pytest skills/spatial/ -v
-python -m pytest skills/singlecell/ -v
-
-# Test single skill
-python -m pytest skills/spatial/spatial-preprocessing/tests/ -v
-
-# Run tests requiring full dependencies
-python -m pytest -m slow -v
-```
-
-All default tests complete in under 5 minutes using synthetic demo data.
-
-## Bot Integration
-
-OmicsClaw includes messaging bot interfaces for Telegram and Feishu (Lark):
+OmicsClaw includes messaging bot interfaces with **persistent memory** for Telegram and Feishu (Lark).
 
 ```bash
 # Install bot dependencies
@@ -393,14 +440,32 @@ python bot/telegram_bot.py    # Telegram
 python bot/feishu_bot.py      # Feishu (WebSocket, no public IP needed)
 ```
 
-**Features:**
-- Natural language query routing to skills
-- Multi-omics file upload support (`.h5ad`, `.vcf`, `.mzML`)
-- Image recognition for tissue sections
-- Automated report and figure delivery
-- Rate limiting and audit logging
+**Key Features:**
+- 🧠 **Persistent memory** — Remembers datasets, analyses, preferences across sessions
+- 💬 **Natural language** — "Find spatial domains" → automatic skill routing
+- 📁 **Multi-omics upload** — Supports `.h5ad`, `.vcf`, `.mzML` files
+- 🖼️ **Image recognition** — Analyzes tissue section photos (H&E, fluorescence)
+- 📊 **Auto-delivery** — Reports and figures sent directly to chat
+- 🔒 **Privacy-first** — Local processing, metadata-only storage
 
-See [bot/README.md](bot/README.md) for detailed setup instructions.
+**Memory in action:**
+```
+Session 1:
+You: [Upload visium_brain.h5ad]
+You: "Preprocess this"
+Bot: ✅ Done. [Saves DatasetMemory + AnalysisMemory]
+
+Session 2 (next day):
+You: "Find spatial domains"
+Bot: 🧠 "Using your Visium brain data (5000 spots, normalized yesterday)"
+     ✅ Done. [Links to parent analysis]
+
+Session 3:
+You: "Use the same clustering as before"
+Bot: 🧠 "Applying leiden (resolution=0.8) from your previous analysis"
+```
+
+See [bot/README.md](bot/README.md) for detailed setup and [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) for memory architecture.
 
 ## Contributing
 

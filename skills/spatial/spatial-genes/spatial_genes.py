@@ -656,7 +656,7 @@ def write_report(
 
 def get_demo_data(output_dir: Path) -> tuple:
     """Run spatial-preprocess --demo and load the resulting processed.h5ad."""
-    preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+    preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
 
     with tempfile.TemporaryDirectory(prefix="svg_demo_") as tmpdir:
         tmpdir = Path(tmpdir)
