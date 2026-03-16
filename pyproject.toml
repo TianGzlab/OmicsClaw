@@ -84,77 +84,54 @@ spatial-domains = [
 ]
 
 # --------------------------------------------------------------------------- #
-# Tier 3: full — all 50+ optional analysis methods                            #
-# Enables every method in all 16 skills (no built-in fallbacks needed).       #
+# Tier 3: Modular Domain Dependencies                                         #
+# Breakdowns for specific domains, preventing installation of unused packages.#
 # --------------------------------------------------------------------------- #
-full = [
-    # --- Deep learning backend ---
+spatial = [
     "torch>=2.0.0,<3.0",
     "scvi-tools>=1.0.0,<2.0",        # Cell2Location, scANVI, VeloVI, scVI
-
-    # --- Spatial domain methods ---
     "GraphST>=1.1.0",                 # spatial-domains: GraphST method
-    "SpaGCN>=1.2.5,<2.0",            # spatial-domains: SpaGCN method
     "torch_geometric",                # spatial-domains: STAGATE dependency
-    # STAGATE_pyG is not on PyPI — install from source before pip install -e ".[full]":
-    #   git clone https://github.com/QIFEIDKN/STAGATE_pyG.git
-    #   cd STAGATE_pyG && python setup.py install
-    # Also requires PyG sparse extensions matching your torch+CUDA version:
-    #   pip install torch_sparse torch_scatter torch_cluster \
-    #     -f https://data.pyg.org/whl/torch-<VERSION>+<CUDA>.html
-
-    # --- Cell type annotation ---
     "tangram-sc>=1.0.0",              # spatial-annotate: Tangram method
-                                      # also used by spatial-deconv
-
-    # --- Deconvolution ---
     "cell2location>=0.1.4",           # spatial-deconv: Cell2Location method
     "flashdeconv>=0.1.0",             # spatial-deconv: FlashDeconv method
-
-    # --- RNA velocity ---
     "scvelo>=0.2.5",                  # spatial-velocity: scVelo
-
-    # --- Cell-cell communication ---
     "liana",                          # spatial-communication: LIANA+ method
     "cellphonedb>=5.0.0,<6.0",        # spatial-communication: CellPhoneDB
     "fastccc>=0.1.0",                 # spatial-communication: FastCCC (requires Python >=3.11)
-
-    # --- Trajectory inference ---
     "cellrank>=2.0.0,<3.0",           # spatial-trajectory: CellRank
     "palantir>=1.0.0",                # spatial-trajectory: Palantir
-
-    # --- Pathway enrichment ---
     "gseapy>=1.0.0",                  # spatial-enrichment: GSEA/Enrichr/ssGSEA
-
-    # --- Spatially variable genes ---
-    "SpatialDE>=1.1.3",               # spatial-genes: SpatialDE method (PyPI: SpatialDE)
-
-    # --- Spatial statistics ---
+    "SpatialDE>=1.1.3",               # spatial-genes: SpatialDE method
     "esda>=2.4.0",                    # spatial-statistics: local Moran, Geary
     "libpysal>=4.6.0",                # spatial-statistics: spatial weights
     "pysal>=2.6.0",                   # spatial-statistics: extended analysis
-
-    # --- Copy number variation ---
     "infercnvpy>=0.4.0",              # spatial-cnv: inferCNVpy
-
-    # --- Multi-sample integration ---
     "harmonypy>=0.0.9",               # spatial-integrate: Harmony
     "bbknn>=1.5.0",                   # spatial-integrate: BBKNN
     "scanorama>=1.7.0",               # spatial-integrate: Scanorama
-
-    # --- Spatial registration ---
     "POT>=0.9.0",                     # spatial-register: optimal transport
     "paste-bio>=1.0.0",               # spatial-register: PASTE
-
-    # --- Condition comparison / pseudobulk DESeq2 ---
     "pydeseq2>=0.4.0",                # spatial-condition: PyDESeq2
-                                      # also used by spatial-de pseudobulk mode
-
-    # --- R interface (RCTD, SPOTlight, Numbat) ---
-    # Requires: conda install -c conda-forge r-base>=4.4
-    # Note: pin rpy2 to <3.7 to stay compatible with R 4.4.x (rpy2 3.6+ needs R 4.5)
     "rpy2>=3.5.0,<3.7",
     "anndata2ri>=1.3.0",              # sparse matrix bridge for R methods
+]
+
+singlecell = [
+    "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
+]
+
+genomics = []
+
+proteomics = []
+
+metabolomics = []
+
+# --------------------------------------------------------------------------- #
+# Tier 4: full — all optional analysis methods across all domains             #
+# --------------------------------------------------------------------------- #
+full = [
+    "omicsclaw[spatial,spatial-domains,singlecell,genomics,proteomics,metabolomics]"
 ]
 
 # --------------------------------------------------------------------------- #
@@ -174,6 +151,9 @@ banksy = [
 memory = [
     "aiosqlite>=0.19.0",
     "cryptography>=41.0.0",
+    "requests>=2.31.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -181,6 +161,7 @@ memory = [
 # --------------------------------------------------------------------------- #
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
     "black>=22.0.0,<26.0",
     "mypy>=1.0.0,<2.0",
@@ -203,6 +184,9 @@ python_files = "test_*.py"
 python_functions = "test_*"
 addopts = "-v --import-mode=importlib -m 'not slow'"
 testpaths = [
+    "tests",
+    "tests/memory",
+    "tests/bot_tests",
     "skills/spatial-preprocess/tests",
     "skills/spatial-domains/tests",
     "skills/spatial-de/tests",

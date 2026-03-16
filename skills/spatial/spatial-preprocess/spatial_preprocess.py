@@ -158,48 +158,48 @@ def preprocess(
 
 
 def generate_figures(adata, output_dir: Path) -> list[str]:
-    """Generate QC and UMAP figures."""
-    import matplotlib
-    matplotlib.use("Agg")
+    """Generate QC, UMAP, and Spatial figures."""
     import matplotlib.pyplot as plt
 
     figures = []
 
     # QC violin
     try:
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4), dpi=200)
-        for ax, key in zip(axes, ["n_genes_by_counts", "total_counts", "pct_counts_mt"]):
-            if key in adata.obs.columns:
-                ax.violinplot(adata.obs[key].dropna().values, showmedians=True)
-                ax.set_title(key)
-        fig.suptitle("QC Metrics")
-        fig.tight_layout()
-        p = save_figure(fig, output_dir, "qc_violin.png")
-        figures.append(str(p))
+        keys_to_plot = [k for k in ["n_genes_by_counts", "total_counts", "pct_counts_mt"] if k in adata.obs.columns]
+        if keys_to_plot:
+            sc.pl.violin(adata, keys_to_plot, jitter=0.4, multi_panel=True, show=False)
+            fig = plt.gcf()
+            p = save_figure(fig, output_dir, "qc_violin.png")
+            figures.append(str(p))
     except Exception as e:
         logger.warning("Could not generate QC violin: %s", e)
 
     # UMAP coloured by leiden
     try:
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=200)
-        clusters = adata.obs["leiden"].astype(int)
-        scatter = ax.scatter(
-            adata.obsm["X_umap"][:, 0],
-            adata.obsm["X_umap"][:, 1],
-            c=clusters,
-            cmap="tab20",
-            s=5,
-            alpha=0.8,
-        )
-        ax.set_title("UMAP — Leiden clusters")
-        ax.set_xlabel("UMAP1")
-        ax.set_ylabel("UMAP2")
-        fig.colorbar(scatter, ax=ax, label="Cluster")
-        fig.tight_layout()
-        p = save_figure(fig, output_dir, "umap_leiden.png")
-        figures.append(str(p))
+        if "leiden" in adata.obs.columns and "X_umap" in adata.obsm.keys():
+            sc.pl.umap(adata, color="leiden", show=False)
+            fig = plt.gcf()
+            p = save_figure(fig, output_dir, "umap_leiden.png")
+            figures.append(str(p))
     except Exception as e:
         logger.warning("Could not generate UMAP figure: %s", e)
+
+    # Spatial plot coloured by leiden
+    try:
+        spatial_key = get_spatial_key(adata)
+        if spatial_key and "leiden" in adata.obs.columns:
+            if "spatial" in adata.uns and len(adata.uns["spatial"]) > 0:
+                sc.pl.spatial(adata, color="leiden", show=False)
+            else:
+                # sc.pl.embedding mandates an "X_" prefix for keys in obsm
+                if "X_spatial" not in adata.obsm and spatial_key == "spatial":
+                    adata.obsm["X_spatial"] = adata.obsm["spatial"]
+                sc.pl.embedding(adata, basis="spatial", color="leiden", show=False)
+            fig = plt.gcf()
+            p = save_figure(fig, output_dir, "spatial_leiden.png")
+            figures.append(str(p))
+    except Exception as e:
+        logger.warning("Could not generate Spatial figure: %s", e)
 
     return figures
 

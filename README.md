@@ -90,9 +90,12 @@ python omicsclaw.py run spatial-preprocessing --input data.h5ad --output results
 ```
 
 **Installation tiers:**
-- `pip install -e .` — Core (works for all skills with built-in methods)
-- `pip install -e ".[spatial]"` — Add advanced spatial methods (SpaGCN, STAGATE)
-- `pip install -e ".[full]"` — All 50+ optional methods
+- `pip install -e .` — Core system operations
+- `pip install -e ".[<domain>]"` — Where `<domain>` is `spatial`, `singlecell`, `genomics`, `proteomics`, or `metabolomics`
+- `pip install -e ".[spatial-domains]"` — Standalone Deep Learning Layer for `SpaGCN` and `STAGATE`
+- `pip install -e ".[full]"` — All 50+ optional methods across all domains
+
+*Check your installation status anytime with `python omicsclaw.py env`.*
 
 > 📚 **Documentation:** [INSTALLATION.md](docs/INSTALLATION.md) • [METHODS.md](docs/METHODS.md) • [MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)
 
@@ -147,21 +150,21 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 | Skill | Description | Key Methods |
 |-------|-------------|-------------|
-| `spatial-preprocessing` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy, Squidpy |
-| `spatial-domain-identification` | Tissue region / niche identification | SpaGCN, STAGATE, GraphST, Leiden |
-| `spatial-cell-annotation` | Cell type annotation | Tangram, scANVI, CellAssign |
-| `spatial-deconvolution` | Cell type proportion estimation | CARD, Cell2Location, RCTD |
-| `spatial-statistics` | Spatial autocorrelation patterns | Moran's I, Geary's C, Ripley's K |
-| `spatial-svg-detection` | Spatially variable genes | SpatialDE, SPARK-X |
+| `spatial-preprocess` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy |
+| `spatial-domain-identification` | Tissue region / niche identification | Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY |
+| `spatial-cell-annotation` | Cell type annotation | Marker-based (Scanpy), Tangram, scANVI, CellAssign |
+| `spatial-deconvolution` | Cell type proportion estimation | FlashDeconv, Cell2location, RCTD, DestVI, Stereoscope, Tangram, SPOTlight, CARD |
+| `spatial-statistics` | Spatial autocorrelation, network topology | Moran's I (Global/Local/Bivariate), Geary's C, Getis-Ord Gi*, Ripley's L, Co-occurrence, Centrality |
+| `spatial-svg-detection` | Spatially variable genes | Moran's I, SpatialDE, SPARK-X, FlashS |
 | `spatial-de` | Differential expression | Wilcoxon, t-test, PyDESeq2 |
 | `spatial-condition-comparison` | Condition comparison | Pseudobulk DESeq2 |
-| `spatial-cell-communication` | Ligand-receptor interactions | LIANA+, CellPhoneDB |
-| `spatial-velocity` | RNA velocity / cellular dynamics | scVelo, VeloVI |
+| `spatial-cell-communication` | Ligand-receptor interactions | LIANA+, CellPhoneDB, FastCCC, CellChat |
+| `spatial-velocity` | RNA velocity / cellular dynamics | scVelo, VELOVI |
 | `spatial-trajectory` | Developmental trajectories | CellRank, Palantir, DPT |
-| `spatial-enrichment` | Pathway enrichment | GSEA, ORA, Enrichr |
+| `spatial-enrichment` | Pathway enrichment | GSEA, ssGSEA, Enrichr |
 | `spatial-cnv` | Copy number variation | inferCNVpy, Numbat |
-| `spatial-integration` | Multi-sample integration | Harmony, BBKNN, Scanorama |
-| `spatial-registration` | Spatial registration | PASTE, STalign |
+| `spatial-integrate` | Multi-sample integration | Harmony, BBKNN, Scanorama |
+| `spatial-register` | Spatial registration | PASTE |
 
 </details>
 

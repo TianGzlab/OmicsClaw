@@ -133,7 +133,7 @@ def identify_domains_leiden(
     if spatial_key is not None and spatial_weight > 0:
         try:
             import squidpy as sq
-            sq.gr.spatial_neighbors(adata, coord_type="generic")
+            sq.gr.spatial_neighbors(adata, spatial_key=spatial_key, coord_type="generic")
             if "spatial_connectivities" in adata.obsp:
                 expr_w = 1 - spatial_weight
                 combined = (
@@ -466,6 +466,10 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
     """Generate spatial domain map and UMAP domain plot using the viz library."""
     figures = []
     spatial_key = get_spatial_key(adata)
+    
+    # viz library hardcodes adata.obsm["spatial"]
+    if spatial_key and "spatial" not in adata.obsm:
+        adata.obsm["spatial"] = adata.obsm[spatial_key]
 
     domain_col = "spatial_domain" if "spatial_domain" in adata.obs.columns else None
     if domain_col is None:
@@ -744,18 +748,18 @@ def main():
     generate_figures(adata, output_dir)
     write_report(output_dir, summary, input_file, params)
 
-    h5ad_path = output_dir / "processed.h5ad"
-    adata.write_h5ad(h5ad_path)
-    logger.info("Saved processed data: %s", h5ad_path)
-
-    print(f"Domain identification complete: {summary['n_domains']} domains ({summary['method']})")
-
     store_analysis_metadata(
         adata,
         SKILL_NAME,
         summary["method"],
         params=params,
     )
+
+    h5ad_path = output_dir / "processed.h5ad"
+    adata.write_h5ad(h5ad_path)
+    logger.info("Saved processed data: %s", h5ad_path)
+
+    print(f"Domain identification complete: {summary['n_domains']} domains ({summary['method']})")
 
 
 if __name__ == "__main__":

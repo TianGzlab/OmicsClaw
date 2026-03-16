@@ -160,10 +160,10 @@ async def send_long_message(update: Update, text: str):
 
 
 async def _drain_pending_media(update: Update, context) -> None:
-    items = core.pending_media.pop(0, [])
+    chat_id = update.effective_chat.id
+    items = core.pending_media.pop(chat_id, [])
     if not items:
         return
-    chat_id = update.effective_chat.id
     for item in items:
         try:
             path = Path(item["path"])

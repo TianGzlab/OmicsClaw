@@ -48,3 +48,19 @@ class MemoryStore(ABC):
     async def delete_session(self, session_id: str) -> None:
         """Delete session and all memories."""
         pass
+
+    @abstractmethod
+    async def search_memories(
+        self, session_id: str, query: str, memory_type: str | None = None
+    ) -> list[BaseMemory]:
+        """Search memories by content."""
+        pass
+
+    async def close(self) -> None:
+        """Close backend resources (optional)."""
+        pass
+
+    async def cleanup_expired(self, ttl_days: int | None = None) -> int:
+        """Remove expired sessions/memories. Returns count deleted."""
+        return 0
+

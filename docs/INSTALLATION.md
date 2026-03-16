@@ -16,6 +16,7 @@ pip install -e .              # Core dependencies
 pip install -e ".[full]"      # All optional methods
 
 # Verify installation
+python omicsclaw.py env
 python omicsclaw.py list
 python omicsclaw.py run preprocess --demo
 ```
@@ -68,14 +69,32 @@ Essential packages for preprocessing and basic analysis:
 - igraph, leidenalg, umap-learn
 - matplotlib, seaborn
 
-### Spatial Domains
+### Domain Platforms
+
+OmicsClaw supports granular installation tiers so you only install what you need for your research domain:
+
+| Domain | Installation Command | Key Packages / Scope |
+|--------|----------------------|----------------------|
+| **Spatial** | `pip install -e ".[spatial]"` | SpaGCN, scvi-tools, tangram-sc, rpy2, cell2location, scvelo |
+| **Single-cell** | `pip install -e ".[singlecell]"` | scrublet + core single-cell packages |
+| **Genomics** | `pip install -e ".[genomics]"` | Genomic python pipelines |
+| **Proteomics** | `pip install -e ".[proteomics]"` | Proteomic python pipelines |
+| **Metabolomics**| `pip install -e ".[metabolomics]"` | Metabolomic python pipelines |
+
+> [!TIP]
+> **Check your installation:** You can run `python omicsclaw.py env` at any time to see exactly which domain frameworks are successfully installed and which ones are missing.
+
+### Standalone Deep-Learning Layer
 
 ```bash
 pip install -e ".[spatial-domains]"
 ```
 
-Adds deep learning spatial domain methods:
-- SpaGCN, torch
+Certain frameworks (like SpaGCN and STAGATE) run complex spatial domains and carry heavy dependencies (e.g. `louvain` and `torch_geometric`) that are often difficult to compile across OS distributions.
+We have isolated them into this tier. You can layer this over the `spatial` module:
+```bash
+pip install -e ".[spatial,spatial-domains]"
+```
 
 > [!WARNING]
 > **macOS**: SpaGCN's `louvain` dependency may fail to compile. Use pre-built wheel:
@@ -83,33 +102,16 @@ Adds deep learning spatial domain methods:
 > pip install louvain --find-links https://wheels.louvain.org
 > ```
 
-### Full
+> [!NOTE]
+> `[spatial]` tier includes R dependencies which requires R ≥4.3.0. See [R Dependencies](#r-dependencies) section.
+
+### Full Arsenal
 
 ```bash
 pip install -e ".[full]"
 ```
 
-All 50+ optional methods across all domains:
-
-| Category | Packages | Skills |
-|----------|----------|--------|
-| Deep learning | torch, scvi-tools | domains, annotate, deconv, velocity |
-| Cell annotation | tangram-sc | annotate, deconv |
-| Deconvolution | cell2location, flashdeconv | deconv |
-| RNA velocity | scvelo | velocity |
-| Communication | liana, cellphonedb, fastccc | communication |
-| Trajectory | cellrank, palantir | trajectory |
-| Enrichment | gseapy | enrichment |
-| SVG | spatialde | genes |
-| Spatial stats | esda, libpysal, pysal | statistics |
-| CNV | infercnvpy | cnv |
-| Integration | harmonypy, bbknn, scanorama | integrate |
-| Registration | POT, paste-bio | register |
-| Pseudobulk | pydeseq2 | condition, de |
-| R interface | rpy2, anndata2ri | deconv, cnv, genes |
-
-> [!NOTE]
-> R interface requires R ≥4.3.0. See [R Dependencies](#r-dependencies) section.
+Installs all 50+ optional methods across all 5 domains.
 
 ### BANKSY (isolated environment)
 
@@ -137,8 +139,8 @@ Adds testing and code quality tools: pytest, black, mypy, ruff, isort, pre-commi
 ### Combining Tiers
 
 ```bash
-pip install -e ".[full,dev]"           # Full methods + dev tools
-pip install -e ".[spatial-domains,dev]" # Spatial domains + dev tools
+pip install -e ".[spatial,singlecell,dev]"  # Multiple domains + dev tools
+pip install -e ".[full,dev]"                # Full methods + dev tools
 ```
 
 ## Fast Installation with uv

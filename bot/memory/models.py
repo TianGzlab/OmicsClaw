@@ -1,8 +1,12 @@
 """Pydantic models for memory system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
 class Session(BaseModel):
@@ -10,8 +14,8 @@ class Session(BaseModel):
     session_id: str
     user_id: str
     platform: Literal["telegram", "feishu"]
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_activity: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+    last_activity: datetime = Field(default_factory=_utcnow)
     preferences: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
 
@@ -20,7 +24,7 @@ class BaseMemory(BaseModel):
     """Base class for all memory types."""
     memory_id: str = Field(default_factory=lambda: __import__('uuid').uuid4().hex)
     memory_type: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class DatasetMemory(BaseMemory):
@@ -51,7 +55,7 @@ class AnalysisMemory(BaseMemory):
     parameters: dict[str, Any] = Field(default_factory=dict)
     output_path: str | None = None
     status: Literal["completed", "failed", "interrupted"] = "completed"
-    executed_at: datetime = Field(default_factory=datetime.utcnow)
+    executed_at: datetime = Field(default_factory=_utcnow)
     duration_seconds: float = 0.0
 
 
@@ -62,7 +66,7 @@ class PreferenceMemory(BaseMemory):
     key: str
     value: Any
     is_strict: bool = False  # True=mandatory, False=soft
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
 
 
 class InsightMemory(BaseMemory):

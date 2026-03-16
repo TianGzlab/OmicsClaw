@@ -517,7 +517,7 @@ def _send_document_file(chat_id: str, filepath: str, caption: str | None = None)
 
 def _send_pending_media(chat_id: str):
     """Send any queued media items to the Feishu chat."""
-    items = core.pending_media.pop(0, [])
+    items = core.pending_media.pop(chat_id, [])
     for item in items:
         try:
             fpath = item.get("path", "")
@@ -654,17 +654,22 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
 
         session_key = f"feishu:{sender_id if chat_type == 'p2p' else chat_id}"
 
+        # Rate limiting
+        if not core.check_rate_limit(sender_id):
+            _send_text(chat_id, f"Rate limit reached ({core.RATE_LIMIT_PER_HOUR} messages/hour). Please try again later.")
+            return
+
         logger.info(f"Feishu message: chat_type={chat_type} text={text[:100]}")
         core.audit("message", platform="feishu", chat_id=chat_id,
                     text_preview=text[:200])
 
         # Thinking placeholder
         placeholder_id = ""
-        done = False
+        done_event = threading.Event()
 
         def _send_thinking():
             nonlocal placeholder_id
-            if done:
+            if done_event.is_set():
                 return
             mid = _send_text(chat_id, "正在分析…")
             if mid:
@@ -683,7 +688,7 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
         except Exception as e:
             reply = f"(system error) {e}"
         finally:
-            done = True
+            done_event.set()
             if timer:
                 timer.cancel()
 
@@ -701,7 +706,7 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
         reply_text = reply_text.strip() + " [看]"
 
         # Send pending media first
-        media_items = core.pending_media.get(0, [])
+        media_items = core.pending_media.get(chat_id, [])
         if media_items:
             if placeholder_id:
                 try:

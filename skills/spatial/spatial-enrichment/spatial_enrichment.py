@@ -60,7 +60,7 @@ def _resolve_library(key: str, organism: str = "human") -> dict:
     """Load first available library variant from gseapy."""
     import gseapy as gp
     if key in _GENESET_LIBRARY_CANDIDATES:
-        last_err: Exception | None = None
+        last_err: Exception = Exception("Not found")
         for lib in _GENESET_LIBRARY_CANDIDATES[key]:
             try:
                 return gp.get_library(lib, organism=organism)
@@ -263,12 +263,7 @@ def run_enrichment(
         )
         used_method = "enrichr"
 
-    n_sig = int((enrich_df["pvalue_adj"] < 0.05).sum()) if not enrich_df.empty else 0
-
-    store_analysis_metadata(
-        adata, SKILL_NAME, used_method,
-        params={"method": method, "groupby": groupby, "source": source},
-    )
+    n_sig = int(np.sum(enrich_df["pvalue_adj"] < 0.05)) if not enrich_df.empty else 0
 
     return {
         "n_cells": n_cells,
@@ -368,8 +363,8 @@ def write_report(
             body_lines.append("| Cluster | Gene Set | Overlap | Adj. p-value |")
             body_lines.append("|---------|----------|---------|--------------|")
             for _, r in sig.iterrows():
-                gs = str(r.get("gene_set", ""))[:50]
-                ol = r.get("overlap", "")
+                gs = str(r.get("gene_set", ""))
+                ol = str(r.get("overlap", ""))
                 body_lines.append(
                     f"| {r.get('cluster', '')} | {gs} | {ol} | {r['pvalue_adj']:.2e} |"
                 )
@@ -399,20 +394,23 @@ def write_report(
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_enrichment.py --input <input.h5ad> --output {output_dir}"
+    
+    cmd_parts: list[str] = [f"python spatial_enrichment.py --input <input.h5ad> --output {output_dir}"]
     for k, v in params.items():
         if v is not None:
-            cmd += f" --{k.replace('_', '-')} {v}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+            cmd_parts.append(f"--{str(k).replace('_', '-')} {v}")
+    
+    cmd_str = " ".join(cmd_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
     try:
-        from importlib.metadata import version as _get_version
+        from importlib.metadata import version as _ver
     except ImportError:
-        from importlib_metadata import version as _get_version  # type: ignore
-    env_lines = []
+        pass
+    env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "scipy", "numpy", "pandas", "matplotlib"]:
         try:
-            env_lines.append(f"{pkg}=={_get_version(pkg)}")
+            env_lines.append(f"{pkg}=={_ver(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
     (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
@@ -426,7 +424,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Run spatial-preprocess --demo and load the resulting processed.h5ad."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -507,6 +505,13 @@ def main():
 
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata,
+        SKILL_NAME,
+        summary["method"],
+        params=params,
+    )
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

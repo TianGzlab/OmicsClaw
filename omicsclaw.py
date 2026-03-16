@@ -440,6 +440,9 @@ def main():
     list_p = sub.add_parser("list", help="List available skills")
     list_p.add_argument("--domain", help="Filter by domain (e.g., spatial, singlecell, genomics)")
 
+    # env
+    env_p = sub.add_parser("env", help="Check installed OmicsClaw dependency tiers")
+
     # upload
     upload_p = sub.add_parser("upload", help="Create a spatial session from h5ad data")
     upload_p.add_argument("--input", required=True, dest="input_path")
@@ -514,6 +517,33 @@ def main():
 
     if args.command == "list":
         list_skills(domain_filter=getattr(args, "domain", None))
+        sys.exit(0)
+
+    if args.command == "env":
+        from omicsclaw.core.dependency_manager import get_installed_tiers
+        tiers = get_installed_tiers()
+        
+        print(f"\n{BOLD}OmicsClaw Environment Status{RESET}")
+        print(f"{BOLD}{'=' * 40}{RESET}")
+        
+        core_status = f"{GREEN}✅ Installed{RESET}" if tiers.get("core") else f"{RED}❌ Missing{RESET}"
+        print(f"Core System:      {core_status}")
+        
+        print(f"\n{BOLD}Domain Tiers:{RESET}")
+        for tier in ["spatial", "singlecell", "genomics", "proteomics", "metabolomics"]:
+            is_installed = tiers.get(tier, False)
+            if is_installed:
+                status = f"{GREEN}✅ Installed{RESET}"
+            else:
+                status = f"{RED}❌ Missing{RESET} (Run: pip install -e \".[{tier}]\")"
+            print(f"- {tier.capitalize():<15} {status}")
+            
+        print(f"\n{BOLD}Standalone Layer:{RESET}")
+        sd_installed = tiers.get("spatial-domains", False)
+        sd_status = f"{GREEN}✅ Installed{RESET}" if sd_installed else f"{RED}❌ Missing{RESET} (Run: pip install -e \".[spatial-domains]\")"
+        print(f"- Spatial-Domains {sd_status} (Deep learning spatial domain methods, e.g., SpaGCN)")
+        
+        print(f"\nTo install all complete functionalities:\n  pip install -e \".[full]\"\n")
         sys.exit(0)
 
     if args.command == "upload":

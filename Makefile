@@ -1,6 +1,5 @@
 .PHONY: demo test list demo-all catalog demo-orchestrator \
         install install-spatial-domains install-full install-dev \
-        bot-telegram bot-feishu \
         bot-telegram bot-feishu
 
 ## ── Virtual-environment + installation targets ──────────────────────────────

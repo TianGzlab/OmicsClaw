@@ -215,11 +215,6 @@ def run_integration(
     if "leiden" not in adata.obs.columns:
         sc.tl.leiden(adata, resolution=1.0, flavor="igraph")
 
-    store_analysis_metadata(
-        adata, SKILL_NAME, result["method"],
-        params={"method": method, "batch_key": batch_key},
-    )
-
     return {
         "n_cells": adata.n_obs,
         "n_genes": adata.n_vars,
@@ -388,14 +383,16 @@ def write_report(
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_integrate.py --input <input.h5ad> --output {output_dir}"
+    cmd_parts: list[str] = [f"python spatial_integrate.py --input <input.h5ad> --output {output_dir}"]
     for k, v in params.items():
         if v is not None:
-            cmd += f" --{k.replace('_', '-')} {v}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+            cmd_parts.append(f"--{str(k).replace('_', '-')} {v}")
+    
+    cmd_str = " ".join(cmd_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
     import pkg_resources
-    env_lines = []
+    env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]:
         try:
             ver = pkg_resources.get_distribution(pkg).version
@@ -420,7 +417,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Generate synthetic multi-batch data from preprocess demo."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -490,6 +487,11 @@ def main():
 
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata, SKILL_NAME, summary["method"],
+        params=params,
+    )
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

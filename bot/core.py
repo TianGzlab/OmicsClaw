@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import requests
 import shutil
 import sys
 import tempfile
@@ -108,8 +109,8 @@ def audit(event: str, **kwargs):
     try:
         with open(_AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning(f"Audit log write failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,9 @@ OMICSCLAW_MODEL: str = "deepseek-chat"
 LLM_PROVIDER_NAME: str = ""
 
 conversations: dict[int | str, list] = {}
-MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))  # Increased from 20, configurable
+_conversation_access: dict[int | str, float] = {}  # LRU tracking
+MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))
+MAX_CONVERSATIONS = int(os.getenv("OMICSCLAW_MAX_CONVERSATIONS", "1000"))
 
 received_files: dict[int | str, dict] = {}
 pending_media: dict[int | str, list[dict]] = {}
@@ -132,6 +135,40 @@ BOT_START_TIME = time.time()
 # Memory system (optional)
 memory_store = None
 session_manager = None
+
+
+# ---------------------------------------------------------------------------
+# Shared rate limiter (used by both Telegram and Feishu)
+# ---------------------------------------------------------------------------
+
+RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "10"))
+_rate_buckets: dict[str, list[float]] = {}
+
+
+def check_rate_limit(user_id: str, admin_id: str = "") -> bool:
+    """Check per-user rate limit. Returns True if allowed."""
+    if RATE_LIMIT_PER_HOUR <= 0 or (admin_id and user_id == admin_id):
+        return True
+    now = time.time()
+    bucket = _rate_buckets.setdefault(user_id, [])
+    bucket[:] = [t for t in bucket if now - t < 3600]
+    if len(bucket) >= RATE_LIMIT_PER_HOUR:
+        return False
+    bucket.append(now)
+    return True
+
+
+def _evict_lru_conversations():
+    """Evict least-recently-used conversations when limit exceeded."""
+    if len(conversations) <= MAX_CONVERSATIONS:
+        return
+    # Sort by access time, evict oldest
+    sorted_keys = sorted(_conversation_access, key=_conversation_access.get)
+    to_evict = len(conversations) - MAX_CONVERSATIONS
+    for key in sorted_keys[:to_evict]:
+        conversations.pop(key, None)
+        _conversation_access.pop(key, None)
+    logger.debug(f"Evicted {to_evict} stale conversation(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +187,17 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         method = args.get("method", "default")
         input_path = args.get("file_path", "")
 
+        # Link to most recent dataset memory for lineage
+        source_dataset_id = ""
+        try:
+            datasets = await memory_store.get_memories(session_id, "dataset", limit=1)
+            if datasets:
+                source_dataset_id = datasets[0].memory_id
+        except Exception:
+            pass
+
         memory = AnalysisMemory(
-            source_dataset_id="",  # Will link later if needed
+            source_dataset_id=source_dataset_id,
             skill=skill,
             method=method,
             parameters={"input": input_path} if input_path else {},
@@ -182,7 +228,7 @@ class SessionManager:
         if not session:
             session = await self.store.create_session(user_id, platform, chat_id)
         else:
-            await self.store.update_session(session_id, {"last_activity": datetime.utcnow()})
+            await self.store.update_session(session_id, {"last_activity": datetime.now(timezone.utc)})
         return session
 
     async def load_context(self, session_id: str) -> str:
@@ -192,8 +238,25 @@ class SessionManager:
             datasets = await self.store.get_memories(session_id, "dataset", limit=2)
             analyses = await self.store.get_memories(session_id, "analysis", limit=3)
             prefs = await self.store.get_memories(session_id, "preference", limit=5)
+            insights = await self.store.get_memories(session_id, "insight", limit=3)
+            project_ctx = await self.store.get_memories(session_id, "project_context", limit=1)
 
             parts = []
+
+            # Project context (top-level)
+            if project_ctx:
+                pc = project_ctx[0]
+                ctx_parts = []
+                if pc.project_goal:
+                    ctx_parts.append(f"Goal: {pc.project_goal}")
+                if pc.species:
+                    ctx_parts.append(f"Species: {pc.species}")
+                if pc.tissue_type:
+                    ctx_parts.append(f"Tissue: {pc.tissue_type}")
+                if pc.disease_model:
+                    ctx_parts.append(f"Disease: {pc.disease_model}")
+                if ctx_parts:
+                    parts.append("**Project Context**: " + " | ".join(ctx_parts))
 
             # Dataset context
             if datasets:
@@ -211,6 +274,13 @@ class SessionManager:
                 parts.append("**User Preferences**:")
                 for p in prefs:
                     parts.append(f"- {p.key}: {p.value}")
+
+            # Biological insights
+            if insights:
+                parts.append("**Known Insights**:")
+                for ins in insights:
+                    confidence = "confirmed" if ins.confidence == "user_confirmed" else "predicted"
+                    parts.append(f"- {ins.entity_type} {ins.entity_id}: {ins.biological_label} ({confidence})")
 
             return "\n".join(parts) if parts else ""
         except Exception as e:
@@ -264,7 +334,9 @@ def init(
 
             encryptor = SecureFieldEncryptor(encryption_key.encode()[:32])
             store = SQLiteBackend(db_path, encryptor)
-            asyncio.create_task(store.initialize())
+            # NOTE: initialize() is called lazily on first async operation
+            # via _ensure_initialized(), since init() runs in sync context
+            # where asyncio.create_task() may not have a running loop.
 
             memory_store = store
             session_manager = SessionManager(store)
@@ -307,7 +379,7 @@ Operational constraints:
    will detect uploaded PDFs automatically.
 8. For quick demos: say "run preprocess demo", "run ms-qc demo", etc.
    Use mode='demo' to run with built-in synthetic data.
-8. FILE PATH MODE (IMPORTANT): Omics data files are often too large to upload
+9. FILE PATH MODE (IMPORTANT): Omics data files are often too large to upload
    via messaging. When the user mentions a file path or filename, use mode='path'
    and set file_path to the path or filename they provided. The system will automatically search
    trusted directories.
@@ -320,7 +392,7 @@ Operational constraints:
 def build_system_prompt(memory_context: str = "") -> str:
     if SOUL_MD.exists():
         soul = SOUL_MD.read_text(encoding="utf-8")
-        logger.info(f"Loaded SOUL.md ({{len(soul)}} chars)")
+        logger.info(f"Loaded SOUL.md ({len(soul)} chars)")
     else:
         soul = (
             "You are a multi-omics AI assistant. "
@@ -758,7 +830,7 @@ def discover_file(filename_or_pattern: str) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-async def execute_omicsclaw(args: dict, session_id: str = None) -> str:
+async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
     """Execute an OmicsClaw skill via subprocess."""
     skill_key = args.get("skill", "auto")
     mode = args.get("mode", "demo")
@@ -904,6 +976,11 @@ async def execute_omicsclaw(args: dict, session_id: str = None) -> str:
         stdout_str = stdout_bytes.decode(errors="replace")
         stderr_str = stderr_bytes.decode(errors="replace")
     except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
         return f"{skill_key} timed out after 300 seconds."
     except Exception as e:
         import traceback as _tb
@@ -924,7 +1001,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None) -> str:
             elif f.suffix == ".png":
                 media_items.append({"type": "photo", "path": str(f)})
         if media_items:
-            pending_media[0] = pending_media.get(0, []) + media_items
+            pending_media[chat_id] = pending_media.get(chat_id, []) + media_items
 
     # Read report for chat display
     report_text = ""
@@ -1075,6 +1152,11 @@ async def execute_generate_audio(args: dict) -> str:
 
     except asyncio.TimeoutError:
         try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        try:
             text_path.unlink()
         except OSError:
             pass
@@ -1141,6 +1223,11 @@ async def execute_parse_literature(args: dict) -> str:
         stdout_str = stdout_bytes.decode(errors="replace")
         stderr_str = stderr_bytes.decode(errors="replace")
     except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
         return "Literature parsing timed out after 180 seconds."
     except Exception as e:
         import traceback as _tb
@@ -1224,12 +1311,22 @@ async def execute_fetch_geo_metadata(args: dict) -> str:
 
 
 async def execute_list_directory(args: dict) -> str:
-    """List directory contents."""
+    """List directory contents (restricted to trusted directories)."""
     path_arg = args.get("path", "")
     target_path = Path(path_arg) if path_arg else DATA_DIR
 
     if not target_path.is_absolute():
         target_path = DATA_DIR / target_path
+
+    # Validate against trusted directories
+    _ensure_trusted_dirs()
+    resolved = target_path.resolve()
+    if not any(
+        resolved == td.resolve() or str(resolved).startswith(str(td.resolve()) + os.sep)
+        for td in TRUSTED_DATA_DIRS
+    ):
+        dirs_str = ", ".join(str(d) for d in TRUSTED_DATA_DIRS)
+        return f"Access denied: {target_path} is not in trusted directories ({dirs_str})"
 
     if not target_path.exists():
         return f"Directory not found: {target_path}"
@@ -1389,7 +1486,7 @@ async def execute_create_csv_file(args: dict) -> str:
 
 
 async def execute_make_directory(args: dict) -> str:
-    """Create a new directory."""
+    """Create a new directory (restricted to trusted directories)."""
     path_arg = args.get("path", "")
 
     if not path_arg:
@@ -1397,6 +1494,17 @@ async def execute_make_directory(args: dict) -> str:
 
     target_path = Path(path_arg)
     if not target_path.is_absolute():
+        target_path = DATA_DIR / target_path
+
+    # Validate against trusted directories
+    _ensure_trusted_dirs()
+    resolved = target_path.resolve() if target_path.exists() else target_path.parent.resolve() / target_path.name
+    if not any(
+        str(resolved).startswith(str(td.resolve()))
+        for td in TRUSTED_DATA_DIRS
+    ):
+        dirs_str = ", ".join(str(d) for d in TRUSTED_DATA_DIRS)
+        return f"Access denied: {target_path} is not in trusted directories ({dirs_str})"
         target_path = DATA_DIR / target_path
 
     try:
@@ -1697,6 +1805,8 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
     system_prompt = build_system_prompt(memory_context) if memory_context else SYSTEM_PROMPT
 
     history = conversations.setdefault(chat_id, [])
+    _conversation_access[chat_id] = time.time()
+    _evict_lru_conversations()
 
     if isinstance(user_content, str):
         history.append({"role": "user", "content": user_content})
@@ -1776,10 +1886,12 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
                 audit("tool_call", chat_id=str(chat_id), tool=func_name,
                       args_preview=json.dumps(func_args, default=str)[:300])
                 try:
-                    # Pass session_id to omicsclaw executor for auto-capture
+                    # Pass session_id and chat_id to omicsclaw executor
                     if func_name == "omicsclaw" and user_id and platform:
                         session_id = f"{platform}:{user_id}:{chat_id}"
-                        result = await executor(func_args, session_id)
+                        result = await executor(func_args, session_id, chat_id=chat_id)
+                    elif func_name == "omicsclaw":
+                        result = await executor(func_args, chat_id=chat_id)
                     else:
                         result = await executor(func_args)
                 except Exception as tool_err:

@@ -157,7 +157,7 @@ def _run_scvelo(adata, *, mode: str = "stochastic") -> dict:
 
     return {
         "method": f"scvelo_{mode}",
-        "n_velocity_genes": int((adata.var.get("velocity_genes", pd.Series([], dtype=bool))).sum())
+        "n_velocity_genes": int(np.sum(adata.var["velocity_genes"]))
         if "velocity_genes" in adata.var.columns else None,
         "mean_speed": float(speed.mean()) if speed is not None else 0.0,
         "median_speed": float(speed.median()) if speed is not None else 0.0,
@@ -237,11 +237,6 @@ def run_velocity(
     else:
         result = _run_scvelo(adata, mode=method)
 
-    store_analysis_metadata(
-        adata, SKILL_NAME, result["method"],
-        params={"method": method},
-    )
-
     return {"n_cells": n_cells, "n_genes": n_genes, **result}
 
 
@@ -319,6 +314,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
 
 
 def write_report(
+    adata,
     output_dir: Path,
     summary: dict,
     input_file: str | None,
@@ -360,7 +356,10 @@ def write_report(
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
-    speed_col = "velocity_speed" if "velocity_speed" in adata_ref if False else None  # written later
+    if "velocity_speed" in adata.obs.columns:
+        df = adata.obs[["velocity_speed"]].copy()
+        df.index.name = "Cell"
+        df.to_csv(tables_dir / "velocity_speed.csv")
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
@@ -368,7 +367,7 @@ def write_report(
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
 
     from importlib.metadata import version as _ver, PackageNotFoundError
-    env_lines = []
+    env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "numpy", "pandas", "scvelo"]:
         try:
             env_lines.append(f"{pkg}=={_ver(pkg)}")
@@ -385,7 +384,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Generate demo AnnData with synthetic spliced/unspliced layers."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -455,7 +454,12 @@ def main():
     summary = run_velocity(adata, method=args.method)
 
     generate_figures(adata, output_dir, summary)
-    write_report(output_dir, summary, input_file, params)
+    write_report(adata, output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata, SKILL_NAME, summary["method"],
+        params=params,
+    )
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

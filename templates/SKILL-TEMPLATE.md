@@ -15,7 +15,7 @@ metadata:
       env: []
       config: []
     emoji: "🔬"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
+    homepage: https://github.com/zhou-1314/OmicsClaw
     os: [macos, linux]
     install:
       - kind: pip

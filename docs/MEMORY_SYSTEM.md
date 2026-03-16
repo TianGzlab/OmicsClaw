@@ -272,17 +272,21 @@ User: "Compare A and B" → Bot: "Loading your two Visium samples..."
                    ▼
 ┌─────────────────────────────────────────────┐
 │  SessionManager.load_context()              │
+│  ├─ Get ProjectContextMemory (last 1)       │
 │  ├─ Get DatasetMemory (last 2)              │
 │  ├─ Get AnalysisMemory (last 3)             │
-│  └─ Get PreferenceMemory (last 5)           │
+│  ├─ Get PreferenceMemory (last 5)           │
+│  └─ Get InsightMemory (last 3)              │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
 │  LLM Context Injection                      │
-│  "Current Dataset: visium.h5ad (normalized) │
+│  "Project: TME in TNBC (Homo sapiens)       │
+│   Current Dataset: visium.h5ad (normalized) │
 │   Recent: preprocessing (scanpy) - done     │
-│   Preference: clustering_method=leiden"     │
+│   Preference: clustering_method=leiden      │
+│   Insight: cluster_3 = CD8+ T cells"       │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
@@ -299,6 +303,53 @@ User: "Compare A and B" → Bot: "Loading your two Visium samples..."
 │  └─ Save AnalysisMemory(skill=domains)      │
 └─────────────────────────────────────────────┘
 ```
+
+---
+
+## Memory Features
+
+### TTL / Automatic Expiration
+
+Sessions and their memories are automatically expired after a configurable period (default: 30 days). Set `OMICSCLAW_MEMORY_TTL_DAYS` in `.env`:
+
+```env
+OMICSCLAW_MEMORY_TTL_DAYS=30  # Default. Set 0 to disable TTL.
+```
+
+Cleanup runs on startup and periodically (every 100 memory operations).
+
+### Memory Search
+
+Search across all memory content for a session:
+
+```python
+results = await store.search_memories(session_id, "brain")
+# Finds all memories containing "brain" (case-insensitive)
+# Works across encrypted fields (decrypt → search → return)
+
+# Filter by type
+datasets = await store.search_memories(session_id, "visium", memory_type="dataset")
+```
+
+### Deduplication
+
+The memory system prevents duplicate entries:
+
+- **DatasetMemory**: Deduplicated by `file_path`. Saving the same file path updates the existing record.
+- **PreferenceMemory**: Deduplicated by `domain` + `key`. Changing a preference updates the value in-place.
+
+### Update Re-encryption
+
+When updating memory fields via `update_memory()`, the system:
+1. Decrypts existing data
+2. Merges in the updates
+3. Re-encrypts the entire object
+
+This prevents plaintext leakage of sensitive fields during partial updates.
+
+### Connection Pooling
+
+The SQLite backend maintains a persistent connection with WAL journaling and foreign key enforcement. PRAGMAs are set once on connection creation, not per-operation.
 
 ---
 
