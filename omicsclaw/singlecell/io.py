@@ -1,0 +1,294 @@
+"""Data loading utilities for single-cell analysis.
+
+Provides multi-format import functions and example data loading.
+Adapted from validated reference scripts (setup_and_import.py, load_example_data.py).
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, Union
+
+import numpy as np
+import pandas as pd
+
+if TYPE_CHECKING:
+    from anndata import AnnData
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Data import functions
+# ---------------------------------------------------------------------------
+
+def import_10x_data(
+    data_dir: Union[str, Path],
+    var_names: str = "gene_symbols",
+    cache: bool = False,
+    min_cells: int = 3,
+    min_genes: int = 200,
+) -> AnnData:
+    """Import 10X Genomics CellRanger output (mtx directory).
+
+    Parameters
+    ----------
+    data_dir
+        Path to directory containing barcodes, features, and matrix files.
+    var_names
+        Column in .var to use for gene names.
+    cache
+        Cache the loaded data.
+    min_cells
+        Minimum cells for a gene to be kept.
+    min_genes
+        Minimum genes for a cell to be kept.
+
+    Returns
+    -------
+    AnnData with raw counts.
+    """
+    import scanpy as sc
+
+    data_dir = Path(data_dir)
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Data directory does not exist: {data_dir}")
+
+    logger.info("Loading 10X data from: %s", data_dir)
+    adata = sc.read_10x_mtx(data_dir, var_names=var_names, cache=cache)
+
+    if min_cells > 0:
+        sc.pp.filter_genes(adata, min_cells=min_cells)
+    if min_genes > 0:
+        sc.pp.filter_cells(adata, min_genes=min_genes)
+
+    logger.info("Created AnnData: %d genes x %d cells", adata.n_vars, adata.n_obs)
+    return adata
+
+
+def import_h5_data(
+    h5_file: Union[str, Path],
+    genome: Optional[str] = None,
+    min_cells: int = 3,
+    min_genes: int = 200,
+) -> AnnData:
+    """Import H5 format data from 10X.
+
+    Parameters
+    ----------
+    h5_file
+        Path to .h5 file.
+    genome
+        Genome name if multiple genomes present.
+    min_cells
+        Minimum cells for a gene to be kept.
+    min_genes
+        Minimum genes for a cell to be kept.
+
+    Returns
+    -------
+    AnnData with raw counts.
+    """
+    import scanpy as sc
+
+    h5_file = Path(h5_file)
+    if not h5_file.exists():
+        raise FileNotFoundError(f"H5 file does not exist: {h5_file}")
+
+    logger.info("Loading H5 data from: %s", h5_file)
+    adata = sc.read_10x_h5(h5_file, genome=genome)
+
+    if min_cells > 0:
+        sc.pp.filter_genes(adata, min_cells=min_cells)
+    if min_genes > 0:
+        sc.pp.filter_cells(adata, min_genes=min_genes)
+
+    logger.info("Created AnnData: %d genes x %d cells", adata.n_vars, adata.n_obs)
+    return adata
+
+
+def import_count_matrix(
+    file_path: Union[str, Path],
+    transpose: bool = False,
+    sep: Optional[str] = None,
+    min_cells: int = 3,
+    min_genes: int = 200,
+) -> AnnData:
+    """Import count matrix from CSV/TSV.
+
+    Parameters
+    ----------
+    file_path
+        Path to count matrix file.
+    transpose
+        Transpose matrix (use if genes are rows in the file).
+    sep
+        Separator character (auto-detect from extension if None).
+    min_cells
+        Minimum cells for a gene to be kept.
+    min_genes
+        Minimum genes for a cell to be kept.
+
+    Returns
+    -------
+    AnnData with raw counts.
+    """
+    import scanpy as sc
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Count matrix file does not exist: {file_path}")
+
+    if sep is None:
+        sep = "\t" if file_path.suffix == ".tsv" else ","
+
+    logger.info("Loading count matrix from: %s", file_path)
+    counts = pd.read_csv(file_path, sep=sep, index_col=0)
+
+    if transpose:
+        counts = counts.T
+
+    # scanpy expects cells x genes
+    adata = sc.AnnData(counts.T)
+
+    if min_cells > 0:
+        sc.pp.filter_genes(adata, min_cells=min_cells)
+    if min_genes > 0:
+        sc.pp.filter_cells(adata, min_genes=min_genes)
+
+    logger.info("Created AnnData: %d genes x %d cells", adata.n_vars, adata.n_obs)
+    return adata
+
+
+def import_loom_data(
+    loom_file: Union[str, Path],
+    sparse: bool = True,
+    cleanup: bool = True,
+) -> AnnData:
+    """Import Loom format data.
+
+    Parameters
+    ----------
+    loom_file
+        Path to .loom file.
+    sparse
+        Store as sparse matrix.
+    cleanup
+        Clean up obs and var names.
+
+    Returns
+    -------
+    AnnData with raw counts.
+    """
+    import scanpy as sc
+
+    loom_file = Path(loom_file)
+    if not loom_file.exists():
+        raise FileNotFoundError(f"Loom file does not exist: {loom_file}")
+
+    logger.info("Loading Loom data from: %s", loom_file)
+    adata = sc.read_loom(loom_file, sparse=sparse, cleanup=cleanup)
+
+    logger.info("Created AnnData: %d genes x %d cells", adata.n_vars, adata.n_obs)
+    return adata
+
+
+def add_metadata(
+    adata: AnnData,
+    metadata_file: Union[str, Path],
+    merge_on: str = "index",
+) -> AnnData:
+    """Add sample metadata to AnnData object.
+
+    Parameters
+    ----------
+    adata
+        AnnData object.
+    metadata_file
+        Path to metadata CSV file.
+    merge_on
+        Column to merge on ('index' for cell barcodes as index).
+
+    Returns
+    -------
+    AnnData with added metadata columns in .obs.
+    """
+    metadata_file = Path(metadata_file)
+    if not metadata_file.exists():
+        raise FileNotFoundError(f"Metadata file does not exist: {metadata_file}")
+
+    logger.info("Loading metadata from: %s", metadata_file)
+    metadata = pd.read_csv(metadata_file)
+
+    if merge_on == "index" and metadata.index.name is None:
+        metadata.set_index(metadata.columns[0], inplace=True)
+
+    common_cells = set(adata.obs_names) & set(metadata.index)
+    if len(common_cells) == 0:
+        raise ValueError("No matching cell barcodes between AnnData and metadata")
+
+    for col in metadata.columns:
+        adata.obs[col] = metadata.loc[adata.obs_names, col]
+
+    logger.info("Added %d metadata columns to %d cells", len(metadata.columns), len(common_cells))
+    return adata
+
+
+# ---------------------------------------------------------------------------
+# Example / demo data
+# ---------------------------------------------------------------------------
+
+def load_example_data(dataset: str = "pbmc3k") -> AnnData:
+    """Load example single-cell RNA-seq dataset.
+
+    Parameters
+    ----------
+    dataset
+        Dataset to load. Options: ``"pbmc3k"``, ``"pbmc68k_reduced"``.
+
+    Returns
+    -------
+    AnnData with raw counts (pbmc3k) or processed data (pbmc68k_reduced).
+    """
+    import scanpy as sc
+
+    logger.info("Loading %s example dataset ...", dataset)
+
+    if dataset == "pbmc3k":
+        adata = sc.datasets.pbmc3k()
+    elif dataset == "pbmc68k_reduced":
+        adata = sc.datasets.pbmc68k_reduced()
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Options: 'pbmc3k', 'pbmc68k_reduced'")
+
+    logger.info("Loaded: %d cells x %d genes", adata.n_obs, adata.n_vars)
+    return adata
+
+
+def smart_load(path: Union[str, Path], **kwargs) -> AnnData:
+    """Auto-detect file format and load accordingly.
+
+    Supports: .h5ad, .h5, .loom, .csv, .tsv, and 10X mtx directories.
+    """
+    import scanpy as sc
+
+    path = Path(path)
+
+    if path.is_dir():
+        return import_10x_data(path, **kwargs)
+
+    suffix = path.suffix.lower()
+    if suffix == ".h5ad":
+        logger.info("Loading H5AD: %s", path)
+        return sc.read_h5ad(path)
+    elif suffix == ".h5":
+        return import_h5_data(path, **kwargs)
+    elif suffix == ".loom":
+        return import_loom_data(path, **kwargs)
+    elif suffix in (".csv", ".tsv"):
+        return import_count_matrix(path, **kwargs)
+    else:
+        # Try as h5ad
+        logger.info("Unknown extension %s, trying as h5ad ...", suffix)
+        return sc.read_h5ad(path)

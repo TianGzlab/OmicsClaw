@@ -1,0 +1,49 @@
+# Minimal single-cell requirements (from biomni reference)
+# Only packages that exist in the reference file
+
+# Core
+numpy==2.1.0
+pandas==2.3.1
+scipy==1.15.0
+scikit-learn==1.7.1
+
+# Single-cell
+anndata==0.12.1
+scanpy==1.11.4
+squidpy==1.6.5
+
+# Clustering
+igraph==0.11.9
+leidenalg==0.10.2
+
+# Dimensionality reduction
+umap-learn==0.5.9.post2
+pynndescent==0.5.13
+
+# Visualization
+matplotlib==3.10.5
+seaborn==0.13.2
+pillow==11.3.0
+
+# HVG
+scikit-misc==0.5.1
+
+# Single-cell methods (in reference)
+scrublet==0.2.3
+scvelo==0.3.3
+scvi-tools==1.3.3
+torch==2.7.1
+arboreto==0.1.6
+gseapy==1.1.9
+muon==0.1.7
+pydeseq2==0.5.2
+
+# Testing
+pytest==8.4.1
+
+# Other dependencies (from reference)
+h5py==3.14.0
+networkx==3.5
+joblib==1.5.1
+tqdm==4.67.1
+packaging==25.0

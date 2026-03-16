@@ -342,6 +342,36 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # Single-cell domain
     # -----------------------------------------------------------------------
+    "sc-qc": {
+        "domain": "singlecell",
+        "alias": "sc-qc",
+        "script": SKILLS_DIR / "singlecell" / "sc-qc" / "sc_qc.py",
+        "demo_args": ["--demo"],
+        "description": "Calculate and visualize QC metrics for scRNA-seq data",
+        "allowed_extra_flags": {"--species"},
+        "saves_h5ad": True,
+    },
+    "sc-filter": {
+        "domain": "singlecell",
+        "alias": "sc-filter",
+        "script": SKILLS_DIR / "singlecell" / "sc-filter" / "sc_filter.py",
+        "demo_args": ["--demo"],
+        "description": "Filter cells and genes based on QC metrics with tissue-specific presets",
+        "allowed_extra_flags": {
+            "--min-genes", "--max-genes", "--min-counts", "--max-counts",
+            "--max-mt-percent", "--min-cells", "--tissue",
+        },
+        "saves_h5ad": True,
+    },
+    "sc-ambient-removal": {
+        "domain": "singlecell",
+        "alias": "sc-ambient-removal",
+        "script": SKILLS_DIR / "singlecell" / "sc-ambient-removal" / "sc_ambient.py",
+        "demo_args": ["--demo"],
+        "description": "Remove ambient RNA contamination using CellBender or simple subtraction",
+        "allowed_extra_flags": {"--method", "--expected-cells", "--raw-h5", "--contamination"},
+        "saves_h5ad": True,
+    },
     "sc-preprocessing": {
         "domain": "singlecell",
         "alias": "sc-preprocessing",
@@ -403,6 +433,16 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "allowed_extra_flags": {
             "--groupby", "--group1", "--group2", "--method", "--n-top-genes",
         },
+        "requires_preprocessed": True,
+        "saves_h5ad": True,
+    },
+    "sc-markers": {
+        "domain": "singlecell",
+        "alias": "sc-markers",
+        "script": SKILLS_DIR / "singlecell" / "sc-markers" / "sc_markers.py",
+        "demo_args": ["--demo"],
+        "description": "Find marker genes for cell clusters using Wilcoxon, t-test, or logistic regression",
+        "allowed_extra_flags": {"--groupby", "--method", "--n-genes", "--n-top"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
