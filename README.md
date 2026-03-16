@@ -16,6 +16,13 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/zhou-1314/OmicsClaw/actions)
 
+> [!WARNING]
+> **🚧 项目开发中 / Under Active Development**
+>
+> OmicsClaw 目前正处于积极开发和完善阶段，部分功能可能存在 bug 或尚未完全稳定。我们正在持续改进代码质量、修复已知问题并增加新功能。如果您在使用过程中遇到任何问题，欢迎通过 [GitHub Issues](https://github.com/zhou-1314/OmicsClaw/issues) 反馈，我们会尽力修复和完善。感谢您的理解与支持！
+>
+> OmicsClaw is currently under active development. Some features may contain bugs or may not be fully stable yet. We are continuously improving code quality, fixing known issues, and adding new features. If you encounter any problems, please report them via [GitHub Issues](https://github.com/zhou-1314/OmicsClaw/issues). Thank you for your understanding and support!
+
 ## Why OmicsClaw?
 
 **Traditional tools make you repeat yourself.** Every session starts from zero: re-upload data, re-explain context, re-run preprocessing. OmicsClaw remembers.
@@ -592,6 +599,13 @@ If you use OmicsClaw in your research, please cite:
   url = {https://github.com/zhou-1314/OmicsClaw}
 }
 ```
+
+## Acknowledgments
+
+OmicsClaw is built upon the inspiration and contributions of the following outstanding open-source projects:
+
+- **[ClawBio](https://github.com/ClawBio/ClawBio)** — The first bioinformatics-native AI agent skill library. OmicsClaw's skill architecture, local-first philosophy, reproducibility design, and bot integration patterns are deeply inspired by ClawBio. Thank you to the ClawBio team for their pioneering work!
+- **[Nocturne Memory](https://github.com/Dataojitori/nocturne_memory)** — A lightweight, rollbackable long-term memory server for MCP agents. OmicsClaw's persistent memory system draws on Nocturne Memory's graph-structured memory architecture and MCP protocol integration, enabling the bot to remember datasets, analysis history, and user preferences across sessions.
 
 ## Contact
 

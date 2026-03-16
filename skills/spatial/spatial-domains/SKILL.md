@@ -3,7 +3,7 @@ name: spatial-domains
 description: >-
   Identify tissue regions and spatial niches from preprocessed spatial transcriptomics
   data using Leiden, Louvain, SpaGCN, STAGATE, GraphST, or BANKSY.
-version: 0.2.0
+version: 0.3.0
 author: SpatialClaw
 license: MIT
 tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spagcn, stagate, graphst, banksy]
@@ -59,8 +59,27 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 
 | Format | Extension | Required Fields | Example |
 |--------|-----------|-----------------|---------|
-| AnnData (preprocessed) | `.h5ad` | `X`, `obsm["spatial"]`, `obsm["X_pca"]` | `preprocessed.h5ad` |
+| AnnData (preprocessed) | `.h5ad` | `X` (log-norm), `obsm["spatial"]`, `obsm["X_pca"]`, `raw` (counts) | `preprocessed.h5ad` |
 | AnnData (raw, demo mode) | `.h5ad` | `X`, `obsm["spatial"]` | `demo_visium.h5ad` |
+
+### Input Preprocessing Notes
+
+Different methods consume the `preprocessed.h5ad` data differently. The skill
+automatically selects the correct data layer for each method:
+
+| Method | Used from adata | Internal preprocessing |
+|--------|----------------|------------------------|
+| **Leiden / Louvain** | `obsp["connectivities"]` (neighbor graph) | None — uses pre-built graph |
+| **SpaGCN** | `X` (log-normalized) | Internal PCA on expression matrix |
+| **STAGATE** | `X` (log-norm, HVG subset) | Auto-filters to `var["highly_variable"]` before training |
+| **GraphST** | `raw.X` (raw counts) | Internal `log1p → normalize → scale → HVG(3000)` |
+| **BANKSY** | `X` (log-norm + z-scored) | Auto-applies `sc.pp.scale()` before feature construction |
+
+> **Why raw counts for GraphST?** GraphST's `preprocess()` internally does
+> `log1p` + `normalize_total` + `scale` + HVG selection. Passing already
+> log-normalized data would cause a double log-transform (`log(log(x+1)+1)`),
+> which distorts the expression distribution. The skill automatically restores
+> `adata.raw` when available.
 
 ## Workflow
 
@@ -113,10 +132,11 @@ python omicsclaw.py run spatial-domain-identification --demo
 
 ### Leiden (default)
 
-1. **Input**: Preprocessed AnnData with neighbor graph
+1. **Input**: Preprocessed AnnData with neighbor graph (uses `adata.obsp["connectivities"]`)
 2. **Spatial weighting**: Combines expression-based and spatial neighbor graphs with configurable weight
 3. **Clustering**: `sc.tl.leiden(resolution=resolution, flavor="igraph")`
 4. **Labels**: Stored in `adata.obs["spatial_domain"]`
+5. **Data layer used**: Neighbor graph only — does not touch `adata.X`
 
 **Key parameters**:
 - `resolution`: Controls granularity (default 1.0; higher = more domains)
@@ -125,21 +145,23 @@ python omicsclaw.py run spatial-domain-identification --demo
 
 ### Louvain
 
-1. **Input**: Preprocessed AnnData with neighbor graph
+1. **Input**: Preprocessed AnnData with neighbor graph (uses `adata.obsp["connectivities"]`)
 2. **Clustering**: `sc.tl.louvain(resolution=resolution)`
 3. **Labels**: Stored in `adata.obs["spatial_domain"]`
 4. **Requires**: `pip install louvain`
+5. **Data layer used**: Neighbor graph only — does not touch `adata.X`
 
 **Key parameters**:
 - `resolution`: Controls granularity (default 1.0)
 
 ### SpaGCN
 
-1. **Input**: AnnData with spatial coordinates and expression matrix
-2. **Spatial graph**: Build adjacency from spatial coordinates
-3. **GCN clustering**: `SpaGCN.train()` with `n_domains` target clusters
-4. **Refinement**: Built-in spatial-aware label refinement
-5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+1. **Input**: AnnData with spatial coordinates and log-normalized expression matrix
+2. **Data layer used**: `adata.X` (log-normalized full gene matrix) — SpaGCN performs internal PCA
+3. **Spatial graph**: Build adjacency from spatial coordinates
+4. **GCN clustering**: `SpaGCN.train()` with `n_domains` target clusters
+5. **Refinement**: Built-in spatial-aware label refinement
+6. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `n_domains`: Target number of spatial domains
@@ -147,11 +169,12 @@ python omicsclaw.py run spatial-domain-identification --demo
 
 ### STAGATE
 
-1. **Input**: AnnData with spatial coordinates
-2. **Spatial network**: Build graph with radius cutoff
-3. **Graph attention**: Train attention auto-encoder on PyTorch
-4. **Clustering**: Gaussian Mixture Model on learned embeddings
-5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+1. **Input**: AnnData with spatial coordinates (auto-subsets to HVGs)
+2. **HVG filtering**: If `adata.var["highly_variable"]` exists, only HVGs are used for the autoencoder (reduces noise, improves convergence speed)
+3. **Spatial network**: Build graph with radius cutoff
+4. **Graph attention**: Train attention auto-encoder on PyTorch (HVG subset)
+5. **Clustering**: Gaussian Mixture Model on learned embeddings
+6. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `n_domains`: Target number of domains
@@ -160,23 +183,27 @@ python omicsclaw.py run spatial-domain-identification --demo
 
 ### GraphST
 
-1. **Input**: AnnData with spatial coordinates
-2. **Contrastive learning**: Self-supervised graph neural network
-3. **Embedding**: PCA on learned representations
-4. **Clustering**: Gaussian Mixture Model
-5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+1. **Input**: AnnData with spatial coordinates (**raw counts** from `adata.raw`)
+2. **Raw count restoration**: Automatically restores `adata.raw.X` to avoid double log-transform (GraphST internally does `log1p → normalize → scale → HVG(3000)`)
+3. **Preprocessing**: `GraphST.preprocess()` + `GraphST.construct_interaction()`
+4. **Contrastive learning**: Self-supervised graph neural network
+5. **Embedding**: PCA on learned representations
+6. **Clustering**: Gaussian Mixture Model
+7. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `n_domains`: Target number of domains
 - Source: Long et al., *Nature Communications* 2023
+- ⚠️ Requires `adata.raw` to contain raw counts; if absent, falls back to `adata.X` with a warning
 
 ### BANKSY
 
 1. **Input**: AnnData with spatial coordinates
-2. **Feature augmentation**: Neighborhood-averaged expression + azimuthal Gabor filters
-3. **PCA**: Dimensionality reduction on augmented features
-4. **Clustering**: Leiden on BANKSY-augmented space
-5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+2. **Z-score scaling**: Auto-applies `sc.pp.scale(max_value=10)` on working copy to prevent high-expression genes from dominating neighbourhood features
+3. **Feature augmentation**: Neighborhood-averaged expression + azimuthal Gabor filters
+4. **PCA**: Dimensionality reduction on augmented features
+5. **Clustering**: Leiden on BANKSY-augmented space
+6. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `lambda_param`: Spatial regularization (default 0.2)

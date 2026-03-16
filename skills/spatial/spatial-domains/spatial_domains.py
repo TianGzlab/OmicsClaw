@@ -56,7 +56,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-domains"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.3.0"
 
 SUPPORTED_METHODS = ("leiden", "louvain", "spagcn", "stagate", "graphst", "banksy")
 
@@ -278,6 +278,10 @@ def identify_domains_stagate(
 
     Learns embeddings by integrating gene expression with spatial information
     through a graph attention mechanism. Requires STAGATE_pyG and PyTorch.
+
+    Note: STAGATE trains best on HVG-filtered data. If the input contains a
+    ``highly_variable`` column in ``adata.var``, only HVGs are used for the
+    autoencoder, reducing noise and training time (per Dong & Zhang, 2022).
     """
     from omicsclaw.spatial.dependency_manager import require
 
@@ -289,7 +293,19 @@ def identify_domains_stagate(
 
     logger.info("Running STAGATE (rad_cutoff=%.1f, n_domains=%d) ...", rad_cutoff, n_domains)
 
-    adata_work = adata.copy()
+    # STAGATE official tutorial recommends using HVG subset for training.
+    # Using the full gene matrix introduces noise and slows convergence.
+    if "highly_variable" in adata.var.columns:
+        n_hvg = adata.var["highly_variable"].sum()
+        logger.info("Subsetting to %d HVGs for STAGATE autoencoder", n_hvg)
+        adata_work = adata[:, adata.var["highly_variable"]].copy()
+    else:
+        logger.warning(
+            "No 'highly_variable' annotation found; using all %d genes. "
+            "Consider running sc.pp.highly_variable_genes() first for best results.",
+            adata.n_vars,
+        )
+        adata_work = adata.copy()
 
     STAGATE_pyG.Cal_Spatial_Net(adata_work, rad_cutoff=rad_cutoff)
 
@@ -336,6 +352,13 @@ def identify_domains_graphst(
     Uses graph neural networks with contrastive learning to learn embeddings
     that preserve both gene expression patterns and spatial relationships.
     Requires the GraphST package and PyTorch.
+
+    Important: GraphST.preprocess() internally performs log1p + normalize +
+    scale + HVG selection (top 3000). If the input ``adata.X`` is already
+    log-normalized, passing it directly would cause a **double log-transform**.
+    This function therefore restores raw counts from ``adata.raw`` (if
+    available) before calling the GraphST pipeline, following the official
+    tutorial workflow (Long et al., Nature Communications 2023).
     """
     from omicsclaw.spatial.dependency_manager import require
 
@@ -343,12 +366,40 @@ def identify_domains_graphst(
     require("torch", feature="GraphST (PyTorch backend)")
 
     import torch
-    from GraphST.GraphST import GraphST as GraphSTModel
+    from GraphST import GraphST as GraphSTModule
 
     logger.info("Running GraphST (n_domains=%d) ...", n_domains)
 
-    adata_work = adata.copy()
+    # GraphST.preprocess() does: log1p → normalize_total → scale → HVG(3000).
+    # If adata.X is already log-normalized (from spatial-preprocess), we must
+    # restore raw counts to avoid double log-transform.
+    if adata.raw is not None:
+        logger.info(
+            "Restoring raw counts from adata.raw for GraphST "
+            "(avoids double log-transform)"
+        )
+        adata_work = adata.raw.to_adata().copy()
+        # Carry over spatial coordinates from the processed object
+        spatial_key = get_spatial_key(adata)
+        if spatial_key and spatial_key in adata.obsm:
+            adata_work.obsm[spatial_key] = adata.obsm[spatial_key]
+        if "spatial" not in adata_work.obsm and spatial_key and spatial_key != "spatial":
+            adata_work.obsm["spatial"] = adata.obsm[spatial_key]
+    else:
+        logger.warning(
+            "adata.raw not found — using adata.X directly. If adata.X is "
+            "already log-normalized, GraphST results may be suboptimal due "
+            "to double log-transform in GraphST.preprocess()."
+        )
+        adata_work = adata.copy()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Follow official GraphST API: preprocess → construct_interaction → train
+    GraphSTModule.preprocess(adata_work)
+    GraphSTModule.construct_interaction(adata_work)
+
+    from GraphST.GraphST import GraphST as GraphSTModel
 
     model = GraphSTModel(adata_work, device=device, random_seed=random_seed)
     adata_work = model.train()
@@ -397,6 +448,11 @@ def identify_domains_banksy(
     Augments gene expression with neighborhood-averaged expression and
     azimuthal Gabor filters. Unlike deep learning methods, BANKSY uses
     explicit mathematical feature construction for interpretability.
+
+    Note: BANKSY official tutorial recommends z-scoring gene expression
+    before neighbourhood feature construction so that high-expression
+    genes do not dominate the neighbourhood average. This function
+    applies ``sc.pp.scale()`` on a working copy before calling BANKSY.
     """
     from omicsclaw.spatial.dependency_manager import require
 
@@ -414,6 +470,13 @@ def identify_domains_banksy(
         raise ValueError("BANKSY requires spatial coordinates in obsm")
     if spatial_key != "spatial":
         adata_work.obsm["spatial"] = adata_work.obsm[spatial_key]
+
+    # BANKSY recommends z-scoring gene expression before neighbourhood
+    # feature construction (prabhakarlab/Banksy_py docs).  Without this,
+    # genes with large absolute expression values dominate the
+    # neighbourhood-averaged features and Gabor filter responses.
+    logger.info("Applying z-score scaling before BANKSY feature construction")
+    sc.pp.scale(adata_work, max_value=10)
 
     coord_keys = ("x", "y", "spatial")
 
@@ -715,8 +778,9 @@ def main():
         input_file = args.input_path
         if "X_pca" not in adata.obsm:
             raise ValueError(
-                "PCA not found. Run spatial-preprocess first:\n"
-                "  python omicsclaw.py run preprocess --input data.h5ad --output results/preprocess/"
+                "Input data is missing required preprocessing. "
+                "Expected 'X_pca' in adata.obsm but not found. "
+                "This data appears to be raw/unprocessed."
             )
     else:
         print("ERROR: Provide --input or --demo", file=sys.stderr)

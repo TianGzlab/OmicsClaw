@@ -270,17 +270,18 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         method = args.get("method", "default")
         input_path = args.get("file_path", "")
 
-        # Link to most recent dataset memory for lineage
+        # Link to most recent dataset memory for lineage (optional, don't fail if missing)
         source_dataset_id = ""
         try:
             datasets = await memory_store.get_memories(session_id, "dataset", limit=1)
             if datasets:
                 source_dataset_id = datasets[0].memory_id
         except Exception:
+            # Dataset not found is OK, just skip the linkage
             pass
 
         memory = AnalysisMemory(
-            source_dataset_id=source_dataset_id,
+            source_dataset_id=source_dataset_id if source_dataset_id else "",
             skill=skill,
             method=method,
             parameters={"input": input_path} if input_path else {},
@@ -291,7 +292,8 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         await memory_store.save_memory(session_id, memory)
         logger.debug(f"Auto-captured analysis: {skill} ({method})")
     except Exception as e:
-        logger.error(f"Auto-capture failed: {e}")
+        # Log but don't fail the main workflow
+        logger.warning(f"Auto-capture failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -318,11 +320,37 @@ class SessionManager:
         """Load recent memories and format for LLM context."""
         try:
             # Get recent memories (limit to keep context small)
-            datasets = await self.store.get_memories(session_id, "dataset", limit=2)
-            analyses = await self.store.get_memories(session_id, "analysis", limit=3)
-            prefs = await self.store.get_memories(session_id, "preference", limit=5)
-            insights = await self.store.get_memories(session_id, "insight", limit=3)
-            project_ctx = await self.store.get_memories(session_id, "project_context", limit=1)
+            # Wrap each get_memories call in try-except to handle decryption errors
+            datasets = []
+            analyses = []
+            prefs = []
+            insights = []
+            project_ctx = []
+
+            try:
+                datasets = await self.store.get_memories(session_id, "dataset", limit=2)
+            except Exception as e:
+                logger.warning(f"Failed to load dataset memories: {e}")
+
+            try:
+                analyses = await self.store.get_memories(session_id, "analysis", limit=3)
+            except Exception as e:
+                logger.warning(f"Failed to load analysis memories: {e}")
+
+            try:
+                prefs = await self.store.get_memories(session_id, "preference", limit=5)
+            except Exception as e:
+                logger.warning(f"Failed to load preference memories: {e}")
+
+            try:
+                insights = await self.store.get_memories(session_id, "insight", limit=3)
+            except Exception as e:
+                logger.warning(f"Failed to load insight memories: {e}")
+
+            try:
+                project_ctx = await self.store.get_memories(session_id, "project_context", limit=1)
+            except Exception as e:
+                logger.warning(f"Failed to load project context memories: {e}")
 
             parts = []
 
@@ -367,7 +395,7 @@ class SessionManager:
 
             return "\n".join(parts) if parts else ""
         except Exception as e:
-            logger.error(f"Failed to load memory context: {e}")
+            logger.error(f"Failed to load memory context: {e}", exc_info=True)
             return ""
 
 
@@ -466,6 +494,12 @@ Operational constraints:
    via messaging. When the user mentions a file path or filename, use mode='path'
    and set file_path to the path or filename they provided. The system will automatically search
    trusted directories.
+   **CRITICAL FILE USAGE RULES**:
+   - When the user specifies a file path, use EXACTLY that file for the requested operation.
+   - Do NOT automatically run preprocessing or other preparatory steps unless explicitly asked.
+   - Do NOT explore directories to find "better" or "preprocessed" versions of the file.
+   - Do NOT use list_directory to search for alternative files after the user specifies one.
+   - If the operation fails because the file needs preprocessing, tell the user - don't auto-fix it.
    Examples:
    - User: "分析 data/brain_visium.h5ad" → mode='path', file_path='data/brain_visium.h5ad'
    - User: "run preprocess on my_data.h5ad" → mode='path', file_path='my_data.h5ad'
@@ -917,6 +951,14 @@ def discover_file(filename_or_pattern: str) -> list[Path]:
     Returns a list of matching paths, sorted by modification time (newest first).
     """
     _ensure_trusted_dirs()
+
+    # Handle absolute paths directly
+    if filename_or_pattern.startswith('/'):
+        p = Path(filename_or_pattern)
+        if p.is_file():
+            return [p]
+        return []
+
     matches: list[Path] = []
     for d in TRUSTED_DATA_DIRS:
         if not d.exists():
@@ -1029,11 +1071,11 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     input_path = str(resolved_path) if resolved_path else None
     session_path = None
 
-    if not input_path:
-        for _cid, info in received_files.items():
-            input_path = info.get("path")
-            session_path = info.get("session_path")
-            break
+    if not input_path and session_id:
+        file_info = received_files.get(session_id)
+        if file_info:
+            input_path = file_info.get("path")
+            session_path = file_info.get("session_path")
 
     if mode in ("file", "path") and not input_path and not session_path:
         _ensure_trusted_dirs()
@@ -1047,8 +1089,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         )
 
     # Output directory
+    import uuid
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = OUTPUT_DIR / f"{skill_key}_{ts}"
+    out_dir = OUTPUT_DIR / f"{skill_key}_{ts}_{uuid.uuid4().hex[:8]}"
 
     # Build command
     cmd = [PYTHON, str(OMICSCLAW_PY), "run"]
@@ -1071,7 +1114,20 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 
     extra_args = args.get("extra_args")
     if extra_args and isinstance(extra_args, list):
-        cmd.extend(extra_args)
+        # Filter out --output to prevent overriding bot-managed output directory
+        filtered = []
+        skip_next = False
+        for arg in extra_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--output":
+                skip_next = True
+                continue
+            if arg.startswith("--output="):
+                continue
+            filtered.append(arg)
+        cmd.extend(filtered)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1090,13 +1146,22 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             await proc.wait()
         except Exception:
             pass
+        # Clean up empty output directory on timeout
+        if out_dir.exists():
+            shutil.rmtree(out_dir, ignore_errors=True)
         return f"{skill_key} timed out after 300 seconds."
     except Exception as e:
         import traceback as _tb
+        # Clean up empty output directory on crash
+        if out_dir.exists():
+            shutil.rmtree(out_dir, ignore_errors=True)
         return f"{skill_key} crashed:\n{_tb.format_exc()[-1500:]}"
 
     if proc.returncode != 0:
         err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        # Clean up empty output directory on failure
+        if out_dir.exists():
+            shutil.rmtree(out_dir, ignore_errors=True)
         return f"{skill_key} failed (exit {proc.returncode}):\n{err}"
 
     # Collect report + figures from output directory
@@ -1128,7 +1193,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                     if any(kw in Path(item["path"]).stem.lower() for kw in keywords)
                 ]
             if filtered:
-                pending_media[0] = pending_media.get(0, []) + filtered
+                pending_media[session_id] = pending_media.get(session_id, []) + filtered
                 sent_names = [Path(item["path"]).name for item in filtered]
                 logger.info(f"return_media='{return_media}': sending {len(filtered)}/{len(media_items)} items")
 
@@ -1954,6 +2019,8 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
     # Load memory context if session manager available
     memory_context = ""
     if session_manager and user_id and platform:
+        # Ensure session exists (create if first time)
+        await session_manager.get_or_create(user_id, platform, str(chat_id))
         session_id = f"{platform}:{user_id}:{chat_id}"
         memory_context = await session_manager.load_context(session_id)
 

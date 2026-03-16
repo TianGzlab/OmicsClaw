@@ -82,6 +82,9 @@ dependencies = [
 spatial-domains = [
     "SpaGCN>=1.2.5,<2.0",
     "torch>=2.0.0,<3.0",
+    "torch_geometric",                # STAGATE dependency
+    "GraphST>=1.1.0",                 # GraphST method
+    "POT>=0.9.0",                     # GraphST requires `ot` (Python Optimal Transport)
 ]
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +140,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #
@@ -146,6 +149,7 @@ full = [
 # --------------------------------------------------------------------------- #
 spatial-velocity = [
     "scvelo>=0.2.5",                  # RNA velocity (scVelo)
+    "scvi-tools>=1.0.0,<2.0",        # VeloVI method
 ]
 
 spatial-cnv = [
@@ -173,10 +177,42 @@ spatial-registration = [
     "paste-bio>=1.0.0",               # PASTE spatial registration
 ]
 
+spatial-annotate = [
+    "tangram-sc>=1.0.0",              # Tangram cell type annotation
+    "scvi-tools>=1.0.0,<2.0",        # scANVI, CellAssign methods
+    "torch>=2.0.0,<3.0",             # PyTorch (required by scvi-tools)
+]
+
+spatial-deconv = [
+    "flashdeconv>=0.1.0",            # FlashDeconv method
+    "cell2location>=0.1.4",          # Cell2Location method
+    "scvi-tools>=1.0.0,<2.0",        # DestVI, Stereoscope methods
+    "tangram-sc>=1.0.0",              # Tangram method
+    "torch>=2.0.0,<3.0",             # PyTorch (required by scvi-tools)
+]
+
+spatial-trajectory = [
+    "cellrank>=2.0.0,<3.0",          # CellRank trajectory inference
+    "palantir>=1.0.0",                # Palantir trajectory inference
+]
+
+spatial-genes = [
+    "SpatialDE>=1.1.3",              # SpatialDE spatially variable genes
+]
+
+spatial-statistics = [
+    "esda>=2.4.0",                    # Local Moran's I, Geary's C
+    "libpysal>=4.6.0",                # Spatial weights
+    "pysal>=2.6.0",                   # Extended spatial analysis
+]
+
+spatial-condition = [
+    "pydeseq2>=0.4.0",                # Pseudobulk differential expression
+]
+
 spatial-r-bridge = [
     "rpy2>=3.5.0,<3.7",              # R language bridge
     "anndata2ri>=1.3.0",              # AnnData <-> R sparse matrix bridge
-    "pydeseq2>=0.4.0",                # PyDESeq2 (Python-native DESeq2)
 ]
 
 # --------------------------------------------------------------------------- #
