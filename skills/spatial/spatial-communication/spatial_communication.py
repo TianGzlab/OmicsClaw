@@ -396,7 +396,9 @@ def run_communication(
 
 
 def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
-    """Generate CCC visualizations using the SpatialClaw viz library."""
+    """Generate CCC visualizations using the OmicsClaw viz library."""
+    import matplotlib.pyplot as plt
+
     figures: list[str] = []
 
     # 1. LR pair dotplot
@@ -404,6 +406,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
         fig = plot_communication(adata, VizParams(), subtype="dotplot", top_n=20)
         p = save_figure(fig, output_dir, "lr_dotplot.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as exc:
         logger.warning("LR dotplot failed: %s", exc)
 
@@ -412,6 +415,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
         fig = plot_communication(adata, VizParams(), subtype="heatmap", top_n=20)
         p = save_figure(fig, output_dir, "lr_heatmap.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as exc:
         logger.warning("LR heatmap failed: %s", exc)
 
@@ -421,6 +425,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig = plot_communication(adata, VizParams(), subtype="spatial", top_n=5)
             p = save_figure(fig, output_dir, "lr_spatial.png")
             figures.append(str(p))
+            plt.close('all')
         except Exception as exc:
             logger.warning("LR spatial map failed: %s", exc)
 

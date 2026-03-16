@@ -870,29 +870,31 @@ def get_demo_data() -> tuple:
     if not preprocess_script.exists():
         raise FileNotFoundError(
             f"spatial-preprocess script not found at {preprocess_script}. "
-            "Run from the SpatialClaw project root."
+            "Run from the OmicsClaw project root."
         )
 
-    demo_dir = Path(tempfile.mkdtemp(prefix="spatialstats_demo_"))
-    logger.info("Running spatial-preprocess --demo -> %s", demo_dir)
+    with tempfile.TemporaryDirectory(prefix="spatialstats_demo_") as demo_dir:
+        demo_dir = Path(demo_dir)
+        logger.info("Running spatial-preprocess --demo -> %s", demo_dir)
 
-    result = subprocess.run(
-        [sys.executable, str(preprocess_script), "--demo", "--output", str(demo_dir)],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        logger.error("spatial-preprocess failed:\n%s", result.stderr)
-        raise RuntimeError(f"spatial-preprocess --demo failed (exit {result.returncode})")
-
-    processed_path = demo_dir / "processed.h5ad"
-    if not processed_path.exists():
-        raise FileNotFoundError(
-            f"Expected processed.h5ad at {processed_path} after spatial-preprocess"
+        result = subprocess.run(
+            [sys.executable, str(preprocess_script), "--demo", "--output", str(demo_dir)],
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
+        if result.returncode != 0:
+            logger.error("spatial-preprocess failed:\n%s", result.stderr)
+            raise RuntimeError(f"spatial-preprocess --demo failed (exit {result.returncode})")
 
-    adata = sc.read_h5ad(processed_path)
-    return adata, str(processed_path)
+        processed_path = demo_dir / "processed.h5ad"
+        if not processed_path.exists():
+            raise FileNotFoundError(
+                f"Expected processed.h5ad at {processed_path} after spatial-preprocess"
+            )
+
+        adata = sc.read_h5ad(processed_path)
+        return adata, None
 
 
 # ---------------------------------------------------------------------------

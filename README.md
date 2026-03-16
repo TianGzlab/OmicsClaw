@@ -150,7 +150,7 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 | Skill | Description | Key Methods |
 |-------|-------------|-------------|
-| `spatial-preprocess` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy |
+| `spatial-preprocessing` | QC, normalization, HVG, PCA, UMAP, clustering | Scanpy |
 | `spatial-domain-identification` | Tissue region / niche identification | Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY |
 | `spatial-cell-annotation` | Cell type annotation | Marker-based (Scanpy), Tangram, scANVI, CellAssign |
 | `spatial-deconvolution` | Cell type proportion estimation | FlashDeconv, Cell2location, RCTD, DestVI, Stereoscope, Tangram, SPOTlight, CARD |
@@ -163,8 +163,8 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 | `spatial-trajectory` | Developmental trajectories | CellRank, Palantir, DPT |
 | `spatial-enrichment` | Pathway enrichment | GSEA, ssGSEA, Enrichr |
 | `spatial-cnv` | Copy number variation | inferCNVpy, Numbat |
-| `spatial-integrate` | Multi-sample integration | Harmony, BBKNN, Scanorama |
-| `spatial-register` | Spatial registration | PASTE |
+| `spatial-integration` | Multi-sample integration | Harmony, BBKNN, Scanorama |
+| `spatial-registration` | Spatial registration | PASTE |
 
 </details>
 

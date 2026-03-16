@@ -90,8 +90,9 @@ def _run_enrichr(
     sc.tl.rank_genes_groups(adata, groupby=groupby, method="wilcoxon", n_genes=n_top_genes)
     markers_df = sc.get.rank_genes_groups_df(adata, group=None)
 
-    # Resolve versioned library name
-    lib_name = _GENESET_LIBRARY_CANDIDATES.get(source, (source,))[0]
+    # Resolve versioned library name through fallback system
+    candidates = _GENESET_LIBRARY_CANDIDATES.get(source, (source,))
+    lib_name = candidates[0]
 
     all_records = []
     for grp in sorted(markers_df["group"].unique().tolist(), key=str):
@@ -106,7 +107,7 @@ def _run_enrichr(
                 outdir=None,
                 no_plot=True,
             )
-            res = enr.results.copy()
+            res = enr.results.copy() if hasattr(enr, 'results') else enr.res2d.copy()
             res["cluster"] = str(grp)
             all_records.append(res)
         except Exception as exc:
@@ -263,7 +264,7 @@ def run_enrichment(
         )
         used_method = "enrichr"
 
-    n_sig = int(np.sum(enrich_df["pvalue_adj"] < 0.05)) if not enrich_df.empty else 0
+    n_sig = int(enrich_df["pvalue_adj"].dropna().lt(0.05).sum()) if not enrich_df.empty else 0
 
     return {
         "n_cells": n_cells,
@@ -406,7 +407,7 @@ def write_report(
     try:
         from importlib.metadata import version as _ver
     except ImportError:
-        pass
+        from importlib_metadata import version as _ver  # type: ignore
     env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "scipy", "numpy", "pandas", "matplotlib"]:
         try:
@@ -467,8 +468,8 @@ def main():
     parser.add_argument("--gene-set", default=None, help="Custom gene set name")
     parser.add_argument("--species", default="human", choices=["human", "mouse"])
     parser.add_argument(
-        "--source", default="GO_Biological_Process_2021",
-        help="Gene set database for gseapy (default: GO_Biological_Process_2021)",
+        "--source", default="GO_Biological_Process",
+        help="Gene set database key (default: GO_Biological_Process)",
     )
     args = parser.parse_args()
 

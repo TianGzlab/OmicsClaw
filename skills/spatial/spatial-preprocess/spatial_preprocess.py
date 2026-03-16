@@ -171,6 +171,7 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
             fig = plt.gcf()
             p = save_figure(fig, output_dir, "qc_violin.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as e:
         logger.warning("Could not generate QC violin: %s", e)
 
@@ -181,6 +182,7 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
             fig = plt.gcf()
             p = save_figure(fig, output_dir, "umap_leiden.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as e:
         logger.warning("Could not generate UMAP figure: %s", e)
 
@@ -198,6 +200,7 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
             fig = plt.gcf()
             p = save_figure(fig, output_dir, "spatial_leiden.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as e:
         logger.warning("Could not generate Spatial figure: %s", e)
 
