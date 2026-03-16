@@ -97,6 +97,9 @@ _lark_client = lark.Client.builder() \
     .log_level(lark.LogLevel.DEBUG if DEBUG else lark.LogLevel.INFO) \
     .build()
 
+# Bot startup time (to filter old cached messages)
+_BOT_START_TIME = time.time()
+
 # ---------------------------------------------------------------------------
 # Async event loop (runs in a background thread)
 # ---------------------------------------------------------------------------
@@ -635,7 +638,7 @@ def _send_media_items(chat_id: str, items: list[dict]):
 
 async def _process_message_async(
     chat_id: str,
-    session_key: str,
+    pure_chat_id: str,  # Pure chat_id without platform prefix
     text: str,
     attachments: list[dict],
     user_id: str = None,
@@ -675,6 +678,8 @@ async def _process_message_async(
         user_content = content_blocks
     else:
         # Check if message contains a file path -> register as received file
+        # Use session_key for received_files (needs platform prefix)
+        session_key = f"feishu:{pure_chat_id}"
         local_path_match = re.search(r"\[local path\]\s*(\S+)", text)
         if local_path_match:
             fpath = local_path_match.group(1)
@@ -685,7 +690,7 @@ async def _process_message_async(
         user_content = text
 
     reply = await core.llm_tool_loop(
-        session_key,
+        pure_chat_id,  # Pass pure chat_id, llm_tool_loop will construct session_id
         user_content,
         user_id=user_id,
         platform="feishu"
@@ -695,14 +700,9 @@ async def _process_message_async(
         reply = "\n\n".join(core.pending_text)
         core.pending_text.clear()
 
-    # Capture media items atomically here (same async context as the tool execution)
-    # to prevent race conditions when multiple messages are processed concurrently
-    media_items = core.pending_media.pop(0, [])
-    if media_items:
-        logger.info(f"Captured {len(media_items)} pending media items: "
-                     f"{[item.get('path', '?') for item in media_items]}")
-
-    return reply, media_items
+    # Don't pop pending_media here - let the outer handler do it
+    # This prevents race conditions when timeout occurs
+    return reply
 
 
 def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
@@ -724,6 +724,14 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
         if not message.content:
             return
 
+        # Ignore messages sent before bot startup (cached messages)
+        if hasattr(message, 'create_time') and message.create_time:
+            # create_time is in milliseconds
+            msg_time = int(message.create_time) / 1000.0
+            if msg_time < _BOT_START_TIME:
+                logger.info(f"Ignoring cached message from before bot startup: {message_id}")
+                return
+
         # Rate limiting (after dedup to avoid counting retries)
         if not _check_rate_limit(sender_id):
             _send_text(chat_id, f"Rate limit reached ({RATE_LIMIT_PER_HOUR} messages/hour). Please try again later.")
@@ -744,7 +752,7 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
             has_attachment = len(attachments) > 0
             mentioned = len(mentions) > 0
 
-            # Check if it's a 2-person group (bot + user)
+            # Check if it's a 2-person group (1 user + 1 bot)
             member_count = _get_group_member_count(chat_id)
             is_two_person_group = member_count == 2
 
@@ -752,10 +760,8 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
             if is_two_person_group:
                 text = cleaned
             else:
-                # Normal group: apply filters
-                if has_attachment and not mentioned and cleaned in ("[image]", "[attachment]", ""):
-                    return
-                if not has_attachment and not _should_respond_in_group(cleaned, mentions):
+                # Normal group (3+ members): only respond when @mentioned
+                if not mentioned:
                     return
                 text = cleaned
 
@@ -785,17 +791,32 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
             timer.start()
 
         try:
-            reply, media_items = _run_async(
-                _process_message_async(chat_id, session_key, text, attachments, sender_id),
+            # Pass pure chat_id (not session_key) to llm_tool_loop
+            # llm_tool_loop will construct session_id internally as f"{platform}:{user_id}:{chat_id}"
+            reply = _run_async(
+                _process_message_async(chat_id, sender_id if chat_type == 'p2p' else chat_id, text, attachments, sender_id),
                 timeout=300,
             )
         except Exception as e:
-            reply = f"(system error) {e}"
-            media_items = []
+            logger.error(f"Message processing error: {e}", exc_info=True)
+            reply = f"抱歉，处理消息时出错了。错误已记录，请稍后重试。"
         finally:
             done_event.set()
             if timer:
                 timer.cancel()
+
+        # Always try to retrieve media items, even after timeout/error
+        # This must be done AFTER the async call completes or times out
+        pure_chat_id = sender_id if chat_type == 'p2p' else chat_id
+        if sender_id:
+            session_id = f"feishu:{sender_id}:{pure_chat_id}"
+        else:
+            session_id = f"feishu::{pure_chat_id}"
+
+        media_items = core.pending_media.pop(session_id, [])
+        if media_items:
+            logger.info(f"Captured {len(media_items)} pending media items: "
+                         f"{[item.get('path', '?') for item in media_items]}")
 
         reply_text = core.strip_markup(reply or "")
 
