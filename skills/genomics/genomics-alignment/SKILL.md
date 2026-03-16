@@ -1,8 +1,9 @@
 ---
 name: genomics-alignment
 description: >-
-  Short/long read alignment to reference genome using BWA-MEM, Bowtie2, or Minimap2.
-version: 0.1.0
+  Alignment statistics from SAM/BAM files: mapping rate, MAPQ distribution,
+  insert size, duplicate rate, proper pair rate. Mirrors samtools-flagstat.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, alignment, BWA, Bowtie2, Minimap2]

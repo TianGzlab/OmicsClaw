@@ -3,7 +3,7 @@ name: genomics-epigenomics
 description: >-
   Epigenomics analysis including ATAC-seq peak calling with MACS3,
   ChIP-seq analysis, motif enrichment, and chromatin accessibility.
-version: 0.1.0
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, epigenomics, ATAC-seq, ChIP-seq, MACS, peaks, motif]

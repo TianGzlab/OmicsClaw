@@ -1,8 +1,9 @@
 ---
 name: genomics-sv-detection
 description: >-
-  Structural variant calling using Manta, Lumpy, Delly, or Sniffles.
-version: 0.1.0
+  Structural variant detection (DEL/DUP/INV/TRA): SV VCF parsing with BND notation,
+  size classification (50bp-10Mb), evidence types. Wraps Manta, Lumpy, Delly, Sniffles.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, structural-variants, Manta, Delly, Sniffles]

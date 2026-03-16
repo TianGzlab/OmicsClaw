@@ -1,8 +1,9 @@
 ---
 name: genomics-vcf-operations
 description: >-
-  VCF file operations — filtering, merging, statistics using bcftools and GATK.
-version: 0.1.0
+  VCF operations: multi-allelic parsing, variant classification (SNP/MNP/INS/DEL/COMPLEX),
+  Ti/Tv ratio, QUAL/DP filtering, INFO field parsing. Mirrors bcftools stats.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, VCF, bcftools, filtering]

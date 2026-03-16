@@ -3,7 +3,7 @@ name: genomics-cnv-calling
 description: >-
   Copy number variant detection from exome/WGS data using CNVkit, Control-FREEC,
   or GATK gCNV. Supports tumor-normal pairs, tumor-only, and germline modes.
-version: 0.1.0
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, CNV, copy-number, CNVkit, GATK]

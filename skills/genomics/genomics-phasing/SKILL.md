@@ -1,8 +1,9 @@
 ---
 name: genomics-phasing
 description: >-
-  Haplotype phasing using WhatsHap, SHAPEIT, or Eagle.
-version: 0.1.0
+  Haplotype phasing analysis: phase block N50, phased fraction, PS (Phase Set) field parsing,
+  pipe-delimited genotype detection. Wraps WhatsHap, SHAPEIT5, Eagle2.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, phasing, haplotype, WhatsHap, SHAPEIT]

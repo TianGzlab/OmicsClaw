@@ -1,8 +1,9 @@
 ---
 name: genomics-assembly
 description: >-
-  De novo genome assembly using SPAdes, Megahit, Flye, or Canu.
-version: 0.1.0
+  Genome assembly quality assessment: N50/N90/L50/L90 (QUAST-compatible),
+  GC content, contig length distribution, completeness estimation. Wraps SPAdes, Megahit, Flye, Canu.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, assembly, SPAdes, Flye, Canu]

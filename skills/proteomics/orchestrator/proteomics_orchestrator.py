@@ -10,21 +10,24 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.report import DISCLAIMER, generate_report_footer, generate_report_header, write_result_json
+from omicsclaw.routing.router import route_query_unified
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "proteomics-orchestrator"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.1.1"
 
 KEYWORD_MAP: dict[str, str] = {
     "mass spec": "proteomics-ms-qc", "ms qc": "proteomics-ms-qc", "quality control": "proteomics-ms-qc",
     "peptide identification": "proteomics-identification", "identify peptides": "proteomics-identification", "maxquant": "proteomics-identification",
     "protein quantification": "proteomics-quantification", "quantify proteins": "proteomics-quantification", "lfq": "proteomics-quantification",
-    "differential abundance": "proteomics-de", "differentially abundant": "proteomics-de",
-    "ptm": "proteomics-ptm", "post-translational": "proteomics-ptm", "phosphorylation": "proteomics-ptm",
+    "ibaq": "proteomics-quantification", "spectral count": "proteomics-quantification",
+    "differential abundance": "proteomics-de", "differentially abundant": "proteomics-de", "fold change": "proteomics-de",
+    "ptm": "proteomics-ptm", "post-translational": "proteomics-ptm", "phosphorylation": "proteomics-ptm", "acetylation": "proteomics-ptm",
     "pathway enrichment": "proteomics-enrichment", "enrichment": "proteomics-enrichment", "string": "proteomics-enrichment",
-    "data import": "proteomics-data-import", "convert": "proteomics-data-import",
+    "data import": "proteomics-data-import", "convert": "proteomics-data-import", "fragpipe": "proteomics-data-import", "diann": "proteomics-data-import",
+    "cross-link": "proteomics-structural", "xl-ms": "proteomics-structural", "structural proteomics": "proteomics-structural",
 }
 
 SKILL_DESCRIPTIONS: dict[str, str] = {

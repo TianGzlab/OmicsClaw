@@ -570,6 +570,352 @@ python omicsclaw.py list
 
 ---
 
+## Genomics Skills
+
+### 17. FASTQ Quality Control (`genomics-qc`)
+
+Comprehensive FASTQ quality assessment: Phred scores, GC/N content, Q20/Q30
+rates, per-base quality profiles, adapter contamination detection.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--input` | required | FASTQ file |
+| `--demo` | — | Generate synthetic FASTQ data |
+
+**Key metrics:** mean quality, Q20/Q30 rate, GC content, N content, adapter hits, per-base quality distribution.
+
+```bash
+python omicsclaw.py run genomics-qc --demo
+python omicsclaw.py run genomics-qc --input reads.fastq.gz --output output/qc
+```
+
+---
+
+### 18. Alignment Statistics (`genomics-alignment`)
+
+SAM/BAM-based alignment statistics: flagstat metrics, MAPQ distribution,
+insert size analysis. Mirrors `samtools flagstat` output.
+
+**Key metrics:** mapping rate, proper pair rate, duplicate rate, MAPQ distribution, insert size mean/std.
+
+```bash
+python omicsclaw.py run genomics-alignment --demo
+python omicsclaw.py run genomics-alignment --input aligned.sam --output output/alignment
+```
+
+---
+
+### 19. Variant Calling (`genomics-variant-calling`)
+
+Variant classification (SNP/MNP/INS/DEL/COMPLEX per VCF spec), Ti/Tv ratio
+calculation, multi-allelic handling.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `gatk` | gatk, deepvariant, freebayes |
+| `--mode` | `germline` | germline or somatic |
+
+**Quality benchmarks:** WGS Ti/Tv ~2.0-2.1, WES Ti/Tv ~2.8-3.3.
+
+```bash
+python omicsclaw.py run genomics-variant-calling --demo
+python omicsclaw.py run genomics-variant-calling --input sample.bam --output output/variants
+```
+
+---
+
+### 20. VCF Operations (`genomics-vcf-operations`)
+
+VCF parsing, multi-allelic handling, variant type classification, quality/depth
+filtering, Ti/Tv and per-chromosome statistics.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--min-qual` | `0` | Minimum QUAL filter |
+| `--min-dp` | `0` | Minimum depth (DP) filter |
+
+```bash
+python omicsclaw.py run genomics-vcf-operations --demo
+python omicsclaw.py run genomics-vcf-operations --input vars.vcf --output output/vcf-ops \
+  --min-qual 30 --min-dp 10
+```
+
+---
+
+### 21. Variant Annotation (`genomics-variant-annotation`)
+
+Functional impact prediction using VEP consequence types (HIGH/MODERATE/LOW/MODIFIER),
+SIFT (<0.05 = deleterious), PolyPhen-2 (>0.908 = probably damaging), CADD Phred
+(>20 = top 1%, >30 = top 0.1%).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--n-variants` | `300` | Number of demo variants |
+
+```bash
+python omicsclaw.py run genomics-variant-annotation --demo
+python omicsclaw.py run genomics-variant-annotation --input annotated.csv --output output/annotation
+```
+
+---
+
+### 22. Structural Variant Detection (`genomics-sv-detection`)
+
+SV VCF parsing with BND notation for translocations. Classifies DEL/DUP/INV/TRA
+with size stratification (small 50bp-1kb, medium 1kb-100kb, large 100kb-10Mb).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--n-svs` | `100` | Number of demo SVs |
+
+```bash
+python omicsclaw.py run genomics-sv-detection --demo
+python omicsclaw.py run genomics-sv-detection --input structural.vcf --output output/sv
+```
+
+---
+
+### 23. CNV Calling (`genomics-cnv-calling`)
+
+Copy number variation calling using simplified CBS (Circular Binary Segmentation,
+Olshen et al. 2004). Uses CNVkit-standard thresholds (gain: log2>0.3, loss: log2<-0.3).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `cbs` | cbs, none |
+| `--alpha` | `0.01` | CBS significance level |
+
+**CN classification:** amplification (log2>1.0), gain (0.3-1.0), neutral (-0.3 to 0.3),
+loss (-1.0 to -0.3), deep deletion (<-1.0). CN estimated as `2 * 2^(log2_ratio)`.
+
+```bash
+python omicsclaw.py run genomics-cnv-calling --demo
+python omicsclaw.py run genomics-cnv-calling --input bins.csv --output output/cnv --alpha 0.01
+```
+
+---
+
+### 24. Genome Assembly (`genomics-assembly`)
+
+Assembly quality metrics (QUAST-compatible): N50/N90/L50/L90, GC content,
+contig length distribution, completeness estimation.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--genome-size` | `0` | Expected genome size in bp (for completeness) |
+
+```bash
+python omicsclaw.py run genomics-assembly --demo
+python omicsclaw.py run genomics-assembly --input contigs.fasta --output output/assembly \
+  --genome-size 5000000
+```
+
+---
+
+### 25. Haplotype Phasing (`genomics-phasing`)
+
+Phase block analysis from phased VCF files: N50 (bp and variants), phased
+fraction, PS field parsing, pipe-delimited genotype detection.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--n-variants` | `2000` | Number of demo variants |
+
+```bash
+python omicsclaw.py run genomics-phasing --demo
+python omicsclaw.py run genomics-phasing --input phased.vcf --output output/phasing
+```
+
+---
+
+### 26. Epigenomics (`genomics-epigenomics`)
+
+Peak analysis for ChIP-seq/ATAC-seq/CUT&Tag data. Parses narrowPeak (BED6+4)
+format with ENCODE quality standards assessment.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `macs2` | macs2, macs3, homer, genrich |
+| `--assay` | `chip-seq` | chip-seq, atac-seq, cut-tag |
+| `--n-peaks` | `500` | Number of demo peaks |
+
+```bash
+python omicsclaw.py run genomics-epigenomics --demo
+python omicsclaw.py run genomics-epigenomics --input peaks.narrowPeak --output output/epi \
+  --assay atac-seq
+```
+
+---
+
+## Metabolomics Skills
+
+### 27. Metabolomics Peak Detection (`metabolomics-peak-detection`)
+
+Detects peaks in metabolomics intensity data using `scipy.signal.find_peaks`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--prominence` | `10000` | Minimum peak prominence |
+| `--height` | `None` | Minimum absolute peak height |
+| `--distance` | `5` | Minimum distance between peaks (data points) |
+| `--sample-prefix` | auto | Column prefix to identify samples |
+
+```bash
+# Demo
+python omicsclaw.py run metabolomics-peak-detection --demo
+
+# With data
+python omicsclaw.py run metabolomics-peak-detection \
+  --input features.csv --output output/peaks \
+  --prominence 50000 --distance 10
+```
+
+---
+
+## 18. Metabolomics XCMS Preprocessing (`metabolomics-xcms-preprocessing`)
+
+Simulates XCMS centWave peak detection and alignment (Python fallback).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--ppm` | `25` | Mass accuracy in ppm |
+| `--peakwidth-min` | `10` | Minimum peak width (seconds) |
+| `--peakwidth-max` | `60` | Maximum peak width (seconds) |
+
+```bash
+python omicsclaw.py run metabolomics-xcms-preprocessing --demo
+
+python omicsclaw.py run metabolomics-xcms-preprocessing \
+  --input sample1.mzML sample2.mzML --output output/xcms \
+  --ppm 15 --peakwidth-min 5 --peakwidth-max 30
+```
+
+---
+
+## 19. Metabolomics Normalization (`metabolomics-normalization`)
+
+| Method | Description | Reference |
+|--------|-------------|-----------|
+| `median` **(default)** | Scale each sample by its median | MetaboAnalyst |
+| `quantile` | Sort → row-mean → rank-assign | Bolstad et al., 2003 |
+| `total` | Total-ion-count (TIC) normalization | — |
+| `pqn` | Probabilistic Quotient Normalization (median reference spectrum) | Dieterle et al., 2006 |
+| `log` | Log2(x + 1) transformation | — |
+
+```bash
+python omicsclaw.py run metabolomics-normalization --demo --method quantile
+
+python omicsclaw.py run metabolomics-normalization \
+  --input features.csv --output output/norm --method pqn
+```
+
+---
+
+## 20. Metabolomics Annotation (`metabolomics-annotation`)
+
+Annotates m/z values against metabolite databases with multi-adduct support.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--database` | `hmdb` | Database (hmdb, kegg, lipidmaps, metlin) |
+| `--ppm` | `10` | Mass tolerance in ppm |
+| `--adducts` | `[M+H]+ [M-H]-` | Adduct types to consider |
+
+Supported adducts: `[M+H]+`, `[M-H]-`, `[M+Na]+`, `[M+K]+`, `[M+NH4]+`
+
+```bash
+python omicsclaw.py run metabolomics-annotation --demo
+
+python omicsclaw.py run metabolomics-annotation \
+  --input peaks.csv --output output/annot \
+  --ppm 5 --adducts "[M+H]+" "[M-H]-" "[M+Na]+"
+```
+
+---
+
+## 21. Metabolomics Quantification (`metabolomics-quantification`)
+
+Feature quantification with imputation and normalization.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--impute` | `min` | Imputation method: `min` (half-minimum), `median`, `knn` (sklearn KNNImputer) |
+| `--normalize` | `tic` | Normalization: `tic`, `median`, `log` |
+
+```bash
+python omicsclaw.py run metabolomics-quantification --demo --impute knn
+
+python omicsclaw.py run metabolomics-quantification \
+  --input features.csv --output output/quant \
+  --impute knn --normalize median
+```
+
+---
+
+## 22. Metabolomics Statistics (`metabolomics-statistics`)
+
+Univariate statistical testing with Benjamini-Hochberg FDR correction.
+
+| Method | Description |
+|--------|-------------|
+| `ttest` **(default)** | Welch's t-test (`equal_var=False`) |
+| `wilcoxon` | Wilcoxon rank-sum (Mann-Whitney U) test |
+| `anova` | One-way ANOVA (F-test) |
+| `kruskal` | Kruskal-Wallis H test (non-parametric ANOVA) |
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `ttest` | Statistical test method |
+| `--alpha` | `0.05` | Significance threshold (applied to FDR-adjusted p-values) |
+| `--group1-prefix` | auto | Column prefix for group 1 |
+| `--group2-prefix` | auto | Column prefix for group 2 |
+
+```bash
+python omicsclaw.py run metabolomics-statistics --demo --method ttest
+
+python omicsclaw.py run metabolomics-statistics \
+  --input features.csv --output output/stats \
+  --method kruskal --alpha 0.01
+```
+
+---
+
+## 23. Metabolomics Differential Analysis (`metabolomics-de`)
+
+Welch's t-test with BH FDR correction and PCA visualization.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--group-a-prefix` | `ctrl` | Column prefix for control group |
+| `--group-b-prefix` | `treat` | Column prefix for treatment group |
+
+```bash
+python omicsclaw.py run metabolomics-de --demo
+
+python omicsclaw.py run metabolomics-de \
+  --input quantified.csv --output output/diff \
+  --group-a-prefix control --group-b-prefix disease
+```
+
+---
+
+## 24. Metabolomics Pathway Enrichment (`metabolomics-pathway-enrichment`)
+
+Over-representation analysis (ORA) using the hypergeometric test against KEGG pathways.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `ora` | Analysis method: `ora`, `mummichog`, `fella` |
+
+```bash
+python omicsclaw.py run metabolomics-pathway-enrichment --demo
+
+python omicsclaw.py run metabolomics-pathway-enrichment \
+  --input significant_metabolites.csv --output output/pathway
+```
+
+---
+
 ## Quick Reference
 
 | Skill | Default Method | All Supported Methods |
@@ -590,3 +936,22 @@ python omicsclaw.py list
 | integrate | `harmony` | harmony, bbknn, scanorama |
 | register | `paste` | paste |
 | orchestrator | — | — |
+| **genomics-qc** | — | FASTQ parsing, Phred scores |
+| **genomics-alignment** | — | SAM flagstat metrics |
+| **genomics-variant-calling** | `gatk` | gatk, deepvariant, freebayes |
+| **genomics-vcf-operations** | — | VCF stats, multi-allelic, Ti/Tv |
+| **genomics-variant-annotation** | — | VEP consequences, SIFT, PolyPhen, CADD |
+| **genomics-sv-detection** | — | DEL/DUP/INV/TRA, BND notation |
+| **genomics-cnv-calling** | `cbs` | cbs, none |
+| **genomics-assembly** | — | N50/N90/L50/L90, GC content |
+| **genomics-phasing** | — | Phase block N50, PS field |
+| **genomics-epigenomics** | `macs2` | macs2, macs3, homer, genrich |
+| **metabolomics-peak-detection** | — | scipy.signal.find_peaks |
+| **metabolomics-xcms-preprocessing** | — | centWave simulation |
+| **metabolomics-normalization** | `median` | median, quantile, total, pqn, log |
+| **metabolomics-annotation** | `hmdb` | hmdb, kegg, lipidmaps, metlin |
+| **metabolomics-quantification** | `min` + `tic` | impute: min, median, knn; norm: tic, median, log |
+| **metabolomics-statistics** | `ttest` | ttest, wilcoxon, anova, kruskal |
+| **metabolomics-de** | — | Welch's t-test + BH FDR |
+| **metabolomics-pathway-enrichment** | `ora` | ora, mummichog, fella |
+

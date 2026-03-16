@@ -1,8 +1,9 @@
 ---
 name: genomics-variant-annotation
 description: >-
-  Variant annotation and functional effect prediction using VEP, snpEff, or ANNOVAR.
-version: 0.1.0
+  Variant functional impact prediction: VEP consequence types (HIGH/MODERATE/LOW/MODIFIER),
+  SIFT, PolyPhen-2, and CADD scoring. Rule-based annotation engine for demo, wraps VEP/snpEff/ANNOVAR.
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, annotation, VEP, snpEff, ANNOVAR]

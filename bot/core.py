@@ -96,6 +96,89 @@ logging.basicConfig(
 logger = logging.getLogger("omicsclaw.bot")
 
 # ---------------------------------------------------------------------------
+# Skills table formatter (for /skills command in bot)
+# ---------------------------------------------------------------------------
+
+
+def format_skills_table(plain: bool = False) -> str:
+    """Format all registered skills as categorized tables for bot display.
+
+    Args:
+        plain: If True, use ASCII markers instead of emoji (for platforms
+               like Feishu where emoji gets stripped by strip_markup).
+    """
+    # Group skills by domain
+    domain_skills: dict[str, list[tuple[str, dict]]] = {}
+    for alias, info in registry.skills.items():
+        d = info.get("domain", "other")
+        domain_skills.setdefault(d, []).append((alias, info))
+
+    total = len(registry.skills)
+    if plain:
+        lines = [f"OmicsClaw Skills ({total} total)", "=" * 40, ""]
+    else:
+        lines = [f"🔬 OmicsClaw Skills ({total} total)", ""]
+
+    for domain_key, domain_info in registry.domains.items():
+        skills_in_domain = domain_skills.get(domain_key, [])
+        if not skills_in_domain:
+            continue
+
+        domain_name = domain_info.get("name", domain_key.title())
+        data_types = domain_info.get("primary_data_types", [])
+        types_str = ", ".join(f".{t}" if t != "*" else "*" for t in data_types)
+        n = len(skills_in_domain)
+
+        if plain:
+            lines.append(f"[{domain_name}] ({n} skills, {types_str})")
+            lines.append("~" * 40)
+            for alias, info in skills_in_domain:
+                script = info.get("script")
+                tag = "[OK]" if script and script.exists() else "[--]"
+                desc = info.get("description", "").split("—")[0].strip()
+                lines.append(f"  {tag} {alias}")
+                lines.append(f"       {desc}")
+        else:
+            lines.append(f"📂 {domain_name} [{types_str}]")
+            for alias, info in skills_in_domain:
+                script = info.get("script")
+                status = "✅" if script and script.exists() else "📋"
+                desc = info.get("description", "").split("—")[0].strip()
+                lines.append(f"  {status} {alias}")
+                lines.append(f"      {desc}")
+
+        lines.append("")
+
+    # Dynamically discovered skills not in known domains
+    known = set(registry.domains.keys())
+    extra = [(a, i) for a, i in registry.skills.items() if i.get("domain", "other") not in known]
+    if extra:
+        if plain:
+            lines.append("[Other] (Dynamically Discovered)")
+            lines.append("~" * 40)
+        else:
+            lines.append("📂 Other (Dynamically Discovered)")
+        for alias, info in extra:
+            script = info.get("script")
+            desc = info.get("description", "").split("—")[0].strip()
+            if plain:
+                tag = "[OK]" if script and script.exists() else "[--]"
+                lines.append(f"  {tag} {alias}")
+                lines.append(f"       {desc}")
+            else:
+                status = "✅" if script and script.exists() else "📋"
+                lines.append(f"  {status} {alias}")
+                lines.append(f"      {desc}")
+        lines.append("")
+
+    if plain:
+        lines.append("[OK] = ready  [--] = planned")
+    else:
+        lines.append("✅ = ready  📋 = planned")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Audit log (JSONL)
 # ---------------------------------------------------------------------------
 
@@ -1752,11 +1835,7 @@ async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: s
                 return f"Error listing outputs: {e}"
 
         elif cmd == "/skills":
-            skill_list = []
-            for alias, info in registry.skills.items():
-                desc = info.get("description", alias).split("—")[0].strip()
-                skill_list.append(f"• {alias}: {desc}")
-            return f"🔬 Available Skills ({len(skill_list)}):\n" + "\n".join(skill_list)
+            return format_skills_table(plain=(platform == "feishu"))
 
         elif cmd == "/recent":
             try:

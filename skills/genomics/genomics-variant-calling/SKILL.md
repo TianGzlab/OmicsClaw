@@ -3,7 +3,7 @@ name: genomics-variant-calling
 description: >-
   Germline and somatic variant calling (SNVs, Indels) using GATK HaplotypeCaller,
   Mutect2, DeepVariant, or FreeBayes. Includes GVCF workflow, VQSR, and hard filtering.
-version: 0.1.0
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, variant-calling, GATK, DeepVariant, FreeBayes, VQSR]

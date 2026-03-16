@@ -209,14 +209,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(core.OMICSCLAW_PY), "list",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(core.OMICSCLAW_DIR),
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
-        output = stdout.decode(errors="replace").strip()
+        output = core.format_skills_table()
         await send_long_message(update, output or "No skills found.")
     except Exception as e:
         await update.message.reply_text(f"Error listing skills: {e}")

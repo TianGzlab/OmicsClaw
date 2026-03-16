@@ -10,6 +10,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.report import DISCLAIMER, generate_report_footer, generate_report_header, write_result_json
+from omicsclaw.routing.router import route_query_unified
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

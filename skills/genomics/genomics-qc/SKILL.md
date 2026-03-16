@@ -1,8 +1,9 @@
 ---
 name: genomics-qc
 description: >-
-  Sequencing reads quality control and adapter trimming using FastQC, MultiQC, or fastp.
-version: 0.1.0
+  FASTQ quality control: Phred quality scores, GC/N content, Q20/Q30 rates,
+  per-base quality profiles, read length distribution, and adapter contamination detection.
+version: 0.3.0
 author: OmicsClaw
 license: MIT
 tags: [genomics, QC, FastQC, fastp, Trimmomatic]
