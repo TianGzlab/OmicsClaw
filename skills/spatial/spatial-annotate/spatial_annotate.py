@@ -366,8 +366,6 @@ def annotate_cellassign(
 
 def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
     """Generate cell type annotation visualizations."""
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     figures = []
@@ -376,48 +374,34 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
     if "cell_type" not in adata.obs.columns:
         return figures
 
-    if spatial_key is not None:
-        try:
-            import matplotlib.patches as mpatches
-
-            coords = adata.obsm[spatial_key]
-            cell_types = adata.obs["cell_type"].astype(str)
-            unique_types = sorted(cell_types.unique(), key=str)
-
-            # assign one discrete colour per category
-            cmap = plt.get_cmap("tab20", len(unique_types))
-            type_to_color = {t: cmap(i) for i, t in enumerate(unique_types)}
-            point_colors = [type_to_color[t] for t in cell_types]
-
-            fig, ax = plt.subplots(figsize=(10, 8))
-            ax.scatter(
-                coords[:, 0], coords[:, 1],
-                c=point_colors, s=8, alpha=0.8,
-            )
-            ax.set_title("Cell Type Annotation")
-            ax.invert_yaxis()
-            ax.set_aspect("equal")
-
-            # discrete legend instead of colorbar
-            handles = [
-                mpatches.Patch(color=type_to_color[t], label=t)
-                for t in unique_types
-            ]
-            ax.legend(
-                handles=handles,
-                title="Cell Type",
-                bbox_to_anchor=(1.01, 1),
-                loc="upper left",
-                borderaxespad=0,
-                fontsize=8,
-                title_fontsize=9,
-            )
-            fig.tight_layout()
+    # 1. Spatial cell type plot
+    try:
+        if spatial_key:
+            if "spatial" in adata.uns and len(adata.uns["spatial"]) > 0:
+                sc.pl.spatial(adata, color="cell_type", show=False)
+            else:
+                if "X_spatial" not in adata.obsm and spatial_key == "spatial":
+                    adata.obsm["X_spatial"] = adata.obsm["spatial"]
+                sc.pl.embedding(adata, basis="spatial", color="cell_type", show=False)
+            fig = plt.gcf()
             p = save_figure(fig, output_dir, "cell_type_spatial.png")
             figures.append(str(p))
-        except Exception as e:
-            logger.warning("Could not generate spatial annotation plot: %s", e)
+    except Exception as e:
+        logger.warning("Could not generate spatial annotation plot: %s", e)
 
+    # 2. UMAP cell type plot
+    try:
+        if "X_umap" not in adata.obsm:
+            sc.tl.umap(adata)
+        if "X_umap" in adata.obsm:
+            sc.pl.umap(adata, color="cell_type", show=False)
+            fig = plt.gcf()
+            p = save_figure(fig, output_dir, "cell_type_umap.png")
+            figures.append(str(p))
+    except Exception as e:
+        logger.warning("Could not generate UMAP annotation plot: %s", e)
+
+    # 3. Barplot
     try:
         counts = adata.obs["cell_type"].value_counts()
         fig, ax = plt.subplots(figsize=(8, max(4, len(counts) * 0.35)))
@@ -497,8 +481,8 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
 # ---------------------------------------------------------------------------
 
 
-def get_demo_data(output_dir: Path):
-    preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+def get_demo_data():
+    preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     with tempfile.TemporaryDirectory(prefix="annotate_demo_") as tmpdir:
         result = subprocess.run(
             [sys.executable, str(preprocess_script), "--demo", "--output", tmpdir],
@@ -537,7 +521,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
-        adata, input_file = get_demo_data(output_dir)
+        adata, input_file = get_demo_data()
     elif args.input_path:
         adata = sc.read_h5ad(args.input_path)
         input_file = args.input_path

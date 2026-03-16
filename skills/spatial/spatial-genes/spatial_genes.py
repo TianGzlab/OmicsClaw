@@ -97,7 +97,7 @@ def run_morans(
         adata.n_vars,
     )
 
-    sq.gr.spatial_neighbors(adata, n_neighs=n_neighs, coord_type="generic")
+    sq.gr.spatial_neighbors(adata, n_neighs=n_neighs, coord_type="generic", spatial_key=spatial_key)
 
     sq.gr.spatial_autocorr(
         adata,
@@ -486,6 +486,9 @@ def generate_figures(
     figures = []
     spatial_key = get_spatial_key(adata)
 
+    if spatial_key and "spatial" not in adata.obsm:
+        adata.obsm["spatial"] = adata.obsm[spatial_key]
+
     genes_to_plot = [g for g in top_genes[:8] if g in adata.var_names]
 
     # 1. Multi-panel spatial feature maps for top SVGs
@@ -695,7 +698,9 @@ def get_demo_data(output_dir: Path) -> tuple:
 # ---------------------------------------------------------------------------
 
 
-_METHOD_DISPATCH = {
+from typing import Callable
+
+_METHOD_DISPATCH: dict[str, Callable] = {
     "morans": run_morans,
     "spatialde": run_spatialde,
     "sparkx": run_sparkx,
@@ -755,17 +760,17 @@ def main():
         fdr_threshold=args.fdr_threshold,
     )
 
-    top_genes = summary.get("top_genes", [])
-
-    generate_figures(adata, output_dir, top_genes)
-    write_report(output_dir, svg_df, summary, input_file, params)
-
     store_analysis_metadata(
         adata,
         SKILL_NAME,
         summary["method"],
         params=params,
     )
+
+    top_genes = summary.get("top_genes", [])
+
+    generate_figures(adata, output_dir, top_genes)
+    write_report(output_dir, svg_df, summary, input_file, params)
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

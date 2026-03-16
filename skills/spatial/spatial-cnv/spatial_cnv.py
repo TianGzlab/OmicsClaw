@@ -225,11 +225,6 @@ def run_cnv(
             step=step,
         )
 
-    store_analysis_metadata(
-        adata, SKILL_NAME, result["method"],
-        params={"method": method, "reference_key": reference_key},
-    )
-
     return {"n_cells": n_cells, "n_genes": n_genes, **result}
 
 
@@ -325,17 +320,18 @@ def write_report(
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = (
-        f"python spatial_cnv.py --input <input.h5ad>"
-        f" --method {params.get('method', 'infercnvpy')}"
-        f" --output {output_dir}"
-    )
+    cmd_parts: list[str] = [
+        f"python spatial_cnv.py --input <input.h5ad>",
+        f"--method {params.get('method', 'infercnvpy')}",
+        f"--output {output_dir}"
+    ]
     if params.get("reference_key"):
-        cmd += f" --reference-key {params['reference_key']}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+        cmd_parts.append(f"--reference-key {params['reference_key']}")
+    cmd_str = " ".join(cmd_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
     from importlib.metadata import version as _ver, PackageNotFoundError
-    env_lines = []
+    env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "infercnvpy", "numpy", "pandas"]:
         try:
             env_lines.append(f"{pkg}=={_ver(pkg)}")
@@ -352,7 +348,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Generate demo AnnData and add synthetic cell-type labels for reference."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -450,6 +446,13 @@ def main():
 
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata,
+        SKILL_NAME,
+        summary["method"],
+        params=params,
+    )
 
     adata.write_h5ad(output_dir / "processed.h5ad")
     logger.info("Saved: %s", output_dir / "processed.h5ad")

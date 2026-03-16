@@ -89,19 +89,19 @@ def _run_dpt(
     if cluster_key:
         for cl in sorted(adata.obs[cluster_key].unique().tolist(), key=str):
             mask = (adata.obs[cluster_key] == cl) & finite_mask
-            if mask.sum() > 0:
+            if np.sum(mask) > 0:
                 per_cluster[str(cl)] = {
                     "mean_pseudotime": float(dpt_vals[mask].mean()),
                     "median_pseudotime": float(np.median(dpt_vals[mask])),
-                    "n_cells": int(mask.sum()),
+                    "n_cells": int(np.sum(mask)),
                 }
 
     return {
         "method": "dpt",
         "root_cell": root_cell,
-        "mean_pseudotime": float(dpt_vals[finite_mask].mean()) if finite_mask.any() else 0.0,
-        "max_pseudotime": float(dpt_vals[finite_mask].max()) if finite_mask.any() else 0.0,
-        "n_finite": int(finite_mask.sum()),
+        "mean_pseudotime": float(dpt_vals[finite_mask].mean()) if np.any(finite_mask) else 0.0,
+        "max_pseudotime": float(dpt_vals[finite_mask].max()) if np.any(finite_mask) else 0.0,
+        "n_finite": int(np.sum(finite_mask)),
         "per_cluster": per_cluster,
     }
 
@@ -158,11 +158,6 @@ def run_trajectory(
             result = _run_dpt(adata, root_cell=root_cell)
     else:
         result = _run_dpt(adata, root_cell=root_cell)
-
-    store_analysis_metadata(
-        adata, SKILL_NAME, result["method"],
-        params={"method": method, "root_cell": root_cell, "n_states": n_states},
-    )
 
     return {"n_cells": n_cells, "n_genes": n_genes, **result}
 
@@ -323,10 +318,10 @@ def write_report(
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
 
     try:
-        from importlib.metadata import version as _get_version
+        from importlib.metadata import version as _ver
     except ImportError:
-        from importlib_metadata import version as _get_version  # type: ignore
-    env_lines = []
+        pass
+    env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]:
         try:
             env_lines.append(f"{pkg}=={_get_version(pkg)}")
@@ -343,7 +338,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Run spatial-preprocess --demo and load the resulting processed.h5ad."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -424,6 +419,13 @@ def main():
 
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata,
+        SKILL_NAME,
+        summary["method"],
+        params=params,
+    )
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

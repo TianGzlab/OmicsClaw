@@ -141,19 +141,7 @@ def run_de(
         .reset_index(drop=True)
     )
 
-    store_analysis_metadata(
-        adata,
-        SKILL_NAME,
-        method,
-        params={
-            "groupby": groupby,
-            "method": method,
-            "n_top_genes": n_top_genes,
-            "group1": group1,
-            "group2": group2,
-            "two_group": two_group,
-        },
-    )
+
 
     return {
         "n_cells": n_cells,
@@ -333,19 +321,7 @@ def run_pydeseq2(
         n_sig, len(results_df),
     )
 
-    store_analysis_metadata(
-        adata,
-        SKILL_NAME,
-        "pydeseq2",
-        params={
-            "groupby": groupby,
-            "method": "pydeseq2",
-            "group1": group1,
-            "group2": group2,
-            "n_pseudobulk_samples": len(sample_ids),
-            "n_genes_tested": len(results_df),
-        },
-    )
+
 
     return {
         "n_cells": adata.n_obs,
@@ -400,7 +376,7 @@ def generate_figures(
             top_df = summary["markers_df"]
             top_genes = top_df["names"].unique()[:20]
             if len(top_genes) > 0:
-                fig, ax = plt.subplots(figsize=(10, max(4, len(top_genes) * 0.3)))
+                fig, ax = plt.subplots(figsize=(10, max(4, int(len(top_genes) * 0.3))))
                 sub = adata[:, [g for g in top_genes if g in adata.var_names]]
                 if hasattr(sub.X, "toarray"):
                     mat = sub.X.toarray()
@@ -625,10 +601,7 @@ def get_demo_data() -> tuple:
                 "but it was not created."
             )
 
-        adata = sc.read_h5ad(processed_path)
-        logger.info(
-            "Loaded demo data: %d cells x %d genes", adata.n_obs, adata.n_vars,
-        )
+        # Copy the preprocessed file to output for reference (optional, skipped here as handled in CLI)
         return adata, None
 
 
@@ -720,6 +693,13 @@ def main():
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
 
+    store_analysis_metadata(
+        adata,
+        SKILL_NAME,
+        args.method,
+        params=params,
+    )
+
     # Save processed h5ad
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)
@@ -728,7 +708,7 @@ def main():
     n_sig = summary["n_de_genes"]
     mode = (
         f"{summary['group1']} vs {summary['group2']}"
-        if summary["two_group"]
+        if summary.get("two_group")
         else "cluster-vs-rest"
     )
     print(f"DE complete: {n_sig} marker entries ({mode}, {summary['method']})")

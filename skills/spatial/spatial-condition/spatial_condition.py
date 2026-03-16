@@ -65,10 +65,23 @@ def pseudobulk_aggregate(
     if cluster_key not in adata.obs.columns:
         raise ValueError(f"Cluster key '{cluster_key}' not in adata.obs")
 
-    X = adata.X
+    if "counts" in adata.layers:
+        X = adata.layers["counts"]
+    elif adata.raw is not None:
+        X = adata.raw.X
+    else:
+        X = adata.X
+
     if sparse.issparse(X):
         X = X.toarray()
-    X = np.asarray(X, dtype=np.float64)
+    X = np.asarray(X)
+
+    if np.any(X < 0):
+        logger.warning("Negative values in counts. PyDESeq2 requires raw counts. Clipping to 0.")
+        X = np.clip(X, 0, None)
+
+    if X.dtype.kind == "f":
+        X = np.round(X).astype(int)
 
     clusters = sorted(adata.obs[cluster_key].unique().tolist(), key=str)
     samples = sorted(adata.obs[sample_key].unique().tolist(), key=str)
@@ -82,7 +95,7 @@ def pseudobulk_aggregate(
             mask = (adata.obs[cluster_key].values == cl) & (
                 adata.obs[sample_key].values == samp
             )
-            if mask.sum() == 0:
+            if np.sum(mask) == 0:
                 continue
             row_labels.append(samp)
             rows.append(X[mask].sum(axis=0))
@@ -100,6 +113,7 @@ def _run_pydeseq2(
     count_df: pd.DataFrame,
     condition_labels: pd.Series,
     reference: str,
+    other: str,
 ) -> pd.DataFrame:
     """Run PyDESeq2 on pseudobulk counts."""
     from omicsclaw.spatial.dependency_manager import require
@@ -107,7 +121,7 @@ def _run_pydeseq2(
     from pydeseq2.dds import DeseqDataSet
     from pydeseq2.ds import DeseqStats
 
-    metadata = pd.DataFrame({"condition": condition_labels}, index=count_df.index)
+    metadata = pd.DataFrame({"condition": condition_labels.astype(str)}, index=count_df.index)
     dds = DeseqDataSet(
         counts=count_df.astype(int),
         metadata=metadata,
@@ -115,7 +129,7 @@ def _run_pydeseq2(
         refit_cooks=True,
     )
     dds.deseq2()
-    stat = DeseqStats(dds, contrast=["condition", "other", reference])
+    stat = DeseqStats(dds, contrast=["condition", other, reference])
     stat.summary()
     res = stat.results_df.copy()
     res = res.rename(columns={"log2FoldChange": "log2fc", "padj": "pvalue_adj"})
@@ -137,7 +151,7 @@ def _run_wilcoxon_pseudobulk(
     ref_mask = condition_labels == reference
     other_mask = ~ref_mask
 
-    if ref_mask.sum() < 1 or other_mask.sum() < 1:
+    if np.sum(ref_mask) < 1 or np.sum(other_mask) < 1:
         return pd.DataFrame(columns=["gene", "log2fc", "pvalue_adj"])
 
     ref_vals = log_cpm.loc[ref_mask]
@@ -215,6 +229,12 @@ def run_condition_comparison(
 
     for cl, count_df in pb_dict.items():
         cond_labels = sample_condition.loc[count_df.index]
+        cond_strs = cond_labels.astype(str)
+        unique_conds = cond_strs.unique().tolist()
+        
+        if len(unique_conds) < 2 or str(ref) not in unique_conds:
+            logger.warning("Cluster %s: missing reference or < 2 conditions, skipping", cl)
+            continue
 
         gene_sums = count_df.sum(axis=0)
         keep = gene_sums >= 10
@@ -224,26 +244,30 @@ def run_condition_comparison(
             logger.warning("Cluster %s: too few genes after filtering, skipping", cl)
             continue
 
-        de_df = _run_pydeseq2(filtered, cond_labels, ref)
-        de_df["method"] = "pydeseq2"
+        for other_c in unique_conds:
+            if other_c == str(ref):
+                continue
 
-        de_df["cluster"] = cl
-        all_de[cl] = de_df
+            mask = cond_strs.isin([str(ref), other_c])
+            sub_filtered = filtered[mask]
+            sub_conds = cond_strs[mask]
+
+            if len(sub_conds.unique()) < 2:
+                continue
+
+            try:
+                de_df = _run_pydeseq2(sub_filtered, sub_conds, str(ref), other_c)
+                de_df["method"] = "pydeseq2"
+                de_df["cluster"] = cl
+                de_df["contrast"] = f"{other_c}_vs_{ref}"
+                all_de[f"{cl}_{other_c}"] = de_df
+            except Exception as exc:
+                logger.error("Cluster %s contrast %s failed: %s", cl, other_c, exc)
 
     if all_de:
         global_de = pd.concat(all_de.values(), ignore_index=True)
 
     sig_count = int((global_de["pvalue_adj"] < 0.05).sum()) if not global_de.empty else 0
-
-    store_analysis_metadata(
-        adata, SKILL_NAME, "pseudobulk",
-        params={
-            "condition_key": condition_key,
-            "sample_key": sample_key,
-            "reference_condition": ref,
-            "cluster_key": cluster_key,
-        },
-    )
 
     return {
         "n_cells": adata.n_obs,
@@ -316,13 +340,13 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
         if cluster_counts:
             clusters = list(cluster_counts.keys())
             counts = [cluster_counts[c] for c in clusters]
-            fig, ax = plt.subplots(figsize=(8, max(3, len(clusters) * 0.4)))
+            fig, ax = plt.subplots(figsize=(8, max(3, int(len(clusters) * 0.4))))
             ax.barh(clusters, counts, color="steelblue")
             ax.set_xlabel("# significant DE genes (padj < 0.05)")
-            ax.set_ylabel("Cluster")
+            ax.set_ylabel("Cluster Comparison")
             ax.set_title("Condition-responsive genes per cluster")
             fig.tight_layout()
-            p = save_figure(fig, output_dir, "condition_pca.png")
+            p = save_figure(fig, output_dir, "condition_de_barplot.png")
             figures.append(str(p))
     except Exception as exc:
         logger.warning("Could not generate cluster bar plot: %s", exc)
@@ -551,6 +575,13 @@ def main():
 
     generate_figures(output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata,
+        SKILL_NAME,
+        "pseudobulk",
+        params=params,
+    )
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)

@@ -220,7 +220,7 @@ def _run_fastccc(
     logger.info("Running FastCCC ...")
 
     result = fastccc.run(adata, groupby=cell_type_key)
-    df = result.copy()
+    df = pd.DataFrame(result.copy())
 
     for old, new in [
         ("ligand_complex", "ligand"), ("receptor_complex", "receptor"),
@@ -347,11 +347,6 @@ def run_communication(
     lr_df = dispatch[method]()
 
     sig_df = lr_df[lr_df["pvalue"] < 0.05] if not lr_df.empty else lr_df
-
-    store_analysis_metadata(
-        adata, SKILL_NAME, method,
-        params={"method": method, "cell_type_key": cell_type_key, "species": species},
-    )
 
     return {
         "n_cells": n_cells,
@@ -495,7 +490,7 @@ def write_report(
 
 def get_demo_data() -> tuple:
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
@@ -571,6 +566,11 @@ def main():
 
     generate_figures(adata, output_dir, summary)
     write_report(output_dir, summary, input_file, params)
+
+    store_analysis_metadata(
+        adata, SKILL_NAME, summary["method"],
+        params=params,
+    )
 
     adata.write_h5ad(output_dir / "processed.h5ad")
     logger.info("Saved: %s", output_dir / "processed.h5ad")

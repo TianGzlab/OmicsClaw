@@ -998,7 +998,9 @@ def _r_cleanup(*var_names: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-_METHOD_DISPATCH: dict[str, object] = {
+from typing import Any
+
+_METHOD_DISPATCH: dict[str, Any] = {
     "flashdeconv":   deconvolve_flashdeconv,
     "cell2location": deconvolve_cell2location,
     "rctd":          deconvolve_rctd,
@@ -1016,8 +1018,13 @@ _METHOD_DISPATCH: dict[str, object] = {
 
 
 def generate_figures(adata, output_dir: Path, prop_df: pd.DataFrame) -> list[str]:
+    import matplotlib.pyplot as plt
     figures: list[str] = []
     spatial_key = get_spatial_key(adata)
+
+    # viz library tight coupling on "spatial"
+    if spatial_key and "spatial" not in adata.obsm:
+        adata.obsm["spatial"] = adata.obsm[spatial_key]
 
     if spatial_key is not None:
         for subtype, fname in [
@@ -1032,9 +1039,8 @@ def generate_figures(adata, output_dir: Path, prop_df: pd.DataFrame) -> list[str
                 logger.warning("Could not generate %s: %s", fname, exc)
 
     try:
-        import matplotlib.pyplot as plt
         mean_props = prop_df.mean().sort_values(ascending=True)
-        fig, ax = plt.subplots(figsize=(8, max(3, len(mean_props) * 0.4)), dpi=200)
+        fig, ax = plt.subplots(figsize=(8, max(3, int(len(mean_props) * 0.4))), dpi=200)
         mean_props.plot.barh(ax=ax, color="coral")
         ax.set_xlabel("Mean Proportion")
         ax.set_title("Average Cell Type Proportions")
@@ -1181,8 +1187,9 @@ def main() -> None:
     logger.info("Running deconvolution: method=%s", args.method)
     prop_df, stats = run_fn(adata, **kwargs)
 
-    adata.obsm["deconv_proportions"] = prop_df.values
-    adata.uns["deconv_cell_types"] = list(prop_df.columns)
+    prop_key = f"deconvolution_{args.method}"
+    adata.obsm[prop_key] = prop_df.values
+    adata.uns[f"{prop_key}_cell_types"] = list(prop_df.columns)
 
     params = {
         "method": args.method,
@@ -1190,14 +1197,14 @@ def main() -> None:
         "cell_type_key": args.cell_type_key,
     }
 
+    store_analysis_metadata(adata, SKILL_NAME, stats["method"], params=params)
+
     generate_figures(adata, output_dir, prop_df)
     write_report(output_dir, stats, input_file, params)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
     prop_df.to_csv(tables_dir / "proportions.csv")
-
-    store_analysis_metadata(adata, SKILL_NAME, stats["method"], params=params)
 
     h5ad_path = output_dir / "processed.h5ad"
     adata.write_h5ad(h5ad_path)
