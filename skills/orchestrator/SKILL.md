@@ -126,15 +126,18 @@ List all available skills with status (ready/planned) and descriptions.
 
 | Query Keywords | Skill | Description |
 |----------------|-------|-------------|
+| qc metrics, quality control | sc-qc | QC metrics calculation |
+| filter cells, gene filtering | sc-filter | Cell/gene filtering |
+| ambient rna, cellbender | sc-ambient-removal | Ambient RNA removal |
 | single cell, scrna-seq | sc-preprocessing | scRNA-seq preprocessing |
-| doublet detection | sc-doublet-detection | Doublet detection |
-| trajectory, pseudotime | sc-trajectory | Trajectory inference |
-| cell type annotation | sc-cell-annotation | Cell type annotation |
-| integration, batch correction | sc-batch-integration | Batch correction |
-| differential expression | sc-de | Differential expression |
-| gene regulatory network, grn | sc-grn | Gene regulatory network |
-| cell communication | sc-cell-communication | Cell-cell communication |
-| multiome, multi-omics | sc-multiome | Multi-omics integration |
+| doublet detection, scrublet | sc-doublet-detection | Doublet detection |
+| trajectory, pseudotime, paga, dpt | sc-pseudotime | Trajectory inference |
+| rna velocity, scvelo | sc-velocity | RNA velocity analysis |
+| cell type annotation, celltypist | sc-cell-annotation | Cell type annotation |
+| integration, batch correction, harmony | sc-batch-integration | Batch correction |
+| differential expression, pseudobulk | sc-de | Differential expression |
+| marker genes, find markers | sc-markers | Marker gene detection |
+| gene regulatory network, grn, pyscenic | sc-grn | Gene regulatory network |
 
 ### Genomics Keywords → Skills
 
