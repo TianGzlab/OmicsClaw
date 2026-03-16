@@ -88,8 +88,8 @@ def _run_infercnvpy(
     *,
     reference_key: str | None = None,
     reference_cat: list[str] | None = None,
-    window_size: int = 250,
-    step: int = 50,
+    window_size: int = 100,
+    step: int = 10,
     dynamic_threshold: float | None = 1.5,
 ) -> dict:
     """Infer CNV using inferCNVpy (expression-based, no allele data needed)."""
@@ -143,7 +143,6 @@ def _run_numbat(
         In R: install.packages("Numbat")
         Allelic count data in adata.obsm["allele_counts"] or external TSV.
     """
-    validate_r_environment(required_r_packages=["numbat"])
     robjects, pandas2ri, numpy2ri, importr, localconverter, default_converter, openrlib, anndata2ri = (
         validate_r_environment(required_r_packages=["numbat"])
     )
@@ -189,8 +188,8 @@ def run_cnv(
     method: str = "infercnvpy",
     reference_key: str | None = None,
     reference_cat: list[str] | None = None,
-    window_size: int = 250,
-    step: int = 50,
+    window_size: int = 100,
+    step: int = 10,
 ) -> dict:
     """Run CNV inference. Returns summary dict.
 
@@ -234,7 +233,9 @@ def run_cnv(
 
 
 def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
-    """Generate CNV visualizations using the SpatialClaw viz library."""
+    """Generate CNV visualizations using the OmicsClaw viz library."""
+    import matplotlib.pyplot as plt
+
     figures: list[str] = []
 
     # 1. CNV chromosome heatmap
@@ -242,6 +243,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
         fig = plot_cnv(adata, VizParams(), subtype="heatmap")
         p = save_figure(fig, output_dir, "cnv_heatmap.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as exc:
         logger.warning("CNV heatmap failed: %s", exc)
 
@@ -251,6 +253,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig = plot_cnv(adata, VizParams(colormap="RdBu_r"), subtype="spatial")
             p = save_figure(fig, output_dir, "cnv_spatial.png")
             figures.append(str(p))
+            plt.close('all')
         except Exception as exc:
             logger.warning("CNV spatial map failed: %s", exc)
 
@@ -267,6 +270,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             )
             p = save_figure(fig, output_dir, "cnv_umap.png")
             figures.append(str(p))
+            plt.close('all')
         except Exception as exc:
             logger.warning("CNV UMAP failed: %s", exc)
 
@@ -402,11 +406,9 @@ def main():
         "--reference-cat", nargs="+", default=None,
         help="Category values marking normal reference cells (e.g. 'Normal')",
     )
-    parser.add_argument("--window-size", type=int, default=250)
-    parser.add_argument("--step", type=int, default=50)
+    parser.add_argument("--window-size", type=int, default=100)
+    parser.add_argument("--step", type=int, default=10)
     args = parser.parse_args()
-
-    require("infercnvpy", feature="CNV inference")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

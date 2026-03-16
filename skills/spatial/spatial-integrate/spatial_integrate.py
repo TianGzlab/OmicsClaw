@@ -61,14 +61,13 @@ def _integrate_harmony(adata, batch_key: str) -> dict:
     import harmonypy
 
     ensure_pca(adata)
-    pca = adata.obsm["X_pca"]
-    batch_labels = adata.obs[batch_key].values
 
-    ho = harmonypy.run_harmony(pca, adata.obs, batch_key, max_iter_harmony=20)
-    adata.obsm["X_pca_harmony"] = ho.Z_corr.T if ho.Z_corr.shape[0] != adata.n_obs else ho.Z_corr
+    ho = harmonypy.run_harmony(adata.obsm["X_pca"], adata.obs, batch_key, max_iter_harmony=20)
 
-    corrected = adata.obsm["X_pca_harmony"]
-    if corrected.shape[0] != adata.n_obs:
+    # harmonypy >= 0.1.0 returns Z_corr as (cells × PCs).
+    # Older versions returned (PCs × cells). Handle both:
+    corrected = ho.Z_corr
+    if corrected.shape[0] != adata.n_obs and corrected.shape[1] == adata.n_obs:
         corrected = corrected.T
     adata.obsm["X_pca_harmony"] = corrected
 
@@ -92,22 +91,22 @@ def _integrate_bbknn(adata, batch_key: str) -> dict:
 
 
 def _integrate_scanorama(adata, batch_key: str) -> dict:
-    """Run Scanorama integration."""
+    """Run Scanorama integration via Scanpy's external API."""
     from omicsclaw.spatial.dependency_manager import require
     require("scanorama", feature="Scanorama batch integration")
-    import scanorama
 
-    batches = sorted(adata.obs[batch_key].unique().tolist(), key=str)
-    adatas = [adata[adata.obs[batch_key] == b].copy() for b in batches]
+    ensure_pca(adata)
 
-    corrected, _ = scanorama.correct_scanpy(adatas, return_dimred=True)
-
-    adata_corrected = corrected[0].concatenate(corrected[1:], batch_key=batch_key)
-    adata.obsm["X_scanorama"] = adata_corrected.obsm.get(
-        "X_scanorama", adata_corrected.obsm.get("X_pca", adata.obsm["X_pca"])
+    # Use Scanpy's built-in Scanorama wrapper — handles splitting, integration,
+    # and storing the corrected embedding in adata.obsm['X_scanorama'].
+    sc.external.pp.scanorama_integrate(
+        adata,
+        key=batch_key,
+        basis="X_pca",
+        adjusted_basis="X_scanorama",
     )
 
-    sc.pp.neighbors(adata, use_rep="X_scanorama" if "X_scanorama" in adata.obsm else "X_pca")
+    sc.pp.neighbors(adata, use_rep="X_scanorama")
     sc.tl.umap(adata)
 
     return {"method": "scanorama", "embedding_key": "X_scanorama"}
@@ -192,7 +191,7 @@ def run_integration(
     if "X_pca" not in adata.obsm:
         raise ValueError(
             "X_pca not found. Run spatial-preprocess before integration:\n"
-            "  python omicsclaw.py run preprocess --input data.h5ad --output results/preprocess/"
+            "  python omicsclaw.py run spatial-preprocess --input data.h5ad --output results/"
         )
     if "X_umap" not in adata.obsm:
         ensure_neighbors(adata)
@@ -299,6 +298,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
         fig.tight_layout()
         p = save_figure(fig, output_dir, "batch_mixing.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as exc:
         logger.warning("Could not generate batch mixing plot: %s", exc)
 
@@ -391,18 +391,19 @@ def write_report(
     cmd_str = " ".join(cmd_parts)
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
-    import pkg_resources
+    try:
+        from importlib.metadata import version as _get_version
+    except ImportError:
+        from importlib_metadata import version as _get_version  # type: ignore
     env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]:
         try:
-            ver = pkg_resources.get_distribution(pkg).version
-            env_lines.append(f"{pkg}=={ver}")
+            env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
     for opt in ["harmonypy", "bbknn", "scanorama"]:
         if is_available(opt):
             try:
-                from importlib.metadata import version as _get_version
                 env_lines.append(f"{opt}=={_get_version(opt)}")
             except Exception:
                 pass

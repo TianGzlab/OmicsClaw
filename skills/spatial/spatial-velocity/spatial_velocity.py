@@ -180,17 +180,16 @@ def _run_velovi(adata) -> dict:
     if "spliced" not in adata.layers or "unspliced" not in adata.layers:
         raise ValueError("VELOVI requires 'spliced' and 'unspliced' layers.")
 
+    # scVelo preprocessing — creates normalized Ms, Mu moment layers
     scv.pp.filter_and_normalize(adata, min_shared_counts=30, n_top_genes=2000, enforce=True)
     scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
 
-    adata.layers["Ms"] = adata.layers["spliced"]
-    adata.layers["Mu"] = adata.layers["unspliced"]
-
-    VELOVI.setup_anndata(adata, spliced_layer="Ms", unspliced_layer="Mu")
+    # VELOVI expects raw spliced/unspliced count layers, NOT the moment layers.
+    VELOVI.setup_anndata(adata, spliced_layer="spliced", unspliced_layer="unspliced")
     model = VELOVI(adata)
     model.train(max_epochs=500)
 
-    adata.layers["velocity"] = model.get_velocity(velo_statistic="mean", velo_mode="spliced")
+    adata.layers["velocity"] = model.get_velocity()
 
     vel = np.asarray(adata.layers["velocity"], dtype=np.float64)
     speed = np.sqrt((vel ** 2).sum(axis=1))

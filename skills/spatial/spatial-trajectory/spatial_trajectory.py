@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "spatial-trajectory"
 SKILL_VERSION = "0.1.0"
 
-
+SUPPORTED_METHODS = ("dpt", "cellrank", "palantir")
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +122,14 @@ def _run_cellrank(adata, *, n_states: int = 3) -> dict:
     estimator.compute_schur(n_components=20)
     estimator.compute_macrostates(n_states=n_states)
 
-    macrostates = adata.obs.get("macrostates", None)
-    n_macro = macrostates.nunique() if macrostates is not None else 0
+    # CellRank 2 stores macrostates in different obs keys depending on version
+    macro_key = None
+    for candidate in ("macrostates_fwd", "macrostates", "term_states_fwd"):
+        if candidate in adata.obs.columns:
+            macro_key = candidate
+            break
+
+    n_macro = adata.obs[macro_key].nunique() if macro_key else 0
 
     return {
         "method": "cellrank",
@@ -320,11 +326,11 @@ def write_report(
     try:
         from importlib.metadata import version as _ver
     except ImportError:
-        pass
+        from importlib_metadata import version as _ver  # type: ignore
     env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]:
         try:
-            env_lines.append(f"{pkg}=={_get_version(pkg)}")
+            env_lines.append(f"{pkg}=={_ver(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
     (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
@@ -401,7 +407,7 @@ def main():
     if "X_pca" not in adata.obsm:
         raise ValueError(
             "PCA not found. Run spatial-preprocess before trajectory analysis:\n"
-            "  python omicsclaw.py run preprocess --input data.h5ad --output results/preprocess/"
+            "  python omicsclaw.py run spatial-preprocess --input data.h5ad --output results/"
         )
 
     params = {

@@ -77,30 +77,46 @@ def _run_paste(
     slices_list = sorted(adata.obs[slice_key].unique().tolist(), key=str)
     ref = reference_slice or slices_list[0]
     ref_adata = adata[adata.obs[slice_key] == ref].copy()
+    ref_coords = ref_adata.obsm[spatial_key].astype(float)
 
     aligned_coords = adata.obsm[spatial_key].copy().astype(float)
+    disparities: dict[str, float] = {}
 
     for sl in slices_list:
         if str(sl) == str(ref):
             continue
         sl_adata = adata[adata.obs[slice_key] == sl].copy()
         try:
-            pi = pst.pairwise_align(ref_adata, sl_adata)
-            coords_new = pi.T @ ref_adata.obsm[spatial_key]
+            # pairwise_align returns (pi, log_info)
+            # pi shape: (n_spots_query × n_spots_ref)
+            result = pst.pairwise_align(ref_adata, sl_adata)
+            pi = result[0] if isinstance(result, tuple) else result
+
+            # Transform query coords using weighted average of reference coords
+            row_sums = pi.sum(axis=1, keepdims=True)
+            row_sums = np.where(row_sums == 0, 1.0, row_sums)  # avoid division by zero
+            coords_new = (pi @ ref_coords) / row_sums
+
             src_mask = adata.obs[slice_key] == sl
             aligned_coords[src_mask] = coords_new
+
+            # Compute alignment disparity (Frobenius norm of transport plan)
+            disparity = float(np.sum(pi * pi))
+            disparities[str(sl)] = disparity
         except Exception as exc:
             logger.warning("PASTE failed for slice '%s': %s", sl, exc)
 
     adata.obsm["spatial_aligned"] = aligned_coords
+
+    mean_disp = float(np.mean(list(disparities.values()))) if disparities else 0.0
 
     return {
         "method": "paste",
         "reference_slice": str(ref),
         "n_slices": len(slices_list),
         "slices": [str(s) for s in slices_list],
-        "disparities": {},
-        "mean_disparity": 0.0,
+        "disparities": disparities,
+        "mean_disparity": mean_disp,
     }
 
 
@@ -196,6 +212,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig.tight_layout()
             p = save_figure(fig, output_dir, "slices_before.png")
             figures.append(str(p))
+            plt.close('all')
         except Exception as exc:
             logger.warning("Could not generate before-registration plot: %s", exc)
 
@@ -220,6 +237,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig.tight_layout()
             p = save_figure(fig, output_dir, "slices_after.png")
             figures.append(str(p))
+            plt.close('all')
         except Exception as exc:
             logger.warning("Could not generate after-registration plot: %s", exc)
 
@@ -315,12 +333,14 @@ def write_report(
     cmd_str = " ".join(cmd_parts)
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
-    import pkg_resources
+    try:
+        from importlib.metadata import version as _get_version
+    except ImportError:
+        from importlib_metadata import version as _get_version  # type: ignore
     env_lines: list[str] = []
     for pkg in ["scanpy", "anndata", "scipy", "numpy", "pandas", "matplotlib"]:
         try:
-            ver = pkg_resources.get_distribution(pkg).version
-            env_lines.append(f"{pkg}=={ver}")
+            env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
     (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")

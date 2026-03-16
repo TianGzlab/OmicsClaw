@@ -328,6 +328,7 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
             fig.tight_layout()
             p = save_figure(fig, output_dir, "pseudobulk_volcano.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as exc:
         logger.warning("Could not generate volcano: %s", exc)
 
@@ -348,6 +349,7 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
             fig.tight_layout()
             p = save_figure(fig, output_dir, "condition_de_barplot.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as exc:
         logger.warning("Could not generate cluster bar plot: %s", exc)
 
@@ -475,7 +477,7 @@ def write_report(
 def get_demo_data() -> tuple:
     """Generate synthetic multi-condition data for demo."""
     preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "preprocess" / "spatial_preprocess.py"
+        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     )
     if not preprocess_script.exists():
         raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")

@@ -370,6 +370,7 @@ def generate_figures(
         fig = plt.gcf()
         p = save_figure(fig, output_dir, "marker_dotplot.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as exc:
         logger.warning("Scanpy dotplot failed (%s), falling back to heatmap", exc)
         try:
@@ -390,6 +391,7 @@ def generate_figures(
                 fig.tight_layout()
                 p = save_figure(fig, output_dir, "marker_dotplot.png")
                 figures.append(str(p))
+                plt.close('all')
         except Exception as inner_exc:
             logger.warning("Fallback heatmap also failed: %s", inner_exc)
 
@@ -426,6 +428,7 @@ def generate_figures(
                 fig.tight_layout()
                 p = save_figure(fig, output_dir, "de_volcano.png")
                 figures.append(str(p))
+                plt.close('all')
         except Exception as exc:
             logger.warning("Could not generate volcano plot: %s", exc)
 

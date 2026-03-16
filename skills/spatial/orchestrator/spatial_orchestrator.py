@@ -186,21 +186,21 @@ NAMED_PIPELINES: dict[str, list[str]] = {
 
 # Human-readable skill descriptions for listing
 SKILL_DESCRIPTIONS: dict[str, str] = {
-    "preprocess": "Spatial data QC, normalization, HVG, PCA/UMAP, Leiden clustering",
-    "domains": "Tissue region/niche identification (SpaGCN, STAGATE, Leiden)",
-    "annotate": "Cell type annotation (Tangram, scANVI, CellAssign)",
-    "deconv": "Deconvolution — cell type proportions (CARD, Cell2Location, RCTD)",
-    "statistics": "Spatial statistics (Moran's I, Geary's C, Ripley, neighborhood enrichment)",
-    "genes": "Spatially variable genes (Moran's I, SpatialDE, SPARK-X)",
-    "de": "Differential expression (Wilcoxon, t-test, cluster markers)",
-    "condition": "Condition comparison with pseudobulk DESeq2 statistics",
-    "communication": "Cell-cell communication (LIANA+, CellPhoneDB, built-in L-R)",
-    "velocity": "RNA velocity and cellular dynamics (scVelo, S/U ratio)",
-    "trajectory": "Trajectory inference (DPT, CellRank, Palantir)",
-    "enrichment": "Pathway enrichment (GSEA, ORA, Enrichr)",
-    "cnv": "Copy number variation inference (inferCNVpy, expression-based)",
-    "integrate": "Multi-sample integration (Harmony, BBKNN, Scanorama)",
-    "register": "Spatial registration / slice alignment (Procrustes, PASTE)",
+    "spatial-preprocessing": "Spatial data QC, normalization, HVG, PCA/UMAP, Leiden clustering",
+    "spatial-domain-identification": "Tissue region/niche identification (SpaGCN, STAGATE, Leiden)",
+    "spatial-cell-annotation": "Cell type annotation (Tangram, scANVI, CellAssign)",
+    "spatial-deconvolution": "Deconvolution — cell type proportions (CARD, Cell2Location, RCTD)",
+    "spatial-statistics": "Spatial statistics (Moran's I, Geary's C, Ripley, neighborhood enrichment)",
+    "spatial-svg-detection": "Spatially variable genes (Moran's I, SpatialDE, SPARK-X)",
+    "spatial-de": "Differential expression (Wilcoxon, t-test, cluster markers)",
+    "spatial-condition-comparison": "Condition comparison with pseudobulk DESeq2 statistics",
+    "spatial-cell-communication": "Cell-cell communication (LIANA+, CellPhoneDB, built-in L-R)",
+    "spatial-velocity": "RNA velocity and cellular dynamics (scVelo, S/U ratio)",
+    "spatial-trajectory": "Trajectory inference (DPT, CellRank, Palantir)",
+    "spatial-enrichment": "Pathway enrichment (GSEA, ORA, Enrichr)",
+    "spatial-cnv": "Copy number variation inference (inferCNVpy, expression-based)",
+    "spatial-integration": "Multi-sample integration (Harmony, BBKNN, Scanorama)",
+    "spatial-registration": "Spatial registration / slice alignment (Procrustes, PASTE)",
 }
 
 
@@ -233,11 +233,11 @@ def route_query(query: str) -> dict:
 
     return {
         "matched": False,
-        "skill": "preprocess",
+        "skill": "spatial-preprocessing",
         "confidence": 0.0,
         "matched_keywords": [],
         "scores": {},
-        "fallback_reason": "No keywords matched; defaulting to preprocess",
+        "fallback_reason": "No keywords matched; defaulting to spatial-preprocessing",
     }
 
 

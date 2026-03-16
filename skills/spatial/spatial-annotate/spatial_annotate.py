@@ -386,6 +386,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig = plt.gcf()
             p = save_figure(fig, output_dir, "cell_type_spatial.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as e:
         logger.warning("Could not generate spatial annotation plot: %s", e)
 
@@ -398,6 +399,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
             fig = plt.gcf()
             p = save_figure(fig, output_dir, "cell_type_umap.png")
             figures.append(str(p))
+            plt.close('all')
     except Exception as e:
         logger.warning("Could not generate UMAP annotation plot: %s", e)
 
@@ -411,6 +413,7 @@ def generate_figures(adata, output_dir: Path, summary: dict) -> list[str]:
         fig.tight_layout()
         p = save_figure(fig, output_dir, "cell_type_barplot.png")
         figures.append(str(p))
+        plt.close('all')
     except Exception as e:
         logger.warning("Could not generate barplot: %s", e)
 
