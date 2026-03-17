@@ -304,8 +304,19 @@ def main():
     if "spliced" not in adata.layers or "unspliced" not in adata.layers:
         logger.error("Input data must have 'spliced' and 'unspliced' layers")
         logger.info("Available layers: " + str(list(adata.layers.keys())))
-        print("\nERROR: spliced/unspliced layers required")
-        print("Generate these using velocyto or kb-python")
+        print("\n" + "="*70)
+        print("ERROR: spliced/unspliced layers required for RNA velocity analysis")
+        print("="*70)
+        print("\nTo generate spliced/unspliced counts, use one of these tools:")
+        print("\n1. velocyto (recommended for Cell Ranger output):")
+        print("   pip install velocyto")
+        print("   velocyto run10x <cellranger_output_dir> <gtf_file>")
+        print("\n2. kb-python (kallisto|bustools):")
+        print("   pip install kb-python")
+        print("   kb ref -i transcriptome.idx -g t2g.txt -f1 transcripts.fa <fasta> <gtf>")
+        print("   kb count -i transcriptome.idx -g t2g.txt -x 10xv2 -o output <fastqs>")
+        print("\n3. For demo mode, use: --demo")
+        print("="*70)
         sys.exit(1)
 
     # Parameters

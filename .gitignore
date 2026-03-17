@@ -46,6 +46,12 @@ data/*
 examples/*.h5ad
 examples/*.vcf.gz
 
+# Single-cell databases (large, user-downloaded)
+skills/singlecell/data/databases/*
+!skills/singlecell/data/databases/.gitkeep
+!skills/singlecell/data/databases/*/.gitkeep
+skills/singlecell/data/demo/*.h5ad
+
 # Bot logs and audit
 bot/logs/
 bot/audit/

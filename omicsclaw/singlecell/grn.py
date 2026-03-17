@@ -126,6 +126,84 @@ def prepare_expression_matrix(adata, layer: str | None = None) -> pd.DataFrame:
     return df
 
 
+def run_correlation_grn(
+    ex_matrix: pd.DataFrame,
+    tf_list: list[str],
+    method: str = "spearman",
+    n_top: int = 50,
+) -> pd.DataFrame:
+    """Run simple correlation-based GRN inference as fallback.
+
+    This is a simpler alternative to GRNBoost2 that doesn't require dask.
+    It computes correlation between TFs and all genes, then returns top correlations.
+
+    Parameters
+    ----------
+    ex_matrix : DataFrame
+        Expression matrix (cells x genes)
+    tf_list : list of str
+        List of transcription factors
+    method : str
+        Correlation method: 'spearman' or 'pearson'
+    n_top : int
+        Number of top targets per TF to return
+
+    Returns
+    -------
+    DataFrame with columns: TF, target, importance
+    """
+    import numpy as np
+    from scipy import stats
+
+    logger.info(f"Running correlation-based GRN inference ({method})...")
+    logger.info(f"Expression matrix: {ex_matrix.shape[0]} cells x {ex_matrix.shape[1]} genes")
+
+    # Filter TFs to those in the expression matrix
+    available_tfs = [tf for tf in tf_list if tf in ex_matrix.columns]
+    if not available_tfs:
+        raise ValueError("None of the provided TFs are in the expression matrix")
+
+    logger.info(f"Using {len(available_tfs)} TFs from the list")
+
+    # Get TF expression
+    tf_expr = ex_matrix[available_tfs]
+
+    # Get target genes (all genes except TFs)
+    target_genes = [g for g in ex_matrix.columns if g not in available_tfs]
+
+    results = []
+
+    # Compute correlations for each TF
+    for tf in available_tfs:
+        tf_values = tf_expr[tf].values
+
+        # Compute correlation with all targets
+        correlations = []
+        for target in target_genes:
+            target_values = ex_matrix[target].values
+
+            if method == "spearman":
+                corr, _ = stats.spearmanr(tf_values, target_values)
+            else:  # pearson
+                corr, _ = stats.pearsonr(tf_values, target_values)
+
+            if not np.isnan(corr):
+                correlations.append((target, abs(corr)))
+
+        # Sort by absolute correlation and take top n
+        correlations.sort(key=lambda x: x[1], reverse=True)
+        for target, importance in correlations[:n_top]:
+            results.append({
+                "TF": tf,
+                "target": target,
+                "importance": importance,
+            })
+
+    adjacencies = pd.DataFrame(results)
+    logger.info(f"Generated {len(adjacencies)} TF-target adjacencies")
+    return adjacencies
+
+
 def run_grnboost2(
     ex_matrix: pd.DataFrame,
     tf_list: list[str],
@@ -144,7 +222,7 @@ def run_grnboost2(
     seed : int
         Random seed for reproducibility
     n_jobs : int
-        Number of parallel jobs
+        Number of parallel jobs (not used, arboreto uses dask)
     verbose : bool
         Print progress information
 
@@ -154,7 +232,6 @@ def run_grnboost2(
     """
     try:
         from arboreto.algo import grnboost2
-        from arboreto.utils import load_tf_names
     except ImportError:
         raise ImportError(
             "arboreto package required for GRNBoost2. "
@@ -164,17 +241,33 @@ def run_grnboost2(
     logger.info(f"Running GRNBoost2 with {len(tf_list)} TFs...")
     logger.info(f"Expression matrix: {ex_matrix.shape[0]} cells x {ex_matrix.shape[1]} genes")
 
-    # Use 'local' for sequential execution to avoid dask overhead/issues
-    adjacencies = grnboost2(
-        expression_data=ex_matrix,
-        tf_names=tf_list,
-        seed=seed,
-        verbose=verbose,
-        client_or_address="local",
-    )
+    # Suppress dask distributed logging noise
+    import logging as py_logging
+    dask_logger = py_logging.getLogger("distributed")
+    old_level = dask_logger.level
+    dask_logger.setLevel(py_logging.WARNING)
 
-    logger.info(f"Generated {len(adjacencies)} TF-target adjacencies")
-    return adjacencies
+    try:
+        # Run GRNBoost2 with local dask cluster (default behavior)
+        adjacencies = grnboost2(
+            expression_data=ex_matrix,
+            tf_names=tf_list,
+            seed=seed,
+            verbose=verbose,
+            client_or_address="local",
+        )
+        logger.info(f"Generated {len(adjacencies)} TF-target adjacencies")
+        return adjacencies
+    finally:
+        # Restore logging level
+        dask_logger.setLevel(old_level)
+        # Clean up any lingering dask client
+        try:
+            from dask.distributed import get_client
+            client = get_client()
+            client.close()
+        except ValueError:
+            pass  # No active client
 
 
 def run_cistarget_pruning(

@@ -51,6 +51,36 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "singlecell-grn"
 SKILL_VERSION = "0.1.0"
 
+# Database download instructions
+DB_DOWNLOAD_INSTRUCTIONS = """
+================================================================================
+pySCENIC Database Files Required for Full GRN Analysis
+================================================================================
+
+For full pySCENIC analysis with motif enrichment, download the following files:
+
+1. TF List (transcription factor gene symbols):
+   wget https://raw.githubusercontent.com/aertslab/pySCENIC/master/resources/hs_hgnc_tfs.txt
+
+2. cisTarget Database (motif-to-gene mappings):
+   wget https://resources.aertslab.org/cistarget/databases/homo_sapiens/hg38/refseq_r80/mc9nr/gene_based/hg38__refseq_r80__mc9nr_gg6_500bp_upstream.feather
+
+3. Motif Annotations (TF-to-motif mappings):
+   wget https://resources.aertslab.org/cistarget/motif2tf/motifs-v9-nr.hgnc-m0.001-o0.0.tbl
+
+Alternatively, store databases in: skills/singlecell/data/databases/motifs/
+
+For more databases, visit:
+- TF list: https://github.com/aertslab/pySCENIC/tree/master/resources
+- cisTarget DBs: https://resources.aertslab.org/cistarget/
+================================================================================
+"""
+
+
+def print_db_instructions():
+    """Print instructions for downloading pySCENIC databases."""
+    print(DB_DOWNLOAD_INSTRUCTIONS)
+
 
 def generate_grn_figures(
     adata,
@@ -262,68 +292,90 @@ def create_demo_tf_list(output_dir: Path) -> Path:
 
 
 def run_demo_mode(adata, output_dir: Path, params: dict) -> dict | None:
-    """Run GRN analysis in demo mode (GRNBoost2 only, no cisTarget)."""
+    """Run GRN analysis in demo mode (GRNBoost2 or correlation fallback)."""
     logger.warning("="*60)
-    logger.warning("Demo mode: Running GRNBoost2 only (no cisTarget pruning)")
+    logger.warning("Demo mode: Running GRN inference")
     logger.warning("For full analysis, provide database files:")
     logger.warning("  --tf-list <file> --db <glob> --motif <file>")
     logger.warning("="*60)
 
+    adjacencies = None
+    regulons = []
+    auc_matrix = pd.DataFrame(index=adata.obs_names)
+
+    # Prepare expression matrix
+    ex_matrix = sc_grn_utils.prepare_expression_matrix(adata)
+
+    # Create demo TF list
+    tf_file = create_demo_tf_list(output_dir)
+    tf_list = sc_grn_utils.load_tf_list(tf_file)
+
+    # Filter TFs to those in data
+    tf_list = [tf for tf in tf_list if tf in adata.var_names]
+    logger.info(f"Using {len(tf_list)} TFs from demo list")
+
+    # Try GRNBoost2 first, then fallback to correlation
     try:
-        # Prepare expression matrix
-        ex_matrix = sc_grn_utils.prepare_expression_matrix(adata)
-
-        # Create demo TF list
-        tf_file = create_demo_tf_list(output_dir)
-        tf_list = sc_grn_utils.load_tf_list(tf_file)
-
-        # Filter TFs to those in data
-        tf_list = [tf for tf in tf_list if tf in adata.var_names]
-        logger.info(f"Using {len(tf_list)} TFs from demo list")
-
-        # Run GRNBoost2 only
         adjacencies = sc_grn_utils.run_grnboost2(
             ex_matrix,
             tf_list,
             seed=42,
             n_jobs=params.get("n_jobs", 4),
         )
+    except ImportError:
+        logger.warning("arboreto not installed, using correlation-based GRN")
+        adjacencies = None
+    except Exception as e:
+        logger.warning(f"GRNBoost2 failed: {e}")
+        logger.info("Falling back to correlation-based GRN inference...")
+        adjacencies = None
 
-        # Create simple regulons from adjacencies
-        regulons = []
-        for tf in tf_list:
-            tf_adj = adjacencies[adjacencies["TF"] == tf].nlargest(params.get("n_top_targets", 50), "importance")
-            if len(tf_adj) > 0:
-                regulons.append({
-                    "tf": tf,
-                    "targets": tf_adj["target"].tolist(),
-                    "n_targets": len(tf_adj),
-                    "motif_nes": None,
-                })
+    # Fallback to correlation-based GRN if GRNBoost2 failed
+    if adjacencies is None or len(adjacencies) == 0:
+        try:
+            adjacencies = sc_grn_utils.run_correlation_grn(
+                ex_matrix,
+                tf_list,
+                method="spearman",
+                n_top=params.get("n_top_targets", 50),
+            )
+            logger.info("Using correlation-based GRN results")
+        except Exception as e:
+            logger.error(f"Correlation-based GRN also failed: {e}")
+            return None
 
-        # Compute pseudo-AUC scores (using top targets)
-        logger.info("Computing pseudo-activity scores...")
-        auc_matrix = pd.DataFrame(index=adata.obs_names)
-        for r in regulons:
-            target_mask = adata.var_names.isin(r["targets"])
-            if target_mask.sum() > 0:
-                if hasattr(adata.X, "toarray"):
-                    expr = adata.X[:, target_mask].toarray()
-                else:
-                    expr = adata.X[:, target_mask]
-                # Mean expression of targets
-                auc_matrix[r["tf"]] = expr.mean(axis=1)
+    # Create simple regulons from adjacencies
+    for tf in tf_list:
+        tf_adj = adjacencies[adjacencies["TF"] == tf].nlargest(params.get("n_top_targets", 50), "importance")
+        if len(tf_adj) > 0:
+            regulons.append({
+                "tf": tf,
+                "targets": tf_adj["target"].tolist(),
+                "n_targets": len(tf_adj),
+                "motif_nes": None,
+            })
 
-        return {
-            "adjacencies": adjacencies,
-            "regulons": regulons,
-            "auc_matrix": auc_matrix,
-        }
+    # Compute pseudo-AUC scores (using top targets)
+    logger.info("Computing pseudo-activity scores...")
+    for r in regulons:
+        target_mask = adata.var_names.isin(r["targets"])
+        if target_mask.sum() > 0:
+            if hasattr(adata.X, "toarray"):
+                expr = adata.X[:, target_mask].toarray()
+            else:
+                expr = adata.X[:, target_mask]
+            # Mean expression of targets
+            auc_matrix[r["tf"]] = expr.mean(axis=1)
 
-    except ImportError as e:
-        logger.error(f"GRNBoost2 requires arboreto: {e}")
-        logger.info("Install with: pip install arboreto")
+    if len(regulons) == 0:
+        logger.error("No regulons identified")
         return None
+
+    return {
+        "adjacencies": adjacencies,
+        "regulons": regulons,
+        "auc_matrix": auc_matrix,
+    }
 
 
 def main():
@@ -395,9 +447,9 @@ def main():
     if result is None:
         logger.error("GRN analysis failed")
         print("\nERROR: GRN analysis failed")
-        print("For full analysis, provide:")
-        print("  --tf-list <file> --db <glob> --motif <file>")
-        print("Or install arboreto for demo mode: pip install arboreto")
+        print("Demo mode uses correlation-based GRN inference (no external databases needed).")
+        print("For full pySCENIC analysis with motif enrichment, download databases:")
+        print_db_instructions()
         sys.exit(1)
 
     adjacencies = result["adjacencies"]
