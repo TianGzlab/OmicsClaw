@@ -144,9 +144,21 @@ of gene expression rankings.
 | Issue | Solution |
 |-------|----------|
 | arboreto not installed | `pip install arboreto` |
+| GRNBoost2 fails (dask error) | Auto-fallback to correlation-based GRN |
 | Database files missing | Download from resources.aertslab.org |
 | Slow GRNBoost2 | Reduce n_jobs if memory-limited |
 | Too few regulons | Check TF list matches your species |
+
+### Known Issue: dask/arboreto Compatibility
+
+arboreto 0.1.6 (2020) may be incompatible with dask 2024.x due to API changes.
+When GRNBoost2 fails, the skill automatically falls back to **correlation-based GRN inference** (Spearman correlation).
+
+For full pySCENIC support with GRNBoost2, you may need:
+```bash
+pip install "dask==2021.11.2" "distributed==2021.11.2"
+```
+However, this may conflict with other packages like squidpy or spatialdata.
 
 ## References
 

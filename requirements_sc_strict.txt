@@ -1,5 +1,6 @@
 # Single-cell requirements with EXACT versions from biomni reference
 # Generated 2026-03-16
+# Updated 2026-03-17: Added dask version for arboreto compatibility
 
 # ========== Core ==========
 numpy==2.1.0
@@ -30,6 +31,9 @@ scvelo==0.3.3
 scvi-tools==1.3.3
 torch==2.7.1
 arboreto==0.1.6
+# NOTE: arboreto 0.1.6 (2020) is incompatible with dask 2024.x
+# If GRNBoost2 fails, sc-grn automatically falls back to correlation-based GRN
+# For full pySCENIC support, consider: dask==2021.11.2 distributed==2021.11.2
 gseapy==1.1.9
 muon==0.1.7
 pydeseq2==0.5.2
