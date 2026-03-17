@@ -102,3 +102,4 @@ htmlcov/
 .coverage.*
 coverage.xml
 *.cover
+bot/data/

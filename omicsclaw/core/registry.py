@@ -201,7 +201,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "script": SKILLS_DIR / "spatial" / "spatial-deconv" / "spatial_deconv.py",
         "demo_args": ["--demo"],
         "description": "Deconvolution — cell type proportions (NNLS, Cell2Location, RCTD, Tangram, CARD)",
-        "allowed_extra_flags": {"--method", "--reference", "--cell-type-key", "--n-epochs"},
+        "allowed_extra_flags": {"--method", "--reference", "--cell-type-key", "--n-epochs", "--no-gpu"},
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },

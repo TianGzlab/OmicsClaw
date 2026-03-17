@@ -223,11 +223,20 @@ async def cmd_demo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Running {skill} demo -- this may take a moment...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
+        async def _progress(msg: str):
+            return await update.message.reply_text(core.strip_markup(msg))
+        async def _progress_update(handle, msg: str):
+            try:
+                await handle.edit_text(core.strip_markup(msg))
+            except Exception:
+                pass
         reply = await core.llm_tool_loop(
             update.effective_chat.id,
             f"Run the {skill} demo using the omicsclaw tool with mode='demo'.",
             user_id=str(update.effective_user.id),
-            platform="telegram"
+            platform="telegram",
+            progress_fn=_progress,
+            progress_update_fn=_progress_update,
         )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
@@ -315,11 +324,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        async def _progress(msg: str):
+            return await update.message.reply_text(core.strip_markup(msg))
+        async def _progress_update(handle, msg: str):
+            try:
+                await handle.edit_text(core.strip_markup(msg))
+            except Exception:
+                pass
         reply = await core.llm_tool_loop(
             update.effective_chat.id,
             user_text,
             user_id=str(update.effective_user.id),
-            platform="telegram"
+            platform="telegram",
+            progress_fn=_progress,
+            progress_update_fn=_progress_update,
         )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
@@ -407,11 +425,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ),
             })
 
+        async def _progress(msg: str):
+            return await update.message.reply_text(core.strip_markup(msg))
+        async def _progress_update(handle, msg: str):
+            try:
+                await handle.edit_text(core.strip_markup(msg))
+            except Exception:
+                pass
         reply = await core.llm_tool_loop(
             update.effective_chat.id,
             content_blocks,
             user_id=str(update.effective_user.id),
-            platform="telegram"
+            platform="telegram",
+            progress_fn=_progress,
+            progress_update_fn=_progress_update,
         )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)
@@ -505,11 +532,20 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"If unsure, use skill='auto'."
             )
 
+        async def _progress(msg: str):
+            return await update.message.reply_text(core.strip_markup(msg))
+        async def _progress_update(handle, msg: str):
+            try:
+                await handle.edit_text(core.strip_markup(msg))
+            except Exception:
+                pass
         reply = await core.llm_tool_loop(
             update.effective_chat.id,
             "\n\n".join(parts),
             user_id=str(update.effective_user.id),
-            platform="telegram"
+            platform="telegram",
+            progress_fn=_progress,
+            progress_update_fn=_progress_update,
         )
         if core.pending_text:
             reply = "\n\n".join(core.pending_text)

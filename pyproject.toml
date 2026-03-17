@@ -154,6 +154,8 @@ spatial-velocity = [
 
 spatial-cnv = [
     "infercnvpy>=0.4.0",             # Copy number variation inference (inferCNVpy)
+    "rpy2>=3.5.0,<3.7",              # R bridge for Numbat
+    "anndata2ri>=1.3.0",              # AnnData <-> R bridge
 ]
 
 spatial-enrichment = [
@@ -184,11 +186,13 @@ spatial-annotate = [
 ]
 
 spatial-deconv = [
-    "flashdeconv>=0.1.0",            # FlashDeconv method
-    "cell2location>=0.1.4",          # Cell2Location method
-    "scvi-tools>=1.0.0,<2.0",        # DestVI, Stereoscope methods
-    "tangram-sc>=1.0.0",              # Tangram method
-    "torch>=2.0.0,<3.0",             # PyTorch (required by scvi-tools)
+    "flashdeconv>=0.1.0",            # FlashDeconv: fast CPU deconvolution
+    "cell2location>=0.1.4",          # Cell2Location: Bayesian spatial deconvolution
+    "scvi-tools>=1.0.0,<2.0",        # DestVI (CondSCVI+DestVI) and Stereoscope
+    "tangram-sc>=1.0.0",             # Tangram: deep learning cell-to-spot mapping
+    "torch>=2.0.0,<3.0",             # PyTorch backend for scvi-tools and Tangram
+    "rpy2>=3.5.0,<3.7",              # R bridge for RCTD, SPOTlight, CARD
+    "anndata2ri>=1.3.0",             # AnnData <-> R object conversion
 ]
 
 spatial-trajectory = [
@@ -198,6 +202,8 @@ spatial-trajectory = [
 
 spatial-genes = [
     "SpatialDE>=1.1.3",              # SpatialDE spatially variable genes
+    "rpy2>=3.5.0,<3.7",              # R bridge for SPARK-X
+    "anndata2ri>=1.3.0",              # AnnData <-> R bridge
 ]
 
 spatial-statistics = [

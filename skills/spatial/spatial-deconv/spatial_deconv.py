@@ -187,12 +187,14 @@ def _common_genes(adata_sp, adata_ref) -> list[str]:
     return common
 
 
-def _get_accelerator(prefer_gpu: bool = False) -> str:
+def _get_accelerator(prefer_gpu: bool = True) -> str:
+    """Return 'gpu' if CUDA is available and preferred, else 'cpu'."""
     if not prefer_gpu:
         return "cpu"
     try:
         import torch
         if torch.cuda.is_available():
+            logger.info("GPU detected: %s", torch.cuda.get_device_name(0))
             return "gpu"
     except ImportError:
         pass
@@ -291,7 +293,7 @@ def deconvolve_cell2location(
     cell_type_key: str = "cell_type",
     n_epochs: int = 30000,
     n_cells_per_spot: int = 30,
-    use_gpu: bool = False,
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     """Deconvolve using Cell2Location (Bayesian, scvi-tools backend)."""
     require("scvi", feature="Cell2Location deconvolution")
@@ -313,9 +315,12 @@ def deconvolve_cell2location(
     if "counts" not in adata_sp.layers:
         adata_sp.layers["counts"] = adata_sp.X.copy()
 
+    accelerator = _get_accelerator(use_gpu)
+    logger.info("Cell2Location accelerator: %s", accelerator)
+
     RegressionModel.setup_anndata(adata_ref_sub, layer="counts", labels_key=cell_type_key)
     ref_model = RegressionModel(adata_ref_sub)
-    ref_model.train(max_epochs=min(250, n_epochs // 10))
+    ref_model.train(max_epochs=min(250, n_epochs // 10), accelerator=accelerator)
 
     inf_aver = ref_model.export_posterior(adata_ref_sub, sample_kwargs={"num_samples": 1000})
 
@@ -341,7 +346,7 @@ def deconvolve_cell2location(
     model = cell2location.models.Cell2location(
         adata_sp, cell_state_df=inf_aver_df, N_cells_per_location=n_cells_per_spot,
     )
-    model.train(max_epochs=n_epochs)
+    model.train(max_epochs=n_epochs, accelerator=accelerator)
 
     adata_sp = model.export_posterior(adata_sp)
     q05 = adata_sp.obsm["q05_cell_abundance_w_sf"]
@@ -360,6 +365,7 @@ def deconvolve_cell2location(
 
     return prop_df, _deconv_stats(
         prop_df, common, "cell2location",
+        device=accelerator,
         n_epochs=n_epochs,
         n_cells_per_spot=n_cells_per_spot,
     )
@@ -475,20 +481,29 @@ def deconvolve_destvi(
     *,
     reference_path: str,
     cell_type_key: str = "cell_type",
-    n_epochs: int = 10000,
+    n_epochs: int = 2500,  # Official tutorial uses max_epochs=2500 for DestVI
     n_hidden: int = 128,
-    n_latent: int = 10,
-    n_layers: int = 1,
-    dropout_rate: float = 0.1,
-    learning_rate: float = 1e-3,
+    n_latent: int = 5,    # Official CondSCVI default
+    n_layers: int = 2,    # Official CondSCVI default
+    dropout_rate: float = 0.05,  # Official CondSCVI default
     vamp_prior_p: int = 15,
-    l1_reg: float = 10.0,
-    use_gpu: bool = False,
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
-    """Deconvolve using DestVI (scvi-tools CondSCVI + DestVI)."""
+    """Deconvolve using DestVI (scvi-tools CondSCVI + DestVI).
+
+    Re-implemented following the official scvi-tools 1.4.x tutorial:
+    https://docs.scvi-tools.org/en/stable/tutorials/notebooks/spatial/DestVI_tutorial.html
+
+    Key design choices from official tutorial:
+      - prior="mog" (Mixture of Gaussians) — avoids mean_vprior type errors
+      - weight_obs=False (default) — no cell type abundance reweighting
+      - CondSCVI trains with default max_epochs (converges ~300)
+      - DestVI trains with user-controlled max_epochs (default 2500)
+    """
     require("scvi", feature="DestVI deconvolution")
 
     import scvi
+    from scvi.model import CondSCVI, DestVI
 
     adata_ref = _load_reference(reference_path, cell_type_key)
     adata_sp = _restore_counts(adata)
@@ -498,44 +513,59 @@ def deconvolve_destvi(
     adata_sp = adata_sp[:, common].copy()
     adata_ref = adata_ref[:, common].copy()
 
-    adata_ref.obs[cell_type_key] = (
-        adata_ref.obs[cell_type_key].astype("category")
+    adata_ref.obs[cell_type_key] = adata_ref.obs[cell_type_key].astype("category")
+
+    accelerator = _get_accelerator(use_gpu)
+
+    # --- Step 1: CondSCVI on reference (scLVM) ---
+    # Determine layer for counts (prefer "counts" layer, fall back to X)
+    sc_layer = "counts" if "counts" in adata_ref.layers else None
+    CondSCVI.setup_anndata(
+        adata_ref,
+        labels_key=cell_type_key,
+        **({"layer": sc_layer} if sc_layer else {}),
     )
 
-    condscvi_epochs = max(400, n_epochs // 5)
-    destvi_epochs = max(200, n_epochs // 10)
-    accelerator = _get_accelerator(use_gpu)
-    plan_kwargs = {"lr": learning_rate}
-
-    scvi.model.CondSCVI.setup_anndata(adata_ref, labels_key=cell_type_key)
-    condscvi_model = scvi.model.CondSCVI(
+    # Official tutorial: prior="mog" with num_classes_mog, weight_obs=False
+    condscvi_model = CondSCVI(
         adata_ref,
         n_hidden=n_hidden,
         n_latent=n_latent,
         n_layers=n_layers,
         dropout_rate=dropout_rate,
-    )
-    condscvi_model.train(
-        max_epochs=condscvi_epochs,
-        accelerator=accelerator,
-        train_size=0.9,
-        plan_kwargs=plan_kwargs,
+        weight_obs=False,
+        prior="mog",
+        num_classes_mog=vamp_prior_p,
     )
 
-    scvi.model.DestVI.setup_anndata(adata_sp)
-    destvi_model = scvi.model.DestVI.from_rna_model(
+    condscvi_epochs = 300  # Official default, converges quickly
+    logger.info(
+        "Training CondSCVI (reference model): max_epochs=%d, accelerator=%s",
+        condscvi_epochs, accelerator,
+    )
+    condscvi_model.train(max_epochs=condscvi_epochs, accelerator=accelerator)
+
+    # --- Step 2: DestVI on spatial data (stLVM) ---
+    st_layer = "counts" if "counts" in adata_sp.layers else None
+    DestVI.setup_anndata(
+        adata_sp,
+        **({"layer": st_layer} if st_layer else {}),
+    )
+
+    destvi_epochs = n_epochs
+    logger.info(
+        "Training DestVI (spatial model): max_epochs=%d, accelerator=%s",
+        destvi_epochs, accelerator,
+    )
+
+    destvi_model = DestVI.from_rna_model(
         adata_sp,
         condscvi_model,
         vamp_prior_p=vamp_prior_p,
-        l1_reg=l1_reg,
     )
-    destvi_model.train(
-        max_epochs=destvi_epochs,
-        accelerator=accelerator,
-        train_size=0.9,
-        plan_kwargs=plan_kwargs,
-    )
+    destvi_model.train(max_epochs=destvi_epochs, accelerator=accelerator)
 
+    # --- Step 3: Extract proportions ---
     prop_df = destvi_model.get_proportions()
     prop_df.index = adata_sp.obs_names
 
@@ -545,9 +575,9 @@ def deconvolve_destvi(
     return prop_df, _deconv_stats(
         prop_df, common, "destvi",
         device=accelerator,
-        n_epochs=n_epochs,
+        n_epochs=destvi_epochs,
         condscvi_epochs=condscvi_epochs,
-        destvi_epochs=destvi_epochs,
+        prior="mog",
     )
 
 
@@ -564,7 +594,7 @@ def deconvolve_stereoscope(
     n_epochs: int = 150000,
     learning_rate: float = 0.01,
     batch_size: int = 128,
-    use_gpu: bool = False,
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     """Deconvolve using Stereoscope (scvi-tools RNAStereoscope + SpatialStereoscope)."""
     require("scvi", feature="Stereoscope deconvolution")
@@ -632,24 +662,32 @@ def deconvolve_tangram(
     reference_path: str,
     cell_type_key: str = "cell_type",
     n_epochs: int = 1000,
-    use_gpu: bool = False,
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     """Deconvolve using Tangram deep learning mapping."""
     require("tangram", feature="Tangram deconvolution")
     import tangram as tg
 
     adata_ref = _load_reference(reference_path, cell_type_key)
+    adata_sp = _restore_counts(adata)
 
+    # Check common genes first (for early error detection)
+    common = _common_genes(adata_sp, adata_ref)
+
+    # Select HVG as training genes
     if "highly_variable" not in adata_ref.var.columns:
         sc.pp.highly_variable_genes(adata_ref, n_top_genes=2000)
     genes = list(adata_ref.var_names[adata_ref.var["highly_variable"]])
 
-    adata_sp = _restore_counts(adata)
     spatial_key = get_spatial_key(adata)
     if spatial_key and spatial_key not in adata_sp.obsm:
         adata_sp.obsm[spatial_key] = adata.obsm[spatial_key].copy()
 
+    # Let tg.pp_adatas handle gene matching internally
     tg.pp_adatas(adata_ref, adata_sp, genes=genes)
+
+    # Get actual training genes used by Tangram
+    training_genes = adata_sp.uns.get('training_genes', common)
 
     device = "cuda" if _get_accelerator(use_gpu) == "gpu" else "cpu"
     logger.info("Tangram mapping (%d epochs, device=%s) ...", n_epochs, device)
@@ -664,9 +702,8 @@ def deconvolve_tangram(
     ct_pred = adata_sp.obsm["tangram_ct_pred"]
     prop_df = ct_pred.div(ct_pred.sum(axis=1), axis=0)
 
-    common = list(set(adata.var_names) & set(adata_ref.var_names))
     return prop_df, _deconv_stats(
-        prop_df, common, "tangram", device=device, n_epochs=n_epochs
+        prop_df, training_genes, "tangram", device=device, n_epochs=n_epochs
     )
 
 
@@ -1131,7 +1168,10 @@ def main() -> None:
     parser.add_argument("--cell-type-key",  default="cell_type",
                         help="Cell type column in reference obs (default: cell_type)")
     parser.add_argument("--n-epochs",       type=int, default=None)
-    parser.add_argument("--use-gpu",        action="store_true")
+    parser.add_argument("--no-gpu", "--cpu", action="store_true",
+                        help="Force CPU even when GPU is available")
+    parser.add_argument("--use-gpu",        action="store_true",
+                        help="(deprecated, GPU is now default for capable methods)")
     parser.add_argument("--rctd-mode",      default="full",
                         choices=["full", "doublet", "single"],
                         help="RCTD mode (default: full)")
@@ -1175,10 +1215,20 @@ def main() -> None:
         "reference_path": args.reference,
         "cell_type_key": args.cell_type_key,
     }
+    # Methods that accept n_epochs parameter
+    _EPOCH_METHODS = {"cell2location", "destvi", "stereoscope", "tangram"}
     if args.n_epochs is not None:
-        kwargs["n_epochs"] = args.n_epochs
+        if args.method in _EPOCH_METHODS:
+            kwargs["n_epochs"] = args.n_epochs
+            logger.info("Using user-specified n_epochs=%d", args.n_epochs)
+        else:
+            logger.warning(
+                "Method '%s' does not support --n-epochs (ignored). "
+                "Supported: %s", args.method, ", ".join(sorted(_EPOCH_METHODS))
+            )
     if cfg.supports_gpu:
-        kwargs["use_gpu"] = args.use_gpu
+        # GPU is default for capable methods; --no-gpu / --cpu opts out
+        kwargs["use_gpu"] = not getattr(args, 'no_gpu', False)
     if args.method == "rctd":
         kwargs["mode"] = args.rctd_mode
     if args.method == "card":

@@ -105,10 +105,17 @@ def get_installed_tiers() -> dict[str, bool]:
         "spatial-domains": importlib.util.find_spec("SpaGCN") is not None and importlib.util.find_spec("torch") is not None,
         "spatial": importlib.util.find_spec("rpy2") is not None or importlib.util.find_spec("scvi") is not None,
         "singlecell": importlib.util.find_spec("scrublet") is not None,
-        "genomics": False, # Genomics currently uses external CLI tools generally, placeholders for now
-        "proteomics": False,
-        "metabolomics": False,
+        "genomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only
+        "proteomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only
+        "metabolomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only
+        "bulkrna": importlib.util.find_spec("pydeseq2") is not None or importlib.util.find_spec("gseapy") is not None,
         # Standalone layers
+        "spatial-annotate": importlib.util.find_spec("tangram") is not None or importlib.util.find_spec("scvi") is not None,
+        "spatial-deconv": importlib.util.find_spec("flashdeconv") is not None or importlib.util.find_spec("cell2location") is not None,
+        "spatial-trajectory": importlib.util.find_spec("cellrank") is not None or importlib.util.find_spec("palantir") is not None,
+        "spatial-genes": importlib.util.find_spec("SpatialDE") is not None,
+        "spatial-statistics": importlib.util.find_spec("esda") is not None or importlib.util.find_spec("libpysal") is not None,
+        "spatial-condition": importlib.util.find_spec("pydeseq2") is not None,
         "spatial-velocity": importlib.util.find_spec("scvelo") is not None,
         "spatial-cnv": importlib.util.find_spec("infercnvpy") is not None,
         "spatial-enrichment": importlib.util.find_spec("gseapy") is not None,

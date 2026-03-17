@@ -306,56 +306,140 @@ def annotate_cellassign(
     *,
     marker_genes: dict[str, list[str]],
     max_epochs: int = 400,
+    batch_key: str | None = None,
+    layer: str | None = None,
 ) -> dict:
-    """Assign cell types using CellAssign probabilistic model."""
+    """Assign cell types using CellAssign probabilistic model.
+
+    CellAssign is a **marker-gene-only** method — it uses a binary marker
+    matrix (genes × cell types) and a negative-binomial mixture model to
+    probabilistically assign each cell to a type.  It does NOT support
+    reference-based transfer (use scANVI / Tangram for that).
+
+    Key implementation notes (per scvi-tools docs):
+      - Size factors must be computed on the **full** gene set *before*
+        subsetting to marker genes.
+      - ``predict()`` always returns a ``pd.DataFrame`` whose columns are
+        the cell-type names from the marker matrix.
+      - The model supports ``batch_key`` for batch-effect correction and
+        ``layer`` to specify which AnnData layer contains raw counts.
+    """
     require("scvi", feature="CellAssign cell type annotation")
     from scvi.external import CellAssign
 
+    # ---- validate marker genes against adata ----
     valid_markers = {}
     all_genes = set(adata.var_names)
+    dropped_genes: dict[str, list[str]] = {}
     for ct, genes in marker_genes.items():
         found = [g for g in genes if g in all_genes]
+        missing = [g for g in genes if g not in all_genes]
         if found:
             valid_markers[ct] = found
+        if missing:
+            dropped_genes[ct] = missing
+
+    if dropped_genes:
+        n_dropped = sum(len(v) for v in dropped_genes.values())
+        logger.warning(
+            "Dropped %d marker gene(s) not present in the dataset: %s",
+            n_dropped,
+            {ct: gs for ct, gs in dropped_genes.items() if gs},
+        )
 
     if not valid_markers:
-        raise ValueError("No marker genes found in the dataset")
+        raise ValueError(
+            "No marker genes found in the dataset. "
+            "Check that gene names in marker_genes match adata.var_names "
+            "(case-sensitive)."
+        )
 
     cell_types = list(valid_markers.keys())
-    marker_gene_list = list({g for genes in valid_markers.values() for g in genes})
+    marker_gene_list = sorted({g for genes in valid_markers.values() for g in genes})
 
+    logger.info(
+        "CellAssign: %d cell types, %d marker genes (from %d provided)",
+        len(cell_types),
+        len(marker_gene_list),
+        sum(len(v) for v in marker_genes.values()),
+    )
+
+    # ---- build binary marker matrix (genes × cell types) ----
     marker_matrix = pd.DataFrame(
-        np.zeros((len(marker_gene_list), len(cell_types))),
+        np.zeros((len(marker_gene_list), len(cell_types)), dtype=np.float64),
         index=marker_gene_list,
         columns=cell_types,
     )
     for ct, genes in valid_markers.items():
         for g in genes:
-            marker_matrix.loc[g, ct] = 1
+            marker_matrix.loc[g, ct] = 1.0
 
+    # ---- compute size factors on FULL gene set before subsetting ----
+    # scvi-tools docs: "the library size should ideally be computed before
+    # any gene subsetting"
+    data_for_libsize = adata.layers[layer] if layer else adata.X
+    lib_size = np.asarray(data_for_libsize.sum(axis=1)).flatten().astype(np.float64)
+    mean_lib = np.mean(lib_size)
+    if mean_lib == 0:
+        raise ValueError("All cells have zero total counts — cannot compute size factors")
+    size_factors = lib_size / mean_lib
+    # Clamp to avoid numerical issues with near-zero cells
+    size_factors = np.maximum(size_factors, 1e-6)
+
+    # ---- subset to marker genes ----
     adata_sub = adata[:, marker_gene_list].copy()
+    adata_sub.obs["size_factors"] = size_factors
 
-    lib_size = np.asarray(adata_sub.X.sum(axis=1)).flatten()
-    adata_sub.obs["size_factors"] = np.maximum(lib_size, 1e-6) / np.mean(np.maximum(lib_size, 1e-6))
+    # ---- setup & train ----
+    setup_kwargs: dict = {"size_factor_key": "size_factors"}
+    if batch_key is not None:
+        if batch_key not in adata_sub.obs.columns:
+            raise ValueError(f"batch_key '{batch_key}' not found in adata.obs")
+        setup_kwargs["batch_key"] = batch_key
+    if layer is not None:
+        if layer in adata_sub.layers:
+            setup_kwargs["layer"] = layer
+        else:
+            logger.warning(
+                "Layer '%s' not found in subsetted adata; using adata.X", layer
+            )
 
-    CellAssign.setup_anndata(adata_sub, size_factor_key="size_factors")
+    CellAssign.setup_anndata(adata_sub, **setup_kwargs)
     model = CellAssign(adata_sub, marker_matrix)
-    model.train(max_epochs=max_epochs)
 
-    predictions = model.predict()
-    if isinstance(predictions, pd.DataFrame):
-        labels = [cell_types[i] for i in predictions.values.argmax(axis=1)]
-    else:
-        labels = [cell_types[i] for i in predictions]
+    logger.info("Training CellAssign (max_epochs=%d, early_stopping=True) ...", max_epochs)
+    model.train(max_epochs=max_epochs, early_stopping=True)
+
+    # ---- predict ----
+    # predict() always returns pd.DataFrame with columns = cell type names
+    predictions = model.predict()  # DataFrame: cells × cell_types, values = probabilities
+
+    # Best cell type per cell (highest probability)
+    labels = predictions.idxmax(axis=1).values
+    # Confidence = max probability per cell
+    confidence = predictions.max(axis=1).values
 
     adata.obs["cell_type"] = pd.Categorical(labels)
+    adata.obs["cellassign_confidence"] = confidence
+    # Store full probability matrix for downstream analysis
+    adata.obsm["cellassign_probabilities"] = predictions.values
+
     counts = adata.obs["cell_type"].value_counts().to_dict()
+    mean_confidence = float(np.mean(confidence))
+
+    logger.info(
+        "CellAssign: %d cell types, mean confidence %.3f",
+        len(counts),
+        mean_confidence,
+    )
 
     return {
         "method": "cellassign",
         "n_cell_types": len(counts),
         "cell_type_counts": counts,
         "n_marker_genes": len(marker_gene_list),
+        "mean_confidence": round(mean_confidence, 4),
+        "cell_type_names": cell_types,
     }
 
 
@@ -517,7 +601,9 @@ def main():
     parser.add_argument("--cell-type-key", default="cell_type", help="Cell type column in reference")
     parser.add_argument("--cluster-key", default="leiden", help="Cluster key for marker_based")
     parser.add_argument("--species", default="human", choices=["human", "mouse"])
-    parser.add_argument("--model", default=None, help="Pre-trained model path (future)")
+    parser.add_argument("--batch-key", default=None, help="Batch key in adata.obs (for cellassign batch correction)")
+    parser.add_argument("--layer", default=None, help="AnnData layer with raw counts (for cellassign)")
+    parser.add_argument("--model", default=None, help="Pre-trained model path or marker gene JSON (for cellassign)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -559,9 +645,16 @@ def main():
         if marker_file and Path(marker_file).exists():
             with open(marker_file) as f:
                 marker_genes = json.load(f)
+            logger.info("Loaded marker genes from: %s", marker_file)
         else:
             marker_genes = _get_default_signatures(args.species)
-        summary = annotate_cellassign(adata, marker_genes=marker_genes)
+            logger.info("Using default %s marker signatures", args.species)
+        summary = annotate_cellassign(
+            adata,
+            marker_genes=marker_genes,
+            batch_key=args.batch_key,
+            layer=args.layer,
+        )
     else:
         print(f"ERROR: Unknown method {args.method}", file=sys.stderr)
         sys.exit(1)

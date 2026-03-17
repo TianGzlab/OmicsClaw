@@ -191,9 +191,8 @@ def run_skill(
     demo: bool = False,
     session_path: str | None = None,
     extra_args: list[str] | None = None,
-    timeout: int = 600,
 ) -> dict:
-    """Run a single skill via subprocess."""
+    """Run a single skill via subprocess (waits until completion)."""
 
     # Resolve legacy aliases
     skill_name = resolve_skill_alias(skill_name)
@@ -204,7 +203,6 @@ def run_skill(
             input_path=input_path,
             output_dir=output_dir,
             session_path=session_path,
-            timeout=timeout,
         )
 
     skill_info = SKILLS.get(skill_name)
@@ -284,13 +282,9 @@ def run_skill(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout,
             cwd=str(script_path.parent),
             env=env,
         )
-    except subprocess.TimeoutExpired:
-        duration = time.time() - t0
-        return _err(skill_name, f"Timed out after {timeout}s", duration=duration)
     except Exception as e:
         duration = time.time() - t0
         return _err(skill_name, str(e), duration=duration)
@@ -324,7 +318,6 @@ def _run_spatial_pipeline(
     input_path: str | None = None,
     output_dir: str | None = None,
     session_path: str | None = None,
-    timeout: int = 600,
 ) -> dict:
     """Run the standard spatial analysis pipeline end-to-end."""
     if not input_path and not session_path:
@@ -348,7 +341,6 @@ def _run_spatial_pipeline(
             input_path=current_input,
             output_dir=str(skill_out),
             session_path=session_path,
-            timeout=timeout,
         )
         all_results[skill_name] = {
             "success": result["success"],
@@ -456,7 +448,6 @@ def main():
     run_p.add_argument("--input", dest="input_path")
     run_p.add_argument("--output", dest="output_dir")
     run_p.add_argument("--session", dest="session_path")
-    run_p.add_argument("--timeout", type=int, default=600)
     # Skill-specific flags (forwarded to the skill script)
     run_p.add_argument("--data-type", dest="data_type")
     run_p.add_argument("--species")
@@ -504,6 +495,10 @@ def main():
     run_p.add_argument("--n-perms", type=int)
     # deconv-specific
     run_p.add_argument("--n-epochs", type=int)
+    run_p.add_argument("--no-gpu", "--cpu", action="store_true",
+                       help="Force CPU even when GPU is available")
+    run_p.add_argument("--use-gpu", action="store_true",
+                       help="(deprecated, GPU is now default for capable methods)")
     # cnv-specific
     run_p.add_argument("--window-size", type=int)
     run_p.add_argument("--step", type=int)
@@ -550,13 +545,19 @@ def main():
         print(f"\n{BOLD}Standalone Layer:{RESET}")
         standalone_layers = [
             ("Spatial-Domains",   "spatial-domains",   "Deep learning spatial domain methods, e.g., SpaGCN"),
-            ("Spatial-Velocity",  "spatial-velocity",  "RNA velocity analysis, e.g., scVelo"),
+            ("Spatial-Annotate",  "spatial-annotate",  "Cell type annotation, e.g., Tangram, scANVI"),
+            ("Spatial-Deconv",    "spatial-deconv",    "Cell type deconvolution, e.g., Cell2Location, FlashDeconv"),
+            ("Spatial-Trajectory","spatial-trajectory","Trajectory inference, e.g., CellRank, Palantir"),
+            ("Spatial-Genes",     "spatial-genes",     "Spatially variable genes, e.g., SpatialDE"),
+            ("Spatial-Statistics","spatial-statistics","Spatial statistics, e.g., Moran's I, Geary's C"),
+            ("Spatial-Condition", "spatial-condition", "Condition comparison, e.g., PyDESeq2 pseudobulk"),
+            ("Spatial-Velocity",  "spatial-velocity",  "RNA velocity analysis, e.g., scVelo, VeloVI"),
             ("Spatial-CNV",       "spatial-cnv",       "Copy number variation inference, e.g., inferCNVpy"),
             ("Spatial-Enrichment","spatial-enrichment", "Pathway enrichment, e.g., GSEApy"),
             ("Spatial-Comm",      "spatial-communication", "Cell communication, e.g., LIANA+, CellPhoneDB"),
             ("Spatial-Integrate", "spatial-integration","Multi-sample integration, e.g., Harmony, BBKNN"),
             ("Spatial-Register",  "spatial-registration","Spatial registration, e.g., PASTE"),
-            ("Spatial-R-Bridge",  "spatial-r-bridge",  "R language bridge, e.g., rpy2, PyDESeq2"),
+            ("Spatial-R-Bridge",  "spatial-r-bridge",  "R language bridge, e.g., rpy2"),
             ("BANKSY",            "banksy",            "BANKSY spatial domains (requires numpy<2.0, isolated env)"),
         ]
         for label, tier_key, desc in standalone_layers:
@@ -655,6 +656,8 @@ def main():
         # boolean flags
         if getattr(args, "refine", False):
             extra.append("--refine")
+        if getattr(args, "no_gpu", False):
+            extra.append("--no-gpu")
         # nargs="+" args
         if getattr(args, "reference_cat", None):
             extra.extend(["--reference-cat"] + args.reference_cat)
@@ -666,7 +669,6 @@ def main():
             demo=args.demo,
             session_path=args.session_path,
             extra_args=extra if extra else None,
-            timeout=args.timeout,
         )
 
         if result["success"]:

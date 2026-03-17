@@ -158,22 +158,47 @@ def run_spatialde(
     fdr_threshold: float = 0.05,
     omnibus: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
-    """SpatialDE2 SVG detection with Gaussian process regression.
+    """SpatialDE SVG detection with Gaussian process regression.
 
-    Identifies genes whose expression patterns have significant spatial structure
-    by comparing spatial GP models against a constant model. Can also assign
-    genes to spatial expression patterns via automatic expression histology (AEH).
+    Re-implemented following the official Teichlab/SpatialDE GitHub tutorial:
+    https://github.com/Teichlab/SpatialDE
+
+    Pipeline:
+      1. NaiveDE.stabilize — Anscombe variance-stabilizing transform
+      2. NaiveDE.regress_out — regress library size (total_counts)
+      3. SpatialDE.run — GP-based spatial DE test
+      4. (optional) SpatialDE.spatial_patterns — AEH pattern assignment
+
+    Key output columns:
+      - g: gene name
+      - pval / qval: raw / FDR-corrected p-value
+      - l: lengthscale (spatial distance of expression change)
+      - FSV: fraction of variance explained by spatial variation
+      - LLR: log-likelihood ratio
     """
-    require("spatialde", feature="SpatialDE spatially variable gene detection")
+    # --- scipy compat shims for SpatialDE 1.x ---
+    # IMPORTANT: These shims MUST run BEFORE require() AND import SpatialDE,
+    # because SpatialDE/base.py does `from scipy.misc import derivative` at
+    # module load time, and SpatialDE/util.py uses `import scipy as sp` then
+    # calls sp.arange, sp.array, sp.argsort, sp.zeros_like which were removed
+    # in scipy >= 1.14.
+    import scipy as _scipy
+    _NUMPY_COMPAT_ATTRS = [
+        "arange", "array", "argsort", "bool_", "concatenate", "diag", "dot",
+        "empty", "exp", "eye", "float64", "inf", "int32", "log", "log2",
+        "newaxis", "ones", "sqrt", "sum", "zeros", "zeros_like", "isnan",
+        "nan", "pi", "linspace", "meshgrid",
+    ]
+    for _attr in _NUMPY_COMPAT_ATTRS:
+        if not hasattr(_scipy, _attr) and hasattr(np, _attr):
+            setattr(_scipy, _attr, getattr(np, _attr))
 
-    # scipy.misc.derivative was removed in scipy>=1.14; patch it back so
-    # SpatialDE 1.x (which imports it at module load time) can be imported.
+    # scipy.misc.derivative — removed in scipy >= 1.14, needed by base.py
     import scipy.misc as _scipy_misc
     if not hasattr(_scipy_misc, "derivative"):
-        import numpy as _np
 
         def _derivative_compat(func, x0, dx=1.0, n=1, args=(), order=3):
-            """Central-difference numerical derivative (scipy.misc compat shim)."""
+            """Central-difference numerical derivative (scipy.misc compat)."""
             if n == 1:
                 return (func(x0 + dx, *args) - func(x0 - dx, *args)) / (2.0 * dx)
             if n == 2:
@@ -182,28 +207,31 @@ def run_spatialde(
                     - 2.0 * func(x0, *args)
                     + func(x0 - dx, *args)
                 ) / dx**2
-            # General n: use higher-order central differences
             from math import comb
             ho = order >> 1
-            weights = _np.array(
+            weights = np.array(
                 [(-1) ** (n - k + ho) * comb(n, abs(k - ho)) for k in range(order)],
                 dtype=float,
             )
-            vals = _np.array(
+            vals = np.array(
                 [func(x0 + (k - ho) * dx, *args) for k in range(order)]
             )
-            return _np.dot(weights, vals) / dx**n
+            return np.dot(weights, vals) / dx**n
 
         _scipy_misc.derivative = _derivative_compat
 
+    # NOW safe to require/import
+    require("spatialde", feature="SpatialDE spatially variable gene detection")
     import SpatialDE
     import NaiveDE
 
+    # ----- Prepare data (following official tutorial) -----
     spatial_key = require_spatial_coords(adata)
     coords = adata.obsm[spatial_key]
 
     logger.info("Running SpatialDE on %d genes ...", adata.n_vars)
 
+    # Build counts DataFrame (samples × genes)
     adata_work = adata.copy()
     if sparse.issparse(adata_work.X):
         adata_work.X = adata_work.X.toarray()
@@ -213,43 +241,64 @@ def run_spatialde(
         index=adata_work.obs_names,
         columns=adata_work.var_names,
     )
+
+    # Filter practically unobserved genes (official: counts.sum(0) >= 3)
+    gene_totals = counts.sum(axis=0)
+    counts = counts.T[gene_totals >= 3].T
+    if counts.shape[1] == 0:
+        raise ValueError("All genes have < 3 total counts — cannot run SpatialDE.")
+    logger.info("SpatialDE: %d genes remain after count filter (>= 3)", counts.shape[1])
+
+    # Build sample_info with spatial coords + total_counts
     sample_info = pd.DataFrame(
         {"x": coords[:, 0], "y": coords[:, 1], "total_counts": counts.sum(axis=1)},
         index=adata_work.obs_names,
     )
 
-    # Drop genes with zero total counts to avoid log(0) in NaiveDE.stabilize.
-    gene_totals = counts.sum(axis=0)
-    counts = counts.loc[:, gene_totals > 0]
-    if counts.shape[1] == 0:
-        raise ValueError("All genes have zero counts after filtering — cannot run SpatialDE.")
-    logger.info("SpatialDE: %d genes remain after zero-count filter", counts.shape[1])
-
-    # Step 1 — variance-stabilize.
-    # NaiveDE.stabilize expects genes × samples (rows=genes), returns same shape.
+    # Step 1 — Anscombe variance-stabilizing transform (official tutorial)
+    # NaiveDE.stabilize expects genes × samples (rows=genes), returns same
     norm_expr = NaiveDE.stabilize(counts.T).T
 
-    # Step 2 — regress out per-cell total-count effect.
-    # Without this step, cells with high library size inflate expression values
-    # across all genes, causing SpatialDE's LR test to produce p-values > 1
-    # and triggering the "p-values should be between 0 and 1" AssertionError.
+    # Step 2 — Regress out per-cell library size (official tutorial)
     resid_expr = NaiveDE.regress_out(
         sample_info, norm_expr.T, "np.log(total_counts)"
     ).T
 
-    # Step 3 — drop zero-variance genes (constant after regress_out → degenerate GP).
+    # Step 3 — Drop zero-variance genes (constant after regress_out → degenerate GP)
     gene_var = resid_expr.var(axis=0)
     resid_expr = resid_expr.loc[:, gene_var > 0]
     if resid_expr.shape[1] == 0:
         raise ValueError(
-            "All genes have zero variance after regress_out — cannot run SpatialDE."
+            "All genes have zero variance after normalization — cannot run SpatialDE."
         )
     logger.info("SpatialDE: %d genes pass variance filter", resid_expr.shape[1])
 
-    # Convert to numpy array: SpatialDE.base uses [:, None] indexing which
-    # is incompatible with pandas Series in newer pandas versions.
-    coords_xy = sample_info[["x", "y"]].to_numpy()
-    results = SpatialDE.run(coords_xy, resid_expr)
+    # Step 4 — Run SpatialDE GP test (official: SpatialDE.run(X, resid_expr))
+    X = sample_info[["x", "y"]]
+    results = SpatialDE.run(X, resid_expr)
+
+    # Step 5 — Optional: AEH (Automatic Expression Histology)
+    # Groups significant genes into spatial co-expression patterns
+    aeh_results = None
+    aeh_patterns = None
+    if omnibus:
+        sign_results = results.query("qval < @fdr_threshold")
+        if len(sign_results) >= 5:
+            # Use median optimal lengthscale from significant genes
+            l_aeh = float(sign_results["l"].median())
+            n_patterns = min(max(3, len(sign_results) // 10), 10)
+            try:
+                logger.info(
+                    "Running AEH: %d significant genes, %d patterns, l=%.2f",
+                    len(sign_results), n_patterns, l_aeh,
+                )
+                aeh_results, aeh_patterns = SpatialDE.spatial_patterns(
+                    X, resid_expr, sign_results, C=n_patterns, l=l_aeh, verbosity=0,
+                )
+            except Exception as aeh_err:
+                logger.warning("AEH failed (non-fatal): %s", aeh_err)
+
+    # ----- Format results -----
     results = results.sort_values("qval")
 
     col_map = {"g": "gene", "qval": "pval_norm", "LLR": "I"}
@@ -270,7 +319,17 @@ def run_spatialde(
         "top_genes": top["gene"].tolist(),
     }
 
+    if aeh_results is not None:
+        n_patterns = int(aeh_results["pattern"].nunique())
+        summary["aeh_patterns"] = n_patterns
+        logger.info("AEH assigned %d genes to %d spatial patterns", len(aeh_results), n_patterns)
+
+    # Store full results for downstream use
     adata.uns["spatialde_results"] = results
+    if aeh_results is not None:
+        adata.uns["spatialde_aeh"] = aeh_results
+    if aeh_patterns is not None:
+        adata.uns["spatialde_patterns"] = aeh_patterns
 
     logger.info(
         "SpatialDE: %d/%d genes significant (qval < %.2f), reporting top %d",

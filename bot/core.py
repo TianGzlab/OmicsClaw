@@ -436,7 +436,7 @@ def init(
             from bot.memory import SQLiteBackend, SecureFieldEncryptor
 
             db_path = os.getenv("OMICSCLAW_MEMORY_DB_PATH", "bot/data/memory.db")
-            encryption_key = os.getenv("OMICSCLAW_MEMORY_ENCRYPTION_KEY")
+            encryption_key = os.getenv("ENCRYPTION_KEY")
 
             if not encryption_key:
                 import secrets
@@ -464,14 +464,14 @@ def init(
 
 def get_role_guardrails() -> str:
     domain_names = ", ".join(d["name"].lower() for d in registry.domains.values())
-    
+
     routing_lines = []
     for alias, info in registry.skills.items():
         desc = info.get("description", alias).split("—")[0].split("(")[0].strip()
         routing_lines.append(f"   - {desc}: skill='{alias}'")
-        
+
     routing_text = "\n".join(routing_lines)
-    
+
     return f"""
 Operational constraints:
 1. You are a multi-omics analysis assistant powered by OmicsClaw skills.
@@ -480,6 +480,18 @@ Operational constraints:
 4. When the user sends omics data or asks about analysis, use the omicsclaw tool. Skill routing:
 {routing_text}
    - Auto-detect skill: skill='auto'
+4b. METHOD PARAMETER (CRITICAL): When user specifies a method, pass it LOWERCASE via method parameter:
+   - spatial-deconv methods: flashdeconv, cell2location, rctd, destvi, stereoscope, tangram, spotlight, card
+   - spatial-domains methods: leiden, louvain, spagcn, stagate, graphst
+   - spatial-annotate methods: tangram, scanvi, cellassign, sctype
+   - spatial-communication methods: liana, cellphonedb, fastccc
+   - spatial-trajectory methods: dpt, cellrank, palantir
+   - spatial-genes methods: spatialde, sparkx
+   - spatial-integration methods: harmony, bbknn, scanorama
+   - spatial-velocity methods: scvelo, velovi
+   Examples: "Cell2location" → method='cell2location', "Tangram" → method='tangram'
+   IMPORTANT: Deep learning methods (cell2location, destvi, stereoscope, tangram, spagcn, stagate, graphst, scvi, velovi)
+   may take 10-30 minutes. Inform user: "This will take 10-30 minutes, please wait..."
 5. TOOL OUTPUT RELAY (STRICT): When the omicsclaw tool returns results, relay
    the output VERBATIM. Do not paraphrase, summarise, or rewrite. The output
    contains precise numerical data that must not be altered. You may add a brief
@@ -513,6 +525,14 @@ Operational constraints:
      asks to save or export specific data. All such files go to the output/ directory.
    - Do NOT use list_directory to browse output directories after an omicsclaw call —
      the tool result already contains all the information you need.
+11. NO SILENT FALLBACK (STRICT): When a user specifies a method and it FAILS:
+    - NEVER silently switch to a different method. This is a CRITICAL violation.
+    - Report the EXACT error message from the failed method to the user.
+    - Ask the user if they want to try an alternative method.
+    - Only switch methods with EXPLICIT user confirmation.
+    Example: User asks for DestVI, it fails → Tell user "DestVI failed: <error>.
+    Would you like to try Tangram or Cell2Location instead?"
+    WRONG: Silently run Tangram and say "The Tangram analysis succeeded".
 """
 
 def build_system_prompt(memory_context: str = "") -> str:
@@ -606,6 +626,15 @@ def get_tools() -> list[dict]:
                         "method": {
                             "type": "string",
                             "description": "Analysis method override passed as --method.",
+                        },
+                        "n_epochs": {
+                            "type": "integer",
+                            "description": (
+                                "Number of training epochs for deep learning methods. "
+                                "Defaults per method if omitted: "
+                                "cell2location=30000, destvi=2500, stereoscope=150000, tangram=1000. "
+                                "Only set when the user explicitly requests a custom epoch count."
+                            ),
                         },
                         "data_type": {
                             "type": "string",
@@ -921,13 +950,20 @@ def validate_input_path(filepath: str) -> Path | None:
     _ensure_trusted_dirs()
     p = Path(filepath).expanduser()
     if not p.is_absolute():
-        for d in TRUSTED_DATA_DIRS:
-            candidate = d / p
-            if candidate.exists() and candidate.is_file():
-                p = candidate
-                break
+        # 1. Try relative to project root first (most common case)
+        candidate = OMICSCLAW_DIR / p
+        if candidate.exists() and candidate.is_file():
+            p = candidate
         else:
-            p = DATA_DIR / p
+            # 2. Try each trusted data directory
+            for d in TRUSTED_DATA_DIRS:
+                candidate = d / p
+                if candidate.exists() and candidate.is_file():
+                    p = candidate
+                    break
+            else:
+                # 3. Fall back to DATA_DIR
+                p = DATA_DIR / p
 
     resolved = p.resolve()
     if not resolved.exists() or not resolved.is_file():
@@ -939,6 +975,13 @@ def validate_input_path(filepath: str) -> Path | None:
             return resolved
         except ValueError:
             continue
+
+    # Also allow files anywhere under project root
+    try:
+        resolved.relative_to(OMICSCLAW_DIR.resolve())
+        return resolved
+    except ValueError:
+        pass
 
     logger.warning(f"Path not in trusted dirs: {resolved}")
     audit("security", severity="MEDIUM", detail="untrusted_path_rejected", path=str(resolved))
@@ -981,8 +1024,16 @@ def discover_file(filename_or_pattern: str) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
+# Deep learning methods that may take a long time
+DEEP_LEARNING_METHODS = {
+    "cell2location", "destvi", "stereoscope", "tangram",
+    "spagcn", "stagate", "graphst", "scvi", "velovi",
+    "scanvi", "cellassign",
+}
+
+
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
-    """Execute an OmicsClaw skill via subprocess."""
+    """Execute an OmicsClaw skill via subprocess (waits until completion)."""
     skill_key = args.get("skill", "auto")
     mode = args.get("mode", "demo")
     query = args.get("query", "")
@@ -1112,6 +1163,11 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     if data_type:
         cmd.extend(["--data-type", data_type])
 
+    # Pass n_epochs if user specified
+    n_epochs = args.get("n_epochs")
+    if n_epochs is not None:
+        cmd.extend(["--n-epochs", str(int(n_epochs))])
+
     extra_args = args.get("extra_args")
     if extra_args and isinstance(extra_args, list):
         # Filter out --output to prevent overriding bot-managed output directory
@@ -1135,21 +1191,16 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=300,
-        )
+
+        # Log start for deep learning methods
+        is_dl = method.lower() in DEEP_LEARNING_METHODS
+        if is_dl:
+            logger.info(f"Starting {skill_key} with {method} (no timeout, may take 10-60 minutes)")
+
+        # Wait until completion — no timeout
+        stdout_bytes, stderr_bytes = await proc.communicate()
         stdout_str = stdout_bytes.decode(errors="replace")
         stderr_str = stderr_bytes.decode(errors="replace")
-    except asyncio.TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        # Clean up empty output directory on timeout
-        if out_dir.exists():
-            shutil.rmtree(out_dir, ignore_errors=True)
-        return f"{skill_key} timed out after 300 seconds."
     except Exception as e:
         import traceback as _tb
         # Clean up empty output directory on crash
@@ -1848,28 +1899,43 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 # ---------------------------------------------------------------------------
 
 
-async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: str = None, platform: str = None) -> str:
+async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: str = None, platform: str = None, progress_fn=None, progress_update_fn=None) -> str:
     """
     Run the LLM tool-use loop:
     1. Append user message to history
     2. Call LLM with system prompt + history + tools
     3. If tool_calls -> execute -> append results -> call again
     4. Return final text
+
+    progress_fn: async callable(msg) -> handle. Sends a progress message, returns a handle.
+    progress_update_fn: async callable(handle, msg). Updates a previously sent progress message.
     """
     # Handle commands before LLM call
     if isinstance(user_content, str) and user_content.strip().startswith("/"):
         cmd = user_content.strip().lower()
 
-        if cmd == "/clear" or cmd == "/new":
+        if cmd == "/clear":
+            # Only clear conversation history, keep memory intact
+            if chat_id in conversations:
+                del conversations[chat_id]
+            return "✓ Conversation history cleared. (Memory preserved)"
+
+        elif cmd == "/new":
+            # Clear conversation history but keep memory
+            if chat_id in conversations:
+                del conversations[chat_id]
+            return "✓ New conversation started. (Memory preserved)"
+
+        elif cmd == "/forget":
+            # Clear both conversation and memory for a complete reset
             if chat_id in conversations:
                 del conversations[chat_id]
 
-            # Clear memory session if enabled
             if session_manager and user_id and platform:
                 session_id = f"{platform}:{user_id}:{chat_id}"
                 await memory_store.delete_session(session_id)
 
-            return "✓ New conversation started." if cmd == "/new" else "✓ Conversation history cleared."
+            return "✓ Memory and conversation cleared. (Fresh start)"
 
         elif cmd == "/files":
             try:
@@ -1984,8 +2050,9 @@ For updates and documentation, visit the GitHub repository."""
             return """# OmicsClaw Bot Commands
 
 **Quick Commands:**
-- `/new` - Start new conversation
-- `/clear` - Clear conversation history
+- `/new` - Start new conversation (memory preserved)
+- `/clear` - Clear conversation history (memory preserved)
+- `/forget` - Clear conversation + memory (complete reset)
 - `/help` - Show this help message
 - `/files` - List data files
 - `/outputs` - Show recent analysis results
@@ -1995,6 +2062,11 @@ For updates and documentation, visit the GitHub repository."""
 - `/examples` - Show usage examples
 - `/status` - Bot status and uptime
 - `/version` - Show version info
+
+**Memory System:**
+- `/clear` and `/new` preserve your analysis history and preferences
+- Only `/forget` completely clears all memory
+- Bot remembers your datasets, analyses, and preferences across sessions
 
 **Literature Analysis:**
 - Upload PDF or send article URL/DOI
@@ -2010,7 +2082,7 @@ For updates and documentation, visit the GitHub repository."""
 - "Run spatial-preprocessing on data.h5ad"
 - "Analyze GSE123456 dataset"
 
-For more info: https://github.com/zhou-1314/OmicsClaw"""
+For more info: https://github.com/TianGzlab/OmicsClaw"""
 
     _ensure_system_prompt()
     if llm is None:
@@ -2064,6 +2136,7 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
     history[:] = sanitised
 
     last_message = None
+    _notified_methods: set[str] = set()  # Avoid duplicate progress messages
     for _iteration in range(MAX_TOOL_ITERATIONS):
         try:
             response = await llm.chat.completions.create(
@@ -2108,6 +2181,21 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
                 logger.info(f"Tool call: {func_name}({json.dumps(func_args)[:200]})")
                 audit("tool_call", chat_id=str(chat_id), tool=func_name,
                       args_preview=json.dumps(func_args, default=str)[:300])
+
+                # Send progress message for deep learning methods (once per method)
+                _progress_handle = None
+                if func_name == "omicsclaw" and progress_fn:
+                    dl_method = (func_args.get("method") or "").lower()
+                    if dl_method in DEEP_LEARNING_METHODS and dl_method not in _notified_methods:
+                        _notified_methods.add(dl_method)
+                        method_display = func_args.get("method", dl_method)
+                        _progress_handle = await progress_fn(
+                            f"⏳ **{method_display}** is a deep learning method and may take "
+                            f"10-60 minutes depending on data size. Please be patient...\n\n"
+                            f"💡 The analysis is running on the server, you can leave this "
+                            f"chat open and come back later."
+                        )
+
                 try:
                     # Pass session_id and chat_id to omicsclaw executor
                     if func_name == "omicsclaw" and user_id and platform:
@@ -2117,11 +2205,27 @@ For more info: https://github.com/zhou-1314/OmicsClaw"""
                         result = await executor(func_args, chat_id=chat_id)
                     else:
                         result = await executor(func_args)
+
+                    # Update progress message on success
+                    if _progress_handle and progress_update_fn:
+                        method_display = (func_args.get("method") or "analysis")
+                        await progress_update_fn(
+                            _progress_handle,
+                            f"✅ **{method_display}** analysis complete!"
+                        )
                 except Exception as tool_err:
                     logger.error(f"Tool {func_name} raised: {tool_err}", exc_info=True)
                     audit("tool_error", chat_id=str(chat_id), tool=func_name,
                           error=str(tool_err)[:300])
                     result = f"Error executing {func_name}: {type(tool_err).__name__}: {tool_err}"
+
+                    # Update progress message on failure
+                    if _progress_handle and progress_update_fn:
+                        method_display = (func_args.get("method") or "analysis")
+                        await progress_update_fn(
+                            _progress_handle,
+                            f"❌ **{method_display}** failed: {type(tool_err).__name__}"
+                        )
             else:
                 result = f"Unknown tool: {func_name}"
 

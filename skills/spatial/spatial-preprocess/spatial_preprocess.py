@@ -50,8 +50,8 @@ SKILL_VERSION = "0.1.0"
 def preprocess(
     adata,
     *,
-    min_genes: int = 200,
-    min_cells: int = 3,
+    min_genes: int = 0,
+    min_cells: int = 0,
     max_mt_pct: float = 20.0,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
@@ -97,7 +97,7 @@ def preprocess(
 
     # HVG
     n_hvg = min(n_top_hvg, adata.n_vars - 1)
-    sc.pp.highly_variable_genes(adata, n_top_genes=n_hvg, flavor="seurat")
+    sc.pp.highly_variable_genes(adata, n_top_genes=n_hvg, flavor="seurat_v3")
     logger.info("Selected %d highly variable genes", adata.var["highly_variable"].sum())
 
     # Scale + PCA on HVG
@@ -330,13 +330,13 @@ def main():
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--data-type", default="generic")
     parser.add_argument("--species", default="human")
-    parser.add_argument("--min-genes", type=int, default=200)
-    parser.add_argument("--min-cells", type=int, default=3)
+    parser.add_argument("--min-genes", type=int, default=0)
+    parser.add_argument("--min-cells", type=int, default=0)
     parser.add_argument("--max-mt-pct", type=float, default=20.0)
     parser.add_argument("--n-top-hvg", type=int, default=2000)
-    parser.add_argument("--n-pcs", type=int, default=50)
+    parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--n-neighbors", type=int, default=15)
-    parser.add_argument("--leiden-resolution", type=float, default=1.0)
+    parser.add_argument("--leiden-resolution", type=float, default=0.5)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)

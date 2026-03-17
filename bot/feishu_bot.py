@@ -689,11 +689,23 @@ async def _process_message_async(
 
         user_content = text
 
+    # Create progress callbacks to notify user about long-running tasks
+    async def _progress(msg: str):
+        """Send progress message, return message_id as handle."""
+        return _send_text(chat_id, core.strip_markup(msg))
+
+    async def _progress_update(handle, msg: str):
+        """Update a previously sent progress message."""
+        if handle:
+            _update_text(handle, core.strip_markup(msg))
+
     reply = await core.llm_tool_loop(
         pure_chat_id,  # Pass pure chat_id, llm_tool_loop will construct session_id
         user_content,
         user_id=user_id,
-        platform="feishu"
+        platform="feishu",
+        progress_fn=_progress,
+        progress_update_fn=_progress_update,
     )
 
     if core.pending_text:
@@ -793,9 +805,10 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
         try:
             # Pass pure chat_id (not session_key) to llm_tool_loop
             # llm_tool_loop will construct session_id internally as f"{platform}:{user_id}:{chat_id}"
+            # No timeout — wait until analysis completes
             reply = _run_async(
                 _process_message_async(chat_id, sender_id if chat_type == 'p2p' else chat_id, text, attachments, sender_id),
-                timeout=300,
+                timeout=None,
             )
         except Exception as e:
             logger.error(f"Message processing error: {e}", exc_info=True)
@@ -837,7 +850,8 @@ def _handle_feishu_event(data: lark.im.v1.P2ImMessageReceiveV1):
             with placeholder_lock:
                 if placeholder_id:
                     try:
-                        _delete_message(placeholder_id)
+                        # Update placeholder instead of deleting it
+                        _update_text(placeholder_id, "✓ 分析完成，正在发送结果…")
                     except Exception:
                         pass
                     placeholder_id = ""
