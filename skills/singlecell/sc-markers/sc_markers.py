@@ -33,6 +33,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 from omicsclaw.singlecell import io as sc_io
 from omicsclaw.singlecell import markers as sc_markers_utils
@@ -41,7 +45,43 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "singlecell-markers"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "wilcoxon": MethodConfig(
+        name="wilcoxon",
+        description="Wilcoxon rank-sum test (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+    "t-test": MethodConfig(
+        name="t-test",
+        description="Welch's t-test (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+    "logreg": MethodConfig(
+        name="logreg",
+        description="Logistic regression (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+# All methods are dispatched via sc_markers_utils.find_all_cluster_markers;
+# _METHOD_DISPATCH kept for structural consistency.
+_METHOD_DISPATCH = {
+    "wilcoxon": "wilcoxon",
+    "t-test": "t-test",
+    "logreg": "logreg",
+}
 
 
 def generate_marker_figures(adata, markers, output_dir: Path, n_top: int = 10) -> list[str]:
@@ -233,7 +273,7 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
     parser.add_argument("--groupby", default="leiden", help="Grouping column (default: leiden)")
-    parser.add_argument("--method", default="wilcoxon", choices=["wilcoxon", "t-test", "logreg"],
+    parser.add_argument("--method", default="wilcoxon", choices=list(METHOD_REGISTRY.keys()),
                         help="Statistical test method")
     parser.add_argument("--n-genes", type=int, default=None, help="Number of genes per cluster")
     parser.add_argument("--n-top", type=int, default=10, help="Top N markers per cluster for visualization")
@@ -264,20 +304,23 @@ def main():
         logger.info(f"Available columns: {list(adata.obs.columns)}")
         raise ValueError(f"Column '{args.groupby}' not found")
 
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY)
+
     # Parameters
     params = {
         "groupby": args.groupby,
-        "method": args.method,
+        "method": method,
         "n_genes": args.n_genes,
         "n_top": args.n_top,
     }
 
     # Find markers
-    logger.info(f"Finding marker genes using {args.method}...")
+    logger.info(f"Finding marker genes using {method}...")
     markers = sc_markers_utils.find_all_cluster_markers(
         adata,
         cluster_key=args.groupby,
-        method=args.method,
+        method=method,
         n_genes=args.n_genes,
     )
 

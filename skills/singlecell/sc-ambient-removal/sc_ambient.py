@@ -33,6 +33,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 from omicsclaw.singlecell import ambient as sc_ambient_utils
 
@@ -40,7 +44,45 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "singlecell-ambient-removal"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "cellbender": MethodConfig(
+        name="cellbender",
+        description="CellBender — deep generative model for ambient RNA removal",
+        dependencies=("cellbender",),
+        supports_gpu=True,
+    ),
+    "soupx": MethodConfig(
+        name="soupx",
+        description="SoupX — ambient RNA estimation and subtraction (R)",
+        dependencies=("rpy2",),
+        is_r_based=True,
+    ),
+    "simple": MethodConfig(
+        name="simple",
+        description="Simple ambient subtraction (scanpy, no extra dependencies)",
+        dependencies=("scanpy",),
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+# Note: ambient removal uses inline dispatch in main() due to complex
+# fallback logic. _METHOD_DISPATCH is provided for structural consistency.
+_METHOD_DISPATCH = {
+    "cellbender": "cellbender",
+    "soupx": "soupx",
+    "simple": "simple",
+}
 
 
 def generate_ambient_figures(adata_before, adata_after, output_dir: Path) -> list[str]:
@@ -197,7 +239,7 @@ def main():
     parser.add_argument("--input", dest="input_path", help="Input file")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
-    parser.add_argument("--method", default="simple", choices=["cellbender", "soupx", "simple"],
+    parser.add_argument("--method", default="simple", choices=list(METHOD_REGISTRY.keys()),
                         help="Method for ambient RNA removal")
     parser.add_argument("--expected-cells", type=int, default=None, help="Expected cells (CellBender)")
     parser.add_argument("--raw-h5", type=str, default=None, help="Raw H5 file for CellBender")
@@ -224,6 +266,10 @@ def main():
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY, fallback="simple")
+    args.method = method
 
     # Store original for comparison
     adata_before = adata.copy()

@@ -24,6 +24,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
 from omicsclaw.singlecell.adata_utils import store_analysis_metadata
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 import matplotlib
 matplotlib.use("Agg")
@@ -33,8 +37,49 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-annotate"
-SKILL_VERSION = "0.2.0"
-SUPPORTED_METHODS = ("markers", "celltypist", "singler", "scmap")
+SKILL_VERSION = "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "markers": MethodConfig(
+        name="markers",
+        description="Marker-based annotation using known gene signatures",
+        dependencies=("scanpy",),
+    ),
+    "celltypist": MethodConfig(
+        name="celltypist",
+        description="CellTypist automated cell type annotation",
+        dependencies=("celltypist",),
+    ),
+    "singler": MethodConfig(
+        name="singler",
+        description="SingleR reference-based annotation (R)",
+        dependencies=("rpy2",),
+        is_r_based=True,
+    ),
+    "scmap": MethodConfig(
+        name="scmap",
+        description="scmap projection-based annotation (R)",
+        dependencies=("rpy2",),
+        is_r_based=True,
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+_METHOD_DISPATCH = {
+    "markers": lambda adata, args: annotate_markers(adata),
+    "celltypist": lambda adata, args: annotate_celltypist(adata, args.model),
+    "singler": lambda adata, args: annotate_singler(adata),
+    "scmap": lambda adata, args: annotate_scmap(adata),
+}
 
 PBMC_MARKERS = {
     'CD4 T': ['CD3D', 'CD4'],
@@ -177,26 +222,12 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
 
 
-def _dispatch_method(method: str, adata, args) -> dict:
-    """Route to annotation method."""
-    if method == "markers":
-        return annotate_markers(adata)
-    elif method == "celltypist":
-        return annotate_celltypist(adata, args.model)
-    elif method == "singler":
-        return annotate_singler(adata)
-    elif method == "scmap":
-        return annotate_scmap(adata)
-    else:
-        raise ValueError(f"Unknown method: {method}. Choose from {SUPPORTED_METHODS}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Single-Cell Annotation")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="markers")
+    parser.add_argument("--method", choices=list(METHOD_REGISTRY.keys()), default="markers")
     parser.add_argument("--model", default="Immune_All_Low", help="CellTypist model")
     args = parser.parse_args()
 
@@ -219,7 +250,10 @@ def main():
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
 
-    summary = _dispatch_method(args.method, adata, args)
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY, fallback="markers")
+
+    summary = _METHOD_DISPATCH[method](adata, args)
     summary['n_cells'] = int(adata.n_obs)
 
     params = {"method": args.method}

@@ -24,6 +24,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
 from omicsclaw.singlecell.adata_utils import store_analysis_metadata
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 from omicsclaw.singlecell.dependency_manager import require, get
 import matplotlib
@@ -34,8 +38,43 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-doublet"
-SKILL_VERSION = "0.2.0"
-SUPPORTED_METHODS = ("scrublet", "doubletfinder", "scdblfinder")
+SKILL_VERSION = "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "scrublet": MethodConfig(
+        name="scrublet",
+        description="Scrublet — computational doublet detection",
+        dependencies=("scrublet",),
+    ),
+    "doubletfinder": MethodConfig(
+        name="doubletfinder",
+        description="DoubletFinder — k-NN based doublet detection (R)",
+        dependencies=("rpy2",),
+        is_r_based=True,
+    ),
+    "scdblfinder": MethodConfig(
+        name="scdblfinder",
+        description="scDblFinder — fast doublet detection (R/Bioconductor)",
+        dependencies=("rpy2",),
+        is_r_based=True,
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+_METHOD_DISPATCH = {
+    "scrublet": lambda adata, args: detect_doublets_scrublet(adata, args.expected_doublet_rate, args.threshold),
+    "doubletfinder": lambda adata, args: detect_doublets_doubletfinder(adata, args.expected_doublet_rate),
+    "scdblfinder": lambda adata, args: detect_doublets_scdblfinder(adata, args.expected_doublet_rate),
+}
 
 
 def detect_doublets_scrublet(adata, expected_doublet_rate=0.06, threshold=None):
@@ -174,24 +213,12 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
 
 
-def _dispatch_method(method: str, adata, args) -> dict:
-    """Route to the correct doublet detection function."""
-    if method == "scrublet":
-        return detect_doublets_scrublet(adata, args.expected_doublet_rate, args.threshold)
-    elif method == "doubletfinder":
-        return detect_doublets_doubletfinder(adata, args.expected_doublet_rate)
-    elif method == "scdblfinder":
-        return detect_doublets_scdblfinder(adata, args.expected_doublet_rate)
-    else:
-        raise ValueError(f"Unknown method: {method}. Choose from {SUPPORTED_METHODS}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Single-Cell Doublet Detection")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="scrublet")
+    parser.add_argument("--method", choices=list(METHOD_REGISTRY.keys()), default="scrublet")
     parser.add_argument("--expected-doublet-rate", type=float, default=0.06)
     parser.add_argument("--threshold", type=float, default=None)
     args = parser.parse_args()
@@ -216,8 +243,11 @@ def main():
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
 
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY, fallback="scrublet")
+
     # Detect doublets
-    summary = _dispatch_method(args.method, adata, args)
+    summary = _METHOD_DISPATCH[method](adata, args)
     summary['n_cells'] = int(adata.n_obs)
 
     params = {

@@ -38,6 +38,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 from omicsclaw.singlecell import io as sc_io
 from omicsclaw.singlecell import trajectory as sc_traj
@@ -46,7 +50,53 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "singlecell-velocity"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.2.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "scvelo_stochastic": MethodConfig(
+        name="scvelo_stochastic",
+        description="scVelo stochastic velocity estimation",
+        dependencies=("scvelo",),
+        requires_layers=("spliced", "unspliced"),
+    ),
+    "scvelo_dynamical": MethodConfig(
+        name="scvelo_dynamical",
+        description="scVelo dynamical model with latent time",
+        dependencies=("scvelo",),
+        requires_layers=("spliced", "unspliced"),
+    ),
+    "scvelo_steady_state": MethodConfig(
+        name="scvelo_steady_state",
+        description="scVelo steady-state velocity estimation",
+        dependencies=("scvelo",),
+        requires_layers=("spliced", "unspliced"),
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# Mapping from CLI --method value to internal mode for sc_traj.run_velocity_analysis
+_CLI_TO_MODE = {
+    "scvelo_stochastic": "stochastic",
+    "scvelo_dynamical": "dynamical",
+    "scvelo_steady_state": "steady_state",
+}
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+# Velocity methods all go through sc_traj.run_velocity_analysis with a mode arg;
+# _METHOD_DISPATCH kept for structural consistency.
+_METHOD_DISPATCH = {
+    "scvelo_stochastic": "stochastic",
+    "scvelo_dynamical": "dynamical",
+    "scvelo_steady_state": "steady_state",
+}
 
 
 def check_scvelo_available() -> bool:
@@ -268,9 +318,9 @@ def main():
     parser.add_argument("--input", dest="input_path", help="Input AnnData file (.h5ad)")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
-    parser.add_argument("--mode", default="stochastic",
-                        choices=["stochastic", "dynamical", "steady_state"],
-                        help="Velocity mode (default: stochastic)")
+    parser.add_argument("--method", default="scvelo_stochastic",
+                        choices=list(METHOD_REGISTRY.keys()),
+                        help="Velocity method (default: scvelo_stochastic)")
     parser.add_argument("--n-jobs", type=int, default=4, help="Number of parallel jobs")
     args = parser.parse_args()
 
@@ -319,17 +369,22 @@ def main():
         print("="*70)
         sys.exit(1)
 
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY)
+    mode = _CLI_TO_MODE[method]
+
     # Parameters
     params = {
-        "mode": args.mode,
+        "mode": mode,
+        "method": method,
         "n_jobs": args.n_jobs,
     }
 
     # Run velocity analysis
-    logger.info(f"Running velocity analysis (mode={args.mode})...")
+    logger.info(f"Running velocity analysis (mode={mode})...")
     velocity_result = sc_traj.run_velocity_analysis(
         adata,
-        mode=args.mode,
+        mode=mode,
         n_jobs=args.n_jobs,
     )
 
@@ -342,7 +397,7 @@ def main():
     summary = {
         "n_cells": adata.n_obs,
         "n_genes": adata.n_vars,
-        "mode": args.mode,
+        "mode": mode,
         "has_latent_time": has_latent_time,
     }
 
@@ -375,7 +430,7 @@ def main():
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
 
-    cmd = f"python sc_velocity.py --output {output_dir} --mode {args.mode} --n-jobs {args.n_jobs}"
+    cmd = f"python sc_velocity.py --output {output_dir} --method {method} --n-jobs {args.n_jobs}"
     if input_file:
         cmd += f" --input {input_file}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
@@ -388,7 +443,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'='*60}")
-    print(f"  Mode: {args.mode}")
+    print(f"  Mode: {mode}")
     print(f"  Cells: {adata.n_obs}")
     print(f"  Latent time: {'Yes' if has_latent_time else 'No'}")
     print(f"  Output: {output_dir}")

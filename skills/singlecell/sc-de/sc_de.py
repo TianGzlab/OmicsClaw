@@ -23,6 +23,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
 from omicsclaw.singlecell.adata_utils import store_analysis_metadata
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 import matplotlib
 matplotlib.use("Agg")
@@ -32,8 +36,62 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-de"
-SKILL_VERSION = "0.2.0"
-SUPPORTED_METHODS = ("wilcoxon", "t-test", "mast", "deseq2")
+SKILL_VERSION = "0.3.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "wilcoxon": MethodConfig(
+        name="wilcoxon",
+        description="Wilcoxon rank-sum test (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+    "t-test": MethodConfig(
+        name="t-test",
+        description="Welch's t-test (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+    "mast": MethodConfig(
+        name="mast",
+        description="MAST hurdle model (via scanpy wrapper)",
+        dependencies=("scanpy",),
+    ),
+    "deseq2": MethodConfig(
+        name="deseq2",
+        description="DESeq2 pseudobulk differential expression",
+        dependencies=("pydeseq2",),
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+# All methods are handled by run_de via sc.tl.rank_genes_groups; dispatch is
+# kept for structural consistency with the other skills.
+
+def _run_de_wilcoxon(adata, groupby="leiden", group1=None, group2=None, **kw):
+    return run_de(adata, groupby=groupby, method="wilcoxon", group1=group1, group2=group2)
+
+def _run_de_ttest(adata, groupby="leiden", group1=None, group2=None, **kw):
+    return run_de(adata, groupby=groupby, method="t-test", group1=group1, group2=group2)
+
+def _run_de_mast(adata, groupby="leiden", group1=None, group2=None, **kw):
+    return run_de(adata, groupby=groupby, method="mast", group1=group1, group2=group2)
+
+def _run_de_deseq2(adata, groupby="leiden", group1=None, group2=None, **kw):
+    return run_de(adata, groupby=groupby, method="deseq2", group1=group1, group2=group2)
+
+_METHOD_DISPATCH = {
+    "wilcoxon": _run_de_wilcoxon,
+    "t-test": _run_de_ttest,
+    "mast": _run_de_mast,
+    "deseq2": _run_de_deseq2,
+}
 
 
 def run_de(adata, groupby="leiden", method="wilcoxon", group1=None, group2=None):
@@ -130,7 +188,7 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--groupby", default="louvain")
-    parser.add_argument("--method", default="wilcoxon", choices=list(SUPPORTED_METHODS))
+    parser.add_argument("--method", default="wilcoxon", choices=list(METHOD_REGISTRY.keys()))
     parser.add_argument("--n-top-genes", type=int, default=10)
     parser.add_argument("--group1", default=None)
     parser.add_argument("--group2", default=None)
@@ -155,7 +213,10 @@ def main():
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
 
-    summary = run_de(adata, args.groupby, args.method, args.group1, args.group2)
+    # Validate method & check dependencies
+    method = validate_method_choice(args.method, METHOD_REGISTRY)
+
+    summary = run_de(adata, args.groupby, method, args.group1, args.group2)
     summary['n_cells'] = int(adata.n_obs)
 
     # Extract and save markers

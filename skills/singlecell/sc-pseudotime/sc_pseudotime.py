@@ -37,6 +37,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from omicsclaw.common.checksums import sha256_file
+from omicsclaw.singlecell.method_config import (
+    MethodConfig,
+    validate_method_choice,
+)
 from omicsclaw.singlecell.viz_utils import save_figure
 from omicsclaw.singlecell import io as sc_io
 from omicsclaw.singlecell import trajectory as sc_traj
@@ -45,7 +49,30 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "singlecell-pseudotime"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.2.0"
+
+# ---------------------------------------------------------------------------
+# Method registry
+# ---------------------------------------------------------------------------
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "dpt": MethodConfig(
+        name="dpt",
+        description="PAGA + Diffusion Pseudotime (scanpy built-in)",
+        dependencies=("scanpy",),
+    ),
+}
+
+SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Method dispatch table
+# ---------------------------------------------------------------------------
+
+# Currently only DPT is supported; dispatch kept for future methods.
+_METHOD_DISPATCH = {
+    "dpt": "dpt",
+}
 
 
 def generate_trajectory_figures(adata, trajectory_genes: pd.DataFrame, output_dir: Path) -> list[str]:
@@ -253,6 +280,8 @@ def main():
     parser.add_argument("--root-cell", type=int, default=None, help="Root cell index")
     parser.add_argument("--n-dcs", type=int, default=10, help="Number of diffusion components")
     parser.add_argument("--n-genes", type=int, default=50, help="Number of trajectory genes")
+    parser.add_argument("--analysis-method", default="dpt", choices=list(METHOD_REGISTRY.keys()),
+                        help="Trajectory analysis method (default: dpt)")
     parser.add_argument("--method", default="pearson", choices=["pearson", "spearman"],
                         help="Correlation method for trajectory genes")
     args = parser.parse_args()
@@ -288,8 +317,12 @@ def main():
         logger.info("Computing neighbor graph...")
         sc.pp.neighbors(adata)
 
+    # Validate analysis method & check dependencies
+    analysis_method = validate_method_choice(args.analysis_method, METHOD_REGISTRY)
+
     # Parameters
     params = {
+        "analysis_method": analysis_method,
         "cluster_key": args.cluster_key,
         "root_cluster": args.root_cluster,
         "root_cell": args.root_cell,
