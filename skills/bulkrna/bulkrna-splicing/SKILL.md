@@ -2,7 +2,7 @@
 name: bulkrna-splicing
 description: >-
   Alternative splicing analysis — PSI quantification, differential splicing event detection from rMATS/SUPPA2 output.
-version: 0.1.0
+version: 0.3.0
 author: OmicsClaw
 license: MIT
 tags: [bulkrna, splicing, alternative-splicing, PSI, rMATS, SUPPA2]
@@ -125,7 +125,7 @@ output_directory/
 - Automatically invoked when user intent matches alternative splicing analysis keywords.
 
 **Chaining partners**:
-- `bulkrna-alignment` — Upstream: aligned BAM files for rMATS/SUPPA2 input
+- `bulkrna-qc` — Upstream: count matrix QC
 - `bulkrna-de` — Parallel: gene-level differential expression to complement exon-level splicing
 - `bulkrna-enrichment` — Downstream: pathway enrichment of genes with significant splicing changes
 
@@ -145,6 +145,6 @@ Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotli
 
 ## Related Skills
 
-- `bulkrna-alignment` — Read alignment upstream
+- `bulkrna-qc` — Count matrix QC upstream
 - `bulkrna-de` — Gene-level differential expression
 - `bulkrna-enrichment` — Pathway enrichment of affected genes

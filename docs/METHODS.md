@@ -916,6 +916,224 @@ python omicsclaw.py run metabolomics-pathway-enrichment \
 
 ---
 
+## Bulk RNA-seq Skills
+
+### 25. FASTQ Quality Assessment (`bulkrna-read-qc`)
+
+Per-base Phred quality profiles, GC content, adapter detection, Q20/Q30 rates.
+Python reimplementation of core FastQC metrics.
+
+```bash
+python omicsclaw.py run bulkrna-read-qc --demo
+python omicsclaw.py run bulkrna-read-qc --input reads.fastq.gz --output output/bulk-fastqc
+```
+
+---
+
+### 26. Read Alignment Statistics (`bulkrna-read-alignment`)
+
+Parses STAR `Log.final.out`, HISAT2 summary, or Salmon `meta_info.json`.
+Computes mapping rate, gene body coverage, strandedness estimation.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `star` | star, hisat2, salmon |
+
+```bash
+python omicsclaw.py run bulkrna-read-alignment --demo
+python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output output/bulk-align
+```
+
+---
+
+### 27. Count Matrix QC (`bulkrna-qc`)
+
+Library size distribution, gene detection rates, sample correlation heatmap,
+outlier detection, and CPM normalization.
+
+```bash
+python omicsclaw.py run bulkrna-qc --demo
+python omicsclaw.py run bulkrna-qc --input counts.csv --output output/bulk-qc
+```
+
+---
+
+### 26. Gene ID Mapping (`bulkrna-geneid-mapping`)
+
+Convert gene identifiers between Ensembl, Entrez, and HGNC symbols. Strips version
+suffixes, resolves duplicates by summing counts.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--from` | `ensembl` | Source ID type |
+| `--to` | `symbol` | Target ID type |
+| `--species` | `human` | human or mouse |
+| `--on-duplicate` | `sum` | Duplicate handling: sum, first, drop |
+
+```bash
+python omicsclaw.py run bulkrna-geneid-mapping --demo
+python omicsclaw.py run bulkrna-geneid-mapping --input counts.csv \
+  --from ensembl --to symbol --output output/bulk-geneid
+```
+
+---
+
+### 27. Batch Effect Correction (`bulkrna-batch-correction`)
+
+ComBat parametric empirical Bayes batch correction (Johnson et al., 2007).
+PCA visualization before and after, silhouette score assessment.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--batch-info` | required | CSV with sample, batch columns |
+| `--mode` | `parametric` | parametric or non-parametric |
+
+```bash
+python omicsclaw.py run bulkrna-batch-correction --demo
+python omicsclaw.py run bulkrna-batch-correction --input counts.csv \
+  --batch-info batches.csv --output output/bulk-combat --mode parametric
+```
+
+---
+
+### 28. Differential Expression (`bulkrna-de`)
+
+PyDESeq2-based DE analysis with t-test fallback. Volcano plots, p-value
+histograms, top gene labeling.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `pydeseq2` | pydeseq2 or ttest |
+| `--control-prefix` | auto | Control sample prefix |
+| `--treat-prefix` | auto | Treatment sample prefix |
+| `--padj-cutoff` | `0.05` | Adjusted p-value threshold |
+| `--lfc-cutoff` | `1.0` | Log2 fold change threshold |
+
+```bash
+python omicsclaw.py run bulkrna-de --demo
+python omicsclaw.py run bulkrna-de --input counts.csv --output output/bulk-de \
+  --control-prefix ctrl --treat-prefix treat --padj-cutoff 0.01
+```
+
+---
+
+### 29. Alternative Splicing (`bulkrna-splicing`)
+
+PSI quantification and differential splicing event detection (rMATS/SUPPA2
+output parsing).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--dpsi-cutoff` | `0.1` | Minimum delta-PSI |
+| `--padj-cutoff` | `0.05` | Adjusted p-value threshold |
+
+```bash
+python omicsclaw.py run bulkrna-splicing --demo
+python omicsclaw.py run bulkrna-splicing --input splicing_events.csv --output output/bulk-splicing
+```
+
+---
+
+### 30. Pathway Enrichment (`bulkrna-enrichment`)
+
+ORA and GSEA via GSEApy with hypergeometric fallback.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `ora` | ora or gsea |
+
+```bash
+python omicsclaw.py run bulkrna-enrichment --demo
+python omicsclaw.py run bulkrna-enrichment --input de_results.csv --output output/bulk-enrich
+```
+
+---
+
+### 31. Cell Type Deconvolution (`bulkrna-deconvolution`)
+
+NNLS-based cell type proportion estimation from bulk expression matrices.
+
+```bash
+python omicsclaw.py run bulkrna-deconvolution --demo
+python omicsclaw.py run bulkrna-deconvolution --input counts.csv --output output/bulk-deconv
+```
+
+---
+
+### 32. Co-expression Network (`bulkrna-coexpression`)
+
+WGCNA-style co-expression analysis: soft thresholding, TOM construction,
+hierarchical clustering, module detection, hub gene identification.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--power` | auto | Soft thresholding power |
+| `--min-module-size` | `30` | Minimum module size |
+
+```bash
+python omicsclaw.py run bulkrna-coexpression --demo
+python omicsclaw.py run bulkrna-coexpression --input counts.csv --output output/bulk-wgcna
+```
+
+---
+
+### 33. PPI Network Analysis (`bulkrna-ppi-network`)
+
+STRING database interaction query, graph centrality (degree, betweenness,
+closeness), hub gene identification, force-directed network visualization.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--species` | `9606` | NCBI taxonomy ID |
+| `--score-threshold` | `400` | Minimum STRING combined score |
+| `--top-n` | `20` | Top hub genes to report |
+
+```bash
+python omicsclaw.py run bulkrna-ppi-network --demo
+python omicsclaw.py run bulkrna-ppi-network --input de_results.csv --output output/bulk-ppi \
+  --score-threshold 400 --top-n 20
+```
+
+---
+
+### 34. Survival Analysis (`bulkrna-survival`)
+
+Expression-based Kaplan-Meier curves, log-rank tests, and Cox proportional
+hazards. Supports median split and optimal cutoff stratification.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--clinical` | required | Clinical data CSV (sample, time, event) |
+| `--genes` | required | Comma-separated gene list |
+| `--cutoff-method` | `median` | median or optimal |
+
+```bash
+python omicsclaw.py run bulkrna-survival --demo
+python omicsclaw.py run bulkrna-survival --input counts.csv \
+  --clinical clinical.csv --genes TP53,BRCA1,KRAS --output output/bulk-survival
+```
+
+---
+
+### 35. Trajectory Interpolation (`bulkrna-trajblend`)
+
+Bulk→single-cell trajectory interpolation using NNLS deconvolution and
+PCA+KNN trajectory mapping. Maps bulk samples onto scRNA-seq developmental
+trajectories.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--reference` | required | scRNA-seq reference (h5ad or CSV) |
+| `--n-epochs` | `50` | VAE epochs (when using PyTorch backend) |
+
+```bash
+python omicsclaw.py run bulkrna-trajblend --demo
+python omicsclaw.py run bulkrna-trajblend --input bulk_counts.csv \
+  --reference scref.h5ad --output output/bulk-traj
+```
+
+---
+
 ## Quick Reference
 
 | Skill | Default Method | All Supported Methods |
@@ -954,4 +1172,17 @@ python omicsclaw.py run metabolomics-pathway-enrichment \
 | **metabolomics-statistics** | `ttest` | ttest, wilcoxon, anova, kruskal |
 | **metabolomics-de** | — | Welch's t-test + BH FDR |
 | **metabolomics-pathway-enrichment** | `ora` | ora, mummichog, fella |
+| **bulkrna-read-qc** | — | Phred scores, GC content, adapter detection |
+| **bulkrna-read-alignment** | `star` | star, hisat2, salmon log parsing |
+| **bulkrna-qc** | — | Library size, correlation, CPM |
+| **bulkrna-geneid-mapping** | `ensembl→symbol` | ensembl, entrez, symbol; mygene API fallback |
+| **bulkrna-batch-correction** | `parametric` | parametric, non-parametric ComBat |
+| **bulkrna-de** | `pydeseq2` | pydeseq2, t-test fallback |
+| **bulkrna-splicing** | — | PSI quantification, delta-PSI |
+| **bulkrna-enrichment** | `ora` | ORA, GSEA (GSEApy), hypergeometric fallback |
+| **bulkrna-deconvolution** | `nnls` | NNLS, CIBERSORTx bridge |
+| **bulkrna-coexpression** | — | WGCNA soft thresholding, TOM, hierarchical clustering |
+| **bulkrna-ppi-network** | — | STRING API, degree/betweenness centrality |
+| **bulkrna-survival** | `median` | median split, optimal cutoff; KM, log-rank, Cox PH |
+| **bulkrna-trajblend** | — | NNLS deconvolution, PCA+KNN trajectory mapping |
 

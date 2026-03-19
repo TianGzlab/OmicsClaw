@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "bulkrna-deconvolution"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.3.0"
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +143,13 @@ def core_analysis(
 
     for i, sample in enumerate(samples):
         mix = counts.loc[shared_genes, sample].values.astype(float)
-        proportions[i] = _run_nnls(mix, sig_mat)
-        # Compute reconstruction residual for diagnostics
-        reconstructed = sig_mat @ proportions[i]
-        residuals[i] = float(np.sqrt(np.mean((mix - reconstructed * mix.sum()) ** 2)))
+        # Run raw NNLS (before normalizing to proportions) for residual
+        raw_coeffs, _ = nnls(sig_mat, mix)
+        total = raw_coeffs.sum()
+        proportions[i] = raw_coeffs / total if total > 0 else raw_coeffs
+        # Reconstruction residual: RMSE between raw mix and NNLS reconstruction
+        reconstructed = sig_mat @ raw_coeffs
+        residuals[i] = float(np.sqrt(np.mean((mix - reconstructed) ** 2)))
 
     proportions_df = pd.DataFrame(proportions, index=samples, columns=cell_types)
     proportions_df.index.name = "sample"

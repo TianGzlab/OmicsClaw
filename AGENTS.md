@@ -76,7 +76,7 @@ OmicsClaw/
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
-├── SOUL.md                     # Bot persona (RoboTerri)
+├── SOUL.md                     # Bot persona (OmicsBot)
 ├── templates/SKILL-TEMPLATE.md # Template for new skills
 ├── examples/                   # Shared demo data
 ├── sessions/                   # SpatialSession JSONs
@@ -134,7 +134,7 @@ Both bots share `bot/core.py` which contains:
 - Security helpers (path sanitization, file size limits)
 - Audit logging (JSONL)
 
-The persona is defined in `SOUL.md` (RoboTerri, based on Professor Teresa K. Attwood).
+The persona is defined in `SOUL.md` (OmicsBot, the OmicsClaw AI assistant).
 
 ### Configuration
 

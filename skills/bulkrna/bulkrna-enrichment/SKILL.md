@@ -2,7 +2,7 @@
 name: bulkrna-enrichment
 description: >-
   Pathway enrichment analysis for bulk RNA-seq — ORA and GSEA via GSEApy, with built-in hypergeometric fallback.
-version: 0.1.0
+version: 0.3.0
 author: OmicsClaw
 license: MIT
 tags: [bulkrna, enrichment, GSEA, ORA, GO, KEGG, Reactome, pathway]

@@ -2,7 +2,7 @@
 name: bulkrna-coexpression
 description: >-
   WGCNA-style weighted gene co-expression network analysis — module detection, soft thresholding, hub genes.
-version: 0.1.0
+version: 0.3.0
 author: OmicsClaw
 license: MIT
 tags: [bulkrna, coexpression, WGCNA, network, modules, hub-genes]
@@ -83,7 +83,7 @@ output_directory/
 **Chaining partners**:
 - `bulkrna-de` -- Upstream: differentially expressed genes can be used as input
 - `bulkrna-enrichment` -- Downstream: pathway/GO enrichment of module gene sets
-- `bulkrna-alignment` -- Upstream: count matrix generation from aligned reads
+- `bulkrna-qc` -- Upstream: count matrix QC
 
 ## Parameters
 
@@ -110,4 +110,4 @@ Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotli
 
 - `bulkrna-de` -- Differential expression analysis upstream
 - `bulkrna-enrichment` -- Pathway enrichment of module gene sets downstream
-- `bulkrna-alignment` -- Count matrix QC and generation upstream
+- `bulkrna-qc` -- Count matrix QC upstream

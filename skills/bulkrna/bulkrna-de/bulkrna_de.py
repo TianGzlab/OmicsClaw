@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "bulkrna-de"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.3.0"
 SUPPORTED_METHODS = ("pydeseq2", "ttest")
 
 
@@ -83,27 +83,40 @@ def _run_pydeseq2(counts: pd.DataFrame, condition: list[str]) -> pd.DataFrame:
 
 
 def _benjamini_hochberg(pvalues: np.ndarray) -> np.ndarray:
-    """Manual Benjamini-Hochberg FDR correction."""
+    """Manual Benjamini-Hochberg FDR correction with NaN handling."""
     pv = np.asarray(pvalues, dtype=float)
     n = len(pv)
     if n == 0:
         return pv
-    order = np.argsort(pv)
-    sorted_p = pv[order]
-    adjusted = np.empty(n, dtype=float)
+    # Handle NaN: track non-NaN positions
+    nan_mask = np.isnan(pv)
+    non_nan_indices = np.where(~nan_mask)[0]
+    pv_clean = pv[non_nan_indices]
+    m = len(pv_clean)
+    if m == 0:
+        return pv
+    order = np.argsort(pv_clean)
+    sorted_p = pv_clean[order]
+    adjusted = np.empty(m, dtype=float)
     adjusted[-1] = sorted_p[-1]
-    for i in range(n - 2, -1, -1):
+    for i in range(m - 2, -1, -1):
         rank = i + 1
-        adjusted[i] = min(sorted_p[i] * n / rank, adjusted[i + 1])
+        adjusted[i] = min(sorted_p[i] * m / rank, adjusted[i + 1])
     adjusted = np.clip(adjusted, 0.0, 1.0)
-    result = np.empty(n, dtype=float)
-    result[order] = adjusted
+    result_clean = np.empty(m, dtype=float)
+    result_clean[order] = adjusted
+    result = np.full(n, np.nan)
+    result[non_nan_indices] = result_clean
     return result
 
 
 def _run_ttest(counts: pd.DataFrame, ctrl_cols: list[str], treat_cols: list[str]) -> pd.DataFrame:
     """Welch's t-test per gene with BH FDR correction.
-    *counts*: genes-as-rows DataFrame; first column is gene name."""
+    *counts*: genes-as-rows DataFrame; first column is gene name.
+
+    Produces output columns consistent with DESeq2: gene, baseMean,
+    log2FoldChange, lfcSE, stat, pvalue, padj.
+    """
     gene_col = counts.columns[0]
     records: list[dict] = []
     for _, row in counts.iterrows():
@@ -113,15 +126,27 @@ def _run_ttest(counts: pd.DataFrame, ctrl_cols: list[str], treat_cols: list[str]
         mean_treat = float(np.mean(treat_vals))
         base_mean = (mean_ctrl + mean_treat) / 2.0
         log2fc = np.log2(mean_treat + 1) - np.log2(mean_ctrl + 1)
+
+        # Standard error of log2FC (delta method approximation)
+        se_ctrl = float(np.std(ctrl_vals, ddof=1)) / (mean_ctrl + 1) / np.log(2) if len(ctrl_vals) > 1 else 0.0
+        se_treat = float(np.std(treat_vals, ddof=1)) / (mean_treat + 1) / np.log(2) if len(treat_vals) > 1 else 0.0
+        lfc_se = float(np.sqrt(se_ctrl**2 / max(len(ctrl_vals), 1) + se_treat**2 / max(len(treat_vals), 1)))
+
         if np.std(ctrl_vals) == 0 and np.std(treat_vals) == 0:
             pval = 1.0
+            t_stat = 0.0
         else:
-            _, pval = stats.ttest_ind(ctrl_vals, treat_vals, equal_var=False)
+            t_stat_val, pval = stats.ttest_ind(ctrl_vals, treat_vals, equal_var=False)
+            t_stat = float(t_stat_val) if not np.isnan(t_stat_val) else 0.0
+            pval = float(pval) if not np.isnan(pval) else 1.0
+
         records.append({
             "gene": row[gene_col],
             "baseMean": round(base_mean, 4),
             "log2FoldChange": round(float(log2fc), 6),
-            "pvalue": float(pval),
+            "lfcSE": round(lfc_se, 6),
+            "stat": round(t_stat, 6),
+            "pvalue": pval,
         })
     result = pd.DataFrame(records)
     result["padj"] = _benjamini_hochberg(result["pvalue"].values)
@@ -197,8 +222,20 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     ax.axhline(-np.log10(padj_cutoff), color="black", ls="--", lw=0.8)
     ax.axvline(-lfc_cutoff, color="black", ls="--", lw=0.8)
     ax.axvline(lfc_cutoff, color="black", ls="--", lw=0.8)
-    ax.set_xlabel("log2 Fold Change"); ax.set_ylabel("-log10(p-value)"); ax.set_title("Volcano Plot")
-    plt.tight_layout(); fig.savefig(fig_dir / "volcano_plot.png", dpi=150); plt.close(fig)
+    ax.set_xlabel("log2 Fold Change")
+    ax.set_ylabel("-log10(p-value)")
+    ax.set_title("Volcano Plot")
+    # Label top 10 genes
+    if "gene" in de_df.columns:
+        top_genes = de_df.dropna(subset=["padj"]).nsmallest(10, "padj")
+        for _, row in top_genes.iterrows():
+            y_val = -np.log10(max(row["pvalue"], 1e-300))
+            ax.annotate(row["gene"], (row["log2FoldChange"], y_val),
+                        fontsize=6, alpha=0.8, ha="center", va="bottom",
+                        textcoords="offset points", xytext=(0, 4))
+    plt.tight_layout()
+    fig.savefig(fig_dir / "volcano_plot.png", dpi=150)
+    plt.close(fig)
     created.append(str(fig_dir / "volcano_plot.png"))
 
     # MA plot
@@ -206,8 +243,14 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     log10_base = np.log10(de_df["baseMean"].clip(lower=1e-1))
     ax.scatter(log10_base, de_df["log2FoldChange"], c=colours, s=12, alpha=0.7, edgecolors="none")
     ax.axhline(0, color="black", lw=0.8)
-    ax.set_xlabel("log10(baseMean)"); ax.set_ylabel("log2 Fold Change"); ax.set_title("MA Plot")
-    plt.tight_layout(); fig.savefig(fig_dir / "ma_plot.png", dpi=150); plt.close(fig)
+    ax.axhline(lfc_cutoff, color="grey", ls="--", lw=0.6, alpha=0.5)
+    ax.axhline(-lfc_cutoff, color="grey", ls="--", lw=0.6, alpha=0.5)
+    ax.set_xlabel("log10(baseMean)")
+    ax.set_ylabel("log2 Fold Change")
+    ax.set_title("MA Plot")
+    plt.tight_layout()
+    fig.savefig(fig_dir / "ma_plot.png", dpi=150)
+    plt.close(fig)
     created.append(str(fig_dir / "ma_plot.png"))
 
     # DE bar chart
@@ -217,11 +260,27 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     cats = ["Up-regulated", "Down-regulated", "Not significant"]
     vals = [n_up, n_down, n_ns]
     ax.bar(cats, vals, color=["firebrick", "steelblue", "grey"], edgecolor="black", linewidth=0.5)
-    ax.set_ylabel("Number of genes"); ax.set_title("Differential Expression Summary")
+    ax.set_ylabel("Number of genes")
+    ax.set_title("Differential Expression Summary")
     for i, v in enumerate(vals):
         ax.text(i, v + max(vals) * 0.01, str(v), ha="center", fontsize=10)
-    plt.tight_layout(); fig.savefig(fig_dir / "de_barplot.png", dpi=150); plt.close(fig)
+    plt.tight_layout()
+    fig.savefig(fig_dir / "de_barplot.png", dpi=150)
+    plt.close(fig)
     created.append(str(fig_dir / "de_barplot.png"))
+
+    # P-value distribution histogram (diagnostic)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    pvals = de_df["pvalue"].dropna()
+    ax.hist(pvals, bins=50, color="steelblue", edgecolor="white", linewidth=0.5)
+    ax.set_xlabel("P-value")
+    ax.set_ylabel("Frequency")
+    ax.set_title("P-value Distribution (expect uniform + peak near 0)")
+    plt.tight_layout()
+    fig.savefig(fig_dir / "pvalue_histogram.png", dpi=150)
+    plt.close(fig)
+    created.append(str(fig_dir / "pvalue_histogram.png"))
+
     return created
 
 

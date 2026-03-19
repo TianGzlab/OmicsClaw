@@ -136,10 +136,10 @@ DOMAIN_KEYWORD_MAPS = {
         "statistical": "metabolomics-statistics",
     },
     "bulkrna": {
-        "bulk rna qc": "bulkrna-alignment",
-        "library size": "bulkrna-alignment",
-        "gene detection": "bulkrna-alignment",
-        "count matrix qc": "bulkrna-alignment",
+        "bulk rna qc": "bulkrna-qc",
+        "library size": "bulkrna-qc",
+        "gene detection": "bulkrna-qc",
+        "count matrix qc": "bulkrna-qc",
         "bulk differential expression": "bulkrna-de",
         "bulk de": "bulkrna-de",
         "deseq2": "bulkrna-de",
@@ -374,7 +374,7 @@ def main():
             "genomics": "genomics-qc",
             "proteomics": "ms-qc",
             "metabolomics": "xcms-preprocess",
-            "bulkrna": "bulkrna-alignment",
+            "bulkrna": "bulkrna-qc",
         }
         skill = defaults.get(domain, "preprocess")
         confidence = 0.5

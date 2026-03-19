@@ -512,6 +512,19 @@ def main():
     run_p.add_argument("--gene-set-file")
     run_p.add_argument("--power", type=int)
     run_p.add_argument("--min-module-size", type=int)
+    # bulkrna-batch-correction
+    run_p.add_argument("--batch-info")
+    # bulkrna-ppi-network
+    run_p.add_argument("--score-threshold", type=int)
+    run_p.add_argument("--top-n", type=int)
+    # bulkrna-geneid-mapping
+    run_p.add_argument("--from", dest="from_type")
+    run_p.add_argument("--to", dest="to_type")
+    run_p.add_argument("--on-duplicate")
+    run_p.add_argument("--mapping-file")
+    # bulkrna-survival
+    run_p.add_argument("--clinical")
+    run_p.add_argument("--cutoff-method")
 
     args = parser.parse_args()
 
@@ -642,9 +655,19 @@ def main():
             "gene_set_file": "--gene-set-file",
             "power": "--power",
             "min_module_size": "--min-module-size",
+            # new bulkrna skills
+            "batch_info": "--batch-info",
+            "score_threshold": "--score-threshold",
+            "top_n": "--top-n",
+            "from_type": "--from",
+            "to_type": "--to",
+            "on_duplicate": "--on-duplicate",
+            "mapping_file": "--mapping-file",
+            "clinical": "--clinical",
+            "cutoff_method": "--cutoff-method",
         }
         # flags whose values are file paths — resolve to absolute so subprocess cwd doesn't matter
-        _FILE_PATH_FLAGS = {"reference", "reference_slice", "model"}
+        _FILE_PATH_FLAGS = {"reference", "reference_slice", "model", "batch_info", "clinical", "mapping_file"}
 
         for attr, flag in flag_map.items():
             val = getattr(args, attr, None)

@@ -2,7 +2,7 @@
 name: bulkrna-deconvolution
 description: >-
   Bulk RNA-seq cell type deconvolution using NNLS (built-in), with optional CIBERSORTx and MuSiC bridges.
-version: 0.1.0
+version: 0.3.0
 author: OmicsClaw
 license: MIT
 tags: [bulkrna, deconvolution, NNLS, CIBERSORTx, MuSiC, cell-type-proportion]
@@ -78,7 +78,7 @@ output_directory/
 - Automatically invoked when user intent matches bulk deconvolution, cell type proportion, or NNLS keywords.
 
 **Chaining partners**:
-- `bulkrna-alignment` -- Upstream: count matrix generation from aligned reads
+- `bulkrna-qc` -- Upstream: count matrix QC
 - `bulkrna-de` -- Upstream/parallel: differential expression identifies condition-specific cell type shifts
 - `bulkrna-enrichment` -- Downstream: pathway enrichment on cell-type-specific gene sets
 
@@ -122,7 +122,7 @@ Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotli
 
 ## Related Skills
 
-- `bulkrna-alignment` -- Count matrix QC upstream
+- `bulkrna-qc` -- Count matrix QC upstream
 - `bulkrna-de` -- Differential expression analysis
 - `bulkrna-enrichment` -- Pathway enrichment of gene sets downstream
 - `spatial-deconvolution` -- Spatial transcriptomics deconvolution (CARD, Cell2Location)

@@ -4,7 +4,7 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/zhou-1314/OmicsClaw.git
+git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
 
 # Create virtual environment (Python 3.11+)
@@ -111,7 +111,7 @@ pip install -e ".[spatial,spatial-domains]"
 pip install -e ".[full]"
 ```
 
-Installs all 50+ optional methods across all 5 domains.
+Installs all 63+ optional methods across all 6 domains.
 
 ### BANKSY (isolated environment)
 

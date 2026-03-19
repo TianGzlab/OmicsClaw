@@ -75,16 +75,23 @@ When the user asks a question, match it to a skill and act:
 | Differential metabolites, PCA, fold change, group comparison | `skills/metabolomics/metabolomics-de/` | Run `python omicsclaw.py run metabolomics-de` |
 | Pathway enrichment, metabolic pathways, KEGG, ORA, hypergeometric test | `skills/metabolomics/metabolomics-pathway-enrichment/` | Run `python omicsclaw.py run metabolomics-pathway-enrichment` |
 
-### Bulk RNA-seq (6 skills)
+### Bulk RNA-seq (13 skills)
 
 | User Intent | Skill | Action |
 |---|---|---|
-| Count matrix QC, library size, gene detection, sample correlation | `skills/bulkrna/bulkrna-alignment/` | Run `python omicsclaw.py run bulkrna-alignment` |
+| FASTQ quality, read quality, Phred scores, adapter, Q20, Q30 | `skills/bulkrna/bulkrna-read-qc/` | Run `python omicsclaw.py run bulkrna-read-qc` |
+| RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate | `skills/bulkrna/bulkrna-read-alignment/` | Run `python omicsclaw.py run bulkrna-read-alignment` |
+| Count matrix QC, library size, gene detection, sample correlation | `skills/bulkrna/bulkrna-qc/` | Run `python omicsclaw.py run bulkrna-qc` |
+| Gene ID mapping, convert Ensembl, Entrez, HGNC symbol | `skills/bulkrna/bulkrna-geneid-mapping/` | Run `python omicsclaw.py run bulkrna-geneid-mapping` |
+| Batch correction, ComBat, batch effect removal | `skills/bulkrna/bulkrna-batch-correction/` | Run `python omicsclaw.py run bulkrna-batch-correction` |
 | Differential expression, DESeq2, PyDESeq2, bulk DE, find DE genes | `skills/bulkrna/bulkrna-de/` | Run `python omicsclaw.py run bulkrna-de` |
 | Alternative splicing, PSI, rMATS, SUPPA2, exon skipping, differential splicing | `skills/bulkrna/bulkrna-splicing/` | Run `python omicsclaw.py run bulkrna-splicing` |
 | Pathway enrichment, GSEA, ORA, GO, KEGG, bulk enrichment | `skills/bulkrna/bulkrna-enrichment/` | Run `python omicsclaw.py run bulkrna-enrichment` |
 | Cell type deconvolution, NNLS, CIBERSORTx, cell proportions, bulk deconv | `skills/bulkrna/bulkrna-deconvolution/` | Run `python omicsclaw.py run bulkrna-deconvolution` |
 | Co-expression network, WGCNA, gene modules, hub genes, network analysis | `skills/bulkrna/bulkrna-coexpression/` | Run `python omicsclaw.py run bulkrna-coexpression` |
+| PPI network, STRING, protein interaction, hub genes, centrality | `skills/bulkrna/bulkrna-ppi-network/` | Run `python omicsclaw.py run bulkrna-ppi-network` |
+| Survival analysis, Kaplan-Meier, Cox, log-rank, patient stratification | `skills/bulkrna/bulkrna-survival/` | Run `python omicsclaw.py run bulkrna-survival` |
+| Trajectory interpolation, bulk to single cell, BulkTrajBlend, pseudotime | `skills/bulkrna/bulkrna-trajblend/` | Run `python omicsclaw.py run bulkrna-trajblend` |
 
 ### Orchestration (1 skill)
 
@@ -178,8 +185,20 @@ python skills/spatial-register/spatial_register.py \
 # Full spatial pipeline (chains preprocess → domains → de → genes → statistics)
 python omicsclaw.py run spatial-pipeline --input <data.h5ad> --output <dir>
 
+# Bulk RNA-seq: FASTQ quality assessment
+python omicsclaw.py run bulkrna-read-qc --input <reads.fastq.gz> --output <dir>
+
+# Bulk RNA-seq: Alignment statistics
+python omicsclaw.py run bulkrna-read-alignment --input <Log.final.out> --output <dir>
+
 # Bulk RNA-seq: Count matrix QC
-python omicsclaw.py run bulkrna-alignment --input <counts.csv> --output <dir>
+python omicsclaw.py run bulkrna-qc --input <counts.csv> --output <dir>
+
+# Bulk RNA-seq: Gene ID mapping
+python omicsclaw.py run bulkrna-geneid-mapping --input <counts.csv> --output <dir> --from ensembl --to symbol
+
+# Bulk RNA-seq: Batch correction
+python omicsclaw.py run bulkrna-batch-correction --input <counts.csv> --batch-info <batches.csv> --output <dir>
 
 # Bulk RNA-seq: Differential expression
 python omicsclaw.py run bulkrna-de --input <counts.csv> --output <dir> \
@@ -196,6 +215,15 @@ python omicsclaw.py run bulkrna-deconvolution --input <counts.csv> --output <dir
 
 # Bulk RNA-seq: Co-expression network
 python omicsclaw.py run bulkrna-coexpression --input <counts.csv> --output <dir>
+
+# Bulk RNA-seq: PPI network
+python omicsclaw.py run bulkrna-ppi-network --input <de_results.csv> --output <dir>
+
+# Bulk RNA-seq: Survival analysis
+python omicsclaw.py run bulkrna-survival --input <counts.csv> --clinical <clinical.csv> --genes TP53,BRCA1 --output <dir>
+
+# Bulk RNA-seq: Trajectory interpolation
+python omicsclaw.py run bulkrna-trajblend --input <counts.csv> --reference <scref.h5ad> --output <dir>
 
 # List all available skills
 python omicsclaw.py list
@@ -241,7 +269,7 @@ SpatialClaw includes dual-channel bot frontends in `bot/`:
 | Shared core | `bot/core.py` | LLM tool-use loop, skill execution, security, audit |
 | Telegram | `bot/telegram_bot.py` | Telegram frontend (python-telegram-bot) |
 | Feishu | `bot/feishu_bot.py` | Feishu frontend (lark-oapi WebSocket) |
-| Persona | `SOUL.md` | RoboTerri persona (reused from ClawBio) |
+| Persona | `SOUL.md` | OmicsBot persona (inspired by ClawBio) |
 
 ### Running the bots
 

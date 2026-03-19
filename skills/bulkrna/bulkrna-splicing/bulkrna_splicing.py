@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "bulkrna-splicing"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.3.0"
 EVENT_TYPES = ("SE", "A5SS", "A3SS", "MXE", "RI")
 
 

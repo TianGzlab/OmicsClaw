@@ -517,7 +517,7 @@ See [docs/MEMORY_SYSTEM.md](../docs/MEMORY_SYSTEM.md) for detailed comparison.
 ## Support
 
 - **Documentation**: [bot/README.md](./README.md)
-- **Issues**: https://github.com/zhou-1314/OmicsClaw/issues
+- **Issues**: https://github.com/TianGzlab/OmicsClaw/issues
 - **Memory system**: [docs/MEMORY_SYSTEM.md](../docs/MEMORY_SYSTEM.md)
 
 ---

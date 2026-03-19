@@ -14,14 +14,14 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/zhou-1314/OmicsClaw/actions)
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/TianGzlab/OmicsClaw/actions)
 
 > [!WARNING]
 > **🚧 项目开发中 / Under Active Development**
 >
-> OmicsClaw 目前正处于积极开发和完善阶段，部分功能可能存在 bug 或尚未完全稳定。我们正在持续改进代码质量、修复已知问题并增加新功能。如果您在使用过程中遇到任何问题，欢迎通过 [GitHub Issues](https://github.com/zhou-1314/OmicsClaw/issues) 反馈，我们会尽力修复和完善。感谢您的理解与支持！
+> OmicsClaw 目前正处于积极开发和完善阶段，部分功能可能存在 bug 或尚未完全稳定。我们正在持续改进代码质量、修复已知问题并增加新功能。如果您在使用过程中遇到任何问题，欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 反馈，我们会尽力修复和完善。感谢您的理解与支持！
 >
-> OmicsClaw is currently under active development. Some features may contain bugs or may not be fully stable yet. We are continuously improving code quality, fixing known issues, and adding new features. If you encounter any problems, please report them via [GitHub Issues](https://github.com/zhou-1314/OmicsClaw/issues). Thank you for your understanding and support!
+> OmicsClaw is currently under active development. Some features may contain bugs or may not be fully stable yet. We are continuously improving code quality, fixing known issues, and adding new features. If you encounter any problems, please report them via [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues). Thank you for your understanding and support!
 
 ## Why OmicsClaw?
 
@@ -33,7 +33,7 @@
 - 🔄 **Workflow continuity** — Resume interrupted analyses, track lineage, avoid redundant computation
 - 🔒 **Privacy-first** — All processing local, memory stores metadata only (no raw data)
 - 🎯 **Smart routing** — Natural language → appropriate analysis automatically
-- 🧬 **Multi-omics coverage** — 56+ skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq
+- 🧬 **Multi-omics coverage** — 63+ skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq
 
 **What makes it different:**
 
@@ -53,7 +53,7 @@
 
 ```bash
 # Clone and setup
-git clone https://github.com/zhou-1314/OmicsClaw.git
+git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
 pip install -e .
 pip install -r bot/requirements.txt
@@ -100,7 +100,7 @@ python omicsclaw.py run spatial-preprocessing --input data.h5ad --output results
 - `pip install -e .` — Core system operations
 - `pip install -e ".[<domain>]"` — Where `<domain>` is `spatial`, `singlecell`, `genomics`, `proteomics`, `metabolomics`, or `bulkrna`
 - `pip install -e ".[spatial-domains]"` — Standalone Deep Learning Layer for `SpaGCN` and `STAGATE`
-- `pip install -e ".[full]"` — All 56+ optional methods across all domains
+- `pip install -e ".[full]"` — All 63+ optional methods across all domains
 
 *Check your installation status anytime with `python omicsclaw.py env`.*
 
@@ -138,7 +138,7 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 | **Genomics** | 10 | Variant calling, alignment, annotation, structural variants, assembly, phasing, CNV |
 | **Proteomics** | 8 | MS QC, peptide ID, quantification, differential abundance, PTM analysis |
 | **Metabolomics** | 8 | Peak detection, XCMS preprocessing, annotation, normalization, statistical analysis |
-| **Bulk RNA-seq** | 6 | Count matrix QC, differential expression, splicing, enrichment, deconvolution, co-expression |
+| **Bulk RNA-seq** | 13 | FASTQ QC, read alignment, count matrix QC, gene ID mapping, batch correction, DE, splicing, enrichment, deconvolution, co-expression, PPI network, survival, trajectory interpolation |
 
 **Platforms:** Visium, Xenium, MERFISH, Slide-seq, 10x scRNA-seq, Illumina/PacBio, LC-MS/MS, bulk RNA-seq (CSV/TSV)
 
@@ -268,23 +268,33 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 </details>
 
-### Bulk RNA-seq (6 skills)
+### Bulk RNA-seq (13 skills)
 
-- **QC:** `bulkrna-alignment` — library size, gene detection, sample correlation
-- **Analysis:** `bulkrna-de`, `bulkrna-splicing`, `bulkrna-enrichment`
-- **Advanced:** `bulkrna-deconvolution`, `bulkrna-coexpression`
+- **Upstream QC:** `bulkrna-read-qc` — FASTQ quality assessment
+- **Alignment:** `bulkrna-read-alignment` — STAR/HISAT2/Salmon mapping statistics
+- **Count QC:** `bulkrna-qc` — library size, gene detection, sample correlation
+- **Preprocessing:** `bulkrna-geneid-mapping`, `bulkrna-batch-correction`
+- **Analysis:** `bulkrna-de`, `bulkrna-splicing`, `bulkrna-enrichment`, `bulkrna-survival`
+- **Advanced:** `bulkrna-deconvolution`, `bulkrna-coexpression`, `bulkrna-ppi-network`, `bulkrna-trajblend`
 
 <details>
 <summary>View all bulk RNA-seq skills</summary>
 
 | Skill | Description | Key Methods |
 |-------|-------------|-------------|
-| `bulkrna-alignment` | Count matrix QC — library size, gene detection, sample correlation | pandas, matplotlib |
+| `bulkrna-read-qc` | FASTQ quality assessment — Phred scores, GC content, adapter detection | FastQC-style Python implementation |
+| `bulkrna-read-alignment` | RNA-seq alignment statistics — mapping rate, composition, gene body coverage | STAR/HISAT2/Salmon log parsing |
+| `bulkrna-qc` | Count matrix QC — library size, gene detection, sample correlation | pandas, matplotlib; MAD outlier detection |
+| `bulkrna-geneid-mapping` | Gene ID conversion — Ensembl, Entrez, HGNC symbol mapping | mygene, built-in tables |
+| `bulkrna-batch-correction` | Batch effect correction — ComBat parametric/non-parametric | Empirical Bayes, PCA assessment |
 | `bulkrna-de` | Differential expression analysis | PyDESeq2, t-test fallback |
 | `bulkrna-splicing` | Alternative splicing analysis — PSI, event detection | rMATS/SUPPA2 parsing, delta-PSI |
 | `bulkrna-enrichment` | Pathway enrichment — ORA/GSEA | GSEApy, hypergeometric fallback |
 | `bulkrna-deconvolution` | Cell type deconvolution from bulk | NNLS (scipy), CIBERSORTx bridge |
 | `bulkrna-coexpression` | WGCNA-style co-expression network | Soft thresholding, hierarchical clustering, TOM |
+| `bulkrna-ppi-network` | Protein-protein interaction network analysis | STRING API, graph centrality, hub genes |
+| `bulkrna-survival` | Expression-based survival analysis | Kaplan-Meier, log-rank test, Cox PH |
+| `bulkrna-trajblend` | Bulk→single-cell trajectory interpolation | NNLS deconvolution, PCA+KNN mapping, pseudotime |
 
 </details>
 
@@ -383,23 +393,44 @@ python omicsclaw.py run metabolomics-statistics --input output/met-quant/tables/
 python omicsclaw.py run metabolomics-pathway-enrichment --input output/met-stats/tables/significant.csv --output output/met-pathway
 ```
 
-**Bulk RNA-seq — differential expression pipeline:**
+**Bulk RNA-seq — full pipeline (FASTQ → downstream):**
 ```bash
-# 1. Count matrix QC (library size, gene detection, sample correlation)
-python omicsclaw.py run bulkrna-alignment --input counts.csv --output output/bulk-qc
+# 1. FASTQ quality assessment
+python omicsclaw.py run bulkrna-read-qc --input reads.fastq.gz --output output/bulk-fastqc
 
-# 2. Differential expression (PyDESeq2 or t-test fallback)
+# 2. Alignment QC (parse STAR/HISAT2/Salmon logs)
+python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output output/bulk-align
+
+# 3. Count matrix QC (library size, gene detection, sample correlation)
+python omicsclaw.py run bulkrna-qc --input counts.csv --output output/bulk-qc
+
+# 4. Gene ID mapping (Ensembl → HGNC symbol)
+python omicsclaw.py run bulkrna-geneid-mapping --input counts.csv --from ensembl --to symbol --output output/bulk-geneid
+
+# 5. Batch correction (ComBat)
+python omicsclaw.py run bulkrna-batch-correction --input counts.csv --batch-info batches.csv --output output/bulk-combat
+
+# 6. Differential expression (PyDESeq2 or t-test fallback)
 python omicsclaw.py run bulkrna-de --input counts.csv --output output/bulk-de \
   --control-prefix ctrl --treat-prefix treat
 
-# 3. Pathway enrichment (ORA with hypergeometric test)
+# 7. Pathway enrichment (ORA with hypergeometric test)
 python omicsclaw.py run bulkrna-enrichment --input output/bulk-de/tables/de_results.csv --output output/bulk-enrich
 
-# 4. Cell type deconvolution (NNLS)
+# 8. Cell type deconvolution (NNLS)
 python omicsclaw.py run bulkrna-deconvolution --input counts.csv --output output/bulk-deconv
 
-# 5. Co-expression network analysis (WGCNA-style)
+# 9. Co-expression network analysis (WGCNA-style)
 python omicsclaw.py run bulkrna-coexpression --input counts.csv --output output/bulk-wgcna
+
+# 10. PPI network (hub gene identification)
+python omicsclaw.py run bulkrna-ppi-network --input output/bulk-de/tables/de_results.csv --output output/bulk-ppi
+
+# 11. Survival analysis (Kaplan-Meier + log-rank)
+python omicsclaw.py run bulkrna-survival --input counts.csv --clinical clinical.csv --genes TP53,BRCA1,KRAS --output output/bulk-survival
+
+# 12. Trajectory interpolation (Bulk→single-cell)
+python omicsclaw.py run bulkrna-trajblend --input counts.csv --reference scref.h5ad --output output/bulk-traj
 ```
 
 ### Smart Orchestration
@@ -492,7 +523,7 @@ OmicsClaw/
 │   ├── genomics/             # 10 genomics skills
 │   ├── proteomics/           # 8 proteomics skills
 │   ├── metabolomics/         # 8 metabolomics skills
-│   ├── bulkrna/              # 6 bulk RNA-seq skills
+│   ├── bulkrna/              # 13 bulk RNA-seq skills
 │   └── orchestrator/         # Multi-domain routing
 ├── bot/                      # Telegram + Feishu messaging interfaces
 ├── docs/                     # Documentation (installation, methods, architecture)
@@ -596,7 +627,7 @@ If you use OmicsClaw in your research, please cite:
   title = {OmicsClaw: A Memory-Enabled AI Agent for Multi-Omics Analysis},
   author = {Zhou, Weige and Chen, Liying and Yin, Pengfei and Tian, Luyi},
   year = {2026},
-  url = {https://github.com/zhou-1314/OmicsClaw}
+  url = {https://github.com/TianGzlab/OmicsClaw}
 }
 ```
 
@@ -614,4 +645,4 @@ OmicsClaw is built upon the inspiration and contributions of the following outst
 - **Liying Chen** (Developer) — [GitHub](https://github.com/chenly255)
 - **Pengfei Yin** (Developer) — [GitHub](https://github.com/astudentfromsustech)
 
-For bug reports and feature requests, please open an issue on [GitHub](https://github.com/zhou-1314/OmicsClaw/issues).
+For bug reports and feature requests, please open an issue on [GitHub](https://github.com/TianGzlab/OmicsClaw/issues).
