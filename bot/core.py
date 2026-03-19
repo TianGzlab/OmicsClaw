@@ -258,9 +258,54 @@ def _evict_lru_conversations():
 # Memory Auto-Capture Helpers
 # ---------------------------------------------------------------------------
 
+async def _auto_capture_dataset(session_id: str, input_path: str, data_type: str = ""):
+    """Auto-capture dataset memory when a file is processed."""
+    if not memory_store or not session_id or not input_path:
+        return
+
+    try:
+        from bot.memory.models import DatasetMemory
+
+        # Make path relative to project dir if possible
+        try:
+            rel_path = str(Path(input_path).relative_to(OMICSCLAW_DIR))
+        except ValueError:
+            # External path — use basename only to avoid leaking absolute paths
+            rel_path = Path(input_path).name
+
+        # Try to detect observation count from h5ad files
+        n_obs = None
+        n_vars = None
+        try:
+            suffix = Path(input_path).suffix.lower()
+            if suffix in (".h5ad",):
+                import h5py
+                with h5py.File(input_path, "r") as h5:
+                    if "obs" in h5 and hasattr(h5["obs"], "attrs"):
+                        shape = h5["obs"].attrs.get("_index", h5["obs"].attrs.get("encoding-type", None))
+                    if "X" in h5:
+                        x = h5["X"]
+                        if hasattr(x, "shape"):
+                            n_obs, n_vars = x.shape
+        except Exception:
+            pass  # Best-effort metadata extraction
+
+        ds_mem = DatasetMemory(
+            file_path=rel_path,
+            platform=data_type or None,
+            n_obs=n_obs,
+            n_vars=n_vars,
+            preprocessing_state="raw",
+        )
+        await memory_store.save_memory(session_id, ds_mem)
+        logger.debug(f"Auto-captured dataset: {rel_path}")
+    except Exception as e:
+        logger.warning(f"Auto-capture dataset failed: {e}")
+
+
 async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output_dir: Path, success: bool):
     """Auto-capture analysis memory after skill execution."""
-    if not session_manager or not session_id:
+    if not memory_store or not session_id:
         return
 
     try:
@@ -270,14 +315,13 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         method = args.get("method", "default")
         input_path = args.get("file_path", "")
 
-        # Link to most recent dataset memory for lineage (optional, don't fail if missing)
+        # Link to most recent dataset memory for lineage
         source_dataset_id = ""
         try:
             datasets = await memory_store.get_memories(session_id, "dataset", limit=1)
             if datasets:
                 source_dataset_id = datasets[0].memory_id
         except Exception:
-            # Dataset not found is OK, just skip the linkage
             pass
 
         memory = AnalysisMemory(
@@ -292,8 +336,7 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         await memory_store.save_memory(session_id, memory)
         logger.debug(f"Auto-captured analysis: {skill} ({method})")
     except Exception as e:
-        # Log but don't fail the main workflow
-        logger.warning(f"Auto-capture failed: {e}")
+        logger.warning(f"Auto-capture analysis failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -440,9 +483,13 @@ def init(
 
             if not encryption_key:
                 import secrets
-                encryption_key = secrets.token_urlsafe(32)[:32].ljust(32, '0')
-                logger.warning("No encryption key set, using temporary key")
+                encryption_key = secrets.token_hex(32)
+                logger.warning("No ENCRYPTION_KEY set, using temporary key (memories lost on restart)")
 
+            # NOTE: We use ASCII encoding of the hex string then truncate to 32 bytes.
+            # This gives 128-bit effective entropy (only 16 unique hex chars in first
+            # 32 positions), not full AES-256. Switching to bytes.fromhex() would
+            # break decryption of existing data. A future migration can fix this.
             encryptor = SecureFieldEncryptor(encryption_key.encode()[:32])
             store = SQLiteBackend(db_path, encryptor)
             # NOTE: initialize() is called lazily on first async operation
@@ -533,6 +580,18 @@ Operational constraints:
     Example: User asks for DestVI, it fails → Tell user "DestVI failed: <error>.
     Would you like to try Tangram or Cell2Location instead?"
     WRONG: Silently run Tangram and say "The Tangram analysis succeeded".
+12. MEMORY (IMPORTANT): You have persistent memory across conversations.
+    - Use the 'remember' tool to save important context:
+      * User preferences: language, default methods, output settings
+      * Biological insights: cell type annotations, spatial domains identified
+      * Project context: species, tissue type, disease model, research goals
+    - Proactively remember when the user:
+      * States a preference ("请用中文回答", "use DPI 300")
+      * Tells you about their project ("我们研究小鼠大脑的阿尔茨海默病")
+      * Confirms a biological annotation ("cluster 0 是T细胞")
+    - Your memory context is loaded automatically at the start of each conversation
+      under the "## Your Memory" section in the system prompt.
+    - Do NOT tell the user you are saving memory; just do it silently.
 """
 
 def build_system_prompt(memory_context: str = "") -> str:
@@ -870,6 +929,85 @@ def get_tools() -> list[dict]:
                         "file_path": {"type": "string", "description": "File path"}
                     },
                     "required": ["file_path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "remember",
+                "description": (
+                    "Save important information to persistent memory so you can recall it "
+                    "in future conversations. Use this to remember: user preferences "
+                    "(language, default methods, DPI settings), biological insights "
+                    "(cell type annotations, spatial domains found), and project context "
+                    "(research goals, species, tissue type, disease model). "
+                    "Memory persists across conversations and bot restarts."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "memory_type": {
+                            "type": "string",
+                            "enum": ["preference", "insight", "project_context"],
+                            "description": (
+                                "Type of memory to save. "
+                                "'preference' = user settings (language, default method, DPI). "
+                                "'insight' = biological discovery (cell types, clusters). "
+                                "'project_context' = research context (species, tissue, disease, goal)."
+                            ),
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": (
+                                "For preference: setting name (e.g. 'language', 'default_method', 'dpi'). "
+                                "For insight: entity ID (e.g. 'cluster_0', 'domain_3'). "
+                                "For project_context: not used."
+                            ),
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": (
+                                "For preference: setting value (e.g. 'Chinese', 'tangram', '300'). "
+                                "For insight: biological label (e.g. 'T cells', 'tumor region'). "
+                                "For project_context: not used."
+                            ),
+                        },
+                        "domain": {
+                            "type": "string",
+                            "description": "For preference: scope of the setting (e.g. 'global', 'spatial-preprocess'). Default: 'global'.",
+                        },
+                        "entity_type": {
+                            "type": "string",
+                            "description": "For insight: type of entity (e.g. 'cluster', 'spatial_domain', 'cell_type').",
+                        },
+                        "source_analysis_id": {
+                            "type": "string",
+                            "description": "For insight: ID of the analysis that produced this insight (optional).",
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["user_confirmed", "ai_predicted"],
+                            "description": "For insight: confidence level. Use 'user_confirmed' when user explicitly states a label.",
+                        },
+                        "project_goal": {
+                            "type": "string",
+                            "description": "For project_context: research goal/objective.",
+                        },
+                        "species": {
+                            "type": "string",
+                            "description": "For project_context: species (e.g. 'human', 'mouse').",
+                        },
+                        "tissue_type": {
+                            "type": "string",
+                            "description": "For project_context: tissue type (e.g. 'brain', 'liver', 'tumor').",
+                        },
+                        "disease_model": {
+                            "type": "string",
+                            "description": "For project_context: disease model (e.g. 'breast cancer', 'Alzheimer').",
+                        },
+                    },
+                    "required": ["memory_type"],
                 },
             },
         },
@@ -1213,6 +1351,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         # Clean up empty output directory on failure
         if out_dir.exists():
             shutil.rmtree(out_dir, ignore_errors=True)
+        # Capture failed analysis to memory (so we remember what was tried)
+        if session_id:
+            await _auto_capture_analysis(session_id, skill_key, args, None, False)
         return f"{skill_key} failed (exit {proc.returncode}):\n{err}"
 
     # Collect report + figures from output directory
@@ -1276,8 +1417,10 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         if not skip:
             keep_lines.append(line)
 
-    # Auto-capture analysis memory
+    # Auto-capture dataset + analysis memory
     if session_id:
+        if input_path:
+            await _auto_capture_dataset(session_id, input_path, data_type)
         await _auto_capture_analysis(session_id, skill_key, args, out_dir, True)
 
     result_text = "\n".join(keep_lines).strip()
@@ -1870,6 +2013,98 @@ async def execute_get_file_size(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# execute_remember — LLM tool for saving persistent memories
+# ---------------------------------------------------------------------------
+
+
+async def execute_remember(args: dict, session_id: str = None) -> str:
+    """Save information to persistent memory (preferences, insights, project context)."""
+    if not memory_store:
+        return "Memory system not enabled. Set OMICSCLAW_MEMORY_BACKEND=sqlite in .env"
+    if not session_id:
+        return "Memory save requires an active session (user_id + platform)."
+
+    mem_type = args.get("memory_type", "")
+
+    try:
+        if mem_type == "preference":
+            from bot.memory.models import PreferenceMemory
+
+            key = args.get("key", "")
+            value = args.get("value", "")
+            domain = args.get("domain", "global")
+
+            if not key or not value:
+                return "Error: preference requires 'key' and 'value'."
+
+            pref = PreferenceMemory(
+                domain=domain,
+                key=key,
+                value=value,
+                is_strict=False,
+            )
+            mem_id = await memory_store.save_memory(session_id, pref)
+            logger.info(f"Memory saved: preference {key}={value} (domain={domain})")
+            return f"✓ Preference saved: {key} = {value} (scope: {domain})"
+
+        elif mem_type == "insight":
+            from bot.memory.models import InsightMemory
+
+            entity_id = args.get("key", "")
+            label = args.get("value", "")
+            entity_type = args.get("entity_type", "cluster")
+            source_id = args.get("source_analysis_id", "")
+            confidence = args.get("confidence", "ai_predicted")
+
+            if not entity_id or not label:
+                return "Error: insight requires 'key' (entity ID) and 'value' (label)."
+
+            insight = InsightMemory(
+                source_analysis_id=source_id or "",
+                entity_type=entity_type,
+                entity_id=entity_id,
+                biological_label=label,
+                confidence=confidence,
+            )
+            mem_id = await memory_store.save_memory(session_id, insight)
+            logger.info(f"Memory saved: insight {entity_type} {entity_id} = {label}")
+            return f"✓ Insight saved: {entity_type} '{entity_id}' → {label} ({confidence})"
+
+        elif mem_type == "project_context":
+            from bot.memory.models import ProjectContextMemory
+
+            ctx = ProjectContextMemory(
+                project_goal=args.get("project_goal", ""),
+                species=args.get("species"),
+                tissue_type=args.get("tissue_type"),
+                disease_model=args.get("disease_model"),
+            )
+
+            if not any([ctx.project_goal, ctx.species, ctx.tissue_type, ctx.disease_model]):
+                return "Error: project_context requires at least one of: project_goal, species, tissue_type, disease_model."
+
+            mem_id = await memory_store.save_memory(session_id, ctx)
+            parts = []
+            if ctx.project_goal:
+                parts.append(f"Goal: {ctx.project_goal}")
+            if ctx.species:
+                parts.append(f"Species: {ctx.species}")
+            if ctx.tissue_type:
+                parts.append(f"Tissue: {ctx.tissue_type}")
+            if ctx.disease_model:
+                parts.append(f"Disease: {ctx.disease_model}")
+            logger.info(f"Memory saved: project context ({', '.join(parts)})")
+            return f"✓ Project context saved: {' | '.join(parts)}"
+
+        else:
+            return f"Error: unknown memory_type '{mem_type}'. Use: preference, insight, project_context."
+
+    except Exception as e:
+        logger.error(f"Memory save failed: {e}", exc_info=True)
+        return f"Error saving memory: {e}"
+
+
+# ---------------------------------------------------------------------------
 # Tool executor registry
 # ---------------------------------------------------------------------------
 
@@ -1889,6 +2124,7 @@ TOOL_EXECUTORS = {
     "move_file": execute_move_file,
     "remove_file": execute_remove_file,
     "get_file_size": execute_get_file_size,
+    "remember": execute_remember,
 }
 
 MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable
@@ -2197,10 +2433,13 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
                         )
 
                 try:
-                    # Pass session_id and chat_id to omicsclaw executor
-                    if func_name == "omicsclaw" and user_id and platform:
+                    # Pass session_id to tools that need it (omicsclaw, remember)
+                    if func_name in ("omicsclaw", "remember") and user_id and platform:
                         session_id = f"{platform}:{user_id}:{chat_id}"
-                        result = await executor(func_args, session_id, chat_id=chat_id)
+                        if func_name == "omicsclaw":
+                            result = await executor(func_args, session_id, chat_id=chat_id)
+                        else:
+                            result = await executor(func_args, session_id)
                     elif func_name == "omicsclaw":
                         result = await executor(func_args, chat_id=chat_id)
                     else:
