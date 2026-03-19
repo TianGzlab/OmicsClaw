@@ -23,17 +23,40 @@
 >
 > OmicsClaw is currently under active development. Some features may contain bugs or may not be fully stable yet. We are continuously improving code quality, fixing known issues, and adding new features. If you encounter any problems, please report them via [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues). Thank you for your understanding and support!
 
+<h3>⚡ Unified Control, Different Surfaces</h3>
+
+<table>
+  <tr>
+    <th width="75%"><p align="center">🖥️ CLI / TUI</p></th>
+    <th width="25%"><p align="center">📱 Mobile (Feishu)</p></th>
+  </tr>
+  <tr>
+    <td align="center">
+      <video src="docs/videos/OmicsClaw_CLI.mov" autoplay loop muted playsinline width="100%">
+        <a href="docs/videos/OmicsClaw_CLI.mov">View CLI demo</a>
+      </video>
+    </td>
+    <td align="center">
+      <video src="docs/videos/Feishu_bot.MP4" width="100%" autoplay loop muted playsinline>
+        <a href="docs/videos/Feishu_bot.MP4">View mobile demo</a>
+      </video>
+    </td>
+  </tr>
+</table>
+
 ## Why OmicsClaw?
 
 **Traditional tools make you repeat yourself.** Every session starts from zero: re-upload data, re-explain context, re-run preprocessing. OmicsClaw remembers.
 
-**Core Value:**
-- 🧠 **Memory system** — Remembers your datasets, analysis history, and preferences across sessions
-- 💬 **Conversational interface** — Chat with your data via Telegram/Feishu, no command-line needed
-- 🔄 **Workflow continuity** — Resume interrupted analyses, track lineage, avoid redundant computation
-- 🔒 **Privacy-first** — All processing local, memory stores metadata only (no raw data)
-- 🎯 **Smart routing** — Natural language → appropriate analysis automatically
-- 🧬 **Multi-omics coverage** — 63+ skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq
+## ✨ Features
+- **🧠 Persistent Memory** — Context, preferences, and analysis history survive across sessions.
+- **🌐 Multi-Provider** — Anthropic, OpenAI, DeepSeek, or local LLMs — one config to switch.
+- **📱 Multi-Channel** — CLI as the hub; Telegram, Feishu, and more — one agent session.
+- **🔌 MCP & Skills** — Plug in MCP servers or install skills from GitHub on the fly.
+- **🔄 Workflow Continuity** — Resume interrupted analyses, track lineage, and avoid redundant computation.
+- **🔒 Privacy-First** — All processing is local; memory stores metadata only (no raw data uploads).
+- **🎯 Smart Routing** — Natural language routed to the appropriate analysis automatically.
+- **🧬 Multi-Omics Coverage** — 63+ predefined skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq.
 
 **What makes it different:**
 
@@ -49,24 +72,33 @@
 
 ## Quick Start
 
+<details>
+<summary> 🪛 Install uv (if you don't have it)</summary>
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+</details>
+
 ### Option 1: Chat Interface (Recommended)
 
 ```bash
 # Clone and setup
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
-pip install -e .
-pip install -r bot/requirements.txt
+pip install -e ".[tui]"
+pip install -r bot/requirements.txt  # If you want Telegram/Feishu bots
 
-# Configure (add your LLM API key)
-cp .env.example .env
-# Edit .env: set LLM_API_KEY and bot tokens
+# Configure (interactive setup wizard)
+omicsclaw onboard  # or use short alias: oc onboard
+# or manually edit .env
 
-# Start Telegram bot
-python bot/telegram_bot.py
+# Start the Interactive Terminal Chat (EvoSci-style TUI)
+omicsclaw tui      # or: oc tui
 
-# Or start Feishu bot (no public IP needed)
-python bot/feishu_bot.py
+# OR Start Telegram/Feishu bots as background channels
+python -m bot.run
 ```
 
 > 📖 **Bot Configuration Guide:** See [bot/README.md](bot/README.md) for detailed step-by-step instructions on obtaining API keys and configuring `.env` for Telegram/Feishu bots.
@@ -82,6 +114,51 @@ You: "Find spatial domains"
 Bot: 🧠 "Using your Visium data from yesterday (5000 spots, normalized).
      Running domain detection..."
 ```
+
+<details>
+<summary>In-session commands (Interactive CLI/TUI)</summary>
+
+| Command | Description |
+| ------- | ----------- |
+| `/skills [domain]` | List all skills (optionally filter by domain) |
+| `/run <skill> [--demo] [--input <path>]` | Run a skill directly |
+| `/sessions` | List recent sessions |
+| `/resume [id]` | Resume a session (interactive picker if no ID) |
+| `/delete <id>` | Delete a saved session |
+| `/current` | Show current session info |
+| `/new` | Start a new session |
+| `/clear` | Clear conversation history |
+| `/mcp list` | List MCP servers |
+| `/mcp add <name> <cmd> [args]` | Add MCP server |
+| `/mcp remove <name>` | Remove MCP server |
+| `/config list` | View configuration |
+| `/config set <key> <val>` | Update configuration |
+| `/help` | Show all commands |
+| `/exit` | Quit OmicsClaw |
+
+</details>
+
+<details>
+<summary>In-bot commands (Telegram / Feishu)</summary>
+
+| Command | Description |
+| ------- | ----------- |
+| `/start` | Welcome message with instructions |
+| `/new` | Start new conversation (memory preserved) |
+| `/clear` | Clear conversation history (memory preserved) |
+| `/forget` | Clear conversation + memory (complete reset) |
+| `/skills` | List all available OmicsClaw analysis skills |
+| `/demo <skill>` | Run a skill demo |
+| `/examples` | Show usage examples |
+| `/files` | List data files |
+| `/outputs` | Show recent analysis results |
+| `/recent` | Show last 3 analyses |
+| `/status` | Bot status and uptime |
+| `/version` | Show version info |
+| `/health` | System health check |
+| `/help` | Show help message |
+
+</details>
 
 ### Option 2: Command Line
 
@@ -393,7 +470,7 @@ python omicsclaw.py run metabolomics-statistics --input output/met-quant/tables/
 python omicsclaw.py run metabolomics-pathway-enrichment --input output/met-stats/tables/significant.csv --output output/met-pathway
 ```
 
-**Bulk RNA-seq — full pipeline (FASTQ → downstream):**
+**(TODO) Bulk RNA-seq — full pipeline (FASTQ → downstream):**
 ```bash
 # 1. FASTQ quality assessment
 python omicsclaw.py run bulkrna-read-qc --input reads.fastq.gz --output output/bulk-fastqc
@@ -460,14 +537,6 @@ python omicsclaw.py run orchestrator \
 python omicsclaw.py run orchestrator \
   --query "analyze cell-cell interactions" \
   --routing-mode hybrid --output output
-```
-
-**File-type detection:**
-```bash
-# Automatically detects file type and runs appropriate preprocessing
-python omicsclaw.py run orchestrator --input data.h5ad --output output
-python omicsclaw.py run orchestrator --input variants.vcf.gz --output output
-python omicsclaw.py run orchestrator --input counts.csv --output output
 ```
 
 **Named pipelines:**
@@ -544,49 +613,35 @@ skills/<domain>/<skill>/
 
 Skills communicate via standardized formats (`.h5ad`, `.vcf`, `.mzML`, `.csv`) and can be chained into pipelines.
 
-## Bot Integration — Memory-Enabled Conversational Interface
+## 📱 Channels Integration — Memory-Enabled Conversational Interface
 
-OmicsClaw includes messaging bot interfaces with **persistent memory** for Telegram and Feishu (Lark).
+OmicsClaw includes messaging bot interfaces with **persistent memory**. Connect messaging platforms so they share the same agent session as the CLI. Currently supported channels include Telegram, Feishu (Lark), DingTalk, Discord, Slack, WeChat, QQ, Email, and iMessage.
 
 ```bash
-# Install bot dependencies
+# Install core bot dependencies
 pip install -r bot/requirements.txt
+# Or install dependencies for all channels:
+pip install -r bot/requirements-channels.txt
 
-# Configure (create .env file with API keys)
+# Configure (create .env file with API keys from .env.example)
 cp .env.example .env
-# Edit .env with your LLM_API_KEY, TELEGRAM_BOT_TOKEN, FEISHU_APP_ID, etc.
 
-# Start bots
-python bot/telegram_bot.py    # Telegram
-python bot/feishu_bot.py      # Feishu (WebSocket, no public IP needed)
+# Start your selected channels concurrently (Unified Runner)
+python -m bot.run --channels telegram,feishu,slack
+# Or start via short alias
+make bot-multi CHANNELS=telegram,discord
 ```
 
 **Key Features:**
 - 🧠 **Persistent memory** — Remembers datasets, analyses, preferences across sessions
 - 💬 **Natural language** — "Find spatial domains" → automatic skill routing
 - 📁 **Multi-omics upload** — Supports `.h5ad`, `.vcf`, `.mzML`, `.csv`/`.tsv` files
-- 🖼️ **Image recognition** — Analyzes tissue section photos (H&E, fluorescence)
 - 📊 **Auto-delivery** — Reports and figures sent directly to chat
 - 🔒 **Privacy-first** — Local processing, metadata-only storage
 
-**Memory in action:**
-```
-Session 1:
-You: [Upload visium_brain.h5ad]
-You: "Preprocess this"
-Bot: ✅ Done. [Saves DatasetMemory + AnalysisMemory]
-
-Session 2 (next day):
-You: "Find spatial domains"
-Bot: 🧠 "Using your Visium brain data (5000 spots, normalized yesterday)"
-     ✅ Done. [Links to parent analysis]
-
-Session 3:
-You: "Use the same clustering as before"
-Bot: 🧠 "Applying leiden (resolution=0.8) from your previous analysis"
-```
-
-See [bot/README.md](bot/README.md) for detailed setup and [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) for memory architecture.
+> [!TIP]
+> For per-channel setup guides, capability matrix, and architecture details, see the **[Channel Integration Guide](bot/README.md)**.
+> See **[docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)** for memory architecture.
 
 ## Contributing
 

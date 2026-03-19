@@ -13,20 +13,44 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 ```bash
 cd /data1/TianLab/zhouwg/project/OmicsClaw
 pip install -r requirements.txt
-python omicsclaw.py list
+
+# Install the package (also registers the `oc` short alias)
+pip install -e .
+
+python omicsclaw.py list   # or: oc list
 python omicsclaw.py run spatial-preprocessing --demo
 ```
 
+> **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
+> are available system-wide. `oc` is registered via `[project.scripts]` in
+> `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
+> `omicsclaw`. No PATH tricks needed.
+
 ## Commands
+
+> Both `python omicsclaw.py <cmd>` and the short alias `oc <cmd>` work identically
+> after `pip install -e .` (or `make install-oc`).
 
 | Command | Purpose |
 |---------|---------|
-| `python omicsclaw.py list` | List all 50+ skills across 5 domains |
-| `python omicsclaw.py run <skill> --demo` | Run a skill with demo data |
-| `python omicsclaw.py run <skill> --input <file> --output <dir>` | Run with user data |
+| `oc list` | List all 50+ skills across 5 domains |
+| `oc run <skill> --demo` | Run a skill with demo data |
+| `oc run <skill> --input <file> --output <dir>` | Run with user data |
+| `oc interactive` | **Start interactive terminal chat (CLI mode)** |
+| `oc interactive --ui tui` | **Start full-screen Textual TUI** |
+| `oc interactive -p "<prompt>"` | **Single-shot mode (non-interactive)** |
+| `oc interactive --session <id>` | **Resume a previous session** |
+| `oc tui` | Alias for `interactive --ui tui` |
+| `oc mcp list` | List configured MCP servers |
+| `oc mcp add <name> <cmd> [args]` | Add an MCP server |
+| `oc mcp remove <name>` | Remove an MCP server |
+| `oc mcp config` | Show MCP config file path |
+| `oc onboard` | Run interactive setup wizard |
 | `python -m pytest -v` | Run all tests |
 | `make test` | Alias for pytest |
 | `make demo` | Run preprocess demo |
+| `make install-oc` | (Re)install package + activate `oc` alias |
+| `make oc-link` | Quick wrapper script in `~/.local/bin/oc` (no pip) |
 | `make bot-telegram` | Start Telegram bot |
 | `make bot-feishu` | Start Feishu bot |
 
@@ -38,7 +62,15 @@ OmicsClaw/
 ├── omicsclaw/                  # Shared utilities package
 │   ├── common/                 # report.py, session.py, checksums.py
 │   ├── spatial/                # loader.py, adata_utils.py, viz_utils.py
-│   └── loaders/                # Unified data loading (load_omics_data)
+│   ├── loaders/                # Unified data loading (load_omics_data)
+│   ├── core/                   # registry.py, dependency_manager.py
+│   └── interactive/            # ★ NEW: Interactive CLI/TUI package
+│       ├── __init__.py         # Package entry: run_interactive(), main()
+│       ├── _constants.py       # Banner, LOGO, slash commands, slogans
+│       ├── _session.py         # SQLite session persistence (aiosqlite)
+│       ├── _mcp.py             # MCP server config / YAML management
+│       ├── interactive.py      # prompt_toolkit REPL loop (CLI mode)
+│       └── tui.py              # Textual full-screen TUI (TUI mode)
 ├── skills/                     # Domain-organized skill directories
 │   ├── spatial/                # 15 spatial transcriptomics skills
 │   │   ├── spatial-preprocess/ # QC + normalization + embedding
@@ -46,37 +78,19 @@ OmicsClaw/
 │   │   ├── spatial-annotate/   # Cell type annotation
 │   │   └── ...
 │   ├── singlecell/             # 9 single-cell omics skills
-│   │   ├── sc-preprocessing/   # scRNA-seq QC + normalization
-│   │   ├── sc-doublet-detection/ # Doublet removal
-│   │   └── ...
 │   ├── genomics/               # 10 genomics skills
-│   │   ├── genomics-vcf-ops/   # VCF operations
-│   │   ├── genomics-variant-calling/ # Variant calling
-│   │   └── ...
 │   ├── proteomics/             # 8 proteomics skills
-│   │   ├── proteomics-ms-qc/   # MS quality control
-│   │   ├── proteomics-peptide-id/ # Peptide identification
-│   │   └── ...
 │   ├── metabolomics/           # 8 metabolomics skills
-│   │   ├── peak-detection/     # Peak detection
-│   │   ├── xcms-preprocess/    # XCMS preprocessing
-│   │   └── ...
 │   └── orchestrator/           # Multi-domain routing
-│   ├── spatial-trajectory/     # Trajectory inference
-│   ├── spatial-enrichment/     # Pathway enrichment
-│   ├── spatial-cnv/            # Copy number variation
-│   ├── spatial-integrate/      # Multi-sample integration
-│   ├── spatial-register/       # Spatial registration
-│   ├── spatial-orchestrator/   # Query routing
-│   └── catalog.json            # Auto-generated skill index
 ├── bot/                        # Messaging bot frontends
-│   ├── core.py                 # Shared LLM engine + tool loop + security
+│   ├── core.py                 # Shared LLM engine + tool loop (reused by interactive)
 │   ├── telegram_bot.py         # Telegram frontend
 │   ├── feishu_bot.py           # Feishu (Lark) frontend
+│   ├── onboard.py              # Interactive setup wizard
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
-├── SOUL.md                     # Bot persona (OmicsBot)
+├── SOUL.md                     # Bot/CLI persona (OmicsBot)
 ├── templates/SKILL-TEMPLATE.md # Template for new skills
 ├── examples/                   # Shared demo data
 ├── sessions/                   # SpatialSession JSONs
@@ -158,3 +172,118 @@ Configuration is via `.env` at the project root. See `bot/README.md` for require
 2. **Disclaimer required**: Every report must include the OmicsClaw disclaimer
 3. **No hallucinated science**: All parameters trace to SKILL.md or cited tools
 4. **Security filtering**: `omicsclaw.py` enforces `allowed_extra_flags` whitelists
+
+## Interactive CLI/TUI
+
+OmicsClaw features a full interactive terminal interface (referencing EvoScientist's architecture).
+
+### Architecture
+
+```
+omicsclaw.py interactive
+    └── omicsclaw/interactive/interactive.py   # prompt_toolkit REPL
+           ├── bot/core.py                     # LLM engine (reused)
+           ├── _session.py                     # SQLite session persistence
+           ├── _mcp.py                         # MCP server management
+           └── _constants.py                   # Banner, slash commands
+
+omicsclaw.py tui  (or --ui tui)
+    └── omicsclaw/interactive/tui.py           # Textual full-screen TUI
+```
+
+### Interactive Mode Commands
+
+```bash
+# Enter interactive CLI (default, uses prompt_toolkit REPL)
+oc interactive
+
+# Enter full-screen TUI (requires: pip install textual)
+oc tui
+oc interactive --ui tui
+
+# Single-shot (non-interactive)
+oc interactive -p "run spatial-preprocessing demo"
+
+# Resume a previous session
+oc interactive --session <session-id>
+
+# Override model/provider
+oc interactive --provider deepseek --model deepseek-chat
+
+# Set working directory
+oc interactive --workspace /path/to/workdir
+
+# Daemon mode (persistent workspace, default behavior)
+oc interactive --mode daemon
+
+# Run mode (isolated per-session workspace)
+oc interactive --mode run
+
+# Run mode with a named workspace
+oc interactive --mode run --name my-analysis
+```
+
+### Slash Commands (inside interactive session)
+
+| Command | Description |
+|---------|-------------|
+| `/skills [domain]` | List all skills (optionally filter by domain) |
+| `/run <skill> [--demo] [--input <path>]` | Run a skill directly |
+| `/sessions` | List recent sessions |
+| `/resume [id]` | Resume a session (interactive picker if no ID) |
+| `/delete <id>` | Delete a saved session |
+| `/current` | Show current session info |
+| `/new` | Start a new session |
+| `/clear` | Clear conversation history |
+| `/mcp list` | List MCP servers |
+| `/mcp add <name> <cmd> [args]` | Add MCP server |
+| `/mcp remove <name>` | Remove MCP server |
+| `/config list` | View configuration |
+| `/config set <key> <val>` | Update configuration |
+| `/help` | Show all commands |
+| `/exit` | Quit OmicsClaw |
+
+### MCP Server Management
+
+```bash
+# Add an MCP server (stdio transport)
+oc mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
+
+# Add an HTTP-based MCP server
+oc mcp add my-server http://localhost:8080
+
+# List all configured MCP servers
+oc mcp list
+
+# Remove an MCP server
+oc mcp remove sequential-thinking
+
+# Show config file location
+oc mcp config
+# → ~/.config/omicsclaw/mcp.yaml
+```
+
+MCP tools are loaded from `~/.config/omicsclaw/mcp.yaml` at session start.
+Requires `langchain-mcp-adapters` for actual tool execution:
+```bash
+pip install langchain-mcp-adapters
+```
+
+### Session Persistence
+
+Sessions are saved to `~/.config/omicsclaw/sessions.db` (SQLite).
+Conversation history is preserved across restarts and can be resumed by ID.
+
+### Dependencies
+
+```bash
+# Minimal (CLI mode)
+pip install prompt-toolkit rich questionary pyyaml aiosqlite
+
+# Or via pyproject.toml extras
+pip install -e ".[interactive]"
+
+# Full TUI support
+pip install -e ".[tui]"
+# then: pip install textual>=0.80
+```

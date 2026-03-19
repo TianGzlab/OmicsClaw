@@ -315,14 +315,23 @@ def identify_domains_stagate(
     adata_work = STAGATE_pyG.train_STAGATE(adata_work, device=device)
 
     from sklearn.mixture import GaussianMixture
+    from sklearn.cluster import KMeans
 
     embedding = adata_work.obsm["STAGATE"]
-    gmm = GaussianMixture(
-        n_components=n_domains,
-        covariance_type="tied",
-        random_state=random_seed,
-    )
-    labels = gmm.fit_predict(embedding)
+    try:
+        gmm = GaussianMixture(
+            n_components=n_domains,
+            covariance_type="tied",
+            random_state=random_seed,
+            reg_covar=1e-4,
+        )
+        labels = gmm.fit_predict(embedding)
+        clustering_name = "gmm_tied"
+    except Exception as e:
+        logger.warning("GMM failed (%s), falling back to KMeans", e)
+        kmeans = KMeans(n_clusters=n_domains, random_state=random_seed, n_init=10)
+        labels = kmeans.fit_predict(embedding)
+        clustering_name = "kmeans"
 
     adata.obs["spatial_domain"] = pd.Categorical(labels.astype(str))
     adata.obsm["X_stagate"] = embedding
@@ -335,7 +344,7 @@ def identify_domains_stagate(
         "n_domains": actual_n,
         "n_domains_requested": n_domains,
         "rad_cutoff": rad_cutoff,
-        "clustering": "gmm_tied",
+        "clustering": clustering_name,
         "device": str(device),
         "domain_counts": adata.obs["spatial_domain"].value_counts().to_dict(),
     }
@@ -406,16 +415,25 @@ def identify_domains_graphst(
 
     from sklearn.decomposition import PCA
     from sklearn.mixture import GaussianMixture
+    from sklearn.cluster import KMeans
 
     pca = PCA(n_components=20, random_state=42)
     embedding = pca.fit_transform(adata_work.obsm["emb"])
 
-    gmm = GaussianMixture(
-        n_components=n_domains,
-        covariance_type="tied",
-        random_state=random_seed,
-    )
-    labels = gmm.fit_predict(embedding)
+    try:
+        gmm = GaussianMixture(
+            n_components=n_domains,
+            covariance_type="tied",
+            random_state=random_seed,
+            reg_covar=1e-4,
+        )
+        labels = gmm.fit_predict(embedding)
+        clustering_name = "gmm_tied"
+    except Exception as e:
+        logger.warning("GMM failed (%s), falling back to KMeans", e)
+        kmeans = KMeans(n_clusters=n_domains, random_state=random_seed, n_init=10)
+        labels = kmeans.fit_predict(embedding)
+        clustering_name = "kmeans"
 
     adata.obs["spatial_domain"] = pd.Categorical(labels.astype(str))
     adata.obsm["X_graphst"] = adata_work.obsm["emb"]
@@ -427,7 +445,7 @@ def identify_domains_graphst(
         "method": "graphst",
         "n_domains": actual_n,
         "n_domains_requested": n_domains,
-        "clustering": "gmm_tied",
+        "clustering": clustering_name,
         "device": str(device),
         "domain_counts": adata.obs["spatial_domain"].value_counts().to_dict(),
     }

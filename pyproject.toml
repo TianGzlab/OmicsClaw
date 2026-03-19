@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -70,7 +70,7 @@ dependencies = [
     "scikit-misc>=0.5.0",
 
     # ========== pkg_resources fallback for older packages ==========
-    "setuptools>=42",
+    "setuptools>=64",
 ]
 
 [project.optional-dependencies]
@@ -246,6 +246,25 @@ memory = [
 # --------------------------------------------------------------------------- #
 # Tier 5: dev — development and testing tools                                 #
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# interactive — CLI/TUI interactive mode dependencies                         #
+# --------------------------------------------------------------------------- #
+interactive = [
+    "prompt-toolkit>=3.0",
+    "rich>=13.0",
+    "questionary>=2.0",
+    "pyyaml>=6.0",
+    "aiosqlite>=0.19.0",
+]
+
+# --------------------------------------------------------------------------- #
+# tui — Full-screen Textual TUI (optional, heavier)                           #
+# --------------------------------------------------------------------------- #
+tui = [
+    "omicsclaw[interactive]",
+    "textual>=0.80",
+]
+
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -263,6 +282,9 @@ Repository = "https://github.com/OmicsClaw/OmicsClaw"
 
 [project.scripts]
 omicsclaw = "omicsclaw.cli:main"
+omicsclaw-chat = "omicsclaw.interactive:main"
+oc = "omicsclaw.cli:main"
+oc-chat = "omicsclaw.interactive:main"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

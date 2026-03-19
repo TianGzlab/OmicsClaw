@@ -17,3 +17,8 @@ python-dotenv>=1.0.0
 
 # ── TTS (optional — for voice replies) ───────────────────────────────
 edge-tts>=6.1.0
+
+# ── Onboarding / CLI ─────────────────────────────────────────────────
+rich>=13.0.0
+questionary>=2.0.0
+textual>=0.85.0

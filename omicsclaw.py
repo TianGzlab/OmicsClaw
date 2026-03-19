@@ -7,6 +7,19 @@ Usage:
     python omicsclaw.py run <skill> --input <data> --output <dir>
     python omicsclaw.py run spatial-pipeline --input <h5ad> --output <dir>
     python omicsclaw.py upload --input <data> --data-type <type>
+
+Interactive CLI/TUI:
+    python omicsclaw.py interactive               # Rich CLI (prompt_toolkit)
+    python omicsclaw.py interactive --ui tui      # Full-screen Textual TUI
+    python omicsclaw.py interactive -p "..."      # Single-shot mode
+    python omicsclaw.py interactive --session <id> # Resume session
+    python omicsclaw.py tui                       # Alias for --ui tui
+
+MCP Server Management:
+    python omicsclaw.py mcp list
+    python omicsclaw.py mcp add <name> <command> [args]
+    python omicsclaw.py mcp remove <name>
+    python omicsclaw.py mcp config
 """
 
 from __future__ import annotations
@@ -37,8 +50,11 @@ PYTHON = sys.executable
 
 _COLOUR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 BOLD = "\033[1m" if _COLOUR else ""
+DIM = "\033[2m" if _COLOUR else ""
 GREEN = "\033[32m" if _COLOUR else ""
 YELLOW = "\033[33m" if _COLOUR else ""
+BLUE = "\033[34m" if _COLOUR else ""
+MAGENTA = "\033[35m" if _COLOUR else ""
 RED = "\033[31m" if _COLOUR else ""
 CYAN = "\033[36m" if _COLOUR else ""
 RESET = "\033[0m" if _COLOUR else ""
@@ -418,13 +434,116 @@ def _err(skill: str, msg: str, duration: float = 0) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Workspace mode helpers (inspired by EvoScientist --mode / --name design)
+# ---------------------------------------------------------------------------
+
+RUNS_DIR = DEFAULT_OUTPUT_ROOT / "runs"
+
+
+def _deduplicate_run_name(name: str, runs_dir: Path | None = None) -> str:
+    """Return *name* if available, otherwise *name_1*, *name_2*, etc."""
+    if runs_dir is None:
+        runs_dir = RUNS_DIR
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    if not (runs_dir / name).exists():
+        return name
+    i = 1
+    while (runs_dir / f"{name}_{i}").exists():
+        i += 1
+    return f"{name}_{i}"
+
+
+def _resolve_workspace(
+    workspace_dir: str | None,
+    mode: str | None,
+    run_name: str | None,
+) -> str | None:
+    """Resolve the effective workspace directory.
+
+    - ``--workspace <dir>`` always wins (explicit override).
+    - ``--mode daemon`` uses workspace_dir or project root (persistent).
+    - ``--mode run`` creates an isolated ``output/runs/<name_or_ts>/`` dir.
+    - ``--name`` gives the run directory a human-friendly name (only with run mode).
+    """
+    import os
+    import re
+
+    # Validate: --name only with --mode run
+    if run_name and mode != "run":
+        print(f"{RED}Error: --name can only be used with --mode run{RESET}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # Sanitize run name
+    if run_name and not re.fullmatch(r"[A-Za-z0-9_-]+", run_name):
+        print(f"{RED}Error: --name may only contain letters, digits, hyphens, and underscores{RESET}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # Explicit --workspace always wins
+    if workspace_dir:
+        ws = os.path.abspath(os.path.expanduser(workspace_dir))
+        os.makedirs(ws, exist_ok=True)
+        return ws
+
+    if mode == "run":
+        if run_name:
+            session_id = _deduplicate_run_name(run_name)
+        else:
+            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ws = str(RUNS_DIR / session_id)
+        os.makedirs(ws, exist_ok=True)
+        return ws
+
+    if mode == "daemon":
+        # Daemon mode: use project root (persistent)
+        return str(OMICSCLAW_DIR)
+
+    # No mode specified: return None (let downstream use default)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 
+class OmicsClawParser(argparse.ArgumentParser):
+    """Custom parser for beautiful OmicsClaw CLI help output."""
+    
+    def print_help(self, file=None):
+        if file is None:
+            file = sys.stdout
+
+        print(f"\n{BOLD}{CYAN}⬡ OmicsClaw{RESET} — AI-powered Multi-Omics Analysis Platform\n", file=file)
+        print(f"{BOLD}Usage:{RESET} oc <command> [options]\n", file=file)
+
+        print(f"{BOLD}{YELLOW}🌟 Core Commands{RESET}", file=file)
+        print(f"  {GREEN}interactive{RESET}  AI interactive terminal (CLI mode) | Alias: {GREEN}chat{RESET}", file=file)
+        print(f"  {GREEN}tui        {RESET}  Advanced full-screen Textual interface", file=file)
+        print(f"  {GREEN}list       {RESET}  List all 50+ available analysis skills", file=file)
+        print(f"  {GREEN}run        {RESET}  Execute a specific skill (e.g., 'oc run preprocess')", file=file)
+
+        print(f"\n{BOLD}{BLUE}🔧 Utility Commands{RESET}", file=file)
+        print(f"  {GREEN}mcp        {RESET}  Manage external Model Context Protocol (MCP) servers", file=file)
+        print(f"  {GREEN}env        {RESET}  Check installed Python dependencies and system tiers", file=file)
+        print(f"  {GREEN}onboard    {RESET}  Interactive setup wizard to configure API keys", file=file)
+        print(f"  {GREEN}upload     {RESET}  Upload/initialize session from existing .h5ad data", file=file)
+
+        print(f"\n{BOLD}{MAGENTA}⚙  Global Options{RESET}", file=file)
+        print(f"  {GREEN}-m, --mode {RESET}  Workspace mode: {CYAN}daemon{RESET} (persistent) | {CYAN}run{RESET} (isolated per-session)", file=file)
+        print(f"  {GREEN}-n, --name {RESET}  Name for run session directory (requires --mode run)", file=file)
+        print(f"  {GREEN}--workspace{RESET}  Override workspace directory for this session", file=file)
+
+        print(f"\n{BOLD}For specific command help, use:{RESET} oc <command> --help\n", file=file)
+
+        print(f"{DIM}OmicsClaw project is under active development.{RESET}\n", file=file)
+
+
 def main():
-    parser = argparse.ArgumentParser(
+    parser = OmicsClawParser(
         description="OmicsClaw — Multi-Omics Skills Runner",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -441,6 +560,59 @@ def main():
     upload_p.add_argument("--data-type", default="generic")
     upload_p.add_argument("--species", default="human")
 
+    # onboard
+    onboard_p = sub.add_parser("onboard", help="Run interactive setup wizard to configure API keys and channels")
+
+    # interactive / chat
+    interactive_p = sub.add_parser("interactive", aliases=["chat"], help="Start interactive terminal chat with LLM and skills")
+    interactive_p.add_argument("--session", dest="session_id", default=None,
+                               help="Resume a saved session by ID (or prefix)")
+    interactive_p.add_argument("-p", "--prompt", dest="prompt", default=None,
+                               help="Single-shot prompt (non-interactive, print response and exit)")
+    interactive_p.add_argument("--ui", choices=["cli", "tui"], default="cli",
+                               help="UI backend: cli (default, prompt_toolkit) or tui (Textual full-screen)")
+    interactive_p.add_argument("--model", default="", help="Override LLM model name")
+    interactive_p.add_argument("--provider", default="", help="Override LLM provider (deepseek, openai, gemini, ...)")
+    interactive_p.add_argument("--workspace", dest="workspace_dir", default=None,
+                               help="Working directory for this session (default: project root)")
+    interactive_p.add_argument("-m", "--mode", dest="mode", default=None,
+                               choices=["daemon", "run"],
+                               help="Workspace mode: 'daemon' (persistent, default) or 'run' (isolated per-session)")
+    interactive_p.add_argument("-n", "--name", dest="run_name", default=None,
+                               help="Name for this run session (used as directory name; requires --mode run)")
+
+    # tui
+    tui_p = sub.add_parser("tui", help="Start advanced full-screen Textual User Interface")
+    tui_p.add_argument("--session", dest="session_id", default=None,
+                       help="Resume a saved session by ID")
+    tui_p.add_argument("--model", default="", help="Override LLM model name")
+    tui_p.add_argument("--provider", default="", help="Override LLM provider")
+    tui_p.add_argument("--workspace", dest="workspace_dir", default=None,
+                       help="Working directory for this session")
+    tui_p.add_argument("-m", "--mode", dest="mode", default=None,
+                       choices=["daemon", "run"],
+                       help="Workspace mode: 'daemon' (persistent) or 'run' (isolated per-session)")
+    tui_p.add_argument("-n", "--name", dest="run_name", default=None,
+                       help="Name for this run session (requires --mode run)")
+
+    # mcp — manage external MCP servers
+    mcp_p = sub.add_parser("mcp", help="Manage external MCP (Model Context Protocol) servers")
+    mcp_sub = mcp_p.add_subparsers(dest="mcp_command")
+    # mcp list
+    mcp_sub.add_parser("list", help="List configured MCP servers")
+    # mcp add
+    mcp_add_p = mcp_sub.add_parser("add", help="Add an MCP server")
+    mcp_add_p.add_argument("name", help="Server name")
+    mcp_add_p.add_argument("command", help="Command or URL")
+    mcp_add_p.add_argument("args", nargs="*", help="Additional args for stdio transport")
+    mcp_add_p.add_argument("--transport", choices=["stdio", "http", "sse", "websocket"], default=None)
+    mcp_add_p.add_argument("--env", nargs="+", metavar="KEY=VAL", help="Environment variables")
+    # mcp remove
+    mcp_rm_p = mcp_sub.add_parser("remove", help="Remove an MCP server")
+    mcp_rm_p.add_argument("name", help="Server name to remove")
+    # mcp config — show config file path
+    mcp_sub.add_parser("config", help="Show MCP config file path")
+    
     # run
     run_p = sub.add_parser("run", help="Run a skill")
     run_p.add_argument("skill", help="Skill alias (e.g. preprocess, domains) or 'spatial-pipeline'")
@@ -535,6 +707,104 @@ def main():
     if args.command == "list":
         list_skills(domain_filter=getattr(args, "domain", None))
         sys.exit(0)
+
+    if args.command == "onboard":
+        from bot.onboard import run_onboard
+        run_onboard()
+        sys.exit(0)
+
+    if args.command in ("interactive", "chat"):
+        _mode = getattr(args, "mode", None) or "daemon"
+        _run_name = getattr(args, "run_name", None)
+        _ws = getattr(args, "workspace_dir", None)
+        _ws = _resolve_workspace(_ws, _mode, _run_name)
+        from omicsclaw.interactive.interactive import run_interactive
+        run_interactive(
+            workspace_dir=_ws,
+            session_id=getattr(args, "session_id", None),
+            model=getattr(args, "model", ""),
+            provider=getattr(args, "provider", ""),
+            ui_backend=getattr(args, "ui", "cli"),
+            prompt=getattr(args, "prompt", None),
+            mode=_mode,
+            run_name=_run_name,
+        )
+        sys.exit(0)
+
+    if args.command == "tui":
+        _mode = getattr(args, "mode", None) or "daemon"
+        _run_name = getattr(args, "run_name", None)
+        _ws = getattr(args, "workspace_dir", None)
+        _ws = _resolve_workspace(_ws, _mode, _run_name)
+        from omicsclaw.interactive.interactive import run_interactive
+        run_interactive(
+            workspace_dir=_ws,
+            session_id=getattr(args, "session_id", None),
+            model=getattr(args, "model", ""),
+            provider=getattr(args, "provider", ""),
+            ui_backend="tui",
+            mode=_mode,
+            run_name=_run_name,
+        )
+        sys.exit(0)
+
+    if args.command == "mcp":
+        from omicsclaw.interactive._mcp import (
+            list_mcp_servers,
+            add_mcp_server,
+            remove_mcp_server,
+            MCP_CONFIG_PATH,
+        )
+        mcp_cmd = getattr(args, "mcp_command", None) or "list"
+        if mcp_cmd == "list":
+            servers = list_mcp_servers()
+            if not servers:
+                print(f"{YELLOW}No MCP servers configured.{RESET}")
+                print(f"{CYAN}Add with: python omicsclaw.py mcp add <name> <command>{RESET}")
+            else:
+                print(f"\n{BOLD}MCP Servers{RESET}")
+                print(f"{BOLD}{'=' * 50}{RESET}")
+                for s in servers:
+                    transport = s.get('transport', '?')
+                    target = s.get('command') or s.get('url', '?')
+                    print(f"  {CYAN}{s['name']:<20}{RESET} [{transport}] {target}")
+            sys.exit(0)
+
+        elif mcp_cmd == "add":
+            env_dict: dict = {}
+            for kv in (getattr(args, "env", None) or []):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    env_dict[k] = v
+            try:
+                entry = add_mcp_server(
+                    args.name, args.command,
+                    extra_args=args.args or None,
+                    transport=getattr(args, "transport", None),
+                    env=env_dict or None,
+                )
+                print(f"{GREEN}Added MCP server:{RESET} {args.name} ({entry['transport']})")
+            except Exception as e:
+                print(f"{RED}Error:{RESET} {e}", file=sys.stderr)
+                sys.exit(1)
+            sys.exit(0)
+
+        elif mcp_cmd == "remove":
+            from omicsclaw.interactive._mcp import remove_mcp_server
+            if remove_mcp_server(args.name):
+                print(f"{GREEN}Removed:{RESET} {args.name}")
+            else:
+                print(f"{RED}Not found:{RESET} {args.name}", file=sys.stderr)
+                sys.exit(1)
+            sys.exit(0)
+
+        elif mcp_cmd == "config":
+            print(f"MCP config file: {CYAN}{MCP_CONFIG_PATH}{RESET}")
+            sys.exit(0)
+
+        else:
+            print(f"Usage: python omicsclaw.py mcp [list|add|remove|config]")
+            sys.exit(1)
 
     if args.command == "env":
         from omicsclaw.core.dependency_manager import get_installed_tiers

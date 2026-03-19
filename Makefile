@@ -1,5 +1,6 @@
 .PHONY: demo test list demo-all catalog demo-orchestrator demo-bulkrna \
         install install-spatial-domains install-full install-dev \
+        install-oc oc-link \
         bot-telegram bot-feishu bot-multi bot-list
 
 ## ── Virtual-environment + installation targets ──────────────────────────────
@@ -19,6 +20,24 @@ install-full:
 
 install-dev:
 	pip install -e ".[dev]"
+
+# Install the package and register the `oc` short alias
+# After this, both `omicsclaw` and `oc` commands are available system-wide.
+install-oc:
+	pip install -e .
+	@echo ""
+	@echo "✓ 'oc' command installed. Try: oc list"
+	@echo "  oc interactive   → start interactive CLI"
+	@echo "  oc tui           → start full-screen TUI"
+
+# Quick symlink alternative (no pip needed, works for current user only)
+# Creates ~/.local/bin/oc → project's omicsclaw.py
+oc-link:
+	@mkdir -p "$(HOME)/.local/bin"
+	@printf '#!/usr/bin/env sh\nexec python "$(CURDIR)/omicsclaw.py" "$$@"\n' > "$(HOME)/.local/bin/oc"
+	@chmod +x "$(HOME)/.local/bin/oc"
+	@echo "✓ Symlink created: ~/.local/bin/oc → $(CURDIR)/omicsclaw.py"
+	@echo "  Make sure ~/.local/bin is in your PATH."
 
 # Convenience: create venv + core install in one step
 setup: venv

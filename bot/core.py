@@ -271,6 +271,93 @@ BOT_START_TIME = time.time()
 memory_store = None
 session_manager = None
 
+# ---------------------------------------------------------------------------
+# Usage statistics (token counters)
+# ---------------------------------------------------------------------------
+
+_usage: dict[str, int] = {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "api_calls": 0,
+}
+
+# Approximate pricing per 1M tokens (USD) — keyed by provider:model fragment.
+# These are reference values; override via LLM_INPUT_PRICE / LLM_OUTPUT_PRICE env vars.
+_TOKEN_PRICES: dict[str, tuple[float, float]] = {
+    # (input $/1M, output $/1M)
+    "deepseek-chat":        (0.27,  1.10),
+    "deepseek-reasoner":    (0.55,  2.19),
+    "gpt-4o":               (2.50, 10.00),
+    "gpt-4o-mini":          (0.15,  0.60),
+    "gpt-4-turbo":          (10.0, 30.00),
+    "gpt-3.5-turbo":        (0.50,  1.50),
+    "claude-3-5-sonnet":    (3.00, 15.00),
+    "claude-3-5-haiku":     (0.80,  4.00),
+    "claude-3-opus":        (15.0, 75.00),
+    "gemini-1.5-pro":       (1.25,  5.00),
+    "gemini-1.5-flash":     (0.075, 0.30),
+    "gemini-2.0-flash":     (0.10,  0.40),
+    "qwen-plus":            (0.40,  1.20),
+    "qwen-long":            (0.05,  0.20),
+}
+
+
+def _get_token_price(model: str) -> tuple[float, float]:
+    """Return (input_price, output_price) per 1M tokens for the current model."""
+    # Allow explicit override via env vars
+    try:
+        inp = float(os.environ.get("LLM_INPUT_PRICE", ""))
+        out = float(os.environ.get("LLM_OUTPUT_PRICE", ""))
+        return inp, out
+    except (ValueError, TypeError):
+        pass
+    model_lower = model.lower()
+    for key, prices in _TOKEN_PRICES.items():
+        if key in model_lower:
+            return prices
+    return (0.0, 0.0)  # Unknown model — no cost estimate
+
+
+def _accumulate_usage(response_usage) -> dict[str, int]:
+    """Add API response usage to global counters. Returns per-call delta."""
+    if response_usage is None:
+        return {}
+    delta = {
+        "prompt_tokens":     getattr(response_usage, "prompt_tokens",     0) or 0,
+        "completion_tokens": getattr(response_usage, "completion_tokens", 0) or 0,
+        "total_tokens":      getattr(response_usage, "total_tokens",      0) or 0,
+    }
+    _usage["prompt_tokens"]     += delta["prompt_tokens"]
+    _usage["completion_tokens"] += delta["completion_tokens"]
+    _usage["total_tokens"]      += delta["total_tokens"]
+    _usage["api_calls"]         += 1
+    return delta
+
+
+def get_usage_snapshot() -> dict:
+    """Return a copy of the current cumulative usage statistics plus cost estimate."""
+    inp_price, out_price = _get_token_price(OMICSCLAW_MODEL)
+    cost = (
+        _usage["prompt_tokens"]     / 1_000_000 * inp_price +
+        _usage["completion_tokens"] / 1_000_000 * out_price
+    )
+    return {
+        **_usage,
+        "model": OMICSCLAW_MODEL,
+        "provider": LLM_PROVIDER_NAME,
+        "input_price_per_1m":  inp_price,
+        "output_price_per_1m": out_price,
+        "estimated_cost_usd":  round(cost, 6),
+    }
+
+
+def reset_usage() -> None:
+    """Reset session-level usage counters to zero."""
+    for k in _usage:
+        _usage[k] = 0
+
+
 
 # ---------------------------------------------------------------------------
 # Shared rate limiter (used by both Telegram and Feishu)
@@ -2205,7 +2292,16 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 # ---------------------------------------------------------------------------
 
 
-async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: str = None, platform: str = None, progress_fn=None, progress_update_fn=None) -> str:
+async def llm_tool_loop(
+    chat_id: int | str,
+    user_content: str | list,
+    user_id: str = None,
+    platform: str = None,
+    progress_fn=None,
+    progress_update_fn=None,
+    on_tool_call=None,
+    on_tool_result=None,
+) -> str:
     """
     Run the LLM tool-use loop:
     1. Append user message to history
@@ -2215,6 +2311,8 @@ async def llm_tool_loop(chat_id: int | str, user_content: str | list, user_id: s
 
     progress_fn: async callable(msg) -> handle. Sends a progress message, returns a handle.
     progress_update_fn: async callable(handle, msg). Updates a previously sent progress message.
+    on_tool_call: async callable(tool.name, arguments: dict). Called before a tool executes.
+    on_tool_result: async callable(tool.name, result: Any). Called after a tool completes.
     """
     # Handle commands before LLM call
     if isinstance(user_content, str) and user_content.strip().startswith("/"):
@@ -2455,6 +2553,9 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             logger.error(f"LLM API error: {e}")
             return f"Sorry, I'm having trouble thinking right now -- API error: {e}"
 
+        # Accumulate token usage statistics
+        _accumulate_usage(response.usage)
+
         choice = response.choices[0]
         last_message = choice.message
 
@@ -2487,6 +2588,12 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
                 logger.info(f"Tool call: {func_name}({json.dumps(func_args)[:200]})")
                 audit("tool_call", chat_id=str(chat_id), tool=func_name,
                       args_preview=json.dumps(func_args, default=str)[:300])
+
+                if on_tool_call:
+                    if asyncio.iscoroutinefunction(on_tool_call):
+                        await on_tool_call(func_name, func_args)
+                    else:
+                        on_tool_call(func_name, func_args)
 
                 # Send progress message for deep learning methods (once per method)
                 _progress_handle = None
@@ -2535,13 +2642,19 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
                             _progress_handle,
                             f"❌ **{method_display}** failed: {type(tool_err).__name__}"
                         )
+
+                if on_tool_result:
+                    if asyncio.iscoroutinefunction(on_tool_result):
+                        await on_tool_result(func_name, result)
+                    else:
+                        on_tool_result(func_name, result)
             else:
                 result = f"Unknown tool: {func_name}"
 
             history.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": result,
+                "content": str(result),
             })
 
     return last_message.content if last_message and last_message.content else "(max tool iterations reached)"

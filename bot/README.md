@@ -1,11 +1,17 @@
-# OmicsClaw Bot
+# OmicsClaw Messaging Bot System
 
-Multi-channel messaging frontend for OmicsClaw. Supports **9 channels** — Telegram, Feishu (Lark), DingTalk (钉钉), Discord, Slack, WeChat (企业微信/公众号), QQ, Email, and iMessage — all sharing the same LLM-powered core engine.
+The `bot` module powers OmicsClaw's conversational AI interfaces. It connects the core multi-omics skills engine with popular messaging platforms and a native terminal experience.
 
-> **OmicsClaw is a research and educational tool. It is not a medical device and does not provide clinical diagnoses. Consult a domain expert before making decisions based on these results.**
+## ✨ New: Interactive Terminal Mode (TUI)
 
-## Table of Contents
+You can now chat with OmicsBot natively in your terminal without any messaging apps configured! Similar to the EvoScientist CLI experience:
 
+```bash
+# Start the interactive conversational UI
+./OmicsClaw interactive
+```
+
+## Supported Channels
 - [Architecture](#architecture)
 - [Capability Matrix](#capability-matrix)
 - [Installation](#installation)
