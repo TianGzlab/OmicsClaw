@@ -1,0 +1,47 @@
+# OmicsClaw Bot — Channel-specific dependencies
+# ─────────────────────────────────────────────────────────────────────
+#
+# Install ALL channel deps:
+#     pip install -r bot/requirements-channels.txt
+#
+# Or install only what you need:
+#     pip install python-telegram-bot>=21.0          # Telegram
+#     pip install lark-oapi>=1.3.0                   # Feishu
+#     pip install discord.py>=2.3.0                  # Discord
+#     pip install slack-sdk>=3.27.0 aiohttp>=3.9.0   # Slack
+#     pip install qq-botpy                           # QQ
+#     pip install websockets>=12.0                   # DingTalk
+#     # Email   — no extra deps (stdlib imaplib/smtplib)
+#     # iMessage — no extra deps (uses `imsg` CLI, macOS only)
+#     # WeChat  — httpx already in core requirements
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Telegram ─────────────────────────────────────────────────────────
+python-telegram-bot>=21.0
+
+# ── Feishu (Lark) ────────────────────────────────────────────────────
+lark-oapi>=1.3.0
+
+# ── DingTalk ─────────────────────────────────────────────────────────
+websockets>=12.0
+# httpx already in core requirements
+
+# ── Discord ──────────────────────────────────────────────────────────
+discord.py>=2.3.0
+
+# ── Slack ────────────────────────────────────────────────────────────
+slack-sdk>=3.27.0
+aiohttp>=3.9.0
+
+# ── WeChat ───────────────────────────────────────────────────────────
+# httpx + aiohttp already covered above
+
+# ── QQ ───────────────────────────────────────────────────────────────
+qq-botpy
+
+# ── Email ────────────────────────────────────────────────────────────
+# No extra dependencies — uses Python stdlib (imaplib, smtplib, email)
+
+# ── iMessage ─────────────────────────────────────────────────────────
+# No Python dependencies — requires `imsg` CLI on macOS
+# Install via: brew install anthropics/tap/imsg

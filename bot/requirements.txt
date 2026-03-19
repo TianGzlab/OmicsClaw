@@ -1,16 +1,19 @@
 # OmicsClaw Bot dependencies
-# Install: pip install -r bot/requirements.txt
+# ─────────────────────────────────────────────────────────────────────
+#
+# INSTALL (core only):
+#     pip install -r bot/requirements.txt
+#
+# INSTALL (all channels):
+#     pip install -r bot/requirements.txt -r bot/requirements-channels.txt
+#
+# Or install individual channel extras — see bot/README.md.
+# ─────────────────────────────────────────────────────────────────────
 
-# Shared core
+# ── Shared core ──────────────────────────────────────────────────────
 openai>=1.12.0
 httpx[socks]>=0.25.0
 python-dotenv>=1.0.0
 
-# Telegram frontend
-python-telegram-bot>=21.0
-
-# Feishu frontend
-lark-oapi>=1.3.0
-
-# TTS (optional — for voice replies)
+# ── TTS (optional — for voice replies) ───────────────────────────────
 edge-tts>=6.1.0

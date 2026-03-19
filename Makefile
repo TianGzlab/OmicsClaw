@@ -1,6 +1,6 @@
 .PHONY: demo test list demo-all catalog demo-orchestrator demo-bulkrna \
         install install-spatial-domains install-full install-dev \
-        bot-telegram bot-feishu
+        bot-telegram bot-feishu bot-multi bot-list
 
 ## ── Virtual-environment + installation targets ──────────────────────────────
 
@@ -78,3 +78,12 @@ bot-telegram:
 
 bot-feishu:
 	python bot/feishu_bot.py
+
+# Multi-channel runner (runs multiple channels in one process)
+# Usage: make bot-multi CHANNELS=telegram,feishu
+bot-multi:
+	python -m bot.run --channels $(CHANNELS)
+
+bot-list:
+	python -m bot.run --list
+

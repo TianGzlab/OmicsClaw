@@ -27,38 +27,90 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI, APIError
 
 # ---------------------------------------------------------------------------
-# LLM provider presets
+# LLM provider presets  (Multi-Provider support)
 # ---------------------------------------------------------------------------
-# Each provider maps to (base_url, default_model).
+# Each provider maps to (base_url, default_model, api_key_env_var).
 # Users set LLM_PROVIDER=<key> for one-step configuration;
 # LLM_BASE_URL and OMICSCLAW_MODEL can still override.
+#
+# Inspired by EvoScientist's Multi-Provider architecture, adapted for
+# OmicsClaw's lightweight AsyncOpenAI-based design. All providers are
+# accessed through the OpenAI-compatible API protocol.
 
-PROVIDER_PRESETS: dict[str, tuple[str, str]] = {
-    "deepseek": ("https://api.deepseek.com", "deepseek-chat"),
-    "gemini": (
-        "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "gemini-2.0-flash",
-    ),
-    "openai": ("", "gpt-4o"),
-    "custom": ("", ""),
+PROVIDER_PRESETS: dict[str, tuple[str, str, str]] = {
+    # --- Tier 1: Primary providers ---
+    "deepseek":   ("https://api.deepseek.com",                                    "deepseek-chat",          "DEEPSEEK_API_KEY"),
+    "openai":     ("",                                                             "gpt-4o",                 "OPENAI_API_KEY"),
+    "anthropic":  ("https://api.anthropic.com/v1/",                                "claude-sonnet-4-5-20250514", "ANTHROPIC_API_KEY"),
+    "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/",     "gemini-2.5-flash",       "GOOGLE_API_KEY"),
+    "nvidia":     ("https://integrate.api.nvidia.com/v1",                          "deepseek-ai/deepseek-r1", "NVIDIA_API_KEY"),
+
+    # --- Tier 2: Third-party aggregators ---
+    "siliconflow": ("https://api.siliconflow.cn/v1",                              "deepseek-ai/DeepSeek-V3", "SILICONFLOW_API_KEY"),
+    "openrouter":  ("https://openrouter.ai/api/v1",                               "deepseek/deepseek-chat-v3-0324", "OPENROUTER_API_KEY"),
+    "volcengine":  ("https://ark.cn-beijing.volces.com/api/v3",                   "doubao-1.5-pro-256k",     "VOLCENGINE_API_KEY"),
+    "dashscope":   ("https://dashscope.aliyuncs.com/compatible-mode/v1",          "qwen-max",                "DASHSCOPE_API_KEY"),
+    "zhipu":       ("https://open.bigmodel.cn/api/paas/v4",                       "glm-4-flash",             "ZHIPU_API_KEY"),
+
+    # --- Tier 3: Local & custom ---
+    "ollama":     ("http://localhost:11434/v1",                                    "qwen2.5:7b",             ""),
+    "custom":     ("",                                                             "",                        ""),
+
+    # --- Legacy alias (backward compat — same as gemini) ---
 }
+
+# Ordered list for auto-detection: when LLM_PROVIDER is not set, we pick the
+# first provider whose API key env var is present in the environment.
+_PROVIDER_DETECT_ORDER = [
+    "deepseek", "openai", "anthropic", "gemini", "nvidia",
+    "siliconflow", "openrouter", "volcengine", "dashscope", "zhipu",
+]
 
 
 def resolve_provider(
     provider: str = "",
     base_url: str = "",
     model: str = "",
-) -> tuple[str | None, str]:
-    """Return (base_url_or_None, model) after applying provider defaults.
+    api_key: str = "",
+) -> tuple[str | None, str, str]:
+    """Return (base_url_or_None, model, resolved_api_key) after applying provider defaults.
 
-    Priority: explicit env vars > provider preset > hardcoded fallback.
+    Priority: explicit env vars > provider preset > auto-detect > hardcoded fallback.
+
+    When *provider* is empty and *api_key* is empty, we scan provider-specific
+    environment variables (DEEPSEEK_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, …)
+    to auto-detect the provider.
     """
-    preset_url, preset_model = PROVIDER_PRESETS.get(
-        provider.lower().strip(), ("", "")
-    )
-    resolved_url = base_url or preset_url or None
+    provider_key = provider.lower().strip() if provider else ""
+
+    # Auto-detect provider from available API keys
+    if not provider_key and not api_key:
+        for p in _PROVIDER_DETECT_ORDER:
+            env_var = PROVIDER_PRESETS[p][2]
+            if env_var and os.environ.get(env_var):
+                provider_key = p
+                api_key = os.environ[env_var]
+                break
+
+    # Look up preset
+    preset = PROVIDER_PRESETS.get(provider_key, ("", "", ""))
+    preset_url, preset_model, preset_key_env = preset
+
+    # Allow per-provider base_url override via env var (e.g. ANTHROPIC_BASE_URL)
+    env_base_url = ""
+    if provider_key:
+        env_base_url = os.environ.get(f"{provider_key.upper()}_BASE_URL", "")
+
+    resolved_url = base_url or env_base_url or preset_url or None
     resolved_model = model or preset_model or "deepseek-chat"
-    return resolved_url, resolved_model
+
+    # Resolve API key: explicit > per-provider env > LLM_API_KEY fallback
+    if not api_key and preset_key_env:
+        api_key = os.environ.get(preset_key_env, "")
+    if not api_key:
+        api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+
+    return resolved_url, resolved_model, api_key
 
 
 # ---------------------------------------------------------------------------
@@ -443,27 +495,45 @@ class SessionManager:
 
 
 def init(
-    api_key: str,
+    api_key: str = "",
     base_url: str | None = None,
     model: str = "",
     provider: str = "",
 ):
     """Initialise the shared LLM client. Call once at startup.
 
-    ``provider`` selects a preset (deepseek, gemini, openai, custom).
-    Explicit ``base_url`` / ``model`` override the preset.
+    ``provider`` selects a preset (deepseek, gemini, openai, anthropic,
+    nvidia, siliconflow, openrouter, volcengine, dashscope, zhipu, ollama,
+    custom).  Explicit ``base_url`` / ``model`` override the preset.
+
+    When ``api_key`` is empty, the key is auto-resolved from provider-
+    specific environment variables (e.g. DEEPSEEK_API_KEY for deepseek).
     """
     global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
 
-    resolved_url, resolved_model = resolve_provider(
+    resolved_url, resolved_model, resolved_key = resolve_provider(
         provider=provider,
         base_url=base_url or "",
         model=model,
+        api_key=api_key,
     )
     OMICSCLAW_MODEL = resolved_model
-    LLM_PROVIDER_NAME = provider or ("custom" if base_url else "openai")
 
-    kw: dict = {"api_key": api_key}
+    # Determine display name for the provider
+    if provider:
+        LLM_PROVIDER_NAME = provider
+    elif resolved_url:
+        # Try to match resolved_url back to a known provider
+        for pname, (purl, _, _) in PROVIDER_PRESETS.items():
+            if purl and resolved_url and purl.rstrip("/") in resolved_url.rstrip("/"):
+                LLM_PROVIDER_NAME = pname
+                break
+        else:
+            LLM_PROVIDER_NAME = "custom"
+    else:
+        LLM_PROVIDER_NAME = "openai"
+
+    kw: dict = {"api_key": resolved_key or api_key}
     if resolved_url:
         kw["base_url"] = resolved_url
     llm = AsyncOpenAI(**kw)
