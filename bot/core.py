@@ -2042,7 +2042,7 @@ Or try: "show me a spatial transcriptomics demo" """
 • Domains: Spatial Transcriptomics, Single-Cell, Genomics, Proteomics, Metabolomics
 • Skills: {len(registry.skills)} analysis skills
 • Tools: {len(TOOL_EXECUTORS)} bot tools
-• Repository: https://github.com/zhou-1314/OmicsClaw
+• Repository: https://github.com/TianGzlab/OmicsClaw
 
 For updates and documentation, visit the GitHub repository."""
 
