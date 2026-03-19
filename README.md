@@ -23,6 +23,26 @@
 >
 > OmicsClaw is currently under active development. Some features may contain bugs or may not be fully stable yet. We are continuously improving code quality, fixing known issues, and adding new features. If you encounter any problems, please report them via [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues). Thank you for your understanding and support!
 
+<h3>⚡ Unified Control, Different Surfaces</h3>
+
+<table>
+  <tr>
+    <th width="75%"><p align="center">🖥️ CLI / TUI</p></th>
+    <th width="25%"><p align="center">📱 Mobile (Feishu)</p></th>
+  </tr>
+  <tr>
+    <td align="center">
+      <video src="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a" autoplay loop muted playsinline width="100%">
+        <a href="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a">View CLI demo</a>
+      </video>
+    </td>
+    <td align="center">
+      <video src="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e" width="100%" autoplay loop muted playsinline>
+        <a href="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e">View mobile demo</a>
+      </video>
+    </td>
+  </tr>
+</table>
 ## Why OmicsClaw?
 
 **Traditional tools make you repeat yourself.** Every session starts from zero: re-upload data, re-explain context, re-run preprocessing. OmicsClaw remembers.
