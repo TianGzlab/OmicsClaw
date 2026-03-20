@@ -70,7 +70,42 @@
 
 > 📖 **Deep dive:** See [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) for detailed comparison of memory vs. stateless workflows.
 
-## Quick Start
+## 🔑 Configuration
+
+<details>
+<summary>View instructions for configuring DeepSeek, Anthropic, OpenAI, or Local LLMs</summary>
+
+OmicsClaw supports switching between multiple LLM engines with a single config change. You can configure this interactively via `oc onboard` or by manually editing the `.env` file in the project root.
+
+**1. DeepSeek (Default):**
+```env
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**2. Anthropic (Claude):**
+```env
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Automatically detects the key and defaults to claude-3-5-sonnet
+```
+
+**3. OpenAI (GPT-4o):**
+```env
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**4. Local LLM (Ollama):**
+If you have strict data compliance requirements, you can run models entirely locally via Ollama. No API key is needed:
+```env
+LLM_PROVIDER=ollama
+OMICSCLAW_MODEL=qwen2.5:7b  # Replace with your pulled model
+LLM_BASE_URL=http://localhost:11434/v1
+```
+
+> 📖 **Full Provider List:** See `.env.example` for instructions on configuring other engines like NVIDIA NIM, OpenRouter, DashScope, and custom endpoints.
+
+</details>
+
+## ⚡ Quick Start
 
 <details>
 <summary> 🪛 Install uv (if you don't have it)</summary>
@@ -401,6 +436,9 @@ python omicsclaw.py run <skill> --input <file> --output <dir>
 
 ### Example Workflows
 
+<details>
+<summary>View example pipelines for Spatial, Single-cell, Genomics, Metabolomics, and Bulk RNA-seq</summary>
+
 **Spatial transcriptomics analysis:**
 ```bash
 # 1. Preprocess: QC, normalize, cluster
@@ -510,7 +548,12 @@ python omicsclaw.py run bulkrna-survival --input counts.csv --clinical clinical.
 python omicsclaw.py run bulkrna-trajblend --input counts.csv --reference scref.h5ad --output output/bulk-traj
 ```
 
+</details>
+
 ### Smart Orchestration
+
+<details>
+<summary>View smart routing and named pipelines</summary>
 
 The orchestrator automatically routes queries and files to the right analysis:
 
@@ -554,7 +597,12 @@ python omicsclaw.py run orchestrator --pipeline singlecell --input data.h5ad --o
 python omicsclaw.py run orchestrator --pipeline cancer --input data.h5ad --output output
 ```
 
+</details>
+
 ## Output Structure
+
+<details>
+<summary>View standardized output directory structure</summary>
 
 Every skill generates standardized output:
 
@@ -568,7 +616,12 @@ output_dir/
 └── reproducibility/       # Version info, run command
 ```
 
+</details>
+
 ## Architecture
+
+<details>
+<summary>View project architecture and skill layout</summary>
 
 OmicsClaw uses a modular, domain-organized structure:
 
@@ -612,6 +665,8 @@ skills/<domain>/<skill>/
 ```
 
 Skills communicate via standardized formats (`.h5ad`, `.vcf`, `.mzML`, `.csv`) and can be chained into pipelines.
+
+</details>
 
 ## 📱 Channels Integration — Memory-Enabled Conversational Interface
 
