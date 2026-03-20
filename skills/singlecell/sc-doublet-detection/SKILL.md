@@ -3,7 +3,7 @@ name: sc-doublet-detection
 description: >-
   Doublet detection and removal using Scrublet (Python), DoubletFinder (R),
   and scDblFinder (R). Essential QC step before clustering.
-version: 0.1.0
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, doublet, Scrublet, DoubletFinder, scDblFinder, QC]
@@ -57,8 +57,10 @@ Detect and remove doublets (multiple cells captured in one droplet) from scRNA-s
 ## CLI Reference
 
 ```bash
-python skills/singlecell/doublet-detection/sc_doublet.py \
+python skills/singlecell/sc-doublet-detection/sc_doublet.py \
   --input <data.h5ad> --output <dir>
+python skills/singlecell/sc-doublet-detection/sc_doublet.py \
+  --input <data.h5ad> --method scdblfinder --output <dir>
 python omicsclaw.py run sc-doublet-detection --demo
 ```
 
@@ -202,7 +204,7 @@ Formula: `rate ≈ cells_loaded / 1000 * 0.008`
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--method` | `scrublet` | scrublet, doubletfinder, scdblfinder |
-| `--expected-rate` | `0.06` | Expected doublet rate |
+| `--expected-doublet-rate` | `0.06` | Expected doublet rate |
 | `--threshold` | `auto` | Doublet score threshold |
 
 ## Example Queries
@@ -230,7 +232,7 @@ output_dir/
 ## Dependencies
 
 **Required**: scanpy, numpy
-**Optional**: scrublet, DoubletFinder (R), scDblFinder (R)
+**Optional**: scrublet, `rpy2` + `anndata2ri` + R packages `DoubletFinder`, `scDblFinder`, `Seurat`, and `SingleCellExperiment`
 
 ## Citations
 

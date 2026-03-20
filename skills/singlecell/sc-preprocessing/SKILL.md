@@ -2,8 +2,8 @@
 name: sc-preprocessing
 description: >-
   Single-cell RNA-seq QC, normalization, HVG selection, PCA, UMAP, and Leiden clustering.
-  Supports both Scanpy (Python) and Seurat (R) workflows.
-version: 0.1.0
+  Supports Scanpy (Python), Seurat LogNormalize (R), and Seurat SCTransform (R) workflows.
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, preprocessing, QC, normalization, clustering]
@@ -68,9 +68,12 @@ You are **SC Preprocessing**, the foundation skill for single-cell analysis in O
 ## CLI Reference
 
 ```bash
-python skills/singlecell/preprocessing/sc_preprocess.py \
-  --input <data.h5ad> --output <dir>
-python skills/singlecell/preprocessing/sc_preprocess.py --demo --output /tmp/demo
+python skills/singlecell/sc-preprocessing/sc_preprocess.py \
+  --input <data.h5ad> --method scanpy --output <dir>
+python skills/singlecell/sc-preprocessing/sc_preprocess.py \
+  --input <data.h5ad> --method seurat --output <dir>
+python skills/singlecell/sc-preprocessing/sc_preprocess.py \
+  --input <data.h5ad> --method sctransform --output <dir>
 python omicsclaw.py run sc-preprocessing --demo
 ```
 
@@ -278,9 +281,17 @@ seurat_obj <- SCTransform(seurat_obj, vars.to.regress = 'percent.mt', verbose = 
 | `--min-genes` | `200` | Min genes per cell |
 | `--min-cells` | `3` | Min cells per gene |
 | `--max-mt-pct` | `20.0` | Max mitochondrial % |
+| `--method` | `scanpy` | `scanpy`, `seurat`, or `sctransform` |
 | `--n-top-hvg` | `2000` | Number of HVGs |
 | `--n-pcs` | `50` | PCA components |
 | `--leiden-resolution` | `1.0` | Leiden resolution |
+
+## Runtime Notes
+
+- `--method scanpy` is the default Python workflow.
+- `--method seurat` runs the Seurat LogNormalize path through `rpy2`.
+- `--method sctransform` runs the Seurat SCTransform path through `rpy2`.
+- R-backed modes require `rpy2`, `anndata2ri`, and the R packages installed via `Rscript install_r_dependencies.R`.
 
 ## Example Queries
 

@@ -1,9 +1,9 @@
 ---
-name: spatial-de
+name: sc-de
 description: >-
   Differential expression analysis for single-cell data — marker gene discovery
-  using Wilcoxon, t-test, MAST, or DESeq2 pseudo-bulk analysis.
-version: 0.1.0
+  using Wilcoxon, t-test, MAST compatibility, or DESeq2 pseudobulk analysis via R.
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, differential-expression, markers, Wilcoxon, MAST, pseudo-bulk]
@@ -73,7 +73,13 @@ python skills/singlecell/de/sc_de.py \
 # Pairwise comparison within a cell type
 python skills/singlecell/de/sc_de.py \
   --input <annotated.h5ad> --output <dir> --groupby condition \
-  --group1 Treatment --group2 Control --subset-col cell_type --subset-val "CD8 T cells"
+  --group1 Treatment --group2 Control
+
+# Pseudobulk DESeq2 through the R bridge
+python skills/singlecell/de/sc_de.py \
+  --input <annotated.h5ad> --output <dir> --method deseq2_r \
+  --groupby condition --group1 Treatment --group2 Control \
+  --sample-key sample_id --celltype-key cell_type
 
 # Demo mode
 python omicsclaw.py run sc-de --demo
@@ -150,11 +156,11 @@ pdata = dc.get_pseudobulk(
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--groupby` | `leiden` | Column in `.obs` defining the groups |
-| `--method` | `wilcoxon` | Test: wilcoxon, t-test, or mast |
+| `--method` | `wilcoxon` | Test: `wilcoxon`, `t-test`, `mast`, or `deseq2_r` |
 | `--group1` | none | Pairwise group A (e.g. Treatment) |
 | `--group2` | none | Pairwise group B (reference, e.g. Control) |
-| `--subset-col` | none | Optional obs column to subset cells before testing |
-| `--subset-val` | none | Value in subset-col to keep |
+| `--sample-key` | `sample_id` | Sample/replicate column for `deseq2_r` |
+| `--celltype-key` | `cell_type` | Cell type column for `deseq2_r` |
 
 ## Example Queries
 
@@ -184,7 +190,12 @@ output_dir/
 ## Dependencies
 
 **Required**: scanpy >= 1.9, pandas, matplotlib
-**Optional**: decoupler, pydeseq2, rpy2
+**Optional**: `rpy2` + `anndata2ri` + R packages `DESeq2`, `muscat`, `SingleCellExperiment`
+
+## Runtime Notes
+
+- `mast` is currently a compatibility option in the Python path and falls back to Wilcoxon.
+- `deseq2_r` is the implemented replicate-aware pseudobulk backend and requires both `--group1` and `--group2`.
 
 ## Safety
 

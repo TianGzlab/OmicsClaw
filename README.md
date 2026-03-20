@@ -288,27 +288,31 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 </details>
 
-### Single-Cell Omics (9 skills)
+### Single-Cell Omics (13 skills)
 
-- **Basic:** `sc-preprocessing`, `sc-doublet-detection`
-- **Analysis:** `sc-cell-annotation`, `sc-de`
-- **Advanced:** `sc-trajectory`, `sc-grn`, `sc-cell-communication`
-- **Integration:** `sc-batch-integration`, `sc-multiome`
+- **Basic:** `sc-qc`, `sc-filter`, `sc-preprocessing`, `sc-ambient-removal`, `sc-doublet-detection`
+- **Analysis:** `sc-cell-annotation`, `sc-de`, `sc-markers`
+- **Advanced:** `sc-pseudotime`, `sc-velocity`, `sc-grn`, `sc-cell-communication`
+- **Integration:** `sc-batch-integration`
 
 <details>
 <summary>View all single-cell skills</summary>
 
 | Skill | Description | Key Methods |
 |-------|-------------|-------------|
-| `sc-preprocessing` | QC, normalization, HVG, PCA, UMAP | Scanpy, Seurat |
-| `sc-doublet-detection` | Identify and remove doublets | Scrublet, DoubletFinder |
-| `sc-cell-annotation` | Cell type annotation | CellTypist, SingleR |
-| `sc-de` | Differential expression | Wilcoxon, MAST, DESeq2 |
-| `sc-trajectory` | Pseudo-time & trajectory inference | Monocle3, Slingshot |
-| `sc-grn` | Gene regulatory networks | SCENIC, CellOracle |
-| `sc-cell-communication` | Ligand-receptor interactions | CellPhoneDB, CellChat |
-| `sc-batch-integration` | Multi-sample integration | Harmony, scVI, Seurat v4 |
-| `sc-multiome` | Multi-omics joint analysis | MOFA+, WNN |
+| `sc-qc` | Calculate and visualize QC metrics | Scanpy QC |
+| `sc-filter` | Filter cells and genes using QC thresholds | Rule-based filtering |
+| `sc-preprocessing` | QC, normalization, HVG, PCA, UMAP | Scanpy, Seurat, SCTransform |
+| `sc-ambient-removal` | Remove ambient RNA contamination | CellBender, SoupX, simple |
+| `sc-doublet-detection` | Identify and remove doublets | Scrublet, DoubletFinder, scDblFinder |
+| `sc-cell-annotation` | Cell type annotation | markers, CellTypist, SingleR |
+| `sc-de` | Differential expression | Wilcoxon, t-test, DESeq2 pseudobulk |
+| `sc-markers` | Marker gene discovery | Wilcoxon, t-test, logistic regression |
+| `sc-pseudotime` | Pseudotime & trajectory inference | PAGA, DPT |
+| `sc-velocity` | RNA velocity | scVelo |
+| `sc-grn` | Gene regulatory networks | pySCENIC |
+| `sc-cell-communication` | Ligand-receptor interactions | builtin, LIANA, CellChat |
+| `sc-batch-integration` | Multi-sample integration | Harmony, scVI, BBKNN, Scanorama, fastMNN, Seurat CCA/RPCA |
 
 </details>
 
@@ -457,13 +461,19 @@ python omicsclaw.py run spatial-cell-communication --input output/spatial-prepro
 **Single-cell analysis:**
 ```bash
 # 1. Preprocess: QC, normalize, cluster
-python omicsclaw.py run sc-preprocessing --input pbmc.h5ad --output output/sc-preprocess
+python omicsclaw.py run sc-preprocessing --input pbmc.h5ad --method scanpy --output output/sc-preprocess
 
 # 2. Doublet detection
-python omicsclaw.py run sc-doublet-detection --input pbmc.h5ad --output output/sc-doublet
+python omicsclaw.py run sc-doublet-detection --input output/sc-preprocess/processed.h5ad --method scdblfinder --output output/sc-doublet
 
 # 3. Cell annotation
-python omicsclaw.py run sc-cell-annotation --input output/sc-preprocess/processed.h5ad --output output/sc-annotate
+python omicsclaw.py run sc-cell-annotation --input output/sc-doublet/processed.h5ad --method singler --reference HPCA --output output/sc-annotate
+
+# 4. Batch integration
+python omicsclaw.py run sc-batch-integration --input output/sc-annotate/processed.h5ad --method seurat_rpca --batch-key sample_id --output output/sc-integrate
+
+# 5. Communication analysis
+python omicsclaw.py run sc-cell-communication --input output/sc-annotate/processed.h5ad --method cellchat_r --cell-type-key cell_type --output output/sc-communication
 ```
 
 **Genomics — variant calling pipeline:**

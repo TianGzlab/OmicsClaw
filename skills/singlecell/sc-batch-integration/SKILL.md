@@ -3,7 +3,7 @@ name: sc-batch-integration
 description: >-
   Batch integration for multi-sample scRNA-seq using Harmony, scVI, Seurat CCA/RPCA,
   BBKNN, and fastMNN. Remove technical variation while preserving biological differences.
-version: 0.1.0
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, batch-integration, Harmony, scVI, Seurat, BBKNN]
@@ -62,8 +62,12 @@ Integrate multiple scRNA-seq datasets to remove batch effects while preserving b
 ## CLI Reference
 
 ```bash
-python skills/singlecell/batch-integration/sc_integrate.py \
-  --input <merged.h5ad> --output <dir>
+python skills/singlecell/sc-batch-integration/sc_integrate.py \
+  --input <merged.h5ad> --method harmony --output <dir>
+python skills/singlecell/sc-batch-integration/sc_integrate.py \
+  --input <merged.h5ad> --method seurat_rpca --batch-key sample_id --output <dir>
+python skills/singlecell/sc-batch-integration/sc_integrate.py \
+  --input <merged.h5ad> --method fastmnn --batch-key sample_id --output <dir>
 python omicsclaw.py run sc-batch-integration --demo
 ```
 
@@ -212,9 +216,10 @@ celltype_sil = silhouette_score(adata.obsm['X_scVI'], adata.obs['cell_type'])  #
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--method` | `harmony` | harmony, scvi, scanorama, bbknn |
+| `--method` | `harmony` | `harmony`, `scvi`, `scanvi`, `bbknn`, `scanorama`, `fastmnn`, `seurat_cca`, `seurat_rpca` |
 | `--batch-key` | `batch` | Column with batch labels |
-| `--n-latent` | `30` | Latent dimensions (scVI) |
+| `--n-epochs` | none | Training epochs for `scvi`/`scanvi` |
+| `--no-gpu` | false | Disable GPU for deep learning methods |
 
 ## Example Queries
 
@@ -245,7 +250,12 @@ Reference examples tested with: scanpy 1.10+, scvi-tools 1.1+, anndata 0.10+
 ## Dependencies
 
 **Required**: scanpy >= 1.9, anndata
-**Optional**: scvi-tools, harmonypy, bbknn
+**Optional**: scvi-tools, harmonypy, bbknn, scanorama, `rpy2` + `anndata2ri` + R packages `Seurat`, `batchelor`, and `harmony`
+
+## Runtime Notes
+
+- `fastmnn`, `seurat_cca`, and `seurat_rpca` are implemented through the shared R bridge.
+- `harmony` in this skill uses the Python `harmony-pytorch` path by default; the README installer also includes the R `harmony` package for Seurat workflows.
 
 ## Citations
 

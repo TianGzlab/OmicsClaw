@@ -8,6 +8,11 @@
 #   • CellChat    — cell-cell communication inference
 #   • Numbat      — copy number variation from scRNA-seq
 #   • SPARK-X     — spatially variable gene detection
+#   • SingleR     — reference-based cell type annotation
+#   • scDblFinder — doublet detection
+#   • SoupX       — ambient RNA removal
+#   • batchelor   — fastMNN integration
+#   • DESeq2      — pseudobulk differential expression
 #
 # Prerequisites:
 #   R >= 4.3.0 on PATH
@@ -100,7 +105,9 @@ cran_pkgs <- c(
   "Matrix",       # sparse matrix operations
   "mclust",       # model-based clustering (GraphST)
   "Seurat",       # single-cell analysis framework (RCTD, Numbat)
-  "NMF"           # non-negative matrix factorisation (SPOTlight)
+  "NMF",          # non-negative matrix factorisation (SPOTlight)
+  "harmony",      # Harmony integration in Seurat
+  "SoupX"         # ambient RNA removal
 )
 
 for (pkg in cran_pkgs) {
@@ -125,6 +132,18 @@ bioc_pkgs <- list(
        cmd  = "BiocManager::install('scuttle',             update=FALSE, ask=FALSE)"),
   list(name = "SPOTlight",
        cmd  = "BiocManager::install('SPOTlight',           update=FALSE, ask=FALSE)"),
+  list(name = "SingleR",
+       cmd  = "BiocManager::install('SingleR',             update=FALSE, ask=FALSE)"),
+  list(name = "celldex",
+       cmd  = "BiocManager::install('celldex',             update=FALSE, ask=FALSE)"),
+  list(name = "scDblFinder",
+       cmd  = "BiocManager::install('scDblFinder',         update=FALSE, ask=FALSE)"),
+  list(name = "batchelor",
+       cmd  = "BiocManager::install('batchelor',           update=FALSE, ask=FALSE)"),
+  list(name = "DESeq2",
+       cmd  = "BiocManager::install('DESeq2',              update=FALSE, ask=FALSE)"),
+  list(name = "muscat",
+       cmd  = "BiocManager::install('muscat',              update=FALSE, ask=FALSE)"),
   list(name = "edgeR",
        cmd  = "BiocManager::install('edgeR',               update=FALSE, ask=FALSE)"),
   list(name = "limma",
@@ -176,6 +195,12 @@ github_pkgs <- list(
     repo   = "xzhoulab/SPARK",
     method = "SPARK-X spatially variable genes",
     cmd    = "devtools::install_github('xzhoulab/SPARK', upgrade='never')"
+  ),
+  list(
+    name   = "DoubletFinder",
+    repo   = "chris-mcginnis-ucsf/DoubletFinder",
+    method = "doublet detection",
+    cmd    = "devtools::install_github('chris-mcginnis-ucsf/DoubletFinder', upgrade='never')"
   )
 )
 
@@ -218,7 +243,16 @@ if (length(failed_packages) > 0) {
   cat("  omicsclaw.py run deconv  --method spotlight   (SPOTlight)\n")
   cat("  omicsclaw.py run comm    --method cellchat    (CellChat via rpy2)\n")
   cat("  omicsclaw.py run cnv     --method numbat      (Numbat)\n")
-  cat("  omicsclaw.py run genes   --method sparkx      (SPARK-X)\n\n")
+  cat("  omicsclaw.py run genes   --method sparkx      (SPARK-X)\n")
+  cat("  omicsclaw.py run sc-cell-annotation --method singler        (SingleR)\n")
+  cat("  omicsclaw.py run sc-doublet-detection --method scdblfinder  (scDblFinder)\n")
+  cat("  omicsclaw.py run sc-doublet-detection --method doubletfinder (DoubletFinder)\n")
+  cat("  omicsclaw.py run sc-ambient-removal --method soupx          (SoupX)\n")
+  cat("  omicsclaw.py run sc-batch-integration --method fastmnn      (batchelor)\n")
+  cat("  omicsclaw.py run sc-batch-integration --method seurat_cca   (Seurat CCA)\n")
+  cat("  omicsclaw.py run sc-batch-integration --method seurat_rpca  (Seurat RPCA)\n")
+  cat("  omicsclaw.py run sc-de --method deseq2_r                    (DESeq2 pseudobulk)\n")
+  cat("  omicsclaw.py run sc-cell-communication --method cellchat_r  (CellChat)\n\n")
   cat("Python-only methods (no R needed):\n")
   cat("  omicsclaw.py run deconv  --method flashdeconv (default, fastest)\n")
   cat("  omicsclaw.py run deconv  --method cell2location\n")

@@ -1,9 +1,9 @@
 ---
 name: sc-ambient-removal
 description: >-
-  Remove ambient RNA contamination from single-cell data using CellBender
-  or simple subtraction methods.
-version: 0.2.0
+  Remove ambient RNA contamination from single-cell data using CellBender,
+  SoupX, or simple subtraction methods.
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, ambient, cellbender, contamination, QC]
@@ -43,8 +43,9 @@ Remove ambient RNA contamination from droplet-based scRNA-seq data.
 ## Core Capabilities
 
 1. **CellBender**: Deep learning-based ambient removal (recommended for 10X)
-2. **Simple subtraction**: Quick ambient profile subtraction
-3. **Contamination estimation**: Automatic or manual contamination fraction
+2. **SoupX (R)**: Ambient RNA estimation using raw/filtered 10X matrix pairs
+3. **Simple subtraction**: Quick ambient profile subtraction
+4. **Contamination estimation**: Automatic or manual contamination fraction
 
 ## Workflow
 
@@ -62,6 +63,13 @@ python skills/singlecell/sc-ambient-removal/sc_ambient.py --input <data.h5ad> --
 # With CellBender (requires raw H5)
 python skills/singlecell/sc-ambient-removal/sc_ambient.py --raw-h5 <raw.h5> \
   --output <dir> --method cellbender --expected-cells 10000
+
+# With SoupX (requires raw + filtered 10X directories)
+python skills/singlecell/sc-ambient-removal/sc_ambient.py \
+  --input <filtered.h5ad> --method soupx \
+  --raw-matrix-dir raw_feature_bc_matrix/ \
+  --filtered-matrix-dir filtered_feature_bc_matrix/ \
+  --output <dir>
 
 # Specify contamination fraction
 python skills/singlecell/sc-ambient-removal/sc_ambient.py --input <data.h5ad> \
@@ -83,6 +91,11 @@ python omicsclaw.py run sc-ambient-removal --demo
 - Fast, works with any count matrix
 - Good for quick cleanup
 
+### SoupX
+- Requires both `--raw-matrix-dir` and `--filtered-matrix-dir`
+- Best suited for 10x raw/filtered matrix pairs
+- Runs through the R bridge and writes the corrected counts back into AnnData
+
 ## Parameters
 
 | Parameter | Default | Description |
@@ -91,6 +104,8 @@ python omicsclaw.py run sc-ambient-removal --demo
 | `--contamination` | 0.05 | Contamination fraction |
 | `--expected-cells` | None | Expected cells (CellBender) |
 | `--raw-h5` | None | Raw H5 file (CellBender) |
+| `--raw-matrix-dir` | None | 10x raw matrix directory for SoupX |
+| `--filtered-matrix-dir` | None | 10x filtered matrix directory for SoupX |
 
 ## Example Queries
 
@@ -116,7 +131,7 @@ output_dir/
 ## Dependencies
 
 **Required**: scanpy, numpy, pandas
-**Optional**: cellbender (for CellBender method)
+**Optional**: cellbender (for CellBender method), `rpy2` + `anndata2ri` + R packages `SoupX` and `Seurat`
 
 ## Citations
 

@@ -3,7 +3,7 @@ name: sc-cell-annotation
 description: >-
   Automated cell type annotation using marker genes, CellTypist, SingleR, or scmap.
   Supports custom references and marker gene lists.
-version: 0.1.0
+version: 0.4.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, annotation, cell-type, CellTypist, SingleR, scmap]
@@ -44,8 +44,8 @@ You are **SC Annotate**, a specialised OmicsClaw agent for automated cell type a
 
 1. **Marker-based annotation**: Assign cell types from known marker gene sets (e.g., PanglaoDB, CellMarker).
 2. **CellTypist integration**: Leverage large-scale pre-trained logistic regression models for immune and pan-tissue data.
-3. **Reference-based transfer**: Transfer labels from a reference AnnData to query data (e.g., scANVI, scmap, Ingest).
-4. **Consensus scoring**: Compare predictions across multiple methods for high-confidence labels.
+3. **Reference-based transfer**: Transfer labels from celldex-style references through the R bridge (SingleR).
+4. **Compatibility alias**: `scmap` is exposed as a CLI-compatible R path and currently reuses the SingleR/celldex bridge.
 
 ## Input Formats
 
@@ -66,12 +66,16 @@ You are **SC Annotate**, a specialised OmicsClaw agent for automated cell type a
 
 ```bash
 # Standard marker-based annotation
-python skills/singlecell/annotation/sc_annotate.py \
-  --input <processed.h5ad> --markers <markers.json> --output <report_dir>
+python skills/singlecell/sc-cell-annotation/sc_annotate.py \
+  --input <processed.h5ad> --method markers --cluster-key leiden --output <report_dir>
 
 # CellTypist immune model
-python skills/singlecell/annotation/sc_annotate.py \
-  --input <processed.h5ad> --method celltypist --model Immune_All_Low.pkl --output <report_dir>
+python skills/singlecell/sc-cell-annotation/sc_annotate.py \
+  --input <processed.h5ad> --method celltypist --model Immune_All_Low --output <report_dir>
+
+# SingleR via celldex
+python skills/singlecell/sc-cell-annotation/sc_annotate.py \
+  --input <processed.h5ad> --method singler --reference HPCA --output <report_dir>
 
 # Demo mode
 python omicsclaw.py run sc-cell-annotation --demo
@@ -157,10 +161,10 @@ seurat_obj$SingleR_labels <- pred$labels
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--method` | `celltypist` | Annotation method: celltypist, markers, singler |
+| `--method` | `markers` | Annotation method: `markers`, `celltypist`, `singler`, `scmap` |
 | `--model` | `Immune_All_Low` | Pre-trained model name for CellTypist |
-| `--markers` | none | Path to JSON/CSV marker dictionary |
-| `--cluster-col` | `leiden` | Cluster column for majority voting |
+| `--reference` | `HPCA` | celldex reference for `singler`/`scmap` |
+| `--cluster-key` | `leiden` | Cluster column for marker mode |
 
 ## Example Queries
 
@@ -190,7 +194,12 @@ output_dir/
 ## Dependencies
 
 **Required**: scanpy >= 1.9, pandas, anndata
-**Optional**: celltypist (Python), SingleR (R), scvi-tools (Python)
+**Optional**: celltypist (Python), `rpy2` + `anndata2ri` + R packages `SingleR` and `celldex`
+
+## Runtime Notes
+
+- `singler` is the main implemented R backend.
+- `scmap` is currently a compatibility alias that reuses the same SingleR/celldex bridge because no native scmap reference script is bundled in this repo.
 
 ## Safety
 

@@ -368,8 +368,8 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "alias": "sc-ambient-removal",
         "script": SKILLS_DIR / "singlecell" / "sc-ambient-removal" / "sc_ambient.py",
         "demo_args": ["--demo"],
-        "description": "Remove ambient RNA contamination using CellBender or simple subtraction",
-        "allowed_extra_flags": {"--method", "--expected-cells", "--raw-h5", "--contamination"},
+        "description": "Remove ambient RNA contamination using CellBender, SoupX, or simple subtraction",
+        "allowed_extra_flags": {"--method", "--expected-cells", "--raw-h5", "--raw-matrix-dir", "--filtered-matrix-dir", "--contamination"},
         "saves_h5ad": True,
     },
     "sc-preprocessing": {
@@ -380,7 +380,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "demo_args": ["--demo"],
         "description": "scRNA-seq QC, normalization, HVG, PCA/UMAP, Leiden clustering (Scanpy, Seurat, Pegasus)",
         "allowed_extra_flags": {
-            "--min-genes", "--min-cells", "--max-mt-pct",
+            "--method", "--min-genes", "--min-cells", "--max-mt-pct",
             "--n-top-hvg", "--n-pcs", "--n-neighbors", "--leiden-resolution",
         },
         "saves_h5ad": True,
@@ -402,7 +402,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "script": SKILLS_DIR / "singlecell" / "sc-cell-annotation" / "sc_annotate.py",
         "demo_args": ["--demo"],
         "description": "Cell type annotation (CellTypist, SingleR, scmap, GARNET, scANVI)",
-        "allowed_extra_flags": {"--method", "--reference", "--species"},
+        "allowed_extra_flags": {"--method", "--reference", "--species", "--cluster-key"},
         "saves_h5ad": True,
     },
     # sc-trajectory: replaced by sc-pseudotime and sc-velocity
@@ -435,7 +435,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "legacy_aliases": ["sc-integrate"],
         "script": SKILLS_DIR / "singlecell" / "sc-batch-integration" / "sc_integrate.py",
         "demo_args": ["--demo"],
-        "description": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN, Scanorama)",
+        "description": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN, Scanorama, fastMNN, Seurat CCA/RPCA)",
         "allowed_extra_flags": {"--method", "--batch-key", "--n-epochs", "--no-gpu"},
         "saves_h5ad": True,
     },
@@ -444,9 +444,9 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "alias": "sc-de",
         "script": SKILLS_DIR / "singlecell" / "sc-de" / "sc_de.py",
         "demo_args": ["--demo"],
-        "description": "Differential expression analysis (Wilcoxon, MAST, pseudobulk PyDESeq2)",
+        "description": "Differential expression analysis (Wilcoxon, t-test, MAST compatibility, pseudobulk DESeq2 via R)",
         "allowed_extra_flags": {
-            "--groupby", "--group1", "--group2", "--method", "--n-top-genes",
+            "--groupby", "--group1", "--group2", "--method", "--n-top-genes", "--sample-key", "--celltype-key",
         },
         "requires_preprocessed": True,
         "saves_h5ad": True,
@@ -473,7 +473,16 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
-    # sc-cell-communication: script not yet implemented
+    "sc-cell-communication": {
+        "domain": "singlecell",
+        "alias": "sc-cell-communication",
+        "script": SKILLS_DIR / "singlecell" / "sc-cell-communication" / "sc_cell_communication.py",
+        "demo_args": ["--demo"],
+        "description": "Cell-cell communication analysis (builtin, LIANA, CellChat)",
+        "allowed_extra_flags": {"--method", "--cell-type-key", "--species"},
+        "requires_preprocessed": True,
+        "saves_h5ad": True,
+    },
     # sc-multiome: script not yet implemented
     # -----------------------------------------------------------------------
     # Genomics domain

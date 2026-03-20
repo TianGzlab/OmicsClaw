@@ -67,6 +67,7 @@ _IMPORT_ALIASES: dict[str, str] = {
     "scrublet": "scrublet",
     "celltypist": "celltypist",
     "rpy2": "rpy2",
+    "anndata2ri": "anndata2ri",
     "palantir": "palantir",
     "scvelo": "scvelo",
     "cellbender": "cellbender",
@@ -74,6 +75,7 @@ _IMPORT_ALIASES: dict[str, str] = {
     "pyscenic": "pyscenic",
     "tangram": "tangram",
     "liana": "liana",
+    "seaborn": "seaborn",
 }
 
 

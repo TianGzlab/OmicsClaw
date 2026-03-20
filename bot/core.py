@@ -1466,6 +1466,8 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     extra_args = args.get("extra_args")
     if extra_args and isinstance(extra_args, list):
         # Filter out --output to prevent overriding bot-managed output directory
+        # Also normalise underscores to hyphens in flag names (LLM often
+        # generates --leiden_resolution instead of --leiden-resolution)
         filtered = []
         skip_next = False
         for arg in extra_args:
@@ -1477,6 +1479,14 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                 continue
             if arg.startswith("--output="):
                 continue
+            # Normalise: --leiden_resolution -> --leiden-resolution
+            if arg.startswith("--"):
+                eq_pos = arg.find("=")
+                if eq_pos > 0:
+                    flag_part = arg[:eq_pos].replace("_", "-")
+                    arg = flag_part + arg[eq_pos:]
+                else:
+                    arg = arg.replace("_", "-")
             filtered.append(arg)
         cmd.extend(filtered)
 

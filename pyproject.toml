@@ -123,6 +123,12 @@ spatial = [
 
 singlecell = [
     "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
+    "liana>=1.4.0",                   # sc-cell-communication: LIANA+
+]
+
+singlecell-r-bridge = [
+    "rpy2>=3.5.0,<3.7",              # R bridge for Seurat, CellChat, SoupX, DESeq2
+    "anndata2ri>=1.3.0",             # AnnData <-> R bridge
 ]
 
 genomics = []
@@ -140,7 +146,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #
@@ -322,7 +328,7 @@ testpaths = [
 markers = [
     "slow: tests requiring full optional deps or significant runtime (excluded by default)",
     "requires_torch: tests requiring PyTorch (SpaGCN, Cell2Location, scVI)",
-    "requires_r: tests requiring R + rpy2 (RCTD, SPOTlight, Numbat)",
+    "requires_r: tests requiring R + rpy2 (spatial and singlecell R backends)",
     "demo: demo-mode integration tests",
 ]
 filterwarnings = [
