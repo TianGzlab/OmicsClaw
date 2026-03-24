@@ -320,39 +320,34 @@ class CompatMemoryStore:
         else:
             domain = None
 
-        # Use search to find memories
-        results = []
+        results: list[BaseMemory] = []
 
-        if domain:
-            # List all children of the domain root
-            children = await self._client.list_children(f"{domain}://")
-            for child in children[:limit]:
-                uri = f"{child['domain']}://{child['path']}"
-                mem = await self._client.recall(uri)
+        async def _collect(uri: str, mtype: str):
+            """Recursively collect leaf memories from a domain tree."""
+            if len(results) >= limit:
+                return
+            children = await self._client.list_children(uri)
+            for child in children:
+                if len(results) >= limit:
+                    return
+                child_uri = f"{child['domain']}://{child['path']}"
+                mem = await self._client.recall(child_uri)
                 if mem and mem.get("content"):
                     content = _decode_legacy_content(mem["content"])
-                    # Auto-fix in DB if it was encoded
                     if content != mem["content"]:
-                        await self._client.remember(uri=uri, content=content)
-                    obj = _content_to_memory(content, memory_type or "")
+                        await self._client.remember(uri=child_uri, content=content)
+                    obj = _content_to_memory(content, mtype)
                     if obj:
                         results.append(obj)
+                    else:
+                        # Not a valid leaf — recurse into this container node
+                        await _collect(child_uri, mtype)
+
+        if domain:
+            await _collect(f"{domain}://", memory_type or "")
         else:
-            # All domains
             for mtype, dom in _TYPE_TO_DOMAIN.items():
-                children = await self._client.list_children(f"{dom}://")
-                for child in children:
-                    uri = f"{child['domain']}://{child['path']}"
-                    mem = await self._client.recall(uri)
-                    if mem and mem.get("content"):
-                        content = _decode_legacy_content(mem["content"])
-                        if content != mem["content"]:
-                            await self._client.remember(uri=uri, content=content)
-                        obj = _content_to_memory(content, mtype)
-                        if obj:
-                            results.append(obj)
-                    if len(results) >= limit:
-                        break
+                await _collect(f"{dom}://", mtype)
                 if len(results) >= limit:
                     break
 
