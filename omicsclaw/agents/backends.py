@@ -19,9 +19,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# System path prefixes to block (from EvoScientist)
+# System path prefixes to block — only truly dangerous system areas.
+# NOTE: /home/ and /tmp/ are intentionally NOT blocked because research
+# workspaces and data directories typically live under /home/ or /data*/.
 _SYSTEM_PATH_PREFIXES = (
-    "/Users/", "/home/", "/tmp/", "/var/", "/etc/",
+    "/var/", "/etc/",
     "/opt/", "/usr/", "/bin/", "/sbin/", "/dev/",
     "/proc/", "/sys/", "/root/",
 )

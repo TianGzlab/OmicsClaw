@@ -137,14 +137,37 @@ initial prompt's ## Workspace section). Use that absolute path for file writes.
 
 Expected files in the workspace:
 - `research_request.md` — Original paper summary + idea
-- `paper_summary.md` — Concise paper summary
-- `paper_fulltext.md` — Full paper text
+- `paper/` — **(Modes A/B only)** Structured paper directory:
+  - `paper/01_abstract_conclusion.md` — Abstract, introduction, conclusions
+  - `paper/02_methodology.md` — Full, untruncated computational methods
+  - `paper/03_results_figs.md` — Results and discussion sections
+  - `paper/04_fulltext.md` — Complete cleaned paper text (reference/fallback)
 - `plan.md` — Experiment plan from planner-agent
 - `todos.md` — Progress tracking
 - `artifacts/` — Figures, tables, intermediate results
 - `*.ipynb` — Analysis notebooks (use simple filenames, not absolute paths)
 - `final_report.md` — Paper-ready report from writing-agent
 - `review_report.json` — Review feedback from reviewer-agent
+
+## Paper Navigation (Modes A/B Only)
+When a reference paper is provided (PDF input), the paper has been "unpacked"
+into a structured directory at `paper/`. Each agent has a specific role:
+
+- **planner-agent**: The `02_methodology.md` content is **pre-injected** into
+  the orchestrator's initial prompt. When delegating to the planner, ALWAYS
+  include the "Paper Methodology" section from the initial prompt in the task
+  body. The planner uses this to extract exact parameters, QC thresholds,
+  algorithms, and model configurations for `plan.md`.
+- **coding-agent**: Does NOT read the paper methodology directly. Instead,
+  it reads `plan.md` produced by the planner-agent and follows the plan
+  step by step. The orchestrator should pass relevant plan sections or key
+  parameters in the coding-agent's task description.
+- **reviewer-agent / writing-agent**: Use `paper/01_abstract_conclusion.md`
+  to evaluate scientific goals, context, and conclusions.
+- **analysis-agent**: Use `paper/03_results_figs.md` to compare your results
+  against the original paper's findings.
+- If any agent needs more context, consult `paper/04_fulltext.md`.
+
 
 CRITICAL: Never write files outside the workspace directory.
 """
@@ -165,24 +188,8 @@ For most tasks, delegate to a single sub-agent:
 - "Draft results section" → writing-agent
 - "Review the report" → reviewer-agent
 
-## When to Parallelize
-Launch multiple sub-agents only when tasks are independent:
-- Different analysis skills on the same dataset → one agent per skill
-- Literature search while running baseline analysis → two agents
-
-## When to Stop Iterating
-After each stage, ask: "Would a critical reviewer accept this evidence?"
-
-**Stop** when ALL hold:
-- Primary metrics are consistent and reported with uncertainty
-- Key comparisons include appropriate controls
-- Results are compared against the original paper's findings
-- Limitations and failure cases are documented
-
-**Keep iterating** if ANY is true:
-- Results vary widely without uncertainty estimates
-- A necessary comparison or control is missing
-- Quality metrics are below standard thresholds
+Parallelization and stopping criteria are defined above in the
+Research Pipeline Workflow section. Follow those rules.
 """
 
 # =============================================================================
@@ -322,7 +329,14 @@ def get_researcher_prompt() -> str:
 
 
 def build_prompt_refs() -> dict[str, str]:
-    """Build the prompt references dict for subagent YAML loading."""
+    """Build the prompt references dict for subagent YAML loading.
+
+    Returns all major prompt blocks so they can be referenced from
+    ``config.yaml`` via ``$VARIABLE_NAME`` syntax.
+    """
     return {
         "RESEARCHER_INSTRUCTIONS": get_researcher_prompt(),
+        "REVIEWER_CHECKLIST": REVIEWER_CHECKLIST,
+        "PAPER_FORMAT_RULES": PAPER_FORMAT_RULES,
+        "DELEGATION_STRATEGY": DELEGATION_STRATEGY,
     }

@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _KERNEL_TIMEOUT = 120  # seconds to wait for kernel ready
 _IOPUB_TIMEOUT = 5     # seconds per iopub message poll
+_EXEC_TIMEOUT = 600    # max wall-clock seconds for a single cell execution
 _MAX_PREVIEW = 4000    # characters for output previews
 
 # ---------------------------------------------------------------------------
@@ -324,14 +325,42 @@ class NotebookSession:
     # ------------------------------------------------------------------
 
     def _execute_source(self, source: str) -> dict[str, Any]:
-        """Send *source* to the kernel and collect outputs."""
+        """Send *source* to the kernel and collect outputs.
+
+        Applies a global execution timeout (``_EXEC_TIMEOUT`` seconds) in
+        addition to the per-message ``_IOPUB_TIMEOUT``.  If the kernel produces
+        no ``status: idle`` within the limit, the execution is considered timed
+        out and an error is returned.
+        """
+        import time
+
         msg_id = self.kc.execute(source, allow_stdin=False, stop_on_error=False)
 
         outputs: list = []
         execution_count = None
         error_text = None
+        wall_start = time.monotonic()
 
         while True:
+            # ── Global timeout guard ─────────────────────────────────
+            elapsed = time.monotonic() - wall_start
+            if elapsed > _EXEC_TIMEOUT:
+                error_text = (
+                    f"Cell execution timed out after {_EXEC_TIMEOUT}s. "
+                    "Consider reducing the workload (subset the data, "
+                    "fewer epochs, etc.) or running in background."
+                )
+                logger.warning(error_text)
+                outputs.append(
+                    new_output(
+                        output_type="error",
+                        ename="TimeoutError",
+                        evalue=error_text,
+                        traceback=[error_text],
+                    )
+                )
+                break
+
             try:
                 msg = self.kc.get_iopub_msg(timeout=_IOPUB_TIMEOUT)
             except queue.Empty:

@@ -45,6 +45,73 @@ class IntakeResult:
     paper_md_path: str = ""
     h5ad_path: str = ""
 
+    @classmethod
+    def from_workspace(
+        cls,
+        workspace_dir: str,
+        idea: str = "",
+        pdf_path: str | None = None,
+        h5ad_path: str | None = None,
+    ) -> "IntakeResult":
+        """Reconstruct an IntakeResult from an existing workspace.
+
+        Used during pipeline resume to skip re-running the intake stage.
+        Reads metadata and file paths from the workspace directory.
+        """
+        ws = Path(workspace_dir)
+
+        # Determine input mode from existing files
+        paper_dir = ws / "paper"
+        has_paper = paper_dir.exists() and any(paper_dir.iterdir())
+        if not has_paper:
+            input_mode = "C"
+        elif h5ad_path:
+            input_mode = "B"
+        else:
+            input_mode = "A"
+
+        # Read paper title from abstract file
+        paper_title = ""
+        abstract_path = paper_dir / "01_abstract_conclusion.md"
+        if abstract_path.exists():
+            # Title is typically the first non-empty line
+            for line in abstract_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip().lstrip("#").strip()
+                if line:
+                    paper_title = line[:200]
+                    break
+
+        # Check for methodology
+        meth_path = paper_dir / "02_methodology.md"
+
+        # Read metadata JSON if it exists
+        geo_accessions: list[str] = []
+        organism = tissue = technology = ""
+        meta_path = ws / "paper" / "metadata.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                geo_accessions = meta.get("geo_accessions", [])
+                organism = meta.get("organism", "")
+                tissue = meta.get("tissue", "")
+                technology = meta.get("technology", "")
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        return cls(
+            paper_markdown="",  # Not needed for resume
+            paper_title=paper_title,
+            idea=idea,
+            geo_accessions=geo_accessions,
+            organism=organism,
+            tissue=tissue,
+            technology=technology,
+            h5ad_metadata=None,
+            input_mode=input_mode,
+            paper_md_path=str(meth_path) if meth_path.exists() else "",
+            h5ad_path=h5ad_path or "",
+        )
+
 
 # =========================================================================
 # PDF → Markdown conversion
@@ -198,8 +265,9 @@ _STRIP_SECTIONS = {
     "extended data",
     "extended data figures",
     "extended data tables",
-    "online methods",       # sometimes main Methods are useful, but
-                            # 'Online Methods' in Nature supplements are not
+    # NOTE: "online methods" was previously stripped here, but Nature papers
+    # put their *entire* methodology in this section.  We now keep it so that
+    # it flows into 02_methodology.md during the Macro Agentic FS split.
     "ethics oversight",
     "peer review information",
     "reprints and permissions",
@@ -427,30 +495,78 @@ def _is_noise_line(line: str) -> bool:
     # Very short fragments that are likely axis ticks or legend labels
     if len(stripped) <= 3 and not re.search(r"[a-zA-Z]{2,}", stripped):
         return True
+    # Single letter sub-panel labels (e.g. "a", "b", "c", "d", "e", "f", "g")
+    if re.fullmatch(r"[a-zA-Z]", stripped):
+        return True
+    # Concatenated axis-tick strings like "0.150.30.610.156" or "0.150.3 0.6160.150.3"
+    if re.fullmatch(r"[\d.\s]{8,}", stripped):
+        return True
+    # Axis tick ranges like "0 1 0 1 0 1 0 1" or "10 30 50 70 90"
+    if re.fullmatch(r"(\d+\s+){2,}\d+", stripped):
+        return True
+    # Journal page-number lines: "484 | Nature | Vol 639 | 13 March 2025"
+    if re.search(r"^\d+\s*\|\s*Nature\s*\|", stripped):
+        return True
+    # Short axis/legend labels: "Min.", "Max.", "Expression", "Bottom Top" etc.
+    if len(stripped) < 15 and not re.search(r"[a-zA-Z]{4,}\s+[a-zA-Z]{4,}", stripped):
+        # But keep short headings that start with # (Markdown headings)
+        if not stripped.startswith("#"):
+            # Keep lines that are clearly sentences (contain a period + letter after)
+            if not re.search(r"\.\s*[A-Z]", stripped):
+                return True
     return False
 
 
 def _clean_body_text(text: str) -> str:
     """Remove figure/table noise from extracted PDF text.
 
-    Keeps meaningful paragraphs and strips:
-    - Runs of short numeric-only lines (axis ticks)
-    - Isolated coordinate / dimension fragments
+    Handles the full spectrum of opendataloader-pdf conversion artifacts:
+    - Empty Markdown tables (``| | |\\n|---|---|``)
+    - Image tag runs (``![image 1234](...)<br><br>``)
+    - Axis tick fragments and concatenated numeric strings
+    - Figure sub-panel labels (isolated ``a``, ``b``, ``c``)
+    - Journal page-number lines
+    - Excessive blank lines
     """
+    # ── Phase 1: Regex-based bulk removal ─────────────────────────
+    # Remove empty Markdown tables  | | |\n|---|---|\n| | |\n...
+    text = re.sub(
+        r"(?:\|\s*(?:<br>)?\s*\|[\s|]*\n?)+(?:\|[-|–]+\|[\s|]*\n?)+(?:\|\s*(?:<br>[^|]*)?\s*\|[\s|]*\n?)*",
+        "\n", text,
+    )
+    # Remove image reference runs: ![image 1234](path)<br><br>...
+    text = re.sub(
+        r"(?:\|?\s*!\[image\s+\d+\]\([^)]+\)\s*(?:<br>)*\s*)+",
+        "\n", text,
+    )
+    # Remove standalone <br> tags
+    text = re.sub(r"<br>\s*", " ", text)
+    # Remove journal page lines: "484 | Nature | Vol 639 | 13 March 2025"
+    text = re.sub(r"^\d+\s*\|\s*Nature\s*\|[^\n]*$", "", text, flags=re.MULTILINE)
+
+    # ── Phase 2: Line-by-line noise filtering ─────────────────────
     lines = text.split("\n")
     cleaned: list[str] = []
     noise_run = 0
     for line in lines:
         if _is_noise_line(line):
             noise_run += 1
-            # Allow isolated noise lines (could be part of a list)
-            if noise_run <= 2:
+            # Allow up to 1 isolated noise line (may be inside a list)
+            if noise_run <= 1:
+                # Only keep it if surrounded by real content
                 cleaned.append(line)
-            # Skip longer noise runs
             continue
         noise_run = 0
         cleaned.append(line)
-    return "\n".join(cleaned)
+
+    # ── Phase 3: Collapse excessive blank lines (max 2) ──────────
+    result = "\n".join(cleaned)
+    result = re.sub(r"\n{4,}", "\n\n\n", result)
+    # Remove leading/trailing whitespace per line but preserve structure
+    lines_final = []
+    for line in result.split("\n"):
+        lines_final.append(line.rstrip())
+    return "\n".join(lines_final)
 
 
 def _extract_title(raw_text: str, pdf_path: str) -> str:
@@ -552,49 +668,186 @@ def _extract_sections(raw_text: str) -> list[tuple[str, str]]:
 
     Returns list of (heading, content) tuples.
     Skips reference lists and acknowledgements.
+
+    Supports **both** Markdown heading syntax (``#+ Title``) and bare
+    title-case headings that appear on their own line.
+
+    For Nature-style papers where a top-level region marker like ``Methods``
+    is followed by multiple sub-sections (``Mice``, ``Adoptive cell transfer``,
+    etc.), the sub-sections are automatically merged into the parent region so
+    that ``02_methodology.md`` captures all of them as a single block.
     """
     # Remove page markers for cleaner section detection
     text = re.sub(r"<!--\s*Page\s*\d+\s*-->", "", raw_text)
 
-    # Section heading pattern: line that looks like a heading
-    # (title case or short uppercase, followed by body text)
-    section_pattern = re.compile(
+    # ── Dual-format heading extraction ────────────────────────────
+    # Pattern A: Markdown headings  (##+ Title)
+    md_heading_pat = re.compile(
+        r"^(#{1,6})\s+(.+)$", re.MULTILINE,
+    )
+    # Pattern B: Bare title-case headings (existing logic)
+    bare_heading_pat = re.compile(
         r"\n\s*((?:[A-Z][a-z]+(?:\s+[a-zA-Z]+){1,10}|[A-Z\s]{10,50}))\s*\n",
     )
 
-    sections: list[tuple[str, str]] = []
-    matches = list(section_pattern.finditer(text))
+    # Collect all heading candidates (position, heading_text)
+    candidates: list[tuple[int, int, str]] = []  # (start_of_heading, end_of_heading, heading_text)
 
-    # Sections to skip
+    for m in md_heading_pat.finditer(text):
+        heading_text = m.group(2).strip()
+        # Skip if it looks like a figure/table sub-label (single letter, e.g. "a", "b c")
+        if len(heading_text) <= 3 and not heading_text[0].isupper():
+            continue
+        candidates.append((m.start(), m.end(), heading_text))
+
+    # Only use bare headings if Markdown headings didn't find enough
+    if len(candidates) < 3:
+        for m in bare_heading_pat.finditer(text):
+            heading_text = m.group(1).strip()
+            candidates.append((m.start(), m.end(), heading_text))
+        # Deduplicate and sort by position
+        candidates.sort(key=lambda x: x[0])
+
+    if not candidates:
+        return []
+
+    # ── Sections to skip ──────────────────────────────────────────
     skip_headings = {
         "references", "bibliography", "acknowledgements", "acknowledgments",
         "author contributions", "competing interests", "additional information",
         "supplementary information", "code availability", "data availability",
-        "extended data", "reporting summary",
+        "extended data", "reporting summary", "online content",
     }
 
-    for i, m in enumerate(matches):
-        heading = m.group(1).strip()
-        if heading.lower() in skip_headings:
-            continue
-        # Content extends to next section or end
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        content = text[start:end].strip()
-        # Skip if content is too short or looks like a figure legend
-        if len(content) < 100:
-            continue
-        sections.append((heading, content[:3000]))  # Cap per-section
+    # ── Top-level region markers for merging sub-sections ─────────
+    # When we encounter these, all following sub-sections are merged
+    # into a single logical block until the next region marker.
+    _REGION_MARKERS = {
+        "methods": "methodology",
+        "online methods": "methodology",
+        "experimental procedures": "methodology",
+        "materials and methods": "methodology",
+        "star methods": "methodology",
+        "discussion": "results_figs",
+    }
 
-    return sections[:15]  # Max 15 sections
+    sections: list[tuple[str, str]] = []
+    active_region: str | None = None  # Current merging region
+    region_heading: str | None = None   # Heading of the active region marker
+
+    for idx, (h_start, h_end, heading) in enumerate(candidates):
+        h_lower = heading.lower().strip()
+
+        # Skip unwanted sections
+        if h_lower in skip_headings:
+            active_region = None  # Stop merging if we hit references etc.
+            continue
+
+        # Determine content span: from heading end to next heading start
+        if idx + 1 < len(candidates):
+            content_end = candidates[idx + 1][0]
+        else:
+            content_end = len(text)
+        content = text[h_end:content_end].strip()
+
+        # Check if this is a region marker
+        if h_lower in _REGION_MARKERS:
+            active_region = _REGION_MARKERS[h_lower]
+            region_heading = heading
+            # If the marker itself has substantial content, include it
+            if len(content) >= 100:
+                sections.append((heading, content))
+            continue
+
+        # If we're inside a region (e.g. under "Methods"), tag the heading
+        # with the region prefix so _classify_section can route it properly.
+        if active_region == "methodology":
+            # Prefix with "Methods: " so _classify_section recognizes it
+            tagged_heading = f"Methods: {heading}"
+        else:
+            tagged_heading = heading
+
+        # Skip very short content (likely figure labels, axis labels, etc.)
+        if len(content) < 80:
+            continue
+
+        sections.append((tagged_heading, content))
+
+    return sections[:40]  # Allow more sections for Nature-style papers
 
 
 # =========================================================================
-# Concise paper summary builder
+# Macro Agentic FS — modular paper file builders
 # =========================================================================
 
+# Heading keywords used to classify sections into the three modular files.
+_ABSTRACT_CONCLUSION_KEYWORDS = [
+    "abstract", "introduction", "background", "conclusion", "conclusions",
+    "summary",
+]
+_METHODOLOGY_KEYWORDS = [
+    "method", "online method", "experimental", "data processing",
+    "data analysis", "computational", "statistical analysis",
+    "bioinformatics", "pipeline", "preprocessing", "pre-processing",
+    "implementation", "algorithm", "workflow",
+]
+_RESULTS_KEYWORDS = [
+    "result", "discussion", "finding", "observation", "analysis",
+    "comparison", "evaluation", "performance", "validation",
+]
 
-def _build_paper_summary(
+
+def _classify_section(heading: str) -> str:
+    """Return the bucket name for a section heading.
+
+    Returns one of ``"abstract_conclusion"``, ``"methodology"``,
+    ``"results_figs"``, or ``"other"``.
+    """
+    h = heading.lower().strip()
+    # Check methodology first — it is the most important to separate.
+    if any(k in h for k in _METHODOLOGY_KEYWORDS):
+        return "methodology"
+    if any(k in h for k in _ABSTRACT_CONCLUSION_KEYWORDS):
+        return "abstract_conclusion"
+    if any(k in h for k in _RESULTS_KEYWORDS):
+        return "results_figs"
+    return "other"
+
+
+def _build_header_block(
+    title: str,
+    pdf_name: str,
+    raw_text: str,
+    organism: str,
+    technology: str,
+    tissue: str,
+    geo_ids: list[str],
+) -> str:
+    """Build the common header (title, DOI, authors, metadata table)."""
+    parts: list[str] = [f"# {title}\n", f"**Source**: {pdf_name}"]
+
+    doi_match = re.search(r"(https?://doi\.org/\S+)", raw_text)
+    if doi_match:
+        parts.append(f"**DOI**: {doi_match.group(1).rstrip('.)}')}")
+
+    author_line = _extract_authors(raw_text, title)
+    if author_line:
+        parts.append(f"\n**Authors**: {author_line}")
+    parts.append("")
+
+    parts.append("## Metadata\n")
+    parts.append("| Field | Value |")
+    parts.append("|-------|-------|")
+    parts.append(f"| Organism | {organism} |")
+    parts.append(f"| Technology | {technology} |")
+    parts.append(f"| Tissue | {tissue} |")
+    if geo_ids:
+        parts.append(f"| GEO Accessions | {', '.join(geo_ids)} |")
+    parts.append("")
+    return "\n".join(parts)
+
+
+def _build_modular_fs(
     *,
     title: str,
     pdf_name: str,
@@ -603,93 +856,118 @@ def _build_paper_summary(
     technology: str,
     tissue: str,
     geo_ids: list[str],
-    fulltext_path: str,
-) -> str:
-    """Build a concise paper_summary.md from extracted text.
+) -> dict[str, str]:
+    """Build the four modular Markdown files for the Macro Agentic FS.
 
-    The summary is designed for quick human review and includes only:
-    - Title, authors, DOI
-    - Structured metadata (organism, technology, tissue, GEO)
-    - Abstract
-    - Key sections (Methods, Results, Discussion) — capped in length
-    - Pointer to the full-text file for detailed reference
+    Returns a dict mapping filename → content string::
 
-    This keeps paper_summary.md under ~200 lines regardless of paper size.
+        {
+            "01_abstract_conclusion.md": ...,
+            "02_methodology.md":        ...,
+            "03_results_figs.md":        ...,
+            "04_fulltext.md":            ...,
+        }
+
+    Key design choices
+    ------------------
+    * ``02_methodology.md`` is **never truncated** — it preserves complete
+      methods/parameters so that the planner-agent can formulate precise
+      experiment plans.
+    * ``01_abstract_conclusion.md`` caps the abstract at 500 words but
+      otherwise keeps introduction/conclusion intact (≤ 2000 words each).
+    * ``03_results_figs.md`` caps each sub-section at 2000 words.
+    * ``04_fulltext.md`` stores the cleaned full text (up to 100 000 chars)
+      as a reference / fallback.
     """
-    parts: list[str] = []
+    header = _build_header_block(
+        title=title, pdf_name=pdf_name, raw_text=raw_text,
+        organism=organism, technology=technology, tissue=tissue,
+        geo_ids=geo_ids,
+    )
 
-    # ── Header ────────────────────────────────────────────────────
-    parts.append(f"# {title}\n")
-    parts.append(f"**Source**: {pdf_name}")
+    sections = _extract_sections(raw_text)
 
-    # DOI
-    doi_match = re.search(r"(https?://doi\.org/\S+)", raw_text)
-    if doi_match:
-        doi = doi_match.group(1).rstrip(".)")
-        parts.append(f"**DOI**: {doi}")
+    # ── Bucketise sections ────────────────────────────────────────
+    buckets: dict[str, list[tuple[str, str]]] = {
+        "abstract_conclusion": [],
+        "methodology": [],
+        "results_figs": [],
+        "other": [],
+    }
+    for heading, content in sections:
+        bucket = _classify_section(heading)
+        buckets[bucket].append((heading, content))
 
-    # Authors — first line after title that looks like an author list
-    _author_line = _extract_authors(raw_text, title)
-    if _author_line:
-        parts.append(f"\n**Authors**: {_author_line}")
-
-    parts.append("")
-
-    # ── Metadata ──────────────────────────────────────────────────
-    parts.append("## Metadata\n")
-    parts.append(f"| Field | Value |")
-    parts.append(f"|-------|-------|")
-    parts.append(f"| Organism | {organism} |")
-    parts.append(f"| Technology | {technology} |")
-    parts.append(f"| Tissue | {tissue} |")
-    if geo_ids:
-        parts.append(f"| GEO Accessions | {', '.join(geo_ids)} |")
-    parts.append("")
-
-    # ── Abstract ──────────────────────────────────────────────────
+    # ── 01_abstract_conclusion.md ─────────────────────────────────
+    parts_01: list[str] = [header]
     abstract = _extract_abstract(raw_text) or ""
     if abstract:
-        parts.append("## Abstract\n")
-        # Cap abstract to ~500 words
         words = abstract.split()
         if len(words) > 500:
             abstract = " ".join(words[:500]) + " [...]"
-        parts.append(abstract)
-        parts.append("")
+        parts_01.append("## Abstract\n")
+        parts_01.append(abstract)
+        parts_01.append("")
+    for heading, content in buckets["abstract_conclusion"]:
+        words = content.split()
+        if len(words) > 2000:
+            content = " ".join(words[:2000]) + " [...]"
+        parts_01.append(f"## {heading}\n")
+        parts_01.append(content.strip())
+        parts_01.append("")
 
-    # ── Key Sections (capped) ─────────────────────────────────────
-    sections = _extract_sections(raw_text)
-
-    # Priority order: keep the most scientifically relevant sections
-    _KEY_SECTIONS = [
-        "results", "discussion", "methods", "introduction",
-        "conclusion", "conclusions",
+    # ── 02_methodology.md (NO truncation) ─────────────────────────
+    parts_02: list[str] = [
+        f"# Detailed Methodology — {title}\n",
+        header,
+        "> This file contains the **complete, untruncated** methods from "
+        "the paper. The planner-agent should read this in its entirety "
+        "before formulating any experiment plan.\n",
     ]
+    if buckets["methodology"]:
+        for heading, content in buckets["methodology"]:
+            parts_02.append(f"## {heading}\n")
+            parts_02.append(content.strip())
+            parts_02.append("")
+    else:
+        # Fallback: if no method-like sections were detected, include a
+        # notice so the planner knows to consult the full text instead.
+        parts_02.append(
+            "*No dedicated Methods section was detected in the paper. "
+            "The planner-agent should consult `04_fulltext.md` for "
+            "methodological details.*\n"
+        )
 
-    added_sections: set[str] = set()
-    max_words_per_section = 500
+    # ── 03_results_figs.md ────────────────────────────────────────
+    parts_03: list[str] = [f"# Results & Discussion — {title}\n", header]
+    for heading, content in buckets["results_figs"]:
+        words = content.split()
+        if len(words) > 2000:
+            content = " ".join(words[:2000]) + " [...]"
+        parts_03.append(f"## {heading}\n")
+        parts_03.append(content.strip())
+        parts_03.append("")
+    # Also include "other" sections that didn't match any keyword
+    for heading, content in buckets["other"]:
+        words = content.split()
+        if len(words) > 1000:
+            content = " ".join(words[:1000]) + " [...]"
+        parts_03.append(f"## {heading}\n")
+        parts_03.append(content.strip())
+        parts_03.append("")
 
-    for key in _KEY_SECTIONS:
-        for heading, content in sections:
-            heading_lower = heading.lower().strip()
-            if key in heading_lower and heading_lower not in added_sections:
-                added_sections.add(heading_lower)
-                words = content.split()
-                if len(words) > max_words_per_section:
-                    content = " ".join(words[:max_words_per_section]) + " [...]"
-                parts.append(f"## {heading}\n")
-                parts.append(content.strip())
-                parts.append("")
-                break
+    # ── 04_fulltext.md ────────────────────────────────────────────
+    full_text = _clean_body_text(raw_text)
+    if len(full_text) > 100_000:
+        full_text = full_text[:100_000] + "\n\n[... text truncated at 100 000 chars ...]"
+    parts_04 = [f"# Full Text — {title}\n", header, full_text]
 
-    # ── Footer ────────────────────────────────────────────────────
-    parts.append("---\n")
-    parts.append(
-        f"> **Full text**: See [{Path(fulltext_path).name}]"
-        f"({fulltext_path}) for the complete paper content.\n"
-    )
-
-    return "\n".join(parts)
+    return {
+        "01_abstract_conclusion.md": "\n".join(parts_01),
+        "02_methodology.md": "\n".join(parts_02),
+        "03_results_figs.md": "\n".join(parts_03),
+        "04_fulltext.md": "\n".join(parts_04),
+    }
 
 
 def _extract_authors(raw_text: str, title: str) -> str:
@@ -914,17 +1192,11 @@ def prepare_intake(
     technology = _extract_technology(raw_text)
     tissue = _extract_tissue(raw_text)
 
-    # ── Save full text to paper_fulltext.md (reference only) ──────
-    if odl_md:
-        fulltext_md = raw_text
-    else:
-        fulltext_md = _pdf_to_markdown(pdf_path, raw_text)
-    fulltext_path = out_dir / "paper_fulltext.md"
-    fulltext_path.write_text(fulltext_md, encoding="utf-8")
-    logger.info("Full paper text saved to: %s (%d chars)", fulltext_path, len(fulltext_md))
+    # ── Build Macro Agentic FS: workspace/paper/ ──────────────────
+    paper_dir = out_dir / "paper"
+    paper_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Build concise paper_summary.md ────────────────────────────
-    paper_md = _build_paper_summary(
+    modular_files = _build_modular_fs(
         title=title,
         pdf_name=Path(pdf_path).name,
         raw_text=raw_text,
@@ -932,11 +1204,15 @@ def prepare_intake(
         technology=technology,
         tissue=tissue,
         geo_ids=geo_ids,
-        fulltext_path=str(fulltext_path),
     )
-    md_path = out_dir / "paper_summary.md"
-    md_path.write_text(paper_md, encoding="utf-8")
-    logger.info("Paper summary saved to: %s (%d chars)", md_path, len(paper_md))
+    for fname, content in modular_files.items():
+        fpath = paper_dir / fname
+        fpath.write_text(content, encoding="utf-8")
+        logger.info("Paper module saved to: %s (%d chars)", fpath, len(content))
+
+    # The "summary" path now points to the abstract/conclusion module
+    md_path = paper_dir / "01_abstract_conclusion.md"
+    paper_md = modular_files["01_abstract_conclusion.md"]
 
     # 6. Handle h5ad (Mode B)
     h5ad_meta = None

@@ -611,6 +611,7 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
         /research paper.pdf --idea "..."                              # Mode A (PDF + idea)
         /research paper.pdf --idea "..." --h5ad d.h5ad                # Mode B (PDF + idea + h5ad)
         /research --idea "..." --output /path/to/output               # with custom output dir
+        /research --resume --output /path/to/previous/workspace       # resume from checkpoint
     """
     tokens = shlex.split(arg.strip()) if arg.strip() else []
     if not tokens:
@@ -619,6 +620,7 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
             "[dim]  Mode A: /research paper.pdf --idea \"explore TME heterogeneity\"              (PDF + idea)\n"
             "  Mode B: /research paper.pdf --idea \"...\" --h5ad data.h5ad                   (PDF + idea + h5ad)\n"
             "  Mode C: /research --idea \"explore TME heterogeneity\"                    (idea only)\n"
+            "  Resume: /research --resume --output /path/to/workspace                  (resume from checkpoint)\n"
             "  All modes support: --output <dir> to specify the output directory[/dim]"
         )
         return
@@ -628,6 +630,7 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
     idea = ""
     h5ad_path = None
     output_dir = None
+    resume = False
     i = 0
     # Check if first token is a file path (not a flag)
     if tokens[0] and not tokens[0].startswith("--"):
@@ -642,11 +645,21 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
             h5ad_path = tokens[i + 1]; i += 2
         elif t == "--output" and i + 1 < len(tokens):
             output_dir = tokens[i + 1]; i += 2
+        elif t == "--resume":
+            resume = True; i += 1
         else:
             i += 1
 
-    if not idea:
+    if not idea and not resume:
         console.print("[red]--idea is required. Describe your research idea.[/red]")
+        return
+
+    if resume and not output_dir:
+        console.print(
+            "[red]--resume requires --output to specify the workspace to resume from.[/red]\n"
+            "[dim]Example: /research --resume --output ./nature_new_insight2 --idea \"...\"\n"
+            "The --idea can be omitted if the workspace already has the context.[/dim]"
+        )
         return
 
     if pdf_path and not Path(pdf_path).exists():
@@ -680,15 +693,33 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
     else:
         workspace_path = str(Path(state.get("workspace_dir", ".")) / "research_workspace")
 
-    console.print(f"\n[bold cyan]🔬 Starting Research Pipeline (Mode {mode})[/bold cyan]")
-    if pdf_path:
-        console.print(f"  [dim]PDF:[/dim]    {pdf_path}")
-    console.print(f"  [dim]Idea:[/dim]   {idea}")
-    if h5ad_path:
-        console.print(f"  [dim]Data:[/dim]   {h5ad_path}")
-    console.print(f"  [dim]Output:[/dim] {workspace_path}")
-    if mode == "C":
-        console.print("  [dim]Mode:[/dim]   Idea only — research-agent will find literature & data")
+    # Show launch info
+    if resume:
+        console.print(f"\n[bold cyan]🔄 Resuming Research Pipeline from checkpoint[/bold cyan]")
+        console.print(f"  [dim]Workspace:[/dim] {workspace_path}")
+        # Show checkpoint info if available
+        ckpt_file = Path(workspace_path) / ".pipeline_checkpoint.json"
+        if ckpt_file.exists():
+            import json
+            try:
+                ckpt = json.loads(ckpt_file.read_text(encoding="utf-8"))
+                completed = ckpt.get("completed_stages", [])
+                console.print(f"  [dim]Completed:[/dim] {', '.join(completed) if completed else 'none'}")
+                console.print(f"  [dim]Reviews:[/dim]   {ckpt.get('review_iterations', 0)}")
+            except Exception:
+                pass
+        else:
+            console.print("  [yellow]⚠ No checkpoint found — will start from scratch[/yellow]")
+    else:
+        console.print(f"\n[bold cyan]🔬 Starting Research Pipeline (Mode {mode})[/bold cyan]")
+        if pdf_path:
+            console.print(f"  [dim]PDF:[/dim]    {pdf_path}")
+        console.print(f"  [dim]Idea:[/dim]   {idea}")
+        if h5ad_path:
+            console.print(f"  [dim]Data:[/dim]   {h5ad_path}")
+        console.print(f"  [dim]Output:[/dim] {workspace_path}")
+        if mode == "C":
+            console.print("  [dim]Mode:[/dim]   Idea only — research-agent will find literature & data")
     console.print()
 
     def on_stage(stage: str, status: str):
@@ -705,17 +736,36 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
             pdf_path=pdf_path,
             h5ad_path=h5ad_path,
             on_stage=on_stage,
+            resume=resume,
         )
 
         if result.get("success"):
             console.print(f"\n[bold green]✓ Research pipeline completed![/bold green]")
-            console.print(f"  [dim]Workspace:[/dim] {result.get('workspace', '')}")
+            console.print(f"  [dim]Workspace:[/dim]  {result.get('workspace', '')}")
             if result.get("report_path"):
-                console.print(f"  [dim]Report:[/dim]    {result['report_path']}")
+                console.print(f"  [dim]Report:[/dim]     {result['report_path']}")
             if result.get("review_path"):
-                console.print(f"  [dim]Review:[/dim]    {result['review_path']}")
+                console.print(f"  [dim]Review:[/dim]     {result['review_path']}")
+            # Show Phase 2 metadata
+            stages = result.get("completed_stages", [])
+            if stages:
+                console.print(f"  [dim]Stages:[/dim]     {' → '.join(stages)}")
+            rev_iter = result.get("review_iterations", 0)
+            if rev_iter > 0:
+                console.print(f"  [dim]Reviews:[/dim]    {rev_iter}")
+            if result.get("review_cap_reached"):
+                console.print(f"  [yellow]⚠ Review iteration cap reached ({rev_iter})[/yellow]")
+            for w in result.get("warnings", []):
+                console.print(f"  [yellow]⚠ {w}[/yellow]")
         else:
             console.print(f"\n[red]✗ Research pipeline failed: {result.get('error', 'unknown')}[/red]")
+            stages = result.get("completed_stages", [])
+            if stages:
+                console.print(f"  [dim]Completed stages before failure:[/dim] {', '.join(stages)}")
+                console.print(
+                    f"  [dim]To resume: /research --resume --output {workspace_path}"
+                    f"{' --idea \"' + idea + '\"' if idea else ''}[/dim]"
+                )
 
         # Inject into conversation
         state["messages"].append({
@@ -727,10 +777,25 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
             "content": f"Research pipeline {'completed' if result.get('success') else 'failed'}. "
                        f"Workspace: {result.get('workspace', '')}",
         })
+
+
+        # Persist session so /resume can find it later
+        await save_session(
+            state["session_id"],
+            state["messages"],
+            workspace=state["workspace_dir"],
+        )
     except Exception as e:
         console.print(f"[red]Research pipeline error: {e}[/red]")
         import traceback
         console.print(f"[dim]{traceback.format_exc()[:500]}[/dim]")
+        # Still persist on failure so the session is not lost
+        if state["messages"]:
+            await save_session(
+                state["session_id"],
+                state["messages"],
+                workspace=state["workspace_dir"],
+            )
 
 
 def _handle_uninstall_skill(arg: str) -> None:

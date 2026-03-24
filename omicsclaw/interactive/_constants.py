@@ -43,7 +43,7 @@ MCP_CONFIG_NAME = "mcp.yaml"
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/skills",          "List all OmicsClaw skills (optional: /skills <domain>)"),
     ("/run",             "Run a skill: /run <skill> [--demo] [--input <path>]"),
-    ("/research",        "Start research pipeline: /research [pdf] --idea \"...\" [--h5ad file] [--output dir]"),
+    ("/research",        "Research pipeline: /research [pdf] --idea \"...\" [--resume --output <dir>]"),
     ("/install-skill",   "Add a skill from a local path or GitHub: /install-skill <src>"),
     ("/uninstall-skill", "Remove an installed skill: /uninstall-skill <name>"),
     ("/sessions",        "List recent conversation sessions"),
