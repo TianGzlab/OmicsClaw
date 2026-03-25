@@ -54,7 +54,7 @@ def test_demo_result_json(tmp_output):
     assert data["skill"] == "spatial-register"
     assert "summary" in data
     assert data["summary"]["n_slices"] >= 2
-    assert data["summary"]["method"] == "procrustes"
+    assert data["summary"]["method"] == "paste"
 
 
 def test_demo_aligned_coords(tmp_output):

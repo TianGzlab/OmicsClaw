@@ -48,7 +48,7 @@ class OmicsRegistry:
             
             # Scan skill directories within the domain
             for skill_path in domain_path.iterdir():
-                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__')):
+                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__', '_')):
                     continue
                     
                 skill_dir_name = skill_path.name
@@ -94,7 +94,7 @@ class OmicsRegistry:
                 continue
 
             for skill_path in domain_path.iterdir():
-                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__')):
+                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__', '_')):
                     continue
 
                 skill_md = skill_path / "SKILL.md"

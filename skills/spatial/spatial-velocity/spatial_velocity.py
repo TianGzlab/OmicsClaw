@@ -43,200 +43,20 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
-from omicsclaw.spatial.adata_utils import store_analysis_metadata
-from omicsclaw.spatial.dependency_manager import require
-from omicsclaw.spatial.viz_utils import save_figure
-from omicsclaw.spatial.viz import VizParams, plot_features, plot_velocity
+from skills.spatial._lib.adata_utils import store_analysis_metadata
+from skills.spatial._lib.dependency_manager import require
+from skills.spatial._lib.velocity import (
+    run_velocity, SUPPORTED_METHODS,
+    validate_velocity_layers, add_demo_velocity_layers,
+)
+from skills.spatial._lib.viz_utils import save_figure
+from skills.spatial._lib.viz import VizParams, plot_features, plot_velocity
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-velocity"
 SKILL_VERSION = "0.2.0"
-
-SUPPORTED_METHODS = ("stochastic", "deterministic", "dynamical", "velovi")
-
-
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_velocity_layers(adata) -> None:
-    """Raise if required spliced/unspliced layers are missing."""
-    missing = [k for k in ("spliced", "unspliced") if k not in adata.layers]
-    if missing:
-        raise ValueError(
-            f"Required layers missing: {missing}.\n\n"
-            "RNA velocity requires spliced and unspliced count layers.\n"
-            "Generate them with velocyto or STARsolo during alignment:\n"
-            "  velocyto run -b barcodes.tsv  BAM_FILE  GENOME.gtf\n"
-            "  STAR --soloFeatures Gene Velocyto ..."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Demo data helpers (only for --demo mode; synthetic layers for software testing)
-# ---------------------------------------------------------------------------
-
-
-def _add_demo_velocity_layers(adata) -> None:
-    """Add synthetic spliced/unspliced layers for demo/test purposes only.
-
-    These layers have no biological meaning — they exist solely so that
-    ``--demo`` mode exercises the full scVelo pipeline without a real dataset.
-    Real velocity analyses require data produced by velocyto or STARsolo.
-    """
-    from scipy import sparse
-
-    X = adata.X
-    if sparse.issparse(X):
-        X = X.toarray()
-    X = np.asarray(X, dtype=np.float32).clip(0)
-
-    rng = np.random.default_rng(42)
-    frac = rng.uniform(0.65, 0.85, size=X.shape)
-    spliced = (X * frac).astype(np.float32)
-    unspliced = (X * (1.0 - frac) + rng.exponential(0.05, size=X.shape)).astype(np.float32)
-
-    adata.layers["spliced"] = spliced
-    adata.layers["unspliced"] = unspliced
-    logger.info("Added synthetic spliced/unspliced layers for demo (not biologically valid)")
-
-
-# ---------------------------------------------------------------------------
-# Core: scVelo  (adapted from ChatSpatial tools/velocity.py)
-# ---------------------------------------------------------------------------
-
-
-def _preprocess_for_velocity(
-    adata,
-    *,
-    min_shared_counts: int = 30,
-    n_top_genes: int = 2000,
-    n_pcs: int = 30,
-    n_neighbors: int = 30,
-) -> None:
-    """Standard scVelo preprocessing pipeline (in-place)."""
-    scv = require("scvelo", feature="RNA velocity")
-    scv.pp.filter_and_normalize(
-        adata,
-        min_shared_counts=min_shared_counts,
-        n_top_genes=n_top_genes,
-        enforce=True,
-    )
-    scv.pp.moments(adata, n_pcs=n_pcs, n_neighbors=n_neighbors)
-
-
-def _run_scvelo(adata, *, mode: str = "stochastic") -> dict:
-    """Run scVelo RNA velocity."""
-    scv = require("scvelo", feature="RNA velocity")
-
-    if "Ms" not in adata.layers or "Mu" not in adata.layers:
-        _preprocess_for_velocity(adata)
-
-    if mode == "dynamical":
-        scv.tl.recover_dynamics(adata)
-        scv.tl.velocity(adata, mode="dynamical")
-        scv.tl.latent_time(adata)
-    else:
-        scv.tl.velocity(adata, mode=mode)
-
-    scv.tl.velocity_graph(adata)
-
-    speed: pd.Series | None = None
-    if "velocity_length" in adata.obs.columns:
-        speed = adata.obs["velocity_length"]
-    elif "velocity" in adata.layers:
-        vel = adata.layers["velocity"]
-        if hasattr(vel, "toarray"):
-            vel = vel.toarray()
-        vals = np.sqrt((np.asarray(vel, dtype=np.float64) ** 2).sum(axis=1))
-        adata.obs["velocity_speed"] = vals
-        speed = pd.Series(vals, index=adata.obs_names)
-
-    return {
-        "method": f"scvelo_{mode}",
-        "n_velocity_genes": int(np.sum(adata.var["velocity_genes"]))
-        if "velocity_genes" in adata.var.columns else None,
-        "mean_speed": float(speed.mean()) if speed is not None else 0.0,
-        "median_speed": float(speed.median()) if speed is not None else 0.0,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Core: VELOVI  (adapted from ChatSpatial tools/velocity.py)
-# ---------------------------------------------------------------------------
-
-
-def _run_velovi(adata) -> dict:
-    """Run VELOVI — variational inference RNA velocity."""
-    require("scvelo", feature="VELOVI preprocessing")
-    require("scvi-tools", feature="VELOVI (VeloVI)")
-
-    import scvelo as scv
-    from scvi.external import VELOVI
-
-    if "spliced" not in adata.layers or "unspliced" not in adata.layers:
-        raise ValueError("VELOVI requires 'spliced' and 'unspliced' layers.")
-
-    # scVelo preprocessing — creates normalized Ms, Mu moment layers
-    scv.pp.filter_and_normalize(adata, min_shared_counts=30, n_top_genes=2000, enforce=True)
-    scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
-
-    # VELOVI expects raw spliced/unspliced count layers, NOT the moment layers.
-    VELOVI.setup_anndata(adata, spliced_layer="spliced", unspliced_layer="unspliced")
-    model = VELOVI(adata)
-    model.train(max_epochs=500)
-
-    adata.layers["velocity"] = model.get_velocity()
-
-    vel = np.asarray(adata.layers["velocity"], dtype=np.float64)
-    speed = np.sqrt((vel ** 2).sum(axis=1))
-    adata.obs["velocity_speed"] = speed
-
-    return {
-        "method": "velovi",
-        "mean_speed": float(speed.mean()),
-        "median_speed": float(np.median(speed)),
-        "n_velocity_genes": adata.n_vars,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Main entry
-# ---------------------------------------------------------------------------
-
-
-def run_velocity(
-    adata,
-    *,
-    method: str = "stochastic",
-) -> dict:
-    """Run RNA velocity. Returns summary dict.
-
-    Parameters
-    ----------
-    adata:
-        AnnData with 'spliced' and 'unspliced' layers.
-    method:
-        One of ``stochastic``, ``deterministic``, ``dynamical``, ``velovi``.
-    """
-    if method not in SUPPORTED_METHODS:
-        raise ValueError(f"Unknown method '{method}'. Choose from: {SUPPORTED_METHODS}")
-
-    _validate_velocity_layers(adata)
-
-    n_cells = adata.n_obs
-    n_genes = adata.n_vars
-    logger.info("Input: %d cells × %d genes, method=%s", n_cells, n_genes, method)
-
-    if method == "velovi":
-        result = _run_velovi(adata)
-    else:
-        result = _run_scvelo(adata, mode=method)
-
-    return {"n_cells": n_cells, "n_genes": n_genes, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +223,7 @@ def get_demo_data() -> tuple:
         if not processed.exists():
             raise FileNotFoundError(f"Expected {processed}")
         adata = sc.read_h5ad(processed)
-        _add_demo_velocity_layers(adata)
+        add_demo_velocity_layers(adata)
         logger.info("Demo: %d cells × %d genes", adata.n_obs, adata.n_vars)
         return adata, None
 

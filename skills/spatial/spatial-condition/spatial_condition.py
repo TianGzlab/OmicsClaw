@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Spatial Condition — pseudobulk condition comparison.
 
+Core analysis functions are in skills.spatial._lib.condition.
+
 Usage:
-    python spatial_condition.py --input <data.h5ad> --output <dir> \
-        --condition-key treatment --sample-key sample_id
+    python spatial_condition.py --input <preprocessed.h5ad> --output <dir> --condition-key condition --sample-key sample_id
     python spatial_condition.py --demo --output <dir>
 """
 
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import sparse, stats
+from scipy import stats  # noqa: F401
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -35,255 +36,15 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
-from omicsclaw.spatial.adata_utils import store_analysis_metadata
-from omicsclaw.spatial.viz_utils import save_figure
+from skills.spatial._lib.adata_utils import store_analysis_metadata
+from skills.spatial._lib.condition import run_condition_comparison
+from skills.spatial._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-condition"
 SKILL_VERSION = "0.1.0"
-
-
-# ---------------------------------------------------------------------------
-# Pseudobulk aggregation
-# ---------------------------------------------------------------------------
-
-
-def pseudobulk_aggregate(
-    adata,
-    *,
-    sample_key: str,
-    cluster_key: str = "leiden",
-) -> dict[str, pd.DataFrame]:
-    """Aggregate raw counts to pseudobulk per (sample, cluster).
-
-    Returns dict mapping cluster label -> DataFrame (samples x genes).
-    """
-    if sample_key not in adata.obs.columns:
-        raise ValueError(f"Sample key '{sample_key}' not in adata.obs")
-    if cluster_key not in adata.obs.columns:
-        raise ValueError(f"Cluster key '{cluster_key}' not in adata.obs")
-
-    if "counts" in adata.layers:
-        X = adata.layers["counts"]
-    elif adata.raw is not None:
-        X = adata.raw.X
-    else:
-        X = adata.X
-
-    if sparse.issparse(X):
-        X = X.toarray()
-    X = np.asarray(X)
-
-    if np.any(X < 0):
-        logger.warning("Negative values in counts. PyDESeq2 requires raw counts. Clipping to 0.")
-        X = np.clip(X, 0, None)
-
-    if X.dtype.kind == "f":
-        X = np.round(X).astype(int)
-
-    clusters = sorted(adata.obs[cluster_key].unique().tolist(), key=str)
-    samples = sorted(adata.obs[sample_key].unique().tolist(), key=str)
-    gene_names = list(adata.var_names)
-
-    result: dict[str, pd.DataFrame] = {}
-    for cl in clusters:
-        rows = []
-        row_labels = []
-        for samp in samples:
-            mask = (adata.obs[cluster_key].values == cl) & (
-                adata.obs[sample_key].values == samp
-            )
-            if np.sum(mask) == 0:
-                continue
-            row_labels.append(samp)
-            rows.append(X[mask].sum(axis=0))
-        if len(rows) >= 2:
-            result[str(cl)] = pd.DataFrame(rows, index=row_labels, columns=gene_names)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# DE methods: PyDESeq2 (primary), Wilcoxon (alternative, available for explicit use)
-# ---------------------------------------------------------------------------
-
-
-def _run_pydeseq2(
-    count_df: pd.DataFrame,
-    condition_labels: pd.Series,
-    reference: str,
-    other: str,
-) -> pd.DataFrame:
-    """Run PyDESeq2 on pseudobulk counts."""
-    from omicsclaw.spatial.dependency_manager import require
-    require("pydeseq2", feature="DESeq2-style pseudobulk analysis")
-    from pydeseq2.dds import DeseqDataSet
-    from pydeseq2.ds import DeseqStats
-
-    metadata = pd.DataFrame({"condition": condition_labels.astype(str)}, index=count_df.index)
-    dds = DeseqDataSet(
-        counts=count_df.astype(int),
-        metadata=metadata,
-        design_factors="condition",
-        refit_cooks=True,
-    )
-    dds.deseq2()
-    stat = DeseqStats(dds, contrast=["condition", other, reference])
-    stat.summary()
-    res = stat.results_df.copy()
-    res = res.rename(columns={"log2FoldChange": "log2fc", "padj": "pvalue_adj"})
-    res["gene"] = res.index
-    return res[["gene", "log2fc", "pvalue_adj"]].reset_index(drop=True)
-
-
-def _run_wilcoxon_pseudobulk(
-    count_df: pd.DataFrame,
-    condition_labels: pd.Series,
-    reference: str,
-) -> pd.DataFrame:
-    """Wilcoxon rank-sum on pseudobulk log-CPM values (alternative DEA method)."""
-    lib_size = count_df.sum(axis=1)
-    lib_size = lib_size.replace(0, 1)
-    cpm = count_df.div(lib_size, axis=0) * 1e6
-    log_cpm = np.log1p(cpm)
-
-    ref_mask = condition_labels == reference
-    other_mask = ~ref_mask
-
-    if np.sum(ref_mask) < 1 or np.sum(other_mask) < 1:
-        return pd.DataFrame(columns=["gene", "log2fc", "pvalue_adj"])
-
-    ref_vals = log_cpm.loc[ref_mask]
-    other_vals = log_cpm.loc[other_mask]
-
-    records = []
-    for gene in count_df.columns:
-        a = other_vals[gene].values
-        b = ref_vals[gene].values
-        if np.std(a) < 1e-10 and np.std(b) < 1e-10:
-            continue
-        try:
-            stat, pval = stats.ranksums(a, b)
-        except Exception:
-            continue
-        lfc = float(np.mean(a) - np.mean(b))
-        records.append({"gene": gene, "log2fc": lfc, "pvalue_adj": pval})
-
-    df = pd.DataFrame(records)
-    if not df.empty:
-        from statsmodels.stats.multitest import multipletests
-        try:
-            _, adj, _, _ = multipletests(df["pvalue_adj"], method="fdr_bh")
-            df["pvalue_adj"] = adj
-        except Exception:
-            pass
-        df = df.sort_values("pvalue_adj").reset_index(drop=True)
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Main entry
-# ---------------------------------------------------------------------------
-
-
-def run_condition_comparison(
-    adata,
-    *,
-    condition_key: str,
-    sample_key: str,
-    reference_condition: str | None = None,
-    cluster_key: str = "leiden",
-) -> dict:
-    """Run pseudobulk condition comparison. Returns summary dict."""
-
-    conditions = sorted(adata.obs[condition_key].unique().tolist(), key=str)
-    if len(conditions) < 2:
-        raise ValueError(
-            f"Need >= 2 conditions in '{condition_key}', found {conditions}"
-        )
-
-    ref = reference_condition or conditions[0]
-    if ref not in conditions:
-        raise ValueError(f"Reference '{ref}' not in conditions: {conditions}")
-
-    samples = sorted(adata.obs[sample_key].unique().tolist(), key=str)
-    logger.info(
-        "Condition comparison: %d conditions (%s), %d samples, ref='%s'",
-        len(conditions), conditions, len(samples), ref,
-    )
-
-    pb_dict = pseudobulk_aggregate(
-        adata, sample_key=sample_key, cluster_key=cluster_key,
-    )
-    logger.info("Pseudobulk aggregated for %d clusters", len(pb_dict))
-
-    sample_condition = (
-        adata.obs[[sample_key, condition_key]]
-        .drop_duplicates()
-        .set_index(sample_key)[condition_key]
-    )
-
-    all_de: dict[str, pd.DataFrame] = {}
-    global_de = pd.DataFrame()
-
-    for cl, count_df in pb_dict.items():
-        cond_labels = sample_condition.loc[count_df.index]
-        cond_strs = cond_labels.astype(str)
-        unique_conds = cond_strs.unique().tolist()
-        
-        if len(unique_conds) < 2 or str(ref) not in unique_conds:
-            logger.warning("Cluster %s: missing reference or < 2 conditions, skipping", cl)
-            continue
-
-        gene_sums = count_df.sum(axis=0)
-        keep = gene_sums >= 10
-        filtered = count_df.loc[:, keep]
-
-        if filtered.shape[1] < 5:
-            logger.warning("Cluster %s: too few genes after filtering, skipping", cl)
-            continue
-
-        for other_c in unique_conds:
-            if other_c == str(ref):
-                continue
-
-            mask = cond_strs.isin([str(ref), other_c])
-            sub_filtered = filtered[mask]
-            sub_conds = cond_strs[mask]
-
-            if len(sub_conds.unique()) < 2:
-                continue
-
-            try:
-                de_df = _run_pydeseq2(sub_filtered, sub_conds, str(ref), other_c)
-                de_df["method"] = "pydeseq2"
-                de_df["cluster"] = cl
-                de_df["contrast"] = f"{other_c}_vs_{ref}"
-                all_de[f"{cl}_{other_c}"] = de_df
-            except Exception as exc:
-                logger.error("Cluster %s contrast %s failed: %s", cl, other_c, exc)
-
-    if all_de:
-        global_de = pd.concat(all_de.values(), ignore_index=True)
-
-    sig_count = int((global_de["pvalue_adj"] < 0.05).sum()) if not global_de.empty else 0
-
-    return {
-        "n_cells": adata.n_obs,
-        "n_genes": adata.n_vars,
-        "conditions": conditions,
-        "reference": ref,
-        "n_samples": len(samples),
-        "n_clusters_tested": len(all_de),
-        "n_de_genes_total": len(global_de),
-        "n_significant": sig_count,
-        "global_de": global_de,
-        "per_cluster_de": all_de,
-        "cluster_key": cluster_key,
-        "condition_key": condition_key,
-        "sample_key": sample_key,
-    }
 
 
 # ---------------------------------------------------------------------------

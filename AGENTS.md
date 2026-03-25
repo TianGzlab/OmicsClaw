@@ -59,28 +59,50 @@ python omicsclaw.py run spatial-preprocessing --demo
 ```
 OmicsClaw/
 ├── omicsclaw.py                # Main CLI runner (SKILLS dict, DOMAINS registry)
-├── omicsclaw/                  # Shared utilities package
+├── omicsclaw/                  # Core framework (domain-agnostic)
 │   ├── common/                 # report.py, session.py, checksums.py
-│   ├── spatial/                # loader.py, adata_utils.py, viz_utils.py
-│   ├── loaders/                # Unified data loading (load_omics_data)
 │   ├── core/                   # registry.py, dependency_manager.py
-│   └── interactive/            # ★ NEW: Interactive CLI/TUI package
+│   ├── loaders/                # Unified data loading (load_omics_data)
+│   ├── memory/                 # Graph memory system
+│   ├── routing/                # Multi-agent routing
+│   ├── agents/                 # Agent definitions
+│   └── interactive/            # Interactive CLI/TUI package
 │       ├── __init__.py         # Package entry: run_interactive(), main()
 │       ├── _constants.py       # Banner, LOGO, slash commands, slogans
 │       ├── _session.py         # SQLite session persistence (aiosqlite)
 │       ├── _mcp.py             # MCP server config / YAML management
 │       ├── interactive.py      # prompt_toolkit REPL loop (CLI mode)
 │       └── tui.py              # Textual full-screen TUI (TUI mode)
-├── skills/                     # Domain-organized skill directories
+├── skills/                     # Domain-organized skills + shared utilities
 │   ├── spatial/                # 15 spatial transcriptomics skills
+│   │   ├── _lib/               # ★ Shared spatial utilities (adata_utils, viz, loader, etc.)
+│   │   │   ├── viz/            # Unified visualization package (13 modules)
+│   │   │   ├── adata_utils.py  # AnnData helper functions
+│   │   │   ├── loader.py       # Multi-platform data loader
+│   │   │   ├── dependency_manager.py  # Lazy import manager
+│   │   │   ├── exceptions.py   # Domain-specific exceptions
+│   │   │   └── viz_utils.py    # Figure saving utilities
 │   │   ├── spatial-preprocess/ # QC + normalization + embedding
 │   │   ├── spatial-domains/    # Tissue region identification
 │   │   ├── spatial-annotate/   # Cell type annotation
 │   │   └── ...
-│   ├── singlecell/             # 9 single-cell omics skills
+│   ├── singlecell/             # 14 single-cell omics skills
+│   │   ├── _lib/               # ★ Shared single-cell utilities (19 modules)
+│   │   │   ├── io.py, qc.py, preprocessing.py, markers.py, ...
+│   │   │   ├── r_bridge.py     # R/Seurat integration bridge
+│   │   │   ├── method_config.py # Method configuration & validation
+│   │   │   └── annotation.py, trajectory.py, grn.py, ...
+│   │   ├── sc-qc/              # Quality control
+│   │   ├── sc-preprocessing/   # Normalization & filtering
+│   │   └── ...
 │   ├── genomics/               # 10 genomics skills
+│   │   └── _lib/               # Shared genomics utilities
 │   ├── proteomics/             # 8 proteomics skills
+│   │   └── _lib/               # Shared proteomics utilities
 │   ├── metabolomics/           # 8 metabolomics skills
+│   │   └── _lib/               # Shared metabolomics utilities
+│   ├── bulkrna/                # Bulk RNA skills
+│   │   └── _lib/               # Shared bulk RNA utilities
 │   └── orchestrator/           # Multi-domain routing
 ├── bot/                        # Messaging bot frontends
 │   ├── core.py                 # Shared LLM engine + tool loop (reused by interactive)
@@ -97,6 +119,13 @@ OmicsClaw/
 ├── CLAUDE.md                   # Agent routing instructions
 └── AGENTS.md                   # This file
 ```
+
+> **Import convention**: Domain-specific utilities are imported via
+> `from skills.<domain>._lib.<module> import <name>`. The `_lib/` directories
+> are internal shared packages — they are **not** registered as skills
+> (the registry ignores directories starting with `_`).
+> `omicsclaw/` contains only domain-agnostic framework code (core, loaders,
+> memory, interactive, routing).
 
 ## Skill Architecture
 

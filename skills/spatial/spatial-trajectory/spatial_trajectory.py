@@ -34,138 +34,16 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
-from omicsclaw.spatial.adata_utils import (
-    ensure_neighbors,
-    ensure_pca,
-    store_analysis_metadata,
-)
-from omicsclaw.spatial.viz_utils import save_figure
-from omicsclaw.spatial.viz import VizParams, plot_trajectory, plot_features
+from skills.spatial._lib.adata_utils import store_analysis_metadata
+from skills.spatial._lib.trajectory import run_trajectory, SUPPORTED_METHODS
+from skills.spatial._lib.viz_utils import save_figure
+from skills.spatial._lib.viz import VizParams, plot_trajectory, plot_features
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-trajectory"
 SKILL_VERSION = "0.1.0"
-
-SUPPORTED_METHODS = ("dpt", "cellrank", "palantir")
-
-
-# ---------------------------------------------------------------------------
-# Core: DPT (built-in, always available)
-# ---------------------------------------------------------------------------
-
-
-def _run_dpt(
-    adata,
-    *,
-    root_cell: str | None = None,
-    n_dcs: int = 10,
-) -> dict:
-    """Run diffusion pseudotime using scanpy."""
-
-    ensure_pca(adata)
-    ensure_neighbors(adata)
-
-    n_comps = min(n_dcs, adata.obsm["X_pca"].shape[1], adata.n_obs - 2)
-    sc.tl.diffmap(adata, n_comps=max(n_comps, 2))
-
-    if root_cell and root_cell in adata.obs_names:
-        adata.uns["iroot"] = list(adata.obs_names).index(root_cell)
-        logger.info("Using provided root cell: %s", root_cell)
-    else:
-        dc1 = adata.obsm["X_diffmap"][:, 0]
-        adata.uns["iroot"] = int(np.argmax(dc1))
-        root_cell = adata.obs_names[adata.uns["iroot"]]
-        logger.info("Auto-selected root cell: %s (max DC1)", root_cell)
-
-    sc.tl.dpt(adata)
-
-    dpt_vals = adata.obs["dpt_pseudotime"].values
-    finite_mask = np.isfinite(dpt_vals)
-
-    cluster_key = "leiden" if "leiden" in adata.obs.columns else None
-    per_cluster = {}
-    if cluster_key:
-        for cl in sorted(adata.obs[cluster_key].unique().tolist(), key=str):
-            mask = (adata.obs[cluster_key] == cl) & finite_mask
-            if np.sum(mask) > 0:
-                per_cluster[str(cl)] = {
-                    "mean_pseudotime": float(dpt_vals[mask].mean()),
-                    "median_pseudotime": float(np.median(dpt_vals[mask])),
-                    "n_cells": int(np.sum(mask)),
-                }
-
-    return {
-        "method": "dpt",
-        "root_cell": root_cell,
-        "mean_pseudotime": float(dpt_vals[finite_mask].mean()) if np.any(finite_mask) else 0.0,
-        "max_pseudotime": float(dpt_vals[finite_mask].max()) if np.any(finite_mask) else 0.0,
-        "n_finite": int(np.sum(finite_mask)),
-        "per_cluster": per_cluster,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Optional: CellRank
-# ---------------------------------------------------------------------------
-
-
-def _run_cellrank(adata, *, n_states: int = 3) -> dict:
-    """Run CellRank for directed trajectory analysis."""
-    from omicsclaw.spatial.dependency_manager import require
-    require("cellrank", feature="CellRank trajectory inference")
-    import cellrank as cr
-
-    kernel = cr.kernels.ConnectivityKernel(adata).compute_transition_matrix()
-    estimator = cr.estimators.GPCCA(kernel)
-    estimator.compute_schur(n_components=20)
-    estimator.compute_macrostates(n_states=n_states)
-
-    # CellRank 2 stores macrostates in different obs keys depending on version
-    macro_key = None
-    for candidate in ("macrostates_fwd", "macrostates", "term_states_fwd"):
-        if candidate in adata.obs.columns:
-            macro_key = candidate
-            break
-
-    n_macro = adata.obs[macro_key].nunique() if macro_key else 0
-
-    return {
-        "method": "cellrank",
-        "n_macrostates": n_macro,
-        "root_cell": None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Main entry
-# ---------------------------------------------------------------------------
-
-
-def run_trajectory(
-    adata,
-    *,
-    method: str = "dpt",
-    root_cell: str | None = None,
-    n_states: int = 3,
-) -> dict:
-    """Run trajectory inference. Returns summary dict."""
-
-    n_cells = adata.n_obs
-    n_genes = adata.n_vars
-    logger.info("Input: %d cells x %d genes", n_cells, n_genes)
-
-    if method == "cellrank":
-        try:
-            result = _run_cellrank(adata, n_states=n_states)
-        except Exception as exc:
-            logger.warning("CellRank failed (%s), falling back to DPT", exc)
-            result = _run_dpt(adata, root_cell=root_cell)
-    else:
-        result = _run_dpt(adata, root_cell=root_cell)
-
-    return {"n_cells": n_cells, "n_genes": n_genes, **result}
 
 
 # ---------------------------------------------------------------------------

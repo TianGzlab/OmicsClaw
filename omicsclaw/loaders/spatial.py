@@ -13,7 +13,7 @@ from typing import Literal
 import anndata as ad
 import scanpy as sc
 
-from omicsclaw.spatial.exceptions import DataError
+from skills.spatial._lib.exceptions import DataError
 
 logger = logging.getLogger(__name__)
 

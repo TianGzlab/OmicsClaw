@@ -390,7 +390,7 @@ target-version = "py311"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["omicsclaw", "omicsclaw.*"]
+include = ["omicsclaw", "omicsclaw.*", "skills.*._lib", "skills.*._lib.*"]
 exclude = ["tests", "tests.*", "output", "sessions"]
 
 [tool.setuptools.package-data]
