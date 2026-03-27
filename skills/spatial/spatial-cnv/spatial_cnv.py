@@ -5,7 +5,7 @@ Core analysis functions are in skills.spatial._lib.cnv.
 
 Supported methods:
   infercnvpy   Expression-based CNV inference using inferCNVpy (default)
-  numbat       Haplotype-aware CNV analysis via R Numbat (requires rpy2 + R)
+  numbat       Haplotype-aware CNV analysis via R Numbat (requires R installation)
 
 Usage:
     python spatial_cnv.py --input <preprocessed.h5ad> --output <dir>

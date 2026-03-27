@@ -11,6 +11,13 @@ tags: [spatial, SVG, spatially-variable-genes, morans, spatialde, sparkx, flashs
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--fdr-threshold"
+      - "--method"
+      - "--n-top-genes"
+    legacy_aliases: [genes]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -51,7 +58,7 @@ You are **Spatial Genes**, the spatially variable gene (SVG) discovery skill for
 
 1. **Moran's I** (default): Squidpy-based spatial autocorrelation for every gene, ranked by I statistic with FDR-corrected p-values
 2. **SpatialDE**: Gaussian process regression via SpatialDE2 (identifies spatial patterns)
-3. **SPARK-X**: Non-parametric kernel test via SPARK-X in R (requires rpy2)
+3. **SPARK-X**: Non-parametric kernel test via SPARK-X in R (requires R installation)
 4. **FlashS**: Randomized kernel approximation (Python native, fast on large datasets)
 5. **Top SVG visualization**: 2×2 spatial scatter grid of the top 4 spatially variable genes
 6. **Ranked table**: CSV of all tested genes sorted by spatial variability with statistics
@@ -184,7 +191,7 @@ output_dir/
 │   └── svg_results.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
@@ -201,7 +208,7 @@ output_dir/
 - `flashs` — FlashS randomized kernel approximation
 
 **Optional (R Environment / Subprocess)**:
-- R system installation (no `rpy2` required)
+- R system installation
 - `SPARK` (R package) — SPARK-X kernel test
 
 ## Safety

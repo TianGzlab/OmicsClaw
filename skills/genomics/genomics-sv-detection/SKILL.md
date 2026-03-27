@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "🧱"
     trigger_keywords: [structural variant, SV, Manta, Delly, Lumpy, Sniffles]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [sv-detect]
+    saves_h5ad: false
 ---
 
 # 🧱 Structural Variant Detection
@@ -57,7 +61,7 @@ output_directory/
 │   └── sv_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

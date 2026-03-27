@@ -11,6 +11,11 @@ metadata:
     domain: metabolomics
     emoji: "📏"
     trigger_keywords: [metabolomics quantification, imputation, feature quantification, missing values]
+    allowed_extra_flags:
+      - "--impute"
+      - "--normalize"
+    legacy_aliases: [met-quantify]
+    saves_h5ad: false
 ---
 
 # 📏 Metabolomics Quantification
@@ -63,7 +68,7 @@ output_directory/
 │   └── imputed_matrix.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

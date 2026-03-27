@@ -439,6 +439,48 @@ def _handle_mcp(arg: str) -> None:
         console.print("[dim]Available: /mcp list | /mcp add <name> <cmd> | /mcp remove <name>[/dim]")
 
 
+def _handle_guide(arg: str) -> str | None:
+    """Handle /guide command — return a prompt to inject into the LLM conversation.
+
+    /guide               → interactive guidance mode (ask LLM to guide user)
+    /guide <topic>       → query knowledge base for a specific topic
+    /guide workflow <d>  → show workflow for a domain
+    """
+    arg = arg.strip()
+
+    if not arg:
+        # Interactive guidance mode
+        console.print("[bold cyan]Knowledge Advisor[/bold cyan] — Let me help you plan your analysis.\n")
+        return (
+            "[GUIDE MODE] The user needs analysis guidance. "
+            "Use consult_knowledge to find relevant decision guides and workflows. "
+            "Then guide them step-by-step: ask about their data type, research question, "
+            "and experience level. Recommend a concrete analysis plan with skill names "
+            "and commands they can run."
+        )
+
+    tokens = arg.split(None, 1)
+
+    if tokens[0].lower() == "workflow" and len(tokens) > 1:
+        domain = tokens[1].strip().lower()
+        console.print(f"[bold cyan]Knowledge Advisor[/bold cyan] — Workflow for [yellow]{domain}[/yellow]\n")
+        return (
+            f"[GUIDE MODE] The user wants to see the recommended analysis workflow "
+            f"for the '{domain}' domain. Use consult_knowledge with "
+            f"domain='{domain}' and category='workflow' to find relevant workflows. "
+            f"Present a clear step-by-step pipeline with skill names and commands."
+        )
+
+    # Topic query
+    topic = arg
+    console.print(f"[bold cyan]Knowledge Advisor[/bold cyan] — Searching: [yellow]{topic}[/yellow]\n")
+    return (
+        f"[GUIDE MODE] The user is asking about: {topic}. "
+        f"Use consult_knowledge to search for relevant knowledge base entries about '{topic}'. "
+        f"Present the most relevant guidance concisely with actionable recommendations."
+    )
+
+
 def _handle_config(arg: str) -> None:
     """Handle /config subcommands."""
     tokens = shlex.split(arg.strip()) if arg.strip() else []
@@ -1219,6 +1261,24 @@ async def _async_interactive_loop(
                 arg = user_input[len("/config"):].strip()
                 _handle_config(arg)
                 console.print()
+                _print_separator()
+                continue
+
+            elif low.startswith("/guide"):
+                arg = user_input[len("/guide"):].strip()
+                guide_prompt = _handle_guide(arg)
+                if guide_prompt:
+                    # Inject as a guided LLM turn
+                    state["messages"].append({"role": "user", "content": guide_prompt})
+                    console.print()
+                    response = await _stream_llm_response(state["messages"])
+                    await save_session(
+                        state["session_id"],
+                        state["messages"],
+                        model=resolved_model,
+                        workspace=state["workspace_dir"],
+                    )
+                    console.print()
                 _print_separator()
                 continue
 

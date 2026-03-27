@@ -11,6 +11,10 @@ metadata:
     domain: bulkrna
     emoji: "🧩"
     trigger_keywords: [bulk deconvolution, cell type proportion, NNLS, CIBERSORTx, bulk deconv, cell fraction]
+    allowed_extra_flags:
+      - "--reference"
+    legacy_aliases: [bulk-deconv]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Cell Type Deconvolution
@@ -103,7 +107,7 @@ The reference signature matrix must be a CSV with:
 While NNLS provides a solid baseline, more sophisticated methods exist:
 
 - **CIBERSORTx**: Upload signature and mixture matrices to the CIBERSORTx web portal for support-vector-regression-based deconvolution with batch correction. Requires free academic registration.
-- **MuSiC**: R/Bioconductor package that uses multi-subject single-cell reference data with variance weighting. Requires rpy2 bridge (not bundled).
+- **MuSiC**: R/Bioconductor package that uses multi-subject single-cell reference data with variance weighting. Requires R installation (not bundled).
 
 ## Version Compatibility
 

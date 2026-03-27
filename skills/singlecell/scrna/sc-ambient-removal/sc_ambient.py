@@ -23,7 +23,7 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from skills.singlecell._lib import ambient as sc_ambient_utils
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
-from skills.singlecell._lib.r_bridge import run_soupx
+
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -41,8 +41,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "soupx": MethodConfig(
         name="soupx",
         description="SoupX — ambient RNA estimation and subtraction (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "simple": MethodConfig(
         name="simple",

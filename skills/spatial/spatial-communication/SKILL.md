@@ -20,6 +20,13 @@ metadata:
       - kind: pip
         package: squidpy
         bins: []
+    allowed_extra_flags:
+      - "--cell-type-key"
+      - "--method"
+      - "--species"
+    legacy_aliases: [communication]
+    saves_h5ad: true
+    requires_preprocessed: true
     trigger_keywords:
       - cell communication
       - ligand receptor

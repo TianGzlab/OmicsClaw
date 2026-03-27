@@ -2,7 +2,11 @@
 """Proteomics Orchestrator — query routing for proteomics analysis."""
 
 from __future__ import annotations
-import argparse, json, logging, sys
+
+import argparse
+import json
+import logging
+import sys
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -10,7 +14,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.report import DISCLAIMER, generate_report_footer, generate_report_header, write_result_json
-from omicsclaw.routing.router import route_query_unified
+from omicsclaw.routing.router import route_keyword, route_query_unified
+from omicsclaw.core.registry import registry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,7 +23,7 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "proteomics-orchestrator"
 SKILL_VERSION = "0.1.1"
 
-KEYWORD_MAP: dict[str, str] = {
+_FALLBACK_KEYWORD_MAP: dict[str, str] = {
     "mass spec": "proteomics-ms-qc", "ms qc": "proteomics-ms-qc", "quality control": "proteomics-ms-qc",
     "peptide identification": "proteomics-identification", "identify peptides": "proteomics-identification", "maxquant": "proteomics-identification",
     "protein quantification": "proteomics-quantification", "quantify proteins": "proteomics-quantification", "lfq": "proteomics-quantification",
@@ -29,6 +34,12 @@ KEYWORD_MAP: dict[str, str] = {
     "data import": "proteomics-data-import", "convert": "proteomics-data-import", "fragpipe": "proteomics-data-import", "diann": "proteomics-data-import",
     "cross-link": "proteomics-structural", "xl-ms": "proteomics-structural", "structural proteomics": "proteomics-structural",
 }
+
+
+def _get_keyword_map() -> dict[str, str]:
+    """Build keyword map from SKILL.md trigger_keywords with hardcoded fallback."""
+    return registry.build_keyword_map(domain="proteomics", fallback_map=_FALLBACK_KEYWORD_MAP)
+
 
 SKILL_DESCRIPTIONS: dict[str, str] = {
     "proteomics-ms-qc": "Mass spectrometry raw data quality control (PTXQC, rawTools, MSstatsQC)",
@@ -42,22 +53,19 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
 }
 
 def route_query(query: str) -> dict:
-    query_lower = query.lower().strip()
-    scores: dict[str, int] = {}
-    for kw, skill in KEYWORD_MAP.items():
-        if kw in query_lower:
-            scores[skill] = scores.get(skill, 0) + len(kw)
-    if scores:
-        best_skill = max(scores, key=lambda s: scores[s])
-        confidence = min(1.0, scores[best_skill] / 20.0)
-        matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
-        return {"matched": True, "skill": best_skill, "confidence": round(confidence, 2), "matched_keywords": matched_kws}
+    effective_map = _get_keyword_map()
+    skill, confidence = route_keyword(query, effective_map)
+    if skill:
+        query_lower = query.lower().strip()
+        matched_kws = [kw for kw, sk in effective_map.items() if sk == skill and kw in query_lower]
+        return {"matched": True, "skill": skill, "confidence": confidence, "matched_keywords": matched_kws}
     return {"matched": False, "skill": "proteomics-ms-qc", "confidence": 0.0, "matched_keywords": [], "fallback_reason": "No keywords matched"}
 
 def route_query_with_mode(query: str, routing_mode: str = "keyword") -> dict:
     """Route query using specified mode."""
     if routing_mode in ["llm", "hybrid"]:
-        skill, conf = route_query_unified(query, KEYWORD_MAP, SKILL_DESCRIPTIONS, "proteomics", routing_mode)
+        effective_map = _get_keyword_map()
+        skill, conf = route_query_unified(query, effective_map, SKILL_DESCRIPTIONS, "proteomics", routing_mode)
         if skill:
             return {"matched": True, "skill": skill, "confidence": conf, "matched_keywords": []}
     return route_query(query)
@@ -90,7 +98,8 @@ def main():
             demo_routes.append({"query": q, "skill": r["skill"], "confidence": r["confidence"], "keywords": r["matched_keywords"]})
         print()
         header = generate_report_header(title="Proteomics Orchestrator — Demo Report", skill_name=SKILL_NAME)
-        body_lines = ["## Routing Demo\n", f"- **Total skills**: {len(SKILL_DESCRIPTIONS)}", f"- **Keyword entries**: {len(KEYWORD_MAP)}", "", "### Example Query Routing\n", "| Query | Routed Skill | Confidence |", "|-------|-------------|------------|"]
+        effective_map = _get_keyword_map()
+        body_lines = ["## Routing Demo\n", f"- **Total skills**: {len(SKILL_DESCRIPTIONS)}", f"- **Keyword entries**: {len(effective_map)}", "", "### Example Query Routing\n", "| Query | Routed Skill | Confidence |", "|-------|-------------|------------|"]
         for r in demo_routes:
             body_lines.append(f"| {r['query'][:45]} | `{r['skill']}` | {r['confidence']:.2f} |")
         body_lines.extend(["", "## All Skills\n", "| Alias | Description |", "|-------|-------------|"])

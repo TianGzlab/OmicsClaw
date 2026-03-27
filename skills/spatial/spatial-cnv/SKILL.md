@@ -9,6 +9,12 @@ tags: [spatial, CNV, copy number, inferCNV, cancer]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--method"
+      - "--reference-key"
+    legacy_aliases: [cnv]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -145,7 +151,7 @@ output_directory/
 │   └── chromosome_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

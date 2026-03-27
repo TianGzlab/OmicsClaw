@@ -13,6 +13,9 @@ metadata:
     domain: metabolomics
     emoji: "🧪"
     trigger_keywords: [xcms, metabolomics preprocessing, LC-MS, peak detection, RT alignment]
+    allowed_extra_flags: []
+    legacy_aliases: [xcms-preprocess]
+    saves_h5ad: false
 ---
 
 # 🧪 XCMS Metabolomics Preprocessing
@@ -209,7 +212,7 @@ output_directory/
 │   └── grouped_features.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

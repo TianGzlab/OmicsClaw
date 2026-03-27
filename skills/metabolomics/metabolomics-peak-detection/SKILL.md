@@ -11,6 +11,9 @@ metadata:
     domain: metabolomics
     emoji: "⛰️"
     trigger_keywords: [peak detection, feature detection, XCMS, MZmine, MS-DIAL, peak picking]
+    allowed_extra_flags: []
+    legacy_aliases: [peak-detect]
+    saves_h5ad: false
 ---
 
 # ⛰️ Metabolomics Peak Detection

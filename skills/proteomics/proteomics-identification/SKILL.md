@@ -11,6 +11,9 @@ metadata:
     domain: proteomics
     emoji: "🔬"
     trigger_keywords: [peptide identification, database search, MaxQuant, MS-GF+, Comet, Mascot]
+    allowed_extra_flags: []
+    legacy_aliases: [peptide-id]
+    saves_h5ad: false
 ---
 
 # 🔬 Peptide Identification
@@ -56,7 +59,7 @@ output_directory/
 │   └── peptide_evidence.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

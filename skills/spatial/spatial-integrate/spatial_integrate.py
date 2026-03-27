@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """Spatial Integrate — multi-sample integration and batch correction.
 
 Usage:
-    python spatial_integrate.py --input <merged.h5ad> --output <dir> --batch-key batch
-    python spatial_integrate.py --demo --output <dir>
+    oc run spatial-integrate --input <merged.h5ad> --output <dir> --batch-key batch
+    oc run spatial-integrate --demo --output <dir>
 """
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-integrate"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.3.0"
 
 
 # ---------------------------------------------------------------------------
@@ -202,10 +201,12 @@ def write_report(
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd_parts: list[str] = [f"python spatial_integrate.py --input <input.h5ad> --output {output_dir}"]
+    cmd_parts: list[str] = [f"oc run spatial-integrate --input <input.h5ad> --output {output_dir}"]
     for k, v in params.items():
-        if v is not None:
+        if v is not None and not isinstance(v, bool):
             cmd_parts.append(f"--{str(k).replace('_', '-')} {v}")
+        elif isinstance(v, bool) and v:
+            cmd_parts.append(f"--{str(k).replace('_', '-')}")
     
     cmd_str = " ".join(cmd_parts)
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
@@ -215,18 +216,18 @@ def write_report(
     except ImportError:
         from importlib_metadata import version as _get_version  # type: ignore
     env_lines: list[str] = []
-    for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]:
+    for pkg in ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "scipy"]:
         try:
             env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
-            env_lines.append(f"{pkg}=?")
+            pass
     for opt in ["harmonypy", "bbknn", "scanorama"]:
         if is_available(opt):
             try:
                 env_lines.append(f"{opt}=={_get_version(opt)}")
             except Exception:
                 pass
-    (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -236,17 +237,16 @@ def write_report(
 
 def get_demo_data() -> tuple:
     """Generate synthetic multi-batch data from preprocess demo."""
-    preprocess_script = (
-        _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
-    )
-    if not preprocess_script.exists():
-        raise FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")
+    main_runner = _PROJECT_ROOT / "omicsclaw.py"
+    if not main_runner.exists():
+        raise FileNotFoundError(f"OmicsClaw runner not found at {main_runner}")
 
     with tempfile.TemporaryDirectory(prefix="spatial_int_demo_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         logger.info("Running spatial-preprocess --demo into %s", tmp_path)
+        # Use centralized router instead of raw script execution
         result = subprocess.run(
-            [sys.executable, str(preprocess_script), "--demo", "--output", str(tmp_path)],
+            [sys.executable, str(main_runner), "run", "spatial-preprocess", "--demo", "--output", str(tmp_path)],
             capture_output=True, text=True, timeout=180,
         )
         if result.returncode != 0:

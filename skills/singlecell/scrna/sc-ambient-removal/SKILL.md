@@ -10,6 +10,14 @@ tags: [singlecell, ambient, cellbender, contamination, QC]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--contamination"
+      - "--expected-cells"
+      - "--filtered-matrix-dir"
+      - "--method"
+      - "--raw-h5"
+      - "--raw-matrix-dir"
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -125,13 +133,13 @@ output_dir/
 │   └── count_distribution.png
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Dependencies
 
 **Required**: scanpy, numpy, pandas
-**Optional**: cellbender (for CellBender method), `rpy2` + `anndata2ri` + R packages `SoupX` and `Seurat`
+**Optional**: cellbender (for CellBender method), R + packages `SoupX` and `Seurat` (executed via native R scripts)
 
 ## Citations
 

@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-register"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.4.0"
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +151,10 @@ def write_report(
         f"- **Method**: {summary['method']}",
         f"- **Reference slice**: {summary['reference_slice']}",
         f"- **Slices aligned**: {summary['n_slices']}",
-        f"- **Mean disparity**: {summary['mean_disparity']:.6f}",
     ]
+    if summary.get("n_common_genes"):
+        body_lines.append(f"- **Common genes used**: {summary['n_common_genes']}")
+    body_lines.append(f"- **Mean disparity**: {summary['mean_disparity']:.6f}")
 
     disparities = summary.get("disparities", {})
     if disparities:
@@ -167,6 +169,19 @@ def write_report(
             "",
             "Alignment performed using PASTE optimal transport. "
             "The reference slice has disparity = 0.",
+        ])
+
+    stalign_params = summary.get("stalign_params")
+    if stalign_params:
+        body_lines.extend([
+            "", "### STalign Parameters\n",
+            f"- **Image size**: {stalign_params.get('image_size')}",
+            f"- **LDDMM iterations**: {stalign_params.get('niter')}",
+            f"- **Kernel bandwidth (a)**: {stalign_params.get('a')}",
+            f"- **Expression intensity**: {stalign_params.get('use_expression')}",
+            f"- **Device**: {stalign_params.get('device')}",
+            "",
+            "Alignment performed using STalign diffeomorphic mapping (LDDMM).",
         ])
 
     body_lines.extend([
@@ -219,7 +234,7 @@ def write_report(
             env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
-    (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +299,19 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument(
-        "--method", default="paste", choices=["paste"],
+        "--method", default="paste", choices=["paste", "stalign"],
     )
     parser.add_argument("--reference-slice", default=None,
                         help="Slice label to use as reference (default: first slice)")
+    # STalign-specific parameters
+    parser.add_argument("--stalign-niter", type=int, default=2000,
+                        help="STalign LDDMM iterations (default: 2000)")
+    parser.add_argument("--stalign-image-size", type=int, default=400,
+                        help="STalign raster image dimension (default: 400)")
+    parser.add_argument("--stalign-a", type=float, default=500.0,
+                        help="STalign kernel bandwidth — larger = smoother warp (default: 500)")
+    parser.add_argument("--use-expression", action="store_true", default=False,
+                        help="Use expression intensity for STalign (default: uniform)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -310,11 +334,27 @@ def main():
         "method": args.method,
         "reference_slice": args.reference_slice,
     }
+    if args.method == "stalign":
+        params["stalign_niter"] = args.stalign_niter
+        params["stalign_image_size"] = args.stalign_image_size
+        params["stalign_a"] = args.stalign_a
+        params["use_expression"] = args.use_expression
+
+    # Build method-specific kwargs
+    extra_kwargs = {}
+    if args.method == "stalign":
+        extra_kwargs = {
+            "image_size": (args.stalign_image_size, args.stalign_image_size),
+            "niter": args.stalign_niter,
+            "a": args.stalign_a,
+            "use_expression": args.use_expression,
+        }
 
     summary = run_registration(
         adata,
         method=args.method,
         reference_slice=args.reference_slice,
+        **extra_kwargs,
     )
 
     generate_figures(adata, output_dir, summary)

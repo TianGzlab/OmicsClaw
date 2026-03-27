@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "📝"
     trigger_keywords: [variant annotation, VEP, snpEff, ANNOVAR, functional effect]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [variant-annotate]
+    saves_h5ad: false
 ---
 
 # 📝 Variant Annotation
@@ -57,7 +61,7 @@ output_directory/
 │   └── top_variants.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -12,6 +12,9 @@ metadata:
     domain: genomics
     emoji: "📋"
     trigger_keywords: [VCF, bcftools, variant filter, merge VCF]
+    allowed_extra_flags: []
+    legacy_aliases: [vcf-ops]
+    saves_h5ad: false
 ---
 
 # 📋 VCF Operations
@@ -57,7 +60,7 @@ output_directory/
 │   └── cohort_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -12,6 +12,11 @@ metadata:
     domain: bulkrna
     emoji: "🔧"
     trigger_keywords: [batch correction, ComBat, batch effect, harmonize, multi-cohort, batch removal]
+    allowed_extra_flags:
+      - "--batch-info"
+      - "--mode"
+    legacy_aliases: [bulk-combat]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Batch Effect Correction

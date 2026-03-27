@@ -407,7 +407,7 @@ def main():
         ]
     except Exception:
         env_lines = ["scanpy", "anndata", "numpy", "pandas"]
-    (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
     # Write result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""

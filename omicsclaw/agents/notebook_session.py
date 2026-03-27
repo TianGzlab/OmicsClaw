@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import sys
 from pathlib import Path
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 _KERNEL_TIMEOUT = 120  # seconds to wait for kernel ready
 _IOPUB_TIMEOUT = 5     # seconds per iopub message poll
-_EXEC_TIMEOUT = 600    # max wall-clock seconds for a single cell execution
+_EXEC_TIMEOUT = int(os.environ.get("OC_NOTEBOOK_TIMEOUT", "600"))  # max wall-clock seconds per cell
 _MAX_PREVIEW = 4000    # characters for output previews
 
 # ---------------------------------------------------------------------------
@@ -280,8 +281,15 @@ class NotebookSession:
     # Execute
     # ------------------------------------------------------------------
 
-    def execute_cell(self, index: int) -> dict[str, Any]:
-        """Execute an existing code cell and store outputs in the notebook."""
+    def execute_cell(self, index: int, *, timeout: int | None = None) -> dict[str, Any]:
+        """Execute an existing code cell and store outputs in the notebook.
+
+        Parameters
+        ----------
+        timeout : int, optional
+            Max wall-clock seconds. Defaults to ``_EXEC_TIMEOUT``
+            (configurable via ``OC_NOTEBOOK_TIMEOUT`` env var).
+        """
         self._require_index(index)
         cell = self.nb.cells[index]
         if cell.cell_type != "code":
@@ -291,7 +299,7 @@ class NotebookSession:
         if isinstance(source, list):
             source = "\n".join(source)
 
-        result = self._execute_source(source)
+        result = self._execute_source(source, timeout=timeout)
 
         cell["outputs"] = result["outputs"]
         cell["execution_count"] = result["execution_count"]
@@ -306,12 +314,19 @@ class NotebookSession:
         }
 
     def insert_execute_code_cell(
-        self, index: int | None, source: str
+        self, index: int | None, source: str, *, timeout: int | None = None
     ) -> dict[str, Any]:
-        """Insert a code cell and immediately execute it (convenience combo)."""
+        """Insert a code cell and immediately execute it (convenience combo).
+
+        Parameters
+        ----------
+        timeout : int, optional
+            Max wall-clock seconds. Defaults to ``_EXEC_TIMEOUT``
+            (configurable via ``OC_NOTEBOOK_TIMEOUT`` env var).
+        """
         inserted = self.insert_cell(index=index, cell_type="code", source=source)
         idx = inserted["cell_index"]
-        executed = self.execute_cell(idx)
+        executed = self.execute_cell(idx, timeout=timeout)
         return {
             "ok": executed["ok"],
             "cell_index": idx,
@@ -324,15 +339,23 @@ class NotebookSession:
     # Internal: kernel message loop
     # ------------------------------------------------------------------
 
-    def _execute_source(self, source: str) -> dict[str, Any]:
+    def _execute_source(self, source: str, *, timeout: int | None = None) -> dict[str, Any]:
         """Send *source* to the kernel and collect outputs.
 
-        Applies a global execution timeout (``_EXEC_TIMEOUT`` seconds) in
-        addition to the per-message ``_IOPUB_TIMEOUT``.  If the kernel produces
-        no ``status: idle`` within the limit, the execution is considered timed
-        out and an error is returned.
+        Parameters
+        ----------
+        timeout : int, optional
+            Max wall-clock seconds. Defaults to ``_EXEC_TIMEOUT``
+            (configurable via ``OC_NOTEBOOK_TIMEOUT`` env var).
+
+        Applies a global execution timeout in addition to the per-message
+        ``_IOPUB_TIMEOUT``.  If the kernel produces no ``status: idle``
+        within the limit, the execution is considered timed out and an
+        error is returned.
         """
         import time
+
+        effective_timeout = timeout if timeout is not None else _EXEC_TIMEOUT
 
         msg_id = self.kc.execute(source, allow_stdin=False, stop_on_error=False)
 
@@ -344,9 +367,9 @@ class NotebookSession:
         while True:
             # ── Global timeout guard ─────────────────────────────────
             elapsed = time.monotonic() - wall_start
-            if elapsed > _EXEC_TIMEOUT:
+            if elapsed > effective_timeout:
                 error_text = (
-                    f"Cell execution timed out after {_EXEC_TIMEOUT}s. "
+                    f"Cell execution timed out after {effective_timeout}s. "
                     "Consider reducing the workload (subset the data, "
                     "fewer epochs, etc.) or running in background."
                 )

@@ -12,6 +12,9 @@ metadata:
     domain: bulkrna
     emoji: "🔍"
     trigger_keywords: [FASTQ QC, read quality, Phred, FastQC, adapter, GC content, Q20, Q30]
+    allowed_extra_flags: []
+    legacy_aliases: [bulk-fastqc]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq FASTQ Quality Assessment

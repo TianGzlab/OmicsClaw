@@ -12,6 +12,11 @@ metadata:
     domain: bulkrna
     emoji: "🧬"
     trigger_keywords: [RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC]
+    allowed_extra_flags:
+      - "--method"
+      - "--species"
+    legacy_aliases: [bulk-align-reads]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Read Alignment & Quantification Statistics

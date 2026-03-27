@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "🧬"
     trigger_keywords: [genome assembly, de novo, SPAdes, Megahit, Flye, Canu]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [assemble]
+    saves_h5ad: false
 ---
 
 # 🧬 Genome Assembly
@@ -57,7 +61,7 @@ output_directory/
 │   └── quast_metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -8,7 +8,8 @@ from omicsclaw.core.registry import registry
 
 def test_registry_loaded():
     registry.load_all()
-    assert "preprocess" in registry.skills
+    assert "spatial-preprocessing" in registry.skills
+    assert "sc-qc" in registry.skills  # verify singlecell subdomain nesting
     assert "spatial" in registry.domains
     assert len(registry.skills) > 0
     assert len(registry.domains) > 0

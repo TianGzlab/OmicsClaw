@@ -4,8 +4,8 @@
 Core computations are in skills.spatial._lib.statistics.
 
 Usage:
-    python spatial_statistics.py --input <adata.h5ad> --output <dir> --analysis-type moran
-    python spatial_statistics.py --demo --output <dir>
+    oc run spatial-statistics --input <adata.h5ad> --output <dir> --analysis-type moran
+    oc run spatial-statistics --demo --output <dir>
 """
 
 from __future__ import annotations
@@ -204,23 +204,27 @@ def write_report(
     # reproducibility/
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_statistics.py --input <input.h5ad> --output {output_dir}"
+    cmd_parts: list[str] = [f"oc run spatial-statistics --input <input.h5ad> --output {output_dir}"]
     for k, v in params.items():
-        if v is not None:
-            cmd += f" --{k.replace('_', '-')} {v}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+        if v is not None and not isinstance(v, bool):
+            cmd_parts.append(f"--{str(k).replace('_', '-')} {v}")
+        elif isinstance(v, bool) and v:
+            cmd_parts.append(f"--{str(k).replace('_', '-')}")
+            
+    cmd_str = " ".join(cmd_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd_str}\n")
 
     try:
         from importlib.metadata import version as _get_version
     except ImportError:
         from importlib_metadata import version as _get_version  # type: ignore
     env_lines = []
-    for pkg in ["squidpy", "scanpy", "anndata", "numpy", "pandas", "matplotlib", "esda", "libpysal", "networkx"]:
+    for pkg in ["squidpy", "scanpy", "anndata", "numpy", "pandas", "matplotlib", "scipy", "esda", "libpysal", "networkx"]:
         try:
             env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
-            env_lines.append(f"{pkg}=?")
-    (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
+            pass
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -230,11 +234,11 @@ def write_report(
 
 def get_demo_data() -> tuple:
     """Run spatial-preprocess --demo to generate a preprocessed h5ad."""
-    preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
+    main_runner = _PROJECT_ROOT / "omicsclaw.py"
 
-    if not preprocess_script.exists():
+    if not main_runner.exists():
         raise FileNotFoundError(
-            f"spatial-preprocess script not found at {preprocess_script}. "
+            f"OmicsClaw runner not found at {main_runner}. "
             "Run from the OmicsClaw project root."
         )
 
@@ -243,7 +247,7 @@ def get_demo_data() -> tuple:
         logger.info("Running spatial-preprocess --demo -> %s", demo_dir)
 
         result = subprocess.run(
-            [sys.executable, str(preprocess_script), "--demo", "--output", str(demo_dir)],
+            [sys.executable, str(main_runner), "run", "spatial-preprocess", "--demo", "--output", str(demo_dir)],
             capture_output=True,
             text=True,
             timeout=180,

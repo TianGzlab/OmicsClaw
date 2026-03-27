@@ -10,6 +10,13 @@ tags: [singlecell, annotation, cell-type, CellTypist, SingleR, scmap]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--cluster-key"
+      - "--method"
+      - "--reference"
+      - "--species"
+    legacy_aliases: [sc-annotate]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -187,14 +194,14 @@ output_dir/
 │   └── annotations.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
 ## Dependencies
 
 **Required**: scanpy >= 1.9, pandas, anndata
-**Optional**: celltypist (Python), `rpy2` + `anndata2ri` + R packages `SingleR` and `celldex`
+**Optional**: celltypist (Python), R + packages `SingleR` and `celldex` (executed via native R scripts)
 
 ## Runtime Notes
 

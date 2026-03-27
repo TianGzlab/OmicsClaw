@@ -69,12 +69,18 @@ def write_result_json(
     summary: dict[str, Any],
     data: dict[str, Any],
     input_checksum: str = "",
+    lineage: list[dict[str, Any]] | None = None,
 ) -> Path:
-    """Write the standardized result.json envelope alongside report.md."""
+    """Write the standardized result.json envelope alongside report.md.
+
+    Args:
+        lineage: Optional list of upstream step records from a
+                 :class:`~omicsclaw.common.manifest.PipelineManifest`.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    envelope = {
+    envelope: dict[str, Any] = {
         "skill": skill,
         "version": version,
         "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -82,6 +88,8 @@ def write_result_json(
         "summary": summary,
         "data": data,
     }
+    if lineage is not None:
+        envelope["lineage"] = lineage
 
     result_path = output_dir / "result.json"
     result_path.write_text(json.dumps(envelope, indent=2, default=str))

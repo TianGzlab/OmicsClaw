@@ -9,6 +9,13 @@ tags: [spatial, condition, pseudobulk, DESeq2, differential expression]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--condition-key"
+      - "--reference-condition"
+      - "--sample-key"
+    legacy_aliases: [condition]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -145,7 +152,7 @@ output_directory/
 │   └── per_cluster_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

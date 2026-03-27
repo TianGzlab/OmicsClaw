@@ -12,6 +12,9 @@ metadata:
     domain: proteomics
     emoji: "⚖️"
     trigger_keywords: [differential abundance, protein expression, MSstats, limma, volcano]
+    allowed_extra_flags: []
+    legacy_aliases: [differential-abundance]
+    saves_h5ad: false
 ---
 
 # ⚖️ Differential Protein Abundance
@@ -161,7 +164,7 @@ output_directory/
 │   └── differential_results.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

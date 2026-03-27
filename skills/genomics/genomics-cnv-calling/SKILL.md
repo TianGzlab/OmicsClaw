@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "📊"
     trigger_keywords: [CNV, copy number, amplification, deletion, CNVkit]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [cnv-calling]
+    saves_h5ad: false
 ---
 
 # 📊 Copy Number Variant Calling
@@ -229,7 +233,7 @@ output_directory/
 │   └── cnv_calls.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

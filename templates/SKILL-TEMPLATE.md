@@ -24,6 +24,12 @@ metadata:
     trigger_keywords:
       - keyword that routes to this skill
       - another trigger phrase
+    allowed_extra_flags:
+      - "--method"
+      - "--species"
+    legacy_aliases: [short-alias]
+    saves_h5ad: false
+    requires_preprocessed: false
 ---
 
 # 🔬 Skill Name
@@ -102,7 +108,7 @@ output_directory/
 │   └── results.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

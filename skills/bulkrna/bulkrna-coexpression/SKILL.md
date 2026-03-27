@@ -11,6 +11,11 @@ metadata:
     domain: bulkrna
     emoji: "🕸️"
     trigger_keywords: [coexpression, WGCNA, gene network, co-expression modules, hub genes, gene modules]
+    allowed_extra_flags:
+      - "--min-module-size"
+      - "--power"
+    legacy_aliases: [bulk-wgcna]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Co-expression Network Analysis

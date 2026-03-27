@@ -24,62 +24,135 @@ class OmicsRegistry:
     """Manages skill definitions and dynamic discovery."""
 
     def __init__(self):
-        # Initialize with baseline pre-defined skills
-        self.skills = _HARDCODED_SKILLS.copy()
+        self.skills: dict[str, dict[str, Any]] = {}
         self.domains = _HARDCODED_DOMAINS.copy()
         self._loaded = False
-        self.lazy_skills = {}
+        self.lazy_skills: dict[str, LazySkillMetadata] = {}
+
+    @staticmethod
+    def _iter_skill_dirs(domain_path: Path):
+        """Yield skill directories, handling optional subdomain nesting.
+
+        Supports both flat layouts (spatial/spatial-preprocess/) and nested
+        layouts with a subdomain tier (singlecell/scrna/sc-qc/).  A child
+        directory is treated as a skill if it contains a matching
+        ``<dir_name>.py`` script or a ``SKILL.md``.  Otherwise it is assumed
+        to be a subdomain container and scanned one level deeper.
+        """
+        for child in domain_path.iterdir():
+            if not child.is_dir() or child.name.startswith(('.', '__', '_')):
+                continue
+
+            script_name = f"{child.name.replace('-', '_')}.py"
+            if (child / script_name).exists() or (child / "SKILL.md").exists():
+                yield child
+            else:
+                # Subdomain container (e.g., scrna/, scatac/, multiome/)
+                for grandchild in child.iterdir():
+                    if not grandchild.is_dir() or grandchild.name.startswith(('.', '__', '_')):
+                        continue
+                    yield grandchild
 
     def load_all(self, skills_dir: Path | None = None) -> None:
-        """Dynamically load and merge skills from the filesystem."""
+        """Dynamically load and merge skills from the filesystem.
+
+        For each skill directory found, metadata is read from SKILL.md first.
+        The hardcoded ``_HARDCODED_SKILLS`` dict fills in any fields that
+        SKILL.md does not define (backward-compatible fallback).
+        """
         if self._loaded:
             return
-            
+
         target_dir = skills_dir or SKILLS_DIR
         if not target_dir.exists():
             return
-            
+
+        # Ensure lightweight metadata is available
+        if not self.lazy_skills:
+            self.load_lightweight(target_dir)
+
         # Scan domain directories
         for domain_path in target_dir.iterdir():
             if not domain_path.is_dir() or domain_path.name.startswith(('.', '__')):
                 continue
-                
+
             domain_name = domain_path.name
-            
-            # Scan skill directories within the domain
-            for skill_path in domain_path.iterdir():
-                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__', '_')):
-                    continue
-                    
+
+            # Scan skill directories (handles subdomain nesting)
+            for skill_path in self._iter_skill_dirs(domain_path):
                 skill_dir_name = skill_path.name
-                
-                # Check for catalog.json or registry.json logic could go here
-                # Check for python execution script
-                # Convention: script matches dir name with underscores instead of dashes
+
+                # Convention: script matches dir name with underscores
                 script_name = f"{skill_dir_name.replace('-', '_')}.py"
                 script_path_candidate = skill_path / script_name
-                
-                # For backward compatibility, check if already in hardcoded skills
-                # Some hardcoded aliases differ from dir name, so we check path
-                already_registered = any(
-                    s.get("script") == script_path_candidate for s in self.skills.values()
-                )
-                
-                if script_path_candidate.exists() and not already_registered:
-                    # Dynamically register the found skill
-                    alias = skill_dir_name
-                    # Make sure no clash
-                    if alias not in self.skills:
-                        self.skills[alias] = {
-                            "domain": domain_name,
-                            "alias": alias,
-                            "script": script_path_candidate,
-                            "demo_args": ["--demo"],
-                            "description": f"Dynamically loaded {alias} skill",
-                            "allowed_extra_flags": set(),  # Strict default
-                            "saves_h5ad": False,
-                        }
-                        logger.debug(f"Dynamically discovered skill: {alias}")
+
+                if not script_path_candidate.exists():
+                    continue
+
+                # Determine the registry alias for this skill.
+                # Check if a hardcoded entry already maps to this script.
+                hardcoded_alias = None
+                hardcoded_info = None
+                for alias, info in _HARDCODED_SKILLS.items():
+                    if info.get("script") == script_path_candidate:
+                        hardcoded_alias = alias
+                        hardcoded_info = info
+                        break
+
+                skill_alias = hardcoded_alias or skill_dir_name
+
+                # Build skill_info from SKILL.md metadata (primary source)
+                lazy = self.lazy_skills.get(skill_dir_name)
+                if lazy and lazy.description:
+                    md_info: dict[str, Any] = {
+                        "domain": lazy.domain or domain_name,
+                        "alias": skill_alias,
+                        "script": script_path_candidate,
+                        "demo_args": ["--demo"],
+                        "description": lazy.description,
+                        "allowed_extra_flags": lazy.allowed_extra_flags or set(),
+                        "legacy_aliases": lazy.legacy_aliases or [],
+                        "saves_h5ad": lazy.saves_h5ad,
+                        "requires_preprocessed": lazy.requires_preprocessed,
+                    }
+                else:
+                    # No SKILL.md or empty — minimal dynamic entry
+                    md_info = {
+                        "domain": domain_name,
+                        "alias": skill_alias,
+                        "script": script_path_candidate,
+                        "demo_args": ["--demo"],
+                        "description": f"Dynamically loaded {skill_alias} skill",
+                        "allowed_extra_flags": set(),
+                        "saves_h5ad": False,
+                    }
+
+                # Merge: hardcoded fills gaps that SKILL.md didn't provide
+                if hardcoded_info:
+                    for key, value in hardcoded_info.items():
+                        if key not in md_info:
+                            md_info[key] = value
+                        elif key == "allowed_extra_flags" and not md_info[key]:
+                            # If SKILL.md has empty flags, use hardcoded
+                            md_info[key] = value
+                        elif key == "description" and md_info[key].startswith("Dynamically loaded"):
+                            md_info[key] = value
+
+                self.skills[skill_alias] = md_info
+
+                # Register legacy aliases as pointers
+                for la in md_info.get("legacy_aliases", []):
+                    if la not in self.skills:
+                        self.skills[la] = md_info
+
+        # Fallback: register any hardcoded skills not discovered on filesystem
+        for alias, info in _HARDCODED_SKILLS.items():
+            if alias not in self.skills:
+                self.skills[alias] = info
+                # Also register legacy aliases from hardcoded
+                for la in info.get("legacy_aliases", []):
+                    if la not in self.skills:
+                        self.skills[la] = info
 
         self._loaded = True
 
@@ -93,10 +166,7 @@ class OmicsRegistry:
             if not domain_path.is_dir() or domain_path.name.startswith(('.', '__')):
                 continue
 
-            for skill_path in domain_path.iterdir():
-                if not skill_path.is_dir() or skill_path.name.startswith(('.', '__', '_')):
-                    continue
-
+            for skill_path in self._iter_skill_dirs(domain_path):
                 skill_md = skill_path / "SKILL.md"
                 if not skill_md.exists():
                     continue
@@ -104,6 +174,53 @@ class OmicsRegistry:
                 lazy = LazySkillMetadata(skill_path)
                 skill_key = skill_path.name
                 self.lazy_skills[skill_key] = lazy
+
+    def _resolve_alias(self, skill_dir_name: str) -> str:
+        """Map a skill directory name to its registry alias.
+
+        Handles cases like ``spatial-preprocess`` -> ``spatial-preprocessing``.
+        Falls back to the directory name itself if no explicit mapping exists.
+        """
+        for alias, info in self.skills.items():
+            script_path = info.get("script")
+            if script_path and Path(script_path).parent.name == skill_dir_name:
+                return alias
+        return skill_dir_name
+
+    def build_keyword_map(
+        self,
+        domain: str | None = None,
+        fallback_map: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Build keyword->skill_alias map from SKILL.md trigger_keywords.
+
+        Args:
+            domain: If provided, only include skills from this domain.
+            fallback_map: Legacy hardcoded map merged underneath
+                          (SKILL.md keywords take priority).
+
+        Returns:
+            Dict mapping lowercase keyword to skill alias.
+        """
+        if not self.lazy_skills:
+            self.load_lightweight()
+
+        keyword_map: dict[str, str] = {}
+
+        # Start with fallback so SKILL.md keywords override
+        if fallback_map:
+            keyword_map.update(fallback_map)
+
+        for skill_key, lazy in self.lazy_skills.items():
+            if domain and lazy.domain != domain:
+                continue
+
+            skill_alias = self._resolve_alias(skill_key)
+
+            for kw in lazy.trigger_keywords:
+                keyword_map[kw.lower()] = skill_alias
+
+        return keyword_map
 
 
 
@@ -122,7 +239,7 @@ _HARDCODED_DOMAINS = {
     "singlecell": {
         "name": "Single-Cell Omics",
         "primary_data_types": ["h5ad", "h5", "loom", "mtx"],
-        "skill_count": 9,
+        "skill_count": 13,
     },
     "genomics": {
         "name": "Genomics",
@@ -345,7 +462,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-qc": {
         "domain": "singlecell",
         "alias": "sc-qc",
-        "script": SKILLS_DIR / "singlecell" / "sc-qc" / "sc_qc.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-qc" / "sc_qc.py",
         "demo_args": ["--demo"],
         "description": "Calculate and visualize QC metrics for scRNA-seq data",
         "allowed_extra_flags": {"--species"},
@@ -354,7 +471,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-filter": {
         "domain": "singlecell",
         "alias": "sc-filter",
-        "script": SKILLS_DIR / "singlecell" / "sc-filter" / "sc_filter.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-filter" / "sc_filter.py",
         "demo_args": ["--demo"],
         "description": "Filter cells and genes based on QC metrics with tissue-specific presets",
         "allowed_extra_flags": {
@@ -366,7 +483,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-ambient-removal": {
         "domain": "singlecell",
         "alias": "sc-ambient-removal",
-        "script": SKILLS_DIR / "singlecell" / "sc-ambient-removal" / "sc_ambient.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-ambient-removal" / "sc_ambient.py",
         "demo_args": ["--demo"],
         "description": "Remove ambient RNA contamination using CellBender, SoupX, or simple subtraction",
         "allowed_extra_flags": {"--method", "--expected-cells", "--raw-h5", "--raw-matrix-dir", "--filtered-matrix-dir", "--contamination"},
@@ -376,7 +493,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "domain": "singlecell",
         "alias": "sc-preprocessing",
         "legacy_aliases": ["sc-preprocess"],
-        "script": SKILLS_DIR / "singlecell" / "sc-preprocessing" / "sc_preprocess.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-preprocessing" / "sc_preprocess.py",
         "demo_args": ["--demo"],
         "description": "scRNA-seq QC, normalization, HVG, PCA/UMAP, Leiden clustering (Scanpy, Seurat, Pegasus)",
         "allowed_extra_flags": {
@@ -389,7 +506,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "domain": "singlecell",
         "alias": "sc-doublet-detection",
         "legacy_aliases": ["sc-doublet"],
-        "script": SKILLS_DIR / "singlecell" / "sc-doublet-detection" / "sc_doublet.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-doublet-detection" / "sc_doublet.py",
         "demo_args": ["--demo"],
         "description": "Doublet detection and removal (Scrublet, scDblFinder, DoubletFinder)",
         "allowed_extra_flags": {"--method", "--expected-doublet-rate", "--threshold"},
@@ -399,7 +516,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "domain": "singlecell",
         "alias": "sc-cell-annotation",
         "legacy_aliases": ["sc-annotate"],
-        "script": SKILLS_DIR / "singlecell" / "sc-cell-annotation" / "sc_annotate.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-cell-annotation" / "sc_annotate.py",
         "demo_args": ["--demo"],
         "description": "Cell type annotation (CellTypist, SingleR, scmap, GARNET, scANVI)",
         "allowed_extra_flags": {"--method", "--reference", "--species", "--cluster-key"},
@@ -409,7 +526,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-pseudotime": {
         "domain": "singlecell",
         "alias": "sc-pseudotime",
-        "script": SKILLS_DIR / "singlecell" / "sc-pseudotime" / "sc_pseudotime.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-pseudotime" / "sc_pseudotime.py",
         "demo_args": ["--demo"],
         "description": "Pseudotime analysis with PAGA, Diffusion Map, and DPT (scanpy)",
         "allowed_extra_flags": {
@@ -422,7 +539,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-velocity": {
         "domain": "singlecell",
         "alias": "sc-velocity",
-        "script": SKILLS_DIR / "singlecell" / "sc-velocity" / "sc_velocity.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-velocity" / "sc_velocity.py",
         "demo_args": ["--demo"],
         "description": "RNA velocity analysis with scVelo (requires spliced/unspliced layers)",
         "allowed_extra_flags": {"--method", "--n-jobs"},
@@ -433,7 +550,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "domain": "singlecell",
         "alias": "sc-batch-integration",
         "legacy_aliases": ["sc-integrate"],
-        "script": SKILLS_DIR / "singlecell" / "sc-batch-integration" / "sc_integrate.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-batch-integration" / "sc_integrate.py",
         "demo_args": ["--demo"],
         "description": "Multi-sample integration and batch correction (Harmony, scVI, BBKNN, Scanorama, fastMNN, Seurat CCA/RPCA)",
         "allowed_extra_flags": {"--method", "--batch-key", "--n-epochs", "--no-gpu"},
@@ -442,7 +559,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-de": {
         "domain": "singlecell",
         "alias": "sc-de",
-        "script": SKILLS_DIR / "singlecell" / "sc-de" / "sc_de.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-de" / "sc_de.py",
         "demo_args": ["--demo"],
         "description": "Differential expression analysis (Wilcoxon, t-test, MAST compatibility, pseudobulk DESeq2 via R)",
         "allowed_extra_flags": {
@@ -454,7 +571,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-markers": {
         "domain": "singlecell",
         "alias": "sc-markers",
-        "script": SKILLS_DIR / "singlecell" / "sc-markers" / "sc_markers.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-markers" / "sc_markers.py",
         "demo_args": ["--demo"],
         "description": "Find marker genes for cell clusters using Wilcoxon, t-test, or logistic regression",
         "allowed_extra_flags": {"--groupby", "--method", "--n-genes", "--n-top"},
@@ -464,7 +581,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-grn": {
         "domain": "singlecell",
         "alias": "sc-grn",
-        "script": SKILLS_DIR / "singlecell" / "sc-grn" / "sc_grn.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-grn" / "sc_grn.py",
         "demo_args": ["--demo"],
         "description": "Gene regulatory network inference with pySCENIC (GRNBoost2, cisTarget, AUCell)",
         "allowed_extra_flags": {
@@ -476,7 +593,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     "sc-cell-communication": {
         "domain": "singlecell",
         "alias": "sc-cell-communication",
-        "script": SKILLS_DIR / "singlecell" / "sc-cell-communication" / "sc_cell_communication.py",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-cell-communication" / "sc_cell_communication.py",
         "demo_args": ["--demo"],
         "description": "Cell-cell communication analysis (builtin, LIANA, CellChat)",
         "allowed_extra_flags": {"--method", "--cell-type-key", "--species"},

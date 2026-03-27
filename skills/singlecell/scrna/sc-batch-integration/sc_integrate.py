@@ -23,7 +23,7 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from skills.singlecell._lib.adata_utils import ensure_pca, store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice, check_data_requirements
-from skills.singlecell._lib.r_bridge import run_seurat_integration
+
 from skills.singlecell._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -58,20 +58,17 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "fastmnn": MethodConfig(
         name="fastmnn",
         description="fastMNN — batchelor mutual nearest neighbors (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "seurat_cca": MethodConfig(
         name="seurat_cca",
         description="Seurat CCA integration (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "seurat_rpca": MethodConfig(
         name="seurat_rpca",
         description="Seurat RPCA integration (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "scanorama": MethodConfig(
         name="scanorama",

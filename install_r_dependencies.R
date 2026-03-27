@@ -24,7 +24,11 @@
 #   Internet access (CRAN / Bioconductor / GitHub)
 #
 # Usage:
-#   Rscript install_r_dependencies.R
+#   Rscript install_r_dependencies.R                 # install all
+#   Rscript install_r_dependencies.R --tier bulkrna  # install only bulk RNA-seq tier
+#   Rscript install_r_dependencies.R --tier spatial   # install only spatial tier
+#   Rscript install_r_dependencies.R --tier singlecell # install only single-cell tier
+#   Rscript install_r_dependencies.R --check          # check only, no install
 #   # or from within R:
 #   source("install_r_dependencies.R")
 
@@ -37,6 +41,36 @@ cat("========================================\n\n")
 options(repos = c(CRAN = "https://cran.r-project.org"))
 
 # ---------------------------------------------------------------------------
+# CLI argument parsing: --tier <name> and --check
+# ---------------------------------------------------------------------------
+
+args <- commandArgs(trailingOnly = TRUE)
+selected_tier <- NULL
+check_only    <- FALSE
+
+if ("--check" %in% args) {
+  check_only <- TRUE
+  args <- args[args != "--check"]
+}
+if ("--tier" %in% args) {
+  tier_idx <- which(args == "--tier")
+  if (tier_idx < length(args)) {
+    selected_tier <- args[tier_idx + 1]
+  }
+}
+
+valid_tiers <- c("bulkrna", "spatial", "singlecell", "all")
+if (!is.null(selected_tier) && !(selected_tier %in% valid_tiers)) {
+  cat(sprintf("ERROR: Unknown tier '%s'. Valid tiers: %s\n",
+              selected_tier, paste(valid_tiers, collapse=", ")))
+  quit(status = 1)
+}
+if (is.null(selected_tier)) selected_tier <- "all"
+
+cat(sprintf("Mode: %s\n", ifelse(check_only, "CHECK ONLY", "INSTALL")))
+cat(sprintf("Tier: %s\n\n", selected_tier))
+
+# ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
 
@@ -46,6 +80,11 @@ install_if_missing <- function(pkg, source = "CRAN", install_cmd = NULL) {
   if (requireNamespace(pkg, quietly = TRUE)) {
     cat(" already installed\n")
     return(TRUE)
+  }
+
+  if (check_only) {
+    cat(" MISSING\n")
+    return(FALSE)
   }
 
   cat(" installing...\n")
@@ -95,88 +134,99 @@ record(install_if_missing("devtools",    "CRAN"), "devtools (CRAN)")
 record(install_if_missing("BiocManager", "CRAN"), "BiocManager (CRAN)")
 
 # ---------------------------------------------------------------------------
-# Step 2 — CRAN packages
+# Step 2 — CRAN packages (tier-filtered)
 # ---------------------------------------------------------------------------
+
+# Tag each CRAN package with its tier
+cran_pkgs_with_tier <- list(
+  # Tools (always needed)
+  list(pkg="dplyr",       tier=c("all","singlecell","spatial")),
+  list(pkg="ggplot2",     tier=c("all","singlecell","spatial")),
+  list(pkg="Matrix",      tier=c("all","singlecell","spatial","bulkrna")),
+  # Single-cell
+  list(pkg="Seurat",      tier=c("all","singlecell")),
+  list(pkg="sctransform", tier=c("all","singlecell")),
+  list(pkg="harmony",     tier=c("all","singlecell")),
+  list(pkg="SoupX",       tier=c("all","singlecell")),
+  list(pkg="openxlsx",    tier=c("all","singlecell")),
+  list(pkg="HGNChelper",  tier=c("all","singlecell")),
+  # Spatial
+  list(pkg="NMF",         tier=c("all","spatial")),
+  list(pkg="mclust",      tier=c("all","spatial")),
+  # Bulk RNA-seq
+  list(pkg="survival",    tier=c("all","bulkrna")),
+  list(pkg="msigdbr",     tier=c("all","bulkrna")),
+  list(pkg="ashr",        tier=c("all","bulkrna"))
+)
 
 cat("\nStep 2: CRAN packages\n")
 cat("---------------------\n")
-
-cran_pkgs <- c(
-  "dplyr",        # data manipulation (CellChat, Numbat, scType)
-  "ggplot2",      # plotting (CellChat, SPOTlight visualisation)
-  "openxlsx",     # Excel file reading (scType marker DB)
-  "HGNChelper",   # gene name validation (scType)
-  "sctransform",  # SCTransform v2 normalisation
-  "Matrix",       # sparse matrix operations
-  "mclust",       # model-based clustering (GraphST)
-  "Seurat",       # single-cell analysis framework (RCTD, Numbat)
-  "NMF",          # non-negative matrix factorisation (SPOTlight)
-  "harmony",      # Harmony integration in Seurat
-  "SoupX",        # ambient RNA removal
-  "survival",     # Kaplan-Meier, Cox PH, log-rank (bulkrna-survival)
-  "msigdbr",      # MSigDB gene set database (bulkrna-enrichment)
-  "ashr"          # adaptive shrinkage for DESeq2 LFC (bulkrna-de)
-)
-
-for (pkg in cran_pkgs) {
-  record(install_if_missing(pkg, "CRAN"), paste0(pkg, " (CRAN)"))
+for (info in cran_pkgs_with_tier) {
+  if (selected_tier %in% info$tier) {
+    record(install_if_missing(info$pkg, "CRAN"), paste0(info$pkg, " (CRAN)"))
+  }
 }
 
 # ---------------------------------------------------------------------------
-# Step 3 — Bioconductor packages
+# Step 3 — Bioconductor packages (tier-filtered)
 # ---------------------------------------------------------------------------
 
 cat("\nStep 3: Bioconductor packages\n")
 cat("-----------------------------\n")
 
 bioc_pkgs <- list(
-  list(name = "SingleCellExperiment",
-       cmd  = "BiocManager::install('SingleCellExperiment', update=FALSE, ask=FALSE)"),
-  list(name = "SpatialExperiment",
-       cmd  = "BiocManager::install('SpatialExperiment',   update=FALSE, ask=FALSE)"),
-  list(name = "zellkonverter",
-       cmd  = "BiocManager::install('zellkonverter',       update=FALSE, ask=FALSE)"),
-  list(name = "scran",
-       cmd  = "BiocManager::install('scran',               update=FALSE, ask=FALSE)"),
-  list(name = "scuttle",
-       cmd  = "BiocManager::install('scuttle',             update=FALSE, ask=FALSE)"),
-  list(name = "SPOTlight",
-       cmd  = "BiocManager::install('SPOTlight',           update=FALSE, ask=FALSE)"),
-  list(name = "SingleR",
-       cmd  = "BiocManager::install('SingleR',             update=FALSE, ask=FALSE)"),
-  list(name = "celldex",
-       cmd  = "BiocManager::install('celldex',             update=FALSE, ask=FALSE)"),
-  list(name = "scDblFinder",
-       cmd  = "BiocManager::install('scDblFinder',         update=FALSE, ask=FALSE)"),
-  list(name = "batchelor",
-       cmd  = "BiocManager::install('batchelor',           update=FALSE, ask=FALSE)"),
-  list(name = "DESeq2",
-       cmd  = "BiocManager::install('DESeq2',              update=FALSE, ask=FALSE)"),
-  list(name = "apeglm",
-       cmd  = "BiocManager::install('apeglm',              update=FALSE, ask=FALSE)"),
-  list(name = "muscat",
-       cmd  = "BiocManager::install('muscat',              update=FALSE, ask=FALSE)"),
-  list(name = "edgeR",
-       cmd  = "BiocManager::install('edgeR',               update=FALSE, ask=FALSE)"),
-  list(name = "limma",
-       cmd  = "BiocManager::install('limma',               update=FALSE, ask=FALSE)"),
-  list(name = "WGCNA",
-       cmd  = "BiocManager::install('WGCNA',               update=FALSE, ask=FALSE)"),
-  list(name = "sva",
-       cmd  = "BiocManager::install('sva',                 update=FALSE, ask=FALSE)"),
-  list(name = "clusterProfiler",
-       cmd  = "BiocManager::install('clusterProfiler',     update=FALSE, ask=FALSE)")
+  # Single-cell
+  list(name="SingleCellExperiment", tier=c("all","singlecell"),
+       cmd="BiocManager::install('SingleCellExperiment', update=FALSE, ask=FALSE)"),
+  list(name="scran",  tier=c("all","singlecell"),
+       cmd="BiocManager::install('scran', update=FALSE, ask=FALSE)"),
+  list(name="scuttle", tier=c("all","singlecell"),
+       cmd="BiocManager::install('scuttle', update=FALSE, ask=FALSE)"),
+  list(name="SingleR", tier=c("all","singlecell"),
+       cmd="BiocManager::install('SingleR', update=FALSE, ask=FALSE)"),
+  list(name="celldex", tier=c("all","singlecell"),
+       cmd="BiocManager::install('celldex', update=FALSE, ask=FALSE)"),
+  list(name="scDblFinder", tier=c("all","singlecell"),
+       cmd="BiocManager::install('scDblFinder', update=FALSE, ask=FALSE)"),
+  list(name="batchelor", tier=c("all","singlecell"),
+       cmd="BiocManager::install('batchelor', update=FALSE, ask=FALSE)"),
+  list(name="muscat",  tier=c("all","singlecell"),
+       cmd="BiocManager::install('muscat', update=FALSE, ask=FALSE)"),
+  # Spatial
+  list(name="SpatialExperiment", tier=c("all","spatial"),
+       cmd="BiocManager::install('SpatialExperiment', update=FALSE, ask=FALSE)"),
+  list(name="zellkonverter", tier=c("all","spatial"),
+       cmd="BiocManager::install('zellkonverter', update=FALSE, ask=FALSE)"),
+  list(name="SPOTlight", tier=c("all","spatial"),
+       cmd="BiocManager::install('SPOTlight', update=FALSE, ask=FALSE)"),
+  # Bulk RNA-seq
+  list(name="DESeq2",  tier=c("all","bulkrna","singlecell"),
+       cmd="BiocManager::install('DESeq2', update=FALSE, ask=FALSE)"),
+  list(name="apeglm",  tier=c("all","bulkrna"),
+       cmd="BiocManager::install('apeglm', update=FALSE, ask=FALSE)"),
+  list(name="edgeR",   tier=c("all","bulkrna"),
+       cmd="BiocManager::install('edgeR', update=FALSE, ask=FALSE)"),
+  list(name="limma",   tier=c("all","bulkrna"),
+       cmd="BiocManager::install('limma', update=FALSE, ask=FALSE)"),
+  list(name="WGCNA",   tier=c("all","bulkrna"),
+       cmd="BiocManager::install('WGCNA', update=FALSE, ask=FALSE)"),
+  list(name="sva",     tier=c("all","bulkrna"),
+       cmd="BiocManager::install('sva', update=FALSE, ask=FALSE)"),
+  list(name="clusterProfiler", tier=c("all","bulkrna"),
+       cmd="BiocManager::install('clusterProfiler', update=FALSE, ask=FALSE)")
 )
 
 for (info in bioc_pkgs) {
-  record(
-    install_if_missing(info$name, "Bioconductor", info$cmd),
-    paste0(info$name, " (Bioconductor)")
-  )
+  if (selected_tier %in% info$tier) {
+    record(
+      install_if_missing(info$name, "Bioconductor", info$cmd),
+      paste0(info$name, " (Bioconductor)")
+    )
+  }
 }
 
 # ---------------------------------------------------------------------------
-# Step 4 — GitHub packages
+# Step 4 — GitHub packages (tier-filtered)
 # ---------------------------------------------------------------------------
 
 cat("\nStep 4: GitHub packages\n")
@@ -184,53 +234,37 @@ cat("Note: These may take several minutes to compile\n")
 cat("-----------------------------------------------\n")
 
 github_pkgs <- list(
-  list(
-    name   = "spacexr",
-    repo   = "dmcable/spacexr",
-    method = "RCTD deconvolution",
-    cmd    = "devtools::install_github('dmcable/spacexr', build_vignettes=FALSE, upgrade='never')"
-  ),
-  list(
-    name   = "CARD",
-    repo   = "YMa-lab/CARD",
-    method = "CARD deconvolution",
-    cmd    = "devtools::install_github('YMa-lab/CARD', upgrade='never')"
-  ),
-  list(
-    name   = "CellChat",
-    repo   = "jinworks/CellChat",
-    method = "cell-cell communication",
-    cmd    = "devtools::install_github('jinworks/CellChat', upgrade='never')"
-  ),
-  list(
-    name   = "numbat",
-    repo   = "kharchenkolab/numbat",
-    method = "CNV analysis",
-    cmd    = "devtools::install_github('kharchenkolab/numbat', upgrade='never')"
-  ),
-  list(
-    name   = "SPARK",
-    repo   = "xzhoulab/SPARK",
-    method = "SPARK-X spatially variable genes",
-    cmd    = "devtools::install_github('xzhoulab/SPARK', upgrade='never')"
-  ),
-  list(
-    name   = "DoubletFinder",
-    repo   = "chris-mcginnis-ucsf/DoubletFinder",
-    method = "doublet detection",
-    cmd    = "devtools::install_github('chris-mcginnis-ucsf/DoubletFinder', upgrade='never')"
-  )
+  list(name="spacexr", repo="dmcable/spacexr", method="RCTD deconvolution",
+       tier=c("all","spatial"),
+       cmd="devtools::install_github('dmcable/spacexr', build_vignettes=FALSE, upgrade='never')"),
+  list(name="CARD", repo="YMa-lab/CARD", method="CARD deconvolution",
+       tier=c("all","spatial"),
+       cmd="devtools::install_github('YMa-lab/CARD', upgrade='never')"),
+  list(name="CellChat", repo="jinworks/CellChat", method="cell-cell communication",
+       tier=c("all","singlecell","spatial"),
+       cmd="devtools::install_github('jinworks/CellChat', upgrade='never')"),
+  list(name="numbat", repo="kharchenkolab/numbat", method="CNV analysis",
+       tier=c("all","spatial"),
+       cmd="devtools::install_github('kharchenkolab/numbat', upgrade='never')"),
+  list(name="SPARK", repo="xzhoulab/SPARK", method="SPARK-X spatially variable genes",
+       tier=c("all","spatial"),
+       cmd="devtools::install_github('xzhoulab/SPARK', upgrade='never')"),
+  list(name="DoubletFinder", repo="chris-mcginnis-ucsf/DoubletFinder", method="doublet detection",
+       tier=c("all","singlecell"),
+       cmd="devtools::install_github('chris-mcginnis-ucsf/DoubletFinder', upgrade='never')")
 )
 
 for (info in github_pkgs) {
-  cat(sprintf("  -> %s (%s) from GitHub:%s\n",
-              info$name, info$method, info$repo))
-  record(
-    install_if_missing(info$name,
-                       paste0("GitHub:", info$repo),
-                       info$cmd),
-    paste0(info$name, " (GitHub:", info$repo, ")")
-  )
+  if (selected_tier %in% info$tier) {
+    cat(sprintf("  -> %s (%s) from GitHub:%s\n",
+                info$name, info$method, info$repo))
+    record(
+      install_if_missing(info$name,
+                         paste0("GitHub:", info$repo),
+                         info$cmd),
+      paste0(info$name, " (GitHub:", info$repo, ")")
+    )
+  }
 }
 
 # ---------------------------------------------------------------------------

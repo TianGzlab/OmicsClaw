@@ -9,6 +9,13 @@ tags: [spatial, trajectory, pseudotime, DPT, CellRank, Palantir]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--method"
+      - "--n-states"
+      - "--root-cell"
+    legacy_aliases: [trajectory]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -128,7 +135,7 @@ output_directory/
 │   └── trajectory_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -227,7 +227,7 @@ def write_report(
             env_lines.append(f"{pkg}=={_get_version(pkg)}")
         except Exception:
             env_lines.append(f"{pkg}=?")
-    (repro_dir / "environment.yml").write_text("\n".join(env_lines) + "\n")
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
 
 # ---------------------------------------------------------------------------

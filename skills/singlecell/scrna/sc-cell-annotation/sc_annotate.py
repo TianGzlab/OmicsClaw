@@ -23,7 +23,7 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_footer, generate_report_header, write_result_json
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
-from skills.singlecell._lib.r_bridge import run_singler_annotation
+
 from skills.singlecell._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -46,14 +46,12 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "singler": MethodConfig(
         name="singler",
         description="SingleR reference-based annotation (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "scmap": MethodConfig(
         name="scmap",
         description="scmap-compatible R annotation path",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
 }
 

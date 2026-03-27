@@ -11,6 +11,9 @@ metadata:
     domain: proteomics
     emoji: "📥"
     trigger_keywords: [data import, convert proteomics, format conversion]
+    allowed_extra_flags: []
+    legacy_aliases: [data-import]
+    saves_h5ad: false
 ---
 
 # 📥 Proteomics Data Import
@@ -56,7 +59,7 @@ output_directory/
 │   └── import_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -38,7 +38,6 @@ class MethodConfig:
     description: str
     requires_reference: bool = True
     dependencies: tuple[str, ...] = ()
-    is_r_based: bool = False
     supports_gpu: bool = False
 
 
@@ -58,7 +57,6 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         name="rctd",
         description="Robust Cell Type Decomposition (R / spacexr)",
         dependencies=(),
-        is_r_based=True,
     ),
     "destvi": MethodConfig(
         name="destvi",
@@ -82,13 +80,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         name="spotlight",
         description="NMF-based deconvolution (R / SPOTlight)",
         dependencies=(),
-        is_r_based=True,
     ),
     "card": MethodConfig(
         name="card",
         description="Conditional AutoRegressive Deconvolution (R / CARD)",
         dependencies=(),
-        is_r_based=True,
     ),
 }
 

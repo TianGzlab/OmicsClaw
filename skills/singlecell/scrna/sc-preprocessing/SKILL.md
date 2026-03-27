@@ -10,6 +10,17 @@ tags: [singlecell, preprocessing, QC, normalization, clustering]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--leiden-resolution"
+      - "--max-mt-pct"
+      - "--method"
+      - "--min-cells"
+      - "--min-genes"
+      - "--n-neighbors"
+      - "--n-pcs"
+      - "--n-top-hvg"
+    legacy_aliases: [sc-preprocess]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -289,9 +300,9 @@ seurat_obj <- SCTransform(seurat_obj, vars.to.regress = 'percent.mt', verbose = 
 ## Runtime Notes
 
 - `--method scanpy` is the default Python workflow.
-- `--method seurat` runs the Seurat LogNormalize path through `rpy2`.
-- `--method sctransform` runs the Seurat SCTransform path through `rpy2`.
-- R-backed modes require `rpy2`, `anndata2ri`, and the R packages installed via `Rscript install_r_dependencies.R`.
+- `--method seurat` runs the Seurat LogNormalize path via native R scripts.
+- `--method sctransform` runs the Seurat SCTransform path via native R scripts.
+- R-backed modes require R and the R packages installed via `Rscript install_r_dependencies.R`.
 
 ## Example Queries
 
@@ -313,7 +324,7 @@ output_dir/
 │   └── umap_genes.png
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

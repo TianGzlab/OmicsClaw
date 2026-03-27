@@ -10,6 +10,15 @@ tags: [spatial, deconvolution, cell-proportion, flashdeconv, cell2location, rctd
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--cell-type-key"
+      - "--method"
+      - "--n-epochs"
+      - "--no-gpu"
+      - "--reference"
+    legacy_aliases: [deconv]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -145,7 +154,7 @@ output_dir/
 │   └── proportions.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -14,8 +14,8 @@ Usage::
     torch = get("torch")
 
     # Lightweight availability check (no import, cached)
-    if is_available("rpy2"):
-        import rpy2
+    if is_available("squidpy"):
+        import squidpy
 """
 
 from __future__ import annotations
@@ -88,15 +88,6 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     "STalign": DependencyInfo(
         "STalign", "pip install STalign",
         "Spatial transcriptomics alignment (STalign)"
-    ),
-    # ── R interface ──────────────────────────────────────────────────────────
-    "rpy2": DependencyInfo(
-        "rpy2", "pip install rpy2",
-        "R-Python interface (requires R 4.4.x installed)"
-    ),
-    "anndata2ri": DependencyInfo(
-        "anndata2ri", "pip install anndata2ri",
-        "AnnData to R SCE conversion bridge"
     ),
     # ── Cell communication ───────────────────────────────────────────────────
     "liana": DependencyInfo(
@@ -292,64 +283,52 @@ def require(name: str, *, feature: str = "") -> Any:
 
 def validate_r_environment(
     required_r_packages: Optional[list[str]] = None,
-) -> tuple[Any, ...]:
-    """Validate R + rpy2 + anndata2ri and return rpy2 modules.
+) -> bool:
+    """Validate that R is available and required packages are installed.
 
-    Returns
-    -------
-    Tuple of ``(robjects, pandas2ri, numpy2ri, importr,
-                localconverter, default_converter, openrlib, anndata2ri)``
+    Uses subprocess (not rpy2) — consistent with the native R script approach.
 
-    Raises
-    ------
-    ImportError
-        If rpy2 / anndata2ri are missing or R cannot be found.
+    Returns True if R and all required packages are available.
+    Raises ImportError if R or required packages are missing.
     """
-    require("rpy2", feature="R-based methods")
-    require("anndata2ri", feature="R-based methods")
+    import subprocess
 
     try:
-        import anndata2ri
-        import rpy2.robjects as robjects
-        from rpy2.rinterface_lib import openrlib
-        from rpy2.robjects import conversion, default_converter, numpy2ri, pandas2ri
-        from rpy2.robjects.conversion import localconverter
-        from rpy2.robjects.packages import importr
-
-        # Smoke-test R availability
-        with openrlib.rlock:
-            with conversion.localconverter(default_converter):
-                robjects.r("R.version")
-
-        if required_r_packages:
-            missing = []
-            for pkg in required_r_packages:
-                try:
-                    with openrlib.rlock:
-                        with conversion.localconverter(default_converter):
-                            importr(pkg)
-                except Exception:
-                    missing.append(pkg)
-            if missing:
-                pkg_list = ", ".join(f"'{p}'" for p in missing)
-                raise ImportError(
-                    f"Missing R packages: {pkg_list}\n"
-                    f"Install in R: install.packages(c({pkg_list}))"
-                )
-
-        return (
-            robjects, pandas2ri, numpy2ri, importr,
-            localconverter, default_converter, openrlib, anndata2ri,
+        result = subprocess.run(
+            ["Rscript", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            raise ImportError("Rscript not found or returned an error.")
+    except FileNotFoundError:
+        raise ImportError(
+            "R is not installed or Rscript is not on PATH.\n"
+            "Install R from https://cran.r-project.org/"
         )
 
-    except ImportError:
-        raise
-    except Exception as exc:
-        raise ImportError(
-            f"R environment setup failed: {exc}\n\n"
-            "Checklist:\n"
-            "  1. Install R 4.4.x: https://www.r-project.org/\n"
-            "  2. Set R_HOME if not detected automatically\n"
-            "  3. Install rpy2: pip install 'rpy2>=3.5.0,<3.7'\n"
-            "  4. Install anndata2ri: pip install anndata2ri"
-        ) from exc
+    if required_r_packages:
+        checks = "; ".join(
+            f'cat("{pkg}:", requireNamespace("{pkg}", quietly=TRUE), "\\n")'
+            for pkg in required_r_packages
+        )
+        result = subprocess.run(
+            ["Rscript", "-e", checks],
+            capture_output=True, text=True, timeout=30,
+        )
+        missing = []
+        for line in result.stdout.strip().splitlines():
+            if ":" in line:
+                parts = line.split(":", 1)
+                pkg = parts[0].strip()
+                val = parts[1].strip().upper()
+                if val != "TRUE":
+                    missing.append(pkg)
+        if missing:
+            pkg_list = ", ".join(f"'{p}'" for p in missing)
+            raise ImportError(
+                f"Missing R packages: {pkg_list}\n"
+                "Install with:\n"
+                "  Rscript -e 'install.packages(c(\"pkg1\", \"pkg2\"))'"
+            )
+
+    return True

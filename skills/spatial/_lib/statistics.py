@@ -1,9 +1,22 @@
 """Spatial statistics toolkit.
 
-Comprehensive toolkit for analyzing spatial omics data:
-- Cluster-level: neighborhood enrichment, Ripley's L, co-occurrence
-- Gene-level: Moran's I, Geary's C, local Moran, Getis-Ord, Bivariate Moran
-- Network-level: spatial centrality, network properties
+Comprehensive toolkit for analyzing spatial omics data, organized by the
+type of input each analysis consumes:
+
+**Cluster-level** (cluster labels + spatial graph/coordinates):
+  - Neighborhood enrichment: cluster labels + spatial graph
+  - Ripley's L function: cluster labels + spatial coordinates
+  - Co-occurrence: cluster labels + spatial coordinates
+
+**Gene-level** (expression matrix + spatial weights):
+  - Moran's I / Geary's C: gene expression matrix + spatial graph
+  - Local Moran's I (LISA): single-gene expression vector + spatial weights
+  - Getis-Ord Gi*: single-gene expression vector + spatial weights
+  - Bivariate Moran: two gene-expression vectors + spatial weights
+
+**Network-level** (spatial graph, optionally + cluster labels):
+  - Network properties: spatial graph
+  - Spatial centrality: spatial graph + cluster labels
 
 Usage::
 
@@ -170,14 +183,22 @@ def _get_gene_expression(adata, gene: str) -> np.ndarray:
 
 
 def run_neighborhood_enrichment(adata, *, cluster_key: str = "leiden") -> dict:
-    """Compute spatial neighbors and neighborhood enrichment z-scores."""
+    """Compute neighborhood enrichment z-scores.
+
+    Input: **cluster labels** (``adata.obs[cluster_key]``) +
+    **spatial graph** (``adata.obsp["spatial_connectivities"]``).
+    Does not use the expression matrix.
+    """
     require("squidpy", feature="Neighborhood enrichment")
     import squidpy as sq
 
     _ensure_categorical(adata, cluster_key)
     _ensure_spatial_graph(adata)
 
-    logger.info("Computing neighborhood enrichment (cluster_key='%s') ...", cluster_key)
+    logger.info(
+        "Neighborhood enrichment: using cluster labels ('%s') + spatial graph",
+        cluster_key,
+    )
     sq.gr.nhood_enrichment(adata, cluster_key=cluster_key)
 
     uns_key = f"{cluster_key}_nhood_enrichment"
@@ -225,13 +246,21 @@ def run_neighborhood_enrichment(adata, *, cluster_key: str = "leiden") -> dict:
 
 
 def run_ripley(adata, *, cluster_key: str = "leiden") -> dict:
-    """Compute Ripley's L function per cluster."""
+    """Compute Ripley's L function per cluster.
+
+    Input: **cluster labels** (``adata.obs[cluster_key]``) +
+    **spatial coordinates** (``adata.obsm["spatial"]``).
+    Point-pattern analysis — does not use expression matrix or graph.
+    """
     require("squidpy", feature="Ripley's L function")
     import squidpy as sq
 
     _ensure_categorical(adata, cluster_key)
     spatial_key = get_spatial_key(adata) or "spatial"
-    logger.info("Computing Ripley's L function (cluster_key='%s') ...", cluster_key)
+    logger.info(
+        "Ripley's L: using cluster labels ('%s') + spatial coordinates",
+        cluster_key,
+    )
     result = sq.gr.ripley(adata, cluster_key=cluster_key, mode="L", spatial_key=spatial_key)
 
     categories = list(adata.obs[cluster_key].cat.categories)
@@ -256,13 +285,21 @@ def run_ripley(adata, *, cluster_key: str = "leiden") -> dict:
 
 
 def run_co_occurrence(adata, *, cluster_key: str = "leiden") -> dict:
-    """Compute pairwise cluster co-occurrence across spatial distances."""
+    """Compute pairwise cluster co-occurrence across spatial distances.
+
+    Input: **cluster labels** (``adata.obs[cluster_key]``) +
+    **spatial coordinates** (``adata.obsm["spatial"]``).
+    Does not use expression matrix.
+    """
     require("squidpy", feature="Co-occurrence analysis")
     import squidpy as sq
 
     _ensure_categorical(adata, cluster_key)
     spatial_key = get_spatial_key(adata) or "spatial"
-    logger.info("Computing co-occurrence (cluster_key='%s') ...", cluster_key)
+    logger.info(
+        "Co-occurrence: using cluster labels ('%s') + spatial coordinates",
+        cluster_key,
+    )
     sq.gr.co_occurrence(adata, cluster_key=cluster_key, spatial_key=spatial_key)
 
     categories = list(adata.obs[cluster_key].cat.categories)
@@ -284,7 +321,12 @@ def run_co_occurrence(adata, *, cluster_key: str = "leiden") -> dict:
 
 
 def run_moran(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n_neighs: int = 6, n_perms: int = 100) -> dict:
-    """Global Moran's I for gene-level spatial autocorrelation."""
+    """Global Moran's I for gene-level spatial autocorrelation.
+
+    Input: **gene expression matrix** (``adata.X``, typically log-normalized)
+    + **spatial graph** (``adata.obsp["spatial_connectivities"]``).
+    Reads expression from ``adata.X`` (or layer/raw via squidpy options).
+    """
     require("squidpy", feature="Moran's I")
     import squidpy as sq
 
@@ -292,7 +334,10 @@ def run_moran(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n
     gene_list = _select_genes(adata, genes, n_top=n_top_genes)
     _ensure_spatial_graph(adata, n_neighs=n_neighs)
 
-    logger.info("Computing Moran's I for %d genes ...", len(gene_list))
+    logger.info(
+        "Moran's I: using gene expression matrix (adata.X) + spatial graph "
+        "for %d genes", len(gene_list),
+    )
     try:
         sq.gr.spatial_autocorr(adata, mode="moran", genes=gene_list, n_perms=n_perms, n_jobs=1)
     except Exception as exc:
@@ -310,7 +355,12 @@ def run_moran(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n
 
 
 def run_geary(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n_neighs: int = 6, n_perms: int = 100) -> dict:
-    """Global Geary's C — measures spatial autocorrelation."""
+    """Global Geary's C — spatial autocorrelation (alternative to Moran).
+
+    Input: **gene expression matrix** (``adata.X``) + **spatial graph**.
+    Same input convention as Moran's I (uses ``sq.gr.spatial_autocorr``
+    with ``mode="geary"``).
+    """
     require("squidpy", feature="Geary's C")
     import squidpy as sq
 
@@ -318,7 +368,10 @@ def run_geary(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n
     gene_list = _select_genes(adata, genes, n_top=n_top_genes)
     _ensure_spatial_graph(adata, n_neighs=n_neighs)
 
-    logger.info("Computing Geary's C for %d genes ...", len(gene_list))
+    logger.info(
+        "Geary's C: using gene expression matrix (adata.X) + spatial graph "
+        "for %d genes", len(gene_list),
+    )
     try:
         sq.gr.spatial_autocorr(adata, mode="geary", genes=gene_list, n_perms=n_perms, n_jobs=1)
     except Exception as exc:
@@ -336,7 +389,12 @@ def run_geary(adata, *, genes: list[str] | None = None, n_top_genes: int = 20, n
 
 
 def run_local_moran(adata, *, genes: list[str] | None = None, n_top_genes: int = 10, n_neighs: int = 6) -> dict:
-    """Local Moran's I (LISA) — identifies spatial hotspots/coldspots per gene."""
+    """Local Moran's I (LISA) — identifies spatial hotspots/coldspots per gene.
+
+    Input: **single-gene expression vector** (extracted from ``adata.X``)
+    + **spatial weights** (PySAL ``W`` built from spatial connectivities).
+    Runs ``esda.Moran_Local(y, w)`` per gene.
+    """
     require_spatial_coords(adata)
     gene_list = _select_genes(adata, genes, n_top=n_top_genes)
     _ensure_spatial_graph(adata, n_neighs=n_neighs)
@@ -386,7 +444,12 @@ def run_local_moran(adata, *, genes: list[str] | None = None, n_top_genes: int =
 
 
 def run_getis_ord(adata, *, genes: list[str] | None = None, n_top_genes: int = 10, n_neighs: int = 6) -> dict:
-    """Getis-Ord Gi* — local hot/cold spot detection."""
+    """Getis-Ord Gi* — local hot/cold spot detection.
+
+    Input: **single-gene expression vector** (from ``adata.X``) +
+    **spatial weights** (from spatial connectivities).
+    Computes the Gi* z-score per spot per gene.
+    """
     require_spatial_coords(adata)
     gene_list = _select_genes(adata, genes, n_top=n_top_genes)
     _ensure_spatial_graph(adata, n_neighs=n_neighs)
@@ -444,7 +507,12 @@ def run_getis_ord(adata, *, genes: list[str] | None = None, n_top_genes: int = 1
 
 
 def run_bivariate_moran(adata, *, genes: list[str] | None = None, n_neighs: int = 6) -> dict:
-    """Bivariate Moran's I — spatial cross-correlation between gene pairs."""
+    """Bivariate Moran's I — spatial cross-correlation between gene pairs.
+
+    Input: **two gene-expression vectors** (from ``adata.X``) +
+    **spatial weights** (from spatial connectivities).
+    Computes I_BV = (x_z^T W y_z) / sum(W).
+    """
     require_spatial_coords(adata)
     if not genes or len(genes) < 2:
         raise ValueError("bivariate_moran requires at least 2 genes")
@@ -484,7 +552,12 @@ def run_bivariate_moran(adata, *, genes: list[str] | None = None, n_neighs: int 
 
 
 def run_network_properties(adata, *, cluster_key: str = "leiden", n_neighs: int = 6) -> dict:
-    """Graph topology metrics of the spatial neighborhood network."""
+    """Graph topology metrics of the spatial neighborhood network.
+
+    Input: **spatial graph** (``adata.obsp["spatial_connectivities"]``).
+    Optionally summarises per cluster when ``cluster_key`` is present.
+    Does not use expression matrix.
+    """
     require_spatial_coords(adata)
     _ensure_spatial_graph(adata, n_neighs=n_neighs)
 
@@ -519,7 +592,11 @@ def run_network_properties(adata, *, cluster_key: str = "leiden", n_neighs: int 
 
 
 def run_spatial_centrality(adata, *, cluster_key: str = "leiden", n_neighs: int = 6, sample_size: int = 2000) -> dict:
-    """Betweenness and closeness centrality per cluster using squidpy."""
+    """Betweenness and closeness centrality per cluster.
+
+    Input: **spatial graph** + **cluster labels** (``adata.obs[cluster_key]``).
+    Uses ``squidpy.gr.centrality_scores``.  Does not use expression matrix.
+    """
     require("squidpy", feature="Centrality analysis")
     import squidpy as sq
 

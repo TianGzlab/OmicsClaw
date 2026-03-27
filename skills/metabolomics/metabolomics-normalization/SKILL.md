@@ -11,6 +11,9 @@ metadata:
     domain: metabolomics
     emoji: "📐"
     trigger_keywords: [metabolomics normalization, scaling, NOREVA, TIC normalization]
+    allowed_extra_flags: []
+    legacy_aliases: [met-normalize]
+    saves_h5ad: false
 ---
 
 # 📐 Metabolomics Normalization
@@ -55,7 +58,7 @@ output_directory/
 │   └── normalization_metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

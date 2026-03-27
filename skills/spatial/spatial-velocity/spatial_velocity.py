@@ -156,6 +156,8 @@ def write_report(
     ]
     if summary.get("n_velocity_genes") is not None:
         body_lines.append(f"- **Velocity genes**: {summary['n_velocity_genes']}")
+    if summary.get("mean_confidence") is not None:
+        body_lines.append(f"- **Mean velocity confidence**: {summary['mean_confidence']:.4f}")
 
     body_lines.extend(["", "## Parameters\n"])
     for k, v in params.items():
@@ -179,6 +181,14 @@ def write_report(
         df = adata.obs[["velocity_speed"]].copy()
         df.index.name = "Cell"
         df.to_csv(tables_dir / "velocity_speed.csv")
+    if "velocity_confidence" in adata.obs.columns:
+        df = adata.obs[["velocity_confidence"]].copy()
+        df.index.name = "Cell"
+        df.to_csv(tables_dir / "velocity_confidence.csv")
+    if "velocity_pseudotime" in adata.obs.columns:
+        df = adata.obs[["velocity_pseudotime"]].copy()
+        df.index.name = "Cell"
+        df.to_csv(tables_dir / "velocity_pseudotime.csv")
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
@@ -187,12 +197,12 @@ def write_report(
 
     from importlib.metadata import version as _ver, PackageNotFoundError
     env_lines: list[str] = []
-    for pkg in ["scanpy", "anndata", "numpy", "pandas", "scvelo"]:
+    for pkg in ["scanpy", "anndata", "numpy", "pandas", "scvelo", "scvi-tools", "velovi", "torch"]:
         try:
             env_lines.append(f"{pkg}=={_ver(pkg)}")
         except PackageNotFoundError:
             pass
-    (repro_dir / "environment.txt").write_text("\n".join(env_lines) + "\n")
+    (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + "\n")
 
 
 # ---------------------------------------------------------------------------

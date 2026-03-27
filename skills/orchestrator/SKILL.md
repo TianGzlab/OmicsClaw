@@ -11,6 +11,11 @@ tags: [orchestrator, routing, pipeline, multi-omics]
 metadata:
   omicsclaw:
     domain: orchestrator
+    allowed_extra_flags:
+      - "--list-skills"
+      - "--pipeline"
+      - "--query"
+    saves_h5ad: false
     requires:
       bins:
         - python3

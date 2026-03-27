@@ -12,6 +12,14 @@ metadata:
     domain: bulkrna
     emoji: "🏷️"
     trigger_keywords: [gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs]
+    allowed_extra_flags:
+      - "--from"
+      - "--mapping-file"
+      - "--on-duplicate"
+      - "--species"
+      - "--to"
+    legacy_aliases: [bulk-geneid]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Gene ID Mapping

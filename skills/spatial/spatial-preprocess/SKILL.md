@@ -10,6 +10,18 @@ tags: [spatial, preprocessing, QC, normalization, clustering, visium, xenium]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--data-type"
+      - "--leiden-resolution"
+      - "--max-mt-pct"
+      - "--min-cells"
+      - "--min-genes"
+      - "--n-neighbors"
+      - "--n-pcs"
+      - "--n-top-hvg"
+      - "--species"
+    legacy_aliases: [preprocess]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -176,7 +188,7 @@ output_dir/
 │   └── cluster_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

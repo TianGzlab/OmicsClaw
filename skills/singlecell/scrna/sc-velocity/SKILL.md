@@ -1,3 +1,26 @@
+---
+name: sc-velocity
+description: >-
+  RNA velocity analysis using scVelo for estimating cell state transitions
+version: 0.1.0
+metadata:
+  omicsclaw:
+    domain: singlecell
+    allowed_extra_flags:
+      - "--method"
+      - "--n-jobs"
+    saves_h5ad: true
+    requires_preprocessed: true
+    trigger_keywords:
+      - rna velocity
+      - velocity
+      - scvelo
+      - spliced unspliced
+      - cellular dynamics
+      - velovi
+      - velocity pseudotime
+---
+
 # sc-velocity — RNA Velocity Analysis
 
 ## Purpose
@@ -80,7 +103,7 @@ output_dir/
 │   └── latent_time_umap.png      # (dynamical mode only)
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Methods

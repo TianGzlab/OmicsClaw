@@ -11,6 +11,9 @@ metadata:
     domain: metabolomics
     emoji: "📈"
     trigger_keywords: [metabolomics statistics, multivariate, PCA, clustering]
+    allowed_extra_flags: []
+    legacy_aliases: [met-stat]
+    saves_h5ad: false
 ---
 
 # 📈 Metabolomics Statistical Analysis
@@ -56,7 +59,7 @@ output_directory/
 │   └── principal_components.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

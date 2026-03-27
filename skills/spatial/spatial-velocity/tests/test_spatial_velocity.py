@@ -53,4 +53,32 @@ def test_demo_result_json(tmp_output):
     data = json.loads((tmp_output / "result.json").read_text())
     assert data["skill"] == "spatial-velocity"
     assert "summary" in data
-    assert data["summary"]["n_cells"] > 0
+    summary = data["summary"]
+    assert summary["n_cells"] > 0
+    assert "mean_speed" in summary
+    assert "median_speed" in summary
+
+
+def test_demo_tables(tmp_output):
+    """velocity_speed table should be written; confidence/pseudotime when available."""
+    subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        capture_output=True, text=True, timeout=180, cwd=str(SKILL_SCRIPT.parent),
+    )
+    tables_dir = tmp_output / "tables"
+    assert tables_dir.exists()
+    assert (tables_dir / "velocity_speed.csv").exists()
+
+
+def test_demo_reproducibility(tmp_output):
+    """Reproducibility artefacts should be present."""
+    subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        capture_output=True, text=True, timeout=180, cwd=str(SKILL_SCRIPT.parent),
+    )
+    repro_dir = tmp_output / "reproducibility"
+    assert repro_dir.exists()
+    assert (repro_dir / "commands.sh").exists()
+    assert (repro_dir / "requirements.txt").exists()
+    reqs = (repro_dir / "requirements.txt").read_text()
+    assert "scvelo" in reqs

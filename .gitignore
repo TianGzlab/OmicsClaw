@@ -126,3 +126,7 @@ nature_new_insight/
 
 # Agent/Research execution artifact folders
 nature_new_insight2/
+
+# Knowledge base and workspace (local only)
+knowledge_base/
+workspace/

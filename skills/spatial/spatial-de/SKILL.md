@@ -10,6 +10,15 @@ tags: [spatial, differential-expression, markers, wilcoxon, t-test, pydeseq2]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--group1"
+      - "--group2"
+      - "--groupby"
+      - "--method"
+      - "--n-top-genes"
+    legacy_aliases: [de]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -183,7 +192,7 @@ output_dir/
 │   └── de_full.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -6,7 +6,7 @@ realistic peak tables whose characteristics respond to the user-supplied
 ppm and peakwidth parameters.
 
 For production use with real mzML files, this module should be replaced
-with an R/rpy2 bridge to the actual XCMS package.
+with a native R script calling the actual XCMS package via RScriptRunner.
 
 Usage:
     python metabolomics_xcms_preprocessing.py --input <data.mzML> [<data2.mzML> ...] --output <dir>
@@ -157,7 +157,7 @@ def write_report(
         "",
         "## Method\n",
         "Python simulation of XCMS centWave peak detection with configurable "
-        "ppm tolerance and peak width parameters. For production use, an R/rpy2 "
+        "ppm tolerance and peak width parameters. For production use, a native R script "
         "bridge to the XCMS Bioconductor package is recommended.",
         "",
         "## Parameters\n",

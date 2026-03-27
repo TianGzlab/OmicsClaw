@@ -36,6 +36,14 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
+from omicsclaw.core.registry import registry
+from omicsclaw.common.manifest import (
+    PipelineManifest,
+    StepRecord,
+    read_manifest,
+    write_manifest,
+)
+from omicsclaw.routing.router import route_keyword
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,10 +52,10 @@ SKILL_NAME = "orchestrator"
 SKILL_VERSION = "0.1.0"
 
 # ---------------------------------------------------------------------------
-# Routing maps
+# Routing maps — hardcoded fallback; SKILL.md trigger_keywords take priority
 # ---------------------------------------------------------------------------
 
-KEYWORD_MAP: dict[str, str] = {
+_FALLBACK_KEYWORD_MAP: dict[str, str] = {
     # Spatial Transcriptomics
     "qc": "spatial-preprocessing",
     "quality control": "spatial-preprocessing",
@@ -125,6 +133,9 @@ KEYWORD_MAP: dict[str, str] = {
     "velocity": "spatial-velocity",
     "cellular dynamics": "spatial-velocity",
     "scvelo": "spatial-velocity",
+    "velovi": "spatial-velocity",
+    "velocity confidence": "spatial-velocity",
+    "velocity pseudotime": "spatial-velocity",
     "spliced unspliced": "spatial-velocity",
     # Trajectory
     "trajectory": "spatial-trajectory",
@@ -166,6 +177,13 @@ KEYWORD_MAP: dict[str, str] = {
     "multi-slice": "spatial-registration",
 }
 
+
+def _get_keyword_map() -> dict[str, str]:
+    """Build keyword map from SKILL.md trigger_keywords with hardcoded fallback."""
+    return registry.build_keyword_map(domain="spatial", fallback_map=_FALLBACK_KEYWORD_MAP)
+
+
+# Backward-compatible alias for EXTENSION_MAP (used in route_file)
 EXTENSION_MAP: dict[str, str] = {
     ".h5ad": "spatial-preprocessing",
     ".h5": "spatial-preprocessing",
@@ -195,7 +213,7 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
     "spatial-de": "Differential expression (Wilcoxon, t-test, cluster markers)",
     "spatial-condition-comparison": "Condition comparison with pseudobulk DESeq2 statistics",
     "spatial-cell-communication": "Cell-cell communication (LIANA+, CellPhoneDB, built-in L-R)",
-    "spatial-velocity": "RNA velocity and cellular dynamics (scVelo, S/U ratio)",
+    "spatial-velocity": "RNA velocity and cellular dynamics (scVelo stochastic/deterministic/dynamical, VeloVI)",
     "spatial-trajectory": "Trajectory inference (DPT, CellRank, Palantir)",
     "spatial-enrichment": "Pathway enrichment (GSEA, ORA, Enrichr)",
     "spatial-cnv": "Copy number variation inference (inferCNVpy, expression-based)",
@@ -211,24 +229,17 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
 
 def route_query(query: str) -> dict:
     """Route a natural language query to the best skill."""
-    query_lower = query.lower().strip()
+    effective_map = _get_keyword_map()
+    skill, confidence = route_keyword(query, effective_map)
 
-    # Score all skills by keyword matches (longest match wins)
-    scores: dict[str, int] = {}
-    for kw, skill in KEYWORD_MAP.items():
-        if kw in query_lower:
-            scores[skill] = scores.get(skill, 0) + len(kw)
-
-    if scores:
-        best_skill = max(scores, key=lambda s: scores[s])
-        confidence = min(1.0, scores[best_skill] / 20.0)
-        matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
+    if skill:
+        query_lower = query.lower().strip()
+        matched_kws = [kw for kw, sk in effective_map.items() if sk == skill and kw in query_lower]
         return {
             "matched": True,
-            "skill": best_skill,
-            "confidence": round(confidence, 2),
+            "skill": skill,
+            "confidence": confidence,
             "matched_keywords": matched_kws,
-            "scores": scores,
         }
 
     return {
@@ -236,7 +247,6 @@ def route_query(query: str) -> dict:
         "skill": "spatial-preprocessing",
         "confidence": 0.0,
         "matched_keywords": [],
-        "scores": {},
         "fallback_reason": "No keywords matched; defaulting to spatial-preprocessing",
     }
 
@@ -244,7 +254,7 @@ def route_query(query: str) -> dict:
 def route_file(input_path: str) -> dict:
     """Route by input file extension."""
     ext = Path(input_path).suffix.lower()
-    skill = EXTENSION_MAP.get(ext, "preprocess")
+    skill = EXTENSION_MAP.get(ext, "spatial-preprocessing")
     return {
         "matched": ext in EXTENSION_MAP,
         "skill": skill,
@@ -330,7 +340,11 @@ def run_pipeline(
     output_dir: Path,
     timeout: int = 600,
 ) -> dict:
-    """Execute a named pipeline, chaining processed.h5ad between steps."""
+    """Execute a named pipeline, chaining processed.h5ad between steps.
+
+    Each step's output directory gets a ``manifest.json`` that records
+    the full execution lineage up to that point.
+    """
     if pipeline_name not in NAMED_PIPELINES:
         return {
             "success": False,
@@ -343,6 +357,7 @@ def run_pipeline(
     results: dict[str, dict] = {}
     current_input = input_path
     all_succeeded = True
+    upstream_manifest: PipelineManifest | None = None
 
     for step in steps:
         step_out = output_dir / step
@@ -364,8 +379,21 @@ def run_pipeline(
             all_succeeded = False
             break
 
-        # Chain: pass processed.h5ad to the next step
+        # Build manifest for this step
         processed = step_out / "processed.h5ad"
+        step_record = StepRecord(
+            skill=step,
+            version="",  # version is recorded inside the skill's own result.json
+            input_file=current_input,
+            output_file=str(processed) if processed.exists() else "",
+            params={},
+        )
+        write_manifest(step_out, step_record, upstream=upstream_manifest)
+
+        # Read back (includes this step) as upstream for next
+        upstream_manifest = read_manifest(step_out)
+
+        # Chain: pass processed.h5ad to the next step
         if processed.exists():
             current_input = str(processed)
 

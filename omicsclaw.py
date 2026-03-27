@@ -628,7 +628,21 @@ def main():
     mem_p.add_argument("--host", default=None, help="Host to bind (default: 0.0.0.0)")
     mem_p.add_argument("--port", type=int, default=None, help="Port to bind (default: 8766)")
 
-    
+    # knowledge — build / search / stats / list for the knowledge base
+    kb_p = sub.add_parser("knowledge", help="Manage the knowledge base (build, search, stats, list)")
+    kb_sub = kb_p.add_subparsers(dest="kb_command")
+    kb_build = kb_sub.add_parser("build", help="Build or rebuild the knowledge index")
+    kb_build.add_argument("--path", dest="kb_path", default=None,
+                          help="Path to knowledge_base directory (default: auto-detect)")
+    kb_search = kb_sub.add_parser("search", help="Search the knowledge base")
+    kb_search.add_argument("query", help="Search query")
+    kb_search.add_argument("--domain", default=None, help="Filter by domain")
+    kb_search.add_argument("--type", dest="doc_type", default=None, help="Filter by doc type")
+    kb_search.add_argument("--limit", type=int, default=5, help="Max results (default: 5)")
+    kb_stats = kb_sub.add_parser("stats", help="Show knowledge index statistics")
+    kb_list = kb_sub.add_parser("list", help="List knowledge topics")
+    kb_list.add_argument("--domain", default=None, help="Filter by domain")
+
     # run
     run_p = sub.add_parser("run", help="Run a skill")
     run_p.add_argument("skill", help="Skill alias (e.g. preprocess, domains) or 'spatial-pipeline'")
@@ -866,7 +880,6 @@ def main():
             ("Spatial-Comm",      "spatial-communication", "Cell communication, e.g., LIANA+, CellPhoneDB"),
             ("Spatial-Integrate", "spatial-integration","Multi-sample integration, e.g., Harmony, BBKNN"),
             ("Spatial-Register",  "spatial-registration","Spatial registration, e.g., PASTE"),
-            ("Spatial-R-Bridge",  "spatial-r-bridge",  "R language bridge, e.g., rpy2"),
             ("BANKSY",            "banksy",            "BANKSY spatial domains (requires numpy<2.0, isolated env)"),
         ]
         for label, tier_key, desc in standalone_layers:
@@ -888,6 +901,82 @@ def main():
         else:
             print(f"{RED}Upload failed{RESET}", file=sys.stderr)
             sys.exit(1)
+        sys.exit(0)
+
+    if args.command == "knowledge":
+        from omicsclaw.knowledge import KnowledgeAdvisor
+        from pathlib import Path as _Path
+
+        advisor = KnowledgeAdvisor()
+        kb_cmd = getattr(args, "kb_command", None) or "stats"
+
+        if kb_cmd == "build":
+            kb_path = _Path(args.kb_path) if getattr(args, "kb_path", None) else None
+            try:
+                stats = advisor.build(kb_path)
+                print(f"\n{GREEN}Knowledge base built successfully!{RESET}")
+                print(f"  Documents: {stats['documents']}")
+                print(f"  Chunks:    {stats['chunks']}")
+                print(f"  Database:  {stats['db_path']}")
+                print(f"\n{BOLD}By Domain:{RESET}")
+                for domain, count in sorted(stats.get("domains", {}).items()):
+                    print(f"  {domain:<15} {count}")
+                print(f"\n{BOLD}By Type:{RESET}")
+                for doc_type, count in sorted(stats.get("types", {}).items()):
+                    print(f"  {doc_type:<20} {count}")
+            except FileNotFoundError as e:
+                print(f"{RED}Error:{RESET} {e}", file=sys.stderr)
+                sys.exit(1)
+
+        elif kb_cmd == "search":
+            query = args.query
+            result = advisor.search_formatted(
+                query=query,
+                domain=getattr(args, "domain", None),
+                doc_type=getattr(args, "doc_type", None),
+                limit=getattr(args, "limit", 5),
+            )
+            print(result)
+
+        elif kb_cmd == "stats":
+            stats = advisor.stats()
+            if "error" in stats:
+                print(f"{YELLOW}{stats['error']}{RESET}")
+                print(f"Run: python omicsclaw.py knowledge build")
+            else:
+                print(f"\n{BOLD}Knowledge Base Statistics{RESET}")
+                print(f"{'=' * 40}")
+                print(f"  Total documents: {stats['total_documents']}")
+                print(f"  Total chunks:    {stats['total_chunks']}")
+                print(f"  Database:        {stats['db_path']}")
+                print(f"\n{BOLD}By Domain:{RESET}")
+                for domain, count in sorted(stats.get("by_domain", {}).items()):
+                    print(f"  {domain:<15} {count}")
+                print(f"\n{BOLD}By Type:{RESET}")
+                for doc_type, count in sorted(stats.get("by_type", {}).items()):
+                    print(f"  {doc_type:<20} {count}")
+
+        elif kb_cmd == "list":
+            topics = advisor.list_topics(getattr(args, "domain", None))
+            if not topics:
+                print(f"{YELLOW}No topics found. Run: python omicsclaw.py knowledge build{RESET}")
+            else:
+                print(f"\n{BOLD}Knowledge Base Topics{RESET} ({len(topics)} documents)")
+                print(f"{'=' * 60}")
+                current_domain = ""
+                for t in topics:
+                    d = t.get("domain", "")
+                    if d != current_domain:
+                        current_domain = d
+                        print(f"\n{CYAN}[{d}]{RESET}")
+                    dtype = t.get("doc_type", "")
+                    title = t.get("title", t.get("source_path", ""))
+                    print(f"  [{dtype:<16}] {title}")
+
+        else:
+            print("Usage: python omicsclaw.py knowledge [build|search|stats|list]")
+            sys.exit(1)
+
         sys.exit(0)
 
     if args.command == "run":

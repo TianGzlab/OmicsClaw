@@ -740,6 +740,10 @@ Operational constraints:
     - Your memory context is loaded automatically at the start of each conversation
       under the "## Your Memory" section in the system prompt.
     - Do NOT tell the user you are saving memory; just do it silently.
+13. KNOWLEDGE ADVISOR: You have a 'consult_knowledge' tool that searches decision
+    guides, best practices, and troubleshooting docs. Use it proactively when users
+    ask about method selection, parameters, or encounter errors. Extract the key
+    recommendation concisely — do NOT dump full knowledge base content.
 """
 
 def build_system_prompt(memory_context: str = "") -> str:
@@ -1156,6 +1160,49 @@ def get_tools() -> list[dict]:
                         },
                     },
                     "required": ["memory_type"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "consult_knowledge",
+                "description": (
+                    "Query the OmicsClaw knowledge base for analysis guidance. "
+                    "Use this PROACTIVELY when: (1) user is unsure which analysis to run, "
+                    "(2) user asks about method selection or parameters, "
+                    "(3) an analysis fails and user needs troubleshooting, "
+                    "(4) user asks 'how to' or 'which method' questions, "
+                    "(5) before running complex analyses to check best practices. "
+                    "Returns relevant decision guides, best practices, or troubleshooting advice."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language question about methodology, parameters, or troubleshooting",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": [
+                                "decision-guide", "best-practices", "troubleshooting",
+                                "workflow", "method-reference", "interpretation",
+                                "preprocessing-qc", "statistics", "tool-setup",
+                                "domain-knowledge", "reference-script", "all",
+                            ],
+                            "description": "Filter by document type. Default: 'all'",
+                        },
+                        "domain": {
+                            "type": "string",
+                            "enum": [
+                                "spatial", "singlecell", "genomics", "proteomics",
+                                "metabolomics", "bulkrna", "general", "all",
+                            ],
+                            "description": "Filter by omics domain. Default: 'all'",
+                        },
+                    },
+                    "required": ["query"],
                 },
             },
         },
@@ -2262,6 +2309,30 @@ async def execute_remember(args: dict, session_id: str = None) -> str:
         return f"Error saving memory: {e}"
 
 
+async def execute_consult_knowledge(args: dict, **kwargs) -> str:
+    """Query the OmicsClaw knowledge base for analysis guidance."""
+    try:
+        from omicsclaw.knowledge import KnowledgeAdvisor
+
+        advisor = KnowledgeAdvisor()
+        query = args.get("query", "")
+        if not query:
+            return "Error: 'query' parameter is required."
+
+        domain = args.get("domain", "all")
+        category = args.get("category", "all")
+
+        return advisor.search_formatted(
+            query=query,
+            domain=domain if domain != "all" else None,
+            doc_type=category if category != "all" else None,
+            limit=5,
+        )
+    except Exception as e:
+        logger.error(f"Knowledge query failed: {e}", exc_info=True)
+        return f"Error querying knowledge base: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Tool executor registry
 # ---------------------------------------------------------------------------
@@ -2283,6 +2354,7 @@ TOOL_EXECUTORS = {
     "remove_file": execute_remove_file,
     "get_file_size": execute_get_file_size,
     "remember": execute_remember,
+    "consult_knowledge": execute_consult_knowledge,
 }
 
 MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable

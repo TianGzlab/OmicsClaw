@@ -23,7 +23,7 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_footer, generate_report_header, write_result_json
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
-from skills.singlecell._lib.r_bridge import run_seurat_preprocessing
+
 from skills.singlecell._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -41,14 +41,12 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "seurat": MethodConfig(
         name="seurat",
         description="Seurat LogNormalize workflow (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "sctransform": MethodConfig(
         name="sctransform",
         description="Seurat SCTransform workflow (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
 }
 

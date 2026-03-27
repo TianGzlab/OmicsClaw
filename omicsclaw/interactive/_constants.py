@@ -54,6 +54,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/clear",           "Clear current conversation history"),
     ("/mcp",             "Manage MCP servers (/mcp list | add | remove)"),
     ("/config",          "View or set config (/config list | /config set key value)"),
+    ("/guide",           "Knowledge advisor: /guide [topic] or /guide workflow <domain>"),
     ("/help",            "Show this help"),
     ("/exit",            "Quit OmicsClaw"),
 ]

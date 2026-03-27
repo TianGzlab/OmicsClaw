@@ -11,6 +11,9 @@ tags: [singlecell, QC, quality control, metrics, visualization]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--species"
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -160,7 +163,7 @@ output_dir/
 │   └── qc_metrics_per_cell.csv  # Per-cell QC values
 └── reproducibility/
     ├── commands.sh              # Command to reproduce
-    └── environment.yml          # Package versions
+    └── requirements.txt          # Package versions
 ```
 
 ## Interpretation Guidance

@@ -10,6 +10,13 @@ tags: [singlecell, batch-integration, Harmony, scVI, Seurat, BBKNN]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--batch-key"
+      - "--method"
+      - "--n-epochs"
+      - "--no-gpu"
+    legacy_aliases: [sc-integrate]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -239,7 +246,7 @@ output_dir/
 │   └── metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
@@ -250,7 +257,7 @@ Reference examples tested with: scanpy 1.10+, scvi-tools 1.1+, anndata 0.10+
 ## Dependencies
 
 **Required**: scanpy >= 1.9, anndata
-**Optional**: scvi-tools, harmonypy, bbknn, scanorama, `rpy2` + `anndata2ri` + R packages `Seurat`, `batchelor`, and `harmony`
+**Optional**: scvi-tools, harmonypy, bbknn, scanorama, R + packages `Seurat`, `batchelor`, and `harmony` (executed via native R scripts)
 
 ## Runtime Notes
 

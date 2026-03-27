@@ -52,10 +52,6 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     "muon": DependencyInfo("muon", "pip install muon", "Multi-omics analysis"),
     "mofapy2": DependencyInfo("mofapy2", "pip install mofapy2", "MOFA+ factor analysis"),
 
-    # R interface
-    "rpy2": DependencyInfo("rpy2", "pip install rpy2", "R-Python interface (requires R installed)"),
-    "anndata2ri": DependencyInfo("anndata2ri", "pip install anndata2ri", "AnnData-R bridge"),
-
     # DE
     "pydeseq2": DependencyInfo("pydeseq2", "pip install pydeseq2", "DESeq2 in Python"),
 }
@@ -121,60 +117,53 @@ def require(name: str, *, feature: str = "") -> Any:
 
 def validate_r_environment(
     required_r_packages: Optional[list[str]] = None,
-) -> tuple[Any, ...]:
-    """Validate R + rpy2 + anndata2ri and return commonly used bridge objects."""
-    require("rpy2", feature="R-based single-cell methods")
-    require("anndata2ri", feature="R-based single-cell methods")
+) -> bool:
+    """Validate that R is available and required packages are installed.
 
+    Uses subprocess (not rpy2) — consistent with the native R script approach.
+
+    Returns True if R and all required packages are available.
+    Raises ImportError if R or required packages are missing.
+    """
+    import subprocess
+
+    # Check R availability
     try:
-        import anndata2ri
-        import rpy2.robjects as robjects
-        from rpy2.rinterface_lib import openrlib
-        from rpy2.robjects import conversion, default_converter, numpy2ri, pandas2ri
-        from rpy2.robjects.conversion import localconverter
-        from rpy2.robjects.packages import importr
-
-        with openrlib.rlock:
-            with conversion.localconverter(default_converter):
-                robjects.r("R.version")
-
-        if required_r_packages:
-            missing = []
-            for pkg in required_r_packages:
-                try:
-                    with openrlib.rlock:
-                        with conversion.localconverter(default_converter):
-                            importr(pkg)
-                except Exception:
-                    missing.append(pkg)
-            if missing:
-                pkg_list = ", ".join(f"'{p}'" for p in missing)
-                raise ImportError(
-                    "Missing R packages: "
-                    f"{pkg_list}\n"
-                    "Install the Python bridge with:\n"
-                    "  pip install rpy2 anndata2ri\n"
-                    "Install the R dependencies with:\n"
-                    "  Rscript install_r_dependencies.R"
-                )
-
-        return (
-            robjects,
-            pandas2ri,
-            numpy2ri,
-            importr,
-            localconverter,
-            default_converter,
-            openrlib,
-            anndata2ri,
+        result = subprocess.run(
+            ["Rscript", "--version"],
+            capture_output=True, text=True, timeout=10,
         )
-    except ImportError:
-        raise
-    except Exception as exc:
+        if result.returncode != 0:
+            raise ImportError("Rscript not found or returned an error.")
+    except FileNotFoundError:
         raise ImportError(
-            "Failed to initialise the R bridge for single-cell methods.\n"
-            "Make sure R is installed and visible on PATH, then install:\n"
-            "  pip install rpy2 anndata2ri\n"
-            "  Rscript install_r_dependencies.R\n"
-            f"Original error: {exc}"
-        ) from exc
+            "R is not installed or Rscript is not on PATH.\n"
+            "Install R from https://cran.r-project.org/"
+        )
+
+    if required_r_packages:
+        checks = "; ".join(
+            f'cat("{pkg}:", requireNamespace("{pkg}", quietly=TRUE), "\\n")'
+            for pkg in required_r_packages
+        )
+        result = subprocess.run(
+            ["Rscript", "-e", checks],
+            capture_output=True, text=True, timeout=30,
+        )
+        missing = []
+        for line in result.stdout.strip().splitlines():
+            if ":" in line:
+                parts = line.split(":", 1)
+                pkg = parts[0].strip()
+                val = parts[1].strip().upper()
+                if val != "TRUE":
+                    missing.append(pkg)
+        if missing:
+            pkg_list = ", ".join(f"'{p}'" for p in missing)
+            raise ImportError(
+                f"Missing R packages: {pkg_list}\n"
+                "Install with:\n"
+                "  Rscript -e 'install.packages(c(\"pkg1\", \"pkg2\"))'"
+            )
+
+    return True

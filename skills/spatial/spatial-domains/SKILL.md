@@ -10,6 +10,16 @@ tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spag
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--lambda-param"
+      - "--method"
+      - "--n-domains"
+      - "--rad-cutoff"
+      - "--refine"
+      - "--resolution"
+      - "--spatial-weight"
+    legacy_aliases: [domains]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -268,7 +278,7 @@ output_dir/
 │   └── domain_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

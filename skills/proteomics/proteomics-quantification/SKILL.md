@@ -11,6 +11,9 @@ metadata:
     domain: proteomics
     emoji: "📏"
     trigger_keywords: [protein quantification, LFQ, TMT, DIA, DIA-NN, Skyline]
+    allowed_extra_flags: []
+    legacy_aliases: [quantification]
+    saves_h5ad: false
 ---
 
 # 📏 Protein Quantification
@@ -56,7 +59,7 @@ output_directory/
 │   └── intensity_matrix.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

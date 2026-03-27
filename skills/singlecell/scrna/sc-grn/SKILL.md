@@ -1,3 +1,30 @@
+---
+name: sc-grn
+description: >-
+  Gene regulatory network inference using pySCENIC (GRNBoost2, cisTarget, AUCell)
+version: 0.1.0
+metadata:
+  omicsclaw:
+    domain: singlecell
+    allowed_extra_flags:
+      - "--db"
+      - "--motif"
+      - "--n-jobs"
+      - "--n-top-targets"
+      - "--seed"
+      - "--tf-list"
+    saves_h5ad: true
+    requires_preprocessed: true
+    trigger_keywords:
+      - grn
+      - gene regulatory
+      - scenic
+      - pyscenic
+      - regulon
+      - transcription factor
+      - grnboost
+---
+
 # sc-grn — Gene Regulatory Network Inference
 
 ## Purpose
@@ -93,7 +120,7 @@ output_dir/
 │   └── grn_auc_matrix.csv         # AUCell activity scores
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Methods

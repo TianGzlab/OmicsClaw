@@ -1,6 +1,27 @@
 """Spatial batch integration functions.
 
-Harmony, BBKNN, and Scanorama batch integration with mixing metrics.
+Provides three integration methods, each consuming a different data
+representation from the preprocessed AnnData:
+
+- **Harmony**: Operates on **PCA embeddings** (``adata.obsm["X_pca"]``).
+  Iteratively adjusts principal components to remove batch effects.
+  Ref: Korsunsky et al., *Nature Methods* 2019.
+
+- **BBKNN**: Operates on **PCA embeddings** (``adata.obsm["X_pca"]``).
+  Constructs a batch-balanced k-nearest-neighbor graph, replacing
+  the standard neighbors graph.
+  Ref: Polanski et al., *Bioinformatics* 2020.
+
+- **Scanorama**: Operates on **preprocessed expression** (via scanpy wrapper
+  using PCA basis by default).  The original Scanorama method stitches
+  expression matrices via mutual nearest neighbors; the scanpy wrapper
+  ``sc.external.pp.scanorama_integrate`` applies this to the PCA basis
+  for efficiency.
+  Ref: Hie et al., *Nature Biotechnology* 2019.
+
+All three methods require upstream preprocessing: ``normalize_total`` →
+``log1p`` → HVG selection → PCA.  The batch labels must be present in
+``adata.obs[batch_key]``.
 
 Usage::
 
@@ -24,11 +45,21 @@ SUPPORTED_METHODS = ("harmony", "bbknn", "scanorama")
 
 
 def integrate_harmony(adata, batch_key: str) -> dict:
-    """Run Harmony integration on PCA embeddings."""
+    """Run Harmony integration on PCA embeddings.
+
+    Harmony adjusts **PCA embeddings** (``adata.obsm["X_pca"]``) to remove
+    batch effects while preserving biological variation.  The upstream data
+    must already be log-normalized with PCA computed.
+    """
     require("harmonypy", feature="Harmony batch integration")
     import harmonypy
 
     ensure_pca(adata)
+    logger.info(
+        "Harmony: integrating on PCA embeddings (X_pca, %d components), "
+        "batch_key='%s'",
+        adata.obsm["X_pca"].shape[1], batch_key,
+    )
     ho = harmonypy.run_harmony(adata.obsm["X_pca"], adata.obs, batch_key, max_iter_harmony=20)
     corrected = ho.Z_corr
     if corrected.shape[0] != adata.n_obs and corrected.shape[1] == adata.n_obs:
@@ -40,20 +71,48 @@ def integrate_harmony(adata, batch_key: str) -> dict:
 
 
 def integrate_bbknn(adata, batch_key: str) -> dict:
-    """Run BBKNN batch-balanced nearest neighbours."""
+    """Run BBKNN batch-balanced nearest neighbours.
+
+    BBKNN replaces the standard k-NN graph with a batch-balanced version
+    built from **PCA embeddings** (``adata.obsm["X_pca"]``).  It modifies
+    the neighbor graph in-place, then UMAP is recomputed on the corrected
+    graph.
+    """
     require("bbknn", feature="BBKNN batch integration")
     import bbknn
 
     ensure_pca(adata)
+    logger.info(
+        "BBKNN: constructing batch-balanced neighbor graph from PCA "
+        "embeddings (X_pca, %d components), batch_key='%s'",
+        adata.obsm["X_pca"].shape[1], batch_key,
+    )
     bbknn.bbknn(adata, batch_key=batch_key)
     sc.tl.umap(adata)
     return {"method": "bbknn", "embedding_key": "X_pca"}
 
 
 def integrate_scanorama(adata, batch_key: str) -> dict:
-    """Run Scanorama integration via Scanpy's external API."""
+    """Run Scanorama integration via Scanpy's external API.
+
+    The original Scanorama algorithm stitches **preprocessed expression
+    matrices** via mutual nearest neighbors (Hie et al., 2019).  The
+    scanpy wrapper ``sc.external.pp.scanorama_integrate`` applies this
+    to the PCA basis for computational efficiency, producing a corrected
+    embedding in ``X_scanorama``.
+
+    For expression-level integration (closer to the original paper), users
+    can call ``scanorama.integrate()`` directly on per-batch HVG matrices.
+    """
     require("scanorama", feature="Scanorama batch integration")
     ensure_pca(adata)
+    logger.info(
+        "Scanorama: integrating via scanpy wrapper on PCA basis "
+        "(X_pca, %d components), batch_key='%s'. "
+        "Note: original Scanorama works on expression matrices; "
+        "scanpy wrapper uses PCA basis for efficiency.",
+        adata.obsm["X_pca"].shape[1], batch_key,
+    )
     sc.external.pp.scanorama_integrate(
         adata, key=batch_key, basis="X_pca", adjusted_basis="X_scanorama",
     )
@@ -63,35 +122,50 @@ def integrate_scanorama(adata, batch_key: str) -> dict:
 
 
 def compute_batch_mixing(adata, batch_key: str) -> float:
-    """Compute batch mixing entropy from the neighbor graph."""
+    """Compute batch mixing entropy from the spatial/neighbor connectivities graph.
+    
+    A higher entropy value relative to the number of batches indicates
+    better physiological or technical mixing.
+    """
     try:
         from scipy import sparse
         if "connectivities" not in adata.obsp:
             return 0.0
+
         conn = adata.obsp["connectivities"]
-        if sparse.issparse(conn):
-            conn = conn.toarray()
-        batch_labels = adata.obs[batch_key].values
+        # CRITICAL: Never run .toarray() on an N x N matrix unless you want a massive RAM explosion.
+        # Force Cast to Compressed Sparse Row (CSR) format to safely navigate rows
+        if not sparse.issparse(conn):
+            conn = sparse.csr_matrix(conn)
+        else:
+            conn = conn.tocsr()
+            
+        # Standardize strings to prevent dtype/category mixing errors
+        batch_labels = np.asarray(adata.obs[batch_key].astype(str))
         batches = np.unique(batch_labels)
         n_batches = len(batches)
         if n_batches < 2:
             return 0.0
 
         entropies = []
+        # Vectorized sparse traversal
         for i in range(adata.n_obs):
-            neighbors_idx = np.where(conn[i] > 0)[0]
-            if len(neighbors_idx) == 0:
+            start, end = conn.indptr[i], conn.indptr[i+1]
+            if start == end:
                 continue
+            neighbors_idx = conn.indices[start:end]
             neighbor_batches = batch_labels[neighbors_idx]
-            counts = np.array([np.sum(neighbor_batches == b) for b in batches])
+            
+            # Fast vectorized counting instead of N looping operations
+            _, counts = np.unique(neighbor_batches, return_counts=True)
             probs = counts / counts.sum()
-            probs = probs[probs > 0]
             entropy = -np.sum(probs * np.log(probs))
             entropies.append(entropy)
 
         max_entropy = np.log(n_batches)
         return float(np.mean(entropies) / max_entropy) if entropies else 0.0
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to compute batch mixing metric: {e}")
         return 0.0
 
 
@@ -117,11 +191,12 @@ def run_integration(adata, *, method: str = "harmony", batch_key: str = "batch")
     if "X_pca" not in adata.obsm:
         raise ValueError(
             "X_pca not found. Run spatial-preprocess before integration:\n"
-            "  python omicsclaw.py run spatial-preprocess --input data.h5ad --output results/"
+            "  oc run spatial-preprocess --input data.h5ad --output results/"
         )
     if "X_umap" not in adata.obsm:
         ensure_neighbors(adata)
         sc.tl.umap(adata)
+        
     umap_before = adata.obsm["X_umap"].copy()
     mixing_before = compute_batch_mixing(adata, batch_key)
 
@@ -131,12 +206,13 @@ def run_integration(adata, *, method: str = "harmony", batch_key: str = "batch")
         result = integrate_bbknn(adata, batch_key)
     elif method == "scanorama":
         result = integrate_scanorama(adata, batch_key)
+        
+    # Prevent clustering collision overrides with existing labels
+    if "leiden" not in adata.obs.columns:
+        sc.tl.leiden(adata, resolution=1.0, flavor="igraph")
 
     mixing_after = compute_batch_mixing(adata, batch_key)
     adata.obsm["X_umap_before_integration"] = umap_before
-
-    if "leiden" not in adata.obs.columns:
-        sc.tl.leiden(adata, resolution=1.0, flavor="igraph")
 
     return {
         "n_cells": adata.n_obs, "n_genes": adata.n_vars,

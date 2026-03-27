@@ -10,6 +10,16 @@ tags: [spatial, annotation, cell-type, tangram, scanvi, cellassign, marker-genes
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--cell-type-key"
+      - "--cluster-key"
+      - "--method"
+      - "--model"
+      - "--reference"
+      - "--species"
+    legacy_aliases: [annotate]
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -127,7 +137,7 @@ output_dir/
 │   └── annotation_summary.csv
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Dependencies

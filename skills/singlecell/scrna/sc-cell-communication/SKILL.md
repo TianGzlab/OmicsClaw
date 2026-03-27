@@ -7,6 +7,21 @@ version: 0.1.0
 author: OmicsClaw Team
 license: MIT
 tags: [singlecell, communication, ligand-receptor, liana, cellchat]
+metadata:
+  omicsclaw:
+    domain: singlecell
+    allowed_extra_flags:
+      - "--cell-type-key"
+      - "--method"
+      - "--species"
+    saves_h5ad: true
+    requires_preprocessed: true
+    trigger_keywords:
+      - cell communication
+      - cell-cell communication
+      - ligand receptor
+      - cellchat
+      - liana
 ---
 
 # Single-Cell Communication
@@ -17,7 +32,7 @@ This skill identifies ligand-receptor interactions between annotated cell popula
 
 - `builtin`: lightweight Python fallback with a curated ligand-receptor set
 - `liana`: LIANA+ consensus ranking when the Python package is available
-- `cellchat_r`: CellChat via `rpy2` + R packages
+- `cellchat_r`: CellChat via native R script (requires R + CellChat package)
 
 ## Input
 

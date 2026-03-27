@@ -13,6 +13,11 @@ metadata:
     domain: bulkrna
     emoji: "🔀"
     trigger_keywords: [trajblend, trajectory, bulk to single cell, interpolation, bulk2single, VAE, deconvolution trajectory]
+    allowed_extra_flags:
+      - "--n-epochs"
+      - "--reference"
+    legacy_aliases: [bulk-trajblend]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Trajectory Interpolation (BulkTrajBlend-style)

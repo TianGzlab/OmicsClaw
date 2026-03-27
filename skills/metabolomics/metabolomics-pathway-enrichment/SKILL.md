@@ -12,6 +12,10 @@ metadata:
     domain: metabolomics
     emoji: "🗺️"
     trigger_keywords: [metabolomics pathway, KEGG, MetaboAnalyst, enrichment, mummichog]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [met-pathway]
+    saves_h5ad: false
 ---
 
 # 🗺️ Metabolomics Pathway Analysis
@@ -216,7 +220,7 @@ output_directory/
 │   └── topology_scores.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

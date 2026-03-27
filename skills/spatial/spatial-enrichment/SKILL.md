@@ -9,6 +9,14 @@ tags: [spatial, enrichment, GSEA, ORA, pathway, GO, KEGG]
 metadata:
   omicsclaw:
     domain: spatial
+    allowed_extra_flags:
+      - "--gene-set"
+      - "--method"
+      - "--source"
+      - "--species"
+    legacy_aliases: [enrichment]
+    saves_h5ad: false
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -146,7 +154,7 @@ output_directory/
 │   └── enrichment_results.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

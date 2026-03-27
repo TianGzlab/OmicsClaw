@@ -12,6 +12,8 @@ metadata:
     domain: genomics
     emoji: "📊"
     trigger_keywords: [sequencing QC, FastQC, read quality, adapter trimming, fastp]
+    allowed_extra_flags: []
+    saves_h5ad: false
 ---
 
 # 📊 Genomics QC
@@ -57,7 +59,7 @@ output_directory/
 │   └── basic_statistics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
