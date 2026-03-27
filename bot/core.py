@@ -2300,6 +2300,58 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_tool_history(history: list[dict]) -> list[dict]:
+    """Drop orphaned or incomplete tool-call bundles from history."""
+    sanitised: list[dict] = []
+    pending_bundle: list[dict] | None = None
+    pending_tool_ids: set[str] = set()
+
+    def flush_pending(drop_incomplete: bool) -> None:
+        nonlocal pending_bundle, pending_tool_ids
+        if pending_bundle is None:
+            return
+        if drop_incomplete and pending_tool_ids:
+            logger.warning(
+                "Dropped incomplete assistant/tool bundle from history; "
+                f"missing tool outputs for: {sorted(pending_tool_ids)}"
+            )
+        else:
+            sanitised.extend(pending_bundle)
+        pending_bundle = None
+        pending_tool_ids = set()
+
+    for msg in history:
+        role = msg.get("role")
+
+        if role == "assistant" and msg.get("tool_calls"):
+            flush_pending(drop_incomplete=True)
+            pending_bundle = [msg]
+            pending_tool_ids = {
+                tc.get("id")
+                for tc in msg.get("tool_calls", [])
+                if isinstance(tc, dict) and tc.get("id")
+            }
+            continue
+
+        if role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            if pending_bundle is not None and tool_call_id in pending_tool_ids:
+                pending_bundle.append(msg)
+                pending_tool_ids.remove(tool_call_id)
+                if not pending_tool_ids:
+                    flush_pending(drop_incomplete=False)
+                continue
+
+            logger.warning("Dropped orphaned tool message from history")
+            continue
+
+        flush_pending(drop_incomplete=True)
+        sanitised.append(msg)
+
+    flush_pending(drop_incomplete=True)
+    return sanitised
+
+
 async def llm_tool_loop(
     chat_id: int | str,
     user_content: str | list,
@@ -2534,18 +2586,7 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     if len(history) > MAX_HISTORY:
         history[:] = history[-MAX_HISTORY:]
 
-    # Sanitise: drop orphaned tool messages
-    sanitised: list[dict] = []
-    for msg in history:
-        if msg.get("role") == "tool":
-            if sanitised and sanitised[-1].get("role") == "assistant":
-                if sanitised[-1].get("tool_calls"):
-                    sanitised.append(msg)
-                    continue
-            logger.warning("Dropped orphaned tool message from history")
-            continue
-        sanitised.append(msg)
-    history[:] = sanitised
+    history[:] = _sanitize_tool_history(history)
 
     last_message = None
     _notified_methods: set[str] = set()  # Avoid duplicate progress messages
