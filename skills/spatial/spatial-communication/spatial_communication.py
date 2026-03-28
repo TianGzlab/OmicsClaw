@@ -199,8 +199,8 @@ def get_demo_data() -> tuple:
             raise FileNotFoundError(f"Expected {processed}")
         adata = sc.read_h5ad(processed)
         logger.info("Demo: %d cells × %d genes", adata.n_obs, adata.n_vars)
-        
-        # Inject realistic gene names to pass LIANA's valid proportion check
+
+        # Inject realistic gene names so LIANA's built-in resource can match them.
         valid_genes = [
             "A1BG", "A2M", "AANAT", "ABCA1", "ACE", "ACKR1", "ACKR2", "ACKR3", "ACKR4", "ACTR2", 
             "ACVR1", "ACVR1B", "ACVR1C", "ACVR2A", "ACVR2B", "ACVRL1", "ADA", "ADAM10", "ADAM11", "ADAM12", 
@@ -216,7 +216,23 @@ def get_demo_data() -> tuple:
         # Pad with dummies if somehow n_vars > 100
         if adata.n_vars > len(valid_genes):
             valid_genes += [f"Gene_dummy_{i}" for i in range(adata.n_vars - len(valid_genes))]
-        adata.var_names = valid_genes[:adata.n_vars]
+        valid_genes = valid_genes[:adata.n_vars]
+        adata.var_names = valid_genes
+
+        # LIANA reads from `.raw` when available, so keep raw gene symbols aligned.
+        if adata.raw is not None:
+            raw_adata = adata.raw.to_adata()
+            if raw_adata.n_vars == len(valid_genes):
+                raw_adata.var_names = valid_genes
+                adata.raw = raw_adata
+            else:
+                logger.warning(
+                    "Demo raw matrix gene count (%d) did not match processed matrix (%d); "
+                    "refreshing `.raw` from the processed matrix for LIANA demo compatibility.",
+                    raw_adata.n_vars,
+                    len(valid_genes),
+                )
+                adata.raw = adata.copy()
         
         return adata, None
 
