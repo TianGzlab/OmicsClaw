@@ -1,332 +1,210 @@
 # Knowledge System Optimization Plan
 
-## 1. Current Architecture Overview
-
-### Knowledge Base Structure (`knowledge_base/`)
-- **424 files** across 10 numbered categories + scripts/
-- 151 markdown docs, 169 Python scripts, 104 R scripts
-- Categories: workflow_guides, decision_guides, best_practices, troubleshooting, method_references, interpretation_guides, data_preprocessing_qc, statistical_methods, tool_setup, domain_knowledge
-- Covers 7 omics domains: spatial, singlecell, genomics, proteomics, metabolomics, bulkrna, general
-
-### Backend (`omicsclaw/knowledge/`)
-- **KnowledgeStore** (`store.py`): SQLite FTS5 full-text search, BM25 ranking
-- **KnowledgeIndexer** (`indexer.py`): Parses markdown/Python/R, chunks at heading boundaries (3000 char max)
-- **KnowledgeAdvisor** (`retriever.py`): Public API facade — `search()`, `search_formatted()`, `build()`, `list_topics()`
-
-### Access Points
-| Channel | Entry | Mechanism |
-|---------|-------|-----------|
-| CLI interactive | `/guide [topic]` | Prompt injection into LLM → LLM calls `consult_knowledge` tool |
-| Bot (Telegram/Feishu) | LLM auto-call | System prompt tells LLM to "use proactively" when user asks method/parameter questions |
-| CLI direct | `python omicsclaw.py knowledge search <q>` | Direct FTS5 query, prints results to terminal |
-
-### Call Flow for `/guide`
-```
-User types "/guide bulk RNA normalization"
-  → _handle_guide() wraps as "[GUIDE MODE] ..."
-  → Injected as user message into LLM conversation
-  → LLM decides to call consult_knowledge tool
-  → execute_consult_knowledge() → KnowledgeAdvisor.search_formatted()
-  → FTS5 BM25 search → top 5 chunks returned
-  → LLM synthesizes answer from chunks
-  → Streamed to user
-```
+> **Status**: Engineering-grade architectural and implementation plan
+> **Last Updated**: 2026-03-28
+> **Confidence**: High (Direction & Feasibility verified against production requirements)
 
 ---
 
-## 2. Current Design: Strengths
+## Executive Summary
 
-1. **Well-structured knowledge taxonomy**: 10 categories cover the full lifecycle (from tool setup → workflow → interpretation → troubleshooting), mimicking how a researcher thinks
-2. **FTS5 + BM25 is solid**: Full-text search with probabilistic ranking is the right primitive for this scale (hundreds of docs, not millions)
-3. **Chunk-level retrieval**: Section-based chunking ensures focused, relevant results rather than dumping entire documents
-4. **Domain/type filtering**: Allows narrowing search to specific omics domains and document types
-5. **Bot integration exists**: The `consult_knowledge` tool is registered for the LLM to call proactively
-6. **Separation of content and code**: Knowledge lives in markdown files, independent of skill scripts — easy to add/edit/review
+**Core Problem**: The `/guide` command forces users to interrupt their analysis flow to explicitly query for knowledge. Knowledge retrieving is disconnected from skill execution context.
+**Key Insight**: This is not primarily a retrieval problem (FTS5+BM25 is sufficient), but an **orchestration problem**. Knowledge must be dynamically pushed based on determined execution states, not pulled via LLM prompt heuristics.
 
----
+**Architectural Pivot**: The knowledge system must be decoupled into two distinct layers:
+1. **Knowledge Orchestration (Routing)**: A deterministic advisory middleware that decides *when* to query, *why*, and *what type* of knowledge to surface.
+2. **Knowledge Retrieval**: The FTS5 engine that finds the best content *after* the candidate set is significantly narrowed down.
 
-## 3. Current Design: Weaknesses
-
-### 3.1 `/guide` is an "extra step" that breaks the user's flow
-
-**Core problem:** User must *stop* their analysis to type `/guide`, wait for results, then manually go back to running skills. This is the "鸡肋" you identified.
-
-Real user flow:
-```
-User: run sc-preprocessing --demo
-→ sees high mitochondrial percentage
-→ wants to know: "is 20% the right threshold?"
-→ currently must: /guide mitochondrial threshold
-→ reads answer
-→ manually adjusts: run sc-filter --max-mt-percent 15
-```
-
-**What should happen:** Knowledge should surface *during* the analysis, not as a separate interrogation.
-
-### 3.2 Knowledge is disconnected from skill execution context
-
-When a skill runs and produces output (e.g., QC plots, DE results), the knowledge system has **no awareness** of:
-- Which skill just ran
-- What the output metrics were
-- What common issues relate to those specific results
-- What the logical next step is
-
-The LLM receives the skill output AND has access to `consult_knowledge`, but **nothing links them together**. The LLM must independently decide to query knowledge — and it usually doesn't, because the system prompt instruction ("use proactively") is a weak signal easily overshadowed by the immediate task of reporting results.
-
-### 3.3 Knowledge coverage is skewed
-
-| Domain | Workflow Guides | Decision Guides | Troubleshooting | Total |
-|--------|----------------|-----------------|-----------------|-------|
-| Bulk RNA-seq | 5+ | 3+ | 2 | ~15 |
-| Genomics (GWAS/variant) | 6+ | 2+ | 2 | ~15 |
-| Single-cell (Scanpy/Seurat) | 4+ | 2+ | 3 | ~12 |
-| Proteomics | 1 | 0 | 0 | ~2 |
-| Metabolomics | 0 | 0 | 0 | ~0 |
-| Spatial | 1 | 0 | 0 | ~2 |
-
-The knowledge base is **heavily biased toward genomics and bulk RNA-seq**, with minimal coverage for spatial, proteomics, and metabolomics — the domains that OmicsClaw also supports.
-
-### 3.4 Knowledge and SKILL.md are duplicative
-
-Each SKILL.md already contains:
-- Algorithm descriptions and methodology
-- Parameter guidance
-- CLI reference
-- Best practices (embedded in the workflow section)
-
-The knowledge_base contains similar but separate documents. There's no clear boundary: when should info go in SKILL.md vs knowledge_base? This leads to:
-- Duplication of effort
-- Risk of contradictory guidance
-- Unclear source of truth
-
-### 3.5 No contextual attachment between knowledge and skills
-
-There's no mechanism to say "this troubleshooting doc relates to the sc-preprocessing skill" or "this best-practice doc should be surfaced after spatial-domains runs". Knowledge docs are standalone with only domain-level filtering.
-
-### 3.6 Search is keyword-only (no semantic understanding)
-
-FTS5 BM25 is good for exact keyword matches but fails on:
-- Synonyms: "normalize" vs "scaling" vs "transform"
-- Conceptual queries: "how to handle batch effects" won't match a doc titled "ComBat correction"
-- Cross-domain concepts: "differential expression" exists in spatial, singlecell, bulkrna, proteomics — domain context matters
-
-### 3.7 The `/guide` prompt injection is fragile
-
-The `[GUIDE MODE]` prefix is a prompt hack — the LLM must:
-1. Notice the prefix
-2. Decide to call `consult_knowledge` (not guaranteed)
-3. Formulate good search parameters (query, domain, category)
-4. Synthesize results well
-
-Each step can fail. If the LLM doesn't call the tool, the user gets a generic answer without knowledge base backing.
+**Crucial Clarification**: The knowledge system provides **decision rationale** (why, interpretation, troubleshooting), while the workflow graph/planner provides **workflow progression** (what to do next). These must remain separate responsibilities.
 
 ---
 
-## 4. Optimization Plan
+## 1. Completed Milestone: Modular Skill & Knowledge Restructuring
 
-### Stage 1: Contextual Knowledge Injection (skill-aware guidance)
+**Current State**: The `knowledge_base/` directory has been successfully refactored from a monolithic "docs dump" into a cleanly decoupled staging ground. This resolves the previous functional overlap where execution scripts and domain knowledge were chaotically mixed.
 
-**Goal:** Knowledge surfaces automatically during skill execution, not as a separate query.
-
-**Approach:** Add a `skill_context` field to each knowledge document (in frontmatter or a mapping file) that links knowledge to specific skills and result patterns. When a skill finishes, automatically attach relevant knowledge context.
-
-**Implementation:**
-
-1. **Add `related_skills` to knowledge document frontmatter:**
-   ```yaml
-   ---
-   title: Mitochondrial Filtering Best Practices
-   related_skills: [sc-filter, sc-qc, sc-preprocessing, spatial-preprocessing]
-   trigger_on: [high_mt_pct, qc_complete]
-   ---
-   ```
-
-2. **Create a knowledge context builder** (`omicsclaw/knowledge/context.py`):
-   ```python
-   class SkillKnowledgeContext:
-       """Attach relevant knowledge to skill execution results."""
-
-       def get_post_run_context(self, skill_name: str, result: dict) -> str:
-           """Return knowledge snippets relevant to what just ran."""
-           # 1. Find docs with related_skills matching skill_name
-           # 2. Optionally match result patterns (e.g., high error rate)
-           # 3. Return formatted context for LLM
-   ```
-
-3. **Integrate into `run_skill()` in `omicsclaw.py`** and `execute_omicsclaw()` in `bot/core.py`:
-   - After skill completes, append relevant knowledge context to the result
-   - LLM receives: skill output + relevant knowledge → synthesizes a response that naturally includes guidance
-
-**Key files:**
-- New: `omicsclaw/knowledge/context.py`
-- Modify: `omicsclaw.py` `run_skill()` (lines 202-330)
-- Modify: `bot/core.py` `execute_omicsclaw()` (lines 1375-1667)
-- Modify: knowledge_base markdown files (add `related_skills` frontmatter)
-
-### Stage 2: Convert `/guide` to inline mode
-
-**Goal:** Instead of a separate `/guide` command, knowledge guidance becomes part of the normal conversation flow.
-
-**Approach:**
-
-1. **Deprecate `/guide` as the primary entry point** — keep it for explicit deep-dive queries but remove the expectation that users should use it
-
-2. **Enhance the system prompt** to make knowledge consultation truly proactive:
-   - Current: one line saying "use proactively" (weak signal)
-   - New: structured rules with specific triggers:
-     ```
-     KNOWLEDGE RULES:
-     - BEFORE running any skill for the first time in a session, consult knowledge
-       for the relevant workflow guide
-     - AFTER a skill produces QC warnings or errors, consult troubleshooting docs
-     - When user asks "which method", "how to choose", "what parameters" — consult
-       decision guides
-     - When presenting results, briefly note the relevant interpretation guide
-     ```
-
-3. **Add a `/tips` toggle** instead of `/guide`:
-   - `/tips on` — enable automatic knowledge tips after each skill run
-   - `/tips off` — disable (for expert users who don't need guidance)
-   - Default: on for new sessions
-
-**Key files:**
-- Modify: `omicsclaw/interactive/interactive.py` (lines 442-481, 1267-1283)
-- Modify: `bot/core.py` `get_role_guardrails()` (lines 660-754)
-- Modify: `omicsclaw/interactive/_constants.py` (slash commands)
-
-### Stage 3: Skill-Knowledge bridging index
-
-**Goal:** Create an explicit mapping between skills and knowledge documents so the system knows which docs are relevant for which skills.
-
-**Approach:**
-
-1. **Create `knowledge_base/skill_map.yaml`:**
-   ```yaml
-   sc-preprocessing:
-     before_run:
-       - 01_workflow_guides/scrnaseq-scanpy-core-analysis.md
-     after_run:
-       - 03_best_practices/scrnaseq-scanpy-core-analysis--scanpy_best_practices.md
-     on_error:
-       - 04_troubleshooting/scrnaseq-scanpy-core-analysis--troubleshooting_guide.md
-     interpretation:
-       - 06_interpretation_guides/...
-
-   bulkrna-de:
-     before_run:
-       - 01_workflow_guides/bulk-rnaseq-counts-to-de-deseq2.md
-     after_run:
-       - 03_best_practices/bulk-rnaseq-counts-to-de-deseq2--decision-guide.md
-     on_error:
-       - 04_troubleshooting/bulk-rnaseq-counts-to-de-deseq2--troubleshooting.md
-   ```
-
-2. **Extend KnowledgeAdvisor with skill-aware methods:**
-   ```python
-   def get_skill_guidance(self, skill_name: str, phase: str = "before_run") -> str:
-       """Get relevant knowledge for a specific skill and execution phase."""
-   ```
-
-3. **Use during execution:**
-   - Bot system prompt includes per-skill knowledge hints
-   - CLI interactive mode auto-suggests relevant docs
-
-**Key files:**
-- New: `knowledge_base/skill_map.yaml`
-- Modify: `omicsclaw/knowledge/retriever.py` — add `get_skill_guidance()`
-- Modify: `omicsclaw/knowledge/indexer.py` — parse `skill_map.yaml` during build
-
-### Stage 4: Fill knowledge coverage gaps
-
-**Goal:** Balance knowledge coverage across all 6 OmicsClaw domains.
-
-**Priority additions:**
-
-| Domain | Missing | Action |
-|--------|---------|--------|
-| Spatial | Workflows, best practices, troubleshooting for all 15 skills | Write 5-8 key docs covering spatial preprocessing, domain identification, SVG detection |
-| Metabolomics | Everything | Write 3-4 docs covering XCMS preprocessing, peak detection, annotation |
-| Proteomics | Almost everything | Write 3-4 docs covering MS QC, quantification, differential abundance |
-| Single-cell | Missing: ambient removal, doublet detection, GRN, cell communication | Write 4 docs for the newer skills |
-
-**Approach:** For each skill that lacks knowledge coverage:
-1. Extract the "best practices" and "common pitfalls" sections from SKILL.md
-2. Expand into standalone knowledge documents
-3. Link via skill_map.yaml
-
-### Stage 5: Improve search quality
-
-**Goal:** Better retrieval without over-engineering.
-
-**Approach (pragmatic, no vector DB):**
-
-1. **Synonym expansion in FTS5 queries**: Before searching, expand common synonyms:
-   ```python
-   SYNONYMS = {
-       "normalize": ["normalization", "scaling", "transform"],
-       "batch effect": ["batch correction", "combat", "harmony"],
-       "de": ["differential expression", "deg", "differentially expressed"],
-   }
-   ```
-   Append synonyms to the FTS5 query to improve recall.
-
-2. **Better search_terms in frontmatter**: Each knowledge doc should list explicit `search_terms` in YAML frontmatter:
-   ```yaml
-   search_terms: [normalization, scaling, log transform, library size, depth normalization, CPM, TPM, RPKM]
-   ```
-
-3. **Boost recently relevant docs**: If a skill just ran, boost the BM25 score for docs linked to that skill (via skill_map.yaml).
-
-**Key files:**
-- Modify: `omicsclaw/knowledge/store.py` — add synonym expansion in `_to_fts5_query()`
-- Modify: `omicsclaw/knowledge/indexer.py` — ensure search_terms from frontmatter are indexed
-- Modify: knowledge_base docs — add `search_terms` frontmatter
+**New Structural Topology**:
+1. **Self-Contained Skill Packages**: All code, execution logic, and tool-specific docs have been unified into 28 independent, cohesive tool folders directly under `knowledge_base/` (e.g., `knowledge_base/bulk-omics-clustering/`). Each is now an encapsulated package featuring its own `SKILL.md`, `scripts/`, and local `references/`.
+2. **Pure Domain Knowledge (`knowhows/`)**: Genuine non-tool-specific biological principles and decision rationale (originally prefixed with `KH-`) are now strictly isolated within the `knowledge_base/knowhows/` directory. **These serve as mandatory scientific constraints**.
+3. **Migration Readiness**: Because each local package in `knowledge_base/` now adheres to the OmicsClaw `SKILL.md` + `scripts/` canonical structure, they mirror the main `skills/` framework. Future integration entails simply dropping these tested folders directly into the central `skills/` registry.
 
 ---
 
-## 5. Recommended Implementation Order
+## 2. High-Level Target Architecture
 
-```
-Stage 1 (Contextual injection)  →  Stage 2 (Inline mode)
-         ↘                              ↙
-          Stage 3 (Skill-knowledge map)
-                    ↓
-          Stage 4 (Coverage gaps)
-                    ↓
-          Stage 5 (Search quality)
+Our goal is a localized, context-aware push system that safely augments analysis:
+
+```text
+User Request / Setup
+  ↓
+  ↳ Preflight Context Injection (Know-Hows Pipeline)
+      ↳ Identify Domain + Modality
+      ↳ Forcibly inject relevant KH rules (e.g., "Always use adjusted p-values")
+      ↓
+Skill Execution
+  ↓
+  ↳ Emits Unified Advisory Event (skill, phase, signals, metrics)
+      ↓
+      ↳ Workflow Planner (suggests next logical skills)
+      ↓
+      ↳ Knowledge Resolver Layer (Deterministic Orchestration)
+          1. Filters candidates based on skill + phase + signals (narrowing)
+          2. Applies Session Cooldown / Deduplication
+          3. Retrieves Top 1-2 advice snippets via FTS5/BM25
+      ↓
+  ↳ LLM Synthesizer gets:
+       (a) Raw skill result metrics
+       (b) Next-step workflow suggestions
+       (c) Short knowledge advice snippets / Reminders of active KH constraints
+      ↓
+Response Presentation to User (Channel-specific UX)
 ```
 
-**Stage 1 + 2** deliver the core value proposition: knowledge surfaces automatically during analysis. Implement these first.
-
-**Stage 3** is the structural foundation that makes 1+2 work well at scale.
-
-**Stage 4** is content work that can be done incrementally.
-
-**Stage 5** is polish that improves quality but isn't blocking.
-
----
-
-## 6. What to Keep vs. Change
-
-| Component | Verdict | Reason |
-|-----------|---------|--------|
-| SQLite FTS5 backend | **Keep** | Right tool for this scale, no need for vector DB |
-| 10-category taxonomy | **Keep** | Well-designed, covers the analysis lifecycle |
-| Chunk-based retrieval | **Keep** | Good granularity for LLM consumption |
-| `/guide` command | **Demote** | Keep as explicit query, but not the primary way to access knowledge |
-| `consult_knowledge` tool | **Keep + enhance** | Add skill-context parameter for skill-aware queries |
-| Prompt injection approach | **Enhance** | Make system prompt rules more specific and actionable |
-| Standalone knowledge docs | **Keep + link** | Add explicit skill associations via skill_map.yaml |
-| Domain/type filtering | **Keep** | Already works, just needs skill-level filtering too |
+### Fundamental Principles
+- **Mandatory Preflight Know-Hows**: `KH-*.md` documents are not suggestions; they are high-frequency error checklists that must be injected as **hard system constraints** into the LLM context *before* the relevant analysis begins.
+- **`/guide` is demoted, not removed**: Remains an explicit, deep-dive mode for teaching purposes. Inline tips (`/tips`) become the default.
+- **Maintain FTS5**: Do not introduce vector databases currently. Contextual narrowing makes BM25 highly effective on this scale (~400 files).
+- **SKILL.md vs. Knowledge Separation**: SKILL.md holds the *execution contract* (what it is, parameters, defaults). Knowledge docs hold the *decision rationale* (why choose it, troubleshooting, interpreting warnings). The boundaries must be strict.
+- **No Prompt-Driven Knowledge Sourcing**: The decision to look up knowledge must happen via definitive signals in the middleware, not by asking the LLM to decide when to call tools.
 
 ---
 
-## 7. Anti-Patterns to Avoid
+## 3. Phased Implementation Plan
 
-1. **Don't add vector embeddings yet** — FTS5 is sufficient for 424 documents. Embedding-based search adds complexity (model dependency, indexing time, storage) with marginal benefit at this scale.
+The implementation must prioritize foundational telemetry and signaling over content or search polish, with immediate integration of the newly minted Know-Hows.
 
-2. **Don't merge knowledge into SKILL.md** — Keep them separate. SKILL.md is the "what and how" of execution. Knowledge base is the "why, when, and what if" of analysis decisions. Different audiences, different update cadences.
+### Stage 0: Observability & Evaluation Baseline ✅ IMPLEMENTED
 
-3. **Don't auto-query knowledge on every skill run** — This adds latency and noise. Only inject knowledge when there's a clear trigger (first run, error, user asks "why").
+Before changing the system, we must be able to measure if knowledge injection is helping or becoming noise.
 
-4. **Don't over-engineer the skill_map.yaml** — Start with the 10-15 most-used skills and expand based on user feedback.
+**Action Items**:
+- Implement basic telemetry to track:
+  - Which skill runs triggered advice queries.
+  - Which KH rules were injected.
+  - Frequency of advice displays.
+  - User engagement: Did they follow up, or turn off `/tips`?
+  - Advice duplication rates.
+  - $p95$ Latency impact of the retrieval process.
+- Establish metrics for **Trigger Precision** (was the hint appropriate) and **Advice Usefulness**.
+
+***
+
+### Stage 1: Mandatory Know-Hows (KH) Injection ✅ IMPLEMENTED
+
+Leverage the 4 newly consolidated Know-How guides to establish a "hard constraint" preflight check.
+
+**Action Items**:
+- Develop a `PreflightContextInjector` that runs *before* tool execution.
+- Map domains/tasks to specific KH docs (e.g., mapping any differential expression task to `KH-bulk-rnaseq-differential-expression.md`).
+- Implement system prompt appending:
+  `[SYSTEM CONTENT MODIFICATION]: You must follow these strict scientific constraints for the current task: {KH_CONTENT}`
+- This guarantees the AI respects rules like "use padj, not pvalue" or "check duplicates & missing values >20%" unconditionally.
+
+***
+
+### Stage 2: Unified Advisory Event Schema ✅ IMPLEMENTED
+
+The knowledge system cannot trigger reliably on unstructured free-text skill outputs.
+
+**Action Items**:
+- Standardize a `dict` or `Pydantic` schema that *every* skill returns when finishing or throwing an error.
+- Example structure to emit:
+  ```json
+  {
+    "skill": "sc-filter",
+    "phase": "post_run",  // before_run, post_run, on_warning, on_error
+    "domain": "singlecell",
+    "toolchain": "scanpy",
+    "signals": ["qc.high_mt_pct", "filter.overaggressive"],
+    "severity": "warning",
+    "metrics": {
+      "median_mt_pct": 18.4,
+      "cells_removed_pct": 47.2
+    }
+  }
+  ```
+- *Rollout Strategy*: Start by modifying just 10-15 high-frequency skills to emit these signals, specifically focusing on `on_warning` and `on_error` phases.
+
+***
+
+### Stage 3: Canonical Knowledge Registry ✅ IMPLEMENTED
+
+We must establish a single source of truth mapping skills/signals to documentation, avoiding the double-maintenance trap.
+
+**Action Items**:
+- Choose **one** canonical approach. Instead of a separate `skill_map.yaml`, mandate strict YAML frontmatter metadata inside the markdown documents as the sole truth source.
+- Standard Metadata Schema:
+  ```yaml
+  doc_id: sc-mt-filtering-best-practices
+  title: Mitochondrial Filtering Best Practices
+  doc_type: decision_guide
+  domains: [singlecell, spatial]
+  related_skills: [sc-qc, sc-filter, sc-preprocessing]
+  phases: [post_run, on_warning]
+  signals: [qc.high_mt_pct]
+  search_terms: [mitochondrial threshold, mt percent, qc cutoff]
+  audience: [basic, expert]
+  priority: 0.8
+  ```
+- Build an inverted index at system startup mapping `skill -> phases/signals -> doc_ids` to ensure fast lookups.
+
+***
+
+### Stage 4: Deterministic Knowledge Resolver ✅ IMPLEMENTED
+
+Replace LLM "guesswork" with a hardcoded logic pipeline that curates what the LLM will see.
+
+**Action Items**:
+- **Routing First, Retrieval Second**: Given an Advisory Event (Stage 2), look up candidate `doc_ids` matching the `related_skills` + `phases` + `signals`.
+- **Ranking**: Apply FTS5/query terms to rank *only* those candidates.
+- **Session Deduplication (Crucial)**: Keep a cache of shown `doc_ids` (and injected KHs) per session ID. Suppress or heavily penalize heavily repeated advice unless the severity level escalates.
+- Output: Pass only 1-2 highly relevant, short snippets to the LLM contextual prompt.
+
+***
+
+### Stage 5: Inline Presentation UX (`/tips`) ✅ IMPLEMENTED
+
+Integrate the curated knowledge smoothly into user interactions contexts.
+
+**Action Items**:
+- Implement `/tips on|off` and optionally `/tips level [basic|expert]`.
+- Enforce **Channel Differences** in the presentation layer:
+  - **CLI (Terminal)**: Output a distinct, concise `Advice:` block containing bullet points and one-line rationales (to avoid scrolling fatigue).
+  - **Bot (Telegram/Feishu)**: Have the LLM synthesize the snippet gracefully into a 1-2 sentence conversational hint at the end of the skill report.
+  - **Explicit `/guide`**: Returns full paragraphs and extensive context.
+
+***
+
+### Stage 6: Risk-Driven Content Program (Coverage) — PENDING
+
+Fill knowledge base gaps based on operational necessity, not arbitrary domain symmetry.
+
+**Action Items**:
+- Analyze output telemetry (Stage 0) over time to identify what fails most often or causes the most confusion.
+- **Prioritize creating docs for**:
+  1. Threshold/Parameter decisions (e.g., QC cutoffs, DE parameters).
+  2. High-frequency warnings, failures, or blank outputs.
+  3. Conceptually complex interpretation gaps (e.g., over-reading cell annotations).
+- Avoid copy-pasting code definitions from `SKILL.md`. Focus purely on *why* and *what if*.
+
+***
+
+### Stage 7: Search & Retrieval Polish — PENDING
+
+Now that candidates are highly targeted, polish the FTS5 retrieval.
+
+**Action Items**:
+- **Split Corpus**: Ensure code files (Py/R scripts) don't bleed into standard "guidance" searches unless explicitly in full-implementation queries.
+- **Field Weighting**: Weight title > explicit search_terms > headings > body text.
+- **Synonym Expansion**: Add minimal runtime mapping before querying (e.g., `batch correction` -> `combat` & `harmony`).
+
+---
+
+## 4. Recommended Rollout Summary
+
+1. **Milestone Reached**: Knowledge Base Modular Restructuring (Section 1 - Completed, 28 workflows, 4 Know-Hows).
+2. **Foundations**: Telemetry (Stage 0), Mandatory Know-How Injection (Stage 1).
+3. **Core Wiring**: Event Schema (Stage 2), Canonical Metadata Frontmatter (Stage 3).
+4. **Orchestration**: The Resolver Engine & Session Dedupe (Stage 4).
+5. **User Experience**: The `/tips` toggle & Channel integrations (Stage 5).
+6. **Maintenance Phase**: Risk-driven content gap filling (Stage 6) & Advanced Search (Stage 7).

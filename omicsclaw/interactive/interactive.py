@@ -147,20 +147,66 @@ def print_banner(
 # ---------------------------------------------------------------------------
 
 def _make_completer() -> "Completer":
-    class _SlashCompleter(Completer):
-        def get_completions(self, document, complete_event):
+    from prompt_toolkit.completion import Completer, Completion, PathCompleter
+    from prompt_toolkit.document import Document
+
+    class _OmniCompleter(Completer):
+        def __init__(self):
+            self.path_completer = PathCompleter(expanduser=True)
+            self._skills_cache = None
+
+        def get_completions(self, document: Document, complete_event):
             text = document.text_before_cursor
-            if not text.startswith("/"):
+
+            # 1. Slash commands
+            if text.startswith("/") and " " not in text.strip():
+                for cmd, desc in SLASH_COMMANDS:
+                    if cmd.startswith(text):
+                        yield Completion(
+                            cmd,
+                            start_position=-len(text),
+                            display=f"{cmd:<20}",
+                            display_meta=desc,
+                        )
                 return
-            for cmd, desc in SLASH_COMMANDS:
-                if cmd.startswith(text):
-                    yield Completion(
-                        cmd,
-                        start_position=-len(text),
-                        display=f"{cmd:<30}",
-                        display_meta=desc,
-                    )
-    return _SlashCompleter()
+
+            # 2. Skill completion for /run <skill>
+            if text.startswith("/run "):
+                skill_prefix = text[len("/run "):].lstrip()
+                if " " not in skill_prefix:
+                    if self._skills_cache is None:
+                        try:
+                            from omicsclaw.core.registry import registry
+                            if not getattr(registry, "_loaded", False):
+                                registry.load_all()
+                            self._skills_cache = list(registry.skills.keys())
+                        except Exception:
+                            self._skills_cache = []
+                    for s in self._skills_cache:
+                        if s.startswith(skill_prefix):
+                            yield Completion(
+                                s,
+                                start_position=-len(skill_prefix),
+                                display_meta="OmicsClaw Skill"
+                            )
+
+            # 3. File path completion
+            words = text.split(" ")
+            last_word = words[-1]
+            if last_word.startswith("./") or last_word.startswith("/") or last_word.startswith("~/"):
+                path_doc = Document(text=last_word, cursor_position=len(last_word))
+                try:
+                    for comp in self.path_completer.get_completions(path_doc, complete_event):
+                        yield Completion(
+                            comp.text,
+                            start_position=-len(last_word),
+                            display=comp.display,
+                            display_meta="File Path"
+                        )
+                except Exception:
+                    pass
+
+    return _OmniCompleter()
 
 
 _COMPLETION_STYLE = PtStyle.from_dict({
@@ -236,8 +282,12 @@ def _handle_run(arg: str) -> str:
             )
         if result.get("success"):
             console.print(f"[green]✓ Skill '{skill}' completed in {result.get('duration_seconds', 0):.1f}s[/green]")
+            if result.get("method"):
+                console.print(f"  [dim]Method:[/dim] {result['method']}")
             if result.get("output_dir"):
                 console.print(f"  [dim]Output:[/dim] {result['output_dir']}")
+            if result.get("readme_path"):
+                console.print(f"  [dim]Guide:[/dim]  {result['readme_path']}")
             if result.get("stdout"):
                 console.print(result["stdout"])
             return f"Skill '{skill}' completed successfully. Output in: {result.get('output_dir', '?')}"
@@ -439,46 +489,6 @@ def _handle_mcp(arg: str) -> None:
         console.print("[dim]Available: /mcp list | /mcp add <name> <cmd> | /mcp remove <name>[/dim]")
 
 
-def _handle_guide(arg: str) -> str | None:
-    """Handle /guide command — return a prompt to inject into the LLM conversation.
-
-    /guide               → interactive guidance mode (ask LLM to guide user)
-    /guide <topic>       → query knowledge base for a specific topic
-    /guide workflow <d>  → show workflow for a domain
-    """
-    arg = arg.strip()
-
-    if not arg:
-        # Interactive guidance mode
-        console.print("[bold cyan]Knowledge Advisor[/bold cyan] — Let me help you plan your analysis.\n")
-        return (
-            "[GUIDE MODE] The user needs analysis guidance. "
-            "Use consult_knowledge to find relevant decision guides and workflows. "
-            "Then guide them step-by-step: ask about their data type, research question, "
-            "and experience level. Recommend a concrete analysis plan with skill names "
-            "and commands they can run."
-        )
-
-    tokens = arg.split(None, 1)
-
-    if tokens[0].lower() == "workflow" and len(tokens) > 1:
-        domain = tokens[1].strip().lower()
-        console.print(f"[bold cyan]Knowledge Advisor[/bold cyan] — Workflow for [yellow]{domain}[/yellow]\n")
-        return (
-            f"[GUIDE MODE] The user wants to see the recommended analysis workflow "
-            f"for the '{domain}' domain. Use consult_knowledge with "
-            f"domain='{domain}' and category='workflow' to find relevant workflows. "
-            f"Present a clear step-by-step pipeline with skill names and commands."
-        )
-
-    # Topic query
-    topic = arg
-    console.print(f"[bold cyan]Knowledge Advisor[/bold cyan] — Searching: [yellow]{topic}[/yellow]\n")
-    return (
-        f"[GUIDE MODE] The user is asking about: {topic}. "
-        f"Use consult_knowledge to search for relevant knowledge base entries about '{topic}'. "
-        f"Present the most relevant guidance concisely with actionable recommendations."
-    )
 
 
 def _handle_config(arg: str) -> None:
@@ -936,6 +946,11 @@ def _init_llm(config: dict) -> tuple[str, str]:
 
         import logging
         logging.getLogger("omicsclaw.bot").setLevel(logging.WARNING)
+        # Suppress verbose loggers in CLI mode to make output cleaner
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("omicsclaw.memory").setLevel(logging.WARNING)
+        logging.getLogger("omicsclaw.memory.snapshot").setLevel(logging.WARNING)
 
         core.init(
             api_key=api_key,
@@ -981,6 +996,12 @@ async def _stream_llm_response(messages: list[dict]) -> str:
         usage_before = core.get_usage_snapshot()
 
         import json
+        from rich.live import Live
+        from rich.markdown import Markdown
+
+        streamed_content = ""
+        live_markdown = None
+
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots") as status:
             def sync_on_tool_call(tool_name: str, args: dict):
                 status.update(f"[cyan]Running {tool_name}...[/cyan]")
@@ -989,24 +1010,44 @@ async def _stream_llm_response(messages: list[dict]) -> str:
                 
             def sync_on_tool_result(tool_name: str, result: str):
                 status.update("[cyan]Thinking...[/cyan]")
-                result_preview = str(result)[:80].replace("\n", " ") + ("..." if len(str(result)) > 80 else "")
+                result_text = str(result)
+                if tool_name == "inspect_data":
+                    marker = "### Method Suitability & Parameter Preview"
+                    pos = result_text.find(marker)
+                    if pos >= 0:
+                        result_text = result_text[pos:]
+                result_preview = result_text[:220].replace("\n", " ") + ("..." if len(result_text) > 220 else "")
                 console.print(f"  [dim]↳ ✓ [green]Result:[/green] {result_preview}[/dim]")
 
-            # llm_tool_loop returns the final assistant reply as a plain string.
-            # Pass user_id and platform so the graph memory system is activated
-            # (core.py gates memory load/save on these being non-empty).
-            final_text = await core.llm_tool_loop(
-                _INTERACTIVE_USER,
-                user_text,
-                user_id="cli_user",
-                platform="cli",
-                on_tool_call=sync_on_tool_call,
-                on_tool_result=sync_on_tool_result,
-            )
+            async def sync_on_stream_content(chunk: str):
+                nonlocal streamed_content, live_markdown
+                if not streamed_content:
+                    # First chunk arrives -> Stop "Thinking" spinner to print clean text
+                    status.stop()
+                    console.print()
+                    live_markdown = Live(Markdown(""), console=console, refresh_per_second=15, transient=False)
+                    live_markdown.start()
+                
+                streamed_content += chunk
+                live_markdown.update(Markdown(streamed_content))
 
-        # Print the response using Markdown rendering
-        if final_text:
-            from rich.markdown import Markdown
+            try:
+                final_text = await core.llm_tool_loop(
+                    _INTERACTIVE_USER,
+                    user_text,
+                    user_id="cli_user",
+                    platform="cli",
+                    on_tool_call=sync_on_tool_call,
+                    on_tool_result=sync_on_tool_result,
+                    on_stream_content=sync_on_stream_content,
+                )
+            finally:
+                if live_markdown:
+                    live_markdown.stop()
+
+        # Fallback if streaming failed or didn't fire for some reason
+        if final_text and not streamed_content:
+            console.print()  # Visual break between reasoning outputs and final text
             console.print(Markdown(final_text))
 
         # Display per-turn usage statistics (inspired by EvoScientist)
@@ -1091,6 +1132,15 @@ async def _async_interactive_loop(
         resolved_model = model
     if provider:
         resolved_provider = provider
+
+    # Quiet noisy loggers in interactive mode to prevent analysis logs from
+    # flooding the terminal.  Override with OMICSCLAW_LOG_LEVEL=INFO.
+    _cli_log_level = os.environ.get("OMICSCLAW_LOG_LEVEL", "WARNING").upper()
+    for noisy in (
+        "omicsclaw.bot", "omicsclaw.knowledge", "omicsclaw.core",
+        "omicsclaw.memory", "httpx", "httpcore", "openai",
+    ):
+        logging.getLogger(noisy).setLevel(getattr(logging, _cli_log_level, logging.WARNING))
 
     # Initialise session
     effective_session_id = session_id or generate_session_id()
@@ -1250,6 +1300,18 @@ async def _async_interactive_loop(
                 _print_separator()
                 continue
 
+            elif low == "/export":
+                from ._session import export_conversation_to_markdown
+                try:
+                    export_dir = Path(state["workspace_dir"]) / "exports"
+                    export_path = export_dir / f"omicsclaw_session_{state['session_id']}.md"
+                    export_conversation_to_markdown(state["session_id"], state["messages"], export_path)
+                    console.print(f"[green]✓ Session exported to:[/green] [cyan]{export_path}[/cyan]")
+                except Exception as e:
+                    console.print(f"[red]Error exporting session: {e}[/red]")
+                _print_separator()
+                continue
+
             elif low.startswith("/mcp"):
                 arg = user_input[len("/mcp"):].strip()
                 _handle_mcp(arg)
@@ -1264,23 +1326,43 @@ async def _async_interactive_loop(
                 _print_separator()
                 continue
 
-            elif low.startswith("/guide"):
-                arg = user_input[len("/guide"):].strip()
-                guide_prompt = _handle_guide(arg)
-                if guide_prompt:
-                    # Inject as a guided LLM turn
-                    state["messages"].append({"role": "user", "content": guide_prompt})
-                    console.print()
-                    response = await _stream_llm_response(state["messages"])
-                    await save_session(
-                        state["session_id"],
-                        state["messages"],
-                        model=resolved_model,
-                        workspace=state["workspace_dir"],
-                    )
-                    console.print()
+            elif low.startswith("/tips"):
+                arg = user_input[len("/tips"):].strip().lower()
+                if arg in ("on", ""):
+                    state["tips_enabled"] = True
+                    console.print("[green]💡 Inline knowledge tips: ON[/green]")
+                    try:
+                        from omicsclaw.knowledge.telemetry import get_telemetry
+                        get_telemetry().log_tips_toggle(state["session_id"], True, state.get("tips_level", "basic"))
+                    except Exception:
+                        pass
+                elif arg == "off":
+                    state["tips_enabled"] = False
+                    console.print("[dim]💡 Inline knowledge tips: OFF[/dim]")
+                    try:
+                        from omicsclaw.knowledge.telemetry import get_telemetry
+                        get_telemetry().log_tips_toggle(state["session_id"], False, state.get("tips_level", "basic"))
+                    except Exception:
+                        pass
+                elif arg.startswith("level"):
+                    level = arg[len("level"):].strip()
+                    if level in ("basic", "expert"):
+                        state["tips_level"] = level
+                        console.print(f"[cyan]💡 Tips level set to: {level}[/cyan]")
+                    else:
+                        console.print("[yellow]Usage: /tips level [basic|expert][/yellow]")
+                else:
+                    status = "ON" if state.get("tips_enabled", True) else "OFF"
+                    level = state.get("tips_level", "basic")
+                    console.print(f"[dim]💡 Tips: {status} (level: {level})[/dim]")
+                    console.print("[dim]  /tips on     — enable inline knowledge tips[/dim]")
+                    console.print("[dim]  /tips off    — disable tips[/dim]")
+                    console.print("[dim]  /tips level basic|expert — set detail level[/dim]")
+                console.print()
                 _print_separator()
                 continue
+
+
 
             elif low.startswith("/install-skill"):
                 arg = user_input[len("/install-skill"):].strip()
@@ -1312,10 +1394,12 @@ async def _async_interactive_loop(
 
             console.print()
             _print_separator()
+            # console.print()  # breathing room before next prompt
 
         except KeyboardInterrupt:
-            console.print("\n[dim]Interrupted. Type /exit to quit.[/dim]")
-            _print_separator()
+            console.print("\n[dim]Goodbye! See you next time.[/dim]")
+            state["running"] = False
+            break
         except EOFError:
             console.print("\n[dim]Goodbye![/dim]")
             state["running"] = False

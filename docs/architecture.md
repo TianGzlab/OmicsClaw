@@ -40,8 +40,8 @@ OmicsClaw/
 │   └── catalog.json          # Auto-generated skill index
 ├── bot/                      # Messaging interfaces
 │   ├── core.py               # LLM engine + tool loop
-│   ├── telegram_bot.py       # Telegram frontend
-│   └── feishu_bot.py         # Feishu frontend
+│   ├── run.py                # Unified bot runner
+│   └── channels/             # Channel implementations
 ├── docs/                     # Documentation
 ├── examples/                 # Demo datasets
 ├── scripts/                  # Utility scripts
@@ -162,7 +162,7 @@ OmicsClaw includes messaging bot interfaces for Telegram and Feishu:
 ```
 User Message
      ↓
-Bot Frontend (telegram_bot.py / feishu_bot.py)
+Bot Frontend (bot/run.py + channels)
      ↓
 bot/core.py (LLM tool loop)
      ↓
@@ -174,8 +174,8 @@ Results delivered via messaging
 **Components:**
 
 - **core.py** - Platform-agnostic LLM engine, tool execution, security, audit logging
-- **telegram_bot.py** - Telegram handlers, rate limiting, media processing
-- **feishu_bot.py** - Feishu WebSocket, rich-text parsing, group chat filtering
+- **run.py** - Unified bot runner
+- **channels/** - Platform implementations (telegram, feishu, etc.)
 - **SOUL.md** - Bot persona definition
 
 Both frontends delegate to `core.llm_tool_loop()` which executes skills as subprocesses and returns results for delivery.

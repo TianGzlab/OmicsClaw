@@ -6,18 +6,92 @@ description: >-
 version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spagcn, stagate, graphst, banksy]
+tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spagcn, stagate, graphst, banksy, cellcharter]
 metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
+      - "--auto-k"
+      - "--auto-k-min"
+      - "--auto-k-max"
+      - "--dim-output"
+      - "--epochs"
+      - "--k-nn"
       - "--lambda-param"
       - "--method"
       - "--n-domains"
+      - "--n-layers"
+      - "--num-neighbours"
+      - "--pre-resolution"
       - "--rad-cutoff"
       - "--refine"
       - "--resolution"
+      - "--spagcn-p"
       - "--spatial-weight"
+      - "--stagate-alpha"
+      - "--use-rep"
+    param_hints:
+      leiden:
+        priority: "resolution → spatial_weight"
+        params: ["resolution", "spatial_weight"]
+        defaults: {resolution: 1.0, spatial_weight: 0.3}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--resolution: Clustering granularity (default 1.0)."
+          - "--spatial-weight: Spatial graph influence (default 0.3)."
+      louvain:
+        priority: "resolution → spatial_weight"
+        params: ["resolution", "spatial_weight"]
+        defaults: {resolution: 1.0, spatial_weight: 0.3}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--resolution: Clustering granularity (default 1.0)."
+          - "--spatial-weight: Spatial graph influence (default 0.3)."
+      spagcn:
+        priority: "spagcn_p → n_domains → epochs"
+        params: ["n_domains", "epochs", "spagcn_p"]
+        defaults: {n_domains: 7, epochs: 200, spagcn_p: 0.5}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--spagcn-p: Spatial neighborhood contribution (default 0.5)."
+          - "--n-domains: Target cluster count."
+          - "--epochs: Training loops (default 200)."
+      stagate:
+        priority: "rad_cutoff/k_nn → stagate_alpha → epochs"
+        params: ["n_domains", "epochs", "k_nn", "rad_cutoff", "stagate_alpha", "pre_resolution"]
+        defaults: {n_domains: 7, epochs: 200, k_nn: 6, rad_cutoff: 120.0, stagate_alpha: 0.0, pre_resolution: 0.2}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--rad-cutoff / --k-nn: Spatial network. Varies by platform (Visium~150, Slide-seq~50)."
+          - "--stagate-alpha: Cell type-aware module weight (0=disabled)."
+          - "--epochs: Training epochs."
+      graphst:
+        priority: "epochs → dim_output → n_domains"
+        params: ["n_domains", "epochs", "dim_output"]
+        defaults: {n_domains: 7, epochs: 100, dim_output: 64}
+        requires: ["obsm.spatial", "raw_or_counts"]
+        tips:
+          - "--epochs: Default ~600 in official code. Lower to 50-100 for large datasets (>30k spots)."
+          - "--dim-output: Embedding dimension (default 64). Increase for complex tissues."
+          - "--n-domains: Target cluster count."
+      banksy:
+        priority: "lambda_param → num_neighbours → resolution"
+        params: ["n_domains", "resolution", "lambda_param", "num_neighbours"]
+        defaults: {n_domains: 7, resolution: 1.0, lambda_param: 0.2, num_neighbours: 15}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--lambda-param: 0.2 for cell-typing, 0.8 for domain-finding."
+          - "--num-neighbours: Spatial geometry k_geom (default 15)."
+          - "--resolution / --n-domains: Clustering granularity."
+      cellcharter:
+        priority: "n_domains/auto_k → n_layers → use_rep"
+        params: ["n_domains", "auto_k", "n_layers", "use_rep", "auto_k_min", "auto_k_max"]
+        defaults: {n_domains: 7, n_layers: 3, auto_k: false}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--n-layers: Number of spatial hops for feature aggregation (default 3)."
+          - "--auto-k: Enable automatic discovery of the most stable cluster count."
+          - "--use-rep: Feature representation to use (defaults to X_pca or X)."
     legacy_aliases: [domains]
     saves_h5ad: true
     requires:
@@ -41,6 +115,7 @@ metadata:
       - niche
       - SpaGCN
       - STAGATE
+      - CellCharter
 ---
 
 # 🗺️ Spatial Domains
@@ -61,9 +136,10 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 4. **STAGATE**: Graph attention auto-encoder (requires PyTorch Geometric)
 5. **GraphST**: Self-supervised contrastive learning (requires PyTorch)
 6. **BANKSY**: Explicit spatial feature augmentation (interpretable)
-7. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
-8. **Domain summary statistics**: Cell counts and proportions per domain
-9. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
+7. **CellCharter**: Neighborhood-aggregated GMM clustering with auto-K selection
+8. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
+9. **Domain summary statistics**: Cell counts and proportions per domain
+10. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
 
 ## Input Formats
 
@@ -101,6 +177,7 @@ automatically selects the correct data layer for each method:
 | **STAGATE** | `X` (log-normalized, HVG subset) | Auto-filters to `var["highly_variable"]` before training | Spatial coords for radius-based adjacency |
 | **GraphST** | `raw.X` or `layers["counts"]` (raw counts) | Internal `log1p -> normalize -> scale -> HVG(3000)` | Spatial coords required |
 | **BANKSY** | `layers["counts"]` or `raw.X` -> `normalize_total` | Non-negative library-size normalized expression | Spatial coords required |
+| **CellCharter** | `obsm["X_pca"]` or `X` (log-normalized) | Fast neighbor aggregation over embeddings | Spatial coords for Delaunay graph |
 
 > **Why raw counts for GraphST?** GraphST's `preprocess()` internally does
 > `log1p` + `normalize_total` + `scale` + HVG selection. Passing already
@@ -148,6 +225,9 @@ oc run spatial-domains \
 
 oc run spatial-domains \
   --input <preprocessed.h5ad> --method banksy --resolution 0.7 --n-domains 7 --output <dir>
+
+oc run spatial-domains \
+  --input <preprocessed.h5ad> --method cellcharter --auto-k --auto-k-min 4 --auto-k-max 12 --output <dir>
 
 # Apply spatial refinement
 oc run spatial-domains \
@@ -247,6 +327,23 @@ python omicsclaw.py run spatial-domains --demo
 > as it introduces negative values that distort BANKSY's neighborhood feature
 > aggregation. See [prabhakarlab/Banksy](https://github.com/prabhakarlab/Banksy).
 
+### CellCharter
+
+1. **Input**: AnnData with spatial coordinates and pre-computed embeddings (preferably `adata.obsm["X_pca"]`).
+2. **Spatial Graph**: Constructs a cell-proximity network using Delaunay triangulation. Spurious long-range links are proactively removed (via 99th-percentile edge length thresholding).
+3. **Neighborhood Aggregation**: Concatenates each cell's intrinsic features with the mean-aggregated features from its 1-hop, 2-hop, ..., up to `n_layers` (default 3) spatial neighbors.
+4. **Clustering**: 
+   - **Fixed mode**: Standard Gaussian Mixture Model (GMM) initialization.
+   - **Auto-K mode** (`--auto-k`): Performs stability analysis across multiple cluster counts to identify the optimal `n_domains`.
+5. **Labels**: Stored in `adata.obs["spatial_domain"]`
+
+**Key parameters**:
+- `n_domains`: Target number of domains (ignored if `--auto-k` is true)
+- `auto_k`: Enable stability analysis for optimal cluster count
+- `n_layers`: Number of spatial neighborhood hops to aggregate (default 3)
+- `use_rep`: Feature representation to use (defaults to `X_pca`)
+- Source: Marco et al., *Nature Genetics* 2024
+
 ### Spatial Refinement (optional)
 
 1. **KNN smoothing**: For each spot, find k nearest spatial neighbors
@@ -295,6 +392,7 @@ output_dir/
 - `STAGATE_pyG` — graph attention auto-encoder domains (requires PyTorch)
 - `GraphST` — graph self-supervised contrastive learning (requires PyTorch)
 - `banksy` — spatial feature augmentation
+- `cellcharter` — neighborhood-aggregated clustering and Auto-K selection
 - `louvain` — Louvain clustering algorithm
 
 ## Safety
@@ -324,3 +422,4 @@ output_dir/
 - [STAGATE](https://doi.org/10.1038/s41467-022-29439-6) — Dong & Zhang, *Nature Communications* 2022
 - [GraphST](https://doi.org/10.1038/s41467-023-36796-3) — Long et al., *Nature Communications* 2023
 - [BANKSY](https://github.com/prabhakarlab/Banksy) — Singhal et al., scalable spatial domain detection
+- [CellCharter](https://doi.org/10.1038/s41588-023-01588-4) — Marco et al., *Nature Genetics* 2024

@@ -1,9 +1,7 @@
 """
 Telegram channel implementation for OmicsClaw.
 
-Extracts the platform-specific logic from bot/telegram_bot.py into a
-reusable Channel subclass. The original telegram_bot.py becomes a thin
-launcher that creates a TelegramChannel and runs it.
+Extracts the platform-specific logic into a reusable Channel subclass.
 
 This follows the EvoScientist Multi-Channel pattern where each platform
 is a Channel subclass with start/stop/_send_chunk lifecycle.

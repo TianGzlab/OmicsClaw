@@ -83,6 +83,7 @@ _CATEGORY_MAP: dict[str, str] = {
     "08_statistical_methods": "statistics",
     "09_tool_setup": "tool-setup",
     "10_domain_knowledge": "domain-knowledge",
+    "knowhows": "knowhow",
     "scripts": "reference-script",
 }
 

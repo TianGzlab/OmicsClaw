@@ -526,10 +526,6 @@ IMESSAGE_REGION=US                          # Optional: phone number region
 ## Usage
 
 ```bash
-# Single-channel (traditional, backward-compatible)
-python bot/telegram_bot.py
-python bot/feishu_bot.py
-
 # Multi-channel runner (runs any combination in one process)
 python -m bot.run --channels telegram
 python -m bot.run --channels feishu

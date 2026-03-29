@@ -114,6 +114,7 @@ class OmicsRegistry:
                         "legacy_aliases": lazy.legacy_aliases or [],
                         "saves_h5ad": lazy.saves_h5ad,
                         "requires_preprocessed": lazy.requires_preprocessed,
+                        "param_hints": lazy.param_hints,
                     }
                 else:
                     # No SKILL.md or empty — minimal dynamic entry

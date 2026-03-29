@@ -282,18 +282,18 @@ SpatialClaw includes dual-channel bot frontends in `bot/`:
 | Component | File | Purpose |
 |---|---|---|
 | Shared core | `bot/core.py` | LLM tool-use loop, skill execution, security, audit |
-| Telegram | `bot/telegram_bot.py` | Telegram frontend (python-telegram-bot) |
-| Feishu | `bot/feishu_bot.py` | Feishu frontend (lark-oapi WebSocket) |
+| Telegram | `bot/channels/telegram.py` | Telegram frontend (python-telegram-bot) |
+| Feishu | `bot/channels/feishu.py` | Feishu frontend (lark-oapi WebSocket) |
 | Persona | `SOUL.md` | OmicsBot persona (inspired by ClawBio) |
 
 ### Running the bots
 
 ```bash
 # Telegram bot
-python bot/telegram_bot.py
+python -m bot.run --channels telegram
 
 # Feishu bot
-python bot/feishu_bot.py
+python -m bot.run --channels feishu
 
 # Or via Makefile
 make bot-telegram
@@ -325,17 +325,17 @@ SpatialClaw includes dual-channel messaging bot frontends. Both share a common L
 
 | User Intent | Component | Action |
 |---|---|---|
-| Telegram bot, chat interface, messaging | `bot/telegram_bot.py` | Run `python bot/telegram_bot.py` |
-| Feishu bot, Lark bot, 飞书机器人 | `bot/feishu_bot.py` | Run `python bot/feishu_bot.py` |
+| Telegram bot, chat interface, messaging | `bot/channels/telegram.py` | Run `python -m bot.run --channels telegram` |
+| Feishu bot, Lark bot, 飞书机器人 | `bot/channels/feishu.py` | Run `python -m bot.run --channels feishu` |
 
 ### Bot Commands
 
 ```bash
 # Start Telegram bot
-python bot/telegram_bot.py
+python -m bot.run --channels telegram
 
 # Start Feishu bot
-python bot/feishu_bot.py
+python -m bot.run --channels feishu
 
 # Or via Makefile
 make bot-telegram

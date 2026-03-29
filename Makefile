@@ -94,10 +94,10 @@ demo-bulkrna:
 ## ── Bot targets ─────────────────────────────────────────────────────────────
 
 bot-telegram:
-	python bot/telegram_bot.py
+	python -m bot.run --channels telegram
 
 bot-feishu:
-	python bot/feishu_bot.py
+	python -m bot.run --channels feishu
 
 # Multi-channel runner (runs multiple channels in one process)
 # Usage: make bot-multi CHANNELS=telegram,feishu

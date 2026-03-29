@@ -276,3 +276,28 @@ def format_relative_time(iso_ts: str | None) -> str:
         return f"{months}mo ago"
     except (ValueError, TypeError):
         return ""
+
+
+def export_conversation_to_markdown(session_id: str, messages: list[dict], out_path: Path) -> None:
+    """Export the conversation to a formatted Markdown report."""
+    lines = [
+        f"# OmicsClaw Analysis Report",
+        f"**Session ID:** `{session_id}`",
+        f"**Exported:** `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n\n---"
+    ]
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "user":
+            if isinstance(content, list):
+                parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                content = " ".join(parts)
+            lines.append(f"\n### 👤 User\n{content}\n")
+        elif role == "assistant":
+            if not content and msg.get("tool_calls"):
+                continue
+            if content:
+                lines.append(f"\n### 🤖 OmicsClaw\n{content}\n")
+                
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines), encoding="utf-8")

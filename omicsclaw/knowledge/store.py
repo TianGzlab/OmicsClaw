@@ -172,6 +172,75 @@ class KnowledgeStore:
     # Search
     # ------------------------------------------------------------------
 
+    # Synonym table for runtime query expansion (Stage 7)
+    _SYNONYMS: dict[str, list[str]] = {
+        # Batch correction methods
+        "batch correction": ["combat", "harmony", "scanorama", "mnn", "bbknn"],
+        "combat": ["batch correction"],
+        "harmony": ["batch correction", "integration"],
+        # Clustering
+        "clustering": ["leiden", "louvain", "cluster"],
+        "leiden": ["clustering"],
+        "louvain": ["clustering"],
+        # Normalization
+        "normalization": ["normalize", "scaling", "scran", "sctransform"],
+        "sctransform": ["normalization", "variance stabilization"],
+        # DE analysis
+        "differential expression": ["deg", "de analysis", "deseq2", "edger"],
+        "deg": ["differential expression", "differentially expressed genes"],
+        "deseq2": ["differential expression", "de analysis"],
+        # Enrichment
+        "enrichment": ["ora", "gsea", "pathway analysis"],
+        "gsea": ["enrichment", "gene set enrichment"],
+        "ora": ["enrichment", "over-representation"],
+        "pathway": ["enrichment", "kegg", "reactome", "go"],
+        # QC
+        "qc": ["quality control", "filtering", "doublet"],
+        "quality control": ["qc", "filtering"],
+        "doublet": ["scrublet", "doubletfinder"],
+        # Dimension reduction
+        "pca": ["dimension reduction", "dimensionality reduction", "embedding"],
+        "umap": ["dimension reduction", "visualization"],
+        "tsne": ["dimension reduction", "visualization"],
+        # Cell annotation
+        "annotation": ["cell type", "celltypist", "marker"],
+        "cell type": ["annotation", "marker genes"],
+        # Trajectory
+        "trajectory": ["pseudotime", "rna velocity", "diffusion map"],
+        "pseudotime": ["trajectory"],
+        # Chinese synonyms
+        "差异表达": ["deg", "differential expression"],
+        "富集分析": ["enrichment", "pathway"],
+        "聚类": ["clustering", "leiden"],
+        "降维": ["dimension reduction", "pca", "umap"],
+        "质控": ["qc", "quality control"],
+        "归一化": ["normalization"],
+        "细胞注释": ["annotation", "cell type"],
+        "轨迹分析": ["trajectory", "pseudotime"],
+    }
+
+    @classmethod
+    def _expand_synonyms(cls, query: str) -> str:
+        """Expand query with synonym terms for better recall."""
+        query_lower = query.lower()
+        additions: list[str] = []
+
+        for term, synonyms in cls._SYNONYMS.items():
+            if term in query_lower:
+                additions.extend(synonyms)
+
+        if additions:
+            # Deduplicate and remove terms already in the query
+            unique = set()
+            for a in additions:
+                if a.lower() not in query_lower:
+                    unique.add(a)
+            if unique:
+                expanded = query + " " + " ".join(unique)
+                return expanded
+
+        return query
+
     @staticmethod
     def _to_fts5_query(query: str) -> tuple[str, str]:
         """Convert free-text into FTS5 MATCH expressions.
@@ -204,10 +273,14 @@ class KnowledgeStore:
     ) -> list[dict]:
         """Full-text search returning ranked chunks.
 
+        Applies synonym expansion (Stage 7) before FTS5 matching.
         Falls back to LIKE search if FTS5 MATCH returns no results.
         """
         self._ensure_schema()
         conn = self._get_conn()
+
+        # Stage 7: Synonym expansion for relaxed query
+        expanded_query = self._expand_synonyms(query)
 
         # Build WHERE filters
         filters = []
@@ -221,7 +294,8 @@ class KnowledgeStore:
         where_clause = (" AND " + " AND ".join(filters)) if filters else ""
 
         # 1. Try FTS5 MATCH — strict (AND) first, then relaxed (OR)
-        strict_q, relaxed_q = self._to_fts5_query(query)
+        strict_q, _ = self._to_fts5_query(query)
+        _, relaxed_q = self._to_fts5_query(expanded_query)
         fts_sql = f"""
             SELECT kc.*, bm25(knowledge_fts, 2.0, 1.5, 1.0, 0.5) AS rank
             FROM knowledge_fts fts

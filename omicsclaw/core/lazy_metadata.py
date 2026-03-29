@@ -37,6 +37,7 @@ class LazySkillMetadata:
                 "legacy_aliases": omicsclaw_meta.get("legacy_aliases", []),
                 "saves_h5ad": omicsclaw_meta.get("saves_h5ad", False),
                 "requires_preprocessed": omicsclaw_meta.get("requires_preprocessed", False),
+                "param_hints": omicsclaw_meta.get("param_hints", {}),
             }
         except yaml.YAMLError:
             self._basic = {}
@@ -84,6 +85,12 @@ class LazySkillMetadata:
     def requires_preprocessed(self) -> bool:
         self._ensure_basic()
         return self._basic.get("requires_preprocessed", False)
+
+    @property
+    def param_hints(self) -> dict:
+        """Method-keyed parameter tuning hints declared in SKILL.md."""
+        self._ensure_basic()
+        return self._basic.get("param_hints", {})
 
     def _load_full(self):
         skill_md = self.path / "SKILL.md"

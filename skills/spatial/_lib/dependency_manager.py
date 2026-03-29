@@ -81,6 +81,10 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
         "banksy", "pip install pybanksy",
         "Spatial domain identification (BANKSY)"
     ),
+    "cellcharter": DependencyInfo(
+        "cellcharter", "pip install cellcharter",
+        "Spatial domain identification and auto-K selection (CellCharter)"
+    ),
     "paste-bio": DependencyInfo(
         "paste", "pip install paste-bio",
         "Probabilistic alignment of spatial transcriptomics (PASTE)"

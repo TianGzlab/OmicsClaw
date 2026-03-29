@@ -85,6 +85,7 @@ spatial-domains = [
     "torch_geometric",                # STAGATE dependency
     "GraphST>=1.1.0",                 # GraphST method
     "POT>=0.9.0",                     # GraphST requires `ot` (Python Optimal Transport)
+    "cellcharter>=0.2.0",             # CellCharter method
 ]
 
 # --------------------------------------------------------------------------- #
@@ -96,6 +97,7 @@ spatial = [
     "scvi-tools>=1.0.0,<2.0",        # Cell2Location, scANVI, VeloVI, scVI
     "GraphST>=1.1.0",                 # spatial-domains: GraphST method
     "torch_geometric",                # spatial-domains: STAGATE dependency
+    "cellcharter>=0.2.0",             # spatial-domains: CellCharter method
     "tangram-sc>=1.0.0",              # spatial-annotate: Tangram method
     "cell2location>=0.1.4",           # spatial-deconv: Cell2Location method
     "flashdeconv>=0.1.0",             # spatial-deconv: FlashDeconv method
