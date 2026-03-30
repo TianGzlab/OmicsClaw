@@ -11,6 +11,13 @@ import pytest
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "spatial_statistics.py"
 
+# Optional heavy dependencies — skip affected tests when not installed
+try:
+    import esda  # noqa: F401
+    _ESDA_AVAILABLE = True
+except ImportError:
+    _ESDA_AVAILABLE = False
+
 
 def _run_skill(output_dir: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
     """Run the spatial-statistics CLI in demo mode."""
@@ -114,6 +121,7 @@ def test_moran_custom_parameters_export_results(tmp_output):
     assert result["data"]["visualization"]["recipe_id"] == "standard-spatial-statistics-gallery"
 
 
+@pytest.mark.skipif(not _ESDA_AVAILABLE, reason="esda not installed")
 def test_getis_ord_exports_local_spot_tables(tmp_output):
     """Local Getis-Ord path should export per-gene and per-spot outputs."""
     out = tmp_output.parent / "stats_getis"
