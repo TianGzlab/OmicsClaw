@@ -4,7 +4,7 @@
 Supports multiple algorithms with distinct strengths:
   - leiden:   Graph-based clustering with spatial-weighted neighbors (default, fast)
   - louvain:  Classic graph-based clustering (requires: pip install louvain)
-  - spagcn:   Spatial Graph Convolutional Network (integrates histology)
+  - spagcn:   Spatial Graph Convolutional Network (coordinate-derived adjacency in the current wrapper)
   - stagate:  Graph attention auto-encoder (PyTorch Geometric)
   - graphst:  Self-supervised contrastive learning (PyTorch)
   - banksy:   Explicit spatial feature augmentation (interpretable)
@@ -395,7 +395,7 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="leiden")
-    parser.add_argument("--n-domains", type=int, default=None, help="Target number of domains (defaults to 7 for GNNs)")
+    parser.add_argument("--n-domains", type=int, default=None, help="Target number of domains (defaults to 7 for GNNs and CellCharter fixed-K mode)")
     parser.add_argument("--epochs", type=int, default=100, help="Max training epochs (for GraphST/SpaGCN/STAGATE)")
     parser.add_argument("--resolution", type=float, default=1.0)
     parser.add_argument("--spatial-weight", type=float, default=0.3)
@@ -442,16 +442,19 @@ def main():
     if args.n_domains is None and args.method in ["spagcn", "stagate", "graphst"]:
         logger.info("Method '%s' strictly requires 'n_domains'. Defaulting to 7.", args.method)
         args.n_domains = 7
+    if args.n_domains is None and args.method == "cellcharter" and not args.auto_k:
+        logger.info("Method '%s' defaults to 'n_domains=7' when auto-k is disabled.", args.method)
+        args.n_domains = 7
 
     # Helpful parameter reminders and current status
     param_tips = {
         "leiden": "1. --resolution (granularity, default 1.0)  2. --spatial-weight (spatial influence, default 0.3)",
         "louvain": "1. --resolution (granularity, default 1.0)  2. --spatial-weight (spatial influence, default 0.3)",
-        "spagcn": "1. --spagcn-p (neighborhood cont, default 0.5)  2. --n-domains (clusters)  3. --epochs (default 200)",
+        "spagcn": "1. --spagcn-p (neighborhood cont, default 0.5)  2. --n-domains (clusters)  3. --epochs (default 100)",
         "stagate": "1. --rad-cutoff / --k-nn (spatial network)  2. --stagate-alpha + --pre-resolution (cell type aware)  3. --epochs",
         "graphst": "1. --epochs (default ~600, lower for huge data)  2. --dim-output (default 64)  3. --n-domains",
         "banksy": "1. --lambda-param (0.2 cell-typing / 0.8 domain-finding)  2. --num-neighbours (k_geom, default 15)  3. --resolution / --n-domains",
-        "cellcharter": "1. --auto-k (automatic best K)  2. --n-domains (if fixed K)  3. --n-layers (default 3)  4. --use-rep (e.g., X_pca)"
+        "cellcharter": "1. --auto-k (automatic best K) or fixed K=7 by default  2. --n-domains (override fixed K)  3. --n-layers (default 3)  4. --use-rep (e.g., X_pca)"
     }
     
     # Collect current parameters specific to the method

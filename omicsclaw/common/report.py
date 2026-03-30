@@ -107,6 +107,7 @@ def write_output_readme(
     description: str = "",
     result_payload: dict[str, Any] | None = None,
     preferred_method: str | None = None,
+    notebook_path: str | Path | None = None,
 ) -> Path:
     """Write a human-friendly ``README.md`` into an analysis output directory."""
     output_dir = Path(output_dir)
@@ -119,6 +120,12 @@ def write_output_readme(
     completed_at = payload.get("completed_at", "")
     report_exists = (output_dir / "report.md").exists()
     readme_path = output_dir / "README.md"
+    notebook_rel = ""
+    if notebook_path:
+        try:
+            notebook_rel = str(Path(notebook_path).resolve().relative_to(output_dir.resolve()))
+        except ValueError:
+            notebook_rel = str(notebook_path)
 
     lines = [
         "# OmicsClaw Output Guide",
@@ -142,6 +149,7 @@ def write_output_readme(
             "",
             f"- {'Open `report.md` for the narrative report.' if report_exists else 'This run did not generate `report.md`; start from `result.json`.'}",
             "- Open `result.json` to inspect structured summary and parameters.",
+            f"- Open `{notebook_rel}` for a code-first walkthrough and rerunnable notebook." if notebook_rel else "- Notebook export is not available for this run.",
             "- Browse `figures/` for plots and `tables/` for tabular outputs when present.",
             "- Use `reproducibility/commands.sh` to rerun with the same settings when available.",
         ]
@@ -150,12 +158,16 @@ def write_output_readme(
     if params:
         lines.extend(["", "## Analysis Method And Parameters", ""])
         for key, value in params.items():
+            if value is None or value == "":
+                continue
             lines.append(f"- `{key}`: {_format_scalar(value)}")
 
     if summary:
         lines.extend(["", "## Key Results", ""])
         for key, value in summary.items():
             if key == "method":
+                continue
+            if value is None or value == "":
                 continue
             lines.append(f"- `{key}`: {_format_scalar(value)}")
 

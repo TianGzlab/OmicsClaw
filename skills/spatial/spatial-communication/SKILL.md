@@ -23,7 +23,29 @@ metadata:
     allowed_extra_flags:
       - "--cell-type-key"
       - "--method"
+      - "--n-perms"
       - "--species"
+    param_hints:
+      liana:
+        priority: "cell_type_key → species"
+        params: ["cell_type_key", "species"]
+        defaults: {cell_type_key: "leiden", species: "human"}
+        requires: ["X_log_normalized"]
+      cellphonedb:
+        priority: "cell_type_key → species → n_perms"
+        params: ["cell_type_key", "species", "n_perms"]
+        defaults: {cell_type_key: "leiden", species: "human", n_perms: 100}
+        requires: ["X_log_normalized"]
+      fastccc:
+        priority: "cell_type_key → species"
+        params: ["cell_type_key", "species"]
+        defaults: {cell_type_key: "leiden", species: "human"}
+        requires: ["X_log_normalized"]
+      cellchat_r:
+        priority: "cell_type_key → species"
+        params: ["cell_type_key", "species"]
+        defaults: {cell_type_key: "leiden", species: "human"}
+        requires: ["X_log_normalized", "Rscript"]
     legacy_aliases: [communication]
     saves_h5ad: true
     requires_preprocessed: true
@@ -38,20 +60,20 @@ metadata:
 
 # 📡 Spatial Communication
 
-You are **Spatial Communication**, a specialised SpatialClaw agent for cell-cell communication analysis in spatial transcriptomics data. Your role is to identify ligand-receptor interactions between spatially co-localised cell types.
+You are **Spatial Communication**, a specialised OmicsClaw agent for cell-cell communication analysis in spatial transcriptomics data. Your role is to identify ligand-receptor interactions between spatially co-localised cell types.
 
 ## Why This Exists
 
 - **Without it**: Users must manually curate L-R databases, compute co-expression scores, and integrate spatial context — days of work
 - **With it**: Automated L-R interaction scoring with spatial awareness in minutes
-- **Why SpatialClaw**: Combines curated L-R databases with spatial proximity, falling back gracefully when optional tools are unavailable
+- **Why OmicsClaw**: Combines curated L-R databases, spatial context, and wrapper-generated output guidance with graceful fallback when optional tools are unavailable
 
 ## Core Capabilities
 
 1. **LIANA+** (default): Multi-method consensus ranking. Uses `adata.X` (log-normalized); reads `adata.raw` for full gene set when available
 2. **CellPhoneDB**: Statistical permutation test for L-R interactions. Uses `adata.X` (log-normalized); do NOT use z-scored matrix
 3. **FastCCC**: FFT-based communication (no permutation, fastest). Uses `adata.X` (log-normalized)
-4. **CellChat (R)**: CellChat via R subprocess with triMean aggregation. Uses `adata.X` (log-normalized); exports centrality scores and pathway-level results
+4. **CellChat (R)**: `cellchat_r` runs CellChat via an R subprocess with triMean aggregation. Uses `adata.X` (log-normalized) and exports pathway-level and centrality summaries
 5. **Pathway-level aggregation**: Groups L-R interactions by cell type pairs for pathway-level statistics
 6. **Signaling role classification**: Classifies each cell type as sender, receiver, or balanced hub
 7. **Centrality metrics** (CellChat): Sender, receiver, mediator, and influencer scores per pathway
@@ -113,11 +135,11 @@ CellChat classifies L-R interactions into three signaling categories from CellCh
 
 ## Workflow
 
-1. **Validate**: Check h5ad input, verify preprocessing and cell type labels
-2. **Build L-R database**: Load curated ligand-receptor pairs for the specified species
-3. **Score interactions**: Compute L-R co-expression scores per cell type pair
-4. **Spatial filter**: Weight by neighborhood enrichment / spatial proximity
-5. **Report**: Write report.md with top interactions, network figure, and tables
+1. **Load**: Read the preprocessed h5ad and verify a usable cell type column is present.
+2. **Validate**: Check the selected method, species, and expression matrix assumptions.
+3. **Score interactions**: Run LIANA, CellPhoneDB, FastCCC, or `cellchat_r` on cell type pairs.
+4. **Spatially contextualize**: Apply neighborhood or proximity-aware weighting when the required spatial structures are available.
+5. **Report and export**: Write `report.md`, `result.json`, `processed.h5ad`, network tables, figures, and the reproducibility bundle.
 
 ## CLI Reference
 
@@ -150,6 +172,11 @@ oc run spatial-communication --input <file> --output <dir>
 oc run spatial-communication --demo
 ```
 
+Every successful standard OmicsClaw wrapper run, including `oc run` and
+conversational skill execution, also writes a top-level `README.md` and
+`reproducibility/analysis_notebook.ipynb` to make the output directory easier
+to inspect and rerun.
+
 ## Example Queries
 
 - "Find ligand-receptor interactions between tumor and stromal spots"
@@ -165,13 +192,14 @@ oc run spatial-communication --demo
 
 **Key parameters**:
 - `--cell-type-key`: obs column with cell type labels (default: leiden)
-- `--species`: human or mouse (default: human)
-- `--method`: builtin or liana (default: builtin)
+- `--species`: `human`, `mouse`, or `zebrafish` (default: `human`)
+- `--method`: `liana`, `cellphonedb`, `fastccc`, or `cellchat_r` (default: `liana`)
 
 ## Output Structure
 
-```
+```text
 output_directory/
+├── README.md
 ├── report.md
 ├── result.json
 ├── processed.h5ad
@@ -187,9 +215,13 @@ output_directory/
 │   ├── cellchat_count_matrix.csv      # (CellChat only) interaction count matrix
 │   └── cellchat_weight_matrix.csv     # (CellChat only) interaction weight matrix
 └── reproducibility/
-    ├── commands.sh
-    └── environment.txt
+    ├── analysis_notebook.ipynb
+    └── commands.sh
 ```
+
+`README.md` and `reproducibility/analysis_notebook.ipynb` are generated by the
+standard OmicsClaw wrapper. Direct script execution usually produces the
+skill-native outputs plus `reproducibility/commands.sh`.
 
 ## Dependencies
 
@@ -211,7 +243,7 @@ output_directory/
 ## Safety
 
 - **Local-first**: No data upload without explicit consent
-- **Disclaimer**: Every report includes the SpatialClaw disclaimer
+- **Disclaimer**: Reports follow the standard OmicsClaw reporting and disclaimer convention
 - **Audit trail**: Log all operations to reproducibility bundle
 
 ## Integration with Spatial Orchestrator

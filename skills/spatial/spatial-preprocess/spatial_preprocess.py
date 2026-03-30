@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Spatial Preprocess — load, QC, normalize, embed, and cluster spatial data.
 
+Current standard pipeline:
+  - Multi-platform loading via OmicsClaw spatial loaders
+  - Scanpy-based QC, normalization, and HVG selection
+  - PCA, neighbors, UMAP, and Leiden clustering
+  - Structured outputs for downstream spatial skills
+
 Usage:
     python spatial_preprocess.py --input <data.h5ad> --output <dir>
     python spatial_preprocess.py --demo --output <dir>
@@ -39,7 +45,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-preprocess"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.4.0"
 
 
 # ---------------------------------------------------------------------------
@@ -100,11 +106,13 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
 
 def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict) -> None:
     """Write report.md, result.json, tables, reproducibility."""
+    method_name = summary.get("method", "scanpy_standard")
     header = generate_report_header(
         title="Spatial Preprocessing Report",
         skill_name=SKILL_NAME,
         input_files=[Path(input_file)] if input_file else None,
         extra_metadata={
+            "Method": method_name,
             "Species": params.get("species", "human"),
             "Data type": params.get("data_type", "generic"),
         },
@@ -112,12 +120,17 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
 
     body_lines = [
         "## Summary\n",
+        f"- **Method**: {method_name}",
         f"- **Raw**: {summary['n_cells_raw']} cells x {summary['n_genes_raw']} genes",
         f"- **After QC**: {summary['n_cells_filtered']} cells x {summary['n_genes_filtered']} genes",
         f"- **HVG selected**: {summary['n_hvg']}",
         f"- **Leiden clusters**: {summary['n_clusters']}",
         f"- **Spatial coordinates**: {'Yes' if summary['has_spatial'] else 'No'}",
+        f"- **Requested PCs**: {params.get('n_pcs', 'N/A')}",
+        f"- **Computed PCs**: {summary.get('n_pcs_computed', 'N/A')}",
+        f"- **Neighbor graph PCs used**: {summary.get('n_pcs_used', 'N/A')}",
         f"- **Suggested PCs**: {summary.get('n_pcs_suggested', 'N/A')}",
+        f"- **Primary Leiden resolution**: {params.get('leiden_resolution', 'N/A')}",
     ]
     if summary.get("tissue_preset"):
         body_lines.append(f"- **Tissue preset**: {summary['tissue_preset']}")
@@ -144,8 +157,14 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     (output_dir / "report.md").write_text(header + "\n".join(body_lines) + "\n" + footer)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, skill=SKILL_NAME, version=SKILL_VERSION,
-                      summary=summary, data={"params": params, **summary}, input_checksum=checksum)
+    write_result_json(
+        output_dir,
+        skill=SKILL_NAME,
+        version=SKILL_VERSION,
+        summary=summary,
+        data={"method": method_name, "params": params, **summary},
+        input_checksum=checksum,
+    )
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
@@ -155,7 +174,10 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_preprocess.py --input <input.h5ad> --output {output_dir}"
+    if input_file:
+        cmd = f"python spatial_preprocess.py --input <input.h5ad> --output {output_dir}"
+    else:
+        cmd = f"python spatial_preprocess.py --demo --output {output_dir}"
     for k, v in params.items():
         cmd += f" --{k.replace('_', '-')} {v}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
@@ -196,12 +218,22 @@ def get_demo_data():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Spatial Preprocess")
+    parser = argparse.ArgumentParser(
+        description="Spatial Preprocess — multi-platform spatial QC, normalization, embedding, and Leiden clustering",
+    )
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--data-type", default="generic")
-    parser.add_argument("--species", default="human")
+    parser.add_argument(
+        "--data-type",
+        default="generic",
+        help="Input platform hint: visium, xenium, slide_seq, merfish, seqfish, or generic",
+    )
+    parser.add_argument(
+        "--species",
+        default="human",
+        help="Species for mitochondrial gene prefix detection (human or mouse)",
+    )
     parser.add_argument("--min-genes", type=int, default=0)
     parser.add_argument("--min-cells", type=int, default=0)
     parser.add_argument("--max-mt-pct", type=float, default=20.0)
@@ -210,10 +242,10 @@ def main():
     parser.add_argument("--tissue", default=None,
                         help="Tissue type for QC presets: pbmc, brain, heart, tumor, "
                              "liver, kidney, lung, gut, skin, muscle")
-    parser.add_argument("--n-top-hvg", type=int, default=2000)
-    parser.add_argument("--n-pcs", type=int, default=30)
-    parser.add_argument("--n-neighbors", type=int, default=15)
-    parser.add_argument("--leiden-resolution", type=float, default=0.5)
+    parser.add_argument("--n-top-hvg", type=int, default=2000, help="Number of highly variable genes to keep")
+    parser.add_argument("--n-pcs", type=int, default=30, help="Requested PCA dimensions before internal clipping")
+    parser.add_argument("--n-neighbors", type=int, default=15, help="Neighbors for graph construction")
+    parser.add_argument("--leiden-resolution", type=float, default=0.5, help="Primary Leiden clustering resolution")
     parser.add_argument("--resolutions", default=None,
                         help="Comma-separated resolutions to explore (e.g., 0.4,0.6,0.8,1.0)")
     args = parser.parse_args()
@@ -223,11 +255,11 @@ def main():
 
     if args.demo:
         adata, input_file = get_demo_data()
-        if args.min_genes == 200:
+        if args.min_genes == 0:
             args.min_genes = 5
         if args.n_top_hvg == 2000:
             args.n_top_hvg = 50
-        if args.n_pcs == 50:
+        if args.n_pcs == 30:
             args.n_pcs = 15
     elif args.input_path:
         adata = load_spatial_data(args.input_path, data_type=args.data_type)
@@ -242,14 +274,21 @@ def main():
         resolutions = [float(r.strip()) for r in args.resolutions.split(",")]
 
     params = {
-        "data_type": args.data_type, "species": args.species,
-        "min_genes": args.min_genes, "min_cells": args.min_cells,
-        "max_mt_pct": args.max_mt_pct, "max_genes": args.max_genes,
-        "tissue": args.tissue,
-        "n_top_hvg": args.n_top_hvg, "n_pcs": args.n_pcs,
+        "data_type": args.data_type,
+        "species": args.species,
+        "min_genes": args.min_genes,
+        "min_cells": args.min_cells,
+        "max_mt_pct": args.max_mt_pct,
+        "max_genes": args.max_genes,
+        "n_top_hvg": args.n_top_hvg,
+        "n_pcs": args.n_pcs,
         "n_neighbors": args.n_neighbors,
         "leiden_resolution": args.leiden_resolution,
     }
+    if args.tissue:
+        params["tissue"] = args.tissue
+    if args.resolutions:
+        params["resolutions"] = args.resolutions
 
     # Run pipeline via _lib
     adata, summary = preprocess(

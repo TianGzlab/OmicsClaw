@@ -8,7 +8,7 @@ license: MIT
 tags: [domain, analysis-type, method]
 metadata:
   omicsclaw:
-    domain: spatial|singlecell|genomics|proteomics|metabolomics
+    domain: spatial|singlecell|genomics|proteomics|metabolomics|bulkrna|orchestrator
     requires:
       bins:
         - python3
@@ -30,6 +30,17 @@ metadata:
     legacy_aliases: [short-alias]
     saves_h5ad: false
     requires_preprocessed: false
+    # Optional but strongly recommended for multi-method skills.
+    # Keep these defaults synced with current CLI/runtime behavior, not just paper defaults.
+    param_hints:
+      method_name:
+        priority: "param_a → param_b"
+        params: ["param_a", "param_b"]
+        defaults: {param_a: 1.0, param_b: 10}
+        requires: ["obsm.spatial"]
+        tips:
+          - "--param-a: First tuning knob to adjust."
+          - "--param-b: Secondary control for stability or granularity."
 ---
 
 # 🔬 Skill Name
@@ -40,13 +51,13 @@ You are **[Skill Name]**, a specialized OmicsClaw agent for [omics domain]. Your
 
 - **Without it**: Users must [painful manual process or complex scripting]
 - **With it**: [Automated outcome in seconds/minutes with standardized output]
-- **Why OmicsClaw**: [What makes this better — grounded in real algorithms/databases/tools]
+- **Why OmicsClaw**: [What makes this better, grounded in actual algorithms, databases, or tooling]
 
 ## Core Capabilities
 
 1. **Capability 1**: [Primary analysis function]
 2. **Capability 2**: [Secondary analysis or validation]
-3. **Capability 3**: [Output generation or integration]
+3. **Capability 3**: [Output generation or downstream integration]
 
 ## Input Formats
 
@@ -59,24 +70,29 @@ You are **[Skill Name]**, a specialized OmicsClaw agent for [omics domain]. Your
 ## Workflow
 
 1. **Load**: Detect input format and load data
-2. **Validate**: Check required fields and data quality
-3. **Process**: [Core computation — algorithm/method used]
-4. **Generate**: Write output files, figures, tables
-5. **Report**: Write `report.md` with findings and reproducibility bundle
+2. **Validate**: Check required fields, structure, and data quality
+3. **Process**: Run the core computation or selected method
+4. **Visualize / Summarize**: Generate figures, tables, or intermediate annotations
+5. **Report**: Write `README.md`, `report.md`, and a reproducibility bundle with rerun artifacts
 
 ## CLI Reference
 
 ```bash
 # Standard usage
+oc run <skill-alias> --input <input_file> --output <report_dir>
+
+# Demo mode
+oc run <skill-alias> --demo --output /tmp/demo
+
+# Optional method-specific example
+oc run <skill-alias> --input <file> --method <method_name> --output <dir>
+
+# Direct script entrypoint
 python skills/<domain>/<skill-name>/<script>.py \
   --input <input_file> --output <report_dir> [--options]
 
-# Demo mode
-python skills/<domain>/<skill-name>/<script>.py --demo --output /tmp/demo
-
-# Via OmicsClaw runner
+# Note: `oc run` and `python omicsclaw.py run` are equivalent entrypoints
 python omicsclaw.py run <skill-alias> --input <file> --output <dir>
-python omicsclaw.py run <skill-alias> --demo
 ```
 
 ## Example Queries
@@ -87,7 +103,11 @@ python omicsclaw.py run <skill-alias> --demo
 
 ## Algorithm / Methodology
 
-1. **Step 1**: [Detailed description with specific function/method]
+Use one subsection per major method if the skill supports multiple backends.
+
+### Method Name (or Default Path)
+
+1. **Step 1**: [Detailed description with specific function or method]
 2. **Step 2**: [Processing step with parameters]
 3. **Step 3**: [Output generation]
 
@@ -95,10 +115,18 @@ python omicsclaw.py run <skill-alias> --demo
 - `parameter_name`: default_value — [purpose and source reference]
 - `another_param`: value — [rationale from paper/tool]
 
+> **Current OmicsClaw behavior**: [Call out any wrapper-specific limitation,
+> simplification, fallback path, or deviation from the upstream paper/tool so
+> the document matches what the code actually does today.]
+
 ## Output Structure
 
-```
+Remove lines that do not apply, but keep `README.md`, `report.md`, `result.json`,
+and `reproducibility/` whenever the skill supports standard OmicsClaw outputs.
+
+```text
 output_directory/
+├── README.md
 ├── report.md
 ├── result.json
 ├── processed.h5ad
@@ -107,10 +135,22 @@ output_directory/
 ├── tables/
 │   └── results.csv
 └── reproducibility/
+    ├── analysis_notebook.ipynb
     ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
+    └── requirements.txt
 ```
+
+### Output Files Explained
+
+- `README.md`: Human-friendly output guide describing where to look first.
+- `report.md`: Narrative report with findings, parameters, and follow-up suggestions.
+- `result.json`: Machine-readable summary for downstream automation.
+- `processed.h5ad`: Output object with new annotations when this skill writes AnnData.
+- `figures/`: Ready-to-open visual summaries for quick inspection.
+- `tables/`: Structured tabular outputs for downstream analysis.
+- `reproducibility/analysis_notebook.ipynb`: Notebook for code inspection and reruns.
+- `reproducibility/commands.sh`: Minimal shell rerun command with the same core parameters.
+- `reproducibility/requirements.txt`: Package snapshot for the current environment.
 
 ## Dependencies
 
@@ -127,6 +167,7 @@ output_directory/
 - **Disclaimer**: Every report includes the OmicsClaw research tool disclaimer
 - **Audit trail**: All operations logged to reproducibility bundle
 - **Data preservation**: Original data structures preserved in output
+- **Current behavior over paper claims**: Document the wrapper's real implementation, not only the upstream method description
 
 ## Integration with Orchestrator
 

@@ -832,11 +832,13 @@ if _HAS_TEXTUAL:
                 if result.get("success"):
                     method_line = f"\n  Method: {result.get('method')}" if result.get("method") else ""
                     guide_line = f"\n  Guide: {result.get('readme_path')}" if result.get("readme_path") else ""
+                    notebook_line = f"\n  Notebook: {result.get('notebook_path')}" if result.get("notebook_path") else ""
                     self._add_system_message(
                         f"✓ Skill '{skill}' done in {result.get('duration_seconds', 0):.1f}s\n"
                         f"  Output: {result.get('output_dir', '?')}"
                         f"{method_line}"
                         f"{guide_line}"
+                        f"{notebook_line}"
                     )
                     # Inject result into conversation for LLM context
                     self._messages.append({"role": "user", "content": f"[Ran skill] {arg}"})

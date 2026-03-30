@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+import tempfile
 from pathlib import Path
 
 import matplotlib
@@ -20,6 +22,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.checksums import sha256_file
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 from omicsclaw.common.report import generate_report_footer, generate_report_header, write_result_json
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
@@ -86,6 +90,174 @@ def preprocess_scanpy(
     sc.tl.leiden(adata, resolution=leiden_resolution)
 
     return adata
+
+
+def _choose_counts_matrix(adata):
+    """Return the best available raw-count-like matrix for R-backed workflows."""
+    if "counts" in adata.layers:
+        return adata.layers["counts"]
+    if adata.raw is not None and adata.raw.shape == adata.shape:
+        return adata.raw.X
+    return adata.X
+
+
+def _build_export_adata(adata):
+    """Build an AnnData export where ``X`` contains counts for the R script."""
+    export_adata = adata.copy()
+    export_adata.obs_names_make_unique()
+    export_adata.var_names_make_unique()
+    export_adata.X = _choose_counts_matrix(export_adata).copy()
+    return export_adata
+
+
+def _load_seurat_result(
+    export_adata,
+    *,
+    output_dir: Path,
+    workflow: str,
+    n_neighbors: int,
+    n_pcs: int,
+):
+    """Load Seurat CSV outputs back into a standard AnnData object."""
+    obs_df = pd.read_csv(output_dir / "obs.csv", index_col=0)
+    pca_df = pd.read_csv(output_dir / "pca.csv", index_col=0)
+    umap_df = pd.read_csv(output_dir / "umap.csv", index_col=0)
+    hvg_df = pd.read_csv(output_dir / "hvg.csv")
+    norm_df = pd.read_csv(output_dir / "X_norm.csv", index_col=0)
+
+    info = {}
+    info_path = output_dir / "info.json"
+    if info_path.exists():
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+
+    norm_df = norm_df.T
+    norm_df.index = norm_df.index.astype(str)
+    norm_df.columns = norm_df.columns.astype(str)
+    obs_df.index = obs_df.index.astype(str)
+    pca_df.index = pca_df.index.astype(str)
+    umap_df.index = umap_df.index.astype(str)
+
+    ordered_cells = [cell for cell in norm_df.index if cell in export_adata.obs_names]
+    ordered_genes = [gene for gene in norm_df.columns if gene in export_adata.var_names]
+    if not ordered_cells or not ordered_genes:
+        raise RuntimeError("Seurat preprocessing returned no overlapping cells or genes")
+
+    norm_df = norm_df.loc[ordered_cells, ordered_genes]
+    obs_base = export_adata.obs.loc[ordered_cells].copy()
+    var_base = export_adata.var.loc[ordered_genes].copy()
+
+    combined_obs = obs_base.join(obs_df, how="left", rsuffix="_seurat")
+    if "seurat_clusters" in combined_obs:
+        combined_obs["seurat_clusters"] = combined_obs["seurat_clusters"].astype(str)
+        combined_obs["leiden"] = combined_obs["seurat_clusters"]
+    if "nFeature_RNA" in combined_obs and "n_genes_by_counts" not in combined_obs:
+        combined_obs["n_genes_by_counts"] = pd.to_numeric(combined_obs["nFeature_RNA"], errors="coerce")
+    if "nCount_RNA" in combined_obs and "total_counts" not in combined_obs:
+        combined_obs["total_counts"] = pd.to_numeric(combined_obs["nCount_RNA"], errors="coerce")
+    if "percent.mt" in combined_obs and "pct_counts_mt" not in combined_obs:
+        combined_obs["pct_counts_mt"] = pd.to_numeric(combined_obs["percent.mt"], errors="coerce")
+    combined_obs["preprocess_method"] = workflow
+
+    hvg_set = set()
+    if "gene" in hvg_df.columns:
+        hvg_set = {str(gene) for gene in hvg_df["gene"].dropna().astype(str)}
+    var_base["highly_variable"] = [gene in hvg_set for gene in var_base.index.astype(str)]
+
+    result = sc.AnnData(X=norm_df.to_numpy(), obs=combined_obs, var=var_base)
+    result.layers["counts"] = export_adata[ordered_cells, ordered_genes].X.copy()
+
+    pca_aligned = pca_df.reindex(ordered_cells)
+    umap_aligned = umap_df.reindex(ordered_cells)
+    if pca_aligned.isna().any().any():
+        raise RuntimeError("Seurat preprocessing returned PCA rows that do not align with exported cells")
+    if umap_aligned.isna().any().any():
+        raise RuntimeError("Seurat preprocessing returned UMAP rows that do not align with exported cells")
+    result.obsm["X_pca"] = pca_aligned.to_numpy(dtype=float)
+    result.obsm["X_umap"] = umap_aligned.to_numpy(dtype=float)
+
+    if result.obsm["X_pca"].size:
+        variance = np.var(result.obsm["X_pca"], axis=0, ddof=1)
+        variance = np.clip(variance, a_min=0.0, a_max=None)
+        total = float(variance.sum())
+        result.uns["pca"] = {
+            "variance": variance,
+            "variance_ratio": (variance / total) if total > 0 else variance,
+        }
+
+    if result.obsm["X_pca"].shape[1] > 0:
+        try:
+            sc.pp.neighbors(
+                result,
+                use_rep="X_pca",
+                n_neighbors=n_neighbors,
+                n_pcs=min(n_pcs, result.obsm["X_pca"].shape[1]),
+            )
+        except Exception as exc:
+            logger.warning("Neighbor graph reconstruction after Seurat failed: %s", exc)
+
+    result.uns["seurat_info"] = info
+    return result
+
+
+def run_seurat_preprocessing(
+    adata,
+    *,
+    workflow: str,
+    min_genes: int = 200,
+    min_cells: int = 3,
+    max_mt_pct: float = 20.0,
+    n_top_hvg: int = 2000,
+    n_pcs: int = 50,
+    n_neighbors: int = 15,
+    leiden_resolution: float = 1.0,
+):
+    """Run the Seurat / SCTransform preprocessing backend via the shared R script."""
+    required_packages = ["Seurat", "SingleCellExperiment", "zellkonverter"]
+    if workflow == "sctransform":
+        required_packages.append("sctransform")
+    validate_r_environment(required_r_packages=required_packages)
+
+    export_adata = _build_export_adata(adata)
+    logger.info("Running R-backed %s preprocessing on %d cells x %d genes", workflow, export_adata.n_obs, export_adata.n_vars)
+
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_sc_preprocess_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        r_output_dir = tmpdir / "output"
+        basilisk_dir = tmpdir / "basilisk"
+        r_output_dir.mkdir(parents=True, exist_ok=True)
+        basilisk_dir.mkdir(parents=True, exist_ok=True)
+        export_adata.write_h5ad(input_h5ad)
+
+        runner.run_script(
+            "sc_seurat_preprocess.R",
+            args=[
+                str(input_h5ad),
+                str(r_output_dir),
+                workflow,
+                str(min_genes),
+                str(min_cells),
+                str(max_mt_pct),
+                str(n_top_hvg),
+                str(n_pcs),
+                str(n_neighbors),
+                str(leiden_resolution),
+            ],
+            expected_outputs=["obs.csv", "pca.csv", "umap.csv", "hvg.csv", "X_norm.csv", "info.json"],
+            output_dir=r_output_dir,
+            env={"BASILISK_EXTERNAL_DIR": str(basilisk_dir)},
+        )
+
+        return _load_seurat_result(
+            export_adata,
+            output_dir=r_output_dir,
+            workflow=workflow,
+            n_neighbors=n_neighbors,
+            n_pcs=n_pcs,
+        )
 
 
 def generate_figures(adata, output_dir: Path) -> list[str]:

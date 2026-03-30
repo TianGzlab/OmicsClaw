@@ -173,3 +173,14 @@ def test_load_all_registers_legacy_aliases():
     # "preprocess" is a legacy alias for spatial-preprocessing
     assert "preprocess" in reg.skills
     assert reg.skills["preprocess"]["alias"] == "spatial-preprocessing"
+
+
+def test_load_all_uses_skill_md_param_hints():
+    """load_all() should populate method-specific param_hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-svg-detection")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "morans" in hints
+    assert "morans_n_neighs" in hints["morans"]["params"]

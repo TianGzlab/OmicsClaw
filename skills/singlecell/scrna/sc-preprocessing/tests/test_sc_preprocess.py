@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -58,3 +59,68 @@ def test_demo_result_json(tmp_output):
     data = json.loads((tmp_output / "result.json").read_text())
     assert data["skill"] == "singlecell-preprocessing"
     assert "summary" in data
+
+
+def test_seurat_backend_function_is_defined():
+    """R-backed Seurat method should be wired in the Python entrypoint."""
+    spec = importlib.util.spec_from_file_location("sc_preprocess", SKILL_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert hasattr(module, "run_seurat_preprocessing")
+
+
+def _has_seurat_r_stack() -> bool:
+    """Return True when the minimal R Seurat preprocessing stack is available."""
+    try:
+        result = subprocess.run(
+            [
+                "Rscript",
+                "-e",
+                (
+                    "cat("
+                    "requireNamespace('Seurat', quietly=TRUE) && "
+                    "requireNamespace('SingleCellExperiment', quietly=TRUE) && "
+                    "requireNamespace('zellkonverter', quietly=TRUE)"
+                    ")"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "TRUE"
+
+
+@pytest.mark.skipif(not _has_seurat_r_stack(), reason="R Seurat preprocessing stack not installed")
+def test_demo_mode_seurat(tmp_output):
+    """sc-preprocessing --method seurat should run when the R stack is available."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SKILL_SCRIPT),
+            "--demo",
+            "--method",
+            "seurat",
+            "--output",
+            str(tmp_output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+    if result.returncode != 0:
+        bootstrap_markers = [
+            "Couldn't connect to server",
+            "trying URL",
+            "Miniforge",
+            "basilisk",
+        ]
+        if any(marker in result.stderr for marker in bootstrap_markers):
+            pytest.skip("R Seurat stack requires basilisk bootstrap that is unavailable in this environment")
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    payload = json.loads((tmp_output / "result.json").read_text())
+    assert payload["summary"]["method"] == "seurat"

@@ -3,19 +3,14 @@ Preflight Know-How (KH) Injection System.
 
 Loads KH-*.md documents from knowledge_base/knowhows/ and forcibly injects
 them as hard scientific constraints into the LLM system prompt BEFORE
-analysis begins.  These are not optional tips — they are mandatory guardrails
+analysis begins. These are not optional tips — they are mandatory guardrails
 derived from high-frequency AI errors observed in real-world analyses.
 
-Architecture (from optimization plan Stage 1):
+Architecture:
     User Request → PreflightKnowHowInjector
         → identifies relevant domain / task keywords
         → loads matching KH rules
         → returns formatted constraint block for system prompt
-
-Usage:
-    injector = KnowHowInjector()
-    constraints = injector.get_constraints(skill="bulk-rnaseq-counts-to-de-deseq2")
-    # → returns string block to append to system prompt
 """
 
 from __future__ import annotations
@@ -30,10 +25,36 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # KH metadata: maps each KH doc to the skills / keywords it constrains.
-# This is the single canonical mapping — no double-maintenance.
+# This is the single canonical mapping in the current hard-coded design.
 # ---------------------------------------------------------------------------
 
 _KH_SKILL_MAP: dict[str, dict] = {
+    "KH-spatial-domain-guardrails.md": {
+        "label": "Spatial Domain Analysis Guardrails",
+        "critical_rule": "MUST inspect the dataset and explain method plus key clustering parameters before running spatial domain identification",
+        "skills": [
+            "spatial-domains", "spatial-domain-identification", "domains",
+        ],
+        "keywords": [
+            "spatial domain", "domain identification", "tissue region", "niche",
+            "leiden", "louvain", "cellcharter", "banksy", "spagcn", "stagate", "graphst",
+            "聚类", "空间域", "组织区域", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-genes-guardrails.md": {
+        "label": "Spatial SVG Analysis Guardrails",
+        "critical_rule": "MUST inspect matrix type and coordinates, then explain the selected SVG method plus method-specific parameters before running",
+        "skills": [
+            "spatial-genes", "spatial-svg-detection", "genes",
+        ],
+        "keywords": [
+            "spatially variable gene", "spatial gene", "svg", "moran", "spatialde",
+            "spark-x", "flashs", "spatial autocorrelation", "spatial pattern",
+            "空间变异基因", "空间基因", "莫兰", "空间模式", "调参",
+        ],
+        "domains": ["spatial"],
+    },
     "KH-bulk-rnaseq-differential-expression.md": {
         "label": "Bulk RNA-Seq Differential Expression",
         "critical_rule": "MUST use padj (not pvalue) for DEG filtering; MUST NOT confuse log2FC sign direction",
@@ -42,9 +63,8 @@ _KH_SKILL_MAP: dict[str, dict] = {
             "bulkrna-de", "bulkrna-deseq2", "de",
         ],
         "keywords": [
-            "differential expression", "DEG", "padj", "pvalue",
-            "fold change", "DESeq2", "edgeR", "limma",
-            # Chinese aliases
+            "differential expression", "deg", "padj", "pvalue",
+            "fold change", "deseq2", "edger", "limma",
             "差异表达", "差异基因", "差异分析",
         ],
         "domains": ["bulkrna", "singlecell"],
@@ -52,11 +72,10 @@ _KH_SKILL_MAP: dict[str, dict] = {
     "KH-data-analysis-best-practices.md": {
         "label": "Best Practices for Data Analyses",
         "critical_rule": "MUST validate data before analysis; MUST handle duplicates and missing values explicitly",
-        "skills": ["__all__"],     # applies to every analysis
+        "skills": ["__all__"],
         "keywords": [
             "data validation", "duplicates", "missing values",
             "data quality", "metadata",
-            # Chinese aliases
             "数据验证", "数据质量", "缺失值", "重复值",
         ],
         "domains": ["__all__"],
@@ -68,9 +87,8 @@ _KH_SKILL_MAP: dict[str, dict] = {
             "pooled-crispr-screens", "lasso-biomarker-panel",
         ],
         "keywords": [
-            "essentiality", "DepMap", "CRISPR", "gene effect",
+            "essentiality", "depmap", "crispr", "gene effect",
             "correlation", "essential",
-            # Chinese aliases
             "基因关键性", "必需基因", "基因敲除",
         ],
         "domains": ["genomics", "general"],
@@ -82,9 +100,8 @@ _KH_SKILL_MAP: dict[str, dict] = {
             "functional-enrichment-from-degs",
         ],
         "keywords": [
-            "enrichment", "pathway", "ORA", "GSEA", "KEGG",
-            "Reactome", "clusterProfiler", "enrichr",
-            # Chinese aliases
+            "enrichment", "pathway", "ora", "gsea", "kegg",
+            "reactome", "clusterprofiler", "enrichr",
             "富集分析", "通路富集", "通路分析", "功能富集",
         ],
         "domains": ["bulkrna", "singlecell", "general"],
@@ -94,38 +111,30 @@ _KH_SKILL_MAP: dict[str, dict] = {
 
 def _find_knowhows_dir() -> Path:
     """Locate the knowledge_base/knowhows/ directory."""
-    # 1. Environment variable
     env_path = os.getenv("OMICSCLAW_KNOWLEDGE_PATH")
     if env_path:
         p = Path(env_path) / "knowhows"
         if p.is_dir():
             return p
 
-    # 2. Relative to this file (omicsclaw/knowledge/knowhow.py → project root)
     project_root = Path(__file__).resolve().parent.parent.parent
     kh = project_root / "knowledge_base" / "knowhows"
     if kh.is_dir():
         return kh
 
-    # 3. CWD fallback
     cwd_kh = Path.cwd() / "knowledge_base" / "knowhows"
     if cwd_kh.is_dir():
         return cwd_kh
 
-    return kh  # Return default even if missing
+    return kh
 
 
 class KnowHowInjector:
-    """Mandatory pre-analysis scientific constraint injector.
-
-    Reads KH-*.md documents and matches them against the current
-    analysis context (skill name, user query keywords, domain).
-    Returns formatted constraint text for system prompt injection.
-    """
+    """Mandatory pre-analysis scientific constraint injector."""
 
     def __init__(self, knowhows_dir: Optional[Path] = None):
         self._dir = knowhows_dir or _find_knowhows_dir()
-        self._cache: dict[str, str] = {}  # filename → content
+        self._cache: dict[str, str] = {}
         self._loaded = False
 
     def _ensure_loaded(self) -> None:
@@ -145,31 +154,18 @@ class KnowHowInjector:
                 logger.warning("Failed to load know-how %s: %s", p.name, e)
         logger.info("Loaded %d know-how documents from %s", len(self._cache), self._dir)
 
-    # ----- public API -----
-
     def get_constraints(
         self,
         skill: Optional[str] = None,
         query: Optional[str] = None,
         domain: Optional[str] = None,
     ) -> str:
-        """Return formatted constraint text for the given analysis context.
-
-        Matches KH documents based on:
-        1. Exact skill name match (highest priority)
-        2. Domain match
-        3. Keyword match against user query
-
-        The universal ``KH-data-analysis-best-practices.md`` is ALWAYS
-        included for any analysis.
-
-        Returns an empty string if no relevant KH documents are found.
-        """
+        """Return formatted constraint text for the given analysis context."""
         self._ensure_loaded()
         if not self._cache:
             return ""
 
-        matched: list[tuple[str, str]] = []  # (filename, content)
+        matched: list[tuple[str, str]] = []
         query_lower = (query or "").lower()
         skill_lower = (skill or "").lower()
         domain_lower = (domain or "").lower()
@@ -179,27 +175,22 @@ class KnowHowInjector:
                 continue
             content = self._cache[filename]
 
-            # Check if this KH applies universally
             if "__all__" in meta.get("skills", []):
                 matched.append((filename, content))
                 continue
 
-            # Check skill match
             if skill_lower and skill_lower in [s.lower() for s in meta.get("skills", [])]:
                 matched.append((filename, content))
                 continue
 
-            # Check domain match
             domains = meta.get("domains", [])
             if domain_lower and ("__all__" in domains or domain_lower in domains):
-                # Also require at least one keyword match for non-universal domains
                 if query_lower:
                     kw_match = any(kw.lower() in query_lower for kw in meta.get("keywords", []))
                     if kw_match:
                         matched.append((filename, content))
                         continue
 
-            # Check keyword match in user query
             if query_lower:
                 keywords = meta.get("keywords", [])
                 if any(kw.lower() in query_lower for kw in keywords):
@@ -208,7 +199,6 @@ class KnowHowInjector:
         if not matched:
             return ""
 
-        # Build routing index (concise 'which guide for which task' table)
         seen = set()
         routing_lines = []
         for filename, _content in matched:
@@ -223,7 +213,6 @@ class KnowHowInjector:
             else:
                 routing_lines.append(f"  → {label}")
 
-        # Format as a mandatory constraint block with routing index + full content
         parts = [
             "## ⚠️ MANDATORY SCIENTIFIC CONSTRAINTS",
             "",
@@ -238,7 +227,6 @@ class KnowHowInjector:
         parts.append("---")
         parts.append("")
 
-        # Append full KH content for each matched guide
         seen2 = set()
         for filename, content in matched:
             if filename in seen2:
@@ -270,11 +258,7 @@ class KnowHowInjector:
 
 
 def _strip_kh_header(content: str) -> str:
-    """Remove the metadata header lines (YAML frontmatter and old **Key:** lines)
-    but keep the markdown body."""
-    import re
-
-    # 1. Strip YAML frontmatter if present
+    """Remove the metadata header lines but keep the markdown body."""
     content = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, flags=re.DOTALL)
 
     lines = content.split("\n")
@@ -283,7 +267,6 @@ def _strip_kh_header(content: str) -> str:
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("# "):
-            # Keep the title
             continue
         if stripped.startswith("**Knowhow ID:") or stripped.startswith("**Category:") or stripped.startswith("**Keywords:"):
             in_header = True
@@ -293,21 +276,19 @@ def _strip_kh_header(content: str) -> str:
         if in_header and not stripped.startswith("**"):
             body_start = i
             break
-    
-    # Return from body_start onwards, but keep the title line if it was skipped
+
     title_line = ""
     for line in lines:
         if line.strip().startswith("# "):
             title_line = line
             break
-            
+
     body = "\n".join(lines[body_start:]).strip()
     if title_line and not body.startswith("# "):
         body = f"{title_line}\n\n{body}"
     return body
 
 
-# Module-level singleton for convenience
 _global_injector: Optional[KnowHowInjector] = None
 
 

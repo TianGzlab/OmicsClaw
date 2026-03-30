@@ -3,7 +3,7 @@ name: spatial-trajectory
 description: >-
   Trajectory inference and pseudotime analysis for spatial transcriptomics data.
 version: 0.3.0
-author: SpatialClaw Team
+author: OmicsClaw
 license: MIT
 tags: [spatial, trajectory, pseudotime, DPT, CellRank, Palantir]
 metadata:
@@ -13,6 +13,21 @@ metadata:
       - "--method"
       - "--n-states"
       - "--root-cell"
+    param_hints:
+      dpt:
+        priority: "root_cell"
+        params: ["root_cell"]
+        requires: ["obsm.X_pca", "neighbors_graph"]
+      cellrank:
+        priority: "root_cell → n_states"
+        params: ["root_cell", "n_states"]
+        defaults: {n_states: 3}
+        requires: ["obsm.X_pca", "neighbors_graph"]
+      palantir:
+        priority: "root_cell → n_states"
+        params: ["root_cell", "n_states"]
+        defaults: {n_states: 3}
+        requires: ["obsm.X_pca", "neighbors_graph"]
     legacy_aliases: [trajectory]
     saves_h5ad: true
     requires_preprocessed: true
@@ -46,20 +61,20 @@ You are **Spatial Trajectory**, a specialised OmicsClaw agent for trajectory inf
 
 - **Without it**: Users must manually select root cells, tune diffusion parameters, and integrate spatial context
 - **With it**: Automated DPT computation with spatial-aware root selection and visualisation
-- **Why OmicsClaw**: Combines pseudotime with spatial coordinates for tissue-level developmental maps
+- **Why OmicsClaw**: Combines pseudotime with spatial coordinates, structured outputs, and wrapper-generated guides for easier trajectory interpretation
 
 ## Workflow
 
-1. **Calculate**: Map single-cell expression relationships using KNN graphs.
-2. **Execute**: Embed pseudotime probabilities over topological layout.
-3. **Assess**: Perform path transition testing.
-4. **Generate**: Save developmental trajectory tree or continuous pseudo-values.
-5. **Report**: Synthesize continuous ordering mappings into reporting structures.
+1. **Load**: Read the preprocessed AnnData and verify embeddings and neighbor graphs are available.
+2. **Select root**: Use the provided barcode root or the wrapper's automatic root-cell heuristic.
+3. **Infer trajectory**: Run DPT, CellRank, or Palantir depending on the requested method and installed dependencies.
+4. **Summarize**: Generate pseudotime plots and rank genes associated with trajectory progression.
+5. **Report and export**: Write `report.md`, `result.json`, `processed.h5ad`, figures, tables, and the reproducibility bundle.
 
 ## Core Capabilities
 
 1. **Diffusion pseudotime (DPT)**: Built-in scanpy DPT — always available, no extra dependencies
-2. **Root cell selection**: By specific barcode, by cell type (progenitor), or automatic (max/min DC1)
+2. **Root cell selection**: By specific barcode (`--root-cell`) or automatic selection (max DC1 in the current CLI wrapper)
 3. **Trajectory gene correlation**: Spearman correlation with FDR correction to find pseudotime-associated genes
 4. **Enhanced CellRank**: Multi-kernel support (Velocity+Connectivity, Pseudotime+Connectivity), terminal state identification, fate probabilities, driver gene detection
 5. **Optional Palantir**: When available, use Palantir for multi-scale diffusion-based pseudotime
@@ -69,10 +84,7 @@ You are **Spatial Trajectory**, a specialised OmicsClaw agent for trajectory inf
 | Strategy | Parameter | Method | Best for |
 |----------|-----------|--------|----------|
 | Automatic | (default) | Max DC1 value | Quick exploration |
-| By cell type | `--root-cell-type` | Min DC1 within specified cell type | When progenitor type is known |
 | By barcode | `--root-cell` | Exact cell barcode | Precise control |
-
-**Root cell type selection** picks the cell with the minimum diffusion component 1 value within the specified cluster/cell type, which typically represents the most stem-like or progenitor-like cell in that group.
 
 ## Trajectory Gene Correlation
 
@@ -98,32 +110,48 @@ After pseudotime computation, the system automatically identifies genes whose ex
 ## CLI Reference
 
 ```bash
-python skills/spatial-trajectory/spatial_trajectory.py \
-  --input <preprocessed.h5ad> --output <report_dir>
+# Standard usage (DPT, default)
+oc run spatial-trajectory --input <preprocessed.h5ad> --output <report_dir>
 
-python skills/spatial-trajectory/spatial_trajectory.py \
+# Explicit root cell
+oc run spatial-trajectory \
   --input <data.h5ad> --output <dir> --method dpt --root-cell AACG_1
 
-python skills/spatial-trajectory/spatial_trajectory.py --demo --output /tmp/traj_demo
+# CellRank or Palantir
+oc run spatial-trajectory --input <data.h5ad> --output <dir> --method cellrank
+oc run spatial-trajectory --input <data.h5ad> --output <dir> --method palantir
+
+# Demo mode
+oc run spatial-trajectory --demo --output /tmp/traj_demo
+
+# Direct script entrypoint
+python skills/spatial/spatial-trajectory/spatial_trajectory.py \
+  --input <data.h5ad> --output <dir> --method dpt --root-cell AACG_1
 ```
+
+Every successful standard OmicsClaw wrapper run, including `oc run` and
+conversational skill execution, also writes a top-level `README.md` and
+`reproducibility/analysis_notebook.ipynb` to make the output directory easier
+to inspect and rerun.
 
 ## Example Queries
 
 - "Infer developmental trajectory mapped onto the spatial slice"
-- "Calculate pseudotime progression using PAGA in this data"
+- "Calculate pseudotime progression with CellRank in this data"
 
 ## Algorithm / Methodology
 
 1. **Diffusion map**: Compute diffusion components from the neighbor graph
 2. **Root selection**: Use provided root cell, or auto-select the cell with the highest diffusion component 1 value
 3. **DPT**: Compute diffusion pseudotime from the root cell
-4. **Optional CellRank**: Fit CytoTRACE kernel + velocity kernel for directed transitions, compute fate probabilities
+4. **Optional CellRank**: Build velocity- or pseudotime-informed transition kernels and compute fate probabilities
 5. **Visualisation**: Overlay pseudotime on spatial coordinates and UMAP
 
 ## Output Structure
 
-```
+```text
 output_directory/
+├── README.md
 ├── report.md
 ├── result.json
 ├── processed.h5ad
@@ -134,14 +162,17 @@ output_directory/
 ├── tables/
 │   └── trajectory_summary.csv
 └── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
+    ├── analysis_notebook.ipynb
+    └── commands.sh
 ```
+
+`README.md` and `reproducibility/analysis_notebook.ipynb` are generated by the
+standard OmicsClaw wrapper. Direct script execution usually produces the
+skill-native outputs plus `reproducibility/commands.sh`.
 
 ## Dependencies
 
-**Required** (in `requirements.txt`):
+**Required**:
 - `scanpy` >= 1.9
 
 **Optional**:
@@ -151,7 +182,7 @@ output_directory/
 ## Safety
 
 - **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
+- **Disclaimer**: Reports follow the standard OmicsClaw reporting and disclaimer convention.
 - **Audit trail**: Hyperparameters and operational flow states are logged fully.
 
 ## Integration with Orchestrator

@@ -1980,6 +1980,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     return_media = str(args.get("return_media", "")).strip().lower()
     figure_names = []
     table_names = []
+    notebook_names = []
     sent_names = []
     if out_dir.exists():
         media_items = []
@@ -1988,6 +1989,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                 continue
             if f.suffix in (".md", ".html"):
                 media_items.append({"type": "document", "path": str(f)})
+            elif f.suffix == ".ipynb":
+                media_items.append({"type": "document", "path": str(f)})
+                notebook_names.append(f.name)
             elif f.suffix == ".png":
                 media_items.append({"type": "photo", "path": str(f)})
                 figure_names.append(f.name)
@@ -2044,6 +2048,13 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         await _auto_capture_analysis(session_id, skill_key, args, out_dir, True)
 
     result_text = "\n".join(keep_lines).strip()
+    notebook_path = out_dir / "reproducibility" / "analysis_notebook.ipynb"
+    if notebook_path.exists():
+        result_text += (
+            "\n\n---\n"
+            f"[Reproducibility notebook available: {notebook_path}. "
+            "Tell the user they can open it in Jupyter to inspect code, outputs, and rerun the analysis.]"
+        )
 
     # Prepend parameter hint so the LLM relays it to the user
     if param_hint:
@@ -2051,7 +2062,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 
     # Append media delivery status so the LLM knows what happened
     # and does NOT attempt to browse output directories itself.
-    all_names = figure_names + table_names
+    all_names = figure_names + table_names + notebook_names
     if sent_names:
         result_text += (
             "\n\n---\n"
@@ -2070,10 +2081,12 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             hints.append(f"Figures: {', '.join(figure_names)}")
         if table_names:
             hints.append(f"Tables: {', '.join(table_names)}")
+        if notebook_names:
+            hints.append(f"Notebooks: {', '.join(notebook_names)}")
         result_text += (
             "\n\n---\n"
             f"[Available outputs: {'; '.join(hints)}. "
-            "Tell the user they can request specific figures or tables by name if interested.]"
+            "Tell the user they can request specific figures, tables, or notebooks by name if interested.]"
         )
 
     # Stage 2+4: Emit AdvisoryEvent and resolve post-execution knowledge

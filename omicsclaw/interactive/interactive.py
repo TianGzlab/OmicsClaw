@@ -288,6 +288,8 @@ def _handle_run(arg: str) -> str:
                 console.print(f"  [dim]Output:[/dim] {result['output_dir']}")
             if result.get("readme_path"):
                 console.print(f"  [dim]Guide:[/dim]  {result['readme_path']}")
+            if result.get("notebook_path"):
+                console.print(f"  [dim]Notebook:[/dim] {result['notebook_path']}")
             if result.get("stdout"):
                 console.print(result["stdout"])
             return f"Skill '{skill}' completed successfully. Output in: {result.get('output_dir', '?')}"

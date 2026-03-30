@@ -198,7 +198,12 @@ def preprocess(
 
     # HVG
     n_hvg = min(n_top_hvg, adata.n_vars - 1)
-    sc.pp.highly_variable_genes(adata, n_top_genes=n_hvg, flavor="seurat_v3")
+    sc.pp.highly_variable_genes(
+        adata,
+        n_top_genes=n_hvg,
+        flavor="seurat_v3",
+        layer="counts",
+    )
     logger.info("Selected %d highly variable genes", adata.var["highly_variable"].sum())
 
     # Scale + PCA on HVG
@@ -256,6 +261,7 @@ def preprocess(
     )
 
     summary = {
+        "method": "scanpy_standard",
         "n_cells_raw": n_cells_raw,
         "n_genes_raw": n_genes_raw,
         "n_cells_filtered": n_cells_filtered,
@@ -264,6 +270,8 @@ def preprocess(
         "n_clusters": n_clusters,
         "has_spatial": get_spatial_key(adata) is not None,
         "cluster_sizes": adata.obs["leiden"].value_counts().to_dict(),
+        "n_pcs_computed": n_comps,
+        "n_pcs_used": n_pcs_use,
         "n_pcs_suggested": suggested_pcs,
         "tissue_preset": preset_applied,
     }

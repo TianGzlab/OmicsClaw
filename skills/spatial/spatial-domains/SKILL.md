@@ -2,7 +2,7 @@
 name: spatial-domains
 description: >-
   Identify tissue regions and spatial niches from preprocessed spatial transcriptomics
-  data using Leiden, Louvain, SpaGCN, STAGATE, GraphST, or BANKSY.
+  data using Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY, or CellCharter.
 version: 0.4.0
 author: OmicsClaw
 license: MIT
@@ -50,21 +50,21 @@ metadata:
       spagcn:
         priority: "spagcn_p → n_domains → epochs"
         params: ["n_domains", "epochs", "spagcn_p"]
-        defaults: {n_domains: 7, epochs: 200, spagcn_p: 0.5}
+        defaults: {n_domains: 7, epochs: 100, spagcn_p: 0.5}
         requires: ["obsm.spatial"]
         tips:
           - "--spagcn-p: Spatial neighborhood contribution (default 0.5)."
           - "--n-domains: Target cluster count."
-          - "--epochs: Training loops (default 200)."
+          - "--epochs: Training loops (default 100 in the OmicsClaw CLI wrapper)."
       stagate:
         priority: "rad_cutoff/k_nn → stagate_alpha → epochs"
         params: ["n_domains", "epochs", "k_nn", "rad_cutoff", "stagate_alpha", "pre_resolution"]
-        defaults: {n_domains: 7, epochs: 200, k_nn: 6, rad_cutoff: 120.0, stagate_alpha: 0.0, pre_resolution: 0.2}
+        defaults: {n_domains: 7, epochs: 100, k_nn: 6, stagate_alpha: 0.0, pre_resolution: 0.2}
         requires: ["obsm.spatial"]
         tips:
           - "--rad-cutoff / --k-nn: Spatial network. Varies by platform (Visium~150, Slide-seq~50)."
           - "--stagate-alpha: Cell type-aware module weight (0=disabled)."
-          - "--epochs: Training epochs."
+          - "--epochs: Training epochs (default 100 in the OmicsClaw CLI wrapper)."
       graphst:
         priority: "epochs → dim_output → n_domains"
         params: ["n_domains", "epochs", "dim_output"]
@@ -75,14 +75,15 @@ metadata:
           - "--dim-output: Embedding dimension (default 64). Increase for complex tissues."
           - "--n-domains: Target cluster count."
       banksy:
-        priority: "lambda_param → num_neighbours → resolution"
-        params: ["n_domains", "resolution", "lambda_param", "num_neighbours"]
-        defaults: {n_domains: 7, resolution: 1.0, lambda_param: 0.2, num_neighbours: 15}
+        priority: "lambda_param → num_neighbours → resolution / n_domains"
+        params: ["resolution", "lambda_param", "num_neighbours", "n_domains"]
+        defaults: {resolution: 1.0, lambda_param: 0.2, num_neighbours: 15}
         requires: ["obsm.spatial"]
         tips:
           - "--lambda-param: 0.2 for cell-typing, 0.8 for domain-finding."
           - "--num-neighbours: Spatial geometry k_geom (default 15)."
-          - "--resolution / --n-domains: Clustering granularity."
+          - "--resolution: Leiden-mode clustering granularity (default 1.0 in the OmicsClaw CLI wrapper)."
+          - "--n-domains: Optional exact cluster count target; if omitted, BANKSY falls back to Leiden discovery mode."
       cellcharter:
         priority: "n_domains/auto_k → n_layers → use_rep"
         params: ["n_domains", "auto_k", "n_layers", "use_rep", "auto_k_min", "auto_k_max"]
@@ -90,7 +91,7 @@ metadata:
         requires: ["obsm.spatial"]
         tips:
           - "--n-layers: Number of spatial hops for feature aggregation (default 3)."
-          - "--auto-k: Enable automatic discovery of the most stable cluster count."
+          - "--auto-k: Enable automatic discovery of the most stable cluster count. If disabled, fixed-K mode defaults to 7 unless --n-domains is provided."
           - "--use-rep: Feature representation to use (defaults to X_pca or X)."
     legacy_aliases: [domains]
     saves_h5ad: true
@@ -126,13 +127,13 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 
 - **Without it**: Users manually configure spatial-aware clustering with inconsistent parameters across methods
 - **With it**: One command identifies tissue domains, generates annotated maps, and produces a reproducible report
-- **Why OmicsClaw**: Unified interface across Leiden, SpaGCN, STAGATE, and GraphST with consistent output formats
+- **Why OmicsClaw**: Unified interface across graph clustering, deep spatial models, and neighborhood-aggregation methods with consistent reports, structured results, and reproducibility notebooks
 
 ## Core Capabilities
 
 1. **Leiden spatial domains**: Fast graph-based clustering with spatial-weighted neighbors (default)
 2. **Louvain clustering**: Classic graph-based clustering (requires louvain package)
-3. **SpaGCN**: Spatial Graph Convolutional Network integrating histology
+3. **SpaGCN**: Spatial Graph Convolutional Network using coordinate-derived adjacency in the current OmicsClaw workflow
 4. **STAGATE**: Graph attention auto-encoder (requires PyTorch Geometric)
 5. **GraphST**: Self-supervised contrastive learning (requires PyTorch)
 6. **BANKSY**: Explicit spatial feature augmentation (interpretable)
@@ -140,6 +141,7 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 8. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
 9. **Domain summary statistics**: Cell counts and proportions per domain
 10. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
+11. **Notebook export**: Auto-generated reproducibility notebook for code walkthrough and reruns
 
 ## Input Formats
 
@@ -173,7 +175,7 @@ automatically selects the correct data layer for each method:
 |--------|----------------------|--------------------------------------|-------------------|
 | **Leiden** | `obsp["connectivities"]` (neighbor graph) | Pre-built k-NN graph from log-normalized + PCA | Spatial coords for spatial-weighted graph |
 | **Louvain** | `obsp["connectivities"]` (neighbor graph) | Pre-built k-NN graph from log-normalized + PCA | Spatial coords optional |
-| **SpaGCN** | `X` (log-normalized expression) | Full gene matrix; internal PCA by SpaGCN | Spatial coords required; histology optional |
+| **SpaGCN** | `X` (log-normalized expression) | Full gene matrix; internal PCA by SpaGCN | Spatial coords required; current wrapper uses coordinates only (`histology=False`) |
 | **STAGATE** | `X` (log-normalized, HVG subset) | Auto-filters to `var["highly_variable"]` before training | Spatial coords for radius-based adjacency |
 | **GraphST** | `raw.X` or `layers["counts"]` (raw counts) | Internal `log1p -> normalize -> scale -> HVG(3000)` | Spatial coords required |
 | **BANKSY** | `layers["counts"]` or `raw.X` -> `normalize_total` | Non-negative library-size normalized expression | Spatial coords required |
@@ -196,10 +198,10 @@ automatically selects the correct data layer for each method:
 
 1. **Load**: Read preprocessed h5ad; verify spatial coordinates and embeddings exist
 2. **Preprocess** (demo mode only): Normalize, log1p, PCA, neighbors if not already done
-3. **Domain identification**: Run selected method (Leiden or SpaGCN)
+3. **Domain identification**: Run the selected method (Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY, or CellCharter)
 4. **Embed**: Compute UMAP if not present for visualization
 5. **Visualize**: Generate spatial domain map and UMAP domain plot
-6. **Report**: Write report.md, result.json, processed.h5ad, figures, tables, reproducibility bundle
+6. **Report and export**: Write `report.md`, `result.json`, `processed.h5ad`, figures, tables, output guide, and reproducibility bundle including a notebook
 
 ## CLI Reference
 
@@ -224,7 +226,10 @@ oc run spatial-domains \
   --input <preprocessed.h5ad> --method graphst --n-domains 7 --output <dir>
 
 oc run spatial-domains \
-  --input <preprocessed.h5ad> --method banksy --resolution 0.7 --n-domains 7 --output <dir>
+  --input <preprocessed.h5ad> --method banksy --lambda-param 0.8 --resolution 1.0 --output <dir>
+
+oc run spatial-domains \
+  --input <preprocessed.h5ad> --method cellcharter --n-domains 7 --n-layers 3 --output <dir>
 
 oc run spatial-domains \
   --input <preprocessed.h5ad> --method cellcharter --auto-k --auto-k-min 4 --auto-k-max 12 --output <dir>
@@ -239,6 +244,9 @@ oc run spatial-domains --demo --output /tmp/domains_demo
 # Note: 'oc run' is an alias for 'python omicsclaw.py run'
 python omicsclaw.py run spatial-domains --demo
 ```
+
+Every successful standard run also writes `reproducibility/analysis_notebook.ipynb`
+and a top-level `README.md` to make the output directory easier to inspect.
 
 ## Algorithm / Methodology
 
@@ -267,7 +275,7 @@ python omicsclaw.py run spatial-domains --demo
 
 ### SpaGCN
 
-1. **Input**: AnnData with spatial coordinates and **log-normalized expression** (following official SpaGCN tutorial: `normalize_per_cell` + `log1p` before training)
+1. **Input**: AnnData with spatial coordinates and **log-normalized expression** (following the official preprocessing logic: `normalize_per_cell` + `log1p` before training)
 2. **Data layer used**: `adata.X` (log-normalized full gene matrix) — SpaGCN performs internal PCA
 3. **Spatial graph**: Build adjacency from spatial coordinates
 4. **GCN clustering**: `SpaGCN.train()` with `n_domains` target clusters
@@ -276,7 +284,12 @@ python omicsclaw.py run spatial-domains --demo
 
 **Key parameters**:
 - `n_domains`: Target number of spatial domains
+- `spagcn_p`: Spatial neighborhood contribution (default 0.5)
+- `epochs`: Training epochs (default 100 in OmicsClaw CLI wrapper)
 - Source: Hu et al., *Nature Methods* 2021
+
+> **Current OmicsClaw behavior**: the wrapper uses `histology=False`, so this
+> execution path is coordinate-aware but not image-aware.
 
 ### STAGATE
 
@@ -290,6 +303,9 @@ python omicsclaw.py run spatial-domains --demo
 **Key parameters**:
 - `n_domains`: Target number of domains
 - `k_nn`: Nearest neighbors for spatial topology graph (default 6)
+- `rad_cutoff`: Optional fixed-radius graph alternative when coordinate scale is known
+- `stagate_alpha`: Cell type-aware module weight (default 0.0)
+- `pre_resolution`: Pre-clustering resolution for the cell type-aware extension
 - Source: Dong & Zhang, *Nature Communications* 2022
 
 ### GraphST
@@ -304,6 +320,9 @@ python omicsclaw.py run spatial-domains --demo
 
 **Key parameters**:
 - `n_domains`: Target number of domains
+- `epochs`: Training epochs (default 100 in OmicsClaw CLI wrapper)
+- `dim_output`: Embedding dimension (default 64)
+- `refine`: Optional GraphST / KNN-style post hoc smoothing
 - Source: Long et al., *Nature Communications* 2023
 
 ### BANKSY
@@ -320,7 +339,7 @@ python omicsclaw.py run spatial-domains --demo
 **Key parameters**:
 - `lambda_param`: Spatial regularization (default 0.2)
 - `n_domains`: Exact cluster quantity target (optional)
-- `resolution`: Leiden resolution (default 0.7, used if n_domains is omitted)
+- `resolution`: Leiden resolution (default 1.0 in the OmicsClaw CLI wrapper, used if `n_domains` is omitted)
 - `num_neighbours`: Neighbors for feature construction (default 15)
 
 > **Note**: Z-score scaling (`sc.pp.scale`) is intentionally **not** applied,
@@ -338,8 +357,9 @@ python omicsclaw.py run spatial-domains --demo
 5. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
-- `n_domains`: Target number of domains (ignored if `--auto-k` is true)
+- `n_domains`: Target number of domains (default 7 in the current CLI wrapper when `--auto-k` is false)
 - `auto_k`: Enable stability analysis for optimal cluster count
+- `auto_k_min` / `auto_k_max`: Search range for stability-based K selection
 - `n_layers`: Number of spatial neighborhood hops to aggregate (default 3)
 - `use_rep`: Feature representation to use (defaults to `X_pca`)
 - Source: Marco et al., *Nature Genetics* 2024
@@ -365,6 +385,7 @@ python omicsclaw.py run spatial-domains --demo
 
 ```
 output_dir/
+├── README.md
 ├── report.md
 ├── result.json
 ├── processed.h5ad
@@ -374,14 +395,27 @@ output_dir/
 ├── tables/
 │   └── domain_summary.csv
 └── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
+    ├── analysis_notebook.ipynb
+    └── commands.sh
 ```
+
+### Output Files Explained
+
+- `README.md`: Human-friendly output guide summarising the method, parameters, and where to look first.
+- `report.md`: Narrative analysis report with domain counts, parameter summary, and next-step guidance.
+- `result.json`: Machine-readable summary and parameter record for downstream automation.
+- `processed.h5ad`: AnnData with `obs["spatial_domain"]` and method-specific embeddings when available.
+- `figures/`: Ready-to-open spatial map and UMAP projections for quick visual review.
+- `tables/domain_summary.csv`: Per-domain counts and proportions for downstream summaries.
+- `reproducibility/analysis_notebook.ipynb`: Auto-generated notebook for code inspection, result loading, and reruns inside Jupyter.
+- `reproducibility/commands.sh`: Minimal shell rerun command with the same core parameters.
+
+Additional files such as `reproducibility/requirements.txt` may appear when
+environment capture is enabled, but they are not guaranteed for every run.
 
 ## Dependencies
 
-**Required** (in `requirements.txt`):
+**Required**:
 - `scanpy` >= 1.9 — single-cell/spatial analysis
 - `squidpy` >= 1.2 — spatial extensions
 - `matplotlib` — plotting
@@ -398,9 +432,10 @@ output_dir/
 ## Safety
 
 - **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
+- **Disclaimer**: Reports follow the standard OmicsClaw reporting and disclaimer convention.
 - **Audit trail**: Hyperparameters and operational flow states are logged fully.
 - **Non-destructive**: Domain labels added as new `adata.obs` column, original data preserved
+- **Reproducible outputs**: Standard runs now emit both shell and notebook-based rerun artifacts
 
 ## Integration with Orchestrator
 

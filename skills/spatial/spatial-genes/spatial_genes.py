@@ -3,7 +3,7 @@
 
 Supported methods:
   - morans:    Moran's I spatial autocorrelation via Squidpy (default)
-  - spatialde: Gaussian process regression via SpatialDE2
+  - spatialde: Gaussian process regression via SpatialDE
   - sparkx:    Non-parametric kernel test via SPARK-X in R
   - flashs:    Randomized kernel approximation (Python native, fast)
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -30,22 +31,25 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-import scanpy as sc
-
 from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import (
     generate_report_footer, generate_report_header, write_result_json,
 )
-from skills.spatial._lib.adata_utils import get_spatial_key, store_analysis_metadata
-from skills.spatial._lib.genes import COUNT_BASED_METHODS, METHOD_DISPATCH, SUPPORTED_METHODS
-from skills.spatial._lib.viz import VizParams, plot_features, plot_spatial_stats
-from skills.spatial._lib.viz_utils import save_figure
+from skills.spatial._lib.genes import (
+    COUNT_BASED_METHODS,
+    METHOD_DISPATCH,
+    METHOD_PARAM_DEFAULTS,
+    SUPPORTED_METHODS,
+    VALID_MORANS_COORD_TYPES,
+    VALID_MORANS_CORR_METHODS,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "spatial-genes"
 SKILL_VERSION = "0.2.0"
+SCRIPT_REL_PATH = "skills/spatial/spatial-genes/spatial_genes.py"
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +58,10 @@ SKILL_VERSION = "0.2.0"
 
 
 def generate_figures(adata, output_dir: Path, top_genes: list[str]) -> list[str]:
+    from skills.spatial._lib.adata_utils import get_spatial_key
+    from skills.spatial._lib.viz import VizParams, plot_features, plot_spatial_stats
+    from skills.spatial._lib.viz_utils import save_figure
+
     figures = []
     spatial_key = get_spatial_key(adata)
 
@@ -114,19 +122,25 @@ def write_report(output_dir: Path, svg_df: pd.DataFrame, summary: dict,
         f"- **Top genes reported**: {summary['n_top_reported']}"]
 
     body_lines.extend(["", "### Top spatially variable genes\n"])
-    has_pval = "pval_norm" in svg_df.columns
-    if has_pval:
-        body_lines.extend(["| Rank | Gene | Moran's I | p-value |", "|------|------|-----------|---------|"])
+    score_label = summary.get("score_label", "Score")
+    score_column = summary.get("score_column", "I")
+    significance_column = summary.get("significance_column")
+    significance_label = summary.get("significance_label", "p-value")
+    has_significance = bool(significance_column and significance_column in svg_df.columns)
+    if has_significance:
+        body_lines.extend([f"| Rank | Gene | {score_label} | {significance_label} |", "|------|------|-----------|---------|"])
     else:
-        body_lines.extend(["| Rank | Gene | Score |", "|------|------|-------|"])
+        body_lines.extend([f"| Rank | Gene | {score_label} |", "|------|------|-------|"])
 
     for rank, gene in enumerate(summary["top_genes"][:20], 1):
         if gene in svg_df.index:
             row = svg_df.loc[gene]
-            if has_pval:
-                body_lines.append(f"| {rank} | {gene} | {row['I']:.4f} | {row.get('pval_norm', float('nan')):.2e} |")
+            score_value = row.get(score_column, float("nan"))
+            if has_significance:
+                sig_value = row.get(significance_column, float("nan"))
+                body_lines.append(f"| {rank} | {gene} | {score_value:.4f} | {sig_value:.2e} |")
             else:
-                body_lines.append(f"| {rank} | {gene} | {row['I']:.4f} |")
+                body_lines.append(f"| {rank} | {gene} | {score_value:.4f} |")
 
     body_lines.extend(["", "## Parameters\n"])
     for k, v in params.items():
@@ -144,14 +158,29 @@ def write_report(output_dir: Path, svg_df: pd.DataFrame, summary: dict,
     csv_df = svg_df.copy()
     if "gene" not in csv_df.columns:
         csv_df["gene"] = csv_df.index
-    cols = ["gene", "I"] + [c for c in ["pval_norm", "var_norm", "pval_z_sim"] if c in csv_df.columns]
+    preferred_cols = ["gene"]
+    if score_column in csv_df.columns:
+        preferred_cols.append(score_column)
+    if significance_column and significance_column in csv_df.columns:
+        preferred_cols.append(significance_column)
+    preferred_cols.extend(
+        c for c in ["pval", "pval_norm", "qval", "var_norm", "pval_z_sim"] if c in csv_df.columns and c not in preferred_cols
+    )
+    cols = preferred_cols
     csv_df[[c for c in cols if c in csv_df.columns]].to_csv(tables_dir / "svg_results.csv", index=False)
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_genes.py --input <input.h5ad> --output {output_dir}"
+    cmd = f"python {SCRIPT_REL_PATH} --input <input.h5ad> --output {shlex.quote(str(output_dir))}"
     for k, v in params.items():
-        cmd += f" --{k.replace('_', '-')} {v}"
+        flag = f"--{k.replace('_', '-')}"
+        if isinstance(v, bool):
+            if v:
+                cmd += f" {flag}"
+            continue
+        if v is None or v == "":
+            continue
+        cmd += f" {flag} {shlex.quote(str(v))}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
 
 
@@ -161,6 +190,8 @@ def write_report(output_dir: Path, svg_df: pd.DataFrame, summary: dict,
 
 
 def get_demo_data(output_dir: Path):
+    import scanpy as sc
+
     preprocess_script = _PROJECT_ROOT / "skills" / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
     with tempfile.TemporaryDirectory(prefix="svg_demo_") as tmpdir:
         result = subprocess.run(
@@ -178,6 +209,101 @@ def get_demo_data(output_dir: Path):
     return adata, None
 
 
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.morans_n_neighs < 1:
+        parser.error("--morans-n-neighs must be >= 1")
+    if args.morans_n_perms < 0:
+        parser.error("--morans-n-perms must be >= 0")
+    if args.spatialde_min_counts < 1:
+        parser.error("--spatialde-min-counts must be >= 1")
+    if args.spatialde_aeh_patterns is not None and args.spatialde_aeh_patterns < 2:
+        parser.error("--spatialde-aeh-patterns must be >= 2")
+    if args.spatialde_aeh_lengthscale is not None and args.spatialde_aeh_lengthscale <= 0:
+        parser.error("--spatialde-aeh-lengthscale must be > 0")
+    if args.sparkx_num_cores < 1:
+        parser.error("--sparkx-num-cores must be >= 1")
+    if args.sparkx_max_genes < 0:
+        parser.error("--sparkx-max-genes must be >= 0")
+    if args.flashs_n_rand_features < 1:
+        parser.error("--flashs-n-rand-features must be >= 1")
+    if args.flashs_bandwidth is not None and args.flashs_bandwidth <= 0:
+        parser.error("--flashs-bandwidth must be > 0")
+
+
+def _collect_run_configuration(args: argparse.Namespace) -> tuple[dict, dict]:
+    params = {
+        "method": args.method,
+        "n_top_genes": args.n_top_genes,
+        "fdr_threshold": args.fdr_threshold,
+    }
+
+    if args.method == "morans":
+        params.update(
+            {
+                "morans_n_neighs": args.morans_n_neighs,
+                "morans_n_perms": args.morans_n_perms,
+                "morans_corr_method": args.morans_corr_method,
+                "morans_coord_type": args.morans_coord_type,
+            }
+        )
+        method_kwargs = {
+            "n_neighs": args.morans_n_neighs,
+            "n_perms": args.morans_n_perms,
+            "corr_method": args.morans_corr_method,
+            "coord_type": args.morans_coord_type,
+        }
+    elif args.method == "spatialde":
+        if args.spatialde_no_aeh and (
+            args.spatialde_aeh_patterns is not None or args.spatialde_aeh_lengthscale is not None
+        ):
+            logger.warning(
+                "Ignoring --spatialde-aeh-patterns / --spatialde-aeh-lengthscale because --spatialde-no-aeh was set."
+            )
+        run_aeh = not args.spatialde_no_aeh
+        params.update(
+            {
+                "spatialde_no_aeh": args.spatialde_no_aeh,
+                "spatialde_min_counts": args.spatialde_min_counts,
+                "spatialde_aeh_patterns": args.spatialde_aeh_patterns if run_aeh else None,
+                "spatialde_aeh_lengthscale": args.spatialde_aeh_lengthscale if run_aeh else None,
+            }
+        )
+        method_kwargs = {
+            "run_aeh": run_aeh,
+            "min_counts_per_gene": args.spatialde_min_counts,
+            "aeh_patterns": args.spatialde_aeh_patterns if run_aeh else None,
+            "aeh_lengthscale": args.spatialde_aeh_lengthscale if run_aeh else None,
+        }
+    elif args.method == "sparkx":
+        params.update(
+            {
+                "sparkx_num_cores": args.sparkx_num_cores,
+                "sparkx_option": args.sparkx_option,
+                "sparkx_max_genes": args.sparkx_max_genes,
+            }
+        )
+        method_kwargs = {
+            "num_cores": args.sparkx_num_cores,
+            "option": args.sparkx_option,
+            "n_max_genes": args.sparkx_max_genes,
+        }
+    elif args.method == "flashs":
+        params.update(
+            {
+                "flashs_n_rand_features": args.flashs_n_rand_features,
+                "flashs_bandwidth": args.flashs_bandwidth,
+            }
+        )
+        method_kwargs = {
+            "n_rand_features": args.flashs_n_rand_features,
+            "bandwidth": args.flashs_bandwidth,
+        }
+    else:
+        method_kwargs = {}
+
+    return params, method_kwargs
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -191,7 +317,66 @@ def main():
     parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="morans")
     parser.add_argument("--n-top-genes", type=int, default=20)
     parser.add_argument("--fdr-threshold", type=float, default=0.05)
+    parser.add_argument(
+        "--morans-n-neighs",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["morans"]["n_neighs"],
+    )
+    parser.add_argument(
+        "--morans-n-perms",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["morans"]["n_perms"],
+        help="Permutation depth for Moran's I. Set to 0 to disable permutations.",
+    )
+    parser.add_argument(
+        "--morans-corr-method",
+        choices=list(VALID_MORANS_CORR_METHODS),
+        default=METHOD_PARAM_DEFAULTS["morans"]["corr_method"],
+    )
+    parser.add_argument(
+        "--morans-coord-type",
+        choices=list(VALID_MORANS_COORD_TYPES),
+        default=METHOD_PARAM_DEFAULTS["morans"]["coord_type"],
+        help="Neighbor graph layout. 'auto' lets Squidpy infer grid vs generic coordinates.",
+    )
+    parser.add_argument("--spatialde-no-aeh", action="store_true")
+    parser.add_argument(
+        "--spatialde-min-counts",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["spatialde"]["min_counts_per_gene"],
+        help="Minimum total counts per gene before running SpatialDE.",
+    )
+    parser.add_argument("--spatialde-aeh-patterns", type=int, default=None)
+    parser.add_argument("--spatialde-aeh-lengthscale", type=float, default=None)
+    parser.add_argument(
+        "--sparkx-num-cores",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["sparkx"]["num_cores"],
+    )
+    parser.add_argument(
+        "--sparkx-option",
+        default=METHOD_PARAM_DEFAULTS["sparkx"]["option"],
+        help="SPARK-X option argument. The official example uses 'mixture'.",
+    )
+    parser.add_argument(
+        "--sparkx-max-genes",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["sparkx"]["n_max_genes"],
+        help="Wrapper-level cap for SPARK-X on very large matrices; 0 disables subsetting.",
+    )
+    parser.add_argument(
+        "--flashs-n-rand-features",
+        type=int,
+        default=METHOD_PARAM_DEFAULTS["flashs"]["n_rand_features"],
+    )
+    parser.add_argument(
+        "--flashs-bandwidth",
+        type=float,
+        default=METHOD_PARAM_DEFAULTS["flashs"]["bandwidth"],
+        help="Optional kernel bandwidth override for FlashS. Default is data-adaptive.",
+    )
     args = parser.parse_args()
+    _validate_args(parser, args)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -199,12 +384,14 @@ def main():
     if args.demo:
         adata, input_file = get_demo_data(output_dir)
     elif args.input_path:
+        import scanpy as sc
+
         adata = sc.read_h5ad(args.input_path)
         input_file = args.input_path
     else:
         print("ERROR: Provide --input or --demo", file=sys.stderr); sys.exit(1)
 
-    params = {"method": args.method, "n_top_genes": args.n_top_genes, "fdr_threshold": args.fdr_threshold}
+    params, method_kwargs = _collect_run_configuration(args)
 
     # Validate input matrix availability for count-based methods.
     if args.method in COUNT_BASED_METHODS and "counts" not in adata.layers:
@@ -222,7 +409,14 @@ def main():
             )
 
     run_fn = METHOD_DISPATCH[args.method]
-    svg_df, summary = run_fn(adata, n_top_genes=args.n_top_genes, fdr_threshold=args.fdr_threshold)
+    svg_df, summary = run_fn(
+        adata,
+        n_top_genes=args.n_top_genes,
+        fdr_threshold=args.fdr_threshold,
+        **method_kwargs,
+    )
+
+    from skills.spatial._lib.adata_utils import store_analysis_metadata
 
     store_analysis_metadata(adata, SKILL_NAME, summary["method"], params=params)
     generate_figures(adata, output_dir, summary.get("top_genes", []))

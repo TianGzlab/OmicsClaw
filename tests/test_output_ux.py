@@ -5,7 +5,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
+
+import nbformat
 
 from omicsclaw.common.report import (
     build_output_dir_name,
@@ -52,6 +55,9 @@ def test_write_output_readme_surfaces_method_params_and_entrypoints(tmp_path):
     }
     (tmp_path / "report.md").write_text("# report\n", encoding="utf-8")
     (tmp_path / "figures").mkdir()
+    (tmp_path / "reproducibility").mkdir()
+    notebook_path = tmp_path / "reproducibility" / "analysis_notebook.ipynb"
+    notebook_path.write_text("{}", encoding="utf-8")
     (tmp_path / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
     readme_path = write_output_readme(
@@ -59,6 +65,7 @@ def test_write_output_readme_surfaces_method_params_and_entrypoints(tmp_path):
         skill_alias="spatial-domain-identification",
         description="Identify tissue domains",
         result_payload=payload,
+        notebook_path=notebook_path,
     )
 
     text = readme_path.read_text(encoding="utf-8")
@@ -66,6 +73,7 @@ def test_write_output_readme_surfaces_method_params_and_entrypoints(tmp_path):
     assert "`cellcharter`" in text
     assert "`resolution`: 1" in text
     assert "Open `report.md`" in text
+    assert "analysis_notebook.ipynb" in text
     assert "`figures/`" in text
     assert "Identify tissue domains" in text
 
@@ -118,10 +126,20 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
     assert result["method"] == "cellcharter"
     assert "__cellcharter__" in Path(result["output_dir"]).name
     assert Path(result["readme_path"]).exists()
+    assert Path(result["notebook_path"]).exists()
     assert "README.md" in result["files"]
+    assert "analysis_notebook.ipynb" in result["files"]
     readme_text = Path(result["readme_path"]).read_text(encoding="utf-8")
     assert "Synthetic test skill" in readme_text
     assert "cellcharter" in readme_text
+    assert "analysis_notebook.ipynb" in readme_text
+
+    notebook = nbformat.read(result["notebook_path"], as_version=4)
+    assert notebook.metadata["omicsclaw"]["skill"] == "fake-skill"
+    sources = "\n".join(cell.source for cell in notebook.cells)
+    assert "load_skill" in sources
+    assert "ACTUAL_RUN_COMMAND" in sources
+    assert "preview_function" in sources
 
 
 def test_pipeline_readme_lists_step_methods(tmp_path):
@@ -132,8 +150,18 @@ def test_pipeline_readme_lists_step_methods(tmp_path):
         pipeline_name="spatial-pipeline",
         completed_at="2026-03-29T06:30:00+00:00",
         results={
-            "preprocess": {"success": True, "method": "scanpy", "output_dir": str(tmp_path / "preprocess")},
-            "domains": {"success": True, "method": "cellcharter", "output_dir": str(tmp_path / "domains")},
+            "preprocess": {
+                "success": True,
+                "method": "scanpy",
+                "output_dir": str(tmp_path / "preprocess"),
+                "notebook_path": str(tmp_path / "preprocess" / "reproducibility" / "analysis_notebook.ipynb"),
+            },
+            "domains": {
+                "success": True,
+                "method": "cellcharter",
+                "output_dir": str(tmp_path / "domains"),
+                "notebook_path": str(tmp_path / "domains" / "reproducibility" / "analysis_notebook.ipynb"),
+            },
         },
     )
 
@@ -142,3 +170,19 @@ def test_pipeline_readme_lists_step_methods(tmp_path):
     assert "scanpy" in text
     assert "cellcharter" in text
     assert "`preprocess`" in text
+    assert "analysis_notebook.ipynb" in text
+
+
+def test_spatial_genes_help_does_not_require_scanpy_runtime():
+    script = ROOT / "skills" / "spatial" / "spatial-genes" / "spatial_genes.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0
+    assert "--morans-coord-type" in result.stdout
+    assert "--sparkx-option" in result.stdout
+    assert "--flashs-bandwidth" in result.stdout

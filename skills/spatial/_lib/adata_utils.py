@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import numpy as np
-import scanpy as sc
 
 from .exceptions import DataError, PreprocessingRequiredError
 
@@ -43,6 +42,8 @@ def require_preprocessed(adata) -> None:
 def ensure_pca(adata, *, n_comps: int = 50) -> None:
     """Compute PCA if not already present."""
     if "X_pca" not in adata.obsm:
+        import scanpy as sc
+
         logger.info("Computing PCA with %d components", n_comps)
         sc.tl.pca(adata, n_comps=min(n_comps, adata.n_vars - 1))
 
@@ -50,6 +51,8 @@ def ensure_pca(adata, *, n_comps: int = 50) -> None:
 def ensure_neighbors(adata, *, n_neighbors: int = 15, n_pcs: int = 50) -> None:
     """Compute neighbors graph if not already present."""
     if "neighbors" not in adata.uns:
+        import scanpy as sc
+
         ensure_pca(adata, n_comps=n_pcs)
         logger.info("Computing neighbors graph (k=%d)", n_neighbors)
         sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
