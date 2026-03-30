@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "🔎"
     trigger_keywords: [variant calling, SNV, indel, GATK, DeepVariant, FreeBayes, Mutect2, VQSR]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [variant-call]
+    saves_h5ad: false
 ---
 
 # 🔎 Variant Calling
@@ -228,7 +232,7 @@ output_directory/
 │   └── variant_quality_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

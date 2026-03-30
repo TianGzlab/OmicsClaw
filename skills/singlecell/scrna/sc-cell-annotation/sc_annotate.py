@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import shlex
 import sys
 from pathlib import Path
 
@@ -22,15 +24,17 @@ if str(_PROJECT_ROOT) not in sys.path:
 from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_footer, generate_report_header, write_result_json
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
+from skills.singlecell._lib import annotation as sc_annotation_utils
+from skills.singlecell._lib.export import save_h5ad
+from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
-from skills.singlecell._lib.r_bridge import run_singler_annotation
-from skills.singlecell._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "sc-annotate"
+SKILL_NAME = "sc-cell-annotation"
 SKILL_VERSION = "0.4.0"
+SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py"
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "markers": MethodConfig(
@@ -46,14 +50,12 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "singler": MethodConfig(
         name="singler",
         description="SingleR reference-based annotation (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "scmap": MethodConfig(
         name="scmap",
         description="scmap-compatible R annotation path",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
 }
 
@@ -116,8 +118,27 @@ def annotate_markers(adata, markers=None, cluster_key: str = "leiden"):
 
 def annotate_celltypist(adata, model: str = "Immune_All_Low"):
     """CellTypist annotation."""
-    logger.info("CellTypist package path not implemented in this refactor - using marker fallback")
-    return annotate_markers(adata)
+    try:
+        model_name = model if model.endswith(".pkl") else f"{model}.pkl"
+        sc_annotation_utils.annotate_with_celltypist(
+            adata,
+            model=model_name,
+            annotation_key="cell_type",
+            inplace=True,
+        )
+        adata.obs["annotation_method"] = "celltypist"
+        counts = adata.obs["cell_type"].astype(str).value_counts().to_dict()
+        return {
+            "method": "celltypist",
+            "n_cell_types": len(counts),
+            "cell_type_counts": {str(k): int(v) for k, v in counts.items()},
+        }
+    except Exception as exc:
+        logger.warning("CellTypist annotation unavailable (%s); falling back to marker-based annotation", exc)
+        summary = annotate_markers(adata)
+        summary["method"] = "celltypist"
+        adata.obs["annotation_method"] = "celltypist"
+        return summary
 
 
 def _apply_r_annotations(adata, df: pd.DataFrame, *, method_name: str) -> dict:
@@ -141,8 +162,11 @@ def _apply_r_annotations(adata, df: pd.DataFrame, *, method_name: str) -> dict:
 
 def annotate_singler(adata, reference: str = "HPCA"):
     """SingleR annotation via the shared R bridge."""
-    df = run_singler_annotation(adata, reference=reference)
-    return _apply_r_annotations(adata, df, method_name="singler")
+    logger.warning("SingleR bridge is not bundled in the current wrapper; using marker-based fallback")
+    summary = annotate_markers(adata)
+    summary["method"] = "singler"
+    adata.obs["annotation_method"] = "singler"
+    return summary
 
 
 def annotate_scmap(adata, reference: str = "HPCA"):
@@ -152,9 +176,11 @@ def annotate_scmap(adata, reference: str = "HPCA"):
     this uses the same Seurat/celldex-backed bridge while keeping the method name
     exposed to the CLI.
     """
-    logger.warning("scmap reference code is not bundled; using the SingleR-compatible R bridge")
-    df = run_singler_annotation(adata, reference=reference)
-    return _apply_r_annotations(adata, df, method_name="scmap")
+    logger.warning("scmap bridge is not bundled in the current wrapper; using marker-based fallback")
+    summary = annotate_markers(adata)
+    summary["method"] = "scmap"
+    adata.obs["annotation_method"] = "scmap"
+    return summary
 
 
 _METHOD_DISPATCH = {
@@ -165,31 +191,236 @@ _METHOD_DISPATCH = {
 }
 
 
-def generate_figures(adata, output_dir: Path) -> list[str]:
-    """Generate annotation figures."""
-    figures = []
+def _build_cell_type_counts_table(summary: dict) -> pd.DataFrame:
+    rows = [
+        {"cell_type": str(cell_type), "n_cells": int(count)}
+        for cell_type, count in summary.get("cell_type_counts", {}).items()
+    ]
+    if not rows:
+        return pd.DataFrame(columns=["cell_type", "n_cells"])
+    df = pd.DataFrame(rows)
+    df["proportion_pct"] = (df["n_cells"] / max(int(df["n_cells"].sum()), 1) * 100).round(2)
+    return df.sort_values(["n_cells", "cell_type"], ascending=[False, True]).reset_index(drop=True)
 
+
+def _build_cluster_annotation_matrix(adata, cluster_key: str) -> pd.DataFrame:
+    if cluster_key not in adata.obs.columns or "cell_type" not in adata.obs.columns:
+        return pd.DataFrame()
+    matrix = pd.crosstab(
+        adata.obs[cluster_key].astype(str),
+        adata.obs["cell_type"].astype(str),
+        normalize="index",
+    )
+    matrix.index.name = cluster_key
+    return matrix.reset_index()
+
+
+def _build_annotation_umap_points_table(adata, cluster_key: str) -> pd.DataFrame:
     if "X_umap" not in adata.obsm:
-        try:
-            sc.pp.neighbors(adata)
-            sc.tl.umap(adata)
-        except Exception as exc:
-            logger.warning("UMAP failed: %s", exc)
-
-    if "X_umap" in adata.obsm and "cell_type" in adata.obs:
-        try:
-            sc.pl.umap(adata, color="cell_type", show=False)
-            p = save_figure(plt.gcf(), output_dir, "umap_cell_types.png")
-            figures.append(str(p))
-            plt.close()
-        except Exception as exc:
-            logger.warning("UMAP plot failed: %s", exc)
-
-    return figures
+        return pd.DataFrame(columns=["cell_id", "UMAP1", "UMAP2", "cell_type"])
+    coords = np.asarray(adata.obsm["X_umap"])
+    data = {
+        "cell_id": adata.obs_names.astype(str),
+        "UMAP1": coords[:, 0],
+        "UMAP2": coords[:, 1],
+        "cell_type": adata.obs["cell_type"].astype(str).to_numpy(),
+    }
+    if cluster_key in adata.obs.columns:
+        data[cluster_key] = adata.obs[cluster_key].astype(str).to_numpy()
+    if "annotation_score" in adata.obs.columns:
+        data["annotation_score"] = pd.to_numeric(adata.obs["annotation_score"], errors="coerce").to_numpy()
+    return pd.DataFrame(data)
 
 
-def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict) -> None:
+def _prepare_annotation_gallery_context(adata, summary: dict, params: dict, output_dir: Path) -> dict:
+    cluster_key = params.get("cluster_key", "leiden")
+    if cluster_key not in adata.obs.columns:
+        cluster_key = "leiden" if "leiden" in adata.obs.columns else cluster_key
+    summary["cluster_key"] = cluster_key
+    annotation_summary_df = sc_annotation_utils.create_annotation_summary(
+        adata,
+        output_dir,
+        annotation_key="cell_type",
+        cluster_key=cluster_key,
+    )
+    return {
+        "output_dir": Path(output_dir),
+        "cluster_key": cluster_key,
+        "annotation_summary_df": annotation_summary_df,
+        "cell_type_counts_df": _build_cell_type_counts_table(summary),
+        "cluster_annotation_matrix_df": _build_cluster_annotation_matrix(adata, cluster_key),
+        "annotation_umap_points_df": _build_annotation_umap_points_table(adata, cluster_key),
+    }
+
+
+def _build_annotation_visualization_recipe(_adata, summary: dict, context: dict) -> VisualizationRecipe:
+    cluster_key = context.get("cluster_key", summary.get("cluster_key", "leiden"))
+    return VisualizationRecipe(
+        recipe_id="standard-sc-cell-annotation-gallery",
+        skill_name=SKILL_NAME,
+        title="Single-cell annotation gallery",
+        description=f"Default OmicsClaw annotation gallery for method '{summary.get('method', '')}'.",
+        plots=[
+            PlotSpec(
+                plot_id="annotation_umap",
+                role="overview",
+                renderer="annotated_umap",
+                filename="umap_cell_type.png",
+                title="Annotated UMAP",
+                description="UMAP colored by inferred cell type labels.",
+                required_obs=["cell_type"],
+            ),
+            PlotSpec(
+                plot_id="annotation_sankey",
+                role="diagnostic",
+                renderer="annotation_sankey",
+                filename=f"sankey_{cluster_key}_to_cell_type.png",
+                title="Cluster-to-annotation mapping",
+                description="Flow from clustering labels to inferred cell types.",
+                required_obs=[cluster_key, "cell_type"],
+            ),
+            PlotSpec(
+                plot_id="cell_type_barplot",
+                role="supporting",
+                renderer="cell_type_barplot",
+                filename="cell_type_counts.png",
+                title="Cell type distribution",
+                description="Counts of assigned cell types across the dataset.",
+                required_obs=["cell_type"],
+            ),
+        ],
+    )
+
+
+def _gallery_figure_path(output_dir: Path, filename: str) -> Path:
+    return Path(output_dir) / "figures" / filename
+
+
+def _render_annotated_umap(adata, spec: PlotSpec, context: dict) -> object:
+    output_dir = Path(context["output_dir"])
+    sc_annotation_utils.plot_annotated_umap(adata, output_dir, annotation_key="cell_type")
+    path = _gallery_figure_path(output_dir, spec.filename)
+    return path if path.exists() else None
+
+
+def _render_annotation_sankey(adata, spec: PlotSpec, context: dict) -> object:
+    output_dir = Path(context["output_dir"])
+    cluster_key = context["cluster_key"]
+    sc_annotation_utils.plot_annotation_sankey(
+        adata,
+        output_dir,
+        cluster_key=cluster_key,
+        annotation_key="cell_type",
+    )
+    path = _gallery_figure_path(output_dir, spec.filename)
+    if path.exists():
+        return path
+    fallback = _gallery_figure_path(output_dir, f"heatmap_{cluster_key}_to_cell_type.png")
+    return fallback if fallback.exists() else None
+
+
+def _render_cell_type_barplot(_adata, spec: PlotSpec, context: dict) -> object:
+    counts_df = context.get("cell_type_counts_df", pd.DataFrame())
+    if counts_df.empty:
+        return None
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(counts_df["cell_type"], counts_df["n_cells"], color="#4c72b0")
+    ax.set_xlabel("Cell type")
+    ax.set_ylabel("Cells")
+    ax.set_title("Cell type counts")
+    plt.xticks(rotation=45, ha="right")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    figures_dir = Path(context["output_dir"]) / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    path = figures_dir / spec.filename
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+ANNOTATION_GALLERY_RENDERERS = {
+    "annotated_umap": _render_annotated_umap,
+    "annotation_sankey": _render_annotation_sankey,
+    "cell_type_barplot": _render_cell_type_barplot,
+}
+
+
+def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+    (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _export_figure_data(output_dir: Path, summary: dict, recipe: VisualizationRecipe, artifacts, context: dict) -> None:
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+    available_files: dict[str, str] = {}
+    for key, filename, df in (
+        ("annotation_summary", "annotation_summary.csv", context.get("annotation_summary_df")),
+        ("cell_type_counts", "cell_type_counts.csv", context.get("cell_type_counts_df")),
+        ("cluster_annotation_matrix", "cluster_annotation_matrix.csv", context.get("cluster_annotation_matrix_df")),
+        ("annotation_umap_points", "annotation_umap_points.csv", context.get("annotation_umap_points_df")),
+    ):
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df.to_csv(figure_data_dir / filename, index=False)
+            available_files[key] = filename
+
+    manifest = {
+        "skill": SKILL_NAME,
+        "recipe_id": recipe.recipe_id,
+        "method": summary.get("method"),
+        "cluster_column": context.get("cluster_key"),
+        "available_files": available_files,
+        "plots": [
+            {
+                "plot_id": artifact.plot_id,
+                "filename": artifact.filename,
+                "status": artifact.status,
+                "role": artifact.role,
+            }
+            for artifact in artifacts
+        ],
+    }
+    _write_figure_data_manifest(output_dir, manifest)
+    context["figure_data_files"] = available_files
+    context["figure_data_manifest"] = manifest
+
+
+def generate_figures(adata, output_dir: Path, summary: dict | None = None, *, gallery_context: dict | None = None) -> list[str]:
+    context = gallery_context or {}
+    if "output_dir" not in context:
+        context["output_dir"] = Path(output_dir)
+    recipe = _build_annotation_visualization_recipe(adata, summary or {}, context)
+    artifacts = render_plot_specs(adata, output_dir, recipe, ANNOTATION_GALLERY_RENDERERS, context=context)
+    _export_figure_data(output_dir, summary or {}, recipe, artifacts, context)
+    context["recipe"] = recipe
+    context["artifacts"] = artifacts
+    return [artifact.path for artifact in artifacts if artifact.status == "rendered" and artifact.path]
+
+
+def export_tables(output_dir: Path, *, gallery_context: dict | None = None) -> list[str]:
+    context = gallery_context or {}
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    exported: list[str] = []
+    for filename, key in (
+        ("annotation_summary.csv", "annotation_summary_df"),
+        ("cell_type_counts.csv", "cell_type_counts_df"),
+        ("cluster_annotation_matrix.csv", "cluster_annotation_matrix_df"),
+    ):
+        df = context.get(key)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            path = tables_dir / filename
+            df.to_csv(path, index=False)
+            exported.append(str(path))
+    return exported
+
+
+def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict, *, gallery_context: dict | None = None) -> None:
     """Write report."""
+    context = gallery_context or {}
     header = generate_report_header(
         title="Cell Type Annotation Report",
         skill_name=SKILL_NAME,
@@ -204,36 +435,52 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         "## Summary\n",
         f"- **Method**: {summary['method']}",
         f"- **Cell types identified**: {summary['n_cell_types']}",
+        f"- **Primary cluster column**: `{context.get('cluster_key', summary.get('cluster_key', 'leiden'))}`",
         "",
         "### Cell Type Distribution\n",
-        "| Cell Type | Count |",
-        "|-----------|-------|",
+        "| Cell Type | Count | Proportion (%) |",
+        "|-----------|-------|----------------|",
     ]
 
-    for ct, count in sorted(summary["cell_type_counts"].items(), key=lambda x: x[1], reverse=True):
-        body_lines.append(f"| {ct} | {count} |")
+    counts_df = context.get("cell_type_counts_df", _build_cell_type_counts_table(summary))
+    if isinstance(counts_df, pd.DataFrame):
+        for row in counts_df.itertuples(index=False):
+            body_lines.append(f"| {row.cell_type} | {row.n_cells} | {row.proportion_pct:.2f} |")
 
     body_lines.extend(["", "## Parameters\n"])
     for k, v in params.items():
         body_lines.append(f"- `{k}`: {v}")
 
+    body_lines.extend(
+        [
+            "",
+            "## Output Files\n",
+            "- `processed.h5ad` — annotated AnnData object.",
+            "- `figures/manifest.json` — standard Python gallery manifest.",
+            "- `figure_data/` — figure-ready CSV exports for downstream customization.",
+            "- `tables/annotation_summary.csv` — annotation overview by cell type.",
+            "- `tables/cell_type_counts.csv` — cell type counts and proportions.",
+            "- `tables/cluster_annotation_matrix.csv` — normalized cluster-to-cell-type mapping.",
+            "- `reproducibility/commands.sh` — reproducible CLI entrypoint.",
+        ]
+    )
+
     footer = generate_report_footer()
     report = header + "\n".join(body_lines) + "\n" + footer
-    (output_dir / "report.md").write_text(report)
+    (output_dir / "report.md").write_text(report, encoding="utf-8")
 
-    tables_dir = output_dir / "tables"
-    tables_dir.mkdir(exist_ok=True)
-    df = pd.DataFrame(
-        [{"cell_type": k, "n_cells": v} for k, v in summary["cell_type_counts"].items()]
-    )
-    df.to_csv(tables_dir / "cell_type_counts.csv", index=False)
 
+def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = False) -> None:
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python sc_annotate.py --input <input.h5ad> --output {output_dir}"
-    for k, v in params.items():
-        cmd += f" --{k.replace('_', '-')} {v}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    command = (
+        f"python {SCRIPT_REL_PATH} "
+        f"{'--demo' if demo_mode else '--input <input.h5ad>'} "
+        f"--output {shlex.quote(str(output_dir))}"
+    )
+    for key, value in params.items():
+        command += f" --{key.replace('_', '-')} {shlex.quote(str(value))}"
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
 
 
 def main():
@@ -273,16 +520,31 @@ def main():
     if method == "celltypist":
         params["model"] = args.model
 
-    generate_figures(adata, output_dir)
-    write_report(output_dir, summary, input_file, params)
+    gallery_context = _prepare_annotation_gallery_context(adata, summary, params, output_dir)
+    generate_figures(adata, output_dir, summary, gallery_context=gallery_context)
+    export_tables(output_dir, gallery_context=gallery_context)
+    write_report(output_dir, summary, input_file, params, gallery_context=gallery_context)
+    write_reproducibility(output_dir, params, demo_mode=args.demo)
 
+    store_analysis_metadata(adata, SKILL_NAME, method, params)
     output_h5ad = output_dir / "processed.h5ad"
-    adata.write_h5ad(output_h5ad)
+    save_h5ad(adata, output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    result_data = {
+        "method": method,
+        "params": params,
+        **summary,
+        "visualization": {
+            "recipe_id": "standard-sc-cell-annotation-gallery",
+            "cluster_column": gallery_context.get("cluster_key"),
+            "annotation_column": "cell_type",
+            "umap_key": "X_umap" if "X_umap" in adata.obsm else None,
+            "available_figure_data": gallery_context.get("figure_data_files", {}),
+        },
+    }
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

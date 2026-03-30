@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Literal
 
 import anndata as ad
+
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+
+ensure_runtime_cache_dirs()
+
 import scanpy as sc
 
 from skills.spatial._lib.exceptions import DataError
@@ -68,6 +73,10 @@ def load_spatial_data(
 def _load_visium(data_path: Path) -> ad.AnnData:
     """Load 10x Visium data (directory, .h5, or .h5ad)."""
     if data_path.is_dir():
+        try:
+            return sc.read_visium(data_path)
+        except Exception as exc:
+            logger.info("sc.read_visium failed for %s (%s); falling back to matrix loaders", data_path, exc)
         h5_candidates = list(data_path.glob("*filtered*feature*bc*matrix*.h5"))
         if h5_candidates:
             return sc.read_10x_h5(h5_candidates[0])

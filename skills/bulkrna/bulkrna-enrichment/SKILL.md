@@ -11,6 +11,13 @@ metadata:
     domain: bulkrna
     emoji: "🛤️"
     trigger_keywords: [bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment, KEGG, bulk pathway]
+    allowed_extra_flags:
+      - "--gene-set-file"
+      - "--lfc-cutoff"
+      - "--method"
+      - "--padj-cutoff"
+    legacy_aliases: [bulk-enrichment]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Pathway Enrichment

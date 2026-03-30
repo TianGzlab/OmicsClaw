@@ -23,7 +23,7 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
-from skills.singlecell._lib.r_bridge import run_doubletfinder, run_scdblfinder
+
 from skills.singlecell._lib.viz_utils import save_figure
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -41,14 +41,12 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "doubletfinder": MethodConfig(
         name="doubletfinder",
         description="DoubletFinder — k-NN based doublet detection (R)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
     "scdblfinder": MethodConfig(
         name="scdblfinder",
         description="scDblFinder — fast doublet detection (R/Bioconductor)",
-        dependencies=("rpy2", "anndata2ri"),
-        is_r_based=True,
+        dependencies=(),
     ),
 }
 

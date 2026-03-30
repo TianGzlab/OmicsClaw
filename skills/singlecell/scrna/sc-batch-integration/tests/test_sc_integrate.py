@@ -29,6 +29,10 @@ def test_demo_mode(tmp_output):
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
+    assert (tmp_output / "figures" / "manifest.json").exists()
+    assert (tmp_output / "figure_data" / "manifest.json").exists()
+    assert (tmp_output / "tables" / "integration_summary.csv").exists()
+    assert (tmp_output / "tables" / "batch_sizes.csv").exists()
 
 
 def test_demo_report_content(tmp_output):
@@ -42,6 +46,7 @@ def test_demo_report_content(tmp_output):
     )
     report = (tmp_output / "report.md").read_text()
     assert "Integration" in report or "integration" in report or "Batch" in report
+    assert "figure_data/" in report
     assert "Disclaimer" in report
 
 
@@ -55,5 +60,7 @@ def test_demo_result_json(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["skill"] == "sc-integrate"
+    assert data["skill"] == "sc-batch-integration"
     assert "summary" in data
+    assert data["data"]["visualization"]["recipe_id"] == "standard-sc-batch-integration-gallery"
+    assert "integration_summary" in data["data"]["visualization"]["available_figure_data"]

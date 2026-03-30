@@ -2,7 +2,7 @@
 # OmicsClaw: SPARK-X spatially variable gene detection
 #
 # Usage:
-#   Rscript sp_sparkx.R <counts_csv> <coords_csv> <output_dir>
+#   Rscript sp_sparkx.R <counts_csv> <coords_csv> <output_dir> [num_cores] [option]
 #
 # counts_csv: genes x spots matrix (first column = gene names)
 # coords_csv: spots x 2 (x, y) coordinates (first column = spot names)
@@ -10,13 +10,15 @@
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 3) {
-    cat("Usage: Rscript sp_sparkx.R <counts.csv> <coords.csv> <output_dir>\n")
+    cat("Usage: Rscript sp_sparkx.R <counts.csv> <coords.csv> <output_dir> [num_cores] [option]\n")
     quit(status = 1)
 }
 
 counts_file <- args[1]
 coords_file <- args[2]
 output_dir  <- args[3]
+num_cores   <- ifelse(length(args) >= 4, max(1, as.integer(args[4])), 1)
+sparkx_option <- ifelse(length(args) >= 5, args[5], "mixture")
 
 suppressPackageStartupMessages({
     library(SPARK)
@@ -32,7 +34,8 @@ tryCatch({
     cat(sprintf("  %d genes x %d spots\n", nrow(counts), ncol(counts)))
 
     cat("Running SPARK-X...\n")
-    sparkx_result <- spark.sparkx(counts, coords, numCores = 1, option = "mixture")
+    cat(sprintf("  numCores=%d, option=%s\n", num_cores, sparkx_option))
+    sparkx_result <- spark.sparkx(counts, coords, numCores = num_cores, option = sparkx_option)
 
     res_df <- sparkx_result$res_mtest
     res_df$gene <- rownames(res_df)

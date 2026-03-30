@@ -11,6 +11,11 @@ metadata:
     domain: proteomics
     emoji: "🗺️"
     trigger_keywords: [proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler, GO enrichment]
+    allowed_extra_flags:
+      - "--method"
+      - "--species"
+    legacy_aliases: [prot-enrichment]
+    saves_h5ad: false
 ---
 
 # 🗺️ Proteomics Enrichment
@@ -63,7 +68,7 @@ output_directory/
 │   └── top_pathways.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

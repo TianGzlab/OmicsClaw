@@ -11,6 +11,10 @@ metadata:
     domain: proteomics
     emoji: "🏗️"
     trigger_keywords: [structural proteomics, cross-linking MS, XL-MS, XlinkX, pLink, xiSEARCH]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [struct-proteomics]
+    saves_h5ad: false
 ---
 
 # 🏗️ Structural Proteomics
@@ -62,7 +66,7 @@ output_directory/
 │   └── specific_linkages.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

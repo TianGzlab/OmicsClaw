@@ -10,6 +10,12 @@ tags: [singlecell, doublet, Scrublet, DoubletFinder, scDblFinder, QC]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--expected-doublet-rate"
+      - "--method"
+      - "--threshold"
+    legacy_aliases: [sc-doublet]
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -225,14 +231,14 @@ output_dir/
 │   └── metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
 ## Dependencies
 
 **Required**: scanpy, numpy
-**Optional**: scrublet, `rpy2` + `anndata2ri` + R packages `DoubletFinder`, `scDblFinder`, `Seurat`, and `SingleCellExperiment`
+**Optional**: scrublet, R + packages `DoubletFinder`, `scDblFinder`, `Seurat`, and `SingleCellExperiment` (executed via native R scripts)
 
 ## Citations
 

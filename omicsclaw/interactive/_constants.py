@@ -41,19 +41,21 @@ MCP_CONFIG_NAME = "mcp.yaml"
 
 # Slash commands shown in help and autocompleter
 SLASH_COMMANDS: list[tuple[str, str]] = [
-    ("/skills",          "List all OmicsClaw skills (optional: /skills <domain>)"),
     ("/run",             "Run a skill: /run <skill> [--demo] [--input <path>]"),
+    ("/skills",          "List all OmicsClaw skills (optional: /skills <domain>)"),
     ("/research",        "Research pipeline: /research [pdf] --idea \"...\" [--resume --output <dir>]"),
-    ("/install-skill",   "Add a skill from a local path or GitHub: /install-skill <src>"),
-    ("/uninstall-skill", "Remove an installed skill: /uninstall-skill <name>"),
+    ("/new",             "Start a new session"),
+    ("/current",         "Show current session info"),
     ("/sessions",        "List recent conversation sessions"),
     ("/resume",          "Resume a previous session (interactive picker if no ID)"),
-    ("/delete",          "Delete a saved session: /delete <id>"),
-    ("/current",         "Show current session info"),
-    ("/new",             "Start a new session"),
     ("/clear",           "Clear current conversation history"),
+    ("/export",          "Export current session to a Markdown report file"),
+    ("/delete",          "Delete a saved session: /delete <id>"),
+    ("/install-skill",   "Add a skill from a local path or GitHub: /install-skill <src>"),
+    ("/uninstall-skill", "Remove an installed skill: /uninstall-skill <name>"),
+    ("/tips",            "Toggle inline knowledge tips: /tips [on|off|level basic|expert]"),
     ("/mcp",             "Manage MCP servers (/mcp list | add | remove)"),
     ("/config",          "View or set config (/config list | /config set key value)"),
     ("/help",            "Show this help"),
-    ("/exit",            "Quit OmicsClaw"),
+    ("/exit",            "Quit OmicsClaw (aliases: /quit, /q)"),
 ]

@@ -11,8 +11,8 @@ class DependencyInfo:
 
 
 DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
-    "xcms": DependencyInfo("rpy2", "pip install rpy2", "XCMS via R"),
-    "metaboanalyst": DependencyInfo("rpy2", "pip install rpy2", "MetaboAnalyst via R"),
+    "xcms": DependencyInfo("xcms", "Rscript -e 'BiocManager::install(\"xcms\")'", "XCMS via native R scripts"),
+    "metaboanalyst": DependencyInfo("MetaboAnalystR", "Rscript -e 'install.packages(\"MetaboAnalystR\")'", "MetaboAnalyst via native R scripts"),
     "mzmine": DependencyInfo("pymzml", "pip install pymzml", "mzML parsing"),
     "ms-entropy": DependencyInfo("ms_entropy", "pip install ms-entropy", "Spectral entropy"),
 }

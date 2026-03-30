@@ -36,53 +36,62 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
+from omicsclaw.core.registry import registry
+from omicsclaw.common.manifest import (
+    PipelineManifest,
+    StepRecord,
+    read_manifest,
+    write_manifest,
+)
+from omicsclaw.routing.router import route_keyword
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "orchestrator"
-SKILL_VERSION = "0.1.0"
+SKILL_NAME = "spatial-orchestrator"
+SKILL_VERSION = "0.2.0"
+SCRIPT_REL_PATH = "skills/spatial/orchestrator/spatial_orchestrator.py"
 
 # ---------------------------------------------------------------------------
-# Routing maps
+# Routing maps — hardcoded fallback; SKILL.md trigger_keywords take priority
 # ---------------------------------------------------------------------------
 
-KEYWORD_MAP: dict[str, str] = {
+_FALLBACK_KEYWORD_MAP: dict[str, str] = {
     # Spatial Transcriptomics
-    "qc": "spatial-preprocessing",
-    "quality control": "spatial-preprocessing",
-    "preprocess": "spatial-preprocessing",
-    "normalize": "spatial-preprocessing",
-    "normalise": "spatial-preprocessing",
-    "clustering": "spatial-preprocessing",
-    "leiden": "spatial-preprocessing",
-    "visium": "spatial-preprocessing",
-    "xenium": "spatial-preprocessing",
-    "merfish": "spatial-preprocessing",
+    "qc": "spatial-preprocess",
+    "quality control": "spatial-preprocess",
+    "preprocess": "spatial-preprocess",
+    "normalize": "spatial-preprocess",
+    "normalise": "spatial-preprocess",
+    "clustering": "spatial-preprocess",
+    "leiden": "spatial-preprocess",
+    "visium": "spatial-preprocess",
+    "xenium": "spatial-preprocess",
+    "merfish": "spatial-preprocess",
     # Spatial domains
-    "spatial domain": "spatial-domain-identification",
-    "tissue region": "spatial-domain-identification",
-    "tissue domain": "spatial-domain-identification",
-    "niche": "spatial-domain-identification",
-    "spagcn": "spatial-domain-identification",
-    "stagate": "spatial-domain-identification",
-    "graphst": "spatial-domain-identification",
-    "banksy": "spatial-domain-identification",
+    "spatial domain": "spatial-domains",
+    "tissue region": "spatial-domains",
+    "tissue domain": "spatial-domains",
+    "niche": "spatial-domains",
+    "spagcn": "spatial-domains",
+    "stagate": "spatial-domains",
+    "graphst": "spatial-domains",
+    "banksy": "spatial-domains",
     # Cell type annotation
-    "cell type annotation": "spatial-cell-annotation",
-    "cell type": "spatial-cell-annotation",
-    "cell assignment": "spatial-cell-annotation",
-    "tangram": "spatial-cell-annotation",
-    "scanvi": "spatial-cell-annotation",
-    "cellassign": "spatial-cell-annotation",
+    "cell type annotation": "spatial-annotate",
+    "cell type": "spatial-annotate",
+    "cell assignment": "spatial-annotate",
+    "tangram": "spatial-annotate",
+    "scanvi": "spatial-annotate",
+    "cellassign": "spatial-annotate",
     # Deconvolution
-    "deconvolution": "spatial-deconvolution",
-    "deconvolve": "spatial-deconvolution",
-    "cell proportion": "spatial-deconvolution",
-    "cell type proportion": "spatial-deconvolution",
-    "card": "spatial-deconvolution",
-    "cell2location": "spatial-deconvolution",
-    "rctd": "spatial-deconvolution",
+    "deconvolution": "spatial-deconv",
+    "deconvolve": "spatial-deconv",
+    "cell proportion": "spatial-deconv",
+    "cell type proportion": "spatial-deconv",
+    "card": "spatial-deconv",
+    "cell2location": "spatial-deconv",
+    "rctd": "spatial-deconv",
     # Spatial statistics
     "spatial statistics": "spatial-statistics",
     "spatial autocorrelation": "spatial-statistics",
@@ -94,12 +103,12 @@ KEYWORD_MAP: dict[str, str] = {
     "neighborhood enrichment": "spatial-statistics",
     "co-occurrence": "spatial-statistics",
     # Spatially variable genes
-    "spatially variable gene": "spatial-svg-detection",
-    "spatially variable": "spatial-svg-detection",
-    "spatial gene": "spatial-svg-detection",
-    "svg": "spatial-svg-detection",
-    "spatialde": "spatial-svg-detection",
-    "spark": "spatial-svg-detection",
+    "spatially variable gene": "spatial-genes",
+    "spatially variable": "spatial-genes",
+    "spatial gene": "spatial-genes",
+    "svg": "spatial-genes",
+    "spatialde": "spatial-genes",
+    "spark": "spatial-genes",
     # Differential expression
     "differential expression": "spatial-de",
     "marker gene": "spatial-de",
@@ -107,24 +116,27 @@ KEYWORD_MAP: dict[str, str] = {
     "de analysis": "spatial-de",
     "wilcoxon": "spatial-de",
     # Condition comparison
-    "condition comparison": "spatial-condition-comparison",
-    "pseudobulk": "spatial-condition-comparison",
-    "deseq2": "spatial-condition-comparison",
-    "treatment vs control": "spatial-condition-comparison",
-    "experimental condition": "spatial-condition-comparison",
+    "condition comparison": "spatial-condition",
+    "pseudobulk": "spatial-condition",
+    "deseq2": "spatial-condition",
+    "treatment vs control": "spatial-condition",
+    "experimental condition": "spatial-condition",
     # Cell communication
-    "cell communication": "spatial-cell-communication",
-    "cell-cell communication": "spatial-cell-communication",
-    "ligand receptor": "spatial-cell-communication",
-    "ligand-receptor": "spatial-cell-communication",
-    "liana": "spatial-cell-communication",
-    "cellphonedb": "spatial-cell-communication",
-    "fastccc": "spatial-cell-communication",
+    "cell communication": "spatial-communication",
+    "cell-cell communication": "spatial-communication",
+    "ligand receptor": "spatial-communication",
+    "ligand-receptor": "spatial-communication",
+    "liana": "spatial-communication",
+    "cellphonedb": "spatial-communication",
+    "fastccc": "spatial-communication",
     # RNA velocity
     "rna velocity": "spatial-velocity",
     "velocity": "spatial-velocity",
     "cellular dynamics": "spatial-velocity",
     "scvelo": "spatial-velocity",
+    "velovi": "spatial-velocity",
+    "velocity confidence": "spatial-velocity",
+    "velocity pseudotime": "spatial-velocity",
     "spliced unspliced": "spatial-velocity",
     # Trajectory
     "trajectory": "spatial-trajectory",
@@ -149,58 +161,76 @@ KEYWORD_MAP: dict[str, str] = {
     "infercnv": "spatial-cnv",
     "chromosomal aberration": "spatial-cnv",
     # Integration
-    "multi-sample integration": "spatial-integration",
-    "multi sample integration": "spatial-integration",
-    "batch correction": "spatial-integration",
-    "batch effect": "spatial-integration",
-    "harmony": "spatial-integration",
-    "bbknn": "spatial-integration",
-    "scanorama": "spatial-integration",
-    "integration": "spatial-integration",
+    "multi-sample integration": "spatial-integrate",
+    "multi sample integration": "spatial-integrate",
+    "batch correction": "spatial-integrate",
+    "batch effect": "spatial-integrate",
+    "harmony": "spatial-integrate",
+    "bbknn": "spatial-integrate",
+    "scanorama": "spatial-integrate",
+    "integration": "spatial-integrate",
     # Registration
-    "spatial registration": "spatial-registration",
-    "slice alignment": "spatial-registration",
-    "paste": "spatial-registration",
-    "stalign": "spatial-registration",
-    "serial section": "spatial-registration",
-    "multi-slice": "spatial-registration",
+    "spatial registration": "spatial-register",
+    "slice alignment": "spatial-register",
+    "paste": "spatial-register",
+    "stalign": "spatial-register",
+    "serial section": "spatial-register",
+    "multi-slice": "spatial-register",
 }
 
+
+def _get_spatial_skill_catalog() -> dict[str, str]:
+    """Build the current canonical spatial-skill catalog."""
+    return {
+        alias: desc
+        for alias, desc in registry.build_skill_catalog(domain="spatial").items()
+        if alias != SKILL_NAME
+    }
+
+
+def _get_keyword_map() -> dict[str, str]:
+    """Build the canonical spatial keyword map, excluding the orchestrator itself."""
+    return {
+        keyword: alias
+        for keyword, alias in registry.build_keyword_map(
+            domain="spatial",
+            fallback_map=_FALLBACK_KEYWORD_MAP,
+        ).items()
+        if alias != SKILL_NAME
+    }
+
+
+# Backward-compatible alias for EXTENSION_MAP (used in route_file)
 EXTENSION_MAP: dict[str, str] = {
-    ".h5ad": "spatial-preprocessing",
-    ".h5": "spatial-preprocessing",
-    ".zarr": "spatial-preprocessing",
-    ".loom": "spatial-preprocessing",
-    ".csv": "spatial-preprocessing",
-    ".txt": "spatial-preprocessing",
+    ".h5ad": "spatial-preprocess",
+    ".h5": "spatial-preprocess",
+    ".zarr": "spatial-preprocess",
+    ".loom": "spatial-preprocess",
+    ".csv": "spatial-preprocess",
+    ".txt": "spatial-preprocess",
 }
 
 # Named pipelines: ordered list of skill aliases to execute in sequence
 NAMED_PIPELINES: dict[str, list[str]] = {
-    "standard": ["preprocess", "domains", "de", "genes", "statistics"],
-    "full": ["preprocess", "domains", "de", "genes", "statistics", "communication", "enrichment"],
-    "integration": ["integrate", "domains", "de"],
-    "spatial_only": ["preprocess", "genes", "statistics"],
-    "cancer": ["preprocess", "cnv", "de", "enrichment"],
-}
-
-# Human-readable skill descriptions for listing
-SKILL_DESCRIPTIONS: dict[str, str] = {
-    "spatial-preprocessing": "Spatial data QC, normalization, HVG, PCA/UMAP, Leiden clustering",
-    "spatial-domain-identification": "Tissue region/niche identification (SpaGCN, STAGATE, Leiden)",
-    "spatial-cell-annotation": "Cell type annotation (Tangram, scANVI, CellAssign)",
-    "spatial-deconvolution": "Deconvolution — cell type proportions (CARD, Cell2Location, RCTD)",
-    "spatial-statistics": "Spatial statistics (Moran's I, Geary's C, Ripley, neighborhood enrichment)",
-    "spatial-svg-detection": "Spatially variable genes (Moran's I, SpatialDE, SPARK-X)",
-    "spatial-de": "Differential expression (Wilcoxon, t-test, cluster markers)",
-    "spatial-condition-comparison": "Condition comparison with pseudobulk DESeq2 statistics",
-    "spatial-cell-communication": "Cell-cell communication (LIANA+, CellPhoneDB, built-in L-R)",
-    "spatial-velocity": "RNA velocity and cellular dynamics (scVelo, S/U ratio)",
-    "spatial-trajectory": "Trajectory inference (DPT, CellRank, Palantir)",
-    "spatial-enrichment": "Pathway enrichment (GSEA, ORA, Enrichr)",
-    "spatial-cnv": "Copy number variation inference (inferCNVpy, expression-based)",
-    "spatial-integration": "Multi-sample integration (Harmony, BBKNN, Scanorama)",
-    "spatial-registration": "Spatial registration / slice alignment (Procrustes, PASTE)",
+    "standard": [
+        "spatial-preprocess",
+        "spatial-domains",
+        "spatial-de",
+        "spatial-genes",
+        "spatial-statistics",
+    ],
+    "full": [
+        "spatial-preprocess",
+        "spatial-domains",
+        "spatial-de",
+        "spatial-genes",
+        "spatial-statistics",
+        "spatial-communication",
+        "spatial-enrichment",
+    ],
+    "integration": ["spatial-integrate", "spatial-domains", "spatial-de"],
+    "spatial_only": ["spatial-preprocess", "spatial-genes", "spatial-statistics"],
+    "cancer": ["spatial-preprocess", "spatial-cnv", "spatial-de", "spatial-enrichment"],
 }
 
 
@@ -211,40 +241,32 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
 
 def route_query(query: str) -> dict:
     """Route a natural language query to the best skill."""
-    query_lower = query.lower().strip()
+    effective_map = _get_keyword_map()
+    skill, confidence = route_keyword(query, effective_map)
 
-    # Score all skills by keyword matches (longest match wins)
-    scores: dict[str, int] = {}
-    for kw, skill in KEYWORD_MAP.items():
-        if kw in query_lower:
-            scores[skill] = scores.get(skill, 0) + len(kw)
-
-    if scores:
-        best_skill = max(scores, key=lambda s: scores[s])
-        confidence = min(1.0, scores[best_skill] / 20.0)
-        matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
+    if skill:
+        query_lower = query.lower().strip()
+        matched_kws = [kw for kw, sk in effective_map.items() if sk == skill and kw in query_lower]
         return {
             "matched": True,
-            "skill": best_skill,
-            "confidence": round(confidence, 2),
+            "skill": skill,
+            "confidence": confidence,
             "matched_keywords": matched_kws,
-            "scores": scores,
         }
 
     return {
         "matched": False,
-        "skill": "spatial-preprocessing",
+        "skill": "spatial-preprocess",
         "confidence": 0.0,
         "matched_keywords": [],
-        "scores": {},
-        "fallback_reason": "No keywords matched; defaulting to spatial-preprocessing",
+        "fallback_reason": "No keywords matched; defaulting to spatial-preprocess",
     }
 
 
 def route_file(input_path: str) -> dict:
     """Route by input file extension."""
     ext = Path(input_path).suffix.lower()
-    skill = EXTENSION_MAP.get(ext, "preprocess")
+    skill = EXTENSION_MAP.get(ext, "spatial-preprocess")
     return {
         "matched": ext in EXTENSION_MAP,
         "skill": skill,
@@ -255,7 +277,7 @@ def route_file(input_path: str) -> dict:
 
 def list_skills() -> dict:
     """Return all registered skills with descriptions."""
-    return {alias: desc for alias, desc in SKILL_DESCRIPTIONS.items()}
+    return _get_spatial_skill_catalog()
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +352,11 @@ def run_pipeline(
     output_dir: Path,
     timeout: int = 600,
 ) -> dict:
-    """Execute a named pipeline, chaining processed.h5ad between steps."""
+    """Execute a named pipeline, chaining processed.h5ad between steps.
+
+    Each step's output directory gets a ``manifest.json`` that records
+    the full execution lineage up to that point.
+    """
     if pipeline_name not in NAMED_PIPELINES:
         return {
             "success": False,
@@ -343,6 +369,7 @@ def run_pipeline(
     results: dict[str, dict] = {}
     current_input = input_path
     all_succeeded = True
+    upstream_manifest: PipelineManifest | None = None
 
     for step in steps:
         step_out = output_dir / step
@@ -364,8 +391,21 @@ def run_pipeline(
             all_succeeded = False
             break
 
-        # Chain: pass processed.h5ad to the next step
+        # Build manifest for this step
         processed = step_out / "processed.h5ad"
+        step_record = StepRecord(
+            skill=step,
+            version="",  # version is recorded inside the skill's own result.json
+            input_file=current_input,
+            output_file=str(processed) if processed.exists() else "",
+            params={},
+        )
+        write_manifest(step_out, step_record, upstream=upstream_manifest)
+
+        # Read back (includes this step) as upstream for next
+        upstream_manifest = read_manifest(step_out)
+
+        # Chain: pass processed.h5ad to the next step
         if processed.exists():
             current_input = str(processed)
 
@@ -414,21 +454,21 @@ def write_routing_report(
         body_lines.append(f"- **Fallback reason**: {routing.get('fallback_reason', '')}")
 
     skill = routing["skill"]
-    desc = SKILL_DESCRIPTIONS.get(skill, "")
+    desc = list_skills().get(skill, "")
     if desc:
         body_lines.extend(["", f"### About `{skill}`\n", desc])
 
     body_lines.extend([
         "", "### Suggested Command\n",
         "```bash",
-        f"python omicsclaw.py run {skill} --input <your_data.h5ad> --output /tmp/{skill}_output",
+        f"oc run {skill} --input <your_data.h5ad> --output /tmp/{skill}_output",
         "```",
     ])
 
     body_lines.extend(["", "## Available Skills\n"])
     body_lines.append("| Alias | Description |")
     body_lines.append("|-------|-------------|")
-    for alias, desc in SKILL_DESCRIPTIONS.items():
+    for alias, desc in list_skills().items():
         body_lines.append(f"| `{alias}` | {desc} |")
 
     footer = generate_report_footer()
@@ -452,7 +492,7 @@ def write_routing_report(
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = f"python spatial_orchestrator.py"
+    cmd = f"python {SCRIPT_REL_PATH}"
     if query:
         cmd += f' --query "{query}"'
     if input_file:
@@ -513,7 +553,7 @@ def write_pipeline_report(
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
     cmd = (
-        f"python spatial_orchestrator.py "
+        f"python {SCRIPT_REL_PATH} "
         f"--pipeline {pipeline_result['pipeline']} "
         f"--input {input_file} --output {output_dir}"
     )
@@ -567,6 +607,8 @@ def main():
 
     # --demo: showcase routing on example queries
     if args.demo:
+        keyword_map = _get_keyword_map()
+        skills = list_skills()
         example_queries = [
             "find spatially variable genes in my tissue",
             "run cell communication analysis",
@@ -594,8 +636,8 @@ def main():
         # Write demo report and result.json
         routing_summary = {
             "demo_routes": demo_routes,
-            "total_skills": len(SKILL_DESCRIPTIONS),
-            "total_keywords": len(KEYWORD_MAP),
+            "total_skills": len(skills),
+            "total_keywords": len(keyword_map),
             "named_pipelines": list(NAMED_PIPELINES.keys()),
         }
 
@@ -605,8 +647,8 @@ def main():
         )
         body_lines = [
             "## Routing Demo\n",
-            f"- **Total skills**: {len(SKILL_DESCRIPTIONS)}",
-            f"- **Keyword entries**: {len(KEYWORD_MAP)}",
+            f"- **Total skills**: {len(skills)}",
+            f"- **Keyword entries**: {len(keyword_map)}",
             f"- **Named pipelines**: {', '.join(NAMED_PIPELINES.keys())}",
             "",
             "### Example Query Routing\n",
@@ -622,7 +664,7 @@ def main():
             "| Alias | Description |",
             "|-------|-------------|",
         ])
-        for alias, desc in SKILL_DESCRIPTIONS.items():
+        for alias, desc in skills.items():
             body_lines.append(f"| `{alias}` | {desc} |")
 
         body_lines.extend(["", "## Named Pipelines\n"])
@@ -636,13 +678,13 @@ def main():
         write_result_json(
             output_dir, skill=SKILL_NAME, version=SKILL_VERSION,
             summary=routing_summary,
-            data={"demo_routes": demo_routes, "keyword_map_size": len(KEYWORD_MAP)},
+            data={"demo_routes": demo_routes, "keyword_map_size": len(keyword_map)},
         )
 
         repro_dir = output_dir / "reproducibility"
         repro_dir.mkdir(exist_ok=True)
         (repro_dir / "commands.sh").write_text(
-            f"#!/bin/bash\npython spatial_orchestrator.py --demo --output {output_dir}\n"
+            f"#!/bin/bash\npython {SCRIPT_REL_PATH} --demo --output {output_dir}\n"
         )
 
         print(f"Demo report written to {output_dir}")
@@ -676,7 +718,7 @@ def main():
         if routing["matched_keywords"]:
             print(f"  Matched keywords: {', '.join(routing['matched_keywords'])}")
         print(f"\nSuggested command:")
-        print(f"  python omicsclaw.py run {routing['skill']} \\")
+        print(f"  oc run {routing['skill']} \\")
         inp_str = f"--input {args.input_path}" if args.input_path else "--input <your_data.h5ad>"
         print(f"    {inp_str} --output {output_dir}")
 
@@ -690,7 +732,7 @@ def main():
         print(f"\nInput: {args.input_path}")
         print(f"→ Recommended skill: {routing['skill']} (extension: {routing['extension']})")
         print(f"\nSuggested command:")
-        print(f"  python omicsclaw.py run {routing['skill']} \\")
+        print(f"  oc run {routing['skill']} \\")
         print(f"    --input {args.input_path} --output {output_dir}")
 
         params = {"input": args.input_path}

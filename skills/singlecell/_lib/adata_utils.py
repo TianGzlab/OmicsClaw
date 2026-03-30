@@ -41,10 +41,15 @@ def ensure_neighbors(adata: AnnData, n_neighbors: int = 15, n_pcs: int = 50) -> 
 
 def store_analysis_metadata(adata: AnnData, skill_name: str, method: str, params: dict) -> None:
     """Store analysis metadata in adata.uns."""
-    if "omicsclaw_analyses" not in adata.uns:
-        adata.uns["omicsclaw_analyses"] = []
-    adata.uns["omicsclaw_analyses"].append({
-        "skill": skill_name,
-        "method": method,
-        "params": params,
-    })
+    record = {
+        "method": str(method),
+        "params": params or {},
+    }
+
+    analyses = adata.uns.get("omicsclaw_analyses")
+    if not isinstance(analyses, dict):
+        analyses = {}
+        adata.uns["omicsclaw_analyses"] = analyses
+
+    analyses[str(skill_name)] = record
+    adata.uns[f"omicsclaw_{skill_name}"] = record

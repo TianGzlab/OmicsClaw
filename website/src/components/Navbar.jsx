@@ -25,10 +25,13 @@ const Navbar = () => {
   return (
     <nav className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'glass py-4' : 'bg-transparent py-6'}`}>
       <div className="container mx-auto px-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Dna className="text-teal-400 w-8 h-8" />
+        <button 
+          onClick={() => window.scrollTo(0, 0)}
+          className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
+        >
+          <Dna className="text-teal-400 w-8 h-8 group-hover:rotate-12 transition-transform duration-300" />
           <span className="text-xl font-bold tracking-tight text-white">Omics<span className="text-teal-400">Claw</span></span>
-        </div>
+        </button>
 
         {/* Desktop Nav */}
         <div className="hidden md:flex items-center gap-8">
@@ -45,10 +48,10 @@ const Navbar = () => {
           {/* Language Toggle */}
           <button
             onClick={toggleLang}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass hover:bg-white/10 transition-colors text-sm font-medium text-slate-300 hover:text-teal-400"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass hover:bg-white/10 transition-colors text-sm font-medium text-slate-300 hover:text-teal-400 group"
             title="Switch Language"
           >
-            <Languages className="w-4 h-4" />
+            <Languages className="w-4 h-4 group-hover:-rotate-12 transition-transform duration-300" />
             <span>{lang === 'en' ? '中文' : 'EN'}</span>
           </button>
 

@@ -1,15 +1,58 @@
 ---
 name: sc-preprocessing
 description: >-
-  Single-cell RNA-seq QC, normalization, HVG selection, PCA, UMAP, and Leiden clustering.
-  Supports Scanpy (Python), Seurat LogNormalize (R), and Seurat SCTransform (R) workflows.
+  Single-cell RNA-seq preprocessing with Scanpy, Seurat LogNormalize, or
+  Seurat SCTransform workflows. Performs QC filtering, normalization, highly
+  variable gene selection, PCA, neighborhood graph construction, UMAP, and
+  clustering, then exports a downstream-ready AnnData plus a standard
+  OmicsClaw gallery and reproducibility bundle.
 version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, preprocessing, QC, normalization, clustering]
+tags: [singlecell, scrna, preprocessing, qc, normalization, clustering]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--leiden-resolution"
+      - "--max-mt-pct"
+      - "--method"
+      - "--min-cells"
+      - "--min-genes"
+      - "--n-neighbors"
+      - "--n-pcs"
+      - "--n-top-hvg"
+    param_hints:
+      scanpy:
+        priority: "min_genes/max_mt_pct → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
+        params: ["min_genes", "min_cells", "max_mt_pct", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution"]
+        defaults: {min_genes: 200, min_cells: 3, max_mt_pct: 20.0, n_top_hvg: 2000, n_pcs: 50, n_neighbors: 15, leiden_resolution: 1.0}
+        requires: ["count_like_matrix_in_X", "scanpy", "igraph", "leidenalg"]
+        tips:
+          - "--method scanpy: Python-native path using `scanpy.pp.highly_variable_genes(..., flavor='seurat')`, PCA on HVGs, Scanpy neighbors, UMAP, and Leiden."
+          - "--max-mt-pct: Wrapper-level filtering threshold applied after QC metric calculation and before normalization."
+          - "--n-neighbors / --leiden-resolution: Main graph-granularity controls; current OmicsClaw defaults match the Scanpy path, not Seurat's upstream defaults."
+      seurat:
+        priority: "min_genes/max_mt_pct → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
+        params: ["min_genes", "min_cells", "max_mt_pct", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution"]
+        defaults: {min_genes: 200, min_cells: 3, max_mt_pct: 20.0, n_top_hvg: 2000, n_pcs: 50, n_neighbors: 20, leiden_resolution: 0.8}
+        requires: ["Rscript", "Seurat", "SingleCellExperiment", "zellkonverter"]
+        tips:
+          - "--method seurat: R-backed `CreateSeuratObject → NormalizeData(LogNormalize) → FindVariableFeatures(vst) → ScaleData → RunPCA → FindNeighbors → FindClusters → RunUMAP`."
+          - "--n-top-hvg: Mapped to Seurat `FindVariableFeatures(..., nfeatures=...)`."
+          - "--n-neighbors / --leiden-resolution: Mapped to Seurat `FindNeighbors(k.param=...)` and `FindClusters(resolution=...)`, while OmicsClaw standardizes the output cluster column to `leiden`."
+      sctransform:
+        priority: "max_mt_pct → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
+        params: ["min_genes", "min_cells", "max_mt_pct", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution"]
+        defaults: {min_genes: 200, min_cells: 3, max_mt_pct: 20.0, n_top_hvg: 3000, n_pcs: 50, n_neighbors: 20, leiden_resolution: 0.8}
+        requires: ["Rscript", "Seurat", "SingleCellExperiment", "zellkonverter", "sctransform"]
+        tips:
+          - "--method sctransform: R-backed `SCTransform(variable.features.n=...)` path followed by PCA, neighbor graph construction, clustering, and UMAP in Seurat."
+          - "--n-top-hvg: Mapped to `SCTransform(variable.features.n=...)`; current OmicsClaw default follows the upstream SCTransform-style 3000-feature regime."
+          - "--max-mt-pct: Still applied as wrapper-level QC filtering before SCTransform, not inside SCTransform itself."
+    legacy_aliases: [sc-preprocess]
+    saves_h5ad: true
+    requires_preprocessed: false
     requires:
       bins:
         - python3
@@ -27,323 +70,352 @@ metadata:
       - scRNA preprocessing
       - QC filter normalize
       - clustering UMAP PCA
+      - Seurat preprocessing
+      - SCTransform preprocessing
 ---
 
 # 🧫 Single-Cell Preprocessing
 
-You are **SC Preprocessing**, the foundation skill for single-cell analysis in OmicsClaw. Your role is to load scRNA-seq data, perform quality control filtering, normalization, and clustering.
+You are **SC Preprocessing**, the OmicsClaw skill for turning raw-count-like
+single-cell RNA-seq input into a downstream-ready AnnData with QC-filtered
+cells, normalized expression, highly variable gene annotations, embedding,
+graph structure, clustering, and a standard result gallery.
 
 ## Why This Exists
 
-- **Without it**: Users write 30+ lines of boilerplate Scanpy code per dataset
-- **With it**: One command handles QC → normalize → HVG → PCA → UMAP → Leiden
-- **Why OmicsClaw**: Standardised preprocessing ensures reproducibility across downstream single-cell skills
+- **Without it**: users manually stitch together QC, normalization, HVG selection, PCA, graph construction, UMAP, and clustering with inconsistent defaults
+- **With it**: one command produces a stable preprocessing object plus a standard OmicsClaw report, gallery, tables, and reproducibility bundle
+- **Why OmicsClaw**: the wrapper keeps a common output contract across Python and R-backed preprocessing branches while exposing only a compact set of high-value controls
+
+## Scope Boundary
+
+Current OmicsClaw `sc-preprocessing` exposes **three implemented workflows**:
+
+1. `scanpy`
+2. `seurat`
+3. `sctransform`
+
+This skill does:
+
+1. QC metric calculation
+2. cell and gene filtering
+3. normalization / transformation
+4. highly variable gene selection
+5. PCA, neighborhood graph, UMAP, and clustering
+6. downstream-ready AnnData export
+
+This skill does **not**:
+
+1. ambient RNA correction
+2. doublet detection
+3. batch integration
+4. annotation
+5. differential expression
+
+Those belong to later OmicsClaw skills.
 
 ## Core Capabilities
 
-1. **QC filtering**: min genes/cells, mitochondrial percentage thresholds
-2. **Normalization**: Library-size normalization + log1p (or SCTransform in R)
-3. **HVG selection**: Seurat-flavored highly variable gene detection
-4. **Embedding**: PCA → neighbors → UMAP
-5. **Clustering**: Leiden community detection
-6. **Confounder regression**: Optional regress-out of technical variation
+1. **Three preprocessing backends**: Scanpy, Seurat LogNormalize, and Seurat SCTransform
+2. **Unified public controls**: one compact parameter set drives all backends while preserving method-aware defaults
+3. **Stable gallery contract**: UMAP clusters, QC violin, HVG plot, and PCA variance figures under `figures/`
+4. **Structured figure-data layer**: `figure_data/` exports summary, cluster, HVG, PCA, UMAP, and QC tables for downstream customization
+5. **Downstream-ready AnnData**: processed matrix, counts layer, raw snapshot, HVG annotations, embeddings, graph, and cluster labels
+6. **Notebook-first reproducibility**: README, report, result JSON, replay command, pinned requirements, and analysis notebook
 
 ## Input Formats
 
-| Format | Extension | Required | Example |
-|--------|-----------|----------|---------|
-| AnnData | `.h5ad` | Count matrix in X | `raw_sc.h5ad` |
-| 10x H5 | `.h5` | Filtered feature matrix | `filtered_feature_bc_matrix.h5` |
-| 10x MTX | directory | `matrix.mtx.gz` + barcodes + features | `filtered_feature_bc_matrix/` |
-| Demo | n/a | `--demo` flag | Built-in PBMC3k |
+The current wrapper uses `skills.singlecell._lib.io.smart_load(...)`.
+
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | yes | preferred path |
+| 10x HDF5 | `.h5` | yes | delegated to the shared single-cell loader |
+| Loom | `.loom` | yes | delegated to the shared single-cell loader |
+| Delimited matrix | `.csv`, `.tsv` | yes | interpreted via the shared count-matrix loader |
+| 10x directory | directory | yes | delegated to the shared 10x importer |
+| Demo | `--demo` | yes | PBMC3k local/example fallback |
+
+### Input Expectations
+
+- The most reliable input is a **raw-count-like matrix in `adata.X`**.
+- If `layers["counts"]` or `adata.raw` already exists, the wrapper will still
+  export a standardized `processed.h5ad`, but preprocessing assumptions should
+  be checked before rerunning on already-normalized data.
+- For best scientific behavior, do **not** feed scaled, regressed, or fully
+  processed matrices into this skill.
 
 ## Workflow
 
-1. **Calculate Metrics**: Compute per-cell UMI counts, features, and mitochondrial percentage.
-2. **Filter**: Remove low-quality cells and uninformative genes.
-3. **Normalize**: Library size normalization and log-transformation.
-4. **Embed & Cluster**: Compute PCA, neighborhood graph, UMAP, and Leiden communities.
-5. **Report**: Produce `report.md` detailing cell drop-out rates and visualization plots.
+1. **Load**: read input via the shared single-cell loader or demo data.
+2. **Validate method**: confirm the requested backend is actually available; explicit method requests are not silently rewritten.
+3. **QC and filtering**:
+   - filter cells by `min_genes`
+   - filter genes by `min_cells`
+   - compute mitochondrial QC and filter by `max_mt_pct`
+4. **Branch by backend**:
+   - `scanpy`: `normalize_total → log1p → highly_variable_genes(flavor='seurat') → scale → PCA → neighbors → UMAP → Leiden`
+   - `seurat`: `CreateSeuratObject → NormalizeData(LogNormalize) → FindVariableFeatures(vst) → ScaleData → RunPCA → FindNeighbors → FindClusters → RunUMAP`
+   - `sctransform`: `CreateSeuratObject → SCTransform → RunPCA → FindNeighbors → FindClusters → RunUMAP`
+5. **Write standard outputs**: `processed.h5ad`, report, result JSON, gallery, figure-data CSVs, summary tables, README, and notebook.
 
 ## CLI Reference
 
 ```bash
+# Default Scanpy path
 python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py \
-  --input <data.h5ad> --method scanpy --output <dir>
+  --input <raw_sc.h5ad> --output <dir>
+
+# Explicit Seurat path
 python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py \
-  --input <data.h5ad> --method seurat --output <dir>
+  --input <raw_sc.h5ad> --method seurat --output <dir>
+
+# Explicit SCTransform path
 python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py \
-  --input <data.h5ad> --method sctransform --output <dir>
-python omicsclaw.py run sc-preprocessing --demo
+  --input <raw_sc.h5ad> --method sctransform --output <dir>
+
+# Tune graph granularity
+python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py \
+  --input <raw_sc.h5ad> --method scanpy \
+  --n-top-hvg 3000 --n-pcs 50 --n-neighbors 20 --leiden-resolution 0.8 \
+  --output <dir>
+
+# Demo
+oc run sc-preprocessing --demo --output /tmp/sc_preprocess_demo
 ```
+
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--method` | preprocessing backend | `scanpy`, `seurat`, or `sctransform` |
+| `--min-genes` | cell filtering threshold | filters low-complexity cells |
+| `--min-cells` | gene filtering threshold | filters rarely detected genes |
+| `--max-mt-pct` | mitochondrial QC threshold | wrapper-level filter before downstream modeling |
+| `--n-top-hvg` | HVG budget | maps to backend-specific HVG control |
+| `--n-pcs` | PCA dimensionality | requested principal components |
+| `--n-neighbors` | graph locality | Scanpy `n_neighbors` or Seurat `k.param` |
+| `--leiden-resolution` | clustering granularity | Scanpy Leiden or Seurat `FindClusters(resolution=...)` |
+
+### Parameter Design Notes
+
+- The public flags are shared because they influence all three backends in the
+  same semantic direction.
+- Some backend-specific behavior is fixed in the wrapper and reported honestly
+  in `effective_params`, for example:
+  - Scanpy HVG flavor = `seurat`
+  - Scanpy normalization target sum = `10000`
+  - Scanpy scaling max value = `10`
+  - Seurat normalization method = `LogNormalize`
+  - Seurat variable feature method = `vst`
+  - SCTransform regression of `%MT` when available
+- These fixed choices are **wrapper-level implementation details**, not public
+  knobs in the current skill contract.
 
 ## Algorithm / Methodology
 
-### Scanpy (Python)
+### Common QC Contract
 
-**Goal:** Preprocess scRNA-seq data through QC filtering, normalization, and feature selection using Scanpy.
+All three methods share the same high-level preprocessing structure:
 
-**Approach:** Calculate per-cell quality metrics, filter low-quality cells/genes, normalize library sizes, identify highly variable genes, and scale for downstream analysis.
+1. start from count-like input
+2. filter cells with `min_genes`
+3. filter genes with `min_cells`
+4. calculate mitochondrial percentage and filter with `max_mt_pct`
+5. compute PCA, graph, UMAP, and clustering
+6. export a standardized AnnData plus OmicsClaw gallery and tables
 
-#### Calculate QC Metrics
+### `scanpy`
 
-```python
-import scanpy as sc
-import numpy as np
+Current OmicsClaw `scanpy` preprocessing does:
 
-# Calculate mitochondrial gene percentage
-adata.var['mt'] = adata.var_names.str.startswith('MT-')
-sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+1. `scanpy.pp.filter_cells(min_genes=...)`
+2. `scanpy.pp.filter_genes(min_cells=...)`
+3. mitochondrial tagging by prefix auto-detection (`MT-` or `mt-`)
+4. `scanpy.pp.calculate_qc_metrics(...)`
+5. `scanpy.pp.normalize_total(target_sum=10000)`
+6. `scanpy.pp.log1p(...)`
+7. `scanpy.pp.highly_variable_genes(..., flavor='seurat', n_top_genes=...)`
+8. scaling with max value `10`
+9. PCA on highly variable genes
+10. neighbor graph, UMAP, and Leiden clustering
 
-# Key metrics added to adata.obs:
-# - n_genes_by_counts: genes detected per cell
-# - total_counts: total UMI counts per cell
-# - pct_counts_mt: percentage mitochondrial
+Important implementation note:
+
+- The current Scanpy branch uses `flavor='seurat'`, not `seurat_v3`.
+- This means the scanpy path expects normalized/log-transformed expression for
+  HVG selection rather than raw-count HVG modeling.
+
+### `seurat`
+
+Current OmicsClaw `seurat` preprocessing calls the shared R script and runs:
+
+1. `CreateSeuratObject(min.cells=..., min.features=...)`
+2. `PercentageFeatureSet(pattern='^MT-' or '^mt-')`
+3. filtering by `nFeature_RNA >= min_genes` and `percent.mt <= max_mt_pct`
+4. `NormalizeData(...)` with Seurat's `LogNormalize` pathway
+5. `FindVariableFeatures(selection.method='vst', nfeatures=...)`
+6. `ScaleData(...)`
+7. `RunPCA(npcs=...)`
+8. `FindNeighbors(k.param=...)`
+9. `FindClusters(resolution=...)`
+10. `RunUMAP(dims=1:effective_pcs)`
+
+Important implementation note:
+
+- OmicsClaw reconstructs a standard AnnData output after the R run and
+  standardizes the main cluster column to `leiden` for downstream compatibility.
+
+### `sctransform`
+
+Current OmicsClaw `sctransform` preprocessing runs the same R wrapper but
+switches the normalization / feature-selection stage to:
+
+1. `SCTransform(variable.features.n=..., vars.to.regress='percent.mt' when available)`
+2. followed by `RunPCA`, `FindNeighbors`, `FindClusters`, and `RunUMAP`
+
+Important implementation notes:
+
+- `n_top_hvg` maps to `variable.features.n`.
+- Current OmicsClaw does **not** expose additional SCTransform knobs such as
+  `vst.flavor` or residual clipping; those remain fixed wrapper behavior.
+
+## Stable Output Contract
+
+### Files
+
+```text
+output_dir/
+├── README.md
+├── report.md
+├── result.json
+├── processed.h5ad
+├── figures/
+│   ├── umap_leiden.png
+│   ├── qc_violin.png
+│   ├── highly_variable_genes.png
+│   ├── pca_variance.png
+│   └── manifest.json
+├── figure_data/
+│   ├── manifest.json
+│   ├── preprocess_summary.csv
+│   ├── cluster_summary.csv
+│   ├── hvg_summary.csv
+│   ├── pca_variance_ratio.csv
+│   ├── umap_points.csv
+│   └── qc_metrics_per_cell.csv
+├── tables/
+│   ├── preprocess_summary.csv
+│   ├── cluster_summary.csv
+│   ├── hvg_summary.csv
+│   ├── pca_variance_ratio.csv
+│   └── qc_metrics_per_cell.csv
+└── reproducibility/
+    ├── commands.sh
+    ├── requirements.txt
+    └── analysis_notebook.ipynb
 ```
 
-#### Visualize QC Metrics
+### Guaranteed AnnData Fields After Success
 
-```python
-import matplotlib.pyplot as plt
+Current successful runs are expected to provide:
 
-sc.pl.violin(adata, ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'], jitter=0.4, multi_panel=True)
-sc.pl.scatter(adata, x='total_counts', y='pct_counts_mt')
-sc.pl.scatter(adata, x='total_counts', y='n_genes_by_counts')
+```text
+adata.layers["counts"]
+adata.raw
+adata.var["highly_variable"]
+adata.obsm["X_pca"]
+adata.obsm["X_umap"]
+adata.uns["neighbors"]
+adata.obsp["connectivities"]
+adata.obsp["distances"]
+adata.obs["leiden"]
+adata.obs["n_genes_by_counts"]
+adata.obs["total_counts"]
+adata.obs["pct_counts_mt"]
+adata.uns["omicsclaw_analyses"]
 ```
 
-#### Filter Cells and Genes
+R-backed methods additionally may provide:
 
-```python
-# Filter cells by QC metrics
-sc.pp.filter_cells(adata, min_genes=200)
-sc.pp.filter_cells(adata, max_genes=5000)
-
-# Filter by mitochondrial percentage
-adata = adata[adata.obs['pct_counts_mt'] < 20, :].copy()
-
-# Filter genes
-sc.pp.filter_genes(adata, min_cells=3)
-
-print(f'After filtering: {adata.n_obs} cells, {adata.n_vars} genes')
+```text
+adata.obs["seurat_clusters"]
+adata.uns["seurat_info"]
 ```
 
-#### Normalization
+### Structured Result Contract
 
-```python
-# Store raw counts before normalization
-adata.raw = adata.copy()
-adata.layers['counts'] = adata.X.copy()
+`result.json` includes:
 
-# Library size normalization (normalize to 10,000 counts per cell)
-sc.pp.normalize_total(adata, target_sum=1e4)
+- `summary.method`
+- `summary.n_cells`, `summary.n_genes`, `summary.n_hvg`, `summary.n_clusters`
+- `summary.n_pcs_used`
+- `data.params` for replayable public CLI parameters
+- `data.effective_params` for actual runtime configuration and resolved wrapper behavior
+- `data.visualization.recipe_id = "standard-sc-preprocessing-gallery"`
+- `data.visualization.available_figure_data`
 
-# Log transform
-sc.pp.log1p(adata)
-```
+### What Users Should Inspect First
 
-#### Highly Variable Genes
+1. `report.md`
+2. `figures/umap_leiden.png`
+3. `tables/preprocess_summary.csv`
+4. `tables/cluster_summary.csv`
+5. `processed.h5ad`
 
-```python
-# Identify highly variable genes (default: top 2000)
-sc.pp.highly_variable_genes(adata, n_top_genes=2000, flavor='seurat_v3', layer='counts')
+## Visualization Contract
 
-# Visualize
-sc.pl.highly_variable_genes(adata)
+`sc-preprocessing` treats Python output as the standard analysis gallery. The
+current roles are:
 
-# Check results
-print(f'Highly variable genes: {adata.var.highly_variable.sum()}')
-```
+- `overview`: UMAP clusters
+- `diagnostic`: QC violin and HVG plot
+- `supporting`: PCA variance
 
-#### Scaling and Embedding
+`figure_data/` is the stable plotting hand-off layer for future custom
+visualization, including optional R-side styling without rerunning preprocessing.
 
-```python
-# Subset to HVGs
-adata = adata[:, adata.var.highly_variable].copy()
+## Practical Interpretation Notes
 
-# Scale to unit variance and zero mean
-sc.pp.scale(adata, max_value=10)
-
-# PCA, neighbors, UMAP, clustering
-sc.tl.pca(adata, n_comps=50)
-sc.pp.neighbors(adata)
-sc.tl.umap(adata)
-sc.tl.leiden(adata, resolution=1.0)
-```
-
-#### Regress Out Confounders (Optional)
-
-```python
-# Regress out unwanted variation (e.g., cell cycle, mitochondrial)
-sc.pp.regress_out(adata, ['total_counts', 'pct_counts_mt'])
-```
-
-#### Complete Pipeline
-
-```python
-import scanpy as sc
-
-adata = sc.read_10x_mtx('filtered_feature_bc_matrix/')
-
-# QC
-adata.var['mt'] = adata.var_names.str.startswith('MT-')
-sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], inplace=True)
-
-# Filter
-sc.pp.filter_cells(adata, min_genes=200)
-sc.pp.filter_genes(adata, min_cells=3)
-adata = adata[adata.obs['pct_counts_mt'] < 20, :].copy()
-
-# Store raw
-adata.raw = adata.copy()
-
-# Normalize
-sc.pp.normalize_total(adata, target_sum=1e4)
-sc.pp.log1p(adata)
-
-# HVGs
-sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-
-# Scale
-adata = adata[:, adata.var.highly_variable].copy()
-sc.pp.scale(adata, max_value=10)
-```
-
-### Seurat (R)
-
-**Goal:** Preprocess scRNA-seq data through QC filtering, normalization, and feature selection using Seurat.
-
-#### Standard Log Normalization Pipeline
-
-```r
-library(Seurat)
-
-counts <- Read10X(data.dir = 'filtered_feature_bc_matrix/')
-seurat_obj <- CreateSeuratObject(counts = counts, min.cells = 3, min.features = 200)
-
-# QC
-seurat_obj[['percent.mt']] <- PercentageFeatureSet(seurat_obj, pattern = '^MT-')
-
-# Filter
-seurat_obj <- subset(seurat_obj,
-    subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & percent.mt < 20)
-
-# Normalize
-seurat_obj <- NormalizeData(seurat_obj)
-
-# HVGs
-seurat_obj <- FindVariableFeatures(seurat_obj, nfeatures = 2000)
-
-# Scale
-seurat_obj <- ScaleData(seurat_obj)
-```
-
-#### SCTransform Pipeline (Recommended)
-
-```r
-library(Seurat)
-
-counts <- Read10X(data.dir = 'filtered_feature_bc_matrix/')
-seurat_obj <- CreateSeuratObject(counts = counts, min.cells = 3, min.features = 200)
-
-# QC
-seurat_obj[['percent.mt']] <- PercentageFeatureSet(seurat_obj, pattern = '^MT-')
-
-# Filter
-seurat_obj <- subset(seurat_obj,
-    subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & percent.mt < 20)
-
-# SCTransform (does normalization, HVG, and scaling)
-seurat_obj <- SCTransform(seurat_obj, vars.to.regress = 'percent.mt', verbose = FALSE)
-```
-
-## QC Thresholds Reference
-
-| Metric | Typical Range | Notes |
-|--------|---------------|-------|
-| min_genes | 200-500 | Remove empty droplets |
-| max_genes | 2500-5000 | Remove doublets |
-| max_mt | 5-20% | Remove dying cells (tissue-dependent) |
-| min_cells | 3-10 | Remove rarely detected genes |
-
-## Method Comparison
-
-| Step | Scanpy | Seurat (Standard) | Seurat (SCTransform) |
-|------|--------|-------------------|---------------------|
-| Normalize | `normalize_total` + `log1p` | `NormalizeData` | `SCTransform` |
-| HVGs | `highly_variable_genes` | `FindVariableFeatures` | (included) |
-| Scale | `scale` | `ScaleData` | (included) |
-| Regress | `regress_out` | `ScaleData(vars.to.regress)` | `SCTransform(vars.to.regress)` |
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--min-genes` | `200` | Min genes per cell |
-| `--min-cells` | `3` | Min cells per gene |
-| `--max-mt-pct` | `20.0` | Max mitochondrial % |
-| `--method` | `scanpy` | `scanpy`, `seurat`, or `sctransform` |
-| `--n-top-hvg` | `2000` | Number of HVGs |
-| `--n-pcs` | `50` | PCA components |
-| `--leiden-resolution` | `1.0` | Leiden resolution |
-
-## Runtime Notes
-
-- `--method scanpy` is the default Python workflow.
-- `--method seurat` runs the Seurat LogNormalize path through `rpy2`.
-- `--method sctransform` runs the Seurat SCTransform path through `rpy2`.
-- R-backed modes require `rpy2`, `anndata2ri`, and the R packages installed via `Rscript install_r_dependencies.R`.
+- If very few cells remain after preprocessing, revisit `min_genes` and
+  `max_mt_pct` first.
+- If clusters are too coarse, inspect `n_neighbors` and `leiden_resolution`.
+- If clusters are overly fragmented, reduce `leiden_resolution` or increase
+  `n_neighbors`.
+- If HVGs look too narrow for a heterogeneous dataset, increase `n_top_hvg`.
+- If the input already appears normalized or scaled, state that preprocessing
+  assumptions may be violated before trusting the result.
 
 ## Example Queries
 
-- "Run single cell preprocessing on this 10x h5 data"
-- "Perform QC and clustering: filter out cells with >20% mito"
-- "Normalize and cluster this PBMC count matrix using Scanpy"
-
-## Output Structure
-
-```
-output_dir/
-├── report.md
-├── processed.h5ad
-├── result.json
-├── figures/
-│   ├── qc_violin.png
-│   ├── hvg_plot.png
-│   ├── umap_clusters.png
-│   └── umap_genes.png
-└── reproducibility/
-    ├── commands.sh
-    ├── environment.yml
-    └── checksums.sha256
-```
-
-## Version Compatibility
-
-Reference examples tested with: scanpy 1.10+, numpy 1.26+, matplotlib 3.8+
+- "Preprocess this scRNA-seq dataset with Scanpy"
+- "Run Seurat LogNormalize preprocessing and give me a processed h5ad"
+- "Use SCTransform for preprocessing and clustering"
+- "Filter by mitochondrial percentage, run PCA/UMAP, and cluster the cells"
 
 ## Dependencies
 
-**Required**: scanpy >= 1.9, anndata >= 0.11, numpy, pandas, matplotlib
+Core Python path:
 
-## Citations
+- `scanpy`
+- `igraph`
+- `leidenalg`
 
-- [Scanpy](https://scanpy.readthedocs.io/) — Wolf et al., Genome Biology 2018
-- [Seurat](https://satijalab.org/seurat/) — Hao et al., Cell 2021
-- [SCTransform](https://doi.org/10.1186/s13059-019-1874-1) — Hafemeister & Satija, Genome Biology 2019
-- [Leiden algorithm](https://www.nature.com/articles/s41598-019-41695-z) — Traag et al., 2019
+R-backed paths additionally require:
 
-## Safety
+- `Rscript`
+- `Seurat`
+- `SingleCellExperiment`
+- `zellkonverter`
+- `sctransform` for the `sctransform` method
 
-- **Local-first**: Strict offline processing without transmitting sample profiles.
-- **Disclaimer**: Reproducible OmicsClaw reports clearly state parameter origins.
-- **Audit trail**: Logging traces down to seed integers used in embedding.
+## Safety And Guardrails
 
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- "preprocess", "QA/QC", "Scanpy pipeline", "filter normalize"
-
-**Chaining partners**:
-- `sc-doublet` — Doublet detection before preprocessing
-- `sc-annotate` — Cell type annotation after clustering
-- `sc-integrate` — Batch integration for multi-sample data
+- This skill assumes **raw-count-like** input.
+- Explicit method requests should fail clearly if the backend is unavailable;
+  they should not silently switch to another scientific method.
+- `max_mt_pct` is a wrapper-level QC filter and should be explained before the run.
+- For short execution guardrails, see
+  `knowledge_base/knowhows/KH-sc-preprocessing-guardrails.md`.
+- For longer method and tuning guidance, see
+  `knowledge_base/skill-guides/singlecell/sc-preprocessing.md`.

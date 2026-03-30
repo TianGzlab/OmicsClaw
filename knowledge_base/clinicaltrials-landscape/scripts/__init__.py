@@ -1,0 +1,2 @@
+# clinicaltrials-landscape scripts package
+

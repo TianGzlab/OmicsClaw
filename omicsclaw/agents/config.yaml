@@ -5,6 +5,8 @@
 # with deepagents create_deep_agent(subagents=[...]).
 #
 # tools: names must match keys in the tool_registry dict built at runtime.
+#        Note: deepagents auto-provides built-in tools (read_file, write_file,
+#        edit_file, ls, glob, grep, execute) — they do NOT need to be listed here.
 # system_prompt_ref: refers to a named prompt in prompts.py (resolved at load time).
 
 planner-agent:
@@ -75,15 +77,16 @@ planner-agent:
 
     SELF-CRITIQUE PROTOCOL:
     After generating your initial plan, critically evaluate it:
-    1. Is each step achievable with a registered OmicsClaw skill function?
-       Verify by referencing the skill's Python API (e.g. preprocess(),
-       run_de(), annotate_tangram()).
-    2. Are success signals measurable and realistic?
-    3. Is the computational complexity appropriate for the dataset size?
-    4. Are there redundant or unnecessary steps?
+    1. Are success signals measurable and realistic?
+    2. Is the computational complexity appropriate for the dataset size?
+    3. Are there redundant or unnecessary steps?
+    4. Does each stage have a clear fallback if the primary method fails?
     Then revise the plan to address any weaknesses found.
     Output both the initial plan AND the revised plan with explanations
     for each change.
+    NOTE: You do NOT need to verify whether specific Python functions exist.
+    The coding-agent will use skill_search to discover available functions
+    at execution time. Focus on choosing the right skills and methods.
 
 research-agent:
   description: >
@@ -134,12 +137,16 @@ coding-agent:
     available in the kernel) to load and call skill functions. This is the
     ONLY correct way to import OmicsClaw skills in the notebook.
 
-    CORRECT PATTERN:
-      mod = load_skill("spatial-preprocess")
+    CORRECT PATTERN (one example — skill_search gives you the exact functions):
+      mod = load_skill("spatial-preprocessing")
       adata, summary = mod.preprocess(adata, min_genes=200, n_top_hvg=2000)
 
-      mod = load_skill("sc-de")
-      result = mod.run_de(adata, groupby="leiden", method="wilcoxon")
+    IMPORTANT: Do NOT guess function names. Call skill_search first — it returns
+    the exact function list (marked with ▶) for each skill. Use those names.
+
+    NOTE: Always call skill_search FIRST to see the actual available functions.
+    The example above shows the general pattern, but skill_search returns the
+    up-to-date function list for each skill.
 
     DO NOT try to use `from skills.spatial... import ...` — skill directories
     use hyphens and have no __init__.py, so normal Python imports will FAIL.

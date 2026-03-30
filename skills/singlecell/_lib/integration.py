@@ -601,7 +601,8 @@ def run_harmony_integration(
         verbose=False,
     )
 
-    adata.obsm["X_harmony"] = harmony_out.Z_corr.T
+    # harmonypy already returns (n_cells, n_components); do not transpose.
+    adata.obsm["X_harmony"] = harmony_out.Z_corr
     logger.info("Added 'X_harmony' to obsm (shape: %s)", adata.obsm["X_harmony"].shape)
 
     adata.uns["harmony_integration"] = {

@@ -4,12 +4,14 @@
 # Usage:
 #   Rscript sp_card.R <spatial_counts> <spatial_coords> <ref_counts>
 #     <ref_meta> <output_dir> [min_count_gene] [min_count_spot]
+#     [imputation] [num_grids] [ineibor]
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 5) {
     cat("Usage: Rscript sp_card.R <spatial_counts.csv> <spatial_coords.csv>",
-        "<ref_counts.csv> <ref_meta.csv> <output_dir> [min_count_gene] [min_count_spot]\n")
+        "<ref_counts.csv> <ref_meta.csv> <output_dir> [min_count_gene] [min_count_spot]",
+        "[imputation] [num_grids] [ineibor]\n")
     quit(status = 1)
 }
 
@@ -20,6 +22,9 @@ ref_meta_file   <- args[4]
 output_dir      <- args[5]
 minCountGene    <- if (length(args) >= 6) as.integer(args[6]) else 100L
 minCountSpot    <- if (length(args) >= 7) as.integer(args[7]) else 5L
+runImputation   <- if (length(args) >= 8 && nzchar(args[8])) toupper(args[8]) %in% c("TRUE", "T", "1", "YES") else FALSE
+numGrids        <- if (length(args) >= 9 && nzchar(args[9])) as.integer(args[9]) else 2000L
+ineibor         <- if (length(args) >= 10 && nzchar(args[10])) as.integer(args[10]) else 10L
 
 suppressPackageStartupMessages({
     library(CARD)
@@ -68,6 +73,29 @@ tryCatch({
 
     write.csv(proportions, file.path(output_dir, "card_proportions.csv"),
         quote = FALSE)
+
+    if (runImputation) {
+        cat(sprintf(
+            "Running CARD imputation (numGrids=%d, ineibor=%d)...\n",
+            numGrids, ineibor
+        ))
+        capture.output(
+            CARD_obj <- CARD.imputation(
+                CARD_obj,
+                NumGrids = numGrids,
+                ineibor = ineibor
+            ),
+            file = "/dev/null"
+        )
+
+        if (!is.null(CARD_obj@refined_prop)) {
+            write.csv(
+                as.data.frame(CARD_obj@refined_prop),
+                file.path(output_dir, "card_refined_proportions.csv"),
+                quote = FALSE
+            )
+        }
+    }
 
     cat(sprintf("Done. Deconvolved %d spots into %d cell types\n",
         nrow(proportions), ncol(proportions)))

@@ -2,7 +2,7 @@
 # OmicsClaw: CellChat cell-cell communication analysis
 #
 # Usage:
-#   Rscript sc_cellchat.R <h5ad_file> <output_dir> [cell_type_key] [species]
+#   Rscript sc_cellchat.R <h5ad_file> <output_dir> [cell_type_key] [species] [prob_type] [min_cells]
 #
 # species: human | mouse (default: human)
 # Used by both single-cell and spatial communication skills.
@@ -16,7 +16,7 @@
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 2) {
-    cat("Usage: Rscript sc_cellchat.R <h5ad_file> <output_dir> [cell_type_key] [species]\n")
+    cat("Usage: Rscript sc_cellchat.R <h5ad_file> <output_dir> [cell_type_key] [species] [prob_type] [min_cells]\n")
     quit(status = 1)
 }
 
@@ -24,6 +24,8 @@ h5ad_file     <- args[1]
 output_dir    <- args[2]
 cell_type_key <- if (length(args) >= 3) args[3] else "cell_type"
 species       <- if (length(args) >= 4) args[4] else "human"
+prob_type     <- if (length(args) >= 5) args[5] else "triMean"
+min_cells     <- if (length(args) >= 6) as.integer(args[6]) else 10
 
 suppressPackageStartupMessages({
     library(CellChat)
@@ -61,9 +63,9 @@ tryCatch({
     cellchat <- identifyOverExpressedGenes(cellchat, do.fast = has_presto)
     cellchat <- identifyOverExpressedInteractions(cellchat)
 
-    cat("Computing communication probabilities (triMean)...\n")
-    cellchat <- computeCommunProb(cellchat, raw.use = TRUE, type = "triMean")
-    cellchat <- filterCommunication(cellchat, min.cells = 10)
+    cat(sprintf("Computing communication probabilities (type=%s)...\n", prob_type))
+    cellchat <- computeCommunProb(cellchat, raw.use = TRUE, type = prob_type)
+    cellchat <- filterCommunication(cellchat, min.cells = min_cells)
     cellchat <- computeCommunProbPathway(cellchat)
     cellchat <- aggregateNet(cellchat)
 

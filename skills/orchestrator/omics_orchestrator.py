@@ -22,41 +22,41 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.loaders import EXTENSION_TO_DOMAIN
-from omicsclaw.routing.router import route_query_unified
+from omicsclaw.routing.router import route_keyword, route_query_unified
 from omicsclaw.core.registry import registry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Domain detection
+# Domain detection — hardcoded maps serve as fallback for SKILL.md keywords
 # ---------------------------------------------------------------------------
 
-DOMAIN_KEYWORD_MAPS = {
+_FALLBACK_KEYWORD_MAPS = {
     "spatial": {
-        "spatial domain": "spatial-domain-identification",
-        "tissue region": "spatial-domain-identification",
-        "spatially variable": "spatial-svg-detection",
+        "spatial domain": "spatial-domains",
+        "tissue region": "spatial-domains",
+        "spatially variable": "spatial-genes",
         "spatial statistics": "spatial-statistics",
         "moran": "spatial-statistics",
-        "cell type annotation": "spatial-cell-annotation",
-        "deconvolution": "spatial-deconvolution",
-        "cell communication": "spatial-cell-communication",
-        "ligand receptor": "spatial-cell-communication",
+        "cell type annotation": "spatial-annotate",
+        "deconvolution": "spatial-deconv",
+        "cell communication": "spatial-communication",
+        "ligand receptor": "spatial-communication",
         "rna velocity": "spatial-velocity",
         "trajectory": "spatial-trajectory",
         "pseudotime": "spatial-trajectory",
         "pathway enrichment": "spatial-enrichment",
         "cnv": "spatial-cnv",
         "copy number": "spatial-cnv",
-        "batch correction": "spatial-integration",
-        "integration": "spatial-integration",
-        "spatial registration": "spatial-registration",
+        "batch correction": "spatial-integrate",
+        "integration": "spatial-integrate",
+        "spatial registration": "spatial-register",
         "differential expression": "spatial-de",
         "marker genes": "spatial-de",
-        "condition comparison": "spatial-condition-comparison",
-        "preprocess": "spatial-preprocessing",
-        "qc": "spatial-preprocessing",
+        "condition comparison": "spatial-condition",
+        "preprocess": "spatial-preprocess",
+        "qc": "spatial-preprocess",
     },
     "singlecell": {
         "qc metrics": "sc-qc",
@@ -98,6 +98,9 @@ DOMAIN_KEYWORD_MAPS = {
         "grn": "sc-grn",
         "pyscenic": "sc-grn",
         "grnboost": "sc-grn",
+        "cell communication": "sc-cell-communication",
+        "ligand receptor": "sc-cell-communication",
+        "cellchat": "sc-cell-communication",
     },
     "genomics": {
         "variant call": "genomics-variant-calling",
@@ -173,6 +176,19 @@ DOMAIN_KEYWORD_MAPS = {
     },
 }
 
+_DOMAINS = ("spatial", "singlecell", "genomics", "proteomics", "metabolomics", "bulkrna")
+
+
+def _get_keyword_maps() -> dict[str, dict[str, str]]:
+    """Build per-domain keyword maps from SKILL.md, with hardcoded fallback."""
+    return {
+        domain: registry.build_keyword_map(
+            domain=domain,
+            fallback_map=_FALLBACK_KEYWORD_MAPS.get(domain, {}),
+        )
+        for domain in _DOMAINS
+    }
+
 
 def detect_domain(input_path: str | None = None, query: str | None = None) -> str:
     """Auto-detect omics domain from file extension or query keywords."""
@@ -183,7 +199,7 @@ def detect_domain(input_path: str | None = None, query: str | None = None) -> st
 
     if query:
         query_lower = query.lower()
-        for domain, keywords in DOMAIN_KEYWORD_MAPS.items():
+        for domain, keywords in _get_keyword_maps().items():
             for kw in keywords:
                 if kw in query_lower:
                     return domain
@@ -200,27 +216,8 @@ def route_query(query: str, domain: str | None = None) -> tuple[str | None, floa
     if domain is None:
         domain = detect_domain(None, query)
 
-    keyword_map = DOMAIN_KEYWORD_MAPS.get(domain, {})
-    query_lower = query.lower()
-
-    # Find best match with confidence scoring
-    best_match = None
-    best_score = 0.0
-
-    for keyword, skill in keyword_map.items():
-        if keyword in query_lower:
-            # Confidence based on keyword length and position
-            score = len(keyword) / len(query_lower)
-            if score > best_score:
-                best_score = score
-                best_match = skill
-
-    if best_match:
-        # Normalize confidence to 0.5-1.0 range
-        confidence = 0.5 + (best_score * 0.5)
-        return best_match, min(confidence, 1.0)
-
-    return None, 0.0
+    keyword_map = _get_keyword_maps().get(domain, {})
+    return route_keyword(query, keyword_map)
 
 
 def route_query_with_mode(query: str, domain: str | None = None, routing_mode: str = "keyword") -> tuple[str | None, float]:
@@ -228,7 +225,7 @@ def route_query_with_mode(query: str, domain: str | None = None, routing_mode: s
     if routing_mode in ["llm", "hybrid"]:
         if domain is None:
             domain = detect_domain(None, query)
-        keyword_map = DOMAIN_KEYWORD_MAPS.get(domain, {})
+        keyword_map = _get_keyword_maps().get(domain, {})
         # Use lightweight loading for LLM routing
         registry.load_lightweight()
         skill_names = set(keyword_map.values())
@@ -370,7 +367,7 @@ def main():
     if not skill:
         defaults = {
             "spatial": "preprocess",
-            "singlecell": "sc-preprocess",
+            "singlecell": "sc-preprocessing",
             "genomics": "genomics-qc",
             "proteomics": "ms-qc",
             "metabolomics": "xcms-preprocess",

@@ -10,6 +10,16 @@ tags: [singlecell, differential-expression, markers, Wilcoxon, MAST, pseudo-bulk
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--celltype-key"
+      - "--group1"
+      - "--group2"
+      - "--groupby"
+      - "--method"
+      - "--n-top-genes"
+      - "--sample-key"
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -183,14 +193,14 @@ output_dir/
 │   └── de_full_statistics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 
 ## Dependencies
 
 **Required**: scanpy >= 1.9, pandas, matplotlib
-**Optional**: `rpy2` + `anndata2ri` + R packages `DESeq2`, `muscat`, `SingleCellExperiment`
+**Optional**: R + packages `DESeq2`, `muscat`, `SingleCellExperiment` (executed via native R scripts)
 
 ## Runtime Notes
 

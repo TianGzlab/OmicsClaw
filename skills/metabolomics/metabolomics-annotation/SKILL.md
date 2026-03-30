@@ -11,6 +11,10 @@ metadata:
     domain: metabolomics
     emoji: "🏷️"
     trigger_keywords: [metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [met-annotate]
+    saves_h5ad: false
 ---
 
 # 🏷️ Metabolite Annotation
@@ -56,7 +60,7 @@ output_directory/
 │   └── compound_identifications.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

@@ -38,9 +38,19 @@ logger = logging.getLogger(__name__)
 
 def _find_ccc_results(adata: Any) -> tuple[pd.DataFrame, str]:
     """Auto-detect CCC results in adata.uns and return (df, method)."""
+    metadata = adata.uns.get("spatial_communication", {})
+    if isinstance(metadata, dict):
+        result_key = metadata.get("result_key")
+        method = metadata.get("method")
+        if result_key in adata.uns:
+            val = adata.uns[result_key]
+            if isinstance(val, pd.DataFrame) and len(val) > 0:
+                return val, str(method or "communication")
+
     # Keys written by spatial-communication skill
     candidates = [
         ("ccc_results", "liana"),
+        ("liana_results", "liana"),
         ("liana_res", "liana"),
         ("cellphonedb_results", "cellphonedb"),
         ("fastccc_results", "fastccc"),
@@ -53,7 +63,7 @@ def _find_ccc_results(adata: Any) -> tuple[pd.DataFrame, str]:
                 return val, method
     raise ValueError(
         "No cell-communication results found. Run spatial-communication first.\n"
-        "Expected one of: ccc_results, liana_res, cellphonedb_results, "
+        "Expected one of: ccc_results, liana_results, liana_res, cellphonedb_results, "
         "fastccc_results, cellchat_results in adata.uns."
     )
 
@@ -117,22 +127,23 @@ def _plot_dotplot(
     results: pd.DataFrame, method: str, *, top_n: int = 20,
 ) -> plt.Figure:
     """L-R pair dotplot: dot size = -log10(p-value), colour = mean expression."""
-    try:
-        import liana as li
-        if hasattr(li, "pl") and hasattr(li.pl, "dotplot"):
-            li.pl.dotplot(
-                adata=adata, colour="lr_means", size="cellphone_pvals",
-                inverse_size=True, top_n=top_n,
-                figure_size=params.figure_size or (10, 8),
-            )
-            fig = plt.gcf()
-            if params.title:
-                fig.suptitle(params.title)
-            return fig
-    except ImportError:
-        pass
-    except Exception as exc:
-        logger.warning("LIANA dotplot failed (%s); falling back to custom impl", exc)
+    if method == "liana":
+        try:
+            import liana as li
+            if hasattr(li, "pl") and hasattr(li.pl, "dotplot"):
+                li.pl.dotplot(
+                    adata=adata, colour="lr_means", size="cellphone_pvals",
+                    inverse_size=True, top_n=top_n,
+                    figure_size=params.figure_size or (10, 8),
+                )
+                fig = plt.gcf()
+                if params.title:
+                    fig.suptitle(params.title)
+                return fig
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.warning("LIANA dotplot failed (%s); falling back to custom impl", exc)
 
     # ---- Custom matplotlib implementation ----
     return _custom_lr_dotplot(adata, params, results, method, top_n=top_n)
@@ -158,9 +169,9 @@ def _custom_lr_dotplot(
 
     # Score column
     score_col = next(
-        (c for c in ("lr_means", "magnitude_rank", "specificity_rank", "mean")
+        (c for c in ("score", "lr_means", "magnitude_rank", "specificity_rank", "mean")
          if c in results.columns),
-        results.columns[2] if len(results.columns) > 2 else None,
+        None,
     )
     # P-value column
     pval_col = next(
@@ -266,8 +277,8 @@ def _plot_heatmap(
         )
 
     score_col = next(
-        (c for c in ("lr_means", "magnitude_rank", "mean") if c in results.columns),
-        results.columns[2] if len(results.columns) > 2 else None,
+        (c for c in ("score", "lr_means", "magnitude_rank", "mean") if c in results.columns),
+        None,
     )
     results = results.copy()
     results["_s"] = pd.to_numeric(results[score_col], errors="coerce").fillna(0)

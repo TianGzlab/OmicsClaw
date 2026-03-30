@@ -11,6 +11,11 @@ metadata:
     domain: bulkrna
     emoji: "🧬"
     trigger_keywords: [alternative splicing, splicing analysis, PSI, rMATS, SUPPA2, exon skipping, differential splicing]
+    allowed_extra_flags:
+      - "--dpsi-cutoff"
+      - "--padj-cutoff"
+    legacy_aliases: [bulk-splicing]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Alternative Splicing Analysis

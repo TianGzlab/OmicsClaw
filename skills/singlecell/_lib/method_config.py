@@ -46,7 +46,6 @@ class MethodConfig:
     description: str
     dependencies: tuple[str, ...] = ()
     supports_gpu: bool = False
-    is_r_based: bool = False
     requires_layers: tuple[str, ...] = ()
     requires_obs_keys: tuple[str, ...] = ()
 
@@ -66,8 +65,6 @@ _IMPORT_ALIASES: dict[str, str] = {
     "scanorama": "scanorama",
     "scrublet": "scrublet",
     "celltypist": "celltypist",
-    "rpy2": "rpy2",
-    "anndata2ri": "anndata2ri",
     "palantir": "palantir",
     "scvelo": "scvelo",
     "cellbender": "cellbender",
@@ -95,13 +92,6 @@ def check_method_available(cfg: MethodConfig) -> tuple[bool, str]:
             importlib.import_module(module_name)
         except ImportError:
             missing.append(dep)
-
-    if cfg.is_r_based:
-        try:
-            importlib.import_module("rpy2")
-        except ImportError:
-            if "rpy2" not in missing:
-                missing.append("rpy2")
 
     if missing:
         install_hint = "pip install " + " ".join(missing)

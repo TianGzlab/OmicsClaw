@@ -10,6 +10,15 @@ tags: [singlecell, filter, QC, preprocessing]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--max-counts"
+      - "--max-genes"
+      - "--max-mt-percent"
+      - "--min-cells"
+      - "--min-counts"
+      - "--min-genes"
+      - "--tissue"
+    saves_h5ad: true
     requires:
       bins:
         - python3
@@ -113,7 +122,7 @@ output_dir/
 │   └── filter_stats.csv
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Dependencies

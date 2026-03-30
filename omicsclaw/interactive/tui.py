@@ -42,16 +42,19 @@ def _load_omicsclaw_script():
 
 
 try:
-    from textual import on
+    from textual import events, on
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Horizontal, ScrollableContainer
+    from textual.containers import Horizontal, ScrollableContainer, Vertical
     from textual.css.query import NoMatches
+    from textual.message import Message
     from textual.widgets import (
+        Collapsible,
+        DirectoryTree,
         Footer,
-        Input,
         Label,
         Static,
+        TextArea,
     )
     _HAS_TEXTUAL = True
 except ImportError:
@@ -150,6 +153,7 @@ Screen {
     border: solid #30363d;
     color: #c9d1d9;
     width: 1fr;
+    height: 5;
     margin-right: 1;
 }
 
@@ -181,6 +185,24 @@ Footer {
     color: #484f58;
     width: 1fr;
 }
+
+#main-area {
+    height: 1fr;
+}
+
+#chat-container {
+    width: 1fr;
+    height: 1fr;
+}
+
+#sidebar {
+    width: 30;
+    dock: left;
+    height: 1fr;
+    background: #0d1117;
+    border-right: solid #30363d;
+    display: none;
+}
 """
 
 
@@ -189,6 +211,104 @@ Footer {
 # ---------------------------------------------------------------------------
 
 if _HAS_TEXTUAL:
+    class ChatTextArea(TextArea):
+        """Custom multiline TextArea supporting Enter to submit and Shift+Enter for newline."""
+        
+        # BINDINGS are often ignored by TextArea for text-editing inputs like 'enter'
+        # so we must explicitly intercept the raw Key events.
+        def _on_key(self, event: events.Key) -> None:
+            if event.key == "enter":
+                event.prevent_default()
+                self.action_submit()
+            elif event.key in ("shift+enter", "ctrl+j", "alt+enter"):
+                # Handle shift+enter. Also provide ctrl+j/alt+enter as a fallback
+                # for older terminals that cannot differentiate shift+enter from enter.
+                event.prevent_default()
+                self.action_insert_newline()
+            elif event.key == "tab":
+                event.prevent_default()
+                self.action_autocomplete()
+            else:
+                super()._on_key(event)
+
+        def action_autocomplete(self) -> None:
+            if not hasattr(self, "_tab_matches"):
+                self._tab_matches = []
+                self._tab_index = 0
+                self._tab_prefix = ""
+
+            row, col = self.cursor_location
+            line = self.document.get_line(row)
+            prefix = line[:col]
+
+            # If user is continuing a cycle
+            if self._tab_matches and prefix in self._tab_matches and prefix.startswith(self._tab_prefix):
+                self._tab_index = (self._tab_index + 1) % len(self._tab_matches)
+                match = self._tab_matches[self._tab_index]
+                if hasattr(self, "replace"):
+                    self.replace(match, (row, 0), (row, col))
+                return
+
+            # Start a new autocomplete session
+            if not prefix.startswith("/"):
+                if hasattr(self, "insert_text"):
+                    self.insert_text("\t")
+                elif hasattr(self, "replace"):
+                    self.replace("\t", self.cursor_location, self.cursor_location)
+                return
+
+            from ._constants import SLASH_COMMANDS
+            commands = [cmd for cmd, _ in SLASH_COMMANDS]
+            matches = []
+
+            if " " not in prefix:
+                matches = [c + " " for c in commands if c.startswith(prefix)]
+            elif prefix.startswith("/run "):
+                skill_prefix = prefix[5:]
+                try:
+                    from omicsclaw.core.registry import registry
+                    if not getattr(registry, "_loaded", False):
+                        registry.load_all()
+                    matches = ["/run " + s + " " for s in registry.skills.keys() if s.startswith(skill_prefix)]
+                except Exception:
+                    pass
+
+            if matches:
+                self._tab_prefix = prefix
+                self._tab_matches = sorted(matches) + [prefix]
+                self._tab_index = 0
+                match = self._tab_matches[0]
+                if hasattr(self, "replace"):
+                    self.replace(match, (row, 0), (row, col))
+
+        class Submitted(Message):
+            def __init__(self, control: "ChatTextArea", text: str) -> None:
+                self._control = control
+                self.text = text
+                super().__init__()
+
+            @property
+            def control(self) -> "ChatTextArea":
+                return self._control
+
+        def action_submit(self) -> None:
+            text = self.text.strip()
+            if text:
+                self.post_message(self.Submitted(self, text))
+                self.text = ""
+
+        def action_insert_newline(self) -> None:
+            # Safely invoke the native newline behavior across all Textual versions
+            if hasattr(self, "action_newline"):
+                self.action_newline()
+            elif hasattr(self, "insert_text"):
+                self.insert_text("\n")
+            elif hasattr(self, "replace"):
+                self.replace("\n", self.cursor_location, self.cursor_location)
+            else:
+                # Absolute fallback buffer append
+                self.text += "\n"
+
     class OmicsClawTUI(App):
         """OmicsClaw full-screen terminal chat interface."""
 
@@ -197,6 +317,7 @@ if _HAS_TEXTUAL:
         BINDINGS = [
             Binding("ctrl+n", "new_session", "New session"),
             Binding("ctrl+l", "clear_chat", "Clear chat"),
+            Binding("ctrl+b", "toggle_sidebar", "Toggle Sidebar"),
             Binding("ctrl+s", "show_sessions", "Sessions"),
             Binding("ctrl+h", "show_help", "Help"),
             Binding("ctrl+q", "quit", "Quit"),
@@ -271,26 +392,26 @@ if _HAS_TEXTUAL:
                     f"{self._model or 'AI'} · {mode_str}session {self._session_id}",
                     id="header-info",
                 )
-            with ScrollableContainer(id="chat-area"):
-                yield Static(
-                    self._get_welcome_renderable(),
-                    classes="msg-system",
-                )
-            with Horizontal(id="usage-bar"):
-                yield Label(
-                    "Tokens: 0 in · 0 out  │  Cost: $0.000000  │  Calls: 0",
-                    id="usage-label",
-                )
-            with Horizontal(id="input-area"):
-                yield Input(
-                    placeholder="Type a message or /help for commands...",
-                    id="chat-input",
-                )
-                yield Label("[dim]↵ Send[/dim]", id="send-hint")
+            with Horizontal(id="main-area"):
+                yield DirectoryTree(self._workspace, id="sidebar")
+                with Vertical(id="chat-container"):
+                    with ScrollableContainer(id="chat-area"):
+                        yield Static(
+                            self._get_welcome_renderable(),
+                            classes="msg-system",
+                        )
+                    with Horizontal(id="usage-bar"):
+                        yield Label(
+                            "Tokens: 0 in · 0 out  │  Cost: $0.000000  │  Calls: 0",
+                            id="usage-label",
+                        )
+                    with Horizontal(id="input-area"):
+                        yield ChatTextArea(id="chat-input")
+                        yield Label("[dim]Enter to send[/dim]\n[dim]Shift+Enter newline[/dim]", id="send-hint")
             yield Footer()
 
         def on_mount(self) -> None:
-            self.query_one("#chat-input", Input).focus()
+            self.query_one("#chat-input", ChatTextArea).focus()
             # Load LLM in background
             self.run_worker(self._init_llm_async(), exclusive=True)
 
@@ -306,6 +427,12 @@ if _HAS_TEXTUAL:
                 base_url = os.environ.get("LLM_BASE_URL", self._config.get("base_url", ""))
                 
                 logging.getLogger("omicsclaw.bot").setLevel(logging.WARNING)
+                # Suppress verbose loggers in TUI mode to make output cleaner
+                logging.getLogger("httpx").setLevel(logging.WARNING)
+                logging.getLogger("httpcore").setLevel(logging.WARNING)
+                logging.getLogger("omicsclaw.memory").setLevel(logging.WARNING)
+                logging.getLogger("omicsclaw.memory.snapshot").setLevel(logging.WARNING)
+
                 
                 core.init(api_key=api_key, base_url=base_url or None, model=model, provider=provider)
                 self._model = core.OMICSCLAW_MODEL
@@ -322,12 +449,12 @@ if _HAS_TEXTUAL:
                 logger.warning("LLM init error: %s", e)
                 self._add_system_message(f"⚠ LLM init error: {e}\nRun 'python omicsclaw.py onboard' to configure.")
 
-        @on(Input.Submitted, "#chat-input")
-        async def _on_submit(self, event: Input.Submitted) -> None:
-            text = event.value.strip()
+        @on(ChatTextArea.Submitted, "#chat-input")
+        async def _on_submit(self, event: ChatTextArea.Submitted) -> None:
+            text = event.text.strip()
             if not text:
                 return
-            self.query_one("#chat-input", Input).value = ""
+            # TextArea is already cleared locally
 
             # Slash commands
             low = text.lower()
@@ -338,15 +465,16 @@ if _HAS_TEXTUAL:
             elif low == "/help":
                 self._add_system_message(
                     "Commands:\n"
-                    "  /skills [domain]  — List skills\n"
+                    "  /skills \\[domain]  — List skills\n"
                     "  /run <skill> [--demo] [--input <path>]  — Run skill\n"
                     "  /install-skill <src>  — Add a skill from path or GitHub\n"
                     "  /uninstall-skill <name>  — Remove a user-installed skill\n"
                     "  /sessions  — List sessions\n"
                     "  /new  — New session\n"
                     "  /clear  — Clear chat\n"
-                    "  /exit  — Quit\n"
-                    "  Ctrl+H — Help | Ctrl+N — New session | Ctrl+Q — Quit"
+                    "  /export  — Export session to Markdown\n"
+                    "  /exit  — Quit (aliases: /quit, /q)\n"
+                    "  Ctrl+B — Sidebar | Ctrl+H — Help | Ctrl+N — New | Ctrl+Q — Quit"
                 )
                 return
 
@@ -390,6 +518,17 @@ if _HAS_TEXTUAL:
                 self.action_clear_chat()
                 return
 
+            elif low == "/export":
+                from ._session import export_conversation_to_markdown
+                try:
+                    export_dir = Path(self._workspace) / "exports"
+                    export_path = export_dir / f"omicsclaw_session_{self._session_id}.md"
+                    export_conversation_to_markdown(self._session_id, self._messages, export_path)
+                    self._add_system_message(f"✓ Session exported to: {export_path}")
+                except Exception as e:
+                    self._add_system_message(f"✗ Export failed: {e}")
+                return
+
             elif low == "/sessions":
                 self.run_worker(self._show_sessions_async(), exclusive=False)
                 return
@@ -417,18 +556,28 @@ if _HAS_TEXTUAL:
 
         def _add_user_message(self, text: str) -> None:
             chat = self.query_one("#chat-area", ScrollableContainer)
-            chat.mount(Static(f"[bold cyan]You ❯[/bold cyan] {text}", classes="msg-user"))
-            chat.scroll_end()
+            from rich.text import Text
+            from rich.markup import escape
+            msg = Text.from_markup(f"[bold cyan]You ❯[/bold cyan] {escape(text)}")
+            msg.overflow = "fold"
+            chat.mount(Static(msg, classes="msg-user"))
+            self.call_after_refresh(chat.scroll_end)
 
         def _add_assistant_message(self, text: str) -> None:
             chat = self.query_one("#chat-area", ScrollableContainer)
-            chat.mount(Static(f"[bold #00b8b8]AI ❯[/bold #00b8b8] {text}", classes="msg-assistant"))
-            chat.scroll_end()
+            from rich.markdown import Markdown
+            chat.mount(Static(""))  # Add visual spacing before AI message
+            chat.mount(Static("[bold #00b8b8]AI ❯[/bold #00b8b8]", classes="msg-assistant-label"))
+            chat.mount(Static(Markdown(text), classes="msg-assistant"))
+            self.call_after_refresh(chat.scroll_end)
 
         def _add_system_message(self, text: str) -> None:
             chat = self.query_one("#chat-area", ScrollableContainer)
-            chat.mount(Static(text, classes="msg-system"))
-            chat.scroll_end()
+            from rich.text import Text
+            msg = Text.from_markup(text)
+            msg.overflow = "fold"
+            chat.mount(Static(msg, classes="msg-system"))
+            self.call_after_refresh(chat.scroll_end)
 
         # ------------------------------------------------------------------
         # LLM response worker
@@ -453,13 +602,34 @@ if _HAS_TEXTUAL:
                     self._messages[-1].get("content", "") if self._messages else ""
                 )
                 import json
+                self._current_reasoning = None
+
                 async def tui_on_tool_call(tool_name: str, args: dict):
                     args_preview = json.dumps(args)[:80] + ("..." if len(json.dumps(args)) > 80 else "")
-                    self._add_system_message(f"  [dim]↳ 🛠️  Calling [cyan]{tool_name}[/cyan]({args_preview})[/dim]")
+                    chat = self.query_one("#chat-area", ScrollableContainer)
+                    
+                    if not getattr(self, "_current_reasoning", None):
+                        c = Collapsible(title="🧠 Agent Reasoning & Tool Execution")
+                        v = Vertical()
+                        c.mount(v)
+                        chat.mount(c)
+                        self._current_reasoning = v
+                    
+                    from rich.text import Text
+                    msg = Text.from_markup(f"[dim]↳ 🛠️  Calling [cyan]{tool_name}[/cyan]({args_preview})[/dim]")
+                    msg.overflow = "fold"
+                    self._current_reasoning.mount(Static(msg, classes="msg-system"))
+                    self.call_after_refresh(chat.scroll_end)
 
                 async def tui_on_tool_result(tool_name: str, result: str):
+                    if not getattr(self, "_current_reasoning", None):
+                        return
                     result_preview = str(result)[:80].replace("\n", " ") + ("..." if len(str(result)) > 80 else "")
-                    self._add_system_message(f"  [dim]↳ ✓ [green]Result:[/green] {result_preview}[/dim]")
+                    from rich.text import Text
+                    msg = Text.from_markup(f"[dim]↳ ✓ [green]Result:[/green] {result_preview}[/dim]")
+                    msg.overflow = "fold"
+                    self._current_reasoning.mount(Static(msg, classes="msg-system"))
+                    self.call_after_refresh(self.query_one("#chat-area", ScrollableContainer).scroll_end)
 
                 # llm_tool_loop returns the final assistant reply as a plain string.
                 # Pass user_id and platform so graph memory is active.
@@ -509,13 +679,11 @@ if _HAS_TEXTUAL:
                 # Remove "⏳ Thinking..." message (last .msg-system widget)
                 try:
                     chat = self.query_one("#chat-area", ScrollableContainer)
-                    sys_msgs = list(chat.query(".msg-system"))
-                    if sys_msgs:
-                        last_widget = sys_msgs[-1]
-                        rendered = getattr(last_widget, "renderable", None)
-                        rendered_str = str(rendered) if rendered is not None else ""
-                        if "Thinking" in rendered_str:
-                            last_widget.remove()
+                    for widget in reversed(list(chat.children)):
+                        rendered = getattr(widget, "renderable", None)
+                        if "Thinking" in str(rendered):
+                            widget.remove()
+                            break
                 except Exception:
                     pass
 
@@ -535,7 +703,7 @@ if _HAS_TEXTUAL:
             finally:
                 self._thinking = False
                 try:
-                    self.query_one("#chat-input", Input).focus()
+                    self.query_one("#chat-input", ChatTextArea).focus()
                 except Exception:
                     pass
 
@@ -662,9 +830,15 @@ if _HAS_TEXTUAL:
                     demo=demo,
                 )
                 if result.get("success"):
+                    method_line = f"\n  Method: {result.get('method')}" if result.get("method") else ""
+                    guide_line = f"\n  Guide: {result.get('readme_path')}" if result.get("readme_path") else ""
+                    notebook_line = f"\n  Notebook: {result.get('notebook_path')}" if result.get("notebook_path") else ""
                     self._add_system_message(
                         f"✓ Skill '{skill}' done in {result.get('duration_seconds', 0):.1f}s\n"
                         f"  Output: {result.get('output_dir', '?')}"
+                        f"{method_line}"
+                        f"{guide_line}"
+                        f"{notebook_line}"
                     )
                     # Inject result into conversation for LLM context
                     self._messages.append({"role": "user", "content": f"[Ran skill] {arg}"})
@@ -877,14 +1051,36 @@ if _HAS_TEXTUAL:
                 "OmicsClaw TUI — Keyboard shortcuts:\n"
                 "  Ctrl+N — New session\n"
                 "  Ctrl+L — Clear chat\n"
+                "  Ctrl+B — Toggle lateral sidebar (File Browser)\n"
                 "  Ctrl+S — List sessions\n"
                 "  Ctrl+H — Show help\n"
                 "  Ctrl+Q — Quit\n\n"
                 "Slash commands:\n"
-                "  /help /skills [domain] /run <skill> [--demo]\n"
+                "  /help /skills \\[domain] /run <skill> [--demo]\n"
                 "  /install-skill <path|url>  /uninstall-skill <name>\n"
-                "  /sessions /new /clear /exit"
+                "  /sessions /new /clear /export /exit (aliases: /quit, /q)"
             )
+
+        def action_toggle_sidebar(self) -> None:
+            sidebar = self.query_one("#sidebar", DirectoryTree)
+            if sidebar.display:
+                sidebar.display = False
+                self.query_one("#chat-input", ChatTextArea).focus()
+            else:
+                sidebar.display = True
+                sidebar.focus()
+
+        @on(DirectoryTree.FileSelected, "#sidebar")
+        def _on_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+            path = str(event.path)
+            chat_box = self.query_one("#chat-input", ChatTextArea)
+            if hasattr(chat_box, "insert_text"):
+                chat_box.insert_text(path)
+            elif hasattr(chat_box, "replace"):
+                chat_box.replace(path, chat_box.cursor_location, chat_box.cursor_location)
+            else:
+                chat_box.text += path
+            chat_box.focus()
 
 
 def run_tui(

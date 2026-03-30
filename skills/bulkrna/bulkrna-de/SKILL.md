@@ -12,6 +12,14 @@ metadata:
     domain: bulkrna
     emoji: "🔬"
     trigger_keywords: [differential expression, DE analysis, DESeq2, volcano plot, fold change, DEGs, bulk DE]
+    allowed_extra_flags:
+      - "--control-prefix"
+      - "--lfc-cutoff"
+      - "--method"
+      - "--padj-cutoff"
+      - "--treat-prefix"
+    legacy_aliases: [bulk-de]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Differential Expression

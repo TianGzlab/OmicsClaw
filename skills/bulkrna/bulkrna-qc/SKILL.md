@@ -12,6 +12,9 @@ metadata:
     domain: bulkrna
     emoji: "📊"
     trigger_keywords: [bulk QC, library size, count matrix, sample quality, gene detection, RNA-seq quality, count QC]
+    allowed_extra_flags: []
+    legacy_aliases: [bulk-align]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Count Matrix QC

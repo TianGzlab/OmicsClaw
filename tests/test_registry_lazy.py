@@ -5,9 +5,12 @@ def test_registry_load_lightweight():
     registry.load_lightweight()
 
     assert len(registry.lazy_skills) > 0
-    assert "preprocess" in registry.lazy_skills
+    assert "spatial-preprocess" in registry.lazy_skills
 
     # Should have basic info
-    preprocess = registry.lazy_skills["preprocess"]
+    preprocess = registry.lazy_skills["spatial-preprocess"]
     assert preprocess.name == "spatial-preprocess"
     assert len(preprocess.description) > 0
+
+    # Verify singlecell subdomain nesting is discovered
+    assert "sc-qc" in registry.lazy_skills

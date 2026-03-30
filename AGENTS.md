@@ -106,8 +106,8 @@ OmicsClaw/
 │   └── orchestrator/           # Multi-domain routing
 ├── bot/                        # Messaging bot frontends
 │   ├── core.py                 # Shared LLM engine + tool loop (reused by interactive)
-│   ├── telegram_bot.py         # Telegram frontend
-│   ├── feishu_bot.py           # Feishu (Lark) frontend
+│   ├── run.py                  # Unified bot runner
+│   ├── channels/               # Platform-specific channel implementations
 │   ├── onboard.py              # Interactive setup wizard
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
@@ -183,8 +183,8 @@ OmicsClaw includes dual-channel messaging bots in `bot/`:
 bot/
 ├── __init__.py
 ├── core.py           # Shared LLM tool loop, skill execution, security
-├── telegram_bot.py   # Telegram frontend (python-telegram-bot)
-├── feishu_bot.py     # Feishu frontend (lark-oapi WebSocket)
+├── run.py            # Unified bot runner
+├── channels/         # Platform implementations (telegram, feishu)
 ├── requirements.txt  # Bot-specific dependencies
 ├── README.md         # Setup and configuration guide
 └── logs/             # Audit logs (audit.jsonl)
@@ -194,8 +194,8 @@ bot/
 
 | Command | Purpose |
 |---------|---------|
-| `python bot/telegram_bot.py` | Start Telegram bot |
-| `python bot/feishu_bot.py` | Start Feishu bot |
+| `python -m bot.run --channels telegram` | Start Telegram bot |
+| `python -m bot.run --channels feishu` | Start Feishu bot |
 | `make bot-telegram` | Makefile alias for Telegram |
 | `make bot-feishu` | Makefile alias for Feishu |
 
@@ -220,8 +220,8 @@ OmicsClaw includes Telegram and Feishu bot frontends in `bot/`. Both import `bot
 
 ```bash
 pip install -r bot/requirements.txt
-python bot/telegram_bot.py   # Telegram
-python bot/feishu_bot.py     # Feishu (WebSocket long-connection, no public IP)
+python -m bot.run --channels telegram   # Telegram
+python -m bot.run --channels feishu     # Feishu (WebSocket long-connection, no public IP)
 ```
 
 Configuration is via `.env` at the project root. See `bot/README.md` for required environment variables.

@@ -12,6 +12,11 @@ metadata:
     domain: genomics
     emoji: "🧬"
     trigger_keywords: [epigenomics, ATAC-seq, ChIP-seq, peak calling, MACS, motif, chromatin]
+    allowed_extra_flags:
+      - "--assay"
+      - "--method"
+    legacy_aliases: [epigenomics]
+    saves_h5ad: false
 ---
 
 # 🧬 Epigenomics Analysis
@@ -179,7 +184,7 @@ output_directory/
 │   └── motif_enrichment.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

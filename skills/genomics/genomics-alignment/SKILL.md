@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "🎯"
     trigger_keywords: [alignment, BWA, Bowtie2, Minimap2, map reads]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [align]
+    saves_h5ad: false
 ---
 
 # 🎯 Genomics Read Alignment
@@ -57,7 +61,7 @@ output_directory/
 │   └── alignment_metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

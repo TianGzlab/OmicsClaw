@@ -10,6 +10,13 @@ tags: [singlecell, markers, differential expression, annotation]
 metadata:
   omicsclaw:
     domain: singlecell
+    allowed_extra_flags:
+      - "--groupby"
+      - "--method"
+      - "--n-genes"
+      - "--n-top"
+    saves_h5ad: true
+    requires_preprocessed: true
     requires:
       bins:
         - python3
@@ -117,7 +124,7 @@ output_dir/
 │   └── cluster_markers_top10.csv
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Marker Table Columns

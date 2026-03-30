@@ -11,6 +11,9 @@ metadata:
     domain: proteomics
     emoji: "📊"
     trigger_keywords: [MS QC, mass spec QC, PTXQC, rawTools]
+    allowed_extra_flags: []
+    legacy_aliases: [ms-qc]
+    saves_h5ad: false
 ---
 
 # 📊 Proteomics MS-QC
@@ -56,7 +59,7 @@ output_directory/
 │   └── qc_summary.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

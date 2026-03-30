@@ -12,6 +12,12 @@ metadata:
     domain: bulkrna
     emoji: "🕸️"
     trigger_keywords: [PPI, protein interaction, STRING, network, hub gene, interactome]
+    allowed_extra_flags:
+      - "--score-threshold"
+      - "--species"
+      - "--top-n"
+    legacy_aliases: [bulk-ppi]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq PPI Network Analysis

@@ -248,6 +248,30 @@ def omicsclaw_execute(
 # Skill search — let coding-agent discover available skills before writing code
 # =============================================================================
 
+# Utility names imported from _lib that are NOT core analysis functions.
+# skill_search filters these out so coding-agent sees only the important
+# callable API (e.g. preprocess, run_de, dispatch_method).
+_LIB_UTIL_NAMES: set[str] = {
+    # Visualization helpers
+    "save_figure", "VizParams", "plot_features", "plot_spatial_stats",
+    "plot_integration", "plot_velocity", "plot_trajectory",
+    "plot_enrichment", "plot_deconvolution", "plot_communication",
+    "plot_cnv", "plot_expression",
+    # AnnData helpers
+    "store_analysis_metadata", "get_spatial_key",
+    # Report helpers (from omicsclaw.common)
+    "generate_report_header", "generate_report_footer",
+    "write_result_json", "sha256_file",
+    # Method config helpers
+    "MethodConfig", "validate_method_choice",
+    # Dependency check helpers
+    "is_available",
+    # Validation helpers
+    "require", "require_spatial_coords",
+    # Data loading (usually not the core analysis step)
+    "load_spatial_data",
+}
+
 
 @tool(parse_docstring=True)
 def skill_search(
@@ -292,21 +316,41 @@ def skill_search(
             if query_lower and query_lower not in searchable:
                 continue
 
-            # Scan for public functions
+            # Scan for public functions — separate core (_lib) from helpers
             script_path = skill_info.get("script")
-            functions = []
+            core_functions = []    # from _lib imports — the main analysis API
+            helper_functions = []  # defined in the script — generate_figures, write_report, etc.
             if script_path and Path(script_path).exists():
                 try:
                     source = Path(script_path).read_text(encoding="utf-8")
                     tree = ast.parse(source)
+                    seen_names: set[str] = set()
+
+                    # Pass 1: functions DEFINED in the script (helpers)
                     for node in ast.walk(tree):
                         if isinstance(node, ast.FunctionDef):
                             if (not node.name.startswith("_")
                                     and node.name != "main"
-                                    and node.name != "get_demo_data"):
+                                    and node.name not in ("get_demo_data", "generate_demo_data")):
                                 args = [a.arg for a in node.args.args if a.arg != "self"]
                                 sig = f"{node.name}({', '.join(args[:5])}{'...' if len(args) > 5 else ''})"
-                                functions.append(sig)
+                                helper_functions.append(sig)
+                                seen_names.add(node.name)
+
+                    # Pass 2: core analysis functions IMPORTED from _lib
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.ImportFrom):
+                            mod_path = node.module or ""
+                            if "_lib" not in mod_path:
+                                continue
+                            for alias in node.names:
+                                name = alias.asname or alias.name
+                                if (not name.startswith("_")
+                                        and name not in _LIB_UTIL_NAMES
+                                        and name.upper() != name
+                                        and name not in seen_names):
+                                    core_functions.append(f"{name}(\u2026)")
+                                    seen_names.add(name)
                 except Exception:
                     pass
 
@@ -314,7 +358,8 @@ def skill_search(
                 "name": skill_name,
                 "domain": skill_info.get("domain", ""),
                 "description": skill_info.get("description", ""),
-                "functions": functions[:8],
+                "core": core_functions[:6],
+                "helpers": helper_functions[:4],
             }
             matches.append(entry)
 
@@ -327,22 +372,24 @@ def skill_search(
                 f"proteomics, metabolomics, bulkrna"
             )
 
-        # Format output with load_skill() usage
+        # Format output with load_skill() usage — core functions first
         parts = [f"Found {len(matches)} skill(s) matching '{query or '*'}':"]
         parts.append("")
-        parts.append("HOW TO USE: In the notebook, call load_skill() (pre-loaded in kernel):")
-        parts.append("  mod = load_skill(\"<skill-name>\")")
-        parts.append("  result = mod.<function_name>(<args>)")
+        parts.append("HOW TO USE: mod = load_skill(\"<skill-name>\"); mod.<function>(<args>)")
         parts.append("")
 
         for m in matches[:15]:
-            parts.append(f"📦 **{m['name']}** [{m['domain']}]")
-            parts.append(f"   {m['description']}")
-            if m["functions"]:
-                # Show concrete usage example
-                parts.append(f"   Usage: mod = load_skill(\"{m['name']}\")")
-                for fn in m["functions"][:3]:
-                    parts.append(f"          mod.{fn}")
+            parts.append(f"\u2550 **{m['name']}** [{m['domain']}]")
+            parts.append(f"  {m['description']}")
+            parts.append(f"  mod = load_skill(\"{m['name']}\")")
+            if m["core"]:
+                for fn in m["core"]:
+                    parts.append(f"    \u25b6 mod.{fn}")
+            # Show all script-defined functions if no core _lib functions
+            funcs_to_show = m["helpers"] if not m["core"] else m["helpers"][:2]
+            if funcs_to_show:
+                helpers_str = ", ".join(f.split("(")[0] + "()" for f in funcs_to_show)
+                parts.append(f"    helpers: {helpers_str}")
             parts.append("")
 
         if len(matches) > 15:
@@ -440,6 +487,7 @@ def notebook_add_execute(
     source: str,
     cell_type: str = "code",
     index: int = -1,
+    timeout: int | None = None,
 ) -> str:
     """Insert a cell into the notebook and execute it (if code cell).
 
@@ -456,6 +504,7 @@ def notebook_add_execute(
         source: The cell source code or markdown text
         cell_type: 'code' (default) or 'markdown'
         index: Position to insert (-1 = append at end)
+        timeout: Max wall-clock seconds for code execution. Defaults to OC_NOTEBOOK_TIMEOUT env var or 600s. Use higher values for deep learning methods like Cell2Location (1800-3600s).
 
     Returns:
         Execution result with output preview or error
@@ -471,7 +520,7 @@ def notebook_add_execute(
                 f"  Total cells: {result['num_cells']}"
             )
         else:
-            result = session.insert_execute_code_cell(idx, source)
+            result = session.insert_execute_code_cell(idx, source, timeout=timeout)
             status = "✓" if result["ok"] else "✗"
             msg = (
                 f"{status} Code cell at index {result['cell_index']} "

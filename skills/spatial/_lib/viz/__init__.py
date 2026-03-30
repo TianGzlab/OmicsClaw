@@ -61,6 +61,7 @@ from .deconvolution import plot_deconvolution
 from .enrichment import plot_enrichment
 from .expression import plot_expression
 from .feature import plot_features
+from .gallery import PlotArtifact, PlotSpec, VisualizationRecipe, render_plot_specs
 from .integration import plot_integration
 from .params import VizParams  # re-export for convenience
 from .spatial_stats import plot_spatial_stats
@@ -85,6 +86,11 @@ __all__ = [
     "auto_spot_size",
     "infer_basis",
     "validate_features",
+    # Gallery protocol
+    "PlotSpec",
+    "PlotArtifact",
+    "VisualizationRecipe",
+    "render_plot_specs",
     # Plot functions (one per analysis domain)
     "plot_features",
     "plot_expression",

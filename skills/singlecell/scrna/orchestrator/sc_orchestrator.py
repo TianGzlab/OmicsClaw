@@ -27,7 +27,8 @@ from omicsclaw.common.report import (
     generate_report_header,
     write_result_json,
 )
-from omicsclaw.routing.router import route_query_unified
+from omicsclaw.routing.router import route_keyword, route_query_unified
+from omicsclaw.core.registry import registry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "orchestrator"
 SKILL_VERSION = "0.2.0"
 
-KEYWORD_MAP: dict[str, str] = {
+_FALLBACK_KEYWORD_MAP: dict[str, str] = {
     # QC
     "qc": "sc-qc",
     "quality control": "sc-qc",
@@ -105,7 +106,19 @@ KEYWORD_MAP: dict[str, str] = {
     "scenic": "sc-grn",
     "pyscenic": "sc-grn",
     "regulon": "sc-grn",
+    # Cell-cell communication
+    "cell communication": "sc-cell-communication",
+    "cell-cell communication": "sc-cell-communication",
+    "ligand receptor": "sc-cell-communication",
+    "cellchat": "sc-cell-communication",
+    "liana": "sc-cell-communication",
 }
+
+
+def _get_keyword_map() -> dict[str, str]:
+    """Build keyword map from SKILL.md trigger_keywords with hardcoded fallback."""
+    return registry.build_keyword_map(domain="singlecell", fallback_map=_FALLBACK_KEYWORD_MAP)
+
 
 SKILL_DESCRIPTIONS: dict[str, str] = {
     "sc-qc": "QC metrics calculation and visualization",
@@ -120,25 +133,21 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
     "sc-pseudotime": "Pseudotime and trajectory (PAGA, DPT)",
     "sc-velocity": "RNA velocity (scVelo stochastic/dynamical)",
     "sc-grn": "Gene regulatory network inference (pySCENIC)",
+    "sc-cell-communication": "Cell-cell communication analysis (LIANA, CellChat)",
 }
 
 def route_query(query: str) -> dict:
     """Route a natural language query to the best skill."""
-    query_lower = query.lower().strip()
+    effective_map = _get_keyword_map()
+    skill, confidence = route_keyword(query, effective_map)
 
-    scores: dict[str, int] = {}
-    for kw, skill in KEYWORD_MAP.items():
-        if kw in query_lower:
-            scores[skill] = scores.get(skill, 0) + len(kw)
-
-    if scores:
-        best_skill = max(scores, key=lambda s: scores[s])
-        confidence = min(1.0, scores[best_skill] / 20.0)
-        matched_kws = [kw for kw, sk in KEYWORD_MAP.items() if sk == best_skill and kw in query_lower]
+    if skill:
+        query_lower = query.lower().strip()
+        matched_kws = [kw for kw, sk in effective_map.items() if sk == skill and kw in query_lower]
         return {
             "matched": True,
-            "skill": best_skill,
-            "confidence": round(confidence, 2),
+            "skill": skill,
+            "confidence": confidence,
             "matched_keywords": matched_kws,
         }
 
@@ -153,7 +162,8 @@ def route_query(query: str) -> dict:
 def route_query_with_mode(query: str, routing_mode: str = "keyword") -> dict:
     """Route query using specified mode."""
     if routing_mode in ["llm", "hybrid"]:
-        skill, conf = route_query_unified(query, KEYWORD_MAP, SKILL_DESCRIPTIONS, "singlecell", routing_mode)
+        effective_map = _get_keyword_map()
+        skill, conf = route_query_unified(query, effective_map, SKILL_DESCRIPTIONS, "singlecell", routing_mode)
         if skill:
             return {"matched": True, "skill": skill, "confidence": conf, "matched_keywords": []}
     # Fallback to keyword routing

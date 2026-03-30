@@ -13,6 +13,9 @@ metadata:
     domain: proteomics
     emoji: "🔬"
     trigger_keywords: [PTM, phosphorylation, acetylation, ubiquitination, modification, motif]
+    allowed_extra_flags: []
+    legacy_aliases: [ptm]
+    saves_h5ad: false
 ---
 
 # 🔬 Post-Translational Modification Analysis
@@ -185,7 +188,7 @@ output_directory/
 │   └── motif_counts.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

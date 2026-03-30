@@ -1,0 +1,184 @@
+# Output Schema Reference
+
+## Compiled Trials DataFrame (`trials_all.csv`)
+
+### Core Fields (Original)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `nct_id` | str | ClinicalTrials.gov NCT identifier |
+| `brief_title` | str | Brief study title |
+| `official_title` | str | Full official study title |
+| `lead_sponsor` | str | Original sponsor name from API |
+| `sponsor_normalized` | str | Normalized sponsor name (e.g., "Takeda") |
+| `sponsor_class` | str | Sponsor type: INDUSTRY, NIH, OTHER, etc. |
+| `is_industry` | bool | True if sponsor_class == INDUSTRY |
+| `mechanism` | str | Classified mechanism of action |
+| `drug_names_str` | str | Semicolon-separated drug/intervention names (raw) |
+| `drug_names_normalized_str` | str | Semicolon-separated canonical drug names (Phase 1B) |
+| `phase_normalized` | str | Normalized phase label (e.g., "Phase 3") |
+| `phase_numeric` | float | Numeric phase for sorting (1, 1.5, 2, 2.5, 3, 4) |
+| `overall_status` | str | Trial status (RECRUITING, etc.) |
+| `conditions_str` | str | Semicolon-separated condition names |
+| `enrollment` | int/null | Raw target enrollment count |
+| `start_date` | str | Trial start date (YYYY-MM or YYYY-MM-DD) |
+| `start_year` | int/null | Extracted start year |
+| `completion_date` | str | Expected completion date |
+| `study_type` | str | INTERVENTIONAL or OBSERVATIONAL |
+
+### Enrollment Quality Fields (Phase 1A)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `is_pharmacological` | bool | True if INTERVENTIONAL + classified mechanism |
+| `enrollment_clean` | float/null | Enrollment capped at 50,000 (NaN for outliers) |
+| `enrollment_outlier` | bool | True if enrollment > 50,000 (registries, mega-studies) |
+
+### Geographic Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `countries_str` | str | Semicolon-separated list of trial countries |
+| `n_countries` | int | Number of unique countries for this trial |
+| `regions_str` | str | Semicolon-separated list of regions (mapped from countries) |
+
+### Study Design Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `allocation` | str | Randomization type: RANDOMIZED, NON_RANDOMIZED, etc. |
+| `masking` | str | Blinding level: DOUBLE, SINGLE, NONE, QUADRUPLE, etc. |
+| `intervention_model` | str | Study model: PARALLEL, CROSSOVER, SINGLE_GROUP, etc. |
+| `study_design_category` | str | Derived: "RCT Double-Blind", "RCT Open-Label", "Single-Arm", "Observational", etc. |
+
+### Arms & Comparator Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `has_placebo_arm` | bool | True if trial has a placebo comparator arm |
+| `has_active_comparator` | bool | True if trial has an active comparator arm |
+| `is_head_to_head` | bool | True if trial is head-to-head (active comparator + experimental) |
+| `n_arms` | int | Number of arms in the trial |
+| `is_combination` | bool | True if trial has 2+ active drug interventions |
+
+### Endpoint Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `primary_endpoint` | str | First primary outcome measure |
+| `endpoint_timeframe` | str | First primary outcome timeframe |
+
+### Eligibility Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `min_age` | str | Minimum age string (e.g., "18 Years") |
+| `max_age` | str | Maximum age string (e.g., "80 Years") |
+| `min_age_years` | float/null | Minimum age in years (numeric) |
+| `max_age_years` | float/null | Maximum age in years (numeric) |
+| `sex` | str | Sex eligibility: ALL, MALE, FEMALE |
+| `is_pediatric` | bool | True if min or max age < 18 years |
+
+### Regulatory Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `is_fda_regulated_drug` | bool/null | True if FDA-regulated drug |
+| `has_dmc` | bool/null | True if Data Safety Monitoring Committee present |
+
+### Collaborator Fields (Phase 2A/2B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `collaborators_str` | str | Semicolon-separated collaborating institution names |
+
+### Classification Fields (Phase 4B)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `is_biosimilar` | bool | True if trial involves a biosimilar product |
+
+---
+
+## Mechanism x Phase Matrix (`trials_by_mechanism.csv`)
+
+Cross-tabulation with mechanisms as rows, phases as columns, and trial counts as values.
+Includes a "Total" column.
+
+## Sponsor Summary (`trials_by_sponsor.csv`)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sponsor_normalized` | str | Index: normalized sponsor name |
+| `trials` | int | Total number of trials |
+| `mechanisms` | int | Number of distinct mechanisms |
+| `industry` | bool | Industry-sponsored |
+
+## Reports
+
+### `landscape_report.pdf`
+
+Publication-quality PDF report generated by reportlab. Contains 24 sections:
+- Title page with executive summary stats (trial count, mechanisms, sponsors)
+- Full 6-panel landscape visualization (embedded from PNG)
+- Mechanism × Phase distribution table
+- Indication breakdown (config-driven categories)
+- Mechanism deep-dives with drug pipeline tables
+- Late-stage pipeline (Phase 3) analysis
+- Upcoming readouts section with time-to-readout estimates
+- Config-driven mechanism highlight sections (e.g., Anti-IL-23 Focus, Anti-TL1A)
+- Sponsor competitive landscape table (top 20 sponsors)
+- Company portfolio analysis
+- Industry vs Academic breakdown
+- Config-driven sponsor highlight sections (e.g., Takeda Portfolio)
+- Enrollment & investment signals (using clean enrollment)
+- Geographic landscape (top countries, region breakdown)
+- Study design analysis (RCT rates, double-blind by phase)
+- Phase transition funnel
+- Phase 3 endpoint comparison
+- Combination therapy landscape
+- Patient population analysis (pediatric vs adult)
+- Trial arms & comparator analysis (placebo, H2H)
+- Biosimilar landscape
+- Whitespace & unmet needs
+- Regulatory signals (FDA, DSMB rates)
+- Data notes with query parameters and caveats
+
+### `landscape_report.md`
+
+Markdown version with the same 24 sections. Useful for embedding in other documents or rendering in Biomni.
+
+### `landscape_supplementary.png`
+
+4-panel supplementary visualization:
+1. Top 15 countries by trial presence (horizontal bar)
+2. Study design by phase (stacked bar)
+3. Enrollment distribution by mechanism (box plot, log scale)
+4. Phase transition funnel (grouped bar)
+
+## Analysis Object (`analysis_object.pkl`)
+
+Python dict with keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `trials_df` | DataFrame | Full compiled trials DataFrame (46+ columns) |
+| `parameters` | dict | Query parameters used |
+| `n_total` | int | Total trial count |
+| `n_by_mechanism` | dict | Trial counts per mechanism |
+| `n_by_phase` | dict | Trial counts per phase |
+| `n_by_sponsor` | dict | Trial counts per sponsor |
+| `n_industry` | int | Industry-sponsored trial count |
+| `unique_mechanisms` | int | Number of distinct mechanisms |
+| `unique_sponsors` | int | Number of distinct sponsors |
+| `mechanism_phase_matrix` | dict | Nested dict of mechanism x phase counts |
+| `timestamp` | str | ISO timestamp of export |
+| `n_with_geographic_data` | int | Trials with location data (Phase 2) |
+| `n_by_design` | dict | Trial counts per study design category (Phase 2) |
+| `n_combination` | int | Combination therapy trials (Phase 2) |
+| `n_pediatric` | int | Pediatric trials (Phase 2) |
+| `n_biosimilar` | int | Biosimilar trials (Phase 4B) |
+| `enrollment_outliers` | int | Enrollment outlier count (Phase 1A) |
+
+
+---

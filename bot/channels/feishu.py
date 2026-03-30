@@ -1,9 +1,7 @@
 """
 Feishu (Lark) channel implementation for OmicsClaw.
 
-Extracts the platform-specific logic from bot/feishu_bot.py into a
-reusable Channel subclass. The original feishu_bot.py becomes a thin
-launcher that creates a FeishuChannel and runs it.
+Extracts the platform-specific logic into a reusable Channel subclass.
 
 Uses lark-oapi Python SDK with WebSocket long-connection (no public IP required).
 """

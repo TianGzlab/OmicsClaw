@@ -13,6 +13,11 @@ metadata:
     domain: metabolomics
     emoji: "📈"
     trigger_keywords: [metabolomics differential, PLS-DA, volcano plot, biomarker, OPLS-DA]
+    allowed_extra_flags:
+      - "--group-a-prefix"
+      - "--group-b-prefix"
+    legacy_aliases: [met-diff]
+    saves_h5ad: false
 ---
 
 # 📈 Metabolomics Differential Analysis
@@ -212,7 +217,7 @@ output_directory/
 │   └── differential_results.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

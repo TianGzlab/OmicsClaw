@@ -11,6 +11,7 @@ use the async helper functions to process user messages.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -130,6 +131,7 @@ MAX_PHOTO_BYTES = 20 * 1024 * 1024
 
 if str(OMICSCLAW_DIR) not in sys.path:
     sys.path.insert(0, str(OMICSCLAW_DIR))
+from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.core.registry import registry
 registry.load_all()
 
@@ -711,6 +713,31 @@ Operational constraints:
    - User: "分析 data/brain_visium.h5ad" → mode='path', file_path='data/brain_visium.h5ad'
    - User: "run preprocess on my_data.h5ad" → mode='path', file_path='my_data.h5ad'
    - User: "对 /mnt/nas/exp1.mzML 做质量控制" → mode='path', file_path='/mnt/nas/exp1.mzML', skill='ms-qc'
+9b. DATA EXPLORATION (IMPORTANT): When the user asks to "explore", "inspect",
+    "what can I do with", or vaguely "analyze" a dataset WITHOUT specifying a
+    concrete analysis pipeline, ALWAYS call `inspect_data` first:
+    - Call inspect_data with the file path.
+    - If user already mentions a specific method, also pass `method`,
+      `skill` (if known), and `preview_params=true` to include parameter preview.
+    - Based on the returned metadata (shape, obs columns, embeddings, platform),
+      suggest 3-5 appropriate analysis skills to the user.
+    - Do NOT call `omicsclaw` until the user picks a specific analysis.
+    This prevents running expensive preprocessing pipelines when the user just
+    wants to understand their data.
+    Examples where you MUST use inspect_data first:
+    - "帮我分析一下 data/brain.h5ad，我能做什么？"
+    - "What analyses can I run on this dataset?"
+    - "Tell me about this h5ad file"
+    - "Explore my spatial data"
+    - "I have data/foo.h5ad, what should I do with it?"
+9c. METHOD SUITABILITY / PARAM PREVIEW (IMPORTANT): When users ask
+    "is this method suitable?", "are defaults reasonable?", or request
+    parameter advice before execution:
+    - First call `inspect_data` with `file_path` and also pass
+      `method`, `skill` (if known), and `preview_params=true`.
+    - Relay the "Method Suitability & Parameter Preview" section.
+    - Ask for confirmation before running expensive analysis.
+    - Do NOT call `omicsclaw` immediately in this preflight scenario.
 10. NO CODE GENERATION (STRICT): You are an analysis assistant, NOT a code generator.
    - NEVER proactively create Python scripts, shell scripts, or code files.
    - NEVER use write_file to generate .py, .sh, .r, .R, or other script files.
@@ -740,9 +767,34 @@ Operational constraints:
     - Your memory context is loaded automatically at the start of each conversation
       under the "## Your Memory" section in the system prompt.
     - Do NOT tell the user you are saving memory; just do it silently.
+13. KNOWLEDGE ADVISOR: You have a 'consult_knowledge' tool that searches decision
+    guides, best practices, and troubleshooting docs. Use it proactively when users
+    ask about method selection, parameters, or encounter errors. Extract the key
+    recommendation concisely — do NOT dump full knowledge base content.
+14. MANDATORY KNOW-HOW GUARDS (CRITICAL — READ BEFORE ANY ANALYSIS):
+    Before starting ANY analysis task, you MUST check ALL relevant know-how guides
+    that are injected into your context. These are non-negotiable scientific constraints
+    derived from high-frequency AI errors in real-world analyses.
+
+    **Routing table — which guide applies to which task:**
+    • For ALL data analysis tasks → ALWAYS check "Best Practices for Data Analyses"
+    • For RNA-seq / DEG analysis (DESeq2, edgeR, limma) → check "Bulk RNA-Seq DE"
+      (MUST use padj not pvalue; MUST NOT confuse log2FC direction)
+    • For pathway enrichment (ORA, GSEA, KEGG, Reactome) → check "Pathway Enrichment"
+      (MUST separate up/down genes for ORA; MUST NOT use keyword filtering on pathways)
+    • For gene essentiality / DepMap / CRISPR screens → check "Gene Essentiality"
+      (MUST invert DepMap scores before correlation; negative raw = essential)
+
+    When these guides appear under "⚠️ MANDATORY SCIENTIFIC CONSTRAINTS" in your
+    context, follow them WITHOUT EXCEPTION. Do NOT skip, summarise, or override them.
 """
 
-def build_system_prompt(memory_context: str = "") -> str:
+def build_system_prompt(
+    memory_context: str = "",
+    skill: str = "",
+    query: str = "",
+    domain: str = "",
+) -> str:
     if SOUL_MD.exists():
         soul = SOUL_MD.read_text(encoding="utf-8")
         logger.info(f"Loaded SOUL.md ({len(soul)} chars)")
@@ -756,6 +808,41 @@ def build_system_prompt(memory_context: str = "") -> str:
     prompt = f"{soul}\n\n{get_role_guardrails()}"
     if memory_context:
         prompt += f"\n\n## Your Memory\n\n{memory_context}"
+
+    # Stage 1: Inject mandatory Know-How scientific constraints
+    try:
+        import time as _t
+        _kh_start = _t.monotonic()
+        from omicsclaw.knowledge.knowhow import get_knowhow_injector
+        injector = get_knowhow_injector()
+        constraints = injector.get_constraints(
+            skill=skill or None,
+            query=query or None,
+            domain=domain or None,
+        )
+        _kh_elapsed_ms = (_t.monotonic() - _kh_start) * 1000
+        if constraints:
+            prompt += f"\n\n{constraints}"
+            logger.info("Injected KH constraints (%d chars, %.1fms) for skill=%s",
+                        len(constraints), _kh_elapsed_ms, skill or '(general)')
+            # Stage 0: Telemetry
+            try:
+                from omicsclaw.knowledge.telemetry import get_telemetry
+                injected_ids = injector.get_kh_for_skill(skill) if skill else injector.get_all_kh_ids()
+                get_telemetry().log_kh_injection(
+                    session_id="system",
+                    skill=skill or "",
+                    query=query[:200] if query else "",
+                    domain=domain or "",
+                    injected_khs=injected_ids,
+                    constraints_length=len(constraints),
+                    latency_ms=_kh_elapsed_ms,
+                )
+            except Exception:
+                pass  # Telemetry must never block
+    except Exception as e:
+        logger.warning("KH injection failed (non-fatal): %s", e)
+
     return prompt
 
 SYSTEM_PROMPT: str = ""
@@ -764,6 +851,58 @@ def _ensure_system_prompt():
     global SYSTEM_PROMPT
     if not SYSTEM_PROMPT:
         SYSTEM_PROMPT = build_system_prompt()
+
+
+def _extract_analysis_hints(text: str) -> tuple[str, str]:
+    """Extract skill name and domain hints from user message text.
+
+    Returns (skill_hint, domain_hint) — both may be empty strings.
+    Used by chat() to pass context to build_system_prompt() for
+    targeted KH constraint injection.
+    """
+    if not text:
+        return "", ""
+
+    text_lower = text.lower()
+
+    # Check for explicit skill names mentioned in the message
+    skill_hint = ""
+    try:
+        from omicsclaw.core.registry import registry
+        for alias in registry.skills:
+            # Match skill names (e.g. "spatial-preprocessing", "sc-qc")
+            if alias.lower() in text_lower:
+                skill_hint = alias
+                break
+    except Exception:
+        pass
+
+    # Check for domain hints
+    domain_hint = ""
+    _domain_keywords = {
+        "bulkrna": ["deseq2", "edger", "limma", "bulk rna", "bulk-rna",
+                     "differential expression", "rnaseq", "rna-seq", "deg",
+                     "差异表达", "差异基因", "差异分析"],
+        "singlecell": ["single cell", "single-cell", "scrna", "scanpy",
+                        "seurat", "scvi", "cellranger", "10x",
+                        "单细胞", "单细胞测序"],
+        "spatial": ["spatial", "visium", "merfish", "slide-seq", "stereo-seq",
+                     "10x visium", "squidpy",
+                     "空间转录组", "空间组学"],
+        "genomics": ["variant", "gwas", "vcf", "plink", "crispr", "depmap",
+                      "essentiality", "genomic",
+                      "基因组", "变异", "遗传变异"],
+        "proteomics": ["proteomic", "mass spec", "peptide", "maxquant",
+                        "蛋白质组", "蛋白组学"],
+        "metabolomics": ["metabolomic", "xcms", "mzml", "metabolite",
+                          "代谢组", "代谢物"],
+    }
+    for domain, keywords in _domain_keywords.items():
+        if any(kw in text_lower for kw in keywords):
+            domain_hint = domain
+            break
+
+    return skill_hint, domain_hint
 
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI function-calling format)
@@ -1166,6 +1305,88 @@ def get_tools() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "consult_knowledge",
+                "description": (
+                    "Query the OmicsClaw knowledge base for analysis guidance. "
+                    "Use this PROACTIVELY when: (1) user is unsure which analysis to run, "
+                    "(2) user asks about method selection or parameters, "
+                    "(3) an analysis fails and user needs troubleshooting, "
+                    "(4) user asks 'how to' or 'which method' questions, "
+                    "(5) before running complex analyses to check best practices. "
+                    "Returns relevant decision guides, best practices, or troubleshooting advice."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language question about methodology, parameters, or troubleshooting",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": [
+                                "decision-guide", "best-practices", "troubleshooting",
+                                "workflow", "method-reference", "interpretation",
+                                "preprocessing-qc", "statistics", "tool-setup",
+                                "domain-knowledge", "knowhow", "reference-script", "all",
+                            ],
+                            "description": "Filter by document type. Default: 'all'",
+                        },
+                        "domain": {
+                            "type": "string",
+                            "enum": [
+                                "spatial", "singlecell", "genomics", "proteomics",
+                                "metabolomics", "bulkrna", "general", "all",
+                            ],
+                            "description": "Filter by omics domain. Default: 'all'",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "inspect_data",
+                "description": (
+                    "Instantly inspect an AnnData (.h5ad) file's metadata — cell/gene counts, "
+                    "obs/var columns, embeddings (obsm), layers, uns keys — WITHOUT loading "
+                    "the expression matrix. Fast even for very large files. "
+                    "Also supports pre-run method suitability and parameter preview when "
+                    "`method` (and optionally `skill`) is provided. "
+                    "ALWAYS call this when the user asks to 'explore', 'inspect', "
+                    "'what can I do with', or vaguely 'analyze' a dataset WITHOUT specifying "
+                    "a concrete analysis pipeline. Returns a formatted summary and suggested "
+                    "analysis directions. Do NOT call omicsclaw for open-ended exploratory queries."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the .h5ad file to inspect.",
+                        },
+                        "skill": {
+                            "type": "string",
+                            "description": "Optional skill alias for preflight preview (e.g. spatial-domain-identification).",
+                        },
+                        "method": {
+                            "type": "string",
+                            "description": "Optional method name for suitability + parameter preview.",
+                        },
+                        "preview_params": {
+                            "type": "boolean",
+                            "description": "If true, include a pre-run method suitability and default parameter preview block.",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            },
+        },
     ]
 
 TOOLS = get_tools()
@@ -1324,6 +1545,239 @@ DEEP_LEARNING_METHODS = {
     "scanvi", "cellassign",
 }
 
+def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
+    from omicsclaw.core.registry import registry
+
+    if force_reload:
+        registry._loaded = False
+        registry.skills.clear()
+        registry.lazy_skills.clear()
+    registry.load_all()
+
+    info = registry.skills.get(skill_key)
+    if info:
+        return info
+
+    # Fallback: find by canonical alias stored in metadata.
+    for _k, meta in registry.skills.items():
+        if meta.get("alias") == skill_key:
+            return meta
+    return {}
+
+
+def _resolve_param_hint_info(skill_key: str, method: str) -> tuple[str, dict, dict]:
+    """Return (method_lower, tip_info, skill_info) from SKILL.md param_hints."""
+    method_lower = (method or "").lower().strip()
+    if not method_lower:
+        return "", {}, {}
+
+    try:
+        skill_info = _lookup_skill_info(skill_key, force_reload=False)
+        hints = skill_info.get("param_hints", {}) if skill_info else {}
+        tip_info = hints.get(method_lower)
+
+        # If no hints found, force-refresh registry once. This picks up edits
+        # to SKILL.md made during a long-lived `oc chat` session.
+        if not tip_info:
+            skill_info = _lookup_skill_info(skill_key, force_reload=True)
+            hints = skill_info.get("param_hints", {}) if skill_info else {}
+            tip_info = hints.get(method_lower)
+
+        logger.info(
+            "param_hint lookup: skill_key=%s, method=%s, skill_found=%s, hints_keys=%s",
+            skill_key,
+            method_lower,
+            bool(skill_info),
+            list(hints.keys()) if hints else "EMPTY",
+        )
+        return method_lower, (tip_info or {}), (skill_info or {})
+    except Exception as e:
+        logger.warning("param_hint loading failed: %s", e)
+        return method_lower, {}, {}
+
+
+def _infer_skill_for_method(method: str, preferred_domain: str = "") -> str:
+    """Infer a skill alias from method name using registry param_hints."""
+    method_lower = (method or "").strip().lower()
+    if not method_lower:
+        return ""
+    try:
+        from omicsclaw.core.registry import registry
+        registry.load_all()
+
+        candidates: list[str] = []
+        for alias, info in registry.skills.items():
+            # Only keep canonical aliases (skip legacy alias duplicates).
+            if alias != info.get("alias", alias):
+                continue
+            if preferred_domain and info.get("domain", "") != preferred_domain:
+                continue
+            hints = info.get("param_hints", {}) or {}
+            if method_lower in hints:
+                candidates.append(alias)
+
+        if len(candidates) == 1:
+            return candidates[0]
+        return sorted(candidates)[0] if candidates else ""
+    except Exception:
+        return ""
+
+
+def _build_method_preview(
+    *,
+    skill_key: str,
+    method: str,
+    n_obs: int | None,
+    has_spatial: bool,
+    has_x_pca: bool,
+    has_raw: bool,
+    has_counts_layer: bool,
+    platform: str,
+) -> str:
+    """Build pre-run suitability + default parameter preview for inspect_data."""
+    method_lower, tip_info, skill_info = _resolve_param_hint_info(skill_key, method)
+    if not method_lower or not tip_info:
+        return ""
+
+    checks: list[str] = []
+    seen_checks: set[str] = set()
+
+    def _add_check(line: str) -> None:
+        if line not in seen_checks:
+            checks.append(line)
+            seen_checks.add(line)
+
+    suitable = True
+
+    requires = tip_info.get("requires", []) if isinstance(tip_info, dict) else []
+    requires_tokens = {str(r).strip().lower() for r in requires}
+
+    # Generic base checks by detected platform (avoid duplicate if explicitly
+    # declared in method-level `requires`).
+    if "spatial" in platform.lower() and "obsm.spatial" not in requires_tokens:
+        if has_spatial:
+            _add_check("- `obsm['spatial']`: found ✅")
+        else:
+            _add_check("- `obsm['spatial']`: missing ❌ (spatial methods usually require this)")
+            suitable = False
+
+    # Optional declarative requirements from SKILL.md:
+    # metadata.omicsclaw.param_hints.<method>.requires
+    # Supported tokens: obsm.spatial, obsm.X_pca, raw, layers.counts, raw_or_counts
+    for req in requires:
+        req_token = str(req).strip().lower()
+        if req_token == "obsm.spatial":
+            ok = has_spatial
+            text = "`obsm['spatial']`"
+        elif req_token == "obsm.x_pca":
+            ok = has_x_pca
+            text = "`obsm['X_pca']`"
+        elif req_token == "raw":
+            ok = has_raw
+            text = "`adata.raw`"
+        elif req_token == "layers.counts":
+            ok = has_counts_layer
+            text = "`layers['counts']`"
+        elif req_token == "raw_or_counts":
+            ok = has_raw or has_counts_layer
+            text = "`adata.raw` or `layers['counts']`"
+        else:
+            _add_check(f"- Requirement `{req}`: please verify manually")
+            continue
+
+        if ok:
+            _add_check(f"- Requirement {text}: found ✅")
+        else:
+            _add_check(f"- Requirement {text}: missing ⚠️")
+            suitable = False
+
+    if has_x_pca:
+        _add_check("- `obsm['X_pca']`: found ✅")
+    if isinstance(n_obs, int):
+        size_note = f"{n_obs:,} cells/spots"
+        if n_obs > 30000 and "epochs" in (tip_info.get("params", []) or []):
+            size_note += " (large; start with fewer epochs)"
+        _add_check(f"- Dataset size: {size_note}")
+
+    defaults = tip_info.get("defaults", {}) if isinstance(tip_info, dict) else {}
+    param_lines = []
+    recommended_args = [f"--method {method_lower}"]
+    for p in tip_info.get("params", []):
+        default_val = defaults.get(p, "default")
+        if (
+            p == "epochs"
+            and isinstance(n_obs, int)
+            and n_obs > 30000
+        ):
+            default_text = f"{default_val} (for large data, try 50-100 first)"
+            recommended_val = 50
+        else:
+            default_text = str(default_val)
+            recommended_val = default_val
+        param_lines.append(f"- `{p}`: {default_text}")
+
+        if recommended_val != "default":
+            cli_flag = f"--{p.replace('_', '-')}"
+            recommended_args.append(f"{cli_flag} {recommended_val}")
+
+    suitability_text = "✅ Suitable for a first run" if suitable else "❌ Not suitable yet"
+    canonical_alias = skill_info.get("alias", skill_key) if skill_info else skill_key
+
+    lines = [
+        "### Method Suitability & Parameter Preview",
+        f"- Requested skill: `{canonical_alias}`",
+        f"- Requested method: `{method_lower}`",
+        f"- Suitability: {suitability_text}",
+    ]
+    if checks:
+        lines.append("- Checks:")
+        lines.extend([f"  {c}" for c in checks])
+    if param_lines:
+        lines.append("- Default parameter preview:")
+        lines.extend([f"  {p}" for p in param_lines])
+    lines.append(f"- Tuning priority: {tip_info.get('priority', 'N/A')}")
+    lines.append(f"- Suggested first run: `{ ' '.join(recommended_args) }`")
+    return "\n".join(lines)
+
+
+def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
+    """Build a parameter summary block from SKILL.md-declared param_hints.
+
+    Reads ``param_hints`` from the registry (loaded from each skill's SKILL.md
+    YAML frontmatter). Returns a markdown-formatted string to prepend to the
+    tool result. Returns empty string if the skill has no hints for *method*.
+
+    Adding hints for a new skill or method requires only editing its SKILL.md —
+    no changes to bot/core.py are needed.
+    """
+    method_lower, tip_info, skill_info = _resolve_param_hint_info(skill_key, method)
+    if not tip_info:
+        hints = skill_info.get("param_hints", {}) if skill_info else {}
+        logger.info("param_hint: no hints for method '%s' in %s", method_lower, list(hints.keys()))
+        return ""
+
+    # Extract CLI arg values from the built command
+    params_found = {}
+    for i, arg in enumerate(cmd):
+        if arg.startswith("--") and i + 1 < len(cmd) and not cmd[i + 1].startswith("--"):
+            params_found[arg.lstrip("-").replace("-", "_")] = cmd[i + 1]
+
+    # Build the hint block
+    lines = [
+        f"📋 **Running {skill_key} with method={method_lower}**",
+        "",
+        "**Current Parameters:**",
+    ]
+    for key in tip_info.get("params", []):
+        lines.append(f"  - `{key}`: {params_found.get(key, 'default')}")
+
+    lines.append("")
+    lines.append(f"**Tuning Priority:** {tip_info.get('priority', 'N/A')}")
+    for t in tip_info.get("tips", []):
+        lines.append(f"  - {t}")
+    lines.append("")
+    return "\n".join(lines)
+
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
     """Execute an OmicsClaw skill via subprocess (waits until completion)."""
@@ -1435,7 +1889,12 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     # Output directory
     import uuid
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = OUTPUT_DIR / f"{skill_key}_{ts}_{uuid.uuid4().hex[:8]}"
+    out_dir = OUTPUT_DIR / build_output_dir_name(
+        skill_key,
+        ts,
+        method=method,
+        unique_suffix=uuid.uuid4().hex[:8],
+    )
 
     # Build command
     cmd = [PYTHON, str(OMICSCLAW_PY), "run"]
@@ -1488,6 +1947,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             filtered.append(arg)
         cmd.extend(filtered)
 
+    # Build a parameter hint block so the LLM can relay it to the user
+    param_hint = _build_param_hint(skill_key, method, cmd)
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -1525,6 +1987,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     return_media = str(args.get("return_media", "")).strip().lower()
     figure_names = []
     table_names = []
+    notebook_names = []
     sent_names = []
     if out_dir.exists():
         media_items = []
@@ -1533,6 +1996,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                 continue
             if f.suffix in (".md", ".html"):
                 media_items.append({"type": "document", "path": str(f)})
+            elif f.suffix == ".ipynb":
+                media_items.append({"type": "document", "path": str(f)})
+                notebook_names.append(f.name)
             elif f.suffix == ".png":
                 media_items.append({"type": "photo", "path": str(f)})
                 figure_names.append(f.name)
@@ -1589,10 +2055,21 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         await _auto_capture_analysis(session_id, skill_key, args, out_dir, True)
 
     result_text = "\n".join(keep_lines).strip()
+    notebook_path = out_dir / "reproducibility" / "analysis_notebook.ipynb"
+    if notebook_path.exists():
+        result_text += (
+            "\n\n---\n"
+            f"[Reproducibility notebook available: {notebook_path}. "
+            "Tell the user they can open it in Jupyter to inspect code, outputs, and rerun the analysis.]"
+        )
+
+    # Prepend parameter hint so the LLM relays it to the user
+    if param_hint:
+        result_text = param_hint + "\n---\n" + result_text
 
     # Append media delivery status so the LLM knows what happened
     # and does NOT attempt to browse output directories itself.
-    all_names = figure_names + table_names
+    all_names = figure_names + table_names + notebook_names
     if sent_names:
         result_text += (
             "\n\n---\n"
@@ -1611,11 +2088,50 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             hints.append(f"Figures: {', '.join(figure_names)}")
         if table_names:
             hints.append(f"Tables: {', '.join(table_names)}")
+        if notebook_names:
+            hints.append(f"Notebooks: {', '.join(notebook_names)}")
         result_text += (
             "\n\n---\n"
             f"[Available outputs: {'; '.join(hints)}. "
-            "Tell the user they can request specific figures or tables by name if interested.]"
+            "Tell the user they can request specific figures, tables, or notebooks by name if interested.]"
         )
+
+    # Stage 2+4: Emit AdvisoryEvent and resolve post-execution knowledge
+    try:
+        from omicsclaw.knowledge.resolver import AdvisoryEvent, get_resolver
+
+        # Determine domain from skill registry
+        _skill_domain = "general"
+        try:
+            from omicsclaw.core.registry import registry
+            skill_info = registry.skills.get(skill_key, {})
+            _skill_domain = skill_info.get("domain", "general")
+        except Exception:
+            pass
+
+        event = AdvisoryEvent(
+            skill=skill_key,
+            phase="post_run",
+            domain=_skill_domain,
+            toolchain=method or "",
+            signals=[method, data_type] if method else [],
+            severity="info",
+            metrics={},
+            message=f"Completed {skill_key}" + (f" with method={method}" if method else ""),
+        )
+        resolver = get_resolver()
+        advice = resolver.resolve(
+            event,
+            session_id=session_id or str(chat_id),
+        )
+        if advice:
+            advice_text = resolver.format_advice(advice, channel="bot")
+            if advice_text:
+                result_text += f"\n\n{advice_text}"
+                logger.info("Post-execution advice appended for %s (%d snippets)",
+                            skill_key, len(advice))
+    except Exception as e:
+        logger.debug("Post-execution advisory skipped: %s", e)
 
     return result_text
 
@@ -1964,6 +2480,192 @@ async def execute_inspect_file(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# execute_inspect_data
+# ---------------------------------------------------------------------------
+
+
+async def execute_inspect_data(args: dict) -> str:
+    """Inspect an h5ad AnnData file's metadata without loading the expression matrix."""
+    file_path_arg = args.get("file_path", "")
+    skill_arg = str(args.get("skill", "")).strip()
+    method_arg = str(args.get("method", "")).strip().lower()
+    preview_params = bool(args.get("preview_params", False) or method_arg)
+    if not file_path_arg:
+        return "Error: file_path is required."
+
+    file_path = validate_input_path(file_path_arg)
+    if not file_path:
+        return f"File not found or not accessible: {file_path_arg}"
+
+    if file_path.suffix.lower() != ".h5ad":
+        return f"inspect_data only supports .h5ad files. Got: {file_path.suffix}"
+
+    try:
+        import h5py
+
+        info: dict = {}
+
+        with h5py.File(file_path, "r") as f:
+            # n_obs / n_vars from index arrays (faster than loading X)
+            if "obs" in f and "_index" in f["obs"]:
+                info["n_obs"] = len(f["obs"]["_index"])
+            elif "X" in f:
+                info["n_obs"] = f["X"].shape[0]
+
+            if "var" in f and "_index" in f["var"]:
+                info["n_vars"] = len(f["var"]["_index"])
+            elif "X" in f:
+                info["n_vars"] = f["X"].shape[1]
+
+            # obs/var column names (drop internal HDF5 keys)
+            _skip = {"_index", "__categories"}
+            info["obs_columns"] = [k for k in f["obs"].keys() if k not in _skip] if "obs" in f else []
+            info["var_columns"] = [k for k in f["var"].keys() if k not in _skip] if "var" in f else []
+
+            info["obsm_keys"] = list(f["obsm"].keys()) if "obsm" in f else []
+            info["obsp_keys"] = list(f["obsp"].keys()) if "obsp" in f else []
+            info["layers"] = list(f["layers"].keys()) if "layers" in f else []
+            info["uns_keys"] = list(f["uns"].keys()) if "uns" in f else []
+            info["has_raw"] = "raw" in f
+
+    except ImportError:
+        # Fallback: use anndata backed mode (no full matrix loaded)
+        try:
+            import anndata as ad
+            adata = ad.read_h5ad(file_path, backed="r")
+            info = {
+                "n_obs": adata.n_obs,
+                "n_vars": adata.n_vars,
+                "obs_columns": list(adata.obs.columns),
+                "var_columns": list(adata.var.columns),
+                "obsm_keys": list(adata.obsm.keys()),
+                "obsp_keys": list(adata.obsp.keys()),
+                "layers": list(adata.layers.keys()),
+                "uns_keys": list(adata.uns.keys()),
+                "has_raw": adata.raw is not None,
+            }
+            adata.file.close()
+        except Exception as e2:
+            return f"Error inspecting {file_path.name}: {e2}"
+    except Exception as e:
+        return f"Error inspecting {file_path.name}: {e}"
+
+    # Platform detection (heuristic, no model execution)
+    obsm_keys_lower = [k.lower() for k in info.get("obsm_keys", [])]
+    obs_cols_lower = [c.lower() for c in info.get("obs_columns", [])]
+
+    if "spatial" in obsm_keys_lower:
+        platform = "Spatial transcriptomics"
+        suggestions = [
+            "- **Spatial preprocessing** (QC → normalization → clustering): `spatial-preprocessing`",
+            "- **Spatial domain identification** (tissue regions/niches): `spatial-domain-identification`",
+            "- **Spatially variable genes** (SpatialDE, SPARK-X): `spatial-svg-detection`",
+            "- **Cell type annotation** (Tangram, scANVI): `spatial-cell-annotation`",
+            "- **Cell-cell communication** (LIANA, CellPhoneDB): `spatial-cell-communication`",
+            "- **Pathway enrichment** (GSEA, ORA): `spatial-enrichment`",
+        ]
+    elif any(c in obs_cols_lower for c in ("leiden", "louvain", "cell_type", "celltype", "cluster")):
+        platform = "Single-cell RNA-seq (already clustered/annotated)"
+        suggestions = [
+            "- **Differential expression** between groups: `sc-de`",
+            "- **Marker gene detection**: `sc-markers`",
+            "- **Trajectory / pseudotime** (DPT, PAGA): `sc-pseudotime`",
+            "- **RNA velocity** (scVelo): `sc-velocity`",
+            "- **Cell-cell communication** (LIANA, CellChat): `sc-cell-communication`",
+            "- **Gene regulatory networks** (SCENIC): `sc-grn`",
+        ]
+    elif any(c in obs_cols_lower for c in ("pct_counts_mt", "n_genes_by_counts", "total_counts")):
+        platform = "Single-cell RNA-seq (raw / QC stage)"
+        suggestions = [
+            "- **QC metrics & visualization**: `sc-qc`",
+            "- **Cell filtering** (QC thresholds): `sc-filter`",
+            "- **Doublet detection** (Scrublet, scDblFinder): `sc-doublet-detection`",
+            "- **Full preprocessing** (QC → normalization → clustering → UMAP): `sc-preprocessing`",
+            "- **Ambient RNA removal** (CellBender): `sc-ambient-removal`",
+        ]
+    else:
+        platform = "Single-cell / generic h5ad"
+        suggestions = [
+            "- **Full preprocessing** (QC → normalization → clustering → UMAP): `sc-preprocessing`",
+            "- **QC metrics**: `sc-qc`",
+            "- **Cell type annotation**: `sc-cell-annotation`",
+            "- **Batch integration** (Harmony, scVI): `sc-batch-integration`",
+        ]
+
+    domain_hint = ""
+    if "spatial" in platform.lower():
+        domain_hint = "spatial"
+    elif "single-cell" in platform.lower() or "singlecell" in platform.lower():
+        domain_hint = "singlecell"
+
+    preview_skill = skill_arg
+    if preview_params and not preview_skill and method_arg:
+        preview_skill = _infer_skill_for_method(method_arg, preferred_domain=domain_hint)
+
+    # Format report
+    n_obs = info.get("n_obs", "?")
+    n_vars = info.get("n_vars", "?")
+    obs_cols = ", ".join(info.get("obs_columns", [])) or "none"
+    var_cols = ", ".join(info.get("var_columns", [])) or "none"
+    obsm = ", ".join(info.get("obsm_keys", [])) or "none"
+    obsp = ", ".join(info.get("obsp_keys", [])) or "none"
+    layers = ", ".join(info.get("layers", [])) or "none (X only)"
+    uns = ", ".join(info.get("uns_keys", [])) or "none"
+    has_spatial = "spatial" in obsm_keys_lower
+    has_x_pca = "x_pca" in obsm_keys_lower
+    has_counts_layer = "counts" in [k.lower() for k in info.get("layers", [])]
+    has_raw = bool(info.get("has_raw", False))
+
+    lines = [
+        f"## Data Inspection: `{file_path.name}`",
+        f"",
+        f"| Property | Value |",
+        f"|---|---|",
+        f"| **Shape** | {n_obs:,} cells × {n_vars:,} genes |" if isinstance(n_obs, int) else f"| **Shape** | {n_obs} cells × {n_vars} genes |",
+        f"| **Platform** | {platform} |",
+        f"| **Cell metadata (obs)** | {obs_cols} |",
+        f"| **Gene metadata (var)** | {var_cols} |",
+        f"| **Embeddings / coords (obsm)** | {obsm} |",
+        f"| **Graph matrices (obsp)** | {obsp} |",
+        f"| **Layers** | {layers} |",
+        f"| **uns keys** | {uns} |",
+    ]
+
+    if preview_params and method_arg:
+        preview_block = _build_method_preview(
+            skill_key=preview_skill or "",
+            method=method_arg,
+            n_obs=n_obs if isinstance(n_obs, int) else None,
+            has_spatial=has_spatial,
+            has_x_pca=has_x_pca,
+            has_raw=has_raw,
+            has_counts_layer=has_counts_layer,
+            platform=platform,
+        )
+        lines.append("")
+        if preview_block:
+            lines.append(preview_block)
+        else:
+            lines.append("### Method Suitability & Parameter Preview")
+            lines.append("- No `param_hints` found for this `skill/method` combination.")
+            lines.append("- Add method hints in SKILL.md: `metadata.omicsclaw.param_hints.<method>`.")
+            if not preview_skill:
+                lines.append("- Tip: pass `skill` with `inspect_data` for accurate method preview.")
+
+    lines.extend([
+        "",
+        "**Suggested analyses for this dataset:**",
+    ])
+    lines.extend(suggestions)
+    lines.extend([
+        "",
+        "Tell me which analysis you'd like to run and I'll get started.",
+    ])
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # execute_download_file
 # ---------------------------------------------------------------------------
 
@@ -2269,6 +2971,51 @@ async def execute_remember(args: dict, session_id: str = None) -> str:
         return f"Error saving memory: {e}"
 
 
+async def execute_consult_knowledge(args: dict, **kwargs) -> str:
+    """Query the OmicsClaw knowledge base for analysis guidance."""
+    try:
+        import time as _t
+        _ck_start = _t.monotonic()
+
+        from omicsclaw.knowledge import KnowledgeAdvisor
+
+        advisor = KnowledgeAdvisor()
+        query = args.get("query", "")
+        if not query:
+            return "Error: 'query' parameter is required."
+
+        domain = args.get("domain", "all")
+        category = args.get("category", "all")
+
+        result = advisor.search_formatted(
+            query=query,
+            domain=domain if domain != "all" else None,
+            doc_type=category if category != "all" else None,
+            limit=5,
+        )
+
+        # Stage 0: Telemetry
+        _ck_elapsed_ms = (_t.monotonic() - _ck_start) * 1000
+        try:
+            from omicsclaw.knowledge.telemetry import get_telemetry
+            results_count = result.count("--- Result") if result else 0
+            get_telemetry().log_consult_knowledge(
+                session_id=kwargs.get("session_id", "unknown"),
+                query=query,
+                category=category,
+                domain=domain,
+                results_count=results_count,
+                latency_ms=_ck_elapsed_ms,
+            )
+        except Exception:
+            pass
+
+        return result
+    except Exception as e:
+        logger.error(f"Knowledge query failed: {e}", exc_info=True)
+        return f"Error querying knowledge base: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Tool executor registry
 # ---------------------------------------------------------------------------
@@ -2290,6 +3037,8 @@ TOOL_EXECUTORS = {
     "remove_file": execute_remove_file,
     "get_file_size": execute_get_file_size,
     "remember": execute_remember,
+    "consult_knowledge": execute_consult_knowledge,
+    "inspect_data": execute_inspect_data,
 }
 
 MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable
@@ -2361,6 +3110,7 @@ async def llm_tool_loop(
     progress_update_fn=None,
     on_tool_call=None,
     on_tool_result=None,
+    on_stream_content=None,
 ) -> str:
     """
     Run the LLM tool-use loop:
@@ -2373,6 +3123,7 @@ async def llm_tool_loop(
     progress_update_fn: async callable(handle, msg). Updates a previously sent progress message.
     on_tool_call: async callable(tool.name, arguments: dict). Called before a tool executes.
     on_tool_result: async callable(tool.name, result: Any). Called after a tool completes.
+    on_stream_content: async callable(chunk: str). Called as final text streams in.
     """
     # Handle commands before LLM call
     if isinstance(user_content, str) and user_content.strip().startswith("/"):
@@ -2560,8 +3311,18 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         session_id = f"{platform}:{user_id}:{chat_id}"
         memory_context = await session_manager.load_context(session_id)
 
-    # Build system prompt with memory context
-    system_prompt = build_system_prompt(memory_context) if memory_context else SYSTEM_PROMPT
+    # Build system prompt with memory context + dynamic KH injection
+    # Extract skill/domain hints from the user's message for targeted KH loading
+    _user_text = user_content if isinstance(user_content, str) else " ".join(
+        b.get("text", "") for b in (user_content or []) if isinstance(b, dict)
+    )
+    _skill_hint, _domain_hint = _extract_analysis_hints(_user_text)
+    system_prompt = build_system_prompt(
+        memory_context=memory_context,
+        skill=_skill_hint,
+        query=_user_text[:200] if _user_text else "",
+        domain=_domain_hint,
+    )
 
     history = conversations.setdefault(chat_id, [])
     _conversation_access[chat_id] = time.time()
@@ -2592,21 +3353,77 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     _notified_methods: set[str] = set()  # Avoid duplicate progress messages
     for _iteration in range(MAX_TOOL_ITERATIONS):
         try:
+            kwargs = {}
+            if on_stream_content is not None:
+                kwargs = {"stream": True, "stream_options": {"include_usage": True}}
+
             response = await llm.chat.completions.create(
                 model=OMICSCLAW_MODEL,
                 max_tokens=8192,
                 messages=[{"role": "system", "content": system_prompt}] + history,
                 tools=TOOLS,
+                **kwargs
             )
+            
+            if on_stream_content is not None:
+                class FakeFunction:
+                    def __init__(self, name, arguments):
+                        self.name = name
+                        self.arguments = arguments
+                class FakeToolCall:
+                    def __init__(self, id, type_, function):
+                        self.id = id
+                        self.type = type_
+                        self.function = function
+                class FakeMessage:
+                    def __init__(self, content, tool_calls):
+                        self.content = content
+                        self.tool_calls = tool_calls
+                        
+                final_content = ""
+                tool_calls_dict = {}
+                
+                async for chunk in response:
+                    if not chunk.choices:
+                        if chunk.usage:
+                            _accumulate_usage(chunk.usage)
+                        continue
+                    
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        final_content += delta.content
+                        if inspect.iscoroutinefunction(on_stream_content):
+                            await on_stream_content(delta.content)
+                        else:
+                            on_stream_content(delta.content)
+                            
+                    if delta.tool_calls:
+                        for tc_chunk in delta.tool_calls:
+                            tc_index = tc_chunk.index
+                            if tc_index not in tool_calls_dict:
+                                tc_id = tc_chunk.id or ""
+                                tc_type = tc_chunk.type or "function"
+                                func_name = tc_chunk.function.name or ""
+                                func_args = tc_chunk.function.arguments or ""
+                                tool_calls_dict[tc_index] = FakeToolCall(tc_id, tc_type, FakeFunction(func_name, func_args))
+                            else:
+                                existing_tc = tool_calls_dict[tc_index]
+                                if tc_chunk.function.name:
+                                    existing_tc.function.name += tc_chunk.function.name
+                                if tc_chunk.function.arguments:
+                                    existing_tc.function.arguments += tc_chunk.function.arguments
+                
+                tcs = [tool_calls_dict[idx] for idx in sorted(tool_calls_dict.keys())]
+                last_message = FakeMessage(final_content if final_content else None, tcs if tcs else None)
+            else:
+                # Accumulate token usage statistics
+                _accumulate_usage(response.usage)
+                choice = response.choices[0]
+                last_message = choice.message
+                
         except APIError as e:
             logger.error(f"LLM API error: {e}")
             return f"Sorry, I'm having trouble thinking right now -- API error: {e}"
-
-        # Accumulate token usage statistics
-        _accumulate_usage(response.usage)
-
-        choice = response.choices[0]
-        last_message = choice.message
 
         assistant_msg: dict = {"role": "assistant", "content": last_message.content or ""}
         if last_message.tool_calls:

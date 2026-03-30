@@ -12,6 +12,12 @@ metadata:
     domain: bulkrna
     emoji: "📈"
     trigger_keywords: [survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome]
+    allowed_extra_flags:
+      - "--clinical"
+      - "--cutoff-method"
+      - "--genes"
+    legacy_aliases: [bulk-survival]
+    saves_h5ad: false
 ---
 
 # Bulk RNA-seq Survival Analysis

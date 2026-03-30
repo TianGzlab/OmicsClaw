@@ -1,67 +1,248 @@
-# 🧬 Contributing to OmicsClaw
+# Contributing to OmicsClaw
 
 We welcome contributions from anyone working in multi-omics analysis, bioinformatics, computational biology, or related fields.
 
+---
+
 ## How to Contribute a Skill
 
-### 1. Copy the template
+### Overview
 
-```bash
-cp -r templates/SKILL-TEMPLATE.md skills/<domain>/<skill-name>/SKILL.md
-```
-
-### 2. Define your skill
-
-Edit `SKILL.md` with:
-- **YAML frontmatter**: name, description, domain, dependencies
-- **Markdown body**: Methodology, capabilities, workflow, input/output formats, and safety rules
-
-### 3. Implement the skill
-
-Create the Python implementation alongside SKILL.md:
+OmicsClaw uses **convention-over-configuration** for skill discovery. Place your files in the correct directory with the correct naming, and the system automatically handles registry, CLI, bot routing, and agent integration — no manual wiring needed.
 
 ```
 skills/<domain>/<skill-name>/
-├── SKILL.md              # Required
-├── <skill_name>.py       # Required
-└── tests/                # Required
-    └── test_<skill>.py
+├── SKILL.md              # Required — metadata + documentation
+├── <skill_name>.py       # Required — entry script (hyphens → underscores)
+└── tests/
+    └── test_<skill_name>.py  # Required — at least demo mode test
 ```
 
-### 4. Test locally
+### Step 1: Create the directory
 
 ```bash
-# Run demo mode
-python omicsclaw.py run <skill-name> --demo
+# Pick your domain: spatial, singlecell, genomics, proteomics, metabolomics, bulkrna
+mkdir -p skills/<domain>/<skill-name>/tests
+```
 
-# Run tests
+**Naming rules:**
+- Folder: lowercase, hyphens (`spatial-de`, `bulkrna-enrichment`)
+- Script: folder name with hyphens replaced by underscores (`spatial_de.py`, `bulkrna_enrichment.py`)
+- The script filename **must** match the folder name — this is how the registry finds it
+
+Subdomain nesting is also supported (e.g., `singlecell/scrna/sc-qc/sc_qc.py`).
+
+### Step 2: Write SKILL.md
+
+Copy and customize the template:
+
+```bash
+cp templates/SKILL-TEMPLATE.md skills/<domain>/<skill-name>/SKILL.md
+```
+
+**Required YAML frontmatter fields:**
+
+```yaml
+---
+name: your-skill-name              # Must match folder name
+description: >-
+  One-line description shown in CLI and skill_search results.
+version: 0.1.0
+metadata:
+  omicsclaw:
+    domain: spatial                 # Your domain
+    trigger_keywords:               # How users find this skill via NLP
+      - preprocess
+      - QC
+      - normalize
+    allowed_extra_flags:            # CLI flags beyond --input/--output/--demo
+      - "--method"
+      - "--species"
+    legacy_aliases: [short-alias]   # Optional short names
+    saves_h5ad: false               # Does output include processed.h5ad?
+    requires_preprocessed: false    # Needs preprocessed input?
+---
+```
+
+**Required markdown sections:** Why This Exists, Core Capabilities, Workflow, Input/Output Formats, CLI Reference (with `--demo` example), Dependencies, Safety disclaimer.
+
+### Step 3: Implement the script
+
+Your script needs three things: a `main()` CLI entry, demo mode support, and standard output files.
+
+```python
+#!/usr/bin/env python3
+"""One-line description of the skill."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+# Project root on sys.path for imports
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Import core analysis functions from _lib (recommended for complex skills)
+from skills.<domain>._lib.<module> import core_function
+
+# Import report utilities
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    write_result_json,
+)
+
+
+def generate_figures(output_dir: Path, summary: dict) -> list[str]:
+    """Create analysis visualizations."""
+    ...
+
+
+def write_report(output_dir: Path, summary: dict, input_file, params: dict) -> None:
+    """Generate report.md + result.json."""
+    ...
+
+
+def get_demo_data():
+    """Return synthetic demo data."""
+    ...
+
+
+def main():
+    parser = argparse.ArgumentParser(description="...")
+    parser.add_argument("--input", dest="input_path")
+    parser.add_argument("--output", dest="output_dir", required=True)
+    parser.add_argument("--demo", action="store_true")
+    # Add flags declared in SKILL.md allowed_extra_flags
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.demo:
+        data = get_demo_data()
+    elif args.input_path:
+        data = load_data(args.input_path)
+    else:
+        print("ERROR: Provide --input or --demo", file=sys.stderr)
+        sys.exit(1)
+
+    # Run analysis → generate output
+    summary = core_function(data, ...)
+    generate_figures(output_dir, summary)
+    write_report(output_dir, summary, args.input_path, vars(args))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**Standard output files** (in `--output` directory):
+
+| File | Purpose |
+|------|---------|
+| `report.md` | Analysis report with methodology, results, disclaimer |
+| `result.json` | Structured results for programmatic access |
+| `figures/` | PNG/SVG visualizations |
+| `tables/` | CSV/TSV data tables |
+| `reproducibility/` | commands.sh, requirements.txt, checksums.sha256 |
+| `processed.h5ad` | Output AnnData (if `saves_h5ad: true`) |
+
+### Step 4: (Recommended) Use `_lib` for core logic
+
+For complex skills, put core analysis functions in a shared `_lib/` module:
+
+```
+skills/<domain>/_lib/
+    ├── __init__.py
+    └── your_module.py    # run_analysis(), compute_metrics(), ...
+```
+
+Then import at the top level of your script:
+
+```python
+from skills.<domain>._lib.your_module import run_analysis
+```
+
+**Why this matters:** The `skill_search()` tool (used by the research pipeline's coding-agent) performs AST scanning to discover callable functions. It specifically extracts functions imported from `_lib` and marks them as **core functions** (`▶`), displayed prominently to the coding-agent. Functions defined directly in your script are shown as helpers.
+
+If your domain doesn't have `_lib` yet, that's fine — all functions defined in your script will still be discovered and shown to agents.
+
+### Step 5: Write tests
+
+```python
+# tests/test_<skill_name>.py
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPT = Path(__file__).resolve().parent.parent / "<skill_name>.py"
+
+def test_demo_mode(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--demo", "--output", str(tmp_path)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "report.md").exists()
+    assert (tmp_path / "result.json").exists()
+```
+
+### Step 6: Verify integration
+
+```bash
+# 1. Registry discovers your skill
+python omicsclaw.py list | grep <skill-name>
+
+# 2. Demo mode works
+python omicsclaw.py run <skill-name> --demo --output /tmp/test_output
+
+# 3. Tests pass
 python -m pytest skills/<domain>/<skill-name>/tests/ -v
 ```
 
-### 5. Submit
+### Step 7: Submit
 
 ```bash
 git checkout -b add-<skill-name>
 git add skills/<domain>/<skill-name>/
-git commit -m "Add <skill-name> skill for <domain>"
+git commit -m "feat(<domain>): add <skill-name> skill"
 git push -u origin add-<skill-name>
 # Open PR on GitHub
 ```
+
+---
+
+## How Auto-Discovery Works
+
+You don't need to register your skill anywhere. The system discovers it automatically:
+
+```
+You create files                          System does the rest
+─────────────────                         ────────────────────
+skills/<domain>/<name>/                 → registry.load_all() discovers the directory
+    SKILL.md (with frontmatter)         → LazySkillMetadata parses trigger_keywords, domain, flags
+    <name>.py (with main())             → registry.skills[alias] = {script, domain, description, ...}
+                                          │
+                                          ├→ CLI: `omicsclaw.py run <name>` works
+                                          ├→ Bot: NLP routing via trigger_keywords
+                                          ├→ skill_search(): AST extracts functions for coding-agent
+                                          └→ load_skill(): dynamic import in notebook kernel
+```
+
+---
 
 ## Skill Guidelines
 
 1. **Local-first**: All data processing happens locally. No mandatory cloud uploads.
 2. **Reproducible**: Generate reports with version info and run commands.
 3. **Single responsibility**: Each skill does one analysis task well.
-4. **Documented**: Include SKILL.md with methodology and examples.
-5. **Safe**: Warn before destructive actions. Include research-use disclaimer.
-6. **Standardized output**: Follow the output structure (report.md, result.json, figures/).
-
-## Naming Conventions
-
-- Skill folder: lowercase, hyphens (`spatial-domains`, `vcf-ops`)
-- Python files: lowercase, underscores (`spatial_domains.py`)
-- Skill name in YAML: matches folder name exactly
+4. **Documented**: SKILL.md with methodology, examples, and safety disclaimer.
+5. **Standardized output**: Follow the output structure (report.md, result.json, figures/).
+6. **Demo mode**: `--demo` must work without `--input` — essential for testing and user onboarding.
 
 ## Code Standards
 
@@ -70,18 +251,18 @@ git push -u origin add-<skill-name>
 - Use `pathlib` for file paths
 - No hardcoded absolute paths
 - Tests with pytest
-- Follow existing skill patterns
+- Follow existing skill patterns (read 2-3 skills in the same domain before starting)
 
 ## Supported Domains
 
-OmicsClaw organizes skills by omics domain:
-
-- `skills/spatial/` - Spatial transcriptomics (16 skills)
-- `skills/singlecell/` - Single-cell omics (5 skills)
-- `skills/genomics/` - Genomics (8 skills)
-- `skills/proteomics/` - Proteomics (6 skills)
-- `skills/metabolomics/` - Metabolomics (5 skills)
-- `skills/orchestrator/` - Multi-domain routing
+| Domain | Directory | Current Skills |
+|--------|-----------|---------------|
+| Spatial Transcriptomics | `skills/spatial/` | 16 skills |
+| Single-Cell Omics | `skills/singlecell/` | 13 skills |
+| Genomics | `skills/genomics/` | 10 skills |
+| Proteomics | `skills/proteomics/` | 8 skills |
+| Metabolomics | `skills/metabolomics/` | 8 skills |
+| Bulk RNA-seq | `skills/bulkrna/` | 13 skills |
 
 ## For AI Agents Contributing Skills
 
@@ -91,55 +272,21 @@ AI coding agents should follow the same workflow, plus:
 2. Read the target skill's `SKILL.md` before modifying code
 3. Use `python omicsclaw.py list` to verify skills load correctly
 4. Run `python -m pytest -v` to confirm all tests pass
-5. Regenerate catalog: `python scripts/generate_catalog.py`
-
-## SKILL.md Quality Checklist
-
-Every SKILL.md should include:
-
-- [ ] **YAML frontmatter** with name, description, version, domain, tags
-- [ ] **Why This Exists** (problem it solves)
-- [ ] **Core Capabilities** (what it does)
-- [ ] **Workflow** (step-by-step methodology)
-- [ ] **Input/Output** (data formats and structure)
-- [ ] **Dependencies** (required and optional packages)
-- [ ] **CLI Reference** (usage examples with --demo)
-- [ ] **Safety** (local-first, disclaimer, no hallucination)
 
 ## Skill Ideas We Need
 
-If you're looking for something to build:
+**Spatial Transcriptomics:** 3D tissue reconstruction, multi-slice alignment
 
-**Spatial Transcriptomics:**
-- Spatial niche identification with advanced methods
-- 3D tissue reconstruction
-- Multi-slice alignment and integration
+**Single-Cell:** Multi-modal integration (RNA + ATAC + protein), rare cell type detection
 
-**Single-Cell:**
-- Multi-modal integration (RNA + ATAC + protein)
-- Cell state dynamics
-- Rare cell type detection
+**Genomics:** Long-read variant calling, population genetics analysis
 
-**Genomics:**
-- Long-read variant calling
-- Structural variant annotation
-- Population genetics analysis
+**Proteomics:** DIA-NN integration, PTM site prediction
 
-**Proteomics:**
-- DIA-NN integration
-- Protein-protein interaction networks
-- PTM site prediction
+**Metabolomics:** Compound identification, flux balance analysis
 
-**Metabolomics:**
-- Metabolic pathway analysis
-- Compound identification
-- Flux balance analysis
-
-**Multi-Omics:**
-- Cross-omics integration
-- Multi-view factor analysis
-- Systems biology modeling
+**Multi-Omics:** Cross-omics integration, multi-view factor analysis
 
 ## Questions?
 
-Open an issue on [GitHub](https://github.com/OmicsClaw/OmicsClaw/issues) or check the documentation. 🧬
+Open an issue on [GitHub](https://github.com/TianGzlab/OmicsClaw/issues) or check the documentation.

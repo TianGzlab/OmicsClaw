@@ -1,3 +1,30 @@
+---
+name: sc-pseudotime
+description: >-
+  Pseudotime and trajectory analysis using PAGA, Diffusion Map, and DPT
+version: 0.1.0
+metadata:
+  omicsclaw:
+    domain: singlecell
+    allowed_extra_flags:
+      - "--cluster-key"
+      - "--method"
+      - "--n-dcs"
+      - "--n-genes"
+      - "--root-cell"
+      - "--root-cluster"
+    saves_h5ad: true
+    requires_preprocessed: true
+    trigger_keywords:
+      - trajectory
+      - pseudotime
+      - diffusion pseudotime
+      - dpt
+      - paga
+      - cell fate
+      - diffusion map
+---
+
 # sc-pseudotime — Pseudotime Trajectory Analysis
 
 ## Purpose
@@ -73,7 +100,7 @@ output_dir/
 │   └── trajectory_genes.csv      # Genes correlated with pseudotime
 └── reproducibility/
     ├── commands.sh
-    └── environment.yml
+    └── requirements.txt
 ```
 
 ## Methods

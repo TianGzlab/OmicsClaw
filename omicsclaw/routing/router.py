@@ -40,8 +40,13 @@ def route_query_unified(
         logger.warning(f"Unknown routing mode: {routing_mode}, using keyword")
         return _route_keyword(query, keyword_map)
 
-def _route_keyword(query: str, keyword_map: Dict[str, str]) -> Tuple[Optional[str], float]:
-    """Keyword-based routing."""
+def route_keyword(query: str, keyword_map: Dict[str, str]) -> Tuple[Optional[str], float]:
+    """Keyword-based routing — public API.
+
+    Scores each skill by summing lengths of matching keywords.
+    Returns ``(best_skill, confidence)`` where confidence is
+    ``min(1.0, total_score / 20.0)``.
+    """
     query_lower = query.lower().strip()
     scores: Dict[str, int] = {}
     for kw, skill in keyword_map.items():
@@ -52,6 +57,10 @@ def _route_keyword(query: str, keyword_map: Dict[str, str]) -> Tuple[Optional[st
         confidence = min(1.0, scores[best_skill] / 20.0)
         return best_skill, round(confidence, 2)
     return None, 0.0
+
+
+# Keep private alias for internal use
+_route_keyword = route_keyword
 
 def _route_llm(query: str, skills: Dict[str, str], domain: str) -> Tuple[Optional[str], float]:
     """LLM-based routing."""

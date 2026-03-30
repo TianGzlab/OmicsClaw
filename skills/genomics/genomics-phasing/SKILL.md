@@ -12,6 +12,10 @@ metadata:
     domain: genomics
     emoji: "🔀"
     trigger_keywords: [haplotype phasing, WhatsHap, SHAPEIT, Eagle, phasing]
+    allowed_extra_flags:
+      - "--method"
+    legacy_aliases: [phase]
+    saves_h5ad: false
 ---
 
 # 🔀 Haplotype Phasing
@@ -57,7 +61,7 @@ output_directory/
 │   └── phasing_metrics.csv
 └── reproducibility/
     ├── commands.sh
-    ├── environment.yml
+    ├── requirements.txt
     └── checksums.sha256
 ```
 

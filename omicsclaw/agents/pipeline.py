@@ -185,20 +185,19 @@ def _resolve_prompt_refs(config: dict[str, Any]) -> dict[str, Any]:
 def _build_subagent_configs(
     agent_config: dict[str, Any],
     tool_registry: dict,
+    get_llm_fn: Callable[[str | None], Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert our YAML config into deepagents subagent format.
-
-    Follows EvoScientist's pattern:
-    - Each subagent gets its tools from the registry
-    - Each subagent declares skills=['/skills/'] so it can read SKILL.md
-    - Each subagent gets ToolErrorHandlerMiddleware for self-recovery
 
     Parameters
     ----------
     agent_config : dict
         Parsed config.yaml content.
     tool_registry : dict
-        Mapping of tool name → tool object.
+        Mapping of tool name -> tool object.
+    get_llm_fn : callable, optional
+        ``pipeline._get_llm(agent_name)`` — when provided, each subagent
+        receives its own LLM resolved from per-agent env vars.
 
     Returns
     -------
@@ -219,15 +218,18 @@ def _build_subagent_configs(
         if "system_prompt" in agent_def:
             subagent["system_prompt"] = agent_def["system_prompt"]
 
-        # EvoScientist pattern: let subagents see /skills/ for SKILL.md
         if "skills" in agent_def:
             subagent["skills"] = agent_def["skills"]
         else:
             subagent["skills"] = ["/skills/"]
 
-        # EvoScientist pattern: inject ToolErrorHandlerMiddleware
-        # so tool errors become recoverable ToolMessages instead of crashes
         subagent["middleware"] = [ToolErrorHandlerMiddleware()]
+
+        # Per-agent LLM override (only if env vars are set for this agent)
+        if get_llm_fn is not None:
+            tag = agent_name.split("-")[0].upper()
+            if os.getenv(f"OC_{tag}_MODEL") or os.getenv(f"OC_{tag}_PROVIDER"):
+                subagent["model"] = get_llm_fn(agent_name)
 
         subagents.append(subagent)
     return subagents
@@ -286,33 +288,41 @@ class ResearchPipeline:
         self.provider = provider
         self.model = model
 
-    def _get_llm(self):
-        """Build the LLM instance from provider/model settings.
+    def _get_llm(self, agent_name: str | None = None):
+        """Build an LLM instance from provider/model settings.
 
-        Resolution order (provider):
-            1. Constructor ``provider`` arg  (e.g. from CLI ``--provider``)
-            2. ``OC_LLM_PROVIDER`` env       (research-pipeline-specific override)
-            3. ``LLM_PROVIDER`` env           (project-wide default, same as bot/interactive)
-            4. Fallback: ``"deepseek"``
+        Resolution order (most specific wins):
 
-        Resolution order (api key):
-            ``DEEPSEEK_API_KEY`` → ``LLM_API_KEY`` (for deepseek)
-            ``OPENAI_API_KEY``  → ``LLM_API_KEY`` (for openai)
-            ``ANTHROPIC_API_KEY`` → ``LLM_API_KEY`` (for anthropic)
+        Per-agent (only when *agent_name* is provided):
+            ``OC_{AGENT}_PROVIDER``  /  ``OC_{AGENT}_MODEL``
+            e.g. ``OC_PLANNER_PROVIDER=deepseek``, ``OC_CODING_MODEL=claude-sonnet-4-5``
 
-        Resolution order (model):
-            1. Constructor ``model`` arg
-            2. ``OC_LLM_MODEL`` env
-            3. ``OMICSCLAW_MODEL`` env
+        Pipeline-level:
+            1. Constructor ``provider``/``model`` args
+            2. ``OC_LLM_PROVIDER`` / ``OC_LLM_MODEL``
+
+        Global:
+            3. ``LLM_PROVIDER`` / ``OMICSCLAW_MODEL``
             4. Provider-specific default
         """
+        # --- per-agent env vars ---
+        agent_provider = None
+        agent_model = None
+        if agent_name:
+            # "planner-agent" → "PLANNER", "coding-agent" → "CODING"
+            tag = agent_name.split("-")[0].upper()
+            agent_provider = os.getenv(f"OC_{tag}_PROVIDER")
+            agent_model = os.getenv(f"OC_{tag}_MODEL")
+
         provider = (
-            self.provider
+            agent_provider
+            or self.provider
             or os.getenv("OC_LLM_PROVIDER")
             or os.getenv("LLM_PROVIDER", "deepseek")
         )
         model = (
-            self.model
+            agent_model
+            or self.model
             or os.getenv("OC_LLM_MODEL")
             or os.getenv("OMICSCLAW_MODEL")
         )
@@ -415,7 +425,8 @@ class ResearchPipeline:
         )
 
         subagents = _build_subagent_configs(
-            self.agent_config, self.tool_registry
+            self.agent_config, self.tool_registry,
+            get_llm_fn=self._get_llm,
         )
 
         # Orchestrator middleware — error handler for main agent tools
@@ -438,6 +449,8 @@ class ResearchPipeline:
         h5ad_path: str | None = None,
         on_stage: Callable[[str, str], None] | None = None,
         resume: bool = False,
+        from_stage: str | None = None,
+        skip_stages: list[str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full research pipeline.
 
@@ -454,6 +467,12 @@ class ResearchPipeline:
             Progress callback ``(stage_name, status_message)``.
         resume : bool, optional
             If True, attempt to resume from a previous checkpoint.
+        from_stage : str, optional
+            Start from this stage (e.g., "execute"). All prior stages are
+            marked as completed. Requires workspace to have necessary artifacts.
+        skip_stages : list[str], optional
+            Skip these stages entirely (e.g., ["research"]). Useful for
+            workflows that don't need literature search.
 
         Returns
         -------
@@ -466,6 +485,57 @@ class ResearchPipeline:
             logger.info("[%s] %s", stage, status)
 
         try:
+            # ── Parameter validation ──────────────────────────────────
+            skip_stages = skip_stages or []
+
+            # Validate from_stage
+            if from_stage and from_stage not in self.STAGES:
+                raise ValueError(
+                    f"Invalid from_stage '{from_stage}'. "
+                    f"Must be one of: {', '.join(self.STAGES)}"
+                )
+
+            # Validate skip_stages
+            invalid_skips = [s for s in skip_stages if s not in self.STAGES]
+            if invalid_skips:
+                raise ValueError(
+                    f"Invalid skip_stages: {', '.join(invalid_skips)}. "
+                    f"Must be from: {', '.join(self.STAGES)}"
+                )
+
+            # from_stage and skip_stages are mutually exclusive with resume
+            if resume and (from_stage or skip_stages):
+                raise ValueError(
+                    "Cannot use --resume with --from-stage or --skip. "
+                    "Use one approach at a time."
+                )
+
+            # ── Stage control: from_stage ─────────────────────────────
+            if from_stage:
+                # Mark all stages before from_stage as completed
+                from_idx = self.STAGES.index(from_stage)
+                for stage in self.STAGES[:from_idx]:
+                    if stage not in skip_stages:
+                        self.state.completed_stages.append(stage)
+                        self.state.stage_outputs[stage] = f"Skipped (--from-stage={from_stage})"
+
+                _notify_stage(
+                    "from_stage",
+                    f"Starting from '{from_stage}' "
+                    f"(marked {from_idx} prior stages as completed)"
+                )
+
+            # ── Stage control: skip_stages ────────────────────────────
+            if skip_stages:
+                for stage in skip_stages:
+                    self.state.completed_stages.append(stage)
+                    self.state.stage_outputs[stage] = "Skipped (--skip)"
+
+                _notify_stage(
+                    "skip_stages",
+                    f"Skipping stages: {', '.join(skip_stages)}"
+                )
+
             # ── Checkpoint resume ─────────────────────────────────────
             skip_intake = False
             if resume:
@@ -481,7 +551,8 @@ class ResearchPipeline:
                         skip_intake = True
 
             # ── Stage 1: Intake ────────────────────────────────────────
-            if skip_intake:
+            # Check if intake should be skipped (resume, from_stage, or explicit skip)
+            if skip_intake or self.state.is_stage_done("intake"):
                 _notify_stage("intake", "Skipped (already completed)")
             else:
                 if pdf_path:
@@ -507,8 +578,8 @@ class ResearchPipeline:
                     has_pdf=bool(pdf_path),
                 )
 
-            # For resume, re-create a minimal intake result from workspace
-            if skip_intake:
+            # For resume/from_stage/skip, re-create a minimal intake result from workspace
+            if skip_intake or self.state.is_stage_done("intake"):
                 from .intake import IntakeResult
                 intake = IntakeResult.from_workspace(
                     str(self.workspace), idea=idea,
@@ -526,7 +597,7 @@ class ResearchPipeline:
             # Construct the initial prompt for the orchestrator
             initial_prompt = self._build_initial_prompt(intake)
 
-            # If resuming with completed stages, append resume context
+            # Append stage control context
             if resume and self.state.completed_stages:
                 completed = self.state.completed_stages
                 pending = [s for s in self.STAGES if s not in completed]
@@ -539,6 +610,31 @@ class ResearchPipeline:
                     f"'{pending[0]}' if stages remain.\n"
                     f"Review existing outputs in the workspace before "
                     f"proceeding.\n"
+                )
+            elif from_stage or skip_stages:
+                completed = self.state.completed_stages
+                pending = [s for s in self.STAGES if s not in completed]
+                context_lines = []
+
+                if from_stage:
+                    context_lines.append(
+                        f"This pipeline is starting from stage '{from_stage}'."
+                    )
+
+                if skip_stages:
+                    context_lines.append(
+                        f"The following stages are SKIPPED: {', '.join(skip_stages)}"
+                    )
+
+                context_lines.extend([
+                    f"- **Already completed/skipped**: {', '.join(completed)}",
+                    f"- **Remaining stages**: {', '.join(pending)}",
+                    "Review existing outputs in the workspace before proceeding.",
+                ])
+
+                initial_prompt += (
+                    f"\n\n## ⚡ Stage Control Context\n"
+                    + "\n".join(context_lines) + "\n"
                 )
 
             _notify_stage("pipeline", "Running research pipeline...")
