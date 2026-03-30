@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Literal
 
 import anndata as ad
+
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+
+ensure_runtime_cache_dirs()
+
 import scanpy as sc
 
 from .exceptions import DataError
@@ -20,6 +25,14 @@ logger = logging.getLogger(__name__)
 SpatialPlatform = Literal[
     "visium", "xenium", "slide_seq", "merfish", "seqfish", "generic"
 ]
+SUPPORTED_SPATIAL_PLATFORMS = (
+    "visium",
+    "xenium",
+    "slide_seq",
+    "merfish",
+    "seqfish",
+    "generic",
+)
 
 
 def load_spatial_data(

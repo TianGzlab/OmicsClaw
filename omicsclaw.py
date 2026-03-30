@@ -79,27 +79,34 @@ registry.load_all()
 SKILLS = registry.skills
 DOMAINS = registry.domains
 
-SPATIAL_PIPELINE = ["preprocess", "domains", "de", "genes", "statistics"]
+SPATIAL_PIPELINE = [
+    "spatial-preprocess",
+    "spatial-domains",
+    "spatial-de",
+    "spatial-genes",
+    "spatial-statistics",
+]
 
 # Canonical workflow order per domain — skills are displayed in this sequence.
 # Skills not listed here appear at the end in alphabetical order.
 _WORKFLOW_ORDER: dict[str, list[str]] = {
     "spatial": [
-        "spatial-preprocessing",
-        "spatial-integration",
-        "spatial-registration",
-        "spatial-domain-identification",
-        "spatial-cell-annotation",
-        "spatial-deconvolution",
+        "spatial-preprocess",
+        "spatial-integrate",
+        "spatial-register",
+        "spatial-domains",
+        "spatial-annotate",
+        "spatial-deconv",
         "spatial-de",
-        "spatial-condition-comparison",
-        "spatial-svg-detection",
+        "spatial-condition",
+        "spatial-genes",
         "spatial-statistics",
         "spatial-enrichment",
-        "spatial-cell-communication",
+        "spatial-communication",
         "spatial-trajectory",
         "spatial-velocity",
         "spatial-cnv",
+        "spatial-orchestrator",
     ],
     "singlecell": [
         "sc-qc",
@@ -172,12 +179,13 @@ def resolve_skill_alias(skill_name: str) -> str:
     """Resolve short alias to full domain:skill format.
 
     For backward compatibility, allows:
-    - 'preprocess' -> 'spatial-preprocessing' (legacy alias)
-    - 'spatial-preprocessing' -> 'spatial-preprocessing' (direct match)
+    - 'preprocess' -> 'spatial-preprocess' (legacy alias)
+    - 'spatial-preprocessing' -> 'spatial-preprocess' (legacy alias)
+    - 'spatial-preprocess' -> 'spatial-preprocess' (direct match)
     """
     # Direct match
     if skill_name in SKILLS:
-        return skill_name
+        return SKILLS[skill_name].get("alias", skill_name)
 
     # Check legacy aliases
     for skill_key, skill_info in SKILLS.items():
@@ -1192,8 +1200,8 @@ def main():
             ("Spatial-CNV",       "spatial-cnv",       "Copy number variation inference, e.g., inferCNVpy"),
             ("Spatial-Enrichment","spatial-enrichment", "Pathway enrichment, e.g., GSEApy"),
             ("Spatial-Comm",      "spatial-communication", "Cell communication, e.g., LIANA+, CellPhoneDB"),
-            ("Spatial-Integrate", "spatial-integration","Multi-sample integration, e.g., Harmony, BBKNN"),
-            ("Spatial-Register",  "spatial-registration","Spatial registration, e.g., PASTE"),
+            ("Spatial-Integrate", "spatial-integrate","Multi-sample integration, e.g., Harmony, BBKNN"),
+            ("Spatial-Register",  "spatial-register","Spatial registration, e.g., PASTE"),
             ("BANKSY",            "banksy",            "BANKSY spatial domains (requires numpy<2.0, isolated env)"),
         ]
         for label, tier_key, desc in standalone_layers:

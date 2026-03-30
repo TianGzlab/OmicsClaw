@@ -19,9 +19,9 @@ Usage::
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
-import pandas as pd
 
 from .adata_utils import require_spatial_coords
 from .dependency_manager import require
@@ -29,8 +29,32 @@ from .dependency_manager import require
 logger = logging.getLogger(__name__)
 
 SUPPORTED_METHODS = ("paste", "stalign")
+VALID_PASTE_DISSIMILARITIES = ("kl", "euclidean", "Euclidean")
 
 _SLICE_KEY_CANDIDATES = ("slice", "sample", "section", "batch", "sample_id")
+
+METHOD_PARAM_DEFAULTS = {
+    "paste": {
+        "alpha": 0.1,
+        "dissimilarity": "kl",
+        "use_gpu": False,
+    },
+    "stalign": {
+        "image_size": 400,
+        "niter": 2000,
+        "a": 500.0,
+        "use_expression": False,
+    },
+}
+
+
+def _prefixed_params(prefix: str, **values) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in values.items():
+        if value is None:
+            continue
+        result[f"{prefix}_{key}"] = value
+    return result
 
 
 def detect_slice_key(adata) -> str | None:
@@ -75,7 +99,14 @@ def _prepare_paste_slice(adata_slice, common_genes: list[str], spatial_key: str)
 
 
 def run_paste(
-    adata, *, slice_key: str, reference_slice: str | None, spatial_key: str,
+    adata,
+    *,
+    slice_key: str,
+    reference_slice: str | None,
+    spatial_key: str,
+    alpha: float = METHOD_PARAM_DEFAULTS["paste"]["alpha"],
+    dissimilarity: str = METHOD_PARAM_DEFAULTS["paste"]["dissimilarity"],
+    use_gpu: bool = METHOD_PARAM_DEFAULTS["paste"]["use_gpu"],
 ) -> dict:
     """Run PASTE optimal transport alignment.
 
@@ -87,7 +118,10 @@ def run_paste(
     alignment.
     """
     require("paste", feature="PASTE optimal transport spatial registration")
+    if use_gpu:
+        require("torch", feature="PASTE GPU backend")
     import paste as pst
+    import ot.backend as ot_backend
 
     slices_list = sorted(adata.obs[slice_key].unique().tolist(), key=str)
     ref = reference_slice or slices_list[0]
@@ -126,7 +160,15 @@ def run_paste(
             continue
         sl_prepared = prepared[str(sl)]
         try:
-            result = pst.pairwise_align(ref_prepared, sl_prepared)
+            backend = ot_backend.TorchBackend() if use_gpu else ot_backend.NumpyBackend()
+            result = pst.pairwise_align(
+                ref_prepared,
+                sl_prepared,
+                alpha=alpha,
+                dissimilarity=dissimilarity,
+                backend=backend,
+                use_gpu=use_gpu,
+            )
             pi = result[0] if isinstance(result, tuple) else result
             row_sums = pi.sum(axis=1, keepdims=True)
             row_sums = np.where(row_sums == 0, 1.0, row_sums)
@@ -147,6 +189,12 @@ def run_paste(
         "n_slices": len(slices_list), "slices": [str(s) for s in slices_list],
         "n_common_genes": n_common,
         "disparities": disparities, "mean_disparity": mean_disp,
+        "effective_params": _prefixed_params(
+            "paste",
+            alpha=alpha,
+            dissimilarity=dissimilarity,
+            use_gpu=use_gpu,
+        ),
     }
 
 
@@ -268,10 +316,13 @@ def run_stalign(
     slice_key: str,
     reference_slice: str | None,
     spatial_key: str,
-    image_size: tuple[int, int] = (400, 400),
-    niter: int = 2000,
-    a: float = 500.0,
-    use_expression: bool = False,
+    image_size: tuple[int, int] = (
+        METHOD_PARAM_DEFAULTS["stalign"]["image_size"],
+        METHOD_PARAM_DEFAULTS["stalign"]["image_size"],
+    ),
+    niter: int = METHOD_PARAM_DEFAULTS["stalign"]["niter"],
+    a: float = METHOD_PARAM_DEFAULTS["stalign"]["a"],
+    use_expression: bool = METHOD_PARAM_DEFAULTS["stalign"]["use_expression"],
 ) -> dict:
     """Run STalign diffeomorphic registration (pairwise only).
 
@@ -442,6 +493,13 @@ def run_stalign(
             "signal_type": "PC1" if use_expression and n_common_genes >= 10 else "uniform",
             "device": str(device),
         },
+        "effective_params": _prefixed_params(
+            "stalign",
+            image_size=image_size[0] if image_size[0] == image_size[1] else list(image_size),
+            niter=niter,
+            a=a,
+            use_expression=use_expression,
+        ),
     }
 
 
@@ -474,11 +532,11 @@ def run_registration(
     if slice_key is None:
         slice_key = detect_slice_key(adata)
     if slice_key is None:
-        logger.warning("No slice column detected — creating synthetic 'slice' column for demo")
-        rng = np.random.default_rng(42)
-        adata.obs["slice"] = rng.choice(["slice_1", "slice_2"], size=adata.n_obs)
-        adata.obs["slice"] = pd.Categorical(adata.obs["slice"])
-        slice_key = "slice"
+        raise ValueError(
+            "Could not detect a slice label column automatically. "
+            "Provide --slice-key or add one of the common columns: "
+            f"{', '.join(_SLICE_KEY_CANDIDATES)}."
+        )
 
     if slice_key not in adata.obs.columns:
         raise ValueError(f"Slice key '{slice_key}' not in adata.obs")
@@ -492,9 +550,12 @@ def run_registration(
         raise ValueError(f"Unknown registration method '{method}'. Choose from: {SUPPORTED_METHODS}")
 
     if method == "paste":
+        paste_keys = {"alpha", "dissimilarity", "use_gpu"}
+        paste_kwargs = {k: v for k, v in kwargs.items() if k in paste_keys}
         result = run_paste(
             adata, slice_key=slice_key,
             reference_slice=reference_slice, spatial_key=spatial_key,
+            **paste_kwargs,
         )
     elif method == "stalign":
         # Filter kwargs to STalign-specific parameters
@@ -506,4 +567,9 @@ def run_registration(
             **stalign_kwargs,
         )
 
-    return {"n_cells": n_cells, "n_genes": n_genes, "slice_key": slice_key, **result}
+    return {
+        "n_cells": n_cells,
+        "n_genes": n_genes,
+        "slice_key": slice_key,
+        **result,
+    }

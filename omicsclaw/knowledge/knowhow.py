@@ -29,6 +29,44 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _KH_SKILL_MAP: dict[str, dict] = {
+    "KH-spatial-preprocess-guardrails.md": {
+        "label": "Spatial Preprocess Guardrails",
+        "critical_rule": "MUST inspect platform type, count preservation, and explain the effective QC thresholds plus graph parameters before running preprocessing",
+        "skills": [
+            "spatial-preprocessing", "spatial-preprocess", "preprocess",
+        ],
+        "keywords": [
+            "spatial preprocess", "spatial preprocessing", "spatial qc",
+            "visium preprocess", "xenium preprocess", "normalize", "leiden",
+            "umap", "空间预处理", "质控", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-trajectory-guardrails.md": {
+        "label": "Spatial Trajectory Guardrails",
+        "critical_rule": "MUST inspect preprocessing state, root selection strategy, and explain the selected trajectory backend plus method-specific parameters before running",
+        "skills": [
+            "spatial-trajectory", "trajectory",
+        ],
+        "keywords": [
+            "trajectory", "pseudotime", "diffusion pseudotime", "dpt",
+            "cellrank", "palantir", "cell fate", "lineage",
+            "轨迹", "拟时序", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-register-guardrails.md": {
+        "label": "Spatial Registration Guardrails",
+        "critical_rule": "MUST inspect slice labels, slice count, and explain the selected registration method plus method-specific parameters before running",
+        "skills": [
+            "spatial-registration", "spatial-register", "register",
+        ],
+        "keywords": [
+            "spatial registration", "slice alignment", "coordinate alignment",
+            "paste", "stalign", "multi-slice", "空间配准", "切片对齐", "调参",
+        ],
+        "domains": ["spatial"],
+    },
     "KH-spatial-domain-guardrails.md": {
         "label": "Spatial Domain Analysis Guardrails",
         "critical_rule": "MUST inspect the dataset and explain method plus key clustering parameters before running spatial domain identification",
@@ -52,6 +90,138 @@ _KH_SKILL_MAP: dict[str, dict] = {
             "spatially variable gene", "spatial gene", "svg", "moran", "spatialde",
             "spark-x", "flashs", "spatial autocorrelation", "spatial pattern",
             "空间变异基因", "空间基因", "莫兰", "空间模式", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-annotate-guardrails.md": {
+        "label": "Spatial Annotation Guardrails",
+        "critical_rule": "MUST inspect matrix type, cluster/reference metadata, and explain the selected annotation method plus key parameters before running",
+        "skills": [
+            "spatial-annotate", "spatial-cell-annotation", "annotate",
+        ],
+        "keywords": [
+            "spatial annotation", "cell type annotation", "label transfer",
+            "tangram", "scanvi", "cellassign", "marker overlap",
+            "空间注释", "细胞类型注释", "标签转移", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-integrate-guardrails.md": {
+        "label": "Spatial Integration Guardrails",
+        "critical_rule": "MUST inspect batch structure and explain the selected integration method plus method-specific parameters before running batch correction",
+        "skills": [
+            "spatial-integrate", "spatial-integration", "integrate",
+        ],
+        "keywords": [
+            "spatial integration", "batch correction", "multi-sample integration",
+            "sample integration", "harmony", "bbknn", "scanorama",
+            "空间整合", "批次校正", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-deconv-guardrails.md": {
+        "label": "Spatial Deconvolution Guardrails",
+        "critical_rule": "MUST inspect reference labels, matrix type, and explain the selected deconvolution method plus method-specific parameters before running",
+        "skills": [
+            "spatial-deconvolution", "spatial-deconv", "deconv",
+        ],
+        "keywords": [
+            "spatial deconvolution", "cell type deconvolution", "cell proportion",
+            "cell2location", "rctd", "destvi", "stereoscope", "tangram",
+            "spotlight", "card", "空间去卷积", "细胞比例", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-communication-guardrails.md": {
+        "label": "Spatial Communication Guardrails",
+        "critical_rule": "MUST inspect cell type labels, species support, and explain the selected communication method plus method-specific parameters before running ligand-receptor analysis",
+        "skills": [
+            "spatial-cell-communication", "spatial-communication", "communication",
+        ],
+        "keywords": [
+            "cell communication", "cell-cell communication", "ligand receptor",
+            "ligand-receptor", "liana", "cellphonedb", "fastccc", "cellchat",
+            "细胞通讯", "细胞通信", "配体受体", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-cnv-guardrails.md": {
+        "label": "Spatial CNV Analysis Guardrails",
+        "critical_rule": "MUST inspect matrix type, genomic annotations, and reference cells before choosing inferCNVpy or Numbat",
+        "skills": [
+            "spatial-cnv", "cnv",
+        ],
+        "keywords": [
+            "copy number variation", "cnv", "infercnv", "infercnvpy", "numbat",
+            "aneuploidy", "tumor clone", "chromosomal aberration",
+            "空间cnv", "拷贝数变异", "染色体异常", "肿瘤克隆", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-condition-guardrails.md": {
+        "label": "Spatial Condition Comparison Guardrails",
+        "critical_rule": "MUST inspect biological replicates and pseudobulk design before running any condition comparison",
+        "skills": [
+            "spatial-condition", "spatial-condition-comparison", "condition",
+        ],
+        "keywords": [
+            "condition comparison", "pseudobulk", "pydeseq2", "deseq2", "wilcoxon",
+            "treatment vs control", "replicate", "experimental condition",
+            "空间条件比较", "伪bulk", "重复", "差异分析", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-de-guardrails.md": {
+        "label": "Spatial Differential Expression Guardrails",
+        "critical_rule": "MUST separate exploratory Scanpy marker ranking from sample-aware pseudobulk inference before running spatial differential expression",
+        "skills": [
+            "spatial-de", "de",
+        ],
+        "keywords": [
+            "spatial differential expression", "marker gene", "cluster marker",
+            "wilcoxon", "t-test", "pydeseq2", "pseudobulk", "pairwise de",
+            "空间差异表达", "marker", "伪bulk", "差异分析", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-enrichment-guardrails.md": {
+        "label": "Spatial Enrichment Guardrails",
+        "critical_rule": "MUST separate ORA, preranked GSEA, and ssGSEA conceptually before running spatial enrichment",
+        "skills": [
+            "spatial-enrichment", "enrichment",
+        ],
+        "keywords": [
+            "spatial enrichment", "pathway enrichment", "gene set enrichment",
+            "enrichr", "gsea", "ssgsea", "go", "reactome", "msigdb",
+            "空间富集", "通路富集", "功能富集", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-statistics-guardrails.md": {
+        "label": "Spatial Statistics Guardrails",
+        "critical_rule": "MUST decide whether the question is cluster-level, gene-level, or graph-level before choosing a spatial statistics method",
+        "skills": [
+            "spatial-statistics", "statistics",
+        ],
+        "keywords": [
+            "spatial statistics", "moran", "geary", "ripley", "co-occurrence",
+            "co occurrence", "getis", "getis-ord", "local moran", "bivariate moran",
+            "centrality", "graph topology", "spatial autocorrelation",
+            "空间统计", "莫兰", "里普利", "热点", "冷点", "调参",
+        ],
+        "domains": ["spatial"],
+    },
+    "KH-spatial-velocity-guardrails.md": {
+        "label": "Spatial Velocity Guardrails",
+        "critical_rule": "MUST inspect spliced/unspliced layer availability and explain the selected velocity backend plus shared preprocessing / graph settings before running",
+        "skills": [
+            "spatial-velocity", "velocity",
+        ],
+        "keywords": [
+            "spatial velocity", "rna velocity", "scvelo", "velovi",
+            "latent time", "velocity pseudotime", "spliced", "unspliced",
+            "cellular dynamics", "velocity graph",
+            "空间速度", "rna速度", "潜在时间", "拟时序", "调参",
         ],
         "domains": ["spatial"],
     },

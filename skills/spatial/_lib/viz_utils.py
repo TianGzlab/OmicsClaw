@@ -72,7 +72,10 @@ def save_figure(
 # Re-export the new VizParams and helpers so callers can progressively adopt
 # the new API without changing their import paths.
 from .viz import (  # noqa: E402, F401
+    PlotArtifact,
+    PlotSpec,
     VizParams,
+    VisualizationRecipe,
     plot_cnv,
     plot_communication,
     plot_deconvolution,
@@ -83,4 +86,5 @@ from .viz import (  # noqa: E402, F401
     plot_spatial_stats,
     plot_trajectory,
     plot_velocity,
+    render_plot_specs,
 )

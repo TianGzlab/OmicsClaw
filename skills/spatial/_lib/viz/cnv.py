@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import sparse
 
 from .core import (
     VizParams,
@@ -23,6 +24,13 @@ from .core import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _as_dense_cnv_matrix(values: Any) -> np.ndarray:
+    """Convert dense or sparse CNV storage into a 2D ndarray."""
+    if sparse.issparse(values):
+        return np.asarray(values.toarray())
+    return np.asarray(values)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +129,7 @@ def _manual_cnv_heatmap(adata: Any, params: VizParams) -> plt.Figure:
     """Build a CNV heatmap from adata.obsm['X_cnv'] using seaborn."""
     import seaborn as sns
 
-    cnv_matrix = np.asarray(adata.obsm["X_cnv"])
+    cnv_matrix = _as_dense_cnv_matrix(adata.obsm["X_cnv"])
 
     # Aggregate by cluster if available
     cluster_key = params.cluster_key
@@ -182,7 +190,7 @@ def _plot_spatial(adata: Any, params: VizParams) -> plt.Figure:
     if not score_candidates:
         # Try to derive from X_cnv mean
         if "X_cnv" in adata.obsm:
-            adata.obs["_cnv_score"] = np.asarray(adata.obsm["X_cnv"]).mean(axis=1)
+            adata.obs["_cnv_score"] = _as_dense_cnv_matrix(adata.obsm["X_cnv"]).mean(axis=1)
             score_candidates = ["_cnv_score"]
         else:
             raise ValueError(

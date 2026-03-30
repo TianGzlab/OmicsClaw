@@ -19,6 +19,10 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+
+ensure_runtime_cache_dirs("omicsclaw")
+
 import scanpy as sc
 
 from .adata_utils import get_spatial_key, require_spatial_coords
@@ -90,6 +94,65 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 
 SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
 DEFAULT_METHOD = "cell2location"
+
+COUNT_BASED_METHODS = ("cell2location", "rctd", "destvi", "stereoscope", "card")
+NONNEGATIVE_EXPRESSION_METHODS = ("tangram", "spotlight")
+FLEXIBLE_INPUT_METHODS = ("flashdeconv",)
+VALID_RCTD_MODES = ("full", "doublet", "multi")
+VALID_TANGRAM_MODES = ("auto", "cells", "clusters")
+VALID_SPOTLIGHT_MODELS = ("ns", "std")
+
+METHOD_PARAM_DEFAULTS = {
+    "flashdeconv": {
+        "sketch_dim": 512,
+        "lambda_spatial": 5000.0,
+        "n_hvg": 2000,
+        "n_markers_per_type": 50,
+    },
+    "cell2location": {
+        "n_epochs": 30000,
+        "n_cells_per_spot": 30,
+        "detection_alpha": 20.0,
+    },
+    "rctd": {
+        "mode": "full",
+    },
+    "destvi": {
+        "n_epochs": 2500,
+        "condscvi_epochs": 300,
+        "n_hidden": 128,
+        "n_latent": 5,
+        "n_layers": 2,
+        "dropout_rate": 0.05,
+        "vamp_prior_p": 15,
+    },
+    "stereoscope": {
+        "rna_epochs": 400,
+        "spatial_epochs": 400,
+        "learning_rate": 0.01,
+        "batch_size": 128,
+    },
+    "tangram": {
+        "n_epochs": 1000,
+        "learning_rate": 0.1,
+        "mode": "auto",
+    },
+    "spotlight": {
+        "n_top": 50,
+        "nmf_model": "ns",
+        "min_prop": 0.01,
+        "scale": True,
+        "weight_id": "weight",
+    },
+    "card": {
+        "sample_key": None,
+        "min_count_gene": 100,
+        "min_count_spot": 5,
+        "imputation": False,
+        "num_grids": 2000,
+        "ineibor": 10,
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -164,11 +227,33 @@ def _get_accelerator(prefer_gpu: bool = True) -> str:
     return "cpu"
 
 
+def _prefixed_params(prefix: str, **values) -> dict[str, Any]:
+    """Return CLI-style parameter names for reportable effective params."""
+    result: dict[str, Any] = {}
+    for key, value in values.items():
+        if value is None:
+            continue
+        result[f"{prefix}_{key}"] = value
+    return result
+
+
+def _normalize_rctd_mode(mode: str) -> str:
+    """Keep backward compatibility for legacy `single` while using public modes."""
+    if mode == "single":
+        logger.warning(
+            "RCTD mode 'single' is deprecated in OmicsClaw; mapping it to 'doublet'. "
+            "Public spacexr documentation uses 'doublet', 'multi', or 'full'."
+        )
+        return "doublet"
+    return mode
+
+
 def _deconv_stats(
     prop_df: pd.DataFrame,
     common_genes: list[str],
     method: str,
     device: str = "cpu",
+    effective_params: dict[str, Any] | None = None,
     **extra,
 ) -> dict:
     stats: dict = {
@@ -182,6 +267,8 @@ def _deconv_stats(
         "dominant_types": prop_df.idxmax(axis=1).value_counts().to_dict(),
     }
     stats.update(extra)
+    if effective_params:
+        stats["effective_params"] = effective_params
     return stats
 
 
@@ -196,8 +283,10 @@ def _deconv_stats(
 
 def deconvolve_flashdeconv(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    sketch_dim: int = 512, lambda_spatial: float = 5000.0,
-    n_hvg: int = 2000, n_markers_per_type: int = 50,
+    sketch_dim: int = METHOD_PARAM_DEFAULTS["flashdeconv"]["sketch_dim"],
+    lambda_spatial: float | str = METHOD_PARAM_DEFAULTS["flashdeconv"]["lambda_spatial"],
+    n_hvg: int = METHOD_PARAM_DEFAULTS["flashdeconv"]["n_hvg"],
+    n_markers_per_type: int = METHOD_PARAM_DEFAULTS["flashdeconv"]["n_markers_per_type"],
 ) -> tuple[pd.DataFrame, dict]:
     require("flashdeconv", feature="FlashDeconv deconvolution")
     import flashdeconv as fd
@@ -228,16 +317,31 @@ def deconvolve_flashdeconv(
     else:
         proportions.index = adata.obs_names
 
+    effective_params = _prefixed_params(
+        "flashdeconv",
+        sketch_dim=sketch_dim,
+        lambda_spatial=lambda_spatial,
+        n_hvg=n_hvg,
+        n_markers_per_type=n_markers_per_type,
+    )
     return proportions, _deconv_stats(
-        proportions, common, "flashdeconv",
-        sketch_dim=sketch_dim, lambda_spatial=lambda_spatial, n_hvg=n_hvg,
+        proportions,
+        common,
+        "flashdeconv",
+        sketch_dim=sketch_dim,
+        lambda_spatial=lambda_spatial,
+        n_hvg=n_hvg,
+        n_markers_per_type=n_markers_per_type,
+        effective_params=effective_params,
     )
 
 
 def deconvolve_cell2location(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    n_epochs: int = 30000, n_cells_per_spot: int = 30, use_gpu: bool = True,
-    detection_alpha: float = 20.0,
+    n_epochs: int = METHOD_PARAM_DEFAULTS["cell2location"]["n_epochs"],
+    n_cells_per_spot: int = METHOD_PARAM_DEFAULTS["cell2location"]["n_cells_per_spot"],
+    use_gpu: bool = True,
+    detection_alpha: float = METHOD_PARAM_DEFAULTS["cell2location"]["detection_alpha"],
 ) -> tuple[pd.DataFrame, dict]:
     require("scvi", feature="Cell2Location deconvolution")
     require("cell2location", feature="Cell2Location deconvolution")
@@ -338,14 +442,31 @@ def deconvolve_cell2location(
     row_sums = prop_df.sum(axis=1).replace(0, 1e-10)
     prop_df = prop_df.div(row_sums, axis=0)
 
+    effective_params = _prefixed_params(
+        "cell2location",
+        n_epochs=n_epochs,
+        n_cells_per_spot=n_cells_per_spot,
+        detection_alpha=detection_alpha,
+        use_gpu=accelerator == "gpu",
+    )
     return prop_df, _deconv_stats(
-        prop_df, common, "cell2location", device=accelerator,
-        n_epochs=n_epochs, n_cells_per_spot=n_cells_per_spot, detection_alpha=detection_alpha,
+        prop_df,
+        common,
+        "cell2location",
+        device=accelerator,
+        n_epochs=n_epochs,
+        n_cells_per_spot=n_cells_per_spot,
+        detection_alpha=detection_alpha,
+        effective_params=effective_params,
     )
 
 
 def deconvolve_rctd(
-    adata, *, reference_path: str, cell_type_key: str = "cell_type", mode: str = "full",
+    adata,
+    *,
+    reference_path: str,
+    cell_type_key: str = "cell_type",
+    mode: str = METHOD_PARAM_DEFAULTS["rctd"]["mode"],
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
@@ -355,6 +476,7 @@ def deconvolve_rctd(
 
     validate_r_environment(required_r_packages=["spacexr"])
 
+    mode = _normalize_rctd_mode(mode)
     logger.info("Initializing RCTD pipeline (mode=%s)...", mode)
     adata_ref = _load_reference(reference_path, cell_type_key)
     adata_sp = _restore_counts(adata, "rctd")
@@ -441,14 +563,25 @@ def deconvolve_rctd(
             empty_df = pd.DataFrame(0.0, index=missing, columns=prop_df.columns)
             prop_df = pd.concat([prop_df, empty_df]).loc[adata.obs_names]
 
-    return prop_df, _deconv_stats(prop_df, common, "rctd", rctd_mode=mode)
+    effective_params = _prefixed_params("rctd", mode=mode)
+    return prop_df, _deconv_stats(
+        prop_df,
+        common,
+        "rctd",
+        rctd_mode=mode,
+        effective_params=effective_params,
+    )
 
 
 def deconvolve_destvi(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    n_epochs: int = 2500, condscvi_epochs: int = 300,
-    n_hidden: int = 128, n_latent: int = 5, n_layers: int = 2,
-    dropout_rate: float = 0.05, vamp_prior_p: int = 15,
+    n_epochs: int = METHOD_PARAM_DEFAULTS["destvi"]["n_epochs"],
+    condscvi_epochs: int = METHOD_PARAM_DEFAULTS["destvi"]["condscvi_epochs"],
+    n_hidden: int = METHOD_PARAM_DEFAULTS["destvi"]["n_hidden"],
+    n_latent: int = METHOD_PARAM_DEFAULTS["destvi"]["n_latent"],
+    n_layers: int = METHOD_PARAM_DEFAULTS["destvi"]["n_layers"],
+    dropout_rate: float = METHOD_PARAM_DEFAULTS["destvi"]["dropout_rate"],
+    vamp_prior_p: int = METHOD_PARAM_DEFAULTS["destvi"]["vamp_prior_p"],
     use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     require("scvi", feature="DestVI deconvolution")
@@ -517,16 +650,36 @@ def deconvolve_destvi(
     del destvi_model, condscvi_model
     gc.collect()
 
+    effective_params = _prefixed_params(
+        "destvi",
+        n_epochs=n_epochs,
+        condscvi_epochs=condscvi_epochs,
+        n_hidden=n_hidden,
+        n_latent=n_latent,
+        n_layers=n_layers,
+        dropout_rate=dropout_rate,
+        vamp_prior_p=vamp_prior_p,
+        use_gpu=accelerator == "gpu",
+    )
     return prop_df, _deconv_stats(
-        prop_df, common, "destvi", device=accelerator,
-        n_epochs=n_epochs, condscvi_epochs=condscvi_epochs, prior="mog",
+        prop_df,
+        common,
+        "destvi",
+        device=accelerator,
+        n_epochs=n_epochs,
+        condscvi_epochs=condscvi_epochs,
+        prior="mog",
+        effective_params=effective_params,
     )
 
 
 def deconvolve_stereoscope(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    n_epochs: int = 150000, learning_rate: float = 0.01,
-    batch_size: int = 128, use_gpu: bool = True,
+    rna_epochs: int = METHOD_PARAM_DEFAULTS["stereoscope"]["rna_epochs"],
+    spatial_epochs: int = METHOD_PARAM_DEFAULTS["stereoscope"]["spatial_epochs"],
+    learning_rate: float = METHOD_PARAM_DEFAULTS["stereoscope"]["learning_rate"],
+    batch_size: int = METHOD_PARAM_DEFAULTS["stereoscope"]["batch_size"],
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     require("scvi", feature="Stereoscope deconvolution")
 
@@ -543,19 +696,6 @@ def deconvolve_stereoscope(
 
     adata_ref.obs[cell_type_key] = adata_ref.obs[cell_type_key].astype("category")
     cell_types = list(adata_ref.obs[cell_type_key].cat.categories)
-
-    # Scvi-tools uses minibatch SGD, not original L-bfgs. 150000 epochs takes weeks.
-    if n_epochs > 5000:
-        logger.warning(
-            "n_epochs=%d is impractically high for scvi-tools SGD Stereoscope. "
-            "Overriding to sensible defaults to prevent infinite training loop.", n_epochs
-        )
-        rna_epochs = 500
-        spatial_epochs = 1500
-        n_epochs = rna_epochs + spatial_epochs
-    else:
-        rna_epochs = max(100, n_epochs // 3)
-        spatial_epochs = n_epochs - rna_epochs
 
     accelerator = _get_accelerator(use_gpu)
     plan_kwargs = {"lr": learning_rate}
@@ -605,15 +745,34 @@ def deconvolve_stereoscope(
     del spatial_model, rna_model
     gc.collect()
 
+    effective_params = _prefixed_params(
+        "stereoscope",
+        rna_epochs=rna_epochs,
+        spatial_epochs=spatial_epochs,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        use_gpu=accelerator == "gpu",
+    )
     return prop_df, _deconv_stats(
-        prop_df, common, "stereoscope", device=accelerator,
-        n_epochs=n_epochs, rna_epochs=rna_epochs, spatial_epochs=spatial_epochs,
+        prop_df,
+        common,
+        "stereoscope",
+        device=accelerator,
+        n_epochs=rna_epochs + spatial_epochs,
+        rna_epochs=rna_epochs,
+        spatial_epochs=spatial_epochs,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        effective_params=effective_params,
     )
 
 
 def deconvolve_tangram(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    n_epochs: int = 1000, mode: str = "auto", use_gpu: bool = True,
+    n_epochs: int = METHOD_PARAM_DEFAULTS["tangram"]["n_epochs"],
+    learning_rate: float = METHOD_PARAM_DEFAULTS["tangram"]["learning_rate"],
+    mode: str = METHOD_PARAM_DEFAULTS["tangram"]["mode"],
+    use_gpu: bool = True,
 ) -> tuple[pd.DataFrame, dict]:
     require("tangram", feature="Tangram deconvolution")
     import tangram as tg
@@ -664,7 +823,10 @@ def deconvolve_tangram(
     logger.info("Training Tangram mapping (mode=%s, epochs=%d, device=%s)...", mode, n_epochs, device)
 
     map_kwargs: dict = {
-        "mode": mode, "num_epochs": n_epochs, "device": device,
+        "mode": mode,
+        "num_epochs": n_epochs,
+        "learning_rate": learning_rate,
+        "device": device,
     }
     if mode == "clusters":
         map_kwargs["cluster_label"] = cell_type_key
@@ -680,13 +842,32 @@ def deconvolve_tangram(
     row_sums = ct_pred.sum(axis=1).replace(0, 1e-10)
     prop_df = ct_pred.div(row_sums, axis=0)
 
-    return prop_df, _deconv_stats(prop_df, training_genes, "tangram", device=device, n_epochs=n_epochs, mode=mode)
+    effective_params = _prefixed_params(
+        "tangram",
+        n_epochs=n_epochs,
+        learning_rate=learning_rate,
+        mode=mode,
+        use_gpu=device == "cuda",
+    )
+    return prop_df, _deconv_stats(
+        prop_df,
+        training_genes,
+        "tangram",
+        device=device,
+        n_epochs=n_epochs,
+        learning_rate=learning_rate,
+        mode=mode,
+        effective_params=effective_params,
+    )
 
 
 def deconvolve_spotlight(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    n_top_genes: int = 2000, nmf_model: str = "ns", min_prop: float = 0.01,
-    scale: bool = True, weight_id: str = "mean.AUC",
+    n_top: int | None = METHOD_PARAM_DEFAULTS["spotlight"]["n_top"],
+    nmf_model: str = METHOD_PARAM_DEFAULTS["spotlight"]["nmf_model"],
+    min_prop: float = METHOD_PARAM_DEFAULTS["spotlight"]["min_prop"],
+    scale: bool = METHOD_PARAM_DEFAULTS["spotlight"]["scale"],
+    weight_id: str = METHOD_PARAM_DEFAULTS["spotlight"]["weight_id"],
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
@@ -743,6 +924,11 @@ def deconvolve_spotlight(
                 str(tmpdir / "spatial_counts.csv"), str(tmpdir / "spatial_coords.csv"),
                 str(tmpdir / "ref_counts.csv"), str(tmpdir / "ref_celltypes.csv"),
                 str(output_dir),
+                str(n_top) if n_top is not None else "",
+                weight_id,
+                nmf_model,
+                str(min_prop),
+                str(scale).upper(),
             ],
             expected_outputs=["spotlight_proportions.csv"],
             output_dir=output_dir,
@@ -750,14 +936,35 @@ def deconvolve_spotlight(
 
         prop_df = read_r_result_csv(output_dir / "spotlight_proportions.csv")
 
-    return prop_df, _deconv_stats(prop_df, common, "spotlight", n_top_genes=n_top_genes, nmf_model=nmf_model, min_prop=min_prop)
+    effective_params = _prefixed_params(
+        "spotlight",
+        n_top=n_top,
+        weight_id=weight_id,
+        nmf_model=nmf_model,
+        min_prop=min_prop,
+        scale=scale,
+    )
+    return prop_df, _deconv_stats(
+        prop_df,
+        common,
+        "spotlight",
+        n_top=n_top,
+        weight_id=weight_id,
+        nmf_model=nmf_model,
+        min_prop=min_prop,
+        scale=scale,
+        effective_params=effective_params,
+    )
 
 
 def deconvolve_card(
     adata, *, reference_path: str, cell_type_key: str = "cell_type",
-    sample_key: str | None = None, min_count_gene: int = 100,
-    min_count_spot: int = 5, imputation: bool = False,
-    num_grids: int = 2000, ineibor: int = 10,
+    sample_key: str | None = METHOD_PARAM_DEFAULTS["card"]["sample_key"],
+    min_count_gene: int = METHOD_PARAM_DEFAULTS["card"]["min_count_gene"],
+    min_count_spot: int = METHOD_PARAM_DEFAULTS["card"]["min_count_spot"],
+    imputation: bool = METHOD_PARAM_DEFAULTS["card"]["imputation"],
+    num_grids: int = METHOD_PARAM_DEFAULTS["card"]["num_grids"],
+    ineibor: int = METHOD_PARAM_DEFAULTS["card"]["ineibor"],
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
@@ -775,12 +982,12 @@ def deconvolve_card(
     adata_sp = adata_sp[:, common].copy()
     adata_ref = adata_ref[:, common].copy()
 
-    spatial_key = get_spatial_key(adata)
-    if spatial_key is not None:
-        coords = pd.DataFrame(adata.obsm[spatial_key][:, :2], index=adata_sp.obs_names, columns=["x", "y"])
-    else:
-        logger.warning("No spatial coordinates found; using dummy coordinates for CARD.")
-        coords = pd.DataFrame({"x": range(adata_sp.n_obs), "y": [0] * adata_sp.n_obs}, index=adata_sp.obs_names)
+    spatial_key = require_spatial_coords(adata_sp)
+    coords = pd.DataFrame(
+        adata_sp.obsm[spatial_key][:, :2],
+        index=adata_sp.obs_names,
+        columns=["x", "y"],
+    )
 
     sc_meta = adata_ref.obs[[cell_type_key]].copy()
     sc_meta.columns = ["cellType"]
@@ -815,16 +1022,43 @@ def deconvolve_card(
             args=[
                 str(tmpdir / "spatial_counts.csv"), str(tmpdir / "spatial_coords.csv"),
                 str(tmpdir / "ref_counts.csv"), str(tmpdir / "ref_meta.csv"),
-                str(output_dir), str(min_count_gene), str(min_count_spot),
+                str(output_dir),
+                str(min_count_gene),
+                str(min_count_spot),
+                str(imputation).upper(),
+                str(num_grids),
+                str(ineibor),
             ],
             expected_outputs=["card_proportions.csv"],
             output_dir=output_dir,
         )
 
         prop_df = read_r_result_csv(output_dir / "card_proportions.csv")
+        extra_tables: dict[str, pd.DataFrame] = {}
+        refined_path = output_dir / "card_refined_proportions.csv"
+        if refined_path.exists():
+            extra_tables["card_refined_proportions"] = read_r_result_csv(refined_path)
 
+    effective_params = _prefixed_params(
+        "card",
+        sample_key=sample_key,
+        min_count_gene=min_count_gene,
+        min_count_spot=min_count_spot,
+        imputation=imputation,
+        num_grids=num_grids if imputation else None,
+        ineibor=ineibor if imputation else None,
+    )
     return prop_df, _deconv_stats(
-        prop_df, common, "card", min_count_gene=min_count_gene, min_count_spot=min_count_spot, imputation=imputation,
+        prop_df,
+        common,
+        "card",
+        min_count_gene=min_count_gene,
+        min_count_spot=min_count_spot,
+        imputation=imputation,
+        num_grids=num_grids if imputation else None,
+        ineibor=ineibor if imputation else None,
+        extra_tables=extra_tables,
+        effective_params=effective_params,
     )
 
 

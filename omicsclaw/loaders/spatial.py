@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Literal
 
 import anndata as ad
+
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+
+ensure_runtime_cache_dirs()
+
 import scanpy as sc
 
 from skills.spatial._lib.exceptions import DataError

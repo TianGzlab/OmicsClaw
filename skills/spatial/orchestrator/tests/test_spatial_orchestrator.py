@@ -44,8 +44,8 @@ def test_list_skills():
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert "preprocess" in result.stdout
-    assert "communication" in result.stdout
+    assert "spatial-preprocess" in result.stdout
+    assert "spatial-communication" in result.stdout
     assert "standard" in result.stdout
 
 
@@ -55,7 +55,7 @@ def test_list_skills():
 
 
 def test_route_svg(tmp_output):
-    """Query about spatially variable genes → spatial-svg-detection skill."""
+    """Query about spatially variable genes → spatial-genes skill."""
     result = subprocess.run(
         [
             sys.executable, str(SKILL_SCRIPT),
@@ -66,14 +66,14 @@ def test_route_svg(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert "svg-detection" in result.stdout
+    assert "spatial-genes" in result.stdout
 
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["summary"]["routed_to"] == "spatial-svg-detection"
+    assert data["summary"]["routed_to"] == "spatial-genes"
 
 
 def test_route_communication(tmp_output):
-    """Query about ligand receptor → spatial-cell-communication skill."""
+    """Query about ligand receptor → spatial-communication skill."""
     result = subprocess.run(
         [
             sys.executable, str(SKILL_SCRIPT),
@@ -85,7 +85,7 @@ def test_route_communication(tmp_output):
     )
     assert result.returncode == 0
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["summary"]["routed_to"] == "spatial-cell-communication"
+    assert data["summary"]["routed_to"] == "spatial-communication"
 
 
 def test_route_trajectory(tmp_output):
@@ -105,7 +105,7 @@ def test_route_trajectory(tmp_output):
 
 
 def test_route_integration(tmp_output):
-    """Query about batch correction → spatial-integration skill."""
+    """Query about batch correction → spatial-integrate skill."""
     result = subprocess.run(
         [
             sys.executable, str(SKILL_SCRIPT),
@@ -117,7 +117,7 @@ def test_route_integration(tmp_output):
     )
     assert result.returncode == 0
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["summary"]["routed_to"] == "spatial-integration"
+    assert data["summary"]["routed_to"] == "spatial-integrate"
 
 
 def test_route_cnv(tmp_output):
@@ -158,7 +158,7 @@ def test_route_enrichment(tmp_output):
 
 
 def test_route_h5ad_file(tmp_output, tmp_path):
-    """h5ad file extension → spatial-preprocessing skill."""
+    """h5ad file extension → spatial-preprocess skill."""
     fake_h5ad = tmp_path / "data.h5ad"
     fake_h5ad.write_bytes(b"fake")  # just needs to exist in name
     result = subprocess.run(
@@ -172,7 +172,7 @@ def test_route_h5ad_file(tmp_output, tmp_path):
     )
     assert result.returncode == 0
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["summary"]["routed_to"] == "spatial-preprocessing"
+    assert data["summary"]["routed_to"] == "spatial-preprocess"
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ def test_demo_result_json(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["skill"] == "orchestrator"
+    assert data["skill"] == "spatial-orchestrator"
     assert "summary" in data
     assert data["summary"]["total_skills"] > 0
     assert data["summary"]["total_keywords"] > 0

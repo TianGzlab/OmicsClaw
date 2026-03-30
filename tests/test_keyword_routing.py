@@ -102,12 +102,12 @@ def test_keywords_are_lowercased():
 
 
 def test_resolve_alias():
-    """Directory names like 'spatial-preprocess' resolve to registry aliases."""
+    """Directory names like 'spatial-preprocess' resolve to canonical skill names."""
     reg = OmicsRegistry()
     reg.load_all()
-    # spatial-preprocess dir -> spatial-preprocessing alias
+    # spatial-preprocess dir -> spatial-preprocess canonical name
     alias = reg._resolve_alias("spatial-preprocess")
-    assert alias == "spatial-preprocessing"
+    assert alias == "spatial-preprocess"
 
 
 def test_resolve_alias_identity():
@@ -130,6 +130,8 @@ def test_allowed_extra_flags_from_skill_md():
     assert isinstance(flags, set)
     assert "--species" in flags
     assert "--min-genes" in flags
+    assert "--tissue" in flags
+    assert "--resolutions" in flags
 
 
 def test_legacy_aliases_from_skill_md():
@@ -159,7 +161,7 @@ def test_load_all_uses_skill_md_flags():
     """load_all() should populate allowed_extra_flags from SKILL.md."""
     reg = OmicsRegistry()
     reg.load_all()
-    info = reg.skills.get("spatial-preprocessing")
+    info = reg.skills.get("spatial-preprocess")
     assert info is not None
     flags = info.get("allowed_extra_flags", set())
     assert "--species" in flags
@@ -170,17 +172,131 @@ def test_load_all_registers_legacy_aliases():
     """load_all() should register legacy_aliases as lookup keys."""
     reg = OmicsRegistry()
     reg.load_all()
-    # "preprocess" is a legacy alias for spatial-preprocessing
+    # "preprocess" is a legacy alias for spatial-preprocess
     assert "preprocess" in reg.skills
-    assert reg.skills["preprocess"]["alias"] == "spatial-preprocessing"
+    assert reg.skills["preprocess"]["alias"] == "spatial-preprocess"
+    assert "spatial-preprocessing" in reg.skills
+    assert reg.skills["spatial-preprocessing"]["alias"] == "spatial-preprocess"
 
 
 def test_load_all_uses_skill_md_param_hints():
     """load_all() should populate method-specific param_hints from SKILL.md."""
     reg = OmicsRegistry()
     reg.load_all()
-    info = reg.skills.get("spatial-svg-detection")
+    info = reg.skills.get("spatial-genes")
     assert info is not None
     hints = info.get("param_hints", {})
     assert "morans" in hints
     assert "morans_n_neighs" in hints["morans"]["params"]
+
+
+def test_load_all_uses_spatial_preprocess_param_hints():
+    """load_all() should populate preprocess param_hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-preprocess")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "scanpy_standard" in hints
+    assert "tissue" in hints["scanpy_standard"]["params"]
+    assert "leiden_resolution" in hints["scanpy_standard"]["params"]
+
+
+def test_load_all_uses_spatial_integration_param_hints():
+    """load_all() should populate spatial integration method hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-integrate")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "harmony" in hints
+    assert "bbknn" in hints
+    assert "scanorama" in hints
+    assert "harmony_theta" in hints["harmony"]["params"]
+    assert "scanorama_batch_size" in hints["scanorama"]["params"]
+
+
+def test_load_all_uses_spatial_communication_param_hints():
+    """load_all() should populate spatial communication method hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-communication")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "liana" in hints
+    assert "cellphonedb" in hints
+    assert "fastccc" in hints
+    assert "cellchat_r" in hints
+    assert "liana_expr_prop" in hints["liana"]["params"]
+    assert "cellchat_prob_type" in hints["cellchat_r"]["params"]
+
+
+def test_load_all_uses_spatial_deconv_param_hints():
+    """load_all() should populate spatial deconvolution method hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-deconv")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "cell2location" in hints
+    assert "rctd" in hints
+    assert "tangram" in hints
+    assert "spotlight" in hints
+    assert "cell2location_n_cells_per_spot" in hints["cell2location"]["params"]
+    assert "spotlight_weight_id" in hints["spotlight"]["params"]
+
+
+def test_load_all_uses_spatial_register_param_hints():
+    """load_all() should populate spatial registration method hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-register")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "paste" in hints
+    assert "stalign" in hints
+    assert "paste_alpha" in hints["paste"]["params"]
+    assert "stalign_a" in hints["stalign"]["params"]
+
+
+def test_load_all_uses_spatial_trajectory_param_hints():
+    """load_all() should populate spatial trajectory method hints from SKILL.md."""
+    reg = OmicsRegistry()
+    reg.load_all()
+    info = reg.skills.get("spatial-trajectory")
+    assert info is not None
+    hints = info.get("param_hints", {})
+    assert "dpt" in hints
+    assert "cellrank" in hints
+    assert "palantir" in hints
+    assert "dpt_n_dcs" in hints["dpt"]["params"]
+    assert "cellrank_frac_to_keep" in hints["cellrank"]["params"]
+    assert "palantir_num_waypoints" in hints["palantir"]["params"]
+
+
+def test_spatial_communication_keywords_route_to_alias():
+    """Communication trigger keywords should resolve to the canonical skill name."""
+    reg = OmicsRegistry()
+    kw_map = reg.build_keyword_map(domain="spatial")
+    assert kw_map["ligand receptor"] == "spatial-communication"
+
+
+def test_spatial_deconv_keywords_route_to_alias():
+    """Deconvolution trigger keywords should resolve to the canonical skill name."""
+    reg = OmicsRegistry()
+    kw_map = reg.build_keyword_map(domain="spatial")
+    assert kw_map["cell type deconvolution"] == "spatial-deconv"
+
+
+def test_spatial_register_keywords_route_to_alias():
+    """Registration trigger keywords should resolve to the canonical skill name."""
+    reg = OmicsRegistry()
+    kw_map = reg.build_keyword_map(domain="spatial")
+    assert kw_map["slice alignment"] == "spatial-register"
+
+
+def test_spatial_trajectory_keywords_route_to_alias():
+    """Trajectory trigger keywords should resolve to the registry alias."""
+    reg = OmicsRegistry()
+    kw_map = reg.build_keyword_map(domain="spatial")
+    assert kw_map["pseudotime"] == "spatial-trajectory"

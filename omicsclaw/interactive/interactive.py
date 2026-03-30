@@ -1034,7 +1034,7 @@ async def _stream_llm_response(messages: list[dict]) -> str:
                 live_markdown.update(Markdown(streamed_content))
 
             try:
-                final_text = await core.llm_tool_loop(
+                llm_task = asyncio.create_task(core.llm_tool_loop(
                     _INTERACTIVE_USER,
                     user_text,
                     user_id="cli_user",
@@ -1042,7 +1042,68 @@ async def _stream_llm_response(messages: list[dict]) -> str:
                     on_tool_call=sync_on_tool_call,
                     on_tool_result=sync_on_tool_result,
                     on_stream_content=sync_on_stream_content,
-                )
+                ))
+
+                async def _watch_escape():
+                    import sys
+                    import termios
+                    import tty
+                    loop = asyncio.get_running_loop()
+                    try:
+                        fd = sys.stdin.fileno()
+                        if not os.isatty(fd):
+                            await asyncio.sleep(86400)
+                            return False
+                    except Exception:
+                        await asyncio.sleep(86400)
+                        return False
+
+                    old_settings = termios.tcgetattr(fd)
+                    try:
+                        tty.setcbreak(fd)
+                        while not llm_task.done():
+                            def _read():
+                                import select
+                                r, _, _ = select.select([sys.stdin], [], [], 0.05)
+                                if r: return sys.stdin.read(1)
+                                return None
+                            char = await loop.run_in_executor(None, _read)
+                            if char in ('\x1b', '\x03'): # ESC or Ctrl+C
+                                return True
+                    except Exception:
+                        pass
+                    finally:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    return False
+
+                watcher_task = asyncio.create_task(_watch_escape())
+                done, pending = await asyncio.wait([llm_task, watcher_task], return_when=asyncio.FIRST_COMPLETED)
+
+                if watcher_task in done and watcher_task.result() is True:
+                    # User interrupted via ESC or Ctrl+C
+                    llm_task.cancel()
+                    try:
+                        await llm_task
+                    except asyncio.CancelledError:
+                        pass
+                    
+                    if live_markdown:
+                        live_markdown.stop()
+                        live_markdown = None
+                    
+                    status.stop()
+                    sys.stdout.write("\r\033[K")
+                    console.print("\n[yellow]Conversation interrupted - tell the model what to do differently. Something went wrong?[/yellow]")
+                    
+                    # Ensure the conversations array captures the interruption
+                    core.conversations[_INTERACTIVE_USER].append({
+                        "role": "user",
+                        "content": "Conversation interrupted - tell the model what to do differently. Something went wrong?"
+                    })
+                    final_text = ""
+                else:
+                    watcher_task.cancel()
+                    final_text = llm_task.result()
             finally:
                 if live_markdown:
                     live_markdown.stop()

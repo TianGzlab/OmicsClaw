@@ -3,13 +3,14 @@
 #
 # Usage:
 #   Rscript sp_spotlight.R <spatial_counts> <spatial_coords> <ref_counts>
-#     <ref_celltypes> <output_dir>
+#     <ref_celltypes> <output_dir> [n_top] [weight_id] [model] [min_prop] [scale]
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 5) {
     cat("Usage: Rscript sp_spotlight.R <spatial_counts.csv> <spatial_coords.csv>",
-        "<ref_counts.csv> <ref_celltypes.csv> <output_dir>\n")
+        "<ref_counts.csv> <ref_celltypes.csv> <output_dir>",
+        "[n_top] [weight_id] [model] [min_prop] [scale]\n")
     quit(status = 1)
 }
 
@@ -18,6 +19,12 @@ sp_coords_file  <- args[2]
 ref_counts_file <- args[3]
 ref_types_file  <- args[4]
 output_dir      <- args[5]
+n_top           <- if (length(args) >= 6 && nzchar(args[6])) as.integer(args[6]) else NULL
+weight_id       <- if (length(args) >= 7 && nzchar(args[7])) args[7] else "weight"
+nmf_model       <- if (length(args) >= 8 && nzchar(args[8])) args[8] else "ns"
+min_prop        <- if (length(args) >= 9 && nzchar(args[9])) as.numeric(args[9]) else 0.01
+scale_input     <- if (length(args) >= 10 && nzchar(args[10])) toupper(args[10]) else "TRUE"
+scale_value     <- scale_input %in% c("TRUE", "T", "1", "YES")
 
 suppressPackageStartupMessages({
     library(SPOTlight)
@@ -62,30 +69,55 @@ tryCatch({
     markers <- findMarkers(sce, groups = sce$cell_type, test.type = "wilcox")
     mgs_list <- list()
     for (ct in names(markers)) {
-        ct_markers <- markers[[ct]]
-        n_markers <- min(50, nrow(ct_markers))
-        top <- head(ct_markers[order(ct_markers$p.value), ], n_markers)
-        mgs_list[[ct]] <- data.frame(
-            gene = rownames(top),
-            cluster = ct,
-            mean.AUC = -log10(top$p.value + 1e-10))
+        ct_markers <- as.data.frame(markers[[ct]])
+        ct_markers$gene <- rownames(ct_markers)
+        ct_markers$cluster <- ct
+
+        if (!"weight" %in% colnames(ct_markers)) {
+            if ("mean.AUC" %in% colnames(ct_markers)) {
+                ct_markers$weight <- ct_markers$mean.AUC
+            } else if ("summary.logFC" %in% colnames(ct_markers)) {
+                ct_markers$weight <- ct_markers$summary.logFC
+            } else if ("logFC" %in% colnames(ct_markers)) {
+                ct_markers$weight <- ct_markers$logFC
+            } else if ("p.value" %in% colnames(ct_markers)) {
+                ct_markers$weight <- -log10(ct_markers$p.value + 1e-300)
+            } else {
+                ct_markers$weight <- seq_len(nrow(ct_markers))
+            }
+        }
+
+        if (!"mean.AUC" %in% colnames(ct_markers)) {
+            ct_markers$mean.AUC <- ct_markers$weight
+        }
+
+        mgs_list[[ct]] <- ct_markers
     }
     mgs <- do.call(rbind, mgs_list)
 
+    if (!(weight_id %in% colnames(mgs))) {
+        stop(sprintf(
+            "Requested weight_id '%s' not found in marker table. Available columns: %s",
+            weight_id, paste(colnames(mgs), collapse = ", ")
+        ))
+    }
+
     # Run SPOTlight
     cat("Running SPOTlight NMF deconvolution...\n")
-    spotlight_result <- SPOTlight(
+    spotlight_args <- list(
         x = sce, y = spe,
         groups = sce$cell_type,
         mgs = mgs,
-        weight_id = "mean.AUC",
+        n_top = n_top,
+        weight_id = weight_id,
         group_id = "cluster",
         gene_id = "gene",
-        model = "ns",
-        min_prop = 0.01,
-        scale = TRUE,
+        model = nmf_model,
+        min_prop = min_prop,
+        scale = scale_value,
         verbose = FALSE
     )
+    spotlight_result <- do.call(SPOTlight, spotlight_args)
 
     proportions <- as.data.frame(spotlight_result$mat)
     rownames(proportions) <- spatial_names

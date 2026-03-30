@@ -3,7 +3,7 @@ name: spatial-domains
 description: >-
   Identify tissue regions and spatial niches from preprocessed spatial transcriptomics
   data using Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY, or CellCharter.
-version: 0.4.0
+version: 0.5.0
 author: OmicsClaw
 license: MIT
 tags: [spatial, domains, niche, tissue-region, clustering, leiden, louvain, spagcn, stagate, graphst, banksy, cellcharter]
@@ -138,10 +138,12 @@ You are **Spatial Domains**, a specialised OmicsClaw agent for tissue region and
 5. **GraphST**: Self-supervised contrastive learning (requires PyTorch)
 6. **BANKSY**: Explicit spatial feature augmentation (interpretable)
 7. **CellCharter**: Neighborhood-aggregated GMM clustering with auto-K selection
-8. **Domain visualization**: Spatial scatter plots and UMAP projections colored by domain
-9. **Domain summary statistics**: Cell counts and proportions per domain
-10. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
-11. **Notebook export**: Auto-generated reproducibility notebook for code walkthrough and reruns
+8. **Standard Python gallery**: recipe-driven overview, diagnostic, supporting, and uncertainty figures under `figures/`
+9. **Figure-ready data export**: `figure_data/` contains domain-level plotting contracts for downstream customization
+10. **Domain summary statistics**: Cell counts, proportions, assignments, and neighbor-mixing summaries
+11. **Spatial refinement**: Optional KNN-based spatial smoothing of domain labels
+12. **Optional R visualization layer**: bundled `r_visualization/` templates consume `figure_data/` without recomputing domains
+13. **Notebook export**: Auto-generated reproducibility notebook for code walkthrough and reruns
 
 ## Input Formats
 
@@ -200,8 +202,27 @@ automatically selects the correct data layer for each method:
 2. **Preprocess** (demo mode only): Normalize, log1p, PCA, neighbors if not already done
 3. **Domain identification**: Run the selected method (Leiden, Louvain, SpaGCN, STAGATE, GraphST, BANKSY, or CellCharter)
 4. **Embed**: Compute UMAP if not present for visualization
-5. **Visualize**: Generate spatial domain map and UMAP domain plot
-6. **Report and export**: Write `report.md`, `result.json`, `processed.h5ad`, figures, tables, output guide, and reproducibility bundle including a notebook
+5. **Render the standard gallery**: build the OmicsClaw narrative gallery with overview, diagnostic, supporting, and uncertainty panels
+6. **Export figure-ready data**: write `figure_data/*.csv` and `figure_data/manifest.json` for downstream customization
+7. **Report and export**: write `report.md`, `result.json`, `processed.h5ad`, figures, tables, output guide, and reproducibility bundle including a notebook and optional R helper
+
+## Visualization Contract
+
+OmicsClaw treats `spatial-domains` visualization as a two-layer system:
+
+1. **Python standard gallery**: the canonical result layer. This is the default output users should inspect first.
+2. **R customization layer**: an optional styling and publication layer that reads `figure_data/` and does not recompute domain labels.
+
+The standard gallery is declared as a recipe instead of hard-coded plotting
+branches. Current gallery roles include:
+
+- `overview`: spatial and UMAP domain maps
+- `diagnostic`: PCA domain view and domain neighbor-mixing heatmap
+- `supporting`: domain size summary
+- `uncertainty`: local-purity spatial map and histogram
+
+This keeps the default OmicsClaw story stable while leaving room for later
+method-specific visualization extensions.
 
 ## CLI Reference
 
@@ -391,12 +412,28 @@ output_dir/
 ├── processed.h5ad
 ├── figures/
 │   ├── spatial_domains.png
-│   └── umap_domains.png
+│   ├── umap_domains.png
+│   ├── pca_domains.png
+│   ├── domain_sizes.png
+│   ├── domain_neighbor_mixing.png
+│   ├── domain_local_purity_spatial.png
+│   ├── domain_local_purity_histogram.png
+│   └── manifest.json
+├── figure_data/
+│   ├── domain_counts.csv
+│   ├── domain_spatial_points.csv
+│   ├── domain_umap_points.csv
+│   ├── domain_method_embedding_points.csv   # if method-specific latent space exists
+│   ├── domain_neighbor_mixing.csv
+│   └── manifest.json
 ├── tables/
-│   └── domain_summary.csv
+│   ├── domain_summary.csv
+│   ├── domain_assignments.csv
+│   └── domain_neighbor_mixing.csv
 └── reproducibility/
     ├── analysis_notebook.ipynb
-    └── commands.sh
+    ├── commands.sh
+    └── r_visualization.sh
 ```
 
 ### Output Files Explained
@@ -405,13 +442,24 @@ output_dir/
 - `report.md`: Narrative analysis report with domain counts, parameter summary, and next-step guidance.
 - `result.json`: Machine-readable summary and parameter record for downstream automation.
 - `processed.h5ad`: AnnData with `obs["spatial_domain"]` and method-specific embeddings when available.
-- `figures/`: Ready-to-open spatial map and UMAP projections for quick visual review.
+- `figures/`: Standard Python gallery with overview, diagnostics, supporting summaries, uncertainty panels, and `figures/manifest.json`.
+- `figure_data/`: Figure-ready CSV exports for custom plotting in Python or R.
 - `tables/domain_summary.csv`: Per-domain counts and proportions for downstream summaries.
+- `tables/domain_assignments.csv`: Per-observation labels plus local purity when available.
 - `reproducibility/analysis_notebook.ipynb`: Auto-generated notebook for code inspection, result loading, and reruns inside Jupyter.
 - `reproducibility/commands.sh`: Minimal shell rerun command with the same core parameters.
+- `reproducibility/r_visualization.sh`: Entry point for the optional R visualization layer.
 
 Additional files such as `reproducibility/requirements.txt` may appear when
 environment capture is enabled, but they are not guaranteed for every run.
+
+The bundled repo-side R helpers live under:
+
+```text
+skills/spatial/spatial-domains/r_visualization/
+├── README.md
+└── domains_publication_template.R
+```
 
 ## Dependencies
 

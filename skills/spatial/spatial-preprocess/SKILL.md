@@ -1,13 +1,14 @@
 ---
 name: spatial-preprocess
 description: >-
-  Load raw spatial transcriptomics data (Visium, Xenium, or h5ad inputs),
-  run scanpy-standard QC, normalization, HVG selection, PCA, UMAP, and Leiden clustering,
-  and produce a downstream-ready AnnData with reproducibility outputs.
-version: 0.4.0
-author: OmicsClaw
+  Load raw spatial transcriptomics data (Visium, Xenium, or converted h5ad
+  inputs), run the current OmicsClaw scanpy-standard preprocessing workflow,
+  and export a downstream-ready AnnData with explicit effective QC parameters
+  plus a standardized preprocessing visualization contract.
+version: 0.5.0
+author: OmicsClaw Team
 license: MIT
-tags: [spatial, preprocessing, QC, normalization, leiden, umap, visium, xenium, h5ad]
+tags: [spatial, preprocessing, QC, normalization, HVG, leiden, umap, visium, xenium]
 metadata:
   omicsclaw:
     domain: spatial
@@ -24,6 +25,18 @@ metadata:
       - "--resolutions"
       - "--species"
       - "--tissue"
+    param_hints:
+      scanpy_standard:
+        priority: "tissue → min_genes/max_mt_pct/max_genes → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
+        params: ["data_type", "species", "tissue", "min_genes", "min_cells", "max_mt_pct", "max_genes", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution", "resolutions"]
+        defaults: {data_type: "generic", species: "human", min_genes: 0, min_cells: 0, max_mt_pct: 20.0, max_genes: 0, n_top_hvg: 2000, n_pcs: 30, n_neighbors: 15, leiden_resolution: 0.5}
+        requires: ["raw_counts_in_X", "obsm.spatial_optional", "scanpy_pipeline"]
+        tips:
+          - "--tissue: OmicsClaw wrapper-level preset that fills QC defaults; reports also record the effective thresholds after preset resolution."
+          - "--min-genes / --max-mt-pct / --max-genes: main QC thresholds controlling how aggressively low-quality spots are removed."
+          - "--n-top-hvg: public Scanpy HVG selection budget passed to `pp.highly_variable_genes(..., flavor='seurat_v3', layer='counts')`."
+          - "--n-pcs / --n-neighbors: public Scanpy graph-construction controls; OmicsClaw reports requested, computed, used, and suggested PCs separately."
+          - "--leiden-resolution / --resolutions: public Leiden clustering resolution controls for the primary clustering and optional sweep."
     legacy_aliases: [preprocess]
     saves_h5ad: true
     requires_preprocessed: false
@@ -45,7 +58,7 @@ metadata:
     trigger_keywords:
       - preprocess
       - spatial preprocessing
-      - QC
+      - spatial QC
       - normalize
       - visium
       - xenium
@@ -58,46 +71,56 @@ metadata:
 
 # 🔬 Spatial Preprocess
 
-You are **Spatial Preprocess**, the foundation skill for OmicsClaw spatial analysis. Your role is to load raw spatial transcriptomics data, perform standard quality control and normalization, and produce a clean AnnData object ready for downstream spatial skills.
+You are **Spatial Preprocess**, the OmicsClaw skill for loading raw spatial
+transcriptomics data and converting it into a downstream-ready AnnData under
+the current `scanpy_standard` workflow. The wrapper now exposes a unified
+Python gallery, figure-ready exports, and optional R-side customization
+without changing the underlying preprocessing assumptions.
 
 ## Why This Exists
 
-- **Without it**: Users manually stitch together loaders, QC thresholds, normalization, and clustering with inconsistent defaults.
-- **With it**: One command loads the dataset, applies a standard preprocessing pipeline, saves figures and summaries, and emits a downstream-ready `processed.h5ad`.
-- **Why OmicsClaw**: A single reproducible preprocessing contract across spatial workflows, with structured outputs, per-run README guidance, and notebook-based reproducibility in standard CLI runs.
+- **Without it**: users manually combine loading, QC, normalization, HVG selection, PCA, neighbors, and clustering with inconsistent defaults.
+- **With it**: one command produces a standardized `processed.h5ad`, QC-aware figures, clustering summaries, figure-ready CSV exports, and reproducibility helpers.
+- **Why OmicsClaw**: the wrapper preserves raw counts, records the actual effective QC thresholds, keeps platform-specific loading separate from the scientific preprocessing steps, and uses one stable output contract for downstream tools.
 
 ## Core Capabilities
 
-1. **Multi-platform loading**: Visium directories / h5 / h5ad, Xenium zarr / h5ad, and generic h5ad inputs.
-2. **QC filtering**: Cell and gene filtering based on `min_genes`, `min_cells`, `max_mt_pct`, and optional `max_genes`.
-3. **Tissue-aware presets**: Built-in QC presets for common tissues such as brain, heart, tumor, and lung.
-4. **Normalization**: Library-size normalization plus `log1p`, while preserving raw counts in both `adata.layers["counts"]` and `adata.raw`.
-5. **HVG selection**: `seurat_v3` highly variable gene selection using the preserved counts layer.
-6. **Embedding**: PCA, neighbor graph construction, and UMAP.
-7. **Clustering**: Primary Leiden clustering plus optional multi-resolution exploration.
-8. **Reusable outputs**: Standard report, figures, tables, processed AnnData, README guidance, and reproducibility notebook in standard `oc run` executions.
+1. **Current workflow: `scanpy_standard`**: QC, normalization, `seurat_v3` HVG selection, PCA, neighbors, UMAP, and Leiden clustering.
+2. **Multi-platform loading**: Visium directories / h5 / h5ad, Xenium zarr / h5ad, and converted `.h5ad` inputs for MERFISH / Slide-seq / seqFISH.
+3. **QC filtering**: spot or cell filtering using `min_genes`, `min_cells`, `max_mt_pct`, and optional `max_genes`.
+4. **Tissue-aware presets**: optional wrapper-level presets for common tissues such as brain, heart, tumor, and lung.
+5. **Raw-count preservation**: raw counts are stored in both `adata.layers["counts"]` and `adata.raw` before normalization.
+6. **Graph embedding**: PCA, neighbor graph, and UMAP.
+7. **Clustering**: primary Leiden clustering plus optional multi-resolution sweeps.
+8. **Standard Python gallery**: emits a recipe-driven preprocessing gallery with clustering overview, QC diagnostics, PCA guidance, and threshold-context panels.
+9. **Figure-ready exports**: writes `figure_data/` CSVs plus a manifest so downstream tools can restyle the same preprocessing result without recomputing QC or clustering.
+10. **Structured exports**: writes `report.md`, `result.json`, summary tables, reproducibility helpers, and an optional R visualization entrypoint.
 
 ## Input Formats
 
-| Format | Extension | Required | Example |
-|--------|-----------|----------|---------|
-| AnnData raw | `.h5ad` | Count matrix in `X`; spatial coordinates recommended for downstream spatial plotting | `raw_visium.h5ad` |
+| Format | Extension | Required Fields | Example |
+|--------|-----------|-----------------|---------|
+| AnnData raw | `.h5ad` | count matrix in `X`; spatial coordinates recommended | `raw_visium.h5ad` |
 | 10x Visium directory | directory | Space Ranger-style output | `visium_output/` |
-| 10x feature matrix | `.h5` / `.hdf5` | 10x filtered feature matrix | `filtered_feature_bc_matrix.h5` |
+| 10x feature matrix | `.h5` / `.hdf5` | filtered feature matrix | `filtered_feature_bc_matrix.h5` |
 | Xenium zarr | `.zarr` or directory | Xenium export readable by `anndata.read_zarr` | `xenium_sample.zarr` |
-| Converted MERFISH / Slide-seq / seqFISH | `.h5ad` | Expression matrix; spatial coordinates strongly recommended | `merfish_converted.h5ad` |
-| Demo | n/a | `--demo` flag | Built-in synthetic Visium-like dataset |
+| Converted MERFISH / Slide-seq / seqFISH | `.h5ad` | expression matrix, ideally with coordinates | `merfish_converted.h5ad` |
+| Demo | n/a | `--demo` flag | built-in Visium-like demo |
 
-### Current Loader Behavior
+## Current Loader Behavior
 
-- **Visium directories**: The current loader now tries `sc.read_visium()` first, then falls back to matrix loaders when needed.
-- **Xenium**: Supported via `.h5ad` or `.zarr`.
-- **MERFISH / Slide-seq / seqFISH**: In the current wrapper these modes are expected as converted `.h5ad` inputs rather than vendor-native raw bundles.
-- **Spatial plots**: If spatial coordinates are absent, preprocessing can still run, but spatial figures and some downstream spatial workflows will be limited.
+| Data type | Current wrapper behavior |
+|----------|--------------------------|
+| `visium` | tries `sc.read_visium()` first, then 10x matrix fallbacks |
+| `xenium` | supports `.h5ad` and `.zarr` |
+| `slide_seq` | current wrapper expects converted `.h5ad` |
+| `merfish` | current wrapper expects converted `.h5ad` |
+| `seqfish` | current wrapper expects converted `.h5ad` |
+| `generic` | expects `.h5ad` |
 
 ## Post-Preprocess Data Convention
 
-After this skill completes, the processed object typically contains:
+After preprocessing, the processed object typically contains:
 
 ```text
 adata.layers["counts"]         # preserved raw counts
@@ -109,102 +132,138 @@ adata.obsm["X_umap"]           # UMAP embedding
 adata.obsp["connectivities"]   # neighbor graph
 adata.obsp["distances"]        # neighbor distances
 adata.obs["leiden"]            # primary Leiden clusters
-adata.obs["leiden_res_*"]      # optional multi-resolution Leiden results
+adata.obs["leiden_res_*"]      # optional multi-resolution results
 ```
 
 ## Tissue-Specific QC Presets
 
-When `--tissue` is set, OmicsClaw auto-fills default QC thresholds. Explicit CLI parameters still take precedence.
+When `--tissue` is set, OmicsClaw auto-fills default QC thresholds. Explicit
+CLI parameters still take precedence.
 
 | Tissue | max_mt_pct | min_genes | max_genes | Notes |
 |--------|------------|-----------|-----------|-------|
-| pbmc | 5 | 200 | 2500 | Low mitochondrial fraction in blood cells |
-| brain | 10 | 200 | 6000 | Higher gene complexity in neurons |
-| heart | 50 | 200 | 5000 | Cardiomyocytes are mitochondria-rich |
-| tumor | 20 | 200 | 5000 | Heterogeneous tissue composition |
-| liver | 15 | 200 | 4000 | Large hepatocytes |
-| kidney | 15 | 200 | 4000 | Tubular cells can be mitochondria-active |
-| lung | 15 | 200 | 5000 | Mixed epithelial and immune content |
-| gut | 20 | 200 | 5000 | High epithelial turnover |
-| skin | 10 | 200 | 4000 | Keratinocyte-rich tissue |
-| muscle | 30 | 200 | 5000 | Elevated mitochondrial burden |
+| pbmc | 5 | 200 | 2500 | low mitochondrial fraction in blood cells |
+| brain | 10 | 200 | 6000 | higher complexity in neuronal tissue |
+| heart | 50 | 200 | 5000 | cardiomyocytes are mitochondria-rich |
+| tumor | 20 | 200 | 5000 | heterogeneous tissue composition |
+| liver | 15 | 200 | 4000 | large hepatocytes |
+| kidney | 15 | 200 | 4000 | mitochondria-active tubular cells |
+| lung | 15 | 200 | 5000 | mixed epithelial and immune content |
+| gut | 20 | 200 | 5000 | high epithelial turnover |
+| skin | 10 | 200 | 4000 | keratinocyte-rich tissue |
+| muscle | 30 | 200 | 5000 | elevated mitochondrial burden |
 
 ## Workflow
 
-1. **Load**: Detect platform type and load the dataset.
-2. **QC**: Compute `n_genes_by_counts`, `total_counts`, and `pct_counts_mt`.
-3. **Filter**: Remove low-quality cells and rarely detected genes.
-4. **Preserve counts**: Store raw counts in `layers["counts"]` and `adata.raw`.
-5. **Normalize**: Apply `normalize_total` and `log1p`.
-6. **Select HVGs**: Run `seurat_v3` HVG selection on the counts layer.
-7. **Embed**: Scale HVGs, compute PCA, build neighbors, and compute UMAP.
-8. **Cluster**: Run primary Leiden clustering and optional multi-resolution exploration.
-9. **Report and export**: Save figures, tables, report, processed AnnData, and reproducibility artifacts.
+1. **Load**: detect platform type and load the dataset.
+2. **QC metrics**: compute `n_genes_by_counts`, `total_counts`, and mitochondrial percentage.
+3. **Filter**: apply `min_genes`, `min_cells`, `max_mt_pct`, and optional `max_genes`.
+4. **Preserve counts**: store raw counts in `layers["counts"]` and `adata.raw`.
+5. **Normalize**: run `normalize_total(target_sum=1e4)` followed by `log1p`.
+6. **Select HVGs**: run `highly_variable_genes(..., flavor="seurat_v3", layer="counts")`.
+7. **Embed**: scale HVGs, compute PCA, build neighbors, and compute UMAP.
+8. **Cluster**: run the primary Leiden clustering and optional resolution sweep.
+9. **Render the standard gallery**: build the OmicsClaw preprocessing gallery with clustering overview, QC maps, PCA variance guidance, and threshold-context panels.
+10. **Export figure-ready data**: write `figure_data/*.csv` and `figure_data/manifest.json` for downstream customization.
+11. **Export**: write summary tables, `report.md`, `result.json`, `processed.h5ad`, and reproducibility helpers.
+
+## Visualization Contract
+
+OmicsClaw treats `spatial-preprocess` visualization as a two-layer system:
+
+1. **Python standard gallery**: the canonical preprocessing result layer. This is the default output users should inspect first.
+2. **R customization layer**: an optional styling and publication layer that reads `figure_data/` and does not recompute QC, clustering, or embeddings.
+
+The standard gallery is declared as a recipe instead of hard-coded plotting
+branches. It reuses the shared `skills/spatial/_lib/viz` feature-map layer for
+spatial and UMAP projections, while skill-local renderers handle preprocessing-
+specific summaries such as PCA variance guidance and QC histograms.
+
+Current gallery roles include:
+
+- `overview`: primary Leiden clusters on tissue and UMAP
+- `diagnostic`: QC metrics projected onto tissue coordinates
+- `supporting`: cluster-size summary, PCA variance guidance, and optional resolution sweep
+- `uncertainty`: QC metric distributions with effective threshold overlays
 
 ## CLI Reference
 
 ```bash
 # Standard usage
-oc run spatial-preprocess --input <data.h5ad> --output <report_dir>
+oc run spatial-preprocessing --input <data.h5ad> --output <report_dir>
 
 # Tissue-aware QC
-oc run spatial-preprocess \
+oc run spatial-preprocessing \
   --input <data.h5ad> --output <report_dir> --tissue brain --species human
 
+# Explicit QC thresholds
+oc run spatial-preprocessing \
+  --input <data.h5ad> --output <report_dir> \
+  --min-genes 200 --max-mt-pct 15 --max-genes 5000
+
+# Graph tuning
+oc run spatial-preprocessing \
+  --input <data.h5ad> --output <report_dir> \
+  --n-top-hvg 3000 --n-pcs 30 --n-neighbors 15 --leiden-resolution 0.6
+
 # Multi-resolution Leiden exploration
-oc run spatial-preprocess \
+oc run spatial-preprocessing \
   --input <data.h5ad> --output <report_dir> --resolutions 0.4,0.6,0.8,1.0
 
 # Explicit platform hint
-oc run spatial-preprocess \
+oc run spatial-preprocessing \
   --input <xenium_sample.zarr> --output <report_dir> --data-type xenium
 
 # Demo
-oc run spatial-preprocess --demo --output /tmp/spatial_preprocess_demo
+oc run spatial-preprocessing --demo --output /tmp/spatial_preprocess_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-preprocess/spatial_preprocess.py \
-  --input <data.h5ad> --output <report_dir> [--data-type generic]
+  --input <data.h5ad> --output <report_dir>
 ```
 
-Every successful standard `oc run` execution also writes a top-level `README.md`
-and `reproducibility/analysis_notebook.ipynb` to make the output folder easier to inspect and rerun.
+Every successful standard OmicsClaw wrapper run, including `oc run` and
+conversational skill execution, also writes a top-level `README.md` and
+`reproducibility/analysis_notebook.ipynb` to make the output directory easier
+to inspect and rerun. Direct script execution primarily produces the
+skill-native outputs plus `reproducibility/commands.sh`.
 
 ## Example Queries
 
-- "Preprocess my Visium dataset with standard QC"
-- "Load this Xenium data and generate a clustered h5ad"
-- "Run spatial QC and normalization before domain identification"
+- "Preprocess my Visium dataset with standard QC and tell me which thresholds you will use first."
+- "Load this Xenium data and generate a clustered h5ad."
+- "Run spatial QC, preserve raw counts, and do a Leiden resolution sweep."
 
 ## Algorithm / Methodology
 
-### Scanpy Standard Pipeline
+### `scanpy_standard`
 
-1. **Tissue presets**: Optionally auto-fill QC thresholds from the tissue preset table.
-2. **QC metrics**: Compute `n_genes_by_counts`, `total_counts`, and mitochondrial percentage.
-3. **Filtering**: Apply `min_genes`, `min_cells`, `max_mt_pct`, and optional `max_genes`.
-4. **Counts preservation**: Save raw counts into `adata.layers["counts"]` and `adata.raw`.
-5. **Normalization**: Run `sc.pp.normalize_total(target_sum=1e4)` followed by `sc.pp.log1p()`.
-6. **HVG selection**: Run `sc.pp.highly_variable_genes(..., flavor="seurat_v3", layer="counts")`.
-7. **Scaling and PCA**: Scale only the HVG subset and compute PCA.
-8. **PC guidance**: Suggest an informative PC count from cumulative explained variance, clamped to `[15, 30]`.
-9. **Neighbors and UMAP**: Build the neighbor graph and compute UMAP.
-10. **Leiden clustering**: Run the primary Leiden clustering plus optional extra resolutions.
+1. **Tissue presets**: optionally fill QC defaults from the tissue preset table.
+2. **QC metrics**: compute `n_genes_by_counts`, `total_counts`, and mitochondrial percentage using `qc_vars=["mt"]`.
+3. **Filtering**: apply `min_genes`, `min_cells`, `max_mt_pct`, and optional `max_genes`.
+4. **Counts preservation**: save raw counts into `adata.layers["counts"]` and `adata.raw`.
+5. **Normalization**: run `sc.pp.normalize_total(target_sum=1e4)` followed by `sc.pp.log1p()`.
+6. **HVG selection**: run `sc.pp.highly_variable_genes(..., flavor="seurat_v3", layer="counts")`.
+7. **Scaling and PCA**: scale only the HVG subset and compute PCA.
+8. **PC guidance**: suggest an informative PC count from cumulative explained variance, clamped to `[15, 30]`.
+9. **Neighbors and UMAP**: build the neighbor graph and compute UMAP.
+10. **Leiden clustering**: run the primary Leiden clustering plus optional extra resolutions.
 
-**Key parameters**:
-- `min_genes`: Minimum detected genes per spot or cell. Default `0`, or preset-defined when `--tissue` is used.
-- `max_mt_pct`: Maximum mitochondrial fraction. Default `20.0`, or preset-defined when `--tissue` is used.
-- `max_genes`: Optional upper bound on detected genes per spot or cell. Default `0` meaning disabled.
-- `n_top_hvg`: Number of HVGs to keep. Default `2000`.
-- `n_pcs`: Requested PCA dimensions before internal clipping by data shape. Default `30` in the current CLI wrapper.
-- `n_neighbors`: Neighbor graph size. Default `15`.
-- `leiden_resolution`: Primary clustering resolution. Default `0.5` in the current CLI wrapper.
-- `resolutions`: Optional comma-separated resolution sweep for exploratory clustering.
-- `species`: Controls the mitochondrial prefix detection logic (`MT-` for human, `mt-` for mouse).
+**Core tuning flags**:
 
-> **Current OmicsClaw behavior**: HVG selection uses the preserved counts layer,
-> PCA is computed only on HVGs, and the neighbor graph uses at most 30 PCs even if
-> a larger PCA is computed. This is the behavior that the wrapper executes today.
+- `data_type`: wrapper-level loader hint, not a Scanpy science parameter.
+- `species`: wrapper-level mitochondrial prefix selector.
+- `tissue`: wrapper-level QC preset selector.
+- `min_genes`, `min_cells`, `max_mt_pct`, `max_genes`: main QC thresholds.
+- `n_top_hvg`: public Scanpy HVG budget.
+- `n_pcs`: requested PCA dimensions before internal clipping by data shape.
+- `n_neighbors`: public neighbor-graph size.
+- `leiden_resolution`: public Leiden clustering resolution.
+- `resolutions`: optional wrapper-level sweep over multiple Leiden resolutions.
+
+> **Current OmicsClaw behavior**: reports include both the user-requested
+> params and the actual effective params after preset application, plus
+> requested / computed / used / suggested PC counts.
 
 ## Output Structure
 
@@ -215,65 +274,86 @@ output_dir/
 ├── result.json
 ├── processed.h5ad
 ├── figures/
-│   ├── qc_violin.png
+│   ├── spatial_leiden.png
 │   ├── umap_leiden.png
-│   └── spatial_leiden.png
+│   ├── qc_metrics_spatial.png
+│   ├── cluster_size_barplot.png
+│   ├── pca_variance_curve.png
+│   ├── leiden_resolution_sweep.png        # if --resolutions was used
+│   ├── qc_metric_distributions.png
+│   └── manifest.json
+├── figure_data/
+│   ├── cluster_summary.csv
+│   ├── qc_metric_distributions.csv
+│   ├── preprocess_run_summary.csv
+│   ├── pca_variance_ratio.csv
+│   ├── multi_resolution_summary.csv       # if --resolutions was used
+│   ├── preprocess_spatial_points.csv      # when spatial coordinates are available
+│   ├── preprocess_umap_points.csv
+│   └── manifest.json
 ├── tables/
-│   └── cluster_summary.csv
+│   ├── cluster_summary.csv
+│   ├── qc_summary.csv
+│   ├── pca_variance_ratio.csv
+│   └── multi_resolution_summary.csv       # if --resolutions was used
 └── reproducibility/
     ├── analysis_notebook.ipynb
-    └── commands.sh
+    ├── commands.sh
+    ├── environment.txt
+    └── r_visualization.sh
 ```
 
-### Output Files Explained
+The bundled optional R templates live under:
 
-- `README.md`: Human-friendly entry point describing the run and where to look first.
-- `report.md`: Narrative preprocessing summary with QC results, PC guidance, and clustering overview.
-- `result.json`: Machine-readable summary for automation and downstream chaining.
-- `processed.h5ad`: Downstream-ready AnnData containing normalized data, embeddings, graphs, and cluster labels.
-- `figures/qc_violin.png`: QC metric overview across spots or cells.
-- `figures/umap_leiden.png`: UMAP colored by primary Leiden clusters.
-- `figures/spatial_leiden.png`: Spatial map colored by primary Leiden clusters when coordinates are available.
-- `tables/cluster_summary.csv`: Cluster sizes for the primary Leiden result.
-- `reproducibility/analysis_notebook.ipynb`: Notebook walkthrough for inspection and reruns in standard `oc run` outputs.
-- `reproducibility/commands.sh`: Minimal rerun command with the same parameter set.
+```text
+skills/spatial/spatial-preprocess/r_visualization/
+├── README.md
+└── preprocess_publication_template.R
+```
 
-Additional files such as `reproducibility/requirements.txt` may appear when
-environment capture is enabled, but they are not guaranteed for every run.
+## Safety
+
+- **Local-first**: all data processing stays local.
+- **Raw preservation**: raw counts are preserved in both `adata.layers["counts"]` and `adata.raw`.
+- **Audit trail**: reports, `result.json`, `figures/manifest.json`, and `figure_data/manifest.json` record effective QC and graph parameters plus visualization outputs.
+- **Method-aware output**: the Python gallery is canonical; optional R styling consumes exported figure data and must not silently rerun preprocessing.
+- **Platform-aware loading**: native vendor loaders are only used where the current wrapper actually supports them.
 
 ## Dependencies
 
 **Required**:
-- `scanpy` >= 1.9 - preprocessing, PCA, UMAP, and Leiden workflow
-- `anndata` >= 0.11 - AnnData container support
-- `squidpy` >= 1.2 - spatial plotting and ecosystem compatibility
-- `numpy`, `pandas`, `matplotlib` - numerics, tables, and plotting
+
+- `scanpy`
+- `anndata`
+- `numpy`, `pandas`, `matplotlib`
 
 **Common runtime companions**:
-- `igraph`, `leidenalg` - Leiden clustering backend used by the current wrapper
 
-## Safety
+- `igraph`, `leidenalg`
+- `squidpy`
 
-- **Local-first**: All data processing stays local.
-- **Disclaimer**: Reports inherit the OmicsClaw research-use disclaimer.
-- **Audit trail**: Parameters and summary metrics are recorded in `result.json`.
-- **Raw preservation**: Raw counts are preserved in both `adata.layers["counts"]` and `adata.raw`.
-- **Transparent behavior**: The documented pipeline reflects the current wrapper behavior rather than only the idealized Scanpy workflow.
+**Optional (R)**:
+
+- `ggplot2`
 
 ## Integration with Orchestrator
 
 **Trigger conditions**:
-- Raw or early-stage spatial inputs such as `.h5ad`, Visium directories, Xenium zarr, or 10x `.h5`
-- User intents around preprocessing, QC, normalization, UMAP, Leiden, or preparing data for downstream spatial analysis
+
+- preprocess
+- spatial preprocessing
+- spatial QC
+- normalization
+- Leiden
+- UMAP
 
 **Chaining partners**:
-- `spatial-domains` - consumes `processed.h5ad` for tissue-domain identification
-- `spatial-annotate` - uses embeddings and clusters for annotation workflows
-- `spatial-de`, `spatial-communication`, `spatial-enrichment` - all expect a clean preprocessed AnnData
+
+- Often provides `processed.h5ad` to `spatial-domains`, `spatial-annotate`, `spatial-de`, `spatial-register`, and other downstream spatial skills
 
 ## Citations
 
-- [Scanpy](https://scanpy.readthedocs.io/) - preprocessing and analysis framework
-- [Squidpy](https://squidpy.readthedocs.io/) - spatial analysis ecosystem
-- [Leiden algorithm](https://www.nature.com/articles/s41598-019-41695-z) - graph community detection
-- [Luecken and Theis 2019](https://doi.org/10.15252/msb.20188746) - best practices for single-cell preprocessing that inform QC defaults
+- [Scanpy `normalize_total`](https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.normalize_total.html)
+- [Scanpy `highly_variable_genes`](https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html)
+- [Scanpy `neighbors`](https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.neighbors.html)
+- [Scanpy `leiden`](https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.leiden.html)

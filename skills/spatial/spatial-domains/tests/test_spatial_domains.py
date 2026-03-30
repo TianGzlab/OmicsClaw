@@ -100,6 +100,8 @@ def test_demo_result_json(tmp_output):
     assert data["skill"] == "spatial-domains"
     assert "summary" in data
     assert data["summary"]["n_domains"] > 0
+    assert data["data"]["visualization"]["recipe_id"] == "standard-spatial-domain-gallery"
+    assert data["data"]["visualization"]["domain_column"] == "spatial_domain"
 
 
 def test_demo_figures(tmp_output):
@@ -117,16 +119,50 @@ def test_demo_figures(tmp_output):
     assert (figures_dir / "umap_domains.png").exists()
 
 
-def test_demo_tables(tmp_output):
-    """Demo mode should produce domain summary table."""
-    subprocess.run(
+def test_demo_tables_and_gallery_contract(tmp_output):
+    """Demo mode should produce tables, manifests, and reproducibility helpers."""
+    result = subprocess.run(
         [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
         capture_output=True,
         text=True,
         timeout=120,
         cwd=str(SKILL_SCRIPT.parent),
     )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (tmp_output / "tables" / "domain_summary.csv").exists()
+    assert (tmp_output / "tables" / "domain_assignments.csv").exists()
+    assert (tmp_output / "tables" / "domain_neighbor_mixing.csv").exists()
+    assert (tmp_output / "figures" / "manifest.json").exists()
+    assert (tmp_output / "figure_data" / "manifest.json").exists()
+    assert (tmp_output / "figure_data" / "domain_counts.csv").exists()
+    assert (tmp_output / "figure_data" / "domain_spatial_points.csv").exists()
+    assert (tmp_output / "figure_data" / "domain_umap_points.csv").exists()
+    assert (tmp_output / "figure_data" / "domain_neighbor_mixing.csv").exists()
+    assert (tmp_output / "reproducibility" / "commands.sh").exists()
+    assert (tmp_output / "reproducibility" / "r_visualization.sh").exists()
+
+
+def test_demo_gallery_manifests_have_roles(tmp_output):
+    """The standard domain gallery should emit figure and figure-data manifests."""
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--output", str(tmp_output)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+
+    figures_manifest = json.loads((tmp_output / "figures" / "manifest.json").read_text())
+    figure_data_manifest = json.loads((tmp_output / "figure_data" / "manifest.json").read_text())
+
+    assert figures_manifest["recipe_id"] == "standard-spatial-domain-gallery"
+    assert any(plot["role"] == "overview" for plot in figures_manifest["plots"])
+    assert any(plot["role"] == "supporting" for plot in figures_manifest["plots"])
+    assert any(plot["role"] == "diagnostic" for plot in figures_manifest["plots"])
+    assert any(plot["role"] == "uncertainty" for plot in figures_manifest["plots"])
+    assert figure_data_manifest["skill"] == "spatial-domains"
+    assert figure_data_manifest["recipe_id"] == "standard-spatial-domain-gallery"
 
 
 # -----------------------------------------------------------------------
@@ -161,10 +197,18 @@ def test_dispatch_invalid_method():
 
 
 def test_dispatch_supported_methods():
-    """SUPPORTED_METHODS should list all six methods."""
+    """SUPPORTED_METHODS should list all registered domain methods."""
     from skills.spatial._lib.domains import SUPPORTED_METHODS
 
-    assert set(SUPPORTED_METHODS) == {"leiden", "louvain", "spagcn", "stagate", "graphst", "banksy"}
+    assert set(SUPPORTED_METHODS) == {
+        "leiden",
+        "louvain",
+        "spagcn",
+        "stagate",
+        "graphst",
+        "banksy",
+        "cellcharter",
+    }
 
 
 def test_refine_spatial_domains():

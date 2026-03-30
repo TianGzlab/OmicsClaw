@@ -21,11 +21,34 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+
+ensure_runtime_cache_dirs()
+
 import scanpy as sc
 
 from .adata_utils import get_spatial_key, store_analysis_metadata
 
 logger = logging.getLogger(__name__)
+
+PREPROCESS_METHOD = "scanpy_standard"
+SUPPORTED_SPECIES = ("human", "mouse")
+METHOD_PARAM_DEFAULTS = {
+    PREPROCESS_METHOD: {
+        "min_genes": 0,
+        "min_cells": 0,
+        "max_mt_pct": 20.0,
+        "max_genes": 0,
+        "n_top_hvg": 2000,
+        "n_pcs": 30,
+        "n_neighbors": 15,
+        "leiden_resolution": 0.5,
+        "normalize_target_sum": 1e4,
+        "hvg_flavor": "seurat_v3",
+        "leiden_flavor": "igraph",
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Tissue-specific QC presets
@@ -83,14 +106,14 @@ def suggest_n_pcs(adata, variance_threshold: float = 0.85) -> int:
 def preprocess(
     adata,
     *,
-    min_genes: int = 0,
-    min_cells: int = 0,
-    max_mt_pct: float = 20.0,
-    max_genes: int = 0,
-    n_top_hvg: int = 2000,
-    n_pcs: int = 50,
-    n_neighbors: int = 15,
-    leiden_resolution: float = 1.0,
+    min_genes: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["min_genes"],
+    min_cells: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["min_cells"],
+    max_mt_pct: float = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["max_mt_pct"],
+    max_genes: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["max_genes"],
+    n_top_hvg: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["n_top_hvg"],
+    n_pcs: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["n_pcs"],
+    n_neighbors: int = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["n_neighbors"],
+    leiden_resolution: float = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["leiden_resolution"],
     resolutions: list[float] | None = None,
     tissue: str | None = None,
     species: str = "human",
@@ -136,6 +159,17 @@ def preprocess(
     tuple[AnnData, dict]
         Processed AnnData and summary dictionary.
     """
+    if species not in SUPPORTED_SPECIES:
+        raise ValueError(f"Unsupported species '{species}'. Supported: {SUPPORTED_SPECIES}")
+    if n_top_hvg <= 0:
+        raise ValueError("n_top_hvg must be > 0")
+    if n_pcs <= 0:
+        raise ValueError("n_pcs must be > 0")
+    if n_neighbors <= 0:
+        raise ValueError("n_neighbors must be > 0")
+    if leiden_resolution <= 0:
+        raise ValueError("leiden_resolution must be > 0")
+
     # Apply tissue presets (explicit params take precedence)
     preset_applied = None
     if tissue:
@@ -180,6 +214,10 @@ def preprocess(
 
     n_cells_filtered = adata.n_obs
     n_genes_filtered = adata.n_vars
+    if n_cells_filtered < 2:
+        raise ValueError("Too few cells/spots remain after QC filtering (<2). Relax QC thresholds.")
+    if n_genes_filtered < 2:
+        raise ValueError("Too few genes remain after QC filtering (<2). Relax QC thresholds.")
     logger.info(
         "After QC: %d cells x %d genes (removed %d cells, %d genes)",
         n_cells_filtered, n_genes_filtered,
@@ -193,23 +231,30 @@ def preprocess(
     adata.raw = adata.copy()
 
     # Normalize
-    sc.pp.normalize_total(adata, target_sum=1e4)
+    normalize_target_sum = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["normalize_target_sum"]
+    sc.pp.normalize_total(adata, target_sum=normalize_target_sum)
     sc.pp.log1p(adata)
 
     # HVG
-    n_hvg = min(n_top_hvg, adata.n_vars - 1)
+    n_hvg = max(1, min(n_top_hvg, adata.n_vars))
     sc.pp.highly_variable_genes(
         adata,
         n_top_genes=n_hvg,
-        flavor="seurat_v3",
+        flavor=METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["hvg_flavor"],
         layer="counts",
     )
-    logger.info("Selected %d highly variable genes", adata.var["highly_variable"].sum())
+    n_hvg_selected = int(adata.var["highly_variable"].sum())
+    logger.info("Selected %d highly variable genes", n_hvg_selected)
 
     # Scale + PCA on HVG
     adata_hvg = adata[:, adata.var["highly_variable"]].copy()
     sc.pp.scale(adata_hvg, max_value=10)
     n_comps = min(n_pcs, adata_hvg.n_vars - 1, adata_hvg.n_obs - 1)
+    if n_comps < 2:
+        raise ValueError(
+            "Too few observations or HVGs remain to compute PCA (<2 components). "
+            "Relax QC thresholds or reduce HVG filtering."
+        )
     sc.tl.pca(adata_hvg, n_comps=n_comps)
 
     # Copy embeddings back
@@ -232,7 +277,8 @@ def preprocess(
     # Neighbors + UMAP + Leiden
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs_use)
     sc.tl.umap(adata)
-    sc.tl.leiden(adata, resolution=leiden_resolution, flavor="igraph")
+    leiden_flavor = METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["leiden_flavor"]
+    sc.tl.leiden(adata, resolution=leiden_resolution, flavor=leiden_flavor)
 
     n_clusters = adata.obs["leiden"].nunique()
     logger.info("Leiden clustering: %d clusters (resolution=%.2f)", n_clusters, leiden_resolution)
@@ -242,31 +288,47 @@ def preprocess(
     if resolutions:
         for res in resolutions:
             col_name = f"leiden_res_{res}"
-            sc.tl.leiden(adata, resolution=res, flavor="igraph", key_added=col_name)
+            sc.tl.leiden(adata, resolution=res, flavor=leiden_flavor, key_added=col_name)
             n_cl = adata.obs[col_name].nunique()
             multi_res_info[str(res)] = n_cl
             logger.info("  Resolution %.2f: %d clusters", res, n_cl)
 
+    effective_params = {
+        "species": species,
+        "tissue_preset": preset_applied,
+        "min_genes": min_genes,
+        "min_cells": min_cells,
+        "max_mt_pct": max_mt_pct,
+        "max_genes": max_genes,
+        "n_top_hvg": n_top_hvg,
+        "n_hvg_selected": n_hvg_selected,
+        "n_pcs_requested": n_pcs,
+        "n_pcs_computed": n_comps,
+        "n_pcs_used": n_pcs_use,
+        "n_pcs_suggested": suggested_pcs,
+        "n_neighbors": n_neighbors,
+        "leiden_resolution": leiden_resolution,
+        "normalize_target_sum": normalize_target_sum,
+        "hvg_flavor": METHOD_PARAM_DEFAULTS[PREPROCESS_METHOD]["hvg_flavor"],
+        "leiden_flavor": leiden_flavor,
+    }
+    if resolutions:
+        effective_params["resolutions"] = list(resolutions)
+
     store_analysis_metadata(
-        adata, skill_name, "scanpy_standard",
-        params={
-            "min_genes": min_genes, "min_cells": min_cells,
-            "max_mt_pct": max_mt_pct, "max_genes": max_genes,
-            "n_top_hvg": n_hvg, "n_pcs": n_comps,
-            "n_pcs_suggested": suggested_pcs,
-            "n_neighbors": n_neighbors,
-            "leiden_resolution": leiden_resolution, "species": species,
-            "tissue_preset": preset_applied,
-        },
+        adata,
+        skill_name,
+        PREPROCESS_METHOD,
+        params=effective_params,
     )
 
     summary = {
-        "method": "scanpy_standard",
+        "method": PREPROCESS_METHOD,
         "n_cells_raw": n_cells_raw,
         "n_genes_raw": n_genes_raw,
         "n_cells_filtered": n_cells_filtered,
         "n_genes_filtered": n_genes_filtered,
-        "n_hvg": int(adata.var["highly_variable"].sum()),
+        "n_hvg": n_hvg_selected,
         "n_clusters": n_clusters,
         "has_spatial": get_spatial_key(adata) is not None,
         "cluster_sizes": adata.obs["leiden"].value_counts().to_dict(),
@@ -274,6 +336,7 @@ def preprocess(
         "n_pcs_used": n_pcs_use,
         "n_pcs_suggested": suggested_pcs,
         "tissue_preset": preset_applied,
+        "effective_params": effective_params,
     }
     if multi_res_info:
         summary["multi_resolution"] = multi_res_info

@@ -32,6 +32,7 @@ class LazySkillMetadata:
                 "name": frontmatter.get("name", ""),
                 "description": frontmatter.get("description", ""),
                 "domain": omicsclaw_meta.get("domain", ""),
+                "script": omicsclaw_meta.get("script", ""),
                 "trigger_keywords": omicsclaw_meta.get("trigger_keywords", []),
                 "allowed_extra_flags": omicsclaw_meta.get("allowed_extra_flags", []),
                 "legacy_aliases": omicsclaw_meta.get("legacy_aliases", []),
@@ -60,6 +61,11 @@ class LazySkillMetadata:
     def domain(self) -> str:
         self._ensure_basic()
         return self._basic.get("domain", "")
+
+    @property
+    def script(self) -> str:
+        self._ensure_basic()
+        return self._basic.get("script", "")
 
     @property
     def trigger_keywords(self) -> list[str]:
