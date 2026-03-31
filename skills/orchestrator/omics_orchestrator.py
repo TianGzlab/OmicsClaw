@@ -21,6 +21,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from omicsclaw.core.capability_resolver import resolve_capability
 from omicsclaw.loaders import EXTENSION_TO_DOMAIN
 from omicsclaw.routing.router import route_keyword, route_query_unified
 from omicsclaw.core.registry import registry
@@ -356,26 +357,31 @@ def main():
 
     skill = None
     confidence = 0.0
+    coverage = "no_skill"
+    should_search_web = False
+    missing_capabilities: list[str] = []
 
     if args.query:
-        skill, confidence = route_query_with_mode(args.query, domain, args.routing_mode)
+        decision = resolve_capability(args.query, file_path=args.input or "", domain_hint=domain)
+        skill = decision.chosen_skill or None
+        confidence = decision.confidence
+        coverage = decision.coverage
+        should_search_web = decision.should_search_web
+        missing_capabilities = decision.missing_capabilities
         if skill:
-            logger.info(f"Routed to skill: {skill} (confidence: {confidence:.2f})")
+            logger.info(
+                "Capability resolver selected %s (%s, confidence %.2f)",
+                skill,
+                coverage,
+                confidence,
+            )
         else:
-            logger.warning(f"No skill found for query: {args.query}")
-
-    if not skill:
-        defaults = {
-            "spatial": "preprocess",
-            "singlecell": "sc-preprocessing",
-            "genomics": "genomics-qc",
-            "proteomics": "ms-qc",
-            "metabolomics": "xcms-preprocess",
-            "bulkrna": "bulkrna-qc",
-        }
-        skill = defaults.get(domain, "preprocess")
-        confidence = 0.5
-        logger.info(f"Fallback routed to {skill} based on domain {domain}")
+            logger.warning("Capability resolver found no skill for query: %s", args.query)
+    elif args.input:
+        # File-only routing still uses keyword/extension heuristics. We no longer
+        # force an arbitrary default skill when there is no clear match.
+        skill, confidence = route_query_with_mode(Path(args.input).name, domain, args.routing_mode)
+        coverage = "exact_skill" if skill else "no_skill"
 
     import json
     result = {
@@ -383,7 +389,10 @@ def main():
         "data": {
             "detected_domain": domain,
             "detected_skill": skill,
-            "confidence": confidence
+            "confidence": confidence,
+            "coverage": coverage,
+            "should_search_web": should_search_web,
+            "missing_capabilities": missing_capabilities,
         }
     }
     out_json = out_dir / "result.json"

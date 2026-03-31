@@ -265,6 +265,18 @@ tui = [
 ]
 
 # --------------------------------------------------------------------------- #
+# autonomous — controlled web-guided notebook fallback for main chat          #
+# --------------------------------------------------------------------------- #
+autonomous = [
+    "tavily-python>=0.7",
+    "httpx>=0.27",
+    "markdownify>=0.14",
+    "nbformat>=5.9",
+    "jupyter_client>=8.0",
+    "ipykernel>=6.0",
+]
+
+# --------------------------------------------------------------------------- #
 # research — Multi-agent research pipeline (deepagents + LangGraph)           #
 # --------------------------------------------------------------------------- #
 research = [

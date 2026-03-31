@@ -672,7 +672,11 @@ if _HAS_TEXTUAL:
                     usage_line = f"[dim]↪ {elapsed:.1f}s[/dim]"
 
                 # Sync the updated conversation history back to our messages list
-                updated_msgs = list(core.conversations.get(_USER, []))
+                updated_msgs = core._sanitize_tool_history(
+                    list(core.conversations.get(_USER, [])),
+                    warn=False,
+                )
+                core.conversations[_USER] = list(updated_msgs)
                 self._messages.clear()
                 self._messages.extend(updated_msgs)
 

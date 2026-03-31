@@ -11,7 +11,6 @@ in config.yaml.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Literal
 
@@ -71,39 +70,6 @@ def think_tool(reflection: str) -> str:
 # Web search — adapted from EvoScientist tools/search.py
 # =============================================================================
 
-_tavily_client = None
-
-
-def _get_tavily_client():
-    """Lazy-init Tavily client."""
-    global _tavily_client
-    if _tavily_client is None:
-        from tavily import TavilyClient
-        _tavily_client = TavilyClient()
-    return _tavily_client
-
-
-async def _fetch_webpage(url: str, timeout: float = 10.0) -> str:
-    """Fetch and convert webpage to markdown."""
-    import httpx
-    from markdownify import markdownify
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/91.0.4472.124 Safari/537.36"
-        )
-    }
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            return markdownify(response.text)
-    except Exception as e:
-        return f"Error fetching {url}: {e}"
-
-
 @tool(parse_docstring=True)
 async def tavily_search(
     query: str,
@@ -123,30 +89,14 @@ async def tavily_search(
     Returns:
         Formatted search results with webpage content in markdown
     """
-    def _sync_search() -> dict:
-        return _get_tavily_client().search(
+    try:
+        from omicsclaw.research import search_web_markdown
+
+        return await search_web_markdown(
             query,
             max_results=max_results,
             topic=topic,
         )
-
-    try:
-        search_results = await asyncio.to_thread(_sync_search)
-        results = search_results.get("results", [])
-        if not results:
-            return f"No results found for '{query}'"
-
-        fetch_tasks = [_fetch_webpage(r["url"]) for r in results]
-        contents = await asyncio.gather(*fetch_tasks)
-
-        parts = []
-        for result, content in zip(results, contents):
-            parts.append(
-                f'## {result["title"]}\n'
-                f'**URL:** {result["url"]}\n\n'
-                f'{content}\n\n---\n'
-            )
-        return f"Found {len(parts)} result(s) for '{query}':\n\n{''.join(parts)}"
     except Exception as e:
         return f"Search failed: {e}"
 
@@ -616,4 +566,3 @@ def build_tool_registry() -> dict:
         "notebook_read": notebook_read,
         "notebook_read_cell": notebook_read_cell,
     }
-

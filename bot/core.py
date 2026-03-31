@@ -738,16 +738,35 @@ Operational constraints:
     - Relay the "Method Suitability & Parameter Preview" section.
     - Ask for confirmation before running expensive analysis.
     - Do NOT call `omicsclaw` immediately in this preflight scenario.
-10. NO CODE GENERATION (STRICT): You are an analysis assistant, NOT a code generator.
-   - NEVER proactively create Python scripts, shell scripts, or code files.
-   - NEVER use write_file to generate .py, .sh, .r, .R, or other script files.
-   - All analysis MUST go through the omicsclaw tool — the skills already implement
-     the code. Your role is to route user requests to the right skill, not to write code.
+10. CAPABILITY-FIRST EXECUTION (STRICT):
+   - Before a non-trivial analysis request, prefer `resolve_capability` unless the
+     request is an obvious exact skill invocation.
+   - If `should_create_skill=true`, use `create_omics_skill` when the user explicitly
+     wants a reusable skill added to OmicsClaw.
+   - If coverage='exact_skill', use `omicsclaw` and stay inside the existing skill.
+   - If coverage='partial_skill', run the matched skill for the covered part and use
+     `custom_analysis_execute` only for the missing step.
+   - If coverage='no_skill', you MAY use `web_method_search` and then
+     `custom_analysis_execute`.
+   - Never silently jump to custom code when an exact skill exists.
+10b. REUSABLE SKILL CREATION (STRICT):
+   - Only create a new skill when the user explicitly asks to add, create, scaffold,
+     package, or persist a reusable OmicsClaw skill.
+   - For one-off analyses, do NOT create a new skill; use web-guided custom analysis instead.
+   - Use `create_omics_skill` to scaffold the skill under `skills/<domain>/<skill-name>/`.
+   - If the user wants to package a previously successful custom notebook, pass
+     `source_analysis_dir`, or set `promote_from_latest=true` for the most recent autonomous run.
+11. CONTROLLED CUSTOM ANALYSIS (STRICT):
+   - NEVER use write_file to generate .py, .sh, .r, .R, or other standalone scripts.
+   - Use `custom_analysis_execute` for custom code so execution stays in the
+     restricted notebook sandbox.
+   - `custom_analysis_execute` is for analysis only: no shell, no package install,
+     no direct network, no arbitrary filesystem exploration.
    - Only use write_file/create_csv_file/create_json_file when the user EXPLICITLY
      asks to save or export specific data. All such files go to the output/ directory.
    - Do NOT use list_directory to browse output directories after an omicsclaw call —
      the tool result already contains all the information you need.
-11. NO SILENT FALLBACK (STRICT): When a user specifies a method and it FAILS:
+12. NO SILENT FALLBACK (STRICT): When a user specifies a method and it FAILS:
     - NEVER silently switch to a different method. This is a CRITICAL violation.
     - Report the EXACT error message from the failed method to the user.
     - Ask the user if they want to try an alternative method.
@@ -755,7 +774,7 @@ Operational constraints:
     Example: User asks for DestVI, it fails → Tell user "DestVI failed: <error>.
     Would you like to try Tangram or Cell2Location instead?"
     WRONG: Silently run Tangram and say "The Tangram analysis succeeded".
-12. MEMORY (IMPORTANT): You have persistent memory across conversations.
+13. MEMORY (IMPORTANT): You have persistent memory across conversations.
     - Use the 'remember' tool to save important context:
       * User preferences: language, default methods, output settings
       * Biological insights: cell type annotations, spatial domains identified
@@ -767,11 +786,11 @@ Operational constraints:
     - Your memory context is loaded automatically at the start of each conversation
       under the "## Your Memory" section in the system prompt.
     - Do NOT tell the user you are saving memory; just do it silently.
-13. KNOWLEDGE ADVISOR: You have a 'consult_knowledge' tool that searches decision
+14. KNOWLEDGE ADVISOR: You have a 'consult_knowledge' tool that searches decision
     guides, best practices, and troubleshooting docs. Use it proactively when users
     ask about method selection, parameters, or encounter errors. Extract the key
     recommendation concisely — do NOT dump full knowledge base content.
-14. MANDATORY KNOW-HOW GUARDS (CRITICAL — READ BEFORE ANY ANALYSIS):
+15. MANDATORY KNOW-HOW GUARDS (CRITICAL — READ BEFORE ANY ANALYSIS):
     Before starting ANY analysis task, you MUST check ALL relevant know-how guides
     that are injected into your context. These are non-negotiable scientific constraints
     derived from high-frequency AI errors in real-world analyses.
@@ -794,6 +813,7 @@ def build_system_prompt(
     skill: str = "",
     query: str = "",
     domain: str = "",
+    capability_context: str = "",
 ) -> str:
     if SOUL_MD.exists():
         soul = SOUL_MD.read_text(encoding="utf-8")
@@ -808,6 +828,8 @@ def build_system_prompt(
     prompt = f"{soul}\n\n{get_role_guardrails()}"
     if memory_context:
         prompt += f"\n\n## Your Memory\n\n{memory_context}"
+    if capability_context:
+        prompt += f"\n\n{capability_context}"
 
     # Stage 1: Inject mandatory Know-How scientific constraints
     try:
@@ -853,6 +875,51 @@ def _ensure_system_prompt():
         SYSTEM_PROMPT = build_system_prompt()
 
 
+def _message_mentions_term(text: str, term: str) -> bool:
+    term = (term or "").strip().lower()
+    if not term:
+        return False
+    if len(term) <= 3 and term.replace("-", "").replace("_", "").isalnum():
+        pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+        return bool(re.search(pattern, text))
+    return term in text
+
+
+def _should_attach_capability_context(text: str) -> bool:
+    if not text:
+        return False
+
+    lower = text.lower()
+    if any(_message_mentions_term(lower, alias.lower()) for alias in registry.skills):
+        return True
+
+    return bool(
+        re.search(r"\.(h5ad|h5|loom|mzml|fastq|fq|bam|vcf|csv|tsv)\b", lower)
+        or any(
+            kw in lower
+            for kw in (
+                "analy",
+                "create skill",
+                "add skill",
+                "scaffold",
+                "创建 skill",
+                "封装成skill",
+                "preprocess",
+                "qc",
+                "cluster",
+                "differential",
+                "deconvolution",
+                "trajectory",
+                "velocity",
+                "enrichment",
+                "survival",
+                "空间",
+                "单细胞",
+            )
+        )
+    )
+
+
 def _extract_analysis_hints(text: str) -> tuple[str, str]:
     """Extract skill name and domain hints from user message text.
 
@@ -871,7 +938,7 @@ def _extract_analysis_hints(text: str) -> tuple[str, str]:
         from omicsclaw.core.registry import registry
         for alias in registry.skills:
             # Match skill names (e.g. "spatial-preprocessing", "sc-qc")
-            if alias.lower() in text_lower:
+            if _message_mentions_term(text_lower, alias.lower()):
                 skill_hint = alias
                 break
     except Exception:
@@ -1351,6 +1418,188 @@ def get_tools() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "resolve_capability",
+                "description": (
+                    "Resolve whether a user request is fully covered by an existing OmicsClaw skill, "
+                    "partially covered, or not covered. Use this before non-trivial analysis requests "
+                    "when skill coverage is uncertain."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The user's analysis request in natural language.",
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "Optional server-side data path or filename mentioned by the user.",
+                        },
+                        "domain_hint": {
+                            "type": "string",
+                            "enum": [
+                                "spatial", "singlecell", "genomics", "proteomics",
+                                "metabolomics", "bulkrna", "",
+                            ],
+                            "description": "Optional domain hint if the user has already narrowed the domain.",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_method_search",
+                "description": (
+                    "Search external web sources for up-to-date method documentation, papers, or workflow guidance. "
+                    "Use this when resolve_capability indicates no_skill or partial_skill and external references are needed."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query describing the method, package, or analysis goal.",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Maximum number of search results to fetch. Default: 3.",
+                        },
+                        "topic": {
+                            "type": "string",
+                            "enum": ["general", "news", "finance"],
+                            "description": "Search topic. Default: general.",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_omics_skill",
+                "description": (
+                    "Create a new OmicsClaw-native skill scaffold under skills/<domain>/<skill-name>/ "
+                    "using templates/SKILL-TEMPLATE.md as the base structure. Use this only when the user "
+                    "explicitly wants a reusable new skill added to OmicsClaw. If a previous "
+                    "custom_analysis_execute run succeeded, you can promote that notebook into the new skill."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "request": {
+                            "type": "string",
+                            "description": "Original user request describing the desired reusable skill.",
+                        },
+                        "skill_name": {
+                            "type": "string",
+                            "description": "Preferred lowercase hyphenated skill alias.",
+                        },
+                        "domain": {
+                            "type": "string",
+                            "enum": [
+                                "spatial", "singlecell", "genomics", "proteomics",
+                                "metabolomics", "bulkrna", "orchestrator",
+                            ],
+                            "description": "Target OmicsClaw domain for the new skill. Optional if it can be inferred from a promoted autonomous analysis.",
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "One-line summary of what the skill should do.",
+                        },
+                        "source_analysis_dir": {
+                            "type": "string",
+                            "description": "Optional path to a successful custom_analysis_execute output directory to promote into a skill.",
+                        },
+                        "promote_from_latest": {
+                            "type": "boolean",
+                            "description": "If true, promote the most recent successful autonomous analysis output when source_analysis_dir is not provided.",
+                        },
+                        "input_formats": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of domain-specific input format notes.",
+                        },
+                        "primary_outputs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of primary outputs the new skill should emit.",
+                        },
+                        "methods": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of primary methods/backends for the skill.",
+                        },
+                        "trigger_keywords": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of routing keywords users may say naturally.",
+                        },
+                        "create_tests": {
+                            "type": "boolean",
+                            "description": "Whether to generate a minimal test scaffold. Default: true.",
+                        },
+                    },
+                    "required": ["request"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "custom_analysis_execute",
+                "description": (
+                    "Execute custom analysis code in a restricted Jupyter notebook when an existing OmicsClaw skill "
+                    "does not fully cover the request. Provide one self-contained Python snippet. "
+                    "The notebook exposes INPUT_FILE, ANALYSIS_GOAL, ANALYSIS_CONTEXT, WEB_CONTEXT, and AUTONOMOUS_OUTPUT_DIR. "
+                    "Shell, package install, and direct network access are blocked."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "description": "Short statement of the analysis objective.",
+                        },
+                        "analysis_plan": {
+                            "type": "string",
+                            "description": "Concise markdown plan describing what the custom analysis will do.",
+                        },
+                        "python_code": {
+                            "type": "string",
+                            "description": "A single self-contained Python snippet to execute inside the restricted notebook.",
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "Optional local context from the conversation or prior skill outputs.",
+                        },
+                        "web_context": {
+                            "type": "string",
+                            "description": "Optional external method notes returned by web_method_search.",
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "Optional input file path to expose as INPUT_FILE inside the notebook.",
+                        },
+                        "sources": {
+                            "type": "string",
+                            "description": "Optional markdown list of cited URLs or source notes to persist alongside the notebook.",
+                        },
+                        "output_label": {
+                            "type": "string",
+                            "description": "Optional short label for the output directory prefix.",
+                        },
+                    },
+                    "required": ["goal", "analysis_plan", "python_code"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "inspect_data",
                 "description": (
                     "Instantly inspect an AnnData (.h5ad) file's metadata — cell/gene counts, "
@@ -1815,55 +2064,50 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             logger.info(f"Resolved input path: {resolved_path}")
             audit("file_resolve", file_path=str(resolved_path), original=file_path_arg)
 
-    # --- Auto-routing via orchestrator ---
+    # --- Auto-routing via capability resolver ---
     if skill_key == "auto":
-        orch_script = OMICSCLAW_DIR / "skills" / "orchestrator" / "omics_orchestrator.py"
-        if not orch_script.exists():
-            return "Error: omics-orchestrator not found."
+        from omicsclaw.core.capability_resolver import resolve_capability
 
-        orch_input = query
+        capability_input = query
         if resolved_path:
-            orch_input = str(resolved_path)
+            capability_input = str(resolved_path)
         elif mode == "file":
             for _cid, info in received_files.items():
-                orch_input = info["path"]
+                capability_input = info["path"]
                 break
-        if not orch_input:
+
+        if not capability_input:
             return "Error: skill='auto' requires either a file, a file_path, or a query to route."
 
         try:
-            orch_cmd = [PYTHON, str(orch_script)]
-            if query:
-                orch_cmd.extend(["--query", query])
-            else:
-                orch_cmd.extend(["--input", orch_input])
-            orch_cmd.extend(["--output", str(OUTPUT_DIR / "orchestrator_auto")])
-
-            proc = await asyncio.create_subprocess_exec(
-                *orch_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(orch_script.parent),
+            decision = resolve_capability(
+                query or capability_input,
+                file_path=str(resolved_path or capability_input or ""),
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                return f"Orchestrator error: {stderr.decode()[-500:]}"
-
-            result_json = OUTPUT_DIR / "orchestrator_auto" / "result.json"
-            if result_json.exists():
-                routing = json.loads(result_json.read_text())
-                detected = routing.get("data", {}).get("detected_skill", "")
-                if detected:
-                    skill_key = detected
-                    logger.info(f"Auto-routed to: {skill_key}")
-                else:
-                    return f"Orchestrator could not determine a skill. Output: {stdout.decode()[:500]}"
+            if decision.chosen_skill:
+                if getattr(decision, "should_create_skill", False):
+                    return (
+                        "This request is asking to add a reusable OmicsClaw skill.\n\n"
+                        "Use create_omics_skill instead of auto-running an analysis skill."
+                    )
+                skill_key = decision.chosen_skill
+                logger.info(
+                    "Auto-routed via capability resolver to: %s (%s, %.2f)",
+                    skill_key,
+                    decision.coverage,
+                    decision.confidence,
+                )
             else:
-                return f"Orchestrator completed but no result.json found. stdout: {stdout.decode()[:500]}"
-        except asyncio.TimeoutError:
-            return "Error: orchestrator timed out."
+                missing = "; ".join(decision.missing_capabilities) or "no matching skill"
+                return (
+                    "No existing OmicsClaw skill fully matches this request.\n"
+                    f"Coverage: {decision.coverage}\n"
+                    f"Reason: {missing}\n\n"
+                    "If the user wants a reusable repository skill, use create_omics_skill. "
+                    "Otherwise use web_method_search and custom_analysis_execute for controlled fallback."
+                )
         except Exception as e:
-            return f"Error running orchestrator: {e}"
+            return f"Error resolving skill automatically: {e}"
 
     # --- Resolve input for file/path mode ---
     input_path = str(resolved_path) if resolved_path else None
@@ -3016,6 +3260,168 @@ async def execute_consult_knowledge(args: dict, **kwargs) -> str:
         return f"Error querying knowledge base: {e}"
 
 
+async def execute_resolve_capability(args: dict, **kwargs) -> str:
+    """Resolve whether a request maps to an existing skill or needs fallback."""
+    try:
+        from omicsclaw.core.capability_resolver import resolve_capability
+
+        query = args.get("query", "")
+        if not query:
+            return "Error: 'query' parameter is required."
+
+        file_path_arg = args.get("file_path", "")
+        resolved_path = validate_input_path(file_path_arg) if file_path_arg else None
+        decision = resolve_capability(
+            query,
+            file_path=str(resolved_path or file_path_arg or ""),
+            domain_hint=args.get("domain_hint", ""),
+        )
+        return decision.to_json()
+    except Exception as e:
+        logger.error(f"Capability resolution failed: {e}", exc_info=True)
+        return f"Error resolving capability: {e}"
+
+
+async def execute_create_omics_skill(args: dict, **kwargs) -> str:
+    """Create a new OmicsClaw skill scaffold inside the repository."""
+    try:
+        from omicsclaw.core.skill_scaffolder import create_skill_scaffold
+
+        request = args.get("request", "")
+        domain = args.get("domain", "")
+        if not request:
+            return "Error: 'request' parameter is required."
+
+        result = create_skill_scaffold(
+            request=request,
+            domain=domain,
+            skill_name=args.get("skill_name", ""),
+            summary=args.get("summary", ""),
+            source_analysis_dir=args.get("source_analysis_dir", ""),
+            promote_from_latest=bool(args.get("promote_from_latest", False)),
+            output_root=OUTPUT_DIR,
+            input_formats=args.get("input_formats") or [],
+            primary_outputs=args.get("primary_outputs") or [],
+            methods=args.get("methods") or [],
+            trigger_keywords=args.get("trigger_keywords") or [],
+            create_tests=bool(args.get("create_tests", True)),
+        )
+        created = "\n".join(f"- {path}" for path in result.created_files or [])
+        return (
+            "Created OmicsClaw skill scaffold.\n"
+            f"Skill: {result.skill_name}\n"
+            f"Domain: {result.domain}\n"
+            f"Directory: {result.skill_dir}\n"
+            f"Registry refreshed: {result.registry_refreshed}\n"
+            f"Source analysis: {args.get('source_analysis_dir') or ('<latest autonomous analysis>' if args.get('promote_from_latest') else '<none>')}\n"
+            "Files:\n"
+            f"{created}"
+        )
+    except FileExistsError as e:
+        return f"Error creating OmicsClaw skill: {e}"
+    except Exception as e:
+        logger.error(f"Create OmicsClaw skill failed: {e}", exc_info=True)
+        return f"Error creating OmicsClaw skill: {e}"
+
+
+async def execute_web_method_search(args: dict, **kwargs) -> str:
+    """Search the web for methods/docs to support custom analysis fallback."""
+    try:
+        from omicsclaw.research import search_web_markdown
+
+        query = args.get("query", "")
+        if not query:
+            return "Error: 'query' parameter is required."
+
+        max_results = int(args.get("max_results", 3) or 3)
+        topic = args.get("topic", "general") or "general"
+        return await search_web_markdown(query, max_results=max_results, topic=topic)
+    except ImportError as e:
+        return (
+            "Error: web search dependencies are not installed. "
+            'Install with: pip install -e ".[autonomous]" or pip install -e ".[research]". '
+            f"Details: {e}"
+        )
+    except Exception as e:
+        logger.error(f"Web method search failed: {e}", exc_info=True)
+        return f"Error searching the web for methods: {e}"
+
+
+async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
+    """Run custom analysis code in a restricted notebook sandbox."""
+    try:
+        from omicsclaw.core.capability_resolver import resolve_capability
+        from omicsclaw.execution import run_autonomous_analysis
+
+        goal = args.get("goal", "")
+        analysis_plan = args.get("analysis_plan", "")
+        python_code = args.get("python_code", "")
+        if not goal or not analysis_plan or not python_code:
+            return "Error: 'goal', 'analysis_plan', and 'python_code' are required."
+
+        file_path_arg = args.get("file_path", "")
+        resolved_path = None
+        if file_path_arg:
+            resolved_path = validate_input_path(file_path_arg)
+            if resolved_path is None:
+                found = discover_file(file_path_arg)
+                if len(found) == 1:
+                    resolved_path = found[0]
+                elif len(found) > 1:
+                    listing = "\n".join(f"  - {f}" for f in found[:8])
+                    return (
+                        f"Multiple files match '{file_path_arg}':\n{listing}\n\n"
+                        "Please specify the full path before custom analysis."
+                    )
+                else:
+                    return f"Error: input file not found or not trusted: {file_path_arg}"
+
+        capability = resolve_capability(
+            f"{goal}\n{analysis_plan}",
+            file_path=str(resolved_path or ""),
+        )
+
+        result = await asyncio.to_thread(
+            run_autonomous_analysis,
+            output_root=str(OUTPUT_DIR),
+            goal=goal,
+            analysis_plan=analysis_plan,
+            python_code=python_code,
+            context=args.get("context", ""),
+            web_context=args.get("web_context", ""),
+            input_file=str(resolved_path or ""),
+            sources=args.get("sources", ""),
+            capability_decision=capability.to_dict(),
+            output_label=args.get("output_label", "autonomous-analysis") or "autonomous-analysis",
+        )
+
+        if not result.get("ok"):
+            return (
+                "Custom analysis failed.\n"
+                f"Output dir: {result.get('output_dir', '<unknown>')}\n"
+                f"Notebook: {result.get('notebook_path', '<unknown>')}\n"
+                f"Error: {result.get('error', 'unknown error')}"
+            )
+
+        preview = str(result.get("output_preview", "") or "")
+        return (
+            "Custom analysis completed.\n"
+            f"Output dir: {result.get('output_dir')}\n"
+            f"Notebook: {result.get('notebook_path')}\n"
+            f"Summary: {result.get('summary_path')}\n"
+            f"Preview:\n{preview or '<no stdout preview>'}"
+        )
+    except ImportError as e:
+        return (
+            "Error: autonomous notebook dependencies are not installed. "
+            'Install with: pip install -e ".[autonomous]" or pip install -e ".[research]". '
+            f"Details: {e}"
+        )
+    except Exception as e:
+        logger.error(f"Custom analysis execution failed: {e}", exc_info=True)
+        return f"Error running custom analysis: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Tool executor registry
 # ---------------------------------------------------------------------------
@@ -3038,6 +3444,10 @@ TOOL_EXECUTORS = {
     "get_file_size": execute_get_file_size,
     "remember": execute_remember,
     "consult_knowledge": execute_consult_knowledge,
+    "resolve_capability": execute_resolve_capability,
+    "create_omics_skill": execute_create_omics_skill,
+    "web_method_search": execute_web_method_search,
+    "custom_analysis_execute": execute_custom_analysis_execute,
     "inspect_data": execute_inspect_data,
 }
 
@@ -3049,7 +3459,7 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 # ---------------------------------------------------------------------------
 
 
-def _sanitize_tool_history(history: list[dict]) -> list[dict]:
+def _sanitize_tool_history(history: list[dict], warn: bool = True) -> list[dict]:
     """Drop orphaned or incomplete tool-call bundles from history."""
     sanitised: list[dict] = []
     pending_bundle: list[dict] | None = None
@@ -3060,10 +3470,11 @@ def _sanitize_tool_history(history: list[dict]) -> list[dict]:
         if pending_bundle is None:
             return
         if drop_incomplete and pending_tool_ids:
-            logger.warning(
-                "Dropped incomplete assistant/tool bundle from history; "
-                f"missing tool outputs for: {sorted(pending_tool_ids)}"
-            )
+            if warn:
+                logger.warning(
+                    "Dropped incomplete assistant/tool bundle from history; "
+                    f"missing tool outputs for: {sorted(pending_tool_ids)}"
+                )
         else:
             sanitised.extend(pending_bundle)
         pending_bundle = None
@@ -3091,7 +3502,8 @@ def _sanitize_tool_history(history: list[dict]) -> list[dict]:
                     flush_pending(drop_incomplete=False)
                 continue
 
-            logger.warning("Dropped orphaned tool message from history")
+            if warn:
+                logger.warning("Dropped orphaned tool message from history")
             continue
 
         flush_pending(drop_incomplete=True)
@@ -3317,11 +3729,26 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         b.get("text", "") for b in (user_content or []) if isinstance(b, dict)
     )
     _skill_hint, _domain_hint = _extract_analysis_hints(_user_text)
+    _capability_context = ""
+    if _should_attach_capability_context(_user_text):
+        try:
+            from omicsclaw.core.capability_resolver import resolve_capability
+
+            decision = resolve_capability(_user_text, domain_hint=_domain_hint)
+            _capability_context = decision.to_prompt_block()
+            if not _skill_hint and decision.chosen_skill:
+                _skill_hint = decision.chosen_skill
+            if not _domain_hint and decision.domain:
+                _domain_hint = decision.domain
+        except Exception as e:
+            logger.warning("Capability resolution context failed (non-fatal): %s", e)
+
     system_prompt = build_system_prompt(
         memory_context=memory_context,
         skill=_skill_hint,
         query=_user_text[:200] if _user_text else "",
         domain=_domain_hint,
+        capability_context=_capability_context,
     )
 
     history = conversations.setdefault(chat_id, [])

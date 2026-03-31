@@ -119,7 +119,25 @@ def _has_notebook_deps():
         return False
 
 
-@pytest.mark.skipif(not _has_notebook_deps(), reason="nbformat/jupyter_client not installed")
+def _has_local_socket_runtime():
+    """Jupyter kernels need loopback sockets; sandboxed CI may forbid them."""
+    try:
+        import socket
+
+        sock = socket.socket()
+        try:
+            sock.bind(("127.0.0.1", 0))
+        finally:
+            sock.close()
+        return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(
+    (not _has_notebook_deps()) or (not _has_local_socket_runtime()),
+    reason="Notebook runtime unavailable (missing deps or local sockets blocked)",
+)
 class TestNotebookSession:
     """Tests for the NotebookSession class."""
 

@@ -985,6 +985,7 @@ async def _stream_llm_response(messages: list[dict]) -> str:
         # Seed history with everything *except* the last user message
         # (llm_tool_loop will append that message itself).
         seed = list(messages[:-1]) if len(messages) > 1 else []
+        seed = core._sanitize_tool_history(seed, warn=False)
         core.conversations[_INTERACTIVE_USER] = seed
         core._conversation_access[_INTERACTIVE_USER] = __import__("time").time()
 
@@ -1094,7 +1095,11 @@ async def _stream_llm_response(messages: list[dict]) -> str:
                     status.stop()
                     sys.stdout.write("\r\033[K")
                     console.print("\n[yellow]Conversation interrupted - tell the model what to do differently. Something went wrong?[/yellow]")
-                    
+
+                    core.conversations[_INTERACTIVE_USER] = core._sanitize_tool_history(
+                        list(core.conversations.get(_INTERACTIVE_USER, [])),
+                        warn=False,
+                    )
                     # Ensure the conversations array captures the interruption
                     core.conversations[_INTERACTIVE_USER].append({
                         "role": "user",
@@ -1117,7 +1122,11 @@ async def _stream_llm_response(messages: list[dict]) -> str:
         _display_usage_stats(core, usage_before)
 
         # Sync the updated conversation history back to our messages list
-        updated_msgs = list(core.conversations.get(_INTERACTIVE_USER, []))
+        updated_msgs = core._sanitize_tool_history(
+            list(core.conversations.get(_INTERACTIVE_USER, [])),
+            warn=False,
+        )
+        core.conversations[_INTERACTIVE_USER] = list(updated_msgs)
         messages.clear()
         messages.extend(updated_msgs)
 

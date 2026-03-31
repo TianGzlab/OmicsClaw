@@ -81,10 +81,21 @@ class NotebookSession:
         from jupyter_client import KernelManager
 
         self.km = KernelManager(kernel_name=kernel_name)
-        self.km.start_kernel(cwd=str(self.path.parent))
-        self.kc = self.km.client()
-        self.kc.start_channels()
-        self.kc.wait_for_ready(timeout=_KERNEL_TIMEOUT)
+        try:
+            self.km.start_kernel(cwd=str(self.path.parent))
+            self.kc = self.km.client()
+            self.kc.start_channels()
+            self.kc.wait_for_ready(timeout=_KERNEL_TIMEOUT)
+        except Exception as e:
+            try:
+                self.km.shutdown_kernel(now=True)
+            except Exception:
+                pass
+            raise RuntimeError(
+                "NotebookSession could not start a local Jupyter kernel. "
+                "This usually means notebook runtime dependencies are missing "
+                "or local socket permissions are blocked in the current environment."
+            ) from e
 
         # Bootstrap: set up matplotlib inline, suppress warnings, inject PYTHONPATH,
         # and provide the load_skill() helper that handles hyphenated skill dirs.
@@ -152,10 +163,19 @@ class NotebookSession:
         from jupyter_client import KernelManager
 
         self.km = KernelManager()
-        self.km.start_kernel(cwd=str(self.path.parent))
-        self.kc = self.km.client()
-        self.kc.start_channels()
-        self.kc.wait_for_ready(timeout=_KERNEL_TIMEOUT)
+        try:
+            self.km.start_kernel(cwd=str(self.path.parent))
+            self.kc = self.km.client()
+            self.kc.start_channels()
+            self.kc.wait_for_ready(timeout=_KERNEL_TIMEOUT)
+        except Exception as e:
+            try:
+                self.km.shutdown_kernel(now=True)
+            except Exception:
+                pass
+            raise RuntimeError(
+                "NotebookSession could not restart the local Jupyter kernel."
+            ) from e
 
         # Re-run the same bootstrap (includes load_skill helper)
         bootstrap = (
@@ -492,4 +512,3 @@ class NotebookSession:
                 parts.append("\n".join(out.get("traceback", [])))
         joined = "\n".join(parts).strip()
         return self._trim(joined, limit)
-

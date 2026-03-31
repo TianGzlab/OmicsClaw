@@ -18,6 +18,11 @@ def test_tools_generated():
     # Just checking an extension loaded dynamically
     assert ".vcf" in OMICS_EXTENSIONS
 
+    assert any(t["function"]["name"] == "resolve_capability" for t in TOOLS)
+    assert any(t["function"]["name"] == "create_omics_skill" for t in TOOLS)
+    assert any(t["function"]["name"] == "web_method_search" for t in TOOLS)
+    assert any(t["function"]["name"] == "custom_analysis_execute" for t in TOOLS)
+
 
 def _assert_array_schemas_define_items(schema):
     if isinstance(schema, dict):
