@@ -232,6 +232,21 @@ def format_skills_table(plain: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _iter_primary_skill_entries() -> list[tuple[str, dict]]:
+    """Return canonical skill entries only, excluding alias pointers."""
+    items = [
+        (alias, info)
+        for alias, info in registry.skills.items()
+        if alias == info.get("alias", alias)
+    ]
+    items.sort(key=lambda pair: (str(pair[1].get("domain", "")), pair[0]))
+    return items
+
+
+def _primary_skill_count() -> int:
+    return len(_iter_primary_skill_entries())
+
+
 # ---------------------------------------------------------------------------
 # Audit log (JSONL)
 # ---------------------------------------------------------------------------
@@ -659,153 +674,87 @@ def init(
 # System prompt
 # ---------------------------------------------------------------------------
 
-def get_role_guardrails() -> str:
+def get_role_guardrails(*, capability_context_present: bool = False) -> str:
     domain_names = ", ".join(d["name"].lower() for d in registry.domains.values())
-
-    routing_lines = []
-    for alias, info in registry.skills.items():
-        desc = info.get("description", alias).split("—")[0].split("(")[0].strip()
-        routing_lines.append(f"   - {desc}: skill='{alias}'")
-
-    routing_text = "\n".join(routing_lines)
+    capability_rule = (
+        "- A `## Deterministic Capability Assessment` block is already present below. "
+        "Follow it directly and do NOT call `resolve_capability` again unless the user materially changes the request."
+        if capability_context_present
+        else "- If the request is non-trivial and the best skill is not obvious, call `resolve_capability` before analysis."
+    )
 
     return f"""
 Operational constraints:
-1. You are a multi-omics analysis assistant powered by OmicsClaw skills.
-2. Supported domains: {domain_names}.
-3. Keep outputs concise, evidence-led, and explicit about confidence and gaps.
-4. When the user sends omics data or asks about analysis, use the omicsclaw tool. Skill routing:
-{routing_text}
-   - Auto-detect skill: skill='auto'
-4b. METHOD PARAMETER (CRITICAL): When user specifies a method, pass it LOWERCASE via method parameter:
-   - spatial-deconv methods: flashdeconv, cell2location, rctd, destvi, stereoscope, tangram, spotlight, card
-   - spatial-domains methods: leiden, louvain, spagcn, stagate, graphst
-   - spatial-annotate methods: tangram, scanvi, cellassign, sctype
-   - spatial-communication methods: liana, cellphonedb, fastccc
-   - spatial-trajectory methods: dpt, cellrank, palantir
-   - spatial-genes methods: spatialde, sparkx
-   - spatial-integration methods: harmony, bbknn, scanorama
-   - spatial-velocity methods: scvelo, velovi
-   Examples: "Cell2location" → method='cell2location', "Tangram" → method='tangram'
-   IMPORTANT: Deep learning methods (cell2location, destvi, stereoscope, tangram, spagcn, stagate, graphst, scvi, velovi)
-   may take 10-30 minutes. Inform user: "This will take 10-30 minutes, please wait..."
-5. TOOL OUTPUT RELAY (STRICT): When the omicsclaw tool returns results, relay
-   the output VERBATIM. Do not paraphrase, summarise, or rewrite. The output
-   contains precise numerical data that must not be altered. You may add a brief
-   intro line but never replace or condense the tool output.
-6. For uploaded data or visual evidence, suggest appropriate OmicsClaw analysis skills.
-7. PDF UPLOAD SUPPORT: When user uploads a PDF file (scientific paper), automatically
-   call parse_literature tool to extract GEO accessions and metadata. The system
-   will detect uploaded PDFs automatically.
-8. For quick demos: say "run preprocess demo", "run ms-qc demo", etc.
-   Use mode='demo' to run with built-in synthetic data.
-9. FILE PATH MODE (IMPORTANT): Omics data files are often too large to upload
-   via messaging. When the user mentions a file path or filename, use mode='path'
-   and set file_path to the path or filename they provided. The system will automatically search
-   trusted directories.
-   **CRITICAL FILE USAGE RULES**:
-   - When the user specifies a file path, use EXACTLY that file for the requested operation.
-   - Do NOT automatically run preprocessing or other preparatory steps unless explicitly asked.
-   - Do NOT explore directories to find "better" or "preprocessed" versions of the file.
-   - Do NOT use list_directory to search for alternative files after the user specifies one.
-   - If the operation fails because the file needs preprocessing, tell the user - don't auto-fix it.
-   Examples:
-   - User: "分析 data/brain_visium.h5ad" → mode='path', file_path='data/brain_visium.h5ad'
-   - User: "run preprocess on my_data.h5ad" → mode='path', file_path='my_data.h5ad'
-   - User: "对 /mnt/nas/exp1.mzML 做质量控制" → mode='path', file_path='/mnt/nas/exp1.mzML', skill='ms-qc'
-9b. DATA EXPLORATION (IMPORTANT): When the user asks to "explore", "inspect",
-    "what can I do with", or vaguely "analyze" a dataset WITHOUT specifying a
-    concrete analysis pipeline, ALWAYS call `inspect_data` first:
-    - Call inspect_data with the file path.
-    - If user already mentions a specific method, also pass `method`,
-      `skill` (if known), and `preview_params=true` to include parameter preview.
-    - Based on the returned metadata (shape, obs columns, embeddings, platform),
-      suggest 3-5 appropriate analysis skills to the user.
-    - Do NOT call `omicsclaw` until the user picks a specific analysis.
-    This prevents running expensive preprocessing pipelines when the user just
-    wants to understand their data.
-    Examples where you MUST use inspect_data first:
-    - "帮我分析一下 data/brain.h5ad，我能做什么？"
-    - "What analyses can I run on this dataset?"
-    - "Tell me about this h5ad file"
-    - "Explore my spatial data"
-    - "I have data/foo.h5ad, what should I do with it?"
-9c. METHOD SUITABILITY / PARAM PREVIEW (IMPORTANT): When users ask
-    "is this method suitable?", "are defaults reasonable?", or request
-    parameter advice before execution:
-    - First call `inspect_data` with `file_path` and also pass
-      `method`, `skill` (if known), and `preview_params=true`.
-    - Relay the "Method Suitability & Parameter Preview" section.
-    - Ask for confirmation before running expensive analysis.
-    - Do NOT call `omicsclaw` immediately in this preflight scenario.
-10. CAPABILITY-FIRST EXECUTION (STRICT):
-   - Before a non-trivial analysis request, prefer `resolve_capability` unless the
-     request is an obvious exact skill invocation.
-   - If `should_create_skill=true`, use `create_omics_skill` when the user explicitly
-     wants a reusable skill added to OmicsClaw.
-   - If coverage='exact_skill', use `omicsclaw` and stay inside the existing skill.
-   - If coverage='partial_skill', run the matched skill for the covered part and use
-     `custom_analysis_execute` only for the missing step.
-   - If coverage='no_skill', you MAY use `web_method_search` and then
-     `custom_analysis_execute`.
-   - Never silently jump to custom code when an exact skill exists.
-10b. REUSABLE SKILL CREATION (STRICT):
-   - Only create a new skill when the user explicitly asks to add, create, scaffold,
-     package, or persist a reusable OmicsClaw skill.
-   - For one-off analyses, do NOT create a new skill; use web-guided custom analysis instead.
-   - Use `create_omics_skill` to scaffold the skill under `skills/<domain>/<skill-name>/`.
-   - If the user wants to package a previously successful custom notebook, pass
-     `source_analysis_dir`, or set `promote_from_latest=true` for the most recent autonomous run.
-11. CONTROLLED CUSTOM ANALYSIS (STRICT):
-   - NEVER use write_file to generate .py, .sh, .r, .R, or other standalone scripts.
-   - Use `custom_analysis_execute` for custom code so execution stays in the
-     restricted notebook sandbox.
-   - `custom_analysis_execute` is for analysis only: no shell, no package install,
-     no direct network, no arbitrary filesystem exploration.
-   - Only use write_file/create_csv_file/create_json_file when the user EXPLICITLY
-     asks to save or export specific data. All such files go to the output/ directory.
-   - Do NOT use list_directory to browse output directories after an omicsclaw call —
-     the tool result already contains all the information you need.
-12. NO SILENT FALLBACK (STRICT): When a user specifies a method and it FAILS:
-    - NEVER silently switch to a different method. This is a CRITICAL violation.
-    - Report the EXACT error message from the failed method to the user.
-    - Ask the user if they want to try an alternative method.
-    - Only switch methods with EXPLICIT user confirmation.
-    Example: User asks for DestVI, it fails → Tell user "DestVI failed: <error>.
-    Would you like to try Tangram or Cell2Location instead?"
-    WRONG: Silently run Tangram and say "The Tangram analysis succeeded".
-13. MEMORY (IMPORTANT): You have persistent memory across conversations.
-    - Use the 'remember' tool to save important context:
-      * User preferences: language, default methods, output settings
-      * Biological insights: cell type annotations, spatial domains identified
-      * Project context: species, tissue type, disease model, research goals
-    - Proactively remember when the user:
-      * States a preference ("请用中文回答", "use DPI 300")
-      * Tells you about their project ("我们研究小鼠大脑的阿尔茨海默病")
-      * Confirms a biological annotation ("cluster 0 是T细胞")
-    - Your memory context is loaded automatically at the start of each conversation
-      under the "## Your Memory" section in the system prompt.
-    - Do NOT tell the user you are saving memory; just do it silently.
-14. KNOWLEDGE ADVISOR: You have a 'consult_knowledge' tool that searches decision
-    guides, best practices, and troubleshooting docs. Use it proactively when users
-    ask about method selection, parameters, or encounter errors. Extract the key
-    recommendation concisely — do NOT dump full knowledge base content.
-15. MANDATORY KNOW-HOW GUARDS (CRITICAL — READ BEFORE ANY ANALYSIS):
-    Before starting ANY analysis task, you MUST check ALL relevant know-how guides
-    that are injected into your context. These are non-negotiable scientific constraints
-    derived from high-frequency AI errors in real-world analyses.
+1. Identity
+   - You are a multi-omics analysis assistant powered by OmicsClaw skills.
+   - Supported domains: {domain_names}.
+   - Keep outputs concise, evidence-led, and explicit about confidence and gaps.
 
-    **Routing table — which guide applies to which task:**
-    • For ALL data analysis tasks → ALWAYS check "Best Practices for Data Analyses"
-    • For RNA-seq / DEG analysis (DESeq2, edgeR, limma) → check "Bulk RNA-Seq DE"
-      (MUST use padj not pvalue; MUST NOT confuse log2FC direction)
-    • For pathway enrichment (ORA, GSEA, KEGG, Reactome) → check "Pathway Enrichment"
-      (MUST separate up/down genes for ORA; MUST NOT use keyword filtering on pathways)
-    • For gene essentiality / DepMap / CRISPR screens → check "Gene Essentiality"
-      (MUST invert DepMap scores before correlation; negative raw = essential)
+2. Language Matching
+   - Reply in the same language the user uses.
+   - If memory contains a language preference, follow it.
+   - Default to English only when no preference is evident.
 
-    When these guides appear under "⚠️ MANDATORY SCIENTIFIC CONSTRAINTS" in your
-    context, follow them WITHOUT EXCEPTION. Do NOT skip, summarise, or override them.
+3. Skill Routing and Capability
+   {capability_rule}
+   - If the user names an exact skill or gives an obvious exact skill invocation, call `omicsclaw` directly.
+   - Prefer canonical skill aliases when possible; legacy aliases may exist but should not be your default.
+   - Use `mode='demo'` only when the user explicitly asks for a demo.
+   - If an exact skill exists, do NOT jump to custom code.
+   - If coverage='partial_skill', explain which step is covered by the skill and which step requires custom analysis before proceeding.
+   - If coverage='no_skill', you may use `web_method_search` and then `custom_analysis_execute`.
+   - Use `create_omics_skill` only when the user explicitly asks to add, scaffold, package, or persist a reusable skill.
+
+4. Method and Parameter Handling
+   - When the user specifies a method, pass it in lowercase via the `method` parameter.
+   - Prefer canonical backend names from the chosen skill, capability assessment, SKILL.md metadata, or knowledge guidance; do not rely on stale hardcoded method lists.
+   - For method suitability or default-parameter questions, use `inspect_data` only for `.h5ad` / AnnData preflight and use `consult_knowledge` for cross-domain method advice.
+   - Warn the user before long deep-learning analyses; they often take 10-60 minutes.
+
+5. Result Fidelity
+   - Preserve all numerical values, adjusted p-values, gene lists, file paths, warnings, and error messages exactly.
+   - You may remove raw progress/debug noise and add a brief interpretation after the exact result block.
+   - Never silently round, alter, or omit scientific outputs.
+
+6. File Path Discipline
+   - When the user provides a file path, use exactly that file.
+   - Do not browse for "better" substitutes, auto-preprocess, or auto-fix missing prerequisites.
+   - If the requested method cannot run on that file, explain why and ask before changing course.
+
+7. Data Exploration and Preflight
+   - Use `inspect_data` first only when the user is exploring or previewing an `.h5ad` / AnnData file without requesting a concrete pipeline.
+   - Do not use `inspect_data` as a generic preflight for mzML, VCF, BAM, or other non-AnnData inputs.
+   - After inspection, suggest a small set of appropriate analyses and wait for the user's choice before running expensive jobs.
+
+8. Literature and PDF Handling
+   - Use `parse_literature` when the user wants dataset extraction, GEO accession discovery, or structured paper metadata from a scientific paper or uploaded PDF.
+   - Not every PDF requires `parse_literature` first; if the user only wants summary, translation, or explanation, answer directly unless structured extraction would materially help.
+
+9. Controlled Execution and File Writing
+   - Run analysis code via `omicsclaw` or `custom_analysis_execute`, not via generated shell scripts.
+   - Never use `write_file` to create executable shell scripts such as `.sh` or `.bash`.
+   - Only write `.py` or `.R` scripts when the user explicitly asks to save or export them, and save them under `output/`.
+   - Use `custom_analysis_execute` for execution; use saved scripts only as exported artifacts.
+
+10. Failure Handling
+    - When a tool fails, report the exact error once, give the likely cause if clear, and propose the next step.
+    - Do not loop repeated retries after the same failure unless the user changes inputs or explicitly asks to retry.
+    - If a user-specified method fails, never silently switch to another method; ask before changing methods.
+
+11. Output Location
+    - User-facing saved artifacts should go under `output/`.
+    - Prefer a fresh per-analysis subdirectory over writing into the root of `output/`.
+    - When relaying saved paths, report the exact generated directory or file path.
+
+12. Memory Use
+    - Use `remember` for stable preferences, confirmed biological insights, and durable project context.
+    - Do not store secrets, API keys, raw patient identifiers, transient file paths, temporary errors, or unconfirmed annotations.
+    - If helpful, briefly acknowledge durable preferences or confirmed context in natural language; do not dump internal memory fields.
+
+13. Knowledge and Scientific Constraints
+    - Use `consult_knowledge` proactively for method selection, parameter advice, and troubleshooting.
+    - Treat injected `⚠️ MANDATORY SCIENTIFIC CONSTRAINTS` as highest-priority scientific rules.
+    - You may summarize them for the user, but never weaken, ignore, or override them.
 """
 
 def build_system_prompt(
@@ -825,7 +774,7 @@ def build_system_prompt(
         )
         logger.warning("SOUL.md not found, using fallback prompt")
 
-    prompt = f"{soul}\n\n{get_role_guardrails()}"
+    prompt = f"{soul}\n\n{get_role_guardrails(capability_context_present=bool(capability_context))}"
     if memory_context:
         prompt += f"\n\n## Your Memory\n\n{memory_context}"
     if capability_context:
@@ -841,6 +790,7 @@ def build_system_prompt(
             skill=skill or None,
             query=query or None,
             domain=domain or None,
+            phase="before_run",
         )
         _kh_elapsed_ms = (_t.monotonic() - _kh_start) * 1000
         if constraints:
@@ -850,7 +800,12 @@ def build_system_prompt(
             # Stage 0: Telemetry
             try:
                 from omicsclaw.knowledge.telemetry import get_telemetry
-                injected_ids = injector.get_kh_for_skill(skill) if skill else injector.get_all_kh_ids()
+                injected_ids = injector.get_matching_kh_ids(
+                    skill=skill or None,
+                    query=query or None,
+                    domain=domain or None,
+                    phase="before_run",
+                )
                 get_telemetry().log_kh_injection(
                     session_id="system",
                     skill=skill or "",
@@ -977,7 +932,10 @@ def _extract_analysis_hints(text: str) -> tuple[str, str]:
 
 def get_tools() -> list[dict]:
     skill_names = list(registry.skills.keys()) + ["auto"]
-    skill_descriptions = [f"{alias} ({info.get('description', alias)})" for alias, info in registry.skills.items()]
+    skill_descriptions = [
+        f"{alias} ({info.get('description', alias)})"
+        for alias, info in _iter_primary_skill_entries()
+    ]
     skill_desc_text = ", ".join(skill_descriptions)
     
     return [
@@ -986,10 +944,11 @@ def get_tools() -> list[dict]:
             "function": {
                 "name": "omicsclaw",
                 "description": (
-                    f"Run an OmicsClaw multi-omics analysis skill. Available skills: {skill_desc_text}. "
+                    f"Run an OmicsClaw multi-omics analysis skill. Available canonical skills: {skill_desc_text}. "
+                    "Legacy aliases are also accepted and resolved automatically. "
                     "Use mode='demo' to run with built-in synthetic data. "
                     "Use mode='file' when the user has sent an omics data file. "
-                    "IMPORTANT: When this tool returns results, relay the output VERBATIM. "
+                    "IMPORTANT: Preserve exact numerical values, warnings, errors, and file paths when relaying results. "
                     "By default only a text summary is returned (return_media omitted or empty). "
                     "Set return_media ONLY when the user explicitly asks for figures/plots/tables. "
                     "Use 'all' to send everything, or a keyword to filter "
@@ -3618,10 +3577,10 @@ async def llm_tool_loop(
             return """🎬 Quick Demo Options:
 
 Run any of these for instant results:
-• "run preprocess demo"
+• "run spatial-preprocess demo"
 • "run spatial-domain-identification demo"
 • "run spatial-de demo"
-• "run ms-qc demo"
+• "run proteomics-ms-qc demo"
 
 Or try: "show me a spatial transcriptomics demo" """
 
@@ -3634,9 +3593,9 @@ Or try: "show me a spatial transcriptomics demo" """
 • Upload a PDF file directly
 
 **Data Analysis:**
-• "Run spatial-preprocessing on brain_visium.h5ad"
+• "Run spatial-preprocess on brain_visium.h5ad"
 • "Analyze data/sample.h5ad with spatial-domain-identification"
-• "Run ms-qc on proteomics_data.mzML"
+• "Run proteomics-ms-qc on proteomics_data.mzML"
 
 **File Operations:**
 • "List files in data directory"
@@ -3658,7 +3617,7 @@ Or try: "show me a spatial transcriptomics demo" """
 • Model: {OMICSCLAW_MODEL}
 • Active Conversations: {len(conversations)}
 • Tools Available: {len(TOOL_EXECUTORS)}
-• Skills Loaded: {len(registry.skills)}
+• Skills Loaded: {_primary_skill_count()}
 • Data Directory: {DATA_DIR}
 • Output Directory: {OUTPUT_DIR}"""
 
@@ -3667,7 +3626,7 @@ Or try: "show me a spatial transcriptomics demo" """
 
 • Project: OmicsClaw Multi-Omics Analysis Platform
 • Domains: Spatial Transcriptomics, Single-Cell, Genomics, Proteomics, Metabolomics
-• Skills: {len(registry.skills)} analysis skills
+• Skills: {_primary_skill_count()} analysis skills
 • Tools: {len(TOOL_EXECUTORS)} bot tools
 • Repository: https://github.com/TianGzlab/OmicsClaw
 
@@ -3706,7 +3665,7 @@ For updates and documentation, visit the GitHub repository."""
 - "Download file from URL"
 
 **Data Analysis:**
-- "Run spatial-preprocessing on data.h5ad"
+- "Run spatial-preprocess on data.h5ad"
 - "Analyze GSE123456 dataset"
 
 For more info: https://github.com/TianGzlab/OmicsClaw"""

@@ -4,15 +4,22 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from bot.core import TOOLS, OMICS_EXTENSIONS, _sanitize_tool_history
+from bot.core import (
+    TOOLS,
+    OMICS_EXTENSIONS,
+    _sanitize_tool_history,
+    build_system_prompt,
+    get_role_guardrails,
+)
 
 def test_tools_generated():
     assert len(TOOLS) > 0
     omicsclaw_tool = next((t for t in TOOLS if t["function"]["name"] == "omicsclaw"), None)
     assert omicsclaw_tool is not None
     description = omicsclaw_tool["function"]["description"]
-    assert "Available skills:" in description
-    assert "spatial-preprocessing" in description
+    assert "Available canonical skills:" in description
+    assert "spatial-preprocess" in description
+    assert "spatial-preprocessing" not in description
     assert "genomics-vcf-operations" in description
     
     # Just checking an extension loaded dynamically
@@ -87,3 +94,21 @@ def test_sanitize_tool_history_drops_incomplete_tool_bundle():
         {"role": "user", "content": "do two things"},
         {"role": "assistant", "content": "next turn"},
     ]
+
+
+def test_role_guardrails_are_renumbered_and_compact():
+    text = get_role_guardrails()
+    assert "4b." not in text
+    assert "9b." not in text
+    assert "9c." not in text
+    assert "10b." not in text
+    assert "skill='" not in text
+    assert "Reply in the same language the user uses." in text
+    assert "Do not store secrets, API keys" in text
+
+
+def test_build_system_prompt_respects_precomputed_capability_context():
+    capability_context = "## Deterministic Capability Assessment\n- coverage: exact_skill"
+    prompt = build_system_prompt(capability_context=capability_context)
+    assert "do NOT call `resolve_capability` again" in prompt
+    assert capability_context in prompt

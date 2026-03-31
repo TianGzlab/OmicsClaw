@@ -62,6 +62,8 @@ class OmicsRegistry:
         for child in domain_path.iterdir():
             if not child.is_dir() or child.name.startswith(('.', '__', '_')):
                 continue
+            if domain_path.name != "orchestrator" and child.name == "orchestrator":
+                continue
 
             if cls._looks_like_skill_dir(child):
                 yield child
@@ -69,6 +71,8 @@ class OmicsRegistry:
                 # Subdomain container (e.g., scrna/, scatac/, multiome/)
                 for grandchild in child.iterdir():
                     if not grandchild.is_dir() or grandchild.name.startswith(('.', '__', '_')):
+                        continue
+                    if domain_path.name != "orchestrator" and grandchild.name == "orchestrator":
                         continue
                     if cls._looks_like_skill_dir(grandchild):
                         yield grandchild
@@ -364,7 +368,7 @@ _HARDCODED_DOMAINS = {
     "spatial": {
         "name": "Spatial Transcriptomics",
         "primary_data_types": ["h5ad", "h5", "zarr", "loom"],
-        "skill_count": 16,
+        "skill_count": 15,
     },
     "singlecell": {
         "name": "Single-Cell Omics",
