@@ -36,7 +36,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.method_config import (
     MethodConfig,
@@ -49,8 +55,56 @@ from skills.singlecell._lib import trajectory as sc_traj
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "singlecell-velocity"
+SKILL_NAME = "sc-velocity"
 SKILL_VERSION = "0.2.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
+            result_payload=result_payload,
+            preferred_method=summary.get("mode", "stochastic"),
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
+            result_payload=result_payload,
+            preferred_method=summary.get("mode", "stochastic"),
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 # ---------------------------------------------------------------------------
 # Method registry
@@ -84,6 +138,11 @@ _CLI_TO_MODE = {
     "scvelo_stochastic": "stochastic",
     "scvelo_dynamical": "dynamical",
     "scvelo_steady_state": "steady_state",
+}
+_MODE_ALIAS_MAP = {
+    "stochastic": "scvelo_stochastic",
+    "dynamical": "scvelo_dynamical",
+    "steady_state": "scvelo_steady_state",
 }
 
 # ---------------------------------------------------------------------------
@@ -266,21 +325,34 @@ def generate_demo_data():
     """
     import scanpy as sc
 
-    logger.info("Generating synthetic demo data with spliced/unspliced layers...")
-
-    np.random.seed(42)
-    n_cells = 500
-    n_genes = 500
-
-    # Generate synthetic counts
-    spliced = np.random.negative_binomial(5, 0.1, size=(n_cells, n_genes)).astype(np.float32)
-    unspliced = np.random.negative_binomial(2, 0.15, size=(n_cells, n_genes)).astype(np.float32)
-
-    adata = sc.AnnData(
-        X=spliced,
-        obs=pd.DataFrame(index=[f"cell_{i}" for i in range(n_cells)]),
-        var=pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)]),
-    )
+    logger.info("Generating demo data with spliced/unspliced layers...")
+    try:
+        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        logger.info("Loaded demo dataset: %s", demo_path or "scanpy-pbmc3k")
+        adata = adata.copy()
+        if adata.n_obs > 500:
+            adata = adata[:500, :500].copy()
+        elif adata.n_vars > 500:
+            adata = adata[:, :500].copy()
+        if hasattr(adata.X, "toarray"):
+            base_counts = adata.X.toarray().astype(np.float32)
+        else:
+            base_counts = np.asarray(adata.X).astype(np.float32)
+        np.random.seed(42)
+        spliced = np.maximum(base_counts, 0).astype(np.float32)
+        unspliced = np.random.negative_binomial(2, 0.15, size=spliced.shape).astype(np.float32)
+        adata.X = spliced
+    except Exception:
+        np.random.seed(42)
+        n_cells = 500
+        n_genes = 500
+        spliced = np.random.negative_binomial(5, 0.1, size=(n_cells, n_genes)).astype(np.float32)
+        unspliced = np.random.negative_binomial(2, 0.15, size=(n_cells, n_genes)).astype(np.float32)
+        adata = sc.AnnData(
+            X=spliced,
+            obs=pd.DataFrame(index=[f"cell_{i}" for i in range(n_cells)]),
+            var=pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)]),
+        )
 
     # Add layers
     adata.layers["spliced"] = spliced
@@ -318,9 +390,14 @@ def main():
     parser.add_argument("--input", dest="input_path", help="Input AnnData file (.h5ad)")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
-    parser.add_argument("--method", default="scvelo_stochastic",
-                        choices=list(METHOD_REGISTRY.keys()),
-                        help="Velocity method (default: scvelo_stochastic)")
+    parser.add_argument(
+        "--method",
+        "--mode",
+        dest="method",
+        default="scvelo_stochastic",
+        choices=list(METHOD_REGISTRY.keys()) + list(_MODE_ALIAS_MAP.keys()),
+        help="Velocity method; accepts full backend ids or shorthand modes such as 'dynamical'",
+    )
     parser.add_argument("--n-jobs", type=int, default=4, help="Number of parallel jobs")
     args = parser.parse_args()
 
@@ -370,7 +447,8 @@ def main():
         sys.exit(1)
 
     # Validate method & check dependencies
-    method = validate_method_choice(args.method, METHOD_REGISTRY)
+    requested_method = _MODE_ALIAS_MAP.get(args.method, args.method)
+    method = validate_method_choice(requested_method, METHOD_REGISTRY)
     mode = _CLI_TO_MODE[method]
 
     # Parameters
@@ -423,6 +501,8 @@ def main():
 
     # Save data
     output_h5ad = output_dir / "adata_with_velocity.h5ad"
+    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    store_analysis_metadata(adata, SKILL_NAME, method, params)
     adata.write_h5ad(output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
@@ -434,10 +514,21 @@ def main():
     if input_file:
         cmd += f" --input {input_file}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "scvelo"],
+    )
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Summary
     print(f"\n{'='*60}")

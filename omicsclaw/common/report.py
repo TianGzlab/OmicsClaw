@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from omicsclaw.common.checksums import sha256_file
+
+logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
     "OmicsClaw is a research and educational tool for multi-omics "
@@ -183,6 +186,76 @@ def write_output_readme(
     lines.extend(["", "## Notes", "", f"- {DISCLAIMER}"])
     readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return readme_path
+
+
+def write_repro_requirements(
+    output_dir: str | Path,
+    packages: list[str],
+) -> Path:
+    """Write a best-effort pinned requirements file under reproducibility/."""
+    output_dir = Path(output_dir)
+    repro_dir = output_dir / "reproducibility"
+    repro_dir.mkdir(parents=True, exist_ok=True)
+
+    env_lines: list[str] = []
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    for pkg in packages:
+        try:
+            env_lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    req_path = repro_dir / "requirements.txt"
+    req_path.write_text("\n".join(env_lines) + ("\n" if env_lines else ""), encoding="utf-8")
+    return req_path
+
+
+def write_standard_run_artifacts(
+    output_dir: str | Path,
+    *,
+    skill_alias: str,
+    description: str,
+    result_payload: dict[str, Any],
+    preferred_method: str | None,
+    script_path: str | Path,
+    actual_command: list[str],
+) -> None:
+    """Emit notebook and README artifacts when dependencies allow."""
+    output_dir = Path(output_dir)
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=skill_alias,
+            description=description,
+            result_payload=result_payload,
+            preferred_method=preferred_method,
+            script_path=Path(script_path).resolve(),
+            actual_command=actual_command,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook for %s: %s", skill_alias, exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=skill_alias,
+            description=description,
+            result_payload=result_payload,
+            preferred_method=preferred_method,
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md for %s: %s", skill_alias, exc)
 
 
 def generate_report_header(

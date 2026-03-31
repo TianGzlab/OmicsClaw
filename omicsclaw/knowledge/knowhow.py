@@ -252,6 +252,281 @@ _KH_SKILL_MAP: dict[str, dict] = {
         ],
         "domains": ["singlecell"],
     },
+    "KH-sc-filter-guardrails.md": {
+        "label": "Single-Cell Filter Guardrails",
+        "critical_rule": "MUST explain the effective cell and gene filtering thresholds, and distinguish wrapper-level mitochondrial or tissue presets from core Scanpy filtering knobs before running sc-filter",
+        "skills": [
+            "sc-filter",
+        ],
+        "keywords": [
+            "filter cells", "cell filtering", "gene filtering", "qc filtering",
+            "min genes", "max mt", "mitochondrial percentage", "tissue preset",
+            "过滤细胞", "过滤基因", "线粒体比例", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-ambient-removal-guardrails.md": {
+        "label": "Single-Cell Ambient RNA Removal Guardrails",
+        "critical_rule": "MUST match the requested ambient-RNA method to the exact required input artifacts and explain only the currently exposed contamination controls before running sc-ambient-removal",
+        "skills": [
+            "sc-ambient-removal",
+        ],
+        "keywords": [
+            "ambient rna", "ambient removal", "cellbender", "soupx",
+            "background rna", "expected cells", "contamination",
+            "环境 RNA", "背景 RNA", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-doublet-guardrails.md": {
+        "label": "Single-Cell Doublet Guardrails",
+        "critical_rule": "MUST explain the expected doublet rate and method-specific threshold behavior, and must not promise unsupported DoubletFinder or scDblFinder tuning knobs before running sc-doublet-detection",
+        "skills": [
+            "sc-doublet-detection", "sc-doublet",
+        ],
+        "keywords": [
+            "doublet", "scrublet", "doubletfinder", "scdblfinder",
+            "expected doublet rate", "threshold",
+            "双细胞", "双重体", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-batch-integration-guardrails.md": {
+        "label": "Single-Cell Batch Integration Guardrails",
+        "critical_rule": "MUST explain the batch label source and the currently exposed training/runtime knobs, and must not advertise unbundled R integration paths as runnable in this build",
+        "skills": [
+            "sc-batch-integration", "sc-integrate",
+        ],
+        "keywords": [
+            "batch integration", "batch effect", "harmony", "scvi", "scanvi",
+            "bbknn", "scanorama", "fastmnn", "seurat rpca",
+            "批次校正", "整合", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-cell-annotation-guardrails.md": {
+        "label": "Single-Cell Annotation Guardrails",
+        "critical_rule": "MUST explain whether the run is marker-based or CellTypist-based, and must label R fallback methods honestly before running sc-cell-annotation",
+        "skills": [
+            "sc-cell-annotation", "sc-annotate",
+        ],
+        "keywords": [
+            "cell type annotation", "annotate cells", "celltypist", "singler",
+            "scmap", "cluster key", "model",
+            "细胞注释", "细胞类型注释", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-cell-communication-guardrails.md": {
+        "label": "Single-Cell Communication Guardrails",
+        "critical_rule": "MUST verify the cell-type label column and species, and must not claim LIANA or CellChat parameters that the current wrapper does not expose before running sc-cell-communication",
+        "skills": [
+            "sc-cell-communication",
+        ],
+        "keywords": [
+            "cell communication", "cell-cell communication", "ligand receptor",
+            "liana", "cellchat", "species", "cell type key",
+            "细胞通讯", "配体受体", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-de-guardrails.md": {
+        "label": "Single-Cell Differential Expression Guardrails",
+        "critical_rule": "MUST separate exploratory Scanpy marker ranking from sample-aware DESeq2 pseudobulk inference and explain the grouping keys before running sc-de",
+        "skills": [
+            "sc-de",
+        ],
+        "keywords": [
+            "differential expression", "marker genes", "wilcoxon", "mast",
+            "deseq2", "pseudobulk", "group1", "group2",
+            "差异表达", "伪 bulk", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-grn-guardrails.md": {
+        "label": "Single-Cell GRN Guardrails",
+        "critical_rule": "MUST verify that pySCENIC resource files are present and explain only the currently wired workflow-level resource parameters before running sc-grn",
+        "skills": [
+            "sc-grn",
+        ],
+        "keywords": [
+            "grn", "gene regulatory", "pyscenic", "regulon",
+            "tf list", "motif", "cistarget", "grnboost",
+            "调控网络", "转录因子", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-markers-guardrails.md": {
+        "label": "Single-Cell Marker Guardrails",
+        "critical_rule": "MUST explain the grouping column and ranking method, and keep cluster-marker discovery distinct from broader condition-level DE before running sc-markers",
+        "skills": [
+            "sc-markers",
+        ],
+        "keywords": [
+            "marker genes", "find markers", "cluster markers", "wilcoxon",
+            "t-test", "logreg", "groupby",
+            "marker", "标记基因", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-pseudotime-guardrails.md": {
+        "label": "Single-Cell Pseudotime Guardrails",
+        "critical_rule": "MUST separate the trajectory method from the trajectory-gene correlation method and explain root selection before running sc-pseudotime",
+        "skills": [
+            "sc-pseudotime",
+        ],
+        "keywords": [
+            "trajectory", "pseudotime", "dpt", "paga", "root cluster",
+            "root cell", "corr method", "diffusion map",
+            "轨迹", "拟时序", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-velocity-guardrails.md": {
+        "label": "Single-Cell Velocity Guardrails",
+        "critical_rule": "MUST verify spliced and unspliced layers and explain the selected scVelo backend, while distinguishing public mode aliases from internal backend ids before running sc-velocity",
+        "skills": [
+            "sc-velocity",
+        ],
+        "keywords": [
+            "rna velocity", "velocity", "scvelo", "latent time",
+            "dynamical", "stochastic", "steady state",
+            "RNA 速度", "速度", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-filter-guardrails.md": {
+        "label": "Single-Cell Filtering Guardrails",
+        "critical_rule": "MUST explain the effective QC thresholds before running sc-filter and treat tissue presets as wrapper heuristics rather than universal biology rules",
+        "skills": [
+            "sc-filter",
+        ],
+        "keywords": [
+            "single-cell filtering", "qc filtering", "min genes", "max mt percent",
+            "tissue preset", "单细胞过滤", "质控阈值", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-ambient-removal-guardrails.md": {
+        "label": "Single-Cell Ambient RNA Guardrails",
+        "critical_rule": "MUST explain the selected ambient-removal path and its true required inputs before running sc-ambient-removal",
+        "skills": [
+            "sc-ambient-removal",
+        ],
+        "keywords": [
+            "ambient rna", "ambient removal", "cellbender", "soupx",
+            "contamination fraction", "背景污染", "环境rna", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-doublet-detection-guardrails.md": {
+        "label": "Single-Cell Doublet Detection Guardrails",
+        "critical_rule": "MUST explain the expected doublet-rate assumption before running sc-doublet-detection and must not invent unsupported backend-specific tuning knobs",
+        "skills": [
+            "sc-doublet-detection", "sc-doublet",
+        ],
+        "keywords": [
+            "doublet detection", "scrublet", "doubletfinder", "scdblfinder",
+            "expected doublet rate", "双细胞检测", "双细胞", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-batch-integration-guardrails.md": {
+        "label": "Single-Cell Batch Integration Guardrails",
+        "critical_rule": "MUST explain the selected integration backend plus the batch metadata it uses before running sc-batch-integration",
+        "skills": [
+            "sc-batch-integration", "sc-integrate",
+        ],
+        "keywords": [
+            "batch integration", "harmony", "scvi", "scanvi", "bbknn", "scanorama",
+            "batch key", "批次校正", "单细胞整合", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-cell-annotation-guardrails.md": {
+        "label": "Single-Cell Annotation Guardrails",
+        "critical_rule": "MUST explain the selected annotation source and the exact reference/model input before running sc-cell-annotation",
+        "skills": [
+            "sc-cell-annotation", "sc-annotate",
+        ],
+        "keywords": [
+            "cell annotation", "celltypist", "singler", "scmap",
+            "model", "reference", "单细胞注释", "参考集", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-cell-communication-guardrails.md": {
+        "label": "Single-Cell Communication Guardrails",
+        "critical_rule": "MUST verify the cell-type labels and explain the selected communication backend plus species setting before running sc-cell-communication",
+        "skills": [
+            "sc-cell-communication",
+        ],
+        "keywords": [
+            "cell communication", "ligand receptor", "liana", "cellchat",
+            "species", "细胞通讯", "配体受体", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-de-guardrails.md": {
+        "label": "Single-Cell Differential Expression Guardrails",
+        "critical_rule": "MUST distinguish exploratory marker ranking from replicate-aware pseudobulk inference before running sc-de",
+        "skills": [
+            "sc-de",
+        ],
+        "keywords": [
+            "single-cell differential expression", "marker ranking", "wilcoxon",
+            "deseq2 pseudobulk", "group comparison", "单细胞差异表达", "伪bulk", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-grn-guardrails.md": {
+        "label": "Single-Cell GRN Guardrails",
+        "critical_rule": "MUST verify the external pySCENIC resources before running sc-grn and must not imply the workflow is self-contained without them",
+        "skills": [
+            "sc-grn",
+        ],
+        "keywords": [
+            "grn", "pyscenic", "regulon", "tf list", "motif database",
+            "单细胞调控网络", "转录因子", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-markers-guardrails.md": {
+        "label": "Single-Cell Marker Guardrails",
+        "critical_rule": "MUST explain the cluster grouping and ranking method before running sc-markers",
+        "skills": [
+            "sc-markers",
+        ],
+        "keywords": [
+            "marker genes", "rank genes groups", "wilcoxon", "logreg",
+            "cluster markers", "单细胞marker", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-pseudotime-guardrails.md": {
+        "label": "Single-Cell Pseudotime Guardrails",
+        "critical_rule": "MUST explain the root choice and distinguish the trajectory method from the trajectory-gene correlation method before running sc-pseudotime",
+        "skills": [
+            "sc-pseudotime",
+        ],
+        "keywords": [
+            "pseudotime", "dpt", "paga", "diffusion map", "root cluster",
+            "trajectory genes", "拟时序", "轨迹", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
+    "KH-sc-velocity-guardrails.md": {
+        "label": "Single-Cell Velocity Guardrails",
+        "critical_rule": "MUST check for spliced and unspliced layers and explain the chosen velocity mode before running sc-velocity",
+        "skills": [
+            "sc-velocity",
+        ],
+        "keywords": [
+            "rna velocity", "scvelo", "stochastic", "dynamical", "steady_state",
+            "latent time", "单细胞速度", "调参",
+        ],
+        "domains": ["singlecell"],
+    },
     "KH-scatac-preprocessing-guardrails.md": {
         "label": "scATAC Preprocessing Guardrails",
         "critical_rule": "MUST inspect whether the input is a raw-count-like peak matrix, explain the effective sparsity, TF-IDF, and graph parameters, and never claim fragment-aware preprocessing when the current wrapper does not implement it",
@@ -403,7 +678,12 @@ class KnowHowInjector:
 
             if query_lower:
                 keywords = meta.get("keywords", [])
-                if any(kw.lower() in query_lower for kw in keywords):
+                domain_ok = (
+                    not domain_lower
+                    or "__all__" in domains
+                    or domain_lower in domains
+                )
+                if domain_ok and any(kw.lower() in query_lower for kw in keywords):
                     matched.append((filename, content))
 
         if not matched:

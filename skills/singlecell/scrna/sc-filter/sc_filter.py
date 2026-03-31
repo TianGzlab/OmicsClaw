@@ -31,7 +31,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
@@ -40,8 +46,56 @@ from skills.singlecell._lib import qc as sc_qc_utils
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "singlecell-filter"
+SKILL_NAME = "sc-filter"
 SKILL_VERSION = "0.2.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Cell and gene filtering based on single-cell QC metrics.",
+            result_payload=result_payload,
+            preferred_method="threshold_filtering",
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Cell and gene filtering based on single-cell QC metrics.",
+            result_payload=result_payload,
+            preferred_method="threshold_filtering",
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 
 def filter_cells_and_genes(
@@ -286,15 +340,17 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
 
 def generate_demo_data():
     """Generate demo data with QC metrics."""
-    import scanpy as sc
-
     logger.info("Generating demo data...")
-
-    # Try scanpy's built-in dataset
     try:
-        adata = sc.datasets.pbmc3k()
-        logger.info(f"Loaded pbmc3k: {adata.n_obs} cells x {adata.n_vars} genes")
+        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        logger.info(
+            "Loaded demo dataset: %s (%d cells x %d genes)",
+            demo_path or "scanpy-pbmc3k",
+            adata.n_obs,
+            adata.n_vars,
+        )
     except Exception:
+        import scanpy as sc
         # Synthetic fallback
         np.random.seed(42)
         n_cells, n_genes = 500, 1000
@@ -394,6 +450,8 @@ def main():
 
     # Save filtered data
     output_h5ad = output_dir / "filtered.h5ad"
+    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    store_analysis_metadata(adata_filtered, SKILL_NAME, "threshold_filtering", params)
     adata_filtered.write_h5ad(output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
@@ -409,10 +467,21 @@ def main():
         cmd += f" --tissue {args.tissue}"
 
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
+    )
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Summary
     print(f"\n{'='*60}")

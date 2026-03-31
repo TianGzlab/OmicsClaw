@@ -23,7 +23,14 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
+from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import ensure_pca, store_analysis_metadata
 from skills.singlecell._lib import dimred as sc_dimred_utils
 from skills.singlecell._lib import integration as sc_integration_utils
@@ -84,6 +91,57 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 }
 
 DEFAULT_METHOD = "harmony"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text(
+        "\n".join(lines) + ("\n" if lines else ""),
+        encoding="utf-8",
+    )
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Batch integration for multi-sample scRNA-seq datasets.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", DEFAULT_METHOD),
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Batch integration for multi-sample scRNA-seq datasets.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", DEFAULT_METHOD),
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 
 def integrate_harmony(adata, batch_key="batch", **kwargs):
@@ -547,6 +605,10 @@ def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = F
     for key, value in params.items():
         command += f" --{key.replace('_', '-')} {shlex.quote(str(value))}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "seaborn"],
+    )
 
 
 def main():
@@ -564,12 +626,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
-        demo_path = _PROJECT_ROOT / "examples" / "pbmc3k.h5ad"
-        if demo_path.exists():
-            adata = sc.read_h5ad(demo_path)
-        else:
-            logger.warning("Local demo data not found, downloading from scanpy")
-            adata = sc.datasets.pbmc3k()
+        adata, _ = sc_io.load_repo_demo_data("pbmc3k_raw")
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
         sc.pp.highly_variable_genes(adata, n_top_genes=2000)
@@ -629,6 +686,12 @@ def main():
         },
     }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

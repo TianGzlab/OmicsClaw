@@ -1,18 +1,33 @@
 ---
 name: sc-pseudotime
 description: >-
-  Pseudotime and trajectory analysis using PAGA, Diffusion Map, and DPT
-version: 0.1.0
+  Trajectory analysis for single-cell RNA-seq using the current Scanpy-based
+  DPT workflow, plus a configurable correlation method for ranking
+  trajectory-associated genes.
+version: 0.3.0
+author: OmicsClaw
+license: MIT
+tags: [singlecell, trajectory, pseudotime, paga, dpt]
 metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
       - "--cluster-key"
+      - "--corr-method"
       - "--method"
       - "--n-dcs"
       - "--n-genes"
       - "--root-cell"
       - "--root-cluster"
+    param_hints:
+      dpt:
+        priority: "cluster_key -> root_cluster/root_cell -> n_dcs -> n_genes -> corr_method"
+        params: ["cluster_key", "root_cluster", "root_cell", "n_dcs", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", n_dcs: 10, n_genes: 50, corr_method: "pearson"}
+        requires: ["neighbors_graph", "cluster_labels_in_obs", "scanpy"]
+        tips:
+          - "--method dpt: Public analysis method for the current wrapper."
+          - "--corr-method: Used only for ranking trajectory genes after pseudotime has been estimated."
     saves_h5ad: true
     requires_preprocessed: true
     trigger_keywords:
@@ -25,127 +40,64 @@ metadata:
       - diffusion map
 ---
 
-# sc-pseudotime — Pseudotime Trajectory Analysis
+# Single-Cell Pseudotime
 
-## Purpose
+## Why This Exists
 
-Infer temporal ordering and trajectory structure of single-cell data using:
-- **PAGA** (Partition-based Graph Abstraction) — cluster connectivity
-- **Diffusion Map** — non-linear dimensionality reduction
-- **DPT** (Diffusion Pseudotime) — pseudotemporal ordering
+- Without it: users often conflate trajectory estimation with downstream gene ranking.
+- With it: the wrapper separates the trajectory method from the trajectory-gene correlation method.
+- Why OmicsClaw: one contract bundles PAGA, diffusion map, DPT, and export tables.
 
-This is a core trajectory analysis skill that works with standard scanpy preprocessing.
+## Scope Boundary
 
-## When to Use
+Implemented analysis method:
 
-- Lineage tracing and developmental biology studies
-- Cell differentiation trajectory inference
-- Identifying trajectory-associated genes
-- Understanding cell state transitions
+1. `dpt`
 
-## Requirements
+Separate post-hoc trajectory-gene ranking methods:
 
-- **Input**: AnnData with:
-  - Preprocessed data (normalized, log-transformed)
-  - PCA computed
-  - Neighbor graph computed
-  - Cluster labels (e.g., `leiden`)
+1. `pearson`
+2. `spearman`
 
-- **Dependencies**:
-  - scanpy (required)
-  - numpy, pandas, scipy (required)
+## Input Contract
 
-## Usage
+- Accepted input: preprocessed `.h5ad`
+- Required metadata: a cluster column such as `leiden`
+- Expected upstream state: neighbor graph available or recomputable
 
-### CLI
+## Workflow Summary
+
+1. Validate cluster labels and graph availability.
+2. Run PAGA.
+3. Run diffusion map and DPT pseudotime.
+4. Rank trajectory-associated genes with `--corr-method`.
+5. Save `adata_with_trajectory.h5ad`, figures, tables, `report.md`, and `result.json`.
+
+## CLI Reference
 
 ```bash
-# Basic usage
-python omicsclaw.py run sc-pseudotime --input preprocessed.h5ad --output results/
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
+  --input <data.h5ad> --method dpt --cluster-key leiden --output <dir>
 
-# With specific root cluster
-python omicsclaw.py run sc-pseudotime --input data.h5ad --output results/ --root-cluster "0"
-
-# Demo mode
-python omicsclaw.py run sc-pseudotime --demo --output /tmp/pseudotime_demo/
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
+  --input <data.h5ad> --method dpt --root-cluster 0 \
+  --n-dcs 10 --n-genes 50 --corr-method spearman --output <dir>
 ```
 
-### Parameters
+## Output Contract
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | required | Input AnnData file (.h5ad) |
-| `--output` | required | Output directory |
-| `--demo` | false | Run with synthetic demo data |
-| `--cluster-key` | `leiden` | Key for cluster labels |
-| `--root-cluster` | auto | Root cluster for pseudotime |
-| `--root-cell` | auto | Root cell index (overrides --root-cluster) |
-| `--n-dcs` | 10 | Number of diffusion components |
-| `--n-genes` | 50 | Number of trajectory genes to find |
-| `--method` | pearson | Correlation method (pearson/spearman) |
+Successful runs write:
 
-## Output Structure
+- `adata_with_trajectory.h5ad`
+- `report.md`
+- `result.json`
+- `tables/trajectory_genes.csv`
+- `figures/paga_graph.png`
+- `figures/pseudotime_umap.png`
+- `figures/diffusion_components*.png`
+- `figures/trajectory_gene_heatmap.png`
 
-```
-output_dir/
-├── adata_with_trajectory.h5ad    # AnnData with pseudotime + diffmap
-├── report.md                      # Analysis report
-├── result.json                    # Machine-readable results
-├── figures/
-│   ├── paga_graph.png            # PAGA connectivity graph
-│   ├── pseudotime_umap.png       # Pseudotime on UMAP
-│   ├── diffusion_components.png  # Diffusion map components
-│   └── trajectory_gene_heatmap.png
-├── tables/
-│   └── trajectory_genes.csv      # Genes correlated with pseudotime
-└── reproducibility/
-    ├── commands.sh
-    └── requirements.txt
-```
+## Current Limitations
 
-## Methods
-
-### PAGA (Partition-based Graph Abstraction)
-
-PAGA estimates the connectivity between clusters by quantifying how much the single-cell graph
-connectivity at each cluster resolution is preserved at a coarser resolution.
-
-- **Input**: Neighbor graph + cluster labels
-- **Output**: Weighted graph of cluster connectivities
-- **Interpretation**: Thick edges indicate strong connectivity (likely transition path)
-
-### Diffusion Map
-
-Diffusion maps provide a non-linear dimensionality reduction that preserves the underlying
-manifold structure of single-cell data.
-
-- **Input**: PCA-reduced data
-- **Output**: Diffusion components (DC1, DC2, ...)
-- **Interpretation**: Cells close in diffusion space are transcriptionally similar
-
-### DPT (Diffusion Pseudotime)
-
-DPT uses random walks on the diffusion graph to estimate pseudotemporal ordering of cells
-from a root cell.
-
-- **Input**: Diffusion map + root cell
-- **Output**: Pseudotime values [0, 1]
-- **Interpretation**: 0 = root state, 1 = terminal state
-
-## Interpretation
-
-1. **PAGA graph**: Look for linear chains (lineages) or branching points (bifurcations)
-2. **Pseudotime UMAP**: Gradient from root (0) to terminal (1) cells
-3. **Trajectory genes**: Genes correlated with pseudotime may be drivers of transition
-
-## Tips
-
-- Choose root cluster/cell based on known biology (e.g., stem cells, early progenitors)
-- Use `sc-velocity` for RNA velocity-based trajectory if spliced/unspliced data available
-- Combine with `sc-grn` to find TFs driving trajectory transitions
-
-## References
-
-- Wolf et al. (2019) PAGA: graph abstraction reconciles clustering with trajectory inference
-- Haghverdi et al. (2016) Diffusion maps for high-dimensional single-cell data
-- Haghverdi et al. (2016) Diffusion pseudotime
+- Only the DPT trajectory path is implemented in the current wrapper.
+- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.

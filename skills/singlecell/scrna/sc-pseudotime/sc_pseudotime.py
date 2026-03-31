@@ -35,7 +35,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.method_config import (
     MethodConfig,
@@ -48,8 +54,56 @@ from skills.singlecell._lib import trajectory as sc_traj
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "singlecell-pseudotime"
+SKILL_NAME = "sc-pseudotime"
 SKILL_VERSION = "0.2.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="PAGA and DPT-based pseudotime trajectory analysis for scRNA-seq.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "dpt"),
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="PAGA and DPT-based pseudotime trajectory analysis for scRNA-seq.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "dpt"),
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 # ---------------------------------------------------------------------------
 # Method registry
@@ -193,10 +247,12 @@ def write_pseudotime_report(
 
     body_lines.extend([
         "## Parameters\n",
+        f"- `--method`: {params.get('method', 'dpt')}",
         f"- `--cluster-key`: {params.get('cluster_key', 'leiden')}",
         f"- `--root-cluster`: {params.get('root_cluster', 'auto')}",
         f"- `--n-dcs`: {params.get('n_dcs', 10)}",
         f"- `--n-genes`: {params.get('n_genes', 50)}",
+        f"- `--corr-method`: {params.get('corr_method', 'pearson')}",
         "",
         "## Output Files\n",
         "- `adata_with_trajectory.h5ad` — AnnData with pseudotime and diffusion map",
@@ -226,7 +282,8 @@ def generate_demo_data():
     logger.info("Generating demo data with trajectory structure...")
 
     try:
-        adata = sc.datasets.pbmc3k()
+        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        logger.info("Loaded demo dataset: %s", demo_path or "scanpy-pbmc3k")
         # Quick preprocessing
         sc.pp.filter_cells(adata, min_genes=200)
         sc.pp.filter_genes(adata, min_cells=3)
@@ -249,7 +306,7 @@ def generate_demo_data():
 
         logger.info(f"Generated: {adata.n_obs} cells x {adata.n_vars} genes, {adata.obs['leiden'].nunique()} clusters")
     except Exception as e:
-        logger.warning(f"Failed to load pbmc3k: {e}. Generating synthetic data.")
+        logger.warning(f"Failed to load local/scanpy pbmc3k: {e}. Generating synthetic data.")
         np.random.seed(42)
         n_cells, n_genes = 500, 1000
         counts = np.random.negative_binomial(2, 0.02, size=(n_cells, n_genes))
@@ -280,10 +337,25 @@ def main():
     parser.add_argument("--root-cell", type=int, default=None, help="Root cell index")
     parser.add_argument("--n-dcs", type=int, default=10, help="Number of diffusion components")
     parser.add_argument("--n-genes", type=int, default=50, help="Number of trajectory genes")
-    parser.add_argument("--analysis-method", default="dpt", choices=list(METHOD_REGISTRY.keys()),
-                        help="Trajectory analysis method (default: dpt)")
-    parser.add_argument("--method", default="pearson", choices=["pearson", "spearman"],
-                        help="Correlation method for trajectory genes")
+    parser.add_argument(
+        "--method",
+        dest="analysis_method",
+        default="dpt",
+        choices=list(METHOD_REGISTRY.keys()),
+        help="Trajectory analysis method (default: dpt)",
+    )
+    parser.add_argument(
+        "--analysis-method",
+        dest="analysis_method",
+        choices=list(METHOD_REGISTRY.keys()),
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--corr-method",
+        default="pearson",
+        choices=["pearson", "spearman"],
+        help="Correlation method for trajectory gene ranking",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -322,13 +394,13 @@ def main():
 
     # Parameters
     params = {
-        "analysis_method": analysis_method,
+        "method": analysis_method,
         "cluster_key": args.cluster_key,
         "root_cluster": args.root_cluster,
         "root_cell": args.root_cell,
         "n_dcs": args.n_dcs,
         "n_genes": args.n_genes,
-        "method": args.method,
+        "corr_method": args.corr_method,
     }
 
     # Step 1: PAGA analysis
@@ -355,12 +427,13 @@ def main():
         adata,
         pseudotime_key="dpt_pseudotime",
         n_genes=args.n_genes,
-        method=args.method,
+        method=args.corr_method,
     )
 
     # Summary
     n_clusters = adata.obs[args.cluster_key].nunique()
     summary = {
+        "method": analysis_method,
         "n_clusters": int(n_clusters),
         "n_trajectory_genes": len(trajectory_genes),
         "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
@@ -388,6 +461,8 @@ def main():
 
     # Save data
     output_h5ad = output_dir / "adata_with_trajectory.h5ad"
+    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    store_analysis_metadata(adata, SKILL_NAME, analysis_method, params)
     adata.write_h5ad(output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
@@ -400,12 +475,26 @@ def main():
         cmd += f" --input {input_file}"
     if args.root_cluster:
         cmd += f" --root-cluster {args.root_cluster}"
-    cmd += f" --n-dcs {args.n_dcs} --n-genes {args.n_genes} --method {args.method}"
+    cmd += (
+        f" --n-dcs {args.n_dcs} --n-genes {args.n_genes}"
+        f" --method {analysis_method} --corr-method {args.corr_method}"
+    )
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
+    )
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Summary
     print(f"\n{'='*60}")

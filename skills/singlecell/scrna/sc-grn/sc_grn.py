@@ -39,7 +39,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
@@ -48,8 +54,56 @@ from skills.singlecell._lib import grn as sc_grn_utils
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "singlecell-grn"
+SKILL_NAME = "sc-grn"
 SKILL_VERSION = "0.1.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Gene regulatory network inference with pySCENIC-style workflow.",
+            result_payload=result_payload,
+            preferred_method="pyscenic",
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Gene regulatory network inference with pySCENIC-style workflow.",
+            result_payload=result_payload,
+            preferred_method="pyscenic",
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 # Database download instructions
 DB_DOWNLOAD_INSTRUCTIONS = """
@@ -499,6 +553,8 @@ def main():
 
     # Save data
     output_h5ad = output_dir / "adata_with_grn.h5ad"
+    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    store_analysis_metadata(adata, SKILL_NAME, "pyscenic", params)
     adata.write_h5ad(output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
@@ -516,10 +572,21 @@ def main():
     if args.motif_annotations:
         cmd += f" --motif {args.motif_annotations}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["anndata", "numpy", "pandas", "matplotlib", "arboreto", "pyscenic"],
+    )
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Summary
     print(f"\n{'='*60}")

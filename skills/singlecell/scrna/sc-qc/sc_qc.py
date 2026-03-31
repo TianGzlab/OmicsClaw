@@ -480,20 +480,12 @@ def generate_demo_data(species: str = "human"):
 
     logger.info("Generating synthetic demo data...")
 
-    # Try to load from local demo data first
-    demo_path = _PROJECT_ROOT / "examples" / "pbmc3k.h5ad"
-    if demo_path.exists():
-        logger.info(f"Loading local demo data: {demo_path}")
-        return sc.read_h5ad(demo_path), None
-
-    # Fall back to scanpy's built-in dataset
-    logger.info("Downloading pbmc3k from scanpy datasets...")
     try:
-        adata = sc.datasets.pbmc3k()
-        logger.info(f"Loaded pbmc3k: {adata.n_obs} cells x {adata.n_vars} genes")
-        return adata, None
+        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        logger.info(f"Loaded demo data: {demo_path or 'scanpy-pbmc3k'}")
+        return adata, demo_path
     except Exception as e:
-        logger.warning(f"Failed to load pbmc3k: {e}")
+        logger.warning(f"Failed to load local/scanpy pbmc3k: {e}")
         # Generate synthetic data as last resort
         logger.info("Generating synthetic data...")
 

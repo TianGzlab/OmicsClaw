@@ -31,7 +31,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.method_config import (
     MethodConfig,
@@ -44,8 +50,56 @@ from skills.singlecell._lib import markers as sc_markers_utils
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "singlecell-markers"
+SKILL_NAME = "sc-markers"
 SKILL_VERSION = "0.3.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Marker gene discovery for clustered single-cell RNA-seq data.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "wilcoxon"),
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Marker gene discovery for clustered single-cell RNA-seq data.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "wilcoxon"),
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 # ---------------------------------------------------------------------------
 # Method registry
@@ -221,7 +275,8 @@ def generate_demo_data():
     logger.info("Generating demo data with clusters...")
 
     try:
-        adata = sc.datasets.pbmc3k()
+        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        logger.info("Loaded demo dataset: %s", demo_path or "scanpy-pbmc3k")
         # Quick preprocessing
         sc.pp.filter_cells(adata, min_genes=200)
         sc.pp.filter_genes(adata, min_cells=3)
@@ -245,7 +300,7 @@ def generate_demo_data():
         logger.info(f"Generated: {adata.n_obs} cells x {adata.n_vars} genes, {adata.obs['leiden'].nunique()} clusters")
     except Exception as e:
         # Synthetic fallback
-        logger.warning(f"Failed to load pbmc3k: {e}. Generating synthetic data.")
+        logger.warning(f"Failed to load local/scanpy pbmc3k: {e}. Generating synthetic data.")
         np.random.seed(42)
         n_cells, n_genes = 500, 1000
         counts = np.random.negative_binomial(2, 0.02, size=(n_cells, n_genes))
@@ -372,6 +427,8 @@ def main():
         del adata.uns['rank_genes_groups_filtered']
 
     output_h5ad = output_dir / "adata_with_markers.h5ad"
+    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    store_analysis_metadata(adata, SKILL_NAME, args.method, params)
     adata.write_h5ad(output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
@@ -383,10 +440,21 @@ def main():
     if input_file:
         cmd += f" --input {input_file}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "seaborn"],
+    )
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Summary
     print(f"\n{'='*60}")

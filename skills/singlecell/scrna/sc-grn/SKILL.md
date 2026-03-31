@@ -1,8 +1,13 @@
 ---
 name: sc-grn
 description: >-
-  Gene regulatory network inference using pySCENIC (GRNBoost2, cisTarget, AUCell)
-version: 0.1.0
+  Infer gene regulatory networks from scRNA-seq using the pySCENIC workflow:
+  GRNBoost2 for adjacency inference, cisTarget-style motif pruning, and AUCell
+  regulon scoring.
+version: 0.2.0
+author: OmicsClaw
+license: MIT
+tags: [singlecell, grn, pyscenic, regulon, transcription-factor]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -13,6 +18,15 @@ metadata:
       - "--n-top-targets"
       - "--seed"
       - "--tf-list"
+    param_hints:
+      pyscenic_workflow:
+        priority: "tf_list -> db -> motif -> n_top_targets -> n_jobs"
+        params: ["tf_list", "db", "motif", "n_top_targets", "n_jobs", "seed"]
+        defaults: {n_top_targets: 50, n_jobs: 4, seed: 42}
+        requires: ["preprocessed_anndata", "pyscenic", "arboreto", "TF_list", "cisTarget_database", "motif_annotations"]
+        tips:
+          - "--tf-list, --db, and --motif are the core external resources for a full pySCENIC run."
+          - "--n-top-targets: Wrapper-level export cap for the top targets retained per regulon."
     saves_h5ad: true
     requires_preprocessed: true
     trigger_keywords:
@@ -25,170 +39,62 @@ metadata:
       - grnboost
 ---
 
-# sc-grn — Gene Regulatory Network Inference
+# Single-Cell GRN
 
-## Purpose
+## Why This Exists
 
-Infer gene regulatory networks from single-cell RNA-seq data using **pySCENIC**:
+- Without it: regulon analysis requires several external resources and multi-step orchestration.
+- With it: pySCENIC-style GRN outputs are standardized into one wrapper contract.
+- Why OmicsClaw: tables, figures, and AnnData outputs are bundled together.
 
-- **GRNBoost2** — co-expression network inference between TFs and target genes
-- **cisTarget** — motif enrichment and pruning to identify direct targets
-- **AUCell** — regulon activity scoring per cell
+## Scope Boundary
 
-Identify master regulators and their target genes driving cell states.
+This skill currently exposes one public workflow: `pyscenic_workflow`.
 
-## When to Use
+That workflow covers:
 
-- Identifying master regulators of cell types/states
-- Understanding transcriptional programs
-- Finding candidate TFs for perturbation experiments
-- Linking TFs to phenotype
+1. GRNBoost2 adjacency inference
+2. motif-based pruning
+3. AUCell regulon scoring
 
-## Requirements
+## Input Contract
 
-### Input Data
-- AnnData with preprocessed gene expression
-- Standard preprocessing (normalize, log1p, HVG)
+- Accepted input: preprocessed `.h5ad`
+- Required external resources: TF list, cisTarget database files, and motif annotations
 
-### Python Dependencies
-- `arboreto` — GRNBoost2 implementation
-- `pyscenic` — cisTarget + AUCell
+## Workflow Summary
 
-### External Databases (Required for Full Analysis)
+1. Load preprocessed expression data.
+2. Run adjacency inference.
+3. Prune candidate targets with motif evidence.
+4. Score regulon activity per cell.
+5. Export `adata_with_grn.h5ad`, tables, figures, `report.md`, and `result.json`.
 
-| Database | Description | Source |
-|----------|-------------|--------|
-| TF list | List of TF gene symbols | [pySCENIC resources](https://github.com/aertslab/pySCENIC/tree/master/resources) |
-| cisTarget DB | Motif-to-gene mappings | [cisTarget DBs](https://resources.aertslab.org/cistarget/) |
-| Motif annotations | TF-to-motif mappings | [motif2TF](https://resources.aertslab.org/cistarget/motif2tf/) |
-
-#### Example Database Files
+## CLI Reference
 
 ```bash
-# Download for human (hg38)
-wget https://raw.githubusercontent.com/aertslab/pySCENIC/master/resources/hs_hgnc_tfs.txt
-wget https://resources.aertslab.org/cistarget/databases/homo_sapiens/hg38/refseq_r80/mc9nr/gene_based/hg38__refseq_r80__mc9nr_gg6_500bp_upstream.feather
-wget https://resources.aertslab.org/cistarget/motif2tf/motifs-v9-nr.hgnc-m0.001-o0.0.tbl
-```
-
-## Usage
-
-### CLI
-
-```bash
-# Full workflow with all databases
 python omicsclaw.py run sc-grn \
-    --input preprocessed.h5ad \
-    --output results/ \
-    --tf-list hs_hgnc_tfs.txt \
-    --db "hg38*.feather" \
-    --motif motifs-v9-nr.hgnc-m0.001-o0.0.tbl
-
-# Demo mode (GRNBoost2 only, no external DBs)
-python omicsclaw.py run sc-grn --demo --output /tmp/grn_demo/
+  --input <processed.h5ad> \
+  --tf-list <tfs.txt> \
+  --db '<db_glob>' \
+  --motif <motif.tbl> \
+  --output <dir>
 ```
 
-### Parameters
+## Output Contract
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | required | Input AnnData file (.h5ad) |
-| `--output` | required | Output directory |
-| `--demo` | false | Run demo mode (GRNBoost2 only) |
-| `--tf-list` | required | TF list file (one per line) |
-| `--db` | required | Glob pattern for cisTarget databases |
-| `--motif` | required | Motif annotations file |
-| `--n-top-targets` | 50 | Max targets per regulon |
-| `--n-jobs` | 4 | Parallel jobs |
-| `--seed` | 42 | Random seed |
+Successful runs write:
 
-## Output Structure
+- `adata_with_grn.h5ad`
+- `report.md`
+- `result.json`
+- `tables/grn_adjacencies.csv`
+- `tables/grn_regulons.csv`
+- `tables/grn_regulon_targets.csv`
+- `tables/grn_auc_matrix.csv`
+- `figures/`
 
-```
-output_dir/
-├── adata_with_grn.h5ad           # AnnData with regulon activity scores
-├── report.md                      # Analysis report
-├── result.json                    # Machine-readable results
-├── figures/
-│   ├── regulon_activity_umap.png  # Top regulons on UMAP
-│   ├── regulon_heatmap.png        # Regulon activity heatmap
-│   └── regulon_network.png        # TF-target network diagram
-├── tables/
-│   ├── grn_adjacencies.csv        # All TF-target adjacencies
-│   ├── grn_regulons.csv           # Regulon summary
-│   ├── grn_regulon_targets.csv    # TF-target pairs
-│   └── grn_auc_matrix.csv         # AUCell activity scores
-└── reproducibility/
-    ├── commands.sh
-    └── requirements.txt
-```
+## Current Limitations
 
-## Methods
-
-### GRNBoost2 (Co-expression)
-
-Gradient boosting-based method that learns feature importance between TF expression
-and target gene expression across cells.
-
-- **Input**: Expression matrix + TF list
-- **Output**: TF-target adjacencies with importance scores
-- **Limitation**: Co-expression ≠ direct regulation
-
-### cisTarget (Motif Pruning)
-
-Prunes co-expression network to direct targets using motif enrichment:
-1. For each TF, get top co-expressed targets
-2. Check if targets share enriched motifs
-3. Keep only targets with the TF's motif in regulatory regions
-
-- **Input**: Adjacencies + cisTarget DB + motif annotations
-- **Output**: Pruned regulons with NES scores
-
-### AUCell (Activity Scoring)
-
-Calculates regulon activity per cell by computing area under the recovery curve
-of gene expression rankings.
-
-- **Input**: Expression matrix + regulons
-- **Output**: AUC score matrix (cells × regulons)
-
-## Interpretation
-
-1. **Regulon activity UMAP**: Shows which TFs are active in which cell types
-2. **Heatmap**: Cluster-level regulon activity patterns
-3. **Network diagram**: TF-target relationships
-4. **High NES**: Strong motif enrichment → likely direct targets
-
-## Tips
-
-- Use appropriate species-specific databases
-- Filter low-quality cells first with `sc-qc` and `sc-filter`
-- Combine with `sc-cell-annotation` to link regulons to cell types
-- Run demo mode first to test installation
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| arboreto not installed | `pip install arboreto` |
-| GRNBoost2 fails (dask error) | Auto-fallback to correlation-based GRN |
-| Database files missing | Download from resources.aertslab.org |
-| Slow GRNBoost2 | Reduce n_jobs if memory-limited |
-| Too few regulons | Check TF list matches your species |
-
-### Known Issue: dask/arboreto Compatibility
-
-arboreto 0.1.6 (2020) may be incompatible with dask 2024.x due to API changes.
-When GRNBoost2 fails, the skill automatically falls back to **correlation-based GRN inference** (Spearman correlation).
-
-For full pySCENIC support with GRNBoost2, you may need:
-```bash
-pip install "dask==2021.11.2" "distributed==2021.11.2"
-```
-However, this may conflict with other packages like squidpy or spatialdata.
-
-## References
-
-- Aibar et al. (2017) SCENIC: Single-cell regulatory network inference and clustering
-- Van de Sande et al. (2020) pySCENIC
-- Moerman et al. (2019) GRNBoost2
+- This skill depends on external pySCENIC resources and does not download them automatically.
+- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.

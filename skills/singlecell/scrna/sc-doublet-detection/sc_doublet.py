@@ -20,7 +20,14 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import generate_report_header, generate_report_footer, write_result_json
+from omicsclaw.common.report import (
+    generate_report_header,
+    generate_report_footer,
+    load_result_json,
+    write_output_readme,
+    write_result_json,
+)
+from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 
@@ -29,8 +36,56 @@ from skills.singlecell._lib.viz_utils import save_figure
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "sc-doublet"
+SKILL_NAME = "sc-doublet-detection"
 SKILL_VERSION = "0.4.0"
+
+
+def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
+    try:
+        from importlib.metadata import PackageNotFoundError, version as get_version
+    except ImportError:  # pragma: no cover
+        PackageNotFoundError = Exception
+        from importlib_metadata import version as get_version  # type: ignore
+
+    lines: list[str] = []
+    for pkg in packages:
+        try:
+            lines.append(f"{pkg}=={get_version(pkg)}")
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
+    notebook_path = None
+    try:
+        from omicsclaw.common.notebook_export import write_analysis_notebook
+
+        notebook_path = write_analysis_notebook(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Doublet detection and scoring for single-cell RNA-seq data.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "scrublet"),
+            script_path=Path(__file__).resolve(),
+            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+        )
+    except Exception as exc:
+        logger.warning("Failed to write analysis notebook: %s", exc)
+
+    try:
+        write_output_readme(
+            output_dir,
+            skill_alias=SKILL_NAME,
+            description="Doublet detection and scoring for single-cell RNA-seq data.",
+            result_payload=result_payload,
+            preferred_method=summary.get("method", "scrublet"),
+            notebook_path=notebook_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write README.md: %s", exc)
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "scrublet": MethodConfig(
@@ -190,6 +245,10 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     for k, v in params.items():
         cmd += f" --{k.replace('_', '-')} {v}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    _write_repro_requirements(
+        repro_dir,
+        ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
+    )
 
 
 def main():
@@ -206,12 +265,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
-        demo_path = _PROJECT_ROOT / "examples" / "pbmc3k.h5ad"
-        if demo_path.exists():
-            adata = sc.read_h5ad(demo_path)
-        else:
-            logger.warning("Local demo data not found, downloading from scanpy")
-            adata = sc.datasets.pbmc3k()
+        adata = sc_io.load_repo_demo_data("pbmc3k_raw")[0]
         input_file = None
     else:
         if not args.input_path:
@@ -231,13 +285,20 @@ def main():
     generate_figures(adata, output_dir)
     write_report(output_dir, summary, input_file, params)
 
+    store_analysis_metadata(adata, SKILL_NAME, method, params)
     output_h5ad = output_dir / "processed.h5ad"
     adata.write_h5ad(output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, {"params": params}, checksum)
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    result_data = {"params": params}
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {
+        "skill": SKILL_NAME,
+        "summary": summary,
+        "data": result_data,
+    }
+    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

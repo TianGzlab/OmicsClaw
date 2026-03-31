@@ -1,12 +1,13 @@
 ---
 name: sc-filter
 description: >-
-  Filter cells and genes based on QC metrics. Supports custom thresholds
-  and tissue-specific presets.
-version: 0.2.0
+  Filter cells and genes from single-cell RNA-seq AnnData objects using
+  QC-derived thresholds or tissue presets. This wrapper removes low-quality
+  cells/genes but does not normalize, cluster, or annotate the dataset.
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, filter, QC, preprocessing]
+tags: [singlecell, filter, qc, preprocessing]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -18,13 +19,23 @@ metadata:
       - "--min-counts"
       - "--min-genes"
       - "--tissue"
+    param_hints:
+      threshold_filtering:
+        priority: "tissue -> min_genes/max_mt_percent -> min_cells -> count caps"
+        params: ["tissue", "min_genes", "max_genes", "min_counts", "max_counts", "max_mt_percent", "min_cells"]
+        defaults: {min_genes: 200, max_mt_percent: 20.0, min_cells: 3}
+        requires: ["qc_metrics_in_obs_or_count_like_matrix_in_X", "scanpy"]
+        tips:
+          - "--tissue: Wrapper-level preset that overrides the default QC thresholds with OmicsClaw tissue heuristics."
+          - "--min-genes / --max-mt-percent: Main cell-retention controls."
+          - "--min-cells: Gene-level retention threshold applied after cell filtering."
     saves_h5ad: true
+    requires_preprocessed: false
     requires:
-      bins:
-        - python3
+      bins: [python3]
       env: []
       config: []
-    emoji: "🔍"
+    emoji: "S"
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install: []
@@ -33,108 +44,88 @@ metadata:
       - cell filtering
       - gene filtering
       - remove low quality
-      - QC filtering
+      - qc filtering
       - tissue-specific thresholds
 ---
 
-# 🔍 Single-Cell Filter
-
-Filter cells and genes based on QC metrics with support for tissue-specific thresholds.
+# Single-Cell Filter
 
 ## Why This Exists
 
-- **Without it**: Low-quality cells and genes contaminate downstream analysis
-- **With it**: Automated filtering with configurable or tissue-specific thresholds
-- **Why OmicsClaw**: Tissue-specific presets (PBMC, brain, tumor, etc.)
+- Without it: downstream clustering and DE are distorted by low-quality droplets and low-information genes.
+- With it: one run applies explicit QC cutoffs and records how many cells/genes were removed.
+- Why OmicsClaw: tissue presets and a stable output contract make filtering easier to reproduce.
 
-## Core Capabilities
+## Scope Boundary
 
-1. **Cell filtering**: Remove cells by gene counts, UMI counts, MT%
-2. **Gene filtering**: Remove genes expressed in too few cells
-3. **Tissue presets**: Pre-configured thresholds for common tissues
-4. **Before/after comparison**: Visualize impact of filtering
+This skill currently exposes one public workflow: `threshold_filtering`.
 
-## Workflow
+This skill does:
 
-1. **Load QC metrics**: Calculate or load existing QC metrics
-2. **Apply filters**: Filter by customizable thresholds
-3. **Filter genes**: Remove low-expression genes
-4. **Report**: Generate summary statistics and comparison plots
+1. use existing QC metrics or compute the ones needed for thresholding
+2. filter cells by genes, counts, and mitochondrial percentage
+3. filter genes by minimum detected-cell count
+4. export filtered AnnData, figures, tables, and a report
+
+This skill does not:
+
+1. normalize counts
+2. run HVG, PCA, UMAP, or clustering
+3. remove doublets or ambient RNA
+
+## Input Contract
+
+- Accepted input: `.h5ad`
+- Expected data state: raw-count-like or QC-annotated AnnData
+- Important columns when present: `n_genes_by_counts`, `total_counts`, `pct_counts_mt`
+- If QC metrics are missing, the wrapper computes the minimum needed metrics before filtering
+
+## Workflow Summary
+
+1. Load AnnData and inspect available QC columns.
+2. Apply optional tissue preset.
+3. Filter cells by configured thresholds.
+4. Filter genes by `min_cells`.
+5. Write `filtered.h5ad`, figures, `tables/filter_stats.csv`, `report.md`, and `result.json`.
 
 ## CLI Reference
 
 ```bash
-# Basic usage
-python skills/singlecell/scrna/sc-filter/sc_filter.py --input <data.h5ad> --output <dir>
+python skills/singlecell/scrna/sc-filter/sc_filter.py \
+  --input <data.h5ad> --output <dir>
 
-# With tissue-specific thresholds
-python skills/singlecell/scrna/sc-filter/sc_filter.py --input <data.h5ad> --output <dir> --tissue pbmc
+python skills/singlecell/scrna/sc-filter/sc_filter.py \
+  --input <data.h5ad> --tissue pbmc --output <dir>
 
-# Custom thresholds
-python skills/singlecell/scrna/sc-filter/sc_filter.py --input <data.h5ad> --output <dir> \
-  --min-genes 200 --max-genes 6000 --max-mt-percent 15
-
-# Demo mode
-python omicsclaw.py run sc-filter --demo
+python skills/singlecell/scrna/sc-filter/sc_filter.py \
+  --input <data.h5ad> --min-genes 200 --max-genes 6000 \
+  --max-mt-percent 15 --min-cells 3 --output <dir>
 ```
 
-## Tissue-Specific Thresholds
+## Public Parameters
 
-| Tissue | Min Genes | Max Genes | Max MT% |
-|--------|-----------|-----------|---------|
-| PBMC | 200 | 6000 | 5% |
-| Brain | 500 | 8000 | 10% |
-| Tumor | 200 | 8000 | 20% |
-| Heart | 300 | 7000 | 15% |
-| Liver | 300 | 7000 | 15% |
-| Kidney | 300 | 7000 | 15% |
-| Lung | 200 | 7000 | 15% |
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--min-genes` | `200` | Minimum detected genes per retained cell |
+| `--max-genes` | none | Optional upper gene-count cap |
+| `--min-counts` | none | Optional lower UMI-count cap |
+| `--max-counts` | none | Optional upper UMI-count cap |
+| `--max-mt-percent` | `20.0` | Maximum mitochondrial percentage |
+| `--min-cells` | `3` | Minimum number of cells expressing a retained gene |
+| `--tissue` | none | OmicsClaw preset thresholds such as `pbmc`, `brain`, or `tumor` |
 
-## Parameters
+## Output Contract
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--min-genes` | 200 | Minimum genes per cell |
-| `--max-genes` | None | Maximum genes per cell |
-| `--min-counts` | None | Minimum UMIs per cell |
-| `--max-counts` | None | Maximum UMIs per cell |
-| `--max-mt-percent` | 20.0 | Maximum mitochondrial % |
-| `--min-cells` | 3 | Minimum cells per gene |
-| `--tissue` | None | Use tissue-specific thresholds |
+Successful runs write:
 
-## Example Queries
+- `filtered.h5ad`
+- `report.md`
+- `result.json`
+- `figures/`
+- `tables/filter_stats.csv`
+- `reproducibility/commands.sh`
 
-- "Filter cells using PBMC thresholds"
-- "Remove low-quality cells with MT% > 15"
-- "Filter genes expressed in < 3 cells"
+## Current Limitations
 
-## Output Structure
-
-```
-output_dir/
-├── report.md
-├── result.json
-├── filtered.h5ad
-├── figures/
-│   ├── filter_comparison.png
-│   └── filter_summary.png
-├── tables/
-│   └── filter_stats.csv
-└── reproducibility/
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Dependencies
-
-**Required**: scanpy, numpy, pandas
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Query mentions "filter cells", "filter genes", "remove cells"
-- Query mentions tissue-specific QC thresholds
-
-**Chaining partners**:
-- `sc-qc` — Calculate QC metrics before filtering
-- `sc-preprocessing` — Continue with normalization after filtering
+- This wrapper does not yet emit the `README.md` and `analysis_notebook.ipynb` artifacts used by the most optimized scrna skills.
+- Threshold presets are OmicsClaw wrapper defaults, not upstream standard recommendations for every tissue.

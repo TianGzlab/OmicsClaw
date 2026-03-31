@@ -1,14 +1,42 @@
 ---
 name: sc-velocity
 description: >-
-  RNA velocity analysis using scVelo for estimating cell state transitions
-version: 0.1.0
+  RNA velocity analysis for scRNA-seq using scVelo stochastic, dynamical, or
+  steady-state modes. The wrapper now accepts both `--method` and `--mode` as
+  public aliases for the velocity backend.
+version: 0.3.0
+author: OmicsClaw
+license: MIT
+tags: [singlecell, velocity, scvelo, latent-time, dynamics]
 metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
       - "--method"
+      - "--mode"
       - "--n-jobs"
+    param_hints:
+      scvelo_stochastic:
+        priority: "n_jobs"
+        params: ["n_jobs"]
+        defaults: {n_jobs: 4}
+        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
+        tips:
+          - "--method scvelo_stochastic or --mode stochastic: default velocity path."
+      scvelo_dynamical:
+        priority: "n_jobs"
+        params: ["n_jobs"]
+        defaults: {n_jobs: 4}
+        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
+        tips:
+          - "--method scvelo_dynamical or --mode dynamical: computes latent time when the fit succeeds."
+      scvelo_steady_state:
+        priority: "n_jobs"
+        params: ["n_jobs"]
+        defaults: {n_jobs: 4}
+        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
+        tips:
+          - "--method scvelo_steady_state or --mode steady_state: steady-state approximation path."
     saves_h5ad: true
     requires_preprocessed: true
     trigger_keywords:
@@ -21,131 +49,65 @@ metadata:
       - velocity pseudotime
 ---
 
-# sc-velocity — RNA Velocity Analysis
+# Single-Cell Velocity
 
-## Purpose
+## Why This Exists
 
-Estimate the future state of cells by analyzing spliced and unspliced mRNA counts using **scVelo**:
+- Without it: velocity analyses are hard to standardize because they require special input layers and backend-specific wording.
+- With it: velocity backend selection and output naming are consistent across runs.
+- Why OmicsClaw: one wrapper captures velocity figures, latent-time summaries, and method provenance.
 
-- **Velocity estimation** — direction and speed of transcriptional change
-- **Velocity graph** — cell-to-cell transition probabilities
-- **Latent time** — global transcriptomic time (dynamical mode only)
+## Scope Boundary
 
-RNA velocity provides dynamic information beyond static snapshots.
+Implemented backends:
 
-## When to Use
+1. `scvelo_stochastic`
+2. `scvelo_dynamical`
+3. `scvelo_steady_state`
 
-- Developmental biology and lineage tracing
-- Cell state transition analysis
-- Identifying direction of differentiation
-- Validating pseudotime trajectories
+Public alias behavior:
 
-## Requirements
+1. `--method scvelo_dynamical`
+2. `--mode dynamical`
 
-- **Input**: AnnData with:
-  - `layers["spliced"]` — spliced mRNA counts
-  - `layers["unspliced"]` — unspliced mRNA counts
-  - Preprocessed (normalized, log-transformed)
+Both point to the same backend selection logic.
 
-- **Dependencies**:
-  - scvelo (required)
-  - scanpy, numpy, scipy
+## Input Contract
 
-### Generating Spliced/Unspliced Data
+- Accepted input: `.h5ad`
+- Required layers: `layers["spliced"]` and `layers["unspliced"]`
+- Expected upstream state: normalized/preprocessed single-cell AnnData
 
-For 10X data, use one of:
-- **velocyto**: `velocyto run10x sample_name/ refdata-cellranger-mm10-3.0.0/genes/genes.gtf`
-- **kb-python**: `kb count -i index.idx -g t2g.txt -x 10xv2 -o output --lamanno`
+## Workflow Summary
 
-## Usage
+1. Validate scVelo availability and required layers.
+2. Run the selected velocity backend.
+3. Generate stream, magnitude, and optional latent-time plots.
+4. Save `adata_with_velocity.h5ad`, `report.md`, and `result.json`.
+5. Record both the public method id and the internal mode used.
 
-### CLI
+## CLI Reference
 
 ```bash
-# Basic usage (stochastic mode)
-python omicsclaw.py run sc-velocity --input data_with_spliced.h5ad --output results/
+python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
+  --input <data.h5ad> --method scvelo_stochastic --output <dir>
 
-# Dynamical mode (slower, computes latent time)
-python omicsclaw.py run sc-velocity --input data.h5ad --output results/ --mode dynamical
-
-# Demo mode (synthetic data)
-python omicsclaw.py run sc-velocity --demo --output /tmp/velocity_demo/
+python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
+  --input <data.h5ad> --mode dynamical --n-jobs 8 --output <dir>
 ```
 
-### Parameters
+## Output Contract
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | required | Input AnnData with spliced/unspliced layers |
-| `--output` | required | Output directory |
-| `--demo` | false | Run with synthetic demo data |
-| `--mode` | stochastic | Velocity mode: stochastic, dynamical, steady_state |
-| `--n-jobs` | 4 | Number of parallel jobs |
+Successful runs write:
 
-### Modes
+- `adata_with_velocity.h5ad`
+- `report.md`
+- `result.json`
+- `figures/velocity_stream.png`
+- `figures/velocity_magnitude_umap.png`
+- `figures/latent_time_umap.png` when latent time is available
 
-| Mode | Speed | Features | When to Use |
-|------|-------|----------|-------------|
-| `stochastic` | Fast | Velocity vectors | Quick analysis, large datasets |
-| `dynamical` | Slow | Velocity + latent time | Full trajectory, publication |
-| `steady_state` | Fastest | Basic velocity | Very large datasets |
+## Current Limitations
 
-## Output Structure
-
-```
-output_dir/
-├── adata_with_velocity.h5ad      # AnnData with velocity results
-├── report.md                      # Analysis report
-├── result.json                    # Machine-readable results
-├── figures/
-│   ├── velocity_stream.png       # Velocity stream plot on UMAP
-│   ├── velocity_magnitude_umap.png
-│   └── latent_time_umap.png      # (dynamical mode only)
-└── reproducibility/
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Methods
-
-### RNA Velocity
-
-RNA velocity estimates transcriptional dynamics by comparing spliced (mature) and unspliced
-(nascent) mRNA abundances.
-
-- **High velocity** → active transcription of gene
-- **Negative velocity** → gene being downregulated
-- **Stream arrows** → direction of future state
-
-### Latent Time (Dynamical Mode Only)
-
-Latent time is a global, transcriptome-wide pseudotime learned from the dynamical model.
-Unlike DPT pseudotime, it accounts for splicing kinetics.
-
-## Interpretation
-
-1. **Stream arrows**: Point toward future cell states
-2. **Velocity magnitude**: High values indicate active transcriptional changes
-3. **Latent time**: Trajectory from early (0) to late (1) states
-4. **Branches**: Arrows pointing in different directions indicate bifurcations
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No spliced/unspliced layers | Run velocyto or kb-python with `--lamanno` |
-| scVelo not installed | `pip install scvelo` |
-| Too few genes pass filtering | Check data quality, reduce `min_shared_counts` |
-| Slow dynamical mode | Use `stochastic` mode for exploration |
-
-## Tips
-
-- Preprocess data with `sc-preprocessing` first
-- Velocity works best on raw counts (not normalized)
-- Combine with `sc-pseudotime` for static trajectory comparison
-- Use `dynamical` mode for final analysis, `stochastic` for exploration
-
-## References
-
-- Bergen et al. (2020) Generalizing RNA velocity to transient cell states through dynamical modeling
-- La Manno et al. (2018) RNA velocity of single cells
+- This wrapper depends on spliced/unspliced layers already being present.
+- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.

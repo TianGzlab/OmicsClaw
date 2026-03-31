@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 logger = logging.getLogger(__name__)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_DATA_DIR = _PROJECT_ROOT / "data"
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +241,70 @@ def add_metadata(
 # Example / demo data
 # ---------------------------------------------------------------------------
 
+
+def _ensure_data_dir() -> Path:
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return _DATA_DIR
+
+
+def _demo_candidates(dataset: str) -> list[Path]:
+    data_dir = _ensure_data_dir()
+    examples_dir = _PROJECT_ROOT / "examples"
+    if dataset == "pbmc3k_raw":
+        return [
+            data_dir / "pbmc3k_raw.h5ad",
+            examples_dir / "pbmc3k.h5ad",
+        ]
+    if dataset == "pbmc3k_processed":
+        return [
+            data_dir / "pbmc3k_processed.h5ad",
+            examples_dir / "pbmc3k_processed.h5ad",
+            examples_dir / "pbmc3k.h5ad",
+        ]
+    if dataset == "pbmc68k_reduced":
+        return [
+            data_dir / "pbmc68k_reduced.h5ad",
+        ]
+    raise ValueError(f"Unknown demo dataset: {dataset}")
+
+
+def load_repo_demo_data(dataset: str = "pbmc3k_raw") -> tuple[AnnData, Path | None]:
+    """Load repo-local demo data first, else download and persist under ``data/``.
+
+    Parameters
+    ----------
+    dataset
+        Supported values: ``pbmc3k_raw``, ``pbmc3k_processed``, ``pbmc68k_reduced``.
+
+    Returns
+    -------
+    tuple
+        ``(adata, path_used_or_written)``
+    """
+    import scanpy as sc
+
+    for candidate in _demo_candidates(dataset):
+        if candidate.exists():
+            logger.info("Loading local demo data: %s", candidate)
+            return sc.read_h5ad(candidate), candidate
+
+    logger.info("Local demo data for %s not found; downloading via scanpy", dataset)
+    if dataset == "pbmc3k_raw":
+        adata = sc.datasets.pbmc3k()
+        out_path = _ensure_data_dir() / "pbmc3k_raw.h5ad"
+    elif dataset == "pbmc3k_processed":
+        adata = sc.datasets.pbmc3k_processed()
+        out_path = _ensure_data_dir() / "pbmc3k_processed.h5ad"
+    elif dataset == "pbmc68k_reduced":
+        adata = sc.datasets.pbmc68k_reduced()
+        out_path = _ensure_data_dir() / "pbmc68k_reduced.h5ad"
+    else:  # pragma: no cover
+        raise ValueError(f"Unknown demo dataset: {dataset}")
+
+    adata.write_h5ad(out_path)
+    logger.info("Downloaded demo data saved to: %s", out_path)
+    return adata, out_path
+
 def load_example_data(dataset: str = "pbmc3k") -> AnnData:
     """Load example single-cell RNA-seq dataset.
 
@@ -256,11 +322,15 @@ def load_example_data(dataset: str = "pbmc3k") -> AnnData:
     logger.info("Loading %s example dataset ...", dataset)
 
     if dataset == "pbmc3k":
-        adata = sc.datasets.pbmc3k()
+        adata, _ = load_repo_demo_data("pbmc3k_raw")
+    elif dataset == "pbmc3k_processed":
+        adata, _ = load_repo_demo_data("pbmc3k_processed")
     elif dataset == "pbmc68k_reduced":
-        adata = sc.datasets.pbmc68k_reduced()
+        adata, _ = load_repo_demo_data("pbmc68k_reduced")
     else:
-        raise ValueError(f"Unknown dataset: {dataset}. Options: 'pbmc3k', 'pbmc68k_reduced'")
+        raise ValueError(
+            f"Unknown dataset: {dataset}. Options: 'pbmc3k', 'pbmc3k_processed', 'pbmc68k_reduced'"
+        )
 
     logger.info("Loaded: %d cells x %d genes", adata.n_obs, adata.n_vars)
     return adata

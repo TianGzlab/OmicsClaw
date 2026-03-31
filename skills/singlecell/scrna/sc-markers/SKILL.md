@@ -1,12 +1,12 @@
 ---
 name: sc-markers
 description: >-
-  Find marker genes for cell clusters using Wilcoxon, t-test, or logistic
-  regression. Essential for cell type annotation.
-version: 0.2.0
+  Find cluster marker genes from single-cell data using Scanpy-backed Wilcoxon,
+  t-test, or logistic-regression ranking.
+version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, markers, differential expression, annotation]
+tags: [singlecell, markers, differential-expression, annotation]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -15,14 +15,35 @@ metadata:
       - "--method"
       - "--n-genes"
       - "--n-top"
+    param_hints:
+      wilcoxon:
+        priority: "groupby -> n_genes -> n_top"
+        params: ["groupby", "n_genes", "n_top"]
+        defaults: {groupby: "leiden", n_top: 10}
+        requires: ["cluster_labels_in_obs", "scanpy"]
+        tips:
+          - "--method wilcoxon: Default non-parametric marker ranking path."
+      t-test:
+        priority: "groupby -> n_genes -> n_top"
+        params: ["groupby", "n_genes", "n_top"]
+        defaults: {groupby: "leiden", n_top: 10}
+        requires: ["cluster_labels_in_obs", "scanpy"]
+        tips:
+          - "--method t-test: Parametric alternative for well-behaved inputs."
+      logreg:
+        priority: "groupby -> n_genes -> n_top"
+        params: ["groupby", "n_genes", "n_top"]
+        defaults: {groupby: "leiden", n_top: 10}
+        requires: ["cluster_labels_in_obs", "scanpy"]
+        tips:
+          - "--method logreg: Classification-style ranking path."
     saves_h5ad: true
     requires_preprocessed: true
     requires:
-      bins:
-        - python3
+      bins: [python3]
       env: []
       config: []
-    emoji: "🎯"
+    emoji: "S"
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install: []
@@ -34,126 +55,64 @@ metadata:
       - cell type markers
 ---
 
-# 🎯 Single-Cell Marker Genes
-
-Identify marker genes that distinguish cell clusters.
+# Single-Cell Markers
 
 ## Why This Exists
 
-- **Without it**: Manual inspection of cluster-specific genes
-- **With it**: Automated marker identification with statistical testing
-- **Why OmicsClaw**: Multiple methods with comprehensive visualizations
+- Without it: users manually inspect cluster genes without a stable statistical contract.
+- With it: marker ranking, top tables, and standard plots are generated in one run.
+- Why OmicsClaw: the wrapper keeps cluster-level marker discovery separate from broader DE workflows.
 
-## Core Capabilities
+## Scope Boundary
 
-1. **Wilcoxon test**: Non-parametric rank-sum test (default)
-2. **t-test**: Parametric differential expression
-3. **Logistic regression**: Classification-based markers
-4. **Visualization**: Heatmaps, dot plots, volcano plots
+Implemented methods:
 
-## Workflow
+1. `wilcoxon`
+2. `t-test`
+3. `logreg`
 
-1. **Load clustered data**: Input should have cluster assignments
-2. **Find markers**: Run statistical test per cluster
-3. **Filter results**: By fold change, p-value, expression fraction
-4. **Visualize**: Generate summary figures and tables
+This skill is cluster-marker focused; for condition-aware DE use `sc-de`.
+
+## Input Contract
+
+- Accepted input: preprocessed `.h5ad`
+- Required metadata: a grouping column such as `leiden`
+
+## Workflow Summary
+
+1. Load clustered AnnData.
+2. Rank genes for each cluster with the selected method.
+3. Export full and top marker tables.
+4. Generate heatmap, dotplot, and volcano-style summaries.
+5. Save `adata_with_markers.h5ad`, `report.md`, and `result.json`.
 
 ## CLI Reference
 
 ```bash
-# Basic usage
-python skills/singlecell/scrna/sc-markers/sc_markers.py --input <data.h5ad> --output <dir> --groupby leiden
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
+  --input <data.h5ad> --groupby leiden --output <dir>
 
-# With specific method
-python skills/singlecell/scrna/sc-markers/sc_markers.py --input <data.h5ad> --output <dir> \
-  --groupby leiden --method t-test
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
+  --input <data.h5ad> --groupby leiden --method t-test --output <dir>
 
-# Limit number of genes
-python skills/singlecell/scrna/sc-markers/sc_markers.py --input <data.h5ad> --output <dir> \
-  --groupby leiden --n-genes 100
-
-# Demo mode
-python omicsclaw.py run sc-markers --demo
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
+  --input <data.h5ad> --groupby leiden --n-genes 100 --n-top 10 --output <dir>
 ```
 
-## Methods
+## Output Contract
 
-### Wilcoxon (Default)
-- Non-parametric Mann-Whitney U test
-- Robust to outliers
-- Best for most use cases
+Successful runs write:
 
-### t-test
-- Parametric test
-- Assumes normal distribution
-- More sensitive to fold changes
+- `adata_with_markers.h5ad`
+- `report.md`
+- `result.json`
+- `figures/markers_heatmap.png`
+- `figures/markers_dotplot.png`
+- `figures/volcano_plots.png`
+- `tables/cluster_markers_all.csv`
+- `tables/cluster_markers_top10.csv`
 
-### Logistic Regression
-- Multiclass classification
-- Good for overlapping populations
-- Computationally intensive
+## Current Limitations
 
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--groupby` | leiden | Column with cluster assignments |
-| `--method` | wilcoxon | wilcoxon, t-test, logreg |
-| `--n-genes` | None | Genes per cluster (None = all) |
-| `--n-top` | 10 | Top markers for visualization |
-
-## Example Queries
-
-- "Find marker genes for my clusters"
-- "Identify differentially expressed genes by cluster"
-- "What markers define each cell type?"
-
-## Output Structure
-
-```
-output_dir/
-├── report.md
-├── result.json
-├── adata_with_markers.h5ad
-├── figures/
-│   ├── markers_heatmap.png
-│   ├── markers_dotplot.png
-│   └── volcano_plots.png
-├── tables/
-│   ├── cluster_markers_all.csv
-│   └── cluster_markers_top10.csv
-└── reproducibility/
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Marker Table Columns
-
-| Column | Description |
-|--------|-------------|
-| group | Cluster ID |
-| names | Gene name |
-| scores | Test statistic score |
-| pvals | Raw p-value |
-| pvals_adj | Adjusted p-value (FDR) |
-| logfoldchanges | Log2 fold change |
-
-## Interpretation
-
-- **LogFC > 1**: Gene upregulated in this cluster
-- **pvals_adj < 0.05**: Statistically significant
-- **scores**: Higher = more cluster-specific
-
-## Dependencies
-
-**Required**: scanpy, numpy, pandas, seaborn
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Query mentions "marker genes", "find markers", "differential expression"
-- Query asks about cluster-specific genes
-
-**Chaining partners**:
-- `sc-preprocessing` — Requires clustered data
-- `sc-cell-annotation` — Use markers for annotation
+- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- Marker ranking is cluster-centric and does not replace replicate-aware DE analysis.

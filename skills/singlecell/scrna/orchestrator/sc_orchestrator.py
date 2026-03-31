@@ -181,6 +181,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.demo:
+        keyword_map = _get_keyword_map()
         example_queries = [
             "remove doublets from single cell data",
             "annotate cell types in my scRNA-seq",
@@ -213,7 +214,7 @@ def main():
         body_lines = [
             "## Routing Demo\n",
             f"- **Total skills**: {len(SKILL_DESCRIPTIONS)}",
-            f"- **Keyword entries**: {len(KEYWORD_MAP)}",
+            f"- **Keyword entries**: {len(keyword_map)}",
             "",
             "### Example Query Routing\n",
             "| Query | Routed Skill | Confidence |",
