@@ -36,6 +36,14 @@ def test_resolve_capability_marks_skill_creation_requests():
     assert decision.should_create_skill is True
 
 
+def test_resolve_capability_detects_spatial_microenvironment_subset_skill():
+    decision = resolve_capability(
+        "Extract a tumor microenvironment neighborhood subset within 50 microns around tumor cells"
+    )
+    assert decision.coverage == "exact_skill"
+    assert decision.chosen_skill == "spatial-microenvironment-subset"
+
+
 def test_validate_custom_analysis_code_blocks_shell_and_network():
     issues = validate_custom_analysis_code(
         "import subprocess\nsubprocess.run(['echo', 'hi'])\n"
