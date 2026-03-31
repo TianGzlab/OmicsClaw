@@ -11,7 +11,8 @@ Standard Metadata Schema (embedded in markdown frontmatter):
     ---
     doc_id: sc-mt-filtering-best-practices
     title: Mitochondrial Filtering Best Practices
-    doc_type: decision_guide
+    doc_type: decision-guide
+    critical_rule: MUST explain why the threshold is chosen
     domains: [singlecell, spatial]
     related_skills: [sc-qc, sc-filter, sc-preprocessing]
     phases: [post_run, on_warning]
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Required and optional frontmatter fields
 _REQUIRED_FIELDS = {"doc_id", "title", "doc_type"}
 _OPTIONAL_FIELDS = {
-    "domains", "related_skills", "phases", "signals",
+    "critical_rule", "domains", "related_skills", "phases", "signals",
     "search_terms", "audience", "priority",
 }
 _VALID_DOC_TYPES = {
@@ -52,6 +53,14 @@ _VALID_DOMAINS = {
 }
 _VALID_PHASES = {
     "before_run", "post_run", "on_warning", "on_error",
+}
+_FRONTMATTER_ALIASES: dict[str, str] = {
+    "skills": "related_skills",
+    "keywords": "search_terms",
+    "phase": "phases",
+}
+_PHASE_ALIASES: dict[str, str] = {
+    "after_run": "post_run",
 }
 
 # SKILL.md category → domain mapping (for compatibility)
@@ -79,6 +88,53 @@ _SKILLMD_FIELD_MAP: dict[str, str] = {
     "detailed-description": "extended_description",
     "starting-prompt": "starting_prompt",
 }
+
+
+def _normalize_phase_name(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return _PHASE_ALIASES.get(text, text)
+
+
+def _normalize_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, (tuple, set)):
+        items = list(value)
+    else:
+        items = [value]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_metadata_aliases(meta: dict) -> dict:
+    """Normalize compatibility aliases to canonical registry keys."""
+    normalized = dict(meta)
+
+    for alias_key, canonical_key in _FRONTMATTER_ALIASES.items():
+        if alias_key in normalized and canonical_key not in normalized:
+            normalized[canonical_key] = normalized[alias_key]
+
+    for key in ("domains", "related_skills", "signals", "search_terms", "audience"):
+        if key in normalized:
+            normalized[key] = _normalize_list(normalized[key])
+
+    if "phases" in normalized:
+        normalized["phases"] = [
+            _normalize_phase_name(item)
+            for item in _normalize_list(normalized["phases"])
+        ]
+
+    return normalized
 
 
 def _normalize_skillmd_frontmatter(meta: dict) -> dict:
@@ -177,6 +233,7 @@ def validate_frontmatter(meta: dict, filepath: str = "") -> list[str]:
 
     Returns a list of validation errors (empty if valid).
     """
+    meta = _normalize_metadata_aliases(meta)
     errors = []
     prefix = f"[{filepath}] " if filepath else ""
 
@@ -277,6 +334,7 @@ class KnowledgeRegistry:
 
             # Normalize SKILL.md-style frontmatter to registry schema
             meta = _normalize_skillmd_frontmatter(meta)
+            meta = _normalize_metadata_aliases(meta)
 
             # Validate (skip strict validation for auto-normalized SKILL.md files)
             rel_path = str(md_file.relative_to(knowledge_dir))

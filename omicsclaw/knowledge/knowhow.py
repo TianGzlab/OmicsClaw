@@ -1,322 +1,182 @@
 """
 Preflight Know-How (KH) Injection System.
 
-Loads KH-*.md documents from knowledge_base/knowhows/ and forcibly injects
-them as hard scientific constraints into the LLM system prompt BEFORE
-analysis begins. These are not optional tips — they are mandatory guardrails
-derived from high-frequency AI errors observed in real-world analyses.
+Loads KH-*.md documents from knowledge_base/knowhows/ and injects them as
+mandatory scientific constraints into the LLM system prompt before analysis.
 
-Architecture:
-    User Request → PreflightKnowHowInjector
-        → identifies relevant domain / task keywords
-        → loads matching KH rules
-        → returns formatted constraint block for system prompt
+Matching priority:
+1. Exact skill match from KH frontmatter
+2. Domain + query-term match
+3. Query-term-only match
+
+Global KH docs (for example related_skills: [__all__]) are always included.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import os
-import re
 from pathlib import Path
-from typing import Optional
+import re
+from typing import Any, Optional
+
+try:
+    import yaml
+except Exception:  # pragma: no cover - optional fallback
+    yaml = None
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# KH metadata: maps each KH doc to the skills / keywords it constrains.
-# This is the single canonical mapping in the current hard-coded design.
-# ---------------------------------------------------------------------------
-
-_KH_SKILL_MAP: dict[str, dict] = {
-    "KH-spatial-preprocess-guardrails.md": {
-        "label": "Spatial Preprocess Guardrails",
-        "critical_rule": "MUST inspect platform type, count preservation, and explain the effective QC thresholds plus graph parameters before running preprocessing",
-        "skills": [
-            "spatial-preprocessing", "spatial-preprocess", "preprocess",
-        ],
-        "keywords": [
-            "spatial preprocess", "spatial preprocessing", "spatial qc",
-            "visium preprocess", "xenium preprocess", "normalize", "leiden",
-            "umap", "空间预处理", "质控", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-trajectory-guardrails.md": {
-        "label": "Spatial Trajectory Guardrails",
-        "critical_rule": "MUST inspect preprocessing state, root selection strategy, and explain the selected trajectory backend plus method-specific parameters before running",
-        "skills": [
-            "spatial-trajectory", "trajectory",
-        ],
-        "keywords": [
-            "trajectory", "pseudotime", "diffusion pseudotime", "dpt",
-            "cellrank", "palantir", "cell fate", "lineage",
-            "轨迹", "拟时序", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-register-guardrails.md": {
-        "label": "Spatial Registration Guardrails",
-        "critical_rule": "MUST inspect slice labels, slice count, and explain the selected registration method plus method-specific parameters before running",
-        "skills": [
-            "spatial-registration", "spatial-register", "register",
-        ],
-        "keywords": [
-            "spatial registration", "slice alignment", "coordinate alignment",
-            "paste", "stalign", "multi-slice", "空间配准", "切片对齐", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-domain-guardrails.md": {
-        "label": "Spatial Domain Analysis Guardrails",
-        "critical_rule": "MUST inspect the dataset and explain method plus key clustering parameters before running spatial domain identification",
-        "skills": [
-            "spatial-domains", "spatial-domain-identification", "domains",
-        ],
-        "keywords": [
-            "spatial domain", "domain identification", "tissue region", "niche",
-            "leiden", "louvain", "cellcharter", "banksy", "spagcn", "stagate", "graphst",
-            "聚类", "空间域", "组织区域", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-genes-guardrails.md": {
-        "label": "Spatial SVG Analysis Guardrails",
-        "critical_rule": "MUST inspect matrix type and coordinates, then explain the selected SVG method plus method-specific parameters before running",
-        "skills": [
-            "spatial-genes", "spatial-svg-detection", "genes",
-        ],
-        "keywords": [
-            "spatially variable gene", "spatial gene", "svg", "moran", "spatialde",
-            "spark-x", "flashs", "spatial autocorrelation", "spatial pattern",
-            "空间变异基因", "空间基因", "莫兰", "空间模式", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-annotate-guardrails.md": {
-        "label": "Spatial Annotation Guardrails",
-        "critical_rule": "MUST inspect matrix type, cluster/reference metadata, and explain the selected annotation method plus key parameters before running",
-        "skills": [
-            "spatial-annotate", "spatial-cell-annotation", "annotate",
-        ],
-        "keywords": [
-            "spatial annotation", "cell type annotation", "label transfer",
-            "tangram", "scanvi", "cellassign", "marker overlap",
-            "空间注释", "细胞类型注释", "标签转移", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-integrate-guardrails.md": {
-        "label": "Spatial Integration Guardrails",
-        "critical_rule": "MUST inspect batch structure and explain the selected integration method plus method-specific parameters before running batch correction",
-        "skills": [
-            "spatial-integrate", "spatial-integration", "integrate",
-        ],
-        "keywords": [
-            "spatial integration", "batch correction", "multi-sample integration",
-            "sample integration", "harmony", "bbknn", "scanorama",
-            "空间整合", "批次校正", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-deconv-guardrails.md": {
-        "label": "Spatial Deconvolution Guardrails",
-        "critical_rule": "MUST inspect reference labels, matrix type, and explain the selected deconvolution method plus method-specific parameters before running",
-        "skills": [
-            "spatial-deconvolution", "spatial-deconv", "deconv",
-        ],
-        "keywords": [
-            "spatial deconvolution", "cell type deconvolution", "cell proportion",
-            "cell2location", "rctd", "destvi", "stereoscope", "tangram",
-            "spotlight", "card", "空间去卷积", "细胞比例", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-communication-guardrails.md": {
-        "label": "Spatial Communication Guardrails",
-        "critical_rule": "MUST inspect cell type labels, species support, and explain the selected communication method plus method-specific parameters before running ligand-receptor analysis",
-        "skills": [
-            "spatial-cell-communication", "spatial-communication", "communication",
-        ],
-        "keywords": [
-            "cell communication", "cell-cell communication", "ligand receptor",
-            "ligand-receptor", "liana", "cellphonedb", "fastccc", "cellchat",
-            "细胞通讯", "细胞通信", "配体受体", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-cnv-guardrails.md": {
-        "label": "Spatial CNV Analysis Guardrails",
-        "critical_rule": "MUST inspect matrix type, genomic annotations, and reference cells before choosing inferCNVpy or Numbat",
-        "skills": [
-            "spatial-cnv", "cnv",
-        ],
-        "keywords": [
-            "copy number variation", "cnv", "infercnv", "infercnvpy", "numbat",
-            "aneuploidy", "tumor clone", "chromosomal aberration",
-            "空间cnv", "拷贝数变异", "染色体异常", "肿瘤克隆", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-condition-guardrails.md": {
-        "label": "Spatial Condition Comparison Guardrails",
-        "critical_rule": "MUST inspect biological replicates and pseudobulk design before running any condition comparison",
-        "skills": [
-            "spatial-condition", "spatial-condition-comparison", "condition",
-        ],
-        "keywords": [
-            "condition comparison", "pseudobulk", "pydeseq2", "deseq2", "wilcoxon",
-            "treatment vs control", "replicate", "experimental condition",
-            "空间条件比较", "伪bulk", "重复", "差异分析", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-de-guardrails.md": {
-        "label": "Spatial Differential Expression Guardrails",
-        "critical_rule": "MUST separate exploratory Scanpy marker ranking from sample-aware pseudobulk inference before running spatial differential expression",
-        "skills": [
-            "spatial-de", "de",
-        ],
-        "keywords": [
-            "spatial differential expression", "marker gene", "cluster marker",
-            "wilcoxon", "t-test", "pydeseq2", "pseudobulk", "pairwise de",
-            "空间差异表达", "marker", "伪bulk", "差异分析", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-enrichment-guardrails.md": {
-        "label": "Spatial Enrichment Guardrails",
-        "critical_rule": "MUST separate ORA, preranked GSEA, and ssGSEA conceptually before running spatial enrichment",
-        "skills": [
-            "spatial-enrichment", "enrichment",
-        ],
-        "keywords": [
-            "spatial enrichment", "pathway enrichment", "gene set enrichment",
-            "enrichr", "gsea", "ssgsea", "go", "reactome", "msigdb",
-            "空间富集", "通路富集", "功能富集", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-statistics-guardrails.md": {
-        "label": "Spatial Statistics Guardrails",
-        "critical_rule": "MUST decide whether the question is cluster-level, gene-level, or graph-level before choosing a spatial statistics method",
-        "skills": [
-            "spatial-statistics", "statistics",
-        ],
-        "keywords": [
-            "spatial statistics", "moran", "geary", "ripley", "co-occurrence",
-            "co occurrence", "getis", "getis-ord", "local moran", "bivariate moran",
-            "centrality", "graph topology", "spatial autocorrelation",
-            "空间统计", "莫兰", "里普利", "热点", "冷点", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-spatial-velocity-guardrails.md": {
-        "label": "Spatial Velocity Guardrails",
-        "critical_rule": "MUST inspect spliced/unspliced layer availability and explain the selected velocity backend plus shared preprocessing / graph settings before running",
-        "skills": [
-            "spatial-velocity", "velocity",
-        ],
-        "keywords": [
-            "spatial velocity", "rna velocity", "scvelo", "velovi",
-            "latent time", "velocity pseudotime", "spliced", "unspliced",
-            "cellular dynamics", "velocity graph",
-            "空间速度", "rna速度", "潜在时间", "拟时序", "调参",
-        ],
-        "domains": ["spatial"],
-    },
-    "KH-sc-qc-guardrails.md": {
-        "label": "Single-Cell QC Guardrails",
-        "critical_rule": "MUST inspect matrix type, gene naming convention, and explain that sc-qc is diagnostic-only before running single-cell QC",
-        "skills": [
-            "sc-qc",
-        ],
-        "keywords": [
-            "scrna qc", "single-cell qc", "single cell qc", "quality control",
-            "mitochondrial percentage", "ribosomal percentage", "genes per cell",
-            "library size", "线粒体比例", "核糖体比例", "质量控制", "调参",
-        ],
-        "domains": ["singlecell"],
-    },
-    "KH-sc-preprocessing-guardrails.md": {
-        "label": "Single-Cell Preprocessing Guardrails",
-        "critical_rule": "MUST inspect whether the input is raw-count-like, explain the chosen preprocessing backend plus effective QC and graph parameters, and never silently swap an explicitly requested method",
-        "skills": [
-            "sc-preprocessing", "sc-preprocess",
-        ],
-        "keywords": [
-            "single-cell preprocessing", "single cell preprocessing", "scrna preprocessing",
-            "scanpy preprocessing", "seurat preprocessing", "sctransform preprocessing",
-            "qc filter normalize cluster", "hvg", "umap", "pca", "leiden",
-            "单细胞预处理", "归一化", "聚类", "调参",
-        ],
-        "domains": ["singlecell"],
-    },
-    "KH-scatac-preprocessing-guardrails.md": {
-        "label": "scATAC Preprocessing Guardrails",
-        "critical_rule": "MUST inspect whether the input is a raw-count-like peak matrix, explain the effective sparsity, TF-IDF, and graph parameters, and never claim fragment-aware preprocessing when the current wrapper does not implement it",
-        "skills": [
-            "scatac-preprocessing", "scatac-preprocess",
-        ],
-        "keywords": [
-            "scatac preprocessing", "single-cell atac preprocessing", "atac tfidf",
-            "lsi preprocessing", "chromatin accessibility clustering", "atac umap",
-            "单细胞atac预处理", "染色质可及性", "调参",
-        ],
-        "domains": ["singlecell"],
-    },
-    "KH-bulk-rnaseq-differential-expression.md": {
-        "label": "Bulk RNA-Seq Differential Expression",
-        "critical_rule": "MUST use padj (not pvalue) for DEG filtering; MUST NOT confuse log2FC sign direction",
-        "skills": [
-            "bulk-rnaseq-counts-to-de-deseq2",
-            "bulkrna-de", "bulkrna-deseq2", "de",
-        ],
-        "keywords": [
-            "differential expression", "deg", "padj", "pvalue",
-            "fold change", "deseq2", "edger", "limma",
-            "差异表达", "差异基因", "差异分析",
-        ],
-        "domains": ["bulkrna", "singlecell"],
-    },
-    "KH-data-analysis-best-practices.md": {
-        "label": "Best Practices for Data Analyses",
-        "critical_rule": "MUST validate data before analysis; MUST handle duplicates and missing values explicitly",
-        "skills": ["__all__"],
-        "keywords": [
-            "data validation", "duplicates", "missing values",
-            "data quality", "metadata",
-            "数据验证", "数据质量", "缺失值", "重复值",
-        ],
-        "domains": ["__all__"],
-    },
-    "KH-gene-essentiality.md": {
-        "label": "Gene Essentiality (DepMap/CRISPR)",
-        "critical_rule": "MUST invert DepMap scores before correlation (negative raw = essential)",
-        "skills": [
-            "pooled-crispr-screens", "lasso-biomarker-panel",
-        ],
-        "keywords": [
-            "essentiality", "depmap", "crispr", "gene effect",
-            "correlation", "essential",
-            "基因关键性", "必需基因", "基因敲除",
-        ],
-        "domains": ["genomics", "general"],
-    },
-    "KH-pathway-enrichment.md": {
-        "label": "Pathway Enrichment (ORA/GSEA)",
-        "critical_rule": "MUST separate up/down genes for ORA; MUST NOT use keyword filtering to select pathways",
-        "skills": [
-            "functional-enrichment-from-degs",
-        ],
-        "keywords": [
-            "enrichment", "pathway", "ora", "gsea", "kegg",
-            "reactome", "clusterprofiler", "enrichr",
-            "富集分析", "通路富集", "通路分析", "功能富集",
-        ],
-        "domains": ["bulkrna", "singlecell", "general"],
-    },
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", flags=re.DOTALL)
+_PHASE_ALIASES = {
+    "after_run": "post_run",
 }
+
+
+@dataclass(frozen=True)
+class KnowHowMetadata:
+    filename: str
+    doc_id: str
+    label: str
+    critical_rule: str
+    skills: tuple[str, ...]
+    domains: tuple[str, ...]
+    keywords: tuple[str, ...]
+    phases: tuple[str, ...]
+    priority: float
+
+
+def _unique(values: list[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return tuple(result)
+
+
+def _normalize_phase(value: str) -> str:
+    text = str(value or "").strip().lower()
+    return _PHASE_ALIASES.get(text, text)
+
+
+def _normalize_list(
+    value: Any,
+    *,
+    normalizer: Any | None = None,
+) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item) for item in value]
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        items = [text]
+    else:
+        text = str(value).strip()
+        if not text:
+            return ()
+        items = [text]
+
+    if normalizer is not None:
+        items = [normalizer(item) for item in items]
+    return _unique(items)
+
+
+def _pick_first_present(frontmatter: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in frontmatter:
+            return frontmatter[key]
+    return None
+
+
+def _parse_simple_frontmatter(raw: str) -> dict[str, Any]:
+    """Fallback parser for simple YAML-like frontmatter."""
+    result: dict[str, Any] = {}
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#") or ":" not in text:
+            continue
+        key, value = text.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            if not inner:
+                result[key] = []
+            else:
+                result[key] = [
+                    item.strip().strip("'\"")
+                    for item in inner.split(",")
+                    if item.strip()
+                ]
+            continue
+
+        clean = value.strip().strip("'\"")
+        try:
+            result[key] = float(clean)
+            if clean.isdigit():
+                result[key] = int(clean)
+        except ValueError:
+            result[key] = clean
+    return result
+
+
+def _extract_frontmatter(text: str) -> dict[str, Any]:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+
+    raw = match.group(1)
+    if yaml is not None:
+        try:
+            parsed = yaml.safe_load(raw) or {}
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception as exc:  # pragma: no cover - fallback path
+            logger.warning("Failed to parse KH frontmatter via yaml: %s", exc)
+
+    return _parse_simple_frontmatter(raw)
+
+
+def _priority_value(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _metadata_from_document(filename: str, text: str) -> KnowHowMetadata:
+    frontmatter = _extract_frontmatter(text)
+    label = str(frontmatter.get("title") or frontmatter.get("label") or filename).strip()
+    doc_id = str(frontmatter.get("doc_id") or Path(filename).stem).strip()
+    critical_rule = str(frontmatter.get("critical_rule") or "").strip()
+    skills = _normalize_list(_pick_first_present(frontmatter, "related_skills", "skills"))
+    domains = _normalize_list(frontmatter.get("domains"))
+    keywords = _normalize_list(_pick_first_present(frontmatter, "search_terms", "keywords"))
+    phases = _normalize_list(
+        _pick_first_present(frontmatter, "phases", "phase"),
+        normalizer=_normalize_phase,
+    )
+
+    return KnowHowMetadata(
+        filename=filename,
+        doc_id=doc_id or Path(filename).stem,
+        label=label or filename,
+        critical_rule=critical_rule,
+        skills=skills,
+        domains=domains,
+        keywords=keywords,
+        phases=phases,
+        priority=_priority_value(frontmatter.get("priority")),
+    )
 
 
 def _find_knowhows_dir() -> Path:
@@ -345,83 +205,91 @@ class KnowHowInjector:
     def __init__(self, knowhows_dir: Optional[Path] = None):
         self._dir = knowhows_dir or _find_knowhows_dir()
         self._cache: dict[str, str] = {}
+        self._metadata: dict[str, KnowHowMetadata] = {}
         self._loaded = False
 
     def _ensure_loaded(self) -> None:
-        """Lazily load all KH documents into memory cache."""
+        """Lazily load all KH documents and their frontmatter metadata."""
         if self._loaded:
             return
         self._loaded = True
         if not self._dir.is_dir():
             logger.warning("Know-Hows directory not found: %s", self._dir)
             return
-        for p in sorted(self._dir.glob("KH-*.md")):
+
+        for path in sorted(self._dir.glob("KH-*.md")):
             try:
-                content = p.read_text(encoding="utf-8", errors="replace")
-                self._cache[p.name] = content
-                logger.debug("Loaded know-how: %s (%d chars)", p.name, len(content))
-            except Exception as e:
-                logger.warning("Failed to load know-how %s: %s", p.name, e)
+                content = path.read_text(encoding="utf-8", errors="replace")
+                self._cache[path.name] = content
+                self._metadata[path.name] = _metadata_from_document(path.name, content)
+                logger.debug("Loaded know-how: %s (%d chars)", path.name, len(content))
+            except Exception as exc:
+                logger.warning("Failed to load know-how %s: %s", path.name, exc)
+
         logger.info("Loaded %d know-how documents from %s", len(self._cache), self._dir)
+
+    @staticmethod
+    def _contains_term(text: str, terms: tuple[str, ...]) -> bool:
+        haystack = (text or "").lower()
+        return any(str(term).lower() in haystack for term in terms if str(term).strip())
+
+    def _match_score(
+        self,
+        meta: KnowHowMetadata,
+        *,
+        skill: str,
+        query: str,
+        domain: str,
+        phase: str,
+    ) -> tuple[float, str] | None:
+        skill_lower = (skill or "").lower().strip()
+        query_lower = (query or "").lower()
+        domain_lower = (domain or "").lower().strip()
+        phase_lower = _normalize_phase(phase or "")
+
+        skill_terms = tuple(item.lower() for item in meta.skills)
+        domain_terms = tuple(item.lower() for item in meta.domains)
+        keyword_terms = tuple(item.lower() for item in meta.keywords)
+        phase_terms = tuple(_normalize_phase(item) for item in meta.phases)
+
+        if phase_lower and phase_terms and phase_lower not in phase_terms:
+            return None
+
+        if "__all__" in skill_terms:
+            return 1000.0 + meta.priority, "global"
+
+        if skill_lower and skill_lower in skill_terms:
+            return 800.0 + meta.priority, "skill"
+
+        keyword_match = bool(query_lower) and self._contains_term(query_lower, keyword_terms)
+        domain_match = bool(domain_lower) and (
+            "__all__" in domain_terms or domain_lower in domain_terms
+        )
+
+        if domain_match and keyword_match:
+            return 500.0 + meta.priority, "domain+query"
+
+        if keyword_match:
+            return 300.0 + meta.priority, "query"
+
+        return None
 
     def get_constraints(
         self,
         skill: Optional[str] = None,
         query: Optional[str] = None,
         domain: Optional[str] = None,
+        phase: Optional[str] = None,
     ) -> str:
         """Return formatted constraint text for the given analysis context."""
-        self._ensure_loaded()
-        if not self._cache:
-            return ""
-
-        matched: list[tuple[str, str]] = []
-        query_lower = (query or "").lower()
-        skill_lower = (skill or "").lower()
-        domain_lower = (domain or "").lower()
-
-        for filename, meta in _KH_SKILL_MAP.items():
-            if filename not in self._cache:
-                continue
-            content = self._cache[filename]
-
-            if "__all__" in meta.get("skills", []):
-                matched.append((filename, content))
-                continue
-
-            if skill_lower and skill_lower in [s.lower() for s in meta.get("skills", [])]:
-                matched.append((filename, content))
-                continue
-
-            domains = meta.get("domains", [])
-            if domain_lower and ("__all__" in domains or domain_lower in domains):
-                if query_lower:
-                    kw_match = any(kw.lower() in query_lower for kw in meta.get("keywords", []))
-                    if kw_match:
-                        matched.append((filename, content))
-                        continue
-
-            if query_lower:
-                keywords = meta.get("keywords", [])
-                if any(kw.lower() in query_lower for kw in keywords):
-                    matched.append((filename, content))
-
+        matched = self._collect_matches(
+            skill=skill or "",
+            query=query or "",
+            domain=domain or "",
+            phase=phase or "",
+        )
         if not matched:
             return ""
-
-        seen = set()
-        routing_lines = []
-        for filename, _content in matched:
-            if filename in seen:
-                continue
-            seen.add(filename)
-            meta = _KH_SKILL_MAP.get(filename, {})
-            label = meta.get("label", filename)
-            rule = meta.get("critical_rule", "")
-            if rule:
-                routing_lines.append(f"  → {label}: {rule}")
-            else:
-                routing_lines.append(f"  → {label}")
 
         parts = [
             "## ⚠️ MANDATORY SCIENTIFIC CONSTRAINTS",
@@ -432,24 +300,59 @@ class KnowHowInjector:
             "",
             "**Active guards for this task:**",
         ]
-        parts.extend(routing_lines)
-        parts.append("")
-        parts.append("---")
-        parts.append("")
 
-        seen2 = set()
-        for filename, content in matched:
-            if filename in seen2:
+        seen: set[str] = set()
+        for _score, filename, meta, _content in matched:
+            if filename in seen:
                 continue
-            seen2.add(filename)
-            meta = _KH_SKILL_MAP.get(filename, {})
-            label = meta.get("label", filename)
-            cleaned = _strip_kh_header(content)
-            parts.append(f"### 📋 {label}")
-            parts.append(cleaned)
+            seen.add(filename)
+            if meta.critical_rule:
+                parts.append(f"  → {meta.label}: {meta.critical_rule}")
+            else:
+                parts.append(f"  → {meta.label}")
+
+        parts.extend(["", "---", ""])
+
+        seen.clear()
+        for _score, filename, meta, content in matched:
+            if filename in seen:
+                continue
+            seen.add(filename)
+            parts.append(f"### 📋 {meta.label}")
+            parts.append(_strip_kh_header(content))
             parts.append("")
 
         return "\n".join(parts)
+
+    def _collect_matches(
+        self,
+        *,
+        skill: str,
+        query: str,
+        domain: str,
+        phase: str,
+    ) -> list[tuple[float, str, KnowHowMetadata, str]]:
+        """Collect matched KH documents sorted by priority."""
+        self._ensure_loaded()
+        if not self._cache:
+            return []
+
+        matched: list[tuple[float, str, KnowHowMetadata, str]] = []
+        for filename, meta in self._metadata.items():
+            score_reason = self._match_score(
+                meta,
+                skill=skill,
+                query=query,
+                domain=domain,
+                phase=phase,
+            )
+            if score_reason is None:
+                continue
+            score, _reason = score_reason
+            matched.append((score, filename, meta, self._cache[filename]))
+
+        matched.sort(key=lambda item: (-item[0], item[1]))
+        return matched
 
     def get_all_kh_ids(self) -> list[str]:
         """Return list of all loaded KH document identifiers."""
@@ -458,18 +361,48 @@ class KnowHowInjector:
 
     def get_kh_for_skill(self, skill: str) -> list[str]:
         """Return KH filenames relevant to a specific skill."""
-        skill_lower = skill.lower()
-        result = []
-        for filename, meta in _KH_SKILL_MAP.items():
-            skills = [s.lower() for s in meta.get("skills", [])]
-            if "__all__" in skills or skill_lower in skills:
-                result.append(filename)
+        self._ensure_loaded()
+        skill_lower = (skill or "").lower().strip()
+        matched: list[tuple[float, str]] = []
+
+        for filename, meta in self._metadata.items():
+            skill_terms = tuple(item.lower() for item in meta.skills)
+            if "__all__" in skill_terms:
+                matched.append((1000.0 + meta.priority, filename))
+                continue
+            if skill_lower and skill_lower in skill_terms:
+                matched.append((800.0 + meta.priority, filename))
+
+        matched.sort(key=lambda item: (-item[0], item[1]))
+        return [filename for _score, filename in matched]
+
+    def get_matching_kh_ids(
+        self,
+        skill: Optional[str] = None,
+        query: Optional[str] = None,
+        domain: Optional[str] = None,
+        phase: Optional[str] = None,
+    ) -> list[str]:
+        """Return matched KH filenames for the current execution context."""
+        matched = self._collect_matches(
+            skill=skill or "",
+            query=query or "",
+            domain=domain or "",
+            phase=phase or "",
+        )
+        seen: set[str] = set()
+        result: list[str] = []
+        for _score, filename, _meta, _content in matched:
+            if filename in seen:
+                continue
+            seen.add(filename)
+            result.append(filename)
         return result
 
 
 def _strip_kh_header(content: str) -> str:
     """Remove the metadata header lines but keep the markdown body."""
-    content = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, flags=re.DOTALL)
+    content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL)
 
     lines = content.split("\n")
     body_start = 0

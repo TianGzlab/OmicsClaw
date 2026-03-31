@@ -202,3 +202,122 @@ def test_sc_preprocessing_constraints_use_guardrail_doc():
 
     assert "Single-Cell Preprocessing Guardrails" in constraints
     assert "knowledge_base/skill-guides/singlecell/sc-preprocessing.md" in constraints
+
+
+def test_global_best_practices_are_always_injected_with_skill_match():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="sc-qc",
+        query="Please run single-cell QC first.",
+        domain="singlecell",
+    )
+
+    assert "Best practices for data analyses" in constraints
+    assert "Single-Cell QC Guardrails" in constraints
+
+
+def test_query_only_fallback_matches_cross_skill_knowhow():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="",
+        query="Please run pathway enrichment with GSEA on these DEGs.",
+        domain="singlecell",
+    )
+
+    assert "Pathway Enrichment Analysis" in constraints
+
+
+def test_frontmatter_alias_keys_are_supported(tmp_path: Path):
+    kh_path = tmp_path / "KH-custom-dynamic.md"
+    kh_path.write_text(
+        """---
+doc_id: custom-dynamic
+title: Custom Dynamic KH
+doc_type: knowhow
+critical_rule: MUST prove dynamic frontmatter parsing works
+domains: [singlecell]
+skills: [custom-skill]
+keywords: [custom phrase]
+phase: [before_run]
+priority: 0.8
+---
+
+# Custom Dynamic KH
+
+This is a synthetic KH document for testing.
+""",
+        encoding="utf-8",
+    )
+
+    injector = KnowHowInjector(knowhows_dir=tmp_path)
+
+    matched = injector.get_kh_for_skill("custom-skill")
+    constraints = injector.get_constraints(
+        skill="custom-skill",
+        query="Please run custom phrase first.",
+        domain="singlecell",
+    )
+
+    assert matched == ["KH-custom-dynamic.md"]
+    assert "Custom Dynamic KH" in constraints
+
+
+def test_phase_filter_uses_normalized_phase_names(tmp_path: Path):
+    (tmp_path / "KH-before.md").write_text(
+        """---
+doc_id: custom-before
+title: Custom Before KH
+doc_type: knowhow
+critical_rule: MUST run before execution
+domains: [singlecell]
+skills: [custom-skill]
+keywords: [custom phrase]
+phase: [before_run]
+priority: 0.7
+---
+
+# Custom Before KH
+
+Before-run rules.
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "KH-after.md").write_text(
+        """---
+doc_id: custom-after
+title: Custom After KH
+doc_type: knowhow
+critical_rule: MUST inspect outputs after execution
+domains: [singlecell]
+skills: [custom-skill]
+keywords: [custom phrase]
+phase: [after_run]
+priority: 0.9
+---
+
+# Custom After KH
+
+After-run rules.
+""",
+        encoding="utf-8",
+    )
+
+    injector = KnowHowInjector(knowhows_dir=tmp_path)
+
+    assert injector.get_matching_kh_ids(skill="custom-skill", phase="before_run") == [
+        "KH-before.md",
+    ]
+    assert injector.get_matching_kh_ids(skill="custom-skill", phase="post_run") == [
+        "KH-after.md",
+    ]
+
+    constraints = injector.get_constraints(
+        skill="custom-skill",
+        query="Please run custom phrase first.",
+        domain="singlecell",
+        phase="post_run",
+    )
+    assert "Custom After KH" in constraints
+    assert "Custom Before KH" not in constraints
