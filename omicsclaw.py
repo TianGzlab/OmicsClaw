@@ -108,7 +108,6 @@ _WORKFLOW_ORDER: dict[str, list[str]] = {
         "spatial-trajectory",
         "spatial-velocity",
         "spatial-cnv",
-        "spatial-orchestrator",
     ],
     "singlecell": [
         "sc-qc",

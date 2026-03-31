@@ -342,7 +342,6 @@ testpaths = [
     "skills/spatial-cnv/tests",
     "skills/spatial-integrate/tests",
     "skills/spatial-register/tests",
-    "skills/spatial-orchestrator/tests",
     "skills/bulkrna/bulkrna-alignment/tests",
     "skills/bulkrna/bulkrna-de/tests",
     "skills/bulkrna/bulkrna-splicing/tests",

@@ -278,7 +278,7 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 | Domain | Skills | Key Capabilities |
 |--------|--------|------------------|
-| **Spatial Transcriptomics** | 16 | QC, clustering, cell typing, deconvolution, spatial statistics, communication, velocity, trajectory |
+| **Spatial Transcriptomics** | 15 | QC, clustering, cell typing, deconvolution, spatial statistics, communication, velocity, trajectory |
 | **Single-Cell Omics** | 14 | QC, filtering, preprocessing, doublet detection, annotation, trajectory, batch integration, DE, GRN, scATAC preprocessing |
 | **Genomics** | 10 | Variant calling, alignment, annotation, structural variants, assembly, phasing, CNV |
 | **Proteomics** | 8 | MS QC, peptide ID, quantification, differential abundance, PTM analysis |
@@ -292,13 +292,13 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 
 ## Skills Overview
 
-### Spatial Transcriptomics (16 skills)
+### Spatial Transcriptomics (15 skills)
 
 - **Basic:** `spatial-preprocess` — QC, normalization, clustering, UMAP
 - **Analysis:** `spatial-domains`, `spatial-annotate`, `spatial-deconv`, `spatial-statistics`, `spatial-genes`, `spatial-de`, `spatial-condition`
 - **Advanced:** `spatial-communication`, `spatial-velocity`, `spatial-trajectory`, `spatial-enrichment`, `spatial-cnv`
 - **Integration:** `spatial-integrate`, `spatial-register`
-- **Orchestration:** `spatial-orchestrator`
+- **Routing:** use top-level `orchestrator` for cross-domain query routing and pipelines
 
 <details>
 <summary>View all spatial skills</summary>
@@ -320,8 +320,6 @@ OmicsClaw's memory system transforms it from a stateless tool into a persistent 
 | `spatial-cnv` | Copy number variation | inferCNVpy, Numbat |
 | `spatial-integrate` | Multi-sample integration | Harmony, BBKNN, Scanorama |
 | `spatial-register` | Spatial registration | PASTE, STalign |
-| `spatial-orchestrator` | Spatial query routing and named pipelines | Routing, catalog, pipelines |
-
 </details>
 
 ### Single-Cell Omics (14 skills)

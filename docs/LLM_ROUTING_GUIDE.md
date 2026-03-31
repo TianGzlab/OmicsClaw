@@ -13,7 +13,7 @@ LLM_PROVIDER=deepseek
 LLM_API_KEY=sk-your-api-key-here
 ```
 
-3. Run any orchestrator with `--routing-mode llm`:
+3. Run the top-level orchestrator with `--routing-mode llm`:
 ```bash
 python skills/orchestrator/omics_orchestrator.py --demo --output /tmp/test --routing-mode llm
 ```
@@ -52,19 +52,22 @@ export LLM_MODEL="your-model"
 
 ## Usage Examples
 
-### Single-Cell Orchestrator
+### Domain-Specific Queries via Top-Level Orchestrator
 ```bash
 # Keyword routing (default)
-python skills/singlecell/orchestrator/sc_orchestrator.py \
-  --demo --output /tmp/sc --routing-mode keyword
+python skills/orchestrator/omics_orchestrator.py \
+  --query "remove doublets from single cell data" \
+  --output /tmp/omics --routing-mode keyword
 
 # LLM routing
-python skills/singlecell/orchestrator/sc_orchestrator.py \
-  --demo --output /tmp/sc --routing-mode llm
+python skills/orchestrator/omics_orchestrator.py \
+  --query "remove doublets from single cell data" \
+  --output /tmp/omics --routing-mode llm
 
 # Hybrid routing
-python skills/singlecell/orchestrator/sc_orchestrator.py \
-  --demo --output /tmp/sc --routing-mode hybrid
+python skills/orchestrator/omics_orchestrator.py \
+  --query "remove doublets from single cell data" \
+  --output /tmp/omics --routing-mode hybrid
 ```
 
 ### Top-Level Omics Orchestrator
@@ -74,12 +77,8 @@ python skills/orchestrator/omics_orchestrator.py \
   --demo --output /tmp/omics --routing-mode llm
 ```
 
-### All Domain Orchestrators
-All orchestrators support `--routing-mode`:
-- `skills/singlecell/orchestrator/sc_orchestrator.py`
-- `skills/genomics/orchestrator/genomics_orchestrator.py`
-- `skills/proteomics/orchestrator/proteomics_orchestrator.py`
-- `skills/metabolomics/orchestrator/metabolomics_orchestrator.py`
+### Supported Entry Point
+LLM routing is exposed through the top-level orchestrator:
 - `skills/orchestrator/omics_orchestrator.py`
 
 ## Configuration Priority
@@ -99,6 +98,5 @@ All orchestrators support `--routing-mode`:
 ## Testing
 
 Tested with DeepSeek API on 2026-03-14:
-- ✅ Single-cell orchestrator: 6/6 queries routed correctly
 - ✅ Omics orchestrator: 30/30 queries across 5 domains routed correctly
 - ✅ Confidence scores: 0.95 for all LLM-routed queries
