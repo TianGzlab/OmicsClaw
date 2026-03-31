@@ -240,14 +240,199 @@ def _print_separator() -> None:
 # Slash-command handlers
 # ---------------------------------------------------------------------------
 
-def _handle_skills(arg: str) -> None:
-    """List skills, optionally filtered by domain."""
+def _get_skill_registry():
+    """Return the loaded skill registry."""
+    from omicsclaw.core.registry import registry
+
+    if not getattr(registry, "_loaded", False):
+        registry.load_all()
+    return registry
+
+
+def _parse_skills_args(arg: str) -> tuple[str | None, bool]:
+    """Parse `/skills` arguments into (domain_filter, list_only)."""
+    tokens = shlex.split(arg.strip()) if arg.strip() else []
+    list_only = False
+    domain_tokens: list[str] = []
+    for token in tokens:
+        if token in {"--list", "-l"}:
+            list_only = True
+            continue
+        if token == "list" and not domain_tokens:
+            list_only = True
+            continue
+        domain_tokens.append(token)
+    domain_filter = " ".join(domain_tokens).strip() or None
+    return domain_filter, list_only
+
+
+def _resolve_domain_filter(domain_filter: str | None) -> str | None:
+    """Resolve a loose domain filter to a canonical domain key."""
+    text = (domain_filter or "").strip()
+    if not text:
+        return None
+
+    registry = _get_skill_registry()
+    lowered = text.lower()
+    normalized = lowered.replace("-", "").replace("_", "").replace(" ", "")
+
+    for domain_key, domain_info in registry.domains.items():
+        domain_name = str(domain_info.get("name", domain_key))
+        if lowered in {domain_key.lower(), domain_name.lower()}:
+            return domain_key
+
+    for domain_key, domain_info in registry.domains.items():
+        domain_name = str(domain_info.get("name", domain_key))
+        candidates = {
+            domain_key.lower(),
+            domain_name.lower(),
+            domain_key.lower().replace("-", "").replace("_", "").replace(" ", ""),
+            domain_name.lower().replace("-", "").replace("_", "").replace(" ", ""),
+        }
+        if any(
+            normalized in candidate or candidate in normalized
+            for candidate in candidates
+            if candidate
+        ):
+            return domain_key
+
+    return text
+
+
+def _iter_primary_skill_entries() -> list[tuple[str, dict[str, Any]]]:
+    """Return canonical skill entries only, excluding alias pointers."""
+    registry = _get_skill_registry()
+    known_domains = list(registry.domains.keys())
+    items = [
+        (alias, info)
+        for alias, info in registry.skills.items()
+        if alias == info.get("alias", alias)
+    ]
+    items.sort(
+        key=lambda pair: (
+            known_domains.index(pair[1].get("domain", "other"))
+            if pair[1].get("domain", "other") in known_domains
+            else len(known_domains),
+            str(pair[1].get("domain", "other")),
+            pair[0],
+        )
+    )
+    return items
+
+
+def _collect_skill_sections(
+    domain_filter: str | None = None,
+) -> list[tuple[str, dict[str, Any], list[tuple[str, dict[str, Any]]]]]:
+    """Group canonical skills into ordered domain sections."""
+    registry = _get_skill_registry()
+    resolved_filter = _resolve_domain_filter(domain_filter)
+    grouped: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+
+    for alias, info in _iter_primary_skill_entries():
+        domain_key = str(info.get("domain", "other"))
+        if resolved_filter and domain_key != resolved_filter:
+            continue
+        grouped.setdefault(domain_key, []).append((alias, info))
+
+    sections: list[tuple[str, dict[str, Any], list[tuple[str, dict[str, Any]]]]] = []
+    for domain_key, domain_info in registry.domains.items():
+        items = grouped.pop(domain_key, [])
+        if items:
+            sections.append((domain_key, domain_info, items))
+
+    for domain_key in sorted(grouped):
+        sections.append((domain_key, {"name": domain_key.title()}, grouped[domain_key]))
+
+    return sections
+
+
+def _print_skills_list(domain_filter: str | None = None) -> None:
+    """Render the legacy text-mode skills list."""
     try:
         _oc = _load_omicsclaw_script()
-        domain_filter = arg.strip() or None
         _oc.list_skills(domain_filter=domain_filter)
     except Exception as e:
         console.print(f"[red]Error listing skills: {escape(str(e))}[/red]")
+
+
+async def _pick_skill_interactive(domain_filter: str | None = None) -> str | None:
+    """Show an interactive skill picker and return the selected alias."""
+    sections = _collect_skill_sections(domain_filter)
+    if not sections:
+        label = domain_filter or "the provided filter"
+        console.print(f"[yellow]No skills found for '{escape(str(label))}'.[/yellow]")
+        return None
+
+    resolved_filter = _resolve_domain_filter(domain_filter)
+
+    try:
+        import questionary
+    except ImportError:
+        _print_skills_list(resolved_filter)
+        console.print(
+            "[dim]Install 'questionary' or use /skills --list for the plain text view.[/dim]"
+        )
+        return None
+
+    choices: list[Any] = []
+    separator_cls = getattr(questionary, "Separator", None)
+    choice_cls = getattr(questionary, "Choice")
+    multi_section = len(sections) > 1
+
+    for domain_key, domain_info, items in sections:
+        domain_name = str(domain_info.get("name", domain_key.title()))
+        data_types = domain_info.get("primary_data_types", [])
+        types_str = ", ".join(f".{t}" if t != "*" else "*" for t in data_types) or "*"
+        if multi_section and separator_cls is not None:
+            choices.append(separator_cls(f"== {domain_name} [{types_str}] =="))
+
+        for alias, info in items:
+            script = info.get("script")
+            ready = bool(script and getattr(script, "exists", lambda: False)())
+            status = "ready" if ready else "planned"
+            desc = str(info.get("description", "") or "").replace("\n", " ").strip()
+            if "—" in desc:
+                desc = desc.split("—", 1)[0].strip()
+            if not desc:
+                desc = "No description available"
+            title = f"{alias:<24} [{status}] {desc}"
+            choices.append(choice_cls(title=title, value=alias))
+
+    prompt_label = "Select a skill:"
+    if resolved_filter:
+        prompt_label = f"Select a skill in {resolved_filter}:"
+
+    return await questionary.select(
+        prompt_label,
+        choices=choices,
+        style=_PICKER_STYLE,
+    ).ask_async()
+
+
+def _build_run_prefill(skill_name: str) -> str:
+    """Build the prefilled `/run` command after skill selection."""
+    return f"/run {skill_name} "
+
+
+async def _handle_skills(arg: str) -> str | None:
+    """Open the skill picker or print the legacy skills list."""
+    domain_filter, list_only = _parse_skills_args(arg)
+    resolved_filter = _resolve_domain_filter(domain_filter)
+
+    if list_only:
+        _print_skills_list(resolved_filter)
+        return None
+
+    selected = await _pick_skill_interactive(resolved_filter or domain_filter)
+    if not selected:
+        return None
+
+    prefill = _build_run_prefill(selected)
+    console.print(f"[green]Selected skill:[/green] [cyan]{selected}[/cyan]")
+    console.print(
+        f"[dim]Next prompt is prefilled. Add flags or press Enter to run:[/dim] {prefill}"
+    )
+    return prefill
 
 
 def _handle_run(arg: str) -> str:
@@ -347,11 +532,11 @@ async def _pick_session_interactive(current_id: str) -> str | None:
             label = f"{preview[:50]:<52}  [{sid}  {when}]{marker}"
             choices.append(questionary.Choice(title=label, value=sid))
 
-        selected = questionary.select(
+        selected = await questionary.select(
             "Select session to resume:",
             choices=choices,
             style=_PICKER_STYLE,
-        ).ask()
+        ).ask_async()
         return selected
     except ImportError:
         # Fallback: show list and ask for input
@@ -1223,6 +1408,7 @@ async def _async_interactive_loop(
         "session_id":   effective_session_id,
         "workspace_dir": effective_workspace,
         "messages":     [],
+        "prefill_input": "",
         "running":      True,
         "ui_backend":   ui_backend,
     }
@@ -1268,7 +1454,8 @@ async def _async_interactive_loop(
     while state["running"]:
         try:
             user_input_raw: str = await pt_session.prompt_async(
-                HTML("<ansiblue><b>❯</b></ansiblue> ")
+                HTML("<ansiblue><b>❯</b></ansiblue> "),
+                default=state.pop("prefill_input", ""),
             )
             user_input = user_input_raw.strip()
 
@@ -1300,7 +1487,9 @@ async def _async_interactive_loop(
 
             elif low.startswith("/skills"):
                 arg = user_input[len("/skills"):].strip()
-                _handle_skills(arg)
+                prefill = await _handle_skills(arg)
+                if prefill:
+                    state["prefill_input"] = prefill
                 _print_separator()
                 continue
 
