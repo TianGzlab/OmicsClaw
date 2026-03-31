@@ -42,7 +42,7 @@ MCP_CONFIG_NAME = "mcp.yaml"
 # Slash commands shown in help and autocompleter
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/run",             "Run a skill: /run <skill> [--demo] [--input <path>]"),
-    ("/skills",          "Open the skill picker (optional: /skills <domain>, /skills --list)"),
+    ("/skills",          "Search and pick a skill (optional: /skills <domain>, /skills --list)"),
     ("/research",        "Research pipeline: /research [pdf] --idea \"...\" [--resume --output <dir>]"),
     ("/new",             "Start a new session"),
     ("/current",         "Show current session info"),
