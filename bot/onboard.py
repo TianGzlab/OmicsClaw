@@ -57,6 +57,43 @@ def save_env(env_vars: dict):
     with open(_ENV_PATH, "w") as f:
         f.writelines(lines)
 
+
+def _prompt_channels(all_channels: list[dict], current_active_list: list[str]) -> list[str] | None:
+    """Prompt for messaging channels and guard against accidental empty submits."""
+    style = questionary.Style([('selected', 'fg:green bold'), ('pointer', 'fg:green')])
+
+    while True:
+        choices = [
+            questionary.Choice(
+                ch["name"],
+                ch["value"],
+                checked=(ch["value"] in current_active_list),
+            )
+            for ch in all_channels
+        ]
+
+        selected_channels = questionary.checkbox(
+            "Select messaging channels to enable:",
+            choices=choices,
+            style=style,
+            instruction="Space=toggle, Enter=confirm. Y/N does not apply on this checklist.",
+        ).ask()
+
+        if selected_channels is None:
+            return None
+        if selected_channels:
+            return selected_channels
+
+        continue_without_channels = questionary.confirm(
+            "No channels selected. On the checklist, use Space to toggle and Enter to confirm; "
+            "Y/N only applies to prompts like this one. Continue without any messaging channels?",
+            default=False,
+        ).ask()
+        if continue_without_channels is None:
+            return None
+        if continue_without_channels:
+            return []
+
 def run_onboard():
     console.print(Panel.fit("[bold cyan]OmicsClaw Configuration Wizard[/bold cyan]\nLet's get your AI multi-omics assistant set up!", border_style="cyan"))
     
@@ -121,15 +158,9 @@ def run_onboard():
     
     current_active = env_vars.get("ACTIVE_CHANNELS", "")
     current_active_list = [c.strip() for c in current_active.split(",") if c.strip()]
-    
-    choices = [questionary.Choice(ch["name"], ch["value"], checked=(ch["value"] in current_active_list)) for ch in all_channels]
-    
-    selected_channels = questionary.checkbox(
-        "Select messaging channels to enable (Space to toggle, Enter to confirm):",
-        choices=choices,
-        style=questionary.Style([('selected', 'fg:green bold'), ('pointer', 'fg:green')])
-    ).ask()
-    
+
+    selected_channels = _prompt_channels(all_channels, current_active_list)
+
     if selected_channels is None:
         return
         
