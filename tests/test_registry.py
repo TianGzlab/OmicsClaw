@@ -11,7 +11,10 @@ def test_registry_loaded():
     assert "spatial-preprocessing" in registry.skills
     assert "spatial-preprocess" in registry.skills
     assert registry.skills["spatial-preprocessing"]["alias"] == "spatial-preprocess"
-    assert "spatial-orchestrator" in registry.skills
+    assert "spatial-orchestrator" not in registry.skills
+    assert "orchestrator" in registry.skills
+    assert registry.skills["orchestrator"]["domain"] == "orchestrator"
+    assert Path(registry.skills["orchestrator"]["script"]).name == "omics_orchestrator.py"
     assert "sc-qc" in registry.skills  # verify singlecell subdomain nesting
     assert "spatial" in registry.domains
     assert len(registry.skills) > 0
