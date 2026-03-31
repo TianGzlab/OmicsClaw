@@ -54,37 +54,52 @@ def test_collect_skill_sections_filters_and_deduplicates(monkeypatch):
     assert aliases == ["sc-markers", "sc-qc"]
 
 
-def test_build_skill_search_entries(monkeypatch):
+def test_build_skill_picker_choices(monkeypatch):
     monkeypatch.setattr(interactive_mod, "_get_skill_registry", _make_fake_registry)
 
-    entries = interactive_mod._build_skill_search_entries("singlecell")
+    class FakeChoice:
+        def __init__(self, title, value=None, description=None, **kwargs):
+            self.title = title
+            self.value = value
+            self.description = description
 
-    assert [alias for alias, _ in entries] == ["sc-markers", "sc-qc"]
-    assert "Single-Cell" in entries[0][1]
-    assert "ready" in entries[0][1]
+    class FakeQuestionary:
+        Choice = FakeChoice
+
+        @staticmethod
+        def Separator(text):
+            return ("separator", text)
+
+    choices = interactive_mod._build_skill_picker_choices(FakeQuestionary(), "singlecell")
+
+    real_choices = [choice for choice in choices if isinstance(choice, FakeChoice)]
+    assert [choice.value for choice in real_choices] == ["sc-markers", "sc-qc"]
+    assert "ready" in real_choices[0].title
+    assert "Single-Cell" in real_choices[0].description
 
 
-def test_resolve_skill_search_input():
-    aliases = ["spatial-annotate", "sc-qc", "sc-markers"]
-
-    assert interactive_mod._resolve_skill_search_input("sc-qc", aliases) == "sc-qc"
-    assert interactive_mod._resolve_skill_search_input("SC-QC", aliases) == "sc-qc"
-    assert interactive_mod._resolve_skill_search_input("markers", aliases) == "sc-markers"
-    assert interactive_mod._resolve_skill_search_input("sc", aliases) is None
-
-
-def test_pick_skill_interactive_uses_autocomplete(monkeypatch):
+def test_pick_skill_interactive_uses_select_filter(monkeypatch):
     monkeypatch.setattr(interactive_mod, "_get_skill_registry", _make_fake_registry)
 
     calls: dict[str, object] = {}
 
     class FakeQuestion:
         async def ask_async(self):
-            return "markers"
+            return "sc-qc"
 
     class FakeQuestionary:
+        class Choice:
+            def __init__(self, title, value=None, description=None, **kwargs):
+                self.title = title
+                self.value = value
+                self.description = description
+
         @staticmethod
-        def autocomplete(message, **kwargs):
+        def Separator(text):
+            return ("separator", text)
+
+        @staticmethod
+        def select(message, **kwargs):
             calls["message"] = message
             calls["kwargs"] = kwargs
             return FakeQuestion()
@@ -93,11 +108,12 @@ def test_pick_skill_interactive_uses_autocomplete(monkeypatch):
 
     result = asyncio.run(interactive_mod._pick_skill_interactive("singlecell"))
 
-    assert result == "sc-markers"
+    assert result == "sc-qc"
     assert calls["message"] == "Search skill in singlecell:"
-    assert calls["kwargs"]["choices"] == ["sc-markers", "sc-qc"]
-    assert "sc-qc" in calls["kwargs"]["meta_information"]
-    assert calls["kwargs"]["complete_while_typing"] is True
+    real_choices = [choice for choice in calls["kwargs"]["choices"] if not isinstance(choice, tuple)]
+    assert [choice.value for choice in real_choices] == ["sc-markers", "sc-qc"]
+    assert calls["kwargs"]["use_search_filter"] is True
+    assert calls["kwargs"]["use_jk_keys"] is False
 
 
 def test_handle_skills_returns_prefill_after_selection(monkeypatch):

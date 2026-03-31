@@ -355,13 +355,21 @@ def _print_skills_list(domain_filter: str | None = None) -> None:
         console.print(f"[red]Error listing skills: {escape(str(e))}[/red]")
 
 
-def _build_skill_search_entries(
-    domain_filter: str | None = None,
-) -> list[tuple[str, str]]:
-    """Build searchable skill entries as (alias, metadata)."""
-    entries: list[tuple[str, str]] = []
-    for domain_key, domain_info, items in _collect_skill_sections(domain_filter):
+def _build_skill_picker_choices(questionary_mod: Any, domain_filter: str | None = None) -> list[Any]:
+    """Build questionary choices for the searchable skill picker."""
+    sections = _collect_skill_sections(domain_filter)
+    choices: list[Any] = []
+    separator_cls = getattr(questionary_mod, "Separator", None)
+    choice_cls = getattr(questionary_mod, "Choice")
+    multi_section = len(sections) > 1
+
+    for domain_key, domain_info, items in sections:
         domain_name = str(domain_info.get("name", domain_key.title()))
+        data_types = domain_info.get("primary_data_types", [])
+        types_str = ", ".join(f".{t}" if t != "*" else "*" for t in data_types) or "*"
+        if multi_section and separator_cls is not None:
+            choices.append(separator_cls(f"== {domain_name} [{types_str}] =="))  # type: ignore[misc]
+
         for alias, info in items:
             script = info.get("script")
             ready = bool(script and getattr(script, "exists", lambda: False)())
@@ -369,34 +377,21 @@ def _build_skill_search_entries(
             desc = str(info.get("description", "") or "").replace("\n", " ").strip()
             if not desc:
                 desc = "No description available"
-            entries.append((alias, f"{domain_name} | {status} | {desc}"))
-    return entries
-
-
-def _resolve_skill_search_input(text: str, aliases: list[str]) -> str | None:
-    """Resolve an autocomplete input to an exact skill alias when possible."""
-    query = text.strip()
-    if not query:
-        return None
-    if query in aliases:
-        return query
-
-    lowered = query.lower()
-    exact_casefold = [alias for alias in aliases if alias.lower() == lowered]
-    if exact_casefold:
-        return exact_casefold[0]
-
-    partial = [alias for alias in aliases if lowered in alias.lower()]
-    if len(partial) == 1:
-        return partial[0]
-
-    return None
+            title = f"{alias:<24} [{status}] {desc}"
+            choices.append(
+                choice_cls(
+                    title=title,
+                    value=alias,
+                    description=f"{domain_name} | {status}",
+                )
+            )
+    return choices
 
 
 async def _pick_skill_interactive(domain_filter: str | None = None) -> str | None:
     """Show an interactive skill picker and return the selected alias."""
-    entries = _build_skill_search_entries(domain_filter)
-    if not entries:
+    sections = _collect_skill_sections(domain_filter)
+    if not sections:
         label = domain_filter or "the provided filter"
         console.print(f"[yellow]No skills found for '{escape(str(label))}'.[/yellow]")
         return None
@@ -412,49 +407,19 @@ async def _pick_skill_interactive(domain_filter: str | None = None) -> str | Non
         )
         return None
 
-    aliases = [alias for alias, _ in entries]
-    meta_information = {alias: meta for alias, meta in entries}
-
+    choices = _build_skill_picker_choices(questionary, domain_filter)
     prompt_label = "Search skill:"
     if resolved_filter:
         prompt_label = f"Search skill in {resolved_filter}:"
 
-    if hasattr(questionary, "autocomplete"):
-        selected = await questionary.autocomplete(
-            prompt_label,
-            choices=aliases,
-            meta_information=meta_information,
-            ignore_case=True,
-            match_middle=True,
-            complete_style=CompleteStyle.COLUMN,
-            style=_PICKER_STYLE,
-            validate=lambda text: _resolve_skill_search_input(text, aliases) is not None,
-            complete_while_typing=True,
-        ).ask_async()
-        return _resolve_skill_search_input(selected or "", aliases)
-
-    choices: list[Any] = []
-    separator_cls = getattr(questionary, "Separator", None)
-    choice_cls = getattr(questionary, "Choice")
-    multi_section = len(_collect_skill_sections(domain_filter)) > 1
-    offset = 0
-
-    for domain_key, domain_info, items in _collect_skill_sections(domain_filter):
-        domain_name = str(domain_info.get("name", domain_key.title()))
-        data_types = domain_info.get("primary_data_types", [])
-        types_str = ", ".join(f".{t}" if t != "*" else "*" for t in data_types) or "*"
-        if multi_section and separator_cls is not None:
-            choices.append(separator_cls(f"== {domain_name} [{types_str}] =="))
-
-        for _ in items:
-            alias, meta = entries[offset]
-            choices.append(choice_cls(title=f"{alias:<24} {meta}", value=alias))
-            offset += 1
-
     return await questionary.select(
-        prompt_label.replace("Search", "Select"),
+        prompt_label,
         choices=choices,
         style=_PICKER_STYLE,
+        use_search_filter=True,
+        use_jk_keys=False,
+        use_arrow_keys=True,
+        show_description=True,
     ).ask_async()
 
 
