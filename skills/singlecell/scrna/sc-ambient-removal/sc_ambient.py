@@ -310,6 +310,7 @@ def main():
     params = {
         "method": method,
         "expected_cells": args.expected_cells,
+        "raw_h5": args.raw_h5,
         "contamination": args.contamination,
         "raw_matrix_dir": args.raw_matrix_dir,
         "filtered_matrix_dir": args.filtered_matrix_dir,
@@ -317,19 +318,19 @@ def main():
 
     contamination_estimate = args.contamination
 
-    if method == "cellbender" and args.raw_h5:
+    if method == "cellbender":
+        if not args.raw_h5:
+            raise ValueError("CellBender requires --raw-h5 pointing to a raw 10x .h5 file.")
+        raw_h5 = Path(args.raw_h5)
+        if raw_h5.suffix.lower() != ".h5":
+            raise ValueError("CellBender only accepts raw 10x .h5 input in this wrapper; processed .h5ad is not supported.")
         logger.info("Running CellBender...")
-        try:
-            adata = sc_ambient_utils.run_cellbender(
-                raw_h5=args.raw_h5,
-                expected_cells=args.expected_cells or adata.n_obs,
-                output_dir=output_dir / "cellbender_output",
-            )
-            contamination_estimate = estimate_contamination_simple(adata)
-        except Exception as exc:
-            logger.warning("CellBender failed: %s. Falling back to simple subtraction.", exc)
-            method = "simple"
-            params["method"] = method
+        adata = sc_ambient_utils.run_cellbender(
+            raw_h5=raw_h5,
+            expected_cells=args.expected_cells or adata.n_obs,
+            output_dir=output_dir / "cellbender_output",
+        )
+        contamination_estimate = estimate_contamination_simple(adata)
 
     elif method == "soupx":
         if args.raw_matrix_dir and args.filtered_matrix_dir:

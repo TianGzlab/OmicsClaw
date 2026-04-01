@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from pandas.errors import EmptyDataError
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -138,7 +139,7 @@ def _build_cellchat_input_adata(adata):
 def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     validate_r_environment(required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"])
     scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
-    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=7200)
     export, source = _build_cellchat_input_adata(adata)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_cellchat_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -152,7 +153,10 @@ def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
             expected_outputs=["cellchat_results.csv"],
             output_dir=output_dir,
         )
-        df = pd.read_csv(output_dir / "cellchat_results.csv")
+        try:
+            df = pd.read_csv(output_dir / "cellchat_results.csv")
+        except EmptyDataError:
+            df = pd.DataFrame(columns=["ligand", "receptor", "source", "target", "score", "pvalue", "pathway"])
     if not df.empty:
         df["expression_source"] = source
     return df

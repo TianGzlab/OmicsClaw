@@ -19,6 +19,7 @@ source_urls:
 - **Inspect first**: verify whether the user actually has `raw_h5` or paired raw/filtered 10x directories, because the method choice depends on those files.
 - **Key wrapper controls**: explain `method`, `contamination`, `expected_cells`, `raw_h5`, `raw_matrix_dir`, and `filtered_matrix_dir`.
 - **Use method-correct language**: `simple` uses a wrapper-level contamination fraction; `cellbender` relies on `expected_cells`; `soupx` requires raw and filtered matrices.
+- **Enforce the input contract**: the current CellBender wrapper only accepts raw 10x `.h5` input; if the user only has processed `.h5ad`, do not try to run CellBender.
 - **Do not invent hidden knobs**: official CellBender docs also discuss `total-droplets-included`, but the current OmicsClaw wrapper does not expose it.
 - **Do not fake SoupX readiness**: if the required raw/filtered inputs are missing, say the wrapper will fall back instead of pretending full SoupX control is available.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-ambient-removal.md`.

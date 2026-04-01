@@ -9,6 +9,7 @@ Adapted from validated reference scripts (remove_ambient_rna.py).
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -83,6 +84,11 @@ def run_cellbender(
     raw_h5 = Path(raw_h5)
     if not raw_h5.exists():
         raise FileNotFoundError(f"Raw H5 file not found: {raw_h5}")
+    if raw_h5.suffix.lower() != ".h5":
+        raise ValueError(
+            "CellBender currently requires a raw 10x .h5 input produced by cellranger count. "
+            "Processed .h5ad files are not accepted by this wrapper."
+        )
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -102,6 +108,27 @@ def run_cellbender(
             "Install: pip install cellbender\n"
             "See: https://cellbender.readthedocs.io/"
         )
+
+    env = os.environ.copy()
+    conda_prefix = env.get("CONDA_PREFIX")
+    if conda_prefix:
+        env["LD_LIBRARY_PATH"] = f"{conda_prefix}/lib:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+
+    if use_cuda:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                logger.info("CellBender CUDA requested but unavailable -- using CPU mode.")
+                use_cuda = False
+            else:
+                try:
+                    torch.cuda.get_device_capability(0)
+                except Exception as exc:  # pragma: no cover - runtime dependent
+                    logger.info("CellBender CUDA requested but unusable (%s) -- using CPU mode.", exc)
+                    use_cuda = False
+        except Exception:
+            use_cuda = False
 
     # Build CLI command
     cmd = [
@@ -127,7 +154,7 @@ def run_cellbender(
 
     logger.info("Running CellBender: %s", " ".join(cmd))
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     if result.returncode != 0:
         # Log stderr for diagnostics

@@ -42,26 +42,19 @@ tryCatch({
     if (method == "fastmnn") {
         suppressPackageStartupMessages(library(batchelor))
         counts <- as.matrix(SummarizedExperiment::assay(sce, "X"))
-
         split_idx <- split(seq_len(ncol(sce)), factor(meta[[batch_key]], levels = unique(meta[[batch_key]])))
-        sce_list  <- lapply(split_idx, function(idx) {
-            obj <- SingleCellExperiment(
-                assays = list(
-                    counts = counts[, idx, drop = FALSE],
-                    logcounts = log1p(counts[, idx, drop = FALSE])
-                ),
-                colData = meta[idx, , drop = FALSE]
-            )
-            rownames(obj) <- rownames(sce)
-            colnames(obj) <- colnames(sce)[idx]
-            obj
+        mat_list  <- lapply(split_idx, function(idx) {
+            mat <- t(log1p(counts[, idx, drop = FALSE]))
+            colnames(mat) <- rownames(sce)
+            rownames(mat) <- colnames(sce)[idx]
+            mat
         })
 
-        mnn <- do.call(batchelor::fastMNN, c(sce_list, list(d = n_pcs)))
+        mnn <- do.call(batchelor::reducedMNN, c(mat_list, list(k = 20)))
 
-        embedding <- reducedDim(mnn, "corrected")
+        embedding <- as.matrix(mnn$corrected)
         write.csv(embedding, file.path(output_dir, "embedding.csv"), quote = FALSE)
-        write.csv(data.frame(row.names = colnames(mnn)),
+        write.csv(data.frame(row.names = rownames(embedding)),
             file.path(output_dir, "obs.csv"), quote = FALSE)
 
         cat(sprintf("Done. fastMNN embedding: %d cells x %d dims\n",

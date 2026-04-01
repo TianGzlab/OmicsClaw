@@ -47,7 +47,7 @@ tryCatch({
 
     seurat_obj <- doubletFinder(seurat_obj,
         PCs = 1:30, pN = 0.25, pK = pK_optimal,
-        nExp = nExp_poi_adj, reuse.pANN = FALSE, sct = FALSE)
+        nExp = nExp_poi_adj, reuse.pANN = NULL, sct = FALSE)
 
     df_cols  <- grep("^DF.classifications", colnames(seurat_obj@meta.data), value = TRUE)
     pann_cols <- grep("^pANN", colnames(seurat_obj@meta.data), value = TRUE)

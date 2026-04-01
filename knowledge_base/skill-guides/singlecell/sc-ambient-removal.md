@@ -27,7 +27,7 @@ Key properties to check:
 - **Technology context**:
   - droplet-based data is the main use case
 - **Input assets**:
-  - `raw_h5` for CellBender
+  - raw 10x `.h5` for CellBender
   - paired raw / filtered 10x directories for SoupX
 - **Current matrix state**:
   - the wrapper fallback uses the current expression matrix directly
@@ -44,7 +44,7 @@ Important implementation notes in current OmicsClaw:
 | Method | Best first use | Strong starting parameters | Main caveat |
 |--------|----------------|----------------------------|-------------|
 | **simple** | Fast baseline when raw inputs for other tools are missing | `contamination=0.05` | Wrapper heuristic, not a full probabilistic model |
-| **cellbender** | Best when `raw_h5` is available for droplet data | `raw_h5`, `expected_cells` | Heavy model; wrapper exposes only a small subset of official options |
+| **cellbender** | Best when a raw 10x `.h5` from CellRanger is available | `raw_h5`, `expected_cells` | Heavy model; processed `.h5ad` is rejected by the current wrapper |
 | **soupx** | Best when raw and filtered 10x directories are available | `raw_matrix_dir`, `filtered_matrix_dir` | Current wrapper does not expose the full SoupX tuning surface |
 
 ## Step 3: Always Show A Parameter Summary Before Running
@@ -75,6 +75,7 @@ Tune in this order:
 
 Guidance:
 - `raw_h5` is not optional for a real CellBender run
+- the current wrapper expects the raw 10x `.h5` produced by CellRanger, not a postprocessed `.h5ad`
 - `expected_cells` is the main public prior worth exposing in the current wrapper
 
 Important warnings:
@@ -109,4 +110,3 @@ Guidance:
 - https://cellbender.readthedocs.io/en/v0.2.2/help_and_reference/remove_background/index.html
 - https://github.com/broadinstitute/CellBender/blob/master/docs/source/usage/index.rst
 - https://github.com/constantAmateur/SoupX
-

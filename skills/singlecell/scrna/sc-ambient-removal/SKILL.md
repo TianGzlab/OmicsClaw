@@ -86,7 +86,7 @@ The wrapper does not currently expose the full upstream CellBender or SoupX para
 
 - Accepted inputs: `.h5ad` or 10x-like inputs required by the selected method
 - `simple`: needs an input AnnData matrix
-- `cellbender`: needs `--raw-h5`
+- `cellbender`: must receive a raw 10x `.h5` file from `cellranger count`; processed `.h5ad` is rejected by this wrapper
 - `soupx`: needs both `--raw-matrix-dir` and `--filtered-matrix-dir`
 
 ## Workflow Summary
