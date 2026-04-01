@@ -897,6 +897,14 @@ def main():
             leiden_resolution=float(effective_params["leiden_resolution"]),
         )
 
+    adata.uns["omicsclaw_matrix_contract"] = {
+        "X": "scaled_expression" if method == "scanpy" else "normalized_expression",
+        "raw": "log1p_normalized_expression" if adata.raw is not None else None,
+        "layers": {"counts": "raw_counts" if "counts" in adata.layers else None},
+        "primary_cluster_key": "leiden",
+        "preprocess_method": method,
+    }
+
     summary = build_summary(adata, method)
     effective_params = finalize_effective_params(adata, effective_params, summary)
     gallery_context = _prepare_preprocess_gallery_context(adata, summary, effective_params, output_dir)

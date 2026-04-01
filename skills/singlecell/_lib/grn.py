@@ -111,8 +111,16 @@ def prepare_expression_matrix(adata, layer: str | None = None) -> pd.DataFrame:
     """
     if layer is not None:
         X = adata.layers[layer]
+        var_names = adata.var_names
+    elif "counts" in adata.layers:
+        X = adata.layers["counts"]
+        var_names = adata.var_names
+    elif adata.raw is not None and adata.raw.shape == adata.shape:
+        X = adata.raw.X
+        var_names = adata.raw.var_names
     else:
         X = adata.X
+        var_names = adata.var_names
 
     if hasattr(X, "toarray"):
         X = X.toarray()
@@ -120,7 +128,7 @@ def prepare_expression_matrix(adata, layer: str | None = None) -> pd.DataFrame:
     df = pd.DataFrame(
         X,
         index=adata.obs_names,
-        columns=adata.var_names,
+        columns=var_names,
     )
 
     return df

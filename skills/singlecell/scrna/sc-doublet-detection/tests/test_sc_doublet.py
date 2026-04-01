@@ -55,5 +55,5 @@ def test_demo_result_json(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["skill"] == "sc-doublet"
+    assert data["skill"] == "sc-doublet-detection"
     assert "summary" in data

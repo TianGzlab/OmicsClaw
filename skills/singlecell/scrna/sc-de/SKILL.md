@@ -23,21 +23,21 @@ metadata:
       wilcoxon:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
-        defaults: {groupby: "louvain", n_top_genes: 10}
+        defaults: {groupby: "leiden", n_top_genes: 10}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method wilcoxon: Default exploratory marker-ranking path."
       t-test:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
-        defaults: {groupby: "louvain", n_top_genes: 10}
+        defaults: {groupby: "leiden", n_top_genes: 10}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method t-test: Parametric alternative to Wilcoxon."
       mast:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
-        defaults: {groupby: "louvain", n_top_genes: 10}
+        defaults: {groupby: "leiden", n_top_genes: 10}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "Current Python wrapper maps `mast` to a compatibility path and falls back to Wilcoxon."
@@ -132,4 +132,4 @@ Successful runs write:
 ## Current Limitations
 
 - `mast` is not a full native MAST implementation in the current Python path.
-- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

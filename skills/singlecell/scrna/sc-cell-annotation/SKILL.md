@@ -130,4 +130,4 @@ Successful runs write:
 ## Current Limitations
 
 - `singler` and `scmap` are exposed as stable method names, but the current wrapper falls back when the R bridge is unavailable.
-- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

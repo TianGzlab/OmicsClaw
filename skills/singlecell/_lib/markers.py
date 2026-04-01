@@ -32,7 +32,7 @@ def find_all_cluster_markers(
     min_in_group_fraction: float = 0.25,
     min_fold_change: float = 1.0,
     max_out_group_fraction: float = 0.5,
-    use_raw: bool = False,
+    use_raw: bool | None = None,
     layer: Optional[str] = None,
 ) -> pd.DataFrame:
     """Find marker genes for all clusters (one-vs-rest).
@@ -44,7 +44,7 @@ def find_all_cluster_markers(
     Parameters
     ----------
     adata
-        AnnData with normalized data.
+        AnnData with log-normalized data in ``adata.raw`` or ``adata.X``.
     cluster_key
         Column in ``adata.obs`` containing cluster labels.
     method
@@ -85,6 +85,9 @@ def find_all_cluster_markers(
     )
 
     # --- Run rank_genes_groups ---
+    if use_raw is None:
+        use_raw = adata.raw is not None and adata.raw.shape == adata.shape
+
     kwargs: dict = dict(
         groupby=cluster_key,
         method=method,
@@ -154,7 +157,7 @@ def find_markers_for_cluster(
     Parameters
     ----------
     adata
-        AnnData with normalized data.
+        AnnData with log-normalized data in ``adata.raw`` or ``adata.X``.
     cluster
         The specific cluster label to find markers for.
     cluster_key
@@ -270,7 +273,7 @@ def plot_top_markers_heatmap(
     n_top: int = 10,
     cluster_key: str = "leiden_0.8",
     figsize: tuple = (12, 8),
-    use_raw: bool = False,
+    use_raw: bool | None = None,
 ) -> None:
     """Plot a clustered heatmap of top marker genes using seaborn.
 

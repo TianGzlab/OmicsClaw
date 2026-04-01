@@ -126,5 +126,5 @@ Successful runs write:
 
 ## Current Limitations
 
-- The wrapper does not yet emit the same README/notebook bundle as `sc-qc` or `sc-preprocessing`.
+- The wrapper writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - `simple` is an OmicsClaw fallback, not an upstream CellBender/SoupX equivalent.

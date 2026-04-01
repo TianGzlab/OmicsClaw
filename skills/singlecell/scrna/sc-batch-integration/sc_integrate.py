@@ -172,7 +172,10 @@ def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kw
     labels_key = "cell_type" if "cell_type" in adata.obs.columns else "leiden" if "leiden" in adata.obs.columns else None
     if labels_key is None:
         logger.warning("scANVI requires labels; falling back to scVI latent integration")
-        return integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
+        result = integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
+        result["method"] = "scanvi_fallback_scvi"
+        result["requested_method"] = "scanvi"
+        return result
     adata = sc_integration_utils.run_scanvi_integration(
         adata,
         batch_key=batch_key,
@@ -627,9 +630,11 @@ def main():
 
     if args.demo:
         adata, _ = sc_io.load_repo_demo_data("pbmc3k_raw")
+        adata.layers["counts"] = adata.X.copy()
         sc.pp.normalize_total(adata)
         sc.pp.log1p(adata)
-        sc.pp.highly_variable_genes(adata, n_top_genes=2000)
+        adata.raw = adata.copy()
+        sc.pp.highly_variable_genes(adata, n_top_genes=2000, layer="counts", flavor="seurat_v3")
         sc.pp.pca(adata)
         adata.obs[args.batch_key] = np.random.choice(["batch1", "batch2"], adata.n_obs)
         input_file = None
@@ -643,6 +648,7 @@ def main():
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
     cfg = METHOD_REGISTRY[method]
     check_data_requirements(adata, cfg)
+    sc_integration_utils.setup_for_integration(adata, batch_key=args.batch_key, inplace=True)
 
     kwargs = {"batch_key": args.batch_key}
     if cfg.supports_gpu:
@@ -656,7 +662,7 @@ def main():
         summary = _METHOD_DISPATCH[method](adata, **kwargs)
 
     summary["n_cells"] = int(adata.n_obs)
-    params = {"method": method, "batch_key": args.batch_key}
+    params = {"method": method, "batch_key": args.batch_key, "counts_layer": "counts" if "counts" in adata.layers else None, "raw_available": adata.raw is not None}
     if args.n_epochs is not None:
         params["n_epochs"] = args.n_epochs
 

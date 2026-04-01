@@ -20,4 +20,5 @@ source_urls:
 - **Use method-correct language**: Scanpy `wilcoxon` and `t-test` are exploratory single-cell ranking paths; `deseq2_r` is the replicate-aware pseudobulk path.
 - **Do not invent unsupported knobs**: the current wrapper does not expose a full DESeq2 design formula editor or Scanpy low-level test parameters.
 - **Do not overclaim MAST**: in this build, `mast` is a compatibility label and should not be described as a native full MAST backend.
-
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-de.md`.
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-de.md`.

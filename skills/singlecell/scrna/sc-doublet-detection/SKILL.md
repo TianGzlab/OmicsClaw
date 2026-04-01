@@ -120,5 +120,5 @@ Successful runs write:
 
 ## Current Limitations
 
-- The wrapper does not yet emit the README/notebook bundle used by the most optimized scrna skills.
+- The wrapper now writes README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - `doubletfinder` can fall back to `scdblfinder` at runtime if the R path fails.

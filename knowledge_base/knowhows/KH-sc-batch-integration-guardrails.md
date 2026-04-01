@@ -23,4 +23,5 @@ source_urls:
 - **Use method-correct language**: `batch_key` is the core control across Harmony, scVI, BBKNN, and Scanorama; `n_epochs` only matters for scVI/scANVI in this wrapper.
 - **Do not invent unsupported knobs**: official docs discuss additional parameters such as Harmony `theta`, BBKNN `neighbors_within_batch`, and Scanorama `knn`/`sigma`, but the current OmicsClaw wrapper does not expose them.
 - **Be honest about unavailable methods**: `fastmnn`, `seurat_cca`, and `seurat_rpca` are declared in metadata but not bundled for execution in this build.
-
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-batch-integration.md`.
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-batch-integration.md`.

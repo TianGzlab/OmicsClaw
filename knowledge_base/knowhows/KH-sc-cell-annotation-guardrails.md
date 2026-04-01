@@ -22,4 +22,4 @@ source_urls:
 - **Use method-correct language**: `model` is the main CellTypist selector; `reference` is the wrapper-level choice for the reference-style path.
 - **Do not invent unsupported knobs**: official CellTypist docs also expose options like `majority_voting`, but the current OmicsClaw wrapper does not expose them.
 - **Be honest about fallbacks**: `singler` and `scmap` are not full native backends in this wrapper and may fall back instead of providing full upstream functionality.
-
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-cell-annotation.md`.

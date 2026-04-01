@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 import logging
 import sys
 from pathlib import Path
@@ -30,6 +31,8 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 
 from skills.singlecell._lib.viz_utils import save_figure
 
@@ -121,6 +124,38 @@ BUILTIN_LR = [
     ("JAG1", "NOTCH1"),
     ("DLL4", "NOTCH1"),
 ]
+
+
+def _build_cellchat_input_adata(adata):
+    if adata.raw is not None and adata.raw.shape == adata.shape:
+        export = sc.AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
+        export.obs_names = adata.obs_names.copy()
+        export.var_names = adata.raw.var_names.copy()
+        return export, "adata.raw"
+    return adata.copy(), "adata.X"
+
+
+def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
+    validate_r_environment(required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"])
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    export, source = _build_cellchat_input_adata(adata)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_cellchat_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(input_h5ad)
+        runner.run_script(
+            "sc_cellchat.R",
+            args=[str(input_h5ad), str(output_dir), cell_type_key, species],
+            expected_outputs=["cellchat_results.csv"],
+            output_dir=output_dir,
+        )
+        df = pd.read_csv(output_dir / "cellchat_results.csv")
+    if not df.empty:
+        df["expression_source"] = source
+    return df
 
 
 def _group_means(adata, cell_type_key: str) -> pd.DataFrame:

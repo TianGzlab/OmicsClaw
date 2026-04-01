@@ -162,4 +162,4 @@ Successful runs write:
 ## Current Limitations
 
 - `fastmnn`, `seurat_cca`, and `seurat_rpca` are documented in metadata but intentionally fail at runtime in the current wrapper because their R bridge is not bundled.
-- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

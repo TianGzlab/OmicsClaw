@@ -127,5 +127,5 @@ Successful runs write:
 
 ## Current Limitations
 
-- This wrapper does not yet emit the `README.md` and `analysis_notebook.ipynb` artifacts used by the most optimized scrna skills.
+- This wrapper now writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - Threshold presets are OmicsClaw wrapper defaults, not upstream standard recommendations for every tissue.

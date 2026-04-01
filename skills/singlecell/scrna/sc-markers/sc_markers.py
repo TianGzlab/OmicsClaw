@@ -362,12 +362,16 @@ def main():
     # Validate method & check dependencies
     method = validate_method_choice(args.method, METHOD_REGISTRY)
 
+    use_raw_markers = adata.raw is not None and adata.raw.shape == adata.shape
+
     # Parameters
     params = {
         "groupby": args.groupby,
         "method": method,
         "n_genes": args.n_genes,
         "n_top": args.n_top,
+        "use_raw": use_raw_markers,
+        "expression_source": "adata.raw" if use_raw_markers else "adata.X",
     }
 
     # Find markers
@@ -377,6 +381,7 @@ def main():
         cluster_key=args.groupby,
         method=method,
         n_genes=args.n_genes,
+        use_raw=use_raw_markers,
     )
 
     n_clusters = markers['group'].nunique()

@@ -133,6 +133,43 @@ PBMC_MARKERS = {
 # ---------------------------------------------------------------------------
 
 
+def _record_annotation_execution(
+    adata,
+    *,
+    requested_method: str,
+    actual_method: str,
+    fallback_reason: str = "",
+) -> None:
+    adata.obs["annotation_requested_method"] = requested_method
+    adata.obs["annotation_actual_method"] = actual_method
+    adata.obs["annotation_method"] = actual_method
+    adata.uns["annotation_runtime"] = {
+        "requested_method": requested_method,
+        "actual_method": actual_method,
+        "used_fallback": bool(fallback_reason),
+        "fallback_reason": fallback_reason,
+    }
+
+
+def _annotation_summary(
+    adata,
+    *,
+    requested_method: str,
+    actual_method: str,
+    fallback_reason: str = "",
+) -> dict:
+    counts = adata.obs["cell_type"].astype(str).value_counts().to_dict()
+    return {
+        "method": actual_method,
+        "requested_method": requested_method,
+        "actual_method": actual_method,
+        "used_fallback": bool(fallback_reason),
+        "fallback_reason": fallback_reason,
+        "n_cell_types": len(counts),
+        "cell_type_counts": {str(k): int(v) for k, v in counts.items()},
+    }
+
+
 def annotate_markers(adata, markers=None, cluster_key: str = "leiden"):
     """Marker-based annotation."""
     if markers is None:
@@ -163,82 +200,133 @@ def annotate_markers(adata, markers=None, cluster_key: str = "leiden"):
         cluster_annotations[cluster] = best_type
 
     adata.obs["cell_type"] = adata.obs[cluster_key].astype(str).map(cluster_annotations)
-    adata.obs["annotation_method"] = "markers"
+    adata.obs["annotation_score"] = np.nan
+    _record_annotation_execution(
+        adata,
+        requested_method="markers",
+        actual_method="markers",
+    )
     logger.info("Annotated %d clusters", len(cluster_annotations))
-
-    cell_type_counts = adata.obs["cell_type"].value_counts().to_dict()
-    return {
-        "method": "markers",
-        "n_cell_types": len(cell_type_counts),
-        "cell_type_counts": {str(k): int(v) for k, v in cell_type_counts.items()},
-    }
+    return _annotation_summary(adata, requested_method="markers", actual_method="markers")
 
 
 def annotate_celltypist(adata, model: str = "Immune_All_Low"):
-    """CellTypist annotation."""
+    """CellTypist annotation with explicit fallback recording."""
+    celltypist_input, expression_source = sc_annotation_utils.build_celltypist_input_adata(adata)
+    is_valid, reason = sc_annotation_utils.validate_celltypist_input_matrix(celltypist_input)
+    if not is_valid:
+        logger.warning("CellTypist input validation failed: %s", reason)
+        annotate_markers(adata)
+        _record_annotation_execution(
+            adata,
+            requested_method="celltypist",
+            actual_method="markers",
+            fallback_reason=reason,
+        )
+        summary = _annotation_summary(
+            adata,
+            requested_method="celltypist",
+            actual_method="markers",
+            fallback_reason=reason,
+        )
+        summary["expression_source"] = expression_source
+        return summary
+
     try:
         model_name = model if model.endswith(".pkl") else f"{model}.pkl"
         sc_annotation_utils.annotate_with_celltypist(
-            adata,
+            celltypist_input,
             model=model_name,
             annotation_key="cell_type",
             inplace=True,
         )
-        adata.obs["annotation_method"] = "celltypist"
-        counts = adata.obs["cell_type"].astype(str).value_counts().to_dict()
-        return {
-            "method": "celltypist",
-            "n_cell_types": len(counts),
-            "cell_type_counts": {str(k): int(v) for k, v in counts.items()},
-        }
+        adata.obs["cell_type"] = celltypist_input.obs["cell_type"].values
+        if "cell_type_score" in celltypist_input.obs.columns:
+            adata.obs["annotation_score"] = pd.to_numeric(celltypist_input.obs["cell_type_score"], errors="coerce").values
+        if "cell_type_prob" in celltypist_input.obsm:
+            adata.obsm["cell_type_prob"] = celltypist_input.obsm["cell_type_prob"]
+        _record_annotation_execution(
+            adata,
+            requested_method="celltypist",
+            actual_method="celltypist",
+        )
+        summary = _annotation_summary(adata, requested_method="celltypist", actual_method="celltypist")
+        summary["expression_source"] = expression_source
+        return summary
     except Exception as exc:
+        reason = str(exc)
         logger.warning("CellTypist annotation unavailable (%s); falling back to marker-based annotation", exc)
-        summary = annotate_markers(adata)
-        summary["method"] = "celltypist"
-        adata.obs["annotation_method"] = "celltypist"
+        annotate_markers(adata)
+        _record_annotation_execution(
+            adata,
+            requested_method="celltypist",
+            actual_method="markers",
+            fallback_reason=reason,
+        )
+        summary = _annotation_summary(
+            adata,
+            requested_method="celltypist",
+            actual_method="markers",
+            fallback_reason=reason,
+        )
+        summary["expression_source"] = expression_source
         return summary
 
 
-def _apply_r_annotations(adata, df: pd.DataFrame, *, method_name: str) -> dict:
+def _apply_r_annotations(adata, df: pd.DataFrame, *, requested_method: str, actual_method: str) -> dict:
     df = df.copy()
     if df.empty:
-        raise RuntimeError(f"R annotation method '{method_name}' returned no predictions")
+        raise RuntimeError(f"R annotation method '{requested_method}' returned no predictions")
     df.index = df.index.astype(str)
     df = df.reindex(adata.obs_names)
     labels = df["pruned_label"].fillna(df["cell_type"]).astype(str)
     adata.obs["cell_type"] = labels.values
     if "score" in df.columns:
         adata.obs["annotation_score"] = pd.to_numeric(df["score"], errors="coerce").values
-    adata.obs["annotation_method"] = method_name
-    counts = adata.obs["cell_type"].value_counts().to_dict()
-    return {
-        "method": method_name,
-        "n_cell_types": len(counts),
-        "cell_type_counts": {str(k): int(v) for k, v in counts.items()},
-    }
+    _record_annotation_execution(
+        adata,
+        requested_method=requested_method,
+        actual_method=actual_method,
+    )
+    return _annotation_summary(adata, requested_method=requested_method, actual_method=actual_method)
 
 
 def annotate_singler(adata, reference: str = "HPCA"):
     """SingleR annotation via the shared R bridge."""
-    logger.warning("SingleR bridge is not bundled in the current wrapper; using marker-based fallback")
+    reason = "SingleR bridge is not bundled in the current wrapper"
+    logger.warning("%s; using marker-based fallback", reason)
     summary = annotate_markers(adata)
-    summary["method"] = "singler"
-    adata.obs["annotation_method"] = "singler"
-    return summary
+    _record_annotation_execution(
+        adata,
+        requested_method="singler",
+        actual_method="markers",
+        fallback_reason=reason,
+    )
+    return _annotation_summary(
+        adata,
+        requested_method="singler",
+        actual_method="markers",
+        fallback_reason=reason,
+    )
 
 
 def annotate_scmap(adata, reference: str = "HPCA"):
-    """scmap-compatible R annotation path.
-
-    The provided reference bundle includes SingleR helpers but not scmap itself, so
-    this uses the same Seurat/celldex-backed bridge while keeping the method name
-    exposed to the CLI.
-    """
-    logger.warning("scmap bridge is not bundled in the current wrapper; using marker-based fallback")
+    """scmap-compatible R annotation path."""
+    reason = "scmap bridge is not bundled in the current wrapper"
+    logger.warning("%s; using marker-based fallback", reason)
     summary = annotate_markers(adata)
-    summary["method"] = "scmap"
-    adata.obs["annotation_method"] = "scmap"
-    return summary
+    _record_annotation_execution(
+        adata,
+        requested_method="scmap",
+        actual_method="markers",
+        fallback_reason=reason,
+    )
+    return _annotation_summary(
+        adata,
+        requested_method="scmap",
+        actual_method="markers",
+        fallback_reason=reason,
+    )
 
 
 _METHOD_DISPATCH = {
@@ -583,14 +671,22 @@ def main():
     write_report(output_dir, summary, input_file, params, gallery_context=gallery_context)
     write_reproducibility(output_dir, params, demo_mode=args.demo)
 
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    params["requested_method"] = method
+    params["actual_method"] = summary.get("actual_method", method)
+    if summary.get("fallback_reason"):
+        params["fallback_reason"] = summary["fallback_reason"]
+    store_analysis_metadata(adata, SKILL_NAME, summary.get("actual_method", method), params)
     output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(adata, output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     result_data = {
-        "method": method,
+        "method": summary.get("actual_method", method),
+        "requested_method": summary.get("requested_method", method),
+        "actual_method": summary.get("actual_method", method),
+        "used_fallback": summary.get("used_fallback", False),
+        "fallback_reason": summary.get("fallback_reason", ""),
         "params": params,
         **summary,
         "visualization": {

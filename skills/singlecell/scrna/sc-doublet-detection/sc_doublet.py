@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import tempfile
 import sys
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 
 from skills.singlecell._lib.viz_utils import save_figure
 
@@ -106,11 +109,85 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 }
 
 
+def _matrix_looks_count_like(matrix) -> bool:
+    sample = matrix
+    if hasattr(sample, "toarray"):
+        sample = sample[: min(200, sample.shape[0]), : min(200, sample.shape[1])].toarray()
+    else:
+        sample = np.asarray(sample[: min(200, sample.shape[0]), : min(200, sample.shape[1])])
+    if sample.size == 0:
+        return True
+    if np.nanmin(sample) < 0:
+        return False
+    frac_integer = float(np.mean(np.isclose(sample, np.round(sample), atol=1e-6)))
+    return frac_integer > 0.98
+
+
+def _get_count_like_matrix(adata):
+    if "counts" in adata.layers:
+        return adata.layers["counts"], "layers.counts"
+    if _matrix_looks_count_like(adata.X):
+        return adata.X, "adata.X"
+    raise ValueError("Doublet detection requires raw count-like input; provide adata.layers['counts'] or count-like adata.X")
+
+
+def _build_count_like_export_adata(adata):
+    matrix, source = _get_count_like_matrix(adata)
+    export = sc.AnnData(X=matrix.copy(), obs=adata.obs.copy(), var=adata.var.copy())
+    export.obs_names = adata.obs_names.copy()
+    export.var_names = adata.var_names.copy()
+    return export, source
+
+
+def _run_r_doublet_script(adata, *, script_name: str, output_csv: str, expected_doublet_rate: float, required_packages: list[str]):
+    validate_r_environment(required_r_packages=required_packages)
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    export, source = _build_count_like_export_adata(adata)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_doublet_r_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(input_h5ad)
+        runner.run_script(
+            script_name,
+            args=[str(input_h5ad), str(output_dir), str(expected_doublet_rate)],
+            expected_outputs=[output_csv],
+            output_dir=output_dir,
+        )
+        df = pd.read_csv(output_dir / output_csv, index_col=0)
+    return df, source
+
+
+def run_doubletfinder(adata, expected_doublet_rate=0.06):
+    df, _ = _run_r_doublet_script(
+        adata,
+        script_name="sc_doubletfinder.R",
+        output_csv="doubletfinder_results.csv",
+        expected_doublet_rate=expected_doublet_rate,
+        required_packages=["Seurat", "DoubletFinder", "SingleCellExperiment", "zellkonverter"],
+    )
+    return df
+
+
+def run_scdblfinder(adata, expected_doublet_rate=0.06):
+    df, _ = _run_r_doublet_script(
+        adata,
+        script_name="sc_scdblfinder.R",
+        output_csv="scdblfinder_results.csv",
+        expected_doublet_rate=expected_doublet_rate,
+        required_packages=["scDblFinder", "SingleCellExperiment", "zellkonverter"],
+    )
+    return df
+
+
 def detect_doublets_scrublet(adata, expected_doublet_rate=0.06, threshold=None):
     import scrublet as scr
 
-    logger.info("Running Scrublet (expected_rate=%s)", expected_doublet_rate)
-    scrub = scr.Scrublet(adata.X, expected_doublet_rate=expected_doublet_rate)
+    counts_matrix, source = _get_count_like_matrix(adata)
+    logger.info("Running Scrublet (expected_rate=%s, source=%s)", expected_doublet_rate, source)
+    scrub = scr.Scrublet(counts_matrix, expected_doublet_rate=expected_doublet_rate)
     doublet_scores, predicted_doublets = scrub.scrub_doublets(
         min_counts=2, min_cells=3, min_gene_variability_pctl=85, n_prin_comps=30
     )
@@ -128,6 +205,7 @@ def detect_doublets_scrublet(adata, expected_doublet_rate=0.06, threshold=None):
         "n_doublets": n_doublets,
         "doublet_rate": float(n_doublets / adata.n_obs),
         "expected_rate": expected_doublet_rate,
+        "expression_source": source,
     }
 
 

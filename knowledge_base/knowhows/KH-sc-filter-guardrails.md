@@ -21,4 +21,5 @@ source_urls:
 - **Treat `--tissue` honestly**: it is an OmicsClaw preset that overrides thresholds; do not describe it as an upstream Scanpy parameter.
 - **Do not overclaim automation**: this wrapper applies explicit threshold filters only; it does not infer optimal cutoffs from the data.
 - **Use method-correct language**: cell filtering and gene filtering are separate operations, and `min_cells` is a gene-retention control, not a cell-quality score.
-
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-filter.md`.
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-filter.md`.

@@ -104,7 +104,7 @@ def annotate_clusters_manual(
 def annotate_with_celltypist(
     adata: AnnData,
     model: str = "Immune_All_Low.pkl",
-    majority_voting: bool = True,
+    majority_voting: bool = False,
     annotation_key: str = "celltypist_annotation",
     inplace: bool = True,
 ) -> AnnData:
@@ -166,7 +166,12 @@ def annotate_with_celltypist(
 
     # Transfer probability matrix if available
     if hasattr(predictions, "probability_matrix"):
-        adata.obsm[f"{annotation_key}_prob"] = predictions.probability_matrix.values
+        prob_matrix = predictions.probability_matrix
+        adata.obsm[f"{annotation_key}_prob"] = prob_matrix.values
+        try:
+            adata.obs[f"{annotation_key}_score"] = prob_matrix.max(axis=1).to_numpy()
+        except Exception:
+            pass
 
     # Summary
     n_types = adata.obs[annotation_key].nunique()
@@ -182,6 +187,34 @@ def annotate_with_celltypist(
     _validate_celltypist_annotations(adata, annotation_key)
 
     return adata
+
+
+def validate_celltypist_input_matrix(adata: AnnData) -> tuple[bool, str]:
+    """Heuristically validate official CellTypist AnnData input expectations."""
+    matrix = adata.X
+    n_obs = min(500, adata.n_obs)
+    n_vars = min(500, adata.n_vars)
+    if hasattr(matrix, "toarray"):
+        matrix = matrix[:n_obs, :n_vars].toarray()
+    else:
+        matrix = np.asarray(matrix[:n_obs, :n_vars])
+
+    if matrix.size == 0:
+        return True, "empty matrix preview"
+    if np.nanmin(matrix) < 0:
+        return False, "CellTypist AnnData input should not contain negative expression values"
+
+    frac_integer = float(np.mean(np.isclose(matrix, np.round(matrix), atol=1e-6)))
+    max_value = float(np.nanmax(matrix))
+    median_row_sum = float(np.nanmedian(matrix.sum(axis=1)))
+
+    if frac_integer > 0.98 and max_value > 20 and median_row_sum > 50:
+        return False, (
+            "CellTypist official AnnData input expects log1p-normalized expression in X; "
+            "the current matrix still looks count-like"
+        )
+
+    return True, "matrix is compatible with CellTypist AnnData input expectations"
 
 
 def _validate_celltypist_annotations(
@@ -650,3 +683,15 @@ def compare_annotations(
     logger.info("Saved comparison heatmap: %s", fig_path)
 
     return confusion_norm
+
+
+
+def build_celltypist_input_adata(adata: AnnData):
+    """Return an AnnData view whose X matches CellTypist official input expectations."""
+    if adata.raw is not None and adata.raw.shape == adata.shape:
+        tmp = adata.copy()
+        tmp.X = adata.raw.X.copy()
+        tmp.var = adata.raw.var.copy()
+        tmp.var_names = adata.raw.var_names.copy()
+        return tmp, "adata.raw"
+    return adata.copy(), "adata.X"

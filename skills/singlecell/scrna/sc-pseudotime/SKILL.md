@@ -100,4 +100,4 @@ Successful runs write:
 ## Current Limitations
 
 - Only the DPT trajectory path is implemented in the current wrapper.
-- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

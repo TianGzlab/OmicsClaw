@@ -29,6 +29,7 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.pseudobulk import aggregate_to_pseudobulk, run_deseq2_analysis
 
 from skills.singlecell._lib.viz_utils import save_figure
 
@@ -111,23 +112,31 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
 
 
 def run_de_scanpy(adata, groupby="leiden", method="wilcoxon", group1=None, group2=None):
-    if groupby not in adata.obs.columns:
-        raise ValueError(f"Column '{groupby}' not found in adata.obs")
+    resolved_groupby = groupby
+    if resolved_groupby not in adata.obs.columns:
+        if resolved_groupby == "leiden" and "louvain" in adata.obs.columns:
+            logger.warning("Column 'leiden' not found; falling back to legacy 'louvain' for DE demo compatibility")
+            resolved_groupby = "louvain"
+        else:
+            raise ValueError(f"Column '{groupby}' not found in adata.obs")
 
     effective_method = method
     if method == "mast":
         logger.warning("MAST is not implemented in the Python path; falling back to Wilcoxon")
         effective_method = "wilcoxon"
 
+    use_raw = adata.raw is not None and adata.raw.shape == adata.shape
+
     if group1 and group2:
-        sc.tl.rank_genes_groups(adata, groupby=groupby, groups=[group1], reference=group2, method=effective_method, pts=True)
+        sc.tl.rank_genes_groups(adata, groupby=resolved_groupby, groups=[group1], reference=group2, method=effective_method, pts=True, use_raw=use_raw)
     else:
-        sc.tl.rank_genes_groups(adata, groupby=groupby, method=effective_method, pts=True)
+        sc.tl.rank_genes_groups(adata, groupby=resolved_groupby, method=effective_method, pts=True, use_raw=use_raw)
 
     result_df = sc.get.rank_genes_groups_df(adata, group=None)
     n_groups = len(result_df["group"].unique()) if "group" in result_df.columns else 0
     return result_df, {
         "method": method,
+        "groupby": resolved_groupby,
         "n_groups": n_groups,
         "n_genes_tested": int(adata.n_vars),
     }
@@ -141,16 +150,36 @@ def run_de_deseq2_r_method(adata, *, condition_key: str, group1: str, group2: st
     if celltype_key not in adata.obs.columns:
         raise ValueError(f"celltype_key '{celltype_key}' not found in adata.obs")
 
-    full_df = run_pseudobulk_deseq2(
+    if "counts" not in adata.layers and not (adata.raw is not None and adata.raw.shape == adata.shape):
+        raise ValueError("deseq2_r requires raw counts in adata.layers['counts'] or a raw-count-like matrix")
+
+    pb = aggregate_to_pseudobulk(
         adata,
-        condition_key=condition_key,
-        case_label=group1,
-        reference_label=group2,
         sample_key=sample_key,
         celltype_key=celltype_key,
+        layer="counts" if "counts" in adata.layers else None,
     )
-    if full_df.empty:
+    if pb["counts"].empty:
+        raise RuntimeError("Pseudobulk aggregation returned no sample-celltype combinations")
+
+    sample_meta = adata.obs[[sample_key, condition_key]].drop_duplicates().rename(columns={sample_key: "sample"})
+    de_results = run_deseq2_analysis(
+        pb,
+        sample_meta,
+        formula="~ condition",
+        contrast=["condition", group1, group2],
+        celltype_key="celltype",
+        use_rpy2=True,
+    )
+    if not de_results:
         raise RuntimeError("R pseudobulk DESeq2 returned no results")
+
+    frames = []
+    for cell_type, df in de_results.items():
+        tmp = df.copy()
+        tmp["cell_type"] = cell_type
+        frames.append(tmp)
+    full_df = pd.concat(frames, ignore_index=True)
     n_groups = full_df["cell_type"].nunique() if "cell_type" in full_df.columns else 0
     return full_df, {
         "method": "deseq2_r",
@@ -223,7 +252,7 @@ def main():
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--groupby", default="louvain", help="Group column for Scanpy DE or condition column for deseq2_r")
+    parser.add_argument("--groupby", default="leiden", help="Group column for Scanpy DE or condition column for deseq2_r")
     parser.add_argument("--method", default="wilcoxon", choices=list(METHOD_REGISTRY.keys()))
     parser.add_argument("--n-top-genes", type=int, default=10)
     parser.add_argument("--group1", default=None)
@@ -271,13 +300,14 @@ def main():
 
     summary["n_cells"] = int(adata.n_obs)
     params = {
-        "groupby": args.groupby,
+        "groupby": summary.get("groupby", args.groupby),
         "method": method,
         "n_top_genes": args.n_top_genes,
         "group1": args.group1,
         "group2": args.group2,
         "sample_key": args.sample_key,
         "celltype_key": args.celltype_key,
+        "expression_source": "adata.raw" if (adata.raw is not None and adata.raw.shape == adata.shape and method != "deseq2_r") else ("layers.counts" if "counts" in adata.layers else "adata.X"),
     }
 
     write_report(output_dir, summary, input_file, params)

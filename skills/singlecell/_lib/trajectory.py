@@ -225,11 +225,13 @@ def find_trajectory_genes(
 
     pseudotime = adata.obs[pseudotime_key].values
 
-    # Get expression matrix
-    if hasattr(adata.X, "toarray"):
-        X = adata.X.toarray()
+    # Get expression matrix; prefer log-normalized raw when available
+    matrix = adata.raw.X if adata.raw is not None and adata.raw.shape == adata.shape else adata.X
+    var_names = adata.raw.var_names if adata.raw is not None and adata.raw.shape == adata.shape else adata.var_names
+    if hasattr(matrix, "toarray"):
+        X = matrix.toarray()
     else:
-        X = adata.X
+        X = matrix
 
     logger.info(f"Finding trajectory genes (method={method}, n={n_genes})...")
 
@@ -237,7 +239,7 @@ def find_trajectory_genes(
     pvalues = []
     genes = []
 
-    for i, gene in enumerate(adata.var_names):
+    for i, gene in enumerate(var_names):
         gene_expr = X[:, i]
 
         # Skip genes with no variance
@@ -317,8 +319,8 @@ def run_velocity_analysis(
 
     logger.info(f"Running scVelo velocity analysis (mode={mode})...")
 
-    # Filter and normalize
-    scv.pp.filter_and_normalize(adata, min_shared_counts=20, n_top_genes=2000)
+    # Filter and normalize using the current scVelo API.
+    scv.pp.filter_and_normalize(adata, min_shared_counts=20)
 
     # Compute moments
     scv.pp.moments(adata, n_pcs=30, n_neighbors=30)

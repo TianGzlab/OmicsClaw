@@ -20,4 +20,5 @@ source_urls:
 - **Use method-correct language**: the workflow combines GRNBoost2 adjacency inference, motif pruning, and AUCell scoring.
 - **Do not invent hidden database knobs**: pySCENIC exposes many resource-specific details, but the current OmicsClaw wrapper only exposes a compact resource-selection surface.
 - **Do not overclaim automation**: this wrapper does not automatically fetch pySCENIC resources for the user.
-
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-grn.md`.
+- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-grn.md`.

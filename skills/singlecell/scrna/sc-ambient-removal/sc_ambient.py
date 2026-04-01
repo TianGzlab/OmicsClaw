@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import tempfile
 import sys
 from pathlib import Path
 
@@ -30,6 +32,8 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import ambient as sc_ambient_utils
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -104,6 +108,49 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         dependencies=("scanpy",),
     ),
 }
+
+
+def _matrix_looks_count_like(matrix) -> bool:
+    sample = matrix
+    if hasattr(sample, "toarray"):
+        sample = sample[: min(200, sample.shape[0]), : min(200, sample.shape[1])].toarray()
+    else:
+        sample = np.asarray(sample[: min(200, sample.shape[0]), : min(200, sample.shape[1])])
+    if sample.size == 0:
+        return True
+    if np.nanmin(sample) < 0:
+        return False
+    frac_integer = float(np.mean(np.isclose(sample, np.round(sample), atol=1e-6)))
+    return frac_integer > 0.98
+
+
+def _get_count_like_matrix(adata):
+    if "counts" in adata.layers:
+        return adata.layers["counts"], "layers.counts"
+    if _matrix_looks_count_like(adata.X):
+        return adata.X, "adata.X"
+    raise ValueError("Ambient RNA removal requires raw count-like input; provide adata.layers['counts'] or count-like adata.X")
+
+
+def run_soupx(raw_matrix_dir: str, filtered_matrix_dir: str):
+    validate_r_environment(required_r_packages=["Seurat", "SoupX"])
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_soupx_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        runner.run_script(
+            "sc_soupx.R",
+            args=[raw_matrix_dir, filtered_matrix_dir, str(output_dir)],
+            expected_outputs=["corrected_counts.csv", "cells.csv", "genes.csv", "contamination.json"],
+            output_dir=output_dir,
+        )
+        corrected = pd.read_csv(output_dir / "corrected_counts.csv", index_col=0)
+        cells = pd.read_csv(output_dir / "cells.csv")["cell"].astype(str).tolist()
+        genes = pd.read_csv(output_dir / "genes.csv")["gene"].astype(str).tolist()
+        contamination = json.loads((output_dir / "contamination.json").read_text(encoding="utf-8"))["contamination"]
+    return corrected.T.to_numpy(dtype=np.float32), cells, genes, contamination
 
 
 def generate_ambient_figures(adata_before, adata_after, output_dir: Path) -> list[str]:
@@ -298,14 +345,15 @@ def main():
 
     if method == "simple":
         logger.info("Applying simple ambient subtraction (contamination=%s)", args.contamination)
-        ambient_profile = np.array(adata.X.mean(axis=0)).flatten()
+        count_matrix, expression_source = _get_count_like_matrix(adata)
+        ambient_profile = np.array(count_matrix.mean(axis=0)).flatten()
         ambient_profile = ambient_profile / max(ambient_profile.sum(), 1e-8)
-        corrected = adata.X.toarray() if hasattr(adata.X, "toarray") else np.asarray(adata.X).copy()
+        corrected = count_matrix.toarray() if hasattr(count_matrix, "toarray") else np.asarray(count_matrix).copy()
         corrected = corrected - args.contamination * ambient_profile
         corrected = np.maximum(corrected, 0)
-        adata.layers["counts"] = adata.X.copy()
+        adata.layers["counts"] = count_matrix.copy()
         adata.X = corrected.astype(np.float32)
-        adata.uns["ambient_correction"] = {"method": "simple", "contamination_fraction": args.contamination}
+        adata.uns["ambient_correction"] = {"method": "simple", "contamination_fraction": args.contamination, "expression_source": expression_source}
         contamination_estimate = args.contamination
 
     mean_after = np.array(adata.X.sum(axis=1)).flatten().mean()

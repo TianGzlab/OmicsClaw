@@ -105,4 +105,4 @@ Successful runs write:
 ## Current Limitations
 
 - The built-in method uses a small curated ligand-receptor set and is intentionally lightweight.
-- This skill does not yet emit the same README/notebook bundle as `sc-qc` and `sc-preprocessing`.
+- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
