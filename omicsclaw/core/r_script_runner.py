@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -111,6 +112,7 @@ class RScriptRunner:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=self._build_r_env(),
             )
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -137,6 +139,7 @@ class RScriptRunner:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                env=self._build_r_env(),
             )
             for line in result.stdout.strip().splitlines():
                 line = line.strip()
@@ -223,7 +226,7 @@ class RScriptRunner:
         if self.verbose:
             logger.info("Running: %s", " ".join(cmd))
 
-        run_env = os.environ.copy()
+        run_env = self._build_r_env()
         if env:
             run_env.update(env)
 
@@ -288,6 +291,36 @@ class RScriptRunner:
             output_dir=Path(output_dir) if output_dir else None,
             elapsed_seconds=elapsed,
         )
+
+    def _build_r_env(self) -> dict[str, str]:
+        """Build a subprocess environment that stays inside the active conda env.
+
+        This keeps reticulate/zellkonverter from silently pulling a managed Python
+        runtime that differs from the current OmicsClaw environment.
+        """
+        env = os.environ.copy()
+        conda_prefix = env.get("CONDA_PREFIX")
+
+        python_candidates: list[str] = []
+        if conda_prefix:
+            python_candidates.append(str(Path(conda_prefix) / "bin" / "python"))
+        python_candidates.append(sys.executable)
+
+        for candidate in python_candidates:
+            if candidate and Path(candidate).exists():
+                env.setdefault("RETICULATE_PYTHON", candidate)
+                env.setdefault("PYTHON_BIN", candidate)
+                break
+
+        if conda_prefix:
+            r_libs_user = Path(conda_prefix) / "lib" / "R" / "omicsclaw-library"
+            r_libs_user.mkdir(parents=True, exist_ok=True)
+            env.setdefault("OMICSCLAW_R_LIBS", str(r_libs_user))
+            env.setdefault("R_LIBS_USER", str(r_libs_user))
+
+        # Disable reticulate's managed ephemeral Python selection when possible.
+        env.setdefault("RETICULATE_USE_MANAGED_VENV", "no")
+        return env
 
     # ------------------------------------------------------------------
     # Helpers

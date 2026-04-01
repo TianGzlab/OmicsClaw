@@ -47,6 +47,12 @@ tryCatch({
     if (!"samples" %in% colnames(meta))
         meta$samples <- "sample1"
 
+    meta[[cell_type_key]] <- as.character(meta[[cell_type_key]])
+    meta[[cell_type_key]] <- ifelse(grepl("^[0-9]", meta[[cell_type_key]]),
+        paste0("cluster_", meta[[cell_type_key]]),
+        meta[[cell_type_key]])
+    meta[[cell_type_key]] <- make.unique(meta[[cell_type_key]])
+
     cat(sprintf("  %d cells, %d cell types, species=%s\n",
         ncol(counts), length(unique(meta[[cell_type_key]])), species))
 

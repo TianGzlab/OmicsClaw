@@ -17,8 +17,8 @@ source_urls:
 
 - **Inspect first**: decide whether the user wants cluster markers or replicate-aware condition DE, because those are different statistical questions.
 - **Key wrapper controls**: explain `method`, `groupby`, `group1`, `group2`, `sample_key`, `celltype_key`, and `n_top_genes` before running.
-- **Use method-correct language**: Scanpy `wilcoxon` and `t-test` are exploratory single-cell ranking paths; `deseq2_r` is the replicate-aware pseudobulk path.
+- **Use method-correct language**: Scanpy `wilcoxon` and `t-test` are exploratory single-cell ranking paths; `mast` is an R-backed hurdle-model path on log-normalized expression; `deseq2_r` is the replicate-aware pseudobulk path on raw counts.
 - **Do not invent unsupported knobs**: the current wrapper does not expose a full DESeq2 design formula editor or Scanpy low-level test parameters.
-- **Do not overclaim MAST**: in this build, `mast` is a compatibility label and should not be described as a native full MAST backend.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-de.md`.
+- **Respect the matrix contract**: `wilcoxon`, `t-test`, and `mast` should use log-normalized expression, preferably `adata.raw`; `deseq2_r` should use raw counts from `layers["counts"]`.
+- **Be honest about runtime dependencies**: `mast` and `deseq2_r` are real public R-backed methods and require their corresponding R stacks.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-de.md`.

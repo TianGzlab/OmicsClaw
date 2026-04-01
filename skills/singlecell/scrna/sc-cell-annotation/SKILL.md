@@ -2,8 +2,7 @@
 name: sc-cell-annotation
 description: >-
   Annotate cell types from preprocessed scRNA-seq data using marker scoring,
-  CellTypist, or R-bridge-compatible method stubs. The current wrapper is
-  honest about which methods are fully implemented and which ones fall back.
+  CellTypist, SingleR, or scmap through the shared Python/R backends.
 version: 0.5.0
 author: OmicsClaw
 license: MIT
@@ -37,14 +36,14 @@ metadata:
         defaults: {reference: "HPCA"}
         requires: ["R_SingleR_stack"]
         tips:
-          - "The current wrapper exposes `singler`, but if the R bridge is unavailable it falls back to marker-based annotation."
+          - "--method singler: SingleR reference-based annotation through the shared R bridge."
       scmap:
         priority: "reference"
         params: ["reference"]
         defaults: {reference: "HPCA"}
         requires: ["R_scmap_stack"]
         tips:
-          - "The current wrapper exposes `scmap`, but currently reuses the same fallback behavior as the R reference path."
+          - "--method scmap: scmap cluster projection through the shared R bridge."
     legacy_aliases: [sc-annotate]
     saves_h5ad: true
     requires_preprocessed: true
@@ -81,16 +80,14 @@ Implemented methods:
 
 1. `markers`
 2. `celltypist`
-
-Compatibility stubs with fallback behavior:
-
-1. `singler`
-2. `scmap`
+3. `singler`
+4. `scmap`
 
 ## Input Contract
 
 - Accepted input: preprocessed `.h5ad`
-- Typical requirements: normalized expression and cluster labels such as `leiden`
+- Typical requirements: log-normalized expression and cluster labels such as `leiden`
+- Preferred matrix source: `adata.raw` when present and aligned; otherwise `adata.X`
 - Output labels are written to `obs["cell_type"]`
 
 ## Workflow Summary
@@ -129,5 +126,6 @@ Successful runs write:
 
 ## Current Limitations
 
-- `singler` and `scmap` are exposed as stable method names, but the current wrapper falls back when the R bridge is unavailable.
+- `singler` requires an R environment with `SingleR`, `celldex`, `SingleCellExperiment`, and `zellkonverter`.
+- `scmap` requires an R environment with `scmap`, `celldex`, `SingleCellExperiment`, and `zellkonverter`.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

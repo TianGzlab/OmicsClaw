@@ -26,6 +26,11 @@ suppressPackageStartupMessages({
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
+cache_dir <- file.path(path.expand("~"), ".cache", "omicsclaw", "experimenthub")
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+Sys.setenv(EXPERIMENT_HUB_CACHE = cache_dir)
+options(timeout = max(600, getOption("timeout")))
+
 tryCatch({
     cat(sprintf("Loading data from %s...\n", h5ad_file))
     sce <- readH5AD(h5ad_file)

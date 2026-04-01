@@ -35,12 +35,12 @@ metadata:
         tips:
           - "--method t-test: Parametric alternative to Wilcoxon."
       mast:
-        priority: "groupby -> n_top_genes -> group1/group2"
-        params: ["groupby", "n_top_genes", "group1", "group2"]
+        priority: "groupby -> group1/group2 -> n_top_genes"
+        params: ["groupby", "group1", "group2", "n_top_genes"]
         defaults: {groupby: "leiden", n_top_genes: 10}
-        requires: ["preprocessed_anndata", "scanpy"]
+        requires: ["R_MAST_stack", "log_normalized_expression_matrix"]
         tips:
-          - "Current Python wrapper maps `mast` to a compatibility path and falls back to Wilcoxon."
+          - "--method mast: R-backed MAST hurdle-model path on log-normalized expression."
       deseq2_r:
         priority: "groupby -> group1/group2 -> sample_key -> celltype_key"
         params: ["groupby", "group1", "group2", "sample_key", "celltype_key"]
@@ -67,7 +67,6 @@ metadata:
       - marker genes
       - de analysis
       - wilcoxon
-      - mast
       - pseudo-bulk
 ---
 
@@ -85,14 +84,15 @@ Implemented methods:
 
 1. `wilcoxon`
 2. `t-test`
-3. `mast` as a compatibility alias in the Python path
+3. `mast` for R-backed hurdle-model DE
 4. `deseq2_r` for pseudobulk DE
 
 ## Input Contract
 
 - Accepted input: preprocessed `.h5ad`
-- Scanpy tests expect a grouping column in `obs`
-- `deseq2_r` additionally expects `group1`, `group2`, `sample_key`, and `celltype_key`
+- `wilcoxon`, `t-test`, and `mast` expect log-normalized expression, preferably in `adata.raw`
+- `deseq2_r` expects raw counts, preferably in `layers["counts"]`; it may read `adata.X` only when `X` itself is still an unnormalized count matrix, plus `group1`, `group2`, `sample_key`, and `celltype_key`
+- All methods require a grouping column in `obs`
 
 ## Workflow Summary
 
@@ -131,5 +131,6 @@ Successful runs write:
 
 ## Current Limitations
 
-- `mast` is not a full native MAST implementation in the current Python path.
+- `mast` requires an R environment with `MAST`, `SingleCellExperiment`, and `zellkonverter`.
+- `deseq2_r` requires an R environment with `DESeq2`, `SingleCellExperiment`, and `zellkonverter`.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

@@ -296,8 +296,11 @@ tryCatch({{
         )
 
         results_df = pd.read_csv(output_dir / "deseq2_results.csv", index_col=0)
-        results_df.index.name = "gene"
-        results_df = results_df.reset_index()
+        if "gene" not in results_df.columns:
+            results_df.index.name = "gene"
+            results_df = results_df.reset_index()
+        else:
+            results_df = results_df.reset_index(drop=True)
         return results_df
 
 
@@ -402,8 +405,11 @@ def run_deseq2_analysis(
     # -- per cell-type DE -----------------------------------------------------
     counts_df = pseudobulk["counts"]
     pb_metadata = pseudobulk["metadata"].copy()
+    pb_metadata["_pb_index"] = pb_metadata.index.astype(str)
 
     pb_metadata = pb_metadata.merge(sample_metadata, left_on="sample", right_on="sample", how="left")
+    pb_metadata = pb_metadata.set_index("_pb_index")
+    pb_metadata.index.name = pseudobulk["metadata"].index.name
 
     celltypes = pb_metadata[celltype_key].unique()
     logger.info("Running DESeq2 for %d cell types ...", len(celltypes))

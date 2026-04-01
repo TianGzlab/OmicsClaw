@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 
 if TYPE_CHECKING:
-    from anndata import AnnData
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -689,9 +690,11 @@ def compare_annotations(
 def build_celltypist_input_adata(adata: AnnData):
     """Return an AnnData view whose X matches CellTypist official input expectations."""
     if adata.raw is not None and adata.raw.shape == adata.shape:
-        tmp = adata.copy()
-        tmp.X = adata.raw.X.copy()
-        tmp.var = adata.raw.var.copy()
+        tmp = AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
+        tmp.obs_names = adata.obs_names.copy()
         tmp.var_names = adata.raw.var_names.copy()
         return tmp, "adata.raw"
-    return adata.copy(), "adata.X"
+    tmp = AnnData(X=adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy())
+    tmp.obs_names = adata.obs_names.copy()
+    tmp.var_names = adata.var_names.copy()
+    return tmp, "adata.X"

@@ -21,5 +21,6 @@ source_urls:
 - **Key wrapper controls**: explain `method`, `cluster_key`, `model`, and `reference` before running.
 - **Use method-correct language**: `model` is the main CellTypist selector; `reference` is the wrapper-level choice for the reference-style path.
 - **Do not invent unsupported knobs**: official CellTypist docs also expose options like `majority_voting`, but the current OmicsClaw wrapper does not expose them.
-- **Be honest about fallbacks**: `singler` and `scmap` are not full native backends in this wrapper and may fall back instead of providing full upstream functionality.
+- **Respect the matrix contract**: marker scoring, CellTypist, SingleR, and scmap should read log-normalized expression, preferably from `adata.raw`; do not describe raw counts as direct input for these methods.
+- **Be honest about runtime dependencies**: `singler` requires an R environment with SingleR, celldex, SingleCellExperiment, and zellkonverter; `scmap` is a public method and requires `scmap` plus the same R bridge stack.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-cell-annotation.md`.

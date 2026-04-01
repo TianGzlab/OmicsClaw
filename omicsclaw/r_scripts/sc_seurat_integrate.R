@@ -41,12 +41,21 @@ tryCatch({
 
     if (method == "fastmnn") {
         suppressPackageStartupMessages(library(batchelor))
+        counts <- as.matrix(SummarizedExperiment::assay(sce, "X"))
 
-        SummarizedExperiment::assay(sce, "counts") <- SummarizedExperiment::assay(sce, "X")
-        SummarizedExperiment::assay(sce, "logcounts") <- log1p(SummarizedExperiment::assay(sce, "X"))
-
-        split_idx <- split(seq_len(ncol(sce)), meta[[batch_key]])
-        sce_list  <- lapply(split_idx, function(idx) sce[, idx])
+        split_idx <- split(seq_len(ncol(sce)), factor(meta[[batch_key]], levels = unique(meta[[batch_key]])))
+        sce_list  <- lapply(split_idx, function(idx) {
+            obj <- SingleCellExperiment(
+                assays = list(
+                    counts = counts[, idx, drop = FALSE],
+                    logcounts = log1p(counts[, idx, drop = FALSE])
+                ),
+                colData = meta[idx, , drop = FALSE]
+            )
+            rownames(obj) <- rownames(sce)
+            colnames(obj) <- colnames(sce)[idx]
+            obj
+        })
 
         mnn <- do.call(batchelor::fastMNN, c(sce_list, list(d = n_pcs)))
 

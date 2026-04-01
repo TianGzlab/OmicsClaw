@@ -1,9 +1,8 @@
 ---
 name: sc-batch-integration
 description: >-
-  Integrate multi-sample scRNA-seq data with Harmony, scVI, scANVI, BBKNN, or
-  Scanorama. The current wrapper also declares several R-backed methods, but
-  those paths are not bundled in this build and are documented honestly below.
+  Integrate multi-sample scRNA-seq data with Harmony, scVI, scANVI, BBKNN,
+  Scanorama, or supported R-backed integration methods.
 version: 0.5.0
 author: OmicsClaw
 license: MIT
@@ -58,21 +57,21 @@ metadata:
         defaults: {batch_key: "batch"}
         requires: ["R_batchelor_stack"]
         tips:
-          - "Declared in metadata, but the current wrapper raises a runtime error because the R path is not bundled."
+          - "--method fastmnn: R-backed batchelor fastMNN path via the shared H5AD bridge."
       seurat_cca:
         priority: "batch_key"
         params: ["batch_key"]
         defaults: {batch_key: "batch"}
         requires: ["R_Seurat_stack"]
         tips:
-          - "Declared but not bundled in this build."
+          - "--method seurat_cca: R-backed Seurat CCA integration path via the shared H5AD bridge."
       seurat_rpca:
         priority: "batch_key"
         params: ["batch_key"]
         defaults: {batch_key: "batch"}
         requires: ["R_Seurat_stack"]
         tips:
-          - "Declared but not bundled in this build."
+          - "--method seurat_rpca: R-backed Seurat RPCA integration path via the shared H5AD bridge."
     legacy_aliases: [sc-integrate]
     saves_h5ad: true
     requires_preprocessed: true
@@ -114,7 +113,7 @@ Actively implemented methods in this wrapper:
 4. `bbknn`
 5. `scanorama`
 
-Declared but not bundled in this build:
+R-backed methods (require corresponding R packages):
 
 1. `fastmnn`
 2. `seurat_cca`
@@ -125,6 +124,7 @@ Declared but not bundled in this build:
 - Accepted input: preprocessed `.h5ad`
 - Required metadata: a batch column such as `batch`, `sample`, or `sample_id`
 - Expected state: normalized data plus PCA or data suitable for PCA recomputation
+- Matrix contract: `harmony`, `bbknn`, and `scanorama` work on normalized/PCA-ready representations; `scvi`, `scanvi`, `fastmnn`, `seurat_cca`, and `seurat_rpca` should preserve raw counts in `layers["counts"]` when available
 
 ## Workflow Summary
 
@@ -161,5 +161,5 @@ Successful runs write:
 
 ## Current Limitations
 
-- `fastmnn`, `seurat_cca`, and `seurat_rpca` are documented in metadata but intentionally fail at runtime in the current wrapper because their R bridge is not bundled.
+- `fastmnn`, `seurat_cca`, and `seurat_rpca` require a working R environment with batchelor or Seurat plus the H5AD bridge packages.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.

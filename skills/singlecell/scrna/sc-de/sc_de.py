@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import tempfile
 import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import scanpy as sc
 
@@ -30,6 +32,8 @@ from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 from skills.singlecell._lib.pseudobulk import aggregate_to_pseudobulk, run_deseq2_analysis
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 
 from skills.singlecell._lib.viz_utils import save_figure
 
@@ -52,8 +56,8 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     ),
     "mast": MethodConfig(
         name="mast",
-        description="MAST-style compatibility path (falls back to Wilcoxon in Python)",
-        dependencies=("scanpy",),
+        description="MAST hurdle-model differential expression (R)",
+        dependencies=(),
     ),
     "deseq2_r": MethodConfig(
         name="deseq2_r",
@@ -121,10 +125,6 @@ def run_de_scanpy(adata, groupby="leiden", method="wilcoxon", group1=None, group
             raise ValueError(f"Column '{groupby}' not found in adata.obs")
 
     effective_method = method
-    if method == "mast":
-        logger.warning("MAST is not implemented in the Python path; falling back to Wilcoxon")
-        effective_method = "wilcoxon"
-
     use_raw = adata.raw is not None and adata.raw.shape == adata.shape
 
     if group1 and group2:
@@ -142,6 +142,36 @@ def run_de_scanpy(adata, groupby="leiden", method="wilcoxon", group1=None, group
     }
 
 
+def _matrix_looks_count_like(matrix) -> bool:
+    sample = matrix
+    if hasattr(sample, "shape") and len(sample.shape) == 2:
+        sample = sample[: min(sample.shape[0], 256), : min(sample.shape[1], 256)]
+    if hasattr(sample, "toarray"):
+        sample = sample.toarray()
+    arr = np.asarray(sample)
+    if arr.size == 0:
+        return False
+    if np.any(~np.isfinite(arr)) or np.any(arr < 0):
+        return False
+    return np.allclose(arr, np.round(arr), atol=1e-8)
+
+
+def _resolve_deseq2_count_source(adata) -> tuple[str | None, str]:
+    if "counts" in adata.layers:
+        return "counts", "layers.counts"
+
+    matrix_contract = adata.uns.get("omicsclaw_matrix_contract", {}) if isinstance(getattr(adata, "uns", {}), dict) else {}
+    if matrix_contract.get("X") == "raw_counts":
+        return None, "adata.X"
+
+    if _matrix_looks_count_like(adata.X):
+        return None, "adata.X"
+
+    raise ValueError(
+        "deseq2_r requires raw counts in adata.layers['counts'] or an unnormalized count-like adata.X matrix"
+    )
+
+
 def run_de_deseq2_r_method(adata, *, condition_key: str, group1: str, group2: str, sample_key: str, celltype_key: str):
     if not group1 or not group2:
         raise ValueError("R pseudobulk DESeq2 requires both --group1 and --group2")
@@ -150,14 +180,13 @@ def run_de_deseq2_r_method(adata, *, condition_key: str, group1: str, group2: st
     if celltype_key not in adata.obs.columns:
         raise ValueError(f"celltype_key '{celltype_key}' not found in adata.obs")
 
-    if "counts" not in adata.layers and not (adata.raw is not None and adata.raw.shape == adata.shape):
-        raise ValueError("deseq2_r requires raw counts in adata.layers['counts'] or a raw-count-like matrix")
+    layer, expression_source = _resolve_deseq2_count_source(adata)
 
     pb = aggregate_to_pseudobulk(
         adata,
         sample_key=sample_key,
         celltype_key=celltype_key,
-        layer="counts" if "counts" in adata.layers else None,
+        layer=layer,
     )
     if pb["counts"].empty:
         raise RuntimeError("Pseudobulk aggregation returned no sample-celltype combinations")
@@ -185,6 +214,56 @@ def run_de_deseq2_r_method(adata, *, condition_key: str, group1: str, group2: st
         "method": "deseq2_r",
         "n_groups": int(n_groups),
         "n_genes_tested": int(full_df["gene"].nunique()) if "gene" in full_df.columns else 0,
+        "expression_source": expression_source,
+    }
+
+
+def run_de_mast_method(adata, *, groupby: str, group1: str | None, group2: str | None):
+    resolved_groupby = groupby
+    if resolved_groupby not in adata.obs.columns:
+        if resolved_groupby == "leiden" and "louvain" in adata.obs.columns:
+            logger.warning("Column 'leiden' not found; falling back to legacy 'louvain' for MAST demo compatibility")
+            resolved_groupby = "louvain"
+        else:
+            raise ValueError(f"Column '{groupby}' not found in adata.obs")
+    validate_r_environment(required_r_packages=["MAST", "SingleCellExperiment", "zellkonverter"])
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    if adata.raw is not None and adata.raw.shape == adata.shape:
+        export = sc.AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
+        export.obs_names = adata.obs_names.copy()
+        export.var_names = adata.raw.var_names.copy()
+        expression_source = "adata.raw"
+    else:
+        export = sc.AnnData(X=adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy())
+        export.obs_names = adata.obs_names.copy()
+        export.var_names = adata.var_names.copy()
+        expression_source = "adata.X"
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_mast_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(input_h5ad)
+        args = [str(input_h5ad), str(output_dir), resolved_groupby]
+        if group1:
+            args.append(group1)
+        if group2:
+            args.append(group2)
+        runner.run_script(
+            "sc_mast_de.R",
+            args=args,
+            expected_outputs=["mast_results.csv"],
+            output_dir=output_dir,
+        )
+        full_df = pd.read_csv(output_dir / "mast_results.csv")
+    n_groups = full_df["group"].nunique() if "group" in full_df.columns else 0
+    return full_df, {
+        "method": "mast",
+        "groupby": resolved_groupby,
+        "n_groups": int(n_groups),
+        "n_genes_tested": int(full_df["gene"].nunique()) if "gene" in full_df.columns else 0,
+        "expression_source": expression_source,
     }
 
 
@@ -291,6 +370,11 @@ def main():
         full_df.to_csv(tables_dir / "de_full.csv", index=False)
         sig_df = full_df.sort_values("padj", na_position="last")
         sig_df.to_csv(tables_dir / "markers_top.csv", index=False)
+    elif method == "mast":
+        full_df, summary = run_de_mast_method(adata, groupby=args.groupby, group1=args.group1, group2=args.group2)
+        top_df = full_df.sort_values(["padj", "pvalue"], na_position="last").groupby("group").head(args.n_top_genes)
+        full_df.to_csv(tables_dir / "de_full.csv", index=False)
+        top_df.to_csv(tables_dir / "markers_top.csv", index=False)
     else:
         full_df, summary = run_de_scanpy(adata, args.groupby, method, args.group1, args.group2)
         top_df = full_df.groupby("group").head(args.n_top_genes)
@@ -307,7 +391,7 @@ def main():
         "group2": args.group2,
         "sample_key": args.sample_key,
         "celltype_key": args.celltype_key,
-        "expression_source": "adata.raw" if (adata.raw is not None and adata.raw.shape == adata.shape and method != "deseq2_r") else ("layers.counts" if "counts" in adata.layers else "adata.X"),
+        "expression_source": summary.get("expression_source", ("adata.raw" if (adata.raw is not None and adata.raw.shape == adata.shape and method != "deseq2_r") else ("layers.counts" if "counts" in adata.layers else "adata.X"))),
     }
 
     write_report(output_dir, summary, input_file, params)

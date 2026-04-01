@@ -8,6 +8,7 @@ import logging
 import tempfile
 import sys
 from pathlib import Path
+import h5py
 
 import matplotlib
 matplotlib.use("Agg")
@@ -150,6 +151,9 @@ def _run_r_doublet_script(adata, *, script_name: str, output_csv: str, expected_
         output_dir = tmpdir / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         export.write_h5ad(input_h5ad)
+        with h5py.File(input_h5ad, "a") as handle:
+            if "layers" in handle and len(handle["layers"].keys()) == 0:
+                del handle["layers"]
         runner.run_script(
             script_name,
             args=[str(input_h5ad), str(output_dir), str(expected_doublet_rate)],

@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import shlex
+import tempfile
 import sys
 from pathlib import Path
 
@@ -37,6 +38,8 @@ from skills.singlecell._lib import integration as sc_integration_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice, check_data_requirements
+from omicsclaw.core.dependency_manager import validate_r_environment
+from omicsclaw.core.r_script_runner import RScriptRunner
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -206,17 +209,76 @@ def integrate_scanorama(adata, batch_key="batch", **kwargs):
     for batch in adata.obs[batch_key].unique():
         batches.append(adata[adata.obs[batch_key] == batch].copy())
     corrected = scanorama.correct_scanpy(batches, return_dimred=True)
-    adata.obsm["X_scanorama"] = np.concatenate(corrected[1])
+    embedding_frames = []
+    for corrected_batch in corrected:
+        embedding = corrected_batch.obsm.get("X_scanorama")
+        if embedding is None:
+            raise RuntimeError("Scanorama did not produce 'X_scanorama' embeddings")
+        frame = pd.DataFrame(embedding, index=corrected_batch.obs_names)
+        embedding_frames.append(frame)
+    combined = pd.concat(embedding_frames, axis=0)
+    combined = combined.loc[adata.obs_names]
+    adata.obsm["X_scanorama"] = combined.to_numpy(dtype=float)
     sc.pp.neighbors(adata, use_rep="X_scanorama")
     sc.tl.umap(adata)
     return {"method": "scanorama", "embedding_key": "X_scanorama", "n_batches": int(adata.obs[batch_key].nunique())}
 
 
+def _build_r_integration_export_adata(adata):
+    if "counts" in adata.layers:
+        matrix = adata.layers["counts"]
+    elif adata.raw is not None and adata.raw.shape == adata.shape:
+        matrix = adata.raw.X
+    else:
+        matrix = adata.X
+    export = sc.AnnData(X=matrix.copy(), obs=adata.obs.copy(), var=adata.var.copy())
+    export.obs_names = adata.obs_names.copy()
+    export.var_names = adata.var_names.copy()
+    return export
+
+
 def integrate_r_method(adata, *, method: str, batch_key: str):
-    raise RuntimeError(
-        f"R-backed integration method '{method}' is declared but not bundled in the current wrapper. "
-        "Use harmony, scvi, scanvi, bbknn, or scanorama in this build."
-    )
+    if method == "fastmnn":
+        required_packages = ["batchelor", "SingleCellExperiment", "zellkonverter"]
+    else:
+        required_packages = ["Seurat", "SingleCellExperiment", "zellkonverter"]
+    validate_r_environment(required_r_packages=required_packages)
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
+    export = _build_r_integration_export_adata(adata)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_sc_integrate_r_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(input_h5ad)
+        expected = ["embedding.csv", "obs.csv"] if method == "fastmnn" else ["embedding.csv", "umap.csv", "obs.csv"]
+        runner.run_script(
+            "sc_seurat_integrate.R",
+            args=[str(input_h5ad), str(output_dir), method, batch_key, "2000", "30"],
+            expected_outputs=expected,
+            output_dir=output_dir,
+        )
+        embedding = pd.read_csv(output_dir / "embedding.csv", index_col=0)
+        obs_df = pd.read_csv(output_dir / "obs.csv", index_col=0)
+        obs_df.index = obs_df.index.astype(str)
+        ordered = [cell for cell in adata.obs_names if str(cell) in obs_df.index and str(cell) in embedding.index.astype(str)]
+        if not ordered:
+            raise RuntimeError(f"R integration method '{method}' returned no overlapping cells")
+        embedding.index = embedding.index.astype(str)
+        adata = adata[ordered].copy()
+        adata.obs = adata.obs.join(obs_df, how="left", rsuffix="_r")
+        key = f"X_{method}"
+        adata.obsm[key] = embedding.loc[ordered].to_numpy(dtype=float)
+        if method != "fastmnn":
+            umap_df = pd.read_csv(output_dir / "umap.csv", index_col=0)
+            umap_df.index = umap_df.index.astype(str)
+            adata.obsm["X_umap"] = umap_df.loc[ordered].to_numpy(dtype=float)
+        else:
+            sc.pp.neighbors(adata, use_rep=key)
+            sc.tl.umap(adata)
+        sc.pp.neighbors(adata, use_rep=key)
+        return adata, {"method": method, "embedding_key": key, "n_batches": int(adata.obs[batch_key].nunique())}
 
 
 _METHOD_DISPATCH = {

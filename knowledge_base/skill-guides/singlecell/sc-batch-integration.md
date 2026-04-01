@@ -11,8 +11,8 @@ priority: 0.8
 # OmicsClaw Skill Guide — SC Batch Integration
 
 **Status**: implementation-aligned guide derived from the current OmicsClaw
-`sc-batch-integration` skill. This guide explains the real wrapper behavior and
-does not imply that every metadata-declared backend is fully bundled today.
+`sc-batch-integration` skill. This guide explains the real wrapper behavior,
+including the public R-backed methods when the matching R stack is available.
 
 ## Purpose
 
@@ -32,10 +32,13 @@ Key properties to check:
   - PCA should exist or be recomputable
 - **Runtime budget**:
   - scVI / scANVI are heavier than Harmony or BBKNN
+- **Matrix contract**:
+  - `harmony`, `bbknn`, and `scanorama` operate on normalized / PCA-ready representations
+  - `scvi`, `scanvi`, `fastmnn`, `seurat_cca`, and `seurat_rpca` should preserve or read raw counts from `layers["counts"]` when available
 
 Important implementation notes in current OmicsClaw:
-- implemented paths are `harmony`, `scvi`, `scanvi`, `bbknn`, and `scanorama`
-- `fastmnn`, `seurat_cca`, and `seurat_rpca` are declared but not bundled in the current wrapper
+- implemented paths are `harmony`, `scvi`, `scanvi`, `bbknn`, `scanorama`, `fastmnn`, `seurat_cca`, and `seurat_rpca`
+- the R-backed methods run through the shared H5AD bridge and depend on matching R packages
 - `n_epochs` only matters for scVI / scANVI
 
 ## Step 2: Pick The Method Deliberately
@@ -47,6 +50,9 @@ Important implementation notes in current OmicsClaw:
 | **scanvi** | Best when existing labels should guide integration and transfer | `batch_key`, `n_epochs`, `no_gpu` | Requires labels; otherwise wrapper falls back to scVI |
 | **bbknn** | Lightweight graph correction after PCA | `batch_key` | Mainly graph correction, not a generative latent model |
 | **scanorama** | Useful panorama-style integration baseline | `batch_key` | Wrapper does not expose Scanorama’s full parameter set |
+| **fastmnn** | R-backed correction when users want batchelor fastMNN | `batch_key` | Requires the R batchelor stack and counts-aware input handling |
+| **seurat_cca** | R-backed Seurat integration with CCA anchors | `batch_key` | Requires the R Seurat stack and counts-aware input handling |
+| **seurat_rpca** | R-backed Seurat integration with RPCA anchors | `batch_key` | Requires the R Seurat stack and counts-aware input handling |
 
 ## Step 3: Always Show A Parameter Summary Before Running
 
@@ -87,6 +93,15 @@ Important warnings:
 - do not describe scANVI as a drop-in replacement for unlabeled integration
 - do not expose `labels_key`, `unlabeled_category`, or architectural internals as current public wrapper knobs
 
+### fastMNN / Seurat CCA / Seurat RPCA
+
+Tune in this order:
+1. `batch_key`
+
+Guidance:
+- keep raw counts available in `layers["counts"]` before handing data to these backends
+- describe these as R-backed integration paths, not as Python-native code paths
+
 ## Step 5: What To Say After The Run
 
 - If batches remain separated: question `batch_key` quality before changing methods.
@@ -106,4 +121,5 @@ Important warnings:
 - https://docs.scvi-tools.org/en/stable/api/reference/scvi.model.SCANVI.html
 - https://bbknn.readthedocs.io/en/latest/bbknn.bbknn.html
 - https://scanpy.readthedocs.io/en/latest/generated/scanpy.external.pp.scanorama_integrate.html
-
+- https://bioconductor.org/packages/release/bioc/html/batchelor.html
+- https://satijalab.org/seurat/reference/findintegrationanchors

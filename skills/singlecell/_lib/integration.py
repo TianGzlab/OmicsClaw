@@ -18,6 +18,7 @@ compare_integration_methods
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
@@ -31,6 +32,78 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 logger = logging.getLogger(__name__)
+
+
+def _trainer_device_kwargs(use_gpu: bool) -> dict[str, object]:
+    """Map the wrapper's boolean GPU preference onto current scvi-tools kwargs."""
+    if use_gpu:
+        return {"accelerator": "gpu", "devices": 1}
+    return {"accelerator": "cpu", "devices": 1}
+
+
+def _resolve_gpu_preference(use_gpu: bool) -> bool:
+    """Return a safe GPU preference for the current torch/runtime stack."""
+    if not use_gpu:
+        return False
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            logger.info("GPU requested but CUDA unavailable -- using CPU.")
+            return False
+        try:
+            torch.cuda.get_device_capability(0)
+        except Exception as exc:  # pragma: no cover - driver/runtime dependent
+            logger.info("GPU requested but CUDA driver/runtime is unusable (%s) -- using CPU.", exc)
+            return False
+        return True
+    except ImportError:
+        logger.info("PyTorch not found -- using CPU.")
+        return False
+
+
+def _force_torch_cpu_mode() -> None:
+    """Hide broken CUDA runtimes from Lightning when CPU execution is requested."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    try:
+        import torch
+
+        torch.cuda.is_available = lambda: False  # type: ignore[method-assign]
+        torch.cuda.device_count = lambda: 0  # type: ignore[method-assign]
+    except ImportError:
+        return
+
+
+def _history_series(history: dict, *keys: str):
+    for key in keys:
+        value = history.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _history_last_float(history_obj) -> float | None:
+    if history_obj is None:
+        return None
+    try:
+        if hasattr(history_obj, "iloc"):
+            value = history_obj.iloc[-1]
+            if hasattr(value, "iloc"):
+                value = value.iloc[-1]
+        else:
+            value = history_obj[-1]
+        return float(value)
+    except Exception:
+        return None
+
+
+def _history_length(history_obj) -> int:
+    if history_obj is None:
+        return 0
+    try:
+        return int(len(history_obj))
+    except Exception:
+        return 0
 
 # ---------------------------------------------------------------------------
 # Data preparation
@@ -281,16 +354,9 @@ def run_scvi_integration(
     )
 
     # -- GPU fallback ---------------------------------------------------------
-    if use_gpu:
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                logger.info("GPU requested but CUDA unavailable -- using CPU.")
-                use_gpu = False
-        except ImportError:
-            logger.info("PyTorch not found -- using CPU.")
-            use_gpu = False
+    use_gpu = _resolve_gpu_preference(use_gpu)
+    if not use_gpu:
+        _force_torch_cpu_mode()
 
     # -- train ----------------------------------------------------------------
     logger.info(
@@ -303,18 +369,21 @@ def run_scvi_integration(
     model.train(
         max_epochs=max_epochs,
         early_stopping=early_stopping,
-        use_gpu=use_gpu,
         check_val_every_n_epoch=10,
         train_size=0.9,
+        **_trainer_device_kwargs(use_gpu),
     )
 
-    train_loss = model.history["elbo_train"][1:]
-    val_loss = model.history["elbo_validation"]
+    train_loss = _history_series(model.history, "elbo_train", "train_loss_epoch", "train_loss")
+    val_loss = _history_series(model.history, "elbo_validation", "validation_loss", "val_loss")
+    epochs_trained = _history_length(train_loss)
+    final_train_loss = _history_last_float(train_loss)
+    final_val_loss = _history_last_float(val_loss)
     logger.info(
         "Training complete: %d epochs, train_loss=%.2f, val_loss=%.2f",
-        len(train_loss),
-        float(train_loss.iloc[-1]),
-        float(val_loss.iloc[-1]),
+        epochs_trained,
+        final_train_loss if final_train_loss is not None else float("nan"),
+        final_val_loss if final_val_loss is not None else float("nan"),
     )
 
     # -- latent representation ------------------------------------------------
@@ -336,9 +405,9 @@ def run_scvi_integration(
         "n_layers": n_layers,
         "n_hidden": n_hidden,
         "max_epochs": max_epochs,
-        "epochs_trained": len(train_loss),
-        "final_train_loss": float(train_loss.iloc[-1]),
-        "final_val_loss": float(val_loss.iloc[-1]),
+        "epochs_trained": epochs_trained,
+        "final_train_loss": final_train_loss,
+        "final_val_loss": final_val_loss,
         "use_highly_variable": use_highly_variable,
         "n_genes": adata_input.n_vars,
     }
@@ -462,28 +531,20 @@ def run_scanvi_integration(
             n_latent=n_latent,
             n_layers=n_layers,
             n_hidden=n_hidden,
-            unlabeled_category=unlabeled_category,
         )
 
     # -- GPU fallback ---------------------------------------------------------
-    if use_gpu:
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                logger.info("GPU requested but CUDA unavailable -- using CPU.")
-                use_gpu = False
-        except ImportError:
-            logger.info("PyTorch not found -- using CPU.")
-            use_gpu = False
+    use_gpu = _resolve_gpu_preference(use_gpu)
+    if not use_gpu:
+        _force_torch_cpu_mode()
 
     # -- train ----------------------------------------------------------------
     logger.info("Training scANVI (max_epochs=%d, gpu=%s) ...", max_epochs, use_gpu)
     model.train(
         max_epochs=max_epochs,
-        use_gpu=use_gpu,
         check_val_every_n_epoch=10,
         train_size=0.9,
+        **_trainer_device_kwargs(use_gpu),
     )
     logger.info("Training complete.")
 

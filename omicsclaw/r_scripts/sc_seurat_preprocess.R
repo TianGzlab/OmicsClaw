@@ -35,6 +35,13 @@ suppressPackageStartupMessages({
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
+.get_assay_matrix <- function(seurat_obj, assay_name, layer_name) {
+    if ("LayerData" %in% getNamespaceExports("SeuratObject")) {
+        return(as.matrix(SeuratObject::LayerData(seurat_obj, assay = assay_name, layer = layer_name)))
+    }
+    return(as.matrix(GetAssayData(seurat_obj, assay = assay_name, slot = layer_name)))
+}
+
 cat(sprintf("Loading data from %s...\n", h5ad_file))
 
 tryCatch({
@@ -102,7 +109,7 @@ tryCatch({
         row.names = FALSE, quote = FALSE)
 
     # Normalized expression matrix (genes x cells) — can be large
-    norm_mat <- as.matrix(GetAssayData(seurat_obj, assay = assay_name, slot = "data"))
+    norm_mat <- .get_assay_matrix(seurat_obj, assay_name, "data")
     write.csv(norm_mat, file.path(output_dir, "X_norm.csv"), quote = FALSE)
 
     # Metadata JSON
