@@ -66,9 +66,21 @@ def _validate_manifest_contract(
         candidate = path / hook_path
         if not candidate.exists():
             errors.append(f"Extension manifest hook file not found: {hook_path}")
+    for hook_path in manifest.tool_execution_hooks:
+        candidate = path / hook_path
+        if not candidate.exists():
+            errors.append(
+                "Extension manifest tool execution hook file not found: "
+                f"{hook_path}"
+            )
     if manifest.hooks and "hooks" not in manifest.trusted_capabilities:
         errors.append(
             "Extension manifests that declare hooks must request the 'hooks' trusted capability."
+        )
+    if manifest.tool_execution_hooks and "runtime-policy" not in manifest.trusted_capabilities:
+        errors.append(
+            "Extension manifests that declare tool_execution_hooks must request "
+            "the 'runtime-policy' trusted capability."
         )
 
 
@@ -183,9 +195,14 @@ def validate_extension_directory(
             errors.append(
                 f"Extension type '{extension_type}' must declare at least one manifest entrypoint."
             )
-        if manifest is not None and extension_type == "hook-pack" and not manifest.hooks:
+        if (
+            manifest is not None
+            and extension_type == "hook-pack"
+            and not (manifest.hooks or manifest.tool_execution_hooks)
+        ):
             errors.append(
-                "Extension type 'hook-pack' must declare at least one hook manifest file."
+                "Extension type 'hook-pack' must declare at least one hook or "
+                "tool_execution_hooks manifest file."
             )
         hinted_capability = _RUNTIME_SURFACE_CAPABILITY_HINTS.get(extension_type, "")
         if (

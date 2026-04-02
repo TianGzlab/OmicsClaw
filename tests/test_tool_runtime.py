@@ -11,7 +11,13 @@ from omicsclaw.runtime.policy import (
 )
 from omicsclaw.runtime.tool_executor import build_executor_kwargs, invoke_tool
 from omicsclaw.runtime.tool_orchestration import (
+    EXECUTION_STATUS_FAILED,
+    EXECUTION_STATUS_HOOK_BLOCKED,
+    EXECUTION_STATUS_INPUT_SCHEMA_INVALID,
+    EXECUTION_STATUS_INPUT_VALIDATION_FAILED,
     EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionHook,
+    ToolExecutionHookResult,
     ToolExecutionRequest,
     execute_tool_requests,
 )
@@ -22,6 +28,7 @@ from omicsclaw.runtime.tool_spec import (
     RISK_LEVEL_HIGH,
     ToolSpec,
 )
+from omicsclaw.runtime.tool_validation import ToolInputValidationResult
 
 
 def test_tool_registry_builds_openai_tools_and_executors_from_same_specs():
@@ -482,3 +489,293 @@ def test_execute_tool_requests_blocks_policy_gated_tool_without_running_executor
     assert results[0].policy_decision.action == TOOL_POLICY_REQUIRE_APPROVAL
     assert "[tool policy blocked]" in str(results[0].output)
     assert results[1].output == "reader"
+
+
+def test_execute_tool_requests_rejects_invalid_schema_without_running_executor():
+    calls = {"alpha": 0}
+
+    async def alpha_executor(args):
+        calls["alpha"] += 1
+        return "ok"
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "lines": {"type": "integer"},
+                    },
+                    "required": ["path"],
+                },
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"alpha": alpha_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-alpha",
+                    name="alpha",
+                    arguments={"path": 123, "lines": "ten"},
+                    spec=runtime.specs_by_name["alpha"],
+                    executor=runtime.executors["alpha"],
+                )
+            ]
+        )
+    )
+
+    assert calls["alpha"] == 0
+    assert results[0].success is False
+    assert results[0].status == EXECUTION_STATUS_INPUT_SCHEMA_INVALID
+    assert "input.path must be a string" in str(results[0].output)
+    assert results[0].trace is not None
+    assert results[0].trace.schema_errors
+
+
+def test_execute_tool_requests_runs_tool_level_input_validator():
+    calls = {"alpha": 0}
+
+    async def alpha_executor(args):
+        calls["alpha"] += 1
+        return "ok"
+
+    def validate_alpha(args, runtime_context=None):
+        if int(args.get("end", 0)) < int(args.get("start", 0)):
+            return ToolInputValidationResult(
+                valid=False,
+                message="end must be >= start",
+            )
+        return ToolInputValidationResult(valid=True)
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "integer"},
+                        "end": {"type": "integer"},
+                    },
+                    "required": ["start", "end"],
+                },
+                input_validator=validate_alpha,
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"alpha": alpha_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-alpha",
+                    name="alpha",
+                    arguments={"start": 9, "end": 3},
+                    spec=runtime.specs_by_name["alpha"],
+                    executor=runtime.executors["alpha"],
+                )
+            ]
+        )
+    )
+
+    assert calls["alpha"] == 0
+    assert results[0].status == EXECUTION_STATUS_INPUT_VALIDATION_FAILED
+    assert results[0].trace is not None
+    assert results[0].trace.input_validation.message == "end must be >= start"
+
+
+def test_execute_tool_requests_applies_pre_hook_argument_updates_and_post_hook_output_updates():
+    observed = {}
+
+    async def alpha_executor(args):
+        observed["args"] = dict(args)
+        return "alpha"
+
+    hook = ToolExecutionHook(
+        name="rewrite-hook",
+        pre_tool=lambda request, arguments, runtime_context: ToolExecutionHookResult(
+            updated_arguments={**arguments, "path": "rewritten.txt"}
+        ),
+        post_tool=lambda request, output, trace, runtime_context: ToolExecutionHookResult(
+            updated_output=f"{output}-post"
+        ),
+    )
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"alpha": alpha_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-alpha",
+                    name="alpha",
+                    arguments={"path": "original.txt"},
+                    spec=runtime.specs_by_name["alpha"],
+                    executor=runtime.executors["alpha"],
+                    runtime_context={"tool_execution_hooks": [hook]},
+                )
+            ]
+        )
+    )
+
+    assert observed["args"] == {"path": "rewritten.txt"}
+    assert results[0].output == "alpha-post"
+    assert results[0].trace is not None
+    assert results[0].trace.effective_arguments == {"path": "rewritten.txt"}
+    assert results[0].trace.pre_hook_records[0].updated_arguments is True
+    assert results[0].trace.post_hook_records[0].updated_output is True
+
+
+def test_execute_tool_requests_blocks_when_pre_hook_denies():
+    calls = {"alpha": 0}
+
+    async def alpha_executor(args):
+        calls["alpha"] += 1
+        return "alpha"
+
+    hook = ToolExecutionHook(
+        name="deny-hook",
+        pre_tool=lambda request, arguments, runtime_context: ToolExecutionHookResult(
+            action=TOOL_POLICY_DENY,
+            message="blocked by hook",
+        ),
+    )
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={"type": "object", "properties": {}},
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"alpha": alpha_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-alpha",
+                    name="alpha",
+                    arguments={},
+                    spec=runtime.specs_by_name["alpha"],
+                    executor=runtime.executors["alpha"],
+                    runtime_context={"tool_execution_hooks": [hook]},
+                )
+            ]
+        )
+    )
+
+    assert calls["alpha"] == 0
+    assert results[0].status == EXECUTION_STATUS_HOOK_BLOCKED
+    assert results[0].policy_decision is not None
+    assert results[0].policy_decision.action == TOOL_POLICY_DENY
+    assert "blocked by hook" in str(results[0].output)
+
+
+def test_execute_tool_requests_runs_failure_hooks_and_records_trace():
+    async def broken_executor(args):
+        raise RuntimeError("boom")
+
+    hook = ToolExecutionHook(
+        name="failure-hook",
+        on_failure=lambda request, error, output, trace, runtime_context: ToolExecutionHookResult(
+            updated_output=f"{output}\nhandled-by-hook"
+        ),
+    )
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="broken",
+                description="Broken tool",
+                parameters={"type": "object", "properties": {}},
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"broken": broken_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-broken",
+                    name="broken",
+                    arguments={},
+                    spec=runtime.specs_by_name["broken"],
+                    executor=runtime.executors["broken"],
+                    runtime_context={"tool_execution_hooks": [hook]},
+                )
+            ]
+        )
+    )
+
+    assert results[0].success is False
+    assert results[0].status == EXECUTION_STATUS_FAILED
+    assert results[0].trace is not None
+    assert results[0].trace.failure_hook_records[0].updated_output is True
+    assert "handled-by-hook" in str(results[0].output)
+
+
+def test_execute_tool_requests_records_speculative_classifier_trace():
+    async def alpha_executor(args):
+        return "ok"
+
+    async def classify_alpha(args, runtime_context=None):
+        await asyncio.sleep(0)
+        return {"label": "workspace_mutation", "risk": "medium"}
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={"type": "object", "properties": {}},
+                speculative_classifier=classify_alpha,
+            )
+        ]
+    )
+    runtime = registry.build_runtime({"alpha": alpha_executor})
+
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-alpha",
+                    name="alpha",
+                    arguments={},
+                    spec=runtime.specs_by_name["alpha"],
+                    executor=runtime.executors["alpha"],
+                )
+            ]
+        )
+    )
+
+    assert results[0].success is True
+    assert results[0].trace is not None
+    assert results[0].trace.classifier_result == {
+        "label": "workspace_mutation",
+        "risk": "medium",
+    }

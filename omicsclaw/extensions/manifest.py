@@ -58,6 +58,7 @@ class ExtensionManifest:
     type: str
     entrypoints: list[str] = field(default_factory=list)
     hooks: list[str] = field(default_factory=list)
+    tool_execution_hooks: list[str] = field(default_factory=list)
     required_files: list[str] = field(default_factory=list)
     trusted_capabilities: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
@@ -157,6 +158,13 @@ def load_extension_manifest(manifest_path: str | Path) -> ExtensionManifest:
         hooks=_ensure_relative_manifest_paths(
             _normalize_manifest_list(raw.get("hooks"), field_name="hooks"),
             field_name="hooks",
+        ),
+        tool_execution_hooks=_ensure_relative_manifest_paths(
+            _normalize_manifest_list(
+                raw.get("tool_execution_hooks"),
+                field_name="tool_execution_hooks",
+            ),
+            field_name="tool_execution_hooks",
         ),
         required_files=_ensure_relative_manifest_paths(
             _normalize_manifest_list(raw.get("required_files"), field_name="required_files"),

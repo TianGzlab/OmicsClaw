@@ -1,10 +1,12 @@
 import json
 
 from omicsclaw.extensions import (
+    ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS,
     build_extension_runtime_snapshot,
     ExtensionManifest,
     extension_store_dir,
     load_active_hook_extensions,
+    load_active_tool_execution_hook_extensions,
     load_enabled_agent_packs,
     load_enabled_output_style_packs,
     load_enabled_prompt_packs,
@@ -90,6 +92,86 @@ def test_load_prompt_pack_runtime_context_builds_budgeted_context_block(tmp_path
     assert "## Active Local Prompt Packs" in runtime_context.content
     assert "analysis-style v1.0.0" in runtime_context.content
     assert "Avoid redundant restatements." in runtime_context.content
+
+
+def test_runtime_snapshot_loads_tool_execution_hook_surface(tmp_path):
+    pack_dir = extension_store_dir(tmp_path, "prompt-pack") / "runtime-rules"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "rules.md").write_text("# rules\n", encoding="utf-8")
+    (pack_dir / "tool-hooks.json").write_text(
+        json.dumps(
+            {
+                "tool_execution_hooks": [
+                    {
+                        "name": "workspace-defaults",
+                        "tools": ["file_write"],
+                        "surfaces": ["cli"],
+                        "pre": {
+                            "set_arguments": {"path": "{workspace}/notes.txt"},
+                            "message": "Pinned output to {workspace}.",
+                        },
+                        "post": {
+                            "output_template": "{output}\npost:{workspace}",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = ExtensionManifest(
+        name="runtime-rules",
+        version="1.0.0",
+        type="prompt-pack",
+        entrypoints=["rules.md"],
+        tool_execution_hooks=["tool-hooks.json"],
+        trusted_capabilities=["runtime-policy"],
+    )
+    (pack_dir / "omicsclaw-extension.json").write_text(
+        json.dumps(
+            {
+                "name": manifest.name,
+                "version": manifest.version,
+                "type": manifest.type,
+                "entrypoints": manifest.entrypoints,
+                "tool_execution_hooks": manifest.tool_execution_hooks,
+                "trusted_capabilities": manifest.trusted_capabilities,
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_install_record(
+        pack_dir,
+        extension_name="runtime-rules",
+        source_kind="local",
+        source="/tmp/runtime-rules",
+        manifest=manifest,
+        extension_type="prompt-pack",
+        relative_install_path="installed_extensions/prompt-packs/runtime-rules",
+    )
+    write_extension_state(pack_dir, enabled=True)
+
+    loaded = load_active_tool_execution_hook_extensions(tmp_path)
+    snapshot = build_extension_runtime_snapshot(tmp_path)
+
+    assert [item.name for item in loaded] == ["runtime-rules"]
+    assert loaded[0].tool_execution_hooks[0].name == "workspace-defaults"
+    assert loaded[0].tool_execution_hooks[0].tools == ("file_write",)
+    assert loaded[0].tool_execution_hooks[0].surfaces == ("cli",)
+    assert loaded[0].tool_execution_hooks[0].pre is not None
+    assert loaded[0].tool_execution_hooks[0].post is not None
+
+    activation_by_type = {
+        record.extension_type: record
+        for record in snapshot.activation_records
+    }
+    runtime_surface = next(
+        surface
+        for surface in activation_by_type["prompt-pack"].surfaces
+        if surface.surface == ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS
+    )
+    assert runtime_surface.surface == ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS
+    assert runtime_surface.active is True
 
 
 def test_runtime_snapshot_loads_agent_workflow_and_hook_surfaces(tmp_path):

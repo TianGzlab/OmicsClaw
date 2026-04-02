@@ -10,12 +10,17 @@ from .events import (
     EVENT_SESSION_START,
     EVENT_TOOL_AFTER,
     EVENT_TOOL_BEFORE,
+    EVENT_TOOL_FAILURE,
 )
 from .hook_payloads import SessionHookPayload, ToolHookPayload
 from .hooks import HOOK_MODE_CONTEXT, HOOK_MODE_NOTICE
 from .policy import evaluate_tool_policy
 from .hooks import LifecycleHookRuntime
 from .policy_state import ToolPolicyState
+from .tool_execution_hooks import (
+    build_default_tool_execution_hooks,
+    merge_tool_execution_hooks,
+)
 from .tool_orchestration import ToolExecutionRequest, ToolExecutionResult, execute_tool_requests
 from .tool_registry import ToolRuntime
 from .tool_result_store import ToolResultRecord, ToolResultStore
@@ -26,6 +31,19 @@ async def _maybe_await(value):
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _prepare_tool_runtime_context(
+    runtime_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    prepared = dict(runtime_context or {})
+    omicsclaw_dir = str(prepared.get("omicsclaw_dir", "") or "").strip()
+    if not omicsclaw_dir:
+        return prepared
+    return merge_tool_execution_hooks(
+        prepared,
+        build_default_tool_execution_hooks(omicsclaw_dir),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +68,7 @@ class QueryEngineContext:
     surface: str = "bot"
     policy_state: ToolPolicyState | None = None
     hook_runtime: LifecycleHookRuntime | None = None
+    tool_runtime_context: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -147,6 +166,7 @@ async def run_query_engine(
 ) -> str:
     callbacks = callbacks or QueryEngineCallbacks()
     hook_runtime = context.hook_runtime
+    tool_runtime_context = _prepare_tool_runtime_context(context.tool_runtime_context)
     history_before = list(transcript_store.get_history(context.chat_id))
     system_prompt = context.system_prompt
 
@@ -243,6 +263,8 @@ async def run_query_engine(
                 "surface": context.surface,
                 "policy_state": context.policy_state,
             }
+            if tool_runtime_context:
+                runtime_context.update(tool_runtime_context)
             request = ToolExecutionRequest(
                 call_id=tc.id,
                 name=tc.name,
@@ -284,8 +306,11 @@ async def run_query_engine(
             request = execution_result.request
             record_output = execution_result.output
             if hook_runtime is not None:
+                event_name = EVENT_TOOL_AFTER
+                if not execution_result.success:
+                    event_name = EVENT_TOOL_FAILURE
                 hook_runtime.emit(
-                    EVENT_TOOL_AFTER,
+                    event_name,
                     ToolHookPayload(
                         tool_name=request.name,
                         call_id=request.call_id,
@@ -304,11 +329,16 @@ async def run_query_engine(
                         "session_id": context.session_id,
                         "chat_id": context.chat_id,
                         "surface": context.surface,
+                        "workspace": str(
+                            (request.runtime_context or {}).get("pipeline_workspace")
+                            or (request.runtime_context or {}).get("workspace")
+                            or ""
+                        ).strip(),
                     },
                 )
                 notices = hook_runtime.consume_pending_messages(
                     mode=HOOK_MODE_NOTICE,
-                    event_names=(EVENT_TOOL_BEFORE, EVENT_TOOL_AFTER),
+                    event_names=(EVENT_TOOL_BEFORE, EVENT_TOOL_AFTER, EVENT_TOOL_FAILURE),
                     call_id=request.call_id,
                 )
                 if notices:
@@ -324,6 +354,11 @@ async def run_query_engine(
                 error=execution_result.error,
                 spec=request.spec,
                 policy_decision=execution_result.policy_decision,
+                execution_trace=(
+                    execution_result.trace.to_dict()
+                    if execution_result.trace is not None
+                    else None
+                ),
             )
 
             if callbacks.after_tool is not None:

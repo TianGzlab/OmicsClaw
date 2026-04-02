@@ -20,6 +20,7 @@ def test_discover_and_load_extension_manifest(tmp_path):
                 "version": "1.0.0",
                 "type": "skill-pack",
                 "entrypoints": ["run.py"],
+                "tool_execution_hooks": ["tool-hooks.json"],
                 "required_files": ["SKILL.md"],
                 "trusted_capabilities": ["skill-run"],
             }
@@ -34,6 +35,7 @@ def test_discover_and_load_extension_manifest(tmp_path):
     assert manifest.name == "my-skill"
     assert manifest.version == "1.0.0"
     assert manifest.entrypoints == ["run.py"]
+    assert manifest.tool_execution_hooks == ["tool-hooks.json"]
     assert manifest.required_files == ["SKILL.md"]
     assert manifest.trusted_capabilities == ["skill-run"]
 
@@ -251,6 +253,67 @@ def test_validate_extension_directory_accepts_local_hook_pack(tmp_path):
                 "type": "hook-pack",
                 "hooks": ["hooks.json"],
                 "trusted_capabilities": ["hooks"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is True
+    assert report.extension_type == "hook-pack"
+
+
+def test_validate_extension_directory_rejects_tool_execution_hooks_without_runtime_policy(
+    tmp_path,
+):
+    extension_dir = tmp_path / "runtime-policy-pack"
+    extension_dir.mkdir()
+    (extension_dir / "rules.md").write_text("# rules\n", encoding="utf-8")
+    (extension_dir / "tool-hooks.json").write_text(
+        '{"tool_execution_hooks":[]}',
+        encoding="utf-8",
+    )
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "runtime-policy-pack",
+                "version": "1.0.0",
+                "type": "prompt-pack",
+                "entrypoints": ["rules.md"],
+                "tool_execution_hooks": ["tool-hooks.json"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is False
+    assert any(
+        "declare tool_execution_hooks must request the 'runtime-policy' trusted capability"
+        in error
+        for error in report.errors
+    )
+
+
+def test_validate_extension_directory_accepts_hook_pack_with_tool_execution_hooks_only(
+    tmp_path,
+):
+    extension_dir = tmp_path / "runtime-hook-pack"
+    extension_dir.mkdir()
+    (extension_dir / "tool-hooks.json").write_text(
+        '{"tool_execution_hooks":[{"name":"gate","tools":["alpha"],"pre":{"action":"ask","message":"confirm"}}]}',
+        encoding="utf-8",
+    )
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "runtime-hook-pack",
+                "version": "1.0.0",
+                "type": "hook-pack",
+                "tool_execution_hooks": ["tool-hooks.json"],
+                "trusted_capabilities": ["runtime-policy"],
             }
         ),
         encoding="utf-8",

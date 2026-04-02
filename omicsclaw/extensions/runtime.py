@@ -24,6 +24,7 @@ OUTPUT_STYLE_PACK_RUNTIME_CAPABILITY = "output-style-entry"
 AGENT_PACK_RUNTIME_CAPABILITY = "agent-entry"
 WORKFLOW_PACK_RUNTIME_CAPABILITY = "workflow-entry"
 HOOK_PACK_RUNTIME_CAPABILITY = "hooks"
+TOOL_EXECUTION_HOOK_RUNTIME_CAPABILITY = "runtime-policy"
 
 ACTIVATION_SURFACE_SKILLS = "skills"
 ACTIVATION_SURFACE_PROMPTS = "prompts"
@@ -31,6 +32,7 @@ ACTIVATION_SURFACE_OUTPUT_STYLES = "output_styles"
 ACTIVATION_SURFACE_AGENTS = "agents"
 ACTIVATION_SURFACE_WORKFLOWS = "workflows"
 ACTIVATION_SURFACE_HOOKS = "hooks"
+ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS = "tool_execution_hooks"
 
 HOOK_MODE_NOTICE = "notice"
 HOOK_MODE_CONTEXT = "context"
@@ -151,6 +153,40 @@ class LoadedHookExtension:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolExecutionHookStageEntry:
+    action: str = ""
+    message: str = ""
+    defaults: dict[str, Any] = field(default_factory=dict)
+    set_arguments: dict[str, Any] = field(default_factory=dict)
+    output_template: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ExtensionToolExecutionHookEntry:
+    name: str
+    tools: tuple[str, ...] = ()
+    surfaces: tuple[str, ...] = ()
+    pre: ToolExecutionHookStageEntry | None = None
+    post: ToolExecutionHookStageEntry | None = None
+    failure: ToolExecutionHookStageEntry | None = None
+    relative_path: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedToolExecutionHookExtension:
+    name: str
+    version: str
+    extension_type: str
+    path: Path
+    source_kind: str
+    trusted_capabilities: tuple[str, ...] = ()
+    tool_execution_hooks: tuple[ExtensionToolExecutionHookEntry, ...] = ()
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ExtensionActivationSurface:
     surface: str
     active: bool
@@ -177,6 +213,7 @@ class ExtensionRuntimeSnapshot:
     agent_packs: tuple[LoadedAgentPack, ...] = ()
     workflow_packs: tuple[LoadedWorkflowPack, ...] = ()
     hook_extensions: tuple[LoadedHookExtension, ...] = ()
+    tool_execution_hook_extensions: tuple[LoadedToolExecutionHookExtension, ...] = ()
     activation_records: tuple[ExtensionActivationRecord, ...] = ()
 
 
@@ -223,6 +260,45 @@ def _normalize_text_list(value: Any) -> tuple[str, ...]:
         text
         for text in (_safe_text(item) for item in value)
         if text
+    )
+
+
+def _normalize_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if _safe_text(key)
+    }
+
+
+def _load_tool_execution_hook_stage_entry(
+    value: Any,
+) -> ToolExecutionHookStageEntry | None:
+    raw = _normalize_mapping(value)
+    if not raw:
+        return None
+
+    defaults = _normalize_mapping(raw.get("defaults"))
+    set_arguments = _normalize_mapping(
+        raw.get("set_arguments") or raw.get("update_arguments")
+    )
+    metadata = _normalize_mapping(raw.get("metadata"))
+    action = _safe_text(raw.get("action"))
+    message = _safe_text(raw.get("message"))
+    output_template = _safe_text(raw.get("output_template"))
+
+    if not any((defaults, set_arguments, metadata, action, message, output_template)):
+        return None
+
+    return ToolExecutionHookStageEntry(
+        action=action,
+        message=message,
+        defaults=defaults,
+        set_arguments=set_arguments,
+        output_template=output_template,
+        metadata=metadata,
     )
 
 
@@ -676,6 +752,95 @@ def load_active_hook_extensions(
     return sorted(loaded, key=lambda item: (item.name.lower(), str(item.path)))
 
 
+def load_active_tool_execution_hook_extensions(
+    omicsclaw_dir: str | Path,
+) -> list[LoadedToolExecutionHookExtension]:
+    loaded: list[LoadedToolExecutionHookExtension] = []
+    for runtime_item in _iter_runtime_manifest_items(
+        omicsclaw_dir,
+        extension_types=(
+            "skill-pack",
+            PROMPT_PACK_EXTENSION_TYPE,
+            OUTPUT_STYLE_PACK_EXTENSION_TYPE,
+            AGENT_PACK_EXTENSION_TYPE,
+            WORKFLOW_PACK_EXTENSION_TYPE,
+            HOOK_PACK_EXTENSION_TYPE,
+        ),
+    ):
+        if (
+            TOOL_EXECUTION_HOOK_RUNTIME_CAPABILITY
+            not in runtime_item.trusted_capabilities
+        ):
+            continue
+
+        hooks: list[ExtensionToolExecutionHookEntry] = []
+        for relative_path in runtime_item.manifest.tool_execution_hooks:
+            raw = _load_structured_entrypoint(runtime_item.inventory.path / relative_path)
+            for index, entry in enumerate(
+                _iter_entry_mappings(raw, collection_key="tool_execution_hooks"),
+                start=1,
+            ):
+                hook_name = _safe_text(entry.get("name")) or (
+                    f"{runtime_item.manifest.name}:{Path(relative_path).stem}:{index}"
+                )
+                pre = _load_tool_execution_hook_stage_entry(entry.get("pre"))
+                post = _load_tool_execution_hook_stage_entry(entry.get("post"))
+                failure = _load_tool_execution_hook_stage_entry(
+                    entry.get("failure") or entry.get("on_failure")
+                )
+                if pre is None and post is None and failure is None:
+                    continue
+                hooks.append(
+                    ExtensionToolExecutionHookEntry(
+                        name=hook_name,
+                        tools=_normalize_text_list(
+                            entry.get("tools") or entry.get("tool_names")
+                        ),
+                        surfaces=_normalize_text_list(entry.get("surfaces")),
+                        pre=pre,
+                        post=post,
+                        failure=failure,
+                        relative_path=relative_path,
+                        metadata={
+                            key: value
+                            for key, value in entry.items()
+                            if key
+                            not in {
+                                "name",
+                                "tools",
+                                "tool_names",
+                                "surfaces",
+                                "pre",
+                                "post",
+                                "failure",
+                                "on_failure",
+                            }
+                        },
+                    )
+                )
+
+        if not hooks:
+            continue
+
+        loaded.append(
+            LoadedToolExecutionHookExtension(
+                name=runtime_item.manifest.name,
+                version=runtime_item.manifest.version,
+                extension_type=runtime_item.inventory.extension_type,
+                path=runtime_item.inventory.path,
+                source_kind=_safe_local_source_kind(runtime_item.inventory.record),
+                trusted_capabilities=runtime_item.trusted_capabilities,
+                tool_execution_hooks=tuple(hooks),
+                metadata={
+                    "manifest_path": str(runtime_item.manifest_path),
+                    "relative_install_path": runtime_item.inventory.record.relative_install_path,
+                },
+            )
+        )
+
+    return sorted(loaded, key=lambda item: (item.name.lower(), str(item.path)))
+
+
 def _build_surface(
     *,
     surface: str,
@@ -734,6 +899,10 @@ def _inactive_surface_reason(
         if HOOK_PACK_RUNTIME_CAPABILITY not in trusted_capabilities:
             return f"missing {HOOK_PACK_RUNTIME_CAPABILITY} capability"
         return "no valid hook definitions"
+    if surface == ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS:
+        if TOOL_EXECUTION_HOOK_RUNTIME_CAPABILITY not in trusted_capabilities:
+            return f"missing {TOOL_EXECUTION_HOOK_RUNTIME_CAPABILITY} capability"
+        return "no valid tool execution hook definitions"
     return "not active"
 
 
@@ -752,12 +921,18 @@ def build_extension_runtime_snapshot(
     agent_packs = tuple(load_enabled_agent_packs(omicsclaw_dir))
     workflow_packs = tuple(load_enabled_workflow_packs(omicsclaw_dir))
     hook_extensions = tuple(load_active_hook_extensions(omicsclaw_dir))
+    tool_execution_hook_extensions = tuple(
+        load_active_tool_execution_hook_extensions(omicsclaw_dir)
+    )
 
     prompt_by_path = {pack.path: pack for pack in prompt_packs}
     output_styles_by_path = {pack.path: pack for pack in output_style_packs}
     agent_by_path = {pack.path: pack for pack in agent_packs}
     workflow_by_path = {pack.path: pack for pack in workflow_packs}
     hooks_by_path = {item.path: item for item in hook_extensions}
+    tool_execution_hooks_by_path = {
+        item.path: item for item in tool_execution_hook_extensions
+    }
 
     activation_records: list[ExtensionActivationRecord] = []
     for item in list_installed_extensions(omicsclaw_dir):
@@ -890,9 +1065,7 @@ def build_extension_runtime_snapshot(
                     )
                 )
 
-        declares_hooks = item.extension_type == HOOK_PACK_EXTENSION_TYPE or bool(
-            manifest.hooks if manifest is not None else ()
-        )
+        declares_hooks = bool(manifest.hooks if manifest is not None else ())
         if declares_hooks:
             loaded_hooks = hooks_by_path.get(item.path)
             if loaded_hooks is not None:
@@ -911,6 +1084,37 @@ def build_extension_runtime_snapshot(
                         active=False,
                         reason=_inactive_surface_reason(
                             surface=ACTIVATION_SURFACE_HOOKS,
+                            item=item,
+                            manifest=manifest,
+                            manifest_error=manifest_error,
+                            trusted_capabilities=trusted_capabilities,
+                        ),
+                    )
+                )
+
+        declares_tool_execution_hooks = bool(
+            manifest.tool_execution_hooks if manifest is not None else ()
+        )
+        if declares_tool_execution_hooks:
+            loaded_hooks = tool_execution_hooks_by_path.get(item.path)
+            if loaded_hooks is not None:
+                surfaces.append(
+                    _build_surface(
+                        surface=ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS,
+                        active=True,
+                        entry_count=len(loaded_hooks.tool_execution_hooks),
+                        labels=tuple(
+                            hook.name for hook in loaded_hooks.tool_execution_hooks
+                        ),
+                    )
+                )
+            else:
+                surfaces.append(
+                    _build_surface(
+                        surface=ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS,
+                        active=False,
+                        reason=_inactive_surface_reason(
+                            surface=ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS,
                             item=item,
                             manifest=manifest,
                             manifest_error=manifest_error,
@@ -942,6 +1146,7 @@ def build_extension_runtime_snapshot(
         agent_packs=agent_packs,
         workflow_packs=workflow_packs,
         hook_extensions=hook_extensions,
+        tool_execution_hook_extensions=tool_execution_hook_extensions,
         activation_records=tuple(activation_records),
     )
 
@@ -961,6 +1166,7 @@ def format_extension_runtime_surface_summary(
         ACTIVATION_SURFACE_AGENTS,
         ACTIVATION_SURFACE_WORKFLOWS,
         ACTIVATION_SURFACE_HOOKS,
+        ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS,
     )
     return ", ".join(
         f"{surface}={counts.get(surface, 0)}"
@@ -1080,10 +1286,12 @@ __all__ = [
     "ACTIVATION_SURFACE_OUTPUT_STYLES",
     "ACTIVATION_SURFACE_PROMPTS",
     "ACTIVATION_SURFACE_SKILLS",
+    "ACTIVATION_SURFACE_TOOL_EXECUTION_HOOKS",
     "ACTIVATION_SURFACE_WORKFLOWS",
     "AGENT_PACK_EXTENSION_TYPE",
     "AGENT_PACK_RUNTIME_CAPABILITY",
     "AgentPackEntry",
+    "ExtensionToolExecutionHookEntry",
     "ExtensionActivationRecord",
     "ExtensionActivationSurface",
     "ExtensionRuntimeSnapshot",
@@ -1094,6 +1302,7 @@ __all__ = [
     "LoadedHookExtension",
     "LoadedOutputStylePack",
     "LoadedPromptPack",
+    "LoadedToolExecutionHookExtension",
     "LoadedWorkflowPack",
     "OUTPUT_STYLE_PACK_EXTENSION_TYPE",
     "OUTPUT_STYLE_PACK_RUNTIME_CAPABILITY",
@@ -1102,6 +1311,8 @@ __all__ = [
     "PROMPT_PACK_RUNTIME_CAPABILITY",
     "PromptPackRuleEntry",
     "PromptPackRuntimeContext",
+    "TOOL_EXECUTION_HOOK_RUNTIME_CAPABILITY",
+    "ToolExecutionHookStageEntry",
     "WORKFLOW_PACK_EXTENSION_TYPE",
     "WORKFLOW_PACK_RUNTIME_CAPABILITY",
     "WorkflowPackEntry",
@@ -1109,6 +1320,7 @@ __all__ = [
     "build_prompt_pack_context",
     "format_extension_runtime_surface_summary",
     "load_active_hook_extensions",
+    "load_active_tool_execution_hook_extensions",
     "load_enabled_agent_packs",
     "load_enabled_output_style_packs",
     "load_enabled_prompt_packs",

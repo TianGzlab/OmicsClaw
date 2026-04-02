@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -44,6 +45,8 @@ class ToolSpec:
     touches_network: bool = False
     allowed_in_background: bool = True
     policy_tags: tuple[str, ...] = ()
+    input_validator: Callable[[dict[str, Any], Mapping[str, Any] | None], Any] | None = None
+    speculative_classifier: Callable[[dict[str, Any], Mapping[str, Any] | None], Any] | None = None
 
     @property
     def resolved_executor_name(self) -> str:

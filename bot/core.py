@@ -133,6 +133,7 @@ from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.core.registry import registry
 from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_registry
 from omicsclaw.runtime.context_assembler import assemble_chat_context as _assemble_chat_context
+from omicsclaw.runtime.engineering_tools import build_engineering_tool_executors
 from omicsclaw.runtime.query_engine import (
     QueryEngineCallbacks,
     QueryEngineConfig,
@@ -2559,7 +2560,7 @@ async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
 # ---------------------------------------------------------------------------
 
 def _available_tool_executors() -> dict[str, object]:
-    return {
+    executors = {
         "omicsclaw": execute_omicsclaw,
         "save_file": execute_save_file,
         "write_file": execute_write_file,
@@ -2583,6 +2584,13 @@ def _available_tool_executors() -> dict[str, object]:
         "custom_analysis_execute": execute_custom_analysis_execute,
         "inspect_data": execute_inspect_data,
     }
+    executors.update(
+        build_engineering_tool_executors(
+            omicsclaw_dir=OMICSCLAW_DIR,
+            tool_specs_supplier=lambda: get_tool_registry().specs,
+        )
+    )
+    return executors
 
 
 def _build_tool_runtime():
@@ -3012,6 +3020,11 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             surface=platform or "bot",
             policy_state=ToolPolicyState(surface=platform or "bot"),
             hook_runtime=hook_runtime,
+            tool_runtime_context={
+                "omicsclaw_dir": str(OMICSCLAW_DIR),
+                "workspace": workspace,
+                "pipeline_workspace": pipeline_workspace,
+            },
         ),
         tool_runtime=tool_runtime,
         transcript_store=transcript_store,

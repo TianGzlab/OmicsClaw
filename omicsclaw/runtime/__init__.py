@@ -1,6 +1,10 @@
 """Shared runtime primitives for OmicsClaw adapters."""
 
 from .bot_tools import BotToolContext, build_bot_tool_registry, build_bot_tool_specs
+from .engineering_tools import (
+    build_engineering_tool_executors,
+    build_engineering_tool_specs,
+)
 from .context_budget import estimate_message_size, trim_history_to_budget
 from .context_assembler import (
     AssembledChatContext,
@@ -33,6 +37,7 @@ from .events import (
     EVENT_TASK_STARTED,
     EVENT_TOOL_AFTER,
     EVENT_TOOL_BEFORE,
+    EVENT_TOOL_FAILURE,
     EVENT_VERIFICATION_COMPLETED,
     LifecycleEvent,
     VALID_LIFECYCLE_EVENTS,
@@ -102,10 +107,27 @@ from .task_store import (
     TaskRecord,
     TaskStore,
 )
-from .tool_orchestration import ToolExecutionRequest, ToolExecutionResult, execute_tool_requests
+from .tool_orchestration import (
+    ToolExecutionHook,
+    ToolExecutionHookRecord,
+    ToolExecutionHookResult,
+    ToolExecutionRequest,
+    ToolExecutionResult,
+    ToolExecutionTrace,
+    execute_tool_requests,
+)
 from .tool_orchestration import (
     EXECUTION_STATUS_COMPLETED,
+    EXECUTION_STATUS_FAILED,
+    EXECUTION_STATUS_HOOK_BLOCKED,
+    EXECUTION_STATUS_INPUT_SCHEMA_INVALID,
+    EXECUTION_STATUS_INPUT_VALIDATION_FAILED,
     EXECUTION_STATUS_POLICY_BLOCKED,
+    EXECUTION_STATUS_UNKNOWN_TOOL,
+)
+from .tool_execution_hooks import (
+    build_default_tool_execution_hooks,
+    merge_tool_execution_hooks,
 )
 from .tool_result_store import ToolResultRecord, ToolResultStore
 from .tool_registry import ToolRegistry, ToolRuntime
@@ -118,6 +140,7 @@ from .tool_spec import (
     RISK_LEVEL_MEDIUM,
     ToolSpec,
 )
+from .tool_validation import ToolInputValidationResult, validate_arguments_against_schema
 from .transcript_store import (
     AdvisoryEventRef,
     CompactedToolResultRef,
@@ -178,6 +201,7 @@ __all__ = [
     "EVENT_TASK_STARTED",
     "EVENT_TOOL_AFTER",
     "EVENT_TOOL_BEFORE",
+    "EVENT_TOOL_FAILURE",
     "EVENT_VERIFICATION_COMPLETED",
     "APPROVAL_MODE_ASK",
     "APPROVAL_MODE_AUTO",
@@ -194,7 +218,12 @@ __all__ = [
     "LifecycleHookRuntime",
     "LifecycleHookSpec",
     "EXECUTION_STATUS_COMPLETED",
+    "EXECUTION_STATUS_FAILED",
+    "EXECUTION_STATUS_HOOK_BLOCKED",
+    "EXECUTION_STATUS_INPUT_SCHEMA_INVALID",
+    "EXECUTION_STATUS_INPUT_VALIDATION_FAILED",
     "EXECUTION_STATUS_POLICY_BLOCKED",
+    "EXECUTION_STATUS_UNKNOWN_TOOL",
     "PendingHookMessage",
     "PlanReference",
     "PlanHookPayload",
@@ -217,6 +246,13 @@ __all__ = [
     "ToolResultStore",
     "ToolExecutionRequest",
     "ToolExecutionResult",
+    "ToolExecutionHook",
+    "ToolExecutionHookRecord",
+    "ToolExecutionHookResult",
+    "ToolExecutionTrace",
+    "build_default_tool_execution_hooks",
+    "merge_tool_execution_hooks",
+    "ToolInputValidationResult",
     "ToolHookPayload",
     "ToolRegistry",
     "ToolRuntime",
@@ -251,6 +287,8 @@ __all__ = [
     "build_completion_report",
     "build_bot_tool_registry",
     "build_bot_tool_specs",
+    "build_engineering_tool_executors",
+    "build_engineering_tool_specs",
     "format_completion_mapping_summary",
     "build_system_prompt",
     "build_selective_replay_context",
@@ -289,6 +327,7 @@ __all__ = [
     "TOOL_POLICY_DENY",
     "TOOL_POLICY_REQUIRE_APPROVAL",
     "trim_history_to_budget",
+    "validate_arguments_against_schema",
     "update_workspace_manifest",
     "verify_workspace_artifacts",
     "write_completion_report",

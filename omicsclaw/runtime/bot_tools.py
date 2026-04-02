@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .engineering_tools import build_engineering_tool_specs
 from .tool_registry import ToolRegistry
 from .tool_spec import (
     APPROVAL_MODE_ASK,
@@ -24,7 +25,7 @@ class BotToolContext:
 
 
 def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
-    return [
+    specs = [
         ToolSpec(
             name="omicsclaw",
             description=(
@@ -754,6 +755,8 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("inspection", "analysis"),
         ),
     ]
+    specs.extend(build_engineering_tool_specs())
+    return specs
 
 
 def build_bot_tool_registry(context: BotToolContext) -> ToolRegistry:

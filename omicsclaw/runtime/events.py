@@ -12,6 +12,7 @@ EVENT_TASK_STARTED = "task_started"
 EVENT_TASK_COMPLETED = "task_completed"
 EVENT_TOOL_BEFORE = "tool_before"
 EVENT_TOOL_AFTER = "tool_after"
+EVENT_TOOL_FAILURE = "tool_failure"
 EVENT_VERIFICATION_COMPLETED = "verification_completed"
 EVENT_EXTENSION_INSTALLED = "extension_installed"
 
@@ -25,6 +26,7 @@ VALID_LIFECYCLE_EVENTS = frozenset(
         EVENT_TASK_COMPLETED,
         EVENT_TOOL_BEFORE,
         EVENT_TOOL_AFTER,
+        EVENT_TOOL_FAILURE,
         EVENT_VERIFICATION_COMPLETED,
         EVENT_EXTENSION_INSTALLED,
     }
@@ -69,6 +71,7 @@ __all__ = [
     "EVENT_TASK_STARTED",
     "EVENT_TOOL_AFTER",
     "EVENT_TOOL_BEFORE",
+    "EVENT_TOOL_FAILURE",
     "EVENT_VERIFICATION_COMPLETED",
     "LifecycleEvent",
     "VALID_LIFECYCLE_EVENTS",
