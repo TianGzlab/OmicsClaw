@@ -9,14 +9,14 @@ Extended with:
 - KnowledgeTelemetry: observability and audit logging (Plan Stage 0)
 - KnowHowInjector: mandatory scientific constraint injection (Plan Stage 1)
 - AdvisoryEvent / KnowledgeResolver: deterministic routing (Plan Stages 2+4)
-- KnowledgeRegistry: canonical frontmatter-based inverted index (Plan Stage 3)
+- KnowledgeRegistry: metadata parsing/validation utilities for knowledge docs
 """
 
 from .retriever import KnowledgeAdvisor
 from .knowhow import KnowHowInjector, get_knowhow_injector
 from .resolver import AdvisoryEvent, KnowledgeResolver, get_resolver
 from .telemetry import KnowledgeTelemetry, get_telemetry
-from .registry import KnowledgeRegistry, get_registry
+from .registry import KnowledgeRegistry
 
 __all__ = [
     "KnowledgeAdvisor",
@@ -28,5 +28,4 @@ __all__ = [
     "KnowledgeTelemetry",
     "get_telemetry",
     "KnowledgeRegistry",
-    "get_registry",
 ]

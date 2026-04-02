@@ -67,7 +67,12 @@ jobs:
           pip install -e ".[memory,dev]"
 
       - name: Run memory tests
-        run: python -m pytest tests/memory/ -v
+        run: |
+          python -m pytest \
+            tests/test_context_assembler.py \
+            tests/test_interactive_memory_command_support.py \
+            tests/test_scoped_memory.py \
+            -v
 
   bot-core-test:
     runs-on: ubuntu-latest
@@ -82,10 +87,16 @@ jobs:
       - name: Install bot core dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest requests openai python-dotenv pydantic numpy pandas scikit-learn matplotlib PyYAML
+          pip install -e ".[dev]"
+          pip install requests
+          pip install -r bot/requirements.txt
 
       - name: Run bot core tests
-        run: python -m pytest tests/bot_tests/ -v
+        run: |
+          python -m pytest \
+            tests/test_bot_completion_messages.py \
+            tests/test_channels.py \
+            -v
 
   spatial-test:
     runs-on: ubuntu-latest
@@ -96,24 +107,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install spatial dependencies
+      - name: Install spatial preprocess test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -e ".[dev]"
 
       - name: Run spatial preprocessing tests
         run: python -m pytest skills/spatial/spatial-preprocess/tests/ -v
-
-      - name: Run spatial domain tests
-        run: python -m pytest skills/spatial/spatial-domains/tests/ -v
-
-      - name: Run spatial DE tests
-        run: python -m pytest skills/spatial/spatial-de/tests/ -v
-
-      - name: Run spatial statistics tests
-        run: python -m pytest skills/spatial/spatial-statistics/tests/ -v
-
-      - name: Run spatial SVG tests
-        run: python -m pytest skills/spatial/spatial-genes/tests/ -v

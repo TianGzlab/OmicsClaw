@@ -105,6 +105,15 @@ class TestPrompts:
         assert len(prompt) > 100
         assert "OmicsClaw" in prompt
 
+    def test_get_system_prompt_includes_workspace_context(self, tmp_path):
+        """Pipeline system prompt reuses the shared context assembler."""
+        from omicsclaw.agents.prompts import get_system_prompt
+
+        prompt = get_system_prompt(workspace=str(tmp_path))
+
+        assert "## Workspace Context" in prompt
+        assert str(tmp_path.resolve()) in prompt
+
     def test_get_researcher_prompt_has_date(self):
         """get_researcher_prompt() includes current date."""
         from omicsclaw.agents.prompts import get_researcher_prompt
@@ -253,10 +262,16 @@ class TestDependencyCheck:
 
 
 class TestSlashCommand:
-    """Test that /research is registered in SLASH_COMMANDS."""
+    """Test that pipeline commands are registered in SLASH_COMMANDS."""
 
-    def test_research_in_slash_commands(self):
+    def test_pipeline_commands_in_slash_commands(self):
         from omicsclaw.interactive._constants import SLASH_COMMANDS
         cmd_names = [cmd for cmd, _ in SLASH_COMMANDS]
         assert "/research" in cmd_names
-
+        assert "/resume-task" in cmd_names
+        assert "/do-current-task" in cmd_names
+        assert "/tasks" in cmd_names
+        assert "/plan" in cmd_names
+        assert "/approve-plan" in cmd_names
+        assert "/install-extension" in cmd_names
+        assert "/disable-extension" in cmd_names

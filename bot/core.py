@@ -1,17 +1,16 @@
 """
 core.py — OmicsClaw Bot shared engine
 =====================================
-Platform-independent logic shared by Telegram and Feishu frontends:
+Platform-independent logic shared by OmicsClaw messaging frontends:
 LLM tool-use loop, skill execution, security helpers, audit logging.
 
-Both frontends import this module, call ``init()`` once at startup, then
+All channel frontends import this module, call ``init()`` once at startup, then
 use the async helper functions to process user messages.
 """
 
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -120,7 +119,6 @@ def resolve_provider(
 
 OMICSCLAW_DIR = Path(__file__).resolve().parent.parent
 OMICSCLAW_PY = OMICSCLAW_DIR / "omicsclaw.py"
-SOUL_MD = OMICSCLAW_DIR / "SOUL.md"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
@@ -133,6 +131,31 @@ if str(OMICSCLAW_DIR) not in sys.path:
     sys.path.insert(0, str(OMICSCLAW_DIR))
 from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.core.registry import registry
+from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_registry
+from omicsclaw.runtime.context_assembler import assemble_chat_context as _assemble_chat_context
+from omicsclaw.runtime.engineering_tools import build_engineering_tool_executors
+from omicsclaw.runtime.query_engine import (
+    QueryEngineCallbacks,
+    QueryEngineConfig,
+    QueryEngineContext,
+    run_query_engine,
+)
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
+from omicsclaw.runtime.policy import TOOL_POLICY_ALLOW
+from omicsclaw.runtime.policy_state import ToolPolicyState
+from omicsclaw.runtime.system_prompt import build_system_prompt, get_role_guardrails
+from omicsclaw.runtime.tool_orchestration import (
+    EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionRequest,
+)
+from omicsclaw.runtime.tool_result_store import ToolResultStore
+from omicsclaw.runtime.transcript_store import (
+    TranscriptStore,
+    build_selective_replay_context,
+    sanitize_tool_history as _runtime_sanitize_tool_history,
+)
+from omicsclaw.runtime.tool_spec import PROGRESS_POLICY_ANALYSIS
+from omicsclaw.runtime.verification import format_completion_mapping_summary
 registry.load_all()
 
 OMICS_EXTENSIONS = {
@@ -273,10 +296,25 @@ llm: AsyncOpenAI | None = None
 OMICSCLAW_MODEL: str = "deepseek-chat"
 LLM_PROVIDER_NAME: str = ""
 
-conversations: dict[int | str, list] = {}
-_conversation_access: dict[int | str, float] = {}  # LRU tracking
 MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))
+MAX_HISTORY_CHARS = int(os.getenv("OMICSCLAW_MAX_HISTORY_CHARS", "0"))
 MAX_CONVERSATIONS = int(os.getenv("OMICSCLAW_MAX_CONVERSATIONS", "1000"))
+TOOL_RESULT_INLINE_BYTES = int(os.getenv("OMICSCLAW_TOOL_RESULT_INLINE_BYTES", "6000"))
+TOOL_RESULT_PREVIEW_CHARS = int(os.getenv("OMICSCLAW_TOOL_RESULT_PREVIEW_CHARS", "1200"))
+TOOL_RESULT_STORAGE_DIR = OMICSCLAW_DIR / "bot" / "logs" / "tool_results"
+transcript_store = TranscriptStore(
+    max_history=MAX_HISTORY,
+    max_history_chars=MAX_HISTORY_CHARS or None,
+    max_conversations=MAX_CONVERSATIONS,
+    sanitizer=_runtime_sanitize_tool_history,
+)
+tool_result_store = ToolResultStore(
+    storage_dir=TOOL_RESULT_STORAGE_DIR,
+    inline_bytes=TOOL_RESULT_INLINE_BYTES,
+    preview_chars=TOOL_RESULT_PREVIEW_CHARS,
+)
+conversations = transcript_store.messages_by_chat
+_conversation_access = transcript_store.access_by_chat  # LRU tracking
 
 received_files: dict[int | str, dict] = {}
 pending_media: dict[int | str, list[dict]] = {}
@@ -377,7 +415,7 @@ def reset_usage() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Shared rate limiter (used by both Telegram and Feishu)
+# Shared rate limiter used across messaging channels
 # ---------------------------------------------------------------------------
 
 RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "10"))
@@ -399,15 +437,12 @@ def check_rate_limit(user_id: str, admin_id: str = "") -> bool:
 
 def _evict_lru_conversations():
     """Evict least-recently-used conversations when limit exceeded."""
-    if len(conversations) <= MAX_CONVERSATIONS:
-        return
-    # Sort by access time, evict oldest
-    sorted_keys = sorted(_conversation_access, key=_conversation_access.get)
-    to_evict = len(conversations) - MAX_CONVERSATIONS
-    for key in sorted_keys[:to_evict]:
-        conversations.pop(key, None)
-        _conversation_access.pop(key, None)
-    logger.debug(f"Evicted {to_evict} stale conversation(s)")
+    transcript_store.max_conversations = MAX_CONVERSATIONS
+    evicted = transcript_store.evict_lru_conversations()
+    for chat_id in evicted:
+        tool_result_store.clear(chat_id)
+    if evicted:
+        logger.debug(f"Evicted {len(evicted)} stale conversation(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -670,934 +705,35 @@ def init(
             logger.error(f"Memory init failed: {e}")
 
 
-# ---------------------------------------------------------------------------
-# System prompt
-# ---------------------------------------------------------------------------
-
-def get_role_guardrails(*, capability_context_present: bool = False) -> str:
-    domain_names = ", ".join(d["name"].lower() for d in registry.domains.values())
-    capability_rule = (
-        "- A `## Deterministic Capability Assessment` block is already present below. "
-        "Follow it directly and do NOT call `resolve_capability` again unless the user materially changes the request."
-        if capability_context_present
-        else "- If the request is non-trivial and the best skill is not obvious, call `resolve_capability` before analysis."
-    )
-
-    return f"""
-Operational constraints:
-1. Identity
-   - You are a multi-omics analysis assistant powered by OmicsClaw skills.
-   - Supported domains: {domain_names}.
-   - Keep outputs concise, evidence-led, and explicit about confidence and gaps.
-
-2. Language Matching
-   - Reply in the same language the user uses.
-   - If memory contains a language preference, follow it.
-   - Default to English only when no preference is evident.
-
-3. Skill Routing and Capability
-   {capability_rule}
-   - If the user names an exact skill or gives an obvious exact skill invocation, call `omicsclaw` directly.
-   - Prefer canonical skill aliases when possible; legacy aliases may exist but should not be your default.
-   - Use `mode='demo'` only when the user explicitly asks for a demo.
-   - If an exact skill exists, do NOT jump to custom code.
-   - If coverage='partial_skill', explain which step is covered by the skill and which step requires custom analysis before proceeding.
-   - If coverage='no_skill', you may use `web_method_search` and then `custom_analysis_execute`.
-   - Use `create_omics_skill` only when the user explicitly asks to add, scaffold, package, or persist a reusable skill.
-
-4. Method and Parameter Handling
-   - When the user specifies a method, pass it in lowercase via the `method` parameter.
-   - Prefer canonical backend names from the chosen skill, capability assessment, SKILL.md metadata, or knowledge guidance; do not rely on stale hardcoded method lists.
-   - For method suitability or default-parameter questions, use `inspect_data` only for `.h5ad` / AnnData preflight and use `consult_knowledge` for cross-domain method advice.
-   - Warn the user before long deep-learning analyses; they often take 10-60 minutes.
-
-5. Result Fidelity
-   - Preserve all numerical values, adjusted p-values, gene lists, file paths, warnings, and error messages exactly.
-   - You may remove raw progress/debug noise and add a brief interpretation after the exact result block.
-   - Never silently round, alter, or omit scientific outputs.
-
-6. File Path Discipline
-   - When the user provides a file path, use exactly that file.
-   - Do not browse for "better" substitutes, auto-preprocess, or auto-fix missing prerequisites.
-   - If the requested method cannot run on that file, explain why and ask before changing course.
-
-7. Data Exploration and Preflight
-   - Use `inspect_data` first only when the user is exploring or previewing an `.h5ad` / AnnData file without requesting a concrete pipeline.
-   - Do not use `inspect_data` as a generic preflight for mzML, VCF, BAM, or other non-AnnData inputs.
-   - After inspection, suggest a small set of appropriate analyses and wait for the user's choice before running expensive jobs.
-
-8. Literature and PDF Handling
-   - Use `parse_literature` when the user wants dataset extraction, GEO accession discovery, or structured paper metadata from a scientific paper or uploaded PDF.
-   - Not every PDF requires `parse_literature` first; if the user only wants summary, translation, or explanation, answer directly unless structured extraction would materially help.
-
-9. Controlled Execution and File Writing
-   - Run analysis code via `omicsclaw` or `custom_analysis_execute`, not via generated shell scripts.
-   - Never use `write_file` to create executable shell scripts such as `.sh` or `.bash`.
-   - Only write `.py` or `.R` scripts when the user explicitly asks to save or export them, and save them under `output/`.
-   - Use `custom_analysis_execute` for execution; use saved scripts only as exported artifacts.
-
-10. Failure Handling
-    - When a tool fails, report the exact error once, give the likely cause if clear, and propose the next step.
-    - Do not loop repeated retries after the same failure unless the user changes inputs or explicitly asks to retry.
-    - If a user-specified method fails, never silently switch to another method; ask before changing methods.
-
-11. Output Location
-    - User-facing saved artifacts should go under `output/`.
-    - Prefer a fresh per-analysis subdirectory over writing into the root of `output/`.
-    - When relaying saved paths, report the exact generated directory or file path.
-
-12. Memory Use
-    - Use `remember` for stable preferences, confirmed biological insights, and durable project context.
-    - Do not store secrets, API keys, raw patient identifiers, transient file paths, temporary errors, or unconfirmed annotations.
-    - If helpful, briefly acknowledge durable preferences or confirmed context in natural language; do not dump internal memory fields.
-
-13. Knowledge and Scientific Constraints
-    - Use `consult_knowledge` proactively for method selection, parameter advice, and troubleshooting.
-    - Treat injected `⚠️ MANDATORY SCIENTIFIC CONSTRAINTS` as highest-priority scientific rules.
-    - You may summarize them for the user, but never weaken, ignore, or override them.
-"""
-
-def build_system_prompt(
-    memory_context: str = "",
-    skill: str = "",
-    query: str = "",
-    domain: str = "",
-    capability_context: str = "",
-) -> str:
-    if SOUL_MD.exists():
-        soul = SOUL_MD.read_text(encoding="utf-8")
-        logger.info(f"Loaded SOUL.md ({len(soul)} chars)")
-    else:
-        soul = (
-            "You are a multi-omics AI assistant. "
-            "Help users analyse multi-omics data with clarity and rigour."
-        )
-        logger.warning("SOUL.md not found, using fallback prompt")
-
-    prompt = f"{soul}\n\n{get_role_guardrails(capability_context_present=bool(capability_context))}"
-    if memory_context:
-        prompt += f"\n\n## Your Memory\n\n{memory_context}"
-    if capability_context:
-        prompt += f"\n\n{capability_context}"
-
-    # Stage 1: Inject mandatory Know-How scientific constraints
-    try:
-        import time as _t
-        _kh_start = _t.monotonic()
-        from omicsclaw.knowledge.knowhow import get_knowhow_injector
-        injector = get_knowhow_injector()
-        constraints = injector.get_constraints(
-            skill=skill or None,
-            query=query or None,
-            domain=domain or None,
-            phase="before_run",
-        )
-        _kh_elapsed_ms = (_t.monotonic() - _kh_start) * 1000
-        if constraints:
-            prompt += f"\n\n{constraints}"
-            logger.info("Injected KH constraints (%d chars, %.1fms) for skill=%s",
-                        len(constraints), _kh_elapsed_ms, skill or '(general)')
-            # Stage 0: Telemetry
-            try:
-                from omicsclaw.knowledge.telemetry import get_telemetry
-                injected_ids = injector.get_matching_kh_ids(
-                    skill=skill or None,
-                    query=query or None,
-                    domain=domain or None,
-                    phase="before_run",
-                )
-                get_telemetry().log_kh_injection(
-                    session_id="system",
-                    skill=skill or "",
-                    query=query[:200] if query else "",
-                    domain=domain or "",
-                    injected_khs=injected_ids,
-                    constraints_length=len(constraints),
-                    latency_ms=_kh_elapsed_ms,
-                )
-            except Exception:
-                pass  # Telemetry must never block
-    except Exception as e:
-        logger.warning("KH injection failed (non-fatal): %s", e)
-
-    return prompt
-
 SYSTEM_PROMPT: str = ""
 
 def _ensure_system_prompt():
     global SYSTEM_PROMPT
     if not SYSTEM_PROMPT:
-        SYSTEM_PROMPT = build_system_prompt()
-
-
-def _message_mentions_term(text: str, term: str) -> bool:
-    term = (term or "").strip().lower()
-    if not term:
-        return False
-    if len(term) <= 3 and term.replace("-", "").replace("_", "").isalnum():
-        pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
-        return bool(re.search(pattern, text))
-    return term in text
-
-
-def _should_attach_capability_context(text: str) -> bool:
-    if not text:
-        return False
-
-    lower = text.lower()
-    if any(_message_mentions_term(lower, alias.lower()) for alias in registry.skills):
-        return True
-
-    return bool(
-        re.search(r"\.(h5ad|h5|loom|mzml|fastq|fq|bam|vcf|csv|tsv)\b", lower)
-        or any(
-            kw in lower
-            for kw in (
-                "analy",
-                "create skill",
-                "add skill",
-                "scaffold",
-                "创建 skill",
-                "封装成skill",
-                "preprocess",
-                "qc",
-                "cluster",
-                "differential",
-                "deconvolution",
-                "trajectory",
-                "velocity",
-                "enrichment",
-                "survival",
-                "空间",
-                "单细胞",
-            )
-        )
-    )
-
-
-def _extract_analysis_hints(text: str) -> tuple[str, str]:
-    """Extract skill name and domain hints from user message text.
-
-    Returns (skill_hint, domain_hint) — both may be empty strings.
-    Used by chat() to pass context to build_system_prompt() for
-    targeted KH constraint injection.
-    """
-    if not text:
-        return "", ""
-
-    text_lower = text.lower()
-
-    # Check for explicit skill names mentioned in the message
-    skill_hint = ""
-    try:
-        from omicsclaw.core.registry import registry
-        for alias in registry.skills:
-            # Match skill names (e.g. "spatial-preprocessing", "sc-qc")
-            if _message_mentions_term(text_lower, alias.lower()):
-                skill_hint = alias
-                break
-    except Exception:
-        pass
-
-    # Check for domain hints
-    domain_hint = ""
-    _domain_keywords = {
-        "bulkrna": ["deseq2", "edger", "limma", "bulk rna", "bulk-rna",
-                     "differential expression", "rnaseq", "rna-seq", "deg",
-                     "差异表达", "差异基因", "差异分析"],
-        "singlecell": ["single cell", "single-cell", "scrna", "scanpy",
-                        "seurat", "scvi", "cellranger", "10x",
-                        "单细胞", "单细胞测序"],
-        "spatial": ["spatial", "visium", "merfish", "slide-seq", "stereo-seq",
-                     "10x visium", "squidpy",
-                     "空间转录组", "空间组学"],
-        "genomics": ["variant", "gwas", "vcf", "plink", "crispr", "depmap",
-                      "essentiality", "genomic",
-                      "基因组", "变异", "遗传变异"],
-        "proteomics": ["proteomic", "mass spec", "peptide", "maxquant",
-                        "蛋白质组", "蛋白组学"],
-        "metabolomics": ["metabolomic", "xcms", "mzml", "metabolite",
-                          "代谢组", "代谢物"],
-    }
-    for domain, keywords in _domain_keywords.items():
-        if any(kw in text_lower for kw in keywords):
-            domain_hint = domain
-            break
-
-    return skill_hint, domain_hint
+        SYSTEM_PROMPT = build_system_prompt(omicsclaw_dir=str(OMICSCLAW_DIR))
 
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI function-calling format)
 # ---------------------------------------------------------------------------
 
 def get_tools() -> list[dict]:
-    skill_names = list(registry.skills.keys()) + ["auto"]
+    return get_tool_registry().to_openai_tools()
+
+
+def _build_bot_tool_context() -> BotToolContext:
+    skill_names = tuple(list(registry.skills.keys()) + ["auto"])
     skill_descriptions = [
         f"{alias} ({info.get('description', alias)})"
         for alias, info in _iter_primary_skill_entries()
     ]
-    skill_desc_text = ", ".join(skill_descriptions)
-    
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "omicsclaw",
-                "description": (
-                    f"Run an OmicsClaw multi-omics analysis skill. Available canonical skills: {skill_desc_text}. "
-                    "Legacy aliases are also accepted and resolved automatically. "
-                    "Use mode='demo' to run with built-in synthetic data. "
-                    "Use mode='file' when the user has sent an omics data file. "
-                    "IMPORTANT: Preserve exact numerical values, warnings, errors, and file paths when relaying results. "
-                    "By default only a text summary is returned (return_media omitted or empty). "
-                    "Set return_media ONLY when the user explicitly asks for figures/plots/tables. "
-                    "Use 'all' to send everything, or a keyword to filter "
-                    "(e.g. 'umap' for UMAP plots, 'qc' for QC violin, 'cluster' for cluster tables). "
-                    "Multiple keywords can be comma-separated (e.g. 'umap,qc')."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "skill": {
-                            "type": "string",
-                            "enum": skill_names,
-                        },
-                        "mode": {
-                            "type": "string",
-                            "enum": ["file", "demo", "path"],
-                            "description": (
-                                "'demo' = built-in synthetic data; "
-                                "'file' = user uploaded a file via messaging; "
-                                "'path' = user provided a file path on the server."
-                            ),
-                        },
-                        "return_media": {
-                            "type": "string",
-                            "description": (
-                                "Filter for which figures/tables to send back. "
-                                "Omit or leave empty for text summary only (default). "
-                                "'all' = send all figures and tables. "
-                                "Otherwise a comma-separated list of keywords to match filenames "
-                                "(e.g. 'umap', 'qc', 'violin', 'cluster', 'umap,qc'). "
-                                "Only set when the user explicitly asks for visual results."
-                            ),
-                        },
-                        "file_path": {
-                            "type": "string",
-                            "description": "Server-side file path or filename for mode='path'.",
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language query for auto-routing.",
-                        },
-                        "extra_args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Additional CLI arguments (e.g. ['--method', 'spagcn']).",
-                        },
-                        "method": {
-                            "type": "string",
-                            "description": "Analysis method override passed as --method.",
-                        },
-                        "n_epochs": {
-                            "type": "integer",
-                            "description": (
-                                "Number of training epochs for deep learning methods. "
-                                "Defaults per method if omitted: "
-                                "cell2location=30000, destvi=2500, stereoscope=150000, tangram=1000. "
-                                "Only set when the user explicitly requests a custom epoch count."
-                            ),
-                        },
-                        "data_type": {
-                            "type": "string",
-                            "description": "Data platform type passed as --data-type.",
-                        },
-                    },
-                    "required": ["skill", "mode"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "save_file",
-                "description": "Save a file that was sent via messaging to a specific folder. Default: OmicsClaw data/ directory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "destination_folder": {"type": "string", "description": "Folder path (absolute)."},
-                        "filename": {"type": "string", "description": "Optional filename."},
-                    },
-                    "required": ["destination_folder"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "write_file",
-                "description": "Create or overwrite a file with the given content. Files are saved to the output/ directory by default. ONLY use when user explicitly asks to create/save a file.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "content": {"type": "string", "description": "Full text content."},
-                        "filename": {"type": "string", "description": "Filename with extension."},
-                        "destination_folder": {"type": "string", "description": "Folder path (absolute). Default: OmicsClaw data/."},
-                    },
-                    "required": ["content", "filename"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "generate_audio",
-                "description": "Generate an MP3 audio file from text using edge-tts.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string", "description": "Text to convert to speech."},
-                        "filename": {"type": "string", "description": "Output MP3 filename."},
-                        "voice": {"type": "string", "description": "TTS voice. Default: en-GB-RyanNeural."},
-                        "rate": {"type": "string", "description": "Speech rate. Default: '-5%'."},
-                        "destination_folder": {"type": "string", "description": "Output folder."},
-                    },
-                    "required": ["text", "filename"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "parse_literature",
-                "description": "Parse scientific literature (PDF, URL, DOI, PubMed ID) to extract GEO accessions and metadata, then download datasets. Use when user mentions a paper, sends a PDF, or provides a literature reference.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "input_type": {
-                            "type": "string",
-                            "enum": ["auto", "url", "doi", "pubmed", "file", "text"],
-                            "description": "Type of input (default: auto-detect)"
-                        },
-                        "input_value": {
-                            "type": "string",
-                            "description": "URL, DOI, PubMed ID, file path, or text content"
-                        },
-                        "auto_download": {
-                            "type": "boolean",
-                            "description": "Automatically download datasets (default: true)"
-                        }
-                    },
-                    "required": ["input_value"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "fetch_geo_metadata",
-                "description": "Fetch metadata for a specific GEO accession (GSE, GSM, or GPL). Use when user asks to fetch, query, or get information about a specific GEO ID.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "accession": {
-                            "type": "string",
-                            "description": "GEO accession ID (e.g., GSE204716, GSM123456)"
-                        },
-                        "download": {
-                            "type": "boolean",
-                            "description": "Download the dataset after fetching metadata (default: false)"
-                        }
-                    },
-                    "required": ["accession"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_directory",
-                "description": "List contents of a directory. Use when user wants to see files in a folder.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Directory path (default: current data directory)"}
-                    },
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "inspect_file",
-                "description": "Display contents of a CSV, JSON, or TXT file. Use when user wants to view file contents.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string", "description": "Path to file"},
-                        "lines": {"type": "integer", "description": "Number of lines to show (default: 20)"}
-                    },
-                    "required": ["file_path"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "download_file",
-                "description": "Download a file from a URL. Use when user provides a direct file URL.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "File URL"},
-                        "destination": {"type": "string", "description": "Destination path (optional)"}
-                    },
-                    "required": ["url"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_json_file",
-                "description": "Create a JSON file from structured data. Saved to output/ by default. ONLY use when user explicitly asks to save data as JSON.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "data": {"type": "object", "description": "Data to save as JSON"},
-                        "filename": {"type": "string", "description": "Filename (without extension)"},
-                        "destination": {"type": "string", "description": "Destination folder (optional)"}
-                    },
-                    "required": ["data", "filename"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_csv_file",
-                "description": "Create a CSV file from tabular data. Saved to output/ by default. ONLY use when user explicitly asks to save data as CSV.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "data": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": {},
-                            },
-                            "description": "Array of row objects",
-                        },
-                        "filename": {"type": "string", "description": "Filename (without extension)"},
-                        "destination": {"type": "string", "description": "Destination folder (optional)"}
-                    },
-                    "required": ["data", "filename"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "make_directory",
-                "description": "Create a new directory under output/. ONLY use when user explicitly asks to create a folder.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Directory path to create"}
-                    },
-                    "required": ["path"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "move_file",
-                "description": "Move or rename a file. ONLY use when user explicitly asks to move or rename files.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "source": {"type": "string", "description": "Source file path"},
-                        "destination": {"type": "string", "description": "Destination path"}
-                    },
-                    "required": ["source", "destination"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "remove_file",
-                "description": "Delete a file or directory. ONLY use when user explicitly asks to remove files/folders.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "File or directory path to remove"}
-                    },
-                    "required": ["path"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_file_size",
-                "description": "Get file size in MB. Use when user asks about file size.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string", "description": "File path"}
-                    },
-                    "required": ["file_path"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "remember",
-                "description": (
-                    "Save important information to persistent memory so you can recall it "
-                    "in future conversations. Use this to remember: user preferences "
-                    "(language, default methods, DPI settings), biological insights "
-                    "(cell type annotations, spatial domains found), and project context "
-                    "(research goals, species, tissue type, disease model). "
-                    "Memory persists across conversations and bot restarts."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "memory_type": {
-                            "type": "string",
-                            "enum": ["preference", "insight", "project_context"],
-                            "description": (
-                                "Type of memory to save. "
-                                "'preference' = user settings (language, default method, DPI). "
-                                "'insight' = biological discovery (cell types, clusters). "
-                                "'project_context' = research context (species, tissue, disease, goal)."
-                            ),
-                        },
-                        "key": {
-                            "type": "string",
-                            "description": (
-                                "For preference: setting name (e.g. 'language', 'default_method', 'dpi'). "
-                                "For insight: entity ID (e.g. 'cluster_0', 'domain_3'). "
-                                "For project_context: not used."
-                            ),
-                        },
-                        "value": {
-                            "type": "string",
-                            "description": (
-                                "For preference: setting value (e.g. 'Chinese', 'tangram', '300'). "
-                                "For insight: biological label (e.g. 'T cells', 'tumor region'). "
-                                "For project_context: not used."
-                            ),
-                        },
-                        "domain": {
-                            "type": "string",
-                            "description": "For preference: scope of the setting (e.g. 'global', 'spatial-preprocess'). Default: 'global'.",
-                        },
-                        "entity_type": {
-                            "type": "string",
-                            "description": "For insight: type of entity (e.g. 'cluster', 'spatial_domain', 'cell_type').",
-                        },
-                        "source_analysis_id": {
-                            "type": "string",
-                            "description": "For insight: ID of the analysis that produced this insight (optional).",
-                        },
-                        "confidence": {
-                            "type": "string",
-                            "enum": ["user_confirmed", "ai_predicted"],
-                            "description": "For insight: confidence level. Use 'user_confirmed' when user explicitly states a label.",
-                        },
-                        "project_goal": {
-                            "type": "string",
-                            "description": "For project_context: research goal/objective.",
-                        },
-                        "species": {
-                            "type": "string",
-                            "description": "For project_context: species (e.g. 'human', 'mouse').",
-                        },
-                        "tissue_type": {
-                            "type": "string",
-                            "description": "For project_context: tissue type (e.g. 'brain', 'liver', 'tumor').",
-                        },
-                        "disease_model": {
-                            "type": "string",
-                            "description": "For project_context: disease model (e.g. 'breast cancer', 'Alzheimer').",
-                        },
-                    },
-                    "required": ["memory_type"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "consult_knowledge",
-                "description": (
-                    "Query the OmicsClaw knowledge base for analysis guidance. "
-                    "Use this PROACTIVELY when: (1) user is unsure which analysis to run, "
-                    "(2) user asks about method selection or parameters, "
-                    "(3) an analysis fails and user needs troubleshooting, "
-                    "(4) user asks 'how to' or 'which method' questions, "
-                    "(5) before running complex analyses to check best practices. "
-                    "Returns relevant decision guides, best practices, or troubleshooting advice."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language question about methodology, parameters, or troubleshooting",
-                        },
-                        "category": {
-                            "type": "string",
-                            "enum": [
-                                "decision-guide", "best-practices", "troubleshooting",
-                                "workflow", "method-reference", "interpretation",
-                                "preprocessing-qc", "statistics", "tool-setup",
-                                "domain-knowledge", "knowhow", "reference-script", "all",
-                            ],
-                            "description": "Filter by document type. Default: 'all'",
-                        },
-                        "domain": {
-                            "type": "string",
-                            "enum": [
-                                "spatial", "singlecell", "genomics", "proteomics",
-                                "metabolomics", "bulkrna", "general", "all",
-                            ],
-                            "description": "Filter by omics domain. Default: 'all'",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "resolve_capability",
-                "description": (
-                    "Resolve whether a user request is fully covered by an existing OmicsClaw skill, "
-                    "partially covered, or not covered. Use this before non-trivial analysis requests "
-                    "when skill coverage is uncertain."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The user's analysis request in natural language.",
-                        },
-                        "file_path": {
-                            "type": "string",
-                            "description": "Optional server-side data path or filename mentioned by the user.",
-                        },
-                        "domain_hint": {
-                            "type": "string",
-                            "enum": [
-                                "spatial", "singlecell", "genomics", "proteomics",
-                                "metabolomics", "bulkrna", "",
-                            ],
-                            "description": "Optional domain hint if the user has already narrowed the domain.",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "web_method_search",
-                "description": (
-                    "Search external web sources for up-to-date method documentation, papers, or workflow guidance. "
-                    "Use this when resolve_capability indicates no_skill or partial_skill and external references are needed."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query describing the method, package, or analysis goal.",
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of search results to fetch. Default: 3.",
-                        },
-                        "topic": {
-                            "type": "string",
-                            "enum": ["general", "news", "finance"],
-                            "description": "Search topic. Default: general.",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_omics_skill",
-                "description": (
-                    "Create a new OmicsClaw-native skill scaffold under skills/<domain>/<skill-name>/ "
-                    "using templates/SKILL-TEMPLATE.md as the base structure. Use this only when the user "
-                    "explicitly wants a reusable new skill added to OmicsClaw. If a previous "
-                    "custom_analysis_execute run succeeded, you can promote that notebook into the new skill."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "request": {
-                            "type": "string",
-                            "description": "Original user request describing the desired reusable skill.",
-                        },
-                        "skill_name": {
-                            "type": "string",
-                            "description": "Preferred lowercase hyphenated skill alias.",
-                        },
-                        "domain": {
-                            "type": "string",
-                            "enum": [
-                                "spatial", "singlecell", "genomics", "proteomics",
-                                "metabolomics", "bulkrna", "orchestrator",
-                            ],
-                            "description": "Target OmicsClaw domain for the new skill. Optional if it can be inferred from a promoted autonomous analysis.",
-                        },
-                        "summary": {
-                            "type": "string",
-                            "description": "One-line summary of what the skill should do.",
-                        },
-                        "source_analysis_dir": {
-                            "type": "string",
-                            "description": "Optional path to a successful custom_analysis_execute output directory to promote into a skill.",
-                        },
-                        "promote_from_latest": {
-                            "type": "boolean",
-                            "description": "If true, promote the most recent successful autonomous analysis output when source_analysis_dir is not provided.",
-                        },
-                        "input_formats": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of domain-specific input format notes.",
-                        },
-                        "primary_outputs": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of primary outputs the new skill should emit.",
-                        },
-                        "methods": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of primary methods/backends for the skill.",
-                        },
-                        "trigger_keywords": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of routing keywords users may say naturally.",
-                        },
-                        "create_tests": {
-                            "type": "boolean",
-                            "description": "Whether to generate a minimal test scaffold. Default: true.",
-                        },
-                    },
-                    "required": ["request"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "custom_analysis_execute",
-                "description": (
-                    "Execute custom analysis code in a restricted Jupyter notebook when an existing OmicsClaw skill "
-                    "does not fully cover the request. Provide one self-contained Python snippet. "
-                    "The notebook exposes INPUT_FILE, ANALYSIS_GOAL, ANALYSIS_CONTEXT, WEB_CONTEXT, and AUTONOMOUS_OUTPUT_DIR. "
-                    "Shell, package install, and direct network access are blocked."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "goal": {
-                            "type": "string",
-                            "description": "Short statement of the analysis objective.",
-                        },
-                        "analysis_plan": {
-                            "type": "string",
-                            "description": "Concise markdown plan describing what the custom analysis will do.",
-                        },
-                        "python_code": {
-                            "type": "string",
-                            "description": "A single self-contained Python snippet to execute inside the restricted notebook.",
-                        },
-                        "context": {
-                            "type": "string",
-                            "description": "Optional local context from the conversation or prior skill outputs.",
-                        },
-                        "web_context": {
-                            "type": "string",
-                            "description": "Optional external method notes returned by web_method_search.",
-                        },
-                        "file_path": {
-                            "type": "string",
-                            "description": "Optional input file path to expose as INPUT_FILE inside the notebook.",
-                        },
-                        "sources": {
-                            "type": "string",
-                            "description": "Optional markdown list of cited URLs or source notes to persist alongside the notebook.",
-                        },
-                        "output_label": {
-                            "type": "string",
-                            "description": "Optional short label for the output directory prefix.",
-                        },
-                    },
-                    "required": ["goal", "analysis_plan", "python_code"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "inspect_data",
-                "description": (
-                    "Instantly inspect an AnnData (.h5ad) file's metadata — cell/gene counts, "
-                    "obs/var columns, embeddings (obsm), layers, uns keys — WITHOUT loading "
-                    "the expression matrix. Fast even for very large files. "
-                    "Also supports pre-run method suitability and parameter preview when "
-                    "`method` (and optionally `skill`) is provided. "
-                    "ALWAYS call this when the user asks to 'explore', 'inspect', "
-                    "'what can I do with', or vaguely 'analyze' a dataset WITHOUT specifying "
-                    "a concrete analysis pipeline. Returns a formatted summary and suggested "
-                    "analysis directions. Do NOT call omicsclaw for open-ended exploratory queries."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Path to the .h5ad file to inspect.",
-                        },
-                        "skill": {
-                            "type": "string",
-                            "description": "Optional skill alias for preflight preview (e.g. spatial-domain-identification).",
-                        },
-                        "method": {
-                            "type": "string",
-                            "description": "Optional method name for suitability + parameter preview.",
-                        },
-                        "preview_params": {
-                            "type": "boolean",
-                            "description": "If true, include a pre-run method suitability and default parameter preview block.",
-                        },
-                    },
-                    "required": ["file_path"],
-                },
-            },
-        },
-    ]
+    return BotToolContext(
+        skill_names=skill_names,
+        skill_desc_text=", ".join(skill_descriptions),
+    )
 
-TOOLS = get_tools()
+
+def get_tool_registry():
+    return build_bot_tool_registry(_build_bot_tool_context())
 
 # ---------------------------------------------------------------------------
 # Security helpers
@@ -3181,21 +2317,47 @@ async def execute_consult_knowledge(args: dict, **kwargs) -> str:
         _ck_start = _t.monotonic()
 
         from omicsclaw.knowledge import KnowledgeAdvisor
+        from omicsclaw.knowledge.semantic_bridge import (
+            generate_query_rewrites,
+            rerank_candidates_with_llm,
+        )
 
         advisor = KnowledgeAdvisor()
         query = args.get("query", "")
         if not query:
             return "Error: 'query' parameter is required."
+        if not advisor.ensure_available(auto_build=True):
+            return "Knowledge base not built yet. Run: python omicsclaw.py knowledge build"
 
         domain = args.get("domain", "all")
         category = args.get("category", "all")
+        domain_filter = domain if domain != "all" else None
+        category_filter = category if category != "all" else None
 
-        result = advisor.search_formatted(
+        rewrites = await generate_query_rewrites(
             query=query,
-            domain=domain if domain != "all" else None,
-            doc_type=category if category != "all" else None,
+            domain=domain_filter or "",
+            doc_type=category_filter or "",
+            llm_client=llm,
+            model=OMICSCLAW_MODEL,
+            available_topics=advisor.list_topics(domain_filter),
+            max_queries=4,
+        )
+        results = advisor.search(
+            query=query,
+            domain=domain_filter,
+            doc_type=category_filter,
+            limit=8,
+            extra_queries=rewrites,
+        )
+        results = await rerank_candidates_with_llm(
+            query=query,
+            candidates=results,
+            llm_client=llm,
+            model=OMICSCLAW_MODEL,
             limit=5,
         )
+        result = advisor.format_results(query, results)
 
         # Stage 0: Telemetry
         _ck_elapsed_ms = (_t.monotonic() - _ck_start) * 1000
@@ -3266,12 +2428,16 @@ async def execute_create_omics_skill(args: dict, **kwargs) -> str:
             create_tests=bool(args.get("create_tests", True)),
         )
         created = "\n".join(f"- {path}" for path in result.created_files or [])
+        completion_summary = format_completion_mapping_summary(result.completion)
         return (
             "Created OmicsClaw skill scaffold.\n"
             f"Skill: {result.skill_name}\n"
             f"Domain: {result.domain}\n"
             f"Directory: {result.skill_dir}\n"
             f"Registry refreshed: {result.registry_refreshed}\n"
+            f"Manifest: {result.manifest_path or '<none>'}\n"
+            f"Completion report: {result.completion_report_path or '<none>'}\n"
+            f"Gate:\n{completion_summary or '<unavailable>'}\n"
             f"Source analysis: {args.get('source_analysis_dir') or ('<latest autonomous analysis>' if args.get('promote_from_latest') else '<none>')}\n"
             "Files:\n"
             f"{created}"
@@ -3355,19 +2521,27 @@ async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
         )
 
         if not result.get("ok"):
+            completion_summary = format_completion_mapping_summary(result.get("completion"))
             return (
                 "Custom analysis failed.\n"
                 f"Output dir: {result.get('output_dir', '<unknown>')}\n"
                 f"Notebook: {result.get('notebook_path', '<unknown>')}\n"
+                f"Manifest: {result.get('manifest_path', '<unknown>')}\n"
+                f"Completion report: {result.get('completion_report_path', '<unknown>')}\n"
+                f"Gate:\n{completion_summary or '<unavailable>'}\n"
                 f"Error: {result.get('error', 'unknown error')}"
             )
 
         preview = str(result.get("output_preview", "") or "")
+        completion_summary = format_completion_mapping_summary(result.get("completion"))
         return (
             "Custom analysis completed.\n"
             f"Output dir: {result.get('output_dir')}\n"
             f"Notebook: {result.get('notebook_path')}\n"
             f"Summary: {result.get('summary_path')}\n"
+            f"Manifest: {result.get('manifest_path')}\n"
+            f"Completion report: {result.get('completion_report_path')}\n"
+            f"Gate:\n{completion_summary or '<unavailable>'}\n"
             f"Preview:\n{preview or '<no stdout preview>'}"
         )
     except ImportError as e:
@@ -3385,30 +2559,51 @@ async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
 # Tool executor registry
 # ---------------------------------------------------------------------------
 
-TOOL_EXECUTORS = {
-    "omicsclaw": execute_omicsclaw,
-    "save_file": execute_save_file,
-    "write_file": execute_write_file,
-    "generate_audio": execute_generate_audio,
-    "parse_literature": execute_parse_literature,
-    "fetch_geo_metadata": execute_fetch_geo_metadata,
-    "list_directory": execute_list_directory,
-    "inspect_file": execute_inspect_file,
-    "download_file": execute_download_file,
-    "create_json_file": execute_create_json_file,
-    "create_csv_file": execute_create_csv_file,
-    "make_directory": execute_make_directory,
-    "move_file": execute_move_file,
-    "remove_file": execute_remove_file,
-    "get_file_size": execute_get_file_size,
-    "remember": execute_remember,
-    "consult_knowledge": execute_consult_knowledge,
-    "resolve_capability": execute_resolve_capability,
-    "create_omics_skill": execute_create_omics_skill,
-    "web_method_search": execute_web_method_search,
-    "custom_analysis_execute": execute_custom_analysis_execute,
-    "inspect_data": execute_inspect_data,
-}
+def _available_tool_executors() -> dict[str, object]:
+    executors = {
+        "omicsclaw": execute_omicsclaw,
+        "save_file": execute_save_file,
+        "write_file": execute_write_file,
+        "generate_audio": execute_generate_audio,
+        "parse_literature": execute_parse_literature,
+        "fetch_geo_metadata": execute_fetch_geo_metadata,
+        "list_directory": execute_list_directory,
+        "inspect_file": execute_inspect_file,
+        "download_file": execute_download_file,
+        "create_json_file": execute_create_json_file,
+        "create_csv_file": execute_create_csv_file,
+        "make_directory": execute_make_directory,
+        "move_file": execute_move_file,
+        "remove_file": execute_remove_file,
+        "get_file_size": execute_get_file_size,
+        "remember": execute_remember,
+        "consult_knowledge": execute_consult_knowledge,
+        "resolve_capability": execute_resolve_capability,
+        "create_omics_skill": execute_create_omics_skill,
+        "web_method_search": execute_web_method_search,
+        "custom_analysis_execute": execute_custom_analysis_execute,
+        "inspect_data": execute_inspect_data,
+    }
+    executors.update(
+        build_engineering_tool_executors(
+            omicsclaw_dir=OMICSCLAW_DIR,
+            tool_specs_supplier=lambda: get_tool_registry().specs,
+        )
+    )
+    return executors
+
+
+def _build_tool_runtime():
+    return get_tool_registry().build_runtime(_available_tool_executors())
+
+
+def get_tool_executors() -> dict[str, object]:
+    return _build_tool_runtime().executors
+
+
+TOOL_RUNTIME = _build_tool_runtime()
+TOOLS = list(TOOL_RUNTIME.openai_tools)
+TOOL_EXECUTORS = dict(TOOL_RUNTIME.executors)
 
 MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # Increased from 10, configurable
 
@@ -3419,57 +2614,146 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 
 
 def _sanitize_tool_history(history: list[dict], warn: bool = True) -> list[dict]:
-    """Drop orphaned or incomplete tool-call bundles from history."""
-    sanitised: list[dict] = []
-    pending_bundle: list[dict] | None = None
-    pending_tool_ids: set[str] = set()
+    return _runtime_sanitize_tool_history(history, warn=warn)
 
-    def flush_pending(drop_incomplete: bool) -> None:
-        nonlocal pending_bundle, pending_tool_ids
-        if pending_bundle is None:
-            return
-        if drop_incomplete and pending_tool_ids:
-            if warn:
-                logger.warning(
-                    "Dropped incomplete assistant/tool bundle from history; "
-                    f"missing tool outputs for: {sorted(pending_tool_ids)}"
+
+async def _emit_tool_callback(callback, *args) -> None:
+    if not callback:
+        return
+    if asyncio.iscoroutinefunction(callback):
+        await callback(*args)
+    else:
+        callback(*args)
+
+
+def _build_bot_query_engine_callbacks(
+    *,
+    chat_id: int | str,
+    progress_fn,
+    progress_update_fn,
+    on_tool_call,
+    on_tool_result,
+    on_stream_content,
+    logger_obj,
+    audit_fn,
+    deep_learning_methods: set[str],
+    usage_accumulator,
+):
+    notified_methods: set[str] = set()
+
+    async def before_tool(request: ToolExecutionRequest):
+        func_name = request.name
+        func_args = request.arguments
+        spec = request.spec
+        policy_decision = request.policy_decision
+        logger_obj.info(f"Tool call: {func_name}({json.dumps(func_args)[:200]})")
+        audit_fn(
+            "tool_call",
+            chat_id=str(chat_id),
+            tool=func_name,
+            args_preview=json.dumps(func_args, default=str)[:300],
+            policy_action=(
+                policy_decision.action if policy_decision is not None else TOOL_POLICY_ALLOW
+            ),
+        )
+        await _emit_tool_callback(on_tool_call, func_name, func_args)
+
+        progress_handle = None
+        if (
+            policy_decision is not None
+            and not policy_decision.allows_execution
+        ):
+            return {"progress_handle": None}
+
+        if spec is not None and spec.progress_policy == PROGRESS_POLICY_ANALYSIS and progress_fn:
+            dl_method = (func_args.get("method") or "").lower()
+            if dl_method in deep_learning_methods and dl_method not in notified_methods:
+                notified_methods.add(dl_method)
+                method_display = func_args.get("method", dl_method)
+                progress_handle = await progress_fn(
+                    f"⏳ **{method_display}** is a deep learning method and may take "
+                    f"10-60 minutes depending on data size. Please be patient...\n\n"
+                    f"💡 The analysis is running on the server, you can leave this "
+                    f"chat open and come back later."
                 )
-        else:
-            sanitised.extend(pending_bundle)
-        pending_bundle = None
-        pending_tool_ids = set()
+        return {"progress_handle": progress_handle}
 
-    for msg in history:
-        role = msg.get("role")
+    async def after_tool(execution_result, result_record, tool_state):
+        request = execution_result.request
+        func_name = request.name
+        func_args = request.arguments
+        progress_handle = (tool_state or {}).get("progress_handle")
+        policy_decision = execution_result.policy_decision
 
-        if role == "assistant" and msg.get("tool_calls"):
-            flush_pending(drop_incomplete=True)
-            pending_bundle = [msg]
-            pending_tool_ids = {
-                tc.get("id")
-                for tc in msg.get("tool_calls", [])
-                if isinstance(tc, dict) and tc.get("id")
-            }
-            continue
+        if progress_handle and progress_update_fn:
+            method_display = func_args.get("method") or "analysis"
+            if execution_result.success:
+                await progress_update_fn(
+                    progress_handle,
+                    f"✅ **{method_display}** analysis complete!"
+                )
+            else:
+                error_name = type(execution_result.error).__name__ if execution_result.error else "Error"
+                await progress_update_fn(
+                    progress_handle,
+                    f"❌ **{method_display}** failed: {error_name}"
+                )
 
-        if role == "tool":
-            tool_call_id = msg.get("tool_call_id")
-            if pending_bundle is not None and tool_call_id in pending_tool_ids:
-                pending_bundle.append(msg)
-                pending_tool_ids.remove(tool_call_id)
-                if not pending_tool_ids:
-                    flush_pending(drop_incomplete=False)
-                continue
+        if (
+            execution_result.status == EXECUTION_STATUS_POLICY_BLOCKED
+            and policy_decision is not None
+        ):
+            audit_fn(
+                "tool_policy_blocked",
+                chat_id=str(chat_id),
+                tool=func_name,
+                action=policy_decision.action,
+                reason=policy_decision.reason[:300],
+                risk=policy_decision.risk_level,
+            )
 
-            if warn:
-                logger.warning("Dropped orphaned tool message from history")
-            continue
+        if execution_result.error:
+            logger_obj.error(
+                "Tool %s raised: %s",
+                func_name,
+                execution_result.error,
+                exc_info=(
+                    type(execution_result.error),
+                    execution_result.error,
+                    execution_result.error.__traceback__,
+                ),
+            )
+            audit_fn(
+                "tool_error",
+                chat_id=str(chat_id),
+                tool=func_name,
+                error=str(execution_result.error)[:300],
+            )
 
-        flush_pending(drop_incomplete=True)
-        sanitised.append(msg)
+        if request.executor:
+            display_output = result_record.content
+            if func_name == "consult_knowledge":
+                try:
+                    from omicsclaw.knowledge.retriever import consume_runtime_notice
 
-    flush_pending(drop_incomplete=True)
-    return sanitised
+                    notice = consume_runtime_notice()
+                    if notice:
+                        display_output = f"{notice}\n{display_output}"
+                except Exception:
+                    pass
+            await _emit_tool_callback(on_tool_result, func_name, display_output)
+
+    def on_llm_error(exc: Exception) -> str:
+        logger_obj.error(f"LLM API error: {exc}")
+        return f"Sorry, I'm having trouble thinking right now -- API error: {exc}"
+
+    return QueryEngineCallbacks(
+        accumulate_usage=usage_accumulator,
+        on_stream_content=on_stream_content,
+        before_tool=before_tool,
+        after_tool=after_tool,
+        on_llm_error=on_llm_error,
+    )
 
 
 async def llm_tool_loop(
@@ -3477,6 +2761,12 @@ async def llm_tool_loop(
     user_content: str | list,
     user_id: str = None,
     platform: str = None,
+    plan_context: str = "",
+    workspace: str = "",
+    pipeline_workspace: str = "",
+    scoped_memory_scope: str = "",
+    mcp_servers: tuple[str, ...] | None = None,
+    output_style: str = "",
     progress_fn=None,
     progress_update_fn=None,
     on_tool_call=None,
@@ -3502,20 +2792,20 @@ async def llm_tool_loop(
 
         if cmd == "/clear":
             # Only clear conversation history, keep memory intact
-            if chat_id in conversations:
-                del conversations[chat_id]
+            transcript_store.clear(chat_id)
+            tool_result_store.clear(chat_id)
             return "✓ Conversation history cleared. (Memory preserved)"
 
         elif cmd == "/new":
             # Clear conversation history but keep memory
-            if chat_id in conversations:
-                del conversations[chat_id]
+            transcript_store.clear(chat_id)
+            tool_result_store.clear(chat_id)
             return "✓ New conversation started. (Memory preserved)"
 
         elif cmd == "/forget":
             # Clear both conversation and memory for a complete reset
-            if chat_id in conversations:
-                del conversations[chat_id]
+            transcript_store.clear(chat_id)
+            tool_result_store.clear(chat_id)
 
             if session_manager and user_id and platform:
                 session_id = f"{platform}:{user_id}:{chat_id}"
@@ -3615,8 +2905,8 @@ Or try: "show me a spatial transcriptomics demo" """
 • Uptime: {hours}h {minutes}m
 • LLM Provider: {LLM_PROVIDER_NAME}
 • Model: {OMICSCLAW_MODEL}
-• Active Conversations: {len(conversations)}
-• Tools Available: {len(TOOL_EXECUTORS)}
+• Active Conversations: {transcript_store.active_conversation_count}
+• Tools Available: {len(get_tool_executors())}
 • Skills Loaded: {_primary_skill_count()}
 • Data Directory: {DATA_DIR}
 • Output Directory: {OUTPUT_DIR}"""
@@ -3627,7 +2917,7 @@ Or try: "show me a spatial transcriptomics demo" """
 • Project: OmicsClaw Multi-Omics Analysis Platform
 • Domains: Spatial Transcriptomics, Single-Cell, Genomics, Proteomics, Metabolomics
 • Skills: {_primary_skill_count()} analysis skills
-• Tools: {len(TOOL_EXECUTORS)} bot tools
+• Tools: {len(get_tool_executors())} bot tools
 • Repository: https://github.com/TianGzlab/OmicsClaw
 
 For updates and documentation, visit the GitHub repository."""
@@ -3674,242 +2964,79 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     if llm is None:
         return "Error: LLM client not initialised. Call core.init() first."
 
-    # Load memory context if session manager available
-    memory_context = ""
-    if session_manager and user_id and platform:
-        # Ensure session exists (create if first time)
-        await session_manager.get_or_create(user_id, platform, str(chat_id))
-        session_id = f"{platform}:{user_id}:{chat_id}"
-        memory_context = await session_manager.load_context(session_id)
-
-    # Build system prompt with memory context + dynamic KH injection
-    # Extract skill/domain hints from the user's message for targeted KH loading
-    _user_text = user_content if isinstance(user_content, str) else " ".join(
-        b.get("text", "") for b in (user_content or []) if isinstance(b, dict)
-    )
-    _skill_hint, _domain_hint = _extract_analysis_hints(_user_text)
-    _capability_context = ""
-    if _should_attach_capability_context(_user_text):
-        try:
-            from omicsclaw.core.capability_resolver import resolve_capability
-
-            decision = resolve_capability(_user_text, domain_hint=_domain_hint)
-            _capability_context = decision.to_prompt_block()
-            if not _skill_hint and decision.chosen_skill:
-                _skill_hint = decision.chosen_skill
-            if not _domain_hint and decision.domain:
-                _domain_hint = decision.domain
-        except Exception as e:
-            logger.warning("Capability resolution context failed (non-fatal): %s", e)
-
-    system_prompt = build_system_prompt(
-        memory_context=memory_context,
-        skill=_skill_hint,
-        query=_user_text[:200] if _user_text else "",
-        domain=_domain_hint,
-        capability_context=_capability_context,
+    transcript_store.max_history = MAX_HISTORY
+    transcript_store.max_history_chars = MAX_HISTORY_CHARS or None
+    transcript_store.max_conversations = MAX_CONVERSATIONS
+    transcript_context = build_selective_replay_context(
+        transcript_store.get_history(chat_id),
+        metadata={"pipeline_workspace": pipeline_workspace} if pipeline_workspace else None,
+        workspace=workspace,
+        max_messages=transcript_store.max_history,
+        max_chars=transcript_store.max_history_chars,
+        sanitizer=transcript_store.sanitizer,
     )
 
-    history = conversations.setdefault(chat_id, [])
-    _conversation_access[chat_id] = time.time()
-    _evict_lru_conversations()
+    chat_context = await _assemble_chat_context(
+        chat_id=chat_id,
+        user_content=user_content,
+        user_id=user_id,
+        platform=platform,
+        session_manager=session_manager,
+        system_prompt_builder=build_system_prompt,
+        skill_aliases=tuple(registry.skills.keys()),
+        plan_context=plan_context,
+        transcript_context=transcript_context,
+        omicsclaw_dir=str(OMICSCLAW_DIR),
+        workspace=workspace,
+        pipeline_workspace=pipeline_workspace,
+        scoped_memory_scope=scoped_memory_scope,
+        mcp_servers=tuple(mcp_servers or ()),
+        output_style=output_style,
+    )
+    session_id = chat_context.session_id
+    system_prompt = chat_context.system_prompt
 
-    if isinstance(user_content, str):
-        history.append({"role": "user", "content": user_content})
-    else:
-        oai_parts = []
-        for block in user_content:
-            if block.get("type") == "text":
-                oai_parts.append({"type": "text", "text": block["text"]})
-            elif block.get("type") == "image":
-                src = block.get("source", {})
-                data_uri = f"data:{src['media_type']};base64,{src['data']}"
-                oai_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": data_uri},
-                })
-        history.append({"role": "user", "content": oai_parts})
-
-    if len(history) > MAX_HISTORY:
-        history[:] = history[-MAX_HISTORY:]
-
-    history[:] = _sanitize_tool_history(history)
-
-    last_message = None
-    _notified_methods: set[str] = set()  # Avoid duplicate progress messages
-    for _iteration in range(MAX_TOOL_ITERATIONS):
-        try:
-            kwargs = {}
-            if on_stream_content is not None:
-                kwargs = {"stream": True, "stream_options": {"include_usage": True}}
-
-            response = await llm.chat.completions.create(
-                model=OMICSCLAW_MODEL,
-                max_tokens=8192,
-                messages=[{"role": "system", "content": system_prompt}] + history,
-                tools=TOOLS,
-                **kwargs
-            )
-            
-            if on_stream_content is not None:
-                class FakeFunction:
-                    def __init__(self, name, arguments):
-                        self.name = name
-                        self.arguments = arguments
-                class FakeToolCall:
-                    def __init__(self, id, type_, function):
-                        self.id = id
-                        self.type = type_
-                        self.function = function
-                class FakeMessage:
-                    def __init__(self, content, tool_calls):
-                        self.content = content
-                        self.tool_calls = tool_calls
-                        
-                final_content = ""
-                tool_calls_dict = {}
-                
-                async for chunk in response:
-                    if not chunk.choices:
-                        if chunk.usage:
-                            _accumulate_usage(chunk.usage)
-                        continue
-                    
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        final_content += delta.content
-                        if inspect.iscoroutinefunction(on_stream_content):
-                            await on_stream_content(delta.content)
-                        else:
-                            on_stream_content(delta.content)
-                            
-                    if delta.tool_calls:
-                        for tc_chunk in delta.tool_calls:
-                            tc_index = tc_chunk.index
-                            if tc_index not in tool_calls_dict:
-                                tc_id = tc_chunk.id or ""
-                                tc_type = tc_chunk.type or "function"
-                                func_name = tc_chunk.function.name or ""
-                                func_args = tc_chunk.function.arguments or ""
-                                tool_calls_dict[tc_index] = FakeToolCall(tc_id, tc_type, FakeFunction(func_name, func_args))
-                            else:
-                                existing_tc = tool_calls_dict[tc_index]
-                                if tc_chunk.function.name:
-                                    existing_tc.function.name += tc_chunk.function.name
-                                if tc_chunk.function.arguments:
-                                    existing_tc.function.arguments += tc_chunk.function.arguments
-                
-                tcs = [tool_calls_dict[idx] for idx in sorted(tool_calls_dict.keys())]
-                last_message = FakeMessage(final_content if final_content else None, tcs if tcs else None)
-            else:
-                # Accumulate token usage statistics
-                _accumulate_usage(response.usage)
-                choice = response.choices[0]
-                last_message = choice.message
-                
-        except APIError as e:
-            logger.error(f"LLM API error: {e}")
-            return f"Sorry, I'm having trouble thinking right now -- API error: {e}"
-
-        assistant_msg: dict = {"role": "assistant", "content": last_message.content or ""}
-        if last_message.tool_calls:
-            assistant_msg["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in last_message.tool_calls
-            ]
-        history.append(assistant_msg)
-
-        if not last_message.tool_calls:
-            return last_message.content or "(no response)"
-
-        for tc in last_message.tool_calls:
-            func_name = tc.function.name
-            executor = TOOL_EXECUTORS.get(func_name)
-            if executor:
-                try:
-                    func_args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    func_args = {}
-                logger.info(f"Tool call: {func_name}({json.dumps(func_args)[:200]})")
-                audit("tool_call", chat_id=str(chat_id), tool=func_name,
-                      args_preview=json.dumps(func_args, default=str)[:300])
-
-                if on_tool_call:
-                    if asyncio.iscoroutinefunction(on_tool_call):
-                        await on_tool_call(func_name, func_args)
-                    else:
-                        on_tool_call(func_name, func_args)
-
-                # Send progress message for deep learning methods (once per method)
-                _progress_handle = None
-                if func_name == "omicsclaw" and progress_fn:
-                    dl_method = (func_args.get("method") or "").lower()
-                    if dl_method in DEEP_LEARNING_METHODS and dl_method not in _notified_methods:
-                        _notified_methods.add(dl_method)
-                        method_display = func_args.get("method", dl_method)
-                        _progress_handle = await progress_fn(
-                            f"⏳ **{method_display}** is a deep learning method and may take "
-                            f"10-60 minutes depending on data size. Please be patient...\n\n"
-                            f"💡 The analysis is running on the server, you can leave this "
-                            f"chat open and come back later."
-                        )
-
-                try:
-                    # Pass session_id to tools that need it (omicsclaw, remember)
-                    if func_name in ("omicsclaw", "remember") and user_id and platform:
-                        session_id = f"{platform}:{user_id}:{chat_id}"
-                        if func_name == "omicsclaw":
-                            result = await executor(func_args, session_id, chat_id=chat_id)
-                        else:
-                            result = await executor(func_args, session_id)
-                    elif func_name == "omicsclaw":
-                        result = await executor(func_args, chat_id=chat_id)
-                    else:
-                        result = await executor(func_args)
-
-                    # Update progress message on success
-                    if _progress_handle and progress_update_fn:
-                        method_display = (func_args.get("method") or "analysis")
-                        await progress_update_fn(
-                            _progress_handle,
-                            f"✅ **{method_display}** analysis complete!"
-                        )
-                except Exception as tool_err:
-                    logger.error(f"Tool {func_name} raised: {tool_err}", exc_info=True)
-                    audit("tool_error", chat_id=str(chat_id), tool=func_name,
-                          error=str(tool_err)[:300])
-                    result = f"Error executing {func_name}: {type(tool_err).__name__}: {tool_err}"
-
-                    # Update progress message on failure
-                    if _progress_handle and progress_update_fn:
-                        method_display = (func_args.get("method") or "analysis")
-                        await progress_update_fn(
-                            _progress_handle,
-                            f"❌ **{method_display}** failed: {type(tool_err).__name__}"
-                        )
-
-                if on_tool_result:
-                    if asyncio.iscoroutinefunction(on_tool_result):
-                        await on_tool_result(func_name, result)
-                    else:
-                        on_tool_result(func_name, result)
-            else:
-                result = f"Unknown tool: {func_name}"
-
-            history.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": str(result),
-            })
-
-    return last_message.content if last_message and last_message.content else "(max tool iterations reached)"
+    tool_runtime = _build_tool_runtime()
+    hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
+    callbacks = _build_bot_query_engine_callbacks(
+        chat_id=chat_id,
+        progress_fn=progress_fn,
+        progress_update_fn=progress_update_fn,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_stream_content=on_stream_content,
+        logger_obj=logger,
+        audit_fn=audit,
+        deep_learning_methods=DEEP_LEARNING_METHODS,
+        usage_accumulator=_accumulate_usage,
+    )
+    return await run_query_engine(
+        llm=llm,
+        context=QueryEngineContext(
+            chat_id=chat_id,
+            session_id=session_id,
+            system_prompt=system_prompt,
+            user_message_content=chat_context.user_message_content,
+            surface=platform or "bot",
+            policy_state=ToolPolicyState(surface=platform or "bot"),
+            hook_runtime=hook_runtime,
+            tool_runtime_context={
+                "omicsclaw_dir": str(OMICSCLAW_DIR),
+                "workspace": workspace,
+                "pipeline_workspace": pipeline_workspace,
+            },
+        ),
+        tool_runtime=tool_runtime,
+        transcript_store=transcript_store,
+        tool_result_store=tool_result_store,
+        config=QueryEngineConfig(
+            model=OMICSCLAW_MODEL,
+            max_iterations=MAX_TOOL_ITERATIONS,
+            max_tokens=8192,
+            llm_error_types=(APIError,),
+        ),
+        callbacks=callbacks,
+    )
 
 
 # ---------------------------------------------------------------------------

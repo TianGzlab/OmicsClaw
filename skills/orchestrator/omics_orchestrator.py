@@ -22,7 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.core.capability_resolver import resolve_capability
-from omicsclaw.loaders import EXTENSION_TO_DOMAIN
+from omicsclaw.loaders import detect_domain_from_path
 from omicsclaw.routing.router import route_keyword, route_query_unified
 from omicsclaw.core.registry import registry
 
@@ -194,9 +194,9 @@ def _get_keyword_maps() -> dict[str, dict[str, str]]:
 def detect_domain(input_path: str | None = None, query: str | None = None) -> str:
     """Auto-detect omics domain from file extension or query keywords."""
     if input_path:
-        ext = Path(input_path).suffix.lower()
-        if ext in EXTENSION_TO_DOMAIN:
-            return EXTENSION_TO_DOMAIN[ext]
+        detected = detect_domain_from_path(input_path, fallback="")
+        if detected:
+            return detected
 
     if query:
         query_lower = query.lower()

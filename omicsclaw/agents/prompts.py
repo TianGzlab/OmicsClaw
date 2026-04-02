@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from omicsclaw.core.registry import OMICSCLAW_DIR
+from omicsclaw.runtime.system_prompt import build_system_prompt
+
 # =============================================================================
 # Main orchestrator workflow
 # =============================================================================
@@ -144,10 +147,12 @@ Expected files in the workspace:
   - `paper/04_fulltext.md` — Complete cleaned paper text (reference/fallback)
 - `plan.md` — Experiment plan from planner-agent
 - `todos.md` — Progress tracking
+- `manifest.json` — Workspace lineage and verification ledger
 - `artifacts/` — Figures, tables, intermediate results
 - `*.ipynb` — Analysis notebooks (use simple filenames, not absolute paths)
 - `final_report.md` — Paper-ready report from writing-agent
 - `review_report.json` — Review feedback from reviewer-agent
+- `completion_report.json` — Structured completion gate summary
 
 ## Paper Navigation (Modes A/B Only)
 When a reference paper is provided (PDF input), the paper has been "unpacked"
@@ -310,14 +315,23 @@ PAPER_FORMAT_RULES = """## Paper Format Validation
 # =============================================================================
 
 
-def get_system_prompt() -> str:
+def get_system_prompt(*, workspace: str = "") -> str:
     """Generate the complete system prompt for the main orchestrator."""
     date = datetime.now().strftime("%Y-%m-%d")
-    return (
+    base_persona = (
         f"Today's date is {date}.\n\n"
-        + RESEARCH_PIPELINE_WORKFLOW
-        + "\n"
-        + DELEGATION_STRATEGY
+        f"{RESEARCH_PIPELINE_WORKFLOW}\n"
+        f"{DELEGATION_STRATEGY}"
+    )
+    return build_system_prompt(
+        surface="pipeline",
+        omicsclaw_dir=str(OMICSCLAW_DIR),
+        base_persona=base_persona,
+        workspace=workspace,
+        include_role_guardrails=False,
+        include_skill_contract=False,
+        include_knowhow=False,
+        workspace_placement="system",
     )
 
 

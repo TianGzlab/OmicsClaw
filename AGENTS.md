@@ -12,19 +12,26 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 
 ```bash
 cd /data1/TianLab/zhouwg/project/OmicsClaw
-pip install -r requirements.txt
-
-# Install the package (also registers the `oc` short alias)
 pip install -e .
 
+# Add optional extras only when needed
+# pip install -e ".[interactive]"
+# pip install -e ".[tui]"
+# pip install -e ".[memory]"
+# pip install -e ".[full]"
+
 python omicsclaw.py list   # or: oc list
-python omicsclaw.py run spatial-preprocessing --demo
+python omicsclaw.py run spatial-preprocess --demo
 ```
 
 > **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
 > are available system-wide. `oc` is registered via `[project.scripts]` in
 > `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
 > `omicsclaw`. No PATH tricks needed.
+>
+> **Dependency source of truth**: Root dependency management lives in
+> `pyproject.toml`. The repository does not use a root `requirements.txt` as a
+> primary install entrypoint.
 
 ## Commands
 
@@ -62,7 +69,7 @@ OmicsClaw/
 ├── omicsclaw/                  # Core framework (domain-agnostic)
 │   ├── common/                 # report.py, session.py, checksums.py
 │   ├── core/                   # registry.py, dependency_manager.py
-│   ├── loaders/                # Unified data loading (load_omics_data)
+│   ├── loaders/                # File-extension → domain detection helpers
 │   ├── memory/                 # Graph memory system
 │   ├── routing/                # Multi-agent routing
 │   ├── agents/                 # Agent definitions
@@ -177,14 +184,14 @@ oc memory-server
 
 ## Bot Integration
 
-OmicsClaw includes dual-channel messaging bots in `bot/`:
+OmicsClaw includes multi-channel messaging frontends in `bot/`:
 
 ```
 bot/
 ├── __init__.py
 ├── core.py           # Shared LLM tool loop, skill execution, security
 ├── run.py            # Unified bot runner
-├── channels/         # Platform implementations (telegram, feishu)
+├── channels/         # Platform implementations (telegram, feishu, dingtalk, discord, slack, wechat, qq, email, imessage)
 ├── requirements.txt  # Bot-specific dependencies
 ├── README.md         # Setup and configuration guide
 └── logs/             # Audit logs (audit.jsonl)
@@ -194,14 +201,14 @@ bot/
 
 | Command | Purpose |
 |---------|---------|
-| `python -m bot.run --channels telegram` | Start Telegram bot |
-| `python -m bot.run --channels feishu` | Start Feishu bot |
+| `python -m bot.run --channels <names>` | Start one or more configured messaging channels |
+| `python -m bot.run --list` | List available channel integrations |
 | `make bot-telegram` | Makefile alias for Telegram |
 | `make bot-feishu` | Makefile alias for Feishu |
 
 ### Bot Architecture
 
-Both bots share `bot/core.py` which contains:
+All channels share `bot/core.py` which contains:
 - LLM tool-use loop (OpenAI function calling)
 - TOOLS definition (omicsclaw, save_file, write_file, generate_audio)
 - `execute_omicsclaw()` — runs `omicsclaw.py run <skill>` as subprocess
@@ -216,12 +223,13 @@ Bot environment variables go in `.env` at the project root. See `bot/README.md` 
 
 ## Bot Integration
 
-OmicsClaw includes Telegram and Feishu bot frontends in `bot/`. Both import `bot/core.py` which provides the shared LLM tool-use loop, skill execution, security helpers, and audit logging. Each frontend handles platform-specific message handling, media upload/download, and rate limiting.
+OmicsClaw includes multi-channel bot frontends in `bot/`. They all import `bot/core.py`, which provides the shared LLM tool-use loop, skill execution, security helpers, and audit logging. Each frontend handles platform-specific message handling, media upload/download, and rate limiting.
 
 ```bash
 pip install -r bot/requirements.txt
 python -m bot.run --channels telegram   # Telegram
-python -m bot.run --channels feishu     # Feishu (WebSocket long-connection, no public IP)
+python -m bot.run --channels feishu     # Feishu
+python -m bot.run --channels telegram,slack,email
 ```
 
 Configuration is via `.env` at the project root. See `bot/README.md` for required environment variables.

@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import time
 
+import pytest
+
 from omicsclaw.core.registry import OmicsRegistry
 from omicsclaw.core.skill_scaffolder import (
     create_skill_scaffold,
@@ -34,6 +36,10 @@ def test_create_skill_scaffold_creates_registry_loadable_skill(tmp_path: Path):
     assert (skill_dir / "proteomics_kinase_activity.py").exists()
     assert (skill_dir / "tests" / "test_proteomics_kinase_activity.py").exists()
     assert (skill_dir / "scaffold_spec.json").exists()
+    assert (skill_dir / "manifest.json").exists()
+    assert (skill_dir / "completion_report.json").exists()
+    assert result.completion["status"] == "complete"
+    assert result.completion["completed"] is True
 
     registry = OmicsRegistry()
     registry.load_all(tmp_path)
@@ -108,6 +114,32 @@ def test_create_skill_scaffold_can_promote_autonomous_analysis(tmp_path: Path):
     assert "out = Path(AUTONOMOUS_OUTPUT_DIR) / 'detected.txt'" in script_text
     assert (skill_dir / "references" / "source_analysis_notebook.ipynb").exists()
     assert (skill_dir / "references" / "source_result_summary.md").exists()
+    assert (skill_dir / "manifest.json").exists()
+    assert (skill_dir / "completion_report.json").exists()
+    assert result.completion["status"] == "complete"
+    assert result.completion["completed"] is True
+
+
+def test_create_skill_scaffold_rejects_incomplete_autonomous_analysis(tmp_path: Path):
+    source_dir = tmp_path / "output" / "incomplete-analysis"
+    repro_dir = source_dir / "reproducibility"
+    repro_dir.mkdir(parents=True)
+    (repro_dir / "analysis_notebook.ipynb").write_text("{}", encoding="utf-8")
+    (source_dir / "analysis_plan.md").write_text("plan\n", encoding="utf-8")
+    (source_dir / "result_summary.md").write_text("summary\n", encoding="utf-8")
+    (source_dir / "completion_report.json").write_text(
+        json.dumps({"completed": False, "status": "failed"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not promotable"):
+        create_skill_scaffold(
+            request="Promote the failed analysis.",
+            domain="orchestrator",
+            skill_name="failed-analysis-skill",
+            skills_root=tmp_path / "skills",
+            source_analysis_dir=source_dir,
+        )
 
 
 def test_find_latest_autonomous_analysis_returns_newest(tmp_path: Path):
@@ -130,3 +162,24 @@ def test_find_latest_autonomous_analysis_returns_newest(tmp_path: Path):
         os.utime(target, (future_ts, future_ts))
     latest = find_latest_autonomous_analysis(output_root=output_root)
     assert latest == newer
+
+
+def test_find_latest_autonomous_analysis_skips_incomplete_completion_reports(tmp_path: Path):
+    output_root = tmp_path / "output"
+    incomplete = output_root / "incomplete"
+    complete = output_root / "complete"
+    for path in (incomplete, complete):
+        (path / "reproducibility").mkdir(parents=True)
+        (path / "reproducibility" / "analysis_notebook.ipynb").write_text("{}", encoding="utf-8")
+        (path / "analysis_plan.md").write_text("plan\n", encoding="utf-8")
+        (path / "result_summary.md").write_text("summary\n", encoding="utf-8")
+    (incomplete / "completion_report.json").write_text(
+        json.dumps({"completed": False, "status": "failed"}),
+        encoding="utf-8",
+    )
+    (complete / "completion_report.json").write_text(
+        json.dumps({"completed": True, "status": "complete"}),
+        encoding="utf-8",
+    )
+
+    assert find_latest_autonomous_analysis(output_root=output_root) == complete

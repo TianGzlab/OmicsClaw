@@ -8,9 +8,22 @@ from datetime import datetime
 from pathlib import Path
 import textwrap
 import uuid
+from typing import Any
 
+from omicsclaw.common.manifest import StepRecord
 from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.agents.notebook_session import NotebookSession
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
+from omicsclaw.runtime.verification import (
+    COMPLETION_STATUS_FAILED,
+    WORKSPACE_KIND_ANALYSIS_RUN,
+    ArtifactRequirement,
+    build_completion_report,
+    update_workspace_manifest,
+    write_completion_report,
+)
+
+_OMICSCLAW_ROOT = Path(__file__).resolve().parents[2]
 
 
 _BLOCKED_IMPORTS = {
@@ -57,6 +70,8 @@ _BLOCKED_TEXT_SNIPPETS = (
     "httpx.",
     "socket.",
 )
+
+AUTONOMOUS_ANALYSIS_VERSION = "0.1.0"
 
 
 def validate_custom_analysis_code(source: str) -> list[str]:
@@ -156,6 +171,41 @@ def _safe_setup_code(
     ).strip()
 
 
+def _autonomous_analysis_requirements() -> list[ArtifactRequirement]:
+    return [
+        ArtifactRequirement(
+            name="analysis_plan",
+            path="analysis_plan.md",
+            description="Human-readable autonomous analysis plan.",
+        ),
+        ArtifactRequirement(
+            name="web_sources",
+            path="web_sources.md",
+            description="Captured web references or source notes.",
+        ),
+        ArtifactRequirement(
+            name="capability_decision",
+            path="capability_decision.json",
+            description="Capability resolver decision snapshot.",
+        ),
+        ArtifactRequirement(
+            name="result_summary",
+            path="result_summary.md",
+            description="Top-level execution summary.",
+        ),
+        ArtifactRequirement(
+            name="notebook",
+            path="reproducibility/analysis_notebook.ipynb",
+            description="Reproducibility notebook for the autonomous run.",
+        ),
+        ArtifactRequirement(
+            name="workspace_manifest",
+            path="manifest.json",
+            description="Workspace lineage and verification ledger.",
+        ),
+    ]
+
+
 def run_autonomous_analysis(
     *,
     output_root: str,
@@ -168,8 +218,9 @@ def run_autonomous_analysis(
     sources: str = "",
     capability_decision: dict | None = None,
     output_label: str = "autonomous-analysis",
-) -> dict[str, str | bool]:
+) -> dict[str, Any]:
     """Execute custom analysis code in a constrained notebook session."""
+    hook_runtime = build_default_lifecycle_hook_runtime(_OMICSCLAW_ROOT)
     issues = validate_custom_analysis_code(python_code)
     if issues:
         return {
@@ -192,6 +243,14 @@ def run_autonomous_analysis(
     capability_path = out_dir / "capability_decision.json"
     summary_path = out_dir / "result_summary.md"
     notebook_path = repro_dir / "analysis_notebook.ipynb"
+    requirements = _autonomous_analysis_requirements()
+    manifest_metadata = {
+        "goal": goal,
+        "output_label": output_label,
+        "input_file": input_file,
+        "has_web_context": bool(web_context.strip()),
+        "has_sources": bool((sources or "").strip()),
+    }
 
     plan_path.write_text((analysis_plan or goal or "").strip() + "\n", encoding="utf-8")
     sources_path.write_text((sources or web_context or "No external sources captured.\n"), encoding="utf-8")
@@ -200,9 +259,73 @@ def run_autonomous_analysis(
         json.dumps(capability_payload, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    manifest_path = update_workspace_manifest(
+        out_dir,
+        workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+        workspace_purpose="autonomous_analysis",
+        requirements=requirements,
+        step=StepRecord(
+            skill="custom_analysis_execute",
+            version=AUTONOMOUS_ANALYSIS_VERSION,
+            input_file=input_file,
+            output_file=str(summary_path),
+            params={
+                "goal": goal,
+                "output_label": output_label,
+                "has_web_context": bool(web_context.strip()),
+            },
+        ),
+        isolation_mode="workspace_dir",
+        metadata=manifest_metadata,
+    )
 
-    session = NotebookSession(str(notebook_path))
+    def _finalize_workspace(
+        *,
+        status: str = "",
+        warnings: list[str] | None = None,
+        errors: list[str] | None = None,
+        completed: bool | None = None,
+        exec_ok: bool | None = None,
+    ) -> tuple[Path, dict[str, Any]]:
+        report = build_completion_report(
+            out_dir,
+            workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+            workspace_purpose="autonomous_analysis",
+            requirements=requirements,
+            status=status,
+            warnings=warnings,
+            errors=errors,
+            manifest_path=str(manifest_path),
+            metadata={
+                **manifest_metadata,
+                "execution_ok": exec_ok,
+            },
+            completed=completed,
+        )
+        report_path = write_completion_report(
+            out_dir,
+            report,
+            hook_runtime=hook_runtime,
+            hook_context={
+                "workspace": str(out_dir),
+                "source": "autonomous_analysis",
+            },
+        )
+        update_workspace_manifest(
+            out_dir,
+            workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+            workspace_purpose="autonomous_analysis",
+            requirements=requirements,
+            completion_report=report,
+            isolation_mode="workspace_dir",
+            metadata=manifest_metadata,
+            append_step=False,
+        )
+        return report_path, report.to_dict()
+
+    session = None
     try:
+        session = NotebookSession(str(notebook_path))
         session.insert_cell(None, "markdown", "# Autonomous Analysis Plan\n\n" + (analysis_plan or goal))
         if web_context:
             session.insert_cell(None, "markdown", "## External Method Context\n\n" + web_context[:12000])
@@ -222,11 +345,19 @@ def run_autonomous_analysis(
                 "Setup failed.\n\n" + (setup_result.get("error") or "unknown error") + "\n",
                 encoding="utf-8",
             )
+            completion_report_path, completion = _finalize_workspace(
+                status=COMPLETION_STATUS_FAILED,
+                errors=[setup_result.get("error") or "autonomous notebook setup failed"],
+                exec_ok=False,
+            )
             return {
                 "ok": False,
                 "error": setup_result.get("error") or "autonomous notebook setup failed",
                 "output_dir": str(out_dir),
                 "notebook_path": str(notebook_path),
+                "manifest_path": str(manifest_path),
+                "completion_report_path": str(completion_report_path),
+                "completion": completion,
             }
 
         exec_result = session.insert_execute_code_cell(None, python_code)
@@ -249,6 +380,11 @@ def run_autonomous_analysis(
             ).strip() + "\n",
             encoding="utf-8",
         )
+        completion_report_path, completion = _finalize_workspace(
+            status=COMPLETION_STATUS_FAILED if not exec_result["ok"] else "",
+            errors=[exec_result.get("error") or ""],
+            exec_ok=bool(exec_result["ok"]),
+        )
         return {
             "ok": bool(exec_result["ok"]),
             "output_dir": str(out_dir),
@@ -256,6 +392,33 @@ def run_autonomous_analysis(
             "summary_path": str(summary_path),
             "output_preview": preview,
             "error": exec_result.get("error") or "",
+            "manifest_path": str(manifest_path),
+            "completion_report_path": str(completion_report_path),
+            "completion": completion,
+        }
+    except Exception as exc:
+        summary_path.write_text(
+            "Execution failed.\n\n" + str(exc) + "\n",
+            encoding="utf-8",
+        )
+        completion_report_path, completion = _finalize_workspace(
+            status=COMPLETION_STATUS_FAILED,
+            errors=[str(exc)],
+            exec_ok=False,
+        )
+        return {
+            "ok": False,
+            "error": str(exc),
+            "output_dir": str(out_dir),
+            "notebook_path": str(notebook_path),
+            "summary_path": str(summary_path),
+            "manifest_path": str(manifest_path),
+            "completion_report_path": str(completion_report_path),
+            "completion": completion,
         }
     finally:
-        session.shutdown()
+        if session is not None:
+            try:
+                session.shutdown()
+            except Exception:
+                pass

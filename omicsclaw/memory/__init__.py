@@ -26,6 +26,28 @@ import os
 from typing import Optional, TYPE_CHECKING
 
 from .database import DatabaseManager
+from .scoped_memory import (
+    DEFAULT_SCOPED_MEMORY_SCOPE,
+    SCOPED_MEMORY_DIRNAME,
+    SCOPED_MEMORY_FRESHNESS_LEVELS,
+    SCOPED_MEMORY_SCOPES,
+    ScopedMemoryPruneCandidate,
+    ScopedMemoryPruneResult,
+    ScopedMemoryRecord,
+    ensure_scoped_memory_root,
+    normalize_scoped_memory_freshness,
+    normalize_scoped_memory_scope,
+    prune_scoped_memories,
+    resolve_scoped_memory_root,
+    write_scoped_memory,
+)
+from .scoped_memory_index import (
+    ScopedMemoryHeader,
+    list_scoped_memory_records,
+    load_scoped_memory_record,
+    scan_scoped_memory_headers,
+)
+from .scoped_memory_select import ScopedMemoryRecall, load_scoped_memory_context
 from .snapshot import ChangesetStore, get_changeset_store
 from .models import (
     Base, ROOT_NODE_UUID, Node, Memory, Edge, Path,
@@ -100,4 +122,23 @@ __all__ = [
     "ChangesetStore", "get_changeset_store",
     "Base", "ROOT_NODE_UUID", "Node", "Memory", "Edge", "Path",
     "GlossaryKeyword", "SearchDocument", "ChangeCollector",
+    "DEFAULT_SCOPED_MEMORY_SCOPE",
+    "SCOPED_MEMORY_DIRNAME",
+    "SCOPED_MEMORY_FRESHNESS_LEVELS",
+    "SCOPED_MEMORY_SCOPES",
+    "ScopedMemoryHeader",
+    "ScopedMemoryPruneCandidate",
+    "ScopedMemoryPruneResult",
+    "ScopedMemoryRecall",
+    "ScopedMemoryRecord",
+    "ensure_scoped_memory_root",
+    "list_scoped_memory_records",
+    "load_scoped_memory_context",
+    "load_scoped_memory_record",
+    "normalize_scoped_memory_freshness",
+    "normalize_scoped_memory_scope",
+    "prune_scoped_memories",
+    "resolve_scoped_memory_root",
+    "scan_scoped_memory_headers",
+    "write_scoped_memory",
 ]

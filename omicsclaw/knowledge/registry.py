@@ -1,29 +1,10 @@
-"""
-Canonical Knowledge Registry — YAML Frontmatter Metadata (Plan Stage 3).
+"""Frontmatter parsing and indexing utilities for knowledge documents.
 
-Establishes a single source of truth mapping from skills/signals to knowledge
-documents via mandatory YAML frontmatter inside the markdown files themselves.
+Current role in OmicsClaw:
+- validate knowledge metadata in tests/tooling
+- normalize SKILL.md-style frontmatter for extension validation
 
-This eliminates the double-maintenance trap: metadata lives *with* the document,
-not in a separate mapping file.
-
-Standard Metadata Schema (embedded in markdown frontmatter):
-    ---
-    doc_id: sc-mt-filtering-best-practices
-    title: Mitochondrial Filtering Best Practices
-    doc_type: decision-guide
-    critical_rule: MUST explain why the threshold is chosen
-    domains: [singlecell, spatial]
-    related_skills: [sc-qc, sc-filter, sc-preprocessing]
-    phases: [post_run, on_warning]
-    signals: [qc.high_mt_pct]
-    search_terms: [mitochondrial threshold, mt percent, qc cutoff]
-    audience: [basic, expert]
-    priority: 0.8
-    ---
-
-At system startup, this module scans all knowledge documents and builds
-an inverted index: skill → phases/signals → doc_ids for fast lookups.
+This module is not on the main retrieval hot path.
 """
 
 from __future__ import annotations
@@ -31,7 +12,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -405,33 +386,3 @@ class KnowledgeRegistry:
         # Sort by priority (higher first)
         results.sort(key=lambda d: d.get("priority", 0.5), reverse=True)
         return results
-
-    @property
-    def doc_count(self) -> int:
-        return len(self._docs)
-
-    @property
-    def skill_count(self) -> int:
-        return len(self._skill_index)
-
-    def get_stats(self) -> dict:
-        """Return index statistics."""
-        return {
-            "total_docs": len(self._docs),
-            "skill_entries": len(self._skill_index),
-            "signal_entries": len(self._signal_index),
-            "domain_entries": len(self._domain_index),
-            "phase_entries": len(self._phase_index),
-        }
-
-
-# Module-level singleton
-_global_registry: Optional[KnowledgeRegistry] = None
-
-
-def get_registry() -> KnowledgeRegistry:
-    """Get or create the global KnowledgeRegistry singleton."""
-    global _global_registry
-    if _global_registry is None:
-        _global_registry = KnowledgeRegistry()
-    return _global_registry

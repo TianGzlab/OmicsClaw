@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import re
 import shutil
@@ -12,12 +12,26 @@ import textwrap
 from typing import Iterable
 
 import omicsclaw
+from omicsclaw.common.manifest import StepRecord
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
+from omicsclaw.runtime.verification import (
+    COMPLETION_REPORT_FILENAME,
+    WORKSPACE_KIND_ANALYSIS_RUN,
+    ArtifactRequirement,
+    build_completion_report,
+    format_completion_summary,
+    isolated_workspace,
+    update_workspace_manifest,
+    write_completion_report,
+)
 
 
 OMICSCLAW_DIR = Path(omicsclaw.__file__).resolve().parent.parent
 SKILLS_DIR = OMICSCLAW_DIR / "skills"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 SKILL_TEMPLATE_PATH = OMICSCLAW_DIR / "templates" / "SKILL-TEMPLATE.md"
+STAGING_ROOT = OMICSCLAW_DIR / ".omicsclaw-staging" / "skill-scaffolds"
+SKILL_SCAFFOLDER_VERSION = "0.1.0"
 
 VALID_DOMAINS = (
     "spatial",
@@ -165,6 +179,9 @@ class SkillScaffoldResult:
     skill_md_path: str
     spec_path: str
     test_path: str = ""
+    manifest_path: str = ""
+    completion_report_path: str = ""
+    completion: dict[str, object] = field(default_factory=dict)
     created_files: list[str] | None = None
     template_path: str = str(SKILL_TEMPLATE_PATH)
     registry_refreshed: bool = False
@@ -675,11 +692,71 @@ def test_scaffold_files_exist():
 """
 
 
+def _skill_scaffold_requirements(
+    *,
+    script_name: str,
+    create_tests: bool,
+    reference_paths: Iterable[str] | None = None,
+) -> list[ArtifactRequirement]:
+    requirements = [
+        ArtifactRequirement(
+            name="skill_markdown",
+            path="SKILL.md",
+            description="Generated skill contract markdown.",
+        ),
+        ArtifactRequirement(
+            name="skill_script",
+            path=script_name,
+            description="Generated skill entrypoint.",
+        ),
+        ArtifactRequirement(
+            name="scaffold_spec",
+            path="scaffold_spec.json",
+            description="Structured scaffold specification.",
+        ),
+        ArtifactRequirement(
+            name="workspace_manifest",
+            path="manifest.json",
+            description="Workspace lineage and verification ledger.",
+        ),
+    ]
+    if create_tests:
+        requirements.append(
+            ArtifactRequirement(
+                name="test_stub",
+                path=f"tests/test_{script_name}",
+                description="Generated smoke-test stub.",
+            )
+        )
+    for rel_path in _unique(reference_paths or []):
+        requirements.append(
+            ArtifactRequirement(
+                name=Path(rel_path).stem,
+                path=rel_path,
+                description="Reference artifact copied from the promoted autonomous analysis.",
+            )
+        )
+    return requirements
+
+
+def _load_completion_report(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _load_notebook(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_autonomous_bundle(path: Path) -> AutonomousAnalysisBundle:
+    completion_path = path / COMPLETION_REPORT_FILENAME
+    if completion_path.exists():
+        completion = _load_completion_report(completion_path)
+        if not bool(completion.get("completed", False)):
+            status = str(completion.get("status", "")).strip() or "incomplete"
+            raise ValueError(
+                f"Autonomous analysis at {path} is not promotable yet (completion status: {status})."
+            )
+
     notebook_path = path / "reproducibility" / "analysis_notebook.ipynb"
     plan_path = path / "analysis_plan.md"
     summary_path = path / "result_summary.md"
@@ -765,6 +842,14 @@ def find_latest_autonomous_analysis(output_root: Path | None = None) -> Path | N
     for child in root.iterdir():
         if not child.is_dir():
             continue
+        completion_path = child / COMPLETION_REPORT_FILENAME
+        if completion_path.exists():
+            try:
+                completion = _load_completion_report(completion_path)
+            except json.JSONDecodeError:
+                continue
+            if not bool(completion.get("completed", False)):
+                continue
         notebook_path = child / "reproducibility" / "analysis_notebook.ipynb"
         plan_path = child / "analysis_plan.md"
         summary_path = child / "result_summary.md"
@@ -812,6 +897,7 @@ def create_skill_scaffold(
     promote_from_latest: bool = False,
     output_root: Path | None = None,
 ) -> SkillScaffoldResult:
+    hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
     source_bundle: AutonomousAnalysisBundle | None = None
     resolved_source_dir: Path | None = None
     if source_analysis_dir:
@@ -839,76 +925,11 @@ def create_skill_scaffold(
     target_root.mkdir(parents=True, exist_ok=True)
 
     resolved_skill_name = infer_skill_name(request, domain, preferred_name=skill_name)
-    skill_dir = target_root / resolved_skill_name
-    if skill_dir.exists():
-        raise FileExistsError(f"Skill directory already exists: {skill_dir}")
-
-    skill_dir.mkdir(parents=True, exist_ok=False)
+    final_skill_dir = target_root / resolved_skill_name
+    if final_skill_dir.exists():
+        raise FileExistsError(f"Skill directory already exists: {final_skill_dir}")
 
     script_name = f"{resolved_skill_name.replace('-', '_')}.py"
-    skill_md_path = skill_dir / "SKILL.md"
-    script_path = skill_dir / script_name
-    spec_path = skill_dir / "scaffold_spec.json"
-    test_path = skill_dir / "tests" / f"test_{script_name}"
-
-    skill_md_path.write_text(
-        render_skill_markdown(
-            skill_name=resolved_skill_name,
-            domain=domain,
-            summary=summary or (source_bundle.goal if source_bundle else ""),
-            request=request or (source_bundle.goal if source_bundle else ""),
-            methods=methods or [],
-            input_formats=input_formats or [],
-            primary_outputs=primary_outputs or [],
-            trigger_keywords=trigger_keywords or [],
-            source_bundle=source_bundle,
-        ),
-        encoding="utf-8",
-    )
-    if source_bundle is not None:
-        script_path.write_text(
-            render_promoted_skill_script(
-                skill_name=resolved_skill_name,
-                domain=domain,
-                summary=summary or source_bundle.goal,
-                source_bundle=source_bundle,
-            ),
-            encoding="utf-8",
-        )
-    else:
-        script_path.write_text(
-            render_skill_script(
-                skill_name=resolved_skill_name,
-                domain=domain,
-                summary=summary,
-                methods=methods or [],
-            ),
-            encoding="utf-8",
-        )
-
-    created_files = [str(skill_md_path), str(script_path)]
-
-    if create_tests:
-        test_path.parent.mkdir(parents=True, exist_ok=True)
-        (test_path.parent / "__init__.py").write_text("", encoding="utf-8")
-        test_path.write_text(render_skill_test(resolved_skill_name), encoding="utf-8")
-        created_files.extend([str(test_path.parent / "__init__.py"), str(test_path)])
-
-    if source_bundle is not None:
-        references_dir = skill_dir / "references"
-        references_dir.mkdir(parents=True, exist_ok=True)
-        reference_targets = {
-            "source_analysis_notebook.ipynb": Path(source_bundle.notebook_path),
-            "source_result_summary.md": resolved_source_dir / "result_summary.md",
-            "source_analysis_plan.md": resolved_source_dir / "analysis_plan.md",
-            "source_web_sources.md": resolved_source_dir / "web_sources.md",
-        }
-        for filename, source_path in reference_targets.items():
-            if source_path.exists():
-                dest = references_dir / filename
-                shutil.copy2(source_path, dest)
-                created_files.append(str(dest))
-
     spec_payload = {
         "request": request,
         "summary": summary,
@@ -922,8 +943,177 @@ def create_skill_scaffold(
         "source_analysis_dir": str(resolved_source_dir) if resolved_source_dir else "",
         "promoted_from_autonomous_analysis": bool(source_bundle),
     }
-    spec_path.write_text(json.dumps(spec_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    created_files.append(str(spec_path))
+    manifest_metadata = {
+        "domain": domain,
+        "skill_name": resolved_skill_name,
+        "request": request,
+        "promoted_from_autonomous_analysis": bool(source_bundle),
+        "source_analysis_dir": str(resolved_source_dir) if resolved_source_dir else "",
+    }
+    relative_created_paths: list[Path] = []
+    manifest_path = final_skill_dir / "manifest.json"
+    completion_report_path = final_skill_dir / COMPLETION_REPORT_FILENAME
+
+    with isolated_workspace(STAGING_ROOT, prefix="skill-scaffold") as staging_root:
+        skill_dir = staging_root / resolved_skill_name
+        skill_dir.mkdir(parents=True, exist_ok=False)
+
+        skill_md_path = skill_dir / "SKILL.md"
+        script_path = skill_dir / script_name
+        spec_path = skill_dir / "scaffold_spec.json"
+        test_path = skill_dir / "tests" / f"test_{script_name}"
+
+        skill_md_path.write_text(
+            render_skill_markdown(
+                skill_name=resolved_skill_name,
+                domain=domain,
+                summary=summary or (source_bundle.goal if source_bundle else ""),
+                request=request or (source_bundle.goal if source_bundle else ""),
+                methods=methods or [],
+                input_formats=input_formats or [],
+                primary_outputs=primary_outputs or [],
+                trigger_keywords=trigger_keywords or [],
+                source_bundle=source_bundle,
+            ),
+            encoding="utf-8",
+        )
+        relative_created_paths.append(Path("SKILL.md"))
+
+        if source_bundle is not None:
+            script_path.write_text(
+                render_promoted_skill_script(
+                    skill_name=resolved_skill_name,
+                    domain=domain,
+                    summary=summary or source_bundle.goal,
+                    source_bundle=source_bundle,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            script_path.write_text(
+                render_skill_script(
+                    skill_name=resolved_skill_name,
+                    domain=domain,
+                    summary=summary,
+                    methods=methods or [],
+                ),
+                encoding="utf-8",
+            )
+        relative_created_paths.append(Path(script_name))
+
+        if create_tests:
+            test_path.parent.mkdir(parents=True, exist_ok=True)
+            (test_path.parent / "__init__.py").write_text("", encoding="utf-8")
+            test_path.write_text(render_skill_test(resolved_skill_name), encoding="utf-8")
+            relative_created_paths.extend(
+                [
+                    Path("tests") / "__init__.py",
+                    Path("tests") / f"test_{script_name}",
+                ]
+            )
+
+        reference_relative_paths: list[str] = []
+        if source_bundle is not None:
+            references_dir = skill_dir / "references"
+            references_dir.mkdir(parents=True, exist_ok=True)
+            reference_targets = {
+                "source_analysis_notebook.ipynb": Path(source_bundle.notebook_path),
+                "source_result_summary.md": resolved_source_dir / "result_summary.md",
+                "source_analysis_plan.md": resolved_source_dir / "analysis_plan.md",
+                "source_web_sources.md": resolved_source_dir / "web_sources.md",
+                "source_manifest.json": resolved_source_dir / "manifest.json",
+                "source_completion_report.json": resolved_source_dir / COMPLETION_REPORT_FILENAME,
+            }
+            for filename, source_path in reference_targets.items():
+                if source_path.exists():
+                    dest = references_dir / filename
+                    shutil.copy2(source_path, dest)
+                    rel_path = Path("references") / filename
+                    reference_relative_paths.append(str(rel_path))
+                    relative_created_paths.append(rel_path)
+
+        spec_path.write_text(
+            json.dumps(spec_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        relative_created_paths.append(Path("scaffold_spec.json"))
+
+        requirements = _skill_scaffold_requirements(
+            script_name=script_name,
+            create_tests=create_tests,
+            reference_paths=reference_relative_paths,
+        )
+        staged_manifest_path = update_workspace_manifest(
+            skill_dir,
+            workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+            workspace_purpose=(
+                "skill_promotion"
+                if source_bundle is not None
+                else "skill_scaffold"
+            ),
+            requirements=requirements,
+            step=StepRecord(
+                skill="create_omics_skill",
+                version=SKILL_SCAFFOLDER_VERSION,
+                input_file=str(resolved_source_dir) if resolved_source_dir else request,
+                output_file=str(final_skill_dir),
+                params={
+                    "domain": domain,
+                    "skill_name": resolved_skill_name,
+                    "create_tests": create_tests,
+                    "promoted_from_autonomous_analysis": bool(source_bundle),
+                },
+            ),
+            isolation_mode="staging_copy",
+            metadata=manifest_metadata,
+        )
+        relative_created_paths.append(Path("manifest.json"))
+
+        completion_report = build_completion_report(
+            skill_dir,
+            workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+            workspace_purpose=(
+                "skill_promotion"
+                if source_bundle is not None
+                else "skill_scaffold"
+            ),
+            requirements=requirements,
+            manifest_path=str(staged_manifest_path),
+            metadata=manifest_metadata,
+        )
+        if not completion_report.completed:
+            raise RuntimeError(
+                "Skill scaffold verification failed.\n"
+                + format_completion_summary(completion_report)
+            )
+        write_completion_report(
+            skill_dir,
+            completion_report,
+            hook_runtime=hook_runtime,
+            hook_context={
+                "workspace": str(skill_dir),
+                "source": "skill_scaffolder",
+            },
+        )
+        update_workspace_manifest(
+            skill_dir,
+            workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+            workspace_purpose=(
+                "skill_promotion"
+                if source_bundle is not None
+                else "skill_scaffold"
+            ),
+            requirements=requirements,
+            completion_report=completion_report,
+            isolation_mode="staging_copy",
+            metadata=manifest_metadata,
+            append_step=False,
+        )
+        relative_created_paths.append(Path(COMPLETION_REPORT_FILENAME))
+
+        shutil.move(str(skill_dir), str(final_skill_dir))
+
+    created_files = [str(final_skill_dir / rel_path) for rel_path in relative_created_paths]
 
     refreshed = False
     if resolved_root.resolve() == SKILLS_DIR.resolve():
@@ -932,11 +1122,14 @@ def create_skill_scaffold(
     return SkillScaffoldResult(
         skill_name=resolved_skill_name,
         domain=domain,
-        skill_dir=str(skill_dir),
-        script_path=str(script_path),
-        skill_md_path=str(skill_md_path),
-        test_path=str(test_path if create_tests else ""),
-        spec_path=str(spec_path),
+        skill_dir=str(final_skill_dir),
+        script_path=str(final_skill_dir / script_name),
+        skill_md_path=str(final_skill_dir / "SKILL.md"),
+        test_path=str(final_skill_dir / "tests" / f"test_{script_name}" if create_tests else ""),
+        spec_path=str(final_skill_dir / "scaffold_spec.json"),
+        manifest_path=str(manifest_path),
+        completion_report_path=str(completion_report_path),
+        completion=completion_report.to_dict(),
         created_files=created_files,
         registry_refreshed=refreshed,
     )

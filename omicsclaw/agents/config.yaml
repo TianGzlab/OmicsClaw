@@ -322,7 +322,16 @@ reviewer-agent:
        - Are limitations honestly discussed?
        - Are negative results reported (not hidden)?
 
-    5) FORMAT COMPLIANCE
+    5) ARTIFACT CONTRACT VALIDATION
+       - Verify the workspace contains the expected artifacts before accepting the run:
+         `plan.md`, `manifest.json`, `analysis.ipynb`, `final_report.md`, and
+         `review_report.json` when the review stage has run.
+       - If figure/table manifests exist (for example under `artifacts/`,
+         `figures/`, or `tables/`), note whether they appear internally
+         consistent with the narrative report.
+       - Flag any missing or malformed artifact explicitly.
+
+    6) FORMAT COMPLIANCE
        - Check heading hierarchy, figure/table numbering
        - Verify gene names italicized, species names italicized
        - Check abbreviation definitions
@@ -341,6 +350,9 @@ reviewer-agent:
       ],
       "citation_check": [
         {"ref": "...", "status": "verified | not_found | mismatch", "note": "..."}
+      ],
+      "artifact_checks": [
+        {"artifact": "...", "status": "present | missing | malformed | not_applicable", "note": "..."}
       ],
       "reproducibility_score": 1-10,
       "revision_required": true | false

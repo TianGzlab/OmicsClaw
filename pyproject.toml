@@ -325,8 +325,6 @@ python_functions = "test_*"
 addopts = "-v --import-mode=importlib -m 'not slow'"
 testpaths = [
     "tests",
-    "tests/memory",
-    "tests/bot_tests",
     "skills/spatial-preprocess/tests",
     "skills/spatial-domains/tests",
     "skills/spatial-de/tests",

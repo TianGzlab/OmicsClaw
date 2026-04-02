@@ -11,11 +11,14 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
+import re
 import shlex
 import sys
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,22 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+
+_INLINE_MARKDOWN_TOKEN_RE = re.compile(
+    r"(?P<link>\[(?P<link_label>[^\]\n]+)\]\((?P<link_url>[^)\n]+)\))"
+    r"|(?P<bold>\*\*(?P<bold_text>[^*\n]+)\*\*)"
+    r"|(?P<underline>__(?P<underline_text>[^_\n]+)__)"
+    r"|(?P<code>`(?P<code_text>[^`\n]+)`)"
+    r"|(?P<italic>(?<!\*)\*(?P<italic_text>[^*\n]+)\*(?!\*))"
+    r"|(?P<italic_u>(?<!_)_(?P<italic_u_text>[^_\n]+)_(?!_))"
+)
+_STRONG_LINE_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
+_ATX_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+_BULLET_LINE_RE = re.compile(r"^(?P<indent>\s*)[-*+]\s+(?P<body>.*)$")
+_NUMBERED_LINE_RE = re.compile(r"^(?P<indent>\s*)(?P<number>\d+)\.\s+(?P<body>.*)$")
+_BLOCKQUOTE_LINE_RE = re.compile(r"^\s*>\s?(?P<body>.*)$")
+_MARKDOWN_LINE_START_RE = re.compile(r"^\s*(?:[-*+]\s|#{1,6}\s|>\s|\d+\.\s|\*\*|__|`{1,3})")
+_UNCERTAIN_MARKDOWN_PREFIX_RE = re.compile(r"^\s*(?:[-*+#>]?|\d+\.?)?\s*$")
 
 # ---------------------------------------------------------------------------
 # prompt_toolkit (required for CLI REPL)
@@ -47,23 +66,111 @@ except ImportError:
 from ._constants import (
     LOGO_GRADIENT,
     LOGO_LINES,
-    SLASH_COMMANDS,
+    RUN_COMMAND_USAGE,
     WELCOME_SLOGANS,
+)
+from ._diagnostics_support import (
+    build_context_command_view,
+    build_doctor_command_view,
+    build_usage_command_view,
+)
+from ._llm_bridge_support import (
+    append_interruption_notice,
+    build_usage_delta,
+    seed_core_conversation,
+    sync_core_conversation,
 )
 from ._mcp import (
     add_mcp_server,
     list_mcp_servers,
+    load_active_mcp_server_entries_for_prompt,
     remove_mcp_server,
 )
+from ._memory_command_support import (
+    build_memory_command_view,
+    resolve_active_scoped_memory_scope,
+)
+from ._omicsclaw_actions import (
+    list_registered_skill_names,
+    list_skills_text,
+    run_skill_command,
+)
+from ._plan_mode_support import (
+    build_approve_plan_command_view as build_interactive_approve_plan_command_view,
+    build_do_current_task_command_view,
+    build_interactive_plan_context_from_metadata,
+    build_plan_command_view as build_interactive_plan_command_view,
+    build_resume_task_command_view as build_interactive_resume_task_command_view,
+    build_tasks_command_view as build_interactive_tasks_command_view,
+    load_interactive_plan_from_metadata,
+    maybe_seed_interactive_plan,
+)
+from ._pipeline_support import (
+    build_approve_plan_command_view,
+    build_pipeline_tasks_command_view,
+    build_plan_preview_command_view,
+    build_research_history_entries,
+    format_research_result_summary,
+    format_research_start_summary,
+    load_pipeline_workspace_snapshot,
+    parse_research_command,
+    parse_resume_task_command,
+    resolve_pipeline_workspace,
+    resolve_research_workspace,
+)
+from ._skill_run_support import (
+    SkillRunExecutionView,
+    build_skill_run_exception_result,
+    build_skill_run_execution_view,
+    parse_skill_run_command,
+)
+from ._skill_management_support import (
+    SkillCommandStatus,
+    build_extension_install_usage_text,
+    build_installed_extension_list_view,
+    build_refresh_extensions_statuses,
+    build_installed_skill_list_view,
+    build_refresh_skills_statuses,
+    format_installed_extension_list_plain,
+    format_installed_skill_list_plain,
+    install_extension_from_source,
+    install_skill_from_source,
+    set_installed_extension_enabled,
+    uninstall_extension,
+)
+from ._slash_command_support import (
+    CLI_SLASH_COMMAND_SPECS,
+    complete_run_skill_names,
+    complete_slash_command_rows,
+    parse_slash_command,
+    slash_command_help_rows,
+)
 from ._session import (
-    delete_session,
     format_relative_time,
     generate_session_id,
+    get_config_dir,
     list_sessions,
     load_session,
     save_session,
-    get_config_dir,
 )
+from ._session_command_support import (
+    build_clear_conversation_command_view,
+    build_current_session_command_view,
+    build_delete_session_command_view,
+    build_export_session_command_view,
+    build_new_session_command_view,
+    build_resume_session_command_view,
+    build_resume_session_command_view_from_data,
+    build_session_tag_command_view,
+    build_session_metadata,
+    build_session_title_command_view,
+    build_session_list_view,
+    enrich_session_metadata,
+    normalize_session_metadata,
+    resolve_active_output_style,
+    resolve_active_pipeline_workspace,
+)
+from ._style_support import build_style_command_view
 
 logger = logging.getLogger(__name__)
 
@@ -72,27 +179,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _OMICSCLAW_DIR = Path(__file__).resolve().parent.parent.parent
 
-
-# ---------------------------------------------------------------------------
-# Helper: load root omicsclaw.py script (not the omicsclaw/ package)
-# ---------------------------------------------------------------------------
-
-def _load_omicsclaw_script():
-    """Load the root-level omicsclaw.py script via importlib.
-
-    `import omicsclaw` would import the omicsclaw/ *package* (which has an
-    __init__.py), not the omicsclaw.py *script* in the project root.  We
-    use importlib.util.spec_from_file_location() to load the script directly
-    so that list_skills() and run_skill() are always accessible.
-    """
-    import importlib.util
-    script_path = _OMICSCLAW_DIR / "omicsclaw.py"
-    spec = importlib.util.spec_from_file_location("_omicsclaw_script", script_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load omicsclaw.py from: {script_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
 
 # ---------------------------------------------------------------------------
 # Banner
@@ -160,7 +246,10 @@ def _make_completer() -> "Completer":
 
             # 1. Slash commands
             if text.startswith("/") and " " not in text.strip():
-                for cmd, desc in SLASH_COMMANDS:
+                for cmd, desc in complete_slash_command_rows(
+                    text,
+                    CLI_SLASH_COMMAND_SPECS,
+                ):
                     if cmd.startswith(text):
                         yield Completion(
                             cmd,
@@ -172,23 +261,18 @@ def _make_completer() -> "Completer":
 
             # 2. Skill completion for /run <skill>
             if text.startswith("/run "):
+                if self._skills_cache is None:
+                    try:
+                        self._skills_cache = list_registered_skill_names()
+                    except Exception:
+                        self._skills_cache = []
                 skill_prefix = text[len("/run "):].lstrip()
-                if " " not in skill_prefix:
-                    if self._skills_cache is None:
-                        try:
-                            from omicsclaw.core.registry import registry
-                            if not getattr(registry, "_loaded", False):
-                                registry.load_all()
-                            self._skills_cache = list(registry.skills.keys())
-                        except Exception:
-                            self._skills_cache = []
-                    for s in self._skills_cache:
-                        if s.startswith(skill_prefix):
-                            yield Completion(
-                                s,
-                                start_position=-len(skill_prefix),
-                                display_meta="OmicsClaw Skill"
-                            )
+                for skill_name in complete_run_skill_names(text, self._skills_cache):
+                    yield Completion(
+                        skill_name,
+                        start_position=-len(skill_prefix),
+                        display_meta="OmicsClaw Skill"
+                    )
 
             # 3. File path completion
             words = text.split(" ")
@@ -236,6 +320,254 @@ def _print_separator() -> None:
     console.print(Text("─" * width, style="dim"))
 
 
+def _truncate_preview(text: str, *, max_chars: int) -> str:
+    value = str(text or "").replace("\n", " ")
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars] + "..."
+
+
+def _format_tool_args_preview(args: dict[str, Any], *, max_chars: int = 80) -> str:
+    try:
+        rendered = json.dumps(args, ensure_ascii=False, default=str)
+    except Exception:
+        rendered = str(args)
+    return _truncate_preview(rendered, max_chars=max_chars)
+
+
+def _format_tool_result_preview(tool_name: str, result: Any, *, max_chars: int = 220) -> str:
+    result_text = str(result)
+    if tool_name == "inspect_data":
+        marker = "### Method Suitability & Parameter Preview"
+        pos = result_text.find(marker)
+        if pos >= 0:
+            result_text = result_text[pos:]
+    return _truncate_preview(result_text, max_chars=max_chars)
+
+
+def _print_stream_section_header(label: str, *, style: str) -> None:
+    console.print(Text(label, style=style))
+
+
+def _print_tool_activity_entry(label: str, detail: str, *, label_style: str) -> None:
+    line = Text("  ")
+    line.append(label, style=label_style)
+    line.append("  ", style="dim")
+    line.append(detail, style="dim")
+    console.print(line)
+
+
+def _stream_output_contains_final_text(streamed_content: str, final_text: str) -> bool:
+    streamed = str(streamed_content or "").rstrip()
+    final = str(final_text or "").rstrip()
+    return bool(final) and streamed.endswith(final)
+
+
+def _append_inline_markdown(target: Text, source: str) -> None:
+    cursor = 0
+    for match in _INLINE_MARKDOWN_TOKEN_RE.finditer(source):
+        start, end = match.span()
+        if start > cursor:
+            target.append(source[cursor:start])
+
+        if match.group("link"):
+            target.append(match.group("link_label"), style="underline cyan")
+            target.append(f" ({match.group('link_url')})", style="dim")
+        elif match.group("bold"):
+            target.append(match.group("bold_text"), style="bold")
+        elif match.group("underline"):
+            target.append(match.group("underline_text"), style="bold")
+        elif match.group("code"):
+            target.append(match.group("code_text"), style="bold yellow")
+        elif match.group("italic"):
+            target.append(match.group("italic_text"), style="italic")
+        elif match.group("italic_u"):
+            target.append(match.group("italic_u_text"), style="italic")
+
+        cursor = end
+
+    if cursor < len(source):
+        target.append(source[cursor:])
+
+
+def _split_line_ending(line: str) -> tuple[str, str]:
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    return line, ""
+
+
+def _render_cli_markdown_line(line: str) -> Text:
+    body, ending = _split_line_ending(line)
+    output = Text()
+
+    if not body.strip():
+        if ending:
+            output.append(ending)
+        return output
+
+    stripped = body.strip()
+    if stripped.startswith("```"):
+        if ending:
+            output.append(ending)
+        return output
+
+    strong_match = _STRONG_LINE_RE.match(body)
+    atx_heading_match = _ATX_HEADING_RE.match(body)
+    bullet_match = _BULLET_LINE_RE.match(body)
+    numbered_match = _NUMBERED_LINE_RE.match(body)
+    blockquote_match = _BLOCKQUOTE_LINE_RE.match(body)
+
+    if strong_match:
+        _append_inline_markdown(output, strong_match.group(1).strip())
+        output.stylize("bold cyan", 0, len(output))
+    elif atx_heading_match:
+        _append_inline_markdown(output, atx_heading_match.group(1).strip())
+        output.stylize("bold cyan", 0, len(output))
+    elif bullet_match:
+        indent = bullet_match.group("indent")
+        output.append(f"{indent}- ", style="dim")
+        _append_inline_markdown(output, bullet_match.group("body"))
+    elif numbered_match:
+        indent = numbered_match.group("indent")
+        number = numbered_match.group("number")
+        output.append(f"{indent}{number}. ", style="dim")
+        _append_inline_markdown(output, numbered_match.group("body"))
+    elif blockquote_match:
+        output.append("| ", style="dim")
+        _append_inline_markdown(output, blockquote_match.group("body"))
+    else:
+        _append_inline_markdown(output, body)
+
+    if ending:
+        output.append(ending)
+    return output
+
+
+def _find_safe_plain_prefix_length(buffer: str) -> int:
+    if not buffer:
+        return 0
+
+    if _MARKDOWN_LINE_START_RE.match(buffer) or _UNCERTAIN_MARKDOWN_PREFIX_RE.match(buffer):
+        return 0
+
+    positions: list[int] = []
+    for marker in ("**", "__", "```", "`", "[", "*", "_"):
+        idx = buffer.find(marker)
+        if idx >= 0:
+            positions.append(idx)
+
+    if positions:
+        first = min(positions)
+        return first if first > 0 else 0
+
+    return len(buffer)
+
+
+class _CliMarkdownStreamFormatter:
+    def __init__(self) -> None:
+        self._pending = ""
+
+    def write(self, chunk: str) -> None:
+        self._pending += str(chunk or "")
+        self._emit_available()
+
+    def finish(self) -> None:
+        if not self._pending:
+            return
+        self._emit_rendered(self._pending)
+        self._pending = ""
+
+    def _emit_available(self) -> None:
+        while True:
+            newline_index = self._pending.find("\n")
+            if newline_index < 0:
+                break
+            line = self._pending[: newline_index + 1]
+            self._pending = self._pending[newline_index + 1 :]
+            self._emit_rendered(line)
+
+        safe_prefix_len = _find_safe_plain_prefix_length(self._pending)
+        if safe_prefix_len <= 0:
+            return
+        plain_prefix = self._pending[:safe_prefix_len]
+        self._pending = self._pending[safe_prefix_len:]
+        console.print(Text(plain_prefix), end="", soft_wrap=True)
+
+    def _emit_rendered(self, line: str) -> None:
+        console.print(_render_cli_markdown_line(line), end="", soft_wrap=True)
+
+
+def _print_cli_response_text(text: str) -> None:
+    formatter = _CliMarkdownStreamFormatter()
+    formatter.write(text)
+    formatter.finish()
+
+
+def _session_metadata_from_state(state: dict[str, Any]) -> dict[str, Any]:
+    metadata = enrich_session_metadata(
+        state.get("session_metadata"),
+        messages=state.get("messages"),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        pipeline_workspace=state.get("pipeline_workspace"),
+        omicsclaw_dir=_OMICSCLAW_DIR,
+    )
+    state["session_metadata"] = metadata
+    return metadata
+
+
+def _active_pipeline_workspace(state: dict[str, Any]) -> str | None:
+    pipeline_workspace = resolve_active_pipeline_workspace(
+        state.get("pipeline_workspace"),
+        state.get("session_metadata"),
+    )
+    if pipeline_workspace:
+        state["pipeline_workspace"] = pipeline_workspace
+        state["session_metadata"] = build_session_metadata(
+            state.get("session_metadata"),
+            pipeline_workspace=pipeline_workspace,
+        )
+        return pipeline_workspace
+    state["session_metadata"] = build_session_metadata(
+        state.get("session_metadata"),
+        pipeline_workspace=None,
+    )
+    return None
+
+
+def _active_output_style(state: dict[str, Any]) -> str | None:
+    return resolve_active_output_style(state.get("session_metadata"))
+
+
+def _active_scoped_memory_scope(state: dict[str, Any]) -> str:
+    return resolve_active_scoped_memory_scope(state.get("session_metadata"))
+
+
+def _set_active_pipeline_workspace(state: dict[str, Any], workspace: str | None) -> None:
+    value = str(workspace or "").strip()
+    state["pipeline_workspace"] = value
+    state["session_metadata"] = build_session_metadata(
+        state.get("session_metadata"),
+        pipeline_workspace=value,
+    )
+
+
+async def _persist_session_state(
+    state: dict[str, Any],
+    *,
+    model: str = "",
+) -> None:
+    await save_session(
+        state["session_id"],
+        state["messages"],
+        model=model,
+        workspace=state["workspace_dir"],
+        metadata=_session_metadata_from_state(state),
+        transcript=state["messages"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Slash-command handlers
 # ---------------------------------------------------------------------------
@@ -243,119 +575,240 @@ def _print_separator() -> None:
 def _handle_skills(arg: str) -> None:
     """List skills, optionally filtered by domain."""
     try:
-        _oc = _load_omicsclaw_script()
-        domain_filter = arg.strip() or None
-        _oc.list_skills(domain_filter=domain_filter)
+        console.print(list_skills_text(arg.strip() or None), markup=False)
     except Exception as e:
         console.print(f"[red]Error listing skills: {escape(str(e))}[/red]")
 
 
-def _handle_run(arg: str) -> str:
-    """Run a skill inline: /run <skill> [--demo] [--input <path>]."""
-    tokens = shlex.split(arg.strip()) if arg.strip() else []
-    if not tokens:
-        console.print("[yellow]Usage: /run <skill> [--demo] [--input <file>] [--output <dir>][/yellow]")
-        return ""
+def _configured_mcp_server_names() -> tuple[str, ...]:
+    return tuple(
+        entry["name"]
+        for entry in list_mcp_servers()
+        if str(entry.get("name", "") or "").strip()
+    )
 
-    skill = tokens[0]
-    demo = "--demo" in tokens
-    input_path = None
-    output_dir = None
-    i = 1
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--input" and i + 1 < len(tokens):
-            input_path = tokens[i + 1]; i += 2
-        elif t == "--output" and i + 1 < len(tokens):
-            output_dir = tokens[i + 1]; i += 2
-        else:
-            i += 1
+
+def _print_skill_run_execution(execution: SkillRunExecutionView) -> None:
+    if not execution.system_summary_lines:
+        return
+
+    first_line = escape(execution.system_summary_lines[0])
+    if execution.success:
+        console.print(f"[green]{first_line}[/green]")
+    elif execution.system_summary_lines[0].startswith("⚠"):
+        console.print(f"[yellow]{first_line}[/yellow]")
+    else:
+        console.print(f"[red]{first_line}[/red]")
+
+    for line in execution.system_summary_lines[1:]:
+        console.print(escape(line))
+
+    if execution.stdout:
+        console.print(execution.stdout)
+
+
+def _apply_pipeline_command_view(
+    state: dict[str, Any],
+    view,
+) -> None:
+    if getattr(view, "active_workspace", ""):
+        _set_active_pipeline_workspace(state, view.active_workspace)
+    console.print(view.output_text)
+
+
+def _apply_interactive_plan_command_view(
+    state: dict[str, Any],
+    view,
+) -> None:
+    if getattr(view, "replace_session_metadata", False):
+        metadata = normalize_session_metadata(getattr(view, "session_metadata", {}))
+        state["session_metadata"] = metadata
+        state["pipeline_workspace"] = str(metadata.get("pipeline_workspace", "") or "")
+
+    text = str(getattr(view, "output_text", "") or "")
+    if not text:
+        return
+    if getattr(view, "success", True):
+        console.print(text)
+    else:
+        console.print(f"[red]{escape(text)}[/red]")
+
+
+def _apply_session_command_view(
+    state: dict[str, Any],
+    view,
+) -> None:
+    if getattr(view, "session_id", ""):
+        state["session_id"] = view.session_id
+    if getattr(view, "workspace_dir", ""):
+        state["workspace_dir"] = view.workspace_dir
+    if getattr(view, "replace_session_metadata", False):
+        metadata = normalize_session_metadata(getattr(view, "session_metadata", {}))
+        state["session_metadata"] = metadata
+        state["pipeline_workspace"] = str(metadata.get("pipeline_workspace", "") or "")
+    if getattr(view, "clear_messages", False):
+        state["messages"] = []
+    if getattr(view, "replace_messages", False):
+        state["messages"] = list(getattr(view, "messages", []))
+    if getattr(view, "clear_pipeline_workspace", False):
+        _set_active_pipeline_workspace(state, None)
+
+    text = str(getattr(view, "output_text", "") or "")
+    if not text:
+        return
+    if getattr(view, "render_as_markup", False):
+        console.print(text)
+        return
+    if getattr(view, "success", True):
+        console.print(f"[green]{escape(text)}[/green]")
+    else:
+        console.print(f"[red]{escape(text)}[/red]")
+
+
+def _print_skill_command_status(status: SkillCommandStatus) -> None:
+    text = escape(status.text)
+    if status.level == "success":
+        console.print(f"[green]{text}[/green]")
+    elif status.level == "warning":
+        console.print(f"[yellow]{text}[/yellow]")
+    elif status.level == "error":
+        console.print(f"[red]{text}[/red]")
+    else:
+        console.print(f"[dim]{text}[/dim]")
+
+
+def _handle_run(arg: str) -> SkillRunExecutionView | None:
+    """Run a skill inline via the shared `/run` command contract."""
+    command = parse_skill_run_command(arg)
+    if command is None:
+        console.print(f"[yellow]Usage: {RUN_COMMAND_USAGE}[/yellow]")
+        return None
 
     try:
-        _oc = _load_omicsclaw_script()
-        with console.status(f"[cyan]Running skill: {skill}...[/cyan]"):
-            result = _oc.run_skill(
-                skill,
-                input_path=input_path,
-                output_dir=output_dir,
-                demo=demo,
-            )
-        if result.get("success"):
-            console.print(f"[green]✓ Skill '{skill}' completed in {result.get('duration_seconds', 0):.1f}s[/green]")
-            if result.get("method"):
-                console.print(f"  [dim]Method:[/dim] {result['method']}")
-            if result.get("output_dir"):
-                console.print(f"  [dim]Output:[/dim] {result['output_dir']}")
-            if result.get("readme_path"):
-                console.print(f"  [dim]Guide:[/dim]  {result['readme_path']}")
-            if result.get("notebook_path"):
-                console.print(f"  [dim]Notebook:[/dim] {result['notebook_path']}")
-            if result.get("stdout"):
-                console.print(result["stdout"])
-            return f"Skill '{skill}' completed successfully. Output in: {result.get('output_dir', '?')}"
-        else:
-            err = result.get("stderr", "unknown error")
-            console.print(f"[red]✗ Skill '{skill}' failed:[/red] {err[:300]}")
-            return f"Skill '{skill}' failed: {err[:200]}"
-    except Exception as e:
-        console.print(f"[red]Error running skill '{skill}': {escape(str(e))}[/red]")
-        return f"Error running skill: {e}"
+        with console.status(f"[cyan]Running skill: {command.skill}...[/cyan]"):
+            result = run_skill_command(command)
+        execution = build_skill_run_execution_view(
+            arg,
+            skill=command.skill,
+            result=result,
+        )
+    except Exception as exc:
+        execution = build_skill_run_exception_result(
+            arg,
+            skill=command.skill,
+            exc=exc,
+        )
+    _print_skill_run_execution(execution)
+    return execution
 
 
-async def _handle_sessions() -> None:
+def _handle_doctor(
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_doctor_command_view(
+            workspace_dir=state.get("workspace_dir", "") or "",
+            pipeline_workspace=_active_pipeline_workspace(state) or "",
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+            output_dir=str(_OMICSCLAW_DIR / "output"),
+        ),
+    )
+
+
+def _handle_context(
+    arg: str,
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_context_command_view(
+            arg,
+            messages=state.get("messages", []),
+            session_metadata=state.get("session_metadata"),
+            workspace_dir=state.get("workspace_dir", "") or "",
+            pipeline_workspace=_active_pipeline_workspace(state) or "",
+            output_style=_active_output_style(state) or "",
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+            mcp_servers=_configured_mcp_server_names(),
+            surface="interactive",
+        ),
+    )
+
+
+def _handle_usage(
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_usage_command_view(),
+    )
+
+
+async def _handle_sessions(arg: str = "") -> None:
     """List recent sessions in a table."""
-    sessions = await list_sessions(limit=20)
-    if not sessions:
-        console.print("[yellow]No saved sessions.[/yellow]")
+    view = await build_session_list_view(limit=20, query=arg)
+    if not view.entries:
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
         return
-    table = Table(title="Sessions", show_header=True, header_style="bold cyan")
+    title = "Sessions"
+    if view.query:
+        title = f"Sessions · {view.query}"
+    table = Table(title=title, show_header=True, header_style="bold cyan")
     table.add_column("ID", style="bold yellow", no_wrap=True)
-    table.add_column("Preview", style="", max_width=50, no_wrap=True)
+    table.add_column("Title / Preview", style="", max_width=50, no_wrap=True)
+    table.add_column("State", style="dim", max_width=54)
     table.add_column("Msgs", justify="right")
     table.add_column("Model", style="dim")
     table.add_column("Last Used", style="dim")
-    for s in sessions:
+    for entry in view.entries:
         table.add_row(
-            s["session_id"],
-            s.get("preview", "") or "",
-            str(s.get("message_count", 0)),
-            s.get("model", "") or "",
-            format_relative_time(s.get("updated_at")),
+            entry.session_id,
+            entry.title or entry.preview,
+            entry.state_summary,
+            str(entry.message_count),
+            entry.model,
+            entry.updated_label,
         )
     console.print()
     console.print(table)
-    console.print("[dim]  /resume to continue a session  /delete <id> to remove  /new to start fresh[/dim]")
+    console.print(f"[dim]  {view.hint_text}[/dim]")
     console.print()
 
 
-async def _pick_session_interactive(current_id: str) -> str | None:
+async def _pick_session_interactive(
+    current_id: str,
+    *,
+    query: str = "",
+) -> str | None:
     """Show an interactive session picker using questionary."""
-    sessions = await list_sessions(limit=20)
-    if not sessions:
-        console.print("[yellow]No sessions to resume.[/yellow]")
+    view = await build_session_list_view(limit=20, query=query)
+    if not view.entries:
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
         return None
 
     try:
         import questionary
 
         choices = []
-        for s in sessions:
-            sid = s["session_id"]
-            preview = s.get("preview", "") or sid
-            when = format_relative_time(s.get("updated_at"))
+        for entry in view.entries:
+            sid = entry.session_id
+            preview = entry.title or entry.preview or sid
+            when = entry.updated_label
             marker = " ●" if sid == current_id else ""
-            label = f"{preview[:50]:<52}  [{sid}  {when}]{marker}"
+            state_summary = f" · {entry.state_summary}" if entry.state_summary else ""
+            label = f"{preview[:46]:<48}{state_summary[:48]:<50} [{sid}  {when}]{marker}"
             choices.append(questionary.Choice(title=label, value=sid))
 
         selected = questionary.select(
-            "Select session to resume:",
+            "Select session to resume:" if not view.query else f"Select session to resume ({view.query}):",
             choices=choices,
             style=_PICKER_STYLE,
         ).ask()
         return selected
     except ImportError:
         # Fallback: show list and ask for input
-        await _handle_sessions()
+        await _handle_sessions(query)
         console.print("Enter session ID to resume (or press Enter to cancel): ", end="")
         try:
             sid = input().strip()
@@ -373,56 +826,61 @@ async def _handle_resume(arg: str, state: dict[str, Any]) -> None:
             return
         target_id = selected
 
-    data = await load_session(target_id)
-    if not data:
-        console.print(f"[red]Session '{escape(target_id)}' not found.[/red]")
+    view = await build_resume_session_command_view(target_id)
+    if view.success:
+        _apply_session_command_view(state, view)
+        if view.render_as_markup:
+            console.print()
         return
 
-    state["session_id"] = data["session_id"]
-    state["messages"] = data.get("messages", [])
-    if data.get("workspace"):
-        state["workspace_dir"] = data["workspace"]
+    search_view = await build_session_list_view(limit=20, query=target_id)
+    if not search_view.entries:
+        _apply_session_command_view(state, view)
+        return
+    if len(search_view.entries) == 1:
+        resolved_view = await build_resume_session_command_view(
+            search_view.entries[0].session_id
+        )
+        _apply_session_command_view(state, resolved_view)
+        if resolved_view.render_as_markup:
+            console.print()
+        return
 
-    console.print(f"[green]Resumed session:[/green] [yellow]{data['session_id']}[/yellow]")
-    if data.get("workspace"):
-        console.print(f"[dim]Workspace:[/dim] [cyan]{data['workspace']}[/cyan]")
-
-    # Show brief history preview
-    msgs = [m for m in state["messages"] if m.get("role") in ("user", "assistant")]
-    if msgs:
-        console.print("[dim]── Conversation history ──[/dim]")
-        for m in msgs[-6:]:
-            role = m.get("role", "")
-            content = m.get("content", "") or ""
-            if isinstance(content, list):
-                content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-            content = str(content).strip()[:160]
-            if role == "user":
-                console.print(Text.assemble(("❯ ", "bold cyan"), (content, "")))
-            elif role == "assistant":
-                console.print(Text(content[:160], style="dim"))
-        console.print("[dim]── End of history ──[/dim]")
-    console.print()
+    console.print(
+        f"[yellow]Multiple sessions matched '{escape(target_id)}'. Narrow the query or choose one below.[/yellow]"
+    )
+    selected = await _pick_session_interactive(
+        state["session_id"],
+        query=target_id,
+    )
+    if not selected:
+        return
+    resolved_view = await build_resume_session_command_view(selected)
+    _apply_session_command_view(state, resolved_view)
+    if resolved_view.render_as_markup:
+        console.print()
 
 
 async def _handle_delete(arg: str, state: dict[str, Any]) -> None:
     """Delete a session by ID."""
-    target_id = arg.strip()
-    if not target_id:
-        console.print("[red]Usage: /delete <session-id>[/red]")
-        return
-    if target_id == state["session_id"]:
-        console.print("[red]Cannot delete the current active session.[/red]")
-        return
-    data = await load_session(target_id)
-    if not data:
-        console.print(f"[red]Session '{escape(target_id)}' not found.[/red]")
-        return
-    deleted = await delete_session(data["session_id"])
-    if deleted:
-        console.print(f"[green]Deleted session {data['session_id']}.[/green]")
-    else:
-        console.print(f"[red]Failed to delete session.[/red]")
+    view = await build_delete_session_command_view(
+        arg.strip(),
+        current_session_id=state["session_id"],
+    )
+    _apply_session_command_view(state, view)
+
+
+async def _handle_memory(arg: str, state: dict[str, Any], *, model: str = "") -> None:
+    """Manage scoped memory entries for the active workspace."""
+    view = build_memory_command_view(
+        arg,
+        session_metadata=state.get("session_metadata"),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        pipeline_workspace=_active_pipeline_workspace(state) or "",
+    )
+    _apply_session_command_view(state, view)
+    if getattr(view, "replace_session_metadata", False) and model:
+        await _persist_session_state(state, model=model)
 
 
 def _handle_mcp(arg: str) -> None:
@@ -548,172 +1006,125 @@ def _handle_config(arg: str) -> None:
 # Skill installation / uninstallation helpers
 # ---------------------------------------------------------------------------
 
+def _handle_install_extension(arg: str) -> None:
+    for status in install_extension_from_source(arg, omicsclaw_dir=_OMICSCLAW_DIR):
+        _print_skill_command_status(status)
+
+
 def _handle_install_skill(arg: str) -> None:
-    """Install a skill from a local path or a GitHub URL.
+    """Install a skill-pack from a local path or a GitHub URL."""
+    statuses = install_skill_from_source(arg, omicsclaw_dir=_OMICSCLAW_DIR)
+    if len(statuses) == 1 and statuses[0].text == build_extension_install_usage_text():
+        statuses = [SkillCommandStatus("error", "Usage: /install-skill <local-path | github-url>")]
+    for status in statuses:
+        _print_skill_command_status(status)
 
-    Usage:
-        /install-skill /path/to/skill-dir
-        /install-skill https://github.com/user/repo
-        /install-skill https://github.com/user/repo/tree/main/skills/my-skill
-    """
-    import shutil
-    import subprocess as _sp
 
-    src = arg.strip()
-    if not src:
-        console.print("[yellow]Usage: /install-skill <local-path | github-url>[/yellow]")
-        console.print("[dim]Examples:[/dim]")
-        console.print("  [dim]/install-skill /path/to/my-skill[/dim]")
-        console.print("  [dim]/install-skill https://github.com/user/my-skill-repo[/dim]")
+def _handle_installed_extensions() -> None:
+    view = build_installed_extension_list_view(omicsclaw_dir=_OMICSCLAW_DIR)
+    if not view.entries:
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
+        console.print(f"[dim]{view.hint_text}[/dim]")
+        return
+    console.print(format_installed_extension_list_plain(view), markup=False)
+
+
+def _handle_installed_skills() -> None:
+    view = build_installed_skill_list_view(omicsclaw_dir=_OMICSCLAW_DIR)
+    if not view.entries:
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
+        console.print(f"[dim]{view.hint_text}[/dim]")
+        return
+    console.print(format_installed_skill_list_plain(view), markup=False)
+
+
+def _handle_refresh_extensions() -> None:
+    for status in build_refresh_extensions_statuses(omicsclaw_dir=_OMICSCLAW_DIR):
+        _print_skill_command_status(status)
+
+
+def _handle_refresh_skills() -> None:
+    for status in build_refresh_skills_statuses(omicsclaw_dir=_OMICSCLAW_DIR):
+        _print_skill_command_status(status)
+
+
+def _handle_tasks(arg: str, state: dict[str, Any]) -> None:
+    if _should_route_plan_commands_to_pipeline(arg, state):
+        view = build_pipeline_tasks_command_view(
+            arg.strip() or None,
+            workspace_fallback=_active_pipeline_workspace(state) or state.get("workspace_dir"),
+        )
+        _apply_pipeline_command_view(state, view)
         return
 
-    skills_dir = _OMICSCLAW_DIR / "skills"
-    user_skills_dir = skills_dir / "user"  # user-installed skills live here
-    user_skills_dir.mkdir(parents=True, exist_ok=True)
+    view = build_interactive_tasks_command_view(
+        session_metadata=state.get("session_metadata"),
+    )
+    _apply_interactive_plan_command_view(state, view)
 
-    is_github = src.startswith(("https://github.com", "http://github.com", "git@github.com"))
 
-    if is_github:
-        # Derive skill name from the repo/URL
-        # e.g. https://github.com/user/my-skill → my-skill
-        url_clean = src.rstrip("/")
-        skill_name = url_clean.split("/")[-1]
-        # Strip .git suffix if present
-        if skill_name.endswith(".git"):
-            skill_name = skill_name[:-4]
-
-        dest = user_skills_dir / skill_name
-        if dest.exists():
-            console.print(f"[yellow]Skill '{skill_name}' already exists at {dest}[/yellow]")
-            console.print("[dim]To reinstall, run /uninstall-skill first.[/dim]")
-            return
-
-        console.print(f"[cyan]Cloning '{skill_name}' from GitHub...[/cyan]")
-        try:
-            result = _sp.run(
-                ["git", "clone", "--depth=1", src, str(dest)],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode != 0:
-                console.print(f"[red]git clone failed:[/red]\n{result.stderr[:500]}")
-                return
-            console.print(f"[green]✓ Cloned to {dest}[/green]")
-        except FileNotFoundError:
-            console.print("[red]git is not installed. Please install git and try again.[/red]")
-            return
-        except _sp.TimeoutExpired:
-            console.print("[red]Clone timed out (120 s). Check your network connection.[/red]")
-            return
-    else:
-        # Local path install — copy into user_skills_dir
-        src_path = Path(src).expanduser().resolve()
-        if not src_path.exists():
-            console.print(f"[red]Path not found: {escape(str(src_path))}[/red]")
-            return
-        if not src_path.is_dir():
-            console.print(f"[red]Source must be a directory (skill folder): {escape(str(src_path))}[/red]")
-            return
-
-        skill_name = src_path.name
-        dest = user_skills_dir / skill_name
-        if dest.exists():
-            console.print(f"[yellow]Skill '{skill_name}' already exists at {dest}[/yellow]")
-            console.print("[dim]To reinstall, run /uninstall-skill first.[/dim]")
-            return
-
-        console.print(f"[cyan]Copying '{skill_name}' from {src_path}...[/cyan]")
-        try:
-            shutil.copytree(src_path, dest)
-            console.print(f"[green]✓ Copied to {dest}[/green]")
-        except Exception as e:
-            console.print(f"[red]Copy failed: {escape(str(e))}[/red]")
-            return
-
-    # Validate: look for a Python script or SKILL.md
-    script_candidates = list(dest.glob("*.py"))
-    has_skill_md = (dest / "SKILL.md").exists()
-    if not script_candidates and not has_skill_md:
-        console.print(
-            "[yellow]⚠ No .py script or SKILL.md found in the installed directory.[/yellow]\n"
-            "[dim]The skill may not be loadable. Make sure the directory follows OmicsClaw conventions.[/dim]"
+def _handle_plan(arg: str, state: dict[str, Any]) -> bool:
+    if _should_route_plan_commands_to_pipeline(arg, state):
+        view = build_plan_preview_command_view(
+            arg.strip() or None,
+            workspace_fallback=_active_pipeline_workspace(state) or state.get("workspace_dir"),
         )
-    else:
-        console.print(
-            f"[dim]Found:[/dim] "
-            + (f"{len(script_candidates)} script(s)" if script_candidates else "")
-            + (" + SKILL.md" if has_skill_md else "")
-        )
+        _apply_pipeline_command_view(state, view)
+        return False
 
-    # Reset registry so the new skill is discovered on next use
+    view = build_interactive_plan_command_view(
+        arg,
+        session_metadata=state.get("session_metadata"),
+        messages=state.get("messages"),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
+    )
+    _apply_interactive_plan_command_view(state, view)
+    return view.persist_session
+
+
+def _handle_approve_plan(arg: str, state: dict[str, Any]) -> bool:
+    if not _should_route_plan_commands_to_pipeline(arg, state):
+        view = build_interactive_approve_plan_command_view(
+            arg,
+            session_metadata=state.get("session_metadata"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+        )
+        _apply_interactive_plan_command_view(state, view)
+        return view.persist_session
+
     try:
-        from omicsclaw.core.registry import registry
-        registry._loaded = False
-        registry.load_all()
-        console.print(f"[green]✓ Skill '{skill_name}' installed and registered.[/green]")
-        console.print(f"[dim]Use /skills to list all available skills.[/dim]")
-    except Exception as e:
-        console.print(f"[yellow]Registry refresh failed (skill files are in place): {e}[/yellow]")
-
-
-async def _handle_research(arg: str, state: dict[str, Any]) -> None:
-    """Start multi-agent research pipeline.
-
-    Usage:
-        /research --idea "..."                                        # Mode C (idea only)
-        /research paper.pdf --idea "..."                              # Mode A (PDF + idea)
-        /research paper.pdf --idea "..." --h5ad d.h5ad                # Mode B (PDF + idea + h5ad)
-        /research --idea "..." --output /path/to/output               # with custom output dir
-        /research --resume --output /path/to/previous/workspace       # resume from checkpoint
-    """
-    tokens = shlex.split(arg.strip()) if arg.strip() else []
-    if not tokens:
-        console.print(
-            "[yellow]Usage:[/yellow]\n"
-            "[dim]  Mode A: /research paper.pdf --idea \"explore TME heterogeneity\"              (PDF + idea)\n"
-            "  Mode B: /research paper.pdf --idea \"...\" --h5ad data.h5ad                   (PDF + idea + h5ad)\n"
-            "  Mode C: /research --idea \"explore TME heterogeneity\"                    (idea only)\n"
-            "  Resume: /research --resume --output /path/to/workspace                  (resume from checkpoint)\n"
-            "  All modes support: --output <dir> to specify the output directory[/dim]"
+        view = build_approve_plan_command_view(
+            arg,
+            workspace_fallback=_active_pipeline_workspace(state) or state.get("workspace_dir"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
         )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        return False
+
+    _apply_pipeline_command_view(state, view)
+    return view.persist_session
+
+
+async def _run_research_pipeline(
+    command_args,
+    state: dict[str, Any],
+) -> None:
+    pdf_path = command_args.pdf_path
+    idea = command_args.idea
+    h5ad_path = command_args.h5ad_path
+    resume = command_args.resume
+    from_stage = command_args.from_stage
+    skip_stages = command_args.skip_stages
+    plan_only = command_args.plan_only
+
+    if not idea and not (resume or from_stage):
+        console.print("[red]--idea is required unless you are resuming an existing workspace.[/red]")
         return
 
-    # Parse arguments — first positional token is PDF if it doesn't start with --
-    pdf_path = None
-    idea = ""
-    h5ad_path = None
-    output_dir = None
-    resume = False
-    i = 0
-    # Check if first token is a file path (not a flag)
-    if tokens[0] and not tokens[0].startswith("--"):
-        pdf_path = tokens[0]
-        i = 1
-
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--idea" and i + 1 < len(tokens):
-            idea = tokens[i + 1]; i += 2
-        elif t == "--h5ad" and i + 1 < len(tokens):
-            h5ad_path = tokens[i + 1]; i += 2
-        elif t == "--output" and i + 1 < len(tokens):
-            output_dir = tokens[i + 1]; i += 2
-        elif t == "--resume":
-            resume = True; i += 1
-        else:
-            i += 1
-
-    if not idea and not resume:
-        console.print("[red]--idea is required. Describe your research idea.[/red]")
-        return
-
-    if resume and not output_dir:
-        console.print(
-            "[red]--resume requires --output to specify the workspace to resume from.[/red]\n"
-            "[dim]Example: /research --resume --output ./nature_new_insight2 --idea \"...\"\n"
-            "The --idea can be omitted if the workspace already has the context.[/dim]"
-        )
+    if resume and from_stage:
+        console.print("[red]Use either --resume or --from-stage, not both.[/red]")
         return
 
     if pdf_path and not Path(pdf_path).exists():
@@ -724,7 +1135,6 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
         console.print(f"[red]h5ad file not found: {h5ad_path}[/red]")
         return
 
-    # Check research dependencies
     try:
         from omicsclaw.agents import _check_research_deps
         _check_research_deps()
@@ -733,7 +1143,6 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
         console.print('[yellow]Install with: pip install -e ".[research]"[/yellow]')
         return
 
-    # Determine mode
     if pdf_path and h5ad_path:
         mode = "B"
     elif pdf_path:
@@ -741,39 +1150,24 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
     else:
         mode = "C"
 
-    # Resolve output directory
-    if output_dir:
-        workspace_path = str(Path(output_dir).resolve())
-    else:
-        workspace_path = str(Path(state.get("workspace_dir", ".")) / "research_workspace")
+    workspace_path = str(
+        resolve_research_workspace(
+            command_args.output_dir,
+            _active_pipeline_workspace(state) or state.get("workspace_dir"),
+        )
+    )
+    _set_active_pipeline_workspace(state, workspace_path)
+    snapshot = load_pipeline_workspace_snapshot(workspace_path)
 
-    # Show launch info
-    if resume:
-        console.print(f"\n[bold cyan]🔄 Resuming Research Pipeline from checkpoint[/bold cyan]")
-        console.print(f"  [dim]Workspace:[/dim] {workspace_path}")
-        # Show checkpoint info if available
-        ckpt_file = Path(workspace_path) / ".pipeline_checkpoint.json"
-        if ckpt_file.exists():
-            import json
-            try:
-                ckpt = json.loads(ckpt_file.read_text(encoding="utf-8"))
-                completed = ckpt.get("completed_stages", [])
-                console.print(f"  [dim]Completed:[/dim] {', '.join(completed) if completed else 'none'}")
-                console.print(f"  [dim]Reviews:[/dim]   {ckpt.get('review_iterations', 0)}")
-            except Exception:
-                pass
-        else:
-            console.print("  [yellow]⚠ No checkpoint found — will start from scratch[/yellow]")
-    else:
-        console.print(f"\n[bold cyan]🔬 Starting Research Pipeline (Mode {mode})[/bold cyan]")
-        if pdf_path:
-            console.print(f"  [dim]PDF:[/dim]    {pdf_path}")
-        console.print(f"  [dim]Idea:[/dim]   {idea}")
-        if h5ad_path:
-            console.print(f"  [dim]Data:[/dim]   {h5ad_path}")
-        console.print(f"  [dim]Output:[/dim] {workspace_path}")
-        if mode == "C":
-            console.print("  [dim]Mode:[/dim]   Idea only — research-agent will find literature & data")
+    console.print()
+    console.print(
+        format_research_start_summary(
+            command_args,
+            workspace_path,
+            snapshot,
+            mode=mode,
+        )
+    )
     console.print()
 
     def on_stage(stage: str, status: str):
@@ -781,155 +1175,164 @@ async def _handle_research(arg: str, state: dict[str, Any]) -> None:
 
     try:
         from omicsclaw.agents.pipeline import ResearchPipeline
+        from omicsclaw.agents.pipeline_result import normalize_pipeline_result
 
-        pipeline = ResearchPipeline(
-            workspace_dir=workspace_path,
-        )
-        result = await pipeline.run(
+        pipeline = ResearchPipeline(workspace_dir=workspace_path)
+        raw_result = await pipeline.run(
             idea=idea,
             pdf_path=pdf_path,
             h5ad_path=h5ad_path,
             on_stage=on_stage,
             resume=resume,
+            from_stage=from_stage,
+            skip_stages=skip_stages,
+            plan_only=plan_only,
+        )
+        result = normalize_pipeline_result(raw_result)
+        if result.workspace:
+            _set_active_pipeline_workspace(state, result.workspace)
+
+        console.print()
+        console.print(
+            format_research_result_summary(
+                result,
+                workspace_fallback=workspace_path,
+                idea=idea,
+            )
         )
 
-        if result.get("success"):
-            console.print(f"\n[bold green]✓ Research pipeline completed![/bold green]")
-            console.print(f"  [dim]Workspace:[/dim]  {result.get('workspace', '')}")
-            if result.get("report_path"):
-                console.print(f"  [dim]Report:[/dim]     {result['report_path']}")
-            if result.get("review_path"):
-                console.print(f"  [dim]Review:[/dim]     {result['review_path']}")
-            # Show Phase 2 metadata
-            stages = result.get("completed_stages", [])
-            if stages:
-                console.print(f"  [dim]Stages:[/dim]     {' → '.join(stages)}")
-            rev_iter = result.get("review_iterations", 0)
-            if rev_iter > 0:
-                console.print(f"  [dim]Reviews:[/dim]    {rev_iter}")
-            if result.get("review_cap_reached"):
-                console.print(f"  [yellow]⚠ Review iteration cap reached ({rev_iter})[/yellow]")
-            for w in result.get("warnings", []):
-                console.print(f"  [yellow]⚠ {w}[/yellow]")
-        else:
-            console.print(f"\n[red]✗ Research pipeline failed: {result.get('error', 'unknown')}[/red]")
-            stages = result.get("completed_stages", [])
-            if stages:
-                console.print(f"  [dim]Completed stages before failure:[/dim] {', '.join(stages)}")
-                idea_part = f' --idea "{idea}"' if idea else ''
-                console.print(
-                    f"  [dim]To resume: /research --resume --output {workspace_path}"
-                    f"{idea_part}[/dim]"
-                )
-
-        # Inject into conversation
-        state["messages"].append({
-            "role": "user",
-            "content": f"[Research pipeline Mode {mode}] Idea: {idea}" + (f", PDF: {pdf_path}" if pdf_path else ""),
-        })
-        state["messages"].append({
-            "role": "assistant",
-            "content": f"Research pipeline {'completed' if result.get('success') else 'failed'}. "
-                       f"Workspace: {result.get('workspace', '')}",
-        })
-
-
-        # Persist session so /resume can find it later
-        await save_session(
-            state["session_id"],
-            state["messages"],
-            workspace=state["workspace_dir"],
+        state["messages"].extend(
+            build_research_history_entries(
+                command_args,
+                result,
+                mode=mode,
+                workspace_fallback=workspace_path,
+            )
         )
+
+        await _persist_session_state(state)
     except Exception as e:
         console.print(f"[red]Research pipeline error: {e}[/red]")
         import traceback
         console.print(f"[dim]{traceback.format_exc()[:500]}[/dim]")
-        # Still persist on failure so the session is not lost
         if state["messages"]:
-            await save_session(
-                state["session_id"],
-                state["messages"],
-                workspace=state["workspace_dir"],
-            )
+            await _persist_session_state(state)
 
 
-def _handle_uninstall_skill(arg: str) -> None:
-    """Remove a user-installed skill by name.
-
-    Only skills inside skills/user/ can be removed — built-in skills are
-    protected.
-
-    Usage:
-        /uninstall-skill my-skill
-    """
-    import shutil
-
-    name = arg.strip()
-    if not name:
-        console.print("[yellow]Usage: /uninstall-skill <skill-name>[/yellow]")
+async def _handle_research(arg: str, state: dict[str, Any]) -> None:
+    """Start or resume the multi-agent research pipeline."""
+    if not arg.strip():
+        console.print(
+            "[yellow]Usage:[/yellow]\n"
+            "[dim]  Mode A: /research paper.pdf --idea \"explore TME heterogeneity\"\n"
+            "  Mode B: /research paper.pdf --idea \"...\" --h5ad data.h5ad\n"
+            "  Mode C: /research --idea \"explore TME heterogeneity\"\n"
+            "  Resume: /research --resume --output /path/to/workspace\n"
+            "  Stage : /research --from-stage analyze --output /path/to/workspace\n"
+            "  Plan  : /research --idea \"...\" --plan-only\n"
+            "  Skip  : /research --idea \"...\" --skip research,review[/dim]"
+        )
         return
 
-    skills_dir = _OMICSCLAW_DIR / "skills"
-    user_skills_dir = skills_dir / "user"
-
-    # Search inside user/ directory only (protect built-in skills)
-    candidate = user_skills_dir / name
-    if not candidate.exists():
-        # Also search all domain sub-dirs to give a helpful error message
-        found_elsewhere: list[Path] = []
-        for domain_path in skills_dir.iterdir():
-            if not domain_path.is_dir() or domain_path.name.startswith((".", "__")):
-                continue
-            skill_path = domain_path / name
-            if skill_path.exists():
-                found_elsewhere.append(skill_path)
-
-        if found_elsewhere:
-            console.print(
-                f"[yellow]Skill '{escape(name)}' is a built-in skill and cannot be removed via /uninstall-skill.[/yellow]"
-            )
-            console.print("[dim]Built-in skills are part of the OmicsClaw core and should not be deleted.[/dim]")
-        else:
-            console.print(f"[red]User-installed skill '{escape(name)}' not found.[/red]")
-            console.print(f"[dim]User skills directory: {user_skills_dir}[/dim]")
-            # List user-installed skills for reference
-            if user_skills_dir.exists():
-                installed = [p.name for p in user_skills_dir.iterdir() if p.is_dir()]
-                if installed:
-                    console.print(f"[dim]Installed user skills: {', '.join(installed)}[/dim]")
-                else:
-                    console.print("[dim]No user-installed skills found.[/dim]")
+    try:
+        command_args = parse_research_command(arg)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
         return
 
-    # Confirm removal
-    console.print(f"[yellow]Remove skill '{name}' from {candidate}? (y/N)[/yellow] ", end="")
+    await _run_research_pipeline(command_args, state)
+
+
+async def _handle_resume_task(arg: str, state: dict[str, Any]) -> bool:
+    """Resume the research pipeline from a specific structured stage."""
+    if not _should_route_resume_task_to_pipeline(arg, state):
+        view = build_interactive_resume_task_command_view(
+            arg,
+            session_metadata=state.get("session_metadata"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+        )
+        _apply_interactive_plan_command_view(state, view)
+        return view.persist_session
+
+    try:
+        command_args = parse_resume_task_command(arg)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        return False
+
+    await _run_research_pipeline(command_args, state)
+    return False
+
+
+async def _handle_do_current_task(arg: str, state: dict[str, Any]) -> bool:
+    snapshot = load_interactive_plan_from_metadata(state.get("session_metadata"))
+    if snapshot is None and _should_route_plan_commands_to_pipeline("", state):
+        console.print(
+            "[yellow]/do-current-task currently targets interactive session plans. "
+            "Use /resume-task <stage> to continue a research pipeline workspace.[/yellow]"
+        )
+        return False
+
+    view = build_do_current_task_command_view(
+        arg,
+        session_metadata=state.get("session_metadata"),
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
+    )
+    _apply_interactive_plan_command_view(state, view)
+    if not view.success:
+        return False
+    if view.execution_prompt:
+        await _continue_interactive_turn(state, view.execution_prompt)
+    return view.persist_session or bool(view.execution_prompt)
+
+
+def _confirm_extension_removal(name: str) -> bool:
+    console.print(
+        f"[yellow]Remove extension '{name}'? (y/N)[/yellow] ",
+        end="",
+    )
     try:
         answer = input().strip().lower()
     except (EOFError, KeyboardInterrupt):
         console.print("\n[dim]Cancelled.[/dim]")
-        return
-
+        return False
     if answer not in ("y", "yes"):
         console.print("[dim]Cancelled.[/dim]")
-        return
+        return False
+    return True
 
-    try:
-        shutil.rmtree(candidate)
-        console.print(f"[green]✓ Skill '{name}' removed.[/green]")
-    except Exception as e:
-        console.print(f"[red]Failed to remove skill: {escape(str(e))}[/red]")
-        return
 
-    # Reset registry
-    try:
-        from omicsclaw.core.registry import registry
-        # Remove from runtime registry dict if present
-        registry.skills.pop(name, None)
-        registry._loaded = False
-        registry.load_all()
-        console.print("[dim]Registry refreshed.[/dim]")
-    except Exception as e:
-        console.print(f"[yellow]Registry refresh failed: {e}[/yellow]")
+def _handle_uninstall_extension(arg: str, *, expected_type: str = "") -> None:
+    name = arg.strip()
+    if not name:
+        _print_skill_command_status(
+            SkillCommandStatus(
+                "error",
+                "Usage: /uninstall-extension <name>" if not expected_type else "Usage: /uninstall-skill <name>",
+            )
+        )
+        return
+    if not _confirm_extension_removal(name):
+        return
+    for status in uninstall_extension(
+        name,
+        omicsclaw_dir=_OMICSCLAW_DIR,
+        expected_type=expected_type,
+    ):
+        _print_skill_command_status(status)
+
+
+def _handle_uninstall_skill(arg: str) -> None:
+    _handle_uninstall_extension(arg, expected_type="skill-pack")
+
+
+def _handle_toggle_extension(arg: str, *, enable: bool) -> None:
+    for status in set_installed_extension_enabled(
+        arg,
+        enable=enable,
+        omicsclaw_dir=_OMICSCLAW_DIR,
+    ):
+        _print_skill_command_status(status)
 
 
 
@@ -966,7 +1369,15 @@ def _init_llm(config: dict) -> tuple[str, str]:
         return os.environ.get("OMICSCLAW_MODEL", "unknown"), os.environ.get("LLM_PROVIDER", "")
 
 
-async def _stream_llm_response(messages: list[dict]) -> str:
+async def _stream_llm_response(
+    messages: list[dict],
+    *,
+    plan_context: str = "",
+    workspace_dir: str = "",
+    pipeline_workspace: str = "",
+    scoped_memory_scope: str = "",
+    output_style: str = "",
+) -> str:
     """Call bot/core.py llm_tool_loop and print the response to the console.
 
     Returns the final assistant text response.
@@ -981,68 +1392,101 @@ async def _stream_llm_response(messages: list[dict]) -> str:
         # local messages list (excluding the last user message which
         # llm_tool_loop will append itself), then sync back after the call.
         _INTERACTIVE_USER = "__interactive__"
-
-        # Seed history with everything *except* the last user message
-        # (llm_tool_loop will append that message itself).
-        seed = list(messages[:-1]) if len(messages) > 1 else []
-        seed = core._sanitize_tool_history(seed, warn=False)
-        core.conversations[_INTERACTIVE_USER] = seed
-        core._conversation_access[_INTERACTIVE_USER] = __import__("time").time()
-
-        user_text = ""
-        if messages:
-            last = messages[-1]
-            content = last.get("content", "")
-            user_text = content if isinstance(content, str) else str(content)
+        user_text = seed_core_conversation(core, _INTERACTIVE_USER, messages)
 
         # Snapshot usage before the call to compute per-turn delta
         usage_before = core.get_usage_snapshot()
 
-        import json
-        from rich.live import Live
-        from rich.markdown import Markdown
-
         streamed_content = ""
-        live_markdown = None
+        stream_started = False
+        response_started = False
+        tool_log_started = False
+        last_zone: str | None = None
+        next_tool_sequence = 1
+        pending_tool_sequences: dict[str, deque[int]] = defaultdict(deque)
+        response_formatter = _CliMarkdownStreamFormatter()
 
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots") as status:
+            def enter_tool_zone() -> None:
+                nonlocal last_zone, tool_log_started
+                if last_zone == "tool":
+                    return
+                if last_zone == "response":
+                    response_formatter.finish()
+                if stream_started and streamed_content and not streamed_content.endswith("\n"):
+                    console.print()
+                console.print()
+                if not tool_log_started:
+                    _print_stream_section_header("TOOL LOG", style="bold dim")
+                    tool_log_started = True
+                else:
+                    _print_stream_section_header("TOOL UPDATE", style="dim")
+                last_zone = "tool"
+
             def sync_on_tool_call(tool_name: str, args: dict):
+                nonlocal next_tool_sequence
                 status.update(f"[cyan]Running {tool_name}...[/cyan]")
-                args_preview = json.dumps(args)[:80] + ("..." if len(json.dumps(args)) > 80 else "")
-                console.print(f"  [dim]↳ 🛠️  Calling [cyan]{tool_name}[/cyan]({args_preview})[/dim]")
-                
+                enter_tool_zone()
+                sequence = next_tool_sequence
+                next_tool_sequence += 1
+                pending_tool_sequences[tool_name].append(sequence)
+                _print_tool_activity_entry(
+                    f"CALL #{sequence}",
+                    f"{tool_name}({_format_tool_args_preview(args)})",
+                    label_style="bold cyan",
+                )
+
             def sync_on_tool_result(tool_name: str, result: str):
                 status.update("[cyan]Thinking...[/cyan]")
-                result_text = str(result)
-                if tool_name == "inspect_data":
-                    marker = "### Method Suitability & Parameter Preview"
-                    pos = result_text.find(marker)
-                    if pos >= 0:
-                        result_text = result_text[pos:]
-                result_preview = result_text[:220].replace("\n", " ") + ("..." if len(result_text) > 220 else "")
-                console.print(f"  [dim]↳ ✓ [green]Result:[/green] {result_preview}[/dim]")
+                enter_tool_zone()
+                sequence_queue = pending_tool_sequences[tool_name]
+                sequence = sequence_queue.popleft() if sequence_queue else None
+                label = f"DONE #{sequence}" if sequence is not None else "DONE"
+                _print_tool_activity_entry(
+                    label,
+                    _format_tool_result_preview(tool_name, result),
+                    label_style="bold green",
+                )
 
             async def sync_on_stream_content(chunk: str):
-                nonlocal streamed_content, live_markdown
-                if not streamed_content:
-                    # First chunk arrives -> Stop "Thinking" spinner to print clean text
+                nonlocal streamed_content, stream_started, response_started, last_zone
+                if not stream_started:
                     status.stop()
-                    console.print()
-                    live_markdown = Live(Markdown(""), console=console, refresh_per_second=15, transient=False)
-                    live_markdown.start()
-                
+                    stream_started = True
+                if last_zone != "response":
+                    if last_zone == "tool":
+                        console.print()
+                        header = "RESPONSE" if not response_started else "RESPONSE CONTINUES"
+                        _print_stream_section_header(header, style="bold cyan")
+                    else:
+                        console.print()
+                    response_started = True
+                    last_zone = "response"
+
                 streamed_content += chunk
-                live_markdown.update(Markdown(streamed_content))
+                response_formatter.write(chunk)
 
             try:
+                active_mcp_servers = await load_active_mcp_server_entries_for_prompt()
+                loop_kwargs = {
+                    "user_id": "cli_user",
+                    "platform": "cli",
+                    "plan_context": plan_context,
+                    "workspace": workspace_dir or "",
+                    "pipeline_workspace": pipeline_workspace or "",
+                    "mcp_servers": active_mcp_servers,
+                    "on_tool_call": sync_on_tool_call,
+                    "on_tool_result": sync_on_tool_result,
+                    "on_stream_content": sync_on_stream_content,
+                }
+                if scoped_memory_scope:
+                    loop_kwargs["scoped_memory_scope"] = scoped_memory_scope
+                if output_style:
+                    loop_kwargs["output_style"] = output_style
                 llm_task = asyncio.create_task(core.llm_tool_loop(
                     _INTERACTIVE_USER,
                     user_text,
-                    user_id="cli_user",
-                    platform="cli",
-                    on_tool_call=sync_on_tool_call,
-                    on_tool_result=sync_on_tool_result,
-                    on_stream_content=sync_on_stream_content,
+                    **loop_kwargs,
                 ))
 
                 async def _watch_escape():
@@ -1088,47 +1532,49 @@ async def _stream_llm_response(messages: list[dict]) -> str:
                     except asyncio.CancelledError:
                         pass
                     
-                    if live_markdown:
-                        live_markdown.stop()
-                        live_markdown = None
-                    
                     status.stop()
                     sys.stdout.write("\r\033[K")
                     console.print("\n[yellow]Conversation interrupted - tell the model what to do differently. Something went wrong?[/yellow]")
-
-                    core.conversations[_INTERACTIVE_USER] = core._sanitize_tool_history(
-                        list(core.conversations.get(_INTERACTIVE_USER, [])),
-                        warn=False,
+                    append_interruption_notice(
+                        core,
+                        _INTERACTIVE_USER,
+                        text=(
+                            "Conversation interrupted - tell the model what "
+                            "to do differently. Something went wrong?"
+                        ),
+                        messages=messages,
                     )
-                    # Ensure the conversations array captures the interruption
-                    core.conversations[_INTERACTIVE_USER].append({
-                        "role": "user",
-                        "content": "Conversation interrupted - tell the model what to do differently. Something went wrong?"
-                    })
                     final_text = ""
                 else:
                     watcher_task.cancel()
                     final_text = llm_task.result()
             finally:
-                if live_markdown:
-                    live_markdown.stop()
+                response_formatter.finish()
+                if stream_started and streamed_content and not streamed_content.endswith("\n"):
+                    console.print()
 
-        # Fallback if streaming failed or didn't fire for some reason
         if final_text and not streamed_content:
-            console.print()  # Visual break between reasoning outputs and final text
-            console.print(Markdown(final_text))
+            console.print()
+            _print_cli_response_text(final_text)
+            if not final_text.endswith("\n"):
+                console.print()
+
+        if (
+            streamed_content
+            and final_text
+            and not _stream_output_contains_final_text(streamed_content, final_text)
+        ):
+            if not streamed_content.endswith("\n"):
+                console.print()
+            _print_cli_response_text(final_text)
+            if not final_text.endswith("\n"):
+                console.print()
 
         # Display per-turn usage statistics (inspired by EvoScientist)
         _display_usage_stats(core, usage_before)
 
         # Sync the updated conversation history back to our messages list
-        updated_msgs = core._sanitize_tool_history(
-            list(core.conversations.get(_INTERACTIVE_USER, [])),
-            warn=False,
-        )
-        core.conversations[_INTERACTIVE_USER] = list(updated_msgs)
-        messages.clear()
-        messages.extend(updated_msgs)
+        sync_core_conversation(core, _INTERACTIVE_USER, messages)
 
         return final_text or ""
     except Exception as e:
@@ -1139,6 +1585,22 @@ async def _stream_llm_response(messages: list[dict]) -> str:
         return err_msg
 
 
+async def _continue_interactive_turn(
+    state: dict[str, Any],
+    user_prompt: str,
+) -> str:
+    state["messages"].append({"role": "user", "content": user_prompt})
+    console.print()
+    return await _stream_llm_response(
+        state["messages"],
+        plan_context=_interactive_plan_context(state),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        pipeline_workspace=_active_pipeline_workspace(state) or "",
+        scoped_memory_scope=_active_scoped_memory_scope(state),
+        output_style=_active_output_style(state) or "",
+    )
+
+
 def _display_usage_stats(core, usage_before: dict) -> None:
     """Display per-turn token usage statistics.
 
@@ -1147,32 +1609,116 @@ def _display_usage_stats(core, usage_before: dict) -> None:
     """
     try:
         usage_after = core.get_usage_snapshot()
-        delta_in = usage_after.get("prompt_tokens", 0) - usage_before.get("prompt_tokens", 0)
-        delta_out = usage_after.get("completion_tokens", 0) - usage_before.get("completion_tokens", 0)
+        delta = build_usage_delta(usage_before, usage_after)
 
-        if delta_in <= 0 and delta_out <= 0:
+        if not delta.has_usage:
             return
 
         stats = Text(justify="right")
         stats.append("[", style="dim italic")
         stats.append("Usage: ", style="dim italic")
-        stats.append(f"{delta_in:,}", style="cyan italic")
+        stats.append(f"{delta.prompt_tokens:,}", style="cyan italic")
         stats.append(" in · ", style="dim italic")
-        stats.append(f"{delta_out:,}", style="green italic")
+        stats.append(f"{delta.completion_tokens:,}", style="green italic")
         stats.append(" out", style="dim italic")
 
         # Show cost estimate if pricing is available
-        cost_before = usage_before.get("estimated_cost_usd", 0.0)
-        cost_after = usage_after.get("estimated_cost_usd", 0.0)
-        delta_cost = cost_after - cost_before
-        if delta_cost > 0:
+        if delta.estimated_cost_usd > 0:
             stats.append(" | ", style="dim italic")
-            stats.append(f"${delta_cost:.4f}", style="yellow italic")
+            stats.append(f"${delta.estimated_cost_usd:.4f}", style="yellow italic")
 
         stats.append("]", style="dim italic")
         console.print(stats)
     except Exception:
         pass  # Silently skip on any usage retrieval error
+
+
+def _command_leading_value(arg: str) -> str | None:
+    tokens = shlex.split(arg.strip()) if arg.strip() else []
+    if tokens and not tokens[0].startswith("--"):
+        return tokens[0]
+    return None
+
+
+def _pipeline_snapshot_exists(
+    explicit_workspace: str | None,
+    *,
+    workspace_fallback: str | None,
+) -> bool:
+    snapshot = load_pipeline_workspace_snapshot(
+        resolve_pipeline_workspace(explicit_workspace, workspace_fallback)
+    )
+    return (
+        snapshot.has_pipeline_state
+        or snapshot.plan_path.exists()
+        or snapshot.todos_path.exists()
+    )
+
+
+def _should_route_plan_commands_to_pipeline(
+    arg: str,
+    state: dict[str, Any],
+) -> bool:
+    workspace_fallback = _active_pipeline_workspace(state) or state.get("workspace_dir")
+    if _pipeline_snapshot_exists(None, workspace_fallback=workspace_fallback):
+        return True
+    explicit_workspace = _command_leading_value(arg)
+    return bool(
+        explicit_workspace
+        and _pipeline_snapshot_exists(
+            explicit_workspace,
+            workspace_fallback=workspace_fallback,
+        )
+    )
+
+
+def _should_route_resume_task_to_pipeline(
+    arg: str,
+    state: dict[str, Any],
+) -> bool:
+    workspace_fallback = _active_pipeline_workspace(state) or state.get("workspace_dir")
+    if _pipeline_snapshot_exists(None, workspace_fallback=workspace_fallback):
+        return True
+    try:
+        command_args = parse_resume_task_command(arg)
+    except ValueError:
+        return False
+    if not command_args.output_dir:
+        return False
+    return _pipeline_snapshot_exists(
+        command_args.output_dir,
+        workspace_fallback=workspace_fallback,
+    )
+
+
+def _interactive_plan_context(state: dict[str, Any]) -> str:
+    return build_interactive_plan_context_from_metadata(
+        state.get("session_metadata")
+    )
+
+
+def _maybe_seed_interactive_plan(
+    state: dict[str, Any],
+    user_input: str,
+) -> bool:
+    workspace_fallback = _active_pipeline_workspace(state) or state.get("workspace_dir")
+    if _pipeline_snapshot_exists(None, workspace_fallback=workspace_fallback):
+        return False
+
+    seed = maybe_seed_interactive_plan(
+        user_input,
+        session_metadata=state.get("session_metadata"),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
+    )
+    if not seed.created:
+        return False
+
+    state["session_metadata"] = normalize_session_metadata(seed.session_metadata)
+    if seed.notice_text:
+        console.print(f"[dim]{escape(seed.notice_text)}[/dim]")
+        console.print()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1210,7 +1756,8 @@ async def _async_interactive_loop(
     _cli_log_level = os.environ.get("OMICSCLAW_LOG_LEVEL", "WARNING").upper()
     for noisy in (
         "omicsclaw.bot", "omicsclaw.knowledge", "omicsclaw.core",
-        "omicsclaw.memory", "httpx", "httpcore", "openai",
+        "omicsclaw.memory", "omicsclaw.runtime", "omicsclaw.runtime.context_layers",
+        "httpx", "httpcore", "openai",
     ):
         logging.getLogger(noisy).setLevel(getattr(logging, _cli_log_level, logging.WARNING))
 
@@ -1222,6 +1769,8 @@ async def _async_interactive_loop(
     state: dict[str, Any] = {
         "session_id":   effective_session_id,
         "workspace_dir": effective_workspace,
+        "pipeline_workspace": "",
+        "session_metadata": {},
         "messages":     [],
         "running":      True,
         "ui_backend":   ui_backend,
@@ -1231,10 +1780,11 @@ async def _async_interactive_loop(
     if session_id:
         data = await load_session(session_id)
         if data:
-            state["messages"] = data.get("messages", [])
-            if data.get("workspace"):
-                state["workspace_dir"] = data["workspace"]
-            console.print(f"[green]Resumed session:[/green] [yellow]{session_id}[/yellow]")
+            _apply_session_command_view(
+                state,
+                build_resume_session_command_view_from_data(data),
+            )
+            console.print()
         else:
             console.print(f"[yellow]Session '{session_id}' not found — starting fresh.[/yellow]")
 
@@ -1280,126 +1830,207 @@ async def _async_interactive_loop(
             _print_separator()
 
             # ── Slash command dispatch ──
-            low = user_input.lower()
+            command = parse_slash_command(user_input, CLI_SLASH_COMMAND_SPECS)
 
-            if low in ("/exit", "/quit", "/q"):
+            if command is not None and command.name == "/exit":
                 console.print("[dim]Goodbye! See you next time.[/dim]")
                 state["running"] = False
                 break
 
-            elif low == "/help":
+            elif command is not None and command.name == "/help":
                 table = Table(title="OmicsClaw Commands", show_header=True, header_style="bold cyan")
                 table.add_column("Command", style="bold yellow", no_wrap=True)
                 table.add_column("Description")
-                for cmd, desc in SLASH_COMMANDS:
+                for cmd, desc in slash_command_help_rows(CLI_SLASH_COMMAND_SPECS):
                     table.add_row(cmd, desc)
                 console.print(table)
                 console.print()
                 _print_separator()
                 continue
 
-            elif low.startswith("/skills"):
-                arg = user_input[len("/skills"):].strip()
-                _handle_skills(arg)
+            if command is not None and command.name == "/skills":
+                _handle_skills(command.arg)
                 _print_separator()
                 continue
 
-            elif low.startswith("/run ") or low == "/run":
-                arg = user_input[len("/run"):].strip()
-                result_text = _handle_run(arg)
-                if result_text:
-                    # Inject run result into conversation for context
-                    state["messages"].append({
-                        "role": "user",
-                        "content": f"[Ran skill] {arg}",
-                    })
-                    state["messages"].append({
-                        "role": "assistant",
-                        "content": result_text,
-                    })
-                    await save_session(
+            elif command is not None and command.name == "/run":
+                run_result = _handle_run(command.arg)
+                if run_result:
+                    state["messages"].extend(run_result.history_messages)
+                    await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/research":
+                await _handle_research(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/approve-plan":
+                if _handle_approve_plan(command.arg, state):
+                    await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/resume-task":
+                if await _handle_resume_task(command.arg, state):
+                    await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/do-current-task":
+                if await _handle_do_current_task(command.arg, state):
+                    await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/tasks":
+                _handle_tasks(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/plan":
+                if _handle_plan(command.arg, state):
+                    await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/sessions":
+                await _handle_sessions(command.arg)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/resume":
+                await _handle_resume(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/delete":
+                await _handle_delete(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/new":
+                _apply_session_command_view(
+                    state,
+                    build_new_session_command_view(generate_session_id()),
+                )
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/current":
+                _apply_session_command_view(
+                    state,
+                    build_current_session_command_view(
+                        session_id=state["session_id"],
+                        workspace_dir=state["workspace_dir"],
+                        model=resolved_model,
+                        provider=resolved_provider,
+                        messages=state["messages"],
+                        session_metadata=state.get("session_metadata"),
+                        pipeline_workspace=state.get("pipeline_workspace"),
+                        omicsclaw_dir=_OMICSCLAW_DIR,
+                    ),
+                )
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/session-title":
+                _apply_session_command_view(
+                    state,
+                    build_session_title_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/session-tag":
+                _apply_session_command_view(
+                    state,
+                    build_session_tag_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/doctor":
+                _handle_doctor(state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/context":
+                _handle_context(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/usage":
+                _handle_usage(state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/memory":
+                await _handle_memory(
+                    command.arg,
+                    state,
+                    model=resolved_model,
+                )
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/style":
+                _apply_session_command_view(
+                    state,
+                    build_style_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/clear":
+                _apply_session_command_view(
+                    state,
+                    build_clear_conversation_command_view(),
+                )
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/export":
+                _apply_session_command_view(
+                    state,
+                    build_export_session_command_view(
                         state["session_id"],
                         state["messages"],
-                        model=resolved_model,
-                        workspace=state["workspace_dir"],
-                    )
+                        workspace_dir=state["workspace_dir"],
+                    ),
+                )
                 _print_separator()
                 continue
 
-            elif low.startswith("/research"):
-                arg = user_input[len("/research"):].strip()
-                await _handle_research(arg, state)
-                _print_separator()
-                continue
-
-            elif low == "/sessions":
-                await _handle_sessions()
-                _print_separator()
-                continue
-
-            elif low.startswith("/resume"):
-                arg = user_input[len("/resume"):].strip()
-                await _handle_resume(arg, state)
-                _print_separator()
-                continue
-
-            elif low.startswith("/delete"):
-                arg = user_input[len("/delete"):].strip()
-                await _handle_delete(arg, state)
-                _print_separator()
-                continue
-
-            elif low == "/new":
-                state["session_id"] = generate_session_id()
-                state["messages"] = []
-                console.print(f"[green]New session:[/green] [yellow]{state['session_id']}[/yellow]")
-                _print_separator()
-                continue
-
-            elif low == "/current":
-                console.print(f"[dim]Session:[/dim]   [yellow]{state['session_id']}[/yellow]")
-                console.print(f"[dim]Workspace:[/dim] [cyan]{state['workspace_dir']}[/cyan]")
-                console.print(f"[dim]Model:[/dim]     [magenta]{resolved_model}[/magenta]")
-                console.print(f"[dim]Provider:[/dim]  [magenta]{resolved_provider}[/magenta]")
-                console.print(f"[dim]Messages:[/dim]  {len([m for m in state['messages'] if m.get('role') in ('user','assistant')])}")
+            elif command is not None and command.name == "/mcp":
+                _handle_mcp(command.arg)
                 console.print()
                 _print_separator()
                 continue
 
-            elif low == "/clear":
-                state["messages"] = []
-                console.print("[dim]Conversation history cleared.[/dim]")
-                _print_separator()
-                continue
-
-            elif low == "/export":
-                from ._session import export_conversation_to_markdown
-                try:
-                    export_dir = Path(state["workspace_dir"]) / "exports"
-                    export_path = export_dir / f"omicsclaw_session_{state['session_id']}.md"
-                    export_conversation_to_markdown(state["session_id"], state["messages"], export_path)
-                    console.print(f"[green]✓ Session exported to:[/green] [cyan]{export_path}[/cyan]")
-                except Exception as e:
-                    console.print(f"[red]Error exporting session: {e}[/red]")
-                _print_separator()
-                continue
-
-            elif low.startswith("/mcp"):
-                arg = user_input[len("/mcp"):].strip()
-                _handle_mcp(arg)
+            elif command is not None and command.name == "/config":
+                _handle_config(command.arg)
                 console.print()
                 _print_separator()
                 continue
 
-            elif low.startswith("/config"):
-                arg = user_input[len("/config"):].strip()
-                _handle_config(arg)
-                console.print()
-                _print_separator()
-                continue
-
-            elif low.startswith("/tips"):
-                arg = user_input[len("/tips"):].strip().lower()
+            elif command is not None and command.name == "/tips":
+                arg = command.arg.lower()
                 if arg in ("on", ""):
                     state["tips_enabled"] = True
                     console.print("[green]💡 Inline knowledge tips: ON[/green]")
@@ -1436,33 +2067,72 @@ async def _async_interactive_loop(
 
 
 
-            elif low.startswith("/install-skill"):
-                arg = user_input[len("/install-skill"):].strip()
-                _handle_install_skill(arg)
+            elif command is not None and command.name == "/install-extension":
+                _handle_install_extension(command.arg)
                 console.print()
                 _print_separator()
                 continue
 
-            elif low.startswith("/uninstall-skill"):
-                arg = user_input[len("/uninstall-skill"):].strip()
-                _handle_uninstall_skill(arg)
+            elif command is not None and command.name == "/installed-extensions":
+                _handle_installed_extensions()
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/refresh-extensions":
+                _handle_refresh_extensions()
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/disable-extension":
+                _handle_toggle_extension(command.arg, enable=False)
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/enable-extension":
+                _handle_toggle_extension(command.arg, enable=True)
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/uninstall-extension":
+                _handle_uninstall_extension(command.arg)
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/install-skill":
+                _handle_install_skill(command.arg)
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/installed-skills":
+                _handle_installed_skills()
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/refresh-skills":
+                _handle_refresh_skills()
+                console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/uninstall-skill":
+                _handle_uninstall_skill(command.arg)
                 console.print()
                 _print_separator()
                 continue
 
             # ── Regular LLM conversation ──
-            state["messages"].append({"role": "user", "content": user_input})
-            console.print()
-
-            response = await _stream_llm_response(state["messages"])
+            _maybe_seed_interactive_plan(state, user_input)
+            response = await _continue_interactive_turn(state, user_input)
 
             # Save session after each exchange
-            await save_session(
-                state["session_id"],
-                state["messages"],
-                model=resolved_model,
-                workspace=state["workspace_dir"],
-            )
+            await _persist_session_state(state, model=resolved_model)
 
             console.print()
             _print_separator()
@@ -1483,12 +2153,7 @@ async def _async_interactive_loop(
 
     # Final session save on exit
     if state["messages"]:
-        await save_session(
-            state["session_id"],
-            state["messages"],
-            model=resolved_model,
-            workspace=state["workspace_dir"],
-        )
+        await _persist_session_state(state, model=resolved_model)
 
 
 # ---------------------------------------------------------------------------
@@ -1586,12 +2251,19 @@ async def _single_shot(
     console.print(f"[dim]Session: {session_id}[/dim]")
     console.print()
 
-    await _stream_llm_response(messages)
+    await _stream_llm_response(
+        messages,
+        workspace_dir=workspace_dir or str(_OMICSCLAW_DIR),
+        pipeline_workspace="",
+    )
 
     await save_session(
-        session_id, messages,
+        session_id,
+        messages,
         model=resolved_model,
         workspace=workspace_dir or str(_OMICSCLAW_DIR),
+        metadata={},
+        transcript=messages,
     )
 
 

@@ -6,9 +6,11 @@ Optionally loads tools via langchain_mcp_adapters (if installed).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,10 @@ MCP_CONFIG_PATH = _get_config_dir() / MCP_CONFIG_NAME
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 VALID_TRANSPORTS = {"stdio", "http", "streamable_http", "sse", "websocket"}
+_PROMPT_STATUS_CACHE_KEY: tuple[str, ...] | None = None
+_PROMPT_STATUS_CACHE_VALUE: tuple[dict[str, Any], ...] = ()
+_PROMPT_STATUS_CACHE_AT: float = 0.0
+_PROMPT_STATUS_CACHE_TTL_SECONDS = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -189,19 +195,9 @@ async def load_mcp_tools_as_openai_functions() -> list[dict]:
 
     connections: dict[str, Any] = {}
     for name, server in config.items():
-        transport = server.get("transport", "")
-        if transport == "stdio":
-            connections[name] = {
-                "transport": "stdio",
-                "command": server.get("command", ""),
-                "args": server.get("args", []),
-                **({"env": server["env"]} if "env" in server else {}),
-            }
-        elif transport in {"http", "streamable_http", "sse", "websocket"}:
-            connections[name] = {
-                "transport": transport,
-                "url": server.get("url", ""),
-            }
+        connection = _build_mcp_connection(server)
+        if connection is not None:
+            connections[name] = connection
 
     if not connections:
         return []
@@ -225,3 +221,100 @@ async def load_mcp_tools_as_openai_functions() -> list[dict]:
         logger.warning("MCP tool loading failed: %s", e)
 
     return openai_tools
+
+
+def _build_mcp_connection(server: dict[str, Any]) -> dict[str, Any] | None:
+    transport = str(server.get("transport", "") or "").strip()
+    if transport == "stdio":
+        return {
+            "transport": "stdio",
+            "command": server.get("command", ""),
+            "args": server.get("args", []),
+            **({"env": server["env"]} if "env" in server else {}),
+        }
+    if transport in {"http", "streamable_http", "sse", "websocket"}:
+        return {
+            "transport": transport,
+            "url": server.get("url", ""),
+        }
+    return None
+
+
+async def _probe_mcp_server_entry_for_prompt(
+    name: str,
+    server: dict[str, Any],
+) -> dict[str, Any] | None:
+    connection = _build_mcp_connection(server)
+    if connection is None:
+        return None
+
+    try:
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+    except ImportError:
+        logger.debug("langchain_mcp_adapters not installed — MCP prompt probe unavailable")
+        return None
+
+    try:
+        client = MultiServerMCPClient({name: connection})
+        tools = await client.get_tools()
+    except Exception as e:
+        logger.debug("MCP prompt probe failed for %s: %s", name, e)
+        return None
+
+    if not tools:
+        return None
+
+    return {
+        "name": name,
+        "transport": str(server.get("transport", "") or "").strip(),
+        "active": True,
+        "loaded": True,
+    }
+
+
+async def load_active_mcp_server_entries_for_prompt() -> tuple[dict[str, Any], ...]:
+    """Return MCP server entries that are currently prompt-worthy.
+
+    Servers are included only when OmicsClaw can successfully load MCP tools
+    for the current config. This keeps disconnected or unavailable servers
+    out of the prompt context budget.
+    """
+    global _PROMPT_STATUS_CACHE_AT, _PROMPT_STATUS_CACHE_KEY, _PROMPT_STATUS_CACHE_VALUE
+
+    config = load_mcp_config()
+    if not config:
+        _PROMPT_STATUS_CACHE_KEY = ()
+        _PROMPT_STATUS_CACHE_VALUE = ()
+        _PROMPT_STATUS_CACHE_AT = time.monotonic()
+        return ()
+
+    cache_key = tuple(
+        f"{name}:{cfg.get('transport', '')}:{cfg.get('url', '')}:{cfg.get('command', '')}:{','.join(cfg.get('args', []) or [])}"
+        for name, cfg in sorted(config.items())
+    )
+    now = time.monotonic()
+    if (
+        cache_key == _PROMPT_STATUS_CACHE_KEY
+        and (now - _PROMPT_STATUS_CACHE_AT) < _PROMPT_STATUS_CACHE_TTL_SECONDS
+    ):
+        return _PROMPT_STATUS_CACHE_VALUE
+
+    probe_tasks = [
+        asyncio.create_task(_probe_mcp_server_entry_for_prompt(name, server))
+        for name, server in config.items()
+        if str(name).strip()
+    ]
+    if not probe_tasks:
+        entries: tuple[dict[str, Any], ...] = ()
+    else:
+        results = await asyncio.gather(*probe_tasks, return_exceptions=True)
+        entries = tuple(
+            result
+            for result in results
+            if isinstance(result, dict) and str(result.get("name", "")).strip()
+        )
+
+    _PROMPT_STATUS_CACHE_KEY = cache_key
+    _PROMPT_STATUS_CACHE_VALUE = entries
+    _PROMPT_STATUS_CACHE_AT = now
+    return entries

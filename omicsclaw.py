@@ -843,6 +843,7 @@ class OmicsClawParser(argparse.ArgumentParser):
 
         print(f"\n{BOLD}{BLUE}🔧 Utility Commands{RESET}", file=file)
         print(f"  {GREEN}mcp           {RESET}  Manage external Model Context Protocol (MCP) servers", file=file)
+        print(f"  {GREEN}doctor        {RESET}  Run environment and runtime diagnostics", file=file)
         print(f"  {GREEN}memory-server {RESET}  Start the graph memory REST API server", file=file)
         print(f"  {GREEN}env           {RESET}  Check installed Python dependencies and system tiers", file=file)
         print(f"  {GREEN}onboard       {RESET}  Interactive setup wizard to configure API keys", file=file)
@@ -944,6 +945,14 @@ def main():
     mem_p = sub.add_parser("memory-server", help="Start the graph memory REST API server")
     mem_p.add_argument("--host", default=None, help="Host to bind (default: 0.0.0.0)")
     mem_p.add_argument("--port", type=int, default=None, help="Port to bind (default: 8766)")
+
+    doctor_p = sub.add_parser("doctor", help="Run environment and runtime diagnostics")
+    doctor_p.add_argument(
+        "--workspace",
+        dest="workspace_dir",
+        default=None,
+        help="Workspace directory to validate (default: current working directory)",
+    )
 
     # knowledge — build / search / stats / list for the knowledge base
     kb_p = sub.add_parser("knowledge", help="Manage the knowledge base (build, search, stats, list)")
@@ -1225,6 +1234,18 @@ def main():
             print(f"{RED}Upload failed{RESET}", file=sys.stderr)
             sys.exit(1)
         sys.exit(0)
+
+    if args.command == "doctor":
+        from omicsclaw.diagnostics import build_doctor_report, render_doctor_report
+
+        workspace_dir = str(Path(getattr(args, "workspace_dir", None) or Path.cwd()).resolve())
+        report = build_doctor_report(
+            omicsclaw_dir=str(OMICSCLAW_DIR),
+            workspace_dir=workspace_dir,
+            output_dir=str(DEFAULT_OUTPUT_ROOT),
+        )
+        print(render_doctor_report(report, markup=False))
+        sys.exit(1 if report.failure_count else 0)
 
     if args.command == "knowledge":
         from omicsclaw.knowledge import KnowledgeAdvisor

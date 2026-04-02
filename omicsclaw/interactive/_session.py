@@ -20,6 +20,11 @@ try:
 except ImportError:
     _HAS_AIOSQLITE = False
 
+from omicsclaw.runtime.transcript_store import (
+    build_transcript_summary,
+    sanitize_tool_history,
+)
+
 from ._constants import AGENT_NAME, DB_NAME
 
 
@@ -56,6 +61,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at  TEXT NOT NULL,
     model       TEXT,
     workspace   TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}',
+    transcript  TEXT NOT NULL DEFAULT '[]',
+    transcript_summary TEXT NOT NULL DEFAULT '{}',
     messages    TEXT NOT NULL DEFAULT '[]'
 );
 """
@@ -75,9 +83,31 @@ async def get_db() -> AsyncIterator["aiosqlite.Connection"]:
     db_path = str(get_db_path())
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
         conn.row_factory = aiosqlite.Row
-        await conn.execute(_CREATE_SQL)
-        await conn.commit()
+        await _ensure_schema(conn)
         yield conn
+
+
+async def _ensure_schema(conn: "aiosqlite.Connection") -> None:
+    await conn.execute(_CREATE_SQL)
+    async with conn.execute("PRAGMA table_info(sessions)") as cur:
+        columns = {
+            row["name"] if isinstance(row, aiosqlite.Row) else row[1]
+            for row in await cur.fetchall()
+        }
+
+    if "metadata" not in columns:
+        await conn.execute(
+            "ALTER TABLE sessions ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'"
+        )
+    if "transcript" not in columns:
+        await conn.execute(
+            "ALTER TABLE sessions ADD COLUMN transcript TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "transcript_summary" not in columns:
+        await conn.execute(
+            "ALTER TABLE sessions ADD COLUMN transcript_summary TEXT NOT NULL DEFAULT '{}'"
+        )
+    await conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +121,7 @@ async def list_sessions(limit: int = 20) -> list[dict]:
     try:
         async with get_db() as db:
             q = """
-                SELECT session_id, created_at, updated_at, model, workspace, messages
+                SELECT session_id, created_at, updated_at, model, workspace, metadata, transcript, transcript_summary, messages
                 FROM sessions
                 WHERE agent_name = ?
                 ORDER BY updated_at DESC
@@ -105,16 +135,32 @@ async def list_sessions(limit: int = 20) -> list[dict]:
 
             result = []
             for r in rows:
-                msgs = json.loads(r["messages"] or "[]")
-                preview = _extract_preview(msgs)
+                metadata = _load_json_field(r["metadata"], default={})
+                transcript = _load_session_transcript(
+                    transcript_raw=r["transcript"],
+                    messages_raw=r["messages"],
+                )
+                transcript_summary = _load_session_transcript_summary(
+                    summary_raw=r["transcript_summary"],
+                    transcript=transcript,
+                    metadata=metadata,
+                    workspace=r["workspace"],
+                )
+                preview = _extract_preview(transcript)
                 result.append({
                     "session_id": r["session_id"],
                     "created_at": r["created_at"],
                     "updated_at": r["updated_at"],
                     "model":      r["model"],
                     "workspace":  r["workspace"],
+                    "metadata":   metadata,
                     "preview":    preview,
-                    "message_count": len(msgs),
+                    "message_count": len(transcript),
+                    "compacted_tool_result_count": len(
+                        transcript_summary["compacted_tool_results"]
+                    ),
+                    "plan_reference_count": len(transcript_summary["plan_references"]),
+                    "advisory_event_count": len(transcript_summary["advisory_events"]),
                 })
             return result
     except Exception:
@@ -150,13 +196,31 @@ async def load_session(session_id: str) -> dict | None:
             if not row:
                 return None
 
+            metadata = _load_json_field(row["metadata"], default={})
+            transcript = _load_session_transcript(
+                transcript_raw=row["transcript"],
+                messages_raw=row["messages"],
+            )
+            transcript_summary = _load_session_transcript_summary(
+                summary_raw=row["transcript_summary"],
+                transcript=transcript,
+                metadata=metadata,
+                workspace=row["workspace"],
+            )
+
             return {
                 "session_id":    row["session_id"],
                 "created_at":    row["created_at"],
                 "updated_at":    row["updated_at"],
                 "model":         row["model"],
                 "workspace":     row["workspace"],
-                "messages":      json.loads(row["messages"] or "[]"),
+                "metadata":      metadata,
+                "transcript":    transcript,
+                "messages":      transcript,
+                "transcript_summary": transcript_summary,
+                "compacted_tool_results": transcript_summary["compacted_tool_results"],
+                "plan_references": transcript_summary["plan_references"],
+                "advisory_events": transcript_summary["advisory_events"],
             }
     except Exception:
         return None
@@ -168,12 +232,28 @@ async def save_session(
     *,
     model: str = "",
     workspace: str = "",
+    metadata: dict | None = None,
+    transcript: list[dict] | None = None,
 ) -> None:
     """Upsert a session into the database."""
     if not _HAS_AIOSQLITE:
         return
     try:
         now = datetime.now(timezone.utc).isoformat()
+        normalized_metadata = dict(metadata or {})
+        metadata_json = json.dumps(normalized_metadata, ensure_ascii=False)
+        source_transcript = transcript if transcript is not None else messages
+        sanitised_transcript = _sanitize_session_messages(source_transcript)
+        transcript_summary_json = json.dumps(
+            build_transcript_summary(
+                sanitised_transcript,
+                metadata=normalized_metadata,
+                workspace=workspace,
+            ).to_dict(),
+            ensure_ascii=False,
+        )
+        transcript_json = json.dumps(sanitised_transcript, ensure_ascii=False)
+        messages_json = json.dumps(sanitised_transcript, ensure_ascii=False)
         async with get_db() as db:
             # Check if exists
             async with db.execute(
@@ -184,17 +264,36 @@ async def save_session(
 
             if existing:
                 await db.execute(
-                    """UPDATE sessions SET updated_at=?, model=?, workspace=?, messages=?
+                    """UPDATE sessions SET updated_at=?, model=?, workspace=?, metadata=?, transcript=?, transcript_summary=?, messages=?
                        WHERE session_id=?""",
-                    (now, model, workspace, json.dumps(messages, ensure_ascii=False), session_id),
+                    (
+                        now,
+                        model,
+                        workspace,
+                        metadata_json,
+                        transcript_json,
+                        transcript_summary_json,
+                        messages_json,
+                        session_id,
+                    ),
                 )
             else:
                 await db.execute(
                     """INSERT INTO sessions
-                       (session_id, agent_name, created_at, updated_at, model, workspace, messages)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (session_id, AGENT_NAME, now, now, model, workspace,
-                     json.dumps(messages, ensure_ascii=False)),
+                       (session_id, agent_name, created_at, updated_at, model, workspace, metadata, transcript, transcript_summary, messages)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        AGENT_NAME,
+                        now,
+                        now,
+                        model,
+                        workspace,
+                        metadata_json,
+                        transcript_json,
+                        transcript_summary_json,
+                        messages_json,
+                    ),
                 )
             await db.commit()
     except Exception:
@@ -234,6 +333,67 @@ async def session_exists(session_id: str) -> bool:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+
+def _load_json_field(raw: str | None, *, default):
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return default
+
+
+def _sanitize_session_messages(messages: list[dict] | object) -> list[dict]:
+    if not isinstance(messages, list):
+        return []
+    safe_messages = [message for message in messages if isinstance(message, dict)]
+    return sanitize_tool_history(safe_messages, warn=False)
+
+
+def _load_session_transcript(
+    *,
+    transcript_raw: str | None,
+    messages_raw: str | None,
+) -> list[dict]:
+    transcript = _sanitize_session_messages(
+        _load_json_field(transcript_raw, default=[])
+    )
+    if transcript:
+        return transcript
+    return _sanitize_session_messages(_load_json_field(messages_raw, default=[]))
+
+
+def _load_session_transcript_summary(
+    *,
+    summary_raw: str | None,
+    transcript: list[dict],
+    metadata: dict | None = None,
+    workspace: str | None = None,
+) -> dict[str, list[dict]]:
+    summary = _load_json_field(summary_raw, default={})
+    if not isinstance(summary, dict):
+        summary = {}
+
+    fallback = build_transcript_summary(
+        transcript,
+        metadata=metadata or {},
+        workspace=workspace,
+    ).to_dict()
+
+    normalized = {
+        "compacted_tool_results": summary.get("compacted_tool_results"),
+        "plan_references": summary.get("plan_references"),
+        "advisory_events": summary.get("advisory_events"),
+    }
+    for key, fallback_value in fallback.items():
+        value = normalized.get(key)
+        if isinstance(value, list):
+            normalized[key] = [item for item in value if isinstance(item, dict)]
+        else:
+            normalized[key] = fallback_value
+    return normalized
+
 
 def _extract_preview(messages: list[dict], max_len: int = 60) -> str:
     """Extract first user message as preview text."""
@@ -280,6 +440,10 @@ def format_relative_time(iso_ts: str | None) -> str:
 
 def export_conversation_to_markdown(session_id: str, messages: list[dict], out_path: Path) -> None:
     """Export the conversation to a formatted Markdown report."""
+    transcript_summary = build_transcript_summary(messages).to_dict()
+    compacted_tool_results = transcript_summary["compacted_tool_results"]
+    plan_references = transcript_summary["plan_references"]
+    advisory_events = transcript_summary["advisory_events"]
     lines = [
         f"# OmicsClaw Analysis Report",
         f"**Session ID:** `{session_id}`",
@@ -298,6 +462,30 @@ def export_conversation_to_markdown(session_id: str, messages: list[dict], out_p
                 continue
             if content:
                 lines.append(f"\n### 🤖 OmicsClaw\n{content}\n")
+
+    if compacted_tool_results:
+        lines.append("\n## Compacted Tool Results\n")
+        for ref in compacted_tool_results:
+            tool_name = str(ref.get("tool_name", "") or "unknown")
+            lines.append(f"- Tool: `{tool_name}`")
+            if ref.get("tool_call_id"):
+                lines.append(f"  Call ID: `{ref['tool_call_id']}`")
+            lines.append(f"  Path: `{ref.get('storage_path', '')}`")
+            if int(ref.get("output_bytes", 0) or 0) > 0:
+                lines.append(f"  Bytes: `{ref['output_bytes']}`")
+
+    if plan_references:
+        lines.append("\n## Plan References\n")
+        for ref in plan_references:
+            lines.append(f"- Path: `{ref.get('path', '')}`")
+            if ref.get("workspace"):
+                lines.append(f"  Workspace: `{ref['workspace']}`")
+            lines.append(f"  Exists: `{bool(ref.get('exists', False))}`")
+
+    if advisory_events:
+        lines.append("\n## Advisory Events\n")
+        for ref in advisory_events:
+            lines.append(f"- `{ref.get('message', '')}`")
                 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")

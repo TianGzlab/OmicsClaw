@@ -1,9 +1,14 @@
-"""Unified data loader for all omics domains."""
+"""Domain-detection helpers for OmicsClaw input files.
+
+This package used to carry experimental runtime data loaders that duplicated
+the maintained loader implementations under ``skills/.../_lib``. The runtime
+only relies on extension-to-domain detection, so the public surface is kept
+small and explicit here.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 EXTENSION_TO_DOMAIN = {
     ".h5ad": "spatial",
@@ -18,41 +23,41 @@ EXTENSION_TO_DOMAIN = {
     ".fasta": "genomics",
     ".fa": "genomics",
     ".fastq": "genomics",
+    ".fastq.gz": "genomics",
     ".fq": "genomics",
+    ".fq.gz": "genomics",
     ".mzml": "proteomics",
     ".mzxml": "proteomics",
     ".cdf": "metabolomics",
 }
 
 
-def detect_domain_from_extension(ext: str) -> str:
-    """Detect omics domain from file extension."""
-    ext = ext.lower()
-    return EXTENSION_TO_DOMAIN.get(ext, "spatial")
+def detect_domain_from_extension(ext: str, *, fallback: str = "spatial") -> str:
+    """Detect an omics domain from a file extension string."""
+    normalized = str(ext or "").strip().lower()
+    if not normalized:
+        return fallback
+    return EXTENSION_TO_DOMAIN.get(normalized, fallback)
 
 
-def load_omics_data(
-    path: str | Path,
-    domain: str | None = None,
-    data_type: str | None = None,
-) -> Any:
-    """Unified data loader for all omics domains."""
-    path = Path(path)
+def detect_domain_from_path(path: str | Path, *, fallback: str = "spatial") -> str:
+    """Detect an omics domain from a file path.
 
-    if domain is None:
-        domain = detect_domain_from_extension(path.suffix)
+    Handles multi-suffix files such as ``.vcf.gz`` and ``.fastq.gz``.
+    """
+    suffixes = [suffix.lower() for suffix in Path(path).suffixes]
+    for start in range(len(suffixes)):
+        candidate = "".join(suffixes[start:])
+        if candidate in EXTENSION_TO_DOMAIN:
+            return EXTENSION_TO_DOMAIN[candidate]
 
-    if domain == "spatial":
-        from .spatial import load_spatial_data
-        return load_spatial_data(path, data_type)
-    elif domain == "singlecell":
-        from .spatial import load_spatial_data  # Reuse for now
-        return load_spatial_data(path, data_type)
-    elif domain == "genomics":
-        raise NotImplementedError("Genomics loader not yet implemented")
-    elif domain == "proteomics":
-        raise NotImplementedError("Proteomics loader not yet implemented")
-    elif domain == "metabolomics":
-        raise NotImplementedError("Metabolomics loader not yet implemented")
-    else:
-        raise ValueError(f"Unknown domain: {domain}")
+    if suffixes:
+        return detect_domain_from_extension(suffixes[-1], fallback=fallback)
+    return fallback
+
+
+__all__ = [
+    "EXTENSION_TO_DOMAIN",
+    "detect_domain_from_extension",
+    "detect_domain_from_path",
+]

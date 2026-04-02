@@ -50,6 +50,15 @@ class OmicsRegistry:
         return len(cls._top_level_python_files(skill_path)) == 1
 
     @classmethod
+    def _is_enabled_skill_dir(cls, skill_path: Path) -> bool:
+        try:
+            from omicsclaw.extensions import load_extension_state
+
+            return load_extension_state(skill_path).enabled
+        except Exception:
+            return True
+
+    @classmethod
     def _iter_skill_dirs(cls, domain_path: Path):
         """Yield skill directories, handling optional subdomain nesting.
 
@@ -64,6 +73,8 @@ class OmicsRegistry:
                 continue
             if domain_path.name != "orchestrator" and child.name == "orchestrator":
                 continue
+            if not cls._is_enabled_skill_dir(child):
+                continue
 
             if cls._looks_like_skill_dir(child):
                 yield child
@@ -73,6 +84,8 @@ class OmicsRegistry:
                     if not grandchild.is_dir() or grandchild.name.startswith(('.', '__', '_')):
                         continue
                     if domain_path.name != "orchestrator" and grandchild.name == "orchestrator":
+                        continue
+                    if not cls._is_enabled_skill_dir(grandchild):
                         continue
                     if cls._looks_like_skill_dir(grandchild):
                         yield grandchild

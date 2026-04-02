@@ -8,10 +8,14 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
 from omicsclaw.common.manifest import (
+    ArtifactRecord,
     MANIFEST_FILENAME,
     PipelineManifest,
     StepRecord,
+    VerificationRecord,
+    WorkspaceRecord,
     read_manifest,
+    save_manifest,
     write_manifest,
 )
 
@@ -124,3 +128,47 @@ def test_manifest_json_structure(tmp_path):
     assert len(raw["steps"]) == 1
     assert raw["steps"][0]["skill"] == "test"
     assert raw["steps"][0]["params"] == {"a": 1}
+
+
+def test_manifest_roundtrip_preserves_workspace_contract(tmp_path):
+    manifest = PipelineManifest(
+        steps=[StepRecord(skill="pipeline", version="0.1.0")],
+        workspace=WorkspaceRecord(
+            kind="analysis_run",
+            purpose="research_pipeline",
+            root=str(tmp_path),
+            isolation_mode="workspace_dir",
+            metadata={"mode": "C"},
+        ),
+        required_artifacts=[
+            ArtifactRecord(
+                name="plan",
+                path="plan.md",
+                required=True,
+                kind="file",
+                description="Research plan",
+                status="present",
+            )
+        ],
+        verification=VerificationRecord(
+            status="complete",
+            completed=True,
+            report_path=str(tmp_path / "completion_report.json"),
+            missing_required_artifacts=[],
+            warnings=[],
+            metadata={"checked_by": "pytest"},
+        ),
+        metadata={"phase": 6},
+    )
+
+    save_manifest(tmp_path, manifest)
+    loaded = read_manifest(tmp_path)
+
+    assert loaded is not None
+    assert loaded.workspace is not None
+    assert loaded.workspace.kind == "analysis_run"
+    assert loaded.workspace.metadata["mode"] == "C"
+    assert loaded.required_artifacts[0].path == "plan.md"
+    assert loaded.verification is not None
+    assert loaded.verification.status == "complete"
+    assert loaded.metadata["phase"] == 6

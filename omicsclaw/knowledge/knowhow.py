@@ -354,11 +354,6 @@ class KnowHowInjector:
         matched.sort(key=lambda item: (-item[0], item[1]))
         return matched
 
-    def get_all_kh_ids(self) -> list[str]:
-        """Return list of all loaded KH document identifiers."""
-        self._ensure_loaded()
-        return list(self._cache.keys())
-
     def get_kh_for_skill(self, skill: str) -> list[str]:
         """Return KH filenames relevant to a specific skill."""
         self._ensure_loaded()

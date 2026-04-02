@@ -16,6 +16,7 @@ def test_registry_loaded():
     assert registry.skills["orchestrator"]["domain"] == "orchestrator"
     assert Path(registry.skills["orchestrator"]["script"]).name == "omics_orchestrator.py"
     assert "sc-qc" in registry.skills  # verify singlecell subdomain nesting
+    assert "spatial-microenvironment-subset" in registry.skills
     assert "spatial" in registry.domains
     assert len(registry.skills) > 0
     assert len(registry.domains) > 0

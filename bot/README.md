@@ -1,14 +1,16 @@
 # OmicsClaw Messaging Bot System
 
-The `bot` module powers OmicsClaw's conversational AI interfaces. It connects the core multi-omics skills engine with popular messaging platforms and a native terminal experience.
+The `bot` module powers OmicsClaw's messaging-channel interfaces. It connects the core multi-omics skills engine with platforms such as Telegram, Feishu, DingTalk, Discord, Slack, WeChat, QQ, Email, and iMessage.
 
-## ✨ New: Interactive Terminal Mode (TUI)
+## Interactive Terminal Chat
 
-You can now chat with OmicsBot natively in your terminal without any messaging apps configured! Similar to the EvoScientist CLI experience:
+Terminal chat is provided by the main OmicsClaw CLI rather than the `bot` package:
 
 ```bash
 # Start the interactive conversational UI
-./OmicsClaw interactive
+oc interactive
+# or
+omicsclaw interactive
 ```
 
 ## Supported Channels

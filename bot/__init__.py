@@ -1,1 +1,1 @@
-# OmicsClaw Bot — Telegram + Feishu dual-channel messaging frontend
+# OmicsClaw Bot — multi-channel messaging frontends

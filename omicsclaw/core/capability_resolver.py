@@ -9,7 +9,6 @@ Determines whether a user request is:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 import json
 import re
 from typing import Any
@@ -17,9 +16,9 @@ from typing import Any
 from omicsclaw.core.registry import OmicsRegistry
 
 try:
-    from omicsclaw.loaders import EXTENSION_TO_DOMAIN
+    from omicsclaw.loaders import detect_domain_from_path
 except Exception:  # pragma: no cover - fallback for partial installs
-    EXTENSION_TO_DOMAIN = {}
+    detect_domain_from_path = None
 
 
 _NON_ANALYSIS_HINTS = (
@@ -120,6 +119,10 @@ _GENERIC_ANALYSIS_HINTS = (
     "run ",
     "perform ",
     "compute ",
+    "microenvironment",
+    "neighborhood",
+    "微环境",
+    "邻域",
     "preprocess",
     "qc",
     "cluster",
@@ -298,10 +301,10 @@ def _detect_domain(
     if domain_hint:
         return domain_hint
 
-    if file_path:
-        ext = Path(file_path).suffix.lower()
-        if ext in EXTENSION_TO_DOMAIN:
-            return str(EXTENSION_TO_DOMAIN[ext])
+    if file_path and detect_domain_from_path is not None:
+        detected = str(detect_domain_from_path(file_path, fallback="")).strip()
+        if detected:
+            return detected
 
     query_lower = query.lower()
     best_domain = ""

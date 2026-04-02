@@ -6,6 +6,7 @@ Install:  pip install textual
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import random
@@ -16,30 +17,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 _OMICSCLAW_DIR = Path(__file__).resolve().parent.parent.parent
-
-
-# ---------------------------------------------------------------------------
-# Helper: load root omicsclaw.py script (not the omicsclaw/ package)
-# ---------------------------------------------------------------------------
-
-def _load_omicsclaw_script():
-    """Load the root-level omicsclaw.py script via importlib.
-
-    `import omicsclaw` would import the omicsclaw/ *package* (which has an
-    __init__.py), not the omicsclaw.py *script* in the project root.  We
-    use importlib.util.spec_from_file_location() to load the script directly
-    so that list_skills() and run_skill() are always accessible.
-    """
-    import importlib.util
-    script_path = _OMICSCLAW_DIR / "omicsclaw.py"
-    spec = importlib.util.spec_from_file_location("_omicsclaw_script", script_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load omicsclaw.py from: {script_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
-
-
 
 try:
     from textual import events, on
@@ -64,13 +41,94 @@ except ImportError:
 from ._constants import (
     LOGO_GRADIENT,
     LOGO_LINES,
+    RUN_COMMAND_USAGE,
     WELCOME_SLOGANS,
+)
+from ._diagnostics_support import (
+    build_context_command_view,
+    build_doctor_command_view,
+    build_usage_command_view,
+)
+from ._llm_bridge_support import (
+    build_usage_delta,
+    seed_core_conversation,
+    sync_core_conversation,
+)
+from ._mcp import list_mcp_servers, load_active_mcp_server_entries_for_prompt
+from ._memory_command_support import (
+    build_memory_command_view,
+    resolve_active_scoped_memory_scope,
+)
+from ._omicsclaw_actions import (
+    list_registered_skill_names,
+    list_skills_text,
+    run_skill_command,
+)
+from ._plan_mode_support import (
+    build_approve_plan_command_view as build_interactive_approve_plan_command_view,
+    build_do_current_task_command_view,
+    build_interactive_plan_context_from_metadata,
+    build_plan_command_view as build_interactive_plan_command_view,
+    build_resume_task_command_view as build_interactive_resume_task_command_view,
+    build_tasks_command_view as build_interactive_tasks_command_view,
+    load_interactive_plan_from_metadata,
+    maybe_seed_interactive_plan,
+)
+from ._pipeline_support import (
+    build_approve_plan_command_view,
+    build_pipeline_tasks_command_view,
+    build_plan_preview_command_view,
+    load_pipeline_workspace_snapshot,
+    parse_resume_task_command,
+    resolve_pipeline_workspace,
+)
+from ._skill_run_support import (
+    build_skill_run_exception_result,
+    build_skill_run_execution_view,
+    parse_skill_run_command,
+)
+from ._skill_management_support import (
+    SkillCommandStatus,
+    build_installed_extension_list_view,
+    build_refresh_extensions_statuses,
+    build_installed_skill_list_view,
+    build_refresh_skills_statuses,
+    format_installed_extension_list_plain,
+    format_installed_skill_list_plain,
+    install_extension_from_source,
+    install_skill_from_source,
+    set_installed_extension_enabled,
+    uninstall_extension,
+)
+from ._slash_command_support import (
+    TUI_SLASH_COMMAND_SPECS,
+    complete_run_skill_names,
+    complete_slash_command_rows,
+    format_tui_help_text,
+    parse_slash_command,
 )
 from ._session import (
     generate_session_id,
-    list_sessions,
     save_session,
 )
+from ._session_command_support import (
+    build_clear_conversation_command_view,
+    build_current_session_command_view,
+    build_export_session_command_view,
+    build_new_session_command_view,
+    build_resume_session_command_view,
+    build_session_tag_command_view,
+    build_session_metadata,
+    build_session_title_command_view,
+    build_session_list_view,
+    enrich_session_metadata,
+    format_session_list_plain,
+    normalize_session_metadata,
+    resolve_active_output_style,
+    resolve_active_pipeline_workspace,
+)
+from ._style_support import build_style_command_view
+from ._tui_support import build_tui_header_label
 
 
 # ---------------------------------------------------------------------------
@@ -257,19 +315,25 @@ if _HAS_TEXTUAL:
                     self.replace("\t", self.cursor_location, self.cursor_location)
                 return
 
-            from ._constants import SLASH_COMMANDS
-            commands = [cmd for cmd, _ in SLASH_COMMANDS]
             matches = []
 
             if " " not in prefix:
-                matches = [c + " " for c in commands if c.startswith(prefix)]
+                matches = [
+                    command + " "
+                    for command, _description in complete_slash_command_rows(
+                        prefix,
+                        TUI_SLASH_COMMAND_SPECS,
+                    )
+                ]
             elif prefix.startswith("/run "):
-                skill_prefix = prefix[5:]
                 try:
-                    from omicsclaw.core.registry import registry
-                    if not getattr(registry, "_loaded", False):
-                        registry.load_all()
-                    matches = ["/run " + s + " " for s in registry.skills.keys() if s.startswith(skill_prefix)]
+                    matches = [
+                        "/run " + skill_name + " "
+                        for skill_name in complete_run_skill_names(
+                            prefix,
+                            list_registered_skill_names(),
+                        )
+                    ]
                 except Exception:
                     pass
 
@@ -333,6 +397,7 @@ if _HAS_TEXTUAL:
             mode: str | None = None,
         ):
             super().__init__()
+            self._requested_session_id = session_id
             self._session_id = session_id or generate_session_id()
             self._workspace = workspace_dir or str(_OMICSCLAW_DIR)
             self._model = model
@@ -340,6 +405,8 @@ if _HAS_TEXTUAL:
             self._config = config or {}
             self._mode = mode
             self._messages: list[dict] = []
+            self._session_metadata: dict[str, object] = {}
+            self._pipeline_workspace = ""
             self._thinking = False
             # Session-level usage statistics
             self._session_stats: dict[str, int] = {
@@ -349,6 +416,73 @@ if _HAS_TEXTUAL:
                 "api_calls": 0,
             }
             self._session_start = _time.time()
+
+        def _active_pipeline_workspace(self) -> str | None:
+            active = resolve_active_pipeline_workspace(
+                self._pipeline_workspace,
+                self._session_metadata,
+            )
+            if active:
+                self._pipeline_workspace = active
+                self._session_metadata = build_session_metadata(
+                    self._session_metadata,
+                    pipeline_workspace=active,
+                )
+            else:
+                self._session_metadata = build_session_metadata(
+                    self._session_metadata,
+                    pipeline_workspace=None,
+                )
+            return active
+
+        def _active_output_style(self) -> str | None:
+            return resolve_active_output_style(self._session_metadata)
+
+        def _active_scoped_memory_scope(self) -> str:
+            return resolve_active_scoped_memory_scope(self._session_metadata)
+
+        def _configured_mcp_server_names(self) -> tuple[str, ...]:
+            return tuple(
+                entry["name"]
+                for entry in list_mcp_servers()
+                if str(entry.get("name", "") or "").strip()
+            )
+
+        def _set_active_pipeline_workspace(self, workspace: str | None) -> None:
+            value = str(workspace or "").strip()
+            self._pipeline_workspace = value
+            self._session_metadata = build_session_metadata(
+                self._session_metadata,
+                pipeline_workspace=value,
+            )
+
+        async def _persist_session(self) -> None:
+            await save_session(
+                self._session_id,
+                self._messages,
+                model=self._model,
+                workspace=self._workspace,
+                metadata=enrich_session_metadata(
+                    self._session_metadata,
+                    messages=self._messages,
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._pipeline_workspace,
+                    omicsclaw_dir=_OMICSCLAW_DIR,
+                ),
+                transcript=self._messages,
+            )
+
+        def _refresh_header_info(self) -> None:
+            try:
+                self.query_one("#header-info", Label).update(
+                    build_tui_header_label(
+                        model=self._model,
+                        session_id=self._session_id,
+                        mode=self._mode,
+                    )
+                )
+            except NoMatches:
+                pass
 
         def _get_welcome_renderable(self):
             from rich.text import Text
@@ -387,9 +521,12 @@ if _HAS_TEXTUAL:
         def compose(self) -> ComposeResult:
             with Horizontal(id="header-bar"):
                 yield Label("⬡ OmicsClaw", id="header-title")
-                mode_str = f"[{self._mode}] · " if self._mode else ""
                 yield Label(
-                    f"{self._model or 'AI'} · {mode_str}session {self._session_id}",
+                    build_tui_header_label(
+                        model=self._model,
+                        session_id=self._session_id,
+                        mode=self._mode,
+                    ),
                     id="header-info",
                 )
             with Horizontal(id="main-area"):
@@ -412,8 +549,26 @@ if _HAS_TEXTUAL:
 
         def on_mount(self) -> None:
             self.query_one("#chat-input", ChatTextArea).focus()
+            if self._requested_session_id:
+                self.run_worker(self._resume_initial_session_async(), exclusive=False)
             # Load LLM in background
             self.run_worker(self._init_llm_async(), exclusive=True)
+
+        async def _resume_initial_session_async(self) -> None:
+            requested_session_id = self._requested_session_id
+            if not requested_session_id:
+                return
+
+            view = await build_resume_session_command_view(requested_session_id)
+            if view.success:
+                self._apply_session_command_view(view)
+                return
+
+            from rich.markup import escape
+
+            self._add_system_message(
+                f"[yellow]Session '{escape(requested_session_id)}' not found — starting fresh.[/yellow]"
+            )
 
         async def _init_llm_async(self) -> None:
             try:
@@ -437,14 +592,7 @@ if _HAS_TEXTUAL:
                 core.init(api_key=api_key, base_url=base_url or None, model=model, provider=provider)
                 self._model = core.OMICSCLAW_MODEL
                 self._provider = core.LLM_PROVIDER_NAME
-                # Update header
-                try:
-                    mode_str = f"[{self._mode}] · " if getattr(self, "_mode", None) else ""
-                    self.query_one("#header-info", Label).update(
-                        f"{self._model} · {mode_str}session {self._session_id}"
-                    )
-                except NoMatches:
-                    pass
+                self._refresh_header_info()
             except Exception as e:
                 logger.warning("LLM init error: %s", e)
                 self._add_system_message(f"⚠ LLM init error: {e}\nRun 'python omicsclaw.py onboard' to configure.")
@@ -457,99 +605,199 @@ if _HAS_TEXTUAL:
             # TextArea is already cleared locally
 
             # Slash commands
-            low = text.lower()
-            if low in ("/exit", "/quit", "/q"):
+            command = parse_slash_command(text, TUI_SLASH_COMMAND_SPECS)
+
+            if command is not None and command.name == "/exit":
                 self.exit()
                 return
 
-            elif low == "/help":
-                self._add_system_message(
-                    "Commands:\n"
-                    "  /skills \\[domain]  — List skills\n"
-                    "  /run <skill> [--demo] [--input <path>]  — Run skill\n"
-                    "  /install-skill <src>  — Add a skill from path or GitHub\n"
-                    "  /uninstall-skill <name>  — Remove a user-installed skill\n"
-                    "  /sessions  — List sessions\n"
-                    "  /new  — New session\n"
-                    "  /clear  — Clear chat\n"
-                    "  /export  — Export session to Markdown\n"
-                    "  /exit  — Quit (aliases: /quit, /q)\n"
-                    "  Ctrl+B — Sidebar | Ctrl+H — Help | Ctrl+N — New | Ctrl+Q — Quit"
+            elif command is not None and command.name == "/help":
+                self._add_system_message(format_tui_help_text(TUI_SLASH_COMMAND_SPECS))
+                return
+
+            elif command is not None and command.name == "/skills":
+                self.run_worker(self._list_skills_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/run":
+                self._add_user_message(text)
+                self.run_worker(self._run_skill_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/tasks":
+                self.run_worker(self._show_tasks_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/plan":
+                self.run_worker(self._show_plan_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/current":
+                self._apply_session_command_view(
+                    build_current_session_command_view(
+                        session_id=self._session_id,
+                        workspace_dir=self._workspace,
+                        model=self._model,
+                        provider=self._provider,
+                        messages=self._messages,
+                        session_metadata=self._session_metadata,
+                        pipeline_workspace=self._pipeline_workspace,
+                        omicsclaw_dir=_OMICSCLAW_DIR,
+                    )
                 )
                 return
 
-            elif low.startswith("/skills"):
-                arg = text[len("/skills"):].strip()
-                self.run_worker(self._list_skills_async(arg), exclusive=False)
+            elif command is not None and command.name == "/approve-plan":
+                self.run_worker(self._approve_plan_async(command.arg), exclusive=False)
                 return
 
-            elif low.startswith("/run ") or low == "/run":
-                arg = text[len("/run"):].strip()
-                self._add_user_message(text)
-                self.run_worker(self._run_skill_async(arg), exclusive=False)
+            elif command is not None and command.name == "/resume-task":
+                self.run_worker(self._resume_task_async(command.arg), exclusive=False)
                 return
 
-            elif low == "/new":
-                self._session_id = generate_session_id()
-                self._messages = []
-                # Reset session usage stats
-                for k in ("prompt_tokens", "completion_tokens", "total_tokens", "api_calls",
-                          "_last_prompt", "_last_completion"):
-                    self._session_stats[k] = 0
-                self._session_start = _time.time()
-                # Reset core conversation history
-                try:
-                    import bot.core as core
-                    core.conversations.pop("__tui__", None)
-                    core.reset_usage()
-                except Exception:
-                    pass
-                self._add_system_message(f"New session: {self._session_id}")
-                # Reset usage bar
-                try:
-                    self.query_one("#usage-label", Label).update(
-                        "Tokens: 0 in · 0 out  │  Cost: $0.000000  │  Calls: 0"
+            elif command is not None and command.name == "/do-current-task":
+                self.run_worker(self._do_current_task_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/new":
+                self._apply_session_command_view(
+                    build_new_session_command_view(generate_session_id())
+                )
+                return
+
+            elif command is not None and command.name == "/style":
+                self._apply_session_command_view(
+                    build_style_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
                     )
-                except Exception:
-                    pass
+                )
+                await self._persist_session()
                 return
 
-            elif low == "/clear":
-                self.action_clear_chat()
+            elif command is not None and command.name == "/clear":
+                self._apply_session_command_view(
+                    build_clear_conversation_command_view()
+                )
                 return
 
-            elif low == "/export":
-                from ._session import export_conversation_to_markdown
-                try:
-                    export_dir = Path(self._workspace) / "exports"
-                    export_path = export_dir / f"omicsclaw_session_{self._session_id}.md"
-                    export_conversation_to_markdown(self._session_id, self._messages, export_path)
-                    self._add_system_message(f"✓ Session exported to: {export_path}")
-                except Exception as e:
-                    self._add_system_message(f"✗ Export failed: {e}")
+            elif command is not None and command.name == "/export":
+                self._apply_session_command_view(
+                    build_export_session_command_view(
+                        self._session_id,
+                        self._messages,
+                        workspace_dir=self._workspace,
+                    )
+                )
                 return
 
-            elif low == "/sessions":
-                self.run_worker(self._show_sessions_async(), exclusive=False)
+            elif command is not None and command.name == "/sessions":
+                self.run_worker(self._show_sessions_async(command.arg), exclusive=False)
                 return
 
-            elif low == "/usage":
+            elif command is not None and command.name == "/resume":
+                self.run_worker(self._resume_session_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/session-title":
+                self._apply_session_command_view(
+                    build_session_title_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                    )
+                )
+                await self._persist_session()
+                return
+
+            elif command is not None and command.name == "/session-tag":
+                self._apply_session_command_view(
+                    build_session_tag_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                    )
+                )
+                await self._persist_session()
+                return
+
+            elif command is not None and command.name == "/doctor":
+                self.run_worker(self._show_doctor_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/context":
+                self.run_worker(self._show_context_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/memory":
+                view = build_memory_command_view(
+                    command.arg,
+                    session_metadata=self._session_metadata,
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                )
+                self._apply_session_command_view(view)
+                if getattr(view, "replace_session_metadata", False):
+                    await self._persist_session()
+                return
+
+            elif command is not None and command.name == "/usage":
                 self._show_usage()
                 return
 
-            elif low.startswith("/install-skill"):
-                arg = text[len("/install-skill"):].strip()
+            elif command is not None and command.name == "/install-extension":
                 self._add_user_message(text)
-                self.run_worker(self._install_skill_async(arg), exclusive=False)
+                self.run_worker(self._install_extension_async(command.arg), exclusive=False)
                 return
 
-            elif low.startswith("/uninstall-skill"):
-                arg = text[len("/uninstall-skill"):].strip()
+            elif command is not None and command.name == "/installed-extensions":
+                self.run_worker(self._show_installed_extensions_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/refresh-extensions":
+                self.run_worker(self._refresh_extensions_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/disable-extension":
                 self._add_user_message(text)
-                self.run_worker(self._uninstall_skill_async(arg), exclusive=False)
+                self.run_worker(
+                    self._toggle_extension_enabled_async(command.arg, enable=False),
+                    exclusive=False,
+                )
+                return
+
+            elif command is not None and command.name == "/enable-extension":
+                self._add_user_message(text)
+                self.run_worker(
+                    self._toggle_extension_enabled_async(command.arg, enable=True),
+                    exclusive=False,
+                )
+                return
+
+            elif command is not None and command.name == "/uninstall-extension":
+                self._add_user_message(text)
+                self.run_worker(self._uninstall_extension_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/install-skill":
+                self._add_user_message(text)
+                self.run_worker(self._install_skill_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/installed-skills":
+                self.run_worker(self._show_installed_skills_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/refresh-skills":
+                self.run_worker(self._refresh_skills_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/uninstall-skill":
+                self._add_user_message(text)
+                self.run_worker(self._uninstall_skill_async(command.arg), exclusive=False)
                 return
 
             # Regular message — send to LLM
+            self._maybe_seed_interactive_plan(text)
             self._add_user_message(text)
             self._messages.append({"role": "user", "content": text})
             self.run_worker(self._llm_response_async(), exclusive=True)
@@ -579,6 +827,173 @@ if _HAS_TEXTUAL:
             chat.mount(Static(msg, classes="msg-system"))
             self.call_after_refresh(chat.scroll_end)
 
+        def _apply_skill_command_status(self, status: SkillCommandStatus) -> None:
+            if status.level == "success":
+                self._add_system_message(f"[green]{status.text}[/green]")
+            elif status.level == "warning":
+                self._add_system_message(f"[yellow]{status.text}[/yellow]")
+            elif status.level == "error":
+                self._add_system_message(f"[red]{status.text}[/red]")
+            else:
+                self._add_system_message(status.text)
+
+        def _clear_chat_widgets(self) -> None:
+            chat = self.query_one("#chat-area", ScrollableContainer)
+            for widget in list(chat.children):
+                widget.remove()
+
+        def _clear_core_conversation(self) -> None:
+            try:
+                import bot.core as core
+
+                core.conversations.pop("__tui__", None)
+            except Exception:
+                pass
+
+        def _reset_session_runtime_state(self) -> None:
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "api_calls",
+            ):
+                self._session_stats[key] = 0
+            self._session_start = _time.time()
+            try:
+                import bot.core as core
+
+                core.reset_usage()
+            except Exception:
+                pass
+            try:
+                self.query_one("#usage-label", Label).update(
+                    "Tokens: 0 in · 0 out  │  Cost: $0.000000  │  Calls: 0"
+                )
+            except Exception:
+                pass
+
+        def _apply_session_command_view(self, view) -> None:
+            if getattr(view, "session_id", ""):
+                self._session_id = view.session_id
+            if getattr(view, "workspace_dir", ""):
+                self._workspace = view.workspace_dir
+            if getattr(view, "replace_session_metadata", False):
+                metadata = normalize_session_metadata(
+                    getattr(view, "session_metadata", {})
+                )
+                self._session_metadata = metadata
+                self._pipeline_workspace = str(
+                    metadata.get("pipeline_workspace", "") or ""
+                )
+            if getattr(view, "clear_pipeline_workspace", False):
+                self._set_active_pipeline_workspace(None)
+            if getattr(view, "clear_messages", False):
+                self._messages = []
+                self._clear_core_conversation()
+                self._clear_chat_widgets()
+            if getattr(view, "replace_messages", False):
+                self._messages = list(getattr(view, "messages", []))
+            if getattr(view, "reset_session_runtime", False):
+                self._reset_session_runtime_state()
+            self._refresh_header_info()
+            text = str(getattr(view, "output_text", "") or "")
+            if not text:
+                return
+            if getattr(view, "render_as_markup", False):
+                self._add_system_message(text)
+                return
+
+            from rich.markup import escape
+
+            if getattr(view, "success", True):
+                self._add_system_message(f"[green]{escape(text)}[/green]")
+            else:
+                self._add_system_message(f"[red]{escape(text)}[/red]")
+
+        def _apply_pipeline_command_view(self, view) -> None:
+            if getattr(view, "active_workspace", ""):
+                self._set_active_pipeline_workspace(view.active_workspace)
+            self._add_system_message(view.output_text)
+
+        def _apply_interactive_plan_command_view(self, view) -> None:
+            if getattr(view, "replace_session_metadata", False):
+                metadata = normalize_session_metadata(
+                    getattr(view, "session_metadata", {})
+                )
+                self._session_metadata = metadata
+                self._pipeline_workspace = str(
+                    metadata.get("pipeline_workspace", "") or ""
+                )
+            text = str(getattr(view, "output_text", "") or "")
+            if not text:
+                return
+            if getattr(view, "success", True):
+                self._add_system_message(text)
+            else:
+                from rich.markup import escape
+
+                self._add_system_message(f"[red]{escape(text)}[/red]")
+
+        def _command_leading_value(self, arg: str) -> str | None:
+            tokens = shlex.split(arg.strip()) if arg.strip() else []
+            if tokens and not tokens[0].startswith("--"):
+                return tokens[0]
+            return None
+
+        def _pipeline_snapshot_exists(self, explicit_workspace: str | None) -> bool:
+            snapshot = load_pipeline_workspace_snapshot(
+                resolve_pipeline_workspace(
+                    explicit_workspace,
+                    self._active_pipeline_workspace() or self._workspace,
+                )
+            )
+            return (
+                snapshot.has_pipeline_state
+                or snapshot.plan_path.exists()
+                or snapshot.todos_path.exists()
+            )
+
+        def _should_route_plan_commands_to_pipeline(self, arg: str) -> bool:
+            if self._pipeline_snapshot_exists(None):
+                return True
+            explicit_workspace = self._command_leading_value(arg)
+            return bool(
+                explicit_workspace
+                and self._pipeline_snapshot_exists(explicit_workspace)
+            )
+
+        def _should_route_resume_task_to_pipeline(self, arg: str) -> bool:
+            if self._pipeline_snapshot_exists(None):
+                return True
+            try:
+                command_args = parse_resume_task_command(arg)
+            except ValueError:
+                return False
+            if not command_args.output_dir:
+                return False
+            return self._pipeline_snapshot_exists(command_args.output_dir)
+
+        def _interactive_plan_context(self) -> str:
+            return build_interactive_plan_context_from_metadata(
+                self._session_metadata,
+            )
+
+        def _maybe_seed_interactive_plan(self, user_text: str) -> bool:
+            if self._pipeline_snapshot_exists(None):
+                return False
+            seed = maybe_seed_interactive_plan(
+                user_text,
+                session_metadata=self._session_metadata,
+                workspace_dir=self._workspace,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
+            )
+            if not seed.created:
+                return False
+            self._session_metadata = normalize_session_metadata(seed.session_metadata)
+            if seed.notice_text:
+                self._add_system_message(f"[dim]{seed.notice_text}[/dim]")
+            return True
+
         # ------------------------------------------------------------------
         # LLM response worker
         # ------------------------------------------------------------------
@@ -592,15 +1007,8 @@ if _HAS_TEXTUAL:
                 import bot.core as core
 
                 _USER = "__tui__"
-                # Seed history with everything *except* the last user message
-                # (llm_tool_loop will append that message itself).
-                seed = list(self._messages[:-1]) if len(self._messages) > 1 else []
-                core.conversations[_USER] = seed
-                core._conversation_access[_USER] = _time.time()
-
-                last_user_msg = (
-                    self._messages[-1].get("content", "") if self._messages else ""
-                )
+                last_user_msg = seed_core_conversation(core, _USER, self._messages)
+                usage_before = core.get_usage_snapshot()
                 import json
                 self._current_reasoning = None
 
@@ -633,52 +1041,52 @@ if _HAS_TEXTUAL:
 
                 # llm_tool_loop returns the final assistant reply as a plain string.
                 # Pass user_id and platform so graph memory is active.
+                active_mcp_servers = await load_active_mcp_server_entries_for_prompt()
+                loop_kwargs = {
+                    "user_id": "tui_user",
+                    "platform": "tui",
+                    "plan_context": self._interactive_plan_context(),
+                    "workspace": self._workspace,
+                    "pipeline_workspace": self._active_pipeline_workspace() or "",
+                    "mcp_servers": active_mcp_servers,
+                    "on_tool_call": tui_on_tool_call,
+                    "on_tool_result": tui_on_tool_result,
+                }
+                active_memory_scope = self._active_scoped_memory_scope()
+                if active_memory_scope:
+                    loop_kwargs["scoped_memory_scope"] = active_memory_scope
+                active_style = self._active_output_style() or ""
+                if active_style:
+                    loop_kwargs["output_style"] = active_style
                 final_text = await core.llm_tool_loop(
                     _USER,
                     last_user_msg,
-                    user_id="tui_user",
-                    platform="tui",
-                    on_tool_call=tui_on_tool_call,
-                    on_tool_result=tui_on_tool_result,
+                    **loop_kwargs,
                 )
                 elapsed = _time.time() - t0
 
                 # Collect usage snapshot from core
                 try:
                     snap = core.get_usage_snapshot()
-                    # Accumulate into session stats
-                    # (snap is cumulative from core; diff from last known totals)
-                    new_in  = snap["prompt_tokens"]     - self._session_stats.get("_last_prompt", 0)
-                    new_out = snap["completion_tokens"] - self._session_stats.get("_last_completion", 0)
-                    self._session_stats["prompt_tokens"]     += max(0, new_in)
-                    self._session_stats["completion_tokens"] += max(0, new_out)
-                    self._session_stats["total_tokens"]      = (
+                    delta = build_usage_delta(usage_before, snap)
+                    self._session_stats["prompt_tokens"] += delta.prompt_tokens
+                    self._session_stats["completion_tokens"] += delta.completion_tokens
+                    self._session_stats["total_tokens"] = (
                         self._session_stats["prompt_tokens"] + self._session_stats["completion_tokens"]
                     )
-                    self._session_stats["api_calls"]         = snap["api_calls"]
-                    self._session_stats["_last_prompt"]      = snap["prompt_tokens"]
-                    self._session_stats["_last_completion"]  = snap["completion_tokens"]
-                    # Cost for this turn
-                    turn_cost = (
-                        max(0, new_in)  / 1_000_000 * snap.get("input_price_per_1m",  0) +
-                        max(0, new_out) / 1_000_000 * snap.get("output_price_per_1m", 0)
-                    )
+                    self._session_stats["api_calls"] += delta.api_calls
                     usage_line = (
-                        f"[dim]↪ {new_in:,} in · {new_out:,} out · "
-                        f"${turn_cost:.6f} · {elapsed:.1f}s[/dim]"
+                        f"[dim]↪ {delta.prompt_tokens:,} in · {delta.completion_tokens:,} out"
                     )
+                    if delta.estimated_cost_usd > 0:
+                        usage_line += f" · ${delta.estimated_cost_usd:.6f}"
+                    usage_line += f" · {elapsed:.1f}s[/dim]"
                     self._update_usage_bar(snap)
                 except Exception:
                     usage_line = f"[dim]↪ {elapsed:.1f}s[/dim]"
 
                 # Sync the updated conversation history back to our messages list
-                updated_msgs = core._sanitize_tool_history(
-                    list(core.conversations.get(_USER, [])),
-                    warn=False,
-                )
-                core.conversations[_USER] = list(updated_msgs)
-                self._messages.clear()
-                self._messages.extend(updated_msgs)
+                sync_core_conversation(core, _USER, self._messages)
 
                 # Remove "⏳ Thinking..." message (last .msg-system widget)
                 try:
@@ -695,12 +1103,7 @@ if _HAS_TEXTUAL:
                 # Show per-turn usage stats below the answer
                 self._add_system_message(usage_line)
 
-                await save_session(
-                    self._session_id,
-                    self._messages,
-                    model=self._model,
-                    workspace=self._workspace,
-                )
+                await self._persist_session()
             except Exception as e:
                 logger.exception("TUI LLM response error")
                 self._add_system_message(f"⚠ Error: {e}")
@@ -733,35 +1136,37 @@ if _HAS_TEXTUAL:
 
         def _show_usage(self) -> None:
             """Display detailed usage statistics in the chat area."""
-            try:
-                sys.path.insert(0, str(_OMICSCLAW_DIR))
-                import bot.core as core
-                snap = core.get_usage_snapshot()
-            except Exception:
-                snap = {}
+            self._apply_session_command_view(
+                build_usage_command_view(
+                    session_usage=self._session_stats,
+                    session_seconds=_time.time() - self._session_start,
+                )
+            )
 
-            sess_in  = self._session_stats.get("prompt_tokens", 0)
-            sess_out = self._session_stats.get("completion_tokens", 0)
-            calls    = self._session_stats.get("api_calls", 0)
-            inp_p    = snap.get("input_price_per_1m", 0.0)
-            out_p    = snap.get("output_price_per_1m", 0.0)
-            cost     = sess_in / 1_000_000 * inp_p + sess_out / 1_000_000 * out_p
-            elapsed  = _time.time() - self._session_start
-            h, m     = int(elapsed // 3600), int((elapsed % 3600) // 60)
+        async def _show_doctor_async(self) -> None:
+            self._apply_session_command_view(
+                build_doctor_command_view(
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                    omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    output_dir=str(_OMICSCLAW_DIR / "output"),
+                )
+            )
 
-            lines = [
-                "┏━ Usage Report ━┓",
-                f"  • Model:       {snap.get('model', '?')} ({snap.get('provider', '?')})",
-                f"  • Input tokens:  {sess_in:,}",
-                f"  • Output tokens: {sess_out:,}",
-                f"  • Total tokens:  {sess_in + sess_out:,}",
-                f"  • API calls:     {calls}",
-                f"  • Est. cost:     ${cost:.6f} USD",
-                f"  • Price:         ${inp_p:.3f} / ${out_p:.3f} per 1M tokens (in/out)",
-                f"  • Session time:  {h}h {m}m",
-                "┗━━━━━━━━━━━━━━┛",
-            ]
-            self._add_system_message("\n".join(lines))
+        async def _show_context_async(self, arg: str) -> None:
+            self._apply_session_command_view(
+                build_context_command_view(
+                    arg,
+                    messages=self._messages,
+                    session_metadata=self._session_metadata,
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                    output_style=self._active_output_style() or "",
+                    omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    mcp_servers=self._configured_mcp_server_names(),
+                    surface="interactive",
+                )
+            )
 
 
         # ------------------------------------------------------------------
@@ -771,31 +1176,7 @@ if _HAS_TEXTUAL:
         async def _list_skills_async(self, domain_filter: str) -> None:
             """List registered skills, optionally filtered by domain."""
             try:
-                sys.path.insert(0, str(_OMICSCLAW_DIR))
-                import bot.core as core
-
-                # format_skills_table is available in core and already
-                # enumerates all domains/skills from the registry.
-                table_text = core.format_skills_table(plain=True)
-
-                # Filter by domain keyword if provided
-                if domain_filter:
-                    lines = table_text.splitlines()
-                    filtered: list[str] = []
-                    include = False
-                    for line in lines:
-                        # Section headers look like "[Domain] (N skills, ...)"
-                        if line.startswith("["):
-                            include = domain_filter.lower() in line.lower()
-                        if include or not line.startswith("["):
-                            # Always include non-section lines belonging to a
-                            # matched section, stop at next unmatched section
-                            if line.startswith("[") and not include:
-                                continue
-                            filtered.append(line)
-                    table_text = "\n".join(filtered) if filtered else f"No skills found for domain: {domain_filter}"
-
-                self._add_system_message(table_text)
+                self._add_system_message(list_skills_text(domain_filter or None))
             except Exception as e:
                 logger.exception("list skills error")
                 self._add_system_message(f"⚠ Error listing skills: {e}")
@@ -805,219 +1186,265 @@ if _HAS_TEXTUAL:
         # ------------------------------------------------------------------
 
         async def _run_skill_async(self, arg: str) -> None:
-            tokens = shlex.split(arg) if arg else []
-            if not tokens:
-                self._add_system_message("Usage: /run <skill> [--demo] [--input <path>] [--output <dir>]")
+            command = parse_skill_run_command(arg)
+            if command is None:
+                self._add_system_message(f"Usage: {RUN_COMMAND_USAGE}")
                 return
-            skill = tokens[0]
-            demo = "--demo" in tokens
-            input_path = None
-            output_dir = None
-            i = 1
-            while i < len(tokens):
-                if tokens[i] == "--input" and i + 1 < len(tokens):
-                    input_path = tokens[i + 1]
-                    i += 2
-                elif tokens[i] == "--output" and i + 1 < len(tokens):
-                    output_dir = tokens[i + 1]
-                    i += 2
-                else:
-                    i += 1
 
-            self._add_system_message(f"⚙ Running skill: {skill}...")
+            self._add_system_message(f"⚙ Running skill: {command.skill}...")
             try:
-                _oc = _load_omicsclaw_script()
-                result = _oc.run_skill(
-                    skill,
-                    input_path=input_path,
-                    output_dir=output_dir,
-                    demo=demo,
+                result = run_skill_command(command)
+                execution = build_skill_run_execution_view(
+                    arg,
+                    skill=command.skill,
+                    result=result,
                 )
-                if result.get("success"):
-                    method_line = f"\n  Method: {result.get('method')}" if result.get("method") else ""
-                    guide_line = f"\n  Guide: {result.get('readme_path')}" if result.get("readme_path") else ""
-                    notebook_line = f"\n  Notebook: {result.get('notebook_path')}" if result.get("notebook_path") else ""
-                    self._add_system_message(
-                        f"✓ Skill '{skill}' done in {result.get('duration_seconds', 0):.1f}s\n"
-                        f"  Output: {result.get('output_dir', '?')}"
-                        f"{method_line}"
-                        f"{guide_line}"
-                        f"{notebook_line}"
-                    )
-                    # Inject result into conversation for LLM context
-                    self._messages.append({"role": "user", "content": f"[Ran skill] {arg}"})
-                    self._messages.append({
-                        "role": "assistant",
-                        "content": f"Skill '{skill}' completed. Output: {result.get('output_dir', '?')}",
-                    })
-                    await save_session(
-                        self._session_id,
-                        self._messages,
-                        model=self._model,
-                        workspace=self._workspace,
-                    )
-                else:
-                    err = result.get("stderr", "unknown error")
-                    self._add_system_message(f"✗ Skill '{skill}' failed: {err[:300]}")
             except Exception as e:
                 logger.exception("run skill error")
-                self._add_system_message(f"⚠ Error running skill '{skill}': {e}")
+                execution = build_skill_run_execution_view(
+                    arg,
+                    skill=command.skill,
+                    result=build_skill_run_exception_result(e),
+                )
+
+            self._add_system_message(execution.system_message)
+            self._messages.extend(execution.history_messages)
+            await self._persist_session()
+
+        async def _show_tasks_async(self, arg: str) -> None:
+            if self._should_route_plan_commands_to_pipeline(arg):
+                view = build_pipeline_tasks_command_view(
+                    arg or None,
+                    workspace_fallback=self._active_pipeline_workspace() or self._workspace,
+                )
+                self._apply_pipeline_command_view(view)
+                return
+
+            view = build_interactive_tasks_command_view(
+                session_metadata=self._session_metadata,
+            )
+            self._apply_interactive_plan_command_view(view)
+
+        async def _show_plan_async(self, arg: str) -> None:
+            if self._should_route_plan_commands_to_pipeline(arg):
+                view = build_plan_preview_command_view(
+                    arg or None,
+                    workspace_fallback=self._active_pipeline_workspace() or self._workspace,
+                )
+                self._apply_pipeline_command_view(view)
+                return
+
+            view = build_interactive_plan_command_view(
+                arg,
+                session_metadata=self._session_metadata,
+                messages=self._messages,
+                workspace_dir=self._workspace,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
+            )
+            self._apply_interactive_plan_command_view(view)
+            if view.persist_session:
+                await self._persist_session()
+
+        async def _approve_plan_async(self, arg: str) -> None:
+            if self._should_route_plan_commands_to_pipeline(arg):
+                try:
+                    view = build_approve_plan_command_view(
+                        arg,
+                        workspace_fallback=self._active_pipeline_workspace() or self._workspace,
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    )
+                    self._apply_pipeline_command_view(view)
+                    if view.persist_session:
+                        await self._persist_session()
+                except ValueError as e:
+                    self._add_system_message(f"✗ {e}")
+                return
+
+            view = build_interactive_approve_plan_command_view(
+                arg,
+                session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
+            )
+            self._apply_interactive_plan_command_view(view)
+            if view.persist_session:
+                await self._persist_session()
+
+        async def _resume_task_async(self, arg: str) -> None:
+            if self._should_route_resume_task_to_pipeline(arg):
+                self._add_system_message(
+                    "Pipeline /resume-task is currently available in CLI mode. Use `oc interactive` to resume structured pipeline stages."
+                )
+                return
+
+            view = build_interactive_resume_task_command_view(
+                arg,
+                session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
+            )
+            self._apply_interactive_plan_command_view(view)
+            if view.persist_session:
+                await self._persist_session()
+
+        def _submit_programmatic_prompt(
+            self,
+            prompt: str,
+            *,
+            display_text: str = "",
+        ) -> None:
+            shown = (display_text or prompt).strip()
+            if shown:
+                self._add_user_message(shown)
+            self._messages.append({"role": "user", "content": prompt})
+            self.run_worker(self._llm_response_async(), exclusive=True)
+
+        async def _do_current_task_async(self, arg: str) -> None:
+            snapshot = load_interactive_plan_from_metadata(self._session_metadata)
+            if snapshot is None and self._should_route_plan_commands_to_pipeline(""):
+                self._add_system_message(
+                    "[yellow]/do-current-task targets interactive session plans. Use `/resume-task <stage>` in CLI mode for research pipeline workspaces.[/yellow]"
+                )
+                return
+
+            view = build_do_current_task_command_view(
+                arg,
+                session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
+            )
+            self._apply_interactive_plan_command_view(view)
+            if view.persist_session:
+                await self._persist_session()
+            if view.success and view.execution_prompt:
+                self._submit_programmatic_prompt(
+                    view.execution_prompt,
+                    display_text=view.suggested_prompt,
+                )
 
         # ------------------------------------------------------------------
         # /sessions worker
         # ------------------------------------------------------------------
 
-        async def _show_sessions_async(self) -> None:
-            sessions = await list_sessions(limit=10)
-            if not sessions:
-                self._add_system_message("No saved sessions.")
-                return
-            lines = ["Recent sessions (newest first):"]
-            for s in sessions:
-                preview = s.get("preview", "") or ""
-                lines.append(
-                    f"  [{s['session_id']}]  {preview[:40]}  "
-                    f"({s.get('message_count', 0)} msgs)"
+        async def _show_sessions_async(self, query: str = "") -> None:
+            view = await build_session_list_view(limit=10, query=query)
+            self._add_system_message(
+                format_session_list_plain(
+                    view,
+                    hint_text=(
+                        "Use /resume <id> or /resume tag:<tag> title:<text> workspace:<path> in TUI."
+                    ),
                 )
-            lines.append("\nUse /resume <id> in CLI mode to resume a session.")
-            self._add_system_message("\n".join(lines))
+            )
+
+        async def _resume_session_async(self, target: str) -> None:
+            query = target.strip()
+            if not query:
+                await self._show_sessions_async()
+                self._add_system_message(
+                    "[dim]Use /resume <session-id> or a search query to restore a session.[/dim]"
+                )
+                return
+
+            view = await build_resume_session_command_view(query)
+            if view.success:
+                self._apply_session_command_view(view)
+                return
+
+            matches = await build_session_list_view(limit=10, query=query)
+            if not matches.entries:
+                self._apply_session_command_view(view)
+                return
+            if len(matches.entries) == 1:
+                resolved = await build_resume_session_command_view(matches.entries[0].session_id)
+                self._apply_session_command_view(resolved)
+                return
+
+            self._add_system_message(
+                format_session_list_plain(
+                    matches,
+                    header=f"Sessions matching: {query}",
+                    hint_text="Multiple sessions matched. Re-run /resume <session-id> with one of the IDs above.",
+                )
+            )
+
+        async def _show_installed_extensions_async(self) -> None:
+            view = build_installed_extension_list_view(omicsclaw_dir=_OMICSCLAW_DIR)
+            if not view.entries:
+                self._add_system_message(
+                    f"[yellow]{view.empty_text}[/yellow]\n[dim]{view.hint_text}[/dim]"
+                )
+                return
+            self._add_system_message(format_installed_extension_list_plain(view))
+
+        async def _show_installed_skills_async(self) -> None:
+            view = build_installed_skill_list_view(omicsclaw_dir=_OMICSCLAW_DIR)
+            if not view.entries:
+                self._add_system_message(
+                    f"[yellow]{view.empty_text}[/yellow]\n[dim]{view.hint_text}[/dim]"
+                )
+                return
+            self._add_system_message(format_installed_skill_list_plain(view))
+
+        async def _refresh_skills_async(self) -> None:
+            for status in build_refresh_skills_statuses(omicsclaw_dir=_OMICSCLAW_DIR):
+                self._apply_skill_command_status(status)
+
+        async def _refresh_extensions_async(self) -> None:
+            for status in build_refresh_extensions_statuses(omicsclaw_dir=_OMICSCLAW_DIR):
+                self._apply_skill_command_status(status)
 
         # ------------------------------------------------------------------
         # /install-skill worker
         # ------------------------------------------------------------------
 
+        async def _install_extension_async(self, src: str) -> None:
+            statuses = await asyncio.to_thread(
+                install_extension_from_source,
+                src,
+                omicsclaw_dir=_OMICSCLAW_DIR,
+            )
+            for status in statuses:
+                self._apply_skill_command_status(status)
+
         async def _install_skill_async(self, src: str) -> None:
-            """Install a skill from a local path or GitHub URL."""
-            import shutil
-            import asyncio
-
-            if not src:
-                self._add_system_message(
-                    "Usage: /install-skill <local-path | github-url>\n"
-                    "Examples:\n"
-                    "  /install-skill /path/to/my-skill\n"
-                    "  /install-skill https://github.com/user/my-skill-repo"
-                )
-                return
-
-            skills_dir = _OMICSCLAW_DIR / "skills"
-            user_skills_dir = skills_dir / "user"
-            user_skills_dir.mkdir(parents=True, exist_ok=True)
-
-            is_github = src.startswith(("https://github.com", "http://github.com", "git@github.com"))
-
-            if is_github:
-                url_clean = src.rstrip("/")
-                skill_name = url_clean.split("/")[-1]
-                if skill_name.endswith(".git"):
-                    skill_name = skill_name[:-4]
-                dest = user_skills_dir / skill_name
-                if dest.exists():
-                    self._add_system_message(
-                        f"Skill '{skill_name}' already exists.\nRun /uninstall-skill {skill_name} first."
-                    )
-                    return
-                self._add_system_message(f"Cloning '{skill_name}' from GitHub...")
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "git", "clone", "--depth=1", src, str(dest),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-                    if proc.returncode != 0:
-                        self._add_system_message(
-                            f"✗ git clone failed:\n{stderr.decode()[:400]}"
-                        )
-                        return
-                    self._add_system_message(f"✓ Cloned to {dest}")
-                except FileNotFoundError:
-                    self._add_system_message("✗ git is not installed.")
-                    return
-                except asyncio.TimeoutError:
-                    self._add_system_message("✗ Clone timed out (120 s).")
-                    return
-            else:
-                src_path = Path(src).expanduser().resolve()
-                if not src_path.exists() or not src_path.is_dir():
-                    self._add_system_message(f"✗ Path not found or not a directory: {src_path}")
-                    return
-                skill_name = src_path.name
-                dest = user_skills_dir / skill_name
-                if dest.exists():
-                    self._add_system_message(
-                        f"Skill '{skill_name}' already exists.\nRun /uninstall-skill {skill_name} first."
-                    )
-                    return
-                try:
-                    shutil.copytree(src_path, dest)
-                    self._add_system_message(f"✓ Copied to {dest}")
-                except Exception as e:
-                    self._add_system_message(f"✗ Copy failed: {e}")
-                    return
-
-            # Reload registry
-            try:
-                from omicsclaw.core.registry import registry
-                registry._loaded = False
-                registry.load_all()
-                self._add_system_message(
-                    f"✓ Skill '{skill_name}' installed and registered.\n"
-                    f"Use /skills to list all available skills."
-                )
-            except Exception as e:
-                self._add_system_message(f"⚠ Registry refresh failed: {e}")
+            statuses = await asyncio.to_thread(
+                install_skill_from_source,
+                src,
+                omicsclaw_dir=_OMICSCLAW_DIR,
+            )
+            for status in statuses:
+                self._apply_skill_command_status(status)
 
         # ------------------------------------------------------------------
         # /uninstall-skill worker
         # ------------------------------------------------------------------
 
+        async def _toggle_extension_enabled_async(self, name: str, *, enable: bool) -> None:
+            statuses = await asyncio.to_thread(
+                set_installed_extension_enabled,
+                name,
+                enable=enable,
+                omicsclaw_dir=_OMICSCLAW_DIR,
+            )
+            for status in statuses:
+                self._apply_skill_command_status(status)
+
+        async def _uninstall_extension_async(self, name: str) -> None:
+            statuses = await asyncio.to_thread(
+                uninstall_extension,
+                name,
+                omicsclaw_dir=_OMICSCLAW_DIR,
+            )
+            for status in statuses:
+                self._apply_skill_command_status(status)
+
         async def _uninstall_skill_async(self, name: str) -> None:
-            """Remove a user-installed skill (skills/user/<name>)."""
-            import shutil
-
-            if not name:
-                self._add_system_message("Usage: /uninstall-skill <skill-name>")
-                return
-
-            skills_dir = _OMICSCLAW_DIR / "skills"
-            user_skills_dir = skills_dir / "user"
-            candidate = user_skills_dir / name
-
-            if not candidate.exists():
-                # Check if it's a built-in skill
-                found_builtin = any(
-                    (d / name).exists()
-                    for d in skills_dir.iterdir()
-                    if d.is_dir() and not d.name.startswith((".", "__"))
-                )
-                if found_builtin:
-                    self._add_system_message(
-                        f"'{name}' is a built-in skill and cannot be removed.\n"
-                        "Built-in skills are part of OmicsClaw core."
-                    )
-                else:
-                    installed = (
-                        [p.name for p in user_skills_dir.iterdir() if p.is_dir()]
-                        if user_skills_dir.exists() else []
-                    )
-                    msg = f"User-installed skill '{name}' not found."
-                    if installed:
-                        msg += f"\nInstalled: {', '.join(installed)}"
-                    self._add_system_message(msg)
-                return
-
-            try:
-                shutil.rmtree(candidate)
-                # Reload registry
-                from omicsclaw.core.registry import registry
-                registry.skills.pop(name, None)
-                registry._loaded = False
-                registry.load_all()
-                self._add_system_message(f"✓ Skill '{name}' removed and registry refreshed.")
-            except Exception as e:
-                logger.exception("uninstall skill error")
-                self._add_system_message(f"✗ Failed to remove skill: {e}")
+            statuses = await asyncio.to_thread(
+                uninstall_extension,
+                name,
+                omicsclaw_dir=_OMICSCLAW_DIR,
+                expected_type="skill-pack",
+            )
+            for status in statuses:
+                self._apply_skill_command_status(status)
 
 
         # ------------------------------------------------------------------
@@ -1025,45 +1452,20 @@ if _HAS_TEXTUAL:
         # ------------------------------------------------------------------
 
         def action_new_session(self) -> None:
-            self._session_id = generate_session_id()
-            self._messages = []
-            try:
-                import bot.core as core
-                core.conversations.pop("__tui__", None)
-            except Exception:
-                pass
-            self._add_system_message(f"New session: {self._session_id}")
+            self._apply_session_command_view(
+                build_new_session_command_view(generate_session_id())
+            )
 
         def action_clear_chat(self) -> None:
-            self._messages = []
-            try:
-                import bot.core as core
-                core.conversations.pop("__tui__", None)
-            except Exception:
-                pass
-            chat = self.query_one("#chat-area", ScrollableContainer)
-            # Remove children one by one (remove() is sync in Textual)
-            for w in list(chat.children):
-                w.remove()
-            self._add_system_message("Chat cleared.")
+            self._apply_session_command_view(
+                build_clear_conversation_command_view()
+            )
 
         def action_show_sessions(self) -> None:
             self.run_worker(self._show_sessions_async(), exclusive=False)
 
         def action_show_help(self) -> None:
-            self._add_system_message(
-                "OmicsClaw TUI — Keyboard shortcuts:\n"
-                "  Ctrl+N — New session\n"
-                "  Ctrl+L — Clear chat\n"
-                "  Ctrl+B — Toggle lateral sidebar (File Browser)\n"
-                "  Ctrl+S — List sessions\n"
-                "  Ctrl+H — Show help\n"
-                "  Ctrl+Q — Quit\n\n"
-                "Slash commands:\n"
-                "  /help /skills \\[domain] /run <skill> [--demo]\n"
-                "  /install-skill <path|url>  /uninstall-skill <name>\n"
-                "  /sessions /new /clear /export /exit (aliases: /quit, /q)"
-            )
+            self._add_system_message(format_tui_help_text(TUI_SLASH_COMMAND_SPECS))
 
         def action_toggle_sidebar(self) -> None:
             sidebar = self.query_one("#sidebar", DirectoryTree)
