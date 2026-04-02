@@ -63,6 +63,14 @@ metadata:
 - With it: marker ranking, top tables, and standard plots are generated in one run.
 - Why OmicsClaw: the wrapper keeps cluster-level marker discovery separate from broader DE workflows.
 
+## Core Capabilities
+
+1. **Three marker-ranking modes**: Wilcoxon, t-test, and logistic regression.
+2. **Cluster-focused interface**: one `groupby` contract for marker discovery across methods.
+3. **Standard direct figure outputs**: heatmap, dotplot, and volcano-style summaries.
+4. **Structured table exports**: full marker table plus configurable top-marker table.
+5. **Downstream-ready export**: writes `adata_with_markers.h5ad`, report, result JSON, README, and notebook artifacts.
+
 ## Scope Boundary
 
 Implemented methods:
@@ -73,12 +81,21 @@ Implemented methods:
 
 This skill is cluster-marker focused; for condition-aware DE use `sc-de`.
 
-## Input Contract
+## Input Formats
 
-- Accepted input: preprocessed `.h5ad`
-- Required metadata: a grouping column such as `leiden`
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | preferred | most realistic clustered-input path |
+| Shared-loader formats | `.h5`, `.loom`, `.csv`, `.tsv`, 10x directory | technically loadable | still need cluster labels to be meaningful |
+| Demo | `--demo` | yes | bundled fallback with synthetic clustering |
 
-## Workflow Summary
+### Input Expectations
+
+- The current skill expects a clustered or at least group-labeled AnnData object.
+- Required metadata: a grouping column such as `leiden`.
+- For best behavior, expression should already be normalized and clustering should already be biologically interpretable.
+
+## Workflow
 
 1. Load clustered AnnData.
 2. Rank genes for each cluster with the selected method.
@@ -99,6 +116,29 @@ python skills/singlecell/scrna/sc-markers/sc_markers.py \
   --input <data.h5ad> --groupby leiden --n-genes 100 --n-top 10 --output <dir>
 ```
 
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--groupby` | grouping column | core control for marker ranking |
+| `--method` | ranking backend | `wilcoxon`, `t-test`, or `logreg` |
+| `--n-genes` | maximum genes retained from ranking | affects exported ranking depth |
+| `--n-top` | top-hit export size | controls the compact summary table |
+
+## Algorithm / Methodology
+
+Current OmicsClaw `sc-markers` always:
+
+1. validates the grouping column
+2. runs Scanpy rank-gene logic with the selected statistical backend
+3. exports both full and compact marker summaries
+4. renders cluster-focused marker figures
+
+Important implementation notes:
+
+- this skill is for cluster-marker discovery, not replicate-aware condition DE
+- the same grouping column drives ranking and figure generation
+
 ## Output Contract
 
 Successful runs write:
@@ -111,6 +151,22 @@ Successful runs write:
 - `figures/volcano_plots.png`
 - `tables/cluster_markers_all.csv`
 - `tables/cluster_markers_top10.csv`
+
+### Visualization Contract
+
+The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+
+- `figures/markers_heatmap.png`
+- `figures/markers_dotplot.png`
+- `figures/volcano_plots.png`
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `tables/cluster_markers_top*.csv`
+3. `figures/markers_dotplot.png`
+4. `figures/markers_heatmap.png`
+5. `adata_with_markers.h5ad`
 
 ## Current Limitations
 

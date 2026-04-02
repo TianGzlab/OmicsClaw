@@ -22,4 +22,3 @@ source_urls:
 - **Do not invent unsupported knobs**: official DoubletFinder and scDblFinder document extra controls such as `pK`, `nExp`, `dbr`, `samples`, or `clusters`, but the current OmicsClaw wrapper does not expose them.
 - **Do not overclaim removal**: this skill annotates doublets in `obs`; it does not silently drop them from the dataset.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-doublet-detection.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-doublet-detection.md`.

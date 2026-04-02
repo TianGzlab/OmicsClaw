@@ -21,4 +21,3 @@ source_urls:
 - **Do not overclaim latent time**: latent time is tied to the dynamical path and should not be promised for every velocity run.
 - **Do not invent unsupported scVelo knobs**: the current OmicsClaw wrapper does not expose the full velocity-model parameter surface from upstream scVelo.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.

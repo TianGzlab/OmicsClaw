@@ -56,6 +56,14 @@ metadata:
 - With it: one run applies explicit QC cutoffs and records how many cells/genes were removed.
 - Why OmicsClaw: tissue presets and a stable output contract make filtering easier to reproduce.
 
+## Core Capabilities
+
+1. **Threshold-based filtering**: gene-count, count-depth, and mitochondrial cutoffs in one wrapper.
+2. **Tissue-aware presets**: wrapper-level heuristics for common tissues.
+3. **QC-aware operation**: reuses existing QC metrics or computes the minimum needed metrics first.
+4. **Direct filter summary figures**: before/after comparison and retention summary.
+5. **Downstream-ready export**: filtered AnnData, filter-stat table, report, structured result JSON, README, and notebook artifacts.
+
 ## Scope Boundary
 
 This skill currently exposes one public workflow: `threshold_filtering`.
@@ -73,14 +81,21 @@ This skill does not:
 2. run HVG, PCA, UMAP, or clustering
 3. remove doublets or ambient RNA
 
-## Input Contract
+## Input Formats
+
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | yes | current direct input path |
+| Demo | `--demo` | yes | bundled fallback |
+
+### Input Expectations
 
 - Accepted input: `.h5ad`
 - Expected data state: raw-count-like or QC-annotated AnnData
 - Important columns when present: `n_genes_by_counts`, `total_counts`, `pct_counts_mt`
 - If QC metrics are missing, the wrapper computes the minimum needed metrics before filtering
 
-## Workflow Summary
+## Workflow
 
 1. Load AnnData and inspect available QC columns.
 2. Apply optional tissue preset.
@@ -114,6 +129,21 @@ python skills/singlecell/scrna/sc-filter/sc_filter.py \
 | `--min-cells` | `3` | Minimum number of cells expressing a retained gene |
 | `--tissue` | none | OmicsClaw preset thresholds such as `pbmc`, `brain`, or `tumor` |
 
+## Algorithm / Methodology
+
+Current OmicsClaw `threshold_filtering` always:
+
+1. loads the AnnData object
+2. checks whether QC metrics already exist
+3. resolves optional tissue presets into effective thresholds
+4. filters cells by genes, counts, and mitochondrial percentage
+5. filters genes by `min_cells`
+6. exports filtered data plus summary artifacts
+
+Important implementation note:
+
+- `tissue` is an OmicsClaw wrapper preset, not an upstream Scanpy parameter.
+
 ## Output Contract
 
 Successful runs write:
@@ -124,6 +154,21 @@ Successful runs write:
 - `figures/`
 - `tables/filter_stats.csv`
 - `reproducibility/commands.sh`
+
+### Visualization Contract
+
+The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+
+- `figures/filter_comparison.png`
+- `figures/filter_summary.png`
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `figures/filter_comparison.png`
+3. `tables/filter_stats.csv`
+4. `figures/filter_summary.png`
+5. `filtered.h5ad`
 
 ## Current Limitations
 

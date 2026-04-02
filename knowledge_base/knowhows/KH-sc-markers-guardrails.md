@@ -20,4 +20,3 @@ source_urls:
 - **Do not overclaim biological certainty**: top-ranked markers are candidate discriminative genes, not final cell-type labels by themselves.
 - **Do not invent unsupported thresholds**: this wrapper does not expose a large matrix of extra rank-gene parameters beyond the public flags above.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-markers.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-markers.md`.

@@ -69,6 +69,14 @@ metadata:
 - With it: cells are annotated with standardized doublet scores and labels before downstream analysis.
 - Why OmicsClaw: one wrapper normalizes three common entry paths into the same output columns.
 
+## Core Capabilities
+
+1. **Three detector backends**: Scrublet, DoubletFinder, and scDblFinder.
+2. **Shared doublet contract**: standardized score, label, and classification columns in `obs`.
+3. **Direct QC figures**: doublet histogram plus optional UMAP projection.
+4. **Compact summary export**: summary table, processed AnnData, report, and structured result JSON.
+5. **No silent removal**: the skill annotates doublets but does not automatically drop them.
+
 ## Scope Boundary
 
 Implemented methods:
@@ -79,13 +87,20 @@ Implemented methods:
 
 The wrapper writes classification columns but does not automatically drop doublets from the AnnData object.
 
-## Input Contract
+## Input Formats
 
-- Accepted input: `.h5ad`
-- Expected data state: count-like matrix in `X`
-- Useful upstream step: run this before final clustering and annotation
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | yes | current direct input path |
+| Demo | `--demo` | yes | bundled fallback |
 
-## Workflow Summary
+### Input Expectations
+
+- Expected data state: count-like matrix in `X`.
+- Useful upstream step: run this before final clustering and annotation.
+- UMAP is optional; when available or computable, the wrapper can render doublet projections on UMAP.
+
+## Workflow
 
 1. Load AnnData or demo data.
 2. Run the selected detector.
@@ -107,6 +122,28 @@ python skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py \
   --expected-doublet-rate 0.08 --threshold 0.25 --output <dir>
 ```
 
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--method` | detector backend | `scrublet`, `doubletfinder`, or `scdblfinder` |
+| `--expected-doublet-rate` | expected doublet prior | shared high-level control |
+| `--threshold` | manual score cutoff | used only by the Scrublet path |
+
+## Algorithm / Methodology
+
+Current OmicsClaw `sc-doublet-detection` always:
+
+1. validates the requested backend
+2. runs doublet scoring with the selected detector
+3. standardizes `doublet_score`, `predicted_doublet`, and `doublet_classification`
+4. exports figures and summary tables
+
+Important implementation notes:
+
+- `threshold` only applies to `scrublet`.
+- `doubletfinder` can fall back to `scdblfinder` if the R path fails.
+
 ## Output Contract
 
 Successful runs write:
@@ -117,6 +154,21 @@ Successful runs write:
 - `figures/doublet_histogram.png`
 - `figures/umap_doublets.png` when a UMAP is available or can be computed
 - `tables/summary.csv`
+
+### Visualization Contract
+
+The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+
+- `figures/doublet_histogram.png`
+- `figures/umap_doublets.png` when available
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `figures/doublet_histogram.png`
+3. `tables/summary.csv`
+4. `figures/umap_doublets.png` when available
+5. `processed.h5ad`
 
 ## Current Limitations
 

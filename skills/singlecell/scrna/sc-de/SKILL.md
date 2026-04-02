@@ -78,6 +78,14 @@ metadata:
 - With it: the wrapper makes the statistical path explicit and preserves the public DE contract.
 - Why OmicsClaw: one interface covers quick Scanpy ranking and the heavier pseudobulk route.
 
+## Core Capabilities
+
+1. **Four DE paths**: Wilcoxon, t-test, MAST, and DESeq2 pseudobulk.
+2. **Separation of statistical questions**: exploratory single-cell ranking versus replicate-aware pseudobulk inference.
+3. **Matrix-aware contract**: normalized expression for ranking paths, raw counts for DESeq2 pseudobulk.
+4. **Direct DE figure exports**: marker dotplot and rank-gene summary where supported.
+5. **Downstream-ready export**: processed AnnData, DE tables, report, structured result JSON, README, and notebook artifacts.
+
 ## Scope Boundary
 
 Implemented methods:
@@ -87,14 +95,21 @@ Implemented methods:
 3. `mast` for R-backed hurdle-model DE
 4. `deseq2_r` for pseudobulk DE
 
-## Input Contract
+## Input Formats
+
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | yes | current direct input path |
+| Demo | `--demo` | yes | bundled fallback |
+
+### Input Expectations
 
 - Accepted input: preprocessed `.h5ad`
 - `wilcoxon`, `t-test`, and `mast` expect log-normalized expression, preferably in `adata.raw`
 - `deseq2_r` expects raw counts, preferably in `layers["counts"]`; it may read `adata.X` only when `X` itself is still an unnormalized count matrix, plus `group1`, `group2`, `sample_key`, and `celltype_key`
 - All methods require a grouping column in `obs`
 
-## Workflow Summary
+## Workflow
 
 1. Validate the requested DE mode.
 2. Run Scanpy ranking or pseudobulk DESeq2.
@@ -118,6 +133,41 @@ python skills/singlecell/scrna/sc-de/sc_de.py \
   --sample-key sample_id --celltype-key cell_type --output <dir>
 ```
 
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--method` | DE backend | `wilcoxon`, `t-test`, `mast`, or `deseq2_r` |
+| `--groupby` | grouping column | core comparison axis |
+| `--group1` / `--group2` | comparison levels | especially important for `mast` and `deseq2_r` |
+| `--n-top-genes` | compact export size | ranking-output control |
+| `--sample-key` | replicate/sample column | required by `deseq2_r` |
+| `--celltype-key` | pseudobulk aggregation label | used by `deseq2_r` |
+
+## Algorithm / Methodology
+
+### Exploratory ranking paths
+
+Current OmicsClaw exploratory DE includes:
+
+1. `wilcoxon`
+2. `t-test`
+3. `mast`
+
+These paths answer the cluster-marker or group-ranking question on normalized expression, ideally from `adata.raw`.
+
+### Replicate-aware pseudobulk path
+
+Current OmicsClaw `deseq2_r`:
+
+1. expects raw counts, ideally from `layers["counts"]`
+2. aggregates counts to pseudobulk using `sample_key` and `celltype_key`
+3. runs DESeq2 through the shared R bridge
+
+Important implementation note:
+
+- `deseq2_r` is the only path here that is explicitly replicate-aware in the current wrapper.
+
 ## Output Contract
 
 Successful runs write:
@@ -128,6 +178,21 @@ Successful runs write:
 - `tables/de_full.csv`
 - `tables/markers_top.csv`
 - `reproducibility/commands.sh`
+
+### Visualization Contract
+
+The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+
+- `figures/marker_dotplot.png` when ranking outputs support it
+- `figures/rank_genes_groups.png` when ranking outputs support it
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `tables/de_full.csv`
+3. `tables/markers_top.csv`
+4. `figures/rank_genes_groups.png` when available
+5. `processed.h5ad`
 
 ## Current Limitations
 

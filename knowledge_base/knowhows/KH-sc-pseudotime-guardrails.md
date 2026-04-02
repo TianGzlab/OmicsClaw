@@ -22,4 +22,3 @@ source_urls:
 - **Do not invent unsupported backends**: this build exposes only the DPT trajectory path, even if users mention other trajectory tools.
 - **Do not hide root selection**: if the root is uncertain, say that explicitly instead of pretending pseudotime direction is fixed by the algorithm alone.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.

@@ -103,6 +103,14 @@ metadata:
 - With it: integrated representations make cross-sample comparison easier.
 - Why OmicsClaw: one contract standardizes multiple integration backends and their diagnostics.
 
+## Core Capabilities
+
+1. **Multiple integration backends**: Harmony, scVI, scANVI, BBKNN, Scanorama, plus supported R-backed methods.
+2. **Shared batch contract**: one `batch_key`-centric interface across Python and R paths.
+3. **Standard integration gallery**: batch-colored UMAP, cluster-colored UMAP, batch-mixing heatmap, and integration metric plot.
+4. **Figure-ready exports**: `figure_data/` CSVs plus a gallery manifest for downstream restyling.
+5. **Downstream-ready export**: writes integrated `processed.h5ad`, tables, report, structured result JSON, README, and notebook bundle.
+
 ## Scope Boundary
 
 Actively implemented methods in this wrapper:
@@ -119,14 +127,21 @@ R-backed methods (require corresponding R packages):
 2. `seurat_cca`
 3. `seurat_rpca`
 
-## Input Contract
+## Input Formats
 
-- Accepted input: preprocessed `.h5ad`
-- Required metadata: a batch column such as `batch`, `sample`, or `sample_id`
-- Expected state: normalized data plus PCA or data suitable for PCA recomputation
-- Matrix contract: `harmony`, `bbknn`, and `scanorama` work on normalized/PCA-ready representations; `scvi`, `scanvi`, `fastmnn`, `seurat_cca`, and `seurat_rpca` should preserve raw counts in `layers["counts"]` when available
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | yes | current direct input path |
+| Demo | `--demo` | yes | bundled merged-example fallback |
 
-## Workflow Summary
+### Input Expectations
+
+- Required metadata: a batch column such as `batch`, `sample`, or `sample_id`.
+- Expected state: normalized data plus PCA or data suitable for PCA recomputation.
+- `harmony`, `bbknn`, and `scanorama` operate on normalized / PCA-ready representations.
+- `scvi`, `scanvi`, `fastmnn`, `seurat_cca`, and `seurat_rpca` should preserve raw counts in `layers["counts"]` when available.
+
+## Workflow
 
 1. Validate batch labels and required dependencies.
 2. Run the selected integration backend.
@@ -148,6 +163,38 @@ python skills/singlecell/scrna/sc-batch-integration/sc_integrate.py \
   --input <merged.h5ad> --method scanorama --batch-key sample_id --output <dir>
 ```
 
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--method` | integration backend | `harmony`, `scvi`, `scanvi`, `bbknn`, `scanorama`, `fastmnn`, `seurat_cca`, or `seurat_rpca` |
+| `--batch-key` | batch metadata column | core public control across all backends |
+| `--n-epochs` | training/runtime control | used by `scvi` and `scanvi` |
+| `--no-gpu` | force CPU execution | relevant to `scvi` / `scanvi` paths |
+
+## Algorithm / Methodology
+
+### Shared integration contract
+
+Current OmicsClaw `sc-batch-integration` always:
+
+1. validates the requested backend
+2. checks that `batch_key` exists
+3. runs backend-specific correction or latent-space learning
+4. rebuilds neighbors and UMAP in the integrated representation
+5. exports one standardized AnnData plus gallery, tables, and result JSON
+
+### Backend groups
+
+- **Graph / embedding correction**: `harmony`, `bbknn`, `scanorama`
+- **Latent-variable models**: `scvi`, `scanvi`
+- **R-backed bridges**: `fastmnn`, `seurat_cca`, `seurat_rpca`
+
+Important implementation notes:
+
+- `scanvi` depends on labels; when labels are absent the current wrapper can fall back to `scvi`.
+- R-backed paths rely on the shared H5AD bridge rather than native Seurat object input.
+
 ## Output Contract
 
 Successful runs write:
@@ -155,9 +202,29 @@ Successful runs write:
 - `processed.h5ad`
 - `report.md`
 - `result.json`
-- `figures/`
-- `tables/`
+- `figures/manifest.json`
+- `figure_data/manifest.json`
+- `tables/integration_summary.csv`
+- `tables/batch_sizes.csv`
 - `reproducibility/commands.sh`
+
+### Visualization Contract
+
+The current standard Python gallery is recipe-based and uses:
+
+- `overview`: UMAP colored by batch and by the active label column
+- `diagnostic`: batch-mixing heatmap
+- `supporting`: integration metric summary bar plot
+
+`figure_data/` is the stable hand-off layer for downstream styling without rerunning integration.
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `figures/umap_<batch_key>.png`
+3. `figures/batch_mixing_heatmap.png`
+4. `tables/integration_summary.csv`
+5. `processed.h5ad`
 
 ## Current Limitations
 

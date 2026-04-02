@@ -21,4 +21,3 @@ source_urls:
 - **Do not invent unsupported knobs**: official LIANA and CellChat workflows expose extra filters such as expression cutoffs and permutation settings, but the current OmicsClaw wrapper does not expose them.
 - **Do not overclaim species support**: if the ligand-receptor database coverage is uncertain for the requested species, say so.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-cell-communication.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-cell-communication.md`.

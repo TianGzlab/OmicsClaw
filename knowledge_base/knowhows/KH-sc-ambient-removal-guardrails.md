@@ -23,4 +23,3 @@ source_urls:
 - **Do not invent hidden knobs**: official CellBender docs also discuss `total-droplets-included`, but the current OmicsClaw wrapper does not expose it.
 - **Do not fake SoupX readiness**: if the required raw/filtered inputs are missing, say the wrapper will fall back instead of pretending full SoupX control is available.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-ambient-removal.md`.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-ambient-removal.md`.

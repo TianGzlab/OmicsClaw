@@ -39,6 +39,17 @@ metadata:
           - "--method scvelo_steady_state or --mode steady_state: steady-state approximation path."
     saves_h5ad: true
     requires_preprocessed: true
+    requires:
+      bins: [python3]
+      env: []
+      config: []
+    emoji: "S"
+    homepage: https://github.com/OmicsClaw/OmicsClaw
+    os: [macos, linux]
+    install:
+      - kind: pip
+        package: scvelo
+        bins: []
     trigger_keywords:
       - rna velocity
       - velocity
@@ -57,6 +68,14 @@ metadata:
 - With it: velocity backend selection and output naming are consistent across runs.
 - Why OmicsClaw: one wrapper captures velocity figures, latent-time summaries, and method provenance.
 
+## Core Capabilities
+
+1. **Three scVelo modes**: stochastic, dynamical, and steady-state.
+2. **Public alias compatibility**: both `--method` and `--mode` map into the same backend selection logic.
+3. **Velocity-specific exports**: stream plot, magnitude plot, and optional latent-time view.
+4. **Explicit layer contract**: requires `spliced` and `unspliced` layers before execution.
+5. **Downstream-ready export**: writes `adata_with_velocity.h5ad`, report, result JSON, README, and notebook artifacts.
+
 ## Scope Boundary
 
 Implemented backends:
@@ -72,13 +91,22 @@ Public alias behavior:
 
 Both point to the same backend selection logic.
 
-## Input Contract
+## Input Formats
 
-- Accepted input: `.h5ad`
-- Required layers: `layers["spliced"]` and `layers["unspliced"]`
-- Expected upstream state: normalized/preprocessed single-cell AnnData
+| Format | Extension / form | Current wrapper support | Notes |
+|--------|------------------|-------------------------|-------|
+| AnnData | `.h5ad` | preferred | most realistic path with velocity layers |
+| Loom | `.loom` | technically loadable | useful only when spliced/unspliced layers are present |
+| Shared-loader formats | `.h5`, `.csv`, `.tsv`, 10x directory | technically loadable | rarely suitable unless velocity layers survive conversion |
+| Demo | `--demo` | yes | bundled fallback |
 
-## Workflow Summary
+### Input Expectations
+
+- Required layers: `layers["spliced"]` and `layers["unspliced"]`.
+- Expected upstream state: normalized / preprocessed single-cell AnnData.
+- Latent time should only be promised for the dynamical path when the fit succeeds.
+
+## Workflow
 
 1. Validate scVelo availability and required layers.
 2. Run the selected velocity backend.
@@ -96,6 +124,29 @@ python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
   --input <data.h5ad> --mode dynamical --n-jobs 8 --output <dir>
 ```
 
+## Public Parameters
+
+| Parameter | Role | Notes |
+|-----------|------|-------|
+| `--method` | velocity backend id | accepts `scvelo_stochastic`, `scvelo_dynamical`, or `scvelo_steady_state` |
+| `--mode` | scVelo-style alias | accepts `stochastic`, `dynamical`, or `steady_state` |
+| `--n-jobs` | parallelism control | runtime knob for scVelo fitting |
+
+## Algorithm / Methodology
+
+Current OmicsClaw `sc-velocity` always:
+
+1. validates the required spliced/unspliced layers
+2. resolves the requested public alias into an internal scVelo mode
+3. runs velocity estimation
+4. renders stream and magnitude figures
+5. writes latent-time outputs only when the chosen mode and fit actually support them
+
+Important implementation notes:
+
+- `scvelo_dynamical` and `mode=dynamical` point to the same backend logic.
+- latent time is mode- and fit-dependent, not a guaranteed output for every run.
+
 ## Output Contract
 
 Successful runs write:
@@ -106,6 +157,22 @@ Successful runs write:
 - `figures/velocity_stream.png`
 - `figures/velocity_magnitude_umap.png`
 - `figures/latent_time_umap.png` when latent time is available
+
+### Visualization Contract
+
+The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+
+- `figures/velocity_stream.png`
+- `figures/velocity_magnitude_umap.png`
+- `figures/latent_time_umap.png` when available
+
+### What Users Should Inspect First
+
+1. `report.md`
+2. `figures/velocity_stream.png`
+3. `figures/velocity_magnitude_umap.png`
+4. `figures/latent_time_umap.png` when available
+5. `adata_with_velocity.h5ad`
 
 ## Current Limitations
 
