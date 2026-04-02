@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -101,13 +101,18 @@ def run_cellbender(
             total_droplets,
         )
 
-    # Verify cellbender CLI is available
-    if shutil.which("cellbender") is None:
+    try:
+        import cellbender  # noqa: F401
+    except ImportError as exc:
         raise RuntimeError(
-            "CellBender CLI not found on PATH.\n"
+            "CellBender Python package is not installed in the active environment.\n"
             "Install: pip install cellbender\n"
             "See: https://cellbender.readthedocs.io/"
-        )
+        ) from exc
+
+    runner_path = Path(__file__).with_name("cellbender_compat_runner.py")
+    if not runner_path.exists():
+        raise FileNotFoundError(f"CellBender compatibility runner not found: {runner_path}")
 
     env = os.environ.copy()
     conda_prefix = env.get("CONDA_PREFIX")
@@ -131,10 +136,12 @@ def run_cellbender(
             use_cuda = False
 
     # Build CLI command
+    checkpoint_tarball = output_dir / "ckpt.tar.gz"
     cmd = [
-        "cellbender", "remove-background",
+        sys.executable, str(runner_path), "remove-background",
         "--input", str(raw_h5),
         "--output", str(output_h5),
+        "--checkpoint", str(checkpoint_tarball),
         "--expected-cells", str(expected_cells),
         "--total-droplets-included", str(total_droplets),
         "--epochs", str(epochs),
@@ -154,7 +161,13 @@ def run_cellbender(
 
     logger.info("Running CellBender: %s", " ".join(cmd))
 
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(output_dir),
+    )
 
     if result.returncode != 0:
         # Log stderr for diagnostics
@@ -187,6 +200,7 @@ def run_cellbender(
     adata.uns["cellbender"] = {
         "raw_h5": str(raw_h5),
         "output_h5": str(load_path),
+        "checkpoint_tarball": str(checkpoint_tarball),
         "expected_cells": expected_cells,
         "total_droplets": total_droplets,
         "epochs": epochs,
