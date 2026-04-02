@@ -54,7 +54,7 @@ from ._llm_bridge_support import (
     seed_core_conversation,
     sync_core_conversation,
 )
-from ._mcp import list_mcp_servers
+from ._mcp import list_mcp_servers, load_active_mcp_server_entries_for_prompt
 from ._memory_command_support import (
     build_memory_command_view,
     resolve_active_scoped_memory_scope,
@@ -1041,11 +1041,7 @@ if _HAS_TEXTUAL:
 
                 # llm_tool_loop returns the final assistant reply as a plain string.
                 # Pass user_id and platform so graph memory is active.
-                active_mcp_servers = tuple(
-                    entry.get("name", "")
-                    for entry in list_mcp_servers()
-                    if entry.get("name")
-                )
+                active_mcp_servers = await load_active_mcp_server_entries_for_prompt()
                 loop_kwargs = {
                     "user_id": "tui_user",
                     "platform": "tui",

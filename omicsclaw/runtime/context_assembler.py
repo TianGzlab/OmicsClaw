@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import re
@@ -114,6 +115,7 @@ class AssembledChatContext:
     session_id: str | None
     memory_context: str
     scoped_memory_context: str
+    skill_context: str
     user_text: str
     user_message_content: str | list[dict[str, Any]]
     skill_hint: str
@@ -275,6 +277,10 @@ def _invoke_legacy_prompt_builder(prompt_builder, **kwargs) -> str:
         return prompt_builder(**kwargs)
 
 
+async def _call_sync_in_background(func, /, *args, **kwargs):
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 def assemble_prompt_context(
     *,
     request: ContextAssemblyRequest | None = None,
@@ -321,9 +327,13 @@ async def assemble_chat_context(
 ) -> AssembledChatContext:
     session_id = f"{platform}:{user_id}:{chat_id}" if user_id and platform else None
     memory_context = ""
+    memory_task = None
     if session_manager and session_id:
-        await session_manager.get_or_create(user_id, platform, str(chat_id))
-        memory_context = await session_manager.load_context(session_id)
+        async def _load_session_memory() -> str:
+            await session_manager.get_or_create(user_id, platform, str(chat_id))
+            return await session_manager.load_context(session_id)
+
+        memory_task = asyncio.create_task(_load_session_memory())
 
     user_text = extract_user_text(user_content)
     skill_hint, domain_hint = extract_analysis_hints(
@@ -332,49 +342,106 @@ async def assemble_chat_context(
     )
 
     capability_context = ""
+    capability_decision = None
+    capability_task = None
     if should_attach_capability_context(user_text, skill_aliases=skill_aliases):
         resolver = capability_resolver or _default_capability_resolver
+        capability_task = asyncio.create_task(
+            _call_sync_in_background(
+                resolver,
+                user_text,
+                domain_hint=domain_hint,
+            )
+        )
+
+    if memory_task is not None:
         try:
-            decision = resolver(user_text, domain_hint=domain_hint)
-            capability_context = decision.to_prompt_block()
-            if not skill_hint and getattr(decision, "chosen_skill", ""):
-                skill_hint = decision.chosen_skill
-            if not domain_hint and getattr(decision, "domain", ""):
-                domain_hint = decision.domain
+            memory_context = await memory_task
+        except Exception as exc:
+            LOGGER.warning("Session memory context preparation failed (non-fatal): %s", exc)
+
+    if capability_task is not None:
+        try:
+            capability_decision = await capability_task
+            capability_context = capability_decision.to_prompt_block()
+            if not skill_hint and getattr(capability_decision, "chosen_skill", ""):
+                skill_hint = capability_decision.chosen_skill
+            if not domain_hint and getattr(capability_decision, "domain", ""):
+                domain_hint = capability_decision.domain
         except Exception as exc:
             LOGGER.warning("Capability resolution context failed (non-fatal): %s", exc)
 
     surface = "interactive" if platform in {"cli", "tui"} else "bot"
     prompt_pack_context = ""
+    scoped_memory_context = ""
+    skill_context = ""
+
+    prompt_pack_task = None
     if omicsclaw_dir:
-        try:
+        def _load_prompt_pack() -> str:
             from omicsclaw.extensions import build_prompt_pack_context
 
-            prompt_pack_context = build_prompt_pack_context(
+            return build_prompt_pack_context(
                 omicsclaw_dir,
                 surface=surface,
                 skill=skill_hint,
                 query=user_text[:200] if user_text else "",
                 domain=domain_hint,
             )
-        except Exception as exc:
-            LOGGER.warning("Prompt-pack context preparation failed (non-fatal): %s", exc)
 
-    scoped_memory_context = ""
+        prompt_pack_task = asyncio.create_task(_call_sync_in_background(_load_prompt_pack))
+
+    scoped_memory_task = None
     if workspace or pipeline_workspace:
-        try:
-            loader = scoped_memory_loader
-            if loader is None:
-                from omicsclaw.memory.scoped_memory_select import load_scoped_memory_context as _load_scoped_memory_context
+        loader = scoped_memory_loader
+        if loader is None:
+            from omicsclaw.memory.scoped_memory_select import load_scoped_memory_context as _load_scoped_memory_context
 
-                loader = _load_scoped_memory_context
-            recall = loader(
+            loader = _load_scoped_memory_context
+
+        scoped_memory_task = asyncio.create_task(
+            _call_sync_in_background(
+                loader,
                 query=user_text[:200] if user_text else "",
                 domain=domain_hint,
                 workspace=workspace,
                 pipeline_workspace=pipeline_workspace,
                 preferred_scope=scoped_memory_scope,
             )
+        )
+
+    skill_context_task = None
+    skill_candidates = tuple(
+        candidate.skill
+        for candidate in getattr(capability_decision, "skill_candidates", [])[:3]
+        if getattr(candidate, "skill", "")
+    )
+    if not skill_candidates and skill_hint:
+        skill_candidates = (skill_hint,)
+    if skill_hint or skill_candidates:
+        def _load_skill_context() -> str:
+            from .context_layers import load_skill_context
+
+            return load_skill_context(
+                skill=skill_hint,
+                query=user_text[:200] if user_text else "",
+                domain=domain_hint,
+                candidate_skills=skill_candidates,
+            )
+
+        skill_context_task = asyncio.create_task(
+            _call_sync_in_background(_load_skill_context)
+        )
+
+    if prompt_pack_task is not None:
+        try:
+            prompt_pack_context = await prompt_pack_task
+        except Exception as exc:
+            LOGGER.warning("Prompt-pack context preparation failed (non-fatal): %s", exc)
+
+    if scoped_memory_task is not None:
+        try:
+            recall = await scoped_memory_task
             if recall is None:
                 scoped_memory_context = ""
             elif hasattr(recall, "to_context_text"):
@@ -384,14 +451,22 @@ async def assemble_chat_context(
         except Exception as exc:
             LOGGER.warning("Scoped memory context preparation failed (non-fatal): %s", exc)
 
+    if skill_context_task is not None:
+        try:
+            skill_context = str(await skill_context_task).strip()
+        except Exception as exc:
+            LOGGER.warning("Skill context prefetch failed (non-fatal): %s", exc)
+
     prompt_context = assemble_prompt_context(
         request=ContextAssemblyRequest(
             surface=surface,
             omicsclaw_dir=omicsclaw_dir,
             output_style=output_style,
             memory_context=memory_context,
+            skill_context=skill_context,
             scoped_memory_context=scoped_memory_context,
             skill=skill_hint,
+            skill_candidates=skill_candidates,
             query=user_text[:200] if user_text else "",
             domain=domain_hint,
             capability_context=capability_context,
@@ -410,7 +485,9 @@ async def assemble_chat_context(
         builder_kwargs = {
             "memory_context": memory_context,
             "scoped_memory_context": scoped_memory_context,
+            "skill_context": skill_context,
             "skill": skill_hint,
+            "skill_candidates": skill_candidates,
             "query": user_text[:200] if user_text else "",
             "domain": domain_hint,
             "capability_context": capability_context,
@@ -442,6 +519,7 @@ async def assemble_chat_context(
         session_id=session_id,
         memory_context=memory_context,
         scoped_memory_context=scoped_memory_context,
+        skill_context=skill_context,
         user_text=user_text,
         user_message_content=build_user_message_content(
             user_content,

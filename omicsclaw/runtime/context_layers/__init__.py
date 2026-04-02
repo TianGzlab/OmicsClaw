@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import time
@@ -267,6 +268,11 @@ def build_memory_context_block(memory_context: str) -> str:
     return f"## Your Memory\n\n{value}"
 
 
+def build_skill_context_block(skill_context: str) -> str:
+    value = str(skill_context or "").strip()
+    return value
+
+
 def build_scoped_memory_context_block(scoped_memory_context: str) -> str:
     value = str(scoped_memory_context or "").strip()
     if not value:
@@ -316,20 +322,49 @@ def build_knowledge_guidance_block(knowledge_context: str) -> str:
 
 
 def build_mcp_instructions_block(mcp_servers: tuple[str, ...] | list[str] | None) -> str:
-    names = tuple(
-        dict.fromkeys(
-            str(name).strip()
-            for name in (mcp_servers or ())
-            if str(name).strip()
-        )
-    )
+    active_entries = []
+    for entry in (mcp_servers or ()):
+        if isinstance(entry, dict):
+            name = str(entry.get("name", "") or "").strip()
+            if not name:
+                continue
+            active = bool(
+                entry.get("active")
+                or entry.get("loaded")
+                or entry.get("connected")
+                or entry.get("ready")
+            )
+            if not active:
+                continue
+            active_entries.append(
+                {
+                    "name": name,
+                    "transport": str(entry.get("transport", "") or "").strip(),
+                }
+            )
+            continue
+
+        name = str(entry).strip()
+        if name:
+            active_entries.append({"name": name, "transport": ""})
+
+    if not active_entries:
+        return ""
+
+    names = tuple(dict.fromkeys(item["name"] for item in active_entries if item["name"]))
     if not names:
         return ""
 
     joined = ", ".join(names)
+    transport_hints = sorted(
+        {item["transport"] for item in active_entries if item.get("transport")}
+    )
+    transport_line = ""
+    if transport_hints:
+        transport_line = f"\n- Active MCP transports: {', '.join(transport_hints)}"
     return (
         "## MCP Instructions\n\n"
-        f"- Configured MCP servers for this session: {joined}\n"
+        f"- Active MCP servers for this session: {joined}{transport_line}\n"
         "- Only use MCP-backed tools when they are actually exposed in the active tool list.\n"
         "- If a needed MCP capability is configured but not loaded as a callable tool, say so explicitly instead of assuming it is available."
     )
@@ -402,6 +437,108 @@ def should_prefetch_knowledge_guidance(
     if not normalized_query.strip():
         return False
     return any(marker in normalized_query for marker in _KNOWLEDGE_GUIDANCE_MARKERS)
+
+
+def should_prefetch_skill_context(
+    *,
+    query: str = "",
+    skill: str = "",
+    domain: str = "",
+    capability_context: str = "",
+) -> bool:
+    if str(skill or "").strip():
+        return True
+    capability_lower = str(capability_context or "").lower()
+    if "coverage: exact_skill" in capability_lower or "coverage: partial_skill" in capability_lower:
+        return True
+
+    normalized_query = str(query or "").strip().lower()
+    if not normalized_query:
+        return False
+    if domain and domain in normalized_query:
+        return True
+    return bool(
+        any(token in normalized_query for token in ("run ", "analy", "preprocess", "cluster", "trajectory", "deconvolution"))
+        or "." in normalized_query
+    )
+
+
+def load_skill_context(
+    *,
+    skill: str = "",
+    query: str = "",
+    domain: str = "",
+    candidate_skills: tuple[str, ...] | list[str] | None = None,
+    max_candidates: int = 3,
+    max_param_hints: int = 4,
+) -> str:
+    if not should_prefetch_skill_context(
+        query=query,
+        skill=skill,
+        domain=domain,
+    ):
+        return ""
+
+    registry.load_all()
+    selected_skill = str(skill or "").strip()
+    candidate_list = [
+        str(name).strip()
+        for name in (candidate_skills or ())
+        if str(name).strip()
+    ]
+    if not selected_skill and candidate_list:
+        selected_skill = candidate_list[0]
+    if not selected_skill:
+        return ""
+
+    info = registry.skills.get(selected_skill)
+    if info is None:
+        return ""
+
+    domain_value = str(info.get("domain", "") or domain or "").strip()
+    description = str(info.get("description", "") or "").strip()
+    legacy_aliases = [
+        str(alias).strip()
+        for alias in info.get("legacy_aliases", []) or []
+        if str(alias).strip()
+    ]
+    param_hints = list((info.get("param_hints", {}) or {}).keys())[:max_param_hints]
+
+    lines = [
+        "## Prefetched Skill Context",
+        "",
+        f"- Selected skill: `{selected_skill}`",
+    ]
+    if domain_value:
+        lines.append(f"- Domain: `{domain_value}`")
+    if description:
+        lines.append(f"- Summary: {description}")
+    if legacy_aliases:
+        lines.append(
+            "- Legacy aliases: "
+            + ", ".join(f"`{alias}`" for alias in legacy_aliases[:3])
+        )
+    if param_hints:
+        lines.append(
+            "- Method/parameter hints declared in SKILL.md: "
+            + ", ".join(f"`{hint}`" for hint in param_hints)
+        )
+    if info.get("requires_preprocessed"):
+        lines.append("- This skill expects preprocessed input.")
+    if info.get("saves_h5ad"):
+        lines.append("- This skill typically writes updated `.h5ad` outputs.")
+
+    nearby = [
+        name for name in candidate_list
+        if name and name != selected_skill
+    ][: max(0, max_candidates - 1)]
+    if nearby:
+        lines.append(
+            "- Nearby alternatives: "
+            + ", ".join(f"`{name}`" for name in nearby)
+        )
+
+    return "\n".join(lines).strip()
 
 
 def load_knowledge_guidance(
@@ -487,8 +624,10 @@ class ContextAssemblyRequest:
     base_persona: str = ""
     output_style: str = ""
     memory_context: str = ""
+    skill_context: str = ""
     scoped_memory_context: str = ""
     skill: str = ""
+    skill_candidates: tuple[str, ...] = ()
     query: str = ""
     domain: str = ""
     capability_context: str = ""
@@ -498,7 +637,7 @@ class ContextAssemblyRequest:
     transcript_context: str = ""
     workspace: str = ""
     pipeline_workspace: str = ""
-    mcp_servers: tuple[str, ...] = ()
+    mcp_servers: tuple[Any, ...] = ()
     soul_md: Path = DEFAULT_SOUL_MD
     include_role_guardrails: bool = True
     include_execution_discipline: bool = True
@@ -519,12 +658,37 @@ class ContextAssemblyRequest:
     def __post_init__(self) -> None:
         normalized_servers = tuple(
             dict.fromkeys(
-                str(name).strip()
-                for name in self.mcp_servers
-                if str(name).strip()
+                (
+                    json.dumps(item, sort_keys=True, default=str)
+                    if isinstance(item, dict)
+                    else str(item).strip()
+                )
+                for item in self.mcp_servers
+                if (
+                    isinstance(item, dict)
+                    and str(item.get("name", "") or "").strip()
+                )
+                or (not isinstance(item, dict) and str(item).strip())
             )
         )
-        object.__setattr__(self, "mcp_servers", normalized_servers)
+        restored_servers: list[Any] = []
+        for item in normalized_servers:
+            if isinstance(item, str) and item.startswith("{"):
+                restored_servers.append(json.loads(item))
+            else:
+                restored_servers.append(item)
+        object.__setattr__(self, "mcp_servers", tuple(restored_servers))
+        object.__setattr__(
+            self,
+            "skill_candidates",
+            tuple(
+                dict.fromkeys(
+                    str(name).strip()
+                    for name in self.skill_candidates
+                    if str(name).strip()
+                )
+            ),
+        )
         object.__setattr__(self, "workspace_placement", str(self.workspace_placement or "system").strip() or "system")
         object.__setattr__(
             self,
@@ -609,6 +773,28 @@ def _build_skill_contract_layer(request: ContextAssemblyRequest) -> str | None:
 
 def _build_memory_context_layer(request: ContextAssemblyRequest) -> str | None:
     return build_memory_context_block(request.memory_context) or None
+
+
+def _build_skill_context_layer(request: ContextAssemblyRequest) -> str | None:
+    include_skill = should_prefetch_skill_context(
+        query=request.query,
+        skill=request.skill,
+        domain=request.domain,
+        capability_context=request.capability_context,
+    )
+    if not include_skill:
+        return None
+
+    block = build_skill_context_block(request.skill_context)
+    if block:
+        return block
+
+    return load_skill_context(
+        skill=request.skill,
+        query=request.query,
+        domain=request.domain,
+        candidate_skills=request.skill_candidates,
+    ) or None
 
 
 def _build_scoped_memory_context_layer(request: ContextAssemblyRequest) -> str | None:
@@ -782,6 +968,13 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         builder=_build_memory_context_layer,
     ),
     ContextLayerInjector(
+        name="skill_context",
+        order=42,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_build_skill_context_layer,
+    ),
+    ContextLayerInjector(
         name="scoped_memory_context",
         order=45,
         placement="system",
@@ -869,6 +1062,7 @@ __all__ = [
     "build_mcp_instructions_block",
     "build_memory_context_block",
     "build_plan_context_block",
+    "build_skill_context_block",
     "build_scoped_memory_context_block",
     "build_transcript_context_block",
     "build_workspace_context_block",
@@ -878,6 +1072,8 @@ __all__ = [
     "get_skill_contract",
     "load_base_persona",
     "load_knowledge_guidance",
+    "load_skill_context",
     "load_knowhow_constraints",
     "should_prefetch_knowledge_guidance",
+    "should_prefetch_skill_context",
 ]

@@ -3,10 +3,13 @@
 import asyncio
 import json
 
+from omicsclaw.interactive import _mcp
 from omicsclaw.extensions import write_extension_state, write_install_record
 from omicsclaw.runtime.context_layers import (
+    build_mcp_instructions_block,
     get_execution_discipline,
     should_prefetch_knowledge_guidance,
+    should_prefetch_skill_context,
 )
 from omicsclaw.runtime.context_assembler import (
     ContextAssemblyRequest,
@@ -77,6 +80,7 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
         "execution_discipline",
         "skill_contract",
         "memory_context",
+        "skill_context",
         "capability_assessment",
         "knowhow_constraints",
         "workspace_context",
@@ -89,6 +93,8 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
     assert "BASE PERSONA" in assembly.system_prompt
     assert "## Output Style Profile" in assembly.system_prompt
     assert "preferred language: Chinese" in assembly.system_prompt
+    assert "## Prefetched Skill Context" in assembly.system_prompt
+    assert "Selected skill: `spatial-preprocess`" in assembly.system_prompt
     assert "seq-think" in assembly.system_prompt
     assert "Execution discipline:" in assembly.system_prompt
     assert assembly.message_context == ""
@@ -207,21 +213,24 @@ def test_assemble_chat_context_loads_memory_and_builds_prompt():
         "Analyze sample.h5ad with spatial-preprocess",
         "spatial",
     )
-    assert calls["prompt"] == {
-        "memory_context": "preferred language: Chinese",
-        "scoped_memory_context": "",
-        "skill": "spatial-preprocess",
-        "query": "Analyze sample.h5ad with spatial-preprocess",
-        "domain": "spatial",
-        "capability_context": "## Deterministic Capability Assessment\n- coverage: exact_skill",
-        "plan_context": "",
-        "transcript_context": "",
-        "surface": "bot",
-        "output_style": "",
-        "workspace": "",
-        "pipeline_workspace": "",
-        "mcp_servers": (),
-    }
+    assert calls["prompt"]["memory_context"] == "preferred language: Chinese"
+    assert calls["prompt"]["scoped_memory_context"] == ""
+    assert calls["prompt"]["skill"] == "spatial-preprocess"
+    assert calls["prompt"]["skill_candidates"] == ("spatial-preprocess",)
+    assert calls["prompt"]["query"] == "Analyze sample.h5ad with spatial-preprocess"
+    assert calls["prompt"]["domain"] == "spatial"
+    assert calls["prompt"]["capability_context"] == "## Deterministic Capability Assessment\n- coverage: exact_skill"
+    assert calls["prompt"]["plan_context"] == ""
+    assert calls["prompt"]["transcript_context"] == ""
+    assert calls["prompt"]["surface"] == "bot"
+    assert calls["prompt"]["output_style"] == ""
+    assert calls["prompt"]["workspace"] == ""
+    assert calls["prompt"]["pipeline_workspace"] == ""
+    assert calls["prompt"]["mcp_servers"] == ()
+    assert calls["prompt"]["skill_context"].startswith("## Prefetched Skill Context")
+    assert "Selected skill: `spatial-preprocess`" in calls["prompt"]["skill_context"]
+    assert "- Domain: `spatial`" in calls["prompt"]["skill_context"]
+    assert "- Summary:" in calls["prompt"]["skill_context"]
     assert "workspace_context" not in context.prompt_context.layer_stats
 
 
@@ -250,7 +259,9 @@ def test_assemble_chat_context_passes_interactive_surface_to_prompt_builder():
     assert calls["prompt"] == {
         "memory_context": "",
         "scoped_memory_context": "",
+        "skill_context": "",
         "skill": "",
+        "skill_candidates": (),
         "query": "hello there",
         "domain": "",
         "capability_context": "",
@@ -342,6 +353,20 @@ def test_should_prefetch_knowledge_guidance_covers_more_real_world_queries():
     ) is False
 
 
+def test_should_prefetch_skill_context_tracks_skill_or_capability_hits():
+    assert should_prefetch_skill_context(
+        skill="spatial-preprocess",
+        query="Analyze sample.h5ad",
+    ) is True
+    assert should_prefetch_skill_context(
+        query="Analyze sample.h5ad",
+        capability_context="## Deterministic Capability Assessment\n- coverage: exact_skill",
+    ) is True
+    assert should_prefetch_skill_context(
+        query="hello there",
+    ) is False
+
+
 def test_assemble_prompt_context_skips_knowledge_guidance_for_generic_requests():
     calls = []
 
@@ -365,6 +390,75 @@ def test_assemble_prompt_context_skips_knowledge_guidance_for_generic_requests()
     assert "knowledge_guidance" not in assembly.layer_stats
     assert "This should not be used." not in assembly.system_prompt
     assert calls == []
+
+
+def test_assemble_prompt_context_includes_skill_context_only_when_relevant():
+    assembly = assemble_prompt_context(
+        request=ContextAssemblyRequest(
+            surface="interactive",
+            base_persona="BASE PERSONA",
+            skill="spatial-preprocess",
+            query="Analyze sample.h5ad with spatial-preprocess",
+            domain="spatial",
+            include_role_guardrails=False,
+            include_skill_contract=False,
+            include_knowhow=False,
+        )
+    )
+
+    assert "skill_context" in assembly.layer_stats
+    assert "## Prefetched Skill Context" in assembly.system_prompt
+    assert "Selected skill: `spatial-preprocess`" in assembly.system_prompt
+
+
+def test_build_mcp_instructions_block_skips_inactive_entries():
+    block = build_mcp_instructions_block(
+        [
+            {"name": "offline-http", "transport": "http", "active": False},
+            {"name": "seq-think", "transport": "stdio", "active": True},
+        ]
+    )
+
+    assert "seq-think" in block
+    assert "offline-http" not in block
+    assert "Active MCP transports: stdio" in block
+
+
+def test_load_active_mcp_server_entries_for_prompt_filters_per_server(monkeypatch):
+    monkeypatch.setattr(
+        _mcp,
+        "load_mcp_config",
+        lambda: {
+            "seq-think": {"transport": "stdio", "command": "npx"},
+            "offline-http": {"transport": "http", "url": "http://offline"},
+        },
+    )
+
+    async def _fake_probe(name, server):
+        if name == "seq-think":
+            return {
+                "name": name,
+                "transport": server["transport"],
+                "active": True,
+                "loaded": True,
+            }
+        return None
+
+    monkeypatch.setattr(_mcp, "_probe_mcp_server_entry_for_prompt", _fake_probe)
+    monkeypatch.setattr(_mcp, "_PROMPT_STATUS_CACHE_KEY", None)
+    monkeypatch.setattr(_mcp, "_PROMPT_STATUS_CACHE_VALUE", ())
+    monkeypatch.setattr(_mcp, "_PROMPT_STATUS_CACHE_AT", 0.0)
+
+    entries = asyncio.run(_mcp.load_active_mcp_server_entries_for_prompt())
+
+    assert entries == (
+        {
+            "name": "seq-think",
+            "transport": "stdio",
+            "active": True,
+            "loaded": True,
+        },
+    )
 
 
 def test_assemble_chat_context_forwards_knowledge_guidance_to_prompt_builder(monkeypatch):

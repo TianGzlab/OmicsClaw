@@ -83,6 +83,7 @@ from ._llm_bridge_support import (
 from ._mcp import (
     add_mcp_server,
     list_mcp_servers,
+    load_active_mcp_server_entries_for_prompt,
     remove_mcp_server,
 )
 from ._memory_command_support import (
@@ -1466,11 +1467,7 @@ async def _stream_llm_response(
                 response_formatter.write(chunk)
 
             try:
-                active_mcp_servers = tuple(
-                    entry.get("name", "")
-                    for entry in list_mcp_servers()
-                    if entry.get("name")
-                )
+                active_mcp_servers = await load_active_mcp_server_entries_for_prompt()
                 loop_kwargs = {
                     "user_id": "cli_user",
                     "platform": "cli",
