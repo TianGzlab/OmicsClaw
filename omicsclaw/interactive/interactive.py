@@ -63,6 +63,8 @@ try:
 except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
+from omicsclaw.common.runtime_env import load_project_dotenv
+
 from ._constants import (
     LOGO_GRADIENT,
     LOGO_LINES,
@@ -1341,8 +1343,7 @@ def _init_llm(config: dict) -> tuple[str, str]:
     try:
         sys.path.insert(0, str(_OMICSCLAW_DIR))
         import bot.core as core
-        from dotenv import load_dotenv
-        load_dotenv(_OMICSCLAW_DIR / ".env", override=False)
+        load_project_dotenv(_OMICSCLAW_DIR, override=False)
 
         provider = os.environ.get("LLM_PROVIDER", config.get("provider", ""))
         api_key = os.environ.get("LLM_API_KEY", config.get("api_key", ""))

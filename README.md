@@ -79,6 +79,8 @@
 
 OmicsClaw supports switching between multiple LLM engines with a single config change. You can configure this interactively via `oc onboard` or by manually editing the `.env` file in the project root.
 
+OmicsClaw automatically loads the project-root `.env` file for CLI, TUI, routing, and bot entrypoints. If `python-dotenv` is not installed, it falls back to a built-in `.env` parser, so standard key/value configuration still works in lean installs.
+
 **1. DeepSeek (Default):**
 ```env
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -101,6 +103,14 @@ If you have strict data compliance requirements, you can run models entirely loc
 LLM_PROVIDER=ollama
 OMICSCLAW_MODEL=qwen2.5:7b  # Replace with your pulled model
 LLM_BASE_URL=http://localhost:11434/v1
+```
+
+**5. Custom OpenAI-compatible endpoint:**
+```env
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://your-endpoint.example.com/v1
+OMICSCLAW_MODEL=your-model-name
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
 > 📖 **Full Provider List:** See `.env.example` for instructions on configuring other engines like NVIDIA NIM, OpenRouter, DashScope, and custom endpoints.
@@ -141,6 +151,7 @@ source .venv/bin/activate
 # Clone and setup
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
+# Includes prompt-toolkit/Textual plus the LLM client stack used by interactive mode
 pip install -e ".[tui]"
 pip install -r bot/requirements.txt  # If you want messaging channels
 

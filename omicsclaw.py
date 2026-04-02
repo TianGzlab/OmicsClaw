@@ -861,13 +861,9 @@ class OmicsClawParser(argparse.ArgumentParser):
 
 def main():
     # Ensure .env is loaded for all subcommands (memory-server, etc.)
-    try:
-        from dotenv import load_dotenv as _load_dotenv
-        _env_path = OMICSCLAW_DIR / ".env"
-        if _env_path.exists():
-            _load_dotenv(str(_env_path), override=False)
-    except ImportError:
-        pass
+    from omicsclaw.common.runtime_env import load_project_dotenv
+
+    load_project_dotenv(OMICSCLAW_DIR, override=False)
 
     parser = OmicsClawParser(
         description="OmicsClaw — Multi-Omics Skills Runner",

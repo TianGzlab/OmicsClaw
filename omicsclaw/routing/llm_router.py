@@ -6,14 +6,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
-# Load .env file if it exists
-try:
-    from dotenv import load_dotenv
-    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-except ImportError:
-    pass  # dotenv not installed, use system environment variables
+from omicsclaw.common.runtime_env import load_project_dotenv
+
+load_project_dotenv(Path(__file__).resolve().parent.parent.parent, override=False)
 
 logger = logging.getLogger(__name__)
 
@@ -166,4 +161,3 @@ The confidence should be between 0.0 and 1.0, where:
     except Exception as e:
         logger.error(f"LLM routing failed: {e}")
         return None, 0.0
-

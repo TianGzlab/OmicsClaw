@@ -111,11 +111,17 @@ Use this when you want the broadest method coverage in one environment.
 
 ### 5. Interactive CLI / TUI
 
-Interactive mode has its own lightweight extras:
+Interactive mode has its own lightweight extras. `.[interactive]` now includes:
+
+- prompt-toolkit / Rich / Questionary for the terminal UI
+- aiosqlite for session persistence
+- OpenAI-compatible client + HTTP dependencies used by the interactive LLM bridge
 
 ```bash
 pip install -e ".[interactive]"
 ```
+
+OmicsClaw automatically reads the project-root `.env` file for interactive startup. If `python-dotenv` is not installed, a built-in fallback parser is used, so standard `.env` key/value files still work.
 
 For the full-screen Textual TUI:
 
@@ -154,6 +160,15 @@ This adds test and lint tooling such as `pytest`, `ruff`, `black`, and `mypy`.
 
 ```bash
 pip install -e ".[interactive]"
+```
+
+Example custom endpoint configuration:
+
+```env
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://your-endpoint.example.com/v1
+OMICSCLAW_MODEL=your-model-name
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
 ### Interactive + TUI + memory

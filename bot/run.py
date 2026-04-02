@@ -34,6 +34,8 @@ import os
 import sys
 from pathlib import Path
 
+from omicsclaw.common.runtime_env import load_env_file
+
 # Ensure project root on sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -41,12 +43,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # Load .env
 for _p in [_PROJECT_ROOT / ".env", Path.cwd() / ".env"]:
-    if _p.exists():
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(str(_p))
-        except ImportError:
-            pass
+    if load_env_file(_p, override=False):
         break
 
 from bot import core  # noqa: E402

@@ -104,9 +104,11 @@ Legend: **S** = send, **R** = receive, **—** = not applicable/unlimited
 ### Step 1: Core Dependencies
 
 ```bash
-# Install core dependencies (LLM client, HTTP, dotenv)
+# Install core dependencies (LLM client, HTTP, dotenv compatibility)
 pip install -r bot/requirements.txt
 ```
+
+OmicsClaw bot entrypoints automatically read the project-root `.env`. If `python-dotenv` is unavailable, OmicsClaw falls back to an internal `.env` parser, so normal `KEY=value` configuration still works.
 
 ### Step 2: Channel Dependencies
 
@@ -265,6 +267,12 @@ OMICSCLAW_MODEL=qwen-max
 # Local Ollama
 LLM_PROVIDER=ollama
 OMICSCLAW_MODEL=qwen2.5:7b
+
+# Custom OpenAI-compatible endpoint
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://your-endpoint.example.com/v1
+OMICSCLAW_MODEL=your-model-name
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
 You can also override the auto-configured defaults:

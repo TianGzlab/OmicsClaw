@@ -15,6 +15,8 @@ import sys
 import time as _time
 from pathlib import Path
 
+from omicsclaw.common.runtime_env import load_project_dotenv
+
 logger = logging.getLogger(__name__)
 _OMICSCLAW_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -573,9 +575,8 @@ if _HAS_TEXTUAL:
         async def _init_llm_async(self) -> None:
             try:
                 sys.path.insert(0, str(_OMICSCLAW_DIR))
-                from dotenv import load_dotenv
                 import bot.core as core
-                load_dotenv(_OMICSCLAW_DIR / ".env", override=False)
+                load_project_dotenv(_OMICSCLAW_DIR, override=False)
                 provider = os.environ.get("LLM_PROVIDER", self._config.get("provider", ""))
                 api_key = os.environ.get("LLM_API_KEY", self._config.get("api_key", ""))
                 model = os.environ.get("OMICSCLAW_MODEL", self._config.get("model", ""))

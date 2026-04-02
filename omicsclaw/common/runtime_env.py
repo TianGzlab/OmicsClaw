@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import tempfile
@@ -73,3 +74,76 @@ def ensure_runtime_cache_dirs(app_name: str = "omicsclaw") -> dict[str, Path]:
 def ensure_numba_cache_dir(app_name: str = "omicsclaw") -> Path:
     """Backward-compatible wrapper returning the configured Numba cache path."""
     return ensure_runtime_cache_dirs(app_name)["numba_cache_dir"]
+
+
+def _load_env_file_with_python_dotenv(env_path: Path, *, override: bool) -> bool:
+    """Load an env file via python-dotenv when the package is available."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return False
+
+    load_dotenv(env_path, override=override)
+    return True
+
+
+def _parse_fallback_env_value(raw_value: str) -> str:
+    """Parse a simple dotenv value without requiring python-dotenv."""
+    value = raw_value.strip()
+    if not value:
+        return ""
+
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            return value[1:-1]
+        return str(parsed)
+
+    if " #" in value:
+        value = value.split(" #", 1)[0].rstrip()
+    return value
+
+
+def _load_env_file_fallback(env_path: Path, *, override: bool) -> bool:
+    """Load a minimal .env file without third-party dependencies."""
+    loaded = False
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        if not override and key in os.environ:
+            loaded = True
+            continue
+
+        os.environ[key] = _parse_fallback_env_value(raw_value)
+        loaded = True
+    return loaded
+
+
+def load_env_file(env_path: str | Path, *, override: bool = False) -> bool:
+    """Load environment variables from a .env-style file.
+
+    This prefers ``python-dotenv`` when available, but falls back to a small
+    built-in parser so OmicsClaw can still read ``.env`` files in lean installs.
+    """
+    path = Path(env_path).expanduser()
+    if not path.exists() or not path.is_file():
+        return False
+    if _load_env_file_with_python_dotenv(path, override=override):
+        return True
+    return _load_env_file_fallback(path, override=override)
+
+
+def load_project_dotenv(project_root: str | Path, *, override: bool = False) -> bool:
+    """Load ``<project_root>/.env`` if present."""
+    return load_env_file(Path(project_root) / ".env", override=override)

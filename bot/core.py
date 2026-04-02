@@ -23,8 +23,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import AsyncOpenAI, APIError
+
+from omicsclaw.common.runtime_env import load_project_dotenv
 
 # ---------------------------------------------------------------------------
 # LLM provider presets  (Multi-Provider support)
@@ -118,6 +119,7 @@ def resolve_provider(
 # ---------------------------------------------------------------------------
 
 OMICSCLAW_DIR = Path(__file__).resolve().parent.parent
+load_project_dotenv(OMICSCLAW_DIR, override=False)
 OMICSCLAW_PY = OMICSCLAW_DIR / "omicsclaw.py"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 DATA_DIR = OMICSCLAW_DIR / "data"
