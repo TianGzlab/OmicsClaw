@@ -53,7 +53,15 @@ TUI_SLASH_COMMAND_SPECS: tuple[SlashCommandSpec, ...] = tuple(
         "/resume-task",
         "/do-current-task",
         "/new",
+        "/current",
         "/sessions",
+        "/resume",
+        "/session-title",
+        "/session-tag",
+        "/doctor",
+        "/context",
+        "/memory",
+        "/usage",
         "/clear",
         "/export",
         "/install-extension",
@@ -66,14 +74,10 @@ TUI_SLASH_COMMAND_SPECS: tuple[SlashCommandSpec, ...] = tuple(
         "/installed-skills",
         "/refresh-skills",
         "/uninstall-skill",
+        "/style",
         "/help",
         "/exit",
     }
-) + (
-    SlashCommandSpec(
-        name="/usage",
-        description="Show current token and cost usage.",
-    ),
 )
 
 TUI_KEYBOARD_SHORTCUTS: tuple[KeyboardShortcut, ...] = (

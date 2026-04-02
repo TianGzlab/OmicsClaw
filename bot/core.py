@@ -139,8 +139,14 @@ from omicsclaw.runtime.query_engine import (
     QueryEngineContext,
     run_query_engine,
 )
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
+from omicsclaw.runtime.policy import TOOL_POLICY_ALLOW
+from omicsclaw.runtime.policy_state import ToolPolicyState
 from omicsclaw.runtime.system_prompt import build_system_prompt, get_role_guardrails
-from omicsclaw.runtime.tool_orchestration import ToolExecutionRequest
+from omicsclaw.runtime.tool_orchestration import (
+    EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionRequest,
+)
 from omicsclaw.runtime.tool_result_store import ToolResultStore
 from omicsclaw.runtime.transcript_store import (
     TranscriptStore,
@@ -2631,16 +2637,26 @@ def _build_bot_query_engine_callbacks(
         func_name = request.name
         func_args = request.arguments
         spec = request.spec
+        policy_decision = request.policy_decision
         logger_obj.info(f"Tool call: {func_name}({json.dumps(func_args)[:200]})")
         audit_fn(
             "tool_call",
             chat_id=str(chat_id),
             tool=func_name,
             args_preview=json.dumps(func_args, default=str)[:300],
+            policy_action=(
+                policy_decision.action if policy_decision is not None else TOOL_POLICY_ALLOW
+            ),
         )
         await _emit_tool_callback(on_tool_call, func_name, func_args)
 
         progress_handle = None
+        if (
+            policy_decision is not None
+            and not policy_decision.allows_execution
+        ):
+            return {"progress_handle": None}
+
         if spec is not None and spec.progress_policy == PROGRESS_POLICY_ANALYSIS and progress_fn:
             dl_method = (func_args.get("method") or "").lower()
             if dl_method in deep_learning_methods and dl_method not in notified_methods:
@@ -2659,6 +2675,7 @@ def _build_bot_query_engine_callbacks(
         func_name = request.name
         func_args = request.arguments
         progress_handle = (tool_state or {}).get("progress_handle")
+        policy_decision = execution_result.policy_decision
 
         if progress_handle and progress_update_fn:
             method_display = func_args.get("method") or "analysis"
@@ -2673,6 +2690,19 @@ def _build_bot_query_engine_callbacks(
                     progress_handle,
                     f"❌ **{method_display}** failed: {error_name}"
                 )
+
+        if (
+            execution_result.status == EXECUTION_STATUS_POLICY_BLOCKED
+            and policy_decision is not None
+        ):
+            audit_fn(
+                "tool_policy_blocked",
+                chat_id=str(chat_id),
+                tool=func_name,
+                action=policy_decision.action,
+                reason=policy_decision.reason[:300],
+                risk=policy_decision.risk_level,
+            )
 
         if execution_result.error:
             logger_obj.error(
@@ -2693,7 +2723,7 @@ def _build_bot_query_engine_callbacks(
             )
 
         if request.executor:
-            display_output = execution_result.output
+            display_output = result_record.content
             if func_name == "consult_knowledge":
                 try:
                     from omicsclaw.knowledge.retriever import consume_runtime_notice
@@ -2726,7 +2756,9 @@ async def llm_tool_loop(
     plan_context: str = "",
     workspace: str = "",
     pipeline_workspace: str = "",
+    scoped_memory_scope: str = "",
     mcp_servers: tuple[str, ...] | None = None,
+    output_style: str = "",
     progress_fn=None,
     progress_update_fn=None,
     on_tool_call=None,
@@ -2949,12 +2981,15 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         omicsclaw_dir=str(OMICSCLAW_DIR),
         workspace=workspace,
         pipeline_workspace=pipeline_workspace,
+        scoped_memory_scope=scoped_memory_scope,
         mcp_servers=tuple(mcp_servers or ()),
+        output_style=output_style,
     )
     session_id = chat_context.session_id
     system_prompt = chat_context.system_prompt
 
     tool_runtime = _build_tool_runtime()
+    hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
     callbacks = _build_bot_query_engine_callbacks(
         chat_id=chat_id,
         progress_fn=progress_fn,
@@ -2974,6 +3009,9 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             session_id=session_id,
             system_prompt=system_prompt,
             user_message_content=chat_context.user_message_content,
+            surface=platform or "bot",
+            policy_state=ToolPolicyState(surface=platform or "bot"),
+            hook_runtime=hook_runtime,
         ),
         tool_runtime=tool_runtime,
         transcript_store=transcript_store,

@@ -38,6 +38,13 @@ class ExtensionValidationReport:
 
 SkillPackValidationReport = ExtensionValidationReport
 
+_RUNTIME_SURFACE_CAPABILITY_HINTS = {
+    "prompt-pack": "prompt-rules",
+    "output-style-pack": "output-style-entry",
+    "agent-pack": "agent-entry",
+    "workflow-pack": "workflow-entry",
+}
+
 
 def _validate_manifest_contract(
     path: Path,
@@ -55,6 +62,14 @@ def _validate_manifest_contract(
             errors.append(f"Extension manifest entrypoint not found: {entrypoint}")
         else:
             entrypoint_paths.append(candidate)
+    for hook_path in manifest.hooks:
+        candidate = path / hook_path
+        if not candidate.exists():
+            errors.append(f"Extension manifest hook file not found: {hook_path}")
+    if manifest.hooks and "hooks" not in manifest.trusted_capabilities:
+        errors.append(
+            "Extension manifests that declare hooks must request the 'hooks' trusted capability."
+        )
 
 
 def _apply_source_policy(
@@ -164,9 +179,24 @@ def validate_extension_directory(
             errors.append(
                 f"Extension type '{extension_type}' requires an omicsclaw-extension.json manifest."
             )
-        if manifest is not None and not manifest.entrypoints:
+        if manifest is not None and extension_type != "hook-pack" and not manifest.entrypoints:
             errors.append(
                 f"Extension type '{extension_type}' must declare at least one manifest entrypoint."
+            )
+        if manifest is not None and extension_type == "hook-pack" and not manifest.hooks:
+            errors.append(
+                "Extension type 'hook-pack' must declare at least one hook manifest file."
+            )
+        hinted_capability = _RUNTIME_SURFACE_CAPABILITY_HINTS.get(extension_type, "")
+        if (
+            manifest is not None
+            and hinted_capability
+            and manifest.trusted_capabilities
+            and hinted_capability not in manifest.trusted_capabilities
+        ):
+            warnings.append(
+                f"Extension type '{extension_type}' declares trusted_capabilities but omits "
+                f"'{hinted_capability}'; runtime activation will be skipped until it is added."
             )
 
     return ExtensionValidationReport(

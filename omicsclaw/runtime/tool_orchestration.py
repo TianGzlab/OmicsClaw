@@ -4,8 +4,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from .policy import ToolPolicyDecision, evaluate_tool_policy, format_policy_block_message
 from .tool_executor import ToolCallable, invoke_tool
 from .tool_spec import ToolSpec
+
+EXECUTION_STATUS_COMPLETED = "completed"
+EXECUTION_STATUS_POLICY_BLOCKED = "policy_blocked"
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,11 +20,15 @@ class ToolExecutionRequest:
     spec: ToolSpec | None
     executor: ToolCallable | None
     runtime_context: dict[str, Any] | None = None
+    policy_decision: ToolPolicyDecision | None = None
 
     @property
     def can_run_concurrently(self) -> bool:
+        policy_decision = _resolve_policy_decision(self)
         return bool(
-            self.spec
+            policy_decision
+            and policy_decision.allows_execution
+            and self.spec
             and self.executor
             and self.spec.read_only
             and self.spec.concurrency_safe
@@ -33,6 +41,20 @@ class ToolExecutionResult:
     output: Any
     success: bool
     error: Exception | None = None
+    status: str = EXECUTION_STATUS_COMPLETED
+    policy_decision: ToolPolicyDecision | None = None
+
+
+def _resolve_policy_decision(
+    request: ToolExecutionRequest,
+) -> ToolPolicyDecision | None:
+    if request.policy_decision is not None:
+        return request.policy_decision
+    return evaluate_tool_policy(
+        request.name,
+        request.spec,
+        runtime_context=request.runtime_context,
+    )
 
 
 async def _execute_single_request(request: ToolExecutionRequest) -> ToolExecutionResult:
@@ -41,6 +63,16 @@ async def _execute_single_request(request: ToolExecutionRequest) -> ToolExecutio
             request=request,
             output=f"Unknown tool: {request.name}",
             success=False,
+        )
+
+    policy_decision = _resolve_policy_decision(request)
+    if policy_decision is not None and not policy_decision.allows_execution:
+        return ToolExecutionResult(
+            request=request,
+            output=format_policy_block_message(request.name, policy_decision),
+            success=False,
+            status=EXECUTION_STATUS_POLICY_BLOCKED,
+            policy_decision=policy_decision,
         )
 
     try:
@@ -54,6 +86,7 @@ async def _execute_single_request(request: ToolExecutionRequest) -> ToolExecutio
             request=request,
             output=output,
             success=True,
+            policy_decision=policy_decision,
         )
     except Exception as exc:
         return ToolExecutionResult(
@@ -61,6 +94,7 @@ async def _execute_single_request(request: ToolExecutionRequest) -> ToolExecutio
             output=f"Error executing {request.name}: {type(exc).__name__}: {exc}",
             success=False,
             error=exc,
+            policy_decision=policy_decision,
         )
 
 
@@ -99,3 +133,12 @@ async def execute_tool_requests(
 
     await flush_concurrent_batch()
     return results
+
+
+__all__ = [
+    "EXECUTION_STATUS_COMPLETED",
+    "EXECUTION_STATUS_POLICY_BLOCKED",
+    "ToolExecutionRequest",
+    "ToolExecutionResult",
+    "execute_tool_requests",
+]

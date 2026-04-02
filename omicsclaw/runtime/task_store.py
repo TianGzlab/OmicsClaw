@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .events import EVENT_TASK_COMPLETED, EVENT_TASK_STARTED
+from .hook_payloads import TaskHookPayload
+
 TASK_STATUS_PENDING = "pending"
 TASK_STATUS_IN_PROGRESS = "in_progress"
 TASK_STATUS_COMPLETED = "completed"
@@ -88,6 +91,17 @@ class TaskStore:
     kind: str = "generic"
     tasks: list[TaskRecord] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    lifecycle_runtime: Any = field(default=None, repr=False)
+    lifecycle_context: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def attach_lifecycle_runtime(
+        self,
+        runtime: Any,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        self.lifecycle_runtime = runtime
+        self.lifecycle_context = dict(context or {})
 
     def task_ids(self) -> list[str]:
         return [task.id for task in self.tasks]
@@ -126,12 +140,14 @@ class TaskStore:
         owner: str = "",
     ) -> TaskRecord:
         task = self.require(task_id)
+        previous_status = task.status
         task.set_status(
             status,
             summary=summary,
             artifact_ref=artifact_ref,
             owner=owner,
         )
+        self._emit_task_lifecycle_event(task, previous_status=previous_status)
         return task
 
     def is_done(self, task_id: str) -> bool:
@@ -210,3 +226,49 @@ class TaskStore:
 
         lines.extend(["", "---", "*Auto-generated from structured task store.*"])
         return "\n".join(lines)
+
+    def _emit_task_lifecycle_event(
+        self,
+        task: TaskRecord,
+        *,
+        previous_status: str,
+    ) -> None:
+        runtime = self.lifecycle_runtime
+        if runtime is None or previous_status == task.status:
+            return
+
+        if task.status == TASK_STATUS_IN_PROGRESS:
+            event_name = EVENT_TASK_STARTED
+        elif task.status in DONE_TASK_STATUSES | {TASK_STATUS_FAILED}:
+            event_name = EVENT_TASK_COMPLETED
+        else:
+            return
+
+        payload = TaskHookPayload(
+            task_id=task.id,
+            title=task.title,
+            status=task.status,
+            owner=task.owner,
+            summary=str(task.metadata.get("summary", "")).strip(),
+            workspace=str(
+                self.lifecycle_context.get("workspace")
+                or self.metadata.get("workspace")
+                or ""
+            ).strip(),
+            plan_kind=str(
+                self.lifecycle_context.get("plan_kind")
+                or self.metadata.get("plan_kind")
+                or ""
+            ).strip(),
+            source=str(self.lifecycle_context.get("source") or self.kind).strip(),
+            artifact_refs=tuple(task.artifact_refs),
+            previous_status=previous_status,
+        )
+        runtime.emit(
+            event_name,
+            payload,
+            context={
+                "workspace": payload.workspace,
+                "source": payload.source or self.kind,
+            },
+        )

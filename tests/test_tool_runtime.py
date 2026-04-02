@@ -4,10 +4,24 @@ import asyncio
 
 import pytest
 
+from omicsclaw.runtime.policy import (
+    TOOL_POLICY_DENY,
+    TOOL_POLICY_REQUIRE_APPROVAL,
+    evaluate_tool_policy,
+)
 from omicsclaw.runtime.tool_executor import build_executor_kwargs, invoke_tool
-from omicsclaw.runtime.tool_orchestration import ToolExecutionRequest, execute_tool_requests
+from omicsclaw.runtime.tool_orchestration import (
+    EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionRequest,
+    execute_tool_requests,
+)
 from omicsclaw.runtime.tool_registry import ToolRegistry
-from omicsclaw.runtime.tool_spec import ToolSpec
+from omicsclaw.runtime.tool_spec import (
+    APPROVAL_MODE_ASK,
+    APPROVAL_MODE_DENY_UNLESS_TRUSTED,
+    RISK_LEVEL_HIGH,
+    ToolSpec,
+)
 
 
 def test_tool_registry_builds_openai_tools_and_executors_from_same_specs():
@@ -362,3 +376,109 @@ def test_execute_tool_requests_wraps_errors_and_unknown_tools_without_aborting_b
     assert results[1].success is True
     assert results[2].success is False
     assert results[2].error is None
+
+
+def test_evaluate_tool_policy_enforces_approval_and_trust_modes():
+    approval_spec = ToolSpec(
+        name="writer",
+        description="Writer tool",
+        parameters={"type": "object", "properties": {}},
+        approval_mode=APPROVAL_MODE_ASK,
+        risk_level=RISK_LEVEL_HIGH,
+        writes_workspace=True,
+    )
+    approval_decision = evaluate_tool_policy(
+        "writer",
+        approval_spec,
+        runtime_context={"surface": "bot"},
+    )
+
+    assert approval_decision is not None
+    assert approval_decision.action == TOOL_POLICY_REQUIRE_APPROVAL
+    assert approval_decision.surface == "bot"
+    assert "explicit approval" in approval_decision.reason
+
+    trusted_spec = ToolSpec(
+        name="trusted-only",
+        description="Trusted-only tool",
+        parameters={"type": "object", "properties": {}},
+        approval_mode=APPROVAL_MODE_DENY_UNLESS_TRUSTED,
+        writes_config=True,
+    )
+    trusted_decision = evaluate_tool_policy(
+        "trusted-only",
+        trusted_spec,
+        runtime_context={"surface": "bot"},
+    )
+
+    assert trusted_decision is not None
+    assert trusted_decision.action == TOOL_POLICY_DENY
+    assert "trusted runtime contexts" in trusted_decision.reason
+
+
+def test_execute_tool_requests_blocks_policy_gated_tool_without_running_executor():
+    calls = {"writer": 0, "reader": 0}
+
+    async def writer_executor(args):
+        calls["writer"] += 1
+        return "writer"
+
+    async def reader_executor(args):
+        calls["reader"] += 1
+        return "reader"
+
+    registry = ToolRegistry(
+        [
+            ToolSpec(
+                name="writer",
+                description="Writer tool",
+                parameters={"type": "object", "properties": {}},
+                approval_mode=APPROVAL_MODE_ASK,
+                risk_level=RISK_LEVEL_HIGH,
+                writes_workspace=True,
+            ),
+            ToolSpec(
+                name="reader",
+                description="Reader tool",
+                parameters={"type": "object", "properties": {}},
+                read_only=True,
+                concurrency_safe=True,
+            ),
+        ]
+    )
+    runtime = registry.build_runtime(
+        {
+            "writer": writer_executor,
+            "reader": reader_executor,
+        }
+    )
+    results = asyncio.run(
+        execute_tool_requests(
+            [
+                ToolExecutionRequest(
+                    call_id="call-writer",
+                    name="writer",
+                    arguments={},
+                    spec=runtime.specs_by_name["writer"],
+                    executor=runtime.executors["writer"],
+                    runtime_context={"surface": "bot"},
+                ),
+                ToolExecutionRequest(
+                    call_id="call-reader",
+                    name="reader",
+                    arguments={},
+                    spec=runtime.specs_by_name["reader"],
+                    executor=runtime.executors["reader"],
+                    runtime_context={"surface": "bot"},
+                ),
+            ]
+        )
+    )
+
+    assert calls == {"writer": 0, "reader": 1}
+    assert results[0].success is False
+    assert results[0].status == EXECUTION_STATUS_POLICY_BLOCKED
+    assert results[0].policy_decision is not None
+    assert results[0].policy_decision.action == TOOL_POLICY_REQUIRE_APPROVAL
+    assert "[tool policy blocked]" in str(results[0].output)
+    assert results[1].output == "reader"

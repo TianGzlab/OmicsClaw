@@ -154,6 +154,51 @@ def test_install_extension_from_source_rejects_untrusted_prompt_pack(monkeypatch
     assert any("only install 'skill-pack'" in status.text for status in statuses)
 
 
+def test_install_extension_from_source_emits_extension_hook_notice(monkeypatch, tmp_path):
+    source = tmp_path / "hook-pack"
+    source.mkdir()
+    (source / "rules.md").write_text("# rules\n", encoding="utf-8")
+    (source / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": [
+                    {
+                        "name": "install-notice",
+                        "event": "extension_installed",
+                        "message": "Installed extension {extension_name} at {install_path}.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "omicsclaw-extension.json").write_text(
+        json.dumps(
+            {
+                "name": "hook-pack",
+                "version": "1.0.0",
+                "type": "prompt-pack",
+                "entrypoints": ["rules.md"],
+                "hooks": ["hooks.json"],
+                "trusted_capabilities": ["hooks"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omicsclaw.interactive._skill_management_support.refresh_skill_registry",
+        lambda: "",
+    )
+
+    statuses = install_extension_from_source(str(source), omicsclaw_dir=tmp_path)
+
+    assert any(
+        status.level == "info"
+        and "Hook notice: Installed extension hook-pack at" in status.text
+        for status in statuses
+    )
+
+
 def test_prepare_extension_uninstall_plan_identifies_removable_extension(tmp_path):
     candidate = tmp_path / "installed_extensions" / "prompt-packs" / "my-prompts"
     candidate.mkdir(parents=True)
@@ -257,6 +302,19 @@ def test_set_installed_extension_enabled_reports_already_enabled(tmp_path):
 def test_build_installed_extension_list_view_marks_tracked_and_disabled_entries(tmp_path):
     tracked = tmp_path / "installed_extensions" / "prompt-packs" / "tracked-prompts"
     tracked.mkdir(parents=True)
+    (tracked / "omicsclaw-extension.json").write_text(
+        json.dumps(
+            {
+                "name": "tracked-prompts",
+                "version": "1.2.3",
+                "type": "prompt-pack",
+                "entrypoints": ["rules.md"],
+                "trusted_capabilities": ["prompt-rules"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tracked / "rules.md").write_text("# rules\n", encoding="utf-8")
     (tracked / ".omicsclaw-install.json").write_text(
         (
             '{"extension_name":"tracked-prompts","source_kind":"local","source":"/tmp/prompts",'
@@ -278,6 +336,7 @@ def test_build_installed_extension_list_view_marks_tracked_and_disabled_entries(
     assert view.entries[0].tracked is True
     assert view.entries[0].enabled is False
     assert view.entries[0].extension_type == "prompt-pack"
+    assert view.entries[0].inactive_surfaces == ["prompts: manual"]
     assert view.entries[1].tracked is False
 
 
@@ -321,12 +380,14 @@ def test_format_installed_extension_list_plain_renders_audit_details():
                     enabled=False,
                     disabled_reason="manual",
                     trusted_capabilities=["prompt-rules"],
+                    inactive_surfaces=["prompts: manual"],
                     path="/tmp/installed_extensions/prompt-packs/tracked-prompts",
                 ),
                 InstalledSkillEntry(
                     skill_name="legacy-skill",
                     extension_type="skill-pack",
                     tracked=False,
+                    active_surfaces=["skills(1)"],
                     path="/tmp/skills/user/legacy-skill",
                 ),
             ]
@@ -335,8 +396,10 @@ def test_format_installed_extension_list_plain_renders_audit_details():
 
     assert "Installed extensions:" in text
     assert "tracked: tracked-prompts · prompt-pack · disabled · v1.2.3 · local · just now" in text
+    assert "inactive surfaces: prompts: manual" in text
     assert "capabilities: prompt-rules" in text
     assert "legacy: legacy-skill · skill-pack · enabled" in text
+    assert "active surfaces: skills(1)" in text
 
 
 def test_format_installed_skill_list_plain_preserves_header():
@@ -377,6 +440,53 @@ def test_build_refresh_extensions_statuses_reports_inventory(monkeypatch, tmp_pa
     assert statuses[0].text == "Extension system refreshed."
     assert statuses[1].level == "info"
     assert "skill-pack=1" in statuses[1].text
+    assert statuses[2].level == "info"
+    assert "skills=1" in statuses[2].text
+
+
+def test_install_extension_from_source_tracks_hook_pack_as_disabled(monkeypatch, tmp_path):
+    source = tmp_path / "lab-hooks"
+    source.mkdir()
+    (source / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": [
+                    {
+                        "name": "session-reminder",
+                        "event": "session_start",
+                        "message": "Remember to inspect metadata first.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "omicsclaw-extension.json").write_text(
+        json.dumps(
+            {
+                "name": "lab-hooks",
+                "version": "1.0.0",
+                "type": "hook-pack",
+                "hooks": ["hooks.json"],
+                "trusted_capabilities": ["hooks"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "omicsclaw.interactive._skill_management_support.refresh_skill_registry",
+        lambda: "",
+    )
+
+    statuses = install_extension_from_source(str(source), omicsclaw_dir=tmp_path)
+
+    assert any(
+        status.level == "info" and "Hook packs install in a gated state" in status.text
+        for status in statuses
+    )
+    installed = tmp_path / "installed_extensions" / "hook-packs" / "lab-hooks"
+    state = json.loads((installed / ".omicsclaw-extension-state.json").read_text(encoding="utf-8"))
+    assert state["enabled"] is False
 
 
 def test_build_refresh_skills_statuses_reports_detected_user_packs(monkeypatch, tmp_path):

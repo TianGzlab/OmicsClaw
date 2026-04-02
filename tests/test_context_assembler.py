@@ -83,6 +83,7 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
     assert assembly.layer_stats["knowhow_constraints"]["cost_chars"] > 0
     assert assembly.total_estimated_tokens >= len(assembly.layer_names)
     assert "BASE PERSONA" in assembly.system_prompt
+    assert "## Output Style Profile" in assembly.system_prompt
     assert "preferred language: Chinese" in assembly.system_prompt
     assert "seq-think" in assembly.system_prompt
     assert assembly.message_context == ""
@@ -103,7 +104,8 @@ def test_assemble_prompt_context_can_route_workspace_to_message_context():
 
     # Bot mode includes output_format layer, so system prompt is not just base persona
     assert "BASE PERSONA" in assembly.system_prompt
-    assert "## Output Format (Bot Mode)" in assembly.system_prompt
+    assert "## Output Style Profile" in assembly.system_prompt
+    assert "Surface Adapter (bot)" in assembly.system_prompt
     assert assembly.message_context.startswith("## Workspace Context")
     assert "/tmp/session" in assembly.message_context
     assert assembly.layer_stats["workspace_context"]["placement"] == "message"
@@ -170,6 +172,7 @@ def test_assemble_chat_context_loads_memory_and_builds_prompt():
     )
     assert calls["prompt"] == {
         "memory_context": "preferred language: Chinese",
+        "scoped_memory_context": "",
         "skill": "spatial-preprocess",
         "query": "Analyze sample.h5ad with spatial-preprocess",
         "domain": "spatial",
@@ -177,6 +180,7 @@ def test_assemble_chat_context_loads_memory_and_builds_prompt():
         "plan_context": "",
         "transcript_context": "",
         "surface": "bot",
+        "output_style": "",
         "workspace": "",
         "pipeline_workspace": "",
         "mcp_servers": (),
@@ -198,6 +202,7 @@ def test_assemble_chat_context_passes_interactive_surface_to_prompt_builder():
             user_id="user-2",
             platform="cli",
             system_prompt_builder=fake_prompt_builder,
+            output_style="teaching",
             workspace="/tmp/chat-workspace",
             pipeline_workspace="/tmp/pipeline-workspace",
             mcp_servers=("seq-think", "bio-tools"),
@@ -207,6 +212,7 @@ def test_assemble_chat_context_passes_interactive_surface_to_prompt_builder():
     assert context.system_prompt == "PROMPT"
     assert calls["prompt"] == {
         "memory_context": "",
+        "scoped_memory_context": "",
         "skill": "",
         "query": "hello there",
         "domain": "",
@@ -214,10 +220,40 @@ def test_assemble_chat_context_passes_interactive_surface_to_prompt_builder():
         "plan_context": "",
         "transcript_context": "",
         "surface": "interactive",
+        "output_style": "teaching",
         "workspace": "/tmp/chat-workspace",
         "pipeline_workspace": "/tmp/pipeline-workspace",
         "mcp_servers": ("seq-think", "bio-tools"),
     }
+
+
+def test_assemble_chat_context_loads_scoped_memory_and_forwards_to_prompt_builder():
+    calls = {"prompt": None}
+
+    class FakeRecall:
+        def to_context_text(self):
+            return "1. PBMC QC defaults\n   scope=project | owner=tester | freshness=evolving | updated=2026-04-02"
+
+    def fake_prompt_builder(**kwargs):
+        calls["prompt"] = kwargs
+        return "PROMPT"
+
+    context = asyncio.run(
+        assemble_chat_context(
+            chat_id="chat-scoped-memory",
+            user_content="Continue the PBMC QC analysis",
+            user_id="user-scoped-memory",
+            platform="cli",
+            workspace="/tmp/project",
+            system_prompt_builder=fake_prompt_builder,
+            scoped_memory_scope="project",
+            scoped_memory_loader=lambda **_: FakeRecall(),
+        )
+    )
+
+    assert context.system_prompt == "PROMPT"
+    assert "PBMC QC defaults" in context.scoped_memory_context
+    assert calls["prompt"]["scoped_memory_context"].startswith("1. PBMC QC defaults")
 
 
 def test_assemble_prompt_context_prefetches_knowledge_guidance_for_method_questions():

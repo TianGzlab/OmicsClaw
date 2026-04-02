@@ -119,16 +119,40 @@ def test_list_installed_extensions_reads_multiple_type_roots(tmp_path):
         disabled_reason="manual disable",
     )
 
+    workflow_dir = extension_store_dir(tmp_path, "workflow-pack") / "my-workflows"
+    workflow_dir.mkdir(parents=True)
+    write_install_record(
+        workflow_dir,
+        extension_name="my-workflows",
+        source_kind="local",
+        source="/tmp/my-workflows",
+        extension_type="workflow-pack",
+    )
+
+    style_dir = extension_store_dir(tmp_path, "output-style-pack") / "my-styles"
+    style_dir.mkdir(parents=True)
+    write_install_record(
+        style_dir,
+        extension_name="my-styles",
+        source_kind="local",
+        source="/tmp/my-styles",
+        extension_type="output-style-pack",
+    )
+
     inventory = list_installed_extensions(tmp_path)
 
     assert sorted((item.extension_type, item.path.name) for item in inventory) == [
+        ("output-style-pack", "my-styles"),
         ("prompt-pack", "my-prompts"),
         ("skill-pack", "my-skill"),
+        ("workflow-pack", "my-workflows"),
     ]
     by_type = {item.extension_type: item for item in inventory}
+    assert by_type["output-style-pack"].state.enabled is True
     assert by_type["prompt-pack"].state.enabled is False
     assert by_type["prompt-pack"].state.disabled_reason == "manual disable"
     assert by_type["skill-pack"].state.enabled is True
+    assert by_type["workflow-pack"].state.enabled is True
 
 
 def test_registry_skips_disabled_skill_pack(tmp_path):

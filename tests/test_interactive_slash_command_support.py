@@ -38,17 +38,25 @@ def test_parse_slash_command_requires_exact_command_token():
     assert parse_slash_command("/skillsx spatial", CLI_SLASH_COMMAND_SPECS) is None
 
 
-def test_tui_slash_command_specs_include_usage_but_not_research():
+def test_tui_slash_command_specs_include_phase_g_commands_but_not_research():
     names = list_slash_command_names(TUI_SLASH_COMMAND_SPECS)
 
+    assert "/doctor" in names
+    assert "/context" in names
     assert "/usage" in names
     assert "/do-current-task" in names
+    assert "/current" in names
+    assert "/resume" in names
     assert "/install-extension" in names
     assert "/installed-extensions" in names
     assert "/disable-extension" in names
     assert "/enable-extension" in names
     assert "/installed-skills" in names
     assert "/refresh-skills" in names
+    assert "/style" in names
+    assert "/memory" in names
+    assert "/session-title" in names
+    assert "/session-tag" in names
     assert "/research" not in names
 
 
@@ -64,6 +72,13 @@ def test_slash_command_help_rows_and_text_render_subset():
         "Run a skill: /run <skill> [--demo] [--input <path>] [--output <dir>] [--method <name>]",
     ) in rows
     assert any(name == "/do-current-task" for name, _description in rows)
+    assert any(name == "/resume" for name, _description in rows)
+    assert any(name == "/style" for name, _description in rows)
+    assert any(name == "/doctor" for name, _description in rows)
+    assert any(name == "/context" for name, _description in rows)
+    assert any(name == "/memory" for name, _description in rows)
+    assert "/doctor  — Run environment and runtime diagnostics" in text
+    assert "/context  — Inspect current prompt-context layers and budget" in text
     assert "/usage  — Show current token and cost usage." in text
     assert "  Footer" in text
 
@@ -95,4 +110,6 @@ def test_format_tui_help_text_includes_shortcuts_and_slash_commands():
     assert "OmicsClaw TUI — Keyboard shortcuts:" in text
     assert "Ctrl+H — Show help" in text
     assert "Slash commands:" in text
+    assert "/doctor  — Run environment and runtime diagnostics" in text
+    assert "/context  — Inspect current prompt-context layers and budget" in text
     assert "/usage  — Show current token and cost usage." in text

@@ -131,6 +131,7 @@ Operational guardrails:
 
 6. Memory Use
    - Use `remember` for stable preferences, confirmed biological insights, and durable project context.
+   - Treat injected `## Scoped Memory` as local project/dataset/lab heuristics, not general scientific knowledge.
    - Do not store secrets, API keys, raw patient identifiers, transient file paths, temporary errors, or unconfirmed annotations.
    - If helpful, briefly acknowledge durable preferences or confirmed context in natural language; do not dump internal memory fields.
 
@@ -199,6 +200,13 @@ def build_memory_context_block(memory_context: str) -> str:
     if not value:
         return ""
     return f"## Your Memory\n\n{value}"
+
+
+def build_scoped_memory_context_block(scoped_memory_context: str) -> str:
+    value = str(scoped_memory_context or "").strip()
+    if not value:
+        return ""
+    return f"## Scoped Memory\n\n{value}"
 
 
 def build_workspace_context_block(
@@ -412,7 +420,9 @@ class ContextAssemblyRequest:
     surface: str = "bot"
     omicsclaw_dir: str = ""
     base_persona: str = ""
+    output_style: str = ""
     memory_context: str = ""
+    scoped_memory_context: str = ""
     skill: str = ""
     query: str = ""
     domain: str = ""
@@ -454,6 +464,7 @@ class ContextAssemblyRequest:
             "transcript_context_placement",
             str(self.transcript_context_placement or "message").strip() or "message",
         )
+        object.__setattr__(self, "output_style", str(self.output_style or "").strip())
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,6 +530,10 @@ def _build_skill_contract_layer(request: ContextAssemblyRequest) -> str | None:
 
 def _build_memory_context_layer(request: ContextAssemblyRequest) -> str | None:
     return build_memory_context_block(request.memory_context) or None
+
+
+def _build_scoped_memory_context_layer(request: ContextAssemblyRequest) -> str | None:
+    return build_scoped_memory_context_block(request.scoped_memory_context) or None
 
 
 def _build_capability_context_layer(request: ContextAssemblyRequest) -> str | None:
@@ -681,6 +696,13 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         builder=_build_memory_context_layer,
     ),
     ContextLayerInjector(
+        name="scoped_memory_context",
+        order=45,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_build_scoped_memory_context_layer,
+    ),
+    ContextLayerInjector(
         name="extension_prompt_packs",
         order=35,
         placement="system",
@@ -761,6 +783,7 @@ __all__ = [
     "build_mcp_instructions_block",
     "build_memory_context_block",
     "build_plan_context_block",
+    "build_scoped_memory_context_block",
     "build_transcript_context_block",
     "build_workspace_context_block",
     "get_default_context_injectors",

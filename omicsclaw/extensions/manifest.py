@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any
 
 EXTENSION_MANIFEST_FILENAME = "omicsclaw-extension.json"
-VALID_EXTENSION_TYPES = {"skill-pack", "agent-pack", "mcp-bundle", "prompt-pack"}
+VALID_EXTENSION_TYPES = {
+    "skill-pack",
+    "agent-pack",
+    "mcp-bundle",
+    "prompt-pack",
+    "output-style-pack",
+    "workflow-pack",
+    "hook-pack",
+}
 VALID_TRUSTED_CAPABILITIES = {
     "skill-run",
     "skill-demo",
@@ -17,8 +25,10 @@ VALID_TRUSTED_CAPABILITIES = {
     "report-write",
     "knowledge-hints",
     "agent-entry",
+    "workflow-entry",
     "mcp-config",
     "prompt-rules",
+    "output-style-entry",
     "hooks",
     "runtime-policy",
 }
@@ -31,7 +41,14 @@ UNTRUSTED_ALLOWED_CAPABILITIES = {
     "report-write",
     "knowledge-hints",
 }
-RESTRICTED_UNTRUSTED_CAPABILITIES = {"hooks", "runtime-policy", "agent-entry", "mcp-config", "prompt-rules"}
+RESTRICTED_UNTRUSTED_CAPABILITIES = {
+    "hooks",
+    "runtime-policy",
+    "agent-entry",
+    "workflow-entry",
+    "mcp-config",
+    "prompt-rules",
+}
 
 
 @dataclass(slots=True)
@@ -40,6 +57,7 @@ class ExtensionManifest:
     version: str
     type: str
     entrypoints: list[str] = field(default_factory=list)
+    hooks: list[str] = field(default_factory=list)
     required_files: list[str] = field(default_factory=list)
     trusted_capabilities: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
@@ -135,6 +153,10 @@ def load_extension_manifest(manifest_path: str | Path) -> ExtensionManifest:
         entrypoints=_ensure_relative_manifest_paths(
             _normalize_manifest_list(raw.get("entrypoints"), field_name="entrypoints"),
             field_name="entrypoints",
+        ),
+        hooks=_ensure_relative_manifest_paths(
+            _normalize_manifest_list(raw.get("hooks"), field_name="hooks"),
+            field_name="hooks",
         ),
         required_files=_ensure_relative_manifest_paths(
             _normalize_manifest_list(raw.get("required_files"), field_name="required_files"),

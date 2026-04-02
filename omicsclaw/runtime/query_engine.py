@@ -5,6 +5,17 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .events import (
+    EVENT_SESSION_RESUME,
+    EVENT_SESSION_START,
+    EVENT_TOOL_AFTER,
+    EVENT_TOOL_BEFORE,
+)
+from .hook_payloads import SessionHookPayload, ToolHookPayload
+from .hooks import HOOK_MODE_CONTEXT, HOOK_MODE_NOTICE
+from .policy import evaluate_tool_policy
+from .hooks import LifecycleHookRuntime
+from .policy_state import ToolPolicyState
 from .tool_orchestration import ToolExecutionRequest, ToolExecutionResult, execute_tool_requests
 from .tool_registry import ToolRuntime
 from .tool_result_store import ToolResultRecord, ToolResultStore
@@ -36,6 +47,9 @@ class QueryEngineContext:
     session_id: str | None
     system_prompt: str
     user_message_content: Any
+    surface: str = "bot"
+    policy_state: ToolPolicyState | None = None
+    hook_runtime: LifecycleHookRuntime | None = None
 
 
 @dataclass(slots=True)
@@ -132,6 +146,38 @@ async def run_query_engine(
     callbacks: QueryEngineCallbacks | None = None,
 ) -> str:
     callbacks = callbacks or QueryEngineCallbacks()
+    hook_runtime = context.hook_runtime
+    history_before = list(transcript_store.get_history(context.chat_id))
+    system_prompt = context.system_prompt
+
+    if hook_runtime is not None:
+        session_event_name = (
+            EVENT_SESSION_RESUME if history_before else EVENT_SESSION_START
+        )
+        hook_runtime.emit(
+            session_event_name,
+            SessionHookPayload(
+                chat_id=str(context.chat_id),
+                session_id=str(context.session_id or ""),
+                surface=context.surface,
+                resumed=bool(history_before),
+                message_count=len(history_before),
+            ),
+            context={
+                "chat_id": str(context.chat_id),
+                "session_id": str(context.session_id or ""),
+                "surface": context.surface,
+            },
+        )
+        context_fragments = hook_runtime.consume_pending_messages(
+            mode=HOOK_MODE_CONTEXT,
+            event_names=(session_event_name,),
+        )
+        if context_fragments:
+            system_prompt = (
+                f"{system_prompt.rstrip()}\n\n## Active Session Hooks\n\n"
+                + "\n\n".join(fragment for fragment in context_fragments if fragment.strip())
+            ).strip()
 
     transcript_store.touch(context.chat_id)
     transcript_store.evict_lru_conversations()
@@ -149,7 +195,7 @@ async def run_query_engine(
             response = await llm.chat.completions.create(
                 model=config.model,
                 max_tokens=config.max_tokens,
-                messages=[{"role": "system", "content": context.system_prompt}] + history,
+                messages=[{"role": "system", "content": system_prompt}] + history,
                 tools=list(tool_runtime.openai_tools),
                 **kwargs,
             )
@@ -191,17 +237,44 @@ async def run_query_engine(
             except json.JSONDecodeError:
                 func_args = {}
 
+            runtime_context = {
+                "session_id": context.session_id,
+                "chat_id": context.chat_id,
+                "surface": context.surface,
+                "policy_state": context.policy_state,
+            }
             request = ToolExecutionRequest(
                 call_id=tc.id,
                 name=tc.name,
                 arguments=func_args,
                 spec=tool_spec,
                 executor=executor,
-                runtime_context={
-                    "session_id": context.session_id,
-                    "chat_id": context.chat_id,
-                },
+                runtime_context=runtime_context,
+                policy_decision=evaluate_tool_policy(
+                    tc.name,
+                    tool_spec,
+                    runtime_context=runtime_context,
+                ),
             )
+            if hook_runtime is not None:
+                hook_runtime.emit(
+                    EVENT_TOOL_BEFORE,
+                    ToolHookPayload(
+                        tool_name=tc.name,
+                        call_id=tc.id,
+                        status="pending",
+                        success=False,
+                        surface=context.surface,
+                        session_id=str(context.session_id or ""),
+                        chat_id=str(context.chat_id),
+                        policy_action=(
+                            request.policy_decision.action
+                            if request.policy_decision is not None
+                            else ""
+                        ),
+                    ),
+                    context=runtime_context,
+                )
             if executor and callbacks.before_tool is not None:
                 tool_states[tc.id] = await _maybe_await(callbacks.before_tool(request))
             execution_requests.append(request)
@@ -209,14 +282,48 @@ async def run_query_engine(
         execution_results = await execute_tool_requests(execution_requests)
         for execution_result in execution_results:
             request = execution_result.request
+            record_output = execution_result.output
+            if hook_runtime is not None:
+                hook_runtime.emit(
+                    EVENT_TOOL_AFTER,
+                    ToolHookPayload(
+                        tool_name=request.name,
+                        call_id=request.call_id,
+                        status=execution_result.status,
+                        success=execution_result.success,
+                        surface=context.surface,
+                        session_id=str(context.session_id or ""),
+                        chat_id=str(context.chat_id),
+                        policy_action=(
+                            execution_result.policy_decision.action
+                            if execution_result.policy_decision is not None
+                            else ""
+                        ),
+                    ),
+                    context={
+                        "session_id": context.session_id,
+                        "chat_id": context.chat_id,
+                        "surface": context.surface,
+                    },
+                )
+                notices = hook_runtime.consume_pending_messages(
+                    mode=HOOK_MODE_NOTICE,
+                    event_names=(EVENT_TOOL_BEFORE, EVENT_TOOL_AFTER),
+                    call_id=request.call_id,
+                )
+                if notices:
+                    record_output = "\n".join(
+                        [*notices, str(record_output)]
+                    ).strip()
             result_record = tool_result_store.record(
                 chat_id=context.chat_id,
                 tool_call_id=request.call_id,
                 tool_name=request.name,
-                output=execution_result.output,
+                output=record_output,
                 success=execution_result.success,
                 error=execution_result.error,
                 spec=request.spec,
+                policy_decision=execution_result.policy_decision,
             )
 
             if callbacks.after_tool is not None:

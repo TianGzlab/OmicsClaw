@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .policy import ToolPolicyDecision
 from .tool_spec import (
     RESULT_POLICY_INLINE,
     RESULT_POLICY_INSPECTION_REFERENCE,
@@ -36,6 +37,8 @@ class ToolResultRecord:
     storage_path: str = ""
     is_compacted: bool = False
     result_policy: str = RESULT_POLICY_INLINE
+    policy_action: str = ""
+    policy_reason: str = ""
 
 
 class ToolResultStore:
@@ -139,6 +142,7 @@ class ToolResultStore:
         success: bool,
         error: Exception | None = None,
         spec: ToolSpec | None = None,
+        policy_decision: ToolPolicyDecision | None = None,
     ) -> ToolResultRecord:
         raw_content = str(output)
         output_bytes = len(raw_content.encode("utf-8"))
@@ -179,6 +183,8 @@ class ToolResultStore:
             storage_path=storage_path,
             is_compacted=is_compacted,
             result_policy=result_policy,
+            policy_action=policy_decision.action if policy_decision else "",
+            policy_reason=policy_decision.reason if policy_decision else "",
         )
         self.records_by_chat.setdefault(chat_id, []).append(record)
         return record

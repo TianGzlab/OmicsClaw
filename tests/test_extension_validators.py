@@ -159,3 +159,130 @@ def test_validate_extension_directory_accepts_local_prompt_pack(tmp_path):
     assert report.valid is True
     assert report.extension_type == "prompt-pack"
     assert report.entrypoint_paths[0].name == "rules.md"
+
+
+def test_validate_extension_directory_accepts_local_output_style_pack(tmp_path):
+    extension_dir = tmp_path / "style-pack"
+    extension_dir.mkdir()
+    (extension_dir / "styles.yaml").write_text(
+        "styles:\n  - name: concise-lab\n    instructions: Keep it concise.\n",
+        encoding="utf-8",
+    )
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "style-pack",
+                "version": "1.0.0",
+                "type": "output-style-pack",
+                "entrypoints": ["styles.yaml"],
+                "trusted_capabilities": ["output-style-entry"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is True
+    assert report.extension_type == "output-style-pack"
+    assert report.entrypoint_paths[0].name == "styles.yaml"
+
+
+def test_validate_extension_directory_rejects_hook_manifest_without_capability(tmp_path):
+    extension_dir = tmp_path / "hook-pack"
+    extension_dir.mkdir()
+    (extension_dir / "rules.md").write_text("# rules\n", encoding="utf-8")
+    (extension_dir / "hooks.json").write_text('{"hooks":[]}', encoding="utf-8")
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "hook-pack",
+                "version": "1.0.0",
+                "type": "prompt-pack",
+                "entrypoints": ["rules.md"],
+                "hooks": ["hooks.json"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is False
+    assert any("declare hooks must request the 'hooks' trusted capability" in error for error in report.errors)
+
+
+def test_validate_extension_directory_accepts_local_workflow_pack(tmp_path):
+    extension_dir = tmp_path / "workflow-pack"
+    extension_dir.mkdir()
+    (extension_dir / "workflows.yaml").write_text(
+        "workflows:\n  - name: qc\n    steps: [inspect, qc]\n",
+        encoding="utf-8",
+    )
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "workflow-pack",
+                "version": "1.0.0",
+                "type": "workflow-pack",
+                "entrypoints": ["workflows.yaml"],
+                "trusted_capabilities": ["workflow-entry"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is True
+    assert report.extension_type == "workflow-pack"
+    assert report.entrypoint_paths[0].name == "workflows.yaml"
+
+
+def test_validate_extension_directory_accepts_local_hook_pack(tmp_path):
+    extension_dir = tmp_path / "hook-pack"
+    extension_dir.mkdir()
+    (extension_dir / "hooks.json").write_text('{"hooks":[{"event":"session_start","message":"hi"}]}', encoding="utf-8")
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "hook-pack",
+                "version": "1.0.0",
+                "type": "hook-pack",
+                "hooks": ["hooks.json"],
+                "trusted_capabilities": ["hooks"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is True
+    assert report.extension_type == "hook-pack"
+
+
+def test_validate_extension_directory_warns_when_runtime_surface_capability_is_omitted(tmp_path):
+    extension_dir = tmp_path / "agent-pack"
+    extension_dir.mkdir()
+    (extension_dir / "agents.yaml").write_text(
+        "agents:\n  - name: reviewer\n",
+        encoding="utf-8",
+    )
+    (extension_dir / EXTENSION_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "name": "agent-pack",
+                "version": "1.0.0",
+                "type": "agent-pack",
+                "entrypoints": ["agents.yaml"],
+                "trusted_capabilities": ["data-read"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_extension_directory(extension_dir, source_kind="local")
+
+    assert report.valid is True
+    assert any("runtime activation will be skipped" in warning for warning in report.warnings)

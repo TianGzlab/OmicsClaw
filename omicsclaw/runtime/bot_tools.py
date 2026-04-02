@@ -4,12 +4,15 @@ from dataclasses import dataclass
 
 from .tool_registry import ToolRegistry
 from .tool_spec import (
+    APPROVAL_MODE_ASK,
     PROGRESS_POLICY_ANALYSIS,
     RESULT_POLICY_INSPECTION_REFERENCE,
     RESULT_POLICY_KNOWLEDGE_REFERENCE,
     RESULT_POLICY_MEMORY_WRITE,
     RESULT_POLICY_SUMMARY_OR_MEDIA,
     RESULT_POLICY_WEB_REFERENCE,
+    RISK_LEVEL_HIGH,
+    RISK_LEVEL_MEDIUM,
     ToolSpec,
 )
 
@@ -102,6 +105,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             concurrency_safe=False,
             result_policy=RESULT_POLICY_SUMMARY_OR_MEDIA,
             progress_policy=PROGRESS_POLICY_ANALYSIS,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("analysis", "workflow"),
         ),
         ToolSpec(
             name="save_file",
@@ -117,6 +123,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="write_file",
@@ -133,6 +142,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="generate_audio",
@@ -151,6 +163,8 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            writes_workspace=True,
+            policy_tags=("artifact",),
         ),
         ToolSpec(
             name="parse_literature",
@@ -177,6 +191,10 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            touches_network=True,
+            policy_tags=("knowledge", "network"),
         ),
         ToolSpec(
             name="fetch_geo_metadata",
@@ -198,6 +216,10 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            touches_network=True,
+            policy_tags=("knowledge", "network"),
         ),
         ToolSpec(
             name="list_directory",
@@ -211,6 +233,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=True,
             concurrency_safe=True,
+            policy_tags=("workspace", "inspection"),
         ),
         ToolSpec(
             name="inspect_file",
@@ -226,6 +249,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=True,
             concurrency_safe=True,
+            policy_tags=("workspace", "inspection"),
         ),
         ToolSpec(
             name="download_file",
@@ -241,6 +265,12 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_HIGH,
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            touches_network=True,
+            allowed_in_background=False,
+            policy_tags=("network", "workspace", "artifact"),
         ),
         ToolSpec(
             name="create_json_file",
@@ -257,6 +287,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="create_csv_file",
@@ -280,6 +313,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="make_directory",
@@ -294,6 +330,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="move_file",
@@ -309,6 +348,11 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_MEDIUM,
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            allowed_in_background=False,
+            policy_tags=("workspace", "mutation"),
         ),
         ToolSpec(
             name="remove_file",
@@ -323,6 +367,11 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_HIGH,
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            allowed_in_background=False,
+            policy_tags=("workspace", "destructive"),
         ),
         ToolSpec(
             name="get_file_size",
@@ -337,6 +386,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=True,
             concurrency_safe=True,
+            policy_tags=("workspace", "inspection"),
         ),
         ToolSpec(
             name="remember",
@@ -418,6 +468,8 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=False,
             concurrency_safe=False,
             result_policy=RESULT_POLICY_MEMORY_WRITE,
+            risk_level=RISK_LEVEL_MEDIUM,
+            policy_tags=("memory", "knowledge"),
         ),
         ToolSpec(
             name="consult_knowledge",
@@ -462,6 +514,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=True,
             concurrency_safe=True,
             result_policy=RESULT_POLICY_KNOWLEDGE_REFERENCE,
+            policy_tags=("knowledge", "reference"),
         ),
         ToolSpec(
             name="resolve_capability",
@@ -495,6 +548,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=True,
             concurrency_safe=True,
+            policy_tags=("planning", "routing"),
         ),
         ToolSpec(
             name="web_method_search",
@@ -525,6 +579,9 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=True,
             concurrency_safe=True,
             result_policy=RESULT_POLICY_WEB_REFERENCE,
+            risk_level=RISK_LEVEL_MEDIUM,
+            touches_network=True,
+            policy_tags=("knowledge", "network"),
         ),
         ToolSpec(
             name="create_omics_skill",
@@ -595,6 +652,11 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_HIGH,
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            allowed_in_background=False,
+            policy_tags=("repo", "skill", "workspace"),
         ),
         ToolSpec(
             name="custom_analysis_execute",
@@ -645,6 +707,10 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             surfaces=("bot",),
             read_only=False,
             concurrency_safe=False,
+            risk_level=RISK_LEVEL_HIGH,
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            policy_tags=("analysis", "workflow", "notebook"),
         ),
         ToolSpec(
             name="inspect_data",
@@ -685,6 +751,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=True,
             concurrency_safe=True,
             result_policy=RESULT_POLICY_INSPECTION_REFERENCE,
+            policy_tags=("inspection", "analysis"),
         ),
     ]
 

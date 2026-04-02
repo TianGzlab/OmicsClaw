@@ -12,8 +12,13 @@ from bot.core import (
 )
 from omicsclaw.core.skill_scaffolder import SkillScaffoldResult
 from omicsclaw.knowledge.retriever import _push_runtime_notice, clear_runtime_notices
-from omicsclaw.runtime.tool_orchestration import ToolExecutionRequest, ToolExecutionResult
-from omicsclaw.runtime.tool_spec import ToolSpec
+from omicsclaw.runtime.policy import TOOL_POLICY_REQUIRE_APPROVAL, ToolPolicyDecision
+from omicsclaw.runtime.tool_orchestration import (
+    EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionRequest,
+    ToolExecutionResult,
+)
+from omicsclaw.runtime.tool_spec import APPROVAL_MODE_ASK, ToolSpec
 
 
 @pytest.mark.asyncio
@@ -149,3 +154,71 @@ async def test_consult_knowledge_ui_callback_receives_refresh_notice():
             'Knowledge base results for: "marker genes"\n',
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_policy_blocked_tool_audits_and_emits_result():
+    observed_results: list[tuple[str, str]] = []
+    audit_events: list[tuple[str, dict[str, object]]] = []
+
+    def audit_fn(event_name, **payload):
+        audit_events.append((event_name, payload))
+
+    callbacks = _build_bot_query_engine_callbacks(
+        chat_id="chat-2",
+        progress_fn=None,
+        progress_update_fn=None,
+        on_tool_call=None,
+        on_tool_result=lambda tool_name, result: observed_results.append((tool_name, result)),
+        on_stream_content=None,
+        logger_obj=logging.getLogger("test.bot.policy"),
+        audit_fn=audit_fn,
+        deep_learning_methods=set(),
+        usage_accumulator=None,
+    )
+
+    request = ToolExecutionRequest(
+        call_id="call-writer",
+        name="write_file",
+        arguments={"filename": "demo.txt"},
+        spec=ToolSpec(
+            name="write_file",
+            description="write file",
+            parameters={"type": "object", "properties": {}},
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+        ),
+        executor=lambda _args: "ignored",
+        policy_decision=ToolPolicyDecision(
+            action=TOOL_POLICY_REQUIRE_APPROVAL,
+            reason="`write_file` requires explicit approval because it writes workspace files.",
+            risk_level="high",
+            approval_mode=APPROVAL_MODE_ASK,
+            writes_workspace=True,
+            writes_config=False,
+            touches_network=False,
+            allowed_in_background=True,
+            policy_tags=("workspace",),
+            surface="cli",
+            trusted=False,
+            hint="Ask the user to confirm this action, then retry the request.",
+        ),
+    )
+    result = ToolExecutionResult(
+        request=request,
+        output="[tool policy blocked]\nreason: approval required",
+        success=False,
+        status=EXECUTION_STATUS_POLICY_BLOCKED,
+        policy_decision=request.policy_decision,
+    )
+
+    await callbacks.after_tool(
+        result,
+        SimpleNamespace(content="[tool policy blocked]\nreason: approval required"),
+        {},
+    )
+
+    assert observed_results == [
+        ("write_file", "[tool policy blocked]\nreason: approval required")
+    ]
+    assert any(event == "tool_policy_blocked" for event, _payload in audit_events)

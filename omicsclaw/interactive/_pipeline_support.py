@@ -22,10 +22,29 @@ from omicsclaw.agents.plan_validation import (
 from omicsclaw.interactive._history_support import (
     build_research_history_messages as _build_research_history_messages,
 )
+from omicsclaw.runtime.events import EVENT_PLAN_APPROVED, EVENT_TASK_COMPLETED
+from omicsclaw.runtime.hook_payloads import PlanHookPayload
+from omicsclaw.runtime.hooks import (
+    HOOK_MODE_NOTICE,
+    LifecycleHookRuntime,
+    build_default_lifecycle_hook_runtime,
+    format_hook_notice_block,
+)
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _build_hook_runtime(
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
+) -> LifecycleHookRuntime | None:
+    if hook_runtime is not None:
+        return hook_runtime
+    if not str(omicsclaw_dir or "").strip():
+        return None
+    return build_default_lifecycle_hook_runtime(omicsclaw_dir)
 
 
 @dataclass(slots=True)
@@ -471,23 +490,37 @@ def build_approve_plan_command_view(
     arg: str,
     *,
     workspace_fallback: str | Path,
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> PipelineCommandView:
     command_args = parse_approve_plan_command(arg)
     workspace = resolve_pipeline_workspace(
         command_args.workspace,
         workspace_fallback,
     )
+    runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
     snapshot = approve_pipeline_plan(
         workspace,
         approver=command_args.approver,
         notes=command_args.notes,
+        hook_runtime=runtime,
     )
+    output_text = (
+        f"Plan approved for: {snapshot.workspace}\n"
+        f"{format_pipeline_tasks(snapshot)}\n"
+        f"Continue with: {build_resume_task_command(snapshot.workspace)}"
+    )
+    if runtime is not None:
+        notice_block = format_hook_notice_block(
+            runtime.consume_pending_messages(
+                mode=HOOK_MODE_NOTICE,
+                event_names=(EVENT_PLAN_APPROVED, EVENT_TASK_COMPLETED),
+            )
+        )
+        if notice_block:
+            output_text = f"{output_text}\n\n{notice_block}"
     return PipelineCommandView(
-        output_text=(
-            f"Plan approved for: {snapshot.workspace}\n"
-            f"{format_pipeline_tasks(snapshot)}\n"
-            f"Continue with: {build_resume_task_command(snapshot.workspace)}"
-        ),
+        output_text=output_text,
         active_workspace=str(snapshot.workspace),
         persist_session=True,
     )
@@ -670,6 +703,7 @@ def approve_pipeline_plan(
     *,
     approver: str = "user",
     notes: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> PipelineWorkspaceSnapshot:
     snapshot = load_pipeline_workspace_snapshot(workspace)
     if not snapshot.exists:
@@ -687,6 +721,15 @@ def approve_pipeline_plan(
         raise ValueError(f"Plan validation failed:\n{joined}")
 
     state = snapshot.state
+    if hook_runtime is not None:
+        state.task_store.attach_lifecycle_runtime(
+            hook_runtime,
+            context={
+                "workspace": str(snapshot.workspace),
+                "plan_kind": "research_pipeline",
+                "source": "research_pipeline",
+            },
+        )
     if not state.is_stage_done("plan"):
         state.mark_stage_completed(
             "plan",
@@ -707,6 +750,22 @@ def approve_pipeline_plan(
         approval_notes=notes,
     )
     save_plan_state_to_metadata(state.task_store.metadata, plan_state)
+    if hook_runtime is not None:
+        hook_runtime.emit(
+            EVENT_PLAN_APPROVED,
+            PlanHookPayload(
+                request=str(state.task_store.metadata.get("idea", "")).strip(),
+                plan_kind="research_pipeline",
+                status=plan_state.status,
+                task_count=len(state.task_store.tasks),
+                workspace=str(snapshot.workspace),
+                source="research_pipeline",
+            ),
+            context={
+                "workspace": str(snapshot.workspace),
+                "source": "research_pipeline",
+            },
+        )
 
     state.checkpoint(snapshot.workspace)
     return load_pipeline_workspace_snapshot(snapshot.workspace)

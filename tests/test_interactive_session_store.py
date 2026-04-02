@@ -14,7 +14,11 @@ async def test_save_and_load_session_with_metadata(tmp_path, monkeypatch):
         [{"role": "user", "content": "hello"}],
         model="test-model",
         workspace="/tmp/workspace",
-        metadata={"pipeline_workspace": "/tmp/pipeline", "tag": "test"},
+        metadata={
+            "pipeline_workspace": "/tmp/pipeline",
+            "tag": "test",
+            "active_style": "scientific-brief",
+        },
     )
 
     loaded = await session_store.load_session("sess-1")
@@ -23,12 +27,14 @@ async def test_save_and_load_session_with_metadata(tmp_path, monkeypatch):
     assert loaded["workspace"] == "/tmp/workspace"
     assert loaded["metadata"]["pipeline_workspace"] == "/tmp/pipeline"
     assert loaded["metadata"]["tag"] == "test"
+    assert loaded["metadata"]["active_style"] == "scientific-brief"
     assert loaded["transcript"] == [{"role": "user", "content": "hello"}]
     assert loaded["messages"] == loaded["transcript"]
 
     sessions = await session_store.list_sessions(limit=10)
     assert sessions
     assert sessions[0]["metadata"]["pipeline_workspace"] == "/tmp/pipeline"
+    assert sessions[0]["metadata"]["active_style"] == "scientific-brief"
 
 
 @pytest.mark.asyncio

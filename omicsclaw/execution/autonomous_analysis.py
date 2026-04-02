@@ -13,6 +13,7 @@ from typing import Any
 from omicsclaw.common.manifest import StepRecord
 from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.agents.notebook_session import NotebookSession
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.verification import (
     COMPLETION_STATUS_FAILED,
     WORKSPACE_KIND_ANALYSIS_RUN,
@@ -21,6 +22,8 @@ from omicsclaw.runtime.verification import (
     update_workspace_manifest,
     write_completion_report,
 )
+
+_OMICSCLAW_ROOT = Path(__file__).resolve().parents[2]
 
 
 _BLOCKED_IMPORTS = {
@@ -217,6 +220,7 @@ def run_autonomous_analysis(
     output_label: str = "autonomous-analysis",
 ) -> dict[str, Any]:
     """Execute custom analysis code in a constrained notebook session."""
+    hook_runtime = build_default_lifecycle_hook_runtime(_OMICSCLAW_ROOT)
     issues = validate_custom_analysis_code(python_code)
     if issues:
         return {
@@ -298,7 +302,15 @@ def run_autonomous_analysis(
             },
             completed=completed,
         )
-        report_path = write_completion_report(out_dir, report)
+        report_path = write_completion_report(
+            out_dir,
+            report,
+            hook_runtime=hook_runtime,
+            hook_context={
+                "workspace": str(out_dir),
+                "source": "autonomous_analysis",
+            },
+        )
         update_workspace_manifest(
             out_dir,
             workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,

@@ -44,12 +44,21 @@ from ._constants import (
     RUN_COMMAND_USAGE,
     WELCOME_SLOGANS,
 )
+from ._diagnostics_support import (
+    build_context_command_view,
+    build_doctor_command_view,
+    build_usage_command_view,
+)
 from ._llm_bridge_support import (
     build_usage_delta,
     seed_core_conversation,
     sync_core_conversation,
 )
 from ._mcp import list_mcp_servers
+from ._memory_command_support import (
+    build_memory_command_view,
+    resolve_active_scoped_memory_scope,
+)
 from ._omicsclaw_actions import (
     list_registered_skill_names,
     list_skills_text,
@@ -104,15 +113,21 @@ from ._session import (
 )
 from ._session_command_support import (
     build_clear_conversation_command_view,
+    build_current_session_command_view,
     build_export_session_command_view,
     build_new_session_command_view,
     build_resume_session_command_view,
+    build_session_tag_command_view,
     build_session_metadata,
+    build_session_title_command_view,
     build_session_list_view,
+    enrich_session_metadata,
     format_session_list_plain,
     normalize_session_metadata,
+    resolve_active_output_style,
     resolve_active_pipeline_workspace,
 )
+from ._style_support import build_style_command_view
 from ._tui_support import build_tui_header_label
 
 
@@ -420,6 +435,19 @@ if _HAS_TEXTUAL:
                 )
             return active
 
+        def _active_output_style(self) -> str | None:
+            return resolve_active_output_style(self._session_metadata)
+
+        def _active_scoped_memory_scope(self) -> str:
+            return resolve_active_scoped_memory_scope(self._session_metadata)
+
+        def _configured_mcp_server_names(self) -> tuple[str, ...]:
+            return tuple(
+                entry["name"]
+                for entry in list_mcp_servers()
+                if str(entry.get("name", "") or "").strip()
+            )
+
         def _set_active_pipeline_workspace(self, workspace: str | None) -> None:
             value = str(workspace or "").strip()
             self._pipeline_workspace = value
@@ -434,9 +462,12 @@ if _HAS_TEXTUAL:
                 self._messages,
                 model=self._model,
                 workspace=self._workspace,
-                metadata=build_session_metadata(
+                metadata=enrich_session_metadata(
                     self._session_metadata,
+                    messages=self._messages,
+                    workspace_dir=self._workspace,
                     pipeline_workspace=self._pipeline_workspace,
+                    omicsclaw_dir=_OMICSCLAW_DIR,
                 ),
                 transcript=self._messages,
             )
@@ -601,6 +632,21 @@ if _HAS_TEXTUAL:
                 self.run_worker(self._show_plan_async(command.arg), exclusive=False)
                 return
 
+            elif command is not None and command.name == "/current":
+                self._apply_session_command_view(
+                    build_current_session_command_view(
+                        session_id=self._session_id,
+                        workspace_dir=self._workspace,
+                        model=self._model,
+                        provider=self._provider,
+                        messages=self._messages,
+                        session_metadata=self._session_metadata,
+                        pipeline_workspace=self._pipeline_workspace,
+                        omicsclaw_dir=_OMICSCLAW_DIR,
+                    )
+                )
+                return
+
             elif command is not None and command.name == "/approve-plan":
                 self.run_worker(self._approve_plan_async(command.arg), exclusive=False)
                 return
@@ -617,6 +663,17 @@ if _HAS_TEXTUAL:
                 self._apply_session_command_view(
                     build_new_session_command_view(generate_session_id())
                 )
+                return
+
+            elif command is not None and command.name == "/style":
+                self._apply_session_command_view(
+                    build_style_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    )
+                )
+                await self._persist_session()
                 return
 
             elif command is not None and command.name == "/clear":
@@ -636,7 +693,51 @@ if _HAS_TEXTUAL:
                 return
 
             elif command is not None and command.name == "/sessions":
-                self.run_worker(self._show_sessions_async(), exclusive=False)
+                self.run_worker(self._show_sessions_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/resume":
+                self.run_worker(self._resume_session_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/session-title":
+                self._apply_session_command_view(
+                    build_session_title_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                    )
+                )
+                await self._persist_session()
+                return
+
+            elif command is not None and command.name == "/session-tag":
+                self._apply_session_command_view(
+                    build_session_tag_command_view(
+                        command.arg,
+                        session_metadata=self._session_metadata,
+                    )
+                )
+                await self._persist_session()
+                return
+
+            elif command is not None and command.name == "/doctor":
+                self.run_worker(self._show_doctor_async(), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/context":
+                self.run_worker(self._show_context_async(command.arg), exclusive=False)
+                return
+
+            elif command is not None and command.name == "/memory":
+                view = build_memory_command_view(
+                    command.arg,
+                    session_metadata=self._session_metadata,
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                )
+                self._apply_session_command_view(view)
+                if getattr(view, "replace_session_metadata", False):
+                    await self._persist_session()
                 return
 
             elif command is not None and command.name == "/usage":
@@ -884,6 +985,7 @@ if _HAS_TEXTUAL:
                 user_text,
                 session_metadata=self._session_metadata,
                 workspace_dir=self._workspace,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
             )
             if not seed.created:
                 return False
@@ -944,17 +1046,26 @@ if _HAS_TEXTUAL:
                     for entry in list_mcp_servers()
                     if entry.get("name")
                 )
+                loop_kwargs = {
+                    "user_id": "tui_user",
+                    "platform": "tui",
+                    "plan_context": self._interactive_plan_context(),
+                    "workspace": self._workspace,
+                    "pipeline_workspace": self._active_pipeline_workspace() or "",
+                    "mcp_servers": active_mcp_servers,
+                    "on_tool_call": tui_on_tool_call,
+                    "on_tool_result": tui_on_tool_result,
+                }
+                active_memory_scope = self._active_scoped_memory_scope()
+                if active_memory_scope:
+                    loop_kwargs["scoped_memory_scope"] = active_memory_scope
+                active_style = self._active_output_style() or ""
+                if active_style:
+                    loop_kwargs["output_style"] = active_style
                 final_text = await core.llm_tool_loop(
                     _USER,
                     last_user_msg,
-                    user_id="tui_user",
-                    platform="tui",
-                    plan_context=self._interactive_plan_context(),
-                    workspace=self._workspace,
-                    pipeline_workspace=self._active_pipeline_workspace() or "",
-                    mcp_servers=active_mcp_servers,
-                    on_tool_call=tui_on_tool_call,
-                    on_tool_result=tui_on_tool_result,
+                    **loop_kwargs,
                 )
                 elapsed = _time.time() - t0
 
@@ -1029,35 +1140,37 @@ if _HAS_TEXTUAL:
 
         def _show_usage(self) -> None:
             """Display detailed usage statistics in the chat area."""
-            try:
-                sys.path.insert(0, str(_OMICSCLAW_DIR))
-                import bot.core as core
-                snap = core.get_usage_snapshot()
-            except Exception:
-                snap = {}
+            self._apply_session_command_view(
+                build_usage_command_view(
+                    session_usage=self._session_stats,
+                    session_seconds=_time.time() - self._session_start,
+                )
+            )
 
-            sess_in  = self._session_stats.get("prompt_tokens", 0)
-            sess_out = self._session_stats.get("completion_tokens", 0)
-            calls    = self._session_stats.get("api_calls", 0)
-            inp_p    = snap.get("input_price_per_1m", 0.0)
-            out_p    = snap.get("output_price_per_1m", 0.0)
-            cost     = sess_in / 1_000_000 * inp_p + sess_out / 1_000_000 * out_p
-            elapsed  = _time.time() - self._session_start
-            h, m     = int(elapsed // 3600), int((elapsed % 3600) // 60)
+        async def _show_doctor_async(self) -> None:
+            self._apply_session_command_view(
+                build_doctor_command_view(
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                    omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    output_dir=str(_OMICSCLAW_DIR / "output"),
+                )
+            )
 
-            lines = [
-                "┏━ Usage Report ━┓",
-                f"  • Model:       {snap.get('model', '?')} ({snap.get('provider', '?')})",
-                f"  • Input tokens:  {sess_in:,}",
-                f"  • Output tokens: {sess_out:,}",
-                f"  • Total tokens:  {sess_in + sess_out:,}",
-                f"  • API calls:     {calls}",
-                f"  • Est. cost:     ${cost:.6f} USD",
-                f"  • Price:         ${inp_p:.3f} / ${out_p:.3f} per 1M tokens (in/out)",
-                f"  • Session time:  {h}h {m}m",
-                "┗━━━━━━━━━━━━━━┛",
-            ]
-            self._add_system_message("\n".join(lines))
+        async def _show_context_async(self, arg: str) -> None:
+            self._apply_session_command_view(
+                build_context_command_view(
+                    arg,
+                    messages=self._messages,
+                    session_metadata=self._session_metadata,
+                    workspace_dir=self._workspace,
+                    pipeline_workspace=self._active_pipeline_workspace() or "",
+                    output_style=self._active_output_style() or "",
+                    omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    mcp_servers=self._configured_mcp_server_names(),
+                    surface="interactive",
+                )
+            )
 
 
         # ------------------------------------------------------------------
@@ -1130,6 +1243,7 @@ if _HAS_TEXTUAL:
                 session_metadata=self._session_metadata,
                 messages=self._messages,
                 workspace_dir=self._workspace,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
             )
             self._apply_interactive_plan_command_view(view)
             if view.persist_session:
@@ -1141,6 +1255,7 @@ if _HAS_TEXTUAL:
                     view = build_approve_plan_command_view(
                         arg,
                         workspace_fallback=self._active_pipeline_workspace() or self._workspace,
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
                     )
                     self._apply_pipeline_command_view(view)
                     if view.persist_session:
@@ -1152,6 +1267,7 @@ if _HAS_TEXTUAL:
             view = build_interactive_approve_plan_command_view(
                 arg,
                 session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
             )
             self._apply_interactive_plan_command_view(view)
             if view.persist_session:
@@ -1167,6 +1283,7 @@ if _HAS_TEXTUAL:
             view = build_interactive_resume_task_command_view(
                 arg,
                 session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
             )
             self._apply_interactive_plan_command_view(view)
             if view.persist_session:
@@ -1195,6 +1312,7 @@ if _HAS_TEXTUAL:
             view = build_do_current_task_command_view(
                 arg,
                 session_metadata=self._session_metadata,
+                omicsclaw_dir=str(_OMICSCLAW_DIR),
             )
             self._apply_interactive_plan_command_view(view)
             if view.persist_session:
@@ -1209,12 +1327,45 @@ if _HAS_TEXTUAL:
         # /sessions worker
         # ------------------------------------------------------------------
 
-        async def _show_sessions_async(self) -> None:
-            view = await build_session_list_view(limit=10)
+        async def _show_sessions_async(self, query: str = "") -> None:
+            view = await build_session_list_view(limit=10, query=query)
             self._add_system_message(
                 format_session_list_plain(
                     view,
-                    hint_text="Use /resume <id> in CLI mode to resume a session.",
+                    hint_text=(
+                        "Use /resume <id> or /resume tag:<tag> title:<text> workspace:<path> in TUI."
+                    ),
+                )
+            )
+
+        async def _resume_session_async(self, target: str) -> None:
+            query = target.strip()
+            if not query:
+                await self._show_sessions_async()
+                self._add_system_message(
+                    "[dim]Use /resume <session-id> or a search query to restore a session.[/dim]"
+                )
+                return
+
+            view = await build_resume_session_command_view(query)
+            if view.success:
+                self._apply_session_command_view(view)
+                return
+
+            matches = await build_session_list_view(limit=10, query=query)
+            if not matches.entries:
+                self._apply_session_command_view(view)
+                return
+            if len(matches.entries) == 1:
+                resolved = await build_resume_session_command_view(matches.entries[0].session_id)
+                self._apply_session_command_view(resolved)
+                return
+
+            self._add_system_message(
+                format_session_list_plain(
+                    matches,
+                    header=f"Sessions matching: {query}",
+                    hint_text="Multiple sessions matched. Re-run /resume <session-id> with one of the IDs above.",
                 )
             )
 

@@ -10,19 +10,25 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from omicsclaw.extensions import (
+    build_extension_runtime_snapshot,
     extension_store_dir,
     find_installed_extensions,
-    load_enabled_prompt_packs,
-    list_installed_extension_records,
+    format_extension_runtime_surface_summary,
     list_installed_extensions,
     load_extension_state,
     set_extension_enabled,
     validate_extension_directory,
-    validate_skill_pack_directory,
     write_extension_state,
     write_install_record,
 )
 from omicsclaw.interactive._session import format_relative_time
+from omicsclaw.runtime.events import EVENT_EXTENSION_INSTALLED
+from omicsclaw.runtime.hook_payloads import ExtensionHookPayload
+from omicsclaw.runtime.hooks import (
+    HOOK_MODE_NOTICE,
+    build_default_lifecycle_hook_runtime,
+    format_hook_notice_block,
+)
 
 
 @dataclass(slots=True)
@@ -72,6 +78,9 @@ class InstalledSkillEntry:
     enabled: bool = True
     disabled_reason: str = ""
     trusted_capabilities: list[str] = field(default_factory=list)
+    active_surfaces: list[str] = field(default_factory=list)
+    inactive_surfaces: list[str] = field(default_factory=list)
+    runtime_entries: list[str] = field(default_factory=list)
     path: str = ""
 
 
@@ -100,13 +109,53 @@ def build_extension_install_usage_text() -> str:
         "  /install-extension https://github.com/user/my-skill-repo\n"
         "Notes:\n"
         "  - GitHub sources are treated as untrusted and may only install skill-pack extensions.\n"
-        "  - agent-pack, mcp-bundle, and prompt-pack are currently supported from local sources only."
+        "  - agent-pack, prompt-pack, workflow-pack, hook-pack, and mcp-bundle are local-source extension types.\n"
+        "  - hook-pack installs are tracked in a disabled state until explicitly enabled."
     )
 
 
 def build_extension_toggle_usage_text(*, enable: bool) -> str:
     command = "/enable-extension" if enable else "/disable-extension"
     return f"Usage: {command} <extension-name>"
+
+
+def _extension_install_hook_statuses(
+    *,
+    omicsclaw_dir: str | Path,
+    extension_name: str,
+    extension_type: str,
+    source_kind: str,
+    install_path: Path,
+    enabled: bool,
+    trusted_capabilities: list[str] | tuple[str, ...],
+    manifest_version: str = "",
+) -> list[SkillCommandStatus]:
+    runtime = build_default_lifecycle_hook_runtime(omicsclaw_dir)
+    runtime.emit(
+        EVENT_EXTENSION_INSTALLED,
+        ExtensionHookPayload(
+            extension_name=extension_name,
+            extension_type=extension_type,
+            source_kind=source_kind,
+            install_path=str(install_path),
+            enabled=enabled,
+            trusted_capabilities=tuple(trusted_capabilities),
+            manifest_version=manifest_version,
+        ),
+        context={
+            "workspace": str(install_path),
+            "source": "extension_install",
+        },
+    )
+    notice_block = format_hook_notice_block(
+        runtime.consume_pending_messages(
+            mode=HOOK_MODE_NOTICE,
+            event_names=(EVENT_EXTENSION_INSTALLED,),
+        )
+    )
+    if not notice_block:
+        return []
+    return [SkillCommandStatus("info", notice_block)]
 
 
 def _infer_github_source(source: str) -> tuple[str, str, str]:
@@ -269,6 +318,98 @@ def _build_validation_statuses(validation) -> list[SkillCommandStatus]:
     return statuses
 
 
+def _default_enabled_state_for_extension_type(extension_type: str) -> bool:
+    return extension_type != "hook-pack"
+
+
+def _format_surface_brief(surface) -> str:
+    if getattr(surface, "entry_count", 0):
+        return f"{surface.surface}({surface.entry_count})"
+    return surface.surface
+
+
+def _format_surface_inactive(surface) -> str:
+    reason = str(getattr(surface, "reason", "") or "").strip()
+    if reason:
+        return f"{surface.surface}: {reason}"
+    return surface.surface
+
+
+def _format_surface_runtime_entries(surface) -> str:
+    labels = [str(label).strip() for label in getattr(surface, "labels", ()) if str(label).strip()]
+    if not labels:
+        return ""
+    preview = labels[:3]
+    suffix = " ..." if len(labels) > 3 else ""
+    return f"{surface.surface}: {', '.join(preview)}{suffix}"
+
+
+def _build_runtime_surface_lists(activation_record) -> tuple[list[str], list[str], list[str]]:
+    if activation_record is None:
+        return [], [], []
+
+    active_surfaces: list[str] = []
+    inactive_surfaces: list[str] = []
+    runtime_entries: list[str] = []
+    for surface in activation_record.surfaces:
+        if surface.active:
+            active_surfaces.append(_format_surface_brief(surface))
+            entry_text = _format_surface_runtime_entries(surface)
+            if entry_text:
+                runtime_entries.append(entry_text)
+        else:
+            inactive_surfaces.append(_format_surface_inactive(surface))
+    return active_surfaces, inactive_surfaces, runtime_entries
+
+
+def _build_post_install_statuses(
+    *,
+    omicsclaw_dir: str | Path,
+    install_name: str,
+    extension_type: str,
+    install_path: Path,
+) -> list[SkillCommandStatus]:
+    snapshot = build_extension_runtime_snapshot(omicsclaw_dir)
+    activation_record = next(
+        (record for record in snapshot.activation_records if record.path == install_path),
+        None,
+    )
+    active_surfaces, inactive_surfaces, _runtime_entries = _build_runtime_surface_lists(
+        activation_record
+    )
+
+    statuses = [
+        SkillCommandStatus(
+            "success",
+            f"Extension '{install_name}' ({extension_type}) installed at {install_path}.",
+        )
+    ]
+    if active_surfaces:
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Active runtime surfaces: " + ", ".join(active_surfaces),
+            )
+        )
+    elif inactive_surfaces:
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Runtime activation pending: " + ", ".join(inactive_surfaces),
+            )
+        )
+
+    if extension_type == "hook-pack":
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Hook packs install in a gated state. Use /enable-extension "
+                f"{install_name} after reviewing the hook behavior.",
+            )
+        )
+    return statuses
+
+
 def _finish_install_from_candidate(
     candidate_dir: Path,
     *,
@@ -310,6 +451,7 @@ def _finish_install_from_candidate(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(candidate_dir, dest)
+    enabled_by_default = _default_enabled_state_for_extension_type(validation.extension_type)
     try:
         write_install_record(
             dest,
@@ -320,7 +462,15 @@ def _finish_install_from_candidate(
             extension_type=validation.extension_type,
             relative_install_path=str(dest.relative_to(Path(omicsclaw_dir))),
         )
-        write_extension_state(dest, enabled=True)
+        write_extension_state(
+            dest,
+            enabled=enabled_by_default,
+            disabled_reason=(
+                "hook-pack installs are gated until explicitly enabled"
+                if not enabled_by_default
+                else ""
+            ),
+        )
     except Exception as exc:
         statuses.append(
             SkillCommandStatus(
@@ -353,19 +503,31 @@ def _finish_install_from_candidate(
             )
         )
     else:
-        statuses.append(
-            SkillCommandStatus(
-                "success",
-                f"Extension '{install_name}' ({validation.extension_type}) installed at {dest}.",
-            )
-        )
-        statuses.append(
-            SkillCommandStatus(
-                "info",
-                "Non-skill extensions are tracked and can be enabled/disabled. Prompt packs are applied while enabled; other extension types are not auto-activated into runtime policy yet.",
+        statuses.extend(
+            _build_post_install_statuses(
+                omicsclaw_dir=omicsclaw_dir,
+                install_name=install_name,
+                extension_type=validation.extension_type,
+                install_path=dest,
             )
         )
 
+    statuses.extend(
+        _extension_install_hook_statuses(
+            omicsclaw_dir=omicsclaw_dir,
+            extension_name=install_name,
+            extension_type=validation.extension_type,
+            source_kind=plan.source_kind,
+            install_path=dest,
+            enabled=enabled_by_default,
+            trusted_capabilities=(
+                validation.manifest.trusted_capabilities if validation.manifest is not None else []
+            ),
+            manifest_version=(
+                validation.manifest.version if validation.manifest is not None else ""
+            ),
+        )
+    )
     return statuses
 
 
@@ -402,6 +564,7 @@ def finalize_installed_skill(plan: SkillInstallPlan) -> list[SkillCommandStatus]
 
     source_root = plan.dest.parents[2]
     install_name = validation.effective_name or plan.skill_name
+    enabled_by_default = _default_enabled_state_for_extension_type(validation.extension_type)
     try:
         write_install_record(
             plan.dest,
@@ -412,7 +575,15 @@ def finalize_installed_skill(plan: SkillInstallPlan) -> list[SkillCommandStatus]
             extension_type=validation.extension_type,
             relative_install_path=str(plan.dest.relative_to(source_root)),
         )
-        write_extension_state(plan.dest, enabled=True)
+        write_extension_state(
+            plan.dest,
+            enabled=enabled_by_default,
+            disabled_reason=(
+                "hook-pack installs are gated until explicitly enabled"
+                if not enabled_by_default
+                else ""
+            ),
+        )
     except Exception as exc:
         statuses.append(
             SkillCommandStatus(
@@ -446,12 +617,30 @@ def finalize_installed_skill(plan: SkillInstallPlan) -> list[SkillCommandStatus]
             )
         )
     else:
-        statuses.append(
-            SkillCommandStatus(
-                "success",
-                f"Extension '{install_name}' ({validation.extension_type}) installed at {plan.dest}.",
+        statuses.extend(
+            _build_post_install_statuses(
+                omicsclaw_dir=source_root,
+                install_name=install_name,
+                extension_type=validation.extension_type,
+                install_path=plan.dest,
             )
         )
+    statuses.extend(
+        _extension_install_hook_statuses(
+            omicsclaw_dir=source_root,
+            extension_name=install_name,
+            extension_type=validation.extension_type,
+            source_kind=plan.source_kind,
+            install_path=plan.dest,
+            enabled=enabled_by_default,
+            trusted_capabilities=(
+                validation.manifest.trusted_capabilities if validation.manifest is not None else []
+            ),
+            manifest_version=(
+                validation.manifest.version if validation.manifest is not None else ""
+            ),
+        )
+    )
     return statuses
 
 
@@ -756,12 +945,21 @@ def build_installed_extension_list_view(
     extension_type: str = "",
 ) -> InstalledSkillListView:
     entries: list[InstalledSkillEntry] = []
+    runtime_snapshot = build_extension_runtime_snapshot(omicsclaw_dir)
+    activation_by_path = {
+        str(record.path): record
+        for record in runtime_snapshot.activation_records
+    }
     inventory = list_installed_extensions(
         omicsclaw_dir,
         extension_types=(extension_type,) if extension_type else None,
     )
     for item in inventory:
         record = item.record
+        activation_record = activation_by_path.get(str(item.path))
+        active_surfaces, inactive_surfaces, runtime_entries = _build_runtime_surface_lists(
+            activation_record
+        )
         entries.append(
             InstalledSkillEntry(
                 skill_name=(record.extension_name if record is not None else item.path.name),
@@ -775,6 +973,9 @@ def build_installed_extension_list_view(
                 enabled=item.state.enabled,
                 disabled_reason=item.state.disabled_reason,
                 trusted_capabilities=list(record.trusted_capabilities) if record is not None else [],
+                active_surfaces=active_surfaces,
+                inactive_surfaces=inactive_surfaces,
+                runtime_entries=runtime_entries,
                 path=str(item.path),
             )
         )
@@ -828,6 +1029,12 @@ def format_installed_extension_list_plain(
         lines.append("  " + " · ".join(details))
         if entry.disabled_reason:
             lines.append(f"    reason: {entry.disabled_reason}")
+        if entry.active_surfaces:
+            lines.append(f"    active surfaces: {', '.join(entry.active_surfaces)}")
+        if entry.inactive_surfaces:
+            lines.append(f"    inactive surfaces: {', '.join(entry.inactive_surfaces)}")
+        if entry.runtime_entries:
+            lines.append(f"    runtime entries: {'; '.join(entry.runtime_entries)}")
         if entry.trusted_capabilities:
             lines.append(f"    capabilities: {', '.join(entry.trusted_capabilities)}")
         if entry.source:
@@ -878,19 +1085,50 @@ def build_refresh_extensions_statuses(
         statuses.append(SkillCommandStatus("success", "Extension system refreshed."))
 
     view = build_installed_extension_list_view(omicsclaw_dir=omicsclaw_dir)
+    runtime_snapshot = build_extension_runtime_snapshot(omicsclaw_dir)
     statuses.append(
         SkillCommandStatus(
             "info",
             f"Installed extension inventory: {_inventory_summary_text(view)}",
         )
     )
-    active_prompt_packs = load_enabled_prompt_packs(omicsclaw_dir)
-    if active_prompt_packs:
+    statuses.append(
+        SkillCommandStatus(
+            "info",
+            "Active extension runtime surfaces: "
+            + format_extension_runtime_surface_summary(runtime_snapshot),
+        )
+    )
+    if runtime_snapshot.prompt_packs:
         statuses.append(
             SkillCommandStatus(
                 "info",
                 "Active prompt packs: "
-                + ", ".join(pack.name for pack in active_prompt_packs),
+                + ", ".join(pack.name for pack in runtime_snapshot.prompt_packs),
+            )
+        )
+    if runtime_snapshot.agent_packs:
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Active agent packs: "
+                + ", ".join(pack.name for pack in runtime_snapshot.agent_packs),
+            )
+        )
+    if runtime_snapshot.workflow_packs:
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Active workflow packs: "
+                + ", ".join(pack.name for pack in runtime_snapshot.workflow_packs),
+            )
+        )
+    if runtime_snapshot.hook_extensions:
+        statuses.append(
+            SkillCommandStatus(
+                "info",
+                "Active hook providers: "
+                + ", ".join(item.name for item in runtime_snapshot.hook_extensions),
             )
         )
     for item in list_installed_extensions(omicsclaw_dir):

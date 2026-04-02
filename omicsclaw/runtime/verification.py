@@ -21,6 +21,9 @@ from omicsclaw.common.manifest import (
     read_manifest,
     save_manifest,
 )
+from .events import EVENT_VERIFICATION_COMPLETED
+from .hook_payloads import VerificationHookPayload
+from .hooks import LifecycleHookRuntime
 
 WORKSPACE_KIND_CONVERSATION = "conversation"
 WORKSPACE_KIND_ANALYSIS_RUN = "analysis_run"
@@ -231,6 +234,8 @@ def write_completion_report(
     report: CompletionReport,
     *,
     filename: str = COMPLETION_REPORT_FILENAME,
+    hook_runtime: LifecycleHookRuntime | None = None,
+    hook_context: Mapping[str, Any] | None = None,
 ) -> Path:
     """Persist ``CompletionReport`` as JSON inside the workspace."""
     root = Path(workspace)
@@ -238,6 +243,23 @@ def write_completion_report(
     path = root / filename
     report.report_path = str(path)
     path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    if hook_runtime is not None:
+        hook_runtime.emit(
+            EVENT_VERIFICATION_COMPLETED,
+            VerificationHookPayload(
+                workspace=report.workspace_root,
+                workspace_kind=report.workspace_kind,
+                workspace_purpose=report.workspace_purpose,
+                status=report.status,
+                completed=report.completed,
+                missing_required_artifacts=tuple(report.missing_required_artifacts()),
+                warnings=tuple(report.warnings),
+                errors=tuple(report.errors),
+                report_path=report.report_path,
+                manifest_path=report.manifest_path,
+            ),
+            context=dict(hook_context or {}),
+        )
     return path
 
 

@@ -10,6 +10,11 @@ import pytest
 from rich.console import Console
 
 from omicsclaw.interactive import interactive
+from omicsclaw.interactive._session_command_support import (
+    SessionCommandView,
+    SessionListEntry,
+    SessionListView,
+)
 
 
 @pytest.mark.asyncio
@@ -27,6 +32,7 @@ async def test_stream_llm_response_uses_explicit_workspace_context(monkeypatch):
         workspace="",
         pipeline_workspace="",
         mcp_servers=(),
+        output_style="",
         on_tool_call=None,
         on_tool_result=None,
         on_stream_content=None,
@@ -39,6 +45,7 @@ async def test_stream_llm_response_uses_explicit_workspace_context(monkeypatch):
                 "workspace": workspace,
                 "pipeline_workspace": pipeline_workspace,
                 "mcp_servers": tuple(mcp_servers),
+                "output_style": output_style,
             }
         )
         core_module.conversations[conversation_id] = [
@@ -69,6 +76,7 @@ async def test_stream_llm_response_uses_explicit_workspace_context(monkeypatch):
         messages,
         workspace_dir="/tmp/workspace",
         pipeline_workspace="/tmp/pipeline",
+        output_style="scientific-brief",
     )
 
     assert result == "I am OmicsClaw."
@@ -76,6 +84,7 @@ async def test_stream_llm_response_uses_explicit_workspace_context(monkeypatch):
     assert captured["plan_context"] == ""
     assert captured["workspace"] == "/tmp/workspace"
     assert captured["pipeline_workspace"] == "/tmp/pipeline"
+    assert captured["output_style"] == "scientific-brief"
     rendered = output.getvalue()
     assert rendered.count("I am OmicsClaw.") == 1
     assert messages == [
@@ -169,6 +178,49 @@ async def test_stream_llm_response_passes_plan_context(monkeypatch):
     )
 
     assert captured["plan_context"] == "## Active Plan Mode\n\n- Status: approved"
+
+
+@pytest.mark.asyncio
+async def test_handle_resume_falls_back_to_session_search_for_unique_match(monkeypatch):
+    calls: list[str] = []
+    applied: list[SessionCommandView] = []
+    output = io.StringIO()
+
+    async def _build_resume(target_id: str) -> SessionCommandView:
+        calls.append(target_id)
+        if target_id == "brain":
+            return SessionCommandView(
+                output_text="Session 'brain' not found.",
+                success=False,
+            )
+        assert target_id == "abc12345"
+        return SessionCommandView(
+            output_text="Resumed session: abc12345",
+            success=True,
+            session_id="abc12345",
+            render_as_markup=True,
+        )
+
+    async def _build_session_list(limit: int = 20, *, query: str = "") -> SessionListView:
+        assert limit == 20
+        assert query == "brain"
+        return SessionListView(
+            entries=[SessionListEntry(session_id="abc12345", title="Brain Visium")]
+        )
+
+    monkeypatch.setattr(interactive, "build_resume_session_command_view", _build_resume)
+    monkeypatch.setattr(interactive, "build_session_list_view", _build_session_list)
+    monkeypatch.setattr(
+        interactive,
+        "_apply_session_command_view",
+        lambda state, view: applied.append(view),
+    )
+    monkeypatch.setattr(interactive, "console", Console(file=output, force_terminal=False))
+
+    await interactive._handle_resume("brain", {"session_id": "current"})
+
+    assert calls == ["brain", "abc12345"]
+    assert [view.session_id for view in applied] == ["abc12345"]
 
 
 def test_pipeline_snapshot_exists_uses_pipeline_workspace_resolver(monkeypatch):
@@ -434,3 +486,87 @@ async def test_stream_llm_response_marks_followup_tool_batches_as_updates(monkey
     assert "DONE #2  preview two" in rendered
     assert "RESPONSE CONTINUES" in rendered
     assert rendered.count("Done.") == 1
+
+
+def test_handle_doctor_applies_shared_diagnostics_view(monkeypatch):
+    captured: dict[str, object] = {}
+    state = {
+        "workspace_dir": "/tmp/workspace",
+        "pipeline_workspace": "",
+        "session_metadata": {},
+        "messages": [],
+    }
+
+    monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
+
+    def _fake_build_doctor_command_view(**kwargs):
+        captured["kwargs"] = kwargs
+        return SessionCommandView("Doctor Report", render_as_markup=True)
+
+    monkeypatch.setattr(interactive, "build_doctor_command_view", _fake_build_doctor_command_view)
+    monkeypatch.setattr(
+        interactive,
+        "_apply_session_command_view",
+        lambda state, view: captured.update({"state": state, "view": view}),
+    )
+
+    interactive._handle_doctor(state)
+
+    assert captured["kwargs"]["workspace_dir"] == "/tmp/workspace"
+    assert captured["kwargs"]["pipeline_workspace"] == "/tmp/pipeline"
+    assert captured["view"].output_text == "Doctor Report"
+
+
+def test_handle_context_passes_session_state_to_shared_builder(monkeypatch):
+    captured: dict[str, object] = {}
+    state = {
+        "workspace_dir": "/tmp/workspace",
+        "pipeline_workspace": "",
+        "session_metadata": {"active_style": "teaching"},
+        "messages": [{"role": "user", "content": "inspect sample.h5ad"}],
+    }
+
+    monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
+    monkeypatch.setattr(interactive, "_active_output_style", lambda state: "teaching")
+    monkeypatch.setattr(interactive, "_configured_mcp_server_names", lambda: ("mcp-a",))
+
+    def _fake_build_context_command_view(arg, **kwargs):
+        captured["arg"] = arg
+        captured["kwargs"] = kwargs
+        return SessionCommandView("Context Report", render_as_markup=True)
+
+    monkeypatch.setattr(interactive, "build_context_command_view", _fake_build_context_command_view)
+    monkeypatch.setattr(
+        interactive,
+        "_apply_session_command_view",
+        lambda state, view: captured.update({"state": state, "view": view}),
+    )
+
+    interactive._handle_context("show me", state)
+
+    assert captured["arg"] == "show me"
+    assert captured["kwargs"]["workspace_dir"] == "/tmp/workspace"
+    assert captured["kwargs"]["pipeline_workspace"] == "/tmp/pipeline"
+    assert captured["kwargs"]["output_style"] == "teaching"
+    assert captured["kwargs"]["mcp_servers"] == ("mcp-a",)
+
+
+def test_handle_usage_applies_shared_usage_view(monkeypatch):
+    captured: dict[str, object] = {}
+    state = {"session_id": "demo"}
+
+    monkeypatch.setattr(
+        interactive,
+        "build_usage_command_view",
+        lambda: SessionCommandView("Usage Report", render_as_markup=True),
+    )
+    monkeypatch.setattr(
+        interactive,
+        "_apply_session_command_view",
+        lambda state, view: captured.update({"state": state, "view": view}),
+    )
+
+    interactive._handle_usage(state)
+
+    assert captured["state"] is state
+    assert captured["view"].output_text == "Usage Report"

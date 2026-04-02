@@ -113,6 +113,7 @@ class PromptContextAssembly:
 class AssembledChatContext:
     session_id: str | None
     memory_context: str
+    scoped_memory_context: str
     user_text: str
     user_message_content: str | list[dict[str, Any]]
     skill_hint: str
@@ -311,9 +312,12 @@ async def assemble_chat_context(
     transcript_context: str = "",
     workspace: str = "",
     pipeline_workspace: str = "",
+    scoped_memory_scope: str = "",
     mcp_servers: tuple[str, ...] | None = None,
+    output_style: str = "",
     omicsclaw_dir: str = "",
     context_injectors: tuple[ContextLayerInjector, ...] | None = None,
+    scoped_memory_loader=None,
 ) -> AssembledChatContext:
     session_id = f"{platform}:{user_id}:{chat_id}" if user_id and platform else None
     memory_context = ""
@@ -356,11 +360,37 @@ async def assemble_chat_context(
         except Exception as exc:
             LOGGER.warning("Prompt-pack context preparation failed (non-fatal): %s", exc)
 
+    scoped_memory_context = ""
+    if workspace or pipeline_workspace:
+        try:
+            loader = scoped_memory_loader
+            if loader is None:
+                from omicsclaw.memory.scoped_memory_select import load_scoped_memory_context as _load_scoped_memory_context
+
+                loader = _load_scoped_memory_context
+            recall = loader(
+                query=user_text[:200] if user_text else "",
+                domain=domain_hint,
+                workspace=workspace,
+                pipeline_workspace=pipeline_workspace,
+                preferred_scope=scoped_memory_scope,
+            )
+            if recall is None:
+                scoped_memory_context = ""
+            elif hasattr(recall, "to_context_text"):
+                scoped_memory_context = str(recall.to_context_text()).strip()
+            else:
+                scoped_memory_context = str(recall).strip()
+        except Exception as exc:
+            LOGGER.warning("Scoped memory context preparation failed (non-fatal): %s", exc)
+
     prompt_context = assemble_prompt_context(
         request=ContextAssemblyRequest(
             surface=surface,
             omicsclaw_dir=omicsclaw_dir,
+            output_style=output_style,
             memory_context=memory_context,
+            scoped_memory_context=scoped_memory_context,
             skill=skill_hint,
             query=user_text[:200] if user_text else "",
             domain=domain_hint,
@@ -379,6 +409,7 @@ async def assemble_chat_context(
     if system_prompt_builder is not None:
         builder_kwargs = {
             "memory_context": memory_context,
+            "scoped_memory_context": scoped_memory_context,
             "skill": skill_hint,
             "query": user_text[:200] if user_text else "",
             "domain": domain_hint,
@@ -386,6 +417,7 @@ async def assemble_chat_context(
             "plan_context": plan_context,
             "transcript_context": transcript_context,
             "surface": surface,
+            "output_style": output_style,
             "workspace": workspace,
             "pipeline_workspace": pipeline_workspace,
             "mcp_servers": tuple(mcp_servers or ()),
@@ -409,6 +441,7 @@ async def assemble_chat_context(
     return AssembledChatContext(
         session_id=session_id,
         memory_context=memory_context,
+        scoped_memory_context=scoped_memory_context,
         user_text=user_text,
         user_message_content=build_user_message_content(
             user_content,

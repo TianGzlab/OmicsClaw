@@ -14,6 +14,7 @@ from .context_layers import (
 
 def build_system_prompt(
     memory_context: str = "",
+    scoped_memory_context: str = "",
     skill: str = "",
     query: str = "",
     domain: str = "",
@@ -25,6 +26,7 @@ def build_system_prompt(
     soul_md: Path = DEFAULT_SOUL_MD,
     *,
     surface: str = "bot",
+    output_style: str = "",
     omicsclaw_dir: str = "",
     workspace: str = "",
     pipeline_workspace: str = "",
@@ -42,7 +44,9 @@ def build_system_prompt(
             surface=surface,
             omicsclaw_dir=omicsclaw_dir,
             base_persona=base_persona,
+            output_style=output_style,
             memory_context=memory_context,
+            scoped_memory_context=scoped_memory_context,
             skill=skill,
             query=query,
             domain=domain,

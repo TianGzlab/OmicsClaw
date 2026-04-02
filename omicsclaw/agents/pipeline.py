@@ -45,6 +45,7 @@ from omicsclaw.runtime.task_store import (
     TaskRecord,
     TaskStore,
 )
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.verification import (
     ARTIFACT_KIND_DIR,
     COMPLETION_STATUS_AWAITING_APPROVAL,
@@ -59,6 +60,7 @@ from omicsclaw.runtime.verification import (
 )
 
 logger = logging.getLogger(__name__)
+_OMICSCLAW_ROOT = Path(__file__).resolve().parents[2]
 
 # Suppress noisy HTTP logs from Langchain/OpenAI/httpx
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -461,7 +463,8 @@ class PipelineState:
         if active is None or active.id == next_stage:
             return
         if active.id in PIPELINE_STAGE_INDEX and PIPELINE_STAGE_INDEX[active.id] != PIPELINE_STAGE_INDEX[next_stage]:
-            active.set_status(
+            self.task_store.set_task_status(
+                active.id,
                 TASK_STATUS_COMPLETED,
                 summary=_task_summary(active),
                 owner=active.owner,
@@ -750,6 +753,15 @@ class ResearchPipeline:
         self.tool_registry = build_tool_registry()
         self.system_prompt = get_system_prompt(workspace=str(self.workspace))
         self.state = PipelineState()
+        self.hook_runtime = build_default_lifecycle_hook_runtime(_OMICSCLAW_ROOT)
+        self.state.task_store.attach_lifecycle_runtime(
+            self.hook_runtime,
+            context={
+                "workspace": str(self.workspace),
+                "plan_kind": "research_pipeline",
+                "source": "research_pipeline",
+            },
+        )
 
         # Notebook session — coding-agent uses this for experiment execution
         self.notebook_path = str(self.workspace / "analysis.ipynb")
@@ -1055,6 +1067,11 @@ class ResearchPipeline:
             completion_report_path = write_completion_report(
                 self.workspace,
                 completion_report,
+                hook_runtime=self.hook_runtime,
+                hook_context={
+                    "workspace": str(self.workspace),
+                    "source": "research_pipeline",
+                },
             )
             update_workspace_manifest(
                 self.workspace,
@@ -1147,6 +1164,14 @@ class ResearchPipeline:
                 if loaded is not None:
                     loaded.configure_pipeline(mode=mode, has_pdf=bool(pdf_path))
                     self.state = loaded
+                    self.state.task_store.attach_lifecycle_runtime(
+                        self.hook_runtime,
+                        context={
+                            "workspace": str(self.workspace),
+                            "plan_kind": "research_pipeline",
+                            "source": "research_pipeline",
+                        },
+                    )
                     completed = ", ".join(loaded.completed_stages) or "none"
                     _notify_stage(
                         "resume",

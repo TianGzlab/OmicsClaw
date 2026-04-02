@@ -69,6 +69,11 @@ from ._constants import (
     RUN_COMMAND_USAGE,
     WELCOME_SLOGANS,
 )
+from ._diagnostics_support import (
+    build_context_command_view,
+    build_doctor_command_view,
+    build_usage_command_view,
+)
 from ._llm_bridge_support import (
     append_interruption_notice,
     build_usage_delta,
@@ -79,6 +84,10 @@ from ._mcp import (
     add_mcp_server,
     list_mcp_servers,
     remove_mcp_server,
+)
+from ._memory_command_support import (
+    build_memory_command_view,
+    resolve_active_scoped_memory_scope,
 )
 from ._omicsclaw_actions import (
     list_registered_skill_names,
@@ -151,11 +160,16 @@ from ._session_command_support import (
     build_new_session_command_view,
     build_resume_session_command_view,
     build_resume_session_command_view_from_data,
+    build_session_tag_command_view,
     build_session_metadata,
+    build_session_title_command_view,
     build_session_list_view,
+    enrich_session_metadata,
     normalize_session_metadata,
+    resolve_active_output_style,
     resolve_active_pipeline_workspace,
 )
+from ._style_support import build_style_command_view
 
 logger = logging.getLogger(__name__)
 
@@ -491,9 +505,12 @@ def _print_cli_response_text(text: str) -> None:
 
 
 def _session_metadata_from_state(state: dict[str, Any]) -> dict[str, Any]:
-    metadata = build_session_metadata(
+    metadata = enrich_session_metadata(
         state.get("session_metadata"),
+        messages=state.get("messages"),
+        workspace_dir=state.get("workspace_dir", "") or "",
         pipeline_workspace=state.get("pipeline_workspace"),
+        omicsclaw_dir=_OMICSCLAW_DIR,
     )
     state["session_metadata"] = metadata
     return metadata
@@ -516,6 +533,14 @@ def _active_pipeline_workspace(state: dict[str, Any]) -> str | None:
         pipeline_workspace=None,
     )
     return None
+
+
+def _active_output_style(state: dict[str, Any]) -> str | None:
+    return resolve_active_output_style(state.get("session_metadata"))
+
+
+def _active_scoped_memory_scope(state: dict[str, Any]) -> str:
+    return resolve_active_scoped_memory_scope(state.get("session_metadata"))
 
 
 def _set_active_pipeline_workspace(state: dict[str, Any], workspace: str | None) -> None:
@@ -552,6 +577,14 @@ def _handle_skills(arg: str) -> None:
         console.print(list_skills_text(arg.strip() or None), markup=False)
     except Exception as e:
         console.print(f"[red]Error listing skills: {escape(str(e))}[/red]")
+
+
+def _configured_mcp_server_names() -> tuple[str, ...]:
+    return tuple(
+        entry["name"]
+        for entry in list_mcp_servers()
+        if str(entry.get("name", "") or "").strip()
+    )
 
 
 def _print_skill_run_execution(execution: SkillRunExecutionView) -> None:
@@ -658,34 +691,80 @@ def _handle_run(arg: str) -> SkillRunExecutionView | None:
             skill=command.skill,
             result=result,
         )
-        _print_skill_run_execution(execution)
-        return execution
-    except Exception as e:
-        execution = build_skill_run_execution_view(
+    except Exception as exc:
+        execution = build_skill_run_exception_result(
             arg,
             skill=command.skill,
-            result=build_skill_run_exception_result(e),
+            exc=exc,
         )
-        _print_skill_run_execution(execution)
-        return execution
+    _print_skill_run_execution(execution)
+    return execution
 
 
-async def _handle_sessions() -> None:
+def _handle_doctor(
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_doctor_command_view(
+            workspace_dir=state.get("workspace_dir", "") or "",
+            pipeline_workspace=_active_pipeline_workspace(state) or "",
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+            output_dir=str(_OMICSCLAW_DIR / "output"),
+        ),
+    )
+
+
+def _handle_context(
+    arg: str,
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_context_command_view(
+            arg,
+            messages=state.get("messages", []),
+            session_metadata=state.get("session_metadata"),
+            workspace_dir=state.get("workspace_dir", "") or "",
+            pipeline_workspace=_active_pipeline_workspace(state) or "",
+            output_style=_active_output_style(state) or "",
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
+            mcp_servers=_configured_mcp_server_names(),
+            surface="interactive",
+        ),
+    )
+
+
+def _handle_usage(
+    state: dict[str, Any],
+) -> None:
+    _apply_session_command_view(
+        state,
+        build_usage_command_view(),
+    )
+
+
+async def _handle_sessions(arg: str = "") -> None:
     """List recent sessions in a table."""
-    view = await build_session_list_view(limit=20)
+    view = await build_session_list_view(limit=20, query=arg)
     if not view.entries:
-        console.print("[yellow]No saved sessions.[/yellow]")
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
         return
-    table = Table(title="Sessions", show_header=True, header_style="bold cyan")
+    title = "Sessions"
+    if view.query:
+        title = f"Sessions · {view.query}"
+    table = Table(title=title, show_header=True, header_style="bold cyan")
     table.add_column("ID", style="bold yellow", no_wrap=True)
-    table.add_column("Preview", style="", max_width=50, no_wrap=True)
+    table.add_column("Title / Preview", style="", max_width=50, no_wrap=True)
+    table.add_column("State", style="dim", max_width=54)
     table.add_column("Msgs", justify="right")
     table.add_column("Model", style="dim")
     table.add_column("Last Used", style="dim")
     for entry in view.entries:
         table.add_row(
             entry.session_id,
-            entry.preview,
+            entry.title or entry.preview,
+            entry.state_summary,
             str(entry.message_count),
             entry.model,
             entry.updated_label,
@@ -696,34 +775,39 @@ async def _handle_sessions() -> None:
     console.print()
 
 
-async def _pick_session_interactive(current_id: str) -> str | None:
+async def _pick_session_interactive(
+    current_id: str,
+    *,
+    query: str = "",
+) -> str | None:
     """Show an interactive session picker using questionary."""
-    sessions = await list_sessions(limit=20)
-    if not sessions:
-        console.print("[yellow]No sessions to resume.[/yellow]")
+    view = await build_session_list_view(limit=20, query=query)
+    if not view.entries:
+        console.print(f"[yellow]{view.empty_text}[/yellow]")
         return None
 
     try:
         import questionary
 
         choices = []
-        for s in sessions:
-            sid = s["session_id"]
-            preview = s.get("preview", "") or sid
-            when = format_relative_time(s.get("updated_at"))
+        for entry in view.entries:
+            sid = entry.session_id
+            preview = entry.title or entry.preview or sid
+            when = entry.updated_label
             marker = " ●" if sid == current_id else ""
-            label = f"{preview[:50]:<52}  [{sid}  {when}]{marker}"
+            state_summary = f" · {entry.state_summary}" if entry.state_summary else ""
+            label = f"{preview[:46]:<48}{state_summary[:48]:<50} [{sid}  {when}]{marker}"
             choices.append(questionary.Choice(title=label, value=sid))
 
         selected = questionary.select(
-            "Select session to resume:",
+            "Select session to resume:" if not view.query else f"Select session to resume ({view.query}):",
             choices=choices,
             style=_PICKER_STYLE,
         ).ask()
         return selected
     except ImportError:
         # Fallback: show list and ask for input
-        await _handle_sessions()
+        await _handle_sessions(query)
         console.print("Enter session ID to resume (or press Enter to cancel): ", end="")
         try:
             sid = input().strip()
@@ -742,8 +826,37 @@ async def _handle_resume(arg: str, state: dict[str, Any]) -> None:
         target_id = selected
 
     view = await build_resume_session_command_view(target_id)
-    _apply_session_command_view(state, view)
-    if view.render_as_markup:
+    if view.success:
+        _apply_session_command_view(state, view)
+        if view.render_as_markup:
+            console.print()
+        return
+
+    search_view = await build_session_list_view(limit=20, query=target_id)
+    if not search_view.entries:
+        _apply_session_command_view(state, view)
+        return
+    if len(search_view.entries) == 1:
+        resolved_view = await build_resume_session_command_view(
+            search_view.entries[0].session_id
+        )
+        _apply_session_command_view(state, resolved_view)
+        if resolved_view.render_as_markup:
+            console.print()
+        return
+
+    console.print(
+        f"[yellow]Multiple sessions matched '{escape(target_id)}'. Narrow the query or choose one below.[/yellow]"
+    )
+    selected = await _pick_session_interactive(
+        state["session_id"],
+        query=target_id,
+    )
+    if not selected:
+        return
+    resolved_view = await build_resume_session_command_view(selected)
+    _apply_session_command_view(state, resolved_view)
+    if resolved_view.render_as_markup:
         console.print()
 
 
@@ -754,6 +867,19 @@ async def _handle_delete(arg: str, state: dict[str, Any]) -> None:
         current_session_id=state["session_id"],
     )
     _apply_session_command_view(state, view)
+
+
+async def _handle_memory(arg: str, state: dict[str, Any], *, model: str = "") -> None:
+    """Manage scoped memory entries for the active workspace."""
+    view = build_memory_command_view(
+        arg,
+        session_metadata=state.get("session_metadata"),
+        workspace_dir=state.get("workspace_dir", "") or "",
+        pipeline_workspace=_active_pipeline_workspace(state) or "",
+    )
+    _apply_session_command_view(state, view)
+    if getattr(view, "replace_session_metadata", False) and model:
+        await _persist_session_state(state, model=model)
 
 
 def _handle_mcp(arg: str) -> None:
@@ -950,6 +1076,7 @@ def _handle_plan(arg: str, state: dict[str, Any]) -> bool:
         session_metadata=state.get("session_metadata"),
         messages=state.get("messages"),
         workspace_dir=state.get("workspace_dir", "") or "",
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
     )
     _apply_interactive_plan_command_view(state, view)
     return view.persist_session
@@ -960,6 +1087,7 @@ def _handle_approve_plan(arg: str, state: dict[str, Any]) -> bool:
         view = build_interactive_approve_plan_command_view(
             arg,
             session_metadata=state.get("session_metadata"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
         )
         _apply_interactive_plan_command_view(state, view)
         return view.persist_session
@@ -968,6 +1096,7 @@ def _handle_approve_plan(arg: str, state: dict[str, Any]) -> bool:
         view = build_approve_plan_command_view(
             arg,
             workspace_fallback=_active_pipeline_workspace(state) or state.get("workspace_dir"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
         )
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
@@ -1119,6 +1248,7 @@ async def _handle_resume_task(arg: str, state: dict[str, Any]) -> bool:
         view = build_interactive_resume_task_command_view(
             arg,
             session_metadata=state.get("session_metadata"),
+            omicsclaw_dir=str(_OMICSCLAW_DIR),
         )
         _apply_interactive_plan_command_view(state, view)
         return view.persist_session
@@ -1145,6 +1275,7 @@ async def _handle_do_current_task(arg: str, state: dict[str, Any]) -> bool:
     view = build_do_current_task_command_view(
         arg,
         session_metadata=state.get("session_metadata"),
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
     )
     _apply_interactive_plan_command_view(state, view)
     if not view.success:
@@ -1243,6 +1374,8 @@ async def _stream_llm_response(
     plan_context: str = "",
     workspace_dir: str = "",
     pipeline_workspace: str = "",
+    scoped_memory_scope: str = "",
+    output_style: str = "",
 ) -> str:
     """Call bot/core.py llm_tool_loop and print the response to the console.
 
@@ -1338,18 +1471,25 @@ async def _stream_llm_response(
                     for entry in list_mcp_servers()
                     if entry.get("name")
                 )
+                loop_kwargs = {
+                    "user_id": "cli_user",
+                    "platform": "cli",
+                    "plan_context": plan_context,
+                    "workspace": workspace_dir or "",
+                    "pipeline_workspace": pipeline_workspace or "",
+                    "mcp_servers": active_mcp_servers,
+                    "on_tool_call": sync_on_tool_call,
+                    "on_tool_result": sync_on_tool_result,
+                    "on_stream_content": sync_on_stream_content,
+                }
+                if scoped_memory_scope:
+                    loop_kwargs["scoped_memory_scope"] = scoped_memory_scope
+                if output_style:
+                    loop_kwargs["output_style"] = output_style
                 llm_task = asyncio.create_task(core.llm_tool_loop(
                     _INTERACTIVE_USER,
                     user_text,
-                    user_id="cli_user",
-                    platform="cli",
-                    plan_context=plan_context,
-                    workspace=workspace_dir or "",
-                    pipeline_workspace=pipeline_workspace or "",
-                    mcp_servers=active_mcp_servers,
-                    on_tool_call=sync_on_tool_call,
-                    on_tool_result=sync_on_tool_result,
-                    on_stream_content=sync_on_stream_content,
+                    **loop_kwargs,
                 ))
 
                 async def _watch_escape():
@@ -1459,6 +1599,8 @@ async def _continue_interactive_turn(
         plan_context=_interactive_plan_context(state),
         workspace_dir=state.get("workspace_dir", "") or "",
         pipeline_workspace=_active_pipeline_workspace(state) or "",
+        scoped_memory_scope=_active_scoped_memory_scope(state),
+        output_style=_active_output_style(state) or "",
     )
 
 
@@ -1570,6 +1712,7 @@ def _maybe_seed_interactive_plan(
         user_input,
         session_metadata=state.get("session_metadata"),
         workspace_dir=state.get("workspace_dir", "") or "",
+        omicsclaw_dir=str(_OMICSCLAW_DIR),
     )
     if not seed.created:
         return False
@@ -1756,7 +1899,7 @@ async def _async_interactive_loop(
                 continue
 
             elif command is not None and command.name == "/sessions":
-                await _handle_sessions()
+                await _handle_sessions(command.arg)
                 _print_separator()
                 continue
 
@@ -1789,9 +1932,71 @@ async def _async_interactive_loop(
                         messages=state["messages"],
                         session_metadata=state.get("session_metadata"),
                         pipeline_workspace=state.get("pipeline_workspace"),
+                        omicsclaw_dir=_OMICSCLAW_DIR,
                     ),
                 )
                 console.print()
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/session-title":
+                _apply_session_command_view(
+                    state,
+                    build_session_title_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/session-tag":
+                _apply_session_command_view(
+                    state,
+                    build_session_tag_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/doctor":
+                _handle_doctor(state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/context":
+                _handle_context(command.arg, state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/usage":
+                _handle_usage(state)
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/memory":
+                await _handle_memory(
+                    command.arg,
+                    state,
+                    model=resolved_model,
+                )
+                _print_separator()
+                continue
+
+            elif command is not None and command.name == "/style":
+                _apply_session_command_view(
+                    state,
+                    build_style_command_view(
+                        command.arg,
+                        session_metadata=state.get("session_metadata"),
+                        omicsclaw_dir=str(_OMICSCLAW_DIR),
+                    ),
+                )
+                await _persist_session_state(state, model=resolved_model)
                 _print_separator()
                 continue
 

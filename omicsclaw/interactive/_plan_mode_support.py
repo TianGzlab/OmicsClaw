@@ -12,6 +12,18 @@ from omicsclaw.agents.plan_state import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_PENDING_APPROVAL,
 )
+from omicsclaw.runtime.events import (
+    EVENT_PLAN_APPROVED,
+    EVENT_PLAN_CREATED,
+    EVENT_TASK_STARTED,
+)
+from omicsclaw.runtime.hook_payloads import PlanHookPayload
+from omicsclaw.runtime.hooks import (
+    HOOK_MODE_NOTICE,
+    LifecycleHookRuntime,
+    build_default_lifecycle_hook_runtime,
+    format_hook_notice_block,
+)
 from omicsclaw.runtime.task_store import (
     DONE_TASK_STATUSES,
     TASK_STATUS_IN_PROGRESS,
@@ -92,7 +104,11 @@ class InteractivePlanSnapshot:
         self.approval_notes = approval_notes
         active = self.active_task()
         if active is not None and active.status == TASK_STATUS_PENDING:
-            active.set_status(TASK_STATUS_IN_PROGRESS, owner="assistant")
+            self.task_store.set_task_status(
+                active.id,
+                TASK_STATUS_IN_PROGRESS,
+                owner="assistant",
+            )
         self.touch()
         self.sync()
 
@@ -102,8 +118,16 @@ class InteractivePlanSnapshot:
         if self.status == PLAN_STATUS_APPROVED and target.status not in DONE_TASK_STATUSES:
             for task in self.task_store.tasks:
                 if task.id != task_id and task.status == TASK_STATUS_IN_PROGRESS:
-                    task.set_status(TASK_STATUS_PENDING, owner=task.owner or "assistant")
-            target.set_status(TASK_STATUS_IN_PROGRESS, owner=target.owner or "assistant")
+                    self.task_store.set_task_status(
+                        task.id,
+                        TASK_STATUS_PENDING,
+                        owner=task.owner or "assistant",
+                    )
+            self.task_store.set_task_status(
+                target.id,
+                TASK_STATUS_IN_PROGRESS,
+                owner=target.owner or "assistant",
+            )
         self.touch()
         self.sync()
         return target
@@ -641,11 +665,61 @@ def _replace_plan_metadata(
     return metadata
 
 
+def _build_hook_runtime(
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
+) -> LifecycleHookRuntime | None:
+    if hook_runtime is not None:
+        return hook_runtime
+    if not str(omicsclaw_dir or "").strip():
+        return None
+    return build_default_lifecycle_hook_runtime(omicsclaw_dir)
+
+
+def _attach_snapshot_hook_runtime(
+    snapshot: InteractivePlanSnapshot,
+    *,
+    runtime: LifecycleHookRuntime | None,
+    workspace_dir: str = "",
+) -> None:
+    if runtime is None:
+        return
+    snapshot.task_store.attach_lifecycle_runtime(
+        runtime,
+        context={
+            "workspace": workspace_dir
+            or str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+            "plan_kind": snapshot.plan_kind,
+            "source": "interactive_plan",
+        },
+    )
+
+
+def _append_hook_notices(
+    output_text: str,
+    runtime: LifecycleHookRuntime | None,
+    *,
+    event_names: tuple[str, ...] | list[str],
+) -> str:
+    if runtime is None:
+        return output_text
+    notices = runtime.consume_pending_messages(
+        mode=HOOK_MODE_NOTICE,
+        event_names=tuple(event_names),
+    )
+    notice_block = format_hook_notice_block(notices)
+    if not notice_block:
+        return output_text
+    return f"{output_text}\n\n{notice_block}".strip()
+
+
 def maybe_seed_interactive_plan(
     request: str,
     *,
     session_metadata: Mapping[str, Any] | None,
     workspace_dir: str = "",
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> AutoPlanSeedResult:
     existing = load_interactive_plan_from_metadata(session_metadata)
     if existing is not None:
@@ -661,14 +735,38 @@ def maybe_seed_interactive_plan(
         )
 
     snapshot = build_interactive_plan(request, workspace_dir=workspace_dir)
+    runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
+    _attach_snapshot_hook_runtime(snapshot, runtime=runtime, workspace_dir=workspace_dir)
+    if runtime is not None:
+        runtime.emit(
+            EVENT_PLAN_CREATED,
+            PlanHookPayload(
+                request=snapshot.request,
+                plan_kind=snapshot.plan_kind,
+                status=snapshot.status,
+                task_count=len(snapshot.task_store.tasks),
+                workspace=workspace_dir,
+                source="interactive_plan",
+            ),
+            context={
+                "workspace": workspace_dir,
+                "source": "interactive_plan",
+            },
+        )
+    notice_text = (
+        "Entered structured plan mode for this multi-step request. "
+        "Review with /plan and approve with /approve-plan before execution."
+    )
+    notice_text = _append_hook_notices(
+        notice_text,
+        runtime,
+        event_names=(EVENT_PLAN_CREATED,),
+    )
     return AutoPlanSeedResult(
         created=True,
         snapshot=snapshot,
         session_metadata=_replace_plan_metadata(session_metadata, snapshot),
-        notice_text=(
-            "Entered structured plan mode for this multi-step request. "
-            "Review with /plan and approve with /approve-plan before execution."
-        ),
+        notice_text=notice_text,
     )
 
 
@@ -814,6 +912,8 @@ def build_plan_command_view(
     session_metadata: Mapping[str, Any] | None,
     messages: list[dict[str, Any]] | None,
     workspace_dir: str = "",
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> InteractivePlanCommandView:
     existing = load_interactive_plan_from_metadata(session_metadata)
     request = str(arg or "").strip()
@@ -839,9 +939,32 @@ def build_plan_command_view(
 
     output_text = format_interactive_plan(snapshot)
     if created:
+        runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
+        _attach_snapshot_hook_runtime(snapshot, runtime=runtime, workspace_dir=workspace_dir)
+        if runtime is not None:
+            runtime.emit(
+                EVENT_PLAN_CREATED,
+                PlanHookPayload(
+                    request=snapshot.request,
+                    plan_kind=snapshot.plan_kind,
+                    status=snapshot.status,
+                    task_count=len(snapshot.task_store.tasks),
+                    workspace=workspace_dir,
+                    source="interactive_plan",
+                ),
+                context={
+                    "workspace": workspace_dir,
+                    "source": "interactive_plan",
+                },
+            )
         output_text = (
             "Interactive plan created for this session.\n"
             f"{output_text}"
+        )
+        output_text = _append_hook_notices(
+            output_text,
+            runtime,
+            event_names=(EVENT_PLAN_CREATED,),
         )
     return InteractivePlanCommandView(
         output_text=output_text,
@@ -868,6 +991,8 @@ def build_approve_plan_command_view(
     arg: str,
     *,
     session_metadata: Mapping[str, Any] | None,
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> InteractivePlanCommandView:
     snapshot = load_interactive_plan_from_metadata(session_metadata)
     if snapshot is None:
@@ -881,10 +1006,32 @@ def build_approve_plan_command_view(
     except ValueError as exc:
         return InteractivePlanCommandView(output_text=str(exc), success=False)
 
+    runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
+    _attach_snapshot_hook_runtime(
+        snapshot,
+        runtime=runtime,
+        workspace_dir=str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+    )
     snapshot.mark_approved(
         approved_by=args.approver,
         approval_notes=args.notes,
     )
+    if runtime is not None:
+        runtime.emit(
+            EVENT_PLAN_APPROVED,
+            PlanHookPayload(
+                request=snapshot.request,
+                plan_kind=snapshot.plan_kind,
+                status=snapshot.status,
+                task_count=len(snapshot.task_store.tasks),
+                workspace=str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+                source="interactive_plan",
+            ),
+            context={
+                "workspace": str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+                "source": "interactive_plan",
+            },
+        )
     active_task = snapshot.active_task()
     lines = [
         "Interactive plan approved for this session.",
@@ -894,8 +1041,13 @@ def build_approve_plan_command_view(
         lines.append("")
         lines.append(f"Continue with: /resume-task {active_task.id}")
         lines.append("Start immediately: /do-current-task")
+    output_text = _append_hook_notices(
+        "\n".join(lines),
+        runtime,
+        event_names=(EVENT_TASK_STARTED, EVENT_PLAN_APPROVED),
+    )
     return InteractivePlanCommandView(
-        output_text="\n".join(lines),
+        output_text=output_text,
         persist_session=True,
         session_metadata=_replace_plan_metadata(session_metadata, snapshot),
         replace_session_metadata=True,
@@ -906,6 +1058,8 @@ def build_resume_task_command_view(
     arg: str,
     *,
     session_metadata: Mapping[str, Any] | None,
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> InteractivePlanCommandView:
     snapshot = load_interactive_plan_from_metadata(session_metadata)
     if snapshot is None:
@@ -939,9 +1093,15 @@ def build_resume_task_command_view(
             success=False,
         )
 
+    runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
+    _attach_snapshot_hook_runtime(
+        snapshot,
+        runtime=runtime,
+        workspace_dir=str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+    )
     selected = snapshot.select_task(task.id)
-    return InteractivePlanCommandView(
-        output_text="\n".join(
+    output_text = _append_hook_notices(
+        "\n".join(
             [
                 f"Interactive task resumed: {selected.id} — {selected.title}",
                 format_interactive_tasks(snapshot),
@@ -949,6 +1109,11 @@ def build_resume_task_command_view(
                 *_build_task_followup_lines(snapshot, selected),
             ]
         ),
+        runtime,
+        event_names=(EVENT_TASK_STARTED,),
+    )
+    return InteractivePlanCommandView(
+        output_text=output_text,
         persist_session=True,
         session_metadata=_replace_plan_metadata(session_metadata, snapshot),
         replace_session_metadata=True,
@@ -961,6 +1126,8 @@ def build_do_current_task_command_view(
     arg: str,
     *,
     session_metadata: Mapping[str, Any] | None,
+    omicsclaw_dir: str = "",
+    hook_runtime: LifecycleHookRuntime | None = None,
 ) -> InteractivePlanCommandView:
     snapshot = load_interactive_plan_from_metadata(session_metadata)
     if snapshot is None:
@@ -1006,6 +1173,12 @@ def build_do_current_task_command_view(
             success=False,
         )
 
+    runtime = _build_hook_runtime(omicsclaw_dir, hook_runtime)
+    _attach_snapshot_hook_runtime(
+        snapshot,
+        runtime=runtime,
+        workspace_dir=str(snapshot.task_store.metadata.get("workspace", "")).strip(),
+    )
     selected = snapshot.select_task(task.id)
     output_lines = [
         f"Executing interactive task: {selected.id} — {selected.title}",
@@ -1019,8 +1192,13 @@ def build_do_current_task_command_view(
             + " is still incomplete, so the assistant should verify blockers instead of assuming the task is already satisfiable."
         )
 
+    output_text = _append_hook_notices(
+        "\n".join(output_lines),
+        runtime,
+        event_names=(EVENT_TASK_STARTED,),
+    )
     return InteractivePlanCommandView(
-        output_text="\n".join(output_lines),
+        output_text=output_text,
         persist_session=True,
         session_metadata=_replace_plan_metadata(session_metadata, snapshot),
         replace_session_metadata=True,

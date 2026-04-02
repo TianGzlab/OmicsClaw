@@ -12,8 +12,12 @@ from omicsclaw.interactive._session_command_support import (
     build_resume_session_command_view,
     build_session_metadata,
     build_session_list_view,
+    build_session_tag_command_view,
+    build_session_title_command_view,
+    enrich_session_metadata,
     format_session_list_plain,
     normalize_session_metadata,
+    resolve_active_output_style,
     resolve_active_pipeline_workspace,
     SessionListEntry,
     SessionListView,
@@ -52,6 +56,8 @@ async def test_build_session_list_view_uses_session_rows(monkeypatch):
         SessionListEntry(
             session_id="abc12345",
             preview="run spatial-preprocess",
+            title="run spatial-preprocess",
+            workspace_kind="conversation",
             message_count=3,
             compacted_tool_result_count=1,
             plan_reference_count=1,
@@ -70,6 +76,8 @@ def test_format_session_list_plain_renders_entries_and_hint():
                 SessionListEntry(
                     session_id="abc12345",
                     preview="run spatial-preprocess",
+                    title="Brain Visium",
+                    state_summary="research-pipeline · pipeline-operator · tag=brain",
                     message_count=3,
                     compacted_tool_result_count=1,
                     plan_reference_count=1,
@@ -81,7 +89,8 @@ def test_format_session_list_plain_renders_entries_and_hint():
     )
 
     assert "Recent sessions (newest first):" in text
-    assert "  [abc12345]  run spatial-preprocess  (3 msgs) · 1 compacted · 1 plan · 1 advisory" in text
+    assert "  [abc12345]  Brain Visium  (3 msgs) · 1 compacted · 1 plan · 1 advisory" in text
+    assert "     research-pipeline · pipeline-operator · tag=brain" in text
     assert "Use /resume <id>" in text
 
 
@@ -162,12 +171,108 @@ def test_build_export_session_command_view_reports_failure(monkeypatch, tmp_path
 
 def test_normalize_session_metadata_and_resolve_pipeline_workspace():
     metadata = normalize_session_metadata(
-        {"pipeline_workspace": "  /tmp/pipeline  ", "foo": "bar"}
+        {
+            "title": "  Brain spatial follow-up  ",
+            "tag": "  visium  ",
+            "pipeline_workspace": "  /tmp/pipeline  ",
+            "active_style": " Scientific_Brief ",
+            "active_workflow": " research-pipeline ",
+            "plan_slug": " Brain Follow Up ",
+            "dataset_refs": ["data/sample.h5ad", "data/sample.h5ad"],
+            "enabled_extension_refs": ["lab-style", "lab-style"],
+            "last_active_task_id": " review-results ",
+            "workspace_kind": " analysis_run ",
+            "domain": " Spatial ",
+            "foo": "bar",
+        }
     )
 
-    assert metadata == {"pipeline_workspace": "/tmp/pipeline", "foo": "bar"}
-    assert build_session_metadata(metadata, pipeline_workspace=None) == {"foo": "bar"}
+    assert metadata == {
+        "title": "Brain spatial follow-up",
+        "tag": "visium",
+        "pipeline_workspace": "/tmp/pipeline",
+        "active_pipeline_workspace": "/tmp/pipeline",
+        "active_style": "scientific-brief",
+        "active_workflow": "research-pipeline",
+        "plan_slug": "brain-follow-up",
+        "dataset_refs": ["data/sample.h5ad"],
+        "enabled_extension_refs": ["lab-style"],
+        "last_active_task_id": "review-results",
+        "workspace_kind": "analysis_run",
+        "domain": "spatial",
+        "foo": "bar",
+    }
+    assert build_session_metadata(metadata, pipeline_workspace=None) == {
+        "title": "Brain spatial follow-up",
+        "tag": "visium",
+        "active_style": "scientific-brief",
+        "active_workflow": "research-pipeline",
+        "plan_slug": "brain-follow-up",
+        "dataset_refs": ["data/sample.h5ad"],
+        "enabled_extension_refs": ["lab-style"],
+        "last_active_task_id": "review-results",
+        "workspace_kind": "analysis_run",
+        "domain": "spatial",
+        "foo": "bar",
+    }
     assert resolve_active_pipeline_workspace("", metadata) == "/tmp/pipeline"
+    assert resolve_active_output_style(metadata) == "scientific-brief"
+
+
+def test_session_title_and_tag_command_views_update_metadata():
+    title_view = build_session_title_command_view(
+        "Brain Visium rerun",
+        session_metadata={"tag": "visium"},
+    )
+    tag_view = build_session_tag_command_view(
+        "priority",
+        session_metadata=title_view.session_metadata,
+    )
+
+    assert title_view.success is True
+    assert title_view.replace_session_metadata is True
+    assert title_view.session_metadata["title"] == "Brain Visium rerun"
+    assert tag_view.session_metadata["tag"] == "priority"
+
+
+def test_enrich_session_metadata_derives_runtime_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "omicsclaw.interactive._session_command_support.resolve_pipeline_workspace",
+        lambda _arg, workspace: Path(workspace),
+    )
+    monkeypatch.setattr(
+        "omicsclaw.interactive._session_command_support.load_pipeline_workspace_snapshot",
+        lambda workspace: SimpleNamespace(
+            has_pipeline_state=True,
+            workspace=Path(workspace),
+            current_stage="review",
+        ),
+    )
+    monkeypatch.setattr(
+        "omicsclaw.interactive._session_command_support.list_installed_extensions",
+        lambda _root: [
+            SimpleNamespace(
+                state=SimpleNamespace(enabled=True),
+                record=SimpleNamespace(extension_name="lab-style"),
+                path=tmp_path / "lab-style",
+            )
+        ],
+    )
+
+    metadata = enrich_session_metadata(
+        {"pipeline_workspace": str(tmp_path / "pipeline"), "active_style": "teaching"},
+        messages=[{"role": "user", "content": "Analyze data/sample.h5ad in spatial mode"}],
+        workspace_dir=str(tmp_path / "workspace"),
+        omicsclaw_dir=str(tmp_path),
+    )
+
+    assert metadata["active_pipeline_workspace"] == str(tmp_path / "pipeline")
+    assert metadata["active_workflow"] == "research-pipeline"
+    assert metadata["last_active_task_id"] == "review"
+    assert metadata["workspace_kind"] == "analysis_run"
+    assert metadata["dataset_refs"] == ["data/sample.h5ad"]
+    assert metadata["enabled_extension_refs"] == ["lab-style"]
+    assert metadata["domain"] == "spatial"
 
 
 @pytest.mark.asyncio
@@ -178,7 +283,10 @@ async def test_build_resume_session_command_view_loads_and_formats_history(monke
             "session_id": "abc12345",
             "workspace": "/tmp/workspace",
             "metadata": {
+                "title": "Spatial transcript follow-up",
+                "tag": "visium",
                 "pipeline_workspace": " /tmp/pipeline ",
+                "active_style": " scientific-brief ",
                 "interactive_plan": {
                     "request": "Analyze data carefully",
                     "plan_kind": "generic_analysis",
@@ -244,11 +352,18 @@ async def test_build_resume_session_command_view_loads_and_formats_history(monke
     assert view.session_id == "abc12345"
     assert view.workspace_dir == "/tmp/workspace"
     assert view.session_metadata["pipeline_workspace"] == "/tmp/pipeline"
+    assert view.session_metadata["active_style"] == "scientific-brief"
+    assert view.session_metadata["title"] == "Spatial transcript follow-up"
+    assert view.session_metadata["tag"] == "visium"
     assert "interactive_plan" in view.session_metadata
     assert view.replace_session_metadata is True
     assert view.replace_messages is True
     assert "Resumed session:" in view.output_text
+    assert "Title:" in view.output_text
+    assert "Tag:" in view.output_text
     assert "Pipeline Workspace:" in view.output_text
+    assert "Style:" in view.output_text
+    assert "Workspace Kind:" in view.output_text
     assert "Interactive Plan:" in view.output_text
     assert "Interactive Task:" in view.output_text
     assert "Compacted Results:" in view.output_text
@@ -283,7 +398,11 @@ def test_build_current_session_command_view_includes_pipeline_snapshot(monkeypat
     )
     monkeypatch.setattr(
         "omicsclaw.interactive._session_command_support.load_pipeline_workspace_snapshot",
-        lambda workspace: SimpleNamespace(has_pipeline_state=True, workspace=workspace),
+        lambda workspace: SimpleNamespace(
+            has_pipeline_state=True,
+            workspace=workspace,
+            current_stage="review",
+        ),
     )
     monkeypatch.setattr(
         "omicsclaw.interactive._session_command_support.build_pipeline_display_from_snapshot",
@@ -314,12 +433,21 @@ def test_build_current_session_command_view_includes_pipeline_snapshot(monkeypat
             },
             {"role": "assistant", "content": "💡 Advice:\nworld"},
         ],
-        session_metadata={"pipeline_workspace": str(tmp_path / "pipeline")},
+        session_metadata={
+            "title": "Pipeline review",
+            "tag": "priority",
+            "pipeline_workspace": str(tmp_path / "pipeline"),
+            "active_style": "pipeline-operator",
+        },
     )
 
     assert view.render_as_markup is True
     assert "Session:" in view.output_text
-    assert "Pipeline WS:" in view.output_text
+    assert "Title:" in view.output_text
+    assert "Tag:" in view.output_text
+    assert "Pipeline Workspace:" in view.output_text
+    assert "Style:" in view.output_text
+    assert "Workflow:" in view.output_text
     assert "Messages:[/dim]  2" in view.output_text
     assert "Compacted:[/dim] 1 tool result artifact(s)" in view.output_text
     assert "Plan Refs:[/dim] 1 linked plan artifact(s)" in view.output_text
@@ -359,6 +487,47 @@ def test_build_current_session_command_view_includes_interactive_plan_summary():
 
     assert "Interactive Plan:" in view.output_text
     assert "Interactive Task:" in view.output_text
+
+
+@pytest.mark.asyncio
+async def test_build_session_list_view_filters_by_metadata_query(monkeypatch):
+    async def _list_sessions(limit: int = 20):
+        assert limit == 0
+        return [
+            {
+                "session_id": "visium1",
+                "preview": "run spatial-preprocess",
+                "workspace": "/tmp/w1",
+                "metadata": {
+                    "title": "Brain Visium",
+                    "tag": "visium",
+                    "domain": "spatial",
+                    "pipeline_workspace": "/tmp/pipeline1",
+                    "active_style": "scientific-brief",
+                    "last_active_task_id": "review",
+                },
+            },
+            {
+                "session_id": "scrna1",
+                "preview": "run sc-qc",
+                "workspace": "/tmp/w2",
+                "metadata": {
+                    "title": "PBMC QC",
+                    "tag": "singlecell",
+                    "domain": "singlecell",
+                },
+            },
+        ]
+
+    monkeypatch.setattr(
+        "omicsclaw.interactive._session_command_support.list_sessions",
+        _list_sessions,
+    )
+
+    view = await build_session_list_view(limit=5, query="tag:visium domain:spatial")
+
+    assert [entry.session_id for entry in view.entries] == ["visium1"]
+    assert view.query == "tag:visium domain:spatial"
 
 
 @pytest.mark.asyncio

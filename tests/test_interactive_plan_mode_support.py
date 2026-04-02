@@ -2,6 +2,12 @@ from omicsclaw.agents.plan_state import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_PENDING_APPROVAL,
 )
+from omicsclaw.runtime.events import (
+    EVENT_PLAN_APPROVED,
+    EVENT_PLAN_CREATED,
+    EVENT_TASK_STARTED,
+)
+from omicsclaw.runtime.hooks import LifecycleHookRuntime, LifecycleHookSpec
 from omicsclaw.interactive._plan_mode_support import (
     PLAN_KIND_GENERIC_ANALYSIS,
     PLAN_KIND_SKILL_CREATION,
@@ -147,3 +153,42 @@ def test_maybe_seed_interactive_plan_creates_pending_plan_for_complex_request():
     assert snapshot is not None
     assert snapshot.status == PLAN_STATUS_PENDING_APPROVAL
     assert snapshot.plan_kind == PLAN_KIND_SKILL_CREATION
+
+
+def test_plan_mode_views_surface_hook_notices():
+    hook_runtime = LifecycleHookRuntime(
+        [
+            LifecycleHookSpec(
+                name="plan-created",
+                event=EVENT_PLAN_CREATED,
+                message="Plan created for {plan_kind}.",
+            ),
+            LifecycleHookSpec(
+                name="plan-approved",
+                event=EVENT_PLAN_APPROVED,
+                message="Plan approved for {plan_kind}.",
+            ),
+            LifecycleHookSpec(
+                name="task-started",
+                event=EVENT_TASK_STARTED,
+                message="Active task is now {task_id}.",
+            ),
+        ]
+    )
+
+    create_view = build_plan_command_view(
+        "Analyze sample.h5ad step by step",
+        session_metadata={},
+        messages=[],
+        workspace_dir="/tmp/workspace",
+        hook_runtime=hook_runtime,
+    )
+    approve_view = build_approve_plan_command_view(
+        "",
+        session_metadata=create_view.session_metadata,
+        hook_runtime=hook_runtime,
+    )
+
+    assert "Hook notice: Plan created for generic_analysis." in create_view.output_text
+    assert "Hook notice: Plan approved for generic_analysis." in approve_view.output_text
+    assert "Hook notice: Active task is now define-objective." in approve_view.output_text

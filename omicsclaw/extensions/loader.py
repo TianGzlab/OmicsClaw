@@ -18,6 +18,9 @@ EXTENSION_TYPE_STORE_DIRS = {
     "agent-pack": (USER_EXTENSION_ROOTNAME, "agent-packs"),
     "mcp-bundle": (USER_EXTENSION_ROOTNAME, "mcp-bundles"),
     "prompt-pack": (USER_EXTENSION_ROOTNAME, "prompt-packs"),
+    "output-style-pack": (USER_EXTENSION_ROOTNAME, "output-style-packs"),
+    "workflow-pack": (USER_EXTENSION_ROOTNAME, "workflow-packs"),
+    "hook-pack": (USER_EXTENSION_ROOTNAME, "hook-packs"),
 }
 
 

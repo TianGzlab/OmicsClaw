@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from omicsclaw.common.manifest import read_manifest
+from omicsclaw.runtime.events import EVENT_VERIFICATION_COMPLETED
+from omicsclaw.runtime.hooks import LifecycleHookRuntime, LifecycleHookSpec
 from omicsclaw.runtime.verification import (
     ArtifactRequirement,
     COMPLETION_STATUS_COMPLETE,
@@ -113,3 +115,30 @@ def test_format_completion_mapping_summary_renders_missing_warnings_and_errors()
     assert "- review skipped" in summary
     assert "Errors:" in summary
     assert "- artifact missing" in summary
+
+
+def test_write_completion_report_emits_verification_hook(tmp_path: Path):
+    (tmp_path / "report.md").write_text("# report\n", encoding="utf-8")
+    hook_runtime = LifecycleHookRuntime(
+        [
+            LifecycleHookSpec(
+                name="verification-note",
+                event=EVENT_VERIFICATION_COMPLETED,
+                message="Verification finished for {workspace_purpose}.",
+            )
+        ]
+    )
+
+    report = build_completion_report(
+        tmp_path,
+        workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
+        workspace_purpose="verification_test",
+        requirements=[ArtifactRequirement(name="report", path="report.md")],
+    )
+
+    write_completion_report(tmp_path, report, hook_runtime=hook_runtime)
+
+    notices = hook_runtime.consume_pending_messages(
+        event_names=(EVENT_VERIFICATION_COMPLETED,),
+    )
+    assert notices == ["Verification finished for verification_test."]

@@ -13,6 +13,7 @@ from typing import Iterable
 
 import omicsclaw
 from omicsclaw.common.manifest import StepRecord
+from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.verification import (
     COMPLETION_REPORT_FILENAME,
     WORKSPACE_KIND_ANALYSIS_RUN,
@@ -896,6 +897,7 @@ def create_skill_scaffold(
     promote_from_latest: bool = False,
     output_root: Path | None = None,
 ) -> SkillScaffoldResult:
+    hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
     source_bundle: AutonomousAnalysisBundle | None = None
     resolved_source_dir: Path | None = None
     if source_analysis_dir:
@@ -1084,7 +1086,15 @@ def create_skill_scaffold(
                 "Skill scaffold verification failed.\n"
                 + format_completion_summary(completion_report)
             )
-        write_completion_report(skill_dir, completion_report)
+        write_completion_report(
+            skill_dir,
+            completion_report,
+            hook_runtime=hook_runtime,
+            hook_context={
+                "workspace": str(skill_dir),
+                "source": "skill_scaffolder",
+            },
+        )
         update_workspace_manifest(
             skill_dir,
             workspace_kind=WORKSPACE_KIND_ANALYSIS_RUN,
