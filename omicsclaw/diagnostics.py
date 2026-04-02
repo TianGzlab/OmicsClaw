@@ -15,6 +15,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from omicsclaw.core.provider_registry import (
+    PROVIDER_PRESETS,
+    detect_provider_from_env,
+    resolve_provider,
+)
 from omicsclaw.runtime.context_assembler import (
     assemble_prompt_context,
     extract_analysis_hints,
@@ -39,9 +44,9 @@ DIAGNOSTIC_STATUS_INFO = "info"
 _CORE_DEPENDENCIES: tuple[tuple[str, str], ...] = (
     ("openai", "openai"),
     ("requests", "requests"),
-    ("dotenv", "python-dotenv"),
 )
 _OPTIONAL_DEPENDENCIES: tuple[tuple[str, str], ...] = (
+    ("dotenv", "python-dotenv"),
     ("prompt_toolkit", "prompt-toolkit"),
     ("aiosqlite", "aiosqlite"),
     ("yaml", "pyyaml"),
@@ -56,20 +61,6 @@ _R_PACKAGES: tuple[str, ...] = (
     "edgeR",
     "limma",
 )
-_FALLBACK_PROVIDER_PRESETS: dict[str, tuple[str, str, str]] = {
-    "deepseek": ("https://api.deepseek.com", "deepseek-chat", "DEEPSEEK_API_KEY"),
-    "openai": ("", "gpt-4o", "OPENAI_API_KEY"),
-    "anthropic": ("https://api.anthropic.com/v1/", "claude-sonnet-4-5-20250514", "ANTHROPIC_API_KEY"),
-    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash", "GOOGLE_API_KEY"),
-    "nvidia": ("https://integrate.api.nvidia.com/v1", "deepseek-ai/deepseek-r1", "NVIDIA_API_KEY"),
-    "siliconflow": ("https://api.siliconflow.cn/v1", "deepseek-ai/DeepSeek-V3", "SILICONFLOW_API_KEY"),
-    "openrouter": ("https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324", "OPENROUTER_API_KEY"),
-    "volcengine": ("https://ark.cn-beijing.volces.com/api/v3", "doubao-1.5-pro-256k", "VOLCENGINE_API_KEY"),
-    "dashscope": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max", "DASHSCOPE_API_KEY"),
-    "zhipu": ("https://open.bigmodel.cn/api/paas/v4", "glm-4-flash", "ZHIPU_API_KEY"),
-    "ollama": ("http://localhost:11434/v1", "qwen2.5:7b", ""),
-    "custom": ("", "", ""),
-}
 _CONTEXT_WARNING_THRESHOLD = 12_000
 
 
@@ -208,47 +199,36 @@ def _get_mcp_config_path() -> Path:
     return MCP_CONFIG_PATH
 
 
-def _detect_provider_from_env(
-    provider_presets: Mapping[str, tuple[str, str, str]],
-) -> str:
-    requested = str(os.environ.get("LLM_PROVIDER", "") or "").strip().lower()
-    if requested:
-        return requested
-    for name, (_base_url, _model, api_env) in provider_presets.items():
-        if api_env and os.environ.get(api_env):
-            return name
-    return ""
-
-
 def _collect_provider_check() -> DiagnosticCheck:
     env_provider = str(os.environ.get("LLM_PROVIDER", "") or "").strip()
     env_model = str(os.environ.get("OMICSCLAW_MODEL", "") or "").strip()
     env_base_url = str(os.environ.get("LLM_BASE_URL", "") or "").strip()
     bot_core = _safe_import("bot.core")
-    provider_presets = getattr(bot_core, "PROVIDER_PRESETS", _FALLBACK_PROVIDER_PRESETS)
-    detected_provider = _detect_provider_from_env(provider_presets)
+    provider_presets = getattr(bot_core, "PROVIDER_PRESETS", PROVIDER_PRESETS)
+    detected_provider = detect_provider_from_env(provider_presets=provider_presets)
     provider_name = env_provider or detected_provider
     resolved_model = env_model
     resolved_url = env_base_url
     api_key_present = False
     details: list[str] = []
 
-    if bot_core is not None and hasattr(bot_core, "resolve_provider"):
-        try:
-            resolved_url_value, resolved_model_value, resolved_key = bot_core.resolve_provider(
-                provider=provider_name,
-                base_url=env_base_url,
-                model=env_model,
-                api_key=os.environ.get("LLM_API_KEY", ""),
-            )
-            if resolved_url_value:
-                resolved_url = str(resolved_url_value)
-            if resolved_model_value:
-                resolved_model = str(resolved_model_value)
-            api_key_present = bool(resolved_key)
+    try:
+        resolved_url_value, resolved_model_value, resolved_key = resolve_provider(
+            provider=provider_name,
+            base_url=env_base_url,
+            model=env_model,
+            api_key=os.environ.get("LLM_API_KEY", ""),
+            provider_presets=provider_presets,
+        )
+        if resolved_url_value:
+            resolved_url = str(resolved_url_value)
+        if resolved_model_value:
+            resolved_model = str(resolved_model_value)
+        api_key_present = bool(resolved_key)
+        if bot_core is not None:
             provider_name = provider_name or getattr(bot_core, "LLM_PROVIDER_NAME", "") or detected_provider
-        except Exception as exc:
-            details.append(f"Provider resolution fallback used: {exc}")
+    except Exception as exc:
+        details.append(f"Provider resolution fallback used: {exc}")
 
     if not resolved_model:
         preset = provider_presets.get(provider_name, ("", "", ""))

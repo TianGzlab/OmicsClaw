@@ -7,89 +7,32 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional
 
 from omicsclaw.common.runtime_env import load_project_dotenv
+from omicsclaw.core.provider_registry import resolve_provider
 
 load_project_dotenv(Path(__file__).resolve().parent.parent.parent, override=False)
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Provider resolution — reuses bot.core when available, else falls back
-# ---------------------------------------------------------------------------
-
-# Import shared provider presets from bot.core (avoids hard-coding provider
-# URLs in multiple places).  Graceful fallback for standalone usage.
-try:
-    from bot.core import PROVIDER_PRESETS, _PROVIDER_DETECT_ORDER
-    _HAS_CORE = True
-except ImportError:
-    _HAS_CORE = False
-    # Minimal fallback matching the most common providers
-    PROVIDER_PRESETS = {
-        "deepseek":   ("https://api.deepseek.com",                                "deepseek-chat",       "DEEPSEEK_API_KEY"),
-        "openai":     ("https://api.openai.com/v1",                               "gpt-4o",              "OPENAI_API_KEY"),
-        "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash",    "GOOGLE_API_KEY"),
-        "anthropic":  ("https://api.anthropic.com/v1/",                            "claude-sonnet-4-5-20250514", "ANTHROPIC_API_KEY"),
-        "nvidia":     ("https://integrate.api.nvidia.com/v1",                      "deepseek-ai/deepseek-r1",    "NVIDIA_API_KEY"),
-        "siliconflow":("https://api.siliconflow.cn/v1",                           "deepseek-ai/DeepSeek-V3",    "SILICONFLOW_API_KEY"),
-        "openrouter": ("https://openrouter.ai/api/v1",                            "deepseek/deepseek-chat-v3-0324", "OPENROUTER_API_KEY"),
-        "volcengine": ("https://ark.cn-beijing.volces.com/api/v3",                "doubao-1.5-pro-256k", "VOLCENGINE_API_KEY"),
-        "dashscope":  ("https://dashscope.aliyuncs.com/compatible-mode/v1",       "qwen-max",            "DASHSCOPE_API_KEY"),
-        "zhipu":      ("https://open.bigmodel.cn/api/paas/v4",                    "glm-4-flash",         "ZHIPU_API_KEY"),
-        "ollama":     ("http://localhost:11434/v1",                                "qwen2.5:7b",          ""),
-        "custom":     ("",                                                         "",                    ""),
-    }
-    _PROVIDER_DETECT_ORDER = [
-        "deepseek", "openai", "anthropic", "gemini", "nvidia",
-        "siliconflow", "openrouter", "volcengine", "dashscope", "zhipu",
-    ]
-
 
 def _resolve_llm_config() -> Tuple[str, str, str]:
     """Resolve (api_key, base_url, model) for LLM routing calls.
 
-    Priority: LLM_PROVIDER env > provider-specific key auto-detection > LLM_API_KEY fallback.
-
     Returns:
         (api_key, base_url, model) tuple.
     """
-    provider = os.getenv("LLM_PROVIDER", "").lower().strip()
-    base_url = os.getenv("LLM_BASE_URL", "")
-    model = os.getenv("OMICSCLAW_MODEL") or os.getenv("LLM_MODEL", "")
-    api_key = os.getenv("LLM_API_KEY", "")
-
-    # If provider is set, use its preset
-    if provider and provider in PROVIDER_PRESETS:
-        purl, pmodel, pkey_env = PROVIDER_PRESETS[provider]
-        base_url = base_url or os.getenv(f"{provider.upper()}_BASE_URL", "") or purl
-        model = model or pmodel
-        if not api_key and pkey_env:
-            api_key = os.getenv(pkey_env, "")
-    elif not provider:
-        # Auto-detect from available API keys
-        for p in _PROVIDER_DETECT_ORDER:
-            purl, pmodel, pkey_env = PROVIDER_PRESETS[p]
-            if pkey_env and os.getenv(pkey_env):
-                api_key = api_key or os.getenv(pkey_env, "")
-                base_url = base_url or purl
-                model = model or pmodel
-                provider = p
-                break
-
-    # Ultimate fallback
-    if not api_key:
-        api_key = os.getenv("OPENAI_API_KEY", "")
-    if not base_url:
-        base_url = "https://api.openai.com/v1"
-    if not model:
-        model = "gpt-4o-mini"
-
-    return api_key, base_url, model
+    base_url, model, api_key = resolve_provider(
+        provider=os.getenv("LLM_PROVIDER", ""),
+        base_url=os.getenv("LLM_BASE_URL", ""),
+        model=os.getenv("OMICSCLAW_MODEL") or os.getenv("LLM_MODEL", ""),
+        api_key=os.getenv("LLM_API_KEY", ""),
+    )
+    return api_key, (base_url or "https://api.openai.com/v1"), (model or "gpt-4o-mini")
 
 
 def route_with_llm(query: str, skills: Dict[str, str], domain: str) -> Tuple[Optional[str], float]:
     """Route query using LLM API.
 
-    Supports all providers configured in bot/core.py PROVIDER_PRESETS:
+    Supports all providers configured in omicsclaw.core.provider_registry:
     deepseek, openai, anthropic, gemini, nvidia, siliconflow, openrouter,
     volcengine, dashscope, zhipu, ollama, custom
 

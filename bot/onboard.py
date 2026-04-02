@@ -5,6 +5,8 @@ bot/onboard.py — Interactive Setup Wizard for OmicsClaw
 import os
 from pathlib import Path
 
+from omicsclaw.core.provider_registry import PROVIDER_CHOICES
+
 try:
     import questionary
     from rich.console import Console
@@ -63,7 +65,7 @@ def run_onboard():
     env_vars = load_env()
     
     # ── 1. LLM Provider ──
-    providers = ["deepseek", "openai", "anthropic", "gemini", "siliconflow", "zhipu", "dashscope", "volcengine", "openrouter", "ollama", "custom"]
+    providers = list(PROVIDER_CHOICES)
     current_provider = env_vars.get("LLM_PROVIDER", "deepseek")
     
     provider = questionary.select(

@@ -26,92 +26,13 @@ from pathlib import Path
 from openai import AsyncOpenAI, APIError
 
 from omicsclaw.common.runtime_env import load_project_dotenv
+from omicsclaw.core.provider_registry import (
+    PROVIDER_DETECT_ORDER,
+    PROVIDER_PRESETS,
+    resolve_provider,
+)
 
-# ---------------------------------------------------------------------------
-# LLM provider presets  (Multi-Provider support)
-# ---------------------------------------------------------------------------
-# Each provider maps to (base_url, default_model, api_key_env_var).
-# Users set LLM_PROVIDER=<key> for one-step configuration;
-# LLM_BASE_URL and OMICSCLAW_MODEL can still override.
-#
-# Inspired by EvoScientist's Multi-Provider architecture, adapted for
-# OmicsClaw's lightweight AsyncOpenAI-based design. All providers are
-# accessed through the OpenAI-compatible API protocol.
-
-PROVIDER_PRESETS: dict[str, tuple[str, str, str]] = {
-    # --- Tier 1: Primary providers ---
-    "deepseek":   ("https://api.deepseek.com",                                    "deepseek-chat",          "DEEPSEEK_API_KEY"),
-    "openai":     ("",                                                             "gpt-4o",                 "OPENAI_API_KEY"),
-    "anthropic":  ("https://api.anthropic.com/v1/",                                "claude-sonnet-4-5-20250514", "ANTHROPIC_API_KEY"),
-    "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/",     "gemini-2.5-flash",       "GOOGLE_API_KEY"),
-    "nvidia":     ("https://integrate.api.nvidia.com/v1",                          "deepseek-ai/deepseek-r1", "NVIDIA_API_KEY"),
-
-    # --- Tier 2: Third-party aggregators ---
-    "siliconflow": ("https://api.siliconflow.cn/v1",                              "deepseek-ai/DeepSeek-V3", "SILICONFLOW_API_KEY"),
-    "openrouter":  ("https://openrouter.ai/api/v1",                               "deepseek/deepseek-chat-v3-0324", "OPENROUTER_API_KEY"),
-    "volcengine":  ("https://ark.cn-beijing.volces.com/api/v3",                   "doubao-1.5-pro-256k",     "VOLCENGINE_API_KEY"),
-    "dashscope":   ("https://dashscope.aliyuncs.com/compatible-mode/v1",          "qwen-max",                "DASHSCOPE_API_KEY"),
-    "zhipu":       ("https://open.bigmodel.cn/api/paas/v4",                       "glm-4-flash",             "ZHIPU_API_KEY"),
-
-    # --- Tier 3: Local & custom ---
-    "ollama":     ("http://localhost:11434/v1",                                    "qwen2.5:7b",             ""),
-    "custom":     ("",                                                             "",                        ""),
-
-    # --- Legacy alias (backward compat — same as gemini) ---
-}
-
-# Ordered list for auto-detection: when LLM_PROVIDER is not set, we pick the
-# first provider whose API key env var is present in the environment.
-_PROVIDER_DETECT_ORDER = [
-    "deepseek", "openai", "anthropic", "gemini", "nvidia",
-    "siliconflow", "openrouter", "volcengine", "dashscope", "zhipu",
-]
-
-
-def resolve_provider(
-    provider: str = "",
-    base_url: str = "",
-    model: str = "",
-    api_key: str = "",
-) -> tuple[str | None, str, str]:
-    """Return (base_url_or_None, model, resolved_api_key) after applying provider defaults.
-
-    Priority: explicit env vars > provider preset > auto-detect > hardcoded fallback.
-
-    When *provider* is empty and *api_key* is empty, we scan provider-specific
-    environment variables (DEEPSEEK_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, …)
-    to auto-detect the provider.
-    """
-    provider_key = provider.lower().strip() if provider else ""
-
-    # Auto-detect provider from available API keys
-    if not provider_key and not api_key:
-        for p in _PROVIDER_DETECT_ORDER:
-            env_var = PROVIDER_PRESETS[p][2]
-            if env_var and os.environ.get(env_var):
-                provider_key = p
-                api_key = os.environ[env_var]
-                break
-
-    # Look up preset
-    preset = PROVIDER_PRESETS.get(provider_key, ("", "", ""))
-    preset_url, preset_model, preset_key_env = preset
-
-    # Allow per-provider base_url override via env var (e.g. ANTHROPIC_BASE_URL)
-    env_base_url = ""
-    if provider_key:
-        env_base_url = os.environ.get(f"{provider_key.upper()}_BASE_URL", "")
-
-    resolved_url = base_url or env_base_url or preset_url or None
-    resolved_model = model or preset_model or "deepseek-chat"
-
-    # Resolve API key: explicit > per-provider env > LLM_API_KEY fallback
-    if not api_key and preset_key_env:
-        api_key = os.environ.get(preset_key_env, "")
-    if not api_key:
-        api_key = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-
-    return resolved_url, resolved_model, api_key
+_PROVIDER_DETECT_ORDER = PROVIDER_DETECT_ORDER
 
 
 # ---------------------------------------------------------------------------
