@@ -12,19 +12,26 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 
 ```bash
 cd /data1/TianLab/zhouwg/project/OmicsClaw
-pip install -r requirements.txt
-
-# Install the package (also registers the `oc` short alias)
 pip install -e .
 
+# Add optional extras only when needed
+# pip install -e ".[interactive]"
+# pip install -e ".[tui]"
+# pip install -e ".[memory]"
+# pip install -e ".[full]"
+
 python omicsclaw.py list   # or: oc list
-python omicsclaw.py run spatial-preprocessing --demo
+python omicsclaw.py run spatial-preprocess --demo
 ```
 
 > **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
 > are available system-wide. `oc` is registered via `[project.scripts]` in
 > `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
 > `omicsclaw`. No PATH tricks needed.
+>
+> **Dependency source of truth**: Root dependency management lives in
+> `pyproject.toml`. The repository does not use a root `requirements.txt` as a
+> primary install entrypoint.
 
 ## Commands
 

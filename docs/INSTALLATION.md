@@ -3,314 +3,352 @@
 ## Quick Start
 
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
 
-# Create virtual environment (Python 3.11+)
+# Create and activate a Python 3.11+ virtual environment
 python3.11 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
-# Install
-pip install -e .              # Core dependencies
-pip install -e ".[full]"      # All optional methods
+# Install the base package
+pip install -e .
 
-# Verify installation
-python omicsclaw.py env
-python omicsclaw.py list
-python omicsclaw.py run preprocess --demo
+# Verify the CLI
+oc list
+oc run spatial-preprocess --demo
 ```
 
-> [!TIP]
-> If `python3.11 -m venv` fails, see [Troubleshooting](#troubleshooting) section.
+After editable install, both of these entrypoints are available:
+
+- `omicsclaw`
+- `oc`
+
+Both resolve to the same package CLI.
+
+## Supported Python Versions
+
+OmicsClaw currently targets:
+
+- Python 3.11
+- Python 3.12
+
+The package metadata currently requires:
+
+```text
+>=3.11,<3.14
+```
 
 ## System Requirements
 
 | Component | Minimum | Recommended |
-|-----------|---------|-------------|
+| --- | --- | --- |
 | Python | 3.11 | 3.11 or 3.12 |
-| RAM | 8 GB | 32 GB+ |
-| Disk (core) | 2 GB | — |
-| Disk (full) | 10 GB+ | — |
-| GPU | Optional | CUDA GPU for deep learning methods |
-| R | Optional | R 4.4+ for RCTD, SPOTlight, Numbat |
+| RAM | 8 GB | 32 GB+ for larger analyses |
+| Disk | 2 GB for core install | 10 GB+ for full method stack |
+| GPU | optional | recommended for deep-learning-heavy methods |
+| R | optional | recommended for R-backed workflows |
 
-## Environment Management
+## Installation Profiles
 
-OmicsClaw uses Python `venv` for reproducibility and speed:
+OmicsClaw uses optional dependency groups instead of requiring one monolithic environment.
 
-- **Reproducibility** - Exact versions from `pyproject.toml`
-- **Speed** - Faster than conda to create and activate
-- **Isolation** - No conflicts with existing conda environments
-- **Portability** - Works on any system with Python 3.11+
+`pyproject.toml` is the only root dependency source of truth. The repository no longer maintains a root `requirements.txt` as a primary installation entrypoint.
 
-**Using conda?** You can still create a venv inside conda:
-
-```bash
-conda deactivate
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[full]"
-```
-
-## Installation Tiers
-
-OmicsClaw uses tiered dependencies. Skills require specific packages - missing dependencies raise clear `ImportError` with install instructions.
-
-### Core (default)
+### 1. Core install
 
 ```bash
 pip install -e .
 ```
 
-Essential packages for preprocessing and basic analysis:
-- scanpy, anndata, squidpy
-- numpy, pandas, scipy, scikit-learn
-- igraph, leidenalg, umap-learn
-- matplotlib, seaborn
+This installs the base platform and the core dependencies needed for:
 
-### Domain Platforms
+- the main CLI
+- skill discovery
+- prompt/runtime infrastructure
+- core AnnData and scientific Python tooling
 
-OmicsClaw supports granular installation tiers so you only install what you need for your research domain:
+### 2. Domain-focused installs
 
-| Domain | Installation Command | Key Packages / Scope |
-|--------|----------------------|----------------------|
-| **Spatial** | `pip install -e ".[spatial]"` | SpaGCN, scvi-tools, tangram-sc, rpy2, cell2location, scvelo |
-| **Single-cell** | `pip install -e ".[singlecell]"` | scrublet + core single-cell packages |
-| **Genomics** | `pip install -e ".[genomics]"` | Genomic python pipelines |
-| **Proteomics** | `pip install -e ".[proteomics]"` | Proteomic python pipelines |
-| **Metabolomics**| `pip install -e ".[metabolomics]"` | Metabolomic python pipelines |
+Install only the domains you need:
 
-> [!TIP]
-> **Check your installation:** You can run `python omicsclaw.py env` at any time to see exactly which domain frameworks are successfully installed and which ones are missing.
+```bash
+pip install -e ".[spatial]"
+pip install -e ".[singlecell]"
+pip install -e ".[genomics]"
+pip install -e ".[proteomics]"
+pip install -e ".[metabolomics]"
+pip install -e ".[bulkrna]"
+```
 
-### Standalone Deep-Learning Layer
+### 3. Optional spatial sub-layers
+
+Some heavier spatial capabilities are intentionally split out:
 
 ```bash
 pip install -e ".[spatial-domains]"
+pip install -e ".[spatial-annotate]"
+pip install -e ".[spatial-deconv]"
+pip install -e ".[spatial-trajectory]"
+pip install -e ".[spatial-velocity]"
+pip install -e ".[spatial-cnv]"
+pip install -e ".[spatial-enrichment]"
+pip install -e ".[spatial-communication]"
+pip install -e ".[spatial-integration]"
+pip install -e ".[spatial-registration]"
+pip install -e ".[spatial-condition]"
 ```
 
-Certain frameworks (like SpaGCN and STAGATE) run complex spatial domains and carry heavy dependencies (e.g. `louvain` and `torch_geometric`) that are often difficult to compile across OS distributions.
-We have isolated them into this tier. You can layer this over the `spatial` module:
-```bash
-pip install -e ".[spatial,spatial-domains]"
-```
+This lets you avoid pulling in every GPU- or R-heavy dependency up front.
 
-> [!WARNING]
-> **macOS**: SpaGCN's `louvain` dependency may fail to compile. Use pre-built wheel:
-> ```bash
-> pip install louvain --find-links https://wheels.louvain.org
-> ```
-
-> [!NOTE]
-> `[spatial]` tier includes R dependencies which requires R ≥4.3.0. See [R Dependencies](#r-dependencies) section.
-
-### Full Arsenal
+### 4. Full install
 
 ```bash
 pip install -e ".[full]"
 ```
 
-Installs all 63+ optional methods across all 6 domains.
+Use this when you want the broadest method coverage in one environment.
 
-### BANKSY (isolated environment)
+### 5. Interactive CLI / TUI
+
+Interactive mode has its own lightweight extras:
 
 ```bash
-pip install -e ".[banksy]"
+pip install -e ".[interactive]"
 ```
 
-> [!CAUTION]
-> `pybanksy` requires `numpy<2.0`, conflicting with `full` tier packages. Use a separate environment:
-> ```bash
-> python3.11 -m venv .venv-banksy
-> source .venv-banksy/bin/activate
-> pip install -e ".[banksy]"
-> pip install -e .
-> ```
+For the full-screen Textual TUI:
 
-### Development
+```bash
+pip install -e ".[tui]"
+```
+
+### 6. Memory server
+
+To use the graph-memory REST API and dashboard backend:
+
+```bash
+pip install -e ".[memory]"
+```
+
+### 7. Research and autonomous extras
+
+For research-pipeline or notebook-style auxiliary workflows:
+
+```bash
+pip install -e ".[research]"
+pip install -e ".[autonomous]"
+```
+
+### 8. Development tools
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Adds testing and code quality tools: pytest, black, mypy, ruff, isort, pre-commit
+This adds test and lint tooling such as `pytest`, `ruff`, `black`, and `mypy`.
 
-### Combining Tiers
+## Common Installation Patterns
 
-```bash
-pip install -e ".[spatial,singlecell,dev]"  # Multiple domains + dev tools
-pip install -e ".[full,dev]"                # Full methods + dev tools
-```
-
-## Fast Installation with uv
-
-[uv](https://docs.astral.sh/uv/) resolves dependencies 10-100× faster than pip:
+### Minimal interactive workstation
 
 ```bash
-pip install uv
-uv venv .venv --python 3.11
-source .venv/bin/activate
-uv pip install -e ".[full]"
+pip install -e ".[interactive]"
 ```
+
+### Interactive + TUI + memory
+
+```bash
+pip install -e ".[tui,memory]"
+```
+
+### Spatial workstation
+
+```bash
+pip install -e ".[spatial,interactive]"
+```
+
+### Broad analysis workstation
+
+```bash
+pip install -e ".[full,interactive,memory]"
+```
+
+### Development environment
+
+```bash
+pip install -e ".[full,interactive,memory,dev]"
+```
+
+## Verifying the Installation
+
+Useful smoke tests:
+
+```bash
+oc list
+python omicsclaw.py env
+oc run spatial-preprocess --demo
+oc interactive -p "介绍一下你能做什么"
+```
+
+If you installed TUI support:
+
+```bash
+oc tui
+```
+
+If you installed memory support:
+
+```bash
+oc memory-server
+```
+
+## Interactive and Workspace Features
+
+After installing `.[interactive]`, you can use:
+
+```bash
+oc interactive
+oc interactive --ui tui
+oc interactive -p "run spatial-preprocess demo"
+oc interactive --session <session-id>
+oc interactive --workspace /path/to/workdir
+oc interactive --mode daemon
+oc interactive --mode run --name my-analysis
+```
+
+Workspace behavior:
+
+- `--mode daemon` keeps using a persistent workspace
+- `--mode run` creates an isolated per-session workspace
+- `--workspace` explicitly selects the workspace directory
+
+## MCP Support
+
+MCP server configuration commands are available from the main CLI:
+
+```bash
+oc mcp list
+oc mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
+oc mcp remove sequential-thinking
+oc mcp config
+```
+
+To actually load and execute MCP tools inside interactive sessions, install the adapter package separately:
+
+```bash
+pip install langchain-mcp-adapters
+```
+
+Notes:
+
+- OmicsClaw stores MCP configuration in the user config directory
+- prompt injection only includes active prompt-worthy MCP servers
+- configured but unavailable servers do not consume prompt budget
 
 ## R Dependencies
 
-Several skills use R libraries via `rpy2`:
+Some skills rely on R packages invoked through subprocess-based R workflows.
 
-| R Package | Skill | Method |
-|-----------|-------|--------|
-| spacexr | deconv | RCTD |
-| CARD | deconv | CARD |
-| SPOTlight | deconv | SPOTlight |
-| CellChat | communication | Cell-cell communication |
-| numbat | cnv | Copy number variation |
-| SPARK | genes | SPARK-X spatially variable genes |
-
-### Setup Steps
-
-**1. Install R (≥4.3.0)**
+Install R first:
 
 ```bash
-# Ubuntu/Debian
+# Ubuntu / Debian
 sudo apt install r-base r-base-dev
 
 # macOS
 brew install r
-
-# Verify
-R --version
 ```
 
-**Ubuntu system libraries:**
+Then install any required system libraries for compiled R packages as needed.
+
+Typical Ubuntu packages:
+
 ```bash
 sudo apt install libcurl4-openssl-dev libssl-dev libxml2-dev \
                  libharfbuzz-dev libfribidi-dev libfreetype6-dev \
                  libpng-dev libtiff5-dev libjpeg-dev
 ```
 
-**2. Install Python bridge**
+If your selected methods require Python-side R bridges or helpers, install those explicitly in your environment.
+
+## Fast Installation with uv
+
+If you use `uv`, environment creation and dependency resolution are usually much faster:
 
 ```bash
-pip install "rpy2>=3.5.0,<3.7" anndata2ri
+pip install uv
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[interactive]"
 ```
 
-> [!NOTE]
-> Pin `rpy2<3.7` for R 4.4.x compatibility. rpy2 3.7+ requires R 4.5+.
+## Testing the Runtime
 
-**3. Install R packages (automated)**
+For a broader runtime verification:
 
 ```bash
-Rscript install_r_dependencies.R
+python -m pytest -q tests/test_context_assembler.py
+python -m pytest -q tests/test_query_engine.py
+python -m pytest -q tests/test_interactive_loop.py
 ```
 
-The script installs all required R packages and reports success/failure.
-
-**4. Verify**
+For a full test run:
 
 ```bash
-# Test R packages
-Rscript -e 'pkgs <- c("spacexr", "CARD", "SPOTlight"); print(sapply(pkgs, requireNamespace, quietly=TRUE))'
-
-# Test Python bridge
-python -c "import rpy2.robjects as ro; print('rpy2 OK')"
-```
-
-**Set R_HOME if needed:**
-```bash
-export R_HOME=$(R RHOME)
-echo 'export R_HOME=$(R RHOME)' >> ~/.bashrc
+python -m pytest -v
 ```
 
 ## Troubleshooting
 
-### venv creation fails
+### `oc` cannot find `omicsclaw.py`
 
-**Error:** `ensurepip` error when creating venv
-
-**Solutions:**
-
-1. **Remove stale venv:**
-   ```bash
-   rm -rf .venv
-   python3.11 -m venv .venv
-   source .venv/bin/activate
-   ```
-
-2. **Ubuntu/Debian - install venv module:**
-   ```bash
-   sudo apt install python3.11-venv python3-pip
-   ```
-
-3. **Anaconda - bootstrap pip manually:**
-   ```bash
-   python3.11 -m venv --without-pip .venv
-   source .venv/bin/activate
-   curl -sS https://bootstrap.pypa.io/get-pip.py | python3
-   ```
-
-### Package not found on Python 3.10
-
-**Error:** `Could not find a version that satisfies the requirement`
-
-**Solution:** Use Python 3.11+ (minimum required version)
+The package entrypoint searches for the repository-root launcher. Run `oc` from inside the OmicsClaw repository, or set:
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[full]"
+export OMICSCLAW_CLI_PATH=/absolute/path/to/omicsclaw.py
 ```
 
-### macOS louvain compilation fails
+### TUI falls back or fails to start
 
-**Solution:** Use pre-built wheel
+Install the TUI extra:
 
 ```bash
-pip install louvain --find-links https://wheels.louvain.org
+pip install -e ".[tui]"
 ```
 
-### rpy2 installation fails
+### MCP servers are configured but no MCP tools appear
 
-**Solution:** Ensure R is on PATH
+Check all three conditions:
+
+1. `langchain-mcp-adapters` is installed
+2. the configured server command or URL is reachable
+3. you restarted the interactive session after changing MCP config
+
+### Memory server command fails
+
+Install the memory extra:
 
 ```bash
-which R
-export R_HOME=$(R RHOME)
-pip install "rpy2>=3.5.0,<3.7" anndata2ri
+pip install -e ".[memory]"
 ```
 
-### PyTorch CUDA mismatch
+### Heavy optional packages fail to build
 
-**Solution:** Install correct CUDA wheel first
+Use smaller installation profiles first, then add only the domain extras you need. This is especially helpful for:
 
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-pip install -e ".[full]"
-```
+- GPU and PyTorch-heavy spatial methods
+- R-backed workflows
+- packages with compiled scientific dependencies
 
-### STAGATE_pyG not on PyPI
+## Summary
 
-**Solution:** Install from GitHub
+The recommended installation strategy is:
 
-```bash
-git clone https://github.com/QIFEIDKN/STAGATE_pyG.git
-cd STAGATE_pyG && python setup.py install
-pip install torch_geometric torch_sparse torch_scatter torch_cluster
-```
+- start with `pip install -e .`
+- add only the domain extras you need
+- add `.[interactive]` or `.[tui]` for interactive use
+- add `.[memory]` if you want the memory API and dashboard
+- add `.[dev]` for testing and development work
 
-### Verify installation
-
-```bash
-python omicsclaw.py list
-python omicsclaw.py run preprocess --demo
-python -m pytest -v
-```
-
-## Platform Support
-
-| Platform | Status | Notes |
-|----------|--------|-------|
-| Linux (x86_64) | ✅ Fully supported | All tiers work |
-| macOS (Apple Silicon) | ⚠️ Partial | louvain needs pre-built wheel |
-| macOS (Intel) | ⚠️ Partial | Same as Apple Silicon |
-| Windows | ⚠️ Untested | WSL2 recommended |
+This matches OmicsClaw's current modular runtime design much better than trying to install every optional method on day one.

@@ -177,8 +177,8 @@ All tests use `--demo` mode. Each skill has at minimum:
 | `skills/catalog.json` | Machine-readable skill index (auto-generated) |
 | `CLAUDE.md` | AI agent routing instructions for Claude |
 | `AGENTS.md` | AI coding agent guide (Codex, Cursor, Devin, etc.) |
+| `pyproject.toml` | Package metadata, dependency source of truth, scripts, optional extras |
 | `docs/architecture.md` | System architecture deep-dive |
 | `llms.txt` | This file — LLM-optimised summary |
-| `requirements.txt` | Core Python dependencies |
 | `pytest.ini` | Test path registration |
 | `Makefile` | `make test`, `make demo`, `make list`, `make catalog` |
