@@ -39,6 +39,7 @@ from skills.singlecell._lib import qc as sc_qc_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_preprocessing
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -866,10 +867,18 @@ def main():
     else:
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
-        adata = sc_io.smart_load(args.input_path)
+        adata = sc_io.smart_load(args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
     method = validate_method_choice(args.method, METHOD_REGISTRY)
+    apply_preflight(
+        preflight_sc_preprocessing(
+            adata,
+            method=method,
+            source_path=input_file,
+        ),
+        logger,
+    )
     effective_params = build_effective_params(method, args)
     public_params = build_public_params(effective_params)
 

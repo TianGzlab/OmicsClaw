@@ -17,8 +17,11 @@ source_urls:
 # Single-Cell Doublet Detection Guardrails
 
 - **Inspect first**: confirm whether the input is a single capture or mixed samples, because doublet expectations depend on capture structure.
+- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` for object hygiene, but still verify that the matrix used for doublet detection is truly raw count-like.
 - **Key wrapper controls**: explain `method`, `expected_doublet_rate`, and `threshold` before running.
 - **Use method-correct language**: `threshold` only applies to the Scrublet path in the current wrapper.
+- **Disclose fallback honestly**: if `doubletfinder` fails and the wrapper executes `scdblfinder`, state both the requested and executed methods explicitly.
+- **Stop when raw counts are not available**: do not run any doublet path if neither `layers["counts"]` nor count-like `adata.X` is available.
 - **Do not invent unsupported knobs**: official DoubletFinder and scDblFinder document extra controls such as `pK`, `nExp`, `dbr`, `samples`, or `clusters`, but the current OmicsClaw wrapper does not expose them.
 - **Do not overclaim removal**: this skill annotates doublets in `obs`; it does not silently drop them from the dataset.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-doublet-detection.md`.

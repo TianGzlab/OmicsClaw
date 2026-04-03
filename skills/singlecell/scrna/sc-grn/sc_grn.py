@@ -50,6 +50,7 @@ from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import grn as sc_grn_utils
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_grn
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -459,10 +460,21 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+    apply_preflight(
+        preflight_sc_grn(
+            adata,
+            tf_list=args.tf_list,
+            database_glob=args.database_glob,
+            motif_annotations=args.motif_annotations,
+            demo_mode=args.demo,
+            source_path=input_file,
+        ),
+        logger,
+    )
 
     # Parameters
     params = {

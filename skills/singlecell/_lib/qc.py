@@ -135,14 +135,27 @@ def calculate_qc_metrics(
     adata.var["mt"] = adata.var_names.str.startswith(mito_pattern)
     logger.info("  Mitochondrial genes: %d", adata.var["mt"].sum())
 
-    qc_vars = ["mt"]
+    qc_vars = []
+
+    mt_count = int(adata.var["mt"].sum())
+    if mt_count > 0:
+        qc_vars.append("mt")
+    else:
+        logger.warning("  No mitochondrial genes matched the selected species prefixes")
 
     # Ribosomal genes
     if calculate_ribo:
         ribo_pattern = get_species_ribo_pattern(species)
         adata.var["ribo"] = adata.var_names.str.match(ribo_pattern)
-        logger.info("  Ribosomal genes: %d", adata.var["ribo"].sum())
-        qc_vars.append("ribo")
+        ribo_count = int(adata.var["ribo"].sum())
+        logger.info("  Ribosomal genes: %d", ribo_count)
+        if ribo_count > 0:
+            qc_vars.append("ribo")
+        else:
+            logger.warning("  No ribosomal genes matched the selected species prefixes")
+
+    if not qc_vars:
+        logger.warning("  No species-specific QC feature sets were detected; only counts-based metrics will be computed")
 
     sc.pp.calculate_qc_metrics(adata, qc_vars=qc_vars, percent_top=None,
                                log1p=False, inplace=True)
@@ -153,7 +166,8 @@ def calculate_qc_metrics(
 
     logger.info("  Median genes/cell: %.0f", adata.obs["n_genes_by_counts"].median())
     logger.info("  Median UMIs/cell: %.0f", adata.obs["total_counts"].median())
-    logger.info("  Median MT%%: %.2f%%", adata.obs["pct_counts_mt"].median())
+    if "pct_counts_mt" in adata.obs.columns:
+        logger.info("  Median MT%%: %.2f%%", adata.obs["pct_counts_mt"].median())
 
     return adata
 
@@ -687,6 +701,10 @@ def plot_qc_violin(
     output_dir = Path(output_dir)
     if metrics is None:
         metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
+    metrics = [metric for metric in metrics if metric in adata.obs.columns]
+    if not metrics:
+        logger.warning("No QC metrics available for violin plotting")
+        return
 
     logger.info("Creating QC violin plots ...")
     sns.set_style("ticks")
@@ -732,13 +750,22 @@ def plot_qc_scatter(
     output_dir = Path(output_dir)
     logger.info("Creating QC scatter plots ...")
 
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
     scatter_cfg = [
         ("total_counts", "n_genes_by_counts", "#8da0cb"),
         ("total_counts", "pct_counts_mt", "#fc8d62"),
         ("n_genes_by_counts", "pct_counts_mt", "#66c2a5"),
+        ("total_counts", "pct_counts_ribo", "#e78ac3"),
+        ("n_genes_by_counts", "pct_counts_ribo", "#a6d854"),
     ]
-    for ax, (x, y, c) in zip(axes, scatter_cfg):
+    available_pairs = [(x, y, c) for x, y, c in scatter_cfg if x in adata.obs.columns and y in adata.obs.columns]
+    if not available_pairs:
+        logger.warning("No QC metric pairs available for scatter plotting")
+        return
+
+    fig, axes = plt.subplots(1, len(available_pairs), figsize=(4 * len(available_pairs), figsize[1]))
+    if len(available_pairs) == 1:
+        axes = [axes]
+    for ax, (x, y, c) in zip(axes, available_pairs):
         ax.scatter(adata.obs[x], adata.obs[y], s=1, alpha=0.3, c=c)
         ax.set_xlabel(x.replace("_", " ").title())
         ax.set_ylabel(y.replace("_", " ").title())
@@ -772,6 +799,10 @@ def plot_qc_histograms(
     output_dir = Path(output_dir)
     if metrics is None:
         metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
+    metrics = [metric for metric in metrics if metric in adata.obs.columns]
+    if not metrics:
+        logger.warning("No QC metrics available for histogram plotting")
+        return
 
     logger.info("Creating QC histograms ...")
     colors = ["#8da0cb", "#fc8d62", "#66c2a5"]

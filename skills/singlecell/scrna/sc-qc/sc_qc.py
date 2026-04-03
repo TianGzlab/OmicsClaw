@@ -38,10 +38,11 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from omicsclaw.common.checksums import sha256_file
-from skills.singlecell._lib.adata_utils import store_analysis_metadata
+from skills.singlecell._lib.adata_utils import prepare_count_like_adata, store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib import io as sc_io
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_qc
 from skills.singlecell._lib import qc as sc_qc_utils
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -65,6 +66,7 @@ def generate_qc_summary_table(adata) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
     if "pct_counts_ribo" in adata.obs.columns:
         metrics.append("pct_counts_ribo")
+    metrics = [metric for metric in metrics if metric in adata.obs.columns]
 
     summary_data = []
     summary_stats = {}
@@ -107,9 +109,10 @@ def _build_highest_expr_genes_table(adata, n_top: int = 20) -> pd.DataFrame:
 def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path) -> dict:
     summary_stats, summary_df, qc_metrics_df = generate_qc_summary_table(adata)
     summary["qc_metrics"] = summary_stats
+    qc_metric_columns = [column for column in qc_metrics_df.columns if column != "cell_id"]
     return {
         "output_dir": Path(output_dir),
-        "qc_metric_columns": [column for column in qc_metrics_df.columns if column != "cell_id"],
+        "qc_metric_columns": qc_metric_columns,
         "qc_summary_df": summary_df,
         "qc_metrics_df": qc_metrics_df,
         "highest_expr_df": _build_highest_expr_genes_table(adata),
@@ -126,6 +129,7 @@ def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, ou
 
 
 def _build_qc_visualization_recipe(_adata, _summary: dict, _context: dict) -> VisualizationRecipe:
+    qc_metric_columns = _context.get("qc_metric_columns", [])
     return VisualizationRecipe(
         recipe_id="standard-sc-qc-gallery",
         skill_name=SKILL_NAME,
@@ -139,7 +143,8 @@ def _build_qc_visualization_recipe(_adata, _summary: dict, _context: dict) -> Vi
                 filename="qc_violin.png",
                 title="QC violin plots",
                 description="Distribution of core QC metrics across cells.",
-                required_obs=["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+                required_obs=["n_genes_by_counts", "total_counts"],
+                params={"metrics": qc_metric_columns},
             ),
             PlotSpec(
                 plot_id="qc_scatter",
@@ -148,7 +153,7 @@ def _build_qc_visualization_recipe(_adata, _summary: dict, _context: dict) -> Vi
                 filename="qc_scatter.png",
                 title="QC scatter plots",
                 description="Pairwise relationships among counts, detected genes, and mitochondrial content.",
-                required_obs=["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+                required_obs=["n_genes_by_counts", "total_counts"],
             ),
             PlotSpec(
                 plot_id="qc_histograms",
@@ -157,7 +162,8 @@ def _build_qc_visualization_recipe(_adata, _summary: dict, _context: dict) -> Vi
                 filename="qc_histograms.png",
                 title="QC histograms",
                 description="Metric distributions with median indicators.",
-                required_obs=["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+                required_obs=["n_genes_by_counts", "total_counts"],
+                params={"metrics": qc_metric_columns},
             ),
             PlotSpec(
                 plot_id="highest_expr_genes",
@@ -177,7 +183,7 @@ def _gallery_figure_path(output_dir: Path, filename: str) -> Path:
 
 def _render_qc_violin(adata, spec: PlotSpec, context: dict) -> object:
     output_dir = Path(context["output_dir"])
-    sc_qc_utils.plot_qc_violin(adata, output_dir)
+    sc_qc_utils.plot_qc_violin(adata, output_dir, metrics=spec.params.get("metrics"))
     path = _gallery_figure_path(output_dir, spec.filename)
     return path if path.exists() else None
 
@@ -191,7 +197,7 @@ def _render_qc_scatter(adata, spec: PlotSpec, context: dict) -> object:
 
 def _render_qc_histograms(adata, spec: PlotSpec, context: dict) -> object:
     output_dir = Path(context["output_dir"])
-    sc_qc_utils.plot_qc_histograms(adata, output_dir)
+    sc_qc_utils.plot_qc_histograms(adata, output_dir, metrics=spec.params.get("metrics"))
     path = _gallery_figure_path(output_dir, spec.filename)
     return path if path.exists() else None
 
@@ -295,6 +301,7 @@ def write_qc_report(output_dir: Path, summary: dict, effective_params: dict, inp
             "Cells": str(summary["n_cells"]),
             "Genes": str(summary["n_genes"]),
             "Species": effective_params["species"],
+            "Expression source": summary.get("expression_source", "adata.X"),
         },
     )
 
@@ -305,10 +312,23 @@ def write_qc_report(output_dir: Path, summary: dict, effective_params: dict, inp
         f"- **Total cells**: {summary['n_cells']:,}",
         f"- **Total genes**: {summary['n_genes']:,}",
         f"- **Species**: {effective_params['species']}",
+        f"- **Expression source used for QC**: {summary.get('expression_source', 'adata.X')}",
+        f"- **Gene identifiers used for QC**: {summary.get('gene_name_source', 'var_names')}",
         "- **Filtering performed**: No; this skill is diagnostic only.",
         "",
-        "## QC Metrics Overview\n",
+        "## Input Validation\n",
     ]
+
+    for warning in summary.get("input_warnings", []):
+        body_lines.append(f"- {warning}")
+
+    if not summary.get("input_warnings"):
+        body_lines.append("- Input matrix and gene identifiers passed QC preparation checks.")
+
+    body_lines.extend([
+        "",
+        "## QC Metrics Overview\n",
+    ])
 
     # Add metric summaries
     for metric, stats in summary.get("qc_metrics", {}).items():
@@ -515,6 +535,28 @@ def generate_demo_data(species: str = "human"):
         return adata, None
 
 
+def _copy_qc_annotations(source_adata, target_adata) -> list[str]:
+    """Copy QC outputs back onto the original AnnData without changing its expression matrix."""
+    copied_obs: list[str] = []
+    for column in (
+        "n_genes_by_counts",
+        "total_counts",
+        "pct_counts_mt",
+        "pct_counts_ribo",
+        "log10_total_counts",
+        "log10_n_genes_by_counts",
+    ):
+        if column in source_adata.obs.columns:
+            target_adata.obs[column] = source_adata.obs[column].to_numpy()
+            copied_obs.append(column)
+
+    for column in ("mt", "ribo"):
+        if column in source_adata.var.columns:
+            target_adata.var[column] = source_adata.var[column].to_numpy()
+
+    return copied_obs
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Single-Cell QC — Quality control metrics and visualization"
@@ -545,7 +587,7 @@ def main():
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
         logger.info(f"Loading data from: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
@@ -556,15 +598,28 @@ def main():
         "species": args.species,
     }
     public_params = build_public_params(effective_params)
+    apply_preflight(
+        preflight_sc_qc(
+            adata,
+            species=effective_params["species"],
+            source_path=input_file,
+        ),
+        logger,
+    )
+
+    logger.info("Preparing count-like input for QC...")
+    prepared_input = prepare_count_like_adata(adata, species=effective_params["species"])
+    qc_adata = prepared_input.adata
 
     # Calculate QC metrics
     logger.info("Calculating QC metrics...")
-    adata = sc_qc_utils.calculate_qc_metrics(
-        adata,
+    qc_adata = sc_qc_utils.calculate_qc_metrics(
+        qc_adata,
         species=effective_params["species"],
         calculate_ribo=effective_params["calculate_ribo"],
         inplace=True,
     )
+    copied_qc_columns = _copy_qc_annotations(qc_adata, adata)
 
     # Build summary dict
     summary = {
@@ -573,12 +628,16 @@ def main():
         "n_genes": int(adata.n_vars),
         "median_genes": float(adata.obs["n_genes_by_counts"].median()),
         "median_counts": float(adata.obs["total_counts"].median()),
+        "expression_source": prepared_input.expression_source,
+        "gene_name_source": prepared_input.gene_name_source,
+        "input_warnings": prepared_input.warnings,
+        "qc_obs_columns": copied_qc_columns,
     }
 
-    gallery_context = _prepare_qc_gallery_context(adata, summary, effective_params, output_dir)
+    gallery_context = _prepare_qc_gallery_context(qc_adata, summary, effective_params, output_dir)
 
     logger.info("Generating QC figures...")
-    generate_qc_figures(adata, output_dir, summary, gallery_context=gallery_context)
+    generate_qc_figures(qc_adata, output_dir, summary, gallery_context=gallery_context)
 
     logger.info("Exporting tables...")
     export_tables(output_dir, gallery_context=gallery_context)
@@ -599,6 +658,12 @@ def main():
         "method": QC_METHOD,
         "params": public_params,
         "effective_params": effective_params,
+        "input_preparation": {
+            "expression_source": prepared_input.expression_source,
+            "gene_name_source": prepared_input.gene_name_source,
+            "warnings": prepared_input.warnings,
+            "qc_obs_columns": copied_qc_columns,
+        },
         **summary,
         "visualization": {
             "recipe_id": "standard-sc-qc-gallery",
@@ -623,8 +688,11 @@ def main():
     print(f"  Genes: {summary['n_genes']:,}")
     print(f"  Median genes/cell: {summary['median_genes']:.0f}")
     print(f"  Median UMIs/cell: {summary['median_counts']:.0f}")
+    print(f"  QC expression source: {summary['expression_source']}")
     if "pct_counts_mt" in summary["qc_metrics"]:
         print(f"  Median MT%: {summary['qc_metrics']['pct_counts_mt']['median']:.2f}%")
+    if summary["input_warnings"]:
+        print(f"  Input warnings: {len(summary['input_warnings'])}")
     print(f"\nFiles generated:")
     print(f"  - report.md")
     print(f"  - README.md")

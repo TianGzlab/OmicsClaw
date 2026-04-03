@@ -43,6 +43,7 @@ from skills.singlecell._lib.method_config import (
     MethodConfig,
     validate_method_choice,
 )
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_markers
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import markers as sc_markers_utils
@@ -348,10 +349,18 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+    apply_preflight(
+        preflight_sc_markers(
+            adata,
+            groupby=args.groupby,
+            source_path=input_file,
+        ),
+        logger,
+    )
 
     # Check grouping exists
     if args.groupby not in adata.obs.columns:

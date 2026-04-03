@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-Cell Pseudotime Analysis - PAGA + DPT trajectory inference.
+"""Single-Cell Pseudotime Analysis - DPT and Palantir trajectory inference.
 
 Usage:
     python sc_pseudotime.py --input <data.h5ad> --output <dir> --root-cluster <cluster>
@@ -14,7 +14,6 @@ This skill performs core trajectory analysis using methods available in scanpy:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -49,13 +48,14 @@ from skills.singlecell._lib.method_config import (
 )
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_pseudotime
 from skills.singlecell._lib import trajectory as sc_traj
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-pseudotime"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.3.0"
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -115,9 +115,36 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="PAGA + Diffusion Pseudotime (scanpy built-in)",
         dependencies=("scanpy",),
     ),
+    "palantir": MethodConfig(
+        name="palantir",
+        description="Palantir pseudotime with diffusion maps and waypoint sampling",
+        dependencies=("palantir",),
+    ),
 }
 
 SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
+METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
+    "dpt": {
+        "cluster_key": "leiden",
+        "root_cluster": None,
+        "root_cell": None,
+        "n_dcs": 10,
+        "n_genes": 50,
+        "corr_method": "pearson",
+    },
+    "palantir": {
+        "cluster_key": "leiden",
+        "root_cluster": None,
+        "root_cell": None,
+        "n_dcs": 10,
+        "n_genes": 50,
+        "corr_method": "pearson",
+        "palantir_knn": 30,
+        "palantir_num_waypoints": 1200,
+        "palantir_max_iterations": 25,
+        "palantir_seed": 20,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Method dispatch table
@@ -126,28 +153,37 @@ SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
 # Currently only DPT is supported; dispatch kept for future methods.
 _METHOD_DISPATCH = {
     "dpt": "dpt",
+    "palantir": "palantir",
 }
 
 
-def generate_trajectory_figures(adata, trajectory_genes: pd.DataFrame, output_dir: Path) -> list[str]:
+def generate_trajectory_figures(
+    adata,
+    trajectory_genes: pd.DataFrame,
+    output_dir: Path,
+    *,
+    method: str,
+    cluster_key: str,
+    pseudotime_key: str,
+) -> list[str]:
     """Generate trajectory visualization figures."""
     figures = []
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    # PAGA graph
-    try:
-        logger.info("Generating PAGA graph...")
-        fig_path = sc_traj.plot_paga_graph(
-            adata,
-            output_dir=figures_dir,
-            cluster_key="leiden",
-            title="PAGA Connectivity Graph",
-        )
-        if fig_path:
-            figures.append(fig_path)
-    except Exception as e:
-        logger.warning(f"PAGA graph plot failed: {e}")
+    if method == "dpt":
+        try:
+            logger.info("Generating PAGA graph...")
+            fig_path = sc_traj.plot_paga_graph(
+                adata,
+                output_dir=figures_dir,
+                cluster_key=cluster_key,
+                title="PAGA Connectivity Graph",
+            )
+            if fig_path:
+                figures.append(fig_path)
+        except Exception as e:
+            logger.warning(f"PAGA graph plot failed: {e}")
 
     # Pseudotime UMAP
     try:
@@ -155,8 +191,8 @@ def generate_trajectory_figures(adata, trajectory_genes: pd.DataFrame, output_di
         fig_path = sc_traj.plot_pseudotime_umap(
             adata,
             output_dir=figures_dir,
-            pseudotime_key="dpt_pseudotime",
-            title="DPT Pseudotime",
+            pseudotime_key=pseudotime_key,
+            title=f"{method.upper()} Pseudotime",
         )
         if fig_path:
             figures.append(fig_path)
@@ -182,7 +218,7 @@ def generate_trajectory_figures(adata, trajectory_genes: pd.DataFrame, output_di
             adata,
             trajectory_genes,
             output_dir=figures_dir,
-            pseudotime_key="dpt_pseudotime",
+            pseudotime_key=pseudotime_key,
             n_genes=30,
             title="Trajectory-Associated Genes",
         )
@@ -215,25 +251,43 @@ def write_pseudotime_report(
 
     body_lines = [
         "## Summary\n",
+        f"- **Method**: {params.get('method', 'dpt')}",
         f"- **Root cluster**: {params.get('root_cluster', 'auto-detected')}",
-        f"- **Root cell index**: {summary.get('root_cell', 'N/A')}",
+        f"- **Root cell**: {summary.get('root_cell_name', summary.get('root_cell', 'N/A'))}",
         f"- **Number of clusters**: {summary.get('n_clusters', 'N/A')}",
         f"- **Trajectory genes found**: {summary.get('n_trajectory_genes', 0)}",
         f"- **Pseudotime range**: [{summary.get('pseudotime_min', 0):.3f}, {summary.get('pseudotime_max', 1):.3f}]",
         "",
         "## Methods\n",
-        "### PAGA (Partition-based Graph Abstraction)",
-        "PAGA estimates connectivity between clusters by quantifying the connectivity",
-        "of the underlying single-cell graph at each cluster resolution.\n",
-        "### Diffusion Map",
-        "Diffusion maps provide a non-linear dimensionality reduction that preserves",
-        "the underlying manifold structure of the data.\n",
-        "### DPT (Diffusion Pseudotime)",
-        "DPT uses random walks on the diffusion graph to estimate pseudotemporal",
-        "ordering of cells from a root cell.\n",
-        "",
-        "## Top Trajectory Genes\n",
     ]
+    if params.get("method") == "dpt":
+        body_lines.extend(
+            [
+                "### PAGA (Partition-based Graph Abstraction)",
+                "PAGA estimates connectivity between clusters by quantifying the connectivity",
+                "of the underlying single-cell graph at each cluster resolution.\n",
+                "### Diffusion Map",
+                "Diffusion maps provide a non-linear dimensionality reduction that preserves",
+                "the underlying manifold structure of the data.\n",
+                "### DPT (Diffusion Pseudotime)",
+                "DPT uses random walks on the diffusion graph to estimate pseudotemporal",
+                "ordering of cells from a root cell.\n",
+            ]
+        )
+    else:
+        body_lines.extend(
+            [
+                "### Palantir",
+                "Palantir computes diffusion maps, determines a multiscale manifold, and",
+                "uses waypoint sampling to infer pseudotime, entropy, and fate probabilities.\n",
+            ]
+        )
+        if summary.get("mean_entropy") is not None:
+            body_lines.append(f"- **Mean Palantir entropy**: {summary['mean_entropy']:.4f}")
+        if summary.get("n_terminal_states") is not None:
+            body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
+        body_lines.append("")
+    body_lines.extend(["", "## Top Trajectory Genes\n"])
 
     # Add top genes table
     body_lines.append("| Gene | Correlation | P-value |")
@@ -256,7 +310,6 @@ def write_pseudotime_report(
         "",
         "## Output Files\n",
         "- `adata_with_trajectory.h5ad` — AnnData with pseudotime and diffusion map",
-        "- `figures/paga_graph.png` — PAGA connectivity graph",
         "- `figures/pseudotime_umap.png` — Pseudotime on UMAP",
         "- `figures/diffusion_components.png` — Diffusion map components",
         "- `figures/trajectory_gene_heatmap.png` — Heatmap of trajectory genes",
@@ -264,10 +317,12 @@ def write_pseudotime_report(
         "",
         "## Interpretation\n",
         "- **Pseudotime** represents the inferred temporal ordering (0 = root, 1 = terminal)",
-        "- **PAGA edges** show significant connectivity between clusters",
         "- **Trajectory genes** are correlated with pseudotime and may drive transitions",
         "",
     ])
+    if params.get("method") == "dpt":
+        body_lines.insert(body_lines.index("- `figures/pseudotime_umap.png` — Pseudotime on UMAP"), "- `figures/paga_graph.png` — PAGA connectivity graph")
+        body_lines.insert(body_lines.index("- **Trajectory genes** are correlated with pseudotime and may drive transitions"), "- **PAGA edges** show significant connectivity between clusters")
 
     footer = generate_report_footer()
     report = header + "\n" + "\n".join(body_lines) + "\n" + footer
@@ -292,6 +347,7 @@ def generate_demo_data():
         sc.pp.highly_variable_genes(adata, n_top_genes=2000)
         sc.pp.pca(adata)
         sc.pp.neighbors(adata)
+        sc.tl.umap(adata)
 
         # Try leiden clustering
         try:
@@ -319,6 +375,7 @@ def generate_demo_data():
         sc.pp.log1p(adata)
         sc.pp.pca(adata)
         sc.pp.neighbors(adata)
+        sc.tl.umap(adata)
 
         from sklearn.cluster import KMeans
         kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
@@ -356,6 +413,10 @@ def main():
         choices=["pearson", "spearman"],
         help="Correlation method for trajectory gene ranking",
     )
+    parser.add_argument("--palantir-knn", type=int, default=30, help="Palantir kNN graph size")
+    parser.add_argument("--palantir-num-waypoints", type=int, default=1200, help="Palantir waypoint count")
+    parser.add_argument("--palantir-max-iterations", type=int, default=25, help="Palantir maximum pseudotime iterations")
+    parser.add_argument("--palantir-seed", type=int, default=20, help="Palantir random seed")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -372,10 +433,21 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+    apply_preflight(
+        preflight_sc_pseudotime(
+            adata,
+            method=args.analysis_method,
+            cluster_key=args.cluster_key,
+            root_cluster=args.root_cluster,
+            root_cell=args.root_cell,
+            source_path=input_file,
+        ),
+        logger,
+    )
 
     # Check cluster key
     if args.cluster_key not in adata.obs.columns:
@@ -388,65 +460,115 @@ def main():
     if "neighbors" not in adata.uns:
         logger.info("Computing neighbor graph...")
         sc.pp.neighbors(adata)
+    if "X_umap" not in adata.obsm:
+        logger.info("Computing UMAP for trajectory visualizations...")
+        sc.tl.umap(adata)
 
     # Validate analysis method & check dependencies
     analysis_method = validate_method_choice(args.analysis_method, METHOD_REGISTRY)
 
-    # Parameters
-    params = {
-        "method": analysis_method,
-        "cluster_key": args.cluster_key,
-        "root_cluster": args.root_cluster,
-        "root_cell": args.root_cell,
-        "n_dcs": args.n_dcs,
-        "n_genes": args.n_genes,
-        "corr_method": args.corr_method,
-    }
-
-    # Step 1: PAGA analysis
-    logger.info("Running PAGA analysis...")
-    paga_result = sc_traj.run_paga_analysis(adata, cluster_key=args.cluster_key)
-
-    # Step 2: Diffusion map
-    logger.info("Running diffusion map...")
-    diffmap_result = sc_traj.run_diffusion_map(adata, n_comps=max(15, args.n_dcs + 5))
-
-    # Step 3: DPT pseudotime
-    logger.info("Running DPT pseudotime...")
-    dpt_result = sc_traj.run_dpt_pseudotime(
-        adata,
-        root_cell_indices=[args.root_cell] if args.root_cell is not None else None,
-        root_cluster=args.root_cluster,
-        cluster_key=args.cluster_key,
-        n_dcs=args.n_dcs,
+    params = dict(METHOD_PARAM_DEFAULTS[analysis_method])
+    params.update(
+        {
+            "method": analysis_method,
+            "cluster_key": args.cluster_key,
+            "root_cluster": args.root_cluster,
+            "root_cell": args.root_cell,
+            "n_dcs": args.n_dcs,
+            "n_genes": args.n_genes,
+            "corr_method": args.corr_method,
+        }
     )
+    if analysis_method == "palantir":
+        params.update(
+            {
+                "palantir_knn": args.palantir_knn,
+                "palantir_num_waypoints": args.palantir_num_waypoints,
+                "palantir_max_iterations": args.palantir_max_iterations,
+                "palantir_seed": args.palantir_seed,
+            }
+        )
 
-    # Step 4: Find trajectory genes
+    pseudotime_key = "dpt_pseudotime"
+    if analysis_method == "dpt":
+        logger.info("Running PAGA analysis...")
+        sc_traj.run_paga_analysis(adata, cluster_key=args.cluster_key)
+
+        logger.info("Running diffusion map...")
+        diffmap_result = sc_traj.run_diffusion_map(adata, n_comps=max(15, args.n_dcs + 5))
+
+        logger.info("Running DPT pseudotime...")
+        dpt_result = sc_traj.run_dpt_pseudotime(
+            adata,
+            root_cell_indices=[args.root_cell] if args.root_cell is not None else None,
+            root_cluster=args.root_cluster,
+            cluster_key=args.cluster_key,
+            n_dcs=args.n_dcs,
+        )
+        summary = {
+            "method": analysis_method,
+            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
+            "n_trajectory_genes": 0,
+            "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
+            "root_cell_name": str(adata.obs_names[int(dpt_result["root_cells"][0])]) if dpt_result["root_cells"] else None,
+            "pseudotime_min": float(adata.obs["dpt_pseudotime"].min()),
+            "pseudotime_max": float(adata.obs["dpt_pseudotime"].max()),
+            "n_diffusion_components": diffmap_result["diffmap"].shape[1],
+        }
+    else:
+        logger.info("Resolving Palantir early cell...")
+        early_cell_name = sc_traj.resolve_palantir_early_cell(
+            adata,
+            root_cell=args.root_cell,
+            root_cluster=args.root_cluster,
+            cluster_key=args.cluster_key,
+        )
+        logger.info("Running Palantir analysis...")
+        palantir_result = sc_traj.run_palantir_pseudotime(
+            adata,
+            early_cell=early_cell_name,
+            knn=args.palantir_knn,
+            n_components=max(5, args.n_dcs),
+            num_waypoints=args.palantir_num_waypoints,
+            max_iterations=args.palantir_max_iterations,
+            seed=args.palantir_seed,
+        )
+        pseudotime_key = "palantir_pseudotime"
+        fate_probs = palantir_result.get("fate_probabilities")
+        summary = {
+            "method": analysis_method,
+            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
+            "n_trajectory_genes": 0,
+            "root_cell": int(np.where(adata.obs_names == early_cell_name)[0][0]),
+            "root_cell_name": early_cell_name,
+            "pseudotime_min": float(adata.obs[pseudotime_key].min()),
+            "pseudotime_max": float(adata.obs[pseudotime_key].max()),
+            "n_diffusion_components": int(np.asarray(adata.obsm["DM_EigenVectors"]).shape[1]) if "DM_EigenVectors" in adata.obsm else 0,
+            "mean_entropy": float(np.nanmean(palantir_result["entropy"])) if palantir_result.get("entropy") is not None else None,
+            "n_terminal_states": int(fate_probs.shape[1]) if fate_probs is not None else None,
+        }
+
     logger.info("Finding trajectory genes...")
     trajectory_genes = sc_traj.find_trajectory_genes(
         adata,
-        pseudotime_key="dpt_pseudotime",
+        pseudotime_key=pseudotime_key,
         n_genes=args.n_genes,
         method=args.corr_method,
     )
-
-    # Summary
-    n_clusters = adata.obs[args.cluster_key].nunique()
-    summary = {
-        "method": analysis_method,
-        "n_clusters": int(n_clusters),
-        "n_trajectory_genes": len(trajectory_genes),
-        "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
-        "pseudotime_min": float(adata.obs["dpt_pseudotime"].min()),
-        "pseudotime_max": float(adata.obs["dpt_pseudotime"].max()),
-        "n_diffusion_components": diffmap_result["diffmap"].shape[1],
-    }
+    summary["n_trajectory_genes"] = len(trajectory_genes)
 
     logger.info(f"Found {len(trajectory_genes)} trajectory-associated genes")
 
     # Generate figures
     logger.info("Generating figures...")
-    figures = generate_trajectory_figures(adata, trajectory_genes, output_dir)
+    generate_trajectory_figures(
+        adata,
+        trajectory_genes,
+        output_dir,
+        method=analysis_method,
+        cluster_key=args.cluster_key,
+        pseudotime_key=pseudotime_key,
+    )
 
     # Export tables
     tables_dir = output_dir / "tables"
@@ -479,11 +601,20 @@ def main():
         f" --n-dcs {args.n_dcs} --n-genes {args.n_genes}"
         f" --method {analysis_method} --corr-method {args.corr_method}"
     )
+    if args.root_cell is not None:
+        cmd += f" --root-cell {args.root_cell}"
+    if analysis_method == "palantir":
+        cmd += (
+            f" --palantir-knn {args.palantir_knn}"
+            f" --palantir-num-waypoints {args.palantir_num_waypoints}"
+            f" --palantir-max-iterations {args.palantir_max_iterations}"
+            f" --palantir-seed {args.palantir_seed}"
+        )
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
-    _write_repro_requirements(
-        repro_dir,
-        ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
-    )
+    packages = ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]
+    if analysis_method == "palantir":
+        packages.append("palantir")
+    _write_repro_requirements(repro_dir, packages)
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
@@ -501,7 +632,7 @@ def main():
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'='*60}")
     print(f"  Root cluster: {params.get('root_cluster', 'auto')}")
-    print(f"  Clusters: {n_clusters}")
+    print(f"  Clusters: {summary['n_clusters']}")
     print(f"  Trajectory genes: {len(trajectory_genes)}")
     print(f"  Output: {output_dir}")
 

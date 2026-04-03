@@ -42,6 +42,7 @@ from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import qc as sc_qc_utils
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_filter
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -394,15 +395,26 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
+
+    logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+    apply_preflight(
+        preflight_sc_filter(
+            adata,
+            tissue=args.tissue,
+            min_counts=args.min_counts,
+            max_counts=args.max_counts,
+            max_mt_percent=args.max_mt_percent,
+            source_path=input_file,
+        ),
+        logger,
+    )
 
     # Calculate QC metrics if not present
     if 'n_genes_by_counts' not in adata.obs.columns:
         logger.info("Calculating QC metrics...")
         adata = sc_qc_utils.calculate_qc_metrics(adata, inplace=True)
-
-    logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
 
     # Store original for comparison
     adata_before = adata.copy()

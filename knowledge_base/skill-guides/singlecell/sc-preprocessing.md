@@ -35,6 +35,8 @@ Before running preprocessing, check:
   - current wrapper can load `.h5ad`, `.h5`, `.loom`, delimited matrices, and 10x-style directories through the shared loader
 - **Count preservation**:
   - if counts already exist in `layers["counts"]` or `adata.raw`, note that, but do not assume the whole object is already preprocessing-ready
+- **Input provenance**:
+  - if the count source is unclear, recommend `sc-standardize-input` first
 - **Gene naming**:
   - mitochondrial tagging depends on `MT-` or `mt-` prefix detection
 - **Dataset size and heterogeneity**:
@@ -49,6 +51,7 @@ Important implementation notes in current OmicsClaw:
 - The Scanpy branch currently uses `scanpy.pp.highly_variable_genes(..., flavor='seurat')`.
 - The Seurat branch currently uses `NormalizeData(LogNormalize)` and `FindVariableFeatures(selection.method='vst')`.
 - The SCTransform branch currently maps `n_top_hvg` to `SCTransform(variable.features.n=...)`.
+- For `seurat` and `sctransform`, if neither `layers["counts"]` nor aligned `adata.raw` exists, the wrapper may fall back to using `adata.X` as the raw-count source.
 
 ## Step 2: Choose The Method Deliberately
 
@@ -120,6 +123,7 @@ Guidance:
 Important warning:
 
 - these are wrapper-level QC gates shared across all three backends
+- for `seurat` or `sctransform`, confirm the raw-count source if the object has no explicit `counts` layer
 
 ### HVG budget
 

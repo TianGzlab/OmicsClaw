@@ -38,6 +38,7 @@ from skills.singlecell._lib import integration as sc_integration_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice, check_data_requirements
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_batch_integration
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
 
@@ -176,8 +177,10 @@ def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kw
     if labels_key is None:
         logger.warning("scANVI requires labels; falling back to scVI latent integration")
         result = integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
-        result["method"] = "scanvi_fallback_scvi"
         result["requested_method"] = "scanvi"
+        result["executed_method"] = "scvi"
+        result["fallback_used"] = True
+        result["fallback_reason"] = "scanvi requires existing labels in adata.obs such as 'cell_type' or 'leiden'"
         return result
     adata = sc_integration_utils.run_scanvi_integration(
         adata,
@@ -618,18 +621,22 @@ def export_tables(output_dir: Path, *, gallery_context: dict | None = None) -> l
 
 def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict, *, gallery_context: dict | None = None) -> None:
     context = gallery_context or {}
+    requested_method = str(summary.get("requested_method", params.get("method", summary["method"])))
+    executed_method = str(summary.get("executed_method", summary["method"]))
+    fallback_reason = summary.get("fallback_reason")
     header = generate_report_header(
         title="Single-Cell Batch Integration Report",
         skill_name=SKILL_NAME,
         input_files=[Path(input_file)] if input_file else None,
         extra_metadata={
-            "Method": summary["method"],
+            "Method": executed_method,
             "Batches": str(summary["n_batches"]),
         },
     )
     body_lines = [
         "## Summary\n",
-        f"- **Method**: {summary['method']}",
+        f"- **Requested method**: {requested_method}",
+        f"- **Executed method**: {executed_method}",
         f"- **Batches**: {summary['n_batches']}",
         f"- **Cells**: {summary['n_cells']}",
         f"- **Embedding key**: {summary['embedding_key']}",
@@ -638,6 +645,8 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         "",
         "## Parameters\n",
     ]
+    if fallback_reason:
+        body_lines.insert(8, f"- **Fallback note**: {fallback_reason}")
     for k, v in params.items():
         body_lines.append(f"- `{k}`: {v}")
     body_lines.extend(
@@ -667,8 +676,10 @@ def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = F
         f"{'--demo' if demo_mode else '--input <input.h5ad>'} "
         f"--output {shlex.quote(str(output_dir))}"
     )
-    for key, value in params.items():
-        command += f" --{key.replace('_', '-')} {shlex.quote(str(value))}"
+    command += f" --method {shlex.quote(str(params['method']))}"
+    command += f" --batch-key {shlex.quote(str(params['batch_key']))}"
+    if params.get("n_epochs") is not None:
+        command += f" --n-epochs {shlex.quote(str(params['n_epochs']))}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
     _write_repro_requirements(
         repro_dir,
@@ -703,11 +714,25 @@ def main():
     else:
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
-        adata = sc.read_h5ad(args.input_path)
+        adata = sc_io.smart_load(
+            args.input_path,
+            suggest_standardize=False,
+            skill_name=SKILL_NAME,
+            preserve_all=True,
+        )
         input_file = args.input_path
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
+    apply_preflight(
+        preflight_sc_batch_integration(
+            adata,
+            method=method,
+            batch_key=args.batch_key,
+            source_path=input_file,
+        ),
+        logger,
+    )
     cfg = METHOD_REGISTRY[method]
     check_data_requirements(adata, cfg)
     sc_integration_utils.setup_for_integration(adata, batch_key=args.batch_key, inplace=True)
@@ -723,10 +748,24 @@ def main():
     else:
         summary = _METHOD_DISPATCH[method](adata, **kwargs)
 
+    summary.setdefault("requested_method", method)
+    summary.setdefault("executed_method", summary.get("method", method))
+    summary.setdefault("fallback_used", summary["requested_method"] != summary["executed_method"])
     summary["n_cells"] = int(adata.n_obs)
-    params = {"method": method, "batch_key": args.batch_key, "counts_layer": "counts" if "counts" in adata.layers else None, "raw_available": adata.raw is not None}
+    params = {
+        "method": method,
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
+        "batch_key": args.batch_key,
+        "counts_layer": "counts" if "counts" in adata.layers else None,
+        "raw_available": adata.raw is not None,
+    }
     if args.n_epochs is not None:
         params["n_epochs"] = args.n_epochs
+    if cfg.supports_gpu:
+        params["no_gpu"] = bool(args.no_gpu)
+    if summary.get("fallback_reason"):
+        params["fallback_reason"] = summary["fallback_reason"]
 
     gallery_context = _prepare_integration_gallery_context(adata, summary, params, output_dir)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)
@@ -734,14 +773,18 @@ def main():
     write_report(output_dir, summary, input_file, params, gallery_context=gallery_context)
     write_reproducibility(output_dir, params, demo_mode=args.demo)
 
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    store_analysis_metadata(adata, SKILL_NAME, summary["executed_method"], params)
     output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(adata, output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     result_data = {
-        "method": method,
+        "method": summary["executed_method"],
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
+        "fallback_used": bool(summary.get("fallback_used")),
+        "fallback_reason": summary.get("fallback_reason"),
         "params": params,
         **summary,
         "visualization": {
@@ -763,7 +806,10 @@ def main():
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"Integration complete: {summary['method']} on {summary['n_batches']} batches")
+    print(
+        f"Integration complete: requested={summary['requested_method']}, "
+        f"executed={summary['executed_method']} on {summary['n_batches']} batches"
+    )
 
 
 if __name__ == "__main__":

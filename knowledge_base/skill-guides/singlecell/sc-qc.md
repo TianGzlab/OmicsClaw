@@ -33,6 +33,8 @@ Key properties to check:
 - **Matrix type**:
   - current `sc-qc` works best when `adata.X` is still count-like
   - if the matrix already looks log-normalized or scaled, say that explicitly
+- **Input provenance**:
+  - if counts or gene symbols come from an external object with unclear provenance, recommend `sc-standardize-input` first
 - **Gene naming convention**:
   - `human` expects mitochondrial `MT-` and ribosomal `RP[SL]`
   - `mouse` expects mitochondrial `mt-` and ribosomal `Rp[sl]`
@@ -49,6 +51,7 @@ Important implementation notes in current OmicsClaw:
 - `--species` is the only public extra flag.
 - Ribosomal percentage is always computed in the current wrapper.
 - The skill writes QC annotations back to `qc_checked.h5ad` but does not remove any cells.
+- The current wrapper now shares the same preflight style as other main scRNA skills: no raw count-like matrix should hard-stop the run; weaker gene-symbol matching should produce warnings rather than fake precision.
 
 ## Step 2: Explain The Current Skill Correctly
 

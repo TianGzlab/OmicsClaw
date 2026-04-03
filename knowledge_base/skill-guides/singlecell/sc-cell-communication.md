@@ -30,17 +30,20 @@ Key properties to check:
   - species affects ligand-receptor resource interpretation
 - **Expression representation**:
   - raw vs normalized state matters differently across backends
+- **Input provenance**:
+  - if this is an external `.h5ad` and counts/labels are not yet standardized, recommend `sc-standardize-input` first
 
 Important implementation notes in current OmicsClaw:
 - public methods are `builtin`, `liana`, and `cellchat_r`
 - `cell_type_key` is the most important scientific parameter in the wrapper
 - the built-in path is a lightweight OmicsClaw baseline, not a full external method
+- `builtin` leaves `pvalue` empty because it is a heuristic ranking path rather than a formal significance test
 
 ## Step 2: Pick The Method Deliberately
 
 | Method | Best first use | Strong starting parameters | Main caveat |
 |--------|----------------|----------------------------|-------------|
-| **builtin** | Fast sanity-check baseline | `cell_type_key`, `species` | Small curated interaction list |
+| **builtin** | Fast sanity-check baseline | `cell_type_key`, `species` | Small curated interaction list and no formal significance testing |
 | **liana** | Best first rich Python-native backend | `cell_type_key`, `species` | Wrapper does not expose LIANA’s full filtering surface |
 | **cellchat_r** | When users explicitly want CellChat-style analysis | `cell_type_key`, `species` | R backend and resource assumptions matter |
 
@@ -67,11 +70,15 @@ Guidance:
 Important warnings:
 - do not expose LIANA `expr_prop`, `min_cells`, or CellChat internal model parameters as current public OmicsClaw knobs
 - do not promise correct species-specific biology if the requested resource support is uncertain
+- do not describe `builtin` `pvalue` values as formal hypothesis-test output; for this backend the field is intentionally left empty
+- for `cellphonedb`, make the user confirm whether genes are HGNC symbols, Ensembl IDs, or plain gene names before trusting the default `cellphonedb_counts_data`
+- for `cellchat_r`, if `adata.X` still looks count-like, stop and confirm matrix state before pretending CellChat is using the expected normalized expression
 
 ## Step 5: What To Say After The Run
 
 - If interactions are sparse: question label quality and species/resource compatibility first.
 - If the built-in method and LIANA disagree: explain that the built-in method is intentionally lightweight.
+- If the run used `builtin`: explicitly say that `n_significant` is not a meaningful statistical count because the backend does not produce formal p values.
 - If users ask for pathway-level CellChat controls: explain that the current wrapper does not expose that full surface.
 
 ## Step 6: Explain Outputs Using Method-Correct Language
@@ -79,10 +86,10 @@ Important warnings:
 - describe interaction tables as ranked ligand-receptor hypotheses between label groups
 - describe top plots as summaries of scored interactions, not direct causal proof
 - describe method names explicitly because score semantics differ by backend
+- for `builtin`, describe the score as a grouped-expression heuristic rather than a statistical communication probability
 
 ## Official References
 
 - https://liana-py.readthedocs.io/en/latest/generated/liana.method.rank_aggregate.__call__.html
 - https://liana-py.readthedocs.io/
 - https://github.com/jinworks/CellChat
-

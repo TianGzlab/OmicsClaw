@@ -30,10 +30,13 @@ Key properties to check:
   - expected doublet burden depends on loading and sample design
 - **Current analysis stage**:
   - doublet labeling is usually more useful before final annotation
+- **Input provenance**:
+  - if the object came from outside OmicsClaw, recommend `sc-standardize-input` first, then confirm the matrix used here is still raw count-like
 
 Important implementation notes in current OmicsClaw:
 - the wrapper exposes `scrublet`, `doubletfinder`, and `scdblfinder`
 - `threshold` only affects the Scrublet path
+- `doubletfinder` may fall back to `scdblfinder` if the R runtime fails
 - the wrapper annotates doublets; it does not automatically drop them
 
 ## Step 2: Pick The Method Deliberately
@@ -41,7 +44,7 @@ Important implementation notes in current OmicsClaw:
 | Method | Best first use | Strong starting parameters | Main caveat |
 |--------|----------------|----------------------------|-------------|
 | **scrublet** | Fast Python-native first pass | `expected_doublet_rate`, optional `threshold` | Threshold override only applies here |
-| **doubletfinder** | When an R-based Seurat-style path is explicitly desired | `expected_doublet_rate` | Current wrapper does not expose the full DoubletFinder tuning stack |
+| **doubletfinder** | When an R-based Seurat-style path is explicitly desired | `expected_doublet_rate` | Current wrapper does not expose the full DoubletFinder tuning stack and may fall back to `scdblfinder` on runtime failure |
 | **scdblfinder** | Strong R/Bioconductor baseline with a simpler public surface | `expected_doublet_rate` | Wrapper hides many advanced scDblFinder options |
 
 ## Step 3: Always Show A Parameter Summary Before Running
@@ -64,6 +67,7 @@ Tune in this order:
 Guidance:
 - `expected_doublet_rate` is the main shared scientific prior in the current wrapper
 - only use manual `threshold` when Scrublet’s automatic separation is clearly unsatisfactory
+- if the user selected an R method but also supplied a Scrublet-only `threshold`, stop and ask which behavior they actually want
 
 Important warnings:
 - do not promise DoubletFinder `pK`, `pN`, or `nExp`; the wrapper does not expose them
@@ -73,6 +77,7 @@ Important warnings:
 
 - If many doublets are called: mention loading burden or sample complexity, not just “bad quality”.
 - If very few are called: mention the assumed expected rate and whether the threshold was conservative.
+- If `doubletfinder` fell back: explain both the requested and executed methods rather than presenting the result as native DoubletFinder output.
 - If users ask whether cells were removed: state clearly that the wrapper labels but does not auto-delete.
 
 ## Step 6: Explain Outputs Using Method-Correct Language
@@ -87,4 +92,3 @@ Important warnings:
 - https://github.com/chris-mcginnis-ucsf/DoubletFinder/blob/master/README.md
 - https://bioconductor.org/packages/release/bioc/vignettes/scDblFinder/inst/doc/scDblFinder.html
 - https://github.com/plger/scDblFinder/blob/devel/README.md
-

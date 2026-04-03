@@ -33,11 +33,14 @@ Key properties to check:
 - **Expression state**:
   - marker scoring, CellTypist, SingleR, and scmap should read log-normalized expression
   - when `adata.raw` exists and matches the current cells/genes, treat it as the preferred source for annotation backends
+- **Input provenance**:
+  - if the object is external and count-vs-normalized state is unclear, recommend `sc-standardize-input` first
 
 Important implementation notes in current OmicsClaw:
 - implemented methods are `markers`, `celltypist`, `singler`, and `scmap`
 - `singler` and `scmap` are available via the shared R bridge when the required R packages are installed
 - `model` is the key user-facing CellTypist selector
+- if CellTypist input validation or model execution fails, the wrapper may fall back to `markers` and records both requested and actual methods
 
 ## Step 2: Pick The Method Deliberately
 
@@ -77,6 +80,7 @@ Guidance:
 
 Important warnings:
 - do not expose `majority_voting`, `mode`, or other CellTypist internals as current public OmicsClaw parameters
+- if the current matrix still looks count-like, do not present CellTypist as if it can run natively without either preprocessing first or explicitly accepting marker fallback
 
 ### SingleR
 
@@ -86,6 +90,7 @@ Tune in this order:
 Important warnings:
 - ensure the requested reference is available in the current R environment
 - be explicit that this path depends on Bioconductor packages outside the Python environment
+- make the user confirm the reference choice instead of blindly running the default HPCA atlas on unknown biology
 
 ### scmap
 
@@ -100,6 +105,7 @@ Important warnings:
 
 - If one label dominates everything: question reference/model mismatch before trusting the labels.
 - If marker-based labels look noisy: question cluster quality first.
+- If CellTypist fell back: explain why the fallback happened and make it explicit that the final labels came from `markers`, not CellTypist.
 - If SingleR cannot run: explain which R packages are missing instead of pretending marker mode is equivalent.
 - If scmap and SingleR disagree: report the disagreement and revisit the reference choice before forcing a single label story.
 
@@ -107,6 +113,7 @@ Important warnings:
 
 - describe `cell_type` as the standardized label column
 - describe `annotation_method` as the actual wrapper method used
+- when a fallback happened, describe the requested and executed methods separately
 - describe confidence only when the chosen backend truly produced one
 
 ## Official References

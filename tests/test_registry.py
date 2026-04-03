@@ -18,5 +18,23 @@ def test_registry_loaded():
     assert "sc-qc" in registry.skills  # verify singlecell subdomain nesting
     assert "spatial-microenvironment-subset" in registry.skills
     assert "spatial" in registry.domains
+    assert registry.domains["singlecell"]["skill_count"] == 14
+    for skill in [
+        "sc-standardize-input",
+        "sc-qc",
+        "sc-preprocessing",
+        "sc-filter",
+        "sc-ambient-removal",
+        "sc-doublet-detection",
+        "sc-cell-annotation",
+        "sc-pseudotime",
+        "sc-velocity",
+        "sc-batch-integration",
+        "sc-de",
+        "sc-markers",
+        "sc-grn",
+        "sc-cell-communication",
+    ]:
+        assert skill in registry.skills
     assert len(registry.skills) > 0
     assert len(registry.domains) > 0

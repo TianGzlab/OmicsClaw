@@ -32,6 +32,8 @@ Key properties to check:
   - `n_genes_by_counts`
   - `total_counts`
   - `pct_counts_mt`
+- **Input provenance**:
+  - if the object is external and QC metric provenance is unclear, recommend `sc-standardize-input` first and be explicit about whether QC will be recomputed
 - **Matrix state**:
   - current wrapper assumes count-like or QC-ready AnnData input
 - **Biological context**:
@@ -86,6 +88,8 @@ Important warnings:
 - do not describe `tissue` as an official Scanpy argument
 - do not imply this wrapper learns optimal cutoffs from the data
 - do not treat `max_counts` and `max_genes` as universally mandatory first-pass knobs
+- if `obs['outlier']` already exists, make the user confirm whether those prior outlier labels should also be enforced
+- if `pct_counts_mt` is missing while MT filtering is requested, do not pretend the MT cutoff is being enforced
 
 ## Step 5: What To Say After The Run
 
@@ -107,4 +111,3 @@ When summarizing results:
 - https://scanpy.readthedocs.io/en/stable/api/scanpy.pp.filter_cells.html
 - https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.filter_genes.html
 - https://scanpy.readthedocs.io/en/stable/api/scanpy.pp.calculate_qc_metrics.html
-

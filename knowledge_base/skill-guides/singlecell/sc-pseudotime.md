@@ -30,11 +30,14 @@ Key properties to check:
   - neighbors should exist or be recomputable
 - **Root knowledge**:
   - a biologically plausible root cluster or root cell is often the most important human choice
+- **Input provenance**:
+  - if the object is external, recommend `sc-standardize-input` first, but make clear that standardization does not choose the root for pseudotime
 
 Important implementation notes in current OmicsClaw:
 - trajectory `method` is currently only `dpt`
 - `corr_method` is not a trajectory algorithm; it only ranks trajectory genes after pseudotime is inferred
 - the wrapper bundles PAGA, diffusion map, and DPT into one execution path
+- the wrapper now uses shared preflight checks, so missing cluster columns or missing root choice should be clarified before the run rather than left to opaque failures
 
 ## Step 2: Pick The Method Deliberately
 
@@ -89,4 +92,3 @@ Important warnings:
 - https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.diffmap.html
 - https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.dpt.html
 - https://scanpy.readthedocs.io/en/latest/tutorials/trajectories/paga-paul15.html
-

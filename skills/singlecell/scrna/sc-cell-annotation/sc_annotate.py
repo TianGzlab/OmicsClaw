@@ -36,6 +36,7 @@ from skills.singlecell._lib import annotation as sc_annotation_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_cell_annotation
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
 
@@ -692,10 +693,22 @@ def main():
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
         adata = sc.read_h5ad(args.input_path)
+        sc_io.maybe_warn_standardize_first(adata, source_path=args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback="markers")
+    apply_preflight(
+        preflight_sc_cell_annotation(
+            adata,
+            method=method,
+            model=args.model,
+            reference=args.reference,
+            cluster_key=args.cluster_key,
+            source_path=input_file,
+        ),
+        logger,
+    )
     summary = _METHOD_DISPATCH[method](adata, args)
     summary["n_cells"] = int(adata.n_obs)
 

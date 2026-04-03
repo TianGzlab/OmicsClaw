@@ -31,6 +31,7 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_de
 from skills.singlecell._lib.pseudobulk import aggregate_to_pseudobulk, run_deseq2_analysis
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
@@ -65,6 +66,13 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         dependencies=(),
     ),
 }
+
+
+def _validate_runtime_dependencies(method: str) -> None:
+    if method == "mast":
+        validate_r_environment(required_r_packages=["MAST", "SingleCellExperiment", "zellkonverter"])
+    elif method == "deseq2_r":
+        validate_r_environment(required_r_packages=["DESeq2", "SingleCellExperiment", "zellkonverter"])
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -226,7 +234,6 @@ def run_de_mast_method(adata, *, groupby: str, group1: str | None, group2: str |
             resolved_groupby = "louvain"
         else:
             raise ValueError(f"Column '{groupby}' not found in adata.obs")
-    validate_r_environment(required_r_packages=["MAST", "SingleCellExperiment", "zellkonverter"])
     scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
     if adata.raw is not None and adata.raw.shape == adata.shape:
@@ -288,19 +295,22 @@ def generate_figures(adata, output_dir: Path, n_top_genes=5) -> list[str]:
 
 
 def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict) -> None:
+    requested_method = str(summary.get("requested_method", params.get("method", summary["method"])))
+    executed_method = str(summary.get("executed_method", summary["method"]))
     header = generate_report_header(
         title="Differential Expression Report",
         skill_name=SKILL_NAME,
         input_files=[Path(input_file)] if input_file else None,
         extra_metadata={
-            "Method": summary["method"],
+            "Method": executed_method,
             "Groups": str(summary["n_groups"]),
         },
     )
 
     body_lines = [
         "## Summary\n",
-        f"- **Method**: {summary['method']}",
+        f"- **Requested method**: {requested_method}",
+        f"- **Executed method**: {executed_method}",
         f"- **Groups compared**: {summary['n_groups']}",
         f"- **Genes tested**: {summary['n_genes_tested']}",
         f"- **Total cells**: {summary.get('n_cells', 'N/A')}",
@@ -316,9 +326,17 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
     cmd = f"python sc_de.py --input <input.h5ad> --output {output_dir}"
-    for k, v in params.items():
-        if v is not None:
-            cmd += f" --{k.replace('_', '-')} {v}"
+    cmd += f" --groupby {params['groupby']}"
+    cmd += f" --method {params['method']}"
+    cmd += f" --n-top-genes {params['n_top_genes']}"
+    if params.get("group1") is not None:
+        cmd += f" --group1 {params['group1']}"
+    if params.get("group2") is not None:
+        cmd += f" --group2 {params['group2']}"
+    if params.get("sample_key") is not None:
+        cmd += f" --sample-key {params['sample_key']}"
+    if params.get("celltype_key") is not None:
+        cmd += f" --celltype-key {params['celltype_key']}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
     _write_repro_requirements(
         repro_dir,
@@ -350,10 +368,25 @@ def main():
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
         adata = sc.read_h5ad(args.input_path)
+        sc_io.maybe_warn_standardize_first(adata, source_path=args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     method = validate_method_choice(args.method, METHOD_REGISTRY)
+    apply_preflight(
+        preflight_sc_de(
+            adata,
+            method=method,
+            groupby=args.groupby,
+            group1=args.group1,
+            group2=args.group2,
+            sample_key=args.sample_key,
+            celltype_key=args.celltype_key,
+            source_path=input_file,
+        ),
+        logger,
+    )
+    _validate_runtime_dependencies(method)
 
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
@@ -383,9 +416,14 @@ def main():
         generate_figures(adata, output_dir, min(5, args.n_top_genes))
 
     summary["n_cells"] = int(adata.n_obs)
+    summary.setdefault("requested_method", method)
+    summary.setdefault("executed_method", summary.get("method", method))
+    summary.setdefault("fallback_used", summary["requested_method"] != summary["executed_method"])
     params = {
         "groupby": summary.get("groupby", args.groupby),
         "method": method,
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
         "n_top_genes": args.n_top_genes,
         "group1": args.group1,
         "group2": args.group2,
@@ -401,7 +439,13 @@ def main():
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
+    result_data = {
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
+        "fallback_used": bool(summary.get("fallback_used")),
+        "fallback_reason": summary.get("fallback_reason"),
+        "params": params,
+    }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
@@ -409,11 +453,14 @@ def main():
         "data": result_data,
     }
     write_standard_run_artifacts(output_dir, result_payload, summary)
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    store_analysis_metadata(adata, SKILL_NAME, summary["executed_method"], params)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"DE complete: {summary['n_groups']} groups, method={method}")
+    print(
+        f"DE complete: {summary['n_groups']} groups, "
+        f"requested={summary['requested_method']}, executed={summary['executed_method']}"
+    )
 
 
 if __name__ == "__main__":

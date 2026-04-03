@@ -16,8 +16,12 @@ source_urls:
 # Single-Cell Communication Guardrails
 
 - **Inspect first**: confirm that the chosen `cell_type_key` contains biologically interpretable labels rather than raw QC groups.
+- **Standardize external inputs first**: when input provenance is unclear, recommend `sc-standardize-input` before communication analysis.
 - **Key wrapper controls**: explain `method`, `cell_type_key`, and `species` before running.
-- **Use method-correct language**: LIANA and CellChat both depend on how cells are grouped; the grouping column is therefore the most important user-facing control in this wrapper.
+- **Use method-correct language**: `builtin`, `liana`, and `cellchat_r` all depend on how cells are grouped; the grouping column is therefore the most important user-facing control in this wrapper.
+- **Stop for missing grouping metadata**: do not run if `cell_type_key` is absent or still ambiguous; users must confirm which annotation / cluster column should define the interacting groups.
 - **Do not invent unsupported knobs**: official LIANA and CellChat workflows expose extra filters such as expression cutoffs and permutation settings, but the current OmicsClaw wrapper does not expose them.
 - **Do not overclaim species support**: if the ligand-receptor database coverage is uncertain for the requested species, say so.
+- **Confirm identifier semantics for CellPhoneDB**: the `cellphonedb_counts_data` choice depends on the user’s gene IDs and should not be guessed silently.
+- **Be honest about significance semantics**: the `builtin` backend leaves `pvalue` empty because it does not run a statistical significance test; do not describe its outputs as formal statistical significance.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-cell-communication.md`.

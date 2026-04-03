@@ -33,6 +33,7 @@ from omicsclaw.runtime.tool_registry import ToolRegistry
 from omicsclaw.runtime.tool_result_store import ToolResultStore
 from omicsclaw.runtime.tool_spec import APPROVAL_MODE_ASK, ToolSpec
 from omicsclaw.runtime.transcript_store import TranscriptStore, sanitize_tool_history
+from omicsclaw.common.user_guidance import format_user_guidance_payload
 
 
 class _FakeFunction:
@@ -345,6 +346,66 @@ def test_run_query_engine_applies_session_context_hooks_and_tool_notices(tmp_pat
     history = transcript_store.get_history("chat-hook")
     assert "Hook summary for alpha: completed." in history[2]["content"]
     assert history[2]["content"].endswith("alpha-result")
+
+
+def test_run_query_engine_short_circuits_on_preflight_payload(tmp_path):
+    async def alpha_executor(args):
+        payload = {
+            "kind": "preflight",
+            "skill_name": "sc-de",
+            "status": "needs_user_input",
+            "guidance": ["run sc-standardize-input first"],
+            "confirmations": ["confirm groupby column", "confirm group1 and group2"],
+            "missing_requirements": [],
+        }
+        return format_user_guidance_payload(payload)
+
+    runtime = ToolRegistry(
+        [
+            ToolSpec(
+                name="alpha",
+                description="Alpha tool",
+                parameters={"type": "object", "properties": {}},
+                read_only=True,
+                concurrency_safe=True,
+            )
+        ]
+    ).build_runtime({"alpha": alpha_executor})
+
+    llm = _FakeLLM(
+        [
+            _FakeResponse(
+                _FakeMessage(
+                    content="",
+                    tool_calls=[_FakeToolCall("call-alpha", "alpha", "{}")],
+                )
+            ),
+        ]
+    )
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+
+    result = asyncio.run(
+        run_query_engine(
+            llm=llm,
+            context=QueryEngineContext(
+                chat_id="chat-preflight",
+                session_id="session-preflight",
+                system_prompt="SYSTEM",
+                user_message_content="run sc-de",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(model="fake-model", llm_error_types=(_FakeAPIError,)),
+        )
+    )
+
+    assert "## Before I run this, please confirm" in result
+    assert "confirm groupby column?" in result
+    history = transcript_store.get_history("chat-preflight")
+    assert history[-1]["role"] == "assistant"
+    assert "Before I run this" in history[-1]["content"]
 
 
 def test_run_query_engine_merges_tool_runtime_context(tmp_path):

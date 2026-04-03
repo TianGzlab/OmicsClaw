@@ -30,6 +30,8 @@ Key properties to check:
   - poor clusters lead to poor markers
 - **Expression state**:
   - the wrapper expects preprocessed single-cell data
+- **Expression source**:
+  - if `adata.raw` exists, the wrapper may use it instead of `adata.X`; mention that explicitly
 
 Important implementation notes in current OmicsClaw:
 - methods are `wilcoxon`, `t-test`, and `logreg`
@@ -66,6 +68,7 @@ Guidance:
 - start with `wilcoxon` unless the user has a strong reason to prefer another ranking mode
 - use `n_genes` to control export breadth
 - use `n_top` to control summary tables and plots
+- if `groupby` is not obviously the main clustering column, stop and ask instead of guessing
 
 Important warnings:
 - do not present this as condition-aware DE
@@ -87,4 +90,3 @@ Important warnings:
 
 - https://scanpy.readthedocs.io/en/stable/api/scanpy.tl.rank_genes_groups.html
 - https://scanpy.readthedocs.io/en/1.9.x/generated/scanpy.tl.rank_genes_groups.html
-

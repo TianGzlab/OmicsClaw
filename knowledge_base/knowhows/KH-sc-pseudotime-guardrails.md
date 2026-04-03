@@ -17,8 +17,10 @@ source_urls:
 # Single-Cell Pseudotime Guardrails
 
 - **Inspect first**: verify the cluster labels and whether the user has a biologically defensible root cluster or root cell.
+- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` for object hygiene, but pseudotime still needs a real cluster column and a defensible root choice.
 - **Key wrapper controls**: explain `method`, `cluster_key`, `root_cluster`, `root_cell`, `n_dcs`, `n_genes`, and `corr_method` before running.
 - **Use method-correct language**: in the current wrapper, `method` selects the trajectory algorithm (`dpt`), while `corr_method` only controls how trajectory-associated genes are ranked afterward.
 - **Do not invent unsupported backends**: this build exposes only the DPT trajectory path, even if users mention other trajectory tools.
 - **Do not hide root selection**: if the root is uncertain, say that explicitly instead of pretending pseudotime direction is fixed by the algorithm alone.
+- **Stop when the trajectory start state is underspecified**: do not run pseudotime blindly if both `root_cluster` and `root_cell` are absent and no human choice has been confirmed.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.

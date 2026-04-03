@@ -16,6 +16,9 @@ import pandas as pd
 if TYPE_CHECKING:
     from anndata import AnnData
 
+from omicsclaw.common.user_guidance import emit_user_guidance
+from .adata_utils import build_standardization_recommendation, ensure_input_contract
+
 logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DATA_DIR = _PROJECT_ROOT / "data"
@@ -336,29 +339,72 @@ def load_example_data(dataset: str = "pbmc3k") -> AnnData:
     return adata
 
 
-def smart_load(path: Union[str, Path], **kwargs) -> AnnData:
+def smart_load(
+    path: Union[str, Path],
+    *,
+    suggest_standardize: bool = True,
+    skill_name: str | None = None,
+    preserve_all: bool = False,
+    **kwargs,
+) -> AnnData:
     """Auto-detect file format and load accordingly.
 
     Supports: .h5ad, .h5, .loom, .csv, .tsv, and 10X mtx directories.
+
+    When ``preserve_all=True``, count-like loaders disable their default
+    cell/gene filtering so downstream skills can decide on QC thresholds.
     """
     import scanpy as sc
 
     path = Path(path)
 
+    filtered_kwargs = dict(kwargs)
+    if preserve_all:
+        filtered_kwargs.setdefault("min_cells", 0)
+        filtered_kwargs.setdefault("min_genes", 0)
+
     if path.is_dir():
-        return import_10x_data(path, **kwargs)
+        adata = import_10x_data(path, **filtered_kwargs)
+        if suggest_standardize:
+            maybe_warn_standardize_first(adata, source_path=str(path), skill_name=skill_name)
+        else:
+            ensure_input_contract(adata, source_path=str(path), standardized=False)
+        return adata
 
     suffix = path.suffix.lower()
     if suffix == ".h5ad":
         logger.info("Loading H5AD: %s", path)
-        return sc.read_h5ad(path)
+        adata = sc.read_h5ad(path)
     elif suffix == ".h5":
-        return import_h5_data(path, **kwargs)
+        adata = import_h5_data(path, **filtered_kwargs)
     elif suffix == ".loom":
-        return import_loom_data(path, **kwargs)
+        adata = import_loom_data(path, **kwargs)
     elif suffix in (".csv", ".tsv"):
-        return import_count_matrix(path, **kwargs)
+        adata = import_count_matrix(path, **filtered_kwargs)
     else:
         # Try as h5ad
         logger.info("Unknown extension %s, trying as h5ad ...", suffix)
-        return sc.read_h5ad(path)
+        adata = sc.read_h5ad(path)
+
+    if suggest_standardize:
+        maybe_warn_standardize_first(adata, source_path=str(path), skill_name=skill_name)
+    else:
+        ensure_input_contract(adata, source_path=str(path))
+    return adata
+
+
+def maybe_warn_standardize_first(
+    adata: AnnData,
+    *,
+    source_path: str | Path | None = None,
+    skill_name: str | None = None,
+) -> dict:
+    """Warn when downstream skills receive input that has not been standardized."""
+    source_text = str(source_path) if source_path is not None else None
+    contract = ensure_input_contract(adata, source_path=source_text)
+    if not contract.get("standardized"):
+        emit_user_guidance(
+            logger,
+            build_standardization_recommendation(source_path=source_text, skill_name=skill_name),
+        )
+    return contract

@@ -11,6 +11,7 @@ use the async helper functions to process user messages.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -58,6 +59,13 @@ MAX_PHOTO_BYTES = 20 * 1024 * 1024
 if str(OMICSCLAW_DIR) not in sys.path:
     sys.path.insert(0, str(OMICSCLAW_DIR))
 from omicsclaw.common.report import build_output_dir_name
+from omicsclaw.common.user_guidance import (
+    extract_user_guidance_lines,
+    extract_user_guidance_payloads,
+    format_user_guidance_payload,
+    render_guidance_block,
+    strip_user_guidance_lines,
+)
 from omicsclaw.core.registry import ensure_registry_loaded, registry
 from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_registry
 from omicsclaw.runtime.context_assembler import assemble_chat_context as _assemble_chat_context
@@ -257,8 +265,186 @@ _conversation_access = transcript_store.access_by_chat  # LRU tracking
 received_files: dict[int | str, dict] = {}
 pending_media: dict[int | str, list[dict]] = {}
 pending_text: list[str] = []
+pending_preflight_requests: dict[int | str, dict] = {}
 
 BOT_START_TIME = time.time()
+
+_PREFLIGHT_TOP_LEVEL_ARGS = {
+    "skill",
+    "mode",
+    "method",
+    "file_path",
+    "data_type",
+    "n_epochs",
+    "return_media",
+}
+
+
+def _strip_answer_prefix(text: str) -> str:
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"^\s*(?:[-*]\s+|\d+\.\s+)", "", cleaned)
+    return cleaned.strip()
+
+
+def _coerce_preflight_value(value: str, value_type: str) -> object:
+    text = _strip_answer_prefix(value)
+    if value_type == "integer":
+        return int(text)
+    if value_type == "number":
+        return float(text)
+    if value_type == "boolean":
+        lowered = text.lower()
+        if lowered in {"yes", "y", "true", "1", "ok", "okay", "accept"}:
+            return True
+        if lowered in {"no", "n", "false", "0", "reject"}:
+            return False
+    return text
+
+
+def _set_or_replace_extra_arg(extra_args: list[str], flag: str, value: object) -> list[str]:
+    updated: list[str] = []
+    i = 0
+    while i < len(extra_args):
+        token = str(extra_args[i])
+        if token == flag:
+            i += 2
+            continue
+        if token.startswith(flag + "="):
+            i += 1
+            continue
+        updated.append(token)
+        i += 1
+    if isinstance(value, bool):
+        if value:
+            updated.append(flag)
+    else:
+        updated.extend([flag, str(value)])
+    return updated
+
+
+def _parse_preflight_reply(state: dict, user_text: str) -> tuple[dict[str, object], list[dict]]:
+    pending_fields = list(state.get("pending_fields", []) or [])
+    existing_answers = dict(state.get("answers", {}) or {})
+    text = str(user_text or "").strip()
+    resolved = dict(existing_answers)
+    lowered = text.lower()
+
+    segments: list[str] = []
+    for chunk in re.split(r"[\n;]+", text):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "=" in chunk or ":" in chunk:
+            segments.extend([piece.strip() for piece in chunk.split(",") if piece.strip()])
+        else:
+            segments.append(chunk)
+
+    for field in pending_fields:
+        key = str(field.get("key", "") or "")
+        if not key or key in resolved:
+            continue
+        aliases = [str(item).lower() for item in field.get("aliases", []) if str(item).strip()]
+        value_type = str(field.get("value_type", "string") or "string")
+        for segment in segments:
+            if "=" in segment:
+                left, right = segment.split("=", 1)
+            elif ":" in segment:
+                left, right = segment.split(":", 1)
+            else:
+                continue
+            left_norm = left.strip().lstrip("-").replace("-", "_").lower()
+            if left_norm in aliases:
+                resolved[key] = _coerce_preflight_value(right, value_type)
+                break
+            if any(left_norm == alias.replace("-", "_") for alias in aliases):
+                resolved[key] = _coerce_preflight_value(right, value_type)
+                break
+
+    for field in pending_fields:
+        key = str(field.get("key", "") or "")
+        if not key or key in resolved:
+            continue
+        choices = [str(choice) for choice in field.get("choices", []) if str(choice).strip()]
+        if choices:
+            for choice in choices:
+                pattern = rf"(?<![a-z0-9_]){re.escape(choice.lower())}(?![a-z0-9_])"
+                if re.search(pattern, lowered):
+                    resolved[key] = _coerce_preflight_value(choice, str(field.get("value_type", "string") or "string"))
+                    break
+
+    unresolved = [field for field in pending_fields if str(field.get("key", "") or "") not in resolved]
+
+    if unresolved:
+        ordered_lines = [_strip_answer_prefix(line) for line in re.split(r"[\n;]+", text) if _strip_answer_prefix(line)]
+        if len(unresolved) == 1 and ordered_lines and not any(("=" in line or ":" in line) for line in ordered_lines):
+            field = unresolved[0]
+            resolved[str(field.get("key", "") or "")] = _coerce_preflight_value(
+                ordered_lines[-1],
+                str(field.get("value_type", "string") or "string"),
+            )
+        elif len(ordered_lines) >= len(unresolved) and not any(("=" in line or ":" in line) for line in ordered_lines):
+            for field, line in zip(unresolved, ordered_lines, strict=False):
+                resolved[str(field.get("key", "") or "")] = _coerce_preflight_value(
+                    line,
+                    str(field.get("value_type", "string") or "string"),
+                )
+
+    remaining = [field for field in pending_fields if str(field.get("key", "") or "") not in resolved]
+    return resolved, remaining
+
+
+def _apply_preflight_answers(original_args: dict, pending_fields: list[dict], answers: dict[str, object]) -> dict:
+    updated_args = copy.deepcopy(original_args)
+    extra_args = list(updated_args.get("extra_args", []) or [])
+    field_map = {
+        str(field.get("key", "") or ""): field
+        for field in pending_fields
+        if str(field.get("key", "") or "")
+    }
+    for key, value in answers.items():
+        field = field_map.get(key, {})
+        flag = str(field.get("flag", "") or "").strip()
+        if key in _PREFLIGHT_TOP_LEVEL_ARGS:
+            updated_args[key] = value
+            continue
+        if key.startswith("allow_"):
+            continue
+        if flag:
+            extra_args = _set_or_replace_extra_arg(extra_args, flag, value)
+    if extra_args:
+        updated_args["extra_args"] = extra_args
+    return updated_args
+
+
+def _build_pending_preflight_message(state: dict, *, answered: dict[str, object] | None = None, remaining_fields: list[dict] | None = None) -> str:
+    payload = dict(state.get("payload", {}) or {})
+    if remaining_fields is not None:
+        remaining_keys = {str(field.get("key", "") or "") for field in remaining_fields}
+        payload["pending_fields"] = remaining_fields
+        payload["confirmations"] = [
+            str(field.get("prompt", "") or "").strip()
+            for field in remaining_fields
+            if str(field.get("prompt", "") or "").strip()
+        ]
+        payload["status"] = "needs_user_input" if payload["confirmations"] else payload.get("status", "needs_user_input")
+        if payload.get("missing_requirements") and not remaining_keys:
+            payload["missing_requirements"] = list(payload.get("missing_requirements", []))
+    block = render_guidance_block([], payloads=[payload]) or ""
+    if answered:
+        accepted = "\n".join(f"- `{key}` = {value}" for key, value in answered.items())
+        if accepted:
+            return f"## Accepted answers\n\n{accepted}\n\n---\n{block}".strip()
+    return block
+
+
+def _extract_pending_preflight_payload(result_text: str) -> dict | None:
+    payloads = extract_user_guidance_payloads(result_text)
+    relevant = [
+        payload
+        for payload in payloads
+        if payload.get("kind") == "preflight" and payload.get("status") in {"needs_user_input", "blocked"}
+    ]
+    return relevant[-1] if relevant else None
 
 # Memory system (optional)
 memory_store = None
@@ -744,8 +930,8 @@ def _ensure_trusted_dirs():
         logger.info(f"Trusted data dirs: {[str(d) for d in TRUSTED_DATA_DIRS]}")
 
 
-def validate_input_path(filepath: str) -> Path | None:
-    """Validate that a user-supplied file path points to a real file in a trusted directory.
+def validate_input_path(filepath: str, *, allow_dir: bool = False) -> Path | None:
+    """Validate that a user-supplied path points to a real file/dir in a trusted directory.
 
     Returns resolved Path if valid, None otherwise.
     """
@@ -754,13 +940,13 @@ def validate_input_path(filepath: str) -> Path | None:
     if not p.is_absolute():
         # 1. Try relative to project root first (most common case)
         candidate = OMICSCLAW_DIR / p
-        if candidate.exists() and candidate.is_file():
+        if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
             p = candidate
         else:
             # 2. Try each trusted data directory
             for d in TRUSTED_DATA_DIRS:
                 candidate = d / p
-                if candidate.exists() and candidate.is_file():
+                if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
                     p = candidate
                     break
             else:
@@ -768,7 +954,9 @@ def validate_input_path(filepath: str) -> Path | None:
                 p = DATA_DIR / p
 
     resolved = p.resolve()
-    if not resolved.exists() or not resolved.is_file():
+    if not resolved.exists():
+        return None
+    if not resolved.is_file() and not (allow_dir and resolved.is_dir()):
         return None
 
     for trusted in TRUSTED_DATA_DIRS:
@@ -832,6 +1020,561 @@ DEEP_LEARNING_METHODS = {
     "spagcn", "stagate", "graphst", "scvi", "velovi",
     "scanvi", "cellassign",
 }
+
+_BATCH_KEY_EXACT_PREFERENCES = (
+    "batch",
+    "sample",
+    "sample_id",
+    "batch_id",
+    "orig.ident",
+    "orig_ident",
+    "library",
+    "library_id",
+    "donor",
+    "donor_id",
+    "patient",
+    "patient_id",
+)
+_BATCH_KEY_HINT_TERMS = (
+    "batch",
+    "sample",
+    "donor",
+    "patient",
+    "subject",
+    "individual",
+    "library",
+    "dataset",
+    "origin",
+    "source",
+    "condition",
+    "treatment",
+    "group",
+    "replicate",
+    "lane",
+    "chemistry",
+    "center",
+    "site",
+)
+_BATCH_KEY_EXCLUDED_COLUMNS = {
+    "_index",
+    "barcode",
+    "cell",
+    "cell_id",
+    "cell_type",
+    "celltype",
+    "annotation",
+    "predicted_label",
+    "predicted_labels",
+    "leiden",
+    "louvain",
+    "seurat_clusters",
+    "cluster",
+    "clusters",
+    "phase",
+    "doublet",
+    "doublet_score",
+    "n_genes_by_counts",
+    "total_counts",
+    "pct_counts_mt",
+    "pct_counts_ribo",
+}
+
+
+def _normalize_obs_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(name).strip().lower()).strip()
+
+
+def _extract_flag_value(args_list: list[str], flag: str) -> str | None:
+    for idx, arg in enumerate(args_list):
+        if arg == flag and idx + 1 < len(args_list):
+            value = str(args_list[idx + 1]).strip()
+            return value or None
+        if arg.startswith(flag + "="):
+            value = arg.split("=", 1)[1].strip()
+            return value or None
+    return None
+
+
+def _resolve_requested_batch_key(args: dict) -> str | None:
+    direct = str(args.get("batch_key", "")).strip()
+    if direct:
+        return direct
+    extra_args = args.get("extra_args")
+    if isinstance(extra_args, list):
+        return _extract_flag_value(extra_args, "--batch-key")
+    return None
+
+
+def _load_h5ad_obs_dataframe(file_path: Path):
+    import anndata as ad
+
+    adata = ad.read_h5ad(file_path, backed="r")
+    try:
+        return adata.obs.copy(), int(adata.n_obs)
+    finally:
+        file_handle = getattr(adata, "file", None)
+        if file_handle is not None:
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+
+
+def _score_batch_key_candidate(column_name: str, series, n_obs: int) -> dict | None:
+    normalized = _normalize_obs_key(column_name)
+    normalized_compact = normalized.replace(" ", "")
+    if normalized_compact in _BATCH_KEY_EXCLUDED_COLUMNS:
+        return None
+
+    non_null = series.dropna()
+    nunique = int(non_null.nunique())
+    if nunique <= 1:
+        return None
+    if n_obs > 0 and nunique >= n_obs:
+        return None
+
+    score = 0
+    reasons: list[str] = []
+    preferred_names = {name.replace(".", "").replace("_", "") for name in _BATCH_KEY_EXACT_PREFERENCES}
+    if normalized_compact in preferred_names:
+        score += 120
+        reasons.append("name matches a common batch/sample column")
+    else:
+        matched_terms = [term for term in _BATCH_KEY_HINT_TERMS if term in normalized]
+        if matched_terms:
+            score += 35 + 10 * min(len(matched_terms), 3)
+            reasons.append("name looks batch-like")
+
+    if 2 <= nunique <= 24:
+        score += 35
+        reasons.append(f"{nunique} groups")
+    elif 25 <= nunique <= 96:
+        score += 20
+        reasons.append(f"{nunique} groups")
+    elif 97 <= nunique <= min(256, max(100, n_obs // 2)):
+        score += 5
+        reasons.append(f"{nunique} groups")
+    else:
+        return None
+
+    preview = [str(v) for v in non_null.astype(str).unique()[:5]]
+    if not preview or score < 40:
+        return None
+
+    return {
+        "column": str(column_name),
+        "score": score,
+        "nunique": nunique,
+        "preview": preview,
+        "reasons": reasons,
+    }
+
+
+def _find_batch_key_candidates(file_path: Path) -> dict:
+    obs_df, n_obs = _load_h5ad_obs_dataframe(file_path)
+    candidates = []
+    for column in obs_df.columns:
+        candidate = _score_batch_key_candidate(column, obs_df[column], n_obs)
+        if candidate:
+            candidates.append(candidate)
+    candidates.sort(key=lambda item: (-int(item["score"]), int(item["nunique"]), str(item["column"])))
+    return {
+        "n_obs": n_obs,
+        "obs_columns": [str(col) for col in obs_df.columns],
+        "candidates": candidates[:8],
+    }
+
+
+def _format_batch_key_clarification(
+    *,
+    file_path: Path,
+    requested_batch_key: str | None,
+    preflight: dict,
+) -> str:
+    obs_columns = preflight.get("obs_columns", [])
+    candidates = preflight.get("candidates", [])
+    lines = [
+        "Batch-key clarification needed before running `sc-batch-integration`.",
+        f"- File: `{file_path.name}`",
+    ]
+
+    if requested_batch_key:
+        lines.extend(
+            [
+                f"- Requested `batch_key`: `{requested_batch_key}`",
+                "- Status: that column was not found in `adata.obs`.",
+            ]
+        )
+    else:
+        lines.append("- Status: no `batch_key` was provided, so I paused before guessing.")
+
+    if candidates:
+        lines.append("- Possible batch-like columns found in `adata.obs`:")
+        for candidate in candidates:
+            preview = ", ".join(candidate["preview"])
+            lines.append(
+                f"  - `{candidate['column']}`: {candidate['nunique']} groups "
+                f"(examples: {preview})"
+            )
+    else:
+        lines.append("- I did not find a confident batch-like column automatically.")
+
+    visible_columns = ", ".join(f"`{col}`" for col in obs_columns[:20]) if obs_columns else "(none found)"
+    lines.extend(
+        [
+            f"- Available `obs` columns: {visible_columns}",
+            "- Please tell me which column should be used as `batch_key`.",
+            "- I have not started the integration yet because `sample`, `patient`, `condition`, and related columns imply different correction targets.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _maybe_require_batch_key_selection(skill_key: str, input_path: str | None, args: dict) -> str:
+    if not input_path:
+        return ""
+
+    skill_info = _lookup_skill_info(skill_key)
+    canonical_skill = skill_info.get("alias", skill_key)
+    if canonical_skill != "sc-batch-integration":
+        return ""
+
+    file_path = Path(input_path)
+    if file_path.suffix.lower() != ".h5ad":
+        return ""
+
+    requested_batch_key = _resolve_requested_batch_key(args)
+    try:
+        preflight = _find_batch_key_candidates(file_path)
+    except Exception as exc:
+        logger.warning("Failed to inspect AnnData batch candidates for %s: %s", file_path, exc)
+        return ""
+
+    obs_columns = set(preflight.get("obs_columns", []))
+    if requested_batch_key:
+        if requested_batch_key in obs_columns:
+            return ""
+        return _format_batch_key_clarification(
+            file_path=file_path,
+            requested_batch_key=requested_batch_key,
+            preflight=preflight,
+        )
+
+    return _format_batch_key_clarification(
+        file_path=file_path,
+        requested_batch_key=None,
+        preflight=preflight,
+    )
+
+
+def _inspect_h5ad_integration_readiness(file_path: Path) -> dict:
+    import anndata as ad
+
+    adata = ad.read_h5ad(file_path, backed="r")
+    try:
+        contract = adata.uns.get("omicsclaw_input_contract", {})
+        if not isinstance(contract, dict):
+            contract = {}
+        obs_columns = [str(col) for col in adata.obs.columns]
+        obsm_keys = [str(key) for key in adata.obsm.keys()]
+        obsp_keys = [str(key) for key in adata.obsp.keys()]
+        uns_keys = [str(key) for key in adata.uns.keys()]
+        obs_keys_lower = {key.lower() for key in obs_columns}
+        obsm_keys_lower = {key.lower() for key in obsm_keys}
+        obsp_keys_lower = {key.lower() for key in obsp_keys}
+        uns_keys_lower = {key.lower() for key in uns_keys}
+        looks_preprocessed = bool(
+            {"x_pca", "x_umap"} & obsm_keys_lower
+            or {"neighbors", "pca"} & uns_keys_lower
+            or {"connectivities", "distances"} & obsp_keys_lower
+            or {"leiden", "louvain", "cluster", "clusters"} & obs_keys_lower
+        )
+        return {
+            "obs_columns": obs_columns,
+            "obsm_keys": obsm_keys,
+            "obsp_keys": obsp_keys,
+            "uns_keys": uns_keys,
+            "layers": [str(key) for key in adata.layers.keys()],
+            "has_raw": adata.raw is not None,
+            "standardized": bool(contract.get("standardized")),
+            "standardized_by": str(contract.get("standardized_by", "")).strip(),
+            "looks_preprocessed": looks_preprocessed,
+        }
+    finally:
+        file_handle = getattr(adata, "file", None)
+        if file_handle is not None:
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+
+
+def _format_sc_batch_workflow_guidance(file_path: Path, reasons: list[str], *, start_step: int = 1) -> str:
+    steps = [
+        "`sc-standardize-input` to canonicalize the input contract",
+        "`sc-preprocessing` to build normalized expression, PCA, neighbors, UMAP, and clusters",
+        "`sc-batch-integration` after the batch column is confirmed",
+    ]
+    lines = [
+        "Workflow check paused before running `sc-batch-integration`.",
+        f"- File: `{file_path.name}`",
+        "- Why I paused:",
+    ]
+    lines.extend(f"  - {reason}" for reason in reasons)
+    lines.append("- Recommended workflow:")
+    for idx, step in enumerate(steps[start_step - 1 :], start=start_step):
+        lines.append(f"  {idx}. {step}")
+    lines.extend(
+        [
+            "- Tell me if you want me to start from the recommended first step.",
+            "- If you really want direct integration anyway, say that explicitly and I can skip this workflow check.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _get_sc_batch_integration_workflow_plan(skill_key: str, input_path: str | None, args: dict) -> dict | None:
+    if not input_path:
+        return None
+    skill_info = _lookup_skill_info(skill_key)
+    canonical_skill = skill_info.get("alias", skill_key)
+    if canonical_skill != "sc-batch-integration":
+        return None
+
+    file_path = Path(input_path)
+    if file_path.is_dir():
+        return {
+            "file_path": file_path,
+            "reasons": [
+                "directory-style single-cell input should be standardized before integration so counts, feature names, and provenance are normalized",
+                "the standard path is to load/standardize first, then preprocess, then integrate",
+            ],
+            "start_step": 1,
+        }
+
+    suffix = file_path.suffix.lower()
+    if suffix != ".h5ad":
+        return {
+            "file_path": file_path,
+            "reasons": [
+                f"`{suffix or 'unknown'}` is not a ready AnnData integration input for the current workflow",
+                "non-h5ad single-cell inputs are better handled by `sc-standardize-input` before integration",
+            ],
+            "start_step": 1,
+        }
+
+    try:
+        readiness = _inspect_h5ad_integration_readiness(file_path)
+    except Exception as exc:
+        logger.warning("Failed to inspect integration readiness for %s: %s", file_path, exc)
+        return None
+
+    reasons: list[str] = []
+    start_step = 2
+    if not readiness.get("standardized"):
+        reasons.append("this `.h5ad` was not marked as standardized by `sc-standardize-input`")
+        start_step = 1
+    if not readiness.get("looks_preprocessed"):
+        reasons.append("this object does not show the usual preprocessing markers such as PCA, neighbors, or cluster labels")
+        start_step = 1 if start_step == 1 else 2
+
+    if not reasons:
+        return None
+    return {
+        "file_path": file_path,
+        "reasons": reasons,
+        "start_step": start_step,
+    }
+
+
+def _maybe_require_batch_integration_workflow(skill_key: str, input_path: str | None, args: dict) -> str:
+    if not input_path or bool(args.get("confirm_workflow_skip")) or bool(args.get("auto_prepare")):
+        return ""
+    plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
+    if not plan:
+        return ""
+    return _format_sc_batch_workflow_guidance(
+        plan["file_path"],
+        plan["reasons"],
+        start_step=int(plan.get("start_step", 1)),
+    )
+
+
+def _normalize_extra_args(extra_args) -> list[str]:
+    if not extra_args or not isinstance(extra_args, list):
+        return []
+    filtered = []
+    skip_next = False
+    for arg in extra_args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--output":
+            skip_next = True
+            continue
+        if arg.startswith("--output="):
+            continue
+        if arg.startswith("--"):
+            eq_pos = arg.find("=")
+            if eq_pos > 0:
+                flag_part = arg[:eq_pos].replace("_", "-")
+                arg = flag_part + arg[eq_pos:]
+            else:
+                arg = arg.replace("_", "-")
+        filtered.append(arg)
+    return filtered
+
+
+async def _run_omics_skill_step(
+    *,
+    skill_key: str,
+    input_path: str | None,
+    mode: str,
+    method: str = "",
+    data_type: str = "",
+    batch_key: str = "",
+    n_epochs: int | None = None,
+    extra_args: list[str] | None = None,
+) -> dict:
+    import uuid
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = OUTPUT_DIR / build_output_dir_name(
+        skill_key,
+        ts,
+        method=method,
+        unique_suffix=uuid.uuid4().hex[:8],
+    )
+
+    cmd = [PYTHON, str(OMICSCLAW_PY), "run", skill_key]
+    if mode == "demo":
+        cmd.append("--demo")
+    elif input_path:
+        cmd.extend(["--input", str(input_path)])
+    cmd.extend(["--output", str(out_dir)])
+    if method:
+        cmd.extend(["--method", method])
+    if data_type:
+        cmd.extend(["--data-type", data_type])
+    if batch_key:
+        cmd.extend(["--batch-key", batch_key])
+    if n_epochs is not None:
+        cmd.extend(["--n-epochs", str(int(n_epochs))])
+    cmd.extend(_normalize_extra_args(extra_args))
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    stdout_str = stdout_bytes.decode(errors="replace")
+    stderr_str = stderr_bytes.decode(errors="replace")
+    guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))
+    clean_stderr = strip_user_guidance_lines(stderr_str)
+    clean_stdout = strip_user_guidance_lines(stdout_str)
+    error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
+    return {
+        "success": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "cmd": cmd,
+        "out_dir": out_dir,
+        "stdout": stdout_str,
+        "stderr": stderr_str,
+        "guidance_block": guidance_block,
+        "error_text": error_text,
+    }
+
+
+def _format_auto_prepare_summary(step_records: list[dict], *, final_input_path: str | None = None) -> str:
+    lines = [
+        "Automatic preparation workflow completed for `sc-batch-integration`.",
+        "- Completed steps:",
+    ]
+    for idx, step in enumerate(step_records, start=1):
+        lines.append(
+            f"  {idx}. `{step['skill']}` -> `{step['output_path']}`"
+        )
+    if final_input_path:
+        lines.append(f"- Integration input prepared at: `{final_input_path}`")
+    return "\n".join(lines)
+
+
+async def _auto_prepare_sc_batch_integration(
+    *,
+    args: dict,
+    skill_key: str,
+    input_path: str,
+    session_id: str | None,
+    chat_id: int | str,
+) -> str:
+    plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
+    if not plan:
+        return ""
+
+    step_records: list[dict] = []
+    current_input = str(plan["file_path"])
+
+    if int(plan.get("start_step", 1)) <= 1:
+        standardize_result = await _run_omics_skill_step(
+            skill_key="sc-standardize-input",
+            input_path=current_input,
+            mode="path",
+        )
+        if not standardize_result["success"]:
+            guidance = standardize_result["guidance_block"]
+            failure = (
+                f"`sc-standardize-input` failed during automatic preparation "
+                f"(exit {standardize_result['returncode']}):\n{standardize_result['error_text']}"
+            )
+            return guidance + f"\n\n---\n{failure}" if guidance else failure
+        standardized_path = standardize_result["out_dir"] / "standardized_input.h5ad"
+        if not standardized_path.exists():
+            return (
+                "Automatic preparation stopped because `sc-standardize-input` did not produce "
+                f"`standardized_input.h5ad` in `{standardize_result['out_dir']}`."
+            )
+        current_input = str(standardized_path)
+        step_records.append({"skill": "sc-standardize-input", "output_path": current_input})
+
+    if int(plan.get("start_step", 1)) <= 2:
+        preprocess_result = await _run_omics_skill_step(
+            skill_key="sc-preprocessing",
+            input_path=current_input,
+            mode="path",
+        )
+        if not preprocess_result["success"]:
+            guidance = preprocess_result["guidance_block"]
+            failure = (
+                f"`sc-preprocessing` failed during automatic preparation "
+                f"(exit {preprocess_result['returncode']}):\n{preprocess_result['error_text']}"
+            )
+            prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
+            message = prefix + "\n\n---\n" + failure
+            return guidance + "\n\n---\n" + message if guidance else message
+        processed_path = preprocess_result["out_dir"] / "processed.h5ad"
+        if not processed_path.exists():
+            return (
+                "Automatic preparation stopped because `sc-preprocessing` did not produce "
+                f"`processed.h5ad` in `{preprocess_result['out_dir']}`."
+            )
+        current_input = str(processed_path)
+        step_records.append({"skill": "sc-preprocessing", "output_path": current_input})
+
+    chained_args = dict(args)
+    chained_args["file_path"] = current_input
+    chained_args["mode"] = "path"
+    chained_args["confirm_workflow_skip"] = True
+    chained_args["auto_prepare"] = False
+
+    batch_clarification = _maybe_require_batch_key_selection(skill_key, current_input, chained_args)
+    prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
+    if batch_clarification:
+        return prefix + "\n\n---\n" + batch_clarification
+
+    final_result = await execute_omicsclaw(chained_args, session_id=session_id, chat_id=chat_id)
+    return prefix + "\n\n---\n" + final_result
+
 
 def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
     skill_registry = registry
@@ -1079,7 +1822,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     if mode == "path" or file_path_arg:
         mode = "path"
         if file_path_arg:
-            resolved_path = validate_input_path(file_path_arg)
+            resolved_path = validate_input_path(file_path_arg, allow_dir=True)
             if resolved_path is None:
                 found = discover_file(file_path_arg)
                 if found:
@@ -1167,6 +1910,25 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             "3. Provide the full server path to the file"
         )
 
+    if bool(args.get("auto_prepare")) and input_path:
+        prepared = await _auto_prepare_sc_batch_integration(
+            args=args,
+            skill_key=skill_key,
+            input_path=input_path,
+            session_id=session_id,
+            chat_id=chat_id,
+        )
+        if prepared:
+            return prepared
+
+    workflow_clarification = _maybe_require_batch_integration_workflow(skill_key, input_path, args)
+    if workflow_clarification:
+        return workflow_clarification
+
+    batch_key_clarification = _maybe_require_batch_key_selection(skill_key, input_path, args)
+    if batch_key_clarification:
+        return batch_key_clarification
+
     # Output directory
     import uuid
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1195,38 +1957,16 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         cmd.extend(["--method", method])
     if data_type:
         cmd.extend(["--data-type", data_type])
+    batch_key = _resolve_requested_batch_key(args)
+    if batch_key:
+        cmd.extend(["--batch-key", batch_key])
 
     # Pass n_epochs if user specified
     n_epochs = args.get("n_epochs")
     if n_epochs is not None:
         cmd.extend(["--n-epochs", str(int(n_epochs))])
 
-    extra_args = args.get("extra_args")
-    if extra_args and isinstance(extra_args, list):
-        # Filter out --output to prevent overriding bot-managed output directory
-        # Also normalise underscores to hyphens in flag names (LLM often
-        # generates --leiden_resolution instead of --leiden-resolution)
-        filtered = []
-        skip_next = False
-        for arg in extra_args:
-            if skip_next:
-                skip_next = False
-                continue
-            if arg == "--output":
-                skip_next = True
-                continue
-            if arg.startswith("--output="):
-                continue
-            # Normalise: --leiden_resolution -> --leiden-resolution
-            if arg.startswith("--"):
-                eq_pos = arg.find("=")
-                if eq_pos > 0:
-                    flag_part = arg[:eq_pos].replace("_", "-")
-                    arg = flag_part + arg[eq_pos:]
-                else:
-                    arg = arg.replace("_", "-")
-            filtered.append(arg)
-        cmd.extend(filtered)
+    cmd.extend(_normalize_extra_args(args.get("extra_args")))
 
     # Build a parameter hint block so the LLM can relay it to the user
     param_hint = _build_param_hint(skill_key, method, cmd)
@@ -1255,14 +1995,28 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         return f"{skill_key} crashed:\n{_tb.format_exc()[-1500:]}"
 
     if proc.returncode != 0:
-        err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        payloads = extract_user_guidance_payloads(stderr_str)
+        payload_prefix = "\n".join(format_user_guidance_payload(payload) for payload in payloads if isinstance(payload, dict))
+        guidance_block = render_guidance_block(
+            extract_user_guidance_lines(stderr_str),
+            payloads=payloads,
+        )
+        clean_stderr = strip_user_guidance_lines(stderr_str)
+        clean_stdout = strip_user_guidance_lines(stdout_str)
+        err = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
         # Clean up empty output directory on failure
         if out_dir.exists():
             shutil.rmtree(out_dir, ignore_errors=True)
         # Capture failed analysis to memory (so we remember what was tried)
         if session_id:
             await _auto_capture_analysis(session_id, skill_key, args, None, False)
-        return f"{skill_key} failed (exit {proc.returncode}):\n{err}"
+        if guidance_block and "preflight check failed" in err.lower():
+            return (payload_prefix + "\n" if payload_prefix else "") + guidance_block
+        if guidance_block:
+            rendered = guidance_block + f"\n\n---\n{skill_key} failed (exit {proc.returncode}):\n{err}"
+            return (payload_prefix + "\n" if payload_prefix else "") + rendered
+        plain = f"{skill_key} failed (exit {proc.returncode}):\n{err}"
+        return (payload_prefix + "\n" if payload_prefix else "") + plain
 
     # Collect report + figures from output directory
     return_media = str(args.get("return_media", "")).strip().lower()
@@ -1313,8 +2067,21 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             if report_text:
                 break
 
+    payloads = extract_user_guidance_payloads(stderr_str)
+    payload_prefix = "\n".join(format_user_guidance_payload(payload) for payload in payloads if isinstance(payload, dict))
+    guidance_block = render_guidance_block(
+        extract_user_guidance_lines(stderr_str),
+        payloads=payloads,
+    )
     if not report_text:
-        return stdout_str if stdout_str else f"{skill_key} completed. Output: {out_dir}"
+        if guidance_block and stdout_str:
+            rendered = guidance_block + "\n\n---\n" + stdout_str
+            return (payload_prefix + "\n" if payload_prefix else "") + rendered
+        if guidance_block:
+            rendered = guidance_block + f"\n\n---\n{skill_key} completed. Output: {out_dir}"
+            return (payload_prefix + "\n" if payload_prefix else "") + rendered
+        plain = stdout_str if stdout_str else f"{skill_key} completed. Output: {out_dir}"
+        return (payload_prefix + "\n" if payload_prefix else "") + plain
 
     # Trim verbose sections for chat readability; full report is on disk.
     keep_lines = []
@@ -1336,6 +2103,10 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         await _auto_capture_analysis(session_id, skill_key, args, out_dir, True)
 
     result_text = "\n".join(keep_lines).strip()
+    if guidance_block:
+        result_text = guidance_block + "\n\n---\n" + result_text
+    if payload_prefix:
+        result_text = payload_prefix + "\n" + result_text
     notebook_path = out_dir / "reproducibility" / "analysis_notebook.ipynb"
     if notebook_path.exists():
         result_text += (
@@ -2688,6 +3459,18 @@ def _build_bot_query_engine_callbacks(
 
         if request.executor:
             display_output = result_record.content
+            if func_name == "omicsclaw":
+                pending_payload = _extract_pending_preflight_payload(display_output)
+                if pending_payload and pending_payload.get("pending_fields"):
+                    pending_preflight_requests[chat_id] = {
+                        "tool_name": func_name,
+                        "original_args": copy.deepcopy(func_args),
+                        "payload": pending_payload,
+                        "pending_fields": list(pending_payload.get("pending_fields", []) or []),
+                        "answers": {},
+                    }
+                else:
+                    pending_preflight_requests.pop(chat_id, None)
             if func_name == "consult_knowledge":
                 try:
                     from omicsclaw.knowledge.retriever import consume_runtime_notice
@@ -2710,6 +3493,46 @@ def _build_bot_query_engine_callbacks(
         after_tool=after_tool,
         on_llm_error=on_llm_error,
     )
+
+
+async def _maybe_resume_pending_preflight_request(
+    *,
+    chat_id: int | str,
+    user_content: str | list,
+    session_id: str | None,
+) -> str | None:
+    state = pending_preflight_requests.get(chat_id)
+    if not state or not isinstance(user_content, str):
+        return None
+
+    user_text = user_content.strip()
+    if not user_text or user_text.startswith("/"):
+        return None
+
+    resolved, remaining = _parse_preflight_reply(state, user_text)
+    state["answers"] = resolved
+    if remaining:
+        pending_preflight_requests[chat_id] = state
+        return _build_pending_preflight_message(state, answered=resolved, remaining_fields=remaining)
+
+    updated_args = _apply_preflight_answers(
+        state.get("original_args", {}),
+        state.get("pending_fields", []),
+        resolved,
+    )
+    pending_preflight_requests.pop(chat_id, None)
+    result = await execute_omicsclaw(updated_args, session_id=session_id, chat_id=chat_id)
+
+    pending_payload = _extract_pending_preflight_payload(result)
+    if pending_payload and pending_payload.get("pending_fields"):
+        pending_preflight_requests[chat_id] = {
+            "tool_name": "omicsclaw",
+            "original_args": copy.deepcopy(updated_args),
+            "payload": pending_payload,
+            "pending_fields": list(pending_payload.get("pending_fields", []) or []),
+            "answers": {},
+        }
+    return strip_user_guidance_lines(result) or result
 
 
 async def llm_tool_loop(
@@ -2915,6 +3738,16 @@ For updates and documentation, visit the GitHub repository."""
 - "Analyze GSE123456 dataset"
 
 For more info: https://github.com/TianGzlab/OmicsClaw"""
+
+    resumed_result = await _maybe_resume_pending_preflight_request(
+        chat_id=chat_id,
+        user_content=user_content,
+        session_id=f"{platform}:{user_id}:{chat_id}" if user_id and platform else None,
+    )
+    if resumed_result is not None:
+        transcript_store.append_user_message(chat_id, user_content)
+        transcript_store.append_assistant_message(chat_id, content=resumed_result)
+        return resumed_result
 
     _ensure_system_prompt()
     if llm is None:

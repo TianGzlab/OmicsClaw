@@ -35,11 +35,14 @@ Key properties to check:
 - **Expression layer**:
   - `wilcoxon`, `t-test`, and `mast` should use log-normalized expression, ideally `adata.raw`
   - `deseq2_r` should use raw counts, ideally `layers["counts"]`; only use `adata.X` if `X` is still the unnormalized count matrix
+- **Input provenance**:
+  - if this is an external `.h5ad` and you are not sure where raw counts live, recommend `sc-standardize-input` first
 
 Important implementation notes in current OmicsClaw:
 - `wilcoxon` and `t-test` are Scanpy exploratory paths
 - the current public wrapper exposes Scanpy exploratory tests, the R-backed `mast` path, and the DESeq2 pseudobulk path
 - `deseq2_r` is the wrapper’s replicate-aware pseudobulk path
+- the wrapper validates required R stacks before entering the `mast` or `deseq2_r` runtime
 
 ## Step 2: Pick The Method Deliberately
 
@@ -83,6 +86,7 @@ Tune in this order:
 Guidance:
 - choose this path only when the user truly has replicate-level samples
 - `sample_key` and `celltype_key` are as important as the statistical method itself
+- do not silently accept the default `groupby=leiden` for pseudobulk condition DE; make the user confirm the real condition column
 
 Important warnings:
 - do not expose a free-form DESeq2 design formula as if the wrapper supports it

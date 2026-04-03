@@ -24,22 +24,44 @@ Use this guide when you need to decide:
 ## Step 1: Inspect The Data First
 
 Key properties to check:
+- **Input format**:
+  - if the user starts from `.h5`, `.loom`, `.csv`, `.tsv`, or a 10x directory, the safer path is `sc-standardize-input` before integration
+- **Input contract**:
+  - if the `.h5ad` was not standardized by OmicsClaw, recommend `sc-standardize-input` first for more stable downstream behavior
 - **Batch column**:
   - `batch_key` must exist and reflect real technical or sample structure
+  - stop when the candidate column looks too close to a per-cell identifier or creates many tiny groups
 - **Label availability**:
   - `scanvi` only makes sense if usable labels already exist
 - **Upstream state**:
   - PCA should exist or be recomputable
+  - when PCA / neighbors / cluster labels are all absent, the standard workflow should usually include `sc-preprocessing` before integration
 - **Runtime budget**:
   - scVI / scANVI are heavier than Harmony or BBKNN
 - **Matrix contract**:
   - `harmony`, `bbknn`, and `scanorama` operate on normalized / PCA-ready representations
   - `scvi`, `scanvi`, `fastmnn`, `seurat_cca`, and `seurat_rpca` should preserve or read raw counts from `layers["counts"]` when available
+- **Input provenance**:
+  - if counts may be hidden in `adata.raw` or `layers["counts"]`, recommend `sc-standardize-input` first
 
 Important implementation notes in current OmicsClaw:
 - implemented paths are `harmony`, `scvi`, `scanvi`, `bbknn`, `scanorama`, `fastmnn`, `seurat_cca`, and `seurat_rpca`
+- the wrapper now loads multiple single-cell file formats through the shared loader, but integration is still safest after standardization and preprocessing
 - the R-backed methods run through the shared H5AD bridge and depend on matching R packages
 - `n_epochs` only matters for scVI / scANVI
+
+## Step 1.5: Prefer The Workflow, Not Just The Final Skill
+
+Recommended default path for messy external input:
+1. `sc-standardize-input`
+2. `sc-preprocessing`
+3. `sc-batch-integration`
+
+Use direct integration only when:
+- the user already has a trustworthy scRNA AnnData object
+- batch/sample metadata are clear
+- the matrix contract is understood
+- the user explicitly wants to skip the earlier workflow stages
 
 ## Step 2: Pick The Method Deliberately
 
@@ -73,6 +95,7 @@ Tune in this order:
 Guidance:
 - treat `batch_key` as the most important scientific input because it defines what should be corrected
 - use Harmony as the safest first-pass correction when the user has not chosen a deep model
+- if `batch_key` produces many tiny groups or almost one group per cell, stop and ask for a better column before discussing method tuning
 
 Important warnings:
 - do not promise Harmony `theta`, BBKNN `neighbors_within_batch`, or Scanorama `knn/sigma` as current public OmicsClaw parameters
@@ -92,6 +115,7 @@ Guidance:
 Important warnings:
 - do not describe scANVI as a drop-in replacement for unlabeled integration
 - do not expose `labels_key`, `unlabeled_category`, or architectural internals as current public wrapper knobs
+- if no usable labels exist, stop and ask whether the user really wants `scanvi` or should switch to `scvi`
 
 ### fastMNN / Seurat CCA / Seurat RPCA
 
@@ -101,12 +125,14 @@ Tune in this order:
 Guidance:
 - keep raw counts available in `layers["counts"]` before handing data to these backends
 - describe these as R-backed integration paths, not as Python-native code paths
+- if only one unique batch is present, do not run integration just because the wrapper can technically execute
+- if the file has not been standardized or does not yet look preprocessed, recommend the upstream workflow before handing data to these methods
 
 ## Step 5: What To Say After The Run
 
 - If batches remain separated: question `batch_key` quality before changing methods.
 - If clusters collapse biologically: explain possible over-correction.
-- If scANVI falls back: say it was because usable labels were missing, not because the model “failed”.
+- If scANVI falls back: say it was because usable labels were missing, and report both the requested and executed methods rather than implying native scANVI output.
 
 ## Step 6: Explain Outputs Using Method-Correct Language
 

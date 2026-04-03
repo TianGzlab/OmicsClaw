@@ -5,6 +5,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from omicsclaw.common.user_guidance import (
+    extract_user_guidance_payloads,
+    render_guidance_block,
+)
+
 from .context_compaction import ContextCompactionConfig, prepare_model_messages
 from .events import (
     EVENT_SESSION_RESUME,
@@ -152,6 +157,21 @@ def _merge_response_segments(segments: list[str], current: str) -> str:
     if not merged:
         return "(no response)"
     return "\n\n".join(merged)
+
+
+def _build_preflight_interruption_message(text: str | None) -> str:
+    payloads = extract_user_guidance_payloads(text)
+    if not payloads:
+        return ""
+    relevant = [
+        payload
+        for payload in payloads
+        if payload.get("kind") == "preflight"
+        and payload.get("status") in {"needs_user_input", "blocked"}
+    ]
+    if not relevant:
+        return ""
+    return render_guidance_block([], payloads=relevant, title="Important follow-up")
 
 
 def _materialize_message_from_choice_message(message) -> MaterializedMessage:
@@ -468,6 +488,7 @@ async def run_query_engine(
             execution_requests.append(request)
 
         execution_results = await execute_tool_requests(execution_requests)
+        interruption_message = ""
         for execution_result in execution_results:
             request = execution_result.request
             record_output = execution_result.output
@@ -541,6 +562,18 @@ async def run_query_engine(
                 tool_call_id=request.call_id,
                 content=result_record.content,
             )
+
+            if not interruption_message:
+                interruption_message = _build_preflight_interruption_message(
+                    result_record.content
+                )
+
+        if interruption_message:
+            transcript_store.append_assistant_message(
+                context.chat_id,
+                content=interruption_message,
+            )
+            return interruption_message
 
     if last_message and last_message.content:
         return _merge_response_segments(accumulated_response_segments, last_message.content)

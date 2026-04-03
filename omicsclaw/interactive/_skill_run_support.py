@@ -6,6 +6,12 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+from omicsclaw.common.user_guidance import (
+    extract_user_guidance_lines,
+    extract_user_guidance_payloads,
+    render_guidance_block,
+    strip_user_guidance_lines,
+)
 from ._history_support import (
     build_skill_run_history_messages,
     build_skill_run_result_text,
@@ -114,6 +120,17 @@ def build_skill_run_display_view(
     skill: str,
     result: dict[str, Any],
 ) -> SkillRunDisplayView:
+    guidance_block = render_guidance_block(
+        extract_user_guidance_lines(str(result.get("stderr", "") or "")),
+        title="Important follow-up",
+        payloads=extract_user_guidance_payloads(str(result.get("stderr", "") or "")),
+    )
+    stdout = str(result.get("stdout", "") or "")
+    if guidance_block:
+        stdout = guidance_block + ("\n\n---\n" + stdout if stdout else "")
+    raw_error = strip_user_guidance_lines(str(result.get("stderr", "unknown error") or "unknown error")) or "unknown error"
+    if guidance_block and "preflight check failed" in raw_error.lower():
+        raw_error = "Preflight needs your confirmation before running."
     return SkillRunDisplayView(
         skill=skill,
         success=bool(result.get("success")),
@@ -122,8 +139,8 @@ def build_skill_run_display_view(
         method=str(result.get("method", "") or ""),
         readme_path=str(result.get("readme_path", "") or ""),
         notebook_path=str(result.get("notebook_path", "") or ""),
-        stdout=str(result.get("stdout", "") or ""),
-        error=str(result.get("stderr", "unknown error") or "unknown error"),
+        stdout=stdout,
+        error=raw_error,
         exception=bool(result.get("exception")),
     )
 

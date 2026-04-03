@@ -32,6 +32,8 @@ Key properties to check:
 - **Scientific question**:
   - directionality only
   - full dynamical interpretation with latent time
+- **Velocity-specific content**:
+  - standardization can help with object hygiene, but it cannot fabricate `spliced` / `unspliced` layers
 
 Important implementation notes in current OmicsClaw:
 - public methods are `scvelo_stochastic`, `scvelo_dynamical`, and `scvelo_steady_state`
@@ -65,6 +67,7 @@ Guidance:
 - choose the mode before touching runtime controls
 - use `stochastic` as the safest first-pass default
 - use `dynamical` when the user specifically wants stronger temporal interpretation
+- if the user has not explicitly asked for latent-time-style interpretation, do not default to `dynamical`
 
 Important warnings:
 - do not expose `recover_dynamics` internals as if they were current public wrapper parameters

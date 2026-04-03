@@ -30,6 +30,8 @@ Key properties to check:
   - TF list
   - motif annotation file
   - cisTarget / ranking database files
+- **Input provenance**:
+  - if the object is external and expression-state provenance is unclear, recommend `sc-standardize-input` first
 - **Compute budget**:
   - GRNBoost2 can be expensive on large matrices
 
@@ -37,6 +39,7 @@ Important implementation notes in current OmicsClaw:
 - the public workflow is effectively `pyscenic_workflow`
 - the wrapper covers GRNBoost2, motif pruning, and AUCell scoring
 - `n_top_targets` is mainly a wrapper export cap, not a pySCENIC core algorithm knob
+- if the full pySCENIC resource bundle is absent, the wrapper may fall back to a simplified GRN mode rather than silently downloading resources
 
 ## Step 2: Pick The Method Deliberately
 
@@ -72,6 +75,7 @@ Guidance:
 Important warnings:
 - do not pretend the wrapper exposes the full pySCENIC CLI parameter surface
 - do not say the workflow can run meaningfully without database resources
+- if the user has not provided TF/database/motif resources, confirm whether they accept the simplified fallback instead of full pySCENIC
 
 ## Step 5: What To Say After The Run
 
@@ -91,4 +95,3 @@ Important warnings:
 - https://pyscenic.readthedocs.io/en/latest/installation.html
 - https://github.com/aertslab/pySCENIC
 - https://arboreto.readthedocs.io/en/latest/userguide.html
-

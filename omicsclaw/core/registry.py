@@ -389,7 +389,7 @@ _HARDCODED_DOMAINS = {
     "singlecell": {
         "name": "Single-Cell Omics",
         "primary_data_types": ["h5ad", "h5", "loom", "mtx"],
-        "skill_count": 13,
+        "skill_count": 14,
     },
     "genomics": {
         "name": "Genomics",
@@ -829,6 +829,15 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # Single-cell domain
     # -----------------------------------------------------------------------
+    "sc-standardize-input": {
+        "domain": "singlecell",
+        "alias": "sc-standardize-input",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-standardize-input" / "sc_standardize_input.py",
+        "demo_args": ["--demo"],
+        "description": "Canonicalize single-cell input into a stable AnnData contract for downstream scRNA skills",
+        "allowed_extra_flags": {"--species"},
+        "saves_h5ad": True,
+    },
     "sc-qc": {
         "domain": "singlecell",
         "alias": "sc-qc",

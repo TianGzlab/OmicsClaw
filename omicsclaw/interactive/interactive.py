@@ -64,6 +64,7 @@ except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
 from omicsclaw.common.runtime_env import load_project_dotenv
+from omicsclaw.common.user_guidance import strip_user_guidance_lines
 
 from ._constants import (
     LOGO_GRADIENT,
@@ -338,7 +339,7 @@ def _format_tool_args_preview(args: dict[str, Any], *, max_chars: int = 80) -> s
 
 
 def _format_tool_result_preview(tool_name: str, result: Any, *, max_chars: int = 220) -> str:
-    result_text = str(result)
+    result_text = strip_user_guidance_lines(str(result))
     if tool_name == "inspect_data":
         marker = "### Method Suitability & Parameter Preview"
         pos = result_text.find(marker)

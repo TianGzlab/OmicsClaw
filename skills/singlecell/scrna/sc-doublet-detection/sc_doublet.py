@@ -32,6 +32,7 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_doublet_detection
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
 
@@ -216,18 +217,24 @@ def detect_doublets_scrublet(adata, expected_doublet_rate=0.06, threshold=None):
 def detect_doublets_doubletfinder(adata, expected_doublet_rate=0.06):
     try:
         df = run_doubletfinder(adata, expected_doublet_rate=expected_doublet_rate)
-        method_name = "doubletfinder"
+        executed_method = "doubletfinder"
+        fallback_reason = None
     except Exception as exc:
         logger.warning("DoubletFinder runtime failed (%s). Falling back to scDblFinder.", exc)
         df = run_scdblfinder(adata, expected_doublet_rate=expected_doublet_rate)
-        method_name = "doubletfinder_fallback_scdblfinder"
+        executed_method = "scdblfinder"
+        fallback_reason = f"DoubletFinder runtime failed and wrapper fell back to scDblFinder: {exc}"
     df = df.reindex(adata.obs_names)
     adata.obs["doublet_score"] = pd.to_numeric(df["doublet_score"], errors="coerce").values
     adata.obs["doublet_classification"] = df["classification"].fillna("Singlet").astype(str).values
     adata.obs["predicted_doublet"] = df["predicted_doublet"].fillna(False).astype(bool).values
     n_doublets = int(adata.obs["predicted_doublet"].sum())
     return {
-        "method": method_name,
+        "method": executed_method,
+        "requested_method": "doubletfinder",
+        "executed_method": executed_method,
+        "fallback_used": fallback_reason is not None,
+        "fallback_reason": fallback_reason,
         "n_doublets": n_doublets,
         "doublet_rate": float(n_doublets / adata.n_obs),
         "expected_rate": expected_doublet_rate,
@@ -289,19 +296,22 @@ def generate_figures(adata, output_dir: Path) -> list[str]:
 
 
 def write_report(output_dir: Path, summary: dict, input_file: str | None, params: dict) -> None:
+    requested_method = str(summary.get("requested_method", params.get("method", summary["method"])))
+    executed_method = str(summary.get("executed_method", summary["method"]))
     header = generate_report_header(
         title="Doublet Detection Report",
         skill_name=SKILL_NAME,
         input_files=[Path(input_file)] if input_file else None,
         extra_metadata={
-            "Method": summary["method"],
+            "Method": executed_method,
             "Doublets detected": str(summary["n_doublets"]),
             "Doublet rate": f"{summary['doublet_rate']*100:.2f}%",
         },
     )
     body_lines = [
         "## Summary\n",
-        f"- **Method**: {summary['method']}",
+        f"- **Requested method**: {requested_method}",
+        f"- **Executed method**: {executed_method}",
         f"- **Total cells**: {summary.get('n_cells', 'N/A')}",
         f"- **Doublets detected**: {summary['n_doublets']}",
         f"- **Doublet rate**: {summary['doublet_rate']*100:.2f}%",
@@ -309,6 +319,8 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         "",
         "## Parameters\n",
     ]
+    if summary.get("fallback_reason"):
+        body_lines.insert(7, f"- **Fallback note**: {summary['fallback_reason']}")
     for k, v in params.items():
         body_lines.append(f"- `{k}`: {v}")
     footer = generate_report_footer()
@@ -324,8 +336,10 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
     cmd = f"python sc_doublet.py --input <input.h5ad> --output {output_dir}"
-    for k, v in params.items():
-        cmd += f" --{k.replace('_', '-')} {v}"
+    cmd += f" --method {params['method']}"
+    cmd += f" --expected-doublet-rate {params['expected_doublet_rate']}"
+    if params.get("threshold") is not None:
+        cmd += f" --threshold {params['threshold']}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
     _write_repro_requirements(
         repro_dir,
@@ -353,27 +367,54 @@ def main():
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
         adata = sc.read_h5ad(args.input_path)
+        sc_io.maybe_warn_standardize_first(adata, source_path=args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback="scrublet")
+    apply_preflight(
+        preflight_sc_doublet_detection(
+            adata,
+            method=method,
+            expected_doublet_rate=args.expected_doublet_rate,
+            threshold=args.threshold,
+            source_path=input_file,
+        ),
+        logger,
+    )
     summary = _METHOD_DISPATCH[method](adata, args)
+    summary.setdefault("requested_method", method)
+    summary.setdefault("executed_method", summary.get("method", method))
+    summary.setdefault("fallback_used", summary["requested_method"] != summary["executed_method"])
     summary["n_cells"] = int(adata.n_obs)
 
-    params = {"method": method, "expected_doublet_rate": args.expected_doublet_rate}
+    params = {
+        "method": method,
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
+        "expected_doublet_rate": args.expected_doublet_rate,
+    }
     if args.threshold is not None:
         params["threshold"] = args.threshold
+    if summary.get("fallback_reason"):
+        params["fallback_reason"] = summary["fallback_reason"]
 
     generate_figures(adata, output_dir)
     write_report(output_dir, summary, input_file, params)
 
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    store_analysis_metadata(adata, SKILL_NAME, summary["executed_method"], params)
     output_h5ad = output_dir / "processed.h5ad"
     adata.write_h5ad(output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
+    result_data = {
+        "requested_method": summary["requested_method"],
+        "executed_method": summary["executed_method"],
+        "fallback_used": bool(summary.get("fallback_used")),
+        "fallback_reason": summary.get("fallback_reason"),
+        "params": params,
+    }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
@@ -384,7 +425,11 @@ def main():
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"Doublet detection complete: {summary['n_doublets']} doublets ({summary['doublet_rate']*100:.1f}%)")
+    print(
+        f"Doublet detection complete: {summary['n_doublets']} doublets "
+        f"({summary['doublet_rate']*100:.1f}%), requested={summary['requested_method']}, "
+        f"executed={summary['executed_method']}"
+    )
 
 
 if __name__ == "__main__":

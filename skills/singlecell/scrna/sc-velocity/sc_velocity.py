@@ -50,6 +50,7 @@ from skills.singlecell._lib.method_config import (
 )
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_velocity
 from skills.singlecell._lib import trajectory as sc_traj
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -422,7 +423,7 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
@@ -450,6 +451,14 @@ def main():
     requested_method = _MODE_ALIAS_MAP.get(args.method, args.method)
     method = validate_method_choice(requested_method, METHOD_REGISTRY)
     mode = _CLI_TO_MODE[method]
+    apply_preflight(
+        preflight_sc_velocity(
+            adata,
+            method=method,
+            source_path=input_file,
+        ),
+        logger,
+    )
 
     # Parameters
     params = {

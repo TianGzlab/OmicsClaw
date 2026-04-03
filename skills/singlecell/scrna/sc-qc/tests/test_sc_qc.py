@@ -7,6 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import anndata as ad
+import numpy as np
+import pandas as pd
 import pytest
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_qc.py"
@@ -55,3 +58,74 @@ def test_demo_result_json(tmp_output):
     assert "qc_metrics_summary" in data["data"]["visualization"]["available_figure_data"]
     command_text = (tmp_output / "reproducibility" / "commands.sh").read_text()
     assert "--calculate-ribo" not in command_text
+
+
+def test_prefers_counts_layer_and_gene_symbol_column(tmp_output, tmp_path):
+    input_path = tmp_path / "layer_fallback.h5ad"
+    norm_x = np.array(
+        [
+            [1.1, 0.4, 0.2, 0.1],
+            [0.8, 0.2, 0.2, 0.0],
+            [1.4, 0.3, 0.1, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    counts = np.array(
+        [
+            [10, 4, 2, 1],
+            [8, 2, 2, 0],
+            [14, 3, 1, 0],
+        ],
+        dtype=np.int32,
+    )
+    adata = ad.AnnData(
+        X=norm_x,
+        obs=pd.DataFrame(index=["cell1", "cell2", "cell3"]),
+        var=pd.DataFrame(
+            {"gene_symbols": ["MT-CO1", "RPS3", "GENE3", "GENE4"]},
+            index=["ENSG1", "ENSG2", "ENSG3", "ENSG4"],
+        ),
+    )
+    adata.layers["counts"] = counts
+    adata.write_h5ad(input_path)
+
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--input", str(input_path), "--output", str(tmp_output)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    data = json.loads((tmp_output / "result.json").read_text())
+    prep = data["data"]["input_preparation"]
+    assert prep["expression_source"] == "layers.counts"
+    assert prep["gene_name_source"] == "var.gene_symbols"
+    assert any("falling back to `layers.counts`" in warning for warning in prep["warnings"])
+
+    qc_h5ad = ad.read_h5ad(tmp_output / "qc_checked.h5ad")
+    assert "pct_counts_mt" in qc_h5ad.obs.columns
+    assert float(qc_h5ad.obs["pct_counts_mt"].max()) > 0
+    np.testing.assert_allclose(np.asarray(qc_h5ad.X), norm_x)
+
+
+def test_rejects_non_count_like_input_without_fallback(tmp_output, tmp_path):
+    input_path = tmp_path / "normalized_only.h5ad"
+    adata = ad.AnnData(
+        X=np.array([[1.2, 0.5], [0.7, 0.3]], dtype=np.float32),
+        obs=pd.DataFrame(index=["cell1", "cell2"]),
+        var=pd.DataFrame(index=["GENE1", "GENE2"]),
+    )
+    adata.write_h5ad(input_path)
+
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--input", str(input_path), "--output", str(tmp_output)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+
+    assert result.returncode != 0
+    assert "expects a raw count-like matrix" in result.stderr

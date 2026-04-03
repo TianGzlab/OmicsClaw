@@ -1,10 +1,29 @@
 from pathlib import Path
 
+import pytest
+
 from omicsclaw.knowledge.knowhow import KnowHowInjector
 
 
 ROOT = Path(__file__).resolve().parent.parent
 KNOWHOW_DIR = ROOT / "knowledge_base" / "knowhows"
+
+SCRNA_SKILL_DOCS = [
+    ("sc-standardize-input", "KH-sc-standardize-input-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-standardize-input.md"),
+    ("sc-qc", "KH-sc-qc-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-qc.md"),
+    ("sc-preprocessing", "KH-sc-preprocessing-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-preprocessing.md"),
+    ("sc-filter", "KH-sc-filter-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-filter.md"),
+    ("sc-ambient-removal", "KH-sc-ambient-removal-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-ambient-removal.md"),
+    ("sc-doublet-detection", "KH-sc-doublet-detection-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-doublet-detection.md"),
+    ("sc-cell-annotation", "KH-sc-cell-annotation-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-cell-annotation.md"),
+    ("sc-pseudotime", "KH-sc-pseudotime-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-pseudotime.md"),
+    ("sc-velocity", "KH-sc-velocity-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-velocity.md"),
+    ("sc-batch-integration", "KH-sc-batch-integration-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-batch-integration.md"),
+    ("sc-de", "KH-sc-de-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-de.md"),
+    ("sc-markers", "KH-sc-markers-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-markers.md"),
+    ("sc-grn", "KH-sc-grn-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-grn.md"),
+    ("sc-cell-communication", "KH-sc-cell-communication-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-cell-communication.md"),
+]
 
 
 def test_spatial_svg_guardrail_is_registered_for_skill():
@@ -183,6 +202,27 @@ def test_sc_qc_constraints_use_guardrail_doc():
     assert "knowledge_base/skill-guides/singlecell/sc-qc.md" in constraints
 
 
+def test_sc_input_contract_guardrail_is_injected_for_singlecell_skill():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    matched = injector.get_kh_for_skill("sc-de")
+
+    assert "KH-sc-input-contract-guardrails.md" in matched
+
+
+def test_sc_input_contract_constraints_reference_standardize_guide():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="sc-de",
+        query="Please run sc-de on this uploaded h5ad and figure out the groups automatically if possible.",
+        domain="singlecell",
+    )
+
+    assert "Single-Cell Input Contract Guardrails" in constraints
+    assert "knowledge_base/skill-guides/singlecell/sc-standardize-input.md" in constraints
+
+
 def test_sc_preprocessing_guardrail_is_registered_for_skill():
     injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
 
@@ -202,6 +242,35 @@ def test_sc_preprocessing_constraints_use_guardrail_doc():
 
     assert "Single-Cell Preprocessing Guardrails" in constraints
     assert "knowledge_base/skill-guides/singlecell/sc-preprocessing.md" in constraints
+
+
+@pytest.mark.parametrize(
+    ("skill", "guardrail_doc", "guide_path"),
+    SCRNA_SKILL_DOCS,
+)
+def test_scrna_guardrail_is_registered_for_skill(skill: str, guardrail_doc: str, guide_path: str):
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    matched = injector.get_kh_for_skill(skill)
+
+    assert guardrail_doc in matched
+
+
+@pytest.mark.parametrize(
+    ("skill", "guardrail_doc", "guide_path"),
+    SCRNA_SKILL_DOCS,
+)
+def test_scrna_constraints_use_guardrail_doc(skill: str, guardrail_doc: str, guide_path: str):
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill=skill,
+        query=f"Please run {skill} and explain the key parameters first.",
+        domain="singlecell",
+    )
+
+    assert constraints
+    assert guide_path in constraints
 
 
 def test_global_best_practices_are_always_injected_with_skill_match():

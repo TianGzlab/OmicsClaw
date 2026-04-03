@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-cell cell-cell communication analysis with builtin, LIANA, and CellChat backends."""
+"""Single-cell cell-cell communication analysis with builtin, LIANA, CellPhoneDB, and CellChat backends."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_cell_communication
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
 
@@ -41,7 +42,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-cell-communication"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.2.0"
+SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py"
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "builtin": MethodConfig(
@@ -54,6 +56,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="LIANA+ consensus ligand-receptor scoring",
         dependencies=("liana",),
     ),
+    "cellphonedb": MethodConfig(
+        name="cellphonedb",
+        description="CellPhoneDB statistical analysis with official Python backend",
+        dependencies=("cellphonedb",),
+    ),
     "cellchat_r": MethodConfig(
         name="cellchat_r",
         description="CellChat communication inference (R)",
@@ -62,6 +69,50 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 }
 
 DEFAULT_METHOD = "builtin"
+METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
+    "builtin": {
+        "cell_type_key": "cell_type",
+        "species": "human",
+    },
+    "liana": {
+        "cell_type_key": "cell_type",
+        "species": "human",
+    },
+    "cellphonedb": {
+        "cell_type_key": "cell_type",
+        "species": "human",
+        "cellphonedb_counts_data": "hgnc_symbol",
+        "cellphonedb_iterations": 1000,
+        "cellphonedb_threshold": 0.1,
+        "cellphonedb_threads": 4,
+        "cellphonedb_pvalue": 0.05,
+    },
+    "cellchat_r": {
+        "cell_type_key": "cell_type",
+        "species": "human",
+    },
+}
+OUTPUT_COLUMNS = ["ligand", "receptor", "source", "target", "score", "pvalue", "pathway"]
+CELLPHONEDB_DB_VERSION = "v4.1.0"
+
+
+def _empty_lr_table() -> pd.DataFrame:
+    return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+
+def _resolve_cellphonedb_database() -> Path:
+    """Ensure the official CellPhoneDB database zip exists locally."""
+    from cellphonedb.utils import db_utils
+
+    cache_dir = Path.home() / ".cache" / "omicsclaw" / "cellphonedb" / CELLPHONEDB_DB_VERSION
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    db_path = cache_dir / "cellphonedb.zip"
+    if not db_path.exists():
+        logger.info("Downloading CellPhoneDB database %s...", CELLPHONEDB_DB_VERSION)
+        db_utils.download_database(str(cache_dir), CELLPHONEDB_DB_VERSION)
+    if not db_path.exists():
+        raise FileNotFoundError(f"CellPhoneDB database not found at {db_path}")
+    return db_path
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -92,7 +143,7 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
             skill_alias=SKILL_NAME,
             description="Cell-cell communication analysis for annotated scRNA-seq data.",
             result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
+            preferred_method=summary.get("executed_method", summary.get("method", DEFAULT_METHOD)),
             script_path=Path(__file__).resolve(),
             actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
         )
@@ -105,7 +156,7 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
             skill_alias=SKILL_NAME,
             description="Cell-cell communication analysis for annotated scRNA-seq data.",
             result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
+            preferred_method=summary.get("executed_method", summary.get("method", DEFAULT_METHOD)),
             notebook_path=notebook_path,
         )
     except Exception as exc:
@@ -136,6 +187,28 @@ def _build_cellchat_input_adata(adata):
     return adata.copy(), "adata.X"
 
 
+def _prepare_cellphonedb_input_adata(adata, *, cell_type_key: str):
+    export, source = _build_cellchat_input_adata(adata)
+    export = export.copy()
+    export.obs = export.obs.copy()
+
+    cell_names = export.obs_names.astype(str).str.replace("-", "_", regex=False)
+    export.obs_names = cell_names
+
+    labels = export.obs[cell_type_key].astype(str)
+    numeric_like = labels.str.fullmatch(r"\d+(\.\d+)?").fillna(False)
+    labels = labels.where(~numeric_like, "cluster_" + labels)
+    export.obs[cell_type_key] = labels.values
+
+    meta = pd.DataFrame({"Cell": export.obs_names.astype(str), "cell_type": labels.astype(str).values})
+    notes = {
+        "renamed_cells": bool((cell_names != adata.obs_names.astype(str)).any()),
+        "renamed_numeric_clusters": bool(numeric_like.any()),
+        "expression_source": source,
+    }
+    return export, meta, notes
+
+
 def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     validate_r_environment(required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"])
     scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
@@ -160,6 +233,55 @@ def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     if not df.empty:
         df["expression_source"] = source
     return df
+
+
+def run_cellphonedb(
+    adata,
+    *,
+    cell_type_key: str,
+    species: str,
+    counts_data: str,
+    iterations: int,
+    threshold: float,
+    threads: int,
+    pvalue: float,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    if species != "human":
+        raise ValueError("The current CellPhoneDB wrapper only supports species='human'.")
+
+    from cellphonedb.src.core.methods import cpdb_statistical_analysis_method
+
+    cpdb_file_path = _resolve_cellphonedb_database()
+    export, meta_df, notes = _prepare_cellphonedb_input_adata(adata, cell_type_key=cell_type_key)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_cellphonedb_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        counts_path = tmpdir_path / "input.h5ad"
+        meta_path = tmpdir_path / "meta.tsv"
+        output_dir = tmpdir_path / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(counts_path)
+        meta_df.to_csv(meta_path, sep="\t", index=False)
+        try:
+            cpdb_statistical_analysis_method.call(
+                cpdb_file_path=str(cpdb_file_path),
+                meta_file_path=str(meta_path),
+                counts_file_path=str(counts_path),
+                counts_data=counts_data,
+                output_path=str(output_dir),
+                iterations=int(iterations),
+                threshold=float(threshold),
+                threads=int(threads),
+                pvalue=float(pvalue),
+                score_interactions=True,
+            )
+        except KeyError as exc:
+            if exc.args != ("significant_means",):
+                raise
+            logger.info("CellPhoneDB reported no significant interactions for this dataset.")
+            notes["no_significant_interactions"] = True
+            return _empty_lr_table(), notes
+        lr_df = _parse_cellphonedb_results(output_dir)
+    return lr_df, notes
 
 
 def _group_means(adata, cell_type_key: str) -> pd.DataFrame:
@@ -194,13 +316,13 @@ def _run_builtin(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
                         "source": source,
                         "target": target,
                         "score": score,
-                        "pvalue": 1.0,
+                        "pvalue": np.nan,
                         "pathway": "builtin",
                     }
                 )
     df = pd.DataFrame(records)
     if df.empty:
-        return pd.DataFrame(columns=["ligand", "receptor", "source", "target", "score", "pvalue", "pathway"])
+        return _empty_lr_table()
     return df.sort_values("score", ascending=False).reset_index(drop=True)
 
 
@@ -237,10 +359,75 @@ def _run_liana(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     return out.sort_values("score", ascending=False).reset_index(drop=True)
 
 
+def _read_cpdb_table(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path, sep="\t")
+    except EmptyDataError:
+        return pd.DataFrame()
+
+
+def _interaction_names_from_cpdb_row(row: pd.Series) -> tuple[str, str]:
+    ligand = str(row.get("gene_a") or row.get("partner_a") or "").strip()
+    receptor = str(row.get("gene_b") or row.get("partner_b") or "").strip()
+    if ligand and receptor:
+        return ligand, receptor
+    pair = str(row.get("interacting_pair", "")).strip()
+    if "_" in pair:
+        left, right = pair.split("_", 1)
+        return left, right
+    return ligand or pair or "unknown_ligand", receptor or "unknown_receptor"
+
+
+def _parse_cellphonedb_results(output_dir: Path) -> pd.DataFrame:
+    significant_df = _read_cpdb_table(output_dir / "significant_means.txt")
+    means_df = _read_cpdb_table(output_dir / "means.txt")
+    pvalues_df = _read_cpdb_table(output_dir / "pvalues.txt")
+    score_df = significant_df if not significant_df.empty else means_df
+    if score_df.empty:
+        return _empty_lr_table()
+
+    pair_cols = [column for column in score_df.columns if "|" in column]
+    if not pair_cols:
+        return _empty_lr_table()
+
+    pvalues_lookup = pvalues_df.reset_index(drop=True) if not pvalues_df.empty else pd.DataFrame()
+    records: list[dict[str, object]] = []
+    for idx, row in score_df.reset_index(drop=True).iterrows():
+        ligand, receptor = _interaction_names_from_cpdb_row(row)
+        pathway = row.get("classification") or row.get("annotation_strategy") or "CellPhoneDB"
+        pvalue_row = pvalues_lookup.iloc[idx] if idx < len(pvalues_lookup) else None
+        for pair_col in pair_cols:
+            score = pd.to_numeric(pd.Series([row.get(pair_col)]), errors="coerce").iloc[0]
+            if pd.isna(score) or float(score) <= 0:
+                continue
+            source, target = pair_col.split("|", 1)
+            if pvalue_row is not None and pair_col in pvalue_row.index:
+                pair_pvalue = pd.to_numeric(pd.Series([pvalue_row[pair_col]]), errors="coerce").iloc[0]
+            else:
+                pair_pvalue = np.nan
+            records.append(
+                {
+                    "ligand": ligand,
+                    "receptor": receptor,
+                    "source": source,
+                    "target": target,
+                    "score": float(score),
+                    "pvalue": float(pair_pvalue) if not pd.isna(pair_pvalue) else 1.0,
+                    "pathway": str(pathway),
+                }
+            )
+
+    if not records:
+        return _empty_lr_table()
+    return pd.DataFrame(records).sort_values(["pvalue", "score"], ascending=[True, False]).reset_index(drop=True)
+
+
 def _run_cellchat_r(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     df = run_cellchat(adata, cell_type_key=cell_type_key, species=species)
     if df.empty:
-        return pd.DataFrame(columns=["ligand", "receptor", "source", "target", "score", "pvalue", "pathway"])
+        return _empty_lr_table()
     if "pathway" not in df.columns:
         df["pathway"] = "CellChat"
     return df.sort_values("score", ascending=False).reset_index(drop=True)
@@ -253,21 +440,60 @@ def run_communication(adata, *, method: str, cell_type_key: str, species: str) -
     dispatch = {
         "builtin": lambda: _run_builtin(adata, cell_type_key=cell_type_key, species=species),
         "liana": lambda: _run_liana(adata, cell_type_key=cell_type_key, species=species),
+        "cellphonedb": lambda: run_cellphonedb(
+            adata,
+            cell_type_key=cell_type_key,
+            species=species,
+            counts_data=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_counts_data"],
+            iterations=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_iterations"],
+            threshold=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_threshold"],
+            threads=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_threads"],
+            pvalue=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_pvalue"],
+        ),
         "cellchat_r": lambda: _run_cellchat_r(adata, cell_type_key=cell_type_key, species=species),
     }
-    lr_df = dispatch[method]()
-    sig_df = lr_df[lr_df["pvalue"] < 0.05] if not lr_df.empty else lr_df
-    return {
+    cpdb_notes: dict[str, object] = {}
+    result = dispatch[method]()
+    if method == "cellphonedb":
+        lr_df, cpdb_notes = result
+    else:
+        lr_df = result
+    pvalue_series = pd.to_numeric(lr_df["pvalue"], errors="coerce") if not lr_df.empty else pd.Series(dtype=float)
+    pvalue_available = bool(pvalue_series.notna().any()) if not lr_df.empty else False
+    sig_df = lr_df[pvalue_series.notna() & (pvalue_series < 0.05)] if not lr_df.empty else lr_df
+    summary = {
         "method": method,
+        "requested_method": method,
+        "executed_method": method,
+        "fallback_used": False,
+        "fallback_reason": "",
         "cell_type_key": cell_type_key,
         "species": species,
         "n_cells": int(adata.n_obs),
         "n_cell_types": int(adata.obs[cell_type_key].astype(str).nunique()),
         "n_interactions_tested": int(len(lr_df)),
         "n_significant": int(len(sig_df)),
+        "pvalue_available": pvalue_available,
         "lr_df": lr_df,
         "top_df": lr_df.head(50) if not lr_df.empty else lr_df,
+        "cellphonedb_renamed_cells": cpdb_notes.get("renamed_cells", False),
+        "cellphonedb_prefixed_numeric_clusters": cpdb_notes.get("renamed_numeric_clusters", False),
+        "expression_source": cpdb_notes.get("expression_source", ""),
     }
+    if method == "builtin":
+        summary["score_semantics"] = (
+            "Builtin score is a lightweight ligand mean x receptor mean heuristic across grouped cells."
+        )
+        summary["significance_semantics"] = (
+            "Builtin results leave pvalue empty (NaN) because this heuristic backend does not run a statistical significance test; treat ranked scores as a sanity-check only."
+        )
+        summary["pvalue_available"] = False
+        summary["n_significant"] = 0
+    if method == "cellphonedb":
+        summary["score_semantics"] = (
+            "CellPhoneDB score comes from the official statistical-analysis output reshaped into the OmicsClaw contract."
+        )
+    return summary
 
 
 def generate_figures(output_dir: Path, summary: dict) -> list[str]:
@@ -318,20 +544,35 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         skill_name=SKILL_NAME,
         input_files=[Path(input_file)] if input_file else None,
         extra_metadata={
-            "Method": summary["method"],
+            "Requested method": summary.get("requested_method", summary["method"]),
+            "Executed method": summary.get("executed_method", summary["method"]),
             "Cell type key": summary["cell_type_key"],
         },
     )
 
     top_df = summary.get("top_df", pd.DataFrame())
+    significance_label = (
+        str(summary["n_significant"])
+        if summary.get("pvalue_available", True)
+        else "N/A for builtin heuristic backend"
+    )
     body_lines = [
         "## Summary\n",
         f"- **Cells**: {summary['n_cells']}",
         f"- **Cell types**: {summary['n_cell_types']}",
-        f"- **Method**: {summary['method']}",
+        f"- **Requested method**: {summary.get('requested_method', summary['method'])}",
+        f"- **Executed method**: {summary.get('executed_method', summary['method'])}",
         f"- **Interactions tested**: {summary['n_interactions_tested']}",
-        f"- **Significant (p < 0.05)**: {summary['n_significant']}",
+        f"- **Significant (p < 0.05)**: {significance_label}",
     ]
+    if summary.get("fallback_reason"):
+        body_lines.append(f"- **Fallback note**: {summary['fallback_reason']}")
+    if summary.get("significance_semantics"):
+        body_lines.append(f"- **Significance note**: {summary['significance_semantics']}")
+    if summary.get("cellphonedb_renamed_cells"):
+        body_lines.append("- **CellPhoneDB export note**: cell IDs containing `-` were rewritten to `_` for compatibility.")
+    if summary.get("cellphonedb_prefixed_numeric_clusters"):
+        body_lines.append("- **CellPhoneDB export note**: numeric cluster labels were prefixed with `cluster_` for compatibility.")
     if not top_df.empty:
         body_lines.extend(["", "### Top Interactions\n"])
         body_lines.append("| Ligand | Receptor | Source | Target | Score |")
@@ -357,13 +598,15 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
-    cmd = (
-        f"python sc_cell_communication.py --input <input.h5ad> --output {output_dir}"
-        f" --method {params.get('method', 'builtin')}"
-        f" --cell-type-key {params.get('cell_type_key', 'cell_type')}"
-        f" --species {params.get('species', 'human')}"
+    command = (
+        f"python {SCRIPT_REL_PATH} "
+        f"{'--demo' if params.get('demo_mode') else '--input <input.h5ad>'} "
+        f"--output {output_dir} "
+        f"--method {params.get('method', 'builtin')} "
+        f"--cell-type-key {params.get('cell_type_key', 'cell_type')} "
+        f"--species {params.get('species', 'human')}"
     )
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
     _write_repro_requirements(
         repro_dir,
         ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
@@ -378,6 +621,11 @@ def main():
     parser.add_argument("--method", choices=list(METHOD_REGISTRY.keys()), default=DEFAULT_METHOD)
     parser.add_argument("--cell-type-key", default="cell_type")
     parser.add_argument("--species", default="human", choices=["human", "mouse"])
+    parser.add_argument("--cellphonedb-counts-data", default="hgnc_symbol", choices=["ensembl", "gene_name", "hgnc_symbol"])
+    parser.add_argument("--cellphonedb-iterations", type=int, default=1000)
+    parser.add_argument("--cellphonedb-threshold", type=float, default=0.1)
+    parser.add_argument("--cellphonedb-threads", type=int, default=4)
+    parser.add_argument("--cellphonedb-pvalue", type=float, default=0.05)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -393,11 +641,50 @@ def main():
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
         adata = sc.read_h5ad(args.input_path)
+        sc_io.maybe_warn_standardize_first(adata, source_path=args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
+    apply_preflight(
+        preflight_sc_cell_communication(
+            adata,
+            method=method,
+            cell_type_key=args.cell_type_key,
+            species=args.species,
+            counts_data=args.cellphonedb_counts_data,
+            source_path=input_file,
+        ),
+        logger,
+    )
+    if method == "cellphonedb":
+        METHOD_PARAM_DEFAULTS["cellphonedb"].update(
+            {
+                "cell_type_key": args.cell_type_key,
+                "species": args.species,
+                "cellphonedb_counts_data": args.cellphonedb_counts_data,
+                "cellphonedb_iterations": args.cellphonedb_iterations,
+                "cellphonedb_threshold": args.cellphonedb_threshold,
+                "cellphonedb_threads": args.cellphonedb_threads,
+                "cellphonedb_pvalue": args.cellphonedb_pvalue,
+            }
+        )
     summary = run_communication(adata, method=method, cell_type_key=args.cell_type_key, species=args.species)
-    params = {"method": method, "cell_type_key": args.cell_type_key, "species": args.species}
+    params = {
+        "method": method,
+        "cell_type_key": args.cell_type_key,
+        "species": args.species,
+        "demo_mode": args.demo,
+    }
+    if method == "cellphonedb":
+        params.update(
+            {
+                "cellphonedb_counts_data": args.cellphonedb_counts_data,
+                "cellphonedb_iterations": args.cellphonedb_iterations,
+                "cellphonedb_threshold": args.cellphonedb_threshold,
+                "cellphonedb_threads": args.cellphonedb_threads,
+                "cellphonedb_pvalue": args.cellphonedb_pvalue,
+            }
+        )
 
     generate_figures(output_dir, summary)
     write_report(output_dir, summary, input_file, params)
@@ -406,7 +693,16 @@ def main():
     adata.write_h5ad(output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
+    result_data = {
+        "requested_method": summary.get("requested_method", method),
+        "executed_method": summary.get("executed_method", method),
+        "fallback_used": summary.get("fallback_used", False),
+        "fallback_reason": summary.get("fallback_reason", ""),
+        "pvalue_available": summary.get("pvalue_available", True),
+        "score_semantics": summary.get("score_semantics"),
+        "significance_semantics": summary.get("significance_semantics"),
+        "params": params,
+    }
     write_result_json(
         output_dir,
         SKILL_NAME,
@@ -421,11 +717,24 @@ def main():
         "data": result_data,
     }
     write_standard_run_artifacts(output_dir, result_payload, summary)
-    store_analysis_metadata(adata, SKILL_NAME, method, params)
+    metadata_params = {
+        "requested_method": summary.get("requested_method", method),
+        "executed_method": summary.get("executed_method", method),
+        "fallback_used": summary.get("fallback_used", False),
+        "fallback_reason": summary.get("fallback_reason", ""),
+        "pvalue_available": summary.get("pvalue_available", True),
+        "cell_type_key": args.cell_type_key,
+        "species": args.species,
+    }
+    store_analysis_metadata(adata, SKILL_NAME, summary.get("executed_method", method), metadata_params)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"Communication analysis complete: {summary['n_interactions_tested']} interactions tested")
+    print(
+        "Communication analysis complete: "
+        f"{summary['n_interactions_tested']} interactions tested "
+        f"(requested={summary.get('requested_method', method)}, executed={summary.get('executed_method', method)})"
+    )
 
 
 if __name__ == "__main__":
