@@ -348,6 +348,11 @@ testpaths = [
     "skills/bulkrna/bulkrna-enrichment/tests",
     "skills/bulkrna/bulkrna-deconvolution/tests",
     "skills/bulkrna/bulkrna-coexpression/tests",
+    "skills/singlecell/scrna/sc-fastq-qc/tests",
+    "skills/singlecell/scrna/sc-count/tests",
+    "skills/singlecell/scrna/sc-multi-count/tests",
+    "skills/singlecell/scrna/sc-pseudoalign-count/tests",
+    "skills/singlecell/scrna/sc-velocity-prep/tests",
 ]
 markers = [
     "slow: tests requiring full optional deps or significant runtime (excluded by default)",

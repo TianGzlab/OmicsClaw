@@ -1,9 +1,9 @@
 ---
 name: sc-velocity
 description: >-
-  RNA velocity analysis for scRNA-seq using scVelo stochastic, dynamical, or
-  steady-state modes. The wrapper now accepts both `--method` and `--mode` as
-  public aliases for the velocity backend.
+  Run scVelo on a velocity-ready h5ad using stochastic, dynamical, or
+  steady-state modes. Use `sc-velocity-prep` first if spliced/unspliced layers
+  are missing.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -177,4 +177,12 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 ## Current Limitations
 
 - This wrapper depends on spliced/unspliced layers already being present.
+- The standard OmicsClaw upstream path is now `sc-velocity-prep` -> `sc-velocity`.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+
+## Safety And Guardrails
+
+- Validate `layers['spliced']` and `layers['unspliced']` before promising any velocity run.
+- Do not promise latent time for every run; it is tied to the dynamical path and successful fitting.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-velocity-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.

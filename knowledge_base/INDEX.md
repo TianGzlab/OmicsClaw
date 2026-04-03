@@ -2,7 +2,7 @@
 
 > OmicsClaw Multi-Omics Knowledge Base
 > Reorganized: 2026-03-29
-> Total workflows: 28 | Shared documents: 33
+> Total workflows: 28 | Shared documents: 39
 
 ## Structure
 
@@ -81,6 +81,9 @@ _Universal best practices and domain knowledge rules that apply across all workf
 | [knowhows/KH-spatial-preprocess-guardrails.md](knowhows/KH-spatial-preprocess-guardrails.md) | Short high-level guardrails for choosing and explaining spatial preprocessing runs |
 | [knowhows/KH-spatial-statistics-guardrails.md](knowhows/KH-spatial-statistics-guardrails.md) | Short high-level guardrails for choosing between cluster, gene, and graph-level spatial statistics |
 | [knowhows/KH-spatial-velocity-guardrails.md](knowhows/KH-spatial-velocity-guardrails.md) | Short high-level guardrails for choosing and explaining spatial RNA velocity runs |
+| [knowhows/KH-sc-differential-abundance-guardrails.md](knowhows/KH-sc-differential-abundance-guardrails.md) | Short high-level guardrails for sample-aware differential abundance and compositional analysis |
+| [knowhows/KH-sc-metacell-guardrails.md](knowhows/KH-sc-metacell-guardrails.md) | Short high-level guardrails for metacell construction, compression, and interpretation boundaries |
+| [knowhows/KH-sc-gene-programs-guardrails.md](knowhows/KH-sc-gene-programs-guardrails.md) | Short high-level guardrails for de novo gene program discovery and usage interpretation |
 
 ---
 
@@ -88,10 +91,29 @@ _Universal best practices and domain knowledge rules that apply across all workf
 
 _These are not part of the 28 validated workflows. They capture longer method-selection and tuning guidance derived from current OmicsClaw skill implementations._
 
+### Recommended Single-Cell Starting Point
+
+If a user is new to scRNA analysis and does not know which skill to run first,
+start here:
+
+- [skill-guides/singlecell/sc-rna-quickstart.md](skill-guides/singlecell/sc-rna-quickstart.md) — beginner route from raw FASTQ or existing h5ad into the current OmicsClaw scRNA workflow
+
 | Document | Description |
 |---|---|
 | [skill-guides/README.md](skill-guides/README.md) | Explains how skill guides differ from validated workflows and from knowhow guardrails |
+| [skill-guides/singlecell/sc-rna-quickstart.md](skill-guides/singlecell/sc-rna-quickstart.md) | Beginner-friendly routing guide for the mainstream scRNA path from FASTQ to downstream-ready h5ad |
+| [skill-guides/singlecell/sc-fastq-qc.md](skill-guides/singlecell/sc-fastq-qc.md) | Implementation-aware guide for raw single-cell FASTQ QC and FastQC / MultiQC interpretation |
+| [skill-guides/singlecell/sc-count.md](skill-guides/singlecell/sc-count.md) | Implementation-aware guide for Cell Ranger / STARsolo count handoff |
+| [skill-guides/singlecell/sc-pseudoalign-count.md](skill-guides/singlecell/sc-pseudoalign-count.md) | Implementation-aware guide for SimpleAF / Alevin-fry and kb-python count handoff |
+| [skill-guides/singlecell/sc-standardize-input.md](skill-guides/singlecell/sc-standardize-input.md) | Implementation-aware guide for stabilizing external AnnData input before downstream scRNA analysis |
+| [skill-guides/singlecell/sc-qc.md](skill-guides/singlecell/sc-qc.md) | Implementation-aware guide for scRNA QC before filtering |
+| [skill-guides/singlecell/sc-preprocessing.md](skill-guides/singlecell/sc-preprocessing.md) | Implementation-aware guide for normalization, HVG selection, PCA, UMAP, and clustering |
+| [skill-guides/singlecell/sc-velocity-prep.md](skill-guides/singlecell/sc-velocity-prep.md) | Implementation-aware guide for preparing spliced / unspliced layers before scVelo analysis |
+| [skill-guides/singlecell/sc-velocity.md](skill-guides/singlecell/sc-velocity.md) | Implementation-aware guide for scVelo mode selection and velocity interpretation |
 | [skill-guides/singlecell/scatac-preprocessing.md](skill-guides/singlecell/scatac-preprocessing.md) | Detailed OmicsClaw-specific parameter and scope guide for scATAC preprocessing |
+| [skill-guides/singlecell/sc-differential-abundance.md](skill-guides/singlecell/sc-differential-abundance.md) | Detailed OmicsClaw-specific method selection and tuning guide for sample-aware differential abundance and compositional analysis |
+| [skill-guides/singlecell/sc-metacell.md](skill-guides/singlecell/sc-metacell.md) | Detailed OmicsClaw-specific guide for metacell construction, summarization, and interpretation |
+| [skill-guides/singlecell/sc-gene-programs.md](skill-guides/singlecell/sc-gene-programs.md) | Detailed OmicsClaw-specific guide for gene program discovery, factor selection, and program interpretation |
 | [skill-guides/spatial/spatial-annotate.md](skill-guides/spatial/spatial-annotate.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial annotation |
 | [skill-guides/spatial/spatial-condition.md](skill-guides/spatial/spatial-condition.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial condition comparison |
 | [skill-guides/spatial/spatial-de.md](skill-guides/spatial/spatial-de.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial differential expression |

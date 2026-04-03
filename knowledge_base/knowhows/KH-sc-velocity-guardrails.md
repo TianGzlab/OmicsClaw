@@ -16,7 +16,8 @@ source_urls:
 # Single-Cell Velocity Guardrails
 
 - **Inspect first**: verify `layers["spliced"]` and `layers["unspliced"]` exist before promising any velocity run.
-- **Standardize external inputs only if it helps provenance**: `sc-standardize-input` can stabilize AnnData structure, but it cannot create velocity layers; if `spliced` / `unspliced` are missing, stop and ask for the real velocity-ready input.
+- **Standardize external inputs only if it helps provenance**: `sc-standardize-input` can stabilize AnnData structure, but it cannot create velocity layers.
+- **Use the new upstream path explicitly**: if `spliced` / `unspliced` are missing, direct the user to `sc-velocity-prep` rather than vaguely asking for a “real velocity object”.
 - **Key wrapper controls**: explain `method` or `mode` and `n_jobs` before running.
 - **Use method-correct language**: `stochastic`, `dynamical`, and `steady_state` are backend modes for the same velocity skill.
 - **Do not overclaim latent time**: latent time is tied to the dynamical path and should not be promised for every velocity run.

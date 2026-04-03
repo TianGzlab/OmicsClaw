@@ -6,6 +6,64 @@ and are running from the project root.
 
 ---
 
+## Single-Cell RNA-seq Quick Start
+
+If you are a beginner and do not know which single-cell skill to run first,
+use this route:
+
+### Route A: I have raw FASTQ files
+
+```bash
+oc run sc-fastq-qc --input fastqs/ --output output/sc_fastq_qc
+oc run sc-count --input fastqs/ --method cellranger --reference /path/to/refdata-gex-GRCh38-2020-A --output output/sc_count
+oc run sc-qc --input output/sc_count/standardized_input.h5ad --output output/sc_qc
+oc run sc-preprocessing --input output/sc_count/standardized_input.h5ad --output output/sc_preprocessing
+```
+
+Use `sc-pseudoalign-count` instead of `sc-count` only when you explicitly want:
+
+- `simpleaf` / `alevin-fry`
+- `kb-python`
+
+### Route B: I already have Cell Ranger or STARsolo outputs
+
+```bash
+oc run sc-count --input sample_count/ --method cellranger --output output/sc_count
+oc run sc-qc --input output/sc_count/standardized_input.h5ad --output output/sc_qc
+oc run sc-preprocessing --input output/sc_count/standardized_input.h5ad --output output/sc_preprocessing
+```
+
+### Route C: I already have an external `.h5ad`
+
+```bash
+oc run sc-standardize-input --input data.h5ad --output output/sc_standardize
+oc run sc-qc --input output/sc_standardize/standardized_input.h5ad --output output/sc_qc
+oc run sc-preprocessing --input output/sc_standardize/standardized_input.h5ad --output output/sc_preprocessing
+```
+
+### Route D: I want RNA velocity
+
+```bash
+oc run sc-velocity-prep --input sample_count/ --method velocyto --gtf genes.gtf --output output/sc_velocity_prep
+oc run sc-velocity --input output/sc_velocity_prep/velocity_input.h5ad --output output/sc_velocity
+```
+
+### When To Use `sc-multi-count`
+
+Only use `sc-multi-count` if the data is clearly:
+
+- `cellranger multi`
+- CITE-seq / ADT
+- HTO / hashing
+
+For ordinary scRNA 10x data, the default route is still `sc-count`.
+
+For a longer beginner-friendly explanation, see:
+
+- `knowledge_base/skill-guides/singlecell/sc-rna-quickstart.md`
+
+---
+
 ## 1. Preprocessing (`preprocess`)
 
 Single fixed pipeline — no `--method` selection needed.
@@ -1185,4 +1243,3 @@ python omicsclaw.py run bulkrna-trajblend --input bulk_counts.csv \
 | **bulkrna-ppi-network** | — | STRING API, degree/betweenness centrality |
 | **bulkrna-survival** | `median` | median split, optimal cutoff; KM, log-rank, Cox PH |
 | **bulkrna-trajblend** | — | NNLS deconvolution, PCA+KNN trajectory mapping |
-
