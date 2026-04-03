@@ -636,15 +636,25 @@ Join the OmicsClaw community to share analysis tips, report issues, and help sha
 
 <table>
   <tr>
-    <td align="center" width="220">
-      <b>微信交流群</b><br/>
-      <sub>OmicsClaw 体验交流群</sub><br/><br/>
-      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw WeChat Group" width="200"/><br/>
-      <sub>扫码加入，加群后二维码自动更新</sub>
+    <td align="center" width="30%">
+      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw WeChat Group" width="180"/>
+      <br/>
+      <b>WeChat Group</b>
+      <br/>
+      <sub>Scan to join</sub>
     </td>
-    <td valign="top">
-      <b>📋 <a href="https://github.com/TianGzlab/OmicsClaw/issues">GitHub Issues</a></b> — Bug reports and feature requests<br/><br/>
-      <b>💬 <a href="https://github.com/TianGzlab/OmicsClaw/discussions">GitHub Discussions</a></b> — Questions, ideas, and workflow sharing
+    <td valign="middle" width="70%">
+      <ul>
+        <li>
+          <b>🐛 <a href="https://github.com/TianGzlab/OmicsClaw/issues">Bug Reports & Feature Requests</a></b>
+          <br/>Help us improve OmicsClaw by reporting issues and suggesting new features.
+        </li>
+        <br/>
+        <li>
+          <b>💡 <a href="https://github.com/TianGzlab/OmicsClaw/discussions">Community Discussions</a></b>
+          <br/>Share analysis tips, ask questions, and discuss workflows with other researchers.
+        </li>
+      </ul>
     </td>
   </tr>
 </table>

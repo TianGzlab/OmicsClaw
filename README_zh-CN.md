@@ -642,15 +642,25 @@ make bot-multi CHANNELS=telegram,discord
 
 <table>
   <tr>
-    <td align="center" width="220">
-      <b>微信交流群</b><br/>
-      <sub>OmicsClaw 体验交流群</sub><br/><br/>
-      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw 微信交流群" width="200"/><br/>
-      <sub>扫码加入，加群后二维码自动更新</sub>
+    <td align="center" width="30%">
+      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw 微信交流群" width="180"/>
+      <br/>
+      <b>微信交流群</b>
+      <br/>
+      <sub>扫码加入体验交流</sub>
     </td>
-    <td valign="top">
-      <b>📋 <a href="https://github.com/TianGzlab/OmicsClaw/issues">GitHub Issues</a></b> — 问题反馈与功能建议<br/><br/>
-      <b>💬 <a href="https://github.com/TianGzlab/OmicsClaw/discussions">GitHub Discussions</a></b> — 想法交流与工作流分享
+    <td valign="middle" width="70%">
+      <ul>
+        <li>
+          <b>🐛 <a href="https://github.com/TianGzlab/OmicsClaw/issues">问题反馈与功能建议 (Issues)</a></b>
+          <br/>遇到 Bug 或有新的需求？点击提交 Issue，帮助我们不断改进。
+        </li>
+        <br/>
+        <li>
+          <b>💡 <a href="https://github.com/TianGzlab/OmicsClaw/discussions">交流与工作流分享 (Discussions)</a></b>
+          <br/>加入讨论板块，分享您的分析技巧、使用心得以及科研见解。
+        </li>
+      </ul>
     </td>
   </tr>
 </table>
