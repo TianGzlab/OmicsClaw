@@ -12,7 +12,6 @@ from .qc import (
 from .upstream import (
     plot_barcode_rank,
     plot_count_distributions,
-    plot_feature_type_totals,
     plot_fastq_per_base_quality,
     plot_fastq_sample_summary,
     plot_velocity_gene_balance,
@@ -33,7 +32,6 @@ __all__ = [
     "plot_fastq_per_base_quality",
     "plot_count_distributions",
     "plot_barcode_rank",
-    "plot_feature_type_totals",
     "plot_velocity_layer_summary",
     "plot_velocity_gene_balance",
 ]

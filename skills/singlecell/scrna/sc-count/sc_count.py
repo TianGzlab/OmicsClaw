@@ -38,6 +38,12 @@ from omicsclaw.common.report import (
 )
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.export import save_h5ad
+from skills.singlecell._lib.pseudoalign import (
+    inspect_pseudoalign_output,
+    load_pseudoalign_adata,
+    run_kb_count,
+    run_simpleaf_quant,
+)
 from skills.singlecell._lib.upstream import (
     choose_fastq_sample,
     detect_cellranger_outs,
@@ -143,6 +149,8 @@ def _write_reproducibility(output_dir: Path, args: argparse.Namespace, *, demo_m
     command_parts.extend(["--output", str(output_dir), "--method", args.method])
     if args.reference:
         command_parts.extend(["--reference", args.reference])
+    if getattr(args, "t2g", None):
+        command_parts.extend(["--t2g", args.t2g])
     if args.sample:
         command_parts.extend(["--sample", args.sample])
     if args.read2:
@@ -162,18 +170,22 @@ def _report_artifact_lines(artifacts) -> list[str]:
     if artifacts is None:
         return ["- Demo mode: no external counting backend was executed."]
     lines = [f"- **Backend run directory**: `{artifacts.run_dir}`"]
-    if artifacts.filtered_h5:
+    if hasattr(artifacts, "filtered_h5") and artifacts.filtered_h5:
         lines.append(f"- **Filtered H5**: `{artifacts.filtered_h5}`")
-    if artifacts.filtered_matrix_dir:
+    if hasattr(artifacts, "filtered_matrix_dir") and artifacts.filtered_matrix_dir:
         lines.append(f"- **Filtered MEX**: `{artifacts.filtered_matrix_dir}`")
-    if artifacts.raw_h5:
+    if hasattr(artifacts, "raw_h5") and artifacts.raw_h5:
         lines.append(f"- **Raw H5**: `{artifacts.raw_h5}`")
-    if artifacts.raw_matrix_dir:
+    if hasattr(artifacts, "raw_matrix_dir") and artifacts.raw_matrix_dir:
         lines.append(f"- **Raw MEX**: `{artifacts.raw_matrix_dir}`")
-    if artifacts.bam_path:
+    if hasattr(artifacts, "bam_path") and artifacts.bam_path:
         lines.append(f"- **BAM**: `{artifacts.bam_path}`")
-    if artifacts.summary_csv:
+    if hasattr(artifacts, "summary_csv") and artifacts.summary_csv:
         lines.append(f"- **Summary CSV**: `{artifacts.summary_csv}`")
+    if hasattr(artifacts, "h5ad_path") and artifacts.h5ad_path:
+        lines.append(f"- **Imported H5AD**: `{artifacts.h5ad_path}`")
+    if hasattr(artifacts, "matrix_dir") and artifacts.matrix_dir:
+        lines.append(f"- **Imported matrix directory**: `{artifacts.matrix_dir}`")
     return lines
 
 
@@ -242,12 +254,18 @@ def _demo_adata():
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate scRNA-seq count matrices with Cell Ranger or STARsolo.")
+    parser = argparse.ArgumentParser(description="Generate scRNA-seq count matrices with mainstream counting backends.")
     parser.add_argument("--input", dest="input_path", help="FASTQ path or existing Cell Ranger / STARsolo output directory")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run built-in demo mode")
-    parser.add_argument("--method", choices=["cellranger", "starsolo"], default="cellranger", help="Counting backend")
-    parser.add_argument("--reference", help="Cell Ranger transcriptome or STAR genome directory")
+    parser.add_argument(
+        "--method",
+        choices=["cellranger", "starsolo", "simpleaf", "kb_python"],
+        default="cellranger",
+        help="Counting backend",
+    )
+    parser.add_argument("--reference", help="Backend reference path: Cell Ranger transcriptome, STAR genome dir, simpleaf index, or kallisto index")
+    parser.add_argument("--t2g", help="Transcript-to-gene map required for kb-python runs")
     parser.add_argument("--sample", help="Choose one sample from a multi-sample FASTQ directory")
     parser.add_argument("--read2", help="Explicit mate file when --input points to one FASTQ file")
     parser.add_argument("--threads", type=int, default=8, help="Backend thread count")
@@ -284,6 +302,11 @@ def main() -> None:
             artifacts = inspect_cellranger_run(input_path)
         elif args.method == "starsolo" and detect_starsolo_output(input_path):
             artifacts = inspect_starsolo_run(input_path)
+        elif args.method in {"simpleaf", "kb_python"} and (input_path.is_dir() or input_path.suffix.lower() == ".h5ad"):
+            try:
+                artifacts = inspect_pseudoalign_output(input_path, method=args.method)
+            except Exception:
+                artifacts = None
         else:
             if not args.reference:
                 raise ValueError("`sc-count` requires `--reference` for real backend runs.")
@@ -299,7 +322,7 @@ def main() -> None:
                     threads=args.threads,
                     chemistry=args.chemistry,
                 )
-            else:
+            elif args.method == "starsolo":
                 if args.chemistry == "auto":
                     raise ValueError("STARsolo runs require an explicit `--chemistry` value such as `10xv3`.")
                 whitelist = Path(args.whitelist) if args.whitelist else guess_starsolo_whitelist(args.reference, args.chemistry)
@@ -316,10 +339,34 @@ def main() -> None:
                     whitelist=whitelist,
                     features=("Gene",),
                 )
+            elif args.method == "simpleaf":
+                artifacts, execution = run_simpleaf_quant(
+                    sample,
+                    index_path=args.reference,
+                    chemistry="10xv3" if args.chemistry == "auto" else args.chemistry,
+                    output_dir=output_dir,
+                    threads=args.threads,
+                )
+            else:
+                if not args.t2g:
+                    raise ValueError("kb-python runs require `--t2g`.")
+                artifacts, execution = run_kb_count(
+                    sample,
+                    index_path=args.reference,
+                    t2g_path=args.t2g,
+                    technology="10xv3" if args.chemistry == "auto" else args.chemistry,
+                    output_dir=output_dir,
+                    threads=args.threads,
+                )
 
-        adata = load_count_adata_from_artifacts(artifacts)
-        raw_adata = load_raw_count_adata_from_artifacts(artifacts) or adata.copy()
-        backend_summary = parse_summary_table(artifacts.summary_csv or artifacts.log_path)
+        if args.method in {"simpleaf", "kb_python"}:
+            adata = load_pseudoalign_adata(artifacts)
+            raw_adata = adata.copy()
+            backend_summary = {}
+        else:
+            adata = load_count_adata_from_artifacts(artifacts)
+            raw_adata = load_raw_count_adata_from_artifacts(artifacts) or adata.copy()
+            backend_summary = parse_summary_table(artifacts.summary_csv or artifacts.log_path)
         standardized, contract = standardize_count_adata(
             adata,
             skill_name=SKILL_NAME,
@@ -327,16 +374,24 @@ def main() -> None:
             source_label=f"{args.method}.filtered_matrix",
             warnings=[],
         )
-        standardized.uns["omicsclaw_count_artifacts"] = {
-            "method": artifacts.method,
-            "run_dir": str(artifacts.run_dir),
-            "filtered_matrix_dir": str(artifacts.filtered_matrix_dir) if artifacts.filtered_matrix_dir else "",
-            "filtered_h5": str(artifacts.filtered_h5) if artifacts.filtered_h5 else "",
-            "raw_matrix_dir": str(artifacts.raw_matrix_dir) if artifacts.raw_matrix_dir else "",
-            "raw_h5": str(artifacts.raw_h5) if artifacts.raw_h5 else "",
-            "bam_path": str(artifacts.bam_path) if artifacts.bam_path else "",
-            "summary_csv": str(artifacts.summary_csv) if artifacts.summary_csv else "",
-        }
+        if args.method in {"simpleaf", "kb_python"}:
+            standardized.uns["omicsclaw_count_artifacts"] = {
+                "method": artifacts.method,
+                "run_dir": str(artifacts.run_dir),
+                "h5ad_path": str(artifacts.h5ad_path) if artifacts.h5ad_path else "",
+                "matrix_dir": str(artifacts.matrix_dir) if artifacts.matrix_dir else "",
+            }
+        else:
+            standardized.uns["omicsclaw_count_artifacts"] = {
+                "method": artifacts.method,
+                "run_dir": str(artifacts.run_dir),
+                "filtered_matrix_dir": str(artifacts.filtered_matrix_dir) if artifacts.filtered_matrix_dir else "",
+                "filtered_h5": str(artifacts.filtered_h5) if artifacts.filtered_h5 else "",
+                "raw_matrix_dir": str(artifacts.raw_matrix_dir) if artifacts.raw_matrix_dir else "",
+                "raw_h5": str(artifacts.raw_h5) if artifacts.raw_h5 else "",
+                "bam_path": str(artifacts.bam_path) if artifacts.bam_path else "",
+                "summary_csv": str(artifacts.summary_csv) if artifacts.summary_csv else "",
+            }
 
     barcode_metrics = _barcode_metrics_df(standardized)
     count_summary = _count_summary_df(standardized, args.method if not args.demo else "demo", backend_summary)
@@ -364,6 +419,7 @@ def main() -> None:
         "method": args.method if not args.demo else "demo",
         "params": {
             "reference": args.reference or "",
+            "t2g": args.t2g or "",
             "sample": args.sample or "",
             "threads": int(args.threads),
             "chemistry": args.chemistry,
@@ -386,7 +442,7 @@ def main() -> None:
     write_standard_run_artifacts(
         output_dir,
         skill_alias=SKILL_NAME,
-        description="Generate single-cell count matrices with Cell Ranger or STARsolo and export a downstream-ready standardized AnnData.",
+        description="Generate single-cell count matrices with Cell Ranger, STARsolo, SimpleAF / Alevin-fry, or kb-python and export a downstream-ready standardized AnnData.",
         result_payload=result_payload,
         preferred_method=summary["method"],
         script_path=Path(__file__).resolve(),

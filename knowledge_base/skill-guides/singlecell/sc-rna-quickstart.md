@@ -6,7 +6,6 @@ domains: [singlecell]
 related_skills:
   - sc-fastq-qc
   - sc-count
-  - sc-pseudoalign-count
   - sc-standardize-input
   - sc-qc
   - sc-preprocessing
@@ -69,7 +68,7 @@ Recommended route:
 If the user explicitly wants:
 
 - **Cell Ranger or STARsolo**: use `sc-count`
-- **SimpleAF / Alevin-fry or kb-python**: use `sc-pseudoalign-count`
+- **SimpleAF / Alevin-fry or kb-python**: still use `sc-count`, but switch `--method`
 
 ### Case 2: The user already has Cell Ranger or STARsolo output
 
@@ -118,27 +117,15 @@ Use `sc-count` when:
 - they want STARsolo
 - they already have Cell Ranger or STARsolo outputs
 
-### The alternative path: `sc-pseudoalign-count`
+### Advanced counting methods inside `sc-count`
 
-Use `sc-pseudoalign-count` when:
+If a user explicitly wants pseudoalignment, keep them on `sc-count` and switch:
 
-- the user explicitly wants SimpleAF / Alevin-fry
-- or they explicitly want kb-python / kallisto-based counting
+- `--method simpleaf`
+- `--method kb_python`
 
-For a beginner who says nothing special, `sc-count` is the more natural first
-default.
-
-## When To Use `sc-multi-count`
-
-Only route to `sc-multi-count` if the user is clearly dealing with:
-
-- `cellranger multi`
-- CITE-seq
-- antibody capture / ADT
-- hashing / HTO
-
-If the user only says “single-cell RNA-seq” and has ordinary 10x gene
-expression data, do **not** send them to `sc-multi-count`.
+For a beginner who says nothing special, `sc-count --method cellranger` is the
+more natural first default.
 
 ## A Beginner-Friendly Command Sequence
 
@@ -189,12 +176,6 @@ Correct route:
 
 - prepare velocity layers first with `sc-velocity-prep`
 
-### Mistake 4: Using `sc-multi-count` for ordinary scRNA
-
-Correct route:
-
-- use `sc-count` unless the data is clearly multimodal
-
 ## Simple Decision Rule For Routing
 
 If the user only says:
@@ -224,7 +205,7 @@ If they say:
 
 route them to:
 
-- `sc-pseudoalign-count`
+- `sc-count` with the corresponding `--method`
 
 If they say:
 
@@ -243,6 +224,5 @@ If they say:
 - “HTO”
 - “cellranger multi”
 
-route them to:
-
-- `sc-multi-count`
+then explain that this is outside the current mainline scRNA workflow and
+should be handled in a future dedicated single-cell multi-omics path.

@@ -1,12 +1,13 @@
 ---
 name: sc-count
 description: >-
-  Default 10x scRNA counting route. Turn FASTQ or existing Cell Ranger /
-  STARsolo outputs into a downstream-ready standardized AnnData.
+  Default scRNA counting route. Turn FASTQ or existing Cell Ranger, STARsolo,
+  SimpleAF / Alevin-fry, or kb-python outputs into a downstream-ready
+  standardized AnnData.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, count, cellranger, starsolo, fastq]
+tags: [singlecell, scrna, count, cellranger, starsolo, simpleaf, kb-python, fastq]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -34,9 +35,10 @@ metadata:
       - "--read2"
       - "--reference"
       - "--sample"
+      - "--t2g"
       - "--threads"
       - "--whitelist"
-    legacy_aliases: [scrna-count]
+    legacy_aliases: [scrna-count, sc-pseudoalign-count, scrna-pseudoalign-count]
     saves_h5ad: true
     requires_preprocessed: false
     param_hints:
@@ -58,6 +60,23 @@ metadata:
           - "--chemistry: current STARsolo wrapper supports `10xv2`, `10xv3`, and `10xv4` geometry."
           - "--whitelist: strongly recommended; OmicsClaw only auto-detects common local v2/v3 whitelist files."
           - "--reference: must be a STAR genome directory, not a raw FASTA/GTF pair."
+      simpleaf:
+        priority: "reference -> chemistry -> sample -> threads"
+        params: ["reference", "chemistry", "sample", "threads"]
+        defaults: {threads: 8, chemistry: "10xv3"}
+        requires: ["simpleaf_output_or_fastq"]
+        tips:
+          - "--reference: current wrapper expects a simpleaf index path."
+          - "--chemistry: current wrapper is optimized for mainstream 10x-style droplet presets."
+      kb_python:
+        priority: "reference -> t2g -> chemistry -> sample -> threads"
+        params: ["reference", "t2g", "chemistry", "sample", "threads"]
+        defaults: {threads: 8, chemistry: "10xv3"}
+        requires: ["kb_output_or_fastq"]
+        tips:
+          - "--reference: current wrapper expects a kallisto index path."
+          - "--t2g: required transcript-to-gene map for kb-python runs."
+          - "--chemistry: forwarded as kb technology string such as `10xv2`, `10xv3`, or `10xv4`."
 ---
 
 # 🧬 Single-Cell Counting
@@ -77,9 +96,8 @@ FASTQ input into standardized count matrices and a downstream-ready AnnData.
 
 ## Core Capabilities
 
-1. **Two mainstream counting backends**: Cell Ranger and STARsolo.
-2. **Direct import path**: can also standardize existing Cell Ranger or
-   STARsolo output directories without rerunning the backend.
+1. **Four counting backends**: Cell Ranger, STARsolo, SimpleAF / Alevin-fry, and kb-python.
+2. **Direct import path**: can also standardize existing backend output directories without rerunning them.
 3. **Stable downstream contract**: writes `standardized_input.h5ad` with
    `layers['counts']` and OmicsClaw input-contract metadata.
 4. **Standard output layer**: barcode-rank and count-distribution figures plus
@@ -102,14 +120,15 @@ FASTQ input into standardized count matrices and a downstream-ready AnnData.
 | Requirement | Where it should exist | Why it matters |
 |-------------|------------------------|----------------|
 | Raw FASTQs or existing count output | input path | counting requires raw reads or a backend output directory to import |
-| Backend reference | `--reference` | required for real Cell Ranger / STARsolo runs |
+| Backend reference | `--reference` | required for real backend runs |
 | 10x chemistry contract | `--chemistry`, `--whitelist` | required for STARsolo barcode/UMI parsing |
+| Transcript-to-gene map | `--t2g` | required for kb-python runs |
 
 ## Workflow
 
 1. **Load**: detect whether the input is FASTQ or an existing count-output directory.
 2. **Validate**: enforce one chosen sample and backend-specific requirements.
-3. **Run method**: launch Cell Ranger or STARsolo when needed, or import existing outputs directly.
+3. **Run method**: launch the selected backend when needed, or import existing outputs directly.
 4. **Persist results**: load the filtered matrix, standardize it into the OmicsClaw AnnData contract, and preserve backend artifact paths.
 5. **Visualize / summarize**: generate barcode-rank and count-distribution plots plus summary tables.
 6. **Report**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle.
@@ -119,6 +138,8 @@ FASTQ input into standardized count matrices and a downstream-ready AnnData.
 ```bash
 oc run sc-count --input fastqs/ --method cellranger --reference /path/to/refdata-gex-GRCh38-2020-A --output results/
 oc run sc-count --input fastqs/ --method starsolo --reference /path/to/star_index --chemistry 10xv3 --whitelist /path/to/3M-february-2018.txt --output results/
+oc run sc-count --input fastqs/ --method simpleaf --reference /path/to/simpleaf_index --chemistry 10xv3 --output results/
+oc run sc-count --input fastqs/ --method kb_python --reference /path/to/kallisto.idx --t2g /path/to/t2g.txt --chemistry 10xv3 --output results/
 oc run sc-count --input sample_count/ --method cellranger --output results/
 python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_count_demo
 ```
@@ -128,6 +149,8 @@ python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_coun
 - "把这些单细胞 FASTQ 先跑成 count matrix"
 - "用 Cell Ranger 跑 10x 数据然后直接转 h5ad"
 - "用 STARsolo 产出能接 OmicsClaw 的 adata"
+- "用 simpleaf 跑 10x FASTQ 然后直接转 h5ad"
+- "把 kb-python 的输出接到后面的 scRNA 技能"
 
 ## Algorithm / Methodology
 
@@ -145,20 +168,35 @@ python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_coun
 3. **Import filtered matrix**: load `Solo.out/Gene/filtered`.
 4. **Standardize output**: create `layers['counts']` and record the same OmicsClaw contract as the Cell Ranger path.
 
+### SimpleAF / Alevin-fry Path
+
+1. **FASTQ grouping or import**: infer one sample or import an existing simpleaf output.
+2. **Run backend**: execute `simpleaf quant` when needed.
+3. **Import result**: read an existing H5AD or matrix output.
+4. **Standardize output**: create the same OmicsClaw count handoff contract.
+
+### kb-python Path
+
+1. **FASTQ grouping or import**: infer one sample or import an existing kb output.
+2. **Run backend**: execute `kb count` when needed.
+3. **Import result**: read an existing H5AD or matrix output.
+4. **Standardize output**: create the same OmicsClaw count handoff contract.
+
 **Key parameters**:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--method` | `cellranger` | choose Cell Ranger or STARsolo |
-| `--reference` | none | backend reference directory |
+| `--method` | `cellranger` | choose Cell Ranger, STARsolo, SimpleAF / Alevin-fry, or kb-python |
+| `--reference` | none | backend reference directory or index path |
+| `--t2g` | none | transcript-to-gene map for kb-python |
 | `--sample` | none | choose one sample from a multi-sample FASTQ directory |
 | `--threads` | `8` | thread count for backend execution |
 | `--chemistry` | `auto` | Cell Ranger auto-detects; STARsolo requires explicit supported chemistry |
 | `--whitelist` | none | STARsolo barcode whitelist file |
 
-> **Current OmicsClaw behavior**: STARsolo support is intentionally scoped to
-> mainstream 10x-style droplet geometry. Complex custom barcode protocols are
-> deferred.
+> **Current OmicsClaw behavior**: all non-Cell Ranger methods are intentionally
+> scoped to mainstream 10x-style droplet geometry first. Complex custom
+> chemistries remain deferred.
 
 ## Visualization Contract
 
@@ -187,7 +225,9 @@ output_directory/
 │   └── barcode_metrics.csv
 ├── artifacts/
 │   ├── cellranger/
-│   └── starsolo/
+│   ├── starsolo/
+│   ├── simpleaf/
+│   └── kb_python/
 └── reproducibility/
     ├── analysis_notebook.ipynb
     ├── commands.sh
@@ -203,8 +243,8 @@ output_directory/
 
 ## Knowledge Companions
 
-- `knowledge_base/knowhows/KH-sc-count-guardrails.md`: short execution guardrails for import-vs-run decisions and protocol boundaries.
-- `knowledge_base/skill-guides/singlecell/sc-count.md`: longer operator guide for Cell Ranger / STARsolo method choice and downstream hand-off.
+- `knowledge_base/knowhows/KH-sc-count-guardrails.md`: short execution guardrails for import-vs-run decisions and backend boundaries.
+- `knowledge_base/skill-guides/singlecell/sc-count.md`: longer operator guide for count-method choice and downstream hand-off.
 
 ## Dependencies
 
@@ -217,3 +257,5 @@ output_directory/
 
 - `cellranger`
 - `STAR`
+- `simpleaf`
+- `kb`
