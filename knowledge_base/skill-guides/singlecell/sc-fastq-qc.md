@@ -103,9 +103,8 @@ About to run scRNA FASTQ QC
 - If FastQC and MultiQC were available: point users to those artifacts first for tool-native interpretation.
 - If they were unavailable: explain that the OmicsClaw fallback summary is still valid for a lightweight local screen, but it is not a full FastQC replacement.
 - If quality looks acceptable:
-  - recommend `sc-count` for mainstream Cell Ranger / STARsolo RNA counting
-  - recommend `sc-multi-count` when the user is clearly heading into CITE-seq / HTO / Cell Ranger multi
-  - recommend `sc-pseudoalign-count` when the user explicitly prefers SimpleAF / Alevin-fry or kb-python
+  - recommend `sc-count` for the normal next step
+  - mention that advanced users can switch `sc-count --method` to `simpleaf` or `kb_python` if they explicitly want those backends
 - If quality looks problematic: say the next step is to fix the sequencing / preprocessing decision upstream, not to run downstream clustering anyway.
 
 ## Output Interpretation

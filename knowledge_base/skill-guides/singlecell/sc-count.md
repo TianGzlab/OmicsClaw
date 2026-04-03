@@ -92,8 +92,8 @@ directory for later reuse.
 
 Current OmicsClaw `sc-count` does:
 
-1. detect FASTQ samples or existing Cell Ranger / STARsolo outputs
-2. run Cell Ranger or STARsolo when needed
+1. detect FASTQ samples or existing backend outputs
+2. run the selected counting backend when needed
 3. import the filtered matrix
 4. standardize it into `standardized_input.h5ad`
 5. preserve backend artifact paths in the result object
@@ -106,10 +106,12 @@ Current OmicsClaw `sc-count` does **not** yet promise:
 4. Drop-seq / inDrops / Parse / custom barcode geometry
 5. BCL demultiplexing as a first-class skill
 
-Neighbor skills now cover adjacent paths:
+Advanced backends are available inside the same skill:
 
-- use `sc-multi-count` for mainstream Cell Ranger multi / CITE-seq / HTO-style multimodal outputs
-- use `sc-pseudoalign-count` for SimpleAF / Alevin-fry or kb-python count handoff
+- `cellranger`
+- `starsolo`
+- `simpleaf`
+- `kb_python`
 
 Important note:
 

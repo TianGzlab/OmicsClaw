@@ -196,27 +196,3 @@ def plot_velocity_gene_balance(
     fig.tight_layout()
     save_figure(fig, output_dir, filename)
 
-
-def plot_feature_type_totals(
-    feature_df: pd.DataFrame,
-    output_dir: Union[str, Path],
-    *,
-    filename: str = "feature_type_totals.png",
-) -> None:
-    """Plot counts aggregated by feature type for multimodal 10x outputs."""
-    import matplotlib.pyplot as plt
-
-    output_dir = Path(output_dir)
-    if feature_df.empty:
-        logger.warning("Feature-type summary is empty; skipping %s", filename)
-        return
-
-    apply_singlecell_theme()
-    fig, ax = plt.subplots(figsize=(max(6.2, 1.6 * len(feature_df)), 4.8))
-    ax.bar(feature_df["feature_type"], feature_df["total_counts"], color=QC_PALETTE["bar"])
-    ax.set_ylabel("Total counts")
-    ax.set_xlabel("Feature type")
-    ax.set_title("Counts by feature type")
-    ax.tick_params(axis="x", rotation=25)
-    fig.tight_layout()
-    save_figure(fig, output_dir, filename)

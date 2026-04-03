@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "generated_by": "scripts/generate_catalog.py",
-  "skill_count": 82,
+  "skill_count": 80,
   "skills": [
     {
       "name": "bulkrna-batch-correction",
@@ -921,7 +921,7 @@
     {
       "name": "sc-count",
       "cli_alias": "sc-count",
-      "description": "Default 10x scRNA counting route. Turn FASTQ or existing Cell Ranger / STARsolo outputs into a downstream-ready standardized AnnData.",
+      "description": "Default scRNA counting route. Turn FASTQ or existing Cell Ranger, STARsolo, SimpleAF / Alevin-fry, or kb-python outputs into a downstream-ready standardized AnnData.",
       "version": "0.1.0",
       "status": "mvp",
       "has_script": true,
@@ -1127,26 +1127,6 @@
       "trigger_keywords": []
     },
     {
-      "name": "sc-multi-count",
-      "cli_alias": "sc-multi-count",
-      "description": "Use this only for Cell Ranger multi, CITE-seq, ADT, or HTO-style multimodal 10x data. Preserves the multimodal object and also exports an RNA-only handoff.",
-      "version": "0.1.0",
-      "status": "mvp",
-      "has_script": true,
-      "has_tests": true,
-      "has_demo": true,
-      "demo_command": "python omicsclaw.py run sc-multi-count --demo",
-      "tags": [
-        "singlecell",
-        "scrna",
-        "multimodal",
-        "cite-seq",
-        "hto",
-        "cellranger-multi"
-      ],
-      "trigger_keywords": []
-    },
-    {
       "name": "sc-preprocessing",
       "cli_alias": "sc-preprocessing",
       "description": "Main preprocessing step after counts and QC. Filters cells, normalizes expression, selects HVGs, and runs PCA, UMAP, and clustering.",
@@ -1163,26 +1143,6 @@
         "qc",
         "normalization",
         "clustering"
-      ],
-      "trigger_keywords": []
-    },
-    {
-      "name": "sc-pseudoalign-count",
-      "cli_alias": "sc-pseudoalign-count",
-      "description": "Alternative counting route if you explicitly want SimpleAF / Alevin-fry or kb-python instead of Cell Ranger / STARsolo, with the same standardized AnnData handoff.",
-      "version": "0.1.0",
-      "status": "mvp",
-      "has_script": true,
-      "has_tests": true,
-      "has_demo": true,
-      "demo_command": "python omicsclaw.py run sc-pseudoalign-count --demo",
-      "tags": [
-        "singlecell",
-        "scrna",
-        "pseudoalignment",
-        "simpleaf",
-        "alevin-fry",
-        "kb-python"
       ],
       "trigger_keywords": []
     },

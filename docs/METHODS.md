@@ -20,7 +20,7 @@ oc run sc-qc --input output/sc_count/standardized_input.h5ad --output output/sc_
 oc run sc-preprocessing --input output/sc_count/standardized_input.h5ad --output output/sc_preprocessing
 ```
 
-Use `sc-pseudoalign-count` instead of `sc-count` only when you explicitly want:
+Use `sc-count` with a different `--method` only when you explicitly want:
 
 - `simpleaf` / `alevin-fry`
 - `kb-python`
@@ -48,15 +48,15 @@ oc run sc-velocity-prep --input sample_count/ --method velocyto --gtf genes.gtf 
 oc run sc-velocity --input output/sc_velocity_prep/velocity_input.h5ad --output output/sc_velocity
 ```
 
-### When To Use `sc-multi-count`
+### What This Quick Start Does Not Cover
 
-Only use `sc-multi-count` if the data is clearly:
+This quick start is for the mainline scRNA route.
+
+It does **not** currently try to cover:
 
 - `cellranger multi`
 - CITE-seq / ADT
 - HTO / hashing
-
-For ordinary scRNA 10x data, the default route is still `sc-count`.
 
 For a longer beginner-friendly explanation, see:
 

@@ -47,3 +47,17 @@ def test_demo_result_json(tmp_output):
     assert payload["skill"] == "sc-count"
     assert payload["summary"]["n_cells"] > 0
     assert payload["data"]["input_contract"]["standardized"] is True
+
+
+@pytest.mark.parametrize("method", ["simpleaf", "kb_python"])
+def test_demo_mode_accepts_pseudoalign_methods(tmp_output, method):
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--method", method, "--output", str(tmp_output)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    payload = json.loads((tmp_output / "result.json").read_text())
+    assert payload["summary"]["method"] == "demo"

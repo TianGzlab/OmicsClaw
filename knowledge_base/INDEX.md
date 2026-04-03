@@ -103,8 +103,7 @@ start here:
 | [skill-guides/README.md](skill-guides/README.md) | Explains how skill guides differ from validated workflows and from knowhow guardrails |
 | [skill-guides/singlecell/sc-rna-quickstart.md](skill-guides/singlecell/sc-rna-quickstart.md) | Beginner-friendly routing guide for the mainstream scRNA path from FASTQ to downstream-ready h5ad |
 | [skill-guides/singlecell/sc-fastq-qc.md](skill-guides/singlecell/sc-fastq-qc.md) | Implementation-aware guide for raw single-cell FASTQ QC and FastQC / MultiQC interpretation |
-| [skill-guides/singlecell/sc-count.md](skill-guides/singlecell/sc-count.md) | Implementation-aware guide for Cell Ranger / STARsolo count handoff |
-| [skill-guides/singlecell/sc-pseudoalign-count.md](skill-guides/singlecell/sc-pseudoalign-count.md) | Implementation-aware guide for SimpleAF / Alevin-fry and kb-python count handoff |
+| [skill-guides/singlecell/sc-count.md](skill-guides/singlecell/sc-count.md) | Implementation-aware guide for the main scRNA counting skill, including Cell Ranger, STARsolo, and advanced pseudoalignment backends |
 | [skill-guides/singlecell/sc-standardize-input.md](skill-guides/singlecell/sc-standardize-input.md) | Implementation-aware guide for stabilizing external AnnData input before downstream scRNA analysis |
 | [skill-guides/singlecell/sc-qc.md](skill-guides/singlecell/sc-qc.md) | Implementation-aware guide for scRNA QC before filtering |
 | [skill-guides/singlecell/sc-preprocessing.md](skill-guides/singlecell/sc-preprocessing.md) | Implementation-aware guide for normalization, HVG selection, PCA, UMAP, and clustering |
