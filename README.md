@@ -5,6 +5,11 @@
   <p><strong>Your Persistent AI Research Partner for Multi-Omics Analysis</strong></p>
   <p>Remembers your data • Learns your preferences • Resumes your workflows</p>
   <p><em>Conversational. Memory-enabled. Local-first. Cross-platform.</em></p>
+
+  <p>
+    <a href="README.md"><b>English</b></a> •
+    <a href="README_zh-CN.md"><b>简体中文</b></a>
+  </p>
 </div>
 
 # OmicsClaw
@@ -23,8 +28,7 @@
 > 经过充分的开发与严格测试，OmicsClaw v0.1.0 现已正式发布！在这一里程碑大版本中，我们提升了交互式自然语言分析的体验，并引入了直观的原生记忆管理面板（Memory Explorer），提供了覆盖 6 个组学领域的 72 个内置原生技能。欢迎下载体验，任何问题与建议请通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交。期待您的反馈！
 > 
 > OmicsClaw v0.1.0 is officially released! This milestone version completes the core architecture, elevating the interactive natural language analysis experience, introducing a native Memory Explorer dashboard, and providing robust execution of 72 built-in skills across 6 omics domains. Try it now and share your feedback via [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues).
-> 
-> [English](README.md) | [中文版](README_zh-CN.md)
+
 
 <h3>⚡ Unified Control, Different Surfaces</h3>
 
