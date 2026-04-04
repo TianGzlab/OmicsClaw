@@ -82,7 +82,8 @@ velocity-ready `spliced` and `unspliced` layers before running `sc-velocity`.
 2. **STARsolo path**: import existing STARsolo Velocyto matrices or run a
    velocity-oriented STARsolo job from FASTQ.
 3. **Optional merge path**: add velocity layers into an existing base `h5ad`.
-4. **Standard output layer**: writes `velocity_input.h5ad`, summary figures, and
+4. **Standard output layer**: writes `processed.h5ad`, a compatibility alias
+   `velocity_input.h5ad`, summary figures, and
    figure-ready exports.
 5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
    and rerun commands.
@@ -175,8 +176,9 @@ python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --demo --out
 
 ## Visualization Contract
 
-1. **Python standard gallery**: layer-total summary and spliced/unspliced top-gene balance plot.
+1. **Python standard gallery**: layer-total summary, top-gene balance, and top-gene stacked layer totals.
 2. **Figure-ready exports**: `figure_data/` tables for layer totals and top genes.
+3. **Gallery manifest**: `figures/manifest.json` records the standard velocity-prep gallery.
 
 ## Output Structure
 
@@ -185,10 +187,13 @@ output_directory/
 ├── README.md
 ├── report.md
 ├── result.json
+├── processed.h5ad
 ├── velocity_input.h5ad
 ├── figures/
 │   ├── velocity_layer_summary.png
 │   └── velocity_gene_balance.png
+│   ├── velocity_top_genes_stacked.png
+│   └── manifest.json
 ├── tables/
 │   ├── velocity_layer_summary.csv
 │   └── top_velocity_genes.csv

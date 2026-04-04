@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shlex
 import sys
 from pathlib import Path
 
@@ -40,72 +41,35 @@ from omicsclaw.common.report import (
     generate_report_header,
     generate_report_footer,
     load_result_json,
-    write_output_readme,
+    write_repro_requirements,
     write_result_json,
+    write_standard_run_artifacts,
 )
 from omicsclaw.common.checksums import sha256_file
+from skills.singlecell._lib.adata_utils import (
+    propagate_singlecell_contracts,
+    store_analysis_metadata,
+)
+from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
 from skills.singlecell._lib.method_config import (
     MethodConfig,
     validate_method_choice,
 )
-from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_velocity
 from skills.singlecell._lib import trajectory as sc_traj
+from skills.singlecell._lib.viz import (
+    plot_latent_time_distribution,
+    plot_velocity_magnitude_distribution,
+    plot_velocity_top_genes_bar,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-velocity"
-SKILL_VERSION = "0.2.0"
-
-
-def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
-    try:
-        from importlib.metadata import PackageNotFoundError, version as get_version
-    except ImportError:  # pragma: no cover
-        PackageNotFoundError = Exception
-        from importlib_metadata import version as get_version  # type: ignore
-
-    lines: list[str] = []
-    for pkg in packages:
-        try:
-            lines.append(f"{pkg}=={get_version(pkg)}")
-        except PackageNotFoundError:
-            continue
-        except Exception:
-            continue
-    (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-
-
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
-            result_payload=result_payload,
-            preferred_method=summary.get("mode", "stochastic"),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
-            result_payload=result_payload,
-            preferred_method=summary.get("mode", "stochastic"),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
+SKILL_VERSION = "0.3.0"
+SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-velocity/sc_velocity.py"
 
 # ---------------------------------------------------------------------------
 # Method registry
@@ -159,6 +123,118 @@ _METHOD_DISPATCH = {
 }
 
 
+def _write_figures_manifest(output_dir: Path, plots: list[dict]) -> None:
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "recipe_id": "standard-sc-velocity-gallery",
+        "skill_name": SKILL_NAME,
+        "title": "Single-cell RNA velocity gallery",
+        "description": "Canonical velocity plots and supporting summaries for scVelo runs.",
+        "backend": "python",
+        "plots": plots,
+    }
+    (figures_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+    (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _velocity_summary_df(summary: dict, params: dict) -> pd.DataFrame:
+    rows = [
+        {"metric": "method", "value": params.get("method", "")},
+        {"metric": "mode", "value": params.get("mode", "")},
+        {"metric": "n_cells", "value": summary.get("n_cells", 0)},
+        {"metric": "n_genes", "value": summary.get("n_genes", 0)},
+        {"metric": "has_latent_time", "value": bool(summary.get("has_latent_time", False))},
+    ]
+    if "latent_time_range" in summary:
+        rows.append({"metric": "latent_time_min", "value": summary["latent_time_range"][0]})
+        rows.append({"metric": "latent_time_max", "value": summary["latent_time_range"][1]})
+    return pd.DataFrame(rows)
+
+
+def _velocity_cell_summary_df(adata) -> pd.DataFrame:
+    frame = pd.DataFrame(index=adata.obs_names.astype(str))
+    if "X_umap" in adata.obsm:
+        frame["umap_1"] = np.asarray(adata.obsm["X_umap"])[:, 0]
+        frame["umap_2"] = np.asarray(adata.obsm["X_umap"])[:, 1]
+    if "velocity" in adata.layers:
+        velocity = np.asarray(adata.layers["velocity"])
+        frame["velocity_magnitude"] = np.linalg.norm(velocity, axis=1)
+    if "latent_time" in adata.obs.columns:
+        frame["latent_time"] = adata.obs["latent_time"].astype(float).to_numpy()
+    return frame.reset_index(names="cell_id")
+
+
+def _velocity_gene_summary_df(adata, n_top: int = 40) -> pd.DataFrame:
+    if "velocity" not in adata.layers:
+        return pd.DataFrame(columns=["gene", "mean_abs_velocity", "mean_velocity"])
+    velocity = np.asarray(adata.layers["velocity"])
+    mean_abs = np.mean(np.abs(velocity), axis=0)
+    mean_signed = np.mean(velocity, axis=0)
+    frame = pd.DataFrame(
+        {
+            "gene": adata.var_names.astype(str),
+            "mean_abs_velocity": mean_abs,
+            "mean_velocity": mean_signed,
+        }
+    )
+    return frame.sort_values("mean_abs_velocity", ascending=False).head(n_top).reset_index(drop=True)
+
+
+def _export_velocity_tables(
+    output_dir: Path,
+    *,
+    summary_df: pd.DataFrame,
+    cell_df: pd.DataFrame,
+    gene_df: pd.DataFrame,
+) -> dict[str, str]:
+    tables_dir = output_dir / "tables"
+    figure_data_dir = output_dir / "figure_data"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "velocity_summary": "velocity_summary.csv",
+        "velocity_cells": "velocity_cells.csv",
+        "top_velocity_genes": "top_velocity_genes.csv",
+    }
+    summary_df.to_csv(tables_dir / files["velocity_summary"], index=False)
+    cell_df.to_csv(tables_dir / files["velocity_cells"], index=False)
+    gene_df.to_csv(tables_dir / files["top_velocity_genes"], index=False)
+
+    summary_df.to_csv(figure_data_dir / files["velocity_summary"], index=False)
+    cell_df.to_csv(figure_data_dir / files["velocity_cells"], index=False)
+    gene_df.to_csv(figure_data_dir / files["top_velocity_genes"], index=False)
+    _write_figure_data_manifest(
+        output_dir,
+        {
+            "skill": SKILL_NAME,
+            "recipe_id": "standard-sc-velocity-gallery",
+            "available_files": files,
+        },
+    )
+    return files
+
+
+def _write_reproducibility(output_dir: Path, params: dict, input_file: str | None, *, demo_mode: bool) -> None:
+    repro_dir = output_dir / "reproducibility"
+    repro_dir.mkdir(parents=True, exist_ok=True)
+    command_parts = ["python", SCRIPT_REL_PATH]
+    if demo_mode:
+        command_parts.append("--demo")
+    elif input_file:
+        command_parts.extend(["--input", input_file])
+    command_parts.extend(["--output", str(output_dir), "--method", params["method"], "--n-jobs", str(params["n_jobs"])])
+    command = " ".join(shlex.quote(part) for part in command_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
+    write_repro_requirements(output_dir, ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "scvelo"])
+
+
 def check_scvelo_available() -> bool:
     """Check if scVelo is available."""
     try:
@@ -168,9 +244,9 @@ def check_scvelo_available() -> bool:
         return False
 
 
-def generate_velocity_figures(adata, output_dir: Path) -> list[str]:
-    """Generate velocity visualization figures."""
-    figures = []
+def generate_velocity_figures(adata, output_dir: Path, *, cell_df: pd.DataFrame, gene_df: pd.DataFrame) -> list[dict]:
+    """Generate velocity visualization figures and return manifest-friendly records."""
+    figures: list[dict] = []
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
@@ -184,7 +260,19 @@ def generate_velocity_figures(adata, output_dir: Path) -> list[str]:
             title="RNA Velocity",
         )
         if fig_path:
-            figures.append(fig_path)
+            figures.append(
+                {
+                    "plot_id": "velocity_stream",
+                    "role": "overview",
+                    "backend": "python",
+                    "renderer": "plot_velocity_stream",
+                    "filename": "velocity_stream.png",
+                    "title": "RNA velocity stream",
+                    "description": "Velocity stream embedding on the active UMAP basis.",
+                    "status": "rendered",
+                    "path": str(fig_path),
+                }
+            )
     except Exception as e:
         logger.warning(f"Velocity stream plot failed: {e}")
 
@@ -213,7 +301,19 @@ def generate_velocity_figures(adata, output_dir: Path) -> list[str]:
             fig.tight_layout()
             fig_path = figures_dir / "velocity_magnitude_umap.png"
             fig.savefig(fig_path, dpi=300, bbox_inches="tight")
-            figures.append(str(fig_path))
+            figures.append(
+                {
+                    "plot_id": "velocity_magnitude_umap",
+                    "role": "diagnostic",
+                    "backend": "python",
+                    "renderer": "velocity_magnitude_umap",
+                    "filename": "velocity_magnitude_umap.png",
+                    "title": "Velocity magnitude",
+                    "description": "UMAP colored by per-cell velocity magnitude.",
+                    "status": "rendered",
+                    "path": str(fig_path),
+                }
+            )
             plt.close()
             logger.info(f"  Saved: velocity_magnitude_umap.png")
 
@@ -241,11 +341,78 @@ def generate_velocity_figures(adata, output_dir: Path) -> list[str]:
             fig.tight_layout()
             fig_path = figures_dir / "latent_time_umap.png"
             fig.savefig(fig_path, dpi=300, bbox_inches="tight")
-            figures.append(str(fig_path))
+            figures.append(
+                {
+                    "plot_id": "latent_time_umap",
+                    "role": "supporting",
+                    "backend": "python",
+                    "renderer": "latent_time_umap",
+                    "filename": "latent_time_umap.png",
+                    "title": "Latent time",
+                    "description": "UMAP colored by latent time when available.",
+                    "status": "rendered",
+                    "path": str(fig_path),
+                }
+            )
             plt.close()
             logger.info(f"  Saved: latent_time_umap.png")
         except Exception as e:
             logger.warning(f"Latent time plot failed: {e}")
+
+    try:
+        plot_velocity_top_genes_bar(gene_df, output_dir)
+        figures.append(
+            {
+                "plot_id": "velocity_top_genes",
+                "role": "supporting",
+                "backend": "python",
+                "renderer": "plot_velocity_top_genes_bar",
+                "filename": "velocity_top_genes.png",
+                "title": "Top genes by velocity magnitude",
+                "description": "Genes ranked by mean absolute velocity.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_top_genes.png"),
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Top velocity genes bar plot failed: {e}")
+
+    try:
+        plot_velocity_magnitude_distribution(cell_df, output_dir)
+        figures.append(
+            {
+                "plot_id": "velocity_magnitude_distribution",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_velocity_magnitude_distribution",
+                "filename": "velocity_magnitude_distribution.png",
+                "title": "Velocity magnitude distribution",
+                "description": "Histogram of per-cell velocity magnitudes.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_magnitude_distribution.png"),
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Velocity magnitude distribution plot failed: {e}")
+
+    if "latent_time" in cell_df.columns:
+        try:
+            plot_latent_time_distribution(cell_df, output_dir)
+            figures.append(
+                {
+                    "plot_id": "latent_time_distribution",
+                    "role": "supporting",
+                    "backend": "python",
+                    "renderer": "plot_latent_time_distribution",
+                    "filename": "latent_time_distribution.png",
+                    "title": "Latent time distribution",
+                    "description": "Histogram of latent time values.",
+                    "status": "rendered",
+                    "path": str(output_dir / "figures" / "latent_time_distribution.png"),
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Latent time distribution plot failed: {e}")
 
     return figures
 
@@ -293,13 +460,22 @@ def write_velocity_report(
         f"- `--n-jobs`: {params.get('n_jobs', 4)}",
         "",
         "## Output Files\n",
-        "- `adata_with_velocity.h5ad` — AnnData with velocity results",
+        "- `processed.h5ad` — AnnData with velocity results",
+        "- `adata_with_velocity.h5ad` — compatibility alias pointing to the same result",
         "- `figures/velocity_stream.png` — Velocity stream plot on UMAP",
         "- `figures/velocity_magnitude_umap.png` — Velocity magnitude on UMAP",
+        "- `figures/velocity_magnitude_distribution.png` — Distribution of per-cell velocity magnitude",
+        "- `figures/velocity_top_genes.png` — Top genes ranked by mean absolute velocity",
+        "- `tables/velocity_summary.csv` — run-level velocity summary",
+        "- `tables/velocity_cells.csv` — per-cell velocity summaries",
+        "- `tables/top_velocity_genes.csv` — top genes ranked by mean absolute velocity",
+        "- `figures/manifest.json` — standard velocity gallery manifest",
+        "- `figure_data/manifest.json` — plot-ready data manifest",
     ])
 
     if summary.get("has_latent_time"):
         body_lines.append("- `figures/latent_time_umap.png` — Latent time on UMAP")
+        body_lines.append("- `figures/latent_time_distribution.png` — Distribution of latent time values")
 
     body_lines.extend([
         "",
@@ -356,8 +532,10 @@ def generate_demo_data():
         )
 
     # Add layers
+    adata.layers["counts"] = spliced.copy()
     adata.layers["spliced"] = spliced
     adata.layers["unspliced"] = unspliced
+    adata.raw = adata.copy()
 
     # Basic preprocessing
     sc.pp.filter_genes(adata, min_cells=10)
@@ -501,42 +679,70 @@ def main():
     if "X_umap" not in adata.obsm:
         sc.tl.umap(adata)
 
-    figures = generate_velocity_figures(adata, output_dir)
+    summary_df = _velocity_summary_df(summary, params)
+    cell_df = _velocity_cell_summary_df(adata)
+    gene_df = _velocity_gene_summary_df(adata)
+    figures = generate_velocity_figures(adata, output_dir, cell_df=cell_df, gene_df=gene_df)
+    _write_figures_manifest(output_dir, figures)
+    table_files = _export_velocity_tables(output_dir, summary_df=summary_df, cell_df=cell_df, gene_df=gene_df)
 
     # Write report
     logger.info("Writing report...")
     write_velocity_report(output_dir, summary, params, input_file)
 
     # Save data
-    output_h5ad = output_dir / "adata_with_velocity.h5ad"
-    from skills.singlecell._lib.adata_utils import store_analysis_metadata
+    if "counts" not in adata.layers:
+        adata.layers["counts"] = adata.X.copy()
+    if adata.raw is None:
+        adata.raw = adata.copy()
     store_analysis_metadata(adata, SKILL_NAME, method, params)
-    adata.write_h5ad(output_h5ad)
+    _, matrix_contract = propagate_singlecell_contracts(
+        adata,
+        adata,
+        producer_skill=SKILL_NAME,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+    )
+    output_h5ad = output_dir / "processed.h5ad"
+    save_h5ad(adata, output_h5ad)
+    alias_paths = write_h5ad_aliases(output_h5ad, [output_dir / "adata_with_velocity.h5ad"])
     logger.info(f"Saved: {output_h5ad}")
 
     # Reproducibility
-    repro_dir = output_dir / "reproducibility"
-    repro_dir.mkdir(exist_ok=True)
-
-    cmd = f"python sc_velocity.py --output {output_dir} --method {method} --n-jobs {args.n_jobs}"
-    if input_file:
-        cmd += f" --input {input_file}"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
-    _write_repro_requirements(
-        repro_dir,
-        ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "scvelo"],
-    )
+    _write_reproducibility(output_dir, params, input_file, demo_mode=args.demo)
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
+    result_data = {
+        "method": method,
+        "params": params,
+        "input_contract": adata.uns.get("omicsclaw_input_contract", {}),
+        "matrix_contract": matrix_contract,
+        "output_h5ad": "processed.h5ad",
+        "visualization": {
+            "recipe_id": "standard-sc-velocity-gallery",
+            "available_figure_data": table_files,
+        },
+        "output_files": {
+            "processed_h5ad": str(output_h5ad),
+            "compatibility_aliases": [str(path) for path in alias_paths],
+        },
+    }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
+    write_standard_run_artifacts(
+        output_dir,
+        skill_alias=SKILL_NAME,
+        description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
+        result_payload=result_payload,
+        preferred_method=summary.get("mode", "stochastic"),
+        script_path=Path(__file__).resolve(),
+        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+    )
 
     # Summary
     print(f"\n{'='*60}")

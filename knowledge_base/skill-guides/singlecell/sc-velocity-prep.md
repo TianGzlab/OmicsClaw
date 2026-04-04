@@ -65,7 +65,7 @@ Current OmicsClaw `sc-velocity-prep` does:
 2. run velocyto or STARsolo when needed
 3. import `spliced`, `unspliced`, and optional `ambiguous` layers
 4. optionally merge these layers into an existing base `h5ad`
-5. save `velocity_input.h5ad`
+5. save `processed.h5ad` and keep `velocity_input.h5ad` as a compatibility alias
 
 Current OmicsClaw `sc-velocity-prep` does **not**:
 
@@ -194,14 +194,15 @@ About to prepare RNA-velocity input
   Source: Cell Ranger output directory
   Required upstream inputs: BAM, filtered barcodes, GTF
   Optional merge: base h5ad
-  Output hand-off: velocity_input.h5ad for sc-velocity
+  Output hand-off: processed.h5ad for sc-velocity
 ```
 
 ## Step 8: Explain The Handoff Correctly
 
 After the run:
 
-- `velocity_input.h5ad` is the file to give to `sc-velocity`
+- `processed.h5ad` is the main file to give to `sc-velocity`
+- `velocity_input.h5ad` is kept as a compatibility alias
 - the result is about layer preparation, not velocity inference
 - preserved artifacts such as loom path or STARsolo directory still matter for auditability
 

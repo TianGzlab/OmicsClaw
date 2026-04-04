@@ -111,6 +111,7 @@ About to run scRNA FASTQ QC
 
 - `figures/fastq_q30_summary.png`: compact sample-level overview
 - `figures/per_base_quality.png`: per-base mean quality curves
+- `figures/fastq_file_quality.png`: file-level Q30, adapter, GC, and read-length relationships
 - `tables/fastq_per_file_summary.csv`: one row per FASTQ file
 - `tables/fastq_per_sample_summary.csv`: one row per logical sample
 - `artifacts/fastqc/`: official FastQC outputs when installed

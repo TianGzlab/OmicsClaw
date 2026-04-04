@@ -35,7 +35,12 @@ from skills.singlecell._lib.upstream import (
     summarize_fastq_samples,
     tool_available,
 )
-from skills.singlecell._lib.viz import plot_fastq_per_base_quality, plot_fastq_sample_summary
+from skills.singlecell._lib.viz import (
+    plot_fastq_file_quality,
+    plot_fastq_per_base_quality,
+    plot_fastq_read_structure,
+    plot_fastq_sample_summary,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -115,6 +120,20 @@ def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _write_figures_manifest(output_dir: Path, plots: list[dict]) -> None:
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "recipe_id": "standard-sc-fastq-qc-gallery",
+        "skill_name": SKILL_NAME,
+        "title": "Single-cell FASTQ QC gallery",
+        "description": "Canonical read-level QC overview for scRNA FASTQ inputs.",
+        "backend": "python",
+        "plots": plots,
+    }
+    (figures_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def _export_tables(output_dir: Path, per_file: pd.DataFrame, per_base: pd.DataFrame, per_sample: pd.DataFrame) -> dict[str, str]:
     tables_dir = output_dir / "tables"
     figure_data_dir = output_dir / "figure_data"
@@ -136,7 +155,9 @@ def _export_tables(output_dir: Path, per_file: pd.DataFrame, per_base: pd.DataFr
         output_dir,
         {
             "skill": SKILL_NAME,
+            "recipe_id": "standard-sc-fastq-qc-gallery",
             "available_files": {
+                "fastq_per_file_summary": table_files["per_file"],
                 "fastq_per_sample_summary": table_files["per_sample"],
                 "fastq_per_base_quality": table_files["per_base"],
             },
@@ -232,6 +253,8 @@ def _write_report(
             "## Output Files\n",
             "- `figures/fastq_q30_summary.png` — sample-level Q30 and GC overview",
             "- `figures/per_base_quality.png` — per-base mean quality curves",
+            "- `figures/fastq_file_quality.png` — per-file quality versus adapter and GC/read-length diagnostics",
+            "- `figures/fastq_read_structure.png` — per-file read length and adapter-seed overview",
             "- `tables/fastq_per_file_summary.csv` — per-FASTQ sampled summary",
             "- `tables/fastq_per_sample_summary.csv` — per-sample sampled summary",
             "- `tables/fastq_per_base_quality.csv` — per-position sampled quality values",
@@ -281,6 +304,57 @@ def main() -> None:
 
     plot_fastq_sample_summary(per_sample_df, output_dir)
     plot_fastq_per_base_quality(per_base_df, output_dir)
+    plot_fastq_file_quality(per_file_df, output_dir)
+    plot_fastq_read_structure(per_file_df, output_dir)
+    _write_figures_manifest(
+        output_dir,
+        [
+            {
+                "plot_id": "fastq_q30_summary",
+                "role": "overview",
+                "backend": "python",
+                "renderer": "plot_fastq_sample_summary",
+                "filename": "fastq_q30_summary.png",
+                "title": "FASTQ sample-level quality overview",
+                "description": "Sample-level Q30 and GC summary.",
+                "status": "rendered",
+                "path": str((output_dir / "figures" / "fastq_q30_summary.png")),
+            },
+            {
+                "plot_id": "per_base_quality",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_fastq_per_base_quality",
+                "filename": "per_base_quality.png",
+                "title": "Per-base mean quality",
+                "description": "Per-position mean quality across FASTQ files.",
+                "status": "rendered",
+                "path": str((output_dir / "figures" / "per_base_quality.png")),
+            },
+            {
+                "plot_id": "fastq_file_quality",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_fastq_file_quality",
+                "filename": "fastq_file_quality.png",
+                "title": "Per-file quality diagnostics",
+                "description": "Per-file Q30, adapter burden, read length, and GC relationships.",
+                "status": "rendered",
+                "path": str((output_dir / "figures" / "fastq_file_quality.png")),
+            },
+            {
+                "plot_id": "fastq_read_structure",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_fastq_read_structure",
+                "filename": "fastq_read_structure.png",
+                "title": "Read structure by FASTQ file",
+                "description": "Mean read length and adapter-seed burden by FASTQ file.",
+                "status": "rendered",
+                "path": str((output_dir / "figures" / "fastq_read_structure.png")),
+            },
+        ],
+    )
     table_files = _export_tables(output_dir, per_file_df, per_base_df, per_sample_df)
     _write_reproducibility(output_dir, args, demo_mode=args.demo)
 
@@ -318,7 +392,9 @@ def main() -> None:
             "per_base": table_files["per_base"],
         },
         "visualization": {
+            "recipe_id": "standard-sc-fastq-qc-gallery",
             "available_figure_data": {
+                "fastq_per_file_summary": table_files["per_file"],
                 "fastq_per_sample_summary": table_files["per_sample"],
                 "fastq_per_base_quality": table_files["per_base"],
             }

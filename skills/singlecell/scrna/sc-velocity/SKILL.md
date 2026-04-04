@@ -74,7 +74,23 @@ metadata:
 2. **Public alias compatibility**: both `--method` and `--mode` map into the same backend selection logic.
 3. **Velocity-specific exports**: stream plot, magnitude plot, and optional latent-time view.
 4. **Explicit layer contract**: requires `spliced` and `unspliced` layers before execution.
-5. **Downstream-ready export**: writes `adata_with_velocity.h5ad`, report, result JSON, README, and notebook artifacts.
+5. **Downstream-ready export**: writes `processed.h5ad`, a compatibility alias `adata_with_velocity.h5ad`, report, result JSON, README, notebook artifacts, and figure-data tables.
+
+## Data / State Requirements
+
+| Requirement | Where it should exist | Why it matters |
+|-------------|------------------------|----------------|
+| Velocity-ready layers | `layers["spliced"]`, `layers["unspliced"]` | required for every scVelo mode |
+| Raw counts source | `layers["counts"]` preferred | retained for downstream provenance and matrix-contract stability |
+| Embedding / graph state | `obsm["X_umap"]`, `uns["neighbors"]` preferred | improves interpretability and avoids unnecessary recomputation |
+
+Matrix expectations:
+
+- input object: velocity-ready single-cell AnnData
+- output object: `processed.h5ad`
+- `adata.X`: `normalized_expression`
+- `layers["counts"]`: raw counts
+- `adata.raw`: raw-count snapshot
 
 ## Scope Boundary
 
@@ -111,7 +127,7 @@ Both point to the same backend selection logic.
 1. Validate scVelo availability and required layers.
 2. Run the selected velocity backend.
 3. Generate stream, magnitude, and optional latent-time plots.
-4. Save `adata_with_velocity.h5ad`, `report.md`, and `result.json`.
+4. Save `processed.h5ad`, `report.md`, `result.json`, gallery manifests, and figure-data tables.
 5. Record both the public method id and the internal mode used.
 
 ## CLI Reference
@@ -151,20 +167,37 @@ Important implementation notes:
 
 Successful runs write:
 
+- `processed.h5ad`
 - `adata_with_velocity.h5ad`
 - `report.md`
 - `result.json`
 - `figures/velocity_stream.png`
 - `figures/velocity_magnitude_umap.png`
+- `figures/velocity_magnitude_distribution.png`
+- `figures/velocity_top_genes.png`
 - `figures/latent_time_umap.png` when latent time is available
+- `figures/latent_time_distribution.png` when latent time is available
+- `figures/manifest.json`
+- `figure_data/manifest.json`
+- `tables/velocity_summary.csv`
+- `tables/velocity_cells.csv`
+- `tables/top_velocity_genes.csv`
 
 ### Visualization Contract
 
-The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+The current wrapper writes a standard Python gallery plus plot-ready tables:
 
 - `figures/velocity_stream.png`
 - `figures/velocity_magnitude_umap.png`
+- `figures/velocity_magnitude_distribution.png`
+- `figures/velocity_top_genes.png`
 - `figures/latent_time_umap.png` when available
+- `figures/latent_time_distribution.png` when available
+- `figures/manifest.json`
+- `figure_data/manifest.json`
+- `tables/velocity_summary.csv`
+- `tables/velocity_cells.csv`
+- `tables/top_velocity_genes.csv`
 
 ### What Users Should Inspect First
 
@@ -172,7 +205,7 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 2. `figures/velocity_stream.png`
 3. `figures/velocity_magnitude_umap.png`
 4. `figures/latent_time_umap.png` when available
-5. `adata_with_velocity.h5ad`
+5. `processed.h5ad`
 
 ## Current Limitations
 

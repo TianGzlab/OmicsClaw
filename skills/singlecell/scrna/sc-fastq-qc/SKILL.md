@@ -142,6 +142,7 @@ python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --demo --output /tmp/s
 
 1. **Python standard gallery**: per-base quality and sample-level quality overview.
 2. **Figure-ready exports**: `figure_data/` tables for custom plotting or audit.
+3. **Gallery manifest**: `figures/manifest.json` records the standard quick-look QC gallery.
 
 ## Output Structure
 
@@ -153,12 +154,15 @@ output_directory/
 ├── figures/
 │   ├── fastq_q30_summary.png
 │   └── per_base_quality.png
+│   ├── fastq_read_structure.png
+│   └── manifest.json
 ├── tables/
 │   ├── fastq_per_file_summary.csv
 │   ├── fastq_per_sample_summary.csv
 │   └── fastq_per_base_quality.csv
 ├── figure_data/
 │   ├── manifest.json
+│   ├── fastq_per_file_summary.csv
 │   ├── fastq_per_sample_summary.csv
 │   └── fastq_per_base_quality.csv
 ├── artifacts/

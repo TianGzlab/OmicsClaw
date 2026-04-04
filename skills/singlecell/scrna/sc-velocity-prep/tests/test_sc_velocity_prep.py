@@ -39,9 +39,13 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "README.md").exists()
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
+    assert (tmp_output / "processed.h5ad").exists()
     assert (tmp_output / "velocity_input.h5ad").exists()
     assert (tmp_output / "figures" / "velocity_layer_summary.png").exists()
+    assert (tmp_output / "figures" / "velocity_layer_fraction.png").exists()
     assert (tmp_output / "figures" / "velocity_gene_balance.png").exists()
+    assert (tmp_output / "figures" / "velocity_top_genes_stacked.png").exists()
+    assert (tmp_output / "figures" / "manifest.json").exists()
     assert (tmp_output / "figure_data" / "manifest.json").exists()
 
 
@@ -57,6 +61,8 @@ def test_demo_result_json(tmp_output):
     assert payload["skill"] == "sc-velocity-prep"
     assert payload["summary"]["spliced_layer_present"] is True
     assert payload["summary"]["unspliced_layer_present"] is True
+    assert payload["data"]["output_h5ad"] == "processed.h5ad"
+    assert payload["data"]["visualization"]["recipe_id"] == "standard-sc-velocity-prep-gallery"
 
 
 def test_demo_mode_with_base_h5ad(tmp_output):

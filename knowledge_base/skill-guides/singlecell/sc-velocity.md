@@ -91,6 +91,8 @@ Important warnings:
 - describe velocity stream / embedding plots as directional summaries on the chosen embedding
 - describe velocity magnitude as a heuristic summary, not a direct biological rate constant
 - describe latent time only as a dynamical-model-derived quantity
+- explain that the downstream-facing AnnData is now `processed.h5ad`, while `adata_with_velocity.h5ad` is kept only as a compatibility alias
+- remind users to inspect `figures/manifest.json`, `figure_data/manifest.json`, and the exported velocity summary tables when checking whether the run looks scientifically plausible
 
 ## Official References
 

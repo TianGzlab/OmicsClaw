@@ -37,7 +37,7 @@ from omicsclaw.common.report import (
     write_standard_run_artifacts,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.export import save_h5ad
+from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
 from skills.singlecell._lib.pseudoalign import (
     inspect_pseudoalign_output,
     load_pseudoalign_adata,
@@ -65,7 +65,11 @@ from skills.singlecell._lib.upstream import (
     t2g_setup_guidance,
     whitelist_setup_guidance,
 )
-from skills.singlecell._lib.viz import plot_barcode_rank, plot_count_distributions
+from skills.singlecell._lib.viz import (
+    plot_barcode_rank,
+    plot_count_complexity_scatter,
+    plot_count_distributions,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -103,6 +107,20 @@ def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
     figure_data_dir = output_dir / "figure_data"
     figure_data_dir.mkdir(parents=True, exist_ok=True)
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_figures_manifest(output_dir: Path, plots: list[dict]) -> None:
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "recipe_id": "standard-sc-count-gallery",
+        "skill_name": SKILL_NAME,
+        "title": "Single-cell counting gallery",
+        "description": "Canonical counting diagnostics for retained barcodes.",
+        "backend": "python",
+        "plots": plots,
+    }
+    (figures_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _barcode_metrics_df(adata) -> pd.DataFrame:
@@ -159,6 +177,7 @@ def _export_tables(output_dir: Path, count_summary: pd.DataFrame, barcode_metric
         output_dir,
         {
             "skill": SKILL_NAME,
+            "recipe_id": "standard-sc-count-gallery",
             "available_files": {
                 "count_summary": table_files["count_summary"],
                 "barcode_metrics": table_files["barcode_metrics"],
@@ -261,10 +280,14 @@ def _write_report(
             "",
             "## Output Files\n",
             "- `processed.h5ad` — downstream-ready AnnData with `layers['counts']`",
+            "- `standardized_input.h5ad` — compatibility alias pointing to the same downstream-ready object",
             "- `figures/barcode_rank.png` — barcode-rank curve for filtered and optional raw counts",
             "- `figures/count_distributions.png` — total-count and detected-gene distributions",
+            "- `figures/count_complexity_scatter.png` — counts versus detected genes across retained barcodes",
             "- `tables/count_summary.csv` — compact run-level summary",
             "- `tables/barcode_metrics.csv` — per-barcode count summary",
+            "- `figures/manifest.json` — standard counting gallery manifest",
+            "- `figure_data/manifest.json` — plot-ready data manifest",
             "",
             "## Recommended Next Step\n",
             "- Continue with `sc-qc` or `sc-preprocessing` on `processed.h5ad`.",
@@ -370,7 +393,8 @@ def main() -> None:
                 artifacts = inspect_pseudoalign_output(input_path, method=args.method)
             except Exception:
                 artifacts = None
-        else:
+
+        if artifacts is None and not args.demo:
             if reference_path is None:
                 raise ValueError(
                     f"`sc-count --method {args.method}` requires a local reference path. "
@@ -475,10 +499,50 @@ def main() -> None:
     plot_count_distributions(standardized, output_dir)
     raw_counts = np.asarray(raw_adata.X.sum(axis=1)).ravel() if raw_adata is not None else None
     plot_barcode_rank(barcode_metrics["total_counts"].to_numpy(), output_dir, raw_counts=raw_counts)
+    plot_count_complexity_scatter(barcode_metrics, output_dir)
+    _write_figures_manifest(
+        output_dir,
+        [
+            {
+                "plot_id": "barcode_rank",
+                "role": "overview",
+                "backend": "python",
+                "renderer": "plot_barcode_rank",
+                "filename": "barcode_rank.png",
+                "title": "Barcode rank curve",
+                "description": "Filtered barcode ranks with optional raw background.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "barcode_rank.png"),
+            },
+            {
+                "plot_id": "count_distributions",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_count_distributions",
+                "filename": "count_distributions.png",
+                "title": "Count distributions",
+                "description": "Total counts and detected genes across retained barcodes.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "count_distributions.png"),
+            },
+            {
+                "plot_id": "count_complexity_scatter",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_count_complexity_scatter",
+                "filename": "count_complexity_scatter.png",
+                "title": "Count complexity per barcode",
+                "description": "Counts versus detected genes for retained barcodes.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "count_complexity_scatter.png"),
+            },
+        ],
+    )
 
     _write_reproducibility(output_dir, args, demo_mode=args.demo)
     output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(standardized, output_h5ad)
+    alias_paths = write_h5ad_aliases(output_h5ad, [output_dir / "standardized_input.h5ad"])
 
     summary = {
         "method": args.method if not args.demo else "demo",
@@ -502,14 +566,21 @@ def main() -> None:
         },
         "backend_summary": backend_summary,
         "input_contract": contract,
+        "matrix_contract": standardized.uns.get("omicsclaw_matrix_contract", {}),
+        "output_h5ad": "processed.h5ad",
         "summary_tables": table_files,
         "visualization": {
+            "recipe_id": "standard-sc-count-gallery",
             "available_figure_data": {
                 "count_summary": table_files["count_summary"],
                 "barcode_metrics": table_files["barcode_metrics"],
             }
         },
         "artifacts": standardized.uns.get("omicsclaw_count_artifacts", {}),
+        "output_files": {
+            "processed_h5ad": str(output_h5ad),
+            "compatibility_aliases": [str(path) for path in alias_paths],
+        },
         "execution": list(execution.command) if execution is not None else [],
     }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)

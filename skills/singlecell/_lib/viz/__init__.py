@@ -26,7 +26,10 @@ from .upstream import (
     plot_velocity_gene_balance,
     plot_velocity_layer_fraction,
     plot_velocity_layer_summary,
+    plot_velocity_magnitude_distribution,
+    plot_velocity_top_genes_bar,
     plot_velocity_top_genes_stacked,
+    plot_latent_time_distribution,
 )
 
 __all__ = [
@@ -55,5 +58,8 @@ __all__ = [
     "plot_velocity_layer_summary",
     "plot_velocity_layer_fraction",
     "plot_velocity_gene_balance",
+    "plot_velocity_top_genes_bar",
     "plot_velocity_top_genes_stacked",
+    "plot_velocity_magnitude_distribution",
+    "plot_latent_time_distribution",
 ]

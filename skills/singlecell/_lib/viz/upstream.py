@@ -417,6 +417,86 @@ def plot_velocity_top_genes_stacked(
     save_figure(fig, output_dir, filename)
 
 
+def plot_velocity_top_genes_bar(
+    gene_df: pd.DataFrame,
+    output_dir: Union[str, Path],
+    *,
+    filename: str = "velocity_top_genes.png",
+) -> None:
+    """Plot the genes with the largest mean absolute velocity."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    output_dir = Path(output_dir)
+    if gene_df.empty:
+        logger.warning("Velocity gene summary is empty; skipping %s", filename)
+        return
+
+    top = gene_df.head(12).copy()
+    labels = top["gene"].astype(str).tolist()
+    x = np.arange(len(labels))
+
+    apply_singlecell_theme()
+    fig, ax = plt.subplots(figsize=(max(7.2, 0.8 * len(labels)), 5.0))
+    ax.bar(x, top["mean_abs_velocity"], color=QC_PALETTE["counts"])
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_ylabel("Mean absolute velocity")
+    ax.set_title("Top genes by velocity magnitude")
+    fig.tight_layout()
+    save_figure(fig, output_dir, filename)
+
+
+def plot_velocity_magnitude_distribution(
+    cell_df: pd.DataFrame,
+    output_dir: Union[str, Path],
+    *,
+    filename: str = "velocity_magnitude_distribution.png",
+) -> None:
+    """Plot the distribution of per-cell velocity magnitudes."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output_dir = Path(output_dir)
+    if "velocity_magnitude" not in cell_df.columns or cell_df.empty:
+        logger.warning("Velocity cell summary is missing `velocity_magnitude`; skipping %s", filename)
+        return
+
+    apply_singlecell_theme()
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    sns.histplot(cell_df["velocity_magnitude"], bins=40, color=QC_PALETTE["counts"], ax=ax)
+    ax.set_xlabel("Velocity magnitude")
+    ax.set_ylabel("Cells")
+    ax.set_title("Velocity magnitude distribution")
+    fig.tight_layout()
+    save_figure(fig, output_dir, filename)
+
+
+def plot_latent_time_distribution(
+    cell_df: pd.DataFrame,
+    output_dir: Union[str, Path],
+    *,
+    filename: str = "latent_time_distribution.png",
+) -> None:
+    """Plot the distribution of latent time when present."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output_dir = Path(output_dir)
+    if "latent_time" not in cell_df.columns or cell_df.empty:
+        logger.warning("Velocity cell summary is missing `latent_time`; skipping %s", filename)
+        return
+
+    apply_singlecell_theme()
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    sns.histplot(cell_df["latent_time"], bins=40, color=QC_PALETTE["genes"], ax=ax)
+    ax.set_xlabel("Latent time")
+    ax.set_ylabel("Cells")
+    ax.set_title("Latent time distribution")
+    fig.tight_layout()
+    save_figure(fig, output_dir, filename)
+
+
 def plot_filter_metric_comparison(
     before_df: pd.DataFrame,
     after_df: pd.DataFrame,

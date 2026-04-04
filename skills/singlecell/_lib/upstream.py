@@ -16,7 +16,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .adata_utils import record_standardized_input_contract, store_analysis_metadata
+from .adata_utils import (
+    record_matrix_contract,
+    record_standardized_input_contract,
+    store_analysis_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +713,7 @@ def standardize_count_adata(
         standardized.var["gene_symbols"] = standardized.var_names.astype(str)
 
     standardized.layers["counts"] = standardized.X.copy()
+    standardized.raw = standardized.copy()
     contract = record_standardized_input_contract(
         standardized,
         expression_source=source_label,
@@ -716,7 +721,15 @@ def standardize_count_adata(
         warnings=warnings or [],
         standardizer_skill=skill_name,
     )
+    matrix_contract = record_matrix_contract(
+        standardized,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill=skill_name,
+    )
     store_analysis_metadata(standardized, skill_name, method, {"source_label": source_label})
+    contract["matrix_contract"] = matrix_contract
     return standardized, contract
 
 

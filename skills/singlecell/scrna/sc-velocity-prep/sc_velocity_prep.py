@@ -37,8 +37,8 @@ from omicsclaw.common.report import (
     write_standard_run_artifacts,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import record_standardized_input_contract, store_analysis_metadata
-from skills.singlecell._lib.export import save_h5ad
+from skills.singlecell._lib.adata_utils import record_matrix_contract, record_standardized_input_contract, store_analysis_metadata
+from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
 from skills.singlecell._lib.upstream import (
     auto_gtf_path,
     auto_reference_path,
@@ -58,7 +58,12 @@ from skills.singlecell._lib.upstream import (
     run_velocyto_from_bam,
     whitelist_setup_guidance,
 )
-from skills.singlecell._lib.viz import plot_velocity_gene_balance, plot_velocity_layer_summary
+from skills.singlecell._lib.viz import (
+    plot_velocity_gene_balance,
+    plot_velocity_layer_fraction,
+    plot_velocity_layer_summary,
+    plot_velocity_top_genes_stacked,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -127,6 +132,20 @@ def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _write_figures_manifest(output_dir: Path, plots: list[dict]) -> None:
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "recipe_id": "standard-sc-velocity-prep-gallery",
+        "skill_name": SKILL_NAME,
+        "title": "Single-cell velocity prep gallery",
+        "description": "Canonical velocity-layer summaries for upstream scVelo preparation.",
+        "backend": "python",
+        "plots": plots,
+    }
+    (figures_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def _export_tables(output_dir: Path, layer_summary: pd.DataFrame, gene_summary: pd.DataFrame) -> dict[str, str]:
     tables_dir = output_dir / "tables"
     figure_data_dir = output_dir / "figure_data"
@@ -145,6 +164,7 @@ def _export_tables(output_dir: Path, layer_summary: pd.DataFrame, gene_summary: 
         output_dir,
         {
             "skill": SKILL_NAME,
+            "recipe_id": "standard-sc-velocity-prep-gallery",
             "available_files": {
                 "velocity_layer_summary": files["layer_summary"],
                 "top_velocity_genes": files["gene_summary"],
@@ -222,14 +242,19 @@ def _write_report(
         [
             "",
             "## Output Files\n",
-            "- `velocity_input.h5ad` — velocity-ready AnnData with `spliced` and `unspliced` layers",
+            "- `processed.h5ad` — velocity-ready AnnData with `spliced` and `unspliced` layers",
+            "- `velocity_input.h5ad` — compatibility alias pointing to the same velocity-ready object",
             "- `figures/velocity_layer_summary.png` — total molecules per velocity layer",
+            "- `figures/velocity_layer_fraction.png` — percent contribution of each velocity layer",
             "- `figures/velocity_gene_balance.png` — top-gene spliced versus unspliced balance",
+            "- `figures/velocity_top_genes_stacked.png` — stacked layer totals for the highest-abundance velocity genes",
             "- `tables/velocity_layer_summary.csv` — layer totals",
             "- `tables/top_velocity_genes.csv` — top genes by velocity-layer abundance",
+            "- `figures/manifest.json` — standard velocity-prep gallery manifest",
+            "- `figure_data/manifest.json` — plot-ready data manifest",
             "",
             "## Recommended Next Step\n",
-            "- Continue with `sc-velocity` on `velocity_input.h5ad`.",
+            "- Continue with `sc-velocity` on `processed.h5ad`.",
         ]
     )
     (output_dir / "report.md").write_text(header + "\n".join(lines) + "\n" + generate_report_footer(), encoding="utf-8")
@@ -388,6 +413,20 @@ def main() -> None:
         warnings=[],
         standardizer_skill=SKILL_NAME,
     )
+    output_adata.raw = output_adata.copy()
+    matrix_contract = record_matrix_contract(
+        output_adata,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={
+            "counts": "raw_counts" if "counts" in output_adata.layers else None,
+            "spliced": "raw_counts" if "spliced" in output_adata.layers else None,
+            "unspliced": "raw_counts" if "unspliced" in output_adata.layers else None,
+            "ambiguous": "raw_counts" if "ambiguous" in output_adata.layers else None,
+        },
+        producer_skill=SKILL_NAME,
+    )
+    contract["matrix_contract"] = matrix_contract
     store_analysis_metadata(output_adata, SKILL_NAME, args.method if not args.demo else "demo", {"used_base_h5ad": used_base})
     output_adata.uns.setdefault("omicsclaw_velocity_prep", {})
     output_adata.uns["omicsclaw_velocity_prep"].update(artifact_info)
@@ -397,11 +436,63 @@ def main() -> None:
     gene_summary = _top_velocity_genes_df(output_adata)
     table_files = _export_tables(output_dir, layer_summary, gene_summary)
     plot_velocity_layer_summary(layer_summary, output_dir)
+    plot_velocity_layer_fraction(layer_summary, output_dir)
     plot_velocity_gene_balance(gene_summary, output_dir)
+    plot_velocity_top_genes_stacked(gene_summary, output_dir)
+    _write_figures_manifest(
+        output_dir,
+        [
+            {
+                "plot_id": "velocity_layer_summary",
+                "role": "overview",
+                "backend": "python",
+                "renderer": "plot_velocity_layer_summary",
+                "filename": "velocity_layer_summary.png",
+                "title": "Velocity layer totals",
+                "description": "Global totals for spliced, unspliced, and ambiguous molecules.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_layer_summary.png"),
+            },
+            {
+                "plot_id": "velocity_layer_fraction",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_velocity_layer_fraction",
+                "filename": "velocity_layer_fraction.png",
+                "title": "Velocity layer composition",
+                "description": "Percent contribution from spliced, unspliced, and ambiguous molecules.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_layer_fraction.png"),
+            },
+            {
+                "plot_id": "velocity_gene_balance",
+                "role": "diagnostic",
+                "backend": "python",
+                "renderer": "plot_velocity_gene_balance",
+                "filename": "velocity_gene_balance.png",
+                "title": "Top genes by spliced/unspliced abundance",
+                "description": "Gene-level spliced versus unspliced scatter for top-abundance genes.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_gene_balance.png"),
+            },
+            {
+                "plot_id": "velocity_top_genes_stacked",
+                "role": "supporting",
+                "backend": "python",
+                "renderer": "plot_velocity_top_genes_stacked",
+                "filename": "velocity_top_genes_stacked.png",
+                "title": "Top velocity genes by layer totals",
+                "description": "Stacked spliced/unspliced/ambiguous totals for top velocity genes.",
+                "status": "rendered",
+                "path": str(output_dir / "figures" / "velocity_top_genes_stacked.png"),
+            },
+        ],
+    )
     _write_reproducibility(output_dir, args, demo_mode=args.demo)
 
-    output_h5ad = output_dir / "velocity_input.h5ad"
+    output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(output_adata, output_h5ad)
+    alias_paths = write_h5ad_aliases(output_h5ad, [output_dir / "velocity_input.h5ad"])
 
     summary = {
         "method": args.method if not args.demo else "demo",
@@ -426,8 +517,15 @@ def main() -> None:
             "whitelist": used_whitelist,
         },
         "input_contract": contract,
+        "matrix_contract": matrix_contract,
         "artifacts": artifact_info,
+        "output_h5ad": "processed.h5ad",
+        "output_files": {
+            "processed_h5ad": str(output_h5ad),
+            "compatibility_aliases": [str(path) for path in alias_paths],
+        },
         "visualization": {
+            "recipe_id": "standard-sc-velocity-prep-gallery",
             "available_figure_data": {
                 "velocity_layer_summary": table_files["layer_summary"],
                 "top_velocity_genes": table_files["gene_summary"],

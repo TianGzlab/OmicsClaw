@@ -22,5 +22,6 @@ source_urls:
 - **Use method-correct language**: `stochastic`, `dynamical`, and `steady_state` are backend modes for the same velocity skill.
 - **Do not overclaim latent time**: latent time is tied to the dynamical path and should not be promised for every velocity run.
 - **Stop for missing velocity content**: do not continue when `spliced` / `unspliced` layers are absent, and ask the user to provide a real velocyto / kb-python style object instead.
+- **Keep the output contract explicit**: the downstream-facing object should be `processed.h5ad`, and the result payload should expose matrix semantics plus gallery/table manifests.
 - **Do not invent unsupported scVelo knobs**: the current OmicsClaw wrapper does not expose the full velocity-model parameter surface from upstream scVelo.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.

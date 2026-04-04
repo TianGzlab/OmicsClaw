@@ -222,6 +222,7 @@ python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_coun
 1. **Python standard gallery**: barcode-rank and count-distribution plots.
 2. **Figure-ready exports**: count summary and per-barcode tables under
    `figure_data/`.
+3. **Gallery manifest**: `figures/manifest.json` records the standard counting gallery.
 
 ## Output Structure
 
@@ -234,6 +235,8 @@ output_directory/
 ├── figures/
 │   ├── barcode_rank.png
 │   └── count_distributions.png
+│   ├── count_complexity_scatter.png
+│   └── manifest.json
 ├── tables/
 │   ├── count_summary.csv
 │   ├── barcode_metrics.csv

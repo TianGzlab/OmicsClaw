@@ -134,7 +134,14 @@ def run_simpleaf_quant(
         "--anndata-out",
     ]
     execution = run_command(command, cwd=out_dir)
-    return inspect_pseudoalign_output(out_dir, method="simpleaf"), execution
+    try:
+        artifacts = inspect_pseudoalign_output(out_dir, method="simpleaf")
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "simpleaf finished without producing an importable H5AD or matrix directory. "
+            f"Inspect `{out_dir}` and the backend logs to confirm whether quantification actually completed.\n{exc}"
+        ) from exc
+    return artifacts, execution
 
 
 def run_kb_count(
@@ -174,4 +181,11 @@ def run_kb_count(
     command.extend(str(path.resolve()) for path in sample.read1_files)
     command.extend(str(path.resolve()) for path in sample.read2_files)
     execution = run_command(command, cwd=out_dir)
-    return inspect_pseudoalign_output(out_dir, method="kb_python"), execution
+    try:
+        artifacts = inspect_pseudoalign_output(out_dir, method="kb_python")
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "kb-python finished without producing an importable H5AD or matrix directory. "
+            f"Inspect `{out_dir}` plus `run_info.json` to see whether reads were retained and matrices were written.\n{exc}"
+        ) from exc
+    return artifacts, execution
