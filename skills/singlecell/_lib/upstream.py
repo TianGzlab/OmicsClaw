@@ -626,7 +626,44 @@ def _read_10x_mtx(path: Path):
     try:
         return sc.read_10x_mtx(path, var_names="gene_symbols", cache=False)
     except Exception:
-        return sc.read_10x_mtx(path, var_names="gene_ids", cache=False)
+        try:
+            return sc.read_10x_mtx(path, var_names="gene_ids", cache=False)
+        except Exception:
+            import anndata as ad
+
+            sparse, mmread = _import_sparse_helpers()
+            matrix_path = path / "matrix.mtx"
+            if not matrix_path.exists():
+                matrix_path = path / "matrix.mtx.gz"
+            if not matrix_path.exists():
+                raise FileNotFoundError(f"No 10x matrix.mtx(.gz) found under {path}")
+
+            feature_path = path / "features.tsv"
+            if not feature_path.exists():
+                feature_path = path / "genes.tsv"
+            if not feature_path.exists():
+                raise FileNotFoundError(f"No features.tsv or genes.tsv found under {path}")
+
+            barcode_path = path / "barcodes.tsv"
+            if not barcode_path.exists():
+                barcode_path = path / "barcodes.tsv.gz"
+            if not barcode_path.exists():
+                raise FileNotFoundError(f"No barcodes.tsv(.gz) found under {path}")
+
+            features = pd.read_csv(feature_path, sep="\t", header=None)
+            barcodes = pd.read_csv(barcode_path, sep="\t", header=None)[0].astype(str).tolist()
+            gene_ids = features.iloc[:, 0].astype(str).tolist()
+            gene_symbols = features.iloc[:, 1].astype(str).tolist() if features.shape[1] > 1 else gene_ids
+            feature_types = features.iloc[:, 2].astype(str).tolist() if features.shape[1] > 2 else ["Gene Expression"] * len(gene_ids)
+
+            matrix = sparse.csr_matrix(mmread(matrix_path)).transpose().tocsr()
+            adata = ad.AnnData(X=matrix)
+            adata.obs_names = pd.Index(barcodes, dtype="object")
+            adata.var_names = pd.Index(gene_symbols, dtype="object")
+            adata.var["gene_ids"] = gene_ids
+            adata.var["gene_symbols"] = gene_symbols
+            adata.var["feature_types"] = feature_types
+            return adata
 
 
 def inspect_cellranger_run(run_dir: str | Path) -> CountArtifacts:
