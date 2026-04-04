@@ -233,3 +233,17 @@ output_directory/
 
 - `velocyto`
 - `STAR`
+
+## Environment Management
+
+- Python extras:
+  - `pip install -e ".[singlecell-velocity]"`
+- External tools that OmicsClaw does **not** auto-install:
+  - `velocyto`
+  - `STAR`
+
+Recommended user guidance:
+
+- Do not auto-install `velocyto` or `STAR` during a skill run.
+- If users want BAM-backed or STARsolo-backed velocity preparation, tell them to install these tools explicitly into their active environment and verify they are on `PATH`.
+- Large annotation and reference assets such as `genes.gtf` and STAR genome directories should be user-managed under `resources/singlecell/references/...` or provided by explicit local paths.

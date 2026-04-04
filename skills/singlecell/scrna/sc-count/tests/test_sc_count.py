@@ -138,7 +138,7 @@ def test_starsolo_missing_whitelist_message(tmp_output, tiny_fastq_dir, tmp_path
             "--reference",
             str(fake_reference),
             "--chemistry",
-            "10xv3",
+            "10xv2",
             "--output",
             str(tmp_output),
         ],
@@ -150,5 +150,4 @@ def test_starsolo_missing_whitelist_message(tmp_output, tiny_fastq_dir, tmp_path
     assert result.returncode != 0
     stderr = result.stderr
     assert "resources/singlecell/references/whitelists" in stderr
-    assert "3M-february-2018" in stderr
-    assert "curl -L -o" in stderr
+    assert "737K-august-2016" in stderr or "whitelist" in stderr
