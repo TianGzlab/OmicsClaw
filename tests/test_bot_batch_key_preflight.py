@@ -221,7 +221,7 @@ def test_auto_prepare_sc_batch_integration_runs_upstream_workflow(tmp_path, monk
     preprocess_out = tmp_path / "prep_out"
     standardize_out.mkdir()
     preprocess_out.mkdir()
-    (standardize_out / "standardized_input.h5ad").write_text("ok", encoding="utf-8")
+    (standardize_out / "processed.h5ad").write_text("ok", encoding="utf-8")
     (preprocess_out / "processed.h5ad").write_text("ok", encoding="utf-8")
 
     monkeypatch.setattr(

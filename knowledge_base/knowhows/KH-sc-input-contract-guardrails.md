@@ -12,7 +12,8 @@ priority: 1.0
 
 # Single-Cell Input Contract Guardrails
 
-- **Recommend standardization first when input provenance is unclear**: if the user drops in an external `.h5ad` or count matrix and immediately asks for a downstream analysis, prefer `sc-standardize-input` before biological analysis unless the object is already clearly standardized.
+- **Auto-canonicalize when safe, export explicitly only when useful**: if the user drops in an external `.h5ad` or count matrix, downstream scRNA skills should prefer the shared canonicalization helper first; `sc-standardize-input` is the optional explicit wrapper when the user wants to inspect or export the canonical object itself.
+- **Keep matrix semantics explicit**: `adata.layers["counts"]` is the stable raw-count source, `adata.X` is the current active matrix for the current stage, and `adata.raw` must not be described as universally meaning raw counts or universally meaning normalized expression without checking `adata.uns["omicsclaw_matrix_contract"]`.
 - **Continue automatically only when defaults are operational, not scientific**: safe examples include wrapper defaults such as a standard plotting path or a first-pass Python backend; do not auto-pick a biologically meaningful grouping, reference atlas, or replicate design.
 - **Stop and ask for user confirmation when multiple scientific choices are plausible**: examples include ambiguous `species`, multiple possible `cluster_key` / `cell_type` / `batch_key` / `sample_key` columns, unclear `groupby` / `group1` / `group2`, or several possible annotation references/models.
 - **Stop and ask for missing metadata when the data cannot answer the question yet**: for example, pseudobulk DE without replicate/sample metadata, cell communication without cell-type labels, batch integration without a real batch column, or annotation without a usable reference/model choice.

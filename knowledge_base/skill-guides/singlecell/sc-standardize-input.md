@@ -24,14 +24,15 @@ Use this guide when you need to decide:
 
 ## Step 1: Decide Whether To Standardize First
 
-Strongly recommend this skill first when:
+Treat this skill as the explicit export/debug wrapper around the shared
+single-cell canonicalization helper. Use it when:
 
 - the user uploads an external `.h5ad` from outside OmicsClaw
 - raw counts may live in `layers['counts']` or `adata.raw` instead of `adata.X`
 - `var_names` are Ensembl IDs, feature IDs, or otherwise not ideal for downstream symbol matching
 - the next requested skill is sensitive to count-vs-normalized state
 
-If the input is already an OmicsClaw-standardized `h5ad`, you usually do not need to rerun this step.
+If the input is already an OmicsClaw-standardized `h5ad`, you usually do not need to rerun this step. Many downstream scRNA skills should canonicalize compatible inputs automatically.
 
 ## Step 2: What The Skill Standardizes Automatically
 
@@ -48,8 +49,12 @@ Current wrapper behavior:
 4. write the canonical count matrix into both:
    - `adata.X`
    - `adata.layers['counts']`
-5. record provenance and state in `adata.uns['omicsclaw_input_contract']`
-6. save `standardized_input.h5ad`
+5. write a count-like snapshot into:
+   - `adata.raw`
+6. record provenance and state in:
+   - `adata.uns['omicsclaw_input_contract']`
+   - `adata.uns['omicsclaw_matrix_contract']`
+7. save `processed.h5ad`
 
 ## Step 3: What The Skill Does Not Invent
 
@@ -88,7 +93,8 @@ A good post-run summary should say:
 - where counts came from
 - where gene symbols came from
 - whether any warnings were emitted
-- that `standardized_input.h5ad` is now the file to pass into downstream scRNA skills
+- that `processed.h5ad` is now the canonical count-like object for downstream scRNA skills
+- that this still does **not** mean normalized-expression skills are ready; methods expecting log-normalized expression usually need `sc-preprocessing` next
 
 ## Step 6: Downstream Decision Rule
 

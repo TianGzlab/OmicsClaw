@@ -33,12 +33,17 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
     assert (tmp_output / "figures" / "manifest.json").exists()
+    assert (tmp_output / "figures" / "barcode_rank.png").exists()
+    assert (tmp_output / "figures" / "qc_correlation_heatmap.png").exists()
     assert (tmp_output / "figure_data" / "manifest.json").exists()
     assert (tmp_output / "tables" / "qc_metrics_summary.csv").exists()
     assert (tmp_output / "tables" / "qc_metrics_per_cell.csv").exists()
+    assert (tmp_output / "tables" / "barcode_rank_curve.csv").exists()
+    assert (tmp_output / "tables" / "qc_metric_correlations.csv").exists()
     assert (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
     assert (tmp_output / "reproducibility" / "requirements.txt").exists()
     assert not (tmp_output / "reproducibility" / "environment.txt").exists()
+    assert "sc-standardize-input" not in result.stderr
 
 
 def test_demo_result_json(tmp_output):
@@ -51,6 +56,7 @@ def test_demo_result_json(tmp_output):
     )
     data = json.loads((tmp_output / "result.json").read_text())
     assert data["skill"] == "sc-qc"
+    assert data["data"]["output_h5ad"] == "processed.h5ad"
     assert data["data"]["params"] == {"species": "human"}
     assert data["data"]["effective_params"]["species"] == "human"
     assert data["data"]["effective_params"]["calculate_ribo"] is True
@@ -104,10 +110,16 @@ def test_prefers_counts_layer_and_gene_symbol_column(tmp_output, tmp_path):
     assert prep["gene_name_source"] == "var.gene_symbols"
     assert any("falling back to `layers.counts`" in warning for warning in prep["warnings"])
 
-    qc_h5ad = ad.read_h5ad(tmp_output / "qc_checked.h5ad")
+    qc_h5ad = ad.read_h5ad(tmp_output / "processed.h5ad")
     assert "pct_counts_mt" in qc_h5ad.obs.columns
     assert float(qc_h5ad.obs["pct_counts_mt"].max()) > 0
-    np.testing.assert_allclose(np.asarray(qc_h5ad.X), norm_x)
+    np.testing.assert_allclose(np.asarray(qc_h5ad.X), counts)
+    np.testing.assert_allclose(np.asarray(qc_h5ad.layers["counts"]), counts)
+    assert qc_h5ad.raw is not None
+    np.testing.assert_allclose(np.asarray(qc_h5ad.raw.X), counts)
+    assert qc_h5ad.uns["omicsclaw_input_contract"]["standardized"] is True
+    assert qc_h5ad.uns["omicsclaw_matrix_contract"]["X"] == "raw_counts"
+    assert qc_h5ad.uns["omicsclaw_matrix_contract"]["raw"] == "raw_counts_snapshot"
 
 
 def test_rejects_non_count_like_input_without_fallback(tmp_output, tmp_path):

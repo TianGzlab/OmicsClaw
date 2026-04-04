@@ -57,7 +57,7 @@ def _find_primary_h5ad(output_dir: Path) -> Path | None:
     """Return the most likely AnnData output for notebook inspection."""
     preferred = [
         output_dir / "processed.h5ad",
-        output_dir / "qc_checked.h5ad",
+        output_dir / "processed.h5ad",
     ]
     for path in preferred:
         if path.exists():

@@ -1,20 +1,9 @@
-"""Visualization utilities for single-cell analysis."""
+"""Backward-compatible visualization helpers for single-cell skills.
 
-from __future__ import annotations
+This module now delegates to :mod:`skills.singlecell._lib.viz` so newer skills
+can import from the shared visualization package while older code keeps working.
+"""
 
-from pathlib import Path
-from typing import TYPE_CHECKING
+from .viz import save_figure
 
-if TYPE_CHECKING:
-    import matplotlib.figure
-
-
-def save_figure(fig: matplotlib.figure.Figure, output_dir: Path, filename: str) -> Path:
-    """Save figure to output directory."""
-    output_dir = Path(output_dir)
-    fig_dir = output_dir / "figures"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-
-    fig_path = fig_dir / filename
-    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
-    return fig_path
+__all__ = ["save_figure"]

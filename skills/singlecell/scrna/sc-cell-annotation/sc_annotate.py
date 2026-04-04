@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-cell-annotation"
-SKILL_VERSION = "0.4.0"
+SKILL_VERSION = "0.6.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py"
 
 
@@ -108,6 +108,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         name="celltypist",
         description="CellTypist automated cell type annotation",
         dependencies=("celltypist",),
+    ),
+    "popv": MethodConfig(
+        name="popv",
+        description="Reference-mapped consensus annotation (PopV)",
+        dependencies=("scanpy",),
     ),
     "singler": MethodConfig(
         name="singler",
@@ -297,7 +302,40 @@ def annotate_celltypist(adata, model: str = "Immune_All_Low"):
             fallback_reason=reason,
             expression_source=expression_source,
         )
-        return summary
+    return summary
+
+
+def annotate_popv(adata, reference: str = "HPCA", cluster_key: str = "leiden"):
+    """PopV-style reference mapping with cluster consensus."""
+    metadata = sc_annotation_utils.apply_popv_annotation(
+        adata,
+        reference,
+        cluster_key=cluster_key,
+    )
+    actual_method = metadata.get("backend", "popv")
+    _record_annotation_execution(
+        adata,
+        requested_method="popv",
+        actual_method=actual_method,
+    )
+    summary = _annotation_summary(
+        adata,
+        requested_method="popv",
+        actual_method=actual_method,
+        expression_source=metadata.get("expression_source"),
+    )
+    summary.update(
+        {
+            "backend": metadata.get("backend"),
+            "reference": reference,
+            "reference_label_key": metadata.get("reference_label_key"),
+            "reference_cell_types": metadata.get("reference_cell_types"),
+            "reference_gene_overlap": metadata.get("reference_gene_overlap"),
+            "reference_path": metadata.get("reference_path"),
+            "popv_methods": metadata.get("popv_methods"),
+        }
+    )
+    return summary
 
 
 def _apply_r_annotations(adata, df: pd.DataFrame, *, requested_method: str, actual_method: str) -> dict:
@@ -371,6 +409,7 @@ def annotate_scmap(adata, reference: str = "HPCA"):
 _METHOD_DISPATCH = {
     "markers": lambda adata, args: annotate_markers(adata, cluster_key=args.cluster_key),
     "celltypist": lambda adata, args: annotate_celltypist(adata, args.model),
+    "popv": lambda adata, args: annotate_popv(adata, args.reference, cluster_key=args.cluster_key),
     "singler": lambda adata, args: annotate_singler(adata, args.reference),
     "scmap": lambda adata, args: annotate_scmap(adata, args.reference),
 }
@@ -428,7 +467,7 @@ def _prepare_annotation_gallery_context(adata, summary: dict, params: dict, outp
         annotation_key="cell_type",
         cluster_key=cluster_key,
     )
-    return {
+    context = {
         "output_dir": Path(output_dir),
         "cluster_key": cluster_key,
         "annotation_summary_df": annotation_summary_df,
@@ -436,6 +475,9 @@ def _prepare_annotation_gallery_context(adata, summary: dict, params: dict, outp
         "cluster_annotation_matrix_df": _build_cluster_annotation_matrix(adata, cluster_key),
         "annotation_umap_points_df": _build_annotation_umap_points_table(adata, cluster_key),
     }
+    if "popv_predictions" in adata.uns:
+        context["popv_predictions_df"] = adata.uns["popv_predictions"].copy()
+    return context
 
 
 def _build_annotation_visualization_recipe(_adata, summary: dict, context: dict) -> VisualizationRecipe:
@@ -547,6 +589,7 @@ def _export_figure_data(output_dir: Path, summary: dict, recipe: VisualizationRe
         ("cell_type_counts", "cell_type_counts.csv", context.get("cell_type_counts_df")),
         ("cluster_annotation_matrix", "cluster_annotation_matrix.csv", context.get("cluster_annotation_matrix_df")),
         ("annotation_umap_points", "annotation_umap_points.csv", context.get("annotation_umap_points_df")),
+        ("popv_predictions", "popv_predictions.csv", context.get("popv_predictions_df")),
     ):
         if isinstance(df, pd.DataFrame) and not df.empty:
             df.to_csv(figure_data_dir / filename, index=False)
@@ -594,6 +637,7 @@ def export_tables(output_dir: Path, *, gallery_context: dict | None = None) -> l
         ("annotation_summary.csv", "annotation_summary_df"),
         ("cell_type_counts.csv", "cell_type_counts_df"),
         ("cluster_annotation_matrix.csv", "cluster_annotation_matrix_df"),
+        ("popv_predictions.csv", "popv_predictions_df"),
     ):
         df = context.get(key)
         if isinstance(df, pd.DataFrame) and not df.empty:
@@ -679,7 +723,7 @@ def main():
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--method", choices=list(METHOD_REGISTRY.keys()), default="markers")
     parser.add_argument("--model", default="Immune_All_Low", help="CellTypist model")
-    parser.add_argument("--reference", default="HPCA", help="SingleR/celldex reference")
+    parser.add_argument("--reference", default="HPCA", help="SingleR/scmap atlas selector or labeled H5AD path for popv")
     parser.add_argument("--cluster-key", default="leiden", help="Cluster column for marker mode")
     args = parser.parse_args()
 

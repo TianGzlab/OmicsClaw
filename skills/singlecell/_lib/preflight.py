@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib.util import find_spec
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidance_payload
@@ -10,7 +12,11 @@ from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidanc
 from .adata_utils import (
     build_standardization_recommendation,
     get_input_contract,
+    matrix_kind_is_count_like,
+    matrix_kind_is_normalized,
     matrix_looks_count_like,
+    raw_matrix_kind,
+    x_matrix_kind,
 )
 from . import annotation as sc_annotation_utils
 
@@ -166,6 +172,42 @@ def _add_standardization_guidance(
         )
 
 
+def _declared_x_is_count_like(adata: AnnData) -> bool:
+    kind = x_matrix_kind(adata)
+    if kind:
+        return matrix_kind_is_count_like(kind)
+    return matrix_looks_count_like(adata.X)
+
+
+def _declared_x_is_normalized(adata: AnnData) -> bool:
+    kind = x_matrix_kind(adata)
+    if kind:
+        return matrix_kind_is_normalized(kind)
+    return False
+
+
+def _declared_raw_is_normalized(adata: AnnData) -> bool:
+    if adata.raw is None or adata.raw.shape != adata.shape:
+        return False
+    kind = raw_matrix_kind(adata)
+    if kind:
+        return matrix_kind_is_normalized(kind)
+    return False
+
+
+def _normalized_expression_available(adata: AnnData) -> bool:
+    return _declared_x_is_normalized(adata) or _declared_raw_is_normalized(adata)
+
+
+def _aligned_raw_is_count_like(adata: AnnData) -> bool:
+    if adata.raw is None or adata.raw.shape != adata.shape:
+        return False
+    kind = raw_matrix_kind(adata)
+    if kind:
+        return matrix_kind_is_count_like(kind)
+    return matrix_looks_count_like(adata.raw.X)
+
+
 def preflight_sc_de(
     adata: AnnData,
     *,
@@ -223,8 +265,8 @@ def preflight_sc_de(
             hint = f" Candidate label columns: {_format_candidates(label_candidates)}." if label_candidates else ""
             decision.require_field("celltype_key", f"`--celltype-key {celltype_key}` was not found in `adata.obs`." + hint, aliases=["celltype_key", "cell_type_key", "cell_type"], flag="--celltype-key")
 
-        if "counts" not in adata.layers and adata.raw is None:
-            if matrix_looks_count_like(adata.X):
+        if "counts" not in adata.layers and not _aligned_raw_is_count_like(adata):
+            if _declared_x_is_count_like(adata):
                 decision.require_confirmation(
                     "No explicit raw-count layer was found; confirm that `adata.X` is still the unnormalized count matrix before running `deseq2_r`."
                 )
@@ -238,7 +280,7 @@ def preflight_sc_de(
             hint = f" Candidate grouping columns: {_format_candidates(candidates)}." if candidates else ""
             decision.require_confirmation(f"`--groupby {groupby}` was not found in `adata.obs`." + hint)
 
-        if method == "mast" and adata.raw is None and matrix_looks_count_like(adata.X):
+        if method == "mast" and not _normalized_expression_available(adata):
             decision.block(
                 "`mast` expects log-normalized expression. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
             )
@@ -271,11 +313,15 @@ def preflight_sc_cell_annotation(
                 )
         return decision
 
-    use_raw = adata.raw is not None and adata.raw.shape == adata.shape
-    if not use_raw and matrix_looks_count_like(adata.X):
+    use_raw = _declared_raw_is_normalized(adata)
+    if not use_raw and not _declared_x_is_normalized(adata):
         if method == "celltypist":
             decision.require_confirmation(
                 "`celltypist` currently sees count-like expression and would likely fall back to marker annotation. Run `sc-preprocessing` first or confirm that fallback is acceptable."
+            )
+        elif method == "popv":
+            decision.add_guidance(
+                "`popv` works best on log-normalized query expression aligned to a labeled reference. If matrix scale is uncertain, run `sc-preprocessing` first."
             )
         else:
             decision.block(
@@ -297,6 +343,20 @@ def preflight_sc_cell_annotation(
                 decision.block(reason)
         return decision
 
+    if method == "popv":
+        ref_path = Path(reference)
+        if reference == "HPCA":
+            decision.require_field(
+                "reference",
+                "`popv` expects `--reference` to be a labeled H5AD path; the default `HPCA` atlas keyword is not valid for this wrapper path.",
+                aliases=["reference", "ref"],
+            )
+        elif not ref_path.exists():
+            decision.block(
+                f"`popv` reference file was not found at {reference}. Provide a labeled H5AD reference via `--reference`."
+            )
+        return decision
+
     if method in {"singler", "scmap"} and reference == "HPCA":
         decision.require_field(
             "reference",
@@ -313,6 +373,11 @@ def preflight_sc_cell_communication(
     cell_type_key: str,
     species: str,
     counts_data: str | None = None,
+    condition_key: str | None = None,
+    condition_oi: str | None = None,
+    condition_ref: str | None = None,
+    receiver: str | None = None,
+    senders: list[str] | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-cell-communication")
@@ -343,10 +408,58 @@ def preflight_sc_cell_communication(
             aliases=["cellphonedb_counts_data", "counts_data"],
         )
 
-    if method == "cellchat_r" and adata.raw is None and matrix_looks_count_like(adata.X):
+    if method == "cellchat_r" and not _normalized_expression_available(adata):
         decision.require_confirmation(
             "`cellchat_r` expects log-normalized expression; the current `adata.X` still looks count-like. Run `sc-preprocessing` first or confirm the matrix state."
         )
+
+    if method == "nichenet_r":
+        if species != "human":
+            decision.block("The current NicheNet wrapper only supports `--species human`.")
+        if condition_key not in adata.obs.columns:
+            candidates = _obs_candidates(adata, "condition") + _obs_candidates(adata, "group")
+            if candidates:
+                decision.require_field(
+                    "condition_key",
+                    f"`--condition-key {condition_key}` was not found. Confirm the perturbation/condition column: {_format_candidates(candidates)}.",
+                    aliases=["condition_key", "condition", "group_key"],
+                    flag="--condition-key",
+                )
+            else:
+                decision.block(
+                    "NicheNet requires a condition column in `adata.obs` so the receiver cell type can be compared between two conditions."
+                )
+        if not receiver:
+            decision.require_field(
+                "receiver",
+                "NicheNet requires one receiver cell type via `--receiver`.",
+                aliases=["receiver", "receiver_celltype"],
+                flag="--receiver",
+            )
+        elif cell_type_key in adata.obs.columns and receiver not in set(adata.obs[cell_type_key].astype(str)):
+            decision.block(
+                f"`--receiver {receiver}` was not found in `adata.obs['{cell_type_key}']`."
+            )
+        if not senders:
+            decision.require_field(
+                "senders",
+                "NicheNet requires one or more sender cell types via `--senders sender1,sender2`.",
+                aliases=["senders", "sender", "sender_celltypes"],
+                flag="--senders",
+            )
+        elif cell_type_key in adata.obs.columns:
+            known = set(adata.obs[cell_type_key].astype(str))
+            missing = [sender for sender in senders if sender not in known]
+            if missing:
+                decision.block(
+                    f"`--senders` contains labels not found in `adata.obs['{cell_type_key}']`: {', '.join(missing)}."
+                )
+        if condition_key and condition_key in adata.obs.columns:
+            values = set(adata.obs[condition_key].astype(str))
+            if condition_oi and condition_oi not in values:
+                decision.block(f"`--condition-oi {condition_oi}` was not found in `adata.obs['{condition_key}']`.")
+            if condition_ref and condition_ref not in values:
+                decision.block(f"`--condition-ref {condition_ref}` was not found in `adata.obs['{condition_key}']`.")
 
     return decision
 
@@ -395,11 +508,11 @@ def preflight_sc_batch_integration(
             "Confirm that this column truly represents technical/sample batches rather than per-cell labels."
         )
 
-    if adata.raw is None and "counts" not in adata.layers and not matrix_looks_count_like(adata.X):
+    if not _aligned_raw_is_count_like(adata) and "counts" not in adata.layers and not _declared_x_is_count_like(adata):
         decision.block(
             "Batch integration needs raw counts in `layers['counts']`, aligned `adata.raw`, or count-like `adata.X`."
         )
-    elif adata.raw is None and "counts" not in adata.layers and matrix_looks_count_like(adata.X):
+    elif not _aligned_raw_is_count_like(adata) and "counts" not in adata.layers and _declared_x_is_count_like(adata):
         decision.add_guidance(
             "No explicit raw-count layer was found; integration will use count-like `adata.X`. Standardizing first is safer for downstream reuse."
         )
@@ -407,7 +520,7 @@ def preflight_sc_batch_integration(
     if not _looks_preprocessed_for_integration(adata):
         decision.add_guidance(
             "This object does not yet show the usual preprocessing markers (`X_pca`, neighbors, or cluster labels). "
-            "The standard OmicsClaw path is `sc-standardize-input` -> `sc-preprocessing` -> `sc-batch-integration`."
+            "The standard OmicsClaw path is canonicalize the input first, then `sc-preprocessing`, then `sc-batch-integration`."
         )
 
     if method == "scanvi":
@@ -452,7 +565,7 @@ def preflight_sc_doublet_detection(
         )
 
     if "counts" not in adata.layers:
-        if matrix_looks_count_like(adata.X):
+        if _declared_x_is_count_like(adata):
             decision.add_guidance(
                 "No explicit `layers['counts']` was found; doublet detection will use count-like `adata.X`."
             )
@@ -564,13 +677,15 @@ def preflight_sc_qc(
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-qc")
+    contract = get_input_contract(adata)
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
-    if "counts" not in adata.layers and adata.raw is None:
-        if matrix_looks_count_like(adata.X):
-            decision.add_guidance(
-                "`sc-qc` will use count-like `adata.X` because no explicit `counts` layer or aligned `adata.raw` was found."
-            )
+    if "counts" not in adata.layers and not _aligned_raw_is_count_like(adata):
+        if _declared_x_is_count_like(adata):
+            if not contract.get("standardized"):
+                decision.add_guidance(
+                    "`sc-qc` will use count-like `adata.X` because no explicit `counts` layer or aligned `adata.raw` was found."
+                )
         else:
             decision.block(
                 "`sc-qc` expects a raw count-like matrix in `layers['counts']`, aligned `adata.raw`, or `adata.X`."
@@ -635,6 +750,20 @@ def preflight_sc_pseudotime(
         decision.add_guidance(
             "`palantir` is available here, but it is heavier than DPT and should be chosen deliberately when users want waypoint-based pseudotime."
         )
+        if find_spec("palantir") is None:
+            decision.block("`palantir` was requested but the Python package `palantir` is not installed in the current environment.")
+    if method == "via":
+        decision.add_guidance(
+            "`via` is intended for graph-based trajectory inference with automatic terminal-state discovery; keep the root choice explicit and do not present it as a generic replacement for every pseudotime workflow."
+        )
+        if find_spec("pyVIA") is None:
+            decision.block("`via` was requested but the Python package `pyVIA` is not installed in the current environment.")
+    if method == "cellrank":
+        decision.add_guidance(
+            "`cellrank` is intended for macrostate and fate-probability inference on top of a transition kernel; use it when users explicitly want terminal states or lineage probabilities."
+        )
+        if find_spec("cellrank") is None:
+            decision.block("`cellrank` was requested but the Python package `cellrank` is not installed in the current environment.")
 
     if "neighbors" not in adata.uns:
         decision.add_guidance(
@@ -648,29 +777,52 @@ def preflight_sc_preprocessing(
     adata: AnnData,
     *,
     method: str,
+    min_genes: int | None = None,
+    max_mt_pct: float | None = None,
+    min_cells: int | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-preprocessing")
-    _add_standardization_guidance(decision, adata, source_path=source_path)
+
+    has_qc_metrics = {"n_genes_by_counts", "total_counts", "pct_counts_mt"}.issubset(set(adata.obs.columns))
+    if not has_qc_metrics and source_path and (
+        min_genes in {None, 200}
+        and max_mt_pct in {None, 20.0}
+        and min_cells in {None, 3}
+    ):
+        decision.require_confirmation(
+            "You asked for preprocessing before reviewing QC. Recommended path: run `sc-qc` first to inspect `n_genes`, `total_counts`, and `%MT`, then confirm the filtering thresholds. If you want to continue now, confirm that the default first-pass filtering thresholds are acceptable."
+        )
 
     if method in {"seurat", "sctransform"} and adata.raw is not None:
         decision.add_guidance(
             f"`{method}` will rebuild preprocessing from count-like input; existing `adata.raw` does not make the object already preprocessing-ready."
         )
-    if method in {"seurat", "sctransform"} and "counts" not in adata.layers and adata.raw is None and matrix_looks_count_like(adata.X):
+    if method in {"seurat", "sctransform"} and "counts" not in adata.layers and not _aligned_raw_is_count_like(adata) and _declared_x_is_count_like(adata):
         decision.require_confirmation(
             f"`{method}` will use count-like `adata.X` as raw input because no `layers['counts']` or aligned `adata.raw` was found. Confirm that `adata.X` is still the unnormalized count matrix."
         )
 
     if "counts" not in adata.layers:
-        if matrix_looks_count_like(adata.X):
+        if _declared_x_is_count_like(adata):
             decision.add_guidance(
                 "No explicit `layers['counts']` was found; preprocessing will treat count-like `adata.X` as the raw matrix."
             )
         else:
             decision.block(
-                "Preprocessing expects raw count-like input. Run `sc-standardize-input` first or provide an unnormalized count matrix."
+                "Preprocessing expects raw count-like input. Provide an unnormalized count matrix or use the shared canonicalization path first."
             )
+
+    if "predicted_doublet" not in adata.obs.columns and "doublet_score" not in adata.obs.columns:
+        decision.add_guidance(
+            "`sc-preprocessing` does not remove doublets automatically. If doublets are a concern, consider `sc-doublet-detection` before downstream interpretation."
+        )
+
+    batch_candidates = _obs_candidates(adata, "batch")
+    if batch_candidates:
+        decision.add_guidance(
+            f"Potential batch/sample columns were detected: {_format_candidates(batch_candidates)}. If batch effects are expected, plan `sc-batch-integration` after preprocessing."
+        )
 
     return decision
 
@@ -682,15 +834,30 @@ def preflight_sc_filter(
     min_counts: int | None = None,
     max_counts: int | None = None,
     max_mt_percent: float | None = None,
+    min_genes: int | None = None,
+    max_genes: int | None = None,
+    min_cells: int | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-filter")
-    _add_standardization_guidance(decision, adata, source_path=source_path)
 
     if "n_genes_by_counts" not in adata.obs.columns:
-        decision.add_guidance(
-            "QC metrics are missing; `sc-filter` will compute QC metrics automatically before filtering."
-        )
+        if _declared_x_is_count_like(adata) or "counts" in adata.layers or _aligned_raw_is_count_like(adata):
+            decision.add_guidance(
+                "QC metrics are missing; `sc-filter` will compute QC metrics automatically before filtering."
+            )
+        else:
+            decision.block(
+                "`sc-filter` needs either existing QC metrics in `adata.obs` or a raw count-like matrix to recompute them safely."
+            )
+        if source_path and all(value is None for value in (min_counts, max_counts, max_genes, tissue)) and (
+            min_genes in {None, 200}
+            and max_mt_percent in {None, 20.0}
+            and min_cells in {None, 3}
+        ):
+            decision.require_confirmation(
+                "You asked for filtering before reviewing QC distributions. Recommended path: run `sc-qc` first to inspect `n_genes`, `total_counts`, and `%MT`, then confirm the filtering thresholds. If you want to continue now, confirm that the default first-pass thresholds are acceptable."
+            )
 
     if (min_counts is not None or max_counts is not None) and "total_counts" not in adata.obs.columns and "n_genes_by_counts" in adata.obs.columns:
         decision.block(
@@ -741,13 +908,13 @@ def preflight_sc_markers(
                 "Marker detection requires an existing grouping column in `adata.obs` such as `leiden` or `cell_type`."
             )
 
-    if adata.raw is not None and adata.raw.shape == adata.shape:
+    if _declared_raw_is_normalized(adata):
         decision.add_guidance(
             "`sc-markers` will prefer `adata.raw` over `adata.X` when available. Make sure that is the expression state you want for marker ranking."
         )
-    if adata.raw is None and matrix_looks_count_like(adata.X):
-        decision.add_guidance(
-            "Marker detection will use `adata.X` directly because `adata.raw` is unavailable; results are more stable after `sc-preprocessing`."
+    elif not _declared_x_is_normalized(adata):
+        decision.require_confirmation(
+            "Marker detection expects normalized expression, but this object currently looks count-like. Run `sc-preprocessing` first or confirm that you want to continue anyway."
         )
 
     return decision
@@ -787,9 +954,9 @@ def preflight_sc_grn(
             aliases=["allow_simplified_grn", "simplified_grn", "fallback"],
         )
 
-    if adata.raw is None and matrix_looks_count_like(adata.X):
-        decision.add_guidance(
-            "GRN inference will read `adata.X` directly because `adata.raw` is unavailable. If this object is already log-normalized elsewhere, confirm the matrix state before interpreting regulons."
+    if not _normalized_expression_available(adata):
+        decision.require_confirmation(
+            "GRN inference currently does not see a declared normalized expression source. Run `sc-preprocessing` first or confirm the matrix state before interpreting regulons."
         )
 
     return decision

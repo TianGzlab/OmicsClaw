@@ -30,11 +30,7 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import (
-    prepare_count_like_adata,
-    record_standardized_input_contract,
-    store_analysis_metadata,
-)
+from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -74,29 +70,11 @@ def _write_reproducibility(output_dir: Path, input_file: str | None, *, demo_mod
 
 
 def _build_standardized_adata(adata, *, species: str):
-    prepared = prepare_count_like_adata(adata, species=species)
-    standardized = prepared.adata
-
-    standardized.obs_names = standardized.obs_names.astype(str)
-    standardized.var_names = standardized.var_names.astype(str)
-    standardized.obs_names_make_unique()
-    standardized.var_names_make_unique()
-
-    if "gene_symbols" not in standardized.var.columns or standardized.var["gene_symbols"].astype(str).eq("").all():
-        standardized.var["gene_symbols"] = standardized.var_names.astype(str)
-
-    if "_omicsclaw_original_var_names" in standardized.var.columns and "feature_id" not in standardized.var.columns:
-        standardized.var["feature_id"] = standardized.var["_omicsclaw_original_var_names"].astype(str)
-
-    standardized.layers["counts"] = standardized.X.copy()
-    contract = record_standardized_input_contract(
-        standardized,
-        expression_source=prepared.expression_source,
-        gene_name_source=prepared.gene_name_source,
-        warnings=prepared.warnings,
+    return canonicalize_singlecell_adata(
+        adata,
+        species=species,
         standardizer_skill=SKILL_NAME,
     )
-    return standardized, prepared, contract
 
 
 def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> None:
@@ -121,14 +99,17 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> No
         f"- **Expression source selected**: {summary['expression_source']}",
         f"- **Gene identifiers selected**: {summary['gene_name_source']}",
         "- **Canonical counts layer**: `adata.layers['counts']`",
-        "- **Canonical active matrix**: `adata.X` now points to count-like expression",
+        "- **Canonical active matrix**: `adata.X` now points to raw count-like expression",
+        "- **Canonical raw snapshot**: `adata.raw` stores a count-like snapshot so downstream skills can inspect provenance explicitly",
         "",
         "## Input Contract\n",
-        "- `adata.X`: count-like matrix for downstream OmicsClaw skills",
+        "- `adata.X`: raw count-like matrix for downstream OmicsClaw skills that need counts",
         "- `adata.layers['counts']`: canonical raw counts copy",
+        "- `adata.raw`: count-like snapshot aligned to the standardized object",
         "- `adata.var_names`: standardized feature names used by OmicsClaw",
         "- `adata.var['gene_symbols']`: user-facing gene symbols when available",
         "- `adata.uns['omicsclaw_input_contract']`: provenance and standardization metadata",
+        "- `adata.uns['omicsclaw_matrix_contract']`: explicit matrix semantics for `X`, `raw`, and `layers`",
         "",
         "## Warnings\n",
     ]
@@ -143,12 +124,12 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> No
     lines.extend([
         "",
         "## Output Files\n",
-        "- `standardized_input.h5ad` - canonical single-cell AnnData for downstream skills",
+        "- `processed.h5ad` - canonical single-cell AnnData for downstream skills",
         "- `report.md` - standardization report",
         "- `result.json` - structured provenance and contract metadata",
         "",
         "## Next Step\n",
-        "- You can now pass `standardized_input.h5ad` directly into downstream scRNA skills such as `sc-qc`, `sc-preprocessing`, `sc-doublet-detection`, and `sc-de`.",
+        "- You can now pass `processed.h5ad` directly into downstream scRNA skills such as `sc-qc`, `sc-preprocessing`, `sc-doublet-detection`, and `sc-de`.",
     ])
 
     footer = generate_report_footer()
@@ -186,6 +167,13 @@ def main() -> None:
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     standardized, prepared, contract = _build_standardized_adata(adata, species=args.species)
+    matrix_contract = {
+        "X": "raw_counts",
+        "raw": "raw_counts_snapshot",
+        "layers": {"counts": "raw_counts"},
+        "producer_skill": SKILL_NAME,
+    }
+    standardized.uns["omicsclaw_matrix_contract"] = matrix_contract
 
     summary = {
         "method": METHOD_NAME,
@@ -200,7 +188,7 @@ def main() -> None:
     }
 
     store_analysis_metadata(standardized, SKILL_NAME, METHOD_NAME, {"species": args.species})
-    output_h5ad = output_dir / "standardized_input.h5ad"
+    output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(standardized, output_h5ad)
     logger.info("Saved: %s", output_h5ad)
 
@@ -210,6 +198,7 @@ def main() -> None:
     result_data = {
         **summary,
         "input_contract": contract,
+        "matrix_contract": matrix_contract,
     }
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
@@ -230,7 +219,7 @@ def main() -> None:
     print(f"  Genes standardized: {summary['n_genes']:,}")
     print(f"  Expression source: {summary['expression_source']}")
     print(f"  Gene names source: {summary['gene_name_source']}")
-    print("  Canonical output: standardized_input.h5ad")
+    print("  Canonical output: processed.h5ad")
     if summary["warnings"]:
         print(f"  Warnings: {len(summary['warnings'])}")
 

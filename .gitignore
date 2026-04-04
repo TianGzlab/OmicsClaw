@@ -47,6 +47,11 @@ data/*
 examples/*.h5ad
 examples/*.vcf.gz
 
+# Local downloaded references and helper binaries
+resources/singlecell/references/
+resources/singlecell/tools/
+resources/
+
 # Single-cell databases (large, user-downloaded)
 skills/singlecell/data/databases/*
 !skills/singlecell/data/databases/.gitkeep
@@ -130,3 +135,6 @@ nature_new_insight2/
 
 # Knowledge base and workspace (local only)
 workspace/
+
+# Local references / external tools (user-downloaded, large)
+resources/

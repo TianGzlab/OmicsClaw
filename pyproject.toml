@@ -124,6 +124,41 @@ spatial = [
 singlecell = [
     "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
     "liana>=1.4.0",                   # sc-cell-communication: LIANA+
+    "harmonypy>=0.0.9",               # sc-batch-integration: Harmony
+    "bbknn>=1.5.0",                   # sc-batch-integration: BBKNN
+    "scanorama>=1.7.0",               # sc-batch-integration: Scanorama
+    "celltypist>=1.6.0",              # sc-cell-annotation: CellTypist
+    "arboreto>=0.1.6",                # sc-grn: GRNBoost2
+    "cellrank>=2.0.0,<3.0",           # sc-pseudotime / sc-velocity downstream
+    "palantir>=1.0.0",                # sc-pseudotime: Palantir
+    "pydeseq2>=0.4.0",                # sc-de pseudobulk Python path
+    "louvain>=0.8.0",                 # sc-clustering: Louvain backend
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-upstream — Python-side helpers for scRNA upstream wrappers.      #
+# External CLIs such as FastQC, STAR, Cell Ranger, simpleaf, and velocyto are #
+# NOT installed here and must be installed manually into the active env/PATH. #
+# --------------------------------------------------------------------------- #
+singlecell-upstream = [
+    "multiqc>=1.33",                  # sc-fastq-qc: MultiQC report aggregation
+    "kb-python>=0.29.0",              # sc-count: kb-python pseudoalignment backend
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-velocity — Python-side velocity analysis stack.                  #
+# External CLIs such as STAR and velocyto remain manual installs.             #
+# --------------------------------------------------------------------------- #
+singlecell-velocity = [
+    "scvelo>=0.3.0",                  # sc-velocity: scVelo modeling
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-full — convenience meta-extra for broader scRNA work.            #
+# Still excludes external CLIs and reference downloads.                       #
+# --------------------------------------------------------------------------- #
+singlecell-full = [
+    "omicsclaw[singlecell,singlecell-upstream,singlecell-velocity]",
 ]
 
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
@@ -348,6 +383,9 @@ testpaths = [
     "skills/bulkrna/bulkrna-enrichment/tests",
     "skills/bulkrna/bulkrna-deconvolution/tests",
     "skills/bulkrna/bulkrna-coexpression/tests",
+    "skills/singlecell/scrna/sc-fastq-qc/tests",
+    "skills/singlecell/scrna/sc-count/tests",
+    "skills/singlecell/scrna/sc-velocity-prep/tests",
 ]
 markers = [
     "slow: tests requiring full optional deps or significant runtime (excluded by default)",

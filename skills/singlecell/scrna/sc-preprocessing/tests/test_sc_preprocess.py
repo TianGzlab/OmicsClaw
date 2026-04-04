@@ -34,8 +34,8 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "figures" / "manifest.json").exists()
     assert (tmp_output / "figure_data" / "manifest.json").exists()
     assert (tmp_output / "tables" / "preprocess_summary.csv").exists()
-    assert (tmp_output / "tables" / "cluster_summary.csv").exists()
     assert (tmp_output / "tables" / "qc_metrics_per_cell.csv").exists()
+    assert (tmp_output / "tables" / "pca_embedding.csv").exists()
     assert (tmp_output / "processed.h5ad").exists()
     assert (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
     assert (tmp_output / "reproducibility" / "requirements.txt").exists()
@@ -74,7 +74,7 @@ def test_demo_result_json(tmp_output):
     assert data["data"]["effective_params"]["hvg_flavor"] == "seurat"
     assert data["data"]["effective_params"]["raw_available"] is True
     assert data["data"]["visualization"]["recipe_id"] == "standard-sc-preprocessing-gallery"
-    assert "cluster_summary" in data["data"]["visualization"]["available_figure_data"]
+    assert "pca_embedding" in data["data"]["visualization"]["available_figure_data"]
     command_text = (tmp_output / "reproducibility" / "commands.sh").read_text()
     assert "--method scanpy" in command_text
 

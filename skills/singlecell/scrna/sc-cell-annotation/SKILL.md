@@ -2,11 +2,12 @@
 name: sc-cell-annotation
 description: >-
   Annotate cell types from preprocessed scRNA-seq data using marker scoring,
-  CellTypist, SingleR, or scmap through the shared Python/R backends.
-version: 0.5.0
+  CellTypist, PopV-style reference mapping, SingleR, or scmap through the
+  shared Python/R backends.
+version: 0.6.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, annotation, celltypist, singler, scmap]
+tags: [singlecell, annotation, celltypist, popv, singler, scmap]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -30,6 +31,13 @@ metadata:
         requires: ["celltypist", "normalized_expression_matrix"]
         tips:
           - "--model: CellTypist model name or model file stem."
+      popv:
+        priority: "reference -> cluster_key"
+        params: ["reference", "cluster_key"]
+        defaults: {cluster_key: "leiden"}
+        requires: ["labeled_reference_h5ad", "normalized_expression_matrix"]
+        tips:
+          - "--method popv: reference-mapped consensus annotation using a labeled H5AD reference provided via --reference."
       singler:
         priority: "reference"
         params: ["reference"]
@@ -63,6 +71,8 @@ metadata:
       - annotate cells
       - celltypist
       - singler
+      - popv
+      - reference mapping
       - marker gene annotation
 ---
 
@@ -132,10 +142,10 @@ python skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py \
 
 | Parameter | Role | Notes |
 |-----------|------|-------|
-| `--method` | annotation backend | `markers`, `celltypist`, `singler`, or `scmap` |
+| `--method` | annotation backend | `markers`, `celltypist`, `popv`, `singler`, or `scmap` |
 | `--cluster-key` | grouping column | most important for `markers` and Sankey-style summaries |
 | `--model` | CellTypist model selector | used only by `celltypist` |
-| `--reference` | reference selector | used by `singler` and `scmap` |
+| `--reference` | reference selector | H5AD reference path for `popv`; atlas selector for `singler` / `scmap` |
 
 ## Algorithm / Methodology
 
@@ -155,6 +165,15 @@ Current OmicsClaw CellTypist path:
 2. uses normalized expression from `adata.raw` when available, otherwise `adata.X`
 3. writes per-cell predictions and standardized summary outputs
 
+### `popv`
+
+Current OmicsClaw PopV-style path:
+
+1. loads a labeled reference H5AD from `--reference`
+2. aligns overlapping genes between query and reference
+3. projects query cells to reference label centroids
+4. derives a cluster-level consensus label when `cluster_key` exists
+
 ### `singler` and `scmap`
 
 Current OmicsClaw R-backed reference paths:
@@ -166,7 +185,8 @@ Current OmicsClaw R-backed reference paths:
 Important implementation notes:
 
 - `model` is the main CellTypist selector.
-- `reference` is an OmicsClaw-level selector for the current SingleR / scmap path.
+- `reference` is an OmicsClaw-level selector: a labeled H5AD for `popv`, or an atlas selector for the current SingleR / scmap path.
+- If CellTypist input validation fails or the model cannot run, the wrapper falls back to `markers` and records both requested and actual methods.
 
 ## Output Contract
 
@@ -201,6 +221,16 @@ The current standard Python gallery uses:
 
 ## Current Limitations
 
+- `celltypist` can fall back to `markers` when the input matrix or requested model is not runnable in the current environment.
+- `popv` currently expects `--reference` to point to a labeled H5AD reference rather than a symbolic atlas shortcut like `HPCA`.
 - `singler` requires an R environment with `SingleR`, `celldex`, `SingleCellExperiment`, and `zellkonverter`.
 - `scmap` requires an R environment with `scmap`, `celldex`, `SingleCellExperiment`, and `zellkonverter`.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+
+## Safety And Guardrails
+
+- Explain the selected annotation source explicitly: `cluster_key` for marker scoring, `model` for CellTypist, `reference` as a labeled H5AD for `popv`, or `reference` as an atlas selector for SingleR/scmap.
+- Treat log-normalized expression as the expected matrix contract for all annotation paths.
+- If the run falls back from `celltypist` to `markers`, state both the requested and executed methods instead of presenting marker labels as CellTypist output.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-cell-annotation-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-cell-annotation.md`.

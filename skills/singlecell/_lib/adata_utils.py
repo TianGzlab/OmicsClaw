@@ -20,6 +20,7 @@ from .exceptions import PreprocessingRequiredError
 logger = logging.getLogger(__name__)
 INPUT_CONTRACT_KEY = "omicsclaw_input_contract"
 INPUT_CONTRACT_VERSION = "1.0"
+MATRIX_CONTRACT_KEY = "omicsclaw_matrix_contract"
 
 GENE_SYMBOL_CANDIDATE_COLUMNS = (
     "gene_symbols",
@@ -85,18 +86,81 @@ def get_input_contract(adata: AnnData) -> dict[str, Any]:
     return contract if isinstance(contract, dict) else {}
 
 
+def get_matrix_contract(adata: AnnData) -> dict[str, Any]:
+    """Return the matrix-semantics contract from ``adata.uns`` when present."""
+    contract = adata.uns.get(MATRIX_CONTRACT_KEY, {})
+    return contract if isinstance(contract, dict) else {}
+
+
+def record_matrix_contract(
+    adata: AnnData,
+    *,
+    x_kind: str,
+    raw_kind: str | None = None,
+    layers: dict[str, str | None] | None = None,
+    producer_skill: str | None = None,
+    preprocess_method: str | None = None,
+    primary_cluster_key: str | None = None,
+) -> dict[str, Any]:
+    """Persist explicit matrix semantics for downstream skill routing."""
+    contract = {
+        "X": x_kind,
+        "raw": raw_kind,
+        "layers": dict(layers or {}),
+    }
+    if producer_skill:
+        contract["producer_skill"] = str(producer_skill)
+    if preprocess_method:
+        contract["preprocess_method"] = str(preprocess_method)
+    if primary_cluster_key:
+        contract["primary_cluster_key"] = str(primary_cluster_key)
+    adata.uns[MATRIX_CONTRACT_KEY] = contract
+    return contract
+
+
+def matrix_kind_is_count_like(kind: str | None) -> bool:
+    """Return True when a contract label represents raw/count-like expression."""
+    return str(kind or "").lower() in {"raw_counts", "count_like", "count_like_expression", "raw_counts_snapshot"}
+
+
+def matrix_kind_is_normalized(kind: str | None) -> bool:
+    """Return True when a contract label represents normalized/transformed expression."""
+    return str(kind or "").lower() in {
+        "normalized_expression",
+        "log1p_normalized_expression",
+        "scaled_expression",
+    }
+
+
+def x_matrix_kind(adata: AnnData) -> str | None:
+    """Return the declared semantic role of ``adata.X`` when available."""
+    return get_matrix_contract(adata).get("X")
+
+
+def raw_matrix_kind(adata: AnnData) -> str | None:
+    """Return the declared semantic role of ``adata.raw`` when available."""
+    return get_matrix_contract(adata).get("raw")
+
+
+def infer_x_matrix_kind(adata: AnnData, *, fallback: str = "normalized_expression") -> str:
+    """Infer the semantic role of ``adata.X`` when no explicit contract exists."""
+    declared = x_matrix_kind(adata)
+    if declared in {"raw_counts", "normalized_expression"}:
+        return declared
+    return "raw_counts" if matrix_looks_count_like(adata.X) else fallback
+
+
 def ensure_input_contract(
     adata: AnnData,
     *,
     source_path: str | None = None,
     standardized: bool | None = None,
 ) -> dict[str, Any]:
-    """Ensure ``adata.uns`` contains a basic single-cell input contract block."""
+    """Ensure ``adata.uns`` contains a minimal single-cell input contract block."""
     contract = get_input_contract(adata).copy()
     contract.setdefault("version", INPUT_CONTRACT_VERSION)
     contract.setdefault("domain", "singlecell")
     contract.setdefault("standardized", False)
-    contract.setdefault("counts_layer", "counts" if "counts" in adata.layers else None)
     if source_path:
         contract.setdefault("source_path", str(source_path))
     if standardized is not None:
@@ -113,24 +177,57 @@ def record_standardized_input_contract(
     warnings: list[str] | None = None,
     standardizer_skill: str = "sc-standardize-input",
 ) -> dict[str, Any]:
-    """Persist the canonical OmicsClaw single-cell input contract."""
+    """Persist a minimal canonical OmicsClaw single-cell input contract."""
     contract = ensure_input_contract(adata, standardized=True)
     contract.update(
         {
             "standardized": True,
             "standardized_by": standardizer_skill,
             "standardized_at": datetime.now(timezone.utc).isoformat(),
-            "expression_source": expression_source,
-            "gene_name_source": gene_name_source,
-            "counts_layer": "counts" if "counts" in adata.layers else contract.get("counts_layer"),
-            "x_count_like": matrix_looks_count_like(adata.X),
-            "obs_names_unique": bool(adata.obs_names.is_unique),
-            "var_names_unique": bool(adata.var_names.is_unique),
-            "warnings": list(warnings or []),
         }
     )
     adata.uns[INPUT_CONTRACT_KEY] = contract
     return contract
+
+
+def propagate_singlecell_contracts(
+    source: AnnData,
+    target: AnnData,
+    *,
+    producer_skill: str,
+    x_kind: str | None = None,
+    raw_kind: str | None = None,
+    preprocess_method: str | None = None,
+    primary_cluster_key: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Copy minimal single-cell contracts onto a downstream output object."""
+    source_input = get_input_contract(source)
+    ensure_input_contract(
+        target,
+        source_path=source_input.get("source_path"),
+        standardized=bool(source_input.get("standardized", False)),
+    )
+
+    source_matrix = get_matrix_contract(source)
+    layers = dict(source_matrix.get("layers") or {})
+    if "counts" in target.layers:
+        layers["counts"] = "raw_counts"
+
+    resolved_x_kind = x_kind or source_matrix.get("X") or infer_x_matrix_kind(target)
+    resolved_raw_kind = raw_kind
+    if resolved_raw_kind is None and target.raw is not None:
+        resolved_raw_kind = source_matrix.get("raw") or "raw_counts_snapshot"
+
+    matrix_contract = record_matrix_contract(
+        target,
+        x_kind=resolved_x_kind,
+        raw_kind=resolved_raw_kind,
+        layers=layers,
+        producer_skill=producer_skill,
+        preprocess_method=preprocess_method,
+        primary_cluster_key=primary_cluster_key,
+    )
+    return get_input_contract(target), matrix_contract
 
 
 def build_standardization_recommendation(
@@ -138,12 +235,12 @@ def build_standardization_recommendation(
     source_path: str | None = None,
     skill_name: str | None = None,
 ) -> str:
-    """Build a user-facing recommendation to run the standardization skill first."""
+    """Build a user-facing note about auto-canonicalization and the optional wrapper skill."""
     prefix = f"`{skill_name}` detected" if skill_name else "This single-cell workflow detected"
     input_arg = str(source_path) if source_path else "<input.h5ad>"
     return (
-        f"{prefix} input that has not been standardized by `sc-standardize-input`; "
-        f"for more stable cross-skill behavior, run `oc run sc-standardize-input --input {input_arg} --output <dir>` first."
+        f"{prefix} input that has not yet been canonicalized under the OmicsClaw scRNA contract. "
+        f"Compatible workflows will auto-prepare it when possible; run `oc run sc-standardize-input --input {input_arg} --output <dir>` only if you want to inspect or export the canonical object explicitly."
     )
 
 
@@ -183,6 +280,20 @@ def _species_prefix_match_counts(names: pd.Index, species: str) -> dict[str, int
         mt_count = 0
         ribo_count = 0
     return {"mt": mt_count, "ribo": ribo_count}
+
+
+def infer_qc_species(adata: AnnData, *, default: str = "human") -> str:
+    """Infer whether QC prefix matching is more consistent with human or mouse."""
+    names = pd.Index([str(value) for value in adata.var_names], dtype="object")
+    human_score = _species_prefix_match_counts(names, "human")
+    mouse_score = _species_prefix_match_counts(names, "mouse")
+    human_total = human_score["mt"] + human_score["ribo"]
+    mouse_total = mouse_score["mt"] + mouse_score["ribo"]
+    if mouse_total > human_total:
+        return "mouse"
+    if human_total > 0:
+        return "human"
+    return default
 
 
 def _best_qc_gene_name_index(adata: AnnData, *, species: str) -> tuple[pd.Index, str, list[str]]:
@@ -272,6 +383,60 @@ def prepare_count_like_adata(
         warnings=source_warnings + gene_warnings,
     )
 
+
+
+
+def canonicalize_singlecell_adata(
+    adata: AnnData,
+    *,
+    species: str,
+    preferred_layer: str = "counts",
+    standardizer_skill: str = "sc-standardize-input",
+) -> tuple[AnnData, CountLikePreparationResult, dict[str, Any]]:
+    """Return a canonical count-like AnnData plus preparation diagnostics.
+
+    The returned object is safe for downstream OmicsClaw scRNA skills: ``X`` is
+    count-like, ``layers['counts']`` is populated, gene identifiers are made
+    stable, and the input contract records how the canonical object was built.
+    """
+    prepared = prepare_count_like_adata(
+        adata,
+        species=species,
+        preferred_layer=preferred_layer,
+    )
+    standardized = prepared.adata
+
+    standardized.obs_names = standardized.obs_names.astype(str)
+    standardized.var_names = standardized.var_names.astype(str)
+    standardized.obs_names_make_unique()
+    standardized.var_names_make_unique()
+
+    if (
+        "gene_symbols" not in standardized.var.columns
+        or standardized.var["gene_symbols"].astype(str).eq("").all()
+    ):
+        standardized.var["gene_symbols"] = standardized.var_names.astype(str)
+
+    if "_omicsclaw_original_var_names" in standardized.var.columns and "feature_id" not in standardized.var.columns:
+        standardized.var["feature_id"] = standardized.var["_omicsclaw_original_var_names"].astype(str)
+
+    standardized.layers[preferred_layer] = standardized.X.copy()
+    standardized.raw = standardized.copy()
+    record_matrix_contract(
+        standardized,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={preferred_layer: "raw_counts"},
+        producer_skill=standardizer_skill,
+    )
+    contract = record_standardized_input_contract(
+        standardized,
+        expression_source=prepared.expression_source,
+        gene_name_source=prepared.gene_name_source,
+        warnings=prepared.warnings,
+        standardizer_skill=standardizer_skill,
+    )
+    return standardized, prepared, contract
 
 def require_preprocessed(adata: AnnData) -> None:
     """Require PCA to be computed."""

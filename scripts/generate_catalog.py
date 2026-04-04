@@ -45,17 +45,18 @@ def parse_yaml_frontmatter(text: str) -> dict:
 
 
 def build_cli_alias_map() -> dict[str, str]:
-    """Build {absolute_skill_dir_path: cli_alias} from the Omics registry."""
+    """Build {absolute_skill_dir_path: canonical_cli_alias} from the Omics registry."""
     if str(OMICSCLAW_DIR) not in sys.path:
         sys.path.insert(0, str(OMICSCLAW_DIR))
     from omicsclaw.core.registry import registry
 
     registry.load_all()
     alias_map: dict[str, str] = {}
-    for alias, info in registry.skills.items():
+    for _alias, info in registry.skills.items():
         script = info.get("script")
         if isinstance(script, Path):
-            alias_map[str(script.parent.resolve())] = alias
+            canonical = info.get("canonical_name") or info.get("alias") or _alias
+            alias_map[str(script.parent.resolve())] = str(canonical)
     return alias_map
 
 

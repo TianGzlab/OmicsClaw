@@ -29,6 +29,7 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     "harmonypy": DependencyInfo("harmonypy", "pip install harmonypy", "Harmony batch correction"),
     "bbknn": DependencyInfo("bbknn", "pip install bbknn", "BBKNN batch correction"),
     "scanorama": DependencyInfo("scanorama", "pip install scanorama", "Scanorama integration"),
+    "louvain": DependencyInfo("louvain", "pip install louvain", "Louvain graph clustering"),
 
     # Annotation
     "celltypist": DependencyInfo("celltypist", "pip install celltypist", "CellTypist annotation"),
@@ -112,6 +113,12 @@ def require(name: str, *, feature: str = "") -> Any:
         f"Install: {info.install_cmd}\n"
         f"Description: {info.description}"
     )
+
+
+def install_hint(name: str) -> str:
+    """Return a human-readable install hint for an optional dependency."""
+    info = _get_info(name)
+    return f"{info.description or name}: install with `{info.install_cmd}`"
 
 
 

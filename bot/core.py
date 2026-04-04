@@ -1528,11 +1528,11 @@ async def _auto_prepare_sc_batch_integration(
                 f"(exit {standardize_result['returncode']}):\n{standardize_result['error_text']}"
             )
             return guidance + f"\n\n---\n{failure}" if guidance else failure
-        standardized_path = standardize_result["out_dir"] / "standardized_input.h5ad"
+        standardized_path = standardize_result["out_dir"] / "processed.h5ad"
         if not standardized_path.exists():
             return (
                 "Automatic preparation stopped because `sc-standardize-input` did not produce "
-                f"`standardized_input.h5ad` in `{standardize_result['out_dir']}`."
+                f"`processed.h5ad` in `{standardize_result['out_dir']}`."
             )
         current_input = str(standardized_path)
         step_records.append({"skill": "sc-standardize-input", "output_path": current_input})

@@ -37,7 +37,7 @@ Key properties to check:
   - if the object is external and count-vs-normalized state is unclear, recommend `sc-standardize-input` first
 
 Important implementation notes in current OmicsClaw:
-- implemented methods are `markers`, `celltypist`, `singler`, and `scmap`
+- implemented methods are `markers`, `celltypist`, `popv`, `singler`, and `scmap`
 - `singler` and `scmap` are available via the shared R bridge when the required R packages are installed
 - `model` is the key user-facing CellTypist selector
 - if CellTypist input validation or model execution fails, the wrapper may fall back to `markers` and records both requested and actual methods
@@ -48,6 +48,7 @@ Important implementation notes in current OmicsClaw:
 |--------|----------------|----------------------------|-------------|
 | **markers** | Fast baseline when clusters are already interpretable | `cluster_key` | Quality is limited by upstream clustering and marker quality; use log-normalized expression rather than counts |
 | **celltypist** | Best first automated model-based label transfer | `model` | Wrapper does not expose the full CellTypist tuning surface |
+| **popv** | Reference mapping when you already have a labeled atlas in H5AD format | `reference`, `cluster_key` | Current wrapper is PopV-style consensus mapping, not the full upstream popV package |
 | **singler** | Reference-based annotation through SingleR | `reference` | Requires an R environment with SingleR and celldex |
 | **scmap** | Cluster-level projection against a reference atlas | `reference` | Requires the R `scmap` stack and is only as good as the reference clusters |
 
@@ -81,6 +82,17 @@ Guidance:
 Important warnings:
 - do not expose `majority_voting`, `mode`, or other CellTypist internals as current public OmicsClaw parameters
 - if the current matrix still looks count-like, do not present CellTypist as if it can run natively without either preprocessing first or explicitly accepting marker fallback
+
+### PopV
+
+Tune in this order:
+1. `reference`
+2. `cluster_key`
+
+Important warnings:
+- the current wrapper expects `reference` to be a labeled H5AD path, not a symbolic atlas name
+- gene overlap and label quality in the reference matter more than the method name
+- describe this path as reference mapping with cluster consensus, not as the full upstream popV ensemble unless that backend is actually present
 
 ### SingleR
 
@@ -121,5 +133,7 @@ Important warnings:
 - https://celltypist.readthedocs.io/en/latest/celltypist.annotate.html
 - https://celltypist.readthedocs.io/en/latest/notebook/celltypist_tutorial.html
 - https://github.com/Teichlab/celltypist
+- https://pmc.ncbi.nlm.nih.gov/articles/PMC11631762/
+- https://docs.scvi-tools.org/en/1.3.3/tutorials/notebooks/multimodal/scarches_scvi_tools.html
 - https://bioconductor.org/packages/release/bioc/vignettes/SingleR/inst/doc/SingleR.html
 - https://bioconductor.org/packages/release/bioc/html/scmap.html

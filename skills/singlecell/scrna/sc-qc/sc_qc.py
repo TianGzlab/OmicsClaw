@@ -38,7 +38,7 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from omicsclaw.common.checksums import sha256_file
-from skills.singlecell._lib.adata_utils import prepare_count_like_adata, store_analysis_metadata
+from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, ensure_input_contract, store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib import io as sc_io
@@ -106,6 +106,22 @@ def _build_highest_expr_genes_table(adata, n_top: int = 20) -> pd.DataFrame:
     return df.sort_values("mean_expression", ascending=False).head(n_top).reset_index(drop=True)
 
 
+def _build_barcode_rank_table(adata) -> pd.DataFrame:
+    counts = np.sort(np.asarray(adata.obs["total_counts"], dtype=float))[::-1]
+    return pd.DataFrame({
+        "rank": np.arange(1, len(counts) + 1),
+        "total_counts": counts,
+        "log10_rank": np.log10(np.arange(1, len(counts) + 1)),
+        "log10_total_counts": np.log10(counts + 1),
+    })
+
+
+def _build_qc_correlation_table(adata, metrics: list[str]) -> pd.DataFrame:
+    corr = adata.obs.loc[:, metrics].corr(numeric_only=True)
+    corr.index.name = "metric"
+    return corr.reset_index()
+
+
 def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path) -> dict:
     summary_stats, summary_df, qc_metrics_df = generate_qc_summary_table(adata)
     summary["qc_metrics"] = summary_stats
@@ -116,6 +132,8 @@ def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, ou
         "qc_summary_df": summary_df,
         "qc_metrics_df": qc_metrics_df,
         "highest_expr_df": _build_highest_expr_genes_table(adata),
+        "barcode_rank_df": _build_barcode_rank_table(adata),
+        "qc_correlation_df": _build_qc_correlation_table(adata, qc_metric_columns),
         "qc_run_summary_df": pd.DataFrame(
             [
                 {"metric": "method", "value": "qc_metrics"},
@@ -123,6 +141,8 @@ def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, ou
                 {"metric": "n_genes", "value": int(summary.get("n_genes", 0))},
                 {"metric": "species", "value": effective_params.get("species", "human")},
                 {"metric": "calculate_ribo", "value": effective_params.get("calculate_ribo", True)},
+                {"metric": "expression_source", "value": summary.get("expression_source", "adata.X")},
+                {"metric": "gene_name_source", "value": summary.get("gene_name_source", "var_names")},
             ]
         ),
     }
@@ -173,6 +193,24 @@ def _build_qc_visualization_recipe(_adata, _summary: dict, _context: dict) -> Vi
                 title="Highest expressed genes",
                 description="Top genes by mean expression to reveal dominant features or contaminants.",
             ),
+            PlotSpec(
+                plot_id="barcode_rank",
+                role="diagnostic",
+                renderer="barcode_rank",
+                filename="barcode_rank.png",
+                title="Barcode-rank curve",
+                description="Ranked library-size curve to inspect capture complexity and tail behavior.",
+                required_obs=["total_counts"],
+            ),
+            PlotSpec(
+                plot_id="qc_correlation_heatmap",
+                role="supporting",
+                renderer="qc_correlation_heatmap",
+                filename="qc_correlation_heatmap.png",
+                title="QC correlation heatmap",
+                description="Pairwise Pearson correlations among QC metrics.",
+                required_obs=["n_genes_by_counts", "total_counts"],
+            ),
         ],
     )
 
@@ -209,11 +247,27 @@ def _render_highest_expr_genes(adata, spec: PlotSpec, context: dict) -> object:
     return path if path.exists() else None
 
 
+def _render_barcode_rank(adata, spec: PlotSpec, context: dict) -> object:
+    output_dir = Path(context["output_dir"])
+    sc_qc_utils.plot_barcode_rank(adata, output_dir)
+    path = _gallery_figure_path(output_dir, spec.filename)
+    return path if path.exists() else None
+
+
+def _render_qc_correlation_heatmap(adata, spec: PlotSpec, context: dict) -> object:
+    output_dir = Path(context["output_dir"])
+    sc_qc_utils.plot_qc_correlation_heatmap(adata, output_dir, metrics=context.get("qc_metric_columns"))
+    path = _gallery_figure_path(output_dir, spec.filename)
+    return path if path.exists() else None
+
+
 QC_GALLERY_RENDERERS = {
     "qc_violin": _render_qc_violin,
     "qc_scatter": _render_qc_scatter,
     "qc_histograms": _render_qc_histograms,
     "highest_expr_genes": _render_highest_expr_genes,
+    "barcode_rank": _render_barcode_rank,
+    "qc_correlation_heatmap": _render_qc_correlation_heatmap,
 }
 
 
@@ -233,6 +287,8 @@ def _export_figure_data(output_dir: Path, summary: dict, recipe: VisualizationRe
         ("qc_metrics_summary", "qc_metrics_summary.csv", context.get("qc_summary_df")),
         ("qc_metrics_per_cell", "qc_metrics_per_cell.csv", context.get("qc_metrics_df")),
         ("highest_expr_genes", "highest_expr_genes.csv", context.get("highest_expr_df")),
+        ("barcode_rank_curve", "barcode_rank_curve.csv", context.get("barcode_rank_df")),
+        ("qc_metric_correlations", "qc_metric_correlations.csv", context.get("qc_correlation_df")),
     ):
         if isinstance(df, pd.DataFrame) and not df.empty:
             df.to_csv(figure_data_dir / filename, index=False)
@@ -280,6 +336,8 @@ def export_tables(output_dir: Path, *, gallery_context: dict | None = None) -> l
         ("qc_metrics_summary.csv", "qc_summary_df"),
         ("qc_metrics_per_cell.csv", "qc_metrics_df"),
         ("highest_expr_genes.csv", "highest_expr_df"),
+        ("barcode_rank_curve.csv", "barcode_rank_df"),
+        ("qc_metric_correlations.csv", "qc_correlation_df"),
     ):
         df = context.get(key)
         if isinstance(df, pd.DataFrame) and not df.empty:
@@ -314,6 +372,7 @@ def write_qc_report(output_dir: Path, summary: dict, effective_params: dict, inp
         f"- **Species**: {effective_params['species']}",
         f"- **Expression source used for QC**: {summary.get('expression_source', 'adata.X')}",
         f"- **Gene identifiers used for QC**: {summary.get('gene_name_source', 'var_names')}",
+        "- **Output object standardization**: Yes; `processed.h5ad` is saved in the OmicsClaw scRNA contract for downstream reuse.",
         "- **Filtering performed**: No; this skill is diagnostic only.",
         "",
         "## Input Validation\n",
@@ -384,7 +443,7 @@ def write_qc_report(output_dir: Path, summary: dict, effective_params: dict, inp
         "- `tables/qc_metrics_summary.csv` — Summary statistics for all QC metrics",
         "- `tables/qc_metrics_per_cell.csv` — Per-cell QC metric values",
         "- `tables/highest_expr_genes.csv` — Top genes by mean expression",
-        "- `qc_checked.h5ad` — AnnData object with QC metrics added to `.obs`, feature tags added to `.var`, and OmicsClaw analysis metadata added to `.uns`",
+        "- `processed.h5ad` — AnnData object with QC metrics added to `.obs`, feature tags added to `.var`, and OmicsClaw analysis metadata added to `.uns`",
         "",
     ])
 
@@ -502,6 +561,7 @@ def generate_demo_data(species: str = "human"):
 
     try:
         adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+        ensure_input_contract(adata, source_path=str(demo_path) if demo_path else None, standardized=True)
         logger.info(f"Loaded demo data: {demo_path or 'scanpy-pbmc3k'}")
         return adata, demo_path
     except Exception as e:
@@ -531,30 +591,11 @@ def generate_demo_data(species: str = "human"):
                 gene_names[i] = mt_gene
         adata.var_names = gene_names
 
+        ensure_input_contract(adata, standardized=True)
         logger.info(f"Generated synthetic data: {adata.n_obs} cells x {adata.n_vars} genes")
         return adata, None
 
 
-def _copy_qc_annotations(source_adata, target_adata) -> list[str]:
-    """Copy QC outputs back onto the original AnnData without changing its expression matrix."""
-    copied_obs: list[str] = []
-    for column in (
-        "n_genes_by_counts",
-        "total_counts",
-        "pct_counts_mt",
-        "pct_counts_ribo",
-        "log10_total_counts",
-        "log10_n_genes_by_counts",
-    ):
-        if column in source_adata.obs.columns:
-            target_adata.obs[column] = source_adata.obs[column].to_numpy()
-            copied_obs.append(column)
-
-    for column in ("mt", "ribo"):
-        if column in source_adata.var.columns:
-            target_adata.var[column] = source_adata.var[column].to_numpy()
-
-    return copied_obs
 
 
 def main():
@@ -607,37 +648,56 @@ def main():
         logger,
     )
 
-    logger.info("Preparing count-like input for QC...")
-    prepared_input = prepare_count_like_adata(adata, species=effective_params["species"])
-    qc_adata = prepared_input.adata
+    logger.info("Canonicalizing input into the OmicsClaw scRNA contract...")
+    processed_adata, prepared_input, input_contract = canonicalize_singlecell_adata(
+        adata,
+        species=effective_params["species"],
+        standardizer_skill=SKILL_NAME,
+    )
+    matrix_contract = {
+        "X": "raw_counts",
+        "raw": "raw_counts_snapshot",
+        "layers": {"counts": "raw_counts"},
+        "producer_skill": SKILL_NAME,
+    }
+    processed_adata.uns["omicsclaw_matrix_contract"] = matrix_contract
 
-    # Calculate QC metrics
     logger.info("Calculating QC metrics...")
-    qc_adata = sc_qc_utils.calculate_qc_metrics(
-        qc_adata,
+    processed_adata = sc_qc_utils.calculate_qc_metrics(
+        processed_adata,
         species=effective_params["species"],
         calculate_ribo=effective_params["calculate_ribo"],
         inplace=True,
     )
-    copied_qc_columns = _copy_qc_annotations(qc_adata, adata)
+    qc_obs_columns = [
+        column
+        for column in (
+            "n_genes_by_counts",
+            "total_counts",
+            "pct_counts_mt",
+            "pct_counts_ribo",
+            "log10_total_counts",
+            "log10_n_genes_by_counts",
+        )
+        if column in processed_adata.obs.columns
+    ]
 
-    # Build summary dict
     summary = {
         "method": QC_METHOD,
-        "n_cells": int(adata.n_obs),
-        "n_genes": int(adata.n_vars),
-        "median_genes": float(adata.obs["n_genes_by_counts"].median()),
-        "median_counts": float(adata.obs["total_counts"].median()),
+        "n_cells": int(processed_adata.n_obs),
+        "n_genes": int(processed_adata.n_vars),
+        "median_genes": float(processed_adata.obs["n_genes_by_counts"].median()),
+        "median_counts": float(processed_adata.obs["total_counts"].median()),
         "expression_source": prepared_input.expression_source,
         "gene_name_source": prepared_input.gene_name_source,
         "input_warnings": prepared_input.warnings,
-        "qc_obs_columns": copied_qc_columns,
+        "qc_obs_columns": qc_obs_columns,
     }
 
-    gallery_context = _prepare_qc_gallery_context(qc_adata, summary, effective_params, output_dir)
+    gallery_context = _prepare_qc_gallery_context(processed_adata, summary, effective_params, output_dir)
 
     logger.info("Generating QC figures...")
-    generate_qc_figures(qc_adata, output_dir, summary, gallery_context=gallery_context)
+    generate_qc_figures(processed_adata, output_dir, summary, gallery_context=gallery_context)
 
     logger.info("Exporting tables...")
     export_tables(output_dir, gallery_context=gallery_context)
@@ -647,12 +707,11 @@ def main():
 
     write_reproducibility(output_dir, public_params, input_file, demo_mode=args.demo)
 
-    store_analysis_metadata(adata, SKILL_NAME, QC_METHOD, effective_params)
-    output_h5ad = output_dir / "qc_checked.h5ad"
-    save_h5ad(adata, output_h5ad)
+    store_analysis_metadata(processed_adata, SKILL_NAME, QC_METHOD, effective_params)
+    output_h5ad = output_dir / "processed.h5ad"
+    save_h5ad(processed_adata, output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
-    # Write result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     result_data = {
         "method": QC_METHOD,
@@ -662,8 +721,11 @@ def main():
             "expression_source": prepared_input.expression_source,
             "gene_name_source": prepared_input.gene_name_source,
             "warnings": prepared_input.warnings,
-            "qc_obs_columns": copied_qc_columns,
+            "qc_obs_columns": qc_obs_columns,
         },
+        "input_contract": input_contract,
+        "matrix_contract": matrix_contract,
+        "output_h5ad": "processed.h5ad",
         **summary,
         "visualization": {
             "recipe_id": "standard-sc-qc-gallery",
@@ -696,11 +758,18 @@ def main():
     print(f"\nFiles generated:")
     print(f"  - report.md")
     print(f"  - README.md")
-    print(f"  - qc_checked.h5ad")
+    print(f"  - processed.h5ad")
     print(f"  - figures/qc_violin.png")
     print(f"  - figures/qc_scatter.png")
     print(f"  - figures/qc_histograms.png")
+    print(f"  - figures/highest_expr_genes.png")
+    print(f"  - figures/barcode_rank.png")
+    print(f"  - figures/qc_correlation_heatmap.png")
+    print(f"  - figures/manifest.json")
+    print(f"  - figure_data/manifest.json")
     print(f"  - tables/qc_metrics_summary.csv")
+    print(f"  - tables/barcode_rank_curve.csv")
+    print(f"  - tables/qc_metric_correlations.csv")
     print(f"  - reproducibility/analysis_notebook.ipynb")
     print(f"\nNote: No cells were filtered. Use sc-preprocessing skill for filtering.")
 

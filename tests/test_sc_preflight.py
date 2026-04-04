@@ -20,6 +20,7 @@ from skills.singlecell._lib.preflight import (
     preflight_sc_qc,
     preflight_sc_velocity,
 )
+from skills.singlecell._lib.adata_utils import record_matrix_contract
 
 
 def _adata(
@@ -89,6 +90,30 @@ def test_preflight_sc_cell_annotation_celltypist_needs_confirmation_on_count_lik
 
     assert decision.status == "needs_user_input"
     assert any("CellTypist model" in line or "`celltypist`" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_cell_annotation_blocks_qc_style_count_contract_for_scmap():
+    adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
+    adata.layers["counts"] = adata.X.copy()
+    adata.raw = adata.copy()
+    record_matrix_contract(
+        adata,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-qc",
+    )
+
+    decision = preflight_sc_cell_annotation(
+        adata,
+        method="scmap",
+        model="Immune_All_Low",
+        reference="custom_ref",
+        cluster_key="leiden",
+    )
+
+    assert decision.status == "blocked"
+    assert any("expects log-normalized expression" in line for line in decision.missing_requirements)
 
 
 def test_preflight_sc_cell_annotation_markers_can_auto_cluster_with_guidance():
@@ -323,6 +348,27 @@ def test_preflight_sc_markers_requires_groupby_confirmation():
 
     assert decision.status == "needs_user_input"
     assert any("--groupby" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_markers_requires_confirmation_on_qc_style_count_contract():
+    adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float), obs={"leiden": ["0", "1"]})
+    adata.layers["counts"] = adata.X.copy()
+    adata.raw = adata.copy()
+    record_matrix_contract(
+        adata,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-qc",
+    )
+
+    decision = preflight_sc_markers(
+        adata,
+        groupby="leiden",
+    )
+
+    assert decision.status == "needs_user_input"
+    assert any("expects normalized expression" in line for line in decision.confirmations)
 
 
 def test_preflight_sc_grn_requires_full_db_bundle_confirmation():

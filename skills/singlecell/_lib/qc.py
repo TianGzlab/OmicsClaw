@@ -172,6 +172,28 @@ def calculate_qc_metrics(
     return adata
 
 
+def ensure_qc_metrics(
+    adata: AnnData,
+    *,
+    species: str = "human",
+    calculate_ribo: bool = True,
+    inplace: bool = True,
+) -> AnnData:
+    """Return an object with the core QC metrics available in ``adata.obs``."""
+    if not inplace:
+        adata = adata.copy()
+
+    required = {"n_genes_by_counts", "total_counts", "pct_counts_mt"}
+    if required.issubset(set(adata.obs.columns)):
+        return adata
+    return calculate_qc_metrics(
+        adata,
+        species=species,
+        calculate_ribo=calculate_ribo,
+        inplace=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Outlier detection
 # ---------------------------------------------------------------------------
@@ -416,6 +438,84 @@ def filter_genes(
 
     logger.info("Retained %d genes (%.1f%%)", adata.n_vars, 100 * adata.n_vars / n_before)
     return adata
+
+
+def summarize_filter_statistics(
+    adata_before: AnnData,
+    adata_after: AnnData,
+    *,
+    filter_stats: dict[str, int],
+) -> dict[str, Any]:
+    """Build a stable filtering summary payload."""
+    n_cells_before = int(adata_before.n_obs)
+    n_cells_after = int(adata_after.n_obs)
+    n_genes_before = int(adata_before.n_vars)
+    n_genes_after = int(adata_after.n_vars)
+    return {
+        "n_cells_before": n_cells_before,
+        "n_cells_after": n_cells_after,
+        "cells_retained_pct": round(100 * n_cells_after / max(n_cells_before, 1), 2),
+        "n_genes_before": n_genes_before,
+        "n_genes_after": n_genes_after,
+        "genes_retained_pct": round(100 * n_genes_after / max(n_genes_before, 1), 2),
+        "filter_stats": {str(key): int(value) for key, value in filter_stats.items()},
+    }
+
+
+def apply_threshold_filtering(
+    adata: AnnData,
+    *,
+    min_genes: int = 200,
+    max_genes: Optional[int] = None,
+    min_counts: Optional[int] = None,
+    max_counts: Optional[int] = None,
+    max_mt_percent: Optional[float] = None,
+    min_cells: int = 3,
+    tissue: str | None = None,
+) -> tuple[AnnData, dict[str, Any], dict[str, Any]]:
+    """Apply cell and gene filtering with a reusable summary payload."""
+    effective_params = {
+        "min_genes": min_genes,
+        "max_genes": max_genes,
+        "min_counts": min_counts,
+        "max_counts": max_counts,
+        "max_mt_percent": max_mt_percent,
+        "min_cells": min_cells,
+        "tissue": tissue,
+    }
+    if tissue:
+        thresholds = get_tissue_qc_thresholds(tissue)
+        effective_params["min_genes"] = thresholds.get("min_genes", effective_params["min_genes"])
+        effective_params["max_genes"] = thresholds.get("max_genes", effective_params["max_genes"])
+        effective_params["max_mt_percent"] = thresholds.get("max_mt", effective_params["max_mt_percent"])
+
+    filtered = filter_cells_by_qc(
+        adata,
+        min_genes=effective_params["min_genes"],
+        max_genes=effective_params["max_genes"],
+        min_counts=effective_params["min_counts"],
+        max_counts=effective_params["max_counts"],
+        max_mt_percent=effective_params["max_mt_percent"],
+        inplace=False,
+    )
+
+    filter_stats: dict[str, int] = {}
+    if effective_params["min_genes"] is not None:
+        filter_stats["min_genes_removed"] = int((adata.obs["n_genes_by_counts"] < effective_params["min_genes"]).sum())
+    if effective_params["max_genes"] is not None:
+        filter_stats["max_genes_removed"] = int((adata.obs["n_genes_by_counts"] > effective_params["max_genes"]).sum())
+    if effective_params["min_counts"] is not None and "total_counts" in adata.obs:
+        filter_stats["min_counts_removed"] = int((adata.obs["total_counts"] < effective_params["min_counts"]).sum())
+    if effective_params["max_counts"] is not None and "total_counts" in adata.obs:
+        filter_stats["max_counts_removed"] = int((adata.obs["total_counts"] > effective_params["max_counts"]).sum())
+    if effective_params["max_mt_percent"] is not None and "pct_counts_mt" in adata.obs:
+        filter_stats["mt_removed"] = int((adata.obs["pct_counts_mt"] > effective_params["max_mt_percent"]).sum())
+    if "outlier" in adata.obs.columns:
+        filter_stats["outliers_removed"] = int(adata.obs["outlier"].sum())
+
+    filtered = filter_genes(filtered, min_cells=effective_params["min_cells"], inplace=True)
+    summary = summarize_filter_statistics(adata, filtered, filter_stats=filter_stats)
+    return filtered, summary, effective_params
 
 
 # ---------------------------------------------------------------------------
@@ -683,168 +783,11 @@ def combine_filters_and_apply(
 # QC visualization
 # ---------------------------------------------------------------------------
 
-def plot_qc_violin(
-    adata: AnnData,
-    output_dir: Union[str, Path],
-    metrics: Optional[List[str]] = None,
-    figsize: tuple = (12, 4),
-) -> None:
-    """Create violin plots of QC metrics and save to *output_dir*.
-
-    Saves ``figures/qc_violin.png``.
-    """
-    from .viz_utils import save_figure
-
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-
-    output_dir = Path(output_dir)
-    if metrics is None:
-        metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
-    metrics = [metric for metric in metrics if metric in adata.obs.columns]
-    if not metrics:
-        logger.warning("No QC metrics available for violin plotting")
-        return
-
-    logger.info("Creating QC violin plots ...")
-    sns.set_style("ticks")
-
-    fig, axes = plt.subplots(1, len(metrics), figsize=figsize)
-    if len(metrics) == 1:
-        axes = [axes]
-
-    for i, metric in enumerate(metrics):
-        if metric not in adata.obs.columns:
-            logger.warning("%s not found, skipping", metric)
-            continue
-
-        parts = axes[i].violinplot([adata.obs[metric]], positions=[0],
-                                   widths=0.7, showmeans=True, showmedians=True)
-        for pc in parts["bodies"]:
-            pc.set_facecolor("#8da0cb")
-            pc.set_alpha(0.7)
-
-        axes[i].set_ylabel(metric.replace("_", " ").title())
-        axes[i].set_xticks([])
-        axes[i].spines["top"].set_visible(False)
-        axes[i].spines["right"].set_visible(False)
-        axes[i].grid(axis="y", alpha=0.3)
-
-    plt.tight_layout()
-    save_figure(fig, output_dir, "qc_violin.png")
-
-
-def plot_qc_scatter(
-    adata: AnnData,
-    output_dir: Union[str, Path],
-    figsize: tuple = (12, 4),
-) -> None:
-    """Create scatter plots of QC metrics.
-
-    Saves ``figures/qc_scatter.png``.
-    """
-    from .viz_utils import save_figure
-
-    import matplotlib.pyplot as plt
-
-    output_dir = Path(output_dir)
-    logger.info("Creating QC scatter plots ...")
-
-    scatter_cfg = [
-        ("total_counts", "n_genes_by_counts", "#8da0cb"),
-        ("total_counts", "pct_counts_mt", "#fc8d62"),
-        ("n_genes_by_counts", "pct_counts_mt", "#66c2a5"),
-        ("total_counts", "pct_counts_ribo", "#e78ac3"),
-        ("n_genes_by_counts", "pct_counts_ribo", "#a6d854"),
-    ]
-    available_pairs = [(x, y, c) for x, y, c in scatter_cfg if x in adata.obs.columns and y in adata.obs.columns]
-    if not available_pairs:
-        logger.warning("No QC metric pairs available for scatter plotting")
-        return
-
-    fig, axes = plt.subplots(1, len(available_pairs), figsize=(4 * len(available_pairs), figsize[1]))
-    if len(available_pairs) == 1:
-        axes = [axes]
-    for ax, (x, y, c) in zip(axes, available_pairs):
-        ax.scatter(adata.obs[x], adata.obs[y], s=1, alpha=0.3, c=c)
-        ax.set_xlabel(x.replace("_", " ").title())
-        ax.set_ylabel(y.replace("_", " ").title())
-        if "counts" in x:
-            ax.set_xscale("log")
-        if "counts" in y and "pct" not in y:
-            ax.set_yscale("log")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    save_figure(fig, output_dir, "qc_scatter.png")
-
-
-def plot_qc_histograms(
-    adata: AnnData,
-    output_dir: Union[str, Path],
-    metrics: Optional[List[str]] = None,
-    figsize: tuple = (12, 4),
-    bins: int = 50,
-) -> None:
-    """Create histograms of QC metrics with median lines.
-
-    Saves ``figures/qc_histograms.png``.
-    """
-    from .viz_utils import save_figure
-
-    import matplotlib.pyplot as plt
-
-    output_dir = Path(output_dir)
-    if metrics is None:
-        metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
-    metrics = [metric for metric in metrics if metric in adata.obs.columns]
-    if not metrics:
-        logger.warning("No QC metrics available for histogram plotting")
-        return
-
-    logger.info("Creating QC histograms ...")
-    colors = ["#8da0cb", "#fc8d62", "#66c2a5"]
-
-    fig, axes = plt.subplots(1, len(metrics), figsize=figsize)
-    if len(metrics) == 1:
-        axes = [axes]
-
-    for i, metric in enumerate(metrics):
-        if metric not in adata.obs.columns:
-            continue
-        axes[i].hist(adata.obs[metric], bins=bins, color=colors[i % len(colors)],
-                     alpha=0.7, edgecolor="black")
-        med = adata.obs[metric].median()
-        axes[i].axvline(med, color="red", linestyle="--", linewidth=2,
-                        label=f"Median: {med:.1f}")
-        axes[i].set_xlabel(metric.replace("_", " ").title())
-        axes[i].set_ylabel("Count")
-        axes[i].legend()
-        axes[i].spines["top"].set_visible(False)
-        axes[i].spines["right"].set_visible(False)
-
-    plt.tight_layout()
-    save_figure(fig, output_dir, "qc_histograms.png")
-
-
-def plot_highest_expr_genes(
-    adata: AnnData,
-    output_dir: Union[str, Path],
-    n_top: int = 20,
-) -> None:
-    """Plot the highest expressed genes.
-
-    Saves ``figures/highest_expr_genes.png``.
-    """
-    import scanpy as sc
-    import matplotlib.pyplot as plt
-    from .viz_utils import save_figure
-
-    output_dir = Path(output_dir)
-    logger.info("Plotting top %d highest expressed genes ...", n_top)
-
-    sc.pl.highest_expr_genes(adata, n_top=n_top, show=False)
-    fig = plt.gcf()
-    save_figure(fig, output_dir, "highest_expr_genes.png")
+from .viz.qc import (
+    plot_barcode_rank,
+    plot_highest_expr_genes,
+    plot_qc_correlation_heatmap,
+    plot_qc_histograms,
+    plot_qc_scatter,
+    plot_qc_violin,
+)

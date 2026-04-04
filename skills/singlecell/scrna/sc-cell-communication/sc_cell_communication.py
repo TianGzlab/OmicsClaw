@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-cell cell-cell communication analysis with builtin, LIANA, CellPhoneDB, and CellChat backends."""
+"""Single-cell cell-cell communication analysis with builtin, LIANA, CellPhoneDB, CellChat, and NicheNet backends."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import store_analysis_metadata
+from skills.singlecell._lib.adata_utils import matrix_looks_count_like, store_analysis_metadata
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_cell_communication
 from omicsclaw.core.dependency_manager import validate_r_environment
@@ -66,6 +66,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="CellChat communication inference (R)",
         dependencies=(),
     ),
+    "nichenet_r": MethodConfig(
+        name="nichenet_r",
+        description="NicheNet ligand activity prioritization with the official R package",
+        dependencies=(),
+    ),
 }
 
 DEFAULT_METHOD = "builtin"
@@ -90,6 +95,17 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
     "cellchat_r": {
         "cell_type_key": "cell_type",
         "species": "human",
+    },
+    "nichenet_r": {
+        "cell_type_key": "cell_type",
+        "species": "human",
+        "condition_key": "condition",
+        "condition_oi": "stim",
+        "condition_ref": "ctrl",
+        "receiver": "",
+        "senders": "",
+        "nichenet_top_ligands": 20,
+        "nichenet_expression_pct": 0.10,
     },
 }
 OUTPUT_COLUMNS = ["ligand", "receptor", "source", "target", "score", "pvalue", "pathway"]
@@ -187,6 +203,25 @@ def _build_cellchat_input_adata(adata):
     return adata.copy(), "adata.X"
 
 
+def _build_nichenet_input_adata(adata):
+    if "counts" in adata.layers and adata.layers["counts"].shape == adata.shape:
+        export = sc.AnnData(X=adata.layers["counts"].copy(), obs=adata.obs.copy(), var=adata.var.copy())
+        export.obs_names = adata.obs_names.copy()
+        export.var_names = adata.var_names.copy()
+        return export, "layers.counts"
+    if adata.raw is not None and adata.raw.shape == adata.shape:
+        export = sc.AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
+        export.obs_names = adata.obs_names.copy()
+        export.var_names = adata.raw.var_names.copy()
+        return export, "adata.raw"
+    if matrix_looks_count_like(adata.X):
+        return adata.copy(), "adata.X"
+    raise ValueError(
+        "NicheNet requires a raw count-like matrix in `layers['counts']`, `adata.raw`, or `adata.X`. "
+        "Run `sc-standardize-input` or provide an object that still contains raw counts."
+    )
+
+
 def _prepare_cellphonedb_input_adata(adata, *, cell_type_key: str):
     export, source = _build_cellchat_input_adata(adata)
     export = export.copy()
@@ -233,6 +268,81 @@ def run_cellchat(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     if not df.empty:
         df["expression_source"] = source
     return df
+
+
+def run_nichenet(
+    adata,
+    *,
+    cell_type_key: str,
+    species: str,
+    condition_key: str,
+    condition_oi: str,
+    condition_ref: str,
+    receiver: str,
+    senders: list[str],
+    top_ligands: int,
+    expression_pct: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    if species != "human":
+        raise ValueError("The current NicheNet wrapper only supports species='human'.")
+
+    validate_r_environment(required_r_packages=["nichenetr", "Seurat", "SingleCellExperiment", "zellkonverter"])
+    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=7200)
+    export, source = _build_nichenet_input_adata(adata)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_nichenet_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export.write_h5ad(input_h5ad)
+        runner.run_script(
+            "sc_nichenet.R",
+            args=[
+                str(input_h5ad),
+                str(output_dir),
+                cell_type_key,
+                condition_key,
+                condition_oi,
+                condition_ref,
+                receiver,
+                ",".join(senders),
+                str(int(top_ligands)),
+                str(float(expression_pct)),
+            ],
+            expected_outputs=[
+                "nichenet_ligand_activities.csv",
+                "nichenet_ligand_target_links.csv",
+                "nichenet_lr_network.csv",
+            ],
+            output_dir=output_dir,
+        )
+        ligand_activities = pd.read_csv(output_dir / "nichenet_ligand_activities.csv")
+        ligand_target_links = pd.read_csv(output_dir / "nichenet_ligand_target_links.csv")
+        lr_network = pd.read_csv(output_dir / "nichenet_lr_network.csv")
+
+    if lr_network.empty:
+        lr_df = _empty_lr_table()
+    else:
+        lr_df = pd.DataFrame(
+            {
+                "ligand": lr_network["ligand"].astype(str),
+                "receptor": lr_network["receptor"].astype(str),
+                "source": lr_network["source"].astype(str),
+                "target": lr_network["target"].astype(str),
+                "score": pd.to_numeric(lr_network["score"], errors="coerce").fillna(0.0),
+                "pvalue": np.nan,
+                "pathway": "NicheNet",
+            }
+        ).sort_values("score", ascending=False).reset_index(drop=True)
+
+    notes = {
+        "expression_source": source,
+        "receiver": receiver,
+        "senders": senders,
+        "n_prioritized_ligands": int(len(ligand_activities)),
+    }
+    return lr_df, ligand_activities, ligand_target_links, notes
 
 
 def run_cellphonedb(
@@ -433,7 +543,20 @@ def _run_cellchat_r(adata, *, cell_type_key: str, species: str) -> pd.DataFrame:
     return df.sort_values("score", ascending=False).reset_index(drop=True)
 
 
-def run_communication(adata, *, method: str, cell_type_key: str, species: str) -> dict:
+def run_communication(
+    adata,
+    *,
+    method: str,
+    cell_type_key: str,
+    species: str,
+    condition_key: str | None = None,
+    condition_oi: str | None = None,
+    condition_ref: str | None = None,
+    receiver: str | None = None,
+    senders: list[str] | None = None,
+    nichenet_top_ligands: int = 20,
+    nichenet_expression_pct: float = 0.10,
+) -> dict:
     if cell_type_key not in adata.obs.columns:
         raise ValueError(f"Cell type key '{cell_type_key}' not in adata.obs: {list(adata.obs.columns)}")
 
@@ -451,11 +574,28 @@ def run_communication(adata, *, method: str, cell_type_key: str, species: str) -
             pvalue=METHOD_PARAM_DEFAULTS["cellphonedb"]["cellphonedb_pvalue"],
         ),
         "cellchat_r": lambda: _run_cellchat_r(adata, cell_type_key=cell_type_key, species=species),
+        "nichenet_r": lambda: run_nichenet(
+            adata,
+            cell_type_key=cell_type_key,
+            species=species,
+            condition_key=condition_key or "",
+            condition_oi=condition_oi or "",
+            condition_ref=condition_ref or "",
+            receiver=receiver or "",
+            senders=senders or [],
+            top_ligands=nichenet_top_ligands,
+            expression_pct=nichenet_expression_pct,
+        ),
     }
     cpdb_notes: dict[str, object] = {}
+    nichenet_notes: dict[str, object] = {}
+    ligand_activity_df = pd.DataFrame()
+    ligand_target_links_df = pd.DataFrame()
     result = dispatch[method]()
     if method == "cellphonedb":
         lr_df, cpdb_notes = result
+    elif method == "nichenet_r":
+        lr_df, ligand_activity_df, ligand_target_links_df, nichenet_notes = result
     else:
         lr_df = result
     pvalue_series = pd.to_numeric(lr_df["pvalue"], errors="coerce") if not lr_df.empty else pd.Series(dtype=float)
@@ -478,7 +618,9 @@ def run_communication(adata, *, method: str, cell_type_key: str, species: str) -
         "top_df": lr_df.head(50) if not lr_df.empty else lr_df,
         "cellphonedb_renamed_cells": cpdb_notes.get("renamed_cells", False),
         "cellphonedb_prefixed_numeric_clusters": cpdb_notes.get("renamed_numeric_clusters", False),
-        "expression_source": cpdb_notes.get("expression_source", ""),
+        "expression_source": cpdb_notes.get("expression_source", nichenet_notes.get("expression_source", "")),
+        "ligand_activity_df": ligand_activity_df,
+        "ligand_target_links_df": ligand_target_links_df,
     }
     if method == "builtin":
         summary["score_semantics"] = (
@@ -493,12 +635,40 @@ def run_communication(adata, *, method: str, cell_type_key: str, species: str) -
         summary["score_semantics"] = (
             "CellPhoneDB score comes from the official statistical-analysis output reshaped into the OmicsClaw contract."
         )
+    if method == "nichenet_r":
+        summary["score_semantics"] = (
+            "NicheNet score is ligand activity prioritization at the receiver cell type, not a permutation-derived communication probability."
+        )
+        summary["significance_semantics"] = (
+            "NicheNet prioritizes ligands using activity scores and ligand-target links; pvalue is left empty in the shared LR table."
+        )
+        summary["pvalue_available"] = False
+        summary["n_significant"] = 0
+        summary["receiver"] = nichenet_notes.get("receiver", receiver or "")
+        summary["senders"] = nichenet_notes.get("senders", senders or [])
+        summary["n_prioritized_ligands"] = int(nichenet_notes.get("n_prioritized_ligands", len(ligand_activity_df)))
     return summary
 
 
 def generate_figures(output_dir: Path, summary: dict) -> list[str]:
     figures = []
     top_df = summary.get("top_df", pd.DataFrame())
+    ligand_activity_df = summary.get("ligand_activity_df", pd.DataFrame())
+    if isinstance(ligand_activity_df, pd.DataFrame) and not ligand_activity_df.empty:
+        try:
+            bar = ligand_activity_df.head(15).copy()
+            ligand_col = "ligand" if "ligand" in bar.columns else "test_ligand"
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.barh(bar[ligand_col].astype(str), bar["pearson"], color="#238b45")
+            ax.set_xlabel("Ligand activity (pearson)")
+            ax.set_title("Top NicheNet ligands")
+            ax.invert_yaxis()
+            fig.tight_layout()
+            p = save_figure(fig, output_dir, "nichenet_top_ligands.png")
+            figures.append(str(p))
+            plt.close(fig)
+        except Exception as exc:
+            logger.warning("NicheNet ligand plot failed: %s", exc)
     if top_df.empty:
         return figures
 
@@ -551,11 +721,12 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     )
 
     top_df = summary.get("top_df", pd.DataFrame())
-    significance_label = (
-        str(summary["n_significant"])
-        if summary.get("pvalue_available", True)
-        else "N/A for builtin heuristic backend"
-    )
+    if summary.get("pvalue_available", True):
+        significance_label = str(summary["n_significant"])
+    elif summary.get("executed_method") == "nichenet_r":
+        significance_label = "N/A for NicheNet ligand prioritization"
+    else:
+        significance_label = "N/A for builtin heuristic backend"
     body_lines = [
         "## Summary\n",
         f"- **Cells**: {summary['n_cells']}",
@@ -573,6 +744,12 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         body_lines.append("- **CellPhoneDB export note**: cell IDs containing `-` were rewritten to `_` for compatibility.")
     if summary.get("cellphonedb_prefixed_numeric_clusters"):
         body_lines.append("- **CellPhoneDB export note**: numeric cluster labels were prefixed with `cluster_` for compatibility.")
+    if summary.get("receiver"):
+        body_lines.append(f"- **Receiver cell type**: {summary['receiver']}")
+    if summary.get("senders"):
+        body_lines.append(f"- **Sender cell types**: {', '.join(summary['senders'])}")
+    if summary.get("n_prioritized_ligands"):
+        body_lines.append(f"- **Prioritized ligands**: {summary['n_prioritized_ligands']}")
     if not top_df.empty:
         body_lines.extend(["", "### Top Interactions\n"])
         body_lines.append("| Ligand | Receptor | Source | Target | Score |")
@@ -595,6 +772,12 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     if not lr_df.empty:
         lr_df.to_csv(tables_dir / "lr_interactions.csv", index=False)
         top_df.head(50).to_csv(tables_dir / "top_interactions.csv", index=False)
+    ligand_activity_df = summary.get("ligand_activity_df", pd.DataFrame())
+    if isinstance(ligand_activity_df, pd.DataFrame) and not ligand_activity_df.empty:
+        ligand_activity_df.to_csv(tables_dir / "nichenet_ligand_activities.csv", index=False)
+    ligand_target_links_df = summary.get("ligand_target_links_df", pd.DataFrame())
+    if isinstance(ligand_target_links_df, pd.DataFrame) and not ligand_target_links_df.empty:
+        ligand_target_links_df.to_csv(tables_dir / "nichenet_ligand_target_links.csv", index=False)
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
@@ -606,11 +789,49 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         f"--cell-type-key {params.get('cell_type_key', 'cell_type')} "
         f"--species {params.get('species', 'human')}"
     )
+    if params.get("method") == "nichenet_r":
+        command += (
+            f" --condition-key {params.get('condition_key', 'condition')}"
+            f" --condition-oi {params.get('condition_oi', 'stim')}"
+            f" --condition-ref {params.get('condition_ref', 'ctrl')}"
+            f" --receiver {params.get('receiver', '<receiver>')}"
+            f" --senders {params.get('senders', '<sender1,sender2>')}"
+            f" --nichenet-top-ligands {params.get('nichenet_top_ligands', 20)}"
+            f" --nichenet-expression-pct {params.get('nichenet_expression_pct', 0.1)}"
+        )
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
     _write_repro_requirements(
         repro_dir,
         ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
     )
+
+
+def _configure_nichenet_demo(adata, *, cell_type_key: str, condition_key: str) -> tuple[str, list[str], str, str]:
+    labels = adata.obs[cell_type_key].astype(str)
+    counts = labels.value_counts()
+    if counts.size < 2:
+        raise ValueError("NicheNet demo requires at least two cell groups.")
+    receiver = str(counts.index[0])
+    senders = [str(label) for label in counts.index[1:4]]
+    if not senders:
+        senders = [str(counts.index[-1])]
+
+    condition = np.array(["ctrl"] * adata.n_obs, dtype=object)
+    receiver_idx = np.where((labels == receiver).to_numpy())[0]
+    condition[receiver_idx[::2]] = "stim"
+    adata.obs[condition_key] = pd.Categorical(condition)
+    stim_idx = receiver_idx[::2]
+    if len(stim_idx) > 0:
+        gene_idx = np.arange(min(15, adata.n_vars))
+        X = adata.X
+        if hasattr(X, "tolil"):
+            X = X.tolil(copy=True)
+            block = X[np.ix_(stim_idx, gene_idx)].toarray()
+            X[np.ix_(stim_idx, gene_idx)] = block + 6
+            adata.X = X.tocsr()
+        else:
+            adata.X[np.ix_(stim_idx, gene_idx)] = adata.X[np.ix_(stim_idx, gene_idx)] + 6
+    return receiver, senders, "stim", "ctrl"
 
 
 def main():
@@ -626,16 +847,45 @@ def main():
     parser.add_argument("--cellphonedb-threshold", type=float, default=0.1)
     parser.add_argument("--cellphonedb-threads", type=int, default=4)
     parser.add_argument("--cellphonedb-pvalue", type=float, default=0.05)
+    parser.add_argument("--condition-key", default="condition")
+    parser.add_argument("--condition-oi", default="stim")
+    parser.add_argument("--condition-ref", default="ctrl")
+    parser.add_argument("--receiver", default="")
+    parser.add_argument("--senders", default="")
+    parser.add_argument("--nichenet-top-ligands", type=int, default=20)
+    parser.add_argument("--nichenet-expression-pct", type=float, default=0.10)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
 
     if args.demo:
-        adata, _ = sc_io.load_repo_demo_data("pbmc3k_processed")
-        if args.cell_type_key not in adata.obs.columns:
-            fallback_key = "louvain" if "louvain" in adata.obs else "leiden"
-            adata.obs[args.cell_type_key] = adata.obs[fallback_key].astype(str)
+        if method == "nichenet_r":
+            adata, _ = sc_io.load_repo_demo_data("pbmc3k_raw")
+            processed_demo, _ = sc_io.load_repo_demo_data("pbmc3k_processed")
+            fallback_key = "louvain" if "louvain" in processed_demo.obs else "leiden"
+            aligned_labels = processed_demo.obs.reindex(adata.obs_names)[fallback_key].astype(str)
+            adata.obs[args.cell_type_key] = aligned_labels.values
+        else:
+            adata, _ = sc_io.load_repo_demo_data("pbmc3k_processed")
+            if args.cell_type_key not in adata.obs.columns:
+                fallback_key = "louvain" if "louvain" in adata.obs else "leiden"
+                adata.obs[args.cell_type_key] = adata.obs[fallback_key].astype(str)
+        if method == "nichenet_r":
+            demo_receiver, demo_senders, demo_oi, demo_ref = _configure_nichenet_demo(
+                adata,
+                cell_type_key=args.cell_type_key,
+                condition_key=args.condition_key,
+            )
+            if not args.receiver:
+                args.receiver = demo_receiver
+            if not args.senders:
+                args.senders = ",".join(demo_senders)
+            if args.condition_oi == "stim":
+                args.condition_oi = demo_oi
+            if args.condition_ref == "ctrl":
+                args.condition_ref = demo_ref
         input_file = None
     else:
         if not args.input_path:
@@ -644,7 +894,7 @@ def main():
         sc_io.maybe_warn_standardize_first(adata, source_path=args.input_path, skill_name=SKILL_NAME)
         input_file = args.input_path
 
-    method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
+    senders = [item.strip() for item in str(args.senders).split(",") if item.strip()]
     apply_preflight(
         preflight_sc_cell_communication(
             adata,
@@ -652,6 +902,11 @@ def main():
             cell_type_key=args.cell_type_key,
             species=args.species,
             counts_data=args.cellphonedb_counts_data,
+            condition_key=args.condition_key,
+            condition_oi=args.condition_oi,
+            condition_ref=args.condition_ref,
+            receiver=args.receiver,
+            senders=senders,
             source_path=input_file,
         ),
         logger,
@@ -668,7 +923,19 @@ def main():
                 "cellphonedb_pvalue": args.cellphonedb_pvalue,
             }
         )
-    summary = run_communication(adata, method=method, cell_type_key=args.cell_type_key, species=args.species)
+    summary = run_communication(
+        adata,
+        method=method,
+        cell_type_key=args.cell_type_key,
+        species=args.species,
+        condition_key=args.condition_key,
+        condition_oi=args.condition_oi,
+        condition_ref=args.condition_ref,
+        receiver=args.receiver,
+        senders=senders,
+        nichenet_top_ligands=args.nichenet_top_ligands,
+        nichenet_expression_pct=args.nichenet_expression_pct,
+    )
     params = {
         "method": method,
         "cell_type_key": args.cell_type_key,
@@ -683,6 +950,18 @@ def main():
                 "cellphonedb_threshold": args.cellphonedb_threshold,
                 "cellphonedb_threads": args.cellphonedb_threads,
                 "cellphonedb_pvalue": args.cellphonedb_pvalue,
+            }
+        )
+    if method == "nichenet_r":
+        params.update(
+            {
+                "condition_key": args.condition_key,
+                "condition_oi": args.condition_oi,
+                "condition_ref": args.condition_ref,
+                "receiver": args.receiver,
+                "senders": ",".join(senders),
+                "nichenet_top_ligands": args.nichenet_top_ligands,
+                "nichenet_expression_pct": args.nichenet_expression_pct,
             }
         )
 
@@ -707,13 +986,13 @@ def main():
         output_dir,
         SKILL_NAME,
         SKILL_VERSION,
-        {k: v for k, v in summary.items() if k not in {"lr_df", "top_df"}},
+        {k: v for k, v in summary.items() if k not in {"lr_df", "top_df", "ligand_activity_df", "ligand_target_links_df"}},
         result_data,
         checksum,
     )
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
-        "summary": {k: v for k, v in summary.items() if k not in {"lr_df", "top_df"}},
+        "summary": {k: v for k, v in summary.items() if k not in {"lr_df", "top_df", "ligand_activity_df", "ligand_target_links_df"}},
         "data": result_data,
     }
     write_standard_run_artifacts(output_dir, result_payload, summary)
@@ -726,6 +1005,16 @@ def main():
         "cell_type_key": args.cell_type_key,
         "species": args.species,
     }
+    if method == "nichenet_r":
+        metadata_params.update(
+            {
+                "condition_key": args.condition_key,
+                "condition_oi": args.condition_oi,
+                "condition_ref": args.condition_ref,
+                "receiver": args.receiver,
+                "senders": senders,
+            }
+        )
     store_analysis_metadata(adata, SKILL_NAME, summary.get("executed_method", method), metadata_params)
 
     print(f"Success: {SKILL_NAME}")

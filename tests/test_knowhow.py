@@ -23,6 +23,12 @@ SCRNA_SKILL_DOCS = [
     ("sc-markers", "KH-sc-markers-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-markers.md"),
     ("sc-grn", "KH-sc-grn-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-grn.md"),
     ("sc-cell-communication", "KH-sc-cell-communication-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-cell-communication.md"),
+    ("sc-differential-abundance", "KH-sc-differential-abundance-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-differential-abundance.md"),
+    ("sc-metacell", "KH-sc-metacell-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-metacell.md"),
+    ("sc-gene-programs", "KH-sc-gene-programs-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-gene-programs.md"),
+    ("sc-perturb-prep", "KH-sc-perturb-prep-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-perturb-prep.md"),
+    ("sc-perturb", "KH-sc-perturb-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-perturb.md"),
+    ("sc-tenifold-knockout", "KH-sc-tenifold-knockout-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-tenifold-knockout.md"),
 ]
 
 

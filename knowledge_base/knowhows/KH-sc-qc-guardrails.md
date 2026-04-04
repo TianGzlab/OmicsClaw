@@ -13,7 +13,7 @@ priority: 1.0
 # Single-Cell QC Guardrails
 
 - **Inspect first**: confirm the input still looks count-like, the gene symbols resemble the selected species convention, and the user understands this step is for diagnostics rather than filtering.
-- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` before QC when counts or gene-symbol provenance are uncertain.
+- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` before QC when counts or gene-symbol provenance are uncertain, but keep that recommendation in preflight rather than the raw loader.
 - **Do not fake method choice**: current OmicsClaw `sc-qc` exposes one public QC path, `qc_metrics`; do not describe multiple QC backends unless they are truly implemented.
 - **Treat `--species` honestly**: it is a wrapper-level control for mitochondrial and ribosomal prefix detection, but it directly affects `%MT` and `%ribo` estimates.
 - **Explain the run before execution**: state the selected species and mention that ribosomal percentage is computed automatically in the current wrapper.

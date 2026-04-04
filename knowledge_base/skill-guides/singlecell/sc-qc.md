@@ -31,8 +31,8 @@ before running QC.
 Key properties to check:
 
 - **Matrix type**:
-  - current `sc-qc` works best when `adata.X` is still count-like
-  - if the matrix already looks log-normalized or scaled, say that explicitly
+  - current `sc-qc` works best when a raw count-like matrix exists in `layers["counts"]`, aligned `adata.raw`, or `adata.X`
+  - if `adata.X` already looks log-normalized or scaled, say that explicitly and let the wrapper fall back to counts when available
 - **Input provenance**:
   - if counts or gene symbols come from an external object with unclear provenance, recommend `sc-standardize-input` first
 - **Gene naming convention**:
@@ -50,8 +50,10 @@ Important implementation notes in current OmicsClaw:
 - The current skill exposes one public method: `qc_metrics`.
 - `--species` is the only public extra flag.
 - Ribosomal percentage is always computed in the current wrapper.
-- The skill writes QC annotations back to `qc_checked.h5ad` but does not remove any cells.
+- The skill writes QC annotations into a canonical downstream-ready `processed.h5ad` but does not remove any cells.
 - The current wrapper now shares the same preflight style as other main scRNA skills: no raw count-like matrix should hard-stop the run; weaker gene-symbol matching should produce warnings rather than fake precision.
+- Loader, preflight, and standardization now have separate roles: `smart_load` reads and records a basic contract, `preflight` decides what to tell the user, and `sc-standardize-input` is the explicit repair path when provenance is messy.
+- The saved `processed.h5ad` is intentionally still a count-oriented object: `adata.X` is raw count-like, `adata.layers["counts"]` is the canonical raw layer, and `adata.raw` is a count-like snapshot. Normalized-expression workflows usually still need `sc-preprocessing` next.
 
 ## Step 2: Explain The Current Skill Correctly
 
@@ -61,7 +63,7 @@ Current OmicsClaw `sc-qc` does:
 2. detect mitochondrial and ribosomal genes from `--species`
 3. calculate Scanpy QC metrics
 4. add log-transformed helper metrics
-5. render the standard OmicsClaw QC gallery
+5. render the standard OmicsClaw QC gallery through the shared single-cell `_lib/viz` layer
 6. export tables, figure-data CSVs, report, result JSON, AnnData, README, and reproducibility files
 
 Current OmicsClaw `sc-qc` does **not**:
@@ -150,8 +152,8 @@ This matters because users often hear "QC" and assume filtering is included.
 
 When summarizing results:
 
-- describe `qc_checked.h5ad` as the diagnostic AnnData with QC annotations added
-- describe `figures/` as the standard Python gallery users should inspect first
+- describe `processed.h5ad` as the canonical downstream-ready AnnData with standardized scRNA contract fields plus QC annotations, `layers["counts"]`, and `adata.raw`
+- describe `figures/` as the standard Python gallery users should inspect first, including the barcode-rank curve and QC correlation heatmap
 - describe `figure_data/` as the stable hand-off layer for downstream custom plotting, including future R-side styling
 - describe `tables/qc_metrics_summary.csv` as the compact metric summary
 - describe `tables/qc_metrics_per_cell.csv` as the per-cell export for threshold review or custom plots

@@ -16,5 +16,5 @@ priority: 1.0
 - **Inspect first**: identify whether counts are most trustworthy in `layers['counts']`, `adata.raw`, or `adata.X`, and whether gene symbols are available in `var_names` or metadata columns such as `gene_symbols`.
 - **Do not fabricate missing metadata**: if the user later wants DE, batch integration, cell communication, or annotation, say clearly that standardization cannot invent `groupby`, `sample_key`, `batch_key`, `cell_type`, or reference/model choices.
 - **Use this skill as a hand-off step**: when users drop in an external `.h5ad` and ask for downstream analysis, recommend standardizing first so later scRNA skills see a stable contract.
-- **Explain the output contract**: after a successful run, users should understand that `standardized_input.h5ad` is the file to pass into downstream OmicsClaw scRNA skills.
+- **Explain the output contract**: after a successful run, users should understand that `processed.h5ad` is the file to pass into downstream OmicsClaw scRNA skills.
 - **For detailed operator guidance**: see `knowledge_base/skill-guides/singlecell/sc-standardize-input.md`.

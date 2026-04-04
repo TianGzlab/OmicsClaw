@@ -56,17 +56,22 @@ def test_standardize_input_creates_canonical_contract(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    standardized_path = output_dir / "standardized_input.h5ad"
+    standardized_path = output_dir / "processed.h5ad"
     assert standardized_path.exists()
     payload = json.loads((output_dir / "result.json").read_text())
     contract = payload["data"]["input_contract"]
+    matrix_contract = payload["data"]["matrix_contract"]
     assert contract["standardized"] is True
     assert contract["standardized_by"] == "sc-standardize-input"
-    assert contract["expression_source"] == "layers.counts"
-    assert contract["gene_name_source"] == "var.gene_symbols"
+    assert payload["data"]["expression_source"] == "layers.counts"
+    assert payload["data"]["gene_name_source"] == "var.gene_symbols"
+    assert matrix_contract["X"] == "raw_counts"
 
     standardized = ad.read_h5ad(standardized_path)
     np.testing.assert_allclose(np.asarray(standardized.X), np.asarray(standardized.layers["counts"]))
+    assert standardized.raw is not None
+    np.testing.assert_allclose(np.asarray(standardized.raw.X), np.asarray(standardized.layers["counts"]))
+    assert standardized.uns["omicsclaw_matrix_contract"]["X"] == "raw_counts"
     assert standardized.var_names.tolist()[0] == "MT-CO1"
     assert standardized.var["feature_id"].tolist()[0] == "ENSG1"
 
@@ -87,6 +92,7 @@ def test_qc_warns_before_standardization_but_not_after(tmp_path):
     )
     assert raw_run.returncode == 0, raw_run.stderr
     assert "sc-standardize-input" in raw_run.stderr
+    assert raw_run.stderr.count("USER_GUIDANCE: `sc-qc` detected input that has not yet been canonicalized") == 1
 
     std_run = subprocess.run(
         [sys.executable, str(STANDARDIZE_SCRIPT), "--input", str(input_path), "--output", str(standardized_dir)],
@@ -97,7 +103,7 @@ def test_qc_warns_before_standardization_but_not_after(tmp_path):
     )
     assert std_run.returncode == 0, std_run.stderr
 
-    standardized_path = standardized_dir / "standardized_input.h5ad"
+    standardized_path = standardized_dir / "processed.h5ad"
     qc_run = subprocess.run(
         [sys.executable, str(QC_SCRIPT), "--input", str(standardized_path), "--output", str(qc_std_dir)],
         capture_output=True,
