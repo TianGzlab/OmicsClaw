@@ -219,3 +219,14 @@ The current wrapper writes a standard Python gallery plus plot-ready tables:
 - Do not promise latent time for every run; it is tied to the dynamical path and successful fitting.
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-velocity-guardrails.md`.
 - For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.
+
+## Environment Management
+
+- Python extras:
+  - `pip install -e ".[singlecell-velocity]"`
+- External tools are not required for this modeling step itself, but are required upstream when users still need to generate velocity-ready layers.
+
+Recommended user guidance:
+
+- Do not auto-install scVelo during a normal skill run; if it is missing, ask the user to install the velocity extra explicitly.
+- If `spliced` / `unspliced` layers are missing, direct users to `sc-velocity-prep` and clearly state that upstream BAM/STAR tools remain manual installs.

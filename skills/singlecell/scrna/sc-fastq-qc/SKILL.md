@@ -195,3 +195,17 @@ output_directory/
 
 - `fastqc`
 - `multiqc`
+
+## Environment Management
+
+- Python extras:
+  - `pip install -e ".[singlecell-upstream]"`
+- External tools that OmicsClaw does **not** auto-install:
+  - `fastqc`
+  - `multiqc`
+
+Recommended user guidance:
+
+- Do not auto-download these tools during a normal skill run.
+- If `fastqc` or `multiqc` is missing, tell the user how to install them in the active environment or on `PATH`.
+- For shared lab machines, recommend a dedicated scRNA upstream environment rather than mixing these tools into every OmicsClaw workflow environment.

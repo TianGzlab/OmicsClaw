@@ -150,6 +150,33 @@ Then explain the rule in simple words:
 - STARsolo usually reuses the same FASTA / GTF plus a STAR-built genome directory
 - `sc-velocity-prep --method velocyto` usually reuses the same `genes.gtf` as the counting reference
 
+## Environment Advice
+
+For users who really want to run upstream locally, the safest recommendation is:
+
+1. keep a dedicated scRNA upstream environment
+2. install Python-side extras explicitly
+3. install large external tools manually
+
+Recommended Python extras:
+
+- `pip install -e ".[singlecell-upstream]"`
+- `pip install -e ".[singlecell-velocity]"`
+
+External tools that should be installed manually instead of auto-downloaded during a run:
+
+- `fastqc`
+- `multiqc`
+- `STAR`
+- `cellranger`
+- `simpleaf`
+- `kb`
+- `velocyto`
+
+Important rule:
+
+- OmicsClaw should guide users to install these tools and place references locally, but should not silently mutate the user's environment during normal skill execution.
+
 ## A Beginner-Friendly Command Sequence
 
 ### Standard 10x FASTQ route
