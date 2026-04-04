@@ -11,11 +11,22 @@ from .qc import (
 )
 from .upstream import (
     plot_barcode_rank,
+    plot_count_complexity_scatter,
+    plot_count_scatter,
     plot_count_distributions,
+    plot_filter_metric_comparison,
+    plot_filter_reason_summary,
+    plot_filter_retention_summary,
+    plot_filter_state_scatter,
+    plot_filter_threshold_panels,
+    plot_fastq_file_quality,
     plot_fastq_per_base_quality,
+    plot_fastq_read_structure,
     plot_fastq_sample_summary,
     plot_velocity_gene_balance,
+    plot_velocity_layer_fraction,
     plot_velocity_layer_summary,
+    plot_velocity_top_genes_stacked,
 )
 
 __all__ = [
@@ -29,9 +40,20 @@ __all__ = [
     "plot_barcode_rank",
     "plot_qc_correlation_heatmap",
     "plot_fastq_sample_summary",
+    "plot_fastq_file_quality",
     "plot_fastq_per_base_quality",
+    "plot_fastq_read_structure",
     "plot_count_distributions",
+    "plot_count_complexity_scatter",
+    "plot_count_scatter",
+    "plot_filter_metric_comparison",
+    "plot_filter_threshold_panels",
+    "plot_filter_state_scatter",
+    "plot_filter_reason_summary",
+    "plot_filter_retention_summary",
     "plot_barcode_rank",
     "plot_velocity_layer_summary",
+    "plot_velocity_layer_fraction",
     "plot_velocity_gene_balance",
+    "plot_velocity_top_genes_stacked",
 ]

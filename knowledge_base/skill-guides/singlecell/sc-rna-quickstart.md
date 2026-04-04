@@ -9,6 +9,9 @@ related_skills:
   - sc-standardize-input
   - sc-qc
   - sc-preprocessing
+  - sc-clustering
+  - sc-batch-integration
+  - sc-doublet-detection
   - sc-velocity-prep
   - sc-velocity
 search_terms: [scRNA quick start, single-cell beginner workflow, FASTQ to h5ad, novice guide, 单细胞新手流程]
@@ -39,8 +42,12 @@ For a normal 10x scRNA project, the recommended path is:
 2. `sc-count`
 3. `sc-qc`
 4. `sc-preprocessing`
-5. downstream analysis such as:
-   - `sc-doublet-detection`
+5. optional branch:
+   - `sc-doublet-detection` before interpretation if doublets are a concern
+6. optional branch:
+   - `sc-batch-integration` if there are multiple batches / donors / libraries
+7. `sc-clustering`
+8. downstream analysis such as:
    - `sc-cell-annotation`
    - `sc-de`
    - `sc-pseudotime`
@@ -64,6 +71,9 @@ Recommended route:
 2. if quality is acceptable, run `sc-count`
 3. pass the resulting `processed.h5ad` into `sc-qc`
 4. then run `sc-preprocessing`
+5. if doublets matter, run `sc-doublet-detection`
+6. if multiple batches exist, run `sc-batch-integration`
+7. then run `sc-clustering`
 
 If the user explicitly wants:
 
@@ -79,6 +89,7 @@ Recommended route:
 1. import with `sc-count`
 2. continue with `sc-qc`
 3. continue with `sc-preprocessing`
+4. then either `sc-batch-integration` or directly `sc-clustering`
 
 ### Case 3: The user already has an external `.h5ad`
 
@@ -87,6 +98,7 @@ Recommended route:
 1. run `sc-standardize-input`
 2. then `sc-qc`
 3. then `sc-preprocessing`
+4. then either `sc-batch-integration` or directly `sc-clustering`
 
 This is the safest way to avoid hidden count-vs-normalized matrix problems.
 
@@ -159,6 +171,7 @@ oc run sc-fastq-qc --input fastqs/ --output output/sc_fastq_qc
 oc run sc-count --input fastqs/ --method cellranger --reference /path/to/refdata-gex-GRCh38-2020-A --output output/sc_count
 oc run sc-qc --input output/sc_count/processed.h5ad --output output/sc_qc
 oc run sc-preprocessing --input output/sc_count/processed.h5ad --output output/sc_preprocessing
+oc run sc-clustering --input output/sc_preprocessing/processed.h5ad --output output/sc_clustering
 ```
 
 ### Existing `.h5ad` route
@@ -167,6 +180,7 @@ oc run sc-preprocessing --input output/sc_count/processed.h5ad --output output/s
 oc run sc-standardize-input --input data.h5ad --output output/sc_standardize
 oc run sc-qc --input output/sc_standardize/processed.h5ad --output output/sc_qc
 oc run sc-preprocessing --input output/sc_standardize/processed.h5ad --output output/sc_preprocessing
+oc run sc-clustering --input output/sc_preprocessing/processed.h5ad --output output/sc_clustering
 ```
 
 ### Velocity route
@@ -185,7 +199,8 @@ Correct route:
 - FASTQ QC
 - counting
 - QC
-- preprocessing
+- base preprocessing
+- clustering
 
 ### Mistake 2: Treating any `.h5ad` as ready for downstream analysis
 

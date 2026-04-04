@@ -11,12 +11,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shlex
 import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -39,16 +39,32 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from omicsclaw.common.checksums import sha256_file
+from skills.singlecell._lib.adata_utils import (
+    canonicalize_singlecell_adata,
+    ensure_input_contract,
+    infer_qc_species,
+    infer_x_matrix_kind,
+    propagate_singlecell_contracts,
+    store_analysis_metadata,
+)
 from skills.singlecell._lib.viz_utils import save_figure
+from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import qc as sc_qc_utils
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_filter
+from skills.singlecell._lib.viz import (
+    plot_filter_metric_comparison,
+    plot_filter_reason_summary,
+    plot_filter_retention_summary,
+    plot_filter_state_scatter,
+    plot_filter_threshold_panels,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-filter"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.4.0"
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -99,174 +115,260 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
         logger.warning("Failed to write README.md: %s", exc)
 
 
-def filter_cells_and_genes(
-    adata,
-    min_genes: int = 200,
-    max_genes: int | None = None,
-    min_counts: int | None = None,
-    max_counts: int | None = None,
-    max_mt_percent: float | None = None,
-    min_cells: int = 3,
-    tissue: str | None = None,
-) -> tuple:
-    """Filter cells and genes based on QC metrics.
-
-    Returns:
-        (filtered_adata, filter_summary)
-    """
-    import scanpy as sc
-
-    n_cells_before = adata.n_obs
-    n_genes_before = adata.n_vars
-
-    # Use tissue-specific thresholds if provided
-    if tissue:
-        thresholds = sc_qc_utils.get_tissue_qc_thresholds(tissue)
-        min_genes = thresholds.get("min_genes", min_genes)
-        max_genes = thresholds.get("max_genes", max_genes)
-        max_mt_percent = thresholds.get("max_mt", max_mt_percent)
-        logger.info(f"Using tissue-specific thresholds for {tissue}")
-
-    logger.info(f"Filtering cells...")
-    logger.info(f"  Starting with {n_cells_before} cells")
-
-    # Create filter mask
-    keep_cells = np.ones(adata.n_obs, dtype=bool)
-    filter_stats = {}
-
-    # Filter by n_genes
-    if min_genes is not None:
-        mask = adata.obs['n_genes_by_counts'] >= min_genes
-        n_removed = (~mask).sum()
-        keep_cells &= mask
-        filter_stats['min_genes_removed'] = int(n_removed)
-        logger.info(f"  Removed {n_removed} cells with < {min_genes} genes")
-
-    if max_genes is not None:
-        mask = adata.obs['n_genes_by_counts'] <= max_genes
-        n_removed = (~mask).sum()
-        keep_cells &= mask
-        filter_stats['max_genes_removed'] = int(n_removed)
-        logger.info(f"  Removed {n_removed} cells with > {max_genes} genes")
-
-    # Filter by total counts
-    if min_counts is not None:
-        mask = adata.obs['total_counts'] >= min_counts
-        n_removed = (~mask).sum()
-        keep_cells &= mask
-        filter_stats['min_counts_removed'] = int(n_removed)
-        logger.info(f"  Removed {n_removed} cells with < {min_counts} counts")
-
-    if max_counts is not None:
-        mask = adata.obs['total_counts'] <= max_counts
-        n_removed = (~mask).sum()
-        keep_cells &= mask
-        filter_stats['max_counts_removed'] = int(n_removed)
-        logger.info(f"  Removed {n_removed} cells with > {max_counts} counts")
-
-    # Filter by mitochondrial percentage
-    if max_mt_percent is not None and 'pct_counts_mt' in adata.obs.columns:
-        mask = adata.obs['pct_counts_mt'] <= max_mt_percent
-        n_removed = (~mask).sum()
-        keep_cells &= mask
-        filter_stats['mt_removed'] = int(n_removed)
-        logger.info(f"  Removed {n_removed} cells with > {max_mt_percent}% MT")
-
-    # Filter by MAD outliers if available
-    if 'outlier' in adata.obs.columns:
-        n_outliers = adata.obs['outlier'].sum()
-        keep_cells &= ~adata.obs['outlier']
-        filter_stats['outliers_removed'] = int(n_outliers)
-        logger.info(f"  Removed {n_outliers} MAD outlier cells")
-
-    # Apply cell filter
-    adata_filtered = adata[keep_cells, :].copy()
-    n_cells_after = adata_filtered.n_obs
-
-    logger.info(f"  Retained {n_cells_after} cells ({100*n_cells_after/n_cells_before:.1f}%)")
-
-    # Filter genes
-    logger.info(f"Filtering genes...")
-    logger.info(f"  Starting with {n_genes_before} genes")
-
-    sc.pp.filter_genes(adata_filtered, min_cells=min_cells)
-    n_genes_after = adata_filtered.n_vars
-
-    logger.info(f"  Retained {n_genes_after} genes ({100*n_genes_after/n_genes_before:.1f}%)")
-
-    # Build summary
-    summary = {
-        "n_cells_before": n_cells_before,
-        "n_cells_after": n_cells_after,
-        "cells_retained_pct": round(100 * n_cells_after / n_cells_before, 2),
-        "n_genes_before": n_genes_before,
-        "n_genes_after": n_genes_after,
-        "genes_retained_pct": round(100 * n_genes_after / n_genes_before, 2),
-        "filter_stats": filter_stats,
+def build_public_params(args) -> dict:
+    return {
+        "min_genes": args.min_genes,
+        "max_genes": args.max_genes,
+        "min_counts": args.min_counts,
+        "max_counts": args.max_counts,
+        "max_mt_percent": args.max_mt_percent,
+        "min_cells": args.min_cells,
+        "tissue": args.tissue,
     }
 
-    return adata_filtered, summary
+
+def _build_filter_summary_table(summary: dict, params: dict) -> pd.DataFrame:
+    records = [
+        {"metric": "workflow", "value": "threshold_filtering"},
+        {"metric": "n_cells_before", "value": int(summary.get("n_cells_before", 0))},
+        {"metric": "n_cells_after", "value": int(summary.get("n_cells_after", 0))},
+        {"metric": "cells_retained_pct", "value": summary.get("cells_retained_pct")},
+        {"metric": "n_genes_before", "value": int(summary.get("n_genes_before", 0))},
+        {"metric": "n_genes_after", "value": int(summary.get("n_genes_after", 0))},
+        {"metric": "genes_retained_pct", "value": summary.get("genes_retained_pct")},
+        {"metric": "min_genes", "value": params.get("min_genes")},
+        {"metric": "max_genes", "value": params.get("max_genes")},
+        {"metric": "min_counts", "value": params.get("min_counts")},
+        {"metric": "max_counts", "value": params.get("max_counts")},
+        {"metric": "max_mt_percent", "value": params.get("max_mt_percent")},
+        {"metric": "min_cells", "value": params.get("min_cells")},
+        {"metric": "tissue", "value": params.get("tissue")},
+        {"metric": "qc_metrics_reused", "value": bool(summary.get("qc_metrics_reused", False))},
+    ]
+    return pd.DataFrame(records)
 
 
-def generate_filter_figures(adata_before, adata_after, output_dir: Path) -> list[str]:
-    """Generate before/after filter comparison figures."""
-    figures = []
-    figures_dir = output_dir / "figures"
+def _build_filter_stats_table(summary: dict) -> pd.DataFrame:
+    return pd.DataFrame(
+        [{"metric": str(key), "value": int(value)} for key, value in summary.get("filter_stats", {}).items()]
+    )
+
+
+def _build_retention_table(summary: dict) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"feature": "Cells", "before": int(summary.get("n_cells_before", 0)), "after": int(summary.get("n_cells_after", 0))},
+            {"feature": "Genes", "before": int(summary.get("n_genes_before", 0)), "after": int(summary.get("n_genes_after", 0))},
+        ]
+    )
+
+
+def _prepare_filter_gallery_context(adata_before, adata_after, summary: dict, params: dict, output_dir: Path) -> dict:
+    metric_columns = [column for column in ("n_genes_by_counts", "total_counts", "pct_counts_mt") if column in adata_before.obs.columns]
+    before_qc = adata_before.obs.loc[:, metric_columns].copy() if metric_columns else pd.DataFrame()
+    after_qc = adata_after.obs.loc[:, metric_columns].copy() if metric_columns else pd.DataFrame()
+    state_df = adata_before.obs.loc[:, metric_columns].copy() if metric_columns else pd.DataFrame()
+    state_df["state"] = "Removed"
+    retained_cells = set(adata_after.obs_names.astype(str))
+    state_df.index = adata_before.obs_names.astype(str)
+    state_df.loc[state_df.index.isin(retained_cells), "state"] = "Retained"
+    reason_labels = {
+        "min_genes_removed": "Below min genes",
+        "max_genes_removed": "Above max genes",
+        "min_counts_removed": "Below min counts",
+        "max_counts_removed": "Above max counts",
+        "mt_removed": "Above MT threshold",
+        "outliers_removed": "Existing outlier flag",
+    }
+    reason_df = pd.DataFrame(
+        [
+            {"reason": reason_labels.get(key, key.replace("_", " ")), "count": int(value)}
+            for key, value in summary.get("filter_stats", {}).items()
+            if int(value) > 0
+        ]
+    )
+    return {
+        "output_dir": Path(output_dir),
+        "metric_columns": metric_columns,
+        "before_qc_df": before_qc,
+        "after_qc_df": after_qc,
+        "state_df": state_df.reset_index(drop=True),
+        "reason_df": reason_df,
+        "filter_summary_df": _build_filter_summary_table(summary, params),
+        "filter_stats_df": _build_filter_stats_table(summary),
+        "retention_df": _build_retention_table(summary),
+        "thresholds": {
+            "min_genes": params.get("min_genes"),
+            "max_genes": params.get("max_genes"),
+            "min_counts": params.get("min_counts"),
+            "max_counts": params.get("max_counts"),
+            "max_mt_percent": params.get("max_mt_percent"),
+        },
+    }
+
+
+def _build_filter_visualization_recipe() -> VisualizationRecipe:
+    plots = [
+        PlotSpec(
+            plot_id="filter_metric_comparison",
+            role="diagnostic",
+            renderer="filter_metric_comparison",
+            filename="filter_comparison.png",
+            title="QC metrics before and after filtering",
+            description="Compare core QC distributions before and after threshold filtering.",
+        ),
+        PlotSpec(
+            plot_id="filter_retention_summary",
+            role="overview",
+            renderer="filter_retention_summary",
+            filename="filter_summary.png",
+            title="Retention summary",
+            description="Cells and genes retained after filtering.",
+        ),
+        PlotSpec(
+            plot_id="filter_threshold_panels",
+            role="diagnostic",
+            renderer="filter_threshold_panels",
+            filename="filter_thresholds.png",
+            title="Threshold-aware distributions",
+            description="Before/after distributions with filter thresholds overlaid.",
+        ),
+        PlotSpec(
+            plot_id="filter_state_scatter",
+            role="diagnostic",
+            renderer="filter_state_scatter",
+            filename="filter_state_scatter.png",
+            title="Retained vs removed in QC space",
+            description="QC-space scatterplots colored by retained vs removed cells.",
+        ),
+        PlotSpec(
+            plot_id="filter_reason_summary",
+            role="supporting",
+            renderer="filter_reason_summary",
+            filename="filter_reason_summary.png",
+            title="Removal reasons",
+            description="How many cells were flagged by each filtering rule.",
+        ),
+    ]
+    return VisualizationRecipe(
+        recipe_id="standard-sc-filter-gallery",
+        skill_name=SKILL_NAME,
+        title="Single-cell filtering gallery",
+        description="Default OmicsClaw gallery for threshold-based single-cell filtering.",
+        plots=plots,
+    )
+
+
+def _render_filter_metric_comparison(_adata, spec: PlotSpec, context: dict) -> object:
+    plot_filter_metric_comparison(
+        context.get("before_qc_df", pd.DataFrame()),
+        context.get("after_qc_df", pd.DataFrame()),
+        context["output_dir"],
+        metrics=context.get("metric_columns", []),
+        filename=spec.filename,
+    )
+    path = Path(context["output_dir"]) / "figures" / spec.filename
+    return path if path.exists() else None
+
+
+def _render_filter_retention_summary(_adata, spec: PlotSpec, context: dict) -> object:
+    plot_filter_retention_summary(
+        context.get("retention_df", pd.DataFrame()),
+        context["output_dir"],
+        filename=spec.filename,
+    )
+    path = Path(context["output_dir"]) / "figures" / spec.filename
+    return path if path.exists() else None
+
+
+def _render_filter_threshold_panels(_adata, spec: PlotSpec, context: dict) -> object:
+    plot_filter_threshold_panels(
+        context.get("before_qc_df", pd.DataFrame()),
+        context.get("after_qc_df", pd.DataFrame()),
+        context["output_dir"],
+        thresholds=context.get("thresholds", {}),
+        filename=spec.filename,
+    )
+    path = Path(context["output_dir"]) / "figures" / spec.filename
+    return path if path.exists() else None
+
+
+def _render_filter_state_scatter(_adata, spec: PlotSpec, context: dict) -> object:
+    plot_filter_state_scatter(
+        context.get("state_df", pd.DataFrame()),
+        context["output_dir"],
+        filename=spec.filename,
+    )
+    path = Path(context["output_dir"]) / "figures" / spec.filename
+    return path if path.exists() else None
+
+
+def _render_filter_reason_summary(_adata, spec: PlotSpec, context: dict) -> object:
+    plot_filter_reason_summary(
+        context.get("reason_df", pd.DataFrame()),
+        context["output_dir"],
+        filename=spec.filename,
+    )
+    path = Path(context["output_dir"]) / "figures" / spec.filename
+    return path if path.exists() else None
+
+
+FILTER_GALLERY_RENDERERS = {
+    "filter_metric_comparison": _render_filter_metric_comparison,
+    "filter_retention_summary": _render_filter_retention_summary,
+    "filter_threshold_panels": _render_filter_threshold_panels,
+    "filter_state_scatter": _render_filter_state_scatter,
+    "filter_reason_summary": _render_filter_reason_summary,
+}
+
+
+def generate_filter_figures(_adata, output_dir: Path, *, gallery_context: dict) -> list[str]:
+    recipe = _build_filter_visualization_recipe()
+    artifacts = render_plot_specs(
+        _adata,
+        output_dir,
+        recipe,
+        FILTER_GALLERY_RENDERERS,
+        context=gallery_context,
+    )
+    gallery_context["recipe"] = recipe
+    gallery_context["artifacts"] = artifacts
+    gallery_context["figure_data_files"] = {
+        "filter_summary": "filter_summary.csv",
+        "filter_stats": "filter_stats.csv",
+        "retention": "retention_summary.csv",
+        "filter_state": "filter_state.csv",
+        "filter_reasons": "filter_reasons.csv",
+    }
+    figures_dir = Path(output_dir) / "figure_data"
     figures_dir.mkdir(parents=True, exist_ok=True)
-
-    # QC comparison violin
-    try:
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-        metrics = ['n_genes_by_counts', 'total_counts', 'pct_counts_mt']
-        for i, metric in enumerate(metrics):
-            if metric in adata_before.obs.columns:
-                data = pd.DataFrame({
-                    'Before': adata_before.obs[metric],
-                    'After': adata_after.obs[metric]
-                })
-                data.boxplot(ax=axes[i])
-                axes[i].set_title(metric.replace('_', ' ').title())
-                axes[i].set_ylabel('Value')
-
-        fig.tight_layout()
-        fig_path = figures_dir / "filter_comparison.png"
-        fig.savefig(fig_path, dpi=300, bbox_inches='tight')
-        figures.append(str(fig_path))
-        plt.close()
-        logger.info(f"  Saved: filter_comparison.png")
-    except Exception as e:
-        logger.warning(f"Filter comparison plot failed: {e}")
-
-    # Retention summary
-    try:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        retention_data = {
-            'Cells': [adata_before.n_obs, adata_after.n_obs],
-            'Genes': [adata_before.n_vars, adata_after.n_vars],
-        }
-        x = np.arange(2)
-        width = 0.35
-
-        bars1 = ax.bar(x - width/2, [adata_before.n_obs, adata_before.n_vars], width, label='Before', color='lightcoral')
-        bars2 = ax.bar(x + width/2, [adata_after.n_obs, adata_after.n_vars], width, label='After', color='lightgreen')
-
-        ax.set_ylabel('Count')
-        ax.set_xticks(x)
-        ax.set_xticklabels(['Cells', 'Genes'])
-        ax.legend()
-        ax.set_title('Before vs After Filtering')
-
-        fig.tight_layout()
-        fig_path = figures_dir / "filter_summary.png"
-        fig.savefig(fig_path, dpi=300, bbox_inches='tight')
-        figures.append(str(fig_path))
-        plt.close()
-        logger.info(f"  Saved: filter_summary.png")
-    except Exception as e:
-        logger.warning(f"Filter summary plot failed: {e}")
-
-    return figures
+    gallery_context["filter_summary_df"].to_csv(figures_dir / "filter_summary.csv", index=False)
+    gallery_context["filter_stats_df"].to_csv(figures_dir / "filter_stats.csv", index=False)
+    gallery_context["retention_df"].to_csv(figures_dir / "retention_summary.csv", index=False)
+    gallery_context["state_df"].to_csv(figures_dir / "filter_state.csv", index=False)
+    gallery_context["reason_df"].to_csv(figures_dir / "filter_reasons.csv", index=False)
+    (figures_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "skill": SKILL_NAME,
+                "recipe_id": recipe.recipe_id,
+                "available_files": gallery_context["figure_data_files"],
+                "plots": [
+                    {
+                        "plot_id": artifact.plot_id,
+                        "filename": artifact.filename,
+                        "status": artifact.status,
+                        "role": artifact.role,
+                    }
+                    for artifact in artifacts
+                ],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return [artifact.path for artifact in artifacts if artifact.status == "rendered" and artifact.path]
 
 
 def write_filter_report(output_dir: Path, summary: dict, params: dict, input_file: str | None) -> None:
@@ -290,6 +392,11 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
         f"- **Genes before**: {summary['n_genes_before']:,}",
         f"- **Genes after**: {summary['n_genes_after']:,}",
         f"- **Retention rate**: {summary['genes_retained_pct']}%",
+        "",
+        "## Matrix Contract\n",
+        f"- **X**: {params.get('matrix_contract', {}).get('X')}",
+        f"- **raw**: {params.get('matrix_contract', {}).get('raw')}",
+        f"- **counts layer**: {params.get('matrix_contract', {}).get('layers', {}).get('counts')}",
         "",
         "## Filter Parameters\n",
     ]
@@ -326,10 +433,11 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
     body_lines.extend([
         "",
         "## Output Files\n",
-        "- `filtered.h5ad` — Filtered AnnData object",
+        "- `processed.h5ad` — Filtered AnnData object ready for downstream steps",
         "- `figures/filter_comparison.png` — Before/after QC comparison",
         "- `figures/filter_summary.png` — Cell/gene retention summary",
         "- `tables/filter_stats.csv` — Detailed filtering statistics",
+        "- `figure_data/` — Plot-ready exports for downstream customization",
         "",
     ])
 
@@ -356,13 +464,35 @@ def generate_demo_data():
         np.random.seed(42)
         n_cells, n_genes = 500, 1000
         counts = np.random.negative_binomial(2, 0.02, size=(n_cells, n_genes))
+        import scanpy as sc
         adata = sc.AnnData(
-            X=counts.astype(np.float32),
+            X=counts.astype("float32"),
             obs=pd.DataFrame(index=[f"cell_{i}" for i in range(n_cells)]),
             var=pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)]),
         )
 
     return adata
+
+
+def write_reproducibility(output_dir: Path, public_params: dict, input_file: str | None, *, demo_mode: bool = False) -> None:
+    repro_dir = output_dir / "reproducibility"
+    repro_dir.mkdir(exist_ok=True)
+
+    command_parts = ["python", "skills/singlecell/scrna/sc-filter/sc_filter.py"]
+    if demo_mode:
+        command_parts.append("--demo")
+    elif input_file:
+        command_parts.extend(["--input", input_file])
+    else:
+        command_parts.extend(["--input", "<input.h5ad>"])
+    command_parts.extend(["--output", str(output_dir)])
+    for key, value in public_params.items():
+        if value is None or value == "":
+            continue
+        command_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+    command = " ".join(shlex.quote(part) for part in command_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
+    _write_repro_requirements(repro_dir, ["scanpy", "anndata", "numpy", "pandas", "matplotlib"])
 
 
 def main():
@@ -395,7 +525,7 @@ def main():
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
         logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
+        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME, preserve_all=True)
         input_file = str(input_path)
 
     logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
@@ -406,33 +536,41 @@ def main():
             min_counts=args.min_counts,
             max_counts=args.max_counts,
             max_mt_percent=args.max_mt_percent,
+            min_genes=args.min_genes,
+            max_genes=args.max_genes,
+            min_cells=args.min_cells,
             source_path=input_file,
         ),
         logger,
     )
 
-    # Calculate QC metrics if not present
-    if 'n_genes_by_counts' not in adata.obs.columns:
-        logger.info("Calculating QC metrics...")
-        adata = sc_qc_utils.calculate_qc_metrics(adata, inplace=True)
+    species = infer_qc_species(adata)
+    original_x_kind = infer_x_matrix_kind(adata)
+    had_qc_metrics = {
+        "n_genes_by_counts",
+        "total_counts",
+        "pct_counts_mt",
+    }.issubset(set(adata.obs.columns))
+    if had_qc_metrics and original_x_kind == "normalized_expression":
+        working_adata = adata.copy()
+        input_contract = ensure_input_contract(
+            working_adata,
+            source_path=input_file,
+            standardized=bool(working_adata.uns.get("omicsclaw_input_contract", {}).get("standardized", False)),
+        )
+        prepared_input = None
+    else:
+        working_adata, prepared_input, input_contract = canonicalize_singlecell_adata(
+            adata,
+            species=species,
+            standardizer_skill=SKILL_NAME,
+        )
+    working_adata = sc_qc_utils.ensure_qc_metrics(working_adata, species=species, inplace=True)
+    adata_before = working_adata.copy()
 
-    # Store original for comparison
-    adata_before = adata.copy()
-
-    # Parameters
-    params = {
-        "min_genes": args.min_genes,
-        "max_genes": args.max_genes,
-        "min_counts": args.min_counts,
-        "max_counts": args.max_counts,
-        "max_mt_percent": args.max_mt_percent,
-        "min_cells": args.min_cells,
-        "tissue": args.tissue,
-    }
-
-    # Apply filtering
-    adata_filtered, summary = filter_cells_and_genes(
-        adata,
+    params = build_public_params(args)
+    adata_filtered, summary, effective_params = sc_qc_utils.apply_threshold_filtering(
+        working_adata,
         min_genes=args.min_genes,
         max_genes=args.max_genes,
         min_counts=args.min_counts,
@@ -441,52 +579,68 @@ def main():
         min_cells=args.min_cells,
         tissue=args.tissue,
     )
+    summary["workflow"] = "threshold_filtering"
+    summary["qc_metrics_reused"] = bool(had_qc_metrics)
+    summary["input_preparation"] = {
+        "expression_source": prepared_input.expression_source if prepared_input is not None else "existing_object_state",
+        "gene_name_source": prepared_input.gene_name_source if prepared_input is not None else "existing_var_names",
+        "warnings": prepared_input.warnings if prepared_input is not None else [],
+        "species": species,
+    }
+    if "counts" in adata_filtered.layers:
+        raw_snapshot = adata_filtered.copy()
+        raw_snapshot.X = adata_filtered.layers["counts"].copy()
+        adata_filtered.raw = raw_snapshot
+    input_contract, matrix_contract = propagate_singlecell_contracts(
+        working_adata,
+        adata_filtered,
+        producer_skill=SKILL_NAME,
+        x_kind=original_x_kind if original_x_kind in {"raw_counts", "normalized_expression"} else "raw_counts",
+        raw_kind="raw_counts_snapshot" if adata_filtered.raw is not None else None,
+    )
 
     # Generate figures
     logger.info("Generating figures...")
-    figures = generate_filter_figures(adata_before, adata_filtered, output_dir)
+    gallery_context = _prepare_filter_gallery_context(adata_before, adata_filtered, summary, effective_params, output_dir)
+    figures = generate_filter_figures(adata_filtered, output_dir, gallery_context=gallery_context)
 
-    # Save filter stats table
+    # Save tables
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
-
-    filter_stats_df = pd.DataFrame([
-        {"metric": k, "value": v}
-        for k, v in summary["filter_stats"].items()
-    ])
-    filter_stats_df.to_csv(tables_dir / "filter_stats.csv", index=False)
+    gallery_context["filter_stats_df"].to_csv(tables_dir / "filter_stats.csv", index=False)
+    gallery_context["filter_summary_df"].to_csv(tables_dir / "filter_summary.csv", index=False)
+    gallery_context["retention_df"].to_csv(tables_dir / "retention_summary.csv", index=False)
 
     # Write report
     logger.info("Writing report...")
-    write_filter_report(output_dir, summary, params, input_file)
+    report_params = dict(effective_params)
+    report_params["matrix_contract"] = matrix_contract
+    write_filter_report(output_dir, summary, report_params, input_file)
 
     # Save filtered data
-    output_h5ad = output_dir / "filtered.h5ad"
-    from skills.singlecell._lib.adata_utils import store_analysis_metadata
-    store_analysis_metadata(adata_filtered, SKILL_NAME, "threshold_filtering", params)
-    adata_filtered.write_h5ad(output_h5ad)
+    output_h5ad = output_dir / "processed.h5ad"
+    store_analysis_metadata(adata_filtered, SKILL_NAME, "threshold_filtering", effective_params)
+    from skills.singlecell._lib.export import save_h5ad
+    save_h5ad(adata_filtered, output_h5ad)
     logger.info(f"Saved: {output_h5ad}")
 
     # Reproducibility
-    repro_dir = output_dir / "reproducibility"
-    repro_dir.mkdir(exist_ok=True)
-
-    cmd = f"python sc_filter.py --output {output_dir}"
-    if input_file:
-        cmd += f" --input {input_file}"
-    cmd += f" --min-genes {args.min_genes} --max-mt-percent {args.max_mt_percent} --min-cells {args.min_cells}"
-    if args.tissue:
-        cmd += f" --tissue {args.tissue}"
-
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
-    _write_repro_requirements(
-        repro_dir,
-        ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
-    )
+    write_reproducibility(output_dir, params, input_file, demo_mode=args.demo)
 
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
+    result_data = {
+        "workflow": "threshold_filtering",
+        "params": params,
+        "effective_params": effective_params,
+        "input_contract": input_contract,
+        "matrix_contract": matrix_contract,
+        "visualization": {
+            "recipe_id": "standard-sc-filter-gallery",
+            "available_figure_data": gallery_context.get("figure_data_files", {}),
+            "qc_metric_columns": gallery_context.get("metric_columns", []),
+        },
+    }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,

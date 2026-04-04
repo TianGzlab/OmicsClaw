@@ -142,6 +142,14 @@ def raw_matrix_kind(adata: AnnData) -> str | None:
     return get_matrix_contract(adata).get("raw")
 
 
+def infer_x_matrix_kind(adata: AnnData, *, fallback: str = "normalized_expression") -> str:
+    """Infer the semantic role of ``adata.X`` when no explicit contract exists."""
+    declared = x_matrix_kind(adata)
+    if declared in {"raw_counts", "normalized_expression"}:
+        return declared
+    return "raw_counts" if matrix_looks_count_like(adata.X) else fallback
+
+
 def ensure_input_contract(
     adata: AnnData,
     *,
@@ -180,6 +188,46 @@ def record_standardized_input_contract(
     )
     adata.uns[INPUT_CONTRACT_KEY] = contract
     return contract
+
+
+def propagate_singlecell_contracts(
+    source: AnnData,
+    target: AnnData,
+    *,
+    producer_skill: str,
+    x_kind: str | None = None,
+    raw_kind: str | None = None,
+    preprocess_method: str | None = None,
+    primary_cluster_key: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Copy minimal single-cell contracts onto a downstream output object."""
+    source_input = get_input_contract(source)
+    ensure_input_contract(
+        target,
+        source_path=source_input.get("source_path"),
+        standardized=bool(source_input.get("standardized", False)),
+    )
+
+    source_matrix = get_matrix_contract(source)
+    layers = dict(source_matrix.get("layers") or {})
+    if "counts" in target.layers:
+        layers["counts"] = "raw_counts"
+
+    resolved_x_kind = x_kind or source_matrix.get("X") or infer_x_matrix_kind(target)
+    resolved_raw_kind = raw_kind
+    if resolved_raw_kind is None and target.raw is not None:
+        resolved_raw_kind = source_matrix.get("raw") or "raw_counts_snapshot"
+
+    matrix_contract = record_matrix_contract(
+        target,
+        x_kind=resolved_x_kind,
+        raw_kind=resolved_raw_kind,
+        layers=layers,
+        producer_skill=producer_skill,
+        preprocess_method=preprocess_method,
+        primary_cluster_key=primary_cluster_key,
+    )
+    return get_input_contract(target), matrix_contract
 
 
 def build_standardization_recommendation(
@@ -232,6 +280,20 @@ def _species_prefix_match_counts(names: pd.Index, species: str) -> dict[str, int
         mt_count = 0
         ribo_count = 0
     return {"mt": mt_count, "ribo": ribo_count}
+
+
+def infer_qc_species(adata: AnnData, *, default: str = "human") -> str:
+    """Infer whether QC prefix matching is more consistent with human or mouse."""
+    names = pd.Index([str(value) for value in adata.var_names], dtype="object")
+    human_score = _species_prefix_match_counts(names, "human")
+    mouse_score = _species_prefix_match_counts(names, "mouse")
+    human_total = human_score["mt"] + human_score["ribo"]
+    mouse_total = mouse_score["mt"] + mouse_score["ribo"]
+    if mouse_total > human_total:
+        return "mouse"
+    if human_total > 0:
+        return "human"
+    return default
 
 
 def _best_qc_gene_name_index(adata: AnnData, *, species: str) -> tuple[pd.Index, str, list[str]]:

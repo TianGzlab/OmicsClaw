@@ -172,6 +172,28 @@ def calculate_qc_metrics(
     return adata
 
 
+def ensure_qc_metrics(
+    adata: AnnData,
+    *,
+    species: str = "human",
+    calculate_ribo: bool = True,
+    inplace: bool = True,
+) -> AnnData:
+    """Return an object with the core QC metrics available in ``adata.obs``."""
+    if not inplace:
+        adata = adata.copy()
+
+    required = {"n_genes_by_counts", "total_counts", "pct_counts_mt"}
+    if required.issubset(set(adata.obs.columns)):
+        return adata
+    return calculate_qc_metrics(
+        adata,
+        species=species,
+        calculate_ribo=calculate_ribo,
+        inplace=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Outlier detection
 # ---------------------------------------------------------------------------
@@ -416,6 +438,84 @@ def filter_genes(
 
     logger.info("Retained %d genes (%.1f%%)", adata.n_vars, 100 * adata.n_vars / n_before)
     return adata
+
+
+def summarize_filter_statistics(
+    adata_before: AnnData,
+    adata_after: AnnData,
+    *,
+    filter_stats: dict[str, int],
+) -> dict[str, Any]:
+    """Build a stable filtering summary payload."""
+    n_cells_before = int(adata_before.n_obs)
+    n_cells_after = int(adata_after.n_obs)
+    n_genes_before = int(adata_before.n_vars)
+    n_genes_after = int(adata_after.n_vars)
+    return {
+        "n_cells_before": n_cells_before,
+        "n_cells_after": n_cells_after,
+        "cells_retained_pct": round(100 * n_cells_after / max(n_cells_before, 1), 2),
+        "n_genes_before": n_genes_before,
+        "n_genes_after": n_genes_after,
+        "genes_retained_pct": round(100 * n_genes_after / max(n_genes_before, 1), 2),
+        "filter_stats": {str(key): int(value) for key, value in filter_stats.items()},
+    }
+
+
+def apply_threshold_filtering(
+    adata: AnnData,
+    *,
+    min_genes: int = 200,
+    max_genes: Optional[int] = None,
+    min_counts: Optional[int] = None,
+    max_counts: Optional[int] = None,
+    max_mt_percent: Optional[float] = None,
+    min_cells: int = 3,
+    tissue: str | None = None,
+) -> tuple[AnnData, dict[str, Any], dict[str, Any]]:
+    """Apply cell and gene filtering with a reusable summary payload."""
+    effective_params = {
+        "min_genes": min_genes,
+        "max_genes": max_genes,
+        "min_counts": min_counts,
+        "max_counts": max_counts,
+        "max_mt_percent": max_mt_percent,
+        "min_cells": min_cells,
+        "tissue": tissue,
+    }
+    if tissue:
+        thresholds = get_tissue_qc_thresholds(tissue)
+        effective_params["min_genes"] = thresholds.get("min_genes", effective_params["min_genes"])
+        effective_params["max_genes"] = thresholds.get("max_genes", effective_params["max_genes"])
+        effective_params["max_mt_percent"] = thresholds.get("max_mt", effective_params["max_mt_percent"])
+
+    filtered = filter_cells_by_qc(
+        adata,
+        min_genes=effective_params["min_genes"],
+        max_genes=effective_params["max_genes"],
+        min_counts=effective_params["min_counts"],
+        max_counts=effective_params["max_counts"],
+        max_mt_percent=effective_params["max_mt_percent"],
+        inplace=False,
+    )
+
+    filter_stats: dict[str, int] = {}
+    if effective_params["min_genes"] is not None:
+        filter_stats["min_genes_removed"] = int((adata.obs["n_genes_by_counts"] < effective_params["min_genes"]).sum())
+    if effective_params["max_genes"] is not None:
+        filter_stats["max_genes_removed"] = int((adata.obs["n_genes_by_counts"] > effective_params["max_genes"]).sum())
+    if effective_params["min_counts"] is not None and "total_counts" in adata.obs:
+        filter_stats["min_counts_removed"] = int((adata.obs["total_counts"] < effective_params["min_counts"]).sum())
+    if effective_params["max_counts"] is not None and "total_counts" in adata.obs:
+        filter_stats["max_counts_removed"] = int((adata.obs["total_counts"] > effective_params["max_counts"]).sum())
+    if effective_params["max_mt_percent"] is not None and "pct_counts_mt" in adata.obs:
+        filter_stats["mt_removed"] = int((adata.obs["pct_counts_mt"] > effective_params["max_mt_percent"]).sum())
+    if "outlier" in adata.obs.columns:
+        filter_stats["outliers_removed"] = int(adata.obs["outlier"].sum())
+
+    filtered = filter_genes(filtered, min_cells=effective_params["min_cells"], inplace=True)
+    summary = summarize_filter_statistics(adata, filtered, filter_stats=filter_stats)
+    return filtered, summary, effective_params
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,10 @@ Use this guide when you need to decide:
 - which filtering thresholds matter most in the current wrapper
 - how to explain wrapper presets without pretending they are universal biology rules
 
+Important workflow rule:
+- if the user has not reviewed QC yet and does not provide thresholds, prefer `sc-qc` first, then come back to `sc-filter`
+- only skip that stop when the user explicitly accepts the default first-pass thresholds
+
 ## Step 1: Inspect The Data First
 
 If the dataset has not been inspected yet in this conversation, inspect it
@@ -33,9 +37,10 @@ Key properties to check:
   - `total_counts`
   - `pct_counts_mt`
 - **Input provenance**:
-  - if the object is external and QC metric provenance is unclear, recommend `sc-standardize-input` first and be explicit about whether QC will be recomputed
+  - if the object is external and QC metric provenance is unclear, let the shared canonicalization path rebuild a clean count-oriented object when possible; recommend `sc-standardize-input` only when the user wants an explicit exported canonical object
 - **Matrix state**:
-  - current wrapper assumes count-like or QC-ready AnnData input
+  - current wrapper accepts either count-oriented AnnData or QC-ready AnnData
+  - if QC metrics already exist, filtering can proceed without forcing the user back through `sc-qc`
 - **Biological context**:
   - blood, tumor, and solid tissues often justify different `%MT` tolerance
 - **Filtering goal**:
@@ -101,9 +106,11 @@ Important warnings:
 ## Step 6: Explain Outputs Using Method-Correct Language
 
 When summarizing results:
-- describe `filtered.h5ad` as the threshold-filtered AnnData
+- describe `processed.h5ad` as the threshold-filtered AnnData
 - describe `tables/filter_stats.csv` as the exact filtering audit trail
+- describe `tables/filter_summary.csv` and `tables/retention_summary.csv` as the compact run summary layer
 - describe `report.md` as the narrative summary of retained cells and genes
+- describe `figure_data/` as the plot-ready export layer for downstream styling
 - describe the reproducibility bundle as the replayable command plus environment snapshot
 
 ## Official References

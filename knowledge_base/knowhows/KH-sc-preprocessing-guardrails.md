@@ -1,23 +1,22 @@
 ---
 doc_id: sc-preprocessing-guardrails
-title: Single-Cell Preprocessing Guardrails
+title: Single-Cell Base Preprocessing Guardrails
 doc_type: knowhow
-critical_rule: MUST inspect whether the input is raw-count-like, explain the chosen preprocessing backend plus effective QC and graph parameters, and never silently swap an explicitly requested method
+critical_rule: MUST inspect whether the input is raw-count-like, explain the chosen backend plus effective QC/HVG/PCA parameters, and never silently claim that preprocessing already finished clustering
 domains: [singlecell]
 related_skills: [sc-preprocessing, sc-preprocess]
 phases: [before_run, on_warning, after_run]
-search_terms: [single-cell preprocessing, scRNA preprocessing, Scanpy preprocessing, Seurat preprocessing, SCTransform preprocessing, QC filter normalize cluster, 单细胞预处理, 归一化, 调参]
+search_terms: [single-cell preprocessing, scRNA preprocessing, normalization, HVG, PCA, 单细胞预处理, 归一化, 调参]
 priority: 1.0
 ---
 
-# Single-Cell Preprocessing Guardrails
+# Single-Cell Base Preprocessing Guardrails
 
-- **Inspect first**: verify the matrix still looks count-like, whether counts are already preserved in `layers["counts"]` or `adata.raw`, and whether the user is accidentally rerunning preprocessing on normalized or scaled data.
-- **Canonicalize external inputs before trusting them**: if count provenance is unclear, prefer the shared single-cell canonicalization helper; mention `sc-standardize-input` only when the user explicitly wants the exported canonical object.
+- **Inspect first**: verify the matrix still looks count-like, whether counts are preserved in `layers["counts"]` or `adata.raw`, and whether the user is accidentally rerunning preprocessing on normalized data.
+- **Canonicalize once, then reuse state**: if count provenance is unclear, prefer the shared single-cell canonicalization helper; if the object already carries QC metrics from `sc-qc`, reuse them instead of forcing the user through the same QC step again.
+- **Default user path is QC-informed preprocessing**: if the user asks for preprocessing without having reviewed QC distributions or provided filtering thresholds, pause and recommend `sc-qc` first, or explicitly confirm that the default first-pass filtering thresholds are acceptable.
 - **Do not fake method choice**: current OmicsClaw `sc-preprocessing` exposes four real backends, `scanpy`, `seurat`, `sctransform`, and `pearson_residuals`; do not imply more methods exist, and do not silently replace an explicitly requested method with another backend.
-- **Separate wrapper filters from backend internals**: `min_genes`, `min_cells`, and `max_mt_pct` are wrapper-level QC controls even when the backend is Seurat or SCTransform.
-- **Explain the run before execution**: state the chosen backend, effective QC thresholds, HVG budget, PCA / graph settings, and clustering resolution.
-- **Use method-correct language**: Scanpy here uses log-normalized HVG selection with `flavor='seurat'`; Pearson residuals uses raw-count HVG selection with `seurat_v3` plus analytic Pearson residual normalization; Seurat uses `NormalizeData + FindVariableFeatures(vst)`; SCTransform uses `SCTransform(variable.features.n=...)`.
+- **Separate base preprocessing from clustering**: this skill stops at a normalized PCA-ready object. UMAP and clustering belong to `sc-clustering`, and batch correction belongs to `sc-batch-integration` when needed.
+- **Surface the important side branches**: this skill does not remove doublets automatically; mention `sc-doublet-detection` when doublets may matter. If likely batch/sample columns are present, remind the user to consider `sc-batch-integration` before clustering.
 - **Stop when the R backend would inherit ambiguous counts**: if `seurat` or `sctransform` would have to treat `adata.X` as raw counts because no `counts` layer or aligned `adata.raw` exists, make the user confirm that matrix state first.
-- **Preserve the contract**: successful runs should emit a downstream-ready `processed.h5ad`, a standard gallery, figure-data CSVs, and the reproducibility bundle including the analysis notebook.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-preprocessing.md`.
+- **Preserve the contract**: successful runs should emit a normalized, PCA-ready `processed.h5ad`, a standard gallery, figure-data CSVs, and the reproducibility bundle including the analysis notebook.

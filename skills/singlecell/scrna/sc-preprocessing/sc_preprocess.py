@@ -31,7 +31,12 @@ from omicsclaw.common.report import (
 )
 from omicsclaw.core.dependency_manager import validate_r_environment
 from omicsclaw.core.r_script_runner import RScriptRunner
-from skills.singlecell._lib.adata_utils import record_matrix_contract, store_analysis_metadata
+from skills.singlecell._lib.adata_utils import (
+    canonicalize_singlecell_adata,
+    infer_qc_species,
+    propagate_singlecell_contracts,
+    store_analysis_metadata,
+)
 from skills.singlecell._lib import dimred as sc_dimred_utils
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import preprocessing as sc_preproc_utils
@@ -67,7 +72,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "pearson_residuals": MethodConfig(
         name="pearson_residuals",
         description="Scanpy Pearson residual workflow",
-        dependencies=("scanpy", "igraph", "leidenalg"),
+        dependencies=("scanpy",),
     ),
 }
 
@@ -79,8 +84,6 @@ PUBLIC_PARAM_KEYS = (
     "max_mt_pct",
     "n_top_hvg",
     "n_pcs",
-    "n_neighbors",
-    "leiden_resolution",
 )
 METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
     "scanpy": {
@@ -90,11 +93,8 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "n_neighbors": 15,
-        "leiden_resolution": 1.0,
         "hvg_flavor": "seurat",
         "normalization_target_sum": 10000.0,
-        "scale_max_value": 10.0,
     },
     "seurat": {
         "method": "seurat",
@@ -103,8 +103,6 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "n_neighbors": 20,
-        "leiden_resolution": 0.8,
         "normalize_data_method": "LogNormalize",
         "normalize_scale_factor": 10000.0,
         "find_variable_features_method": "vst",
@@ -116,8 +114,6 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 3000,
         "n_pcs": 50,
-        "n_neighbors": 20,
-        "leiden_resolution": 0.8,
         "sctransform_regress_mt": True,
     },
     "pearson_residuals": {
@@ -127,8 +123,6 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "n_neighbors": 15,
-        "leiden_resolution": 1.0,
         "hvg_flavor": "seurat_v3",
         "pearson_theta": 100.0,
     },
@@ -138,26 +132,15 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
 def preprocess_scanpy(
     adata,
     *,
-    min_genes: int = 200,
-    min_cells: int = 3,
-    max_mt_pct: float = 20.0,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
-    n_neighbors: int = 15,
-    leiden_resolution: float = 1.0,
 ):
     """Implementation-aligned Scanpy preprocessing pipeline."""
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
-
-    adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_cells(adata, min_genes=min_genes)
-    sc.pp.filter_genes(adata, min_cells=min_cells)
-
-    adata.var["mt"] = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
-    sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True)
-    adata = adata[adata.obs.pct_counts_mt < max_mt_pct, :].copy()
-    adata.layers["counts"] = adata.X.copy()
-    adata.raw = adata.copy()
+    adata.layers["counts"] = adata.layers["counts"].copy()
+    raw_snapshot = adata.copy()
+    raw_snapshot.X = adata.layers["counts"].copy()
+    adata.raw = raw_snapshot
 
     adata = sc_preproc_utils.run_standard_normalization(
         adata,
@@ -176,19 +159,6 @@ def preprocess_scanpy(
         svd_solver="arpack",
         inplace=True,
     )
-    adata = sc_dimred_utils.build_neighbor_graph(
-        adata,
-        n_neighbors=n_neighbors,
-        n_pcs=n_pcs,
-        inplace=True,
-    )
-    adata = sc_dimred_utils.run_umap_reduction(adata, inplace=True)
-    adata = sc_dimred_utils.cluster_leiden(
-        adata,
-        resolution=leiden_resolution,
-        key_added="leiden",
-        inplace=True,
-    )
 
     return adata
 
@@ -196,31 +166,19 @@ def preprocess_scanpy(
 def preprocess_pearson_residuals(
     adata,
     *,
-    min_genes: int = 200,
-    min_cells: int = 3,
-    max_mt_pct: float = 20.0,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
-    n_neighbors: int = 15,
-    leiden_resolution: float = 1.0,
 ):
     """Scanpy preprocessing pipeline using Pearson residual normalization."""
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
-
-    adata.layers["counts"] = adata.X.copy()
-    sc.pp.filter_cells(adata, min_genes=min_genes)
-    sc.pp.filter_genes(adata, min_cells=min_cells)
-
-    adata.var["mt"] = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
-    sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True)
-    adata = adata[adata.obs.pct_counts_mt < max_mt_pct, :].copy()
-    adata.layers["counts"] = adata.X.copy()
 
     # Keep a conventional log-normalized view for downstream wrappers that expect it.
     adata_for_raw = adata.copy()
     adata_for_raw = sc_preproc_utils.run_standard_normalization(adata_for_raw, inplace=True)
     adata.layers["lognorm"] = adata_for_raw.X.copy()
-    adata.raw = adata.copy()
+    raw_snapshot = adata.copy()
+    raw_snapshot.X = adata.layers["counts"].copy()
+    adata.raw = raw_snapshot
 
     adata = sc_preproc_utils.find_highly_variable_genes(
         adata,
@@ -235,14 +193,8 @@ def preprocess_pearson_residuals(
     )
     adata.layers["pearson_residuals"] = adata.X.copy()
     adata = sc_dimred_utils.run_pca_analysis(adata, n_pcs=n_pcs, svd_solver="arpack", inplace=True)
-    adata = sc_dimred_utils.build_neighbor_graph(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, inplace=True)
-    adata = sc_dimred_utils.run_umap_reduction(adata, inplace=True)
-    adata = sc_dimred_utils.cluster_leiden(
-        adata,
-        resolution=leiden_resolution,
-        key_added="leiden",
-        inplace=True,
-    )
+    if "lognorm" in adata.layers:
+        adata.X = adata.layers["lognorm"].copy()
     return adata
 
 
@@ -269,13 +221,11 @@ def _load_seurat_result(
     *,
     output_dir: Path,
     workflow: str,
-    n_neighbors: int,
     n_pcs: int,
 ):
     """Load Seurat CSV outputs back into a standard AnnData object."""
     obs_df = pd.read_csv(output_dir / "obs.csv", index_col=0)
     pca_df = pd.read_csv(output_dir / "pca.csv", index_col=0)
-    umap_df = pd.read_csv(output_dir / "umap.csv", index_col=0)
     hvg_df = pd.read_csv(output_dir / "hvg.csv")
     norm_df = pd.read_csv(output_dir / "X_norm.csv", index_col=0)
 
@@ -289,7 +239,6 @@ def _load_seurat_result(
     norm_df.columns = norm_df.columns.astype(str)
     obs_df.index = obs_df.index.astype(str)
     pca_df.index = pca_df.index.astype(str)
-    umap_df.index = umap_df.index.astype(str)
 
     ordered_cells = [cell for cell in norm_df.index if cell in export_adata.obs_names]
     ordered_genes = [gene for gene in norm_df.columns if gene in export_adata.var_names]
@@ -301,9 +250,6 @@ def _load_seurat_result(
     var_base = export_adata.var.loc[ordered_genes].copy()
 
     combined_obs = obs_base.join(obs_df, how="left", rsuffix="_seurat")
-    if "seurat_clusters" in combined_obs:
-        combined_obs["seurat_clusters"] = combined_obs["seurat_clusters"].astype(str)
-        combined_obs["leiden"] = combined_obs["seurat_clusters"]
     if "nFeature_RNA" in combined_obs and "n_genes_by_counts" not in combined_obs:
         combined_obs["n_genes_by_counts"] = pd.to_numeric(combined_obs["nFeature_RNA"], errors="coerce")
     if "nCount_RNA" in combined_obs and "total_counts" not in combined_obs:
@@ -321,13 +267,9 @@ def _load_seurat_result(
     result.layers["counts"] = export_adata[ordered_cells, ordered_genes].X.copy()
 
     pca_aligned = pca_df.reindex(ordered_cells)
-    umap_aligned = umap_df.reindex(ordered_cells)
     if pca_aligned.isna().any().any():
         raise RuntimeError("Seurat preprocessing returned PCA rows that do not align with exported cells")
-    if umap_aligned.isna().any().any():
-        raise RuntimeError("Seurat preprocessing returned UMAP rows that do not align with exported cells")
     result.obsm["X_pca"] = pca_aligned.to_numpy(dtype=float)
-    result.obsm["X_umap"] = umap_aligned.to_numpy(dtype=float)
 
     if result.obsm["X_pca"].size:
         variance = np.var(result.obsm["X_pca"], axis=0, ddof=1)
@@ -337,14 +279,6 @@ def _load_seurat_result(
             "variance": variance,
             "variance_ratio": (variance / total) if total > 0 else variance,
         }
-
-    if result.obsm["X_pca"].shape[1] > 0:
-        sc.pp.neighbors(
-            result,
-            use_rep="X_pca",
-            n_neighbors=n_neighbors,
-            n_pcs=min(n_pcs, result.obsm["X_pca"].shape[1]),
-        )
 
     result.uns["seurat_info"] = info
     # Keep the raw-count snapshot in .raw and normalized expression in .X.
@@ -363,8 +297,6 @@ def run_seurat_preprocessing(
     max_mt_pct: float = 20.0,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
-    n_neighbors: int = 15,
-    leiden_resolution: float = 1.0,
 ):
     """Run the Seurat / SCTransform preprocessing backend via the shared R script."""
     required_packages = ["Seurat", "SingleCellExperiment", "zellkonverter"]
@@ -398,10 +330,10 @@ def run_seurat_preprocessing(
                 str(max_mt_pct),
                 str(n_top_hvg),
                 str(n_pcs),
-                str(n_neighbors),
-                str(leiden_resolution),
+                str(0),
+                str(0),
             ],
-            expected_outputs=["obs.csv", "pca.csv", "umap.csv", "hvg.csv", "X_norm.csv", "info.json"],
+            expected_outputs=["obs.csv", "pca.csv", "hvg.csv", "X_norm.csv", "info.json"],
             output_dir=r_output_dir,
             env={"BASILISK_EXTERNAL_DIR": str(basilisk_dir)},
         )
@@ -410,25 +342,8 @@ def run_seurat_preprocessing(
             export_adata,
             output_dir=r_output_dir,
             workflow=workflow,
-            n_neighbors=n_neighbors,
             n_pcs=n_pcs,
         )
-
-
-def _build_cluster_summary_table(summary: dict) -> pd.DataFrame:
-    cluster_counts = summary.get("cluster_counts", {})
-    n_cells = max(int(summary.get("n_cells", 0)), 1)
-    rows = [
-        {
-            "cluster": str(cluster),
-            "n_cells": int(count),
-            "proportion_pct": round(int(count) / n_cells * 100, 2),
-        }
-        for cluster, count in cluster_counts.items()
-    ]
-    if not rows:
-        return pd.DataFrame(columns=["cluster", "n_cells", "proportion_pct"])
-    return pd.DataFrame(rows).sort_values(["n_cells", "cluster"], ascending=[False, True]).reset_index(drop=True)
 
 
 def _build_preprocess_summary_table(summary: dict, effective_params: dict) -> pd.DataFrame:
@@ -437,16 +352,15 @@ def _build_preprocess_summary_table(summary: dict, effective_params: dict) -> pd
         {"metric": "n_cells", "value": int(summary.get("n_cells", 0))},
         {"metric": "n_genes", "value": int(summary.get("n_genes", 0))},
         {"metric": "n_hvg", "value": int(summary.get("n_hvg", 0))},
-        {"metric": "n_clusters", "value": int(summary.get("n_clusters", 0))},
-        {"metric": "cluster_key", "value": str(summary.get("cluster_key", "leiden"))},
         {"metric": "min_genes", "value": effective_params.get("min_genes")},
         {"metric": "min_cells", "value": effective_params.get("min_cells")},
         {"metric": "max_mt_pct", "value": effective_params.get("max_mt_pct")},
         {"metric": "n_top_hvg", "value": effective_params.get("n_top_hvg")},
         {"metric": "n_pcs_requested", "value": effective_params.get("n_pcs")},
         {"metric": "n_pcs_used", "value": summary.get("n_pcs_used")},
-        {"metric": "n_neighbors", "value": effective_params.get("n_neighbors")},
-        {"metric": "leiden_resolution", "value": effective_params.get("leiden_resolution")},
+        {"metric": "cells_before_filter", "value": summary.get("n_cells_before_filter")},
+        {"metric": "genes_before_filter", "value": summary.get("n_genes_before_filter")},
+        {"metric": "qc_metrics_reused", "value": summary.get("qc_metrics_reused")},
     ]
     return pd.DataFrame(records)
 
@@ -487,17 +401,14 @@ def _build_pca_variance_table(adata) -> pd.DataFrame:
     )
 
 
-def _build_umap_points_table(adata, cluster_key: str) -> pd.DataFrame:
-    if "X_umap" not in adata.obsm:
-        return pd.DataFrame(columns=["cell_id", "UMAP1", "UMAP2", cluster_key])
-    coords = np.asarray(adata.obsm["X_umap"])
-    data = {
-        "cell_id": adata.obs_names.astype(str),
-        "UMAP1": coords[:, 0],
-        "UMAP2": coords[:, 1],
-    }
-    if cluster_key in adata.obs.columns:
-        data[cluster_key] = adata.obs[cluster_key].astype(str).to_numpy()
+def _build_pca_embedding_table(adata) -> pd.DataFrame:
+    if "X_pca" not in adata.obsm:
+        return pd.DataFrame(columns=["cell_id", "PC1", "PC2"])
+    coords = np.asarray(adata.obsm["X_pca"])
+    n_components = min(5, coords.shape[1])
+    data = {"cell_id": adata.obs_names.astype(str)}
+    for idx in range(n_components):
+        data[f"PC{idx + 1}"] = coords[:, idx]
     return pd.DataFrame(data)
 
 
@@ -531,36 +442,61 @@ def build_public_params(effective_params: dict) -> dict:
     return {key: effective_params[key] for key in PUBLIC_PARAM_KEYS if key in effective_params}
 
 
+def prepare_preprocessing_input(
+    adata,
+    *,
+    method: str,
+    effective_params: dict,
+):
+    """Canonicalize the input and run shared QC/filter steps before backend-specific normalization."""
+    species = infer_qc_species(adata)
+    canonical_adata, prepared_input, input_contract = canonicalize_singlecell_adata(
+        adata,
+        species=species,
+        standardizer_skill=SKILL_NAME,
+    )
+    had_qc_metrics = {
+        "n_genes_by_counts",
+        "total_counts",
+        "pct_counts_mt",
+    }.issubset(set(canonical_adata.obs.columns))
+    canonical_adata = sc_qc_utils.ensure_qc_metrics(
+        canonical_adata,
+        species=species,
+        inplace=True,
+    )
+    filtered_adata, filter_summary, filter_params = sc_qc_utils.apply_threshold_filtering(
+        canonical_adata,
+        min_genes=int(effective_params["min_genes"]),
+        min_cells=int(effective_params["min_cells"]),
+        max_mt_percent=float(effective_params["max_mt_pct"]),
+    )
+    filter_summary["qc_metrics_reused"] = bool(had_qc_metrics)
+    filter_summary["input_preparation"] = {
+        "expression_source": prepared_input.expression_source,
+        "gene_name_source": prepared_input.gene_name_source,
+        "warnings": prepared_input.warnings,
+        "species": species,
+    }
+    return filtered_adata, filter_summary, filter_params, input_contract
+
+
 def _prepare_preprocess_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path) -> dict:
-    cluster_key = str(summary.get("cluster_key", "leiden"))
     qc_metric_cols = [column for column in ("n_genes_by_counts", "total_counts", "pct_counts_mt") if column in adata.obs.columns]
     context = {
         "output_dir": Path(output_dir),
-        "cluster_key": cluster_key,
         "qc_metric_cols": qc_metric_cols,
-        "cluster_summary_df": _build_cluster_summary_table(summary),
         "preprocess_summary_df": _build_preprocess_summary_table(summary, effective_params),
         "hvg_summary_df": _build_hvg_summary_table(adata),
         "pca_variance_df": _build_pca_variance_table(adata),
-        "umap_points_df": _build_umap_points_table(adata, cluster_key),
+        "pca_embedding_df": _build_pca_embedding_table(adata),
         "qc_metrics_df": _build_qc_metrics_table(adata),
     }
     return context
 
 
 def _build_preprocess_visualization_recipe(adata, summary: dict, context: dict) -> VisualizationRecipe:
-    cluster_key = context["cluster_key"]
     plots: list[PlotSpec] = [
-        PlotSpec(
-            plot_id="preprocess_umap_clusters",
-            role="overview",
-            renderer="umap_clusters",
-            filename=f"umap_{cluster_key}.png",
-            title="UMAP clusters",
-            description="UMAP embedding colored by the default clustering column.",
-            required_obsm=["X_umap"],
-            required_obs=[cluster_key],
-        ),
         PlotSpec(
             plot_id="preprocess_qc_violin",
             role="diagnostic",
@@ -623,19 +559,10 @@ def _render_pca_variance(adata, spec: PlotSpec, context: dict) -> object:
     return path if path.exists() else None
 
 
-def _render_umap_clusters(adata, spec: PlotSpec, context: dict) -> object:
-    output_dir = Path(context["output_dir"])
-    cluster_key = context["cluster_key"]
-    sc_dimred_utils.plot_umap_clusters(adata, output_dir, cluster_key=cluster_key)
-    path = _gallery_figure_path(output_dir, spec.filename)
-    return path if path.exists() else None
-
-
 PREPROCESS_GALLERY_RENDERERS = {
     "qc_violin": _render_qc_violin,
     "hvg_plot": _render_hvg_plot,
     "pca_variance": _render_pca_variance,
-    "umap_clusters": _render_umap_clusters,
 }
 
 
@@ -655,7 +582,7 @@ def _export_figure_data(adata, output_dir: Path, summary: dict, recipe: Visualiz
         "cluster_summary": ("cluster_summary.csv", context.get("cluster_summary_df", pd.DataFrame())),
         "hvg_summary": ("hvg_summary.csv", context.get("hvg_summary_df", pd.DataFrame())),
         "pca_variance_ratio": ("pca_variance_ratio.csv", context.get("pca_variance_df", pd.DataFrame())),
-        "umap_points": ("umap_points.csv", context.get("umap_points_df", pd.DataFrame())),
+        "pca_embedding": ("pca_embedding.csv", context.get("pca_embedding_df", pd.DataFrame())),
         "qc_metrics_per_cell": ("qc_metrics_per_cell.csv", context.get("qc_metrics_df", pd.DataFrame())),
     }
     for key, (filename, df) in export_map.items():
@@ -667,9 +594,8 @@ def _export_figure_data(adata, output_dir: Path, summary: dict, recipe: Visualiz
         "skill": SKILL_NAME,
         "recipe_id": recipe.recipe_id,
         "method": summary.get("method"),
-        "cluster_column": context.get("cluster_key"),
-        "available_files": available_files,
-        "plots": [
+            "available_files": available_files,
+            "plots": [
             {
                 "plot_id": artifact.plot_id,
                 "filename": artifact.filename,
@@ -714,10 +640,10 @@ def export_tables(output_dir: Path, summary: dict, *, gallery_context: dict | No
 
     for filename, key in (
         ("preprocess_summary.csv", "preprocess_summary_df"),
-        ("cluster_summary.csv", "cluster_summary_df"),
         ("hvg_summary.csv", "hvg_summary_df"),
         ("pca_variance_ratio.csv", "pca_variance_df"),
         ("qc_metrics_per_cell.csv", "qc_metrics_df"),
+        ("pca_embedding.csv", "pca_embedding_df"),
     ):
         df = context.get(key)
         if isinstance(df, pd.DataFrame) and not df.empty:
@@ -737,7 +663,6 @@ def write_report(
 ) -> None:
     """Write comprehensive report."""
     context = gallery_context or {}
-    cluster_key = context.get("cluster_key", summary.get("cluster_key", "leiden"))
     header = generate_report_header(
         title="Single-Cell Preprocessing Report",
         skill_name=SKILL_NAME,
@@ -746,7 +671,7 @@ def write_report(
             "Method": summary["method"],
             "Cells": str(summary["n_cells"]),
             "Genes": str(summary["n_genes"]),
-            "Clusters": str(summary["n_clusters"]),
+            "HVGs": str(summary["n_hvg"]),
         },
     )
 
@@ -755,24 +680,24 @@ def write_report(
         f"- **Method**: {summary['method']}",
         f"- **Cells after QC**: {summary['n_cells']}",
         f"- **Genes after QC**: {summary['n_genes']}",
+        f"- **Cells before filter**: {summary.get('n_cells_before_filter', summary['n_cells'])}",
+        f"- **Genes before filter**: {summary.get('n_genes_before_filter', summary['n_genes'])}",
         f"- **HVGs selected**: {summary['n_hvg']}",
-        f"- **Clusters**: {summary['n_clusters']}",
-        f"- **Primary cluster column**: `{cluster_key}`",
+        f"- **QC metrics reused**: {summary.get('qc_metrics_reused', False)}",
         "",
         "## Default Gallery\n",
         "- `figures/manifest.json` records the standard Python gallery.",
         "- `figure_data/` contains figure-ready CSV files for optional downstream styling.",
         "",
+        "## Matrix Contract\n",
+        f"- `X`: {context.get('matrix_contract', {}).get('X')}",
+        f"- `raw`: {context.get('matrix_contract', {}).get('raw')}",
+        f"- `counts layer`: {context.get('matrix_contract', {}).get('layers', {}).get('counts')}",
+        "",
         "## Effective Parameters\n",
     ]
     for key, value in effective_params.items():
         body_lines.append(f"- `{key}`: {value}")
-
-    cluster_summary_df = context.get("cluster_summary_df")
-    if isinstance(cluster_summary_df, pd.DataFrame) and not cluster_summary_df.empty:
-        body_lines.extend(["", "## Cluster Summary\n", "| Cluster | Cells | Proportion (%) |", "|---------|-------|----------------|"])
-        for row in cluster_summary_df.itertuples(index=False):
-            body_lines.append(f"| {row.cluster} | {row.n_cells} | {row.proportion_pct:.2f} |")
 
     body_lines.extend(
         [
@@ -780,13 +705,13 @@ def write_report(
             "## Output Files\n",
             "- `README.md` — user-first output navigation file.",
             "- `processed.h5ad` — downstream-ready AnnData object.",
-            "- `figures/` — standard OmicsClaw preprocessing gallery.",
+            "- `figures/` — standard OmicsClaw base preprocessing gallery.",
             "- `figure_data/` — CSV exports for optional R or custom visualization layers.",
             "- `tables/preprocess_summary.csv` — run summary table.",
-            "- `tables/cluster_summary.csv` — cluster size summary.",
             "- `tables/hvg_summary.csv` — top highly variable genes.",
             "- `tables/pca_variance_ratio.csv` — PCA variance explained.",
             "- `tables/qc_metrics_per_cell.csv` — QC metrics retained after filtering.",
+            "- `tables/pca_embedding.csv` — first PCs per cell for downstream clustering/integration.",
             "- `reproducibility/commands.sh` — reproducible CLI entrypoint.",
             "- `reproducibility/analysis_notebook.ipynb` — code-first rerun notebook.",
         ]
@@ -875,30 +800,33 @@ def get_demo_data():
 
 
 def build_summary(adata, method: str) -> dict:
-    cluster_key = "leiden" if "leiden" in adata.obs else "seurat_clusters"
     n_hvg = int(adata.var["highly_variable"].sum()) if "highly_variable" in adata.var else 0
-    cluster_counts = adata.obs[cluster_key].astype(str).value_counts().to_dict() if cluster_key in adata.obs else {}
     n_pcs_used = int(adata.obsm["X_pca"].shape[1]) if "X_pca" in adata.obsm else 0
-    n_neighbors_used = adata.uns.get("neighbors", {}).get("params", {}).get("n_neighbors")
     return {
         "method": method,
-        "cluster_key": cluster_key,
         "n_cells": int(adata.n_obs),
         "n_genes": int(adata.n_vars),
         "n_hvg": n_hvg,
-        "n_clusters": len(cluster_counts),
         "n_pcs_used": n_pcs_used,
-        "n_neighbors_used": int(n_neighbors_used) if n_neighbors_used is not None else None,
-        "cluster_counts": {str(k): int(v) for k, v in cluster_counts.items()},
     }
+
+
+def merge_filter_summary(summary: dict, filter_summary: dict) -> dict:
+    """Merge shared filtering context into the preprocessing summary."""
+    merged = dict(summary)
+    merged["n_cells_before_filter"] = int(filter_summary.get("n_cells_before", summary.get("n_cells", 0)))
+    merged["n_genes_before_filter"] = int(filter_summary.get("n_genes_before", summary.get("n_genes", 0)))
+    merged["filter_stats"] = dict(filter_summary.get("filter_stats", {}))
+    merged["qc_metrics_reused"] = bool(filter_summary.get("qc_metrics_reused", False))
+    if "input_preparation" in filter_summary:
+        merged["input_preparation"] = filter_summary["input_preparation"]
+    return merged
 
 
 def finalize_effective_params(adata, effective_params: dict, summary: dict) -> dict:
     """Augment effective parameters with runtime-resolved values."""
     finalized = dict(effective_params)
-    finalized["cluster_key"] = summary.get("cluster_key")
     finalized["n_pcs_used"] = summary.get("n_pcs_used")
-    finalized["n_neighbors_used"] = summary.get("n_neighbors_used")
     finalized["counts_layer"] = "counts" if "counts" in adata.layers else None
     finalized["raw_available"] = adata.raw is not None
 
@@ -920,8 +848,6 @@ def main():
     parser.add_argument("--max-mt-pct", type=float, default=None)
     parser.add_argument("--n-top-hvg", type=int, default=None)
     parser.add_argument("--n-pcs", type=int, default=None)
-    parser.add_argument("--n-neighbors", type=int, default=None)
-    parser.add_argument("--leiden-resolution", type=float, default=None)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -933,7 +859,7 @@ def main():
     else:
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
-        adata = sc_io.smart_load(args.input_path, skill_name=SKILL_NAME)
+        adata = sc_io.smart_load(args.input_path, skill_name=SKILL_NAME, preserve_all=True)
         input_file = args.input_path
 
     method = validate_method_choice(args.method, METHOD_REGISTRY)
@@ -941,61 +867,57 @@ def main():
         preflight_sc_preprocessing(
             adata,
             method=method,
+            min_genes=args.min_genes,
+            max_mt_pct=args.max_mt_pct,
+            min_cells=args.min_cells,
             source_path=input_file,
         ),
         logger,
     )
     effective_params = build_effective_params(method, args)
     public_params = build_public_params(effective_params)
+    adata, filter_summary, filter_params, input_contract = prepare_preprocessing_input(
+        adata,
+        method=method,
+        effective_params=effective_params,
+    )
 
     if method == "scanpy":
         adata = preprocess_scanpy(
             adata,
-            min_genes=int(effective_params["min_genes"]),
-            min_cells=int(effective_params["min_cells"]),
-            max_mt_pct=float(effective_params["max_mt_pct"]),
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
-            n_neighbors=int(effective_params["n_neighbors"]),
-            leiden_resolution=float(effective_params["leiden_resolution"]),
         )
     elif method == "pearson_residuals":
         adata = preprocess_pearson_residuals(
             adata,
-            min_genes=int(effective_params["min_genes"]),
-            min_cells=int(effective_params["min_cells"]),
-            max_mt_pct=float(effective_params["max_mt_pct"]),
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
-            n_neighbors=int(effective_params["n_neighbors"]),
-            leiden_resolution=float(effective_params["leiden_resolution"]),
         )
     else:
         adata = run_seurat_preprocessing(
             adata,
             workflow=method,
-            min_genes=int(effective_params["min_genes"]),
-            min_cells=int(effective_params["min_cells"]),
-            max_mt_pct=float(effective_params["max_mt_pct"]),
+            min_genes=0,
+            min_cells=1,
+            max_mt_pct=100.0,
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
-            n_neighbors=int(effective_params["n_neighbors"]),
-            leiden_resolution=float(effective_params["leiden_resolution"]),
         )
 
-    record_matrix_contract(
+    input_contract, matrix_contract = propagate_singlecell_contracts(
         adata,
+        adata,
+        producer_skill=SKILL_NAME,
         x_kind="normalized_expression",
         raw_kind="raw_counts_snapshot" if adata.raw is not None else None,
-        layers={"counts": "raw_counts" if "counts" in adata.layers else None},
-        primary_cluster_key="leiden",
         preprocess_method=method,
-        producer_skill=SKILL_NAME,
     )
 
-    summary = build_summary(adata, method)
+    summary = merge_filter_summary(build_summary(adata, method), filter_summary)
     effective_params = finalize_effective_params(adata, effective_params, summary)
     gallery_context = _prepare_preprocess_gallery_context(adata, summary, effective_params, output_dir)
+    gallery_context["matrix_contract"] = matrix_contract
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)
     export_tables(output_dir, summary, gallery_context=gallery_context)
     write_report(output_dir, summary, input_file, effective_params, gallery_context=gallery_context)
@@ -1011,11 +933,11 @@ def main():
         "method": method,
         "params": public_params,
         "effective_params": effective_params,
+        "input_contract": input_contract,
+        "matrix_contract": matrix_contract,
         **summary,
         "visualization": {
             "recipe_id": "standard-sc-preprocessing-gallery",
-            "cluster_column": gallery_context.get("cluster_key"),
-            "umap_key": "X_umap" if "X_umap" in adata.obsm else None,
             "counts_layer": "counts" if "counts" in adata.layers else None,
             "hvg_column": "highly_variable" if "highly_variable" in adata.var.columns else None,
             "qc_metric_columns": gallery_context.get("qc_metric_cols", []),
@@ -1032,7 +954,7 @@ def main():
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"Preprocessing complete: {summary['n_cells']} cells, {summary['n_clusters']} clusters")
+    print(f"Preprocessing complete: {summary['n_cells']} cells, {summary['n_hvg']} HVGs, PCA ready")
 
 
 if __name__ == "__main__":
