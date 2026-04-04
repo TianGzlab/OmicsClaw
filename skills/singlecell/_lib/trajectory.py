@@ -239,6 +239,131 @@ def run_palantir_pseudotime(
     }
 
 
+def run_cellrank_pseudotime(
+    adata,
+    *,
+    root_cell: int | None = None,
+    root_cluster: str | None = None,
+    cluster_key: str = "leiden",
+    n_states: int = 3,
+    schur_components: int = 20,
+    frac_to_keep: float = 0.3,
+    use_velocity: bool = False,
+    n_dcs: int = 10,
+    copy: bool = False,
+) -> dict[str, Any]:
+    """Run CellRank fate inference using connectivity, pseudotime, or velocity kernels."""
+    import scanpy as sc
+    import cellrank as cr
+
+    if copy:
+        adata = adata.copy()
+
+    if "neighbors" not in adata.uns:
+        sc.pp.neighbors(adata)
+
+    dpt_result = run_dpt_pseudotime(
+        adata,
+        root_cell_indices=[root_cell] if root_cell is not None else None,
+        root_cluster=root_cluster,
+        cluster_key=cluster_key,
+        n_dcs=n_dcs,
+    )
+
+    ck = cr.kernels.ConnectivityKernel(adata).compute_transition_matrix()
+    kernel = ck
+    kernel_mode = "connectivity"
+
+    if use_velocity and check_velocity_available(adata):
+        try:
+            vk = cr.kernels.VelocityKernel(adata).compute_transition_matrix()
+            kernel = 0.8 * vk + 0.2 * ck
+            kernel_mode = "velocity+connectivity"
+        except Exception as exc:
+            logger.warning("CellRank VelocityKernel unavailable (%s); falling back to pseudotime/connectivity.", exc)
+
+    if kernel_mode == "connectivity":
+        try:
+            pk = cr.kernels.PseudotimeKernel(adata, time_key="dpt_pseudotime").compute_transition_matrix(
+                frac_to_keep=frac_to_keep,
+                n_jobs=1,
+                backend="threading",
+                show_progress_bar=False,
+            )
+            kernel = 0.8 * pk + 0.2 * ck
+            kernel_mode = "pseudotime+connectivity"
+        except Exception as exc:
+            logger.warning("CellRank PseudotimeKernel unavailable (%s); using ConnectivityKernel only.", exc)
+
+    if cluster_key in adata.obs.columns and not pd.api.types.is_categorical_dtype(adata.obs[cluster_key]):
+        adata.obs[cluster_key] = adata.obs[cluster_key].astype("category")
+
+    effective_schur = min(max(int(schur_components), 2), max(2, adata.n_obs - 1))
+    effective_states = min(max(int(n_states), 2), effective_schur)
+
+    estimator = cr.estimators.GPCCA(kernel)
+    estimator.compute_schur(n_components=effective_schur)
+    estimator.compute_macrostates(
+        n_states=effective_states,
+        cluster_key=cluster_key if cluster_key in adata.obs.columns else None,
+    )
+
+    macro_key = next((key for key in ("macrostates_fwd", "macrostates", "term_states_fwd") if key in adata.obs.columns), None)
+    terminal_states: list[str] = []
+    lineage_key: str | None = None
+    driver_genes: dict[str, list[str]] = {}
+    fate_probs = None
+
+    try:
+        estimator.predict_terminal_states()
+        term_key = next((key for key in ("terminal_states", "term_states_fwd") if key in adata.obs.columns), None)
+        if term_key:
+            terminal_states = [str(x) for x in adata.obs[term_key].dropna().unique().tolist()]
+        estimator.compute_fate_probabilities(
+            n_jobs=1,
+            backend="threading",
+            show_progress_bar=False,
+            use_petsc=False,
+        )
+        lineage_key = next((key for key in ("lineages_fwd", "to_terminal_states") if key in adata.obsm), None)
+        if lineage_key:
+            fate_probs = np.asarray(adata.obsm[lineage_key], dtype=float)
+        for state in terminal_states[:5]:
+            try:
+                drivers = estimator.compute_lineage_drivers(lineages=state)
+                if drivers is not None and not drivers.empty:
+                    driver_genes[state] = drivers.head(10).index.astype(str).tolist()
+            except Exception as exc:
+                logger.warning("CellRank lineage drivers failed for '%s': %s", state, exc)
+    except Exception as exc:
+        logger.warning("CellRank terminal-state / fate computation failed: %s", exc)
+
+    adata.uns["cellrank_trajectory"] = {
+        "kernel_mode": kernel_mode,
+        "macrostate_key": macro_key,
+        "lineage_key": lineage_key,
+        "terminal_states": terminal_states,
+        "n_states": effective_states,
+        "schur_components": effective_schur,
+        "frac_to_keep": frac_to_keep,
+        "use_velocity": use_velocity,
+        "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
+    }
+
+    return {
+        "pseudotime": adata.obs["dpt_pseudotime"].values.copy(),
+        "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
+        "root_cell_name": str(adata.obs_names[int(dpt_result["root_cells"][0])]) if dpt_result["root_cells"] else None,
+        "kernel_mode": kernel_mode,
+        "macrostate_key": macro_key,
+        "lineage_key": lineage_key,
+        "terminal_states": terminal_states,
+        "driver_genes": driver_genes,
+        "fate_probabilities": fate_probs.copy() if fate_probs is not None else None,
+        "n_macrostates": int(adata.obs[macro_key].nunique()) if macro_key else 0,
+    }
+
+
 def run_via_pseudotime(
     adata,
     *,

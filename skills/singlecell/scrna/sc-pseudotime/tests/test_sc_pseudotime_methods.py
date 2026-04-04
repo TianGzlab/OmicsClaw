@@ -27,3 +27,15 @@ def test_method_registry_includes_via():
 def test_via_defaults_are_exposed():
     assert '"via_knn": 30' in MODULE_TEXT
     assert '"via_seed": 20' in MODULE_TEXT
+
+
+def test_method_registry_includes_cellrank():
+    assert '"cellrank": MethodConfig(' in MODULE_TEXT
+    assert 'description="CellRank fate mapping with GPCCA on pseudotime/connectivity kernels"' in MODULE_TEXT
+
+
+def test_cellrank_defaults_are_exposed():
+    assert '"cellrank_n_states": 3' in MODULE_TEXT
+    assert '"cellrank_schur_components": 20' in MODULE_TEXT
+    assert '"cellrank_frac_to_keep": 0.3' in MODULE_TEXT
+    assert '"cellrank_use_velocity": False' in MODULE_TEXT

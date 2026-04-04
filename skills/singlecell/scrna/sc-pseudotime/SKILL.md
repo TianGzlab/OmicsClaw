@@ -7,7 +7,7 @@ description: >-
 version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, trajectory, pseudotime, paga, dpt, palantir, via]
+tags: [singlecell, trajectory, pseudotime, paga, dpt, palantir, via, cellrank]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -23,6 +23,10 @@ metadata:
       - "--palantir-seed"
       - "--via-knn"
       - "--via-seed"
+      - "--cellrank-n-states"
+      - "--cellrank-schur-components"
+      - "--cellrank-frac-to-keep"
+      - "--cellrank-use-velocity"
       - "--root-cell"
       - "--root-cluster"
     param_hints:
@@ -92,6 +96,7 @@ Implemented analysis method:
 1. `dpt`
 2. `palantir`
 3. `via`
+4. `cellrank`
 
 Separate post-hoc trajectory-gene ranking methods:
 
@@ -139,7 +144,7 @@ python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
 
 | Parameter | Role | Notes |
 |-----------|------|-------|
-| `--method` | trajectory backend | current public values are `dpt`, `palantir`, and `via` |
+| `--method` | trajectory backend | current public values are `dpt`, `palantir`, `via`, and `cellrank` |
 | `--cluster-key` | grouping column | used for root selection and summaries |
 | `--root-cluster` | root cluster choice | recommended when the start population is known |
 | `--root-cell` | root cell override | cell-level alternative to `root-cluster` |
@@ -151,6 +156,10 @@ python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
 | `--palantir-max-iterations` | Palantir convergence cap | used only by `palantir` |
 | `--via-knn` | VIA graph size | used only by `via` |
 | `--via-seed` | VIA random seed | used only by `via` |
+| `--cellrank-n-states` | CellRank macrostates | used only by `cellrank` |
+| `--cellrank-schur-components` | CellRank Schur decomposition size | used only by `cellrank` |
+| `--cellrank-frac-to-keep` | CellRank pseudotime kernel sparsification | used only by `cellrank` |
+| `--cellrank-use-velocity` | prefer VelocityKernel when available | used only by `cellrank` |
 
 ## Algorithm / Methodology
 
@@ -210,6 +219,7 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - `palantir` currently requires an explicit root choice in OmicsClaw.
 - `via` requires the optional `pyVIA` dependency and an explicit root choice.
+- `cellrank` requires the optional `cellrank` dependency and is intended for terminal-state / fate analysis, not just scalar ordering.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
 
 ## Safety And Guardrails

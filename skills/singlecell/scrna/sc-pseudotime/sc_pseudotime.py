@@ -150,6 +150,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="VIA pseudotime with automatic terminal-state inference",
         dependencies=("pyVIA",),
     ),
+    "cellrank": MethodConfig(
+        name="cellrank",
+        description="CellRank fate mapping with GPCCA on pseudotime/connectivity kernels",
+        dependencies=("cellrank",),
+    ),
 }
 
 SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
@@ -184,6 +189,18 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "via_knn": 30,
         "via_seed": 20,
     },
+    "cellrank": {
+        "cluster_key": "leiden",
+        "root_cluster": None,
+        "root_cell": None,
+        "n_dcs": 10,
+        "n_genes": 50,
+        "corr_method": "pearson",
+        "cellrank_n_states": 3,
+        "cellrank_schur_components": 20,
+        "cellrank_frac_to_keep": 0.3,
+        "cellrank_use_velocity": False,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -195,6 +212,7 @@ _METHOD_DISPATCH = {
     "dpt": "dpt",
     "palantir": "palantir",
     "via": "via",
+    "cellrank": "cellrank",
 }
 
 
@@ -332,7 +350,7 @@ def write_pseudotime_report(
         if summary.get("n_terminal_states") is not None:
             body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
         body_lines.append("")
-    else:
+    elif params.get("method") == "via":
         body_lines.extend(
             [
                 "### VIA",
@@ -341,6 +359,21 @@ def write_pseudotime_report(
                 "OmicsClaw keeps the command successful by falling back to a diffusion-pseudotime-compatible path.\n",
             ]
         )
+        if summary.get("n_terminal_states") is not None:
+            body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
+        body_lines.append("")
+    else:
+        body_lines.extend(
+            [
+                "### CellRank",
+                "CellRank fits a transition kernel on the single-cell graph and uses GPCCA",
+                "to summarize macrostates, terminal states, and fate probabilities.\n",
+            ]
+        )
+        if summary.get("kernel_mode") is not None:
+            body_lines.append(f"- **Kernel mode**: {summary['kernel_mode']}")
+        if summary.get("n_macrostates") is not None:
+            body_lines.append(f"- **Macrostates**: {summary['n_macrostates']}")
         if summary.get("n_terminal_states") is not None:
             body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
         body_lines.append("")
@@ -476,10 +509,16 @@ def main():
     parser.add_argument("--palantir-seed", type=int, default=20, help="Palantir random seed")
     parser.add_argument("--via-knn", type=int, default=30, help="VIA kNN graph size")
     parser.add_argument("--via-seed", type=int, default=20, help="VIA random seed")
+    parser.add_argument("--cellrank-n-states", type=int, default=3, help="CellRank number of macrostates")
+    parser.add_argument("--cellrank-schur-components", type=int, default=20, help="CellRank Schur components")
+    parser.add_argument("--cellrank-frac-to-keep", type=float, default=0.3, help="CellRank pseudotime kernel sparsification")
+    parser.add_argument("--cellrank-use-velocity", action="store_true", help="Prefer CellRank VelocityKernel when velocity layers are available")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(exist_ok=True)
 
     # Load data
     if args.demo:
@@ -556,6 +595,15 @@ def main():
                 "via_seed": args.via_seed,
             }
         )
+    elif analysis_method == "cellrank":
+        params.update(
+            {
+                "cellrank_n_states": args.cellrank_n_states,
+                "cellrank_schur_components": args.cellrank_schur_components,
+                "cellrank_frac_to_keep": args.cellrank_frac_to_keep,
+                "cellrank_use_velocity": args.cellrank_use_velocity,
+            }
+        )
 
     pseudotime_key = "dpt_pseudotime"
     if analysis_method == "dpt":
@@ -617,7 +665,7 @@ def main():
             "mean_entropy": float(np.nanmean(palantir_result["entropy"])) if palantir_result.get("entropy") is not None else None,
             "n_terminal_states": int(fate_probs.shape[1]) if fate_probs is not None else None,
         }
-    else:
+    elif analysis_method == "via":
         logger.info("Running VIA analysis...")
         via_result = sc_traj.run_via_pseudotime(
             adata,
@@ -642,6 +690,43 @@ def main():
             "n_diffusion_components": int(max(2, args.n_dcs)),
             "n_terminal_states": int(fate_probs.shape[1]) if fate_probs is not None and hasattr(fate_probs, "shape") and len(fate_probs.shape) == 2 else None,
         }
+    else:
+        logger.info("Running CellRank analysis...")
+        cellrank_result = sc_traj.run_cellrank_pseudotime(
+            adata,
+            root_cell=args.root_cell,
+            root_cluster=args.root_cluster,
+            cluster_key=args.cluster_key,
+            n_states=args.cellrank_n_states,
+            schur_components=args.cellrank_schur_components,
+            frac_to_keep=args.cellrank_frac_to_keep,
+            use_velocity=args.cellrank_use_velocity,
+            n_dcs=args.n_dcs,
+        )
+        pseudotime_key = "dpt_pseudotime"
+        fate_probs = cellrank_result.get("fate_probabilities")
+        summary = {
+            "method": analysis_method,
+            "backend": analysis_method,
+            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
+            "n_trajectory_genes": 0,
+            "root_cell": int(cellrank_result["root_cell"]) if cellrank_result.get("root_cell") is not None else None,
+            "root_cell_name": str(cellrank_result["root_cell_name"]) if cellrank_result.get("root_cell_name") is not None else None,
+            "pseudotime_min": float(np.nanmin(adata.obs[pseudotime_key].to_numpy())),
+            "pseudotime_max": float(np.nanmax(adata.obs[pseudotime_key].to_numpy())),
+            "n_diffusion_components": int(args.n_dcs),
+            "n_terminal_states": int(len(cellrank_result.get("terminal_states", []))),
+            "n_macrostates": int(cellrank_result.get("n_macrostates", 0)),
+            "kernel_mode": cellrank_result.get("kernel_mode"),
+        }
+        driver_genes = cellrank_result.get("driver_genes", {})
+        if driver_genes:
+            driver_rows = []
+            for lineage, genes in driver_genes.items():
+                for rank, gene in enumerate(genes, start=1):
+                    driver_rows.append({"lineage": lineage, "rank": rank, "gene": gene})
+            pd.DataFrame(driver_rows).to_csv(tables_dir / "cellrank_driver_genes.csv", index=False)
+            summary["n_driver_genes"] = int(len(driver_rows))
 
     logger.info("Finding trajectory genes...")
     trajectory_genes = sc_traj.find_trajectory_genes(
@@ -664,10 +749,6 @@ def main():
         cluster_key=args.cluster_key,
         pseudotime_key=pseudotime_key,
     )
-
-    # Export tables
-    tables_dir = output_dir / "tables"
-    tables_dir.mkdir(exist_ok=True)
 
     trajectory_genes.to_csv(tables_dir / "trajectory_genes.csv", index=False)
     logger.info(f"  Saved: tables/trajectory_genes.csv")
@@ -707,12 +788,22 @@ def main():
         )
     if analysis_method == "via":
         cmd += f" --via-knn {args.via_knn} --via-seed {args.via_seed}"
+    if analysis_method == "cellrank":
+        cmd += (
+            f" --cellrank-n-states {args.cellrank_n_states}"
+            f" --cellrank-schur-components {args.cellrank_schur_components}"
+            f" --cellrank-frac-to-keep {args.cellrank_frac_to_keep}"
+        )
+        if args.cellrank_use_velocity:
+            cmd += " --cellrank-use-velocity"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
     packages = ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]
     if analysis_method == "palantir":
         packages.append("palantir")
     if analysis_method == "via":
         packages.append("pyVIA")
+    if analysis_method == "cellrank":
+        packages.extend(["cellrank", "pygpcca"])
     _write_repro_requirements(repro_dir, packages)
 
     # Result.json

@@ -705,6 +705,12 @@ def preflight_sc_pseudotime(
         )
         if find_spec("pyVIA") is None:
             decision.block("`via` was requested but the Python package `pyVIA` is not installed in the current environment.")
+    if method == "cellrank":
+        decision.add_guidance(
+            "`cellrank` is intended for macrostate and fate-probability inference on top of a transition kernel; use it when users explicitly want terminal states or lineage probabilities."
+        )
+        if find_spec("cellrank") is None:
+            decision.block("`cellrank` was requested but the Python package `cellrank` is not installed in the current environment.")
 
     if "neighbors" not in adata.uns:
         decision.add_guidance(
@@ -718,10 +724,22 @@ def preflight_sc_preprocessing(
     adata: AnnData,
     *,
     method: str,
+    min_genes: int | None = None,
+    max_mt_pct: float | None = None,
+    min_cells: int | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-preprocessing")
-    _add_standardization_guidance(decision, adata, source_path=source_path)
+
+    has_qc_metrics = {"n_genes_by_counts", "total_counts", "pct_counts_mt"}.issubset(set(adata.obs.columns))
+    if not has_qc_metrics and source_path and (
+        min_genes in {None, 200}
+        and max_mt_pct in {None, 20.0}
+        and min_cells in {None, 3}
+    ):
+        decision.require_confirmation(
+            "You asked for preprocessing before reviewing QC. Recommended path: run `sc-qc` first to inspect `n_genes`, `total_counts`, and `%MT`, then confirm the filtering thresholds. If you want to continue now, confirm that the default first-pass filtering thresholds are acceptable."
+        )
 
     if method in {"seurat", "sctransform"} and adata.raw is not None:
         decision.add_guidance(
@@ -742,6 +760,17 @@ def preflight_sc_preprocessing(
                 "Preprocessing expects raw count-like input. Provide an unnormalized count matrix or use the shared canonicalization path first."
             )
 
+    if "predicted_doublet" not in adata.obs.columns and "doublet_score" not in adata.obs.columns:
+        decision.add_guidance(
+            "`sc-preprocessing` does not remove doublets automatically. If doublets are a concern, consider `sc-doublet-detection` before downstream interpretation."
+        )
+
+    batch_candidates = _obs_candidates(adata, "batch")
+    if batch_candidates:
+        decision.add_guidance(
+            f"Potential batch/sample columns were detected: {_format_candidates(batch_candidates)}. If batch effects are expected, plan `sc-batch-integration` after preprocessing."
+        )
+
     return decision
 
 
@@ -752,15 +781,30 @@ def preflight_sc_filter(
     min_counts: int | None = None,
     max_counts: int | None = None,
     max_mt_percent: float | None = None,
+    min_genes: int | None = None,
+    max_genes: int | None = None,
+    min_cells: int | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-filter")
-    _add_standardization_guidance(decision, adata, source_path=source_path)
 
     if "n_genes_by_counts" not in adata.obs.columns:
-        decision.add_guidance(
-            "QC metrics are missing; `sc-filter` will compute QC metrics automatically before filtering."
-        )
+        if _declared_x_is_count_like(adata) or "counts" in adata.layers or _aligned_raw_is_count_like(adata):
+            decision.add_guidance(
+                "QC metrics are missing; `sc-filter` will compute QC metrics automatically before filtering."
+            )
+        else:
+            decision.block(
+                "`sc-filter` needs either existing QC metrics in `adata.obs` or a raw count-like matrix to recompute them safely."
+            )
+        if source_path and all(value is None for value in (min_counts, max_counts, max_genes, tissue)) and (
+            min_genes in {None, 200}
+            and max_mt_percent in {None, 20.0}
+            and min_cells in {None, 3}
+        ):
+            decision.require_confirmation(
+                "You asked for filtering before reviewing QC distributions. Recommended path: run `sc-qc` first to inspect `n_genes`, `total_counts`, and `%MT`, then confirm the filtering thresholds. If you want to continue now, confirm that the default first-pass thresholds are acceptable."
+            )
 
     if (min_counts is not None or max_counts is not None) and "total_counts" not in adata.obs.columns and "n_genes_by_counts" in adata.obs.columns:
         decision.block(
