@@ -40,6 +40,7 @@ from skills.singlecell._lib import dimred as sc_dimred_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.preflight import apply_preflight, PreflightDecision, _obs_candidates, _format_candidates
+from skills.singlecell._lib import dependency_manager as sc_dep_manager
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -101,6 +102,10 @@ def preflight_sc_clustering(
 
     if cluster_method not in {"leiden", "louvain"}:
         decision.block("`sc-clustering` currently supports `--cluster-method leiden` or `louvain`.")
+    elif cluster_method == "louvain" and not sc_dep_manager.is_available("louvain"):
+        decision.block(
+            "`louvain` clustering requires the optional Python package `louvain`, which is not installed in the current environment. Install it explicitly before rerunning."
+        )
 
     batch_candidates = _obs_candidates(adata, "batch")
     if batch_candidates and not any(key in adata.obsm for key in ("X_harmony", "X_scvi", "X_scanvi", "X_scanorama")):
@@ -221,6 +226,16 @@ def _build_visualization_recipe(summary: dict) -> VisualizationRecipe:
                 required_obsm=["X_pca"],
                 required_uns=["pca"],
             ),
+            PlotSpec(
+                plot_id="clustering_pca_scatter",
+                role="supporting",
+                renderer="pca_scatter",
+                filename="pca_scatter.png",
+                title="PCA embedding",
+                description="First two principal components colored by cluster labels.",
+                required_obsm=["X_pca"],
+                required_obs=[cluster_key],
+            ),
         ],
     )
 
@@ -241,9 +256,16 @@ def _render_pca_variance(adata, spec: PlotSpec, context: dict) -> object:
     return path if path.exists() else None
 
 
+def _render_pca_scatter(adata, spec: PlotSpec, context: dict) -> object:
+    sc_dimred_utils.plot_pca_scatter(adata, context["output_dir"], color=context["cluster_key"])
+    path = _gallery_figure_path(context["output_dir"], spec.filename)
+    return path if path.exists() else None
+
+
 CLUSTER_GALLERY_RENDERERS = {
     "umap_clusters": _render_umap_clusters,
     "pca_variance": _render_pca_variance,
+    "pca_scatter": _render_pca_scatter,
 }
 
 

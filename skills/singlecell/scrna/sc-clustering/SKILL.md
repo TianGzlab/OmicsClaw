@@ -31,6 +31,12 @@ This skill starts from a normalized scRNA AnnData and performs:
 Expected input:
 - `processed.h5ad` from `sc-preprocessing`
 - or an integrated object from `sc-batch-integration`
+- `X = normalized_expression`
+- `obsm["X_pca"]` or another explicit embedding chosen by `--use-rep`
+
+Dependency note:
+- `leiden` is the recommended default path.
+- `louvain` is optional; if the Python package `louvain` is missing, the skill should stop and ask the user to install it explicitly rather than trying to install it automatically.
 
 Standard output:
 - `processed.h5ad`

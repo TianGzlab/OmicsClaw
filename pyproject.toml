@@ -124,6 +124,15 @@ spatial = [
 singlecell = [
     "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
     "liana>=1.4.0",                   # sc-cell-communication: LIANA+
+    "harmonypy>=0.0.9",               # sc-batch-integration: Harmony
+    "bbknn>=1.5.0",                   # sc-batch-integration: BBKNN
+    "scanorama>=1.7.0",               # sc-batch-integration: Scanorama
+    "celltypist>=1.6.0",              # sc-cell-annotation: CellTypist
+    "arboreto>=0.1.6",                # sc-grn: GRNBoost2
+    "cellrank>=2.0.0,<3.0",           # sc-pseudotime / sc-velocity downstream
+    "palantir>=1.0.0",                # sc-pseudotime: Palantir
+    "pydeseq2>=0.4.0",                # sc-de pseudobulk Python path
+    "louvain>=0.8.0",                 # sc-clustering: Louvain backend
 ]
 
 # --------------------------------------------------------------------------- #

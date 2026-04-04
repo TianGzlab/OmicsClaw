@@ -172,10 +172,10 @@ def preprocess_pearson_residuals(
     """Scanpy preprocessing pipeline using Pearson residual normalization."""
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
 
-    # Keep a conventional log-normalized view for downstream wrappers that expect it.
+    # Keep a conventional log-normalized view as the final public matrix.
     adata_for_raw = adata.copy()
     adata_for_raw = sc_preproc_utils.run_standard_normalization(adata_for_raw, inplace=True)
-    adata.layers["lognorm"] = adata_for_raw.X.copy()
+    lognorm_x = adata_for_raw.X.copy()
     raw_snapshot = adata.copy()
     raw_snapshot.X = adata.layers["counts"].copy()
     adata.raw = raw_snapshot
@@ -193,8 +193,7 @@ def preprocess_pearson_residuals(
     )
     adata.layers["pearson_residuals"] = adata.X.copy()
     adata = sc_dimred_utils.run_pca_analysis(adata, n_pcs=n_pcs, svd_solver="arpack", inplace=True)
-    if "lognorm" in adata.layers:
-        adata.X = adata.layers["lognorm"].copy()
+    adata.X = lognorm_x
     return adata
 
 
