@@ -468,6 +468,40 @@ def plot_variable_genes(
     save_figure(fig, output_dir, "highly_variable_genes.png")
 
 
+def plot_variable_genes_fallback(
+    adata: AnnData,
+    output_dir: Union[str, Path],
+    *,
+    top_n: int = 30,
+    figsize: Tuple[int, int] = (9, 8),
+) -> None:
+    """Render a simple HVG rank plot when Scanpy's summary columns are absent."""
+    import matplotlib.pyplot as plt
+    from .viz_utils import save_figure
+
+    output_dir = Path(output_dir)
+    if "highly_variable" not in adata.var.columns:
+        logger.warning("HVG annotations not found. Run find_highly_variable_genes() first.")
+        return
+
+    hvg_names = adata.var.index[adata.var["highly_variable"]].astype(str).tolist()
+    if not hvg_names:
+        logger.warning("No highly variable genes available for fallback plotting.")
+        return
+
+    top_genes = hvg_names[:top_n]
+    ranks = list(range(len(top_genes), 0, -1))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.barh(top_genes[::-1], ranks[::-1], color="#4C72B0", edgecolor="white", linewidth=0.8)
+    ax.set_xlabel("HVG rank")
+    ax.set_ylabel("Gene")
+    ax.set_title(f"Top {len(top_genes)} highly variable genes")
+    ax.grid(axis="x", alpha=0.2, linestyle="--")
+    plt.tight_layout()
+    save_figure(fig, output_dir, "highly_variable_genes.png")
+
+
 # ---------------------------------------------------------------------------
 # HVG filtering
 # ---------------------------------------------------------------------------

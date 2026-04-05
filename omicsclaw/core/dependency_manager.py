@@ -1,5 +1,6 @@
 import importlib
 import importlib.util
+import os
 import subprocess
 import sys
 
@@ -132,15 +133,29 @@ def get_installed_tiers() -> dict[str, bool]:
 
 def _check_r_available() -> bool:
     """Check if Rscript is on PATH (cached)."""
+    candidates = []
+    conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
+    if conda_prefix:
+        candidates.append(os.path.join(conda_prefix, "bin", "Rscript"))
+    if sys.prefix:
+        candidates.append(os.path.join(sys.prefix, "bin", "Rscript"))
+    candidates.append("Rscript")
+
     try:
-        result = subprocess.run(
-            ["Rscript", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        for rscript in dict.fromkeys(candidates):
+            try:
+                result = subprocess.run(
+                    [rscript, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except FileNotFoundError:
+                continue
+            if result.returncode == 0:
+                return True
+        return False
+    except subprocess.TimeoutExpired:
         return False
 
 

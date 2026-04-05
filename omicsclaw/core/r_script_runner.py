@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "r_scripts"
 
 
+def _preferred_rscript_executable(default: str = "Rscript") -> str:
+    """Prefer the active conda environment's Rscript when available."""
+    candidates: list[Path] = []
+    conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
+    if conda_prefix:
+        candidates.append(Path(conda_prefix) / "bin" / "Rscript")
+    if sys.prefix:
+        candidates.append(Path(sys.prefix) / "bin" / "Rscript")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return default
+
+
 class RScriptError(Exception):
     """An R subprocess call failed."""
 
@@ -97,7 +112,11 @@ class RScriptRunner:
     ):
         self.scripts_dir = Path(scripts_dir) if scripts_dir else _SCRIPTS_DIR
         self.timeout = timeout
-        self.r_executable = r_executable
+        self.r_executable = (
+            _preferred_rscript_executable(r_executable)
+            if r_executable == "Rscript"
+            else r_executable
+        )
         self.verbose = verbose
 
     # ------------------------------------------------------------------
