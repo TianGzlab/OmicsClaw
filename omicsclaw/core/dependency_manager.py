@@ -58,6 +58,9 @@ DOMAIN_TIERS = {
 
     # Single-cell domain dependencies
     "scrublet": "singlecell",
+    "multiqc": "singlecell-upstream",
+    "kb_python": "singlecell-upstream",
+    "scvelo": "singlecell-velocity",
 
     # Other domains can be added here as the software grows
 }

@@ -15,6 +15,8 @@ create_summary_report
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -184,6 +186,28 @@ def save_h5ad(
                     raise
     finally:
         adata.uns.update(removed_uns)
+
+
+def write_h5ad_aliases(canonical_file: str | Path, aliases: list[str | Path]) -> list[Path]:
+    """Create lightweight aliases pointing to the canonical H5AD output.
+
+    Symlinks are preferred. If symlink creation fails, a copy is written instead.
+    Existing aliases are replaced.
+    """
+    canonical_path = Path(canonical_file).resolve()
+    created: list[Path] = []
+    for alias in aliases:
+        alias_path = Path(alias)
+        alias_path.parent.mkdir(parents=True, exist_ok=True)
+        if alias_path.exists() or alias_path.is_symlink():
+            alias_path.unlink()
+        try:
+            relative_target = os.path.relpath(canonical_path, start=alias_path.parent.resolve())
+            alias_path.symlink_to(relative_target)
+        except Exception:
+            shutil.copy2(canonical_path, alias_path)
+        created.append(alias_path)
+    return created
 
 
 # ---------------------------------------------------------------------------

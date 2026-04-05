@@ -21,6 +21,11 @@ Use this guide when you need to decide:
 - which scVelo mode is appropriate
 - how to explain latent time honestly
 
+Standard OmicsClaw path:
+
+- `sc-velocity-prep` prepares `spliced` / `unspliced` layers
+- `sc-velocity` performs the actual scVelo modeling step
+
 ## Step 1: Inspect The Data First
 
 Key properties to check:
@@ -34,6 +39,7 @@ Key properties to check:
   - full dynamical interpretation with latent time
 - **Velocity-specific content**:
   - standardization can help with object hygiene, but it cannot fabricate `spliced` / `unspliced` layers
+  - if the layers are missing, the current upstream repair path is `sc-velocity-prep`
 
 Important implementation notes in current OmicsClaw:
 - public methods are `scvelo_stochastic`, `scvelo_dynamical`, and `scvelo_steady_state`
@@ -85,6 +91,8 @@ Important warnings:
 - describe velocity stream / embedding plots as directional summaries on the chosen embedding
 - describe velocity magnitude as a heuristic summary, not a direct biological rate constant
 - describe latent time only as a dynamical-model-derived quantity
+- explain that the downstream-facing AnnData is now `processed.h5ad`, while `adata_with_velocity.h5ad` is kept only as a compatibility alias
+- remind users to inspect `figures/manifest.json`, `figure_data/manifest.json`, and the exported velocity summary tables when checking whether the run looks scientifically plausible
 
 ## Official References
 

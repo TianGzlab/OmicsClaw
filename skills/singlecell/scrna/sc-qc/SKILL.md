@@ -1,9 +1,9 @@
 ---
 name: sc-qc
 description: >-
-  Quality control metric calculation and diagnostic visualization for
-  single-cell RNA-seq data. Computes library size, detected genes,
-  mitochondrial percentage, and ribosomal percentage without filtering cells.
+  Review cell quality before filtering. Computes counts, detected genes,
+  mitochondrial percentage, and ribosomal percentage, but does not remove
+  cells.
 version: 0.2.0
 author: OmicsClaw
 license: MIT
@@ -18,7 +18,7 @@ metadata:
         priority: "species"
         params: ["species"]
         defaults: {species: "human"}
-        requires: ["count_like_matrix_in_X", "gene_symbols_with_species_prefix_convention"]
+        requires: ["count_like_matrix_in_layers.raw_or_X", "gene_symbols_with_species_prefix_convention"]
         tips:
           - "--species: Wrapper-level control for mitochondrial / ribosomal gene-prefix detection; use `human` for `MT-` / `RP[SL]`, `mouse` for `mt-` / `Rp[sl]`."
           - "Current OmicsClaw implementation exposes one public QC path, `qc_metrics`; it always computes ribosomal percentage in addition to mitochondrial percentage."
@@ -89,7 +89,7 @@ the QC outputs.
 2. **Species-aware gene tagging**: mitochondrial and ribosomal features are detected from `--species`
 3. **Standard Python gallery**: QC violin, scatter, histogram, and highest-expressed-gene panels
 4. **Structured figure-data contract**: `figure_data/` exports figure-ready CSVs plus a manifest for downstream plotting or styling
-5. **Stable AnnData write-back**: QC metrics are added to `.obs`, marker flags to `.var`, and OmicsClaw analysis metadata to `.uns`
+5. **Stable processed AnnData output**: a canonical `processed.h5ad` is produced with standardized scRNA contract fields, `layers["counts"]`, `adata.raw`, QC metrics in `.obs`, marker flags in `.var`, and OmicsClaw metadata in `.uns`
 6. **Notebook-friendly reproducibility**: report, structured result JSON, reproducibility shell command, pinned requirements bundle, README, and analysis notebook
 
 ## Input Formats
@@ -107,20 +107,19 @@ The current wrapper uses `skills.singlecell._lib.io.smart_load(...)`.
 
 ### Input Expectations
 
-- The most reliable input is a **raw-count-like matrix in `adata.X`**.
-- Gene names should follow the selected species convention closely enough for
-  mitochondrial and ribosomal prefix detection to work.
-- If gene symbols use a different naming system, explain that QC percentages may
-  be underestimated before running.
+- The most reliable input is a **raw-count-like matrix available in `adata.layers["counts"]`, aligned `adata.raw`, or `adata.X`**.
+- If explicit counts are not in `adata.X`, the wrapper now auto-selects the best count-like source before QC.
+- Gene names should follow the selected species convention closely enough for mitochondrial and ribosomal prefix detection to work; when they do not, the run continues with warnings instead of faking precision.
 
 ## Workflow
 
 1. **Load**: read input data with the shared single-cell loader or demo data.
-2. **Tag genes**: mark mitochondrial genes in `adata.var["mt"]` and ribosomal genes in `adata.var["ribo"]`.
-3. **Calculate metrics**: run Scanpy QC metric calculation and add log-transformed helper columns.
-4. **Render standard gallery**: generate the default OmicsClaw QC gallery under `figures/`.
-5. **Export figure data and tables**: write stable CSV exports under `figure_data/` and `tables/`.
-6. **Write outputs**: save `qc_checked.h5ad`, `report.md`, `result.json`, README, notebook, and reproducibility bundle.
+2. **Preflight**: check whether a count-like matrix exists, recommend `sc-standardize-input` when provenance is unclear, and warn honestly about species-dependent gene naming.
+3. **Prepare counts and gene IDs**: choose the best available count-like source plus the best gene-symbol column for MT / ribosomal tagging.
+4. **Calculate metrics**: run Scanpy QC metric calculation and add log-transformed helper columns.
+5. **Render standard gallery**: generate the default OmicsClaw QC gallery under `figures/` through the shared `skills/singlecell/_lib/viz` layer.
+6. **Export figure data and tables**: write stable CSV exports under `figure_data/` and `tables/`.
+7. **Write outputs**: save `processed.h5ad`, `report.md`, `result.json`, README, notebook, and reproducibility bundle.
 
 ## CLI Reference
 
@@ -181,9 +180,16 @@ species-specific feature tagging.
    - QC histograms
    - highest expressed genes summary
 
+### Current Input Robustness Behavior
+
+- `smart_load(...)` is now loader-only: it reads the object and records a minimal input contract.
+- User-facing standardization advice is emitted by shared `preflight`, not by the loader.
+- `prepare_count_like_adata(...)` then selects `layers["counts"]` → aligned `adata.raw` → count-like `adata.X` in that order.
+- If no mitochondrial or ribosomal genes match the selected species convention, the run continues with warnings and counts-based QC metrics remain available.
+
 ### Guaranteed Metric Columns After Success
 
-The saved `qc_checked.h5ad` is expected to contain at least:
+The saved `processed.h5ad` is expected to contain at least:
 
 ```text
 adata.obs["n_genes_by_counts"]
@@ -240,23 +246,29 @@ output_dir/
 ├── README.md
 ├── report.md
 ├── result.json
-├── qc_checked.h5ad
+├── processed.h5ad
 ├── figures/
 │   ├── qc_violin.png
 │   ├── qc_scatter.png
 │   ├── qc_histograms.png
 │   ├── highest_expr_genes.png
+│   ├── barcode_rank.png
+│   ├── qc_correlation_heatmap.png
 │   └── manifest.json
 ├── figure_data/
 │   ├── manifest.json
 │   ├── qc_run_summary.csv
 │   ├── qc_metrics_summary.csv
 │   ├── qc_metrics_per_cell.csv
-│   └── highest_expr_genes.csv
+│   ├── highest_expr_genes.csv
+│   ├── barcode_rank_curve.csv
+│   └── qc_metric_correlations.csv
 ├── tables/
 │   ├── qc_metrics_summary.csv
 │   ├── qc_metrics_per_cell.csv
-│   └── highest_expr_genes.csv
+│   ├── highest_expr_genes.csv
+│   ├── barcode_rank_curve.csv
+│   └── qc_metric_correlations.csv
 └── reproducibility/
     ├── commands.sh
     ├── requirements.txt
@@ -269,7 +281,8 @@ output_dir/
 2. `figures/qc_violin.png` and `figures/qc_scatter.png`
 3. `tables/qc_metrics_summary.csv`
 4. `tables/qc_metrics_per_cell.csv`
-5. `qc_checked.h5ad` for downstream filtering workflows
+5. `tables/barcode_rank_curve.csv` and `tables/qc_metric_correlations.csv` for deeper QC review
+6. `processed.h5ad` for downstream filtering workflows
 
 ### Structured Result Contract
 

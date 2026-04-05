@@ -1,11 +1,8 @@
 ---
 name: sc-preprocessing
 description: >-
-  Single-cell RNA-seq preprocessing with Scanpy, Seurat LogNormalize, or
-  Seurat SCTransform workflows. Performs QC filtering, normalization, highly
-  variable gene selection, PCA, neighborhood graph construction, UMAP, and
-  clustering, then exports a downstream-ready AnnData plus a standard
-  OmicsClaw gallery and reproducibility bundle.
+  Main preprocessing step after counts and QC. Filters cells, normalizes
+  expression, selects HVGs, and runs PCA, UMAP, and clustering.
 version: 0.4.0
 author: OmicsClaw
 license: MIT
@@ -50,6 +47,14 @@ metadata:
           - "--method sctransform: R-backed `SCTransform(variable.features.n=...)` path followed by PCA, neighbor graph construction, clustering, and UMAP in Seurat."
           - "--n-top-hvg: Mapped to `SCTransform(variable.features.n=...)`; current OmicsClaw default follows the upstream SCTransform-style 3000-feature regime."
           - "--max-mt-pct: Still applied as wrapper-level QC filtering before SCTransform, not inside SCTransform itself."
+      pearson_residuals:
+        priority: "min_genes/max_mt_pct → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
+        params: ["min_genes", "min_cells", "max_mt_pct", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution"]
+        defaults: {min_genes: 200, min_cells: 3, max_mt_pct: 20.0, n_top_hvg: 2000, n_pcs: 50, n_neighbors: 15, leiden_resolution: 1.0}
+        requires: ["count_like_matrix_in_X", "scanpy", "igraph", "leidenalg"]
+        tips:
+          - "--method pearson_residuals: Python-native path using raw-count HVG selection with `seurat_v3` plus analytic Pearson residual normalization before PCA, neighbors, UMAP, and Leiden."
+          - "This path preserves a log-normalized compatibility view in `adata.raw` while exposing Pearson residuals as the active working matrix."
     legacy_aliases: [sc-preprocess]
     saves_h5ad: true
     requires_preprocessed: false
@@ -94,6 +99,7 @@ Current OmicsClaw `sc-preprocessing` exposes **three implemented workflows**:
 1. `scanpy`
 2. `seurat`
 3. `sctransform`
+4. `pearson_residuals`
 
 This skill does:
 
@@ -188,7 +194,7 @@ oc run sc-preprocessing --demo --output /tmp/sc_preprocess_demo
 
 | Parameter | Role | Notes |
 |-----------|------|-------|
-| `--method` | preprocessing backend | `scanpy`, `seurat`, or `sctransform` |
+| `--method` | preprocessing backend | `scanpy`, `seurat`, `sctransform`, or `pearson_residuals` |
 | `--min-genes` | cell filtering threshold | filters low-complexity cells |
 | `--min-cells` | gene filtering threshold | filters rarely detected genes |
 | `--max-mt-pct` | mitochondrial QC threshold | wrapper-level filter before downstream modeling |
@@ -242,7 +248,7 @@ Current OmicsClaw `scanpy` preprocessing does:
 
 Important implementation note:
 
-- The current Scanpy branch uses `flavor='seurat'`, not `seurat_v3`.
+- The current Scanpy branch uses `flavor='seurat'`, while the Pearson-residual branch uses `seurat_v3` HVG selection on raw counts before residual normalization.
 - This means the scanpy path expects normalized/log-transformed expression for
   HVG selection rather than raw-count HVG modeling.
 

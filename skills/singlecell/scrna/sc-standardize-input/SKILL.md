@@ -1,8 +1,8 @@
 ---
 name: sc-standardize-input
 description: >-
-  Canonicalize single-cell input into a stable AnnData contract for downstream
-  OmicsClaw scRNA skills.
+  Start here if you already have an external single-cell h5ad. Fixes the AnnData
+  contract so downstream OmicsClaw scRNA skills can use it safely.
 version: 0.1.0
 author: OmicsClaw
 license: MIT

@@ -17,5 +17,10 @@ Use skill guides when:
 - you want implementation-aware guidance without presenting it as a fully
   validated canonical workflow
 
+Some skill guides also act as **navigation guides** across multiple related
+skills when one command alone is not enough for a beginner to finish a task.
+For example, `skill-guides/singlecell/sc-rna-quickstart.md` gives a novice
+route from raw FASTQ to a downstream-ready scRNA object.
+
 Use `knowhows/` for short guardrails. Use `skill-guides/` for the longer,
 method-specific reasoning that should not be injected wholesale into prompts.

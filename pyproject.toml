@@ -126,6 +126,32 @@ singlecell = [
     "liana>=1.4.0",                   # sc-cell-communication: LIANA+
 ]
 
+# --------------------------------------------------------------------------- #
+# singlecell-upstream — Python-side helpers for scRNA upstream wrappers.      #
+# External CLIs such as FastQC, STAR, Cell Ranger, simpleaf, and velocyto are #
+# NOT installed here and must be installed manually into the active env/PATH. #
+# --------------------------------------------------------------------------- #
+singlecell-upstream = [
+    "multiqc>=1.33",                  # sc-fastq-qc: MultiQC report aggregation
+    "kb-python>=0.29.0",              # sc-count: kb-python pseudoalignment backend
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-velocity — Python-side velocity analysis stack.                  #
+# External CLIs such as STAR and velocyto remain manual installs.             #
+# --------------------------------------------------------------------------- #
+singlecell-velocity = [
+    "scvelo>=0.3.0",                  # sc-velocity: scVelo modeling
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-full — convenience meta-extra for broader scRNA work.            #
+# Still excludes external CLIs and reference downloads.                       #
+# --------------------------------------------------------------------------- #
+singlecell-full = [
+    "omicsclaw[singlecell,singlecell-upstream,singlecell-velocity]",
+]
+
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
 singlecell-r-bridge = []
 
@@ -348,6 +374,9 @@ testpaths = [
     "skills/bulkrna/bulkrna-enrichment/tests",
     "skills/bulkrna/bulkrna-deconvolution/tests",
     "skills/bulkrna/bulkrna-coexpression/tests",
+    "skills/singlecell/scrna/sc-fastq-qc/tests",
+    "skills/singlecell/scrna/sc-count/tests",
+    "skills/singlecell/scrna/sc-velocity-prep/tests",
 ]
 markers = [
     "slow: tests requiring full optional deps or significant runtime (excluded by default)",

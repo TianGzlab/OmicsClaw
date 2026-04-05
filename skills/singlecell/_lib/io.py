@@ -16,8 +16,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from anndata import AnnData
 
-from omicsclaw.common.user_guidance import emit_user_guidance
-from .adata_utils import build_standardization_recommendation, ensure_input_contract
+from .adata_utils import ensure_input_contract
 
 logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -351,6 +350,10 @@ def smart_load(
 
     Supports: .h5ad, .h5, .loom, .csv, .tsv, and 10X mtx directories.
 
+    This function is intentionally loader-only: it reads data and ensures a
+    minimal input contract exists, while user-facing standardization guidance is
+    emitted later by shared preflight checks.
+
     When ``preserve_all=True``, count-like loaders disable their default
     cell/gene filtering so downstream skills can decide on QC thresholds.
     """
@@ -364,11 +367,16 @@ def smart_load(
         filtered_kwargs.setdefault("min_genes", 0)
 
     if path.is_dir():
-        adata = import_10x_data(path, **filtered_kwargs)
-        if suggest_standardize:
-            maybe_warn_standardize_first(adata, source_path=str(path), skill_name=skill_name)
-        else:
-            ensure_input_contract(adata, source_path=str(path), standardized=False)
+        try:
+            from .upstream import load_count_output_directory
+
+            adata = load_count_output_directory(path)
+        except Exception:
+            adata = None
+
+        if adata is None:
+            adata = import_10x_data(path, **filtered_kwargs)
+        ensure_input_contract(adata, source_path=str(path))
         return adata
 
     suffix = path.suffix.lower()
@@ -386,10 +394,7 @@ def smart_load(
         logger.info("Unknown extension %s, trying as h5ad ...", suffix)
         adata = sc.read_h5ad(path)
 
-    if suggest_standardize:
-        maybe_warn_standardize_first(adata, source_path=str(path), skill_name=skill_name)
-    else:
-        ensure_input_contract(adata, source_path=str(path))
+    ensure_input_contract(adata, source_path=str(path))
     return adata
 
 
@@ -399,12 +404,10 @@ def maybe_warn_standardize_first(
     source_path: str | Path | None = None,
     skill_name: str | None = None,
 ) -> dict:
-    """Warn when downstream skills receive input that has not been standardized."""
+    """Ensure the single-cell input contract exists.
+
+    User-facing standardization recommendations are now emitted centrally by
+    shared preflight checks rather than the loader layer.
+    """
     source_text = str(source_path) if source_path is not None else None
-    contract = ensure_input_contract(adata, source_path=source_text)
-    if not contract.get("standardized"):
-        emit_user_guidance(
-            logger,
-            build_standardization_recommendation(source_path=source_text, skill_name=skill_name),
-        )
-    return contract
+    return ensure_input_contract(adata, source_path=source_text)
