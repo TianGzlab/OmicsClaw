@@ -550,22 +550,22 @@ def run_fastqc(inputs: list[Path], output_dir: str | Path, *, threads: int = 4) 
     """Run FastQC when available."""
     if not inputs or not tool_available("fastqc"):
         return None
-    outdir = Path(output_dir)
+    outdir = Path(output_dir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
     command = ["fastqc", "--quiet", "--threads", str(max(int(threads), 1)), "--outdir", str(outdir)]
     command.extend(str(path) for path in inputs)
-    return run_command(command, cwd=outdir)
+    return run_command(command, cwd=outdir.parent)
 
 
 def run_multiqc(search_dir: str | Path, output_dir: str | Path) -> CommandExecution | None:
     """Run MultiQC on a FastQC output directory when available."""
     if not tool_available("multiqc"):
         return None
-    outdir = Path(output_dir)
+    outdir = Path(output_dir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
     command = [
         "multiqc",
-        str(search_dir),
+        str(Path(search_dir).resolve()),
         "--module",
         "fastqc",
         "--outdir",
@@ -575,7 +575,7 @@ def run_multiqc(search_dir: str | Path, output_dir: str | Path) -> CommandExecut
         "--force",
         "--quiet",
     ]
-    return run_command(command, cwd=outdir)
+    return run_command(command, cwd=outdir.parent)
 
 
 def _slugify(value: str) -> str:
@@ -900,6 +900,8 @@ def run_starsolo_count(
     read2 = ",".join(str(path.resolve()) for path in sample.read2_files)
     read1 = ",".join(str(path.resolve()) for path in sample.read1_files)
 
+    out_prefix = f"{out_dir.resolve().as_posix()}/"
+
     command = [
         "STAR",
         "--genomeDir",
@@ -937,7 +939,7 @@ def run_starsolo_count(
         "BAM",
         "SortedByCoordinate",
         "--outFileNamePrefix",
-        f"{out_dir.as_posix()}/",
+        out_prefix,
     ]
     if all(path.name.endswith(".gz") for path in sample.all_files()):
         command.extend(["--readFilesCommand", "zcat"])

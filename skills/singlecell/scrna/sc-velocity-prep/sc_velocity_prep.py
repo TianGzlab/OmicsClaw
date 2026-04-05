@@ -15,6 +15,8 @@ import matplotlib
 matplotlib.use("Agg")
 import numpy as np
 import pandas as pd
+from scipy import sparse
+from scipy.io import mmread
 
 try:
     import anndata
@@ -93,6 +95,57 @@ def _demo_velocity_adata():
     demo.layers["ambiguous"] = ambiguous.copy()
     demo.X = counts.copy()
     return demo, str(demo_path) if demo_path else None
+
+
+def _load_starsolo_velocyto_dir_safe(path: str | Path):
+    """Load STARsolo Velocyto matrices with a local fallback for index-name quirks."""
+    try:
+        return load_starsolo_velocyto_dir(path)
+    except ValueError as exc:
+        if "var.index.name" not in str(exc):
+            raise
+
+    # Fallback path: parse matrices directly and force var/obs index names to None.
+    import anndata as ad
+
+    velo_dir = find_starsolo_velocyto_dir(path)
+    if velo_dir is None:
+        raise FileNotFoundError(f"Could not locate STARsolo Velocyto matrices under: {path}")
+
+    barcodes = pd.read_csv(velo_dir / "barcodes.tsv", sep="\t", header=None)[0].astype(str).tolist()
+    features_path = velo_dir / "features.tsv"
+    if not features_path.exists():
+        features_path = velo_dir / "genes.tsv"
+    features = pd.read_csv(features_path, sep="\t", header=None)
+    gene_ids = features.iloc[:, 0].astype(str)
+    gene_symbols = features.iloc[:, 1].astype(str) if features.shape[1] > 1 else gene_ids
+    feature_type = (
+        features.iloc[:, 2].astype(str)
+        if features.shape[1] > 2
+        else pd.Series(["Gene Expression"] * len(gene_ids), dtype="object")
+    )
+
+    spliced = sparse.csr_matrix(mmread(velo_dir / "spliced.mtx")).transpose().tocsr()
+    unspliced = sparse.csr_matrix(mmread(velo_dir / "unspliced.mtx")).transpose().tocsr()
+    ambiguous_path = velo_dir / "ambiguous.mtx"
+    ambiguous = (
+        sparse.csr_matrix(mmread(ambiguous_path)).transpose().tocsr()
+        if ambiguous_path.exists()
+        else sparse.csr_matrix(spliced.shape, dtype=spliced.dtype)
+    )
+    total = spliced + unspliced + ambiguous
+
+    adata = ad.AnnData(X=total)
+    adata.obs_names = pd.Index(barcodes, dtype="object", name=None)
+    adata.var_names = pd.Index(gene_symbols.to_numpy(dtype="object"), dtype="object", name=None)
+    adata.var["gene_ids"] = gene_ids.to_numpy()
+    adata.var["gene_symbols"] = gene_symbols.to_numpy()
+    adata.var["feature_types"] = feature_type.to_numpy()
+    adata.layers["counts"] = total.copy()
+    adata.layers["spliced"] = spliced
+    adata.layers["unspliced"] = unspliced
+    adata.layers["ambiguous"] = ambiguous
+    return adata, velo_dir
 
 
 def _layer_summary_df(adata) -> pd.DataFrame:
@@ -338,7 +391,7 @@ def main() -> None:
                 }
         else:
             if detect_starsolo_output(input_path) or find_starsolo_velocyto_dir(input_path):
-                velocity_adata, velo_dir = load_starsolo_velocyto_dir(input_path)
+                velocity_adata, velo_dir = _load_starsolo_velocyto_dir_safe(input_path)
                 artifact_info = {"starsolo_velocyto_dir": str(velo_dir)}
             else:
                 if args.reference:
@@ -391,7 +444,7 @@ def main() -> None:
                     whitelist=whitelist,
                     features=("Gene", "Velocyto"),
                 )
-                velocity_adata, velo_dir = load_starsolo_velocyto_dir(artifacts.run_dir)
+                velocity_adata, velo_dir = _load_starsolo_velocyto_dir_safe(artifacts.run_dir)
                 artifact_info = {
                     "starsolo_run_dir": str(artifacts.run_dir),
                     "starsolo_velocyto_dir": str(velo_dir),

@@ -163,7 +163,10 @@ def _velocity_cell_summary_df(adata) -> pd.DataFrame:
         frame["umap_1"] = np.asarray(adata.obsm["X_umap"])[:, 0]
         frame["umap_2"] = np.asarray(adata.obsm["X_umap"])[:, 1]
     if "velocity" in adata.layers:
-        velocity = np.asarray(adata.layers["velocity"])
+        velocity = adata.layers["velocity"]
+        if hasattr(velocity, "toarray"):
+            velocity = velocity.toarray()
+        velocity = np.asarray(velocity, dtype=np.float32)
         frame["velocity_magnitude"] = np.linalg.norm(velocity, axis=1)
     if "latent_time" in adata.obs.columns:
         frame["latent_time"] = adata.obs["latent_time"].astype(float).to_numpy()

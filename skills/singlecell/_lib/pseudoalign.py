@@ -55,6 +55,13 @@ def _find_quants_matrix_dir(path: Path) -> Path | None:
             and (candidate / "barcodes.tsv").exists()
         ):
             return candidate
+        # kb-python count outputs often use cells_x_genes.* naming.
+        if (
+            (candidate / "cells_x_genes.mtx").exists()
+            and (candidate / "cells_x_genes.genes.txt").exists()
+            and (candidate / "cells_x_genes.barcodes.txt").exists()
+        ):
+            return candidate
     return None
 
 
@@ -92,6 +99,17 @@ def load_pseudoalign_adata(artifacts: PseudoalignArtifacts):
         adata = ad.AnnData(X=matrix)
         adata.obs_names = pd.Index(cols, dtype="object")
         adata.var_names = pd.Index(rows, dtype="object")
+        return adata
+
+    if (path / "cells_x_genes.mtx").exists():
+        # kb-python matrix market output is cell x gene orientation already.
+        matrix = sparse.csr_matrix(mmread(path / "cells_x_genes.mtx")).tocsr()
+        genes = pd.read_csv(path / "cells_x_genes.genes.txt", header=None)[0].astype(str).tolist()
+        barcodes = pd.read_csv(path / "cells_x_genes.barcodes.txt", header=None)[0].astype(str).tolist()
+        adata = ad.AnnData(X=matrix)
+        adata.obs_names = pd.Index(barcodes, dtype="object")
+        adata.var_names = pd.Index(genes, dtype="object")
+        adata.var["gene_symbols"] = adata.var_names.astype(str)
         return adata
 
     try:
