@@ -546,7 +546,10 @@ def _render_qc_violin(adata, spec: PlotSpec, context: dict) -> object:
 
 def _render_hvg_plot(adata, spec: PlotSpec, context: dict) -> object:
     output_dir = Path(context["output_dir"])
-    sc_preproc_utils.plot_variable_genes(adata, output_dir)
+    try:
+        sc_preproc_utils.plot_variable_genes(adata, output_dir)
+    except Exception:
+        sc_preproc_utils.plot_variable_genes_fallback(adata, output_dir)
     path = _gallery_figure_path(output_dir, spec.filename)
     return path if path.exists() else None
 
@@ -795,6 +798,12 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
 def get_demo_data():
     logger.info("Generating demo single-cell data")
     adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
+    adata, _, _ = canonicalize_singlecell_adata(
+        adata,
+        species=infer_qc_species(adata),
+        preferred_layer="counts",
+        standardizer_skill=SKILL_NAME,
+    )
     return adata, demo_path
 
 

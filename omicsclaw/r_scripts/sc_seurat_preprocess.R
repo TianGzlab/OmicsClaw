@@ -45,7 +45,7 @@ if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 cat(sprintf("Loading data from %s...\n", h5ad_file))
 
 tryCatch({
-    sce <- readH5AD(h5ad_file)
+    sce <- readH5AD(h5ad_file, reader = "R")
     counts <- SummarizedExperiment::assay(sce, "X")
     meta   <- as.data.frame(SummarizedExperiment::colData(sce))
 
@@ -80,17 +80,11 @@ tryCatch({
         seurat_obj <- ScaleData(seurat_obj, verbose = FALSE)
     }
 
-    # Dimensionality reduction + clustering
+    # Dimensionality reduction (base preprocessing stops at PCA)
     seurat_obj <- RunPCA(seurat_obj, npcs = n_pcs, verbose = FALSE)
-    effective_pcs <- min(n_pcs, ncol(Embeddings(seurat_obj, "pca")))
-    seurat_obj <- FindNeighbors(seurat_obj,
-        dims = seq_len(effective_pcs), k.param = n_neighbors, verbose = FALSE)
-    seurat_obj <- FindClusters(seurat_obj, resolution = resolution, verbose = FALSE)
-    seurat_obj <- RunUMAP(seurat_obj, dims = seq_len(effective_pcs), verbose = FALSE)
 
     # Extract results
     meta_out <- seurat_obj@meta.data
-    meta_out$seurat_clusters <- as.character(Idents(seurat_obj))
     assay_name <- DefaultAssay(seurat_obj)
 
     # Write outputs
@@ -100,9 +94,6 @@ tryCatch({
 
     pca_emb <- Embeddings(seurat_obj, "pca")
     write.csv(pca_emb, file.path(output_dir, "pca.csv"), quote = FALSE)
-
-    umap_emb <- Embeddings(seurat_obj, "umap")
-    write.csv(umap_emb, file.path(output_dir, "umap.csv"), quote = FALSE)
 
     hvg <- VariableFeatures(seurat_obj)
     write.csv(data.frame(gene = hvg), file.path(output_dir, "hvg.csv"),
