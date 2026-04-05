@@ -485,12 +485,15 @@ def preflight_sc_batch_integration(
             )
         else:
             decision.block(
-                "Batch integration requires a real batch/sample column in `adata.obs`; none was found."
+                "Batch integration requires a real batch/sample column in `adata.obs`; none was found. Stay on the standard `sc-preprocessing -> sc-clustering` path instead."
             )
         return decision
 
     if int(adata.obs[batch_key].astype(str).nunique()) < 2:
-        decision.block(f"`{batch_key}` has fewer than 2 unique batches, so integration is not meaningful.")
+        decision.block(
+            f"`{batch_key}` has fewer than 2 unique batches, so integration is not meaningful. "
+            "Use `sc-clustering` directly on the preprocessed object instead."
+        )
         return decision
 
     batch_sizes = adata.obs[batch_key].astype(str).value_counts()
@@ -524,11 +527,11 @@ def preflight_sc_batch_integration(
         )
 
     if method == "scanvi":
-        labels = [name for name in ("cell_type", "leiden") if name in adata.obs.columns]
+        labels = [name for name in ("cell_type", "leiden", "louvain", "seurat_clusters") if name in adata.obs.columns]
         if not labels:
             decision.require_field(
                 "method",
-                "`scanvi` needs existing labels such as `cell_type` or `leiden`; otherwise choose `scvi` instead.",
+                "`scanvi` needs existing labels such as `cell_type`, `leiden`, or `louvain`; otherwise choose `scvi` instead.",
                 choices=["scanvi", "scvi"],
                 aliases=["method"],
             )

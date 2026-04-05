@@ -25,13 +25,14 @@ n_pcs      <- if (length(args) >= 6) as.integer(args[6]) else 30L
 suppressPackageStartupMessages({
     library(SingleCellExperiment)
     library(zellkonverter)
+    library(scuttle)
 })
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 tryCatch({
     cat(sprintf("Loading data from %s...\n", h5ad_file))
-    sce <- readH5AD(h5ad_file)
+    sce <- readH5AD(h5ad_file, reader = "R")
     meta <- as.data.frame(SummarizedExperiment::colData(sce))
 
     if (!batch_key %in% colnames(meta))
@@ -43,16 +44,21 @@ tryCatch({
         suppressPackageStartupMessages(library(batchelor))
         counts <- as.matrix(SummarizedExperiment::assay(sce, "X"))
         split_idx <- split(seq_len(ncol(sce)), factor(meta[[batch_key]], levels = unique(meta[[batch_key]])))
-        mat_list  <- lapply(split_idx, function(idx) {
-            mat <- t(log1p(counts[, idx, drop = FALSE]))
-            colnames(mat) <- rownames(sce)
-            rownames(mat) <- colnames(sce)[idx]
-            mat
+        sce_list <- lapply(split_idx, function(idx) {
+            batch_counts <- counts[, idx, drop = FALSE]
+            batch_sce <- SingleCellExperiment(
+                assays = list(counts = batch_counts),
+                colData = S4Vectors::DataFrame(row.names = colnames(sce)[idx])
+            )
+            scuttle::logNormCounts(batch_sce)
         })
 
-        mnn <- do.call(batchelor::reducedMNN, c(mat_list, list(k = 20)))
-
-        embedding <- as.matrix(mnn$corrected)
+        mnn <- do.call(batchelor::fastMNN, c(sce_list, list(k = 20, d = n_pcs, deferred = FALSE)))
+        embedding <- SingleCellExperiment::reducedDim(mnn, "corrected")
+        if (is.null(embedding)) {
+            stop("fastMNN did not return a reducedDim named 'corrected'")
+        }
+        embedding <- as.matrix(embedding)
         write.csv(embedding, file.path(output_dir, "embedding.csv"), quote = FALSE)
         write.csv(data.frame(row.names = rownames(embedding)),
             file.path(output_dir, "obs.csv"), quote = FALSE)

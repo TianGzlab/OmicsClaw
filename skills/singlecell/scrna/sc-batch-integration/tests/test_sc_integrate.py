@@ -64,3 +64,29 @@ def test_demo_result_json(tmp_output):
     assert "summary" in data
     assert data["data"]["visualization"]["recipe_id"] == "standard-sc-batch-integration-gallery"
     assert "integration_summary" in data["data"]["visualization"]["available_figure_data"]
+
+
+def test_scanvi_demo_smoke(tmp_output):
+    """scanvi demo should run when demo labels are available."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SKILL_SCRIPT),
+            "--demo",
+            "--method",
+            "scanvi",
+            "--n-epochs",
+            "2",
+            "--no-gpu",
+            "--output",
+            str(tmp_output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=240,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    data = json.loads((tmp_output / "result.json").read_text())
+    assert data["summary"]["requested_method"] == "scanvi"
+    assert data["summary"]["executed_method"] == "scanvi"

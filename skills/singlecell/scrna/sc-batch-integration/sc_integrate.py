@@ -173,7 +173,7 @@ def integrate_scvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwar
 
 
 def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwargs):
-    labels_key = "cell_type" if "cell_type" in adata.obs.columns else "leiden" if "leiden" in adata.obs.columns else None
+    labels_key = next((key for key in ("cell_type", "leiden", "louvain", "seurat_clusters") if key in adata.obs.columns), None)
     if labels_key is None:
         logger.warning("scANVI requires labels; falling back to scVI latent integration")
         result = integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
@@ -293,15 +293,11 @@ _METHOD_DISPATCH = {
 }
 
 
-def _ensure_leiden_labels(adata, embedding_key: str, cluster_key: str = "leiden") -> None:
-    if cluster_key in adata.obs.columns:
-        return
-    if embedding_key in adata.obsm:
-        sc.pp.neighbors(adata, use_rep=embedding_key)
-    elif "neighbors" not in adata.uns:
-        ensure_pca(adata)
-        sc.pp.neighbors(adata)
-    sc.tl.leiden(adata, key_added=cluster_key)
+def _preferred_label_key(adata) -> str | None:
+    for candidate in ("cell_type", "leiden", "louvain", "seurat_clusters"):
+        if candidate in adata.obs.columns:
+            return candidate
+    return None
 
 
 def _build_batch_sizes_table(adata, batch_key: str) -> pd.DataFrame:
@@ -316,7 +312,9 @@ def _build_batch_sizes_table(adata, batch_key: str) -> pd.DataFrame:
     )
 
 
-def _build_cluster_sizes_table(adata, label_key: str) -> pd.DataFrame:
+def _build_cluster_sizes_table(adata, label_key: str | None) -> pd.DataFrame:
+    if not label_key or label_key not in adata.obs.columns:
+        return pd.DataFrame(columns=["label", "n_cells"])
     return (
         adata.obs[label_key]
         .astype(str)
@@ -328,7 +326,9 @@ def _build_cluster_sizes_table(adata, label_key: str) -> pd.DataFrame:
     )
 
 
-def _build_batch_mixing_table(adata, batch_key: str, label_key: str) -> pd.DataFrame:
+def _build_batch_mixing_table(adata, batch_key: str, label_key: str | None) -> pd.DataFrame:
+    if not label_key or label_key not in adata.obs.columns:
+        return pd.DataFrame()
     mix = pd.crosstab(
         adata.obs[label_key].astype(str),
         adata.obs[batch_key].astype(str),
@@ -338,32 +338,37 @@ def _build_batch_mixing_table(adata, batch_key: str, label_key: str) -> pd.DataF
     return mix.reset_index()
 
 
-def _build_umap_points_table(adata, batch_key: str, label_key: str) -> pd.DataFrame:
+def _build_umap_points_table(adata, batch_key: str, label_key: str | None) -> pd.DataFrame:
     if "X_umap" not in adata.obsm:
-        return pd.DataFrame(columns=["cell_id", "UMAP1", "UMAP2", batch_key, label_key])
+        columns = ["cell_id", "UMAP1", "UMAP2", batch_key]
+        if label_key:
+            columns.append(label_key)
+        return pd.DataFrame(columns=columns)
     coords = np.asarray(adata.obsm["X_umap"])
-    return pd.DataFrame(
-        {
-            "cell_id": adata.obs_names.astype(str),
-            "UMAP1": coords[:, 0],
-            "UMAP2": coords[:, 1],
-            batch_key: adata.obs[batch_key].astype(str).to_numpy(),
-            label_key: adata.obs[label_key].astype(str).to_numpy(),
-        }
-    )
+    payload = {
+        "cell_id": adata.obs_names.astype(str),
+        "UMAP1": coords[:, 0],
+        "UMAP2": coords[:, 1],
+        batch_key: adata.obs[batch_key].astype(str).to_numpy(),
+    }
+    if label_key and label_key in adata.obs.columns:
+        payload[label_key] = adata.obs[label_key].astype(str).to_numpy()
+    return pd.DataFrame(payload)
 
 
-def _build_integration_metrics_table(adata, batch_key: str, label_key: str, embedding_key: str) -> pd.DataFrame:
+def _build_integration_metrics_table(adata, batch_key: str, label_key: str | None, embedding_key: str) -> pd.DataFrame:
     metrics = {
         "embedding_key": embedding_key,
         "n_batches": int(adata.obs[batch_key].nunique()),
-        "n_labels": int(adata.obs[label_key].nunique()),
     }
+    if label_key and label_key in adata.obs.columns:
+        metrics["label_key"] = label_key
+        metrics["n_labels"] = int(adata.obs[label_key].nunique())
     try:
         lisi_df = sc_integration_utils.compute_lisi_scores(
             adata,
             batch_key=batch_key,
-            label_key=label_key,
+            label_key=label_key if label_key in adata.obs.columns else None,
             use_rep=embedding_key,
             verbose=False,
         )
@@ -378,6 +383,8 @@ def _build_integration_metrics_table(adata, batch_key: str, label_key: str, embe
         logger.warning("LISI diagnostics unavailable: %s", exc)
 
     try:
+        if not label_key or label_key not in adata.obs.columns:
+            raise ValueError("No stable label column available yet; skip label-based ASW diagnostics.")
         asw = sc_integration_utils.compute_asw_scores(
             adata,
             batch_key=batch_key,
@@ -395,8 +402,7 @@ def _build_integration_metrics_table(adata, batch_key: str, label_key: str, embe
 
 def _prepare_integration_gallery_context(adata, summary: dict, params: dict, output_dir: Path) -> dict:
     batch_key = params["batch_key"]
-    label_key = "leiden"
-    _ensure_leiden_labels(adata, summary["embedding_key"], cluster_key=label_key)
+    label_key = _preferred_label_key(adata)
     return {
         "output_dir": Path(output_dir),
         "batch_key": batch_key,
@@ -413,7 +419,7 @@ def _prepare_integration_gallery_context(adata, summary: dict, params: dict, out
                 {"metric": "n_batches", "value": summary.get("n_batches")},
                 {"metric": "n_cells", "value": summary.get("n_cells")},
                 {"metric": "batch_key", "value": batch_key},
-                {"metric": "label_key", "value": label_key},
+                {"metric": "label_key", "value": label_key or ""},
             ]
         ),
     }
@@ -422,12 +428,7 @@ def _prepare_integration_gallery_context(adata, summary: dict, params: dict, out
 def _build_integration_visualization_recipe(_adata, summary: dict, context: dict) -> VisualizationRecipe:
     batch_key = context["batch_key"]
     label_key = context["label_key"]
-    return VisualizationRecipe(
-        recipe_id="standard-sc-batch-integration-gallery",
-        skill_name=SKILL_NAME,
-        title="Single-cell integration gallery",
-        description=f"Default OmicsClaw integration gallery for method '{summary.get('method', '')}'.",
-        plots=[
+    plots = [
             PlotSpec(
                 plot_id="integration_umap_batch",
                 role="overview",
@@ -439,24 +440,6 @@ def _build_integration_visualization_recipe(_adata, summary: dict, context: dict
                 required_obs=[batch_key],
             ),
             PlotSpec(
-                plot_id="integration_umap_cluster",
-                role="overview",
-                renderer="umap_cluster",
-                filename=f"umap_{label_key}.png",
-                title="Cluster UMAP",
-                description="UMAP colored by Leiden labels after integration.",
-                required_obsm=["X_umap"],
-                required_obs=[label_key],
-            ),
-            PlotSpec(
-                plot_id="integration_batch_mixing",
-                role="diagnostic",
-                renderer="batch_mixing_heatmap",
-                filename="batch_mixing_heatmap.png",
-                title="Batch mixing heatmap",
-                description="Per-cluster batch composition after integration.",
-            ),
-            PlotSpec(
                 plot_id="integration_metrics",
                 role="supporting",
                 renderer="integration_metrics_barplot",
@@ -464,7 +447,36 @@ def _build_integration_visualization_recipe(_adata, summary: dict, context: dict
                 title="Integration diagnostics",
                 description="Summary diagnostics including LISI and ASW when available.",
             ),
-        ],
+        ]
+    if label_key:
+        plots.extend(
+            [
+                PlotSpec(
+                    plot_id="integration_umap_cluster",
+                    role="overview",
+                    renderer="umap_cluster",
+                    filename=f"umap_{label_key}.png",
+                    title="Label UMAP",
+                    description="UMAP colored by the existing label column.",
+                    required_obsm=["X_umap"],
+                    required_obs=[label_key],
+                ),
+                PlotSpec(
+                    plot_id="integration_batch_mixing",
+                    role="diagnostic",
+                    renderer="batch_mixing_heatmap",
+                    filename="batch_mixing_heatmap.png",
+                    title="Batch mixing heatmap",
+                    description="Per-label batch composition after integration.",
+                ),
+            ]
+        )
+    return VisualizationRecipe(
+        recipe_id="standard-sc-batch-integration-gallery",
+        skill_name=SKILL_NAME,
+        title="Single-cell integration gallery",
+        description=f"Default OmicsClaw integration gallery for method '{summary.get('method', '')}'.",
+        plots=plots,
     )
 
 
@@ -488,7 +500,7 @@ def _render_umap_cluster(adata, spec: PlotSpec, context: dict) -> object:
 
 def _render_batch_mixing_heatmap(_adata, spec: PlotSpec, context: dict) -> object:
     mix_df = context.get("batch_mixing_df", pd.DataFrame())
-    label_key = context["label_key"]
+    label_key = context.get("label_key") or "label"
     if mix_df.empty:
         return None
     matrix = mix_df.set_index(label_key)
@@ -641,7 +653,8 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
         f"- **Cells**: {summary['n_cells']}",
         f"- **Embedding key**: {summary['embedding_key']}",
         f"- **Batch key**: `{context.get('batch_key', params.get('batch_key'))}`",
-        f"- **Label key**: `{context.get('label_key', 'leiden')}`",
+        f"- **Label key**: `{context.get('label_key') or 'none'}`",
+        f"- **Recommended next step**: `sc-clustering --use-rep {summary['embedding_key']}`",
         "",
         "## Parameters\n",
     ]
@@ -662,6 +675,9 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
             "- `tables/batch_mixing_matrix.csv` — normalized per-cluster batch composition.",
             "- `tables/integration_metrics.csv` — LISI and ASW diagnostics when available.",
             "- `reproducibility/commands.sh` — reproducible CLI entrypoint.",
+            "",
+            "## Next Step\n",
+            f"- If integration looks acceptable, run `sc-clustering --use-rep {summary['embedding_key']}` on `processed.h5ad`.",
         ]
     )
     footer = generate_report_footer()
@@ -709,6 +725,15 @@ def main():
         adata.raw = adata.copy()
         sc.pp.highly_variable_genes(adata, n_top_genes=2000, layer="counts", flavor="seurat_v3")
         sc.pp.pca(adata)
+        try:
+            processed_demo, _ = sc_io.load_repo_demo_data("pbmc3k_processed")
+            label_key = "louvain" if "louvain" in processed_demo.obs.columns else "leiden" if "leiden" in processed_demo.obs.columns else None
+            if label_key:
+                aligned = processed_demo.obs.reindex(adata.obs_names)[label_key]
+                if aligned.notna().any():
+                    adata.obs[label_key] = aligned.astype(str)
+        except Exception as exc:
+            logger.warning("Demo labels unavailable for scanvi-style validation: %s", exc)
         adata.obs[args.batch_key] = np.random.choice(["batch1", "batch2"], adata.n_obs)
         input_file = None
     else:
@@ -752,6 +777,8 @@ def main():
     summary.setdefault("executed_method", summary.get("method", method))
     summary.setdefault("fallback_used", summary["requested_method"] != summary["executed_method"])
     summary["n_cells"] = int(adata.n_obs)
+    summary["recommended_next_skill"] = "sc-clustering"
+    summary["recommended_use_rep"] = summary.get("embedding_key")
     params = {
         "method": method,
         "requested_method": summary["requested_method"],
@@ -794,6 +821,10 @@ def main():
             "embedding_key": summary.get("embedding_key"),
             "umap_key": "X_umap" if "X_umap" in adata.obsm else None,
             "available_figure_data": gallery_context.get("figure_data_files", {}),
+        },
+        "next_step": {
+            "skill": "sc-clustering",
+            "use_rep": summary.get("embedding_key"),
         },
     }
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)

@@ -107,7 +107,7 @@ metadata:
 
 1. **Multiple integration backends**: Harmony, scVI, scANVI, BBKNN, Scanorama, plus supported R-backed methods.
 2. **Shared batch contract**: one `batch_key`-centric interface across Python and R paths.
-3. **Standard integration gallery**: batch-colored UMAP, cluster-colored UMAP, batch-mixing heatmap, and integration metric plot.
+3. **Standard integration gallery**: batch-colored UMAP plus label-aware diagnostics when stable labels already exist.
 4. **Figure-ready exports**: `figure_data/` CSVs plus a gallery manifest for downstream restyling.
 5. **Downstream-ready export**: writes integrated `processed.h5ad`, tables, report, structured result JSON, README, and notebook bundle.
 
@@ -146,7 +146,7 @@ R-backed methods (require corresponding R packages):
 1. Validate batch labels and required dependencies.
 2. Run the selected integration backend.
 3. Rebuild neighbors/UMAP in the corrected space.
-4. Export batch-mixing tables and gallery figures.
+4. Export integration diagnostics and point the user to `sc-clustering` as the next standard step.
 5. Write `processed.h5ad`, `report.md`, and `result.json`.
 
 ## CLI Reference
@@ -182,7 +182,7 @@ Current OmicsClaw `sc-batch-integration` always:
 2. checks that `batch_key` exists
 3. runs backend-specific correction or latent-space learning
 4. rebuilds neighbors and UMAP in the integrated representation
-5. exports one standardized AnnData plus gallery, tables, and result JSON
+5. exports one standardized AnnData plus gallery, tables, result JSON, and downstream guidance
 
 ### Backend groups
 
@@ -192,7 +192,7 @@ Current OmicsClaw `sc-batch-integration` always:
 
 Important implementation notes:
 
-- `scanvi` depends on labels; when labels are absent the current wrapper can fall back to `scvi`.
+- `scanvi` depends on labels; the demo path now injects stable labels, but real inputs still need `cell_type`, `leiden`, `louvain`, or another trustworthy label column.
 - R-backed paths rely on the shared H5AD bridge rather than native Seurat object input.
 
 ## Output Contract
@@ -212,8 +212,8 @@ Successful runs write:
 
 The current standard Python gallery is recipe-based and uses:
 
-- `overview`: UMAP colored by batch and by the active label column
-- `diagnostic`: batch-mixing heatmap
+- `overview`: UMAP colored by batch and, when a stable label column already exists, by that label column
+- `diagnostic`: batch-mixing heatmap when stable labels already exist
 - `supporting`: integration metric summary bar plot
 
 `figure_data/` is the stable hand-off layer for downstream styling without rerunning integration.
@@ -225,6 +225,15 @@ The current standard Python gallery is recipe-based and uses:
 3. `figures/batch_mixing_heatmap.png`
 4. `tables/integration_summary.csv`
 5. `processed.h5ad`
+
+## Downstream Link
+
+- After integration, the default next step is `sc-clustering`.
+- Use the embedding reported in `report.md` / `result.json`, for example:
+  - `sc-clustering --use-rep X_harmony`
+  - `sc-clustering --use-rep X_scvi`
+  - `sc-clustering --use-rep X_scanorama`
+- If there is no real batch column, do not force integration; return to the standard `sc-preprocessing -> sc-clustering` path.
 
 ## Current Limitations
 

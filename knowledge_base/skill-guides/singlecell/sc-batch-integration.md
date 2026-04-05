@@ -56,6 +56,7 @@ Recommended default path for messy external input:
 1. `sc-standardize-input`
 2. `sc-preprocessing`
 3. `sc-batch-integration`
+4. `sc-clustering`
 
 Use direct integration only when:
 - the user already has a trustworthy scRNA AnnData object
@@ -133,12 +134,14 @@ Guidance:
 - If batches remain separated: question `batch_key` quality before changing methods.
 - If clusters collapse biologically: explain possible over-correction.
 - If scANVI falls back: say it was because usable labels were missing, and report both the requested and executed methods rather than implying native scANVI output.
+- If the integrated embedding looks acceptable: point users to `sc-clustering --use-rep <embedding_key>`.
+- If no real batch column exists after review: say integration is unnecessary and return the user to the standard `sc-preprocessing -> sc-clustering` path.
 
 ## Step 6: Explain Outputs Using Method-Correct Language
 
 - describe integrated embeddings as corrected latent or graph spaces, depending on the method
 - describe batch-mixing tables as diagnostics, not universal quality scores
-- describe `processed.h5ad` as the integrated AnnData used for downstream clustering and plotting
+- describe `processed.h5ad` as the integrated AnnData that should usually feed into `sc-clustering` next
 
 ## Official References
 
