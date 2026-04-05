@@ -245,12 +245,33 @@ def plot_barcode_rank(
 
     fig, ax = plt.subplots(figsize=(7.4, 4.8))
     filtered = np.sort(np.asarray(filtered_counts).ravel())[::-1]
+    if filtered.size == 0:
+        logger.warning("Filtered barcode counts are empty; skipping %s", filename)
+        plt.close(fig)
+        return
+
     ax.plot(np.arange(1, len(filtered) + 1), filtered, color=QC_PALETTE["counts"], linewidth=1.8, label="filtered")
     if raw_counts is not None:
         raw = np.sort(np.asarray(raw_counts).ravel())[::-1]
         ax.plot(np.arange(1, len(raw) + 1), raw, color=QC_PALETTE["neutral"], linewidth=1.2, alpha=0.8, label="raw")
+
+    has_positive = np.any(filtered > 0)
+    if raw_counts is not None:
+        has_positive = has_positive or np.any(np.asarray(raw_counts).ravel() > 0)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    if has_positive:
+        ax.set_yscale("log")
+    else:
+        ax.set_yscale("linear")
+        ax.text(
+            0.02,
+            0.95,
+            "All barcode counts are zero; using linear y-axis.",
+            transform=ax.transAxes,
+            fontsize=8,
+            color=QC_PALETTE["neutral"],
+            va="top",
+        )
     ax.set_xlabel("Barcode rank")
     ax.set_ylabel("Total counts")
     ax.set_title("Barcode rank curve")

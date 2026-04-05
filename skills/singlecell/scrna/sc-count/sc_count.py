@@ -95,7 +95,7 @@ def _resolve_reference_arg(method: str, reference: str | None) -> Path | None:
             flag="--reference",
             label=f"{method} reference",
             recommended_dir=_recommended_reference_dir(method),
-            expect_directory=method in {"cellranger", "starsolo"},
+            expect_directory=method in {"cellranger", "starsolo", "simpleaf"},
         )
     inferred = auto_reference_path(method)
     if inferred is not None:
@@ -358,19 +358,19 @@ def main() -> None:
         reference_path = _resolve_reference_arg(args.method, args.reference)
         used_reference = str(reference_path) if reference_path is not None else ""
         t2g_path = None
-        if args.method == "kb_python":
+        if args.method in {"simpleaf", "kb_python"}:
             if args.t2g:
                 t2g_path = ensure_existing_path(
                     args.t2g,
                     flag="--t2g",
-                    label="kb transcript-to-gene map",
-                    recommended_dir=Path("resources/singlecell/references/kb"),
+                    label=f"{args.method} transcript-to-gene map",
+                    recommended_dir=_recommended_reference_dir("kb_python"),
                     expect_directory=False,
                 )
             else:
                 t2g_path = auto_t2g_path()
                 if t2g_path is not None:
-                    logger.info("Using project-local kb t2g map: %s", t2g_path)
+                    logger.info("Using project-local t2g map: %s", t2g_path)
             used_t2g = str(t2g_path) if t2g_path is not None else ""
 
         if args.whitelist:
@@ -440,7 +440,9 @@ def main() -> None:
                     sample,
                     index_path=reference_path,
                     chemistry="10xv3" if args.chemistry == "auto" else args.chemistry,
+                    t2g_path=t2g_path,
                     output_dir=output_dir,
+                    whitelist_path=whitelist_path,
                     threads=args.threads,
                 )
             else:
@@ -456,6 +458,7 @@ def main() -> None:
                     t2g_path=t2g_path,
                     technology="10xv3" if args.chemistry == "auto" else args.chemistry,
                     output_dir=output_dir,
+                    whitelist_path=whitelist_path,
                     threads=args.threads,
                 )
 
