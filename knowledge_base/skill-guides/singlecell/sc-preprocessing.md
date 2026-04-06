@@ -38,18 +38,22 @@ Practical workflow rule:
 ### `scanpy`
 - pure Python base preprocessing
 - normalized expression + HVGs + PCA
+- wrapper-specific knobs: `normalization_target_sum`, `scanpy_hvg_flavor`
 
 ### `pearson_residuals`
 - raw-count HVG selection plus Pearson residual modeling
 - still exports a normalized public matrix plus PCA-ready object
+- wrapper-specific knobs: `pearson_hvg_flavor`, `pearson_theta`
 
 ### `seurat`
 - Seurat LogNormalize path up to PCA export
 - use when the user explicitly wants a Seurat-style preprocessing branch
+- wrapper-specific knobs: `seurat_normalize_method`, `seurat_scale_factor`, `seurat_hvg_method`
 
 ### `sctransform`
 - Seurat SCTransform path up to PCA export
 - use when the user explicitly wants SCTransform normalization
+- wrapper-specific knob: `sctransform_regress_mt`
 
 ## Step 3: Tune Parameters In A Stable Order
 

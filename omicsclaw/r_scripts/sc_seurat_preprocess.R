@@ -3,7 +3,8 @@
 #
 # Usage:
 #   Rscript sc_seurat_preprocess.R <h5ad_file> <output_dir> [workflow] [min_genes]
-#     [min_cells] [max_mt_pct] [n_hvg] [n_pcs] [n_neighbors] [resolution]
+#     [min_cells] [max_mt_pct] [n_hvg] [n_pcs]
+#     [normalize_method] [scale_factor] [hvg_method] [regress_mt]
 #
 # Extracted from skills/singlecell/_lib/r_bridge.py::run_seurat_preprocessing
 
@@ -12,7 +13,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {
     cat("Usage: Rscript sc_seurat_preprocess.R <h5ad_file> <output_dir>",
         "[workflow] [min_genes] [min_cells] [max_mt_pct] [n_hvg] [n_pcs]",
-        "[n_neighbors] [resolution]\n")
+        "[normalize_method] [scale_factor] [hvg_method] [regress_mt]\n")
     quit(status = 1)
 }
 
@@ -24,8 +25,10 @@ min_cells   <- if (length(args) >= 5)  as.integer(args[5]) else 3L
 max_mt_pct  <- if (length(args) >= 6)  as.numeric(args[6]) else 20.0
 n_top_hvg   <- if (length(args) >= 7)  as.integer(args[7]) else 2000L
 n_pcs       <- if (length(args) >= 8)  as.integer(args[8]) else 50L
-n_neighbors <- if (length(args) >= 9)  as.integer(args[9]) else 15L
-resolution  <- if (length(args) >= 10) as.numeric(args[10]) else 1.0
+normalize_method <- if (length(args) >= 9)  args[9] else "LogNormalize"
+scale_factor <- if (length(args) >= 10) as.numeric(args[10]) else 10000.0
+hvg_method <- if (length(args) >= 11) args[11] else "vst"
+regress_mt <- if (length(args) >= 12) toupper(args[12]) == "TRUE" else TRUE
 
 suppressPackageStartupMessages({
     library(Seurat)
@@ -71,12 +74,23 @@ tryCatch({
         if (!requireNamespace("sctransform", quietly = TRUE))
             stop("SCTransform workflow requires the R package 'sctransform'")
         seurat_obj <- SCTransform(seurat_obj,
-            vars.to.regress = if ("percent.mt" %in% colnames(seurat_obj@meta.data)) "percent.mt" else NULL,
+            vars.to.regress = if (regress_mt && "percent.mt" %in% colnames(seurat_obj@meta.data)) "percent.mt" else NULL,
             variable.features.n = n_top_hvg, verbose = FALSE)
     } else {
-        seurat_obj <- NormalizeData(seurat_obj, verbose = FALSE)
+        hvg_method_real <- switch(
+            hvg_method,
+            "mvp" = "mean.var.plot",
+            "disp" = "dispersion",
+            hvg_method
+        )
+        seurat_obj <- NormalizeData(
+            seurat_obj,
+            normalization.method = normalize_method,
+            scale.factor = scale_factor,
+            verbose = FALSE
+        )
         seurat_obj <- FindVariableFeatures(seurat_obj,
-            selection.method = "vst", nfeatures = n_top_hvg, verbose = FALSE)
+            selection.method = hvg_method_real, nfeatures = n_top_hvg, verbose = FALSE)
         seurat_obj <- ScaleData(seurat_obj, verbose = FALSE)
     }
 
@@ -104,8 +118,8 @@ tryCatch({
     write.csv(norm_mat, file.path(output_dir, "X_norm.csv"), quote = FALSE)
 
     # Metadata JSON
-    cat(sprintf('{"workflow": "%s", "default_assay": "%s", "n_cells": %d, "n_genes": %d}\n',
-        workflow, assay_name, ncol(seurat_obj), nrow(seurat_obj)),
+    cat(sprintf('{"workflow": "%s", "default_assay": "%s", "n_cells": %d, "n_genes": %d, "normalize_method": "%s", "scale_factor": %s, "hvg_method": "%s", "regress_mt": %s}\n',
+        workflow, assay_name, ncol(seurat_obj), nrow(seurat_obj), normalize_method, scale_factor, hvg_method, ifelse(regress_mt, "true", "false")),
         file = file.path(output_dir, "info.json"))
 
     cat(sprintf("Done. %d cells, %d genes, %d HVGs\n",

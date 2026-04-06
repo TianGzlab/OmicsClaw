@@ -68,22 +68,22 @@ Use direct integration only when:
 
 | Method | Best first use | Strong starting parameters | Main caveat |
 |--------|----------------|----------------------------|-------------|
-| **harmony** | Fast first-pass correction when a batch column is clear | `batch_key` | Wrapper does not expose Harmony’s full low-level tuning surface |
-| **scvi** | Best general deep generative baseline when count data and GPU/compute are available | `batch_key`, `n_epochs`, `no_gpu` | Heavier and slower than graph-based methods |
-| **scanvi** | Best when existing labels should guide integration and transfer | `batch_key`, `n_epochs`, `no_gpu` | Requires labels; otherwise wrapper falls back to scVI |
-| **bbknn** | Lightweight graph correction after PCA | `batch_key` | Mainly graph correction, not a generative latent model |
-| **scanorama** | Useful panorama-style integration baseline | `batch_key` | Wrapper does not expose Scanorama’s full parameter set |
-| **fastmnn** | R-backed correction when users want batchelor fastMNN | `batch_key` | Requires the R batchelor stack and counts-aware input handling |
-| **seurat_cca** | R-backed Seurat integration with CCA anchors | `batch_key` | Requires the R Seurat stack and counts-aware input handling |
-| **seurat_rpca** | R-backed Seurat integration with RPCA anchors | `batch_key` | Requires the R Seurat stack and counts-aware input handling |
+| **harmony** | Fast first-pass correction when a batch column is clear | `batch_key`, `harmony_theta`, `integration_pcs` | Wrapper still does not expose Harmony’s full low-level tuning surface |
+| **scvi** | Best general deep generative baseline when count data and GPU/compute are available | `batch_key`, `n_epochs`, `n_latent`, `no_gpu` | Heavier and slower than graph-based methods |
+| **scanvi** | Best when existing labels should guide integration and transfer | `batch_key`, `labels_key`, `n_epochs`, `n_latent`, `no_gpu` | Requires labels; otherwise wrapper falls back to scVI |
+| **bbknn** | Lightweight graph correction after PCA | `batch_key`, `bbknn_neighbors_within_batch` | Mainly graph correction, not a generative latent model |
+| **scanorama** | Useful panorama-style integration baseline | `batch_key`, `scanorama_knn` | Wrapper still does not expose Scanorama’s full parameter set |
+| **fastmnn** | R-backed correction when users want batchelor fastMNN | `batch_key`, `integration_features`, `integration_pcs` | Requires the R batchelor stack and counts-aware input handling |
+| **seurat_cca** | R-backed Seurat integration with CCA anchors | `batch_key`, `integration_features`, `integration_pcs` | Requires the R Seurat stack and counts-aware input handling |
+| **seurat_rpca** | R-backed Seurat integration with RPCA anchors | `batch_key`, `integration_features`, `integration_pcs` | Requires the R Seurat stack and counts-aware input handling |
 
 ## Step 3: Always Show A Parameter Summary Before Running
 
 ```text
 About to run batch integration
   Method: scvi
-  Parameters: batch_key=batch, n_epochs=400, no_gpu=false
-  Note: n_epochs is only meaningful for the scVI/scANVI paths.
+  Parameters: batch_key=batch, n_epochs=400, n_latent=30, no_gpu=false
+  Note: `n_epochs`/`n_latent` are only meaningful for the scVI/scANVI paths.
 ```
 
 ## Step 4: Method-Specific Tuning Rules
@@ -92,6 +92,8 @@ About to run batch integration
 
 Tune in this order:
 1. `batch_key`
+2. `harmony_theta`
+3. `integration_pcs`
 
 Guidance:
 - treat `batch_key` as the most important scientific input because it defines what should be corrected
@@ -99,14 +101,16 @@ Guidance:
 - if `batch_key` produces many tiny groups or almost one group per cell, stop and ask for a better column before discussing method tuning
 
 Important warnings:
-- do not promise Harmony `theta`, BBKNN `neighbors_within_batch`, or Scanorama `knn/sigma` as current public OmicsClaw parameters
+- do not promise Harmony or Scanorama internals beyond the wrapper parameters already exposed
 
 ### scVI / scANVI
 
 Tune in this order:
 1. `batch_key`
-2. `n_epochs`
-3. `no_gpu`
+2. `labels_key` for scANVI
+3. `n_epochs`
+4. `n_latent`
+5. `no_gpu`
 
 Guidance:
 - confirm the batch column before tuning epochs
@@ -115,13 +119,14 @@ Guidance:
 
 Important warnings:
 - do not describe scANVI as a drop-in replacement for unlabeled integration
-- do not expose `labels_key`, `unlabeled_category`, or architectural internals as current public wrapper knobs
 - if no usable labels exist, stop and ask whether the user really wants `scanvi` or should switch to `scvi`
 
 ### fastMNN / Seurat CCA / Seurat RPCA
 
 Tune in this order:
 1. `batch_key`
+2. `integration_features`
+3. `integration_pcs`
 
 Guidance:
 - keep raw counts available in `layers["counts"]` before handing data to these backends

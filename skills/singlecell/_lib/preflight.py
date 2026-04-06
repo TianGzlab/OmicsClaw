@@ -469,9 +469,12 @@ def preflight_sc_batch_integration(
     *,
     method: str,
     batch_key: str,
+    labels_key: str | None = None,
+    effective_params: dict[str, object] | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-batch-integration")
+    params = effective_params or {}
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
     if batch_key not in adata.obs.columns:
@@ -528,7 +531,15 @@ def preflight_sc_batch_integration(
 
     if method == "scanvi":
         labels = [name for name in ("cell_type", "leiden", "louvain", "seurat_clusters") if name in adata.obs.columns]
-        if not labels:
+        if labels_key:
+            if labels_key not in adata.obs.columns:
+                decision.require_field(
+                    "labels_key",
+                    f"`--labels-key {labels_key}` was not found. Available label columns include: {_format_candidates(labels)}.",
+                    aliases=["labels_key", "label_key", "labels"],
+                    flag="--labels-key",
+                )
+        elif not labels:
             decision.require_field(
                 "method",
                 "`scanvi` needs existing labels such as `cell_type`, `leiden`, or `louvain`; otherwise choose `scvi` instead.",
@@ -536,8 +547,41 @@ def preflight_sc_batch_integration(
                 aliases=["method"],
             )
         elif len(labels) > 1:
+            decision.require_field(
+                "labels_key",
+                f"`scanvi` needs a label column. Multiple candidates are available: {_format_candidates(labels)}. Confirm which one should guide scANVI.",
+                aliases=["labels_key", "label_key", "labels"],
+                flag="--labels-key",
+                choices=labels,
+            )
+
+    if params:
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `batch_key={batch_key}`."
+        )
+        if method == "harmony":
             decision.add_guidance(
-                f"`scanvi` will prefer `{labels[0]}` as labels because the wrapper does not currently expose a `labels_key` parameter."
+                f"`harmony`-specific settings: `harmony_theta={params.get('harmony_theta')}`, `integration_pcs={params.get('integration_pcs')}`."
+            )
+        elif method in {"scvi", "scanvi"}:
+            guidance = (
+                f"`{method}`-specific settings: `n_epochs={params.get('n_epochs')}`, "
+                f"`n_latent={params.get('n_latent')}`, `no_gpu={params.get('no_gpu')}`."
+            )
+            if method == "scanvi":
+                guidance += f" `labels_key={params.get('labels_key')}`."
+            decision.add_guidance(guidance)
+        elif method == "bbknn":
+            decision.add_guidance(
+                f"`bbknn`-specific settings: `bbknn_neighbors_within_batch={params.get('bbknn_neighbors_within_batch')}`."
+            )
+        elif method == "scanorama":
+            decision.add_guidance(
+                f"`scanorama`-specific settings: `scanorama_knn={params.get('scanorama_knn')}`."
+            )
+        elif method in {"fastmnn", "seurat_cca", "seurat_rpca"}:
+            decision.add_guidance(
+                f"`{method}`-specific settings: `integration_features={params.get('integration_features')}`, `integration_pcs={params.get('integration_pcs')}`."
             )
 
     return decision
@@ -783,9 +827,13 @@ def preflight_sc_preprocessing(
     min_genes: int | None = None,
     max_mt_pct: float | None = None,
     min_cells: int | None = None,
+    n_top_hvg: int | None = None,
+    n_pcs: int | None = None,
+    effective_params: dict[str, object] | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-preprocessing")
+    params = effective_params or {}
 
     has_qc_metrics = {"n_genes_by_counts", "total_counts", "pct_counts_mt"}.issubset(set(adata.obs.columns))
     if not has_qc_metrics and source_path and (
@@ -826,6 +874,27 @@ def preflight_sc_preprocessing(
         decision.add_guidance(
             f"Potential batch/sample columns were detected: {_format_candidates(batch_candidates)}. If batch effects are expected, plan `sc-batch-integration` after preprocessing."
         )
+
+    if params:
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `min_genes={params.get('min_genes')}`, `min_cells={params.get('min_cells')}`, `max_mt_pct={params.get('max_mt_pct')}`, `n_top_hvg={params.get('n_top_hvg')}`, `n_pcs={params.get('n_pcs')}`."
+        )
+        if method == "scanpy":
+            decision.add_guidance(
+                f"`scanpy`-specific settings: `normalization_target_sum={params.get('normalization_target_sum')}`, `scanpy_hvg_flavor={params.get('scanpy_hvg_flavor')}`."
+            )
+        elif method == "pearson_residuals":
+            decision.add_guidance(
+                f"`pearson_residuals`-specific settings: `pearson_hvg_flavor={params.get('pearson_hvg_flavor')}`, `pearson_theta={params.get('pearson_theta')}`."
+            )
+        elif method == "seurat":
+            decision.add_guidance(
+                f"`seurat`-specific settings: `seurat_normalize_method={params.get('seurat_normalize_method')}`, `seurat_scale_factor={params.get('seurat_scale_factor')}`, `seurat_hvg_method={params.get('seurat_hvg_method')}`."
+            )
+        elif method == "sctransform":
+            decision.add_guidance(
+                f"`sctransform`-specific settings: `sctransform_regress_mt={params.get('sctransform_regress_mt')}`."
+            )
 
     return decision
 

@@ -95,6 +95,27 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 }
 
 DEFAULT_METHOD = "harmony"
+SHARED_PARAM_KEYS = ("method", "batch_key")
+METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
+    "harmony": {"method": "harmony", "batch_key": "batch", "integration_pcs": 50, "harmony_theta": 2.0},
+    "scvi": {"method": "scvi", "batch_key": "batch", "n_epochs": 400, "no_gpu": False, "n_latent": 30},
+    "scanvi": {"method": "scanvi", "batch_key": "batch", "n_epochs": 200, "no_gpu": False, "n_latent": 30, "labels_key": None},
+    "bbknn": {"method": "bbknn", "batch_key": "batch", "bbknn_neighbors_within_batch": 3},
+    "scanorama": {"method": "scanorama", "batch_key": "batch", "scanorama_knn": 20},
+    "fastmnn": {"method": "fastmnn", "batch_key": "batch", "integration_features": 2000, "integration_pcs": 30},
+    "seurat_cca": {"method": "seurat_cca", "batch_key": "batch", "integration_features": 2000, "integration_pcs": 30},
+    "seurat_rpca": {"method": "seurat_rpca", "batch_key": "batch", "integration_features": 2000, "integration_pcs": 30},
+}
+METHOD_PARAM_KEYS: dict[str, tuple[str, ...]] = {
+    "harmony": ("integration_pcs", "harmony_theta"),
+    "scvi": ("n_epochs", "no_gpu", "n_latent"),
+    "scanvi": ("n_epochs", "no_gpu", "n_latent", "labels_key"),
+    "bbknn": ("bbknn_neighbors_within_batch",),
+    "scanorama": ("scanorama_knn",),
+    "fastmnn": ("integration_features", "integration_pcs"),
+    "seurat_cca": ("integration_features", "integration_pcs"),
+    "seurat_rpca": ("integration_features", "integration_pcs"),
+}
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -166,6 +187,7 @@ def integrate_scvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwar
         batch_key=batch_key,
         max_epochs=n_epochs or 400,
         use_gpu=use_gpu,
+        n_latent=int(kwargs.get("n_latent", 30)),
     )
     sc.pp.neighbors(adata, use_rep="X_scvi")
     sc.tl.umap(adata)
@@ -173,7 +195,10 @@ def integrate_scvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwar
 
 
 def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwargs):
-    labels_key = next((key for key in ("cell_type", "leiden", "louvain", "seurat_clusters") if key in adata.obs.columns), None)
+    labels_key = kwargs.get("labels_key") or next(
+        (key for key in ("cell_type", "leiden", "louvain", "seurat_clusters") if key in adata.obs.columns),
+        None,
+    )
     if labels_key is None:
         logger.warning("scANVI requires labels; falling back to scVI latent integration")
         result = integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
@@ -188,6 +213,7 @@ def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kw
         labels_key=labels_key,
         max_epochs=n_epochs or 200,
         use_gpu=use_gpu,
+        n_latent=int(kwargs.get("n_latent", 30)),
     )
     sc.pp.neighbors(adata, use_rep="X_scanvi")
     sc.tl.umap(adata)
@@ -199,7 +225,11 @@ def integrate_bbknn(adata, batch_key="batch", **kwargs):
 
     ensure_pca(adata)
     logger.info("Running BBKNN on %d batches", adata.obs[batch_key].nunique())
-    bbknn.bbknn(adata, batch_key=batch_key)
+    bbknn.bbknn(
+        adata,
+        batch_key=batch_key,
+        neighbors_within_batch=int(kwargs.get("neighbors_within_batch", 3)),
+    )
     sc.tl.umap(adata)
     return {"method": "bbknn", "embedding_key": "X_pca", "n_batches": int(adata.obs[batch_key].nunique())}
 
@@ -211,7 +241,11 @@ def integrate_scanorama(adata, batch_key="batch", **kwargs):
     batches = []
     for batch in adata.obs[batch_key].unique():
         batches.append(adata[adata.obs[batch_key] == batch].copy())
-    corrected = scanorama.correct_scanpy(batches, return_dimred=True)
+    corrected = scanorama.correct_scanpy(
+        batches,
+        return_dimred=True,
+        knn=int(kwargs.get("knn", 20)),
+    )
     embedding_frames = []
     for corrected_batch in corrected:
         embedding = corrected_batch.obsm.get("X_scanorama")
@@ -240,7 +274,7 @@ def _build_r_integration_export_adata(adata):
     return export
 
 
-def integrate_r_method(adata, *, method: str, batch_key: str):
+def integrate_r_method(adata, *, method: str, batch_key: str, n_features: int = 2000, n_pcs: int = 30):
     if method == "fastmnn":
         required_packages = ["batchelor", "SingleCellExperiment", "zellkonverter"]
     else:
@@ -258,7 +292,7 @@ def integrate_r_method(adata, *, method: str, batch_key: str):
         expected = ["embedding.csv", "obs.csv"] if method == "fastmnn" else ["embedding.csv", "umap.csv", "obs.csv"]
         runner.run_script(
             "sc_seurat_integrate.R",
-            args=[str(input_h5ad), str(output_dir), method, batch_key, "2000", "30"],
+            args=[str(input_h5ad), str(output_dir), method, batch_key, str(n_features), str(n_pcs)],
             expected_outputs=expected,
             output_dir=output_dir,
         )
@@ -694,8 +728,15 @@ def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = F
     )
     command += f" --method {shlex.quote(str(params['method']))}"
     command += f" --batch-key {shlex.quote(str(params['batch_key']))}"
-    if params.get("n_epochs") is not None:
-        command += f" --n-epochs {shlex.quote(str(params['n_epochs']))}"
+    for key, value in params.items():
+        if key in {"method", "batch_key"} or value is None or value == "":
+            continue
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            if value:
+                command += f" {flag}"
+            continue
+        command += f" {flag} {shlex.quote(str(value))}"
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
     _write_repro_requirements(
         repro_dir,
@@ -712,6 +753,13 @@ def main():
     parser.add_argument("--batch-key", default="batch")
     parser.add_argument("--n-epochs", type=int, default=None)
     parser.add_argument("--no-gpu", action="store_true")
+    parser.add_argument("--n-latent", type=int, default=None)
+    parser.add_argument("--labels-key", default=None)
+    parser.add_argument("--harmony-theta", type=float, default=None)
+    parser.add_argument("--bbknn-neighbors-within-batch", type=int, default=None)
+    parser.add_argument("--scanorama-knn", type=int, default=None)
+    parser.add_argument("--integration-features", type=int, default=None)
+    parser.add_argument("--integration-pcs", type=int, default=None)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -749,11 +797,22 @@ def main():
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)
+    effective_params = dict(METHOD_PARAM_DEFAULTS[method])
+    effective_params["method"] = method
+    effective_params["batch_key"] = args.batch_key
+    for key in METHOD_PARAM_KEYS.get(method, ()):
+        value = getattr(args, key, None)
+        if value is not None:
+            effective_params[key] = value
+    if method in {"scvi", "scanvi"} and args.no_gpu:
+        effective_params["no_gpu"] = True
     apply_preflight(
         preflight_sc_batch_integration(
             adata,
             method=method,
             batch_key=args.batch_key,
+            labels_key=effective_params.get("labels_key"),
+            effective_params=effective_params,
             source_path=input_file,
         ),
         logger,
@@ -764,12 +823,28 @@ def main():
 
     kwargs = {"batch_key": args.batch_key}
     if cfg.supports_gpu:
-        kwargs["use_gpu"] = not args.no_gpu
-    if args.n_epochs is not None and "torch" in cfg.dependencies:
-        kwargs["n_epochs"] = args.n_epochs
+        kwargs["use_gpu"] = not bool(effective_params.get("no_gpu", False))
+    if method in {"scvi", "scanvi"}:
+        kwargs["n_epochs"] = int(effective_params["n_epochs"])
+        kwargs["n_latent"] = int(effective_params["n_latent"])
+    if method == "scanvi" and effective_params.get("labels_key"):
+        kwargs["labels_key"] = str(effective_params["labels_key"])
+    if method == "harmony":
+        kwargs["theta"] = float(effective_params["harmony_theta"])
+        kwargs["n_pcs"] = int(effective_params["integration_pcs"])
+    if method == "bbknn":
+        kwargs["neighbors_within_batch"] = int(effective_params["bbknn_neighbors_within_batch"])
+    if method == "scanorama":
+        kwargs["knn"] = int(effective_params["scanorama_knn"])
 
     if method in {"fastmnn", "seurat_cca", "seurat_rpca"}:
-        adata, summary = integrate_r_method(adata, method=method, batch_key=args.batch_key)
+        adata, summary = integrate_r_method(
+            adata,
+            method=method,
+            batch_key=args.batch_key,
+            n_features=int(effective_params["integration_features"]),
+            n_pcs=int(effective_params["integration_pcs"]),
+        )
     else:
         summary = _METHOD_DISPATCH[method](adata, **kwargs)
 
@@ -780,17 +855,12 @@ def main():
     summary["recommended_next_skill"] = "sc-clustering"
     summary["recommended_use_rep"] = summary.get("embedding_key")
     params = {
-        "method": method,
+        **effective_params,
         "requested_method": summary["requested_method"],
         "executed_method": summary["executed_method"],
-        "batch_key": args.batch_key,
         "counts_layer": "counts" if "counts" in adata.layers else None,
         "raw_available": adata.raw is not None,
     }
-    if args.n_epochs is not None:
-        params["n_epochs"] = args.n_epochs
-    if cfg.supports_gpu:
-        params["no_gpu"] = bool(args.no_gpu)
     if summary.get("fallback_reason"):
         params["fallback_reason"] = summary["fallback_reason"]
 

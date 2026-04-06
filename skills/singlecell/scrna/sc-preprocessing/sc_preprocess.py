@@ -77,7 +77,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 }
 
 DEFAULT_METHOD = "scanpy"
-PUBLIC_PARAM_KEYS = (
+SHARED_PUBLIC_PARAM_KEYS = (
     "method",
     "min_genes",
     "min_cells",
@@ -85,6 +85,12 @@ PUBLIC_PARAM_KEYS = (
     "n_top_hvg",
     "n_pcs",
 )
+METHOD_SPECIFIC_PARAM_KEYS: dict[str, tuple[str, ...]] = {
+    "scanpy": ("normalization_target_sum", "scanpy_hvg_flavor"),
+    "seurat": ("seurat_normalize_method", "seurat_scale_factor", "seurat_hvg_method"),
+    "sctransform": ("sctransform_regress_mt",),
+    "pearson_residuals": ("pearson_hvg_flavor", "pearson_theta"),
+}
 METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
     "scanpy": {
         "method": "scanpy",
@@ -93,7 +99,7 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "hvg_flavor": "seurat",
+        "scanpy_hvg_flavor": "seurat",
         "normalization_target_sum": 10000.0,
     },
     "seurat": {
@@ -103,9 +109,9 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "normalize_data_method": "LogNormalize",
-        "normalize_scale_factor": 10000.0,
-        "find_variable_features_method": "vst",
+        "seurat_normalize_method": "LogNormalize",
+        "seurat_scale_factor": 10000.0,
+        "seurat_hvg_method": "vst",
     },
     "sctransform": {
         "method": "sctransform",
@@ -123,7 +129,7 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "max_mt_pct": 20.0,
         "n_top_hvg": 2000,
         "n_pcs": 50,
-        "hvg_flavor": "seurat_v3",
+        "pearson_hvg_flavor": "seurat_v3",
         "pearson_theta": 100.0,
     },
 }
@@ -134,6 +140,8 @@ def preprocess_scanpy(
     *,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
+    normalization_target_sum: float = 10000.0,
+    scanpy_hvg_flavor: str = "seurat",
 ):
     """Implementation-aligned Scanpy preprocessing pipeline."""
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
@@ -144,13 +152,13 @@ def preprocess_scanpy(
 
     adata = sc_preproc_utils.run_standard_normalization(
         adata,
-        target_sum=float(METHOD_PARAM_DEFAULTS["scanpy"]["normalization_target_sum"]),
+        target_sum=float(normalization_target_sum),
         inplace=True,
     )
     adata = sc_preproc_utils.find_highly_variable_genes(
         adata,
         n_top_genes=n_top_hvg,
-        flavor=str(METHOD_PARAM_DEFAULTS["scanpy"]["hvg_flavor"]),
+        flavor=str(scanpy_hvg_flavor),
         inplace=True,
     )
     adata = sc_dimred_utils.run_pca_analysis(
@@ -168,6 +176,8 @@ def preprocess_pearson_residuals(
     *,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
+    pearson_hvg_flavor: str = "seurat_v3",
+    pearson_theta: float = 100.0,
 ):
     """Scanpy preprocessing pipeline using Pearson residual normalization."""
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
@@ -183,12 +193,12 @@ def preprocess_pearson_residuals(
     adata = sc_preproc_utils.find_highly_variable_genes(
         adata,
         n_top_genes=n_top_hvg,
-        flavor=str(METHOD_PARAM_DEFAULTS["pearson_residuals"]["hvg_flavor"]),
+        flavor=str(pearson_hvg_flavor),
         inplace=True,
     )
     adata = sc_preproc_utils.run_pearson_residuals(
         adata,
-        theta=float(METHOD_PARAM_DEFAULTS["pearson_residuals"]["pearson_theta"]),
+        theta=float(pearson_theta),
         inplace=True,
     )
     adata.layers["pearson_residuals"] = adata.X.copy()
@@ -296,6 +306,10 @@ def run_seurat_preprocessing(
     max_mt_pct: float = 20.0,
     n_top_hvg: int = 2000,
     n_pcs: int = 50,
+    seurat_normalize_method: str = "LogNormalize",
+    seurat_scale_factor: float = 10000.0,
+    seurat_hvg_method: str = "vst",
+    sctransform_regress_mt: bool = True,
 ):
     """Run the Seurat / SCTransform preprocessing backend via the shared R script."""
     required_packages = ["Seurat", "SingleCellExperiment", "zellkonverter"]
@@ -329,8 +343,10 @@ def run_seurat_preprocessing(
                 str(max_mt_pct),
                 str(n_top_hvg),
                 str(n_pcs),
-                str(0),
-                str(0),
+                str(seurat_normalize_method),
+                str(seurat_scale_factor),
+                str(seurat_hvg_method),
+                str(bool(sctransform_regress_mt)).upper(),
             ],
             expected_outputs=["obs.csv", "pca.csv", "hvg.csv", "X_norm.csv", "info.json"],
             output_dir=r_output_dir,
@@ -426,9 +442,13 @@ def build_effective_params(method: str, args) -> dict:
         raise ValueError(f"Unknown preprocessing method '{method}'")
 
     effective = dict(METHOD_PARAM_DEFAULTS[method])
-    for key in PUBLIC_PARAM_KEYS:
+    for key in SHARED_PUBLIC_PARAM_KEYS:
         if key == "method":
             continue
+        value = getattr(args, key, None)
+        if value is not None:
+            effective[key] = value
+    for key in METHOD_SPECIFIC_PARAM_KEYS.get(method, ()):
         value = getattr(args, key, None)
         if value is not None:
             effective[key] = value
@@ -438,7 +458,9 @@ def build_effective_params(method: str, args) -> dict:
 
 def build_public_params(effective_params: dict) -> dict:
     """Return replayable public parameters for result.json and commands.sh."""
-    return {key: effective_params[key] for key in PUBLIC_PARAM_KEYS if key in effective_params}
+    method = str(effective_params.get("method", DEFAULT_METHOD))
+    keys = list(SHARED_PUBLIC_PARAM_KEYS) + list(METHOD_SPECIFIC_PARAM_KEYS.get(method, ()))
+    return {key: effective_params[key] for key in keys if key in effective_params}
 
 
 def prepare_preprocessing_input(
@@ -736,13 +758,14 @@ def write_reproducibility(output_dir: Path, public_params: dict, input_file: str
     else:
         command_parts.extend(["--input", "<input.h5ad>"])
     command_parts.extend(["--output", str(output_dir)])
-    for key in PUBLIC_PARAM_KEYS:
-        if key not in public_params:
-            continue
-        value = public_params[key]
+    for key, value in public_params.items():
         if value is None or value == "":
             continue
-        command_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        flag = f"--{key.replace('_', '-')}"
+        if isinstance(value, bool):
+            command_parts.append(flag if value else f"--no-{key.replace('_', '-')}")
+            continue
+        command_parts.extend([flag, str(value)])
     command = " ".join(shlex.quote(part) for part in command_parts)
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
 
@@ -856,6 +879,14 @@ def main():
     parser.add_argument("--max-mt-pct", type=float, default=None)
     parser.add_argument("--n-top-hvg", type=int, default=None)
     parser.add_argument("--n-pcs", type=int, default=None)
+    parser.add_argument("--normalization-target-sum", type=float, default=None)
+    parser.add_argument("--scanpy-hvg-flavor", choices=["seurat", "cell_ranger", "seurat_v3"], default=None)
+    parser.add_argument("--pearson-hvg-flavor", choices=["seurat_v3", "seurat"], default=None)
+    parser.add_argument("--pearson-theta", type=float, default=None)
+    parser.add_argument("--seurat-normalize-method", choices=["LogNormalize", "CLR", "RC"], default=None)
+    parser.add_argument("--seurat-scale-factor", type=float, default=None)
+    parser.add_argument("--seurat-hvg-method", choices=["vst", "mvp", "disp"], default=None)
+    parser.add_argument("--sctransform-regress-mt", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -871,18 +902,21 @@ def main():
         input_file = args.input_path
 
     method = validate_method_choice(args.method, METHOD_REGISTRY)
+    effective_params = build_effective_params(method, args)
     apply_preflight(
         preflight_sc_preprocessing(
             adata,
             method=method,
-            min_genes=args.min_genes,
-            max_mt_pct=args.max_mt_pct,
-            min_cells=args.min_cells,
+            min_genes=effective_params.get("min_genes"),
+            max_mt_pct=effective_params.get("max_mt_pct"),
+            min_cells=effective_params.get("min_cells"),
+            n_top_hvg=effective_params.get("n_top_hvg"),
+            n_pcs=effective_params.get("n_pcs"),
+            effective_params=effective_params,
             source_path=input_file,
         ),
         logger,
     )
-    effective_params = build_effective_params(method, args)
     public_params = build_public_params(effective_params)
     adata, filter_summary, filter_params, input_contract = prepare_preprocessing_input(
         adata,
@@ -895,12 +929,16 @@ def main():
             adata,
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
+            normalization_target_sum=float(effective_params["normalization_target_sum"]),
+            scanpy_hvg_flavor=str(effective_params["scanpy_hvg_flavor"]),
         )
     elif method == "pearson_residuals":
         adata = preprocess_pearson_residuals(
             adata,
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
+            pearson_hvg_flavor=str(effective_params["pearson_hvg_flavor"]),
+            pearson_theta=float(effective_params["pearson_theta"]),
         )
     else:
         adata = run_seurat_preprocessing(
@@ -911,6 +949,10 @@ def main():
             max_mt_pct=100.0,
             n_top_hvg=int(effective_params["n_top_hvg"]),
             n_pcs=int(effective_params["n_pcs"]),
+            seurat_normalize_method=str(effective_params.get("seurat_normalize_method", "LogNormalize")),
+            seurat_scale_factor=float(effective_params.get("seurat_scale_factor", 10000.0)),
+            seurat_hvg_method=str(effective_params.get("seurat_hvg_method", "vst")),
+            sctransform_regress_mt=bool(effective_params.get("sctransform_regress_mt", True)),
         )
 
     input_contract, matrix_contract = propagate_singlecell_contracts(

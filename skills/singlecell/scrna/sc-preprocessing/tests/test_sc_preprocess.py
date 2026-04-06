@@ -71,7 +71,8 @@ def test_demo_result_json(tmp_output):
     assert "summary" in data
     assert data["data"]["params"]["method"] == "scanpy"
     assert data["data"]["effective_params"]["method"] == "scanpy"
-    assert data["data"]["effective_params"]["hvg_flavor"] == "seurat"
+    assert data["data"]["effective_params"]["scanpy_hvg_flavor"] == "seurat"
+    assert data["data"]["effective_params"]["normalization_target_sum"] == 10000.0
     assert data["data"]["effective_params"]["raw_available"] is True
     assert data["data"]["visualization"]["recipe_id"] == "standard-sc-preprocessing-gallery"
     assert "pca_embedding" in data["data"]["visualization"]["available_figure_data"]

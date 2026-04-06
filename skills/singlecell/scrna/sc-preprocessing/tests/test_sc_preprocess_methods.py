@@ -14,5 +14,15 @@ def test_method_registry_includes_pearson_residuals():
 
 def test_pearson_defaults_are_exposed():
     assert '"pearson_residuals": {' in MODULE_TEXT
-    assert '"hvg_flavor": "seurat_v3"' in MODULE_TEXT
+    assert '"pearson_hvg_flavor": "seurat_v3"' in MODULE_TEXT
     assert '"pearson_theta": 100.0' in MODULE_TEXT
+
+
+def test_method_specific_cli_args_are_exposed():
+    assert '"--normalization-target-sum"' in MODULE_TEXT
+    assert '"--scanpy-hvg-flavor"' in MODULE_TEXT
+    assert '"--pearson-theta"' in MODULE_TEXT
+    assert '"--seurat-normalize-method"' in MODULE_TEXT
+    assert '"--seurat-scale-factor"' in MODULE_TEXT
+    assert '"--seurat-hvg-method"' in MODULE_TEXT
+    assert '"--sctransform-regress-mt"' in MODULE_TEXT

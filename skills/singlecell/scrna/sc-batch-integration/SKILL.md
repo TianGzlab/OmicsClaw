@@ -15,60 +15,67 @@ metadata:
       - "--method"
       - "--n-epochs"
       - "--no-gpu"
+      - "--n-latent"
+      - "--labels-key"
+      - "--harmony-theta"
+      - "--bbknn-neighbors-within-batch"
+      - "--scanorama-knn"
+      - "--integration-features"
+      - "--integration-pcs"
     param_hints:
       harmony:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "harmony_theta", "integration_pcs"]
+        defaults: {batch_key: "batch", harmony_theta: 2.0, integration_pcs: 50}
         requires: ["existing_PCA_or_computeable_PCA", "harmonypy"]
         tips:
           - "--method harmony: Default integration path in the current wrapper."
       scvi:
         priority: "batch_key -> n_epochs -> no_gpu"
-        params: ["batch_key", "n_epochs", "no_gpu"]
-        defaults: {batch_key: "batch", n_epochs: 400, no_gpu: false}
+        params: ["batch_key", "n_epochs", "n_latent", "no_gpu"]
+        defaults: {batch_key: "batch", n_epochs: 400, n_latent: 30, no_gpu: false}
         requires: ["scvi", "torch"]
         tips:
           - "--n-epochs: Main runtime/optimization knob for scVI."
       scanvi:
         priority: "batch_key -> n_epochs -> no_gpu"
-        params: ["batch_key", "n_epochs", "no_gpu"]
-        defaults: {batch_key: "batch", n_epochs: 200, no_gpu: false}
+        params: ["batch_key", "labels_key", "n_epochs", "n_latent", "no_gpu"]
+        defaults: {batch_key: "batch", labels_key: null, n_epochs: 200, n_latent: 30, no_gpu: false}
         requires: ["scvi", "torch", "labels_in_obs"]
         tips:
           - "If no labels are available, the current wrapper falls back to `scvi`."
       bbknn:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "bbknn_neighbors_within_batch"]
+        defaults: {batch_key: "batch", bbknn_neighbors_within_batch: 3}
         requires: ["bbknn", "existing_PCA_or_computeable_PCA"]
         tips:
           - "--method bbknn: Lightweight graph correction path."
       scanorama:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "scanorama_knn"]
+        defaults: {batch_key: "batch", scanorama_knn: 20}
         requires: ["scanorama"]
         tips:
           - "--method scanorama: Panorama-stitching integration path."
       fastmnn:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "integration_features", "integration_pcs"]
+        defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_batchelor_stack"]
         tips:
           - "--method fastmnn: R-backed batchelor fastMNN path via the shared H5AD bridge."
       seurat_cca:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "integration_features", "integration_pcs"]
+        defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_Seurat_stack"]
         tips:
           - "--method seurat_cca: R-backed Seurat CCA integration path via the shared H5AD bridge."
       seurat_rpca:
         priority: "batch_key"
-        params: ["batch_key"]
-        defaults: {batch_key: "batch"}
+        params: ["batch_key", "integration_features", "integration_pcs"]
+        defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_Seurat_stack"]
         tips:
           - "--method seurat_rpca: R-backed Seurat RPCA integration path via the shared H5AD bridge."
@@ -170,7 +177,14 @@ python skills/singlecell/scrna/sc-batch-integration/sc_integrate.py \
 | `--method` | integration backend | `harmony`, `scvi`, `scanvi`, `bbknn`, `scanorama`, `fastmnn`, `seurat_cca`, or `seurat_rpca` |
 | `--batch-key` | batch metadata column | core public control across all backends |
 | `--n-epochs` | training/runtime control | used by `scvi` and `scanvi` |
+| `--n-latent` | latent dimension | used by `scvi` and `scanvi` |
+| `--labels-key` | label column | used by `scanvi` |
 | `--no-gpu` | force CPU execution | relevant to `scvi` / `scanvi` paths |
+| `--harmony-theta` | Harmony diversity penalty | used by `harmony` |
+| `--bbknn-neighbors-within-batch` | local neighbors per batch | used by `bbknn` |
+| `--scanorama-knn` | panorama neighbor count | used by `scanorama` |
+| `--integration-features` | integration features | used by `fastmnn`, `seurat_cca`, `seurat_rpca` |
+| `--integration-pcs` | integration PCs | used by `harmony`, `fastmnn`, `seurat_cca`, `seurat_rpca` |
 
 ## Algorithm / Methodology
 
