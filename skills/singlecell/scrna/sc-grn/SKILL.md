@@ -167,3 +167,10 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - This skill depends on external pySCENIC resources and does not download them automatically.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+
+## Safety And Guardrails
+
+- Verify the TF list, cisTarget databases, and motif annotations before promising a full run.
+- Do not present `n_top_targets` as a full pySCENIC science parameter; it is a wrapper-level export control.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-grn-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-grn.md`.

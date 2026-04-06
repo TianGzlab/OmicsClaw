@@ -199,3 +199,11 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 - `mast` requires an R environment with `MAST`, `SingleCellExperiment`, and `zellkonverter`.
 - `deseq2_r` requires an R environment with `DESeq2`, `SingleCellExperiment`, and `zellkonverter`.
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+
+## Safety And Guardrails
+
+- Distinguish exploratory marker-style DE from replicate-aware pseudobulk inference before running.
+- `mast` and `deseq2_r` are real public methods but require their R stacks up front in the current wrapper.
+- Treat `sample_key` and `celltype_key` as part of the statistical design for `deseq2_r`, not as cosmetic metadata.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-de-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-de.md`.

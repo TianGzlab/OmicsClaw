@@ -172,3 +172,10 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - Marker ranking is cluster-centric and does not replace replicate-aware DE analysis.
+
+## Safety And Guardrails
+
+- Confirm that `groupby` truly represents clusters or labels worth ranking before running.
+- Marker ranking is not a final annotation by itself and should not be described as formal replicate-aware DE.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-markers-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-markers.md`.

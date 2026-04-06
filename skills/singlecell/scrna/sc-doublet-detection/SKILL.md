@@ -174,3 +174,11 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - The wrapper now writes README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - `doubletfinder` can fall back to `scdblfinder` at runtime if the R path fails.
+
+## Safety And Guardrails
+
+- Explain both the requested method and the actually executed method when `doubletfinder` falls back to `scdblfinder`.
+- `threshold` is only a Scrublet control; do not present it as a universal cutoff knob across backends.
+- This skill annotates doublets in `obs` and does not automatically remove them.
+- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-doublet-detection-guardrails.md`.
+- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-doublet-detection.md`.
