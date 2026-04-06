@@ -1,6 +1,6 @@
 ---
 doc_id: sc-preprocessing-guardrails
-title: Single-Cell Base Preprocessing Guardrails
+title: Single-Cell Preprocessing Guardrails
 doc_type: knowhow
 critical_rule: MUST inspect whether the input is raw-count-like, explain the chosen backend plus effective QC/HVG/PCA parameters, and never silently claim that preprocessing already finished clustering
 domains: [singlecell]
@@ -10,7 +10,7 @@ search_terms: [single-cell preprocessing, scRNA preprocessing, normalization, HV
 priority: 1.0
 ---
 
-# Single-Cell Base Preprocessing Guardrails
+# Single-Cell Preprocessing Guardrails
 
 - **Inspect first**: verify the matrix still looks count-like, whether counts are preserved in `layers["counts"]` or `adata.raw`, and whether the user is accidentally rerunning preprocessing on normalized data.
 - **Canonicalize once, then reuse state**: if count provenance is unclear, prefer the shared single-cell canonicalization helper; if the object already carries QC metrics from `sc-qc`, reuse them instead of forcing the user through the same QC step again.
@@ -20,3 +20,4 @@ priority: 1.0
 - **Surface the important side branches**: this skill does not remove doublets automatically; mention `sc-doublet-detection` when doublets may matter. If likely batch/sample columns are present, remind the user to consider `sc-batch-integration` before clustering.
 - **Stop when the R backend would inherit ambiguous counts**: if `seurat` or `sctransform` would have to treat `adata.X` as raw counts because no `counts` layer or aligned `adata.raw` exists, make the user confirm that matrix state first.
 - **Preserve the contract**: successful runs should emit a normalized, PCA-ready `processed.h5ad`, a standard gallery, figure-data CSVs, and the reproducibility bundle including the analysis notebook.
+- **For detailed parameter and workflow guidance**: see `knowledge_base/skill-guides/singlecell/sc-preprocessing.md`.

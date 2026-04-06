@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-cell virtual knockout analysis with scTenifoldKnk."""
+"""Single-cell in-silico perturbation analysis with scTenifoldKnk."""
 
 from __future__ import annotations
 
@@ -26,12 +26,12 @@ from skills.singlecell._lib import io as sc_io
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-SKILL_NAME = "sc-tenifold-knockout"
+SKILL_NAME = "sc-in-silico-perturbation"
 SKILL_VERSION = "0.1.0"
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Single-cell virtual knockout analysis with scTenifoldKnk")
+    p = argparse.ArgumentParser(description="Single-cell in-silico perturbation analysis with scTenifoldKnk")
     p.add_argument("--input", type=str, default=None)
     p.add_argument("--output", type=str, required=True)
     p.add_argument("--demo", action="store_true")
@@ -51,7 +51,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _write_report(output_dir: Path, summary: dict, params: dict, input_path: str | None) -> None:
     header = generate_report_header(
-        title="scTenifoldKnk Virtual Knockout Report",
+        title="In-Silico Perturbation Report",
         skill_name=SKILL_NAME,
         input_files=[Path(input_path)] if input_path else None,
         extra_metadata={
@@ -200,7 +200,7 @@ def main() -> int:
     write_output_readme(
         output_dir,
         skill_alias=SKILL_NAME,
-        description="Single-cell virtual knockout analysis with scTenifoldKnk.",
+        description="Single-cell in-silico perturbation analysis with scTenifoldKnk.",
         preferred_method="sctenifoldknk",
     )
     logger.info("Done: %s", output_dir)

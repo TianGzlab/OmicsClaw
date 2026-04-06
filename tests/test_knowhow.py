@@ -28,7 +28,7 @@ SCRNA_SKILL_DOCS = [
     ("sc-gene-programs", "KH-sc-gene-programs-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-gene-programs.md"),
     ("sc-perturb-prep", "KH-sc-perturb-prep-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-perturb-prep.md"),
     ("sc-perturb", "KH-sc-perturb-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-perturb.md"),
-    ("sc-tenifold-knockout", "KH-sc-tenifold-knockout-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-tenifold-knockout.md"),
+    ("sc-in-silico-perturbation", "KH-sc-in-silico-perturbation-guardrails.md", "knowledge_base/skill-guides/singlecell/sc-in-silico-perturbation.md"),
 ]
 
 

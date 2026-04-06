@@ -1,8 +1,8 @@
 ---
-name: sc-tenifold-knockout
+name: sc-in-silico-perturbation
 description: >-
-  Virtual knockout analysis for scRNA-seq using the official scTenifoldKnk R
-  workflow on a wild-type expression matrix.
+  In-silico perturbation analysis for scRNA-seq, currently using the official
+  scTenifoldKnk R workflow on a wild-type expression matrix.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -24,14 +24,14 @@ metadata:
       - "--n-cores"
 ---
 
-# scTenifoldKnk Virtual Knockout
+# In-Silico Perturbation
 
 ## Why This Exists
 
-- Without it: virtual knockout analysis is usually left outside standard scRNA pipelines.
-- With it: the official scTenifoldKnk workflow can predict downstream perturbed genes from a wild-type single-cell expression matrix.
+- Without it: virtual perturbation analysis is usually left outside standard scRNA pipelines.
+- With it: this skill can host in-silico perturbation methods; currently it exposes the official scTenifoldKnk workflow.
 
-## Current Method
+## Current Methods
 
 1. `sctenifoldknk`
 

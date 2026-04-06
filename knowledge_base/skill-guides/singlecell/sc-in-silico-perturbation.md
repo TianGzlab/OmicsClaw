@@ -1,14 +1,14 @@
 ---
-doc_id: skill-guide-sc-tenifold-knockout
-title: OmicsClaw Skill Guide — scTenifoldKnk
+doc_id: skill-guide-sc-in-silico-perturbation
+title: OmicsClaw Skill Guide — In-Silico Perturbation
 doc_type: method-reference
 domains: [singlecell]
-related_skills: [sc-tenifold-knockout]
+related_skills: [sc-in-silico-perturbation]
 search_terms: [scTenifoldKnk, virtual knockout, in silico knockout, single-cell GRN]
 priority: 0.8
 ---
 
-# OmicsClaw Skill Guide — scTenifoldKnk
+# OmicsClaw Skill Guide — In-Silico Perturbation
 
 ## Purpose
 
