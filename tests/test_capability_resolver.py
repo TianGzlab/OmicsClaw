@@ -52,6 +52,16 @@ def test_resolve_capability_detects_spatial_microenvironment_subset_skill():
     assert decision.chosen_skill == "spatial-microenvironment-subset"
 
 
+
+def test_resolve_capability_routes_spatial_raw_fastq_requests_to_spatial_domain():
+    decision = resolve_capability(
+        "Run st_pipeline on these Visium spatial FASTQs with barcode coordinates",
+        file_path="/tmp/sample_R1.fastq.gz",
+    )
+    assert decision.domain == "spatial"
+    assert decision.chosen_skill == "spatial-raw-processing"
+
+
 def test_validate_custom_analysis_code_blocks_shell_and_network():
     issues = validate_custom_analysis_code(
         "import subprocess\nsubprocess.run(['echo', 'hi'])\n"

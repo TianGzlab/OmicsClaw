@@ -396,3 +396,24 @@ After-run rules.
     )
     assert "Custom After KH" in constraints
     assert "Custom Before KH" not in constraints
+
+
+def test_spatial_raw_processing_guardrail_is_registered_for_skill():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    matched = injector.get_kh_for_skill("spatial-raw-processing")
+
+    assert "KH-spatial-raw-processing-guardrails.md" in matched
+
+
+def test_spatial_raw_processing_constraints_use_guardrail_doc():
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="spatial-raw-processing",
+        query="Please process these spatial FASTQs with st_pipeline and explain the handoff to preprocessing first.",
+        domain="spatial",
+    )
+
+    assert "Spatial Raw Processing Guardrails" in constraints
+    assert "knowledge_base/skill-guides/spatial/spatial-raw-processing.md" in constraints

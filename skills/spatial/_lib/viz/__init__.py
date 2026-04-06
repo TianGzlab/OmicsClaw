@@ -64,6 +64,12 @@ from .feature import plot_features
 from .gallery import PlotArtifact, PlotSpec, VisualizationRecipe, render_plot_specs
 from .integration import plot_integration
 from .params import VizParams  # re-export for convenience
+from .raw_processing import (
+    plot_saturation_curve,
+    plot_spot_qc_histograms,
+    plot_stage_attrition,
+    plot_top_genes_bar,
+)
 from .spatial_stats import plot_spatial_stats
 from .trajectory import plot_trajectory
 from .velocity import plot_velocity
@@ -95,6 +101,10 @@ __all__ = [
     "plot_features",
     "plot_expression",
     "plot_integration",
+    "plot_stage_attrition",
+    "plot_spot_qc_histograms",
+    "plot_top_genes_bar",
+    "plot_saturation_curve",
     "plot_spatial_stats",
     "plot_velocity",
     "plot_trajectory",

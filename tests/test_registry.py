@@ -17,8 +17,15 @@ def test_registry_loaded():
     assert Path(registry.skills["orchestrator"]["script"]).name == "omics_orchestrator.py"
     assert "sc-qc" in registry.skills  # verify singlecell subdomain nesting
     assert "spatial-microenvironment-subset" in registry.skills
+    assert "spatial-raw-processing" in registry.skills
+    assert "st_pipeline" in [
+        keyword.lower()
+        for keyword in registry.skills["spatial-raw-processing"].get("trigger_keywords", [])
+    ]
     assert "spatial" in registry.domains
-    assert registry.domains["singlecell"]["skill_count"] == 14
+    assert registry.domains["singlecell"]["skill_count"] == len(
+        registry.iter_primary_skills(domain="singlecell")
+    )
     for skill in [
         "sc-standardize-input",
         "sc-qc",
@@ -36,5 +43,8 @@ def test_registry_loaded():
         "sc-cell-communication",
     ]:
         assert skill in registry.skills
+    assert registry.domains["spatial"]["skill_count"] == len(
+        registry.iter_primary_skills(domain="spatial")
+    )
     assert len(registry.skills) > 0
     assert len(registry.domains) > 0

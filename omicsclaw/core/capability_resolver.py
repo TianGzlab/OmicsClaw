@@ -72,6 +72,26 @@ _WEB_HINTS = (
     "官网",
 )
 
+
+def _score_trigger_keyword_matches(
+    query_lower: str,
+    keywords: list[str] | tuple[str, ...],
+    *,
+    limit: int = 3,
+) -> tuple[float, list[str]]:
+    matches: list[str] = []
+    score = 0.0
+    for keyword in keywords:
+        phrase = str(keyword).strip().lower()
+        if not phrase or not _mentions_phrase(query_lower, phrase):
+            continue
+        matches.append(phrase)
+        score += max(1.5, min(4.5, len(phrase) / 6.0))
+        if len(matches) >= limit:
+            break
+    return score, matches
+
+
 _SKILL_CREATION_HINTS = (
     "create skill",
     "create a skill",
@@ -301,28 +321,42 @@ def _detect_domain(
     if domain_hint:
         return domain_hint
 
+    query_lower = query.lower()
+    query_tokens = _tokenize(query_lower)
+    domain_scores: dict[str, float] = {
+        domain: 0.0
+        for domain in registry.domains
+    }
+
     if file_path and detect_domain_from_path is not None:
         detected = str(detect_domain_from_path(file_path, fallback="")).strip()
         if detected:
-            return detected
+            domain_scores[detected] = domain_scores.get(detected, 0.0) + 5.0
 
-    query_lower = query.lower()
     best_domain = ""
     best_score = 0.0
 
     for domain, info in registry.domains.items():
-        score = 0.0
+        score = domain_scores.get(domain, 0.0)
         for alias, skill_info in registry.iter_primary_skills(domain=domain):
             if _mentions_phrase(query_lower, alias.lower()):
                 score += 8.0
+
+            for legacy in skill_info.get("legacy_aliases", []):
+                legacy_lower = str(legacy).lower()
+                if legacy_lower and _mentions_phrase(query_lower, legacy_lower):
+                    score += 6.0
+
             description = str(skill_info.get("description", "")).lower()
-            overlap = _tokenize(query_lower) & _tokenize(description)
+            overlap = query_tokens & _tokenize(description)
             score += min(len(overlap), 5) * 0.6
 
-        keyword_map = registry.build_keyword_map(domain=domain)
-        for kw in keyword_map:
-            if kw and _mentions_phrase(query_lower, kw):
-                score += max(1.0, min(5.0, len(kw) / 6.0))
+            keyword_score, _ = _score_trigger_keyword_matches(
+                query_lower,
+                skill_info.get("trigger_keywords", []),
+                limit=2,
+            )
+            score += keyword_score
 
         domain_name = str(info.get("name", domain)).lower()
         if domain_name in query_lower or domain.lower() in query_lower:
@@ -363,6 +397,16 @@ def _candidate_score(
         overlap_score = min(len(overlap), 8) * 0.85
         score += overlap_score
         reasons.append("description token overlap: " + ", ".join(sorted(list(overlap))[:5]))
+
+    keyword_score, keyword_matches = _score_trigger_keyword_matches(
+        query_lower,
+        info.get("trigger_keywords", []),
+    )
+    if keyword_score:
+        score += keyword_score
+        reasons.append(
+            "trigger keyword match: " + ", ".join(keyword_matches[:3])
+        )
 
     for kw in info.get("param_hints", {}):
         kw_lower = str(kw).lower()

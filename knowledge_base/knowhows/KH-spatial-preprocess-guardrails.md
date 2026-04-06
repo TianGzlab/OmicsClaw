@@ -12,7 +12,7 @@ priority: 1.0
 
 # Spatial Preprocess Guardrails
 
-- **Inspect first**: confirm the platform or file type, whether the matrix in `X` still contains raw counts, and whether spatial coordinates are present.
+- **Inspect first**: confirm the platform or file type, whether the matrix in `X` still contains raw counts, and whether spatial coordinates are present. If the user only has FASTQ pairs plus barcode-coordinate metadata, route to `spatial-raw-processing` first.
 - **Do not hide preset behavior**: when `--tissue` is used, explain the resolved QC thresholds rather than only mentioning the preset name.
 - **Separate loader hints from scientific parameters**: `data_type`, `species`, and `tissue` are wrapper-level controls; `n_top_hvg`, `n_neighbors`, and `leiden_resolution` map to the actual preprocessing workflow.
 - **Explain the run before execution**: state the effective QC thresholds and the main graph / clustering parameters that will control the first pass.

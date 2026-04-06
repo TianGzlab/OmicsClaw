@@ -1,8 +1,8 @@
 ---
 name: spatial-preprocess
 description: >-
-  Load raw spatial transcriptomics data (Visium, Xenium, or converted h5ad
-  inputs), run the current OmicsClaw scanpy-standard preprocessing workflow,
+  Load matrix-level spatial transcriptomics data (including raw_counts.h5ad
+  from spatial-raw-processing), run the current OmicsClaw scanpy-standard preprocessing workflow,
   and export a downstream-ready AnnData with explicit effective QC parameters
   plus a standardized preprocessing visualization contract.
 version: 0.5.0
@@ -81,6 +81,7 @@ without changing the underlying preprocessing assumptions.
 
 - **Without it**: users manually combine loading, QC, normalization, HVG selection, PCA, neighbors, and clustering with inconsistent defaults.
 - **With it**: one command produces a standardized `processed.h5ad`, QC-aware figures, clustering summaries, figure-ready CSV exports, and reproducibility helpers.
+- **Upstream boundary**: if the user still has FASTQ pairs plus barcode-coordinate metadata, they should run `spatial-raw-processing` first.
 - **Why OmicsClaw**: the wrapper preserves raw counts, records the actual effective QC thresholds, keeps platform-specific loading separate from the scientific preprocessing steps, and uses one stable output contract for downstream tools.
 
 ## Core Capabilities
@@ -100,12 +101,20 @@ without changing the underlying preprocessing assumptions.
 
 | Format | Extension | Required Fields | Example |
 |--------|-----------|-----------------|---------|
+| OmicsClaw raw spatial counts | `.h5ad` | `raw_counts.h5ad` emitted by `spatial-raw-processing` | `raw_counts.h5ad` |
 | AnnData raw | `.h5ad` | count matrix in `X`; spatial coordinates recommended | `raw_visium.h5ad` |
 | 10x Visium directory | directory | Space Ranger-style output | `visium_output/` |
 | 10x feature matrix | `.h5` / `.hdf5` | filtered feature matrix | `filtered_feature_bc_matrix.h5` |
 | Xenium zarr | `.zarr` or directory | Xenium export readable by `anndata.read_zarr` | `xenium_sample.zarr` |
 | Converted MERFISH / Slide-seq / seqFISH | `.h5ad` | expression matrix, ideally with coordinates | `merfish_converted.h5ad` |
 | Demo | n/a | `--demo` flag | built-in Visium-like demo |
+
+## Upstream Boundary
+
+If the user still has sequencing-level inputs such as FASTQ pairs plus an IDs
+barcode-coordinate file and STAR reference files, this is **not** the correct
+entry point. Run `spatial-raw-processing` first, then pass the resulting
+`raw_counts.h5ad` into `spatial-preprocess`.
 
 ## Current Loader Behavior
 

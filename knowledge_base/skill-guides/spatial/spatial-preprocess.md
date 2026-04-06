@@ -29,9 +29,11 @@ If the dataset has not been inspected yet in this conversation, call
 
 Key properties to check:
 - **Input type**:
+  - `raw_counts.h5ad` emitted by `spatial-raw-processing`
   - Visium directory or feature matrix
   - Xenium `.zarr` / `.h5ad`
   - converted `.h5ad` for MERFISH / Slide-seq / seqFISH
+  - if the user still has FASTQ pairs plus IDs / STAR reference files, route to `spatial-raw-processing` instead
 - **Matrix representation**:
   - current wrapper expects raw counts in `X` on input
   - if the input already looks log-normalized or scaled, say that explicitly before preprocessing

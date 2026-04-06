@@ -2,7 +2,7 @@
 
 > OmicsClaw Multi-Omics Knowledge Base
 > Reorganized: 2026-03-29
-> Total workflows: 28 | Shared documents: 39
+> Total workflows: 28 | Shared documents: 41
 
 ## Structure
 
@@ -79,6 +79,7 @@ _Universal best practices and domain knowledge rules that apply across all workf
 | [knowhows/KH-spatial-genes-guardrails.md](knowhows/KH-spatial-genes-guardrails.md) | Short high-level guardrails for matrix-aware SVG method selection and explanation |
 | [knowhows/KH-spatial-integrate-guardrails.md](knowhows/KH-spatial-integrate-guardrails.md) | Short high-level guardrails for selecting and explaining spatial integration runs |
 | [knowhows/KH-spatial-preprocess-guardrails.md](knowhows/KH-spatial-preprocess-guardrails.md) | Short high-level guardrails for choosing and explaining spatial preprocessing runs |
+| [knowhows/KH-spatial-raw-processing-guardrails.md](knowhows/KH-spatial-raw-processing-guardrails.md) | Short high-level guardrails for sequencing-level spatial FASTQ processing and downstream handoff |
 | [knowhows/KH-spatial-statistics-guardrails.md](knowhows/KH-spatial-statistics-guardrails.md) | Short high-level guardrails for choosing between cluster, gene, and graph-level spatial statistics |
 | [knowhows/KH-spatial-velocity-guardrails.md](knowhows/KH-spatial-velocity-guardrails.md) | Short high-level guardrails for choosing and explaining spatial RNA velocity runs |
 | [knowhows/KH-sc-differential-abundance-guardrails.md](knowhows/KH-sc-differential-abundance-guardrails.md) | Short high-level guardrails for sample-aware differential abundance and compositional analysis |
@@ -124,6 +125,7 @@ start here:
 | [skill-guides/spatial/spatial-genes.md](skill-guides/spatial/spatial-genes.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatially variable gene detection |
 | [skill-guides/spatial/spatial-integrate.md](skill-guides/spatial/spatial-integrate.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial multi-sample integration |
 | [skill-guides/spatial/spatial-preprocess.md](skill-guides/spatial/spatial-preprocess.md) | Detailed OmicsClaw-specific parameter and loader guide for spatial preprocessing |
+| [skill-guides/spatial/spatial-raw-processing.md](skill-guides/spatial/spatial-raw-processing.md) | Detailed OmicsClaw-specific guide for sequencing-level spatial FASTQ processing and handoff to preprocessing |
 | [skill-guides/spatial/spatial-statistics.md](skill-guides/spatial/spatial-statistics.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial statistics |
 | [skill-guides/spatial/spatial-velocity.md](skill-guides/spatial/spatial-velocity.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial RNA velocity |
 | [skill-guides/spatial/spatial-register.md](skill-guides/spatial/spatial-register.md) | Detailed OmicsClaw-specific method selection and tuning guide for spatial registration |

@@ -25,7 +25,10 @@ class OmicsRegistry:
 
     def __init__(self):
         self.skills: dict[str, dict[str, Any]] = {}
-        self.domains = _HARDCODED_DOMAINS.copy()
+        self.domains = {
+            domain: dict(info)
+            for domain, info in _HARDCODED_DOMAINS.items()
+        }
         self._loaded = False
         self.lazy_skills: dict[str, LazySkillMetadata] = {}
 
@@ -210,6 +213,7 @@ class OmicsRegistry:
                         "script": script_path_candidate,
                         "demo_args": ["--demo"],
                         "description": lazy.description,
+                        "trigger_keywords": lazy.trigger_keywords or [],
                         "allowed_extra_flags": lazy.allowed_extra_flags or set(),
                         "legacy_aliases": self._unique_strings(legacy_aliases),
                         "saves_h5ad": lazy.saves_h5ad,
@@ -226,6 +230,7 @@ class OmicsRegistry:
                         "script": script_path_candidate,
                         "demo_args": ["--demo"],
                         "description": f"Dynamically loaded {canonical_alias} skill",
+                        "trigger_keywords": [],
                         "allowed_extra_flags": set(),
                         "legacy_aliases": self._unique_strings(
                             [hardcoded_alias] if hardcoded_alias and hardcoded_alias != canonical_alias else []
@@ -271,6 +276,7 @@ class OmicsRegistry:
                     if la not in self.skills:
                         self.skills[la] = info
 
+        self._refresh_domain_skill_counts()
         self._loaded = True
 
     def load_lightweight(self, skills_dir: Path | None = None) -> None:
@@ -369,6 +375,25 @@ class OmicsRegistry:
 
         return keyword_map
 
+    def _refresh_domain_skill_counts(self) -> None:
+        """Update domain skill counts from loaded canonical entries."""
+        counts: dict[str, int] = {
+            domain: 0
+            for domain in self.domains
+        }
+        for alias, info in self.skills.items():
+            if alias != info.get("alias", alias):
+                continue
+            domain = str(info.get("domain", "")).strip()
+            if not domain:
+                continue
+            counts[domain] = counts.get(domain, 0) + 1
+
+        for domain, count in counts.items():
+            if domain not in self.domains:
+                self.domains[domain] = {"name": domain, "primary_data_types": []}
+            self.domains[domain]["skill_count"] = count
+
 
 def ensure_registry_loaded(skills_dir: Path | None = None) -> OmicsRegistry:
     """Return the shared registry after ensuring full skill metadata is loaded."""
@@ -384,7 +409,7 @@ _HARDCODED_DOMAINS = {
     "spatial": {
         "name": "Spatial Transcriptomics",
         "primary_data_types": ["h5ad", "h5", "zarr", "loom"],
-        "skill_count": 15,
+        "skill_count": 17,
     },
     "singlecell": {
         "name": "Single-Cell Omics",

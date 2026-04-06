@@ -6,7 +6,7 @@ def test_lazy_metadata_loads_basic_info():
     lazy = LazySkillMetadata(skill_path)
 
     assert lazy.name == "spatial-preprocess"
-    assert "Load raw spatial transcriptomics data" in lazy.description
+    assert "Load matrix-level spatial transcriptomics data" in lazy.description
     assert lazy.domain == "spatial"
 
 def test_lazy_metadata_loads_full_on_demand():
