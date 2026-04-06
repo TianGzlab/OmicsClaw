@@ -68,6 +68,7 @@ def _embedding_key_from_method(embedding_method: str) -> str:
         "umap": "X_umap",
         "tsne": "X_tsne",
         "diffmap": "X_diffmap",
+        "phate": "X_phate",
     }
     return mapping[embedding_method]
 
@@ -80,6 +81,8 @@ def preflight_sc_clustering(
     use_rep: str | None,
     tsne_perplexity: float,
     diffmap_n_comps: int,
+    phate_knn: int,
+    phate_decay: int,
     n_neighbors: int,
     n_pcs: int,
     resolution: float,
@@ -128,8 +131,8 @@ def preflight_sc_clustering(
         else:
             decision.add_guidance(f"`sc-clustering` will use `{candidates[0]}` as the active embedding.")
 
-    if embedding_method not in {"umap", "tsne", "diffmap"}:
-        decision.block("`sc-clustering` currently supports `--embedding-method umap`, `tsne`, or `diffmap`.")
+    if embedding_method not in {"umap", "tsne", "diffmap", "phate"}:
+        decision.block("`sc-clustering` currently supports `--embedding-method umap`, `tsne`, `diffmap`, or `phate`.")
     if cluster_method not in {"leiden", "louvain"}:
         decision.block("`sc-clustering` currently supports `--cluster-method leiden` or `louvain`.")
     elif cluster_method == "louvain" and not sc_dep_manager.is_available("louvain"):
@@ -140,6 +143,12 @@ def preflight_sc_clustering(
         decision.block("`--tsne-perplexity` must be greater than 0.")
     if embedding_method == "diffmap" and diffmap_n_comps < 2:
         decision.block("`--diffmap-n-comps` must be at least 2.")
+    if embedding_method == "phate" and not sc_dep_manager.is_available("phate"):
+        decision.block(
+            "`phate` embedding requires the optional Python package `phate`, which is not installed in the current environment. Install it explicitly before rerunning."
+        )
+    if embedding_method == "phate" and phate_knn < 2:
+        decision.block("`--phate-knn` must be at least 2.")
 
     batch_candidates = _obs_candidates(adata, "batch")
     if batch_candidates and not any(key in adata.obsm for key in ("X_harmony", "X_scvi", "X_scanvi", "X_scanorama")):
@@ -157,6 +166,10 @@ def preflight_sc_clustering(
     elif embedding_method == "tsne":
         decision.add_guidance(
             f"`tsne`-specific settings: `tsne_perplexity={tsne_perplexity}`, `tsne_metric={tsne_metric}`."
+        )
+    elif embedding_method == "phate":
+        decision.add_guidance(
+            f"`phate`-specific settings: `phate_knn={phate_knn}`, `phate_decay={phate_decay}`."
         )
     else:
         decision.add_guidance(
@@ -192,6 +205,8 @@ def run_clustering(
     tsne_perplexity: float = 30.0,
     tsne_metric: str = "euclidean",
     diffmap_n_comps: int = 15,
+    phate_knn: int = 15,
+    phate_decay: int = 40,
 ) -> tuple[object, dict]:
     sc_dimred_utils.build_neighbor_graph(
         adata,
@@ -221,8 +236,16 @@ def run_clustering(
             metric=tsne_metric,
             inplace=True,
         )
-    else:
+    elif embedding_method == "diffmap":
         sc_dimred_utils.run_diffmap(adata, n_comps=diffmap_n_comps, inplace=True)
+    else:
+        sc_dimred_utils.run_phate_reduction(
+            adata,
+            use_rep=use_rep,
+            knn=phate_knn,
+            decay=phate_decay,
+            inplace=True,
+        )
     embedding_key = _embedding_key_from_method(embedding_method)
     return adata, {"cluster_key": cluster_key, "embedding_key": embedding_key}
 
@@ -285,6 +308,13 @@ def _build_clustering_summary_table(summary: dict, params: dict) -> pd.DataFrame
         )
     elif params.get("embedding_method") == "diffmap":
         rows.append({"metric": "diffmap_n_comps", "value": params.get("diffmap_n_comps")})
+    elif params.get("embedding_method") == "phate":
+        rows.extend(
+            [
+                {"metric": "phate_knn", "value": params.get("phate_knn")},
+                {"metric": "phate_decay", "value": params.get("phate_decay")},
+            ]
+        )
     return pd.DataFrame(rows)
 
 
@@ -589,7 +619,7 @@ def main():
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--embedding-method", choices=["umap", "tsne", "diffmap"], default="umap")
+    parser.add_argument("--embedding-method", choices=["umap", "tsne", "diffmap", "phate"], default="umap")
     parser.add_argument("--cluster-method", choices=["leiden", "louvain"], default="leiden")
     parser.add_argument("--use-rep", default=None, help="Embedding in adata.obsm to use, e.g. X_pca or X_harmony")
     parser.add_argument("--n-neighbors", type=int, default=15)
@@ -600,6 +630,8 @@ def main():
     parser.add_argument("--tsne-perplexity", type=float, default=30.0)
     parser.add_argument("--tsne-metric", default="euclidean")
     parser.add_argument("--diffmap-n-comps", type=int, default=15)
+    parser.add_argument("--phate-knn", type=int, default=15)
+    parser.add_argument("--phate-decay", type=int, default=40)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -622,6 +654,8 @@ def main():
             use_rep=args.use_rep,
             tsne_perplexity=args.tsne_perplexity,
             diffmap_n_comps=args.diffmap_n_comps,
+            phate_knn=args.phate_knn,
+            phate_decay=args.phate_decay,
             n_neighbors=args.n_neighbors,
             n_pcs=args.n_pcs,
             resolution=args.resolution,
@@ -647,6 +681,8 @@ def main():
         tsne_perplexity=args.tsne_perplexity,
         tsne_metric=args.tsne_metric,
         diffmap_n_comps=args.diffmap_n_comps,
+        phate_knn=args.phate_knn,
+        phate_decay=args.phate_decay,
     )
     summary = build_summary(adata, cluster_key=args.cluster_method, cluster_method=args.cluster_method)
     input_contract, matrix_contract = propagate_singlecell_contracts(
@@ -670,6 +706,8 @@ def main():
         "tsne_perplexity": args.tsne_perplexity,
         "tsne_metric": args.tsne_metric,
         "diffmap_n_comps": args.diffmap_n_comps,
+        "phate_knn": args.phate_knn,
+        "phate_decay": args.phate_decay,
     }, output_dir)
     recipe = _build_visualization_recipe(summary)
     artifacts = render_plot_specs(adata, output_dir, recipe, CLUSTER_GALLERY_RENDERERS, context=gallery_context)
@@ -696,6 +734,8 @@ def main():
         "tsne_perplexity": args.tsne_perplexity,
         "tsne_metric": args.tsne_metric,
         "diffmap_n_comps": args.diffmap_n_comps,
+        "phate_knn": args.phate_knn,
+        "phate_decay": args.phate_decay,
     }
     write_report(output_dir, summary, params, input_file, gallery_context=gallery_context)
     write_reproducibility(output_dir, params, input_file, demo_mode=args.demo)

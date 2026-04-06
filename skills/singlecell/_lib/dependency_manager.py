@@ -30,6 +30,7 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     "bbknn": DependencyInfo("bbknn", "pip install bbknn", "BBKNN batch correction"),
     "scanorama": DependencyInfo("scanorama", "pip install scanorama", "Scanorama integration"),
     "louvain": DependencyInfo("louvain", "pip install louvain", "Louvain graph clustering"),
+    "phate": DependencyInfo("phate", "pip install phate", "PHATE nonlinear embedding"),
 
     # Annotation
     "celltypist": DependencyInfo("celltypist", "pip install celltypist", "CellTypist annotation"),

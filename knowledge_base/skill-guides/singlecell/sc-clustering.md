@@ -30,7 +30,7 @@ Do not use this skill on raw counts or before PCA has been computed.
 - `X = normalized_expression`
 - `obsm["X_pca"]` must exist
 - if an integrated embedding exists (for example `X_harmony`, `X_scvi`, `X_scanvi`, `X_scanorama`), decide whether clustering should use that embedding instead of plain PCA
-- choose the rendered low-dimensional view via `embedding_method` (`umap`, `tsne`, `diffmap`)
+- choose the rendered low-dimensional view via `embedding_method` (`umap`, `tsne`, `diffmap`, `phate`)
 
 ## Main Tuning Knobs
 
@@ -49,9 +49,11 @@ Guidance:
 - `umap` is the default first-pass view
 - `tsne` is useful when the user wants a second view of local neighborhoods
 - `diffmap` is useful when the user wants a smoother manifold-style embedding
+- `phate` is useful when the user wants a denoised manifold view with smoother global transitions
 - `umap` key parameters: `umap_min_dist`, `umap_spread`
 - `tsne` key parameters: `tsne_perplexity`, `tsne_metric`
 - `diffmap` key parameter: `diffmap_n_comps`
+- `phate` key parameters: `phate_knn`, `phate_decay`
 
 ## Output Interpretation
 

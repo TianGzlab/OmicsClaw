@@ -6,7 +6,7 @@ description: >-
 version: 0.1.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, clustering, embedding, umap, tsne, diffmap, leiden, louvain]
+tags: [singlecell, scrna, clustering, embedding, umap, tsne, diffmap, phate, leiden, louvain]
 metadata:
   omicsclaw:
     domain: singlecell
@@ -22,6 +22,8 @@ metadata:
       - "--tsne-perplexity"
       - "--tsne-metric"
       - "--diffmap-n-comps"
+      - "--phate-knn"
+      - "--phate-decay"
     saves_h5ad: true
     requires_preprocessed: true
     legacy_aliases: [sc-dimred-cluster]
@@ -31,7 +33,7 @@ metadata:
 
 This skill starts from a normalized scRNA AnnData and performs:
 1. neighbor graph construction
-2. low-dimensional embedding (`umap`, `tsne`, or `diffmap`)
+2. low-dimensional embedding (`umap`, `tsne`, `diffmap`, or `phate`)
 3. graph clustering (`leiden` or `louvain`)
 
 Expected input:
@@ -45,7 +47,7 @@ Dependency note:
 - `louvain` is optional; if the Python package `louvain` is missing, the skill should stop and ask the user to install it explicitly rather than trying to install it automatically.
 
 Main tuning knobs:
-- `--embedding-method`: how to render the low-dimensional view (`umap`, `tsne`, `diffmap`)
+- `--embedding-method`: how to render the low-dimensional view (`umap`, `tsne`, `diffmap`, `phate`)
 - `--cluster-method`: graph clustering backend (`leiden`, `louvain`)
 - `--use-rep`: which embedding in `adata.obsm` should drive the neighbor graph
 - `--n-neighbors`: local neighborhood size
@@ -56,6 +58,7 @@ Method-specific parameters:
 - `umap`: `--umap-min-dist`, `--umap-spread`
 - `tsne`: `--tsne-perplexity`, `--tsne-metric`
 - `diffmap`: `--diffmap-n-comps`
+- `phate`: `--phate-knn`, `--phate-decay`
 
 Typical path:
 - if the object still has batch effects: `sc-preprocessing -> sc-batch-integration -> sc-clustering`

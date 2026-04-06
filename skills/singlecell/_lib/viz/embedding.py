@@ -24,6 +24,8 @@ def embedding_axis_labels(obsm_key: str) -> tuple[str, str]:
         return "t-SNE1", "t-SNE2"
     if key == "X_diffmap":
         return "DC1", "DC2"
+    if key == "X_phate":
+        return "PHATE1", "PHATE2"
     return "Dim1", "Dim2"
 
 

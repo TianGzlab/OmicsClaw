@@ -540,6 +540,37 @@ def run_diffmap(
     return adata
 
 
+def run_phate_reduction(
+    adata: AnnData,
+    *,
+    use_rep: Optional[str] = None,
+    knn: int = 15,
+    decay: int = 40,
+    random_state: int = 0,
+    inplace: bool = True,
+) -> AnnData:
+    """Compute PHATE embedding from a chosen representation."""
+    import phate
+
+    if not inplace:
+        adata = adata.copy()
+
+    if use_rep is not None:
+        if use_rep not in adata.obsm:
+            raise ValueError(f"{use_rep} not found in adata.obsm")
+        data = np.asarray(adata.obsm[use_rep])
+    elif "X_pca" in adata.obsm:
+        data = np.asarray(adata.obsm["X_pca"])
+    else:
+        data = np.asarray(adata.X)
+
+    logger.info("Computing PHATE (use_rep=%s, knn=%d, decay=%d)", use_rep, knn, decay)
+    operator = phate.PHATE(knn=knn, decay=decay, random_state=random_state, n_jobs=1, verbose=False)
+    adata.obsm["X_phate"] = operator.fit_transform(data)
+    logger.info("PHATE complete. Shape: %s", adata.obsm["X_phate"].shape)
+    return adata
+
+
 # ===========================================================================
 # Neighbor graph & Clustering  (from cluster_cells.py)
 # ===========================================================================

@@ -12,6 +12,7 @@ def test_cluster_methods_are_supported():
     assert '"umap"' in MODULE_TEXT
     assert '"tsne"' in MODULE_TEXT
     assert '"diffmap"' in MODULE_TEXT
+    assert '"phate"' in MODULE_TEXT
     assert '"--cluster-method"' in MODULE_TEXT
     assert '"leiden"' in MODULE_TEXT
     assert '"louvain"' in MODULE_TEXT

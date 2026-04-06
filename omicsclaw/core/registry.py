@@ -916,6 +916,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "allowed_extra_flags": {
             "--embedding-method", "--cluster-method", "--use-rep", "--n-neighbors", "--n-pcs", "--resolution",
             "--umap-min-dist", "--umap-spread", "--tsne-perplexity", "--tsne-metric", "--diffmap-n-comps",
+            "--phate-knn", "--phate-decay",
         },
         "saves_h5ad": True,
         "requires_preprocessed": True,
