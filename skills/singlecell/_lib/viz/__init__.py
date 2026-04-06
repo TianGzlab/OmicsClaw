@@ -1,6 +1,14 @@
 """Unified visualization primitives for single-cell OmicsClaw skills."""
 
 from .core import QC_PALETTE, apply_singlecell_theme, save_figure
+from .embedding import (
+    embedding_axis_labels,
+    make_categorical_palette,
+    plot_cluster_qc_heatmap,
+    plot_cluster_size_summary,
+    plot_embedding_categorical,
+    plot_embedding_comparison,
+)
 from .qc import (
     plot_barcode_rank,
     plot_highest_expr_genes,
@@ -36,6 +44,12 @@ __all__ = [
     "QC_PALETTE",
     "apply_singlecell_theme",
     "save_figure",
+    "embedding_axis_labels",
+    "make_categorical_palette",
+    "plot_embedding_categorical",
+    "plot_embedding_comparison",
+    "plot_cluster_size_summary",
+    "plot_cluster_qc_heatmap",
     "plot_qc_violin",
     "plot_qc_scatter",
     "plot_qc_histograms",

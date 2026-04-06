@@ -41,6 +41,12 @@ from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.preflight import apply_preflight, PreflightDecision, _obs_candidates, _format_candidates
 from skills.singlecell._lib import dependency_manager as sc_dep_manager
+from skills.singlecell._lib.viz import (
+    plot_cluster_qc_heatmap,
+    plot_cluster_size_summary,
+    plot_embedding_categorical,
+    plot_embedding_comparison,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -57,10 +63,20 @@ def _candidate_embeddings(adata) -> list[str]:
     return [str(key) for key in adata.obsm.keys() if str(key).startswith("X_")]
 
 
+def _embedding_key_from_method(embedding_method: str) -> str:
+    mapping = {
+        "umap": "X_umap",
+        "tsne": "X_tsne",
+        "diffmap": "X_diffmap",
+    }
+    return mapping[embedding_method]
+
+
 def preflight_sc_clustering(
     adata,
     *,
     cluster_method: str,
+    embedding_method: str,
     use_rep: str | None,
     source_path: str | None = None,
 ) -> PreflightDecision:
@@ -100,6 +116,8 @@ def preflight_sc_clustering(
         else:
             decision.add_guidance(f"`sc-clustering` will use `{candidates[0]}` as the active embedding.")
 
+    if embedding_method not in {"umap", "tsne", "diffmap"}:
+        decision.block("`sc-clustering` currently supports `--embedding-method umap`, `tsne`, or `diffmap`.")
     if cluster_method not in {"leiden", "louvain"}:
         decision.block("`sc-clustering` currently supports `--cluster-method leiden` or `louvain`.")
     elif cluster_method == "louvain" and not sc_dep_manager.is_available("louvain"):
@@ -129,6 +147,7 @@ def run_clustering(
     adata,
     *,
     use_rep: str,
+    embedding_method: str = "umap",
     n_neighbors: int = 15,
     n_pcs: int = 50,
     cluster_method: str = "leiden",
@@ -141,13 +160,19 @@ def run_clustering(
         use_rep=use_rep,
         inplace=True,
     )
-    sc_dimred_utils.run_umap_reduction(adata, inplace=True)
     cluster_key = cluster_method
     if cluster_method == "leiden":
         sc_dimred_utils.cluster_leiden(adata, resolution=resolution, key_added=cluster_key, inplace=True)
     else:
         sc_dimred_utils.cluster_louvain(adata, resolution=resolution, key_added=cluster_key, inplace=True)
-    return adata, {"cluster_key": cluster_key}
+    if embedding_method == "umap":
+        sc_dimred_utils.run_umap_reduction(adata, inplace=True)
+    elif embedding_method == "tsne":
+        sc_dimred_utils.run_tsne_reduction(adata, n_pcs=n_pcs, use_rep=use_rep, inplace=True)
+    else:
+        sc_dimred_utils.run_diffmap(adata, inplace=True)
+    embedding_key = _embedding_key_from_method(embedding_method)
+    return adata, {"cluster_key": cluster_key, "embedding_key": embedding_key}
 
 
 def _build_cluster_summary_table(summary: dict) -> pd.DataFrame:
@@ -160,21 +185,30 @@ def _build_cluster_summary_table(summary: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_umap_points_table(adata, cluster_key: str) -> pd.DataFrame:
-    coords = np.asarray(adata.obsm["X_umap"])
-    return pd.DataFrame(
+def _build_embedding_points_table(adata, cluster_key: str, embedding_key: str, extra_obs: list[str] | None = None) -> pd.DataFrame:
+    coords = np.asarray(adata.obsm[embedding_key])
+    x_name = "coord1"
+    y_name = "coord2"
+    frame = pd.DataFrame(
         {
             "cell_id": adata.obs_names.astype(str),
-            "UMAP1": coords[:, 0],
-            "UMAP2": coords[:, 1],
+            "embedding_key": embedding_key,
+            x_name: coords[:, 0],
+            y_name: coords[:, 1],
             cluster_key: adata.obs[cluster_key].astype(str).to_numpy(),
         }
     )
+    for key in (extra_obs or []):
+        if key in adata.obs.columns:
+            frame[key] = adata.obs[key].astype(str).to_numpy()
+    return frame
 
 
 def _build_clustering_summary_table(summary: dict, params: dict) -> pd.DataFrame:
     return pd.DataFrame(
         [
+            {"metric": "embedding_method", "value": params.get("embedding_method")},
+            {"metric": "embedding_key", "value": params.get("embedding_key")},
             {"metric": "cluster_method", "value": summary.get("cluster_method")},
             {"metric": "cluster_key", "value": summary.get("cluster_key")},
             {"metric": "n_cells", "value": summary.get("n_cells")},
@@ -189,11 +223,29 @@ def _build_clustering_summary_table(summary: dict, params: dict) -> pd.DataFrame
 
 def _prepare_gallery_context(adata, summary: dict, params: dict, output_dir: Path) -> dict:
     cluster_key = summary["cluster_key"]
+    compare_candidates = (
+        _obs_candidates(adata, "batch")
+        or _obs_candidates(adata, "condition")
+        or _obs_candidates(adata, "cell_type")
+    )
+    compare_key = compare_candidates[0] if compare_candidates else None
+    qc_df = pd.DataFrame()
+    if any(col in adata.obs.columns for col in ("n_genes_by_counts", "total_counts", "pct_counts_mt")):
+        try:
+            qc_df = sc_dimred_utils.calculate_cluster_qc_stats(adata, cluster_key=cluster_key).reset_index()
+        except Exception:
+            qc_df = pd.DataFrame()
     return {
         "output_dir": Path(output_dir),
         "cluster_key": cluster_key,
+        "embedding_key": params["embedding_key"],
+        "embedding_method": params["embedding_method"],
+        "compare_key": compare_key,
         "cluster_summary_df": _build_cluster_summary_table(summary),
-        "umap_points_df": _build_umap_points_table(adata, cluster_key),
+        "embedding_points_df": _build_embedding_points_table(
+            adata, cluster_key, params["embedding_key"], [compare_key] if compare_key else []
+        ),
+        "cluster_qc_df": qc_df,
         "clustering_summary_df": _build_clustering_summary_table(summary, params),
     }
 
@@ -204,16 +256,42 @@ def _build_visualization_recipe(summary: dict) -> VisualizationRecipe:
         recipe_id="standard-sc-clustering-gallery",
         skill_name=SKILL_NAME,
         title="Single-cell clustering gallery",
-        description="Default OmicsClaw gallery for graph construction, UMAP, and clustering.",
+        description="Default OmicsClaw gallery for graph construction, embedding, and clustering.",
         plots=[
             PlotSpec(
-                plot_id="clustering_umap",
+                plot_id="clustering_embedding",
                 role="overview",
-                renderer="umap_clusters",
-                filename=f"umap_{cluster_key}.png",
-                title="UMAP clusters",
-                description="UMAP embedding colored by the active clustering column.",
-                required_obsm=["X_umap"],
+                renderer="embedding_clusters",
+                filename="embedding_clusters.png",
+                title="Embedding clusters",
+                description="Primary embedding colored by the active clustering column.",
+                required_obs=[cluster_key],
+            ),
+            PlotSpec(
+                plot_id="clustering_embedding_compare",
+                role="supporting",
+                renderer="embedding_comparison",
+                filename="embedding_comparison.png",
+                title="Embedding comparison",
+                description="Side-by-side view of clusters and the most likely batch/sample grouping.",
+                required_obs=[cluster_key],
+            ),
+            PlotSpec(
+                plot_id="clustering_cluster_size",
+                role="supporting",
+                renderer="cluster_size_summary",
+                filename="cluster_size_summary.png",
+                title="Cluster sizes",
+                description="Per-cluster size and proportion summary.",
+                required_obs=[cluster_key],
+            ),
+            PlotSpec(
+                plot_id="clustering_cluster_qc",
+                role="supporting",
+                renderer="cluster_qc_heatmap",
+                filename="cluster_qc_heatmap.png",
+                title="Cluster QC overview",
+                description="Cluster-level mean genes, counts, and mitochondrial fraction when available.",
                 required_obs=[cluster_key],
             ),
             PlotSpec(
@@ -244,8 +322,47 @@ def _gallery_figure_path(output_dir: Path, filename: str) -> Path:
     return Path(output_dir) / "figures" / filename
 
 
-def _render_umap_clusters(adata, spec: PlotSpec, context: dict) -> object:
-    sc_dimred_utils.plot_umap_clusters(adata, context["output_dir"], cluster_key=context["cluster_key"])
+def _render_embedding_clusters(adata, spec: PlotSpec, context: dict) -> object:
+    plot_embedding_categorical(
+        adata,
+        context["output_dir"],
+        obsm_key=context["embedding_key"],
+        color_key=context["cluster_key"],
+        filename=spec.filename,
+        title=f"{context['embedding_method'].upper()} clusters",
+        subtitle=f"Embedding: {context['embedding_key']} | cluster: {context['cluster_key']}",
+    )
+    path = _gallery_figure_path(context["output_dir"], spec.filename)
+    return path if path.exists() else None
+
+
+def _render_embedding_comparison(adata, spec: PlotSpec, context: dict) -> object:
+    if not context.get("compare_key"):
+        return None
+    compare_keys = [context["cluster_key"]]
+    compare_keys.append(context["compare_key"])
+    plot_embedding_comparison(
+        adata,
+        context["output_dir"],
+        obsm_key=context["embedding_key"],
+        color_keys=compare_keys,
+        filename=spec.filename,
+        title=f"{context['embedding_method'].upper()} comparison view",
+    )
+    path = _gallery_figure_path(context["output_dir"], spec.filename)
+    return path if path.exists() else None
+
+
+def _render_cluster_size_summary(adata, spec: PlotSpec, context: dict) -> object:
+    plot_cluster_size_summary(context["cluster_summary_df"], context["output_dir"], filename=spec.filename)
+    path = _gallery_figure_path(context["output_dir"], spec.filename)
+    return path if path.exists() else None
+
+
+def _render_cluster_qc_heatmap(adata, spec: PlotSpec, context: dict) -> object:
+    if context["cluster_qc_df"].empty:
+        return None
+    plot_cluster_qc_heatmap(context["cluster_qc_df"].set_index(context["cluster_key"]), context["output_dir"], filename=spec.filename)
     path = _gallery_figure_path(context["output_dir"], spec.filename)
     return path if path.exists() else None
 
@@ -263,7 +380,10 @@ def _render_pca_scatter(adata, spec: PlotSpec, context: dict) -> object:
 
 
 CLUSTER_GALLERY_RENDERERS = {
-    "umap_clusters": _render_umap_clusters,
+    "embedding_clusters": _render_embedding_clusters,
+    "embedding_comparison": _render_embedding_comparison,
+    "cluster_size_summary": _render_cluster_size_summary,
+    "cluster_qc_heatmap": _render_cluster_qc_heatmap,
     "pca_variance": _render_pca_variance,
     "pca_scatter": _render_pca_scatter,
 }
@@ -273,15 +393,18 @@ def _write_figure_data(output_dir: Path, context: dict, recipe: VisualizationRec
     figure_data_dir = output_dir / "figure_data"
     figure_data_dir.mkdir(parents=True, exist_ok=True)
     context["cluster_summary_df"].to_csv(figure_data_dir / "cluster_summary.csv", index=False)
-    context["umap_points_df"].to_csv(figure_data_dir / "umap_points.csv", index=False)
+    context["embedding_points_df"].to_csv(figure_data_dir / "embedding_points.csv", index=False)
     context["clustering_summary_df"].to_csv(figure_data_dir / "clustering_summary.csv", index=False)
+    if not context["cluster_qc_df"].empty:
+        context["cluster_qc_df"].to_csv(figure_data_dir / "cluster_qc_summary.csv", index=False)
     manifest = {
         "skill": SKILL_NAME,
         "recipe_id": recipe.recipe_id,
         "available_files": {
             "cluster_summary": "cluster_summary.csv",
-            "umap_points": "umap_points.csv",
+            "embedding_points": "embedding_points.csv",
             "clustering_summary": "clustering_summary.csv",
+            **({"cluster_qc_summary": "cluster_qc_summary.csv"} if not context["cluster_qc_df"].empty else {}),
         },
         "plots": [
             {"plot_id": artifact.plot_id, "filename": artifact.filename, "status": artifact.status, "role": artifact.role}
@@ -305,22 +428,31 @@ def write_report(output_dir: Path, summary: dict, params: dict, input_file: str 
     )
     body = [
         "## Summary\n",
-        f"- **Embedding used**: `{params['use_rep']}`",
+        f"- **Neighbor graph source**: `{params['use_rep']}`",
+        f"- **Embedding method**: `{params['embedding_method']}`",
+        f"- **Rendered embedding**: `{params['embedding_key']}`",
         f"- **Cluster method**: {summary['cluster_method']}",
         f"- **Cluster key**: `{summary['cluster_key']}`",
         f"- **Cells**: {summary['n_cells']}",
         f"- **Clusters**: {summary['n_clusters']}",
         "",
         "## Effective Parameters\n",
+        f"- `embedding_method`: {params['embedding_method']}",
         f"- `n_neighbors`: {params['n_neighbors']}",
         f"- `n_pcs`: {params['n_pcs']}",
         f"- `resolution`: {params['resolution']}",
         "",
+        "## Recommended Next Steps\n",
+        "- Inspect `tables/cluster_summary.csv` and the embedding gallery to judge whether clusters are too coarse or too fragmented.",
+        "- If marker discovery is next: run `sc-markers`.",
+        "- If cell type interpretation is next: run `sc-cell-annotation`.",
+        "- If you need group-level testing after labels are stable: run `sc-de`.",
+        "",
         "## Output Files\n",
-        "- `processed.h5ad` — clustered AnnData with `neighbors`, `X_umap`, and cluster labels.",
+        "- `processed.h5ad` — clustered AnnData with neighbor graph, embedding coordinates, and cluster labels.",
         "- `figures/` — standard clustering gallery.",
         "- `tables/cluster_summary.csv` — per-cluster cell counts.",
-        "- `figure_data/umap_points.csv` — UMAP coordinates for downstream styling.",
+        "- `figure_data/embedding_points.csv` — rendered embedding coordinates for downstream styling.",
     ]
     report = header + "\n".join(body) + "\n" + generate_report_footer()
     (output_dir / "report.md").write_text(report, encoding="utf-8")
@@ -337,7 +469,7 @@ def write_reproducibility(output_dir: Path, params: dict, input_file: str | None
     else:
         command_parts.extend(["--input", "<input.h5ad>"])
     command_parts.extend(["--output", str(output_dir)])
-    for key in ("cluster_method", "use_rep", "n_neighbors", "n_pcs", "resolution"):
+    for key in ("cluster_method", "embedding_method", "use_rep", "n_neighbors", "n_pcs", "resolution"):
         value = params.get(key)
         if value not in (None, ""):
             command_parts.extend([f"--{key.replace('_', '-')}", str(value)])
@@ -366,6 +498,7 @@ def main():
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--embedding-method", choices=["umap", "tsne", "diffmap"], default="umap")
     parser.add_argument("--cluster-method", choices=["leiden", "louvain"], default="leiden")
     parser.add_argument("--use-rep", default=None, help="Embedding in adata.obsm to use, e.g. X_pca or X_harmony")
     parser.add_argument("--n-neighbors", type=int, default=15)
@@ -389,6 +522,7 @@ def main():
         preflight_sc_clustering(
             adata,
             cluster_method=args.cluster_method,
+            embedding_method=args.embedding_method,
             use_rep=args.use_rep,
             source_path=input_file,
         ),
@@ -399,6 +533,7 @@ def main():
     adata, _ = run_clustering(
         adata,
         use_rep=use_rep,
+        embedding_method=args.embedding_method,
         n_neighbors=args.n_neighbors,
         n_pcs=args.n_pcs,
         cluster_method=args.cluster_method,
@@ -415,6 +550,8 @@ def main():
     )
 
     gallery_context = _prepare_gallery_context(adata, summary, {
+        "embedding_method": args.embedding_method,
+        "embedding_key": _embedding_key_from_method(args.embedding_method),
         "use_rep": use_rep,
         "n_neighbors": args.n_neighbors,
         "n_pcs": args.n_pcs,
@@ -428,9 +565,13 @@ def main():
     tables_dir.mkdir(exist_ok=True)
     gallery_context["cluster_summary_df"].to_csv(tables_dir / "cluster_summary.csv", index=False)
     gallery_context["clustering_summary_df"].to_csv(tables_dir / "clustering_summary.csv", index=False)
-    gallery_context["umap_points_df"].to_csv(tables_dir / "umap_points.csv", index=False)
+    gallery_context["embedding_points_df"].to_csv(tables_dir / "embedding_points.csv", index=False)
+    if not gallery_context["cluster_qc_df"].empty:
+        gallery_context["cluster_qc_df"].to_csv(tables_dir / "cluster_qc_summary.csv", index=False)
 
     params = {
+        "embedding_method": args.embedding_method,
+        "embedding_key": _embedding_key_from_method(args.embedding_method),
         "cluster_method": args.cluster_method,
         "use_rep": use_rep,
         "n_neighbors": args.n_neighbors,
@@ -452,7 +593,8 @@ def main():
         "visualization": {
             "recipe_id": recipe.recipe_id,
             "cluster_column": summary["cluster_key"],
-            "umap_key": "X_umap",
+            "embedding_method": args.embedding_method,
+            "embedding_key": _embedding_key_from_method(args.embedding_method),
             "available_figure_data": gallery_context.get("figure_data_files", {}),
         },
         **summary,

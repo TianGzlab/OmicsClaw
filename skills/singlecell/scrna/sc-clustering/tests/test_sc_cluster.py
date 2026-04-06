@@ -30,7 +30,7 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "figures" / "manifest.json").exists()
     assert (tmp_output / "figure_data" / "manifest.json").exists()
     assert (tmp_output / "tables" / "cluster_summary.csv").exists()
-    assert (tmp_output / "tables" / "umap_points.csv").exists()
+    assert (tmp_output / "tables" / "embedding_points.csv").exists()
 
 
 def test_demo_result_json(tmp_output):
@@ -45,3 +45,5 @@ def test_demo_result_json(tmp_output):
     assert data["skill"] == "sc-clustering"
     assert data["data"]["visualization"]["recipe_id"] == "standard-sc-clustering-gallery"
     assert data["data"]["visualization"]["cluster_column"] == "leiden"
+    assert data["data"]["visualization"]["embedding_method"] == "umap"
+    assert data["data"]["visualization"]["embedding_key"] == "X_umap"

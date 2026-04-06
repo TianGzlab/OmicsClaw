@@ -912,9 +912,9 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "legacy_aliases": ["sc-dimred-cluster"],
         "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-clustering" / "sc_cluster.py",
         "demo_args": ["--demo"],
-        "description": "Single-cell neighbors, UMAP, and graph clustering from normalized or integrated embeddings",
+        "description": "Single-cell neighbors, low-dimensional embedding, and graph clustering from normalized or integrated embeddings",
         "allowed_extra_flags": {
-            "--cluster-method", "--use-rep", "--n-neighbors", "--n-pcs", "--resolution",
+            "--embedding-method", "--cluster-method", "--use-rep", "--n-neighbors", "--n-pcs", "--resolution",
         },
         "saves_h5ad": True,
         "requires_preprocessed": True,
