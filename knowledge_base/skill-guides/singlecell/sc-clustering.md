@@ -34,6 +34,7 @@ Tune in this order:
 2. clustering resolution
 3. embedding choice (`use_rep`) when multiple embeddings exist
 4. embedding method (`umap`, `tsne`, `diffmap`) for visualization
+5. method-specific parameters for the selected embedding backend
 
 Guidance:
 - smaller `n_neighbors` emphasizes local structure
@@ -43,6 +44,9 @@ Guidance:
 - `umap` is the default first-pass view
 - `tsne` is useful when the user wants a second view of local neighborhoods
 - `diffmap` is useful when the user wants a smoother manifold-style embedding
+- `umap` key parameters: `umap_min_dist`, `umap_spread`
+- `tsne` key parameters: `tsne_perplexity`, `tsne_metric`
+- `diffmap` key parameter: `diffmap_n_comps`
 
 ## Output Interpretation
 

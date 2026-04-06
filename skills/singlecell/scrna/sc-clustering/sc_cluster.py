@@ -78,6 +78,8 @@ def preflight_sc_clustering(
     cluster_method: str,
     embedding_method: str,
     use_rep: str | None,
+    tsne_perplexity: float,
+    diffmap_n_comps: int,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision(SKILL_NAME)
@@ -124,6 +126,10 @@ def preflight_sc_clustering(
         decision.block(
             "`louvain` clustering requires the optional Python package `louvain`, which is not installed in the current environment. Install it explicitly before rerunning."
         )
+    if embedding_method == "tsne" and tsne_perplexity <= 0:
+        decision.block("`--tsne-perplexity` must be greater than 0.")
+    if embedding_method == "diffmap" and diffmap_n_comps < 2:
+        decision.block("`--diffmap-n-comps` must be at least 2.")
 
     batch_candidates = _obs_candidates(adata, "batch")
     if batch_candidates and not any(key in adata.obsm for key in ("X_harmony", "X_scvi", "X_scanvi", "X_scanorama")):
@@ -152,6 +158,11 @@ def run_clustering(
     n_pcs: int = 50,
     cluster_method: str = "leiden",
     resolution: float = 1.0,
+    umap_min_dist: float = 0.5,
+    umap_spread: float = 1.0,
+    tsne_perplexity: float = 30.0,
+    tsne_metric: str = "euclidean",
+    diffmap_n_comps: int = 15,
 ) -> tuple[object, dict]:
     sc_dimred_utils.build_neighbor_graph(
         adata,
@@ -166,11 +177,23 @@ def run_clustering(
     else:
         sc_dimred_utils.cluster_louvain(adata, resolution=resolution, key_added=cluster_key, inplace=True)
     if embedding_method == "umap":
-        sc_dimred_utils.run_umap_reduction(adata, inplace=True)
+        sc_dimred_utils.run_umap_reduction(
+            adata,
+            min_dist=umap_min_dist,
+            spread=umap_spread,
+            inplace=True,
+        )
     elif embedding_method == "tsne":
-        sc_dimred_utils.run_tsne_reduction(adata, n_pcs=n_pcs, use_rep=use_rep, inplace=True)
+        sc_dimred_utils.run_tsne_reduction(
+            adata,
+            n_pcs=n_pcs,
+            use_rep=use_rep,
+            perplexity=tsne_perplexity,
+            metric=tsne_metric,
+            inplace=True,
+        )
     else:
-        sc_dimred_utils.run_diffmap(adata, inplace=True)
+        sc_dimred_utils.run_diffmap(adata, n_comps=diffmap_n_comps, inplace=True)
     embedding_key = _embedding_key_from_method(embedding_method)
     return adata, {"cluster_key": cluster_key, "embedding_key": embedding_key}
 
@@ -205,20 +228,35 @@ def _build_embedding_points_table(adata, cluster_key: str, embedding_key: str, e
 
 
 def _build_clustering_summary_table(summary: dict, params: dict) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {"metric": "embedding_method", "value": params.get("embedding_method")},
-            {"metric": "embedding_key", "value": params.get("embedding_key")},
-            {"metric": "cluster_method", "value": summary.get("cluster_method")},
-            {"metric": "cluster_key", "value": summary.get("cluster_key")},
-            {"metric": "n_cells", "value": summary.get("n_cells")},
-            {"metric": "n_clusters", "value": summary.get("n_clusters")},
-            {"metric": "use_rep", "value": params.get("use_rep")},
-            {"metric": "n_neighbors", "value": params.get("n_neighbors")},
-            {"metric": "n_pcs", "value": params.get("n_pcs")},
-            {"metric": "resolution", "value": params.get("resolution")},
-        ]
-    )
+    rows = [
+        {"metric": "embedding_method", "value": params.get("embedding_method")},
+        {"metric": "embedding_key", "value": params.get("embedding_key")},
+        {"metric": "cluster_method", "value": summary.get("cluster_method")},
+        {"metric": "cluster_key", "value": summary.get("cluster_key")},
+        {"metric": "n_cells", "value": summary.get("n_cells")},
+        {"metric": "n_clusters", "value": summary.get("n_clusters")},
+        {"metric": "use_rep", "value": params.get("use_rep")},
+        {"metric": "n_neighbors", "value": params.get("n_neighbors")},
+        {"metric": "n_pcs", "value": params.get("n_pcs")},
+        {"metric": "resolution", "value": params.get("resolution")},
+    ]
+    if params.get("embedding_method") == "umap":
+        rows.extend(
+            [
+                {"metric": "umap_min_dist", "value": params.get("umap_min_dist")},
+                {"metric": "umap_spread", "value": params.get("umap_spread")},
+            ]
+        )
+    elif params.get("embedding_method") == "tsne":
+        rows.extend(
+            [
+                {"metric": "tsne_perplexity", "value": params.get("tsne_perplexity")},
+                {"metric": "tsne_metric", "value": params.get("tsne_metric")},
+            ]
+        )
+    elif params.get("embedding_method") == "diffmap":
+        rows.append({"metric": "diffmap_n_comps", "value": params.get("diffmap_n_comps")})
+    return pd.DataFrame(rows)
 
 
 def _prepare_gallery_context(adata, summary: dict, params: dict, output_dir: Path) -> dict:
@@ -229,6 +267,12 @@ def _prepare_gallery_context(adata, summary: dict, params: dict, output_dir: Pat
         or _obs_candidates(adata, "cell_type")
     )
     compare_key = compare_candidates[0] if compare_candidates else None
+    if compare_key and compare_key == cluster_key:
+        compare_key = None
+    if compare_key and adata.obs[compare_key].astype(str).nunique(dropna=False) <= 1:
+        compare_key = None
+    if compare_key and adata.obs[compare_key].astype(str).equals(adata.obs[cluster_key].astype(str)):
+        compare_key = None
     qc_df = pd.DataFrame()
     if any(col in adata.obs.columns for col in ("n_genes_by_counts", "total_counts", "pct_counts_mt")):
         try:
@@ -438,6 +482,7 @@ def write_report(output_dir: Path, summary: dict, params: dict, input_file: str 
         "",
         "## Effective Parameters\n",
         f"- `embedding_method`: {params['embedding_method']}",
+        f"- `use_rep`: {params['use_rep']}",
         f"- `n_neighbors`: {params['n_neighbors']}",
         f"- `n_pcs`: {params['n_pcs']}",
         f"- `resolution`: {params['resolution']}",
@@ -469,7 +514,19 @@ def write_reproducibility(output_dir: Path, params: dict, input_file: str | None
     else:
         command_parts.extend(["--input", "<input.h5ad>"])
     command_parts.extend(["--output", str(output_dir)])
-    for key in ("cluster_method", "embedding_method", "use_rep", "n_neighbors", "n_pcs", "resolution"):
+    for key in (
+        "cluster_method",
+        "embedding_method",
+        "use_rep",
+        "n_neighbors",
+        "n_pcs",
+        "resolution",
+        "umap_min_dist",
+        "umap_spread",
+        "tsne_perplexity",
+        "tsne_metric",
+        "diffmap_n_comps",
+    ):
         value = params.get(key)
         if value not in (None, ""):
             command_parts.extend([f"--{key.replace('_', '-')}", str(value)])
@@ -504,6 +561,11 @@ def main():
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--n-pcs", type=int, default=50)
     parser.add_argument("--resolution", type=float, default=1.0)
+    parser.add_argument("--umap-min-dist", type=float, default=0.5)
+    parser.add_argument("--umap-spread", type=float, default=1.0)
+    parser.add_argument("--tsne-perplexity", type=float, default=30.0)
+    parser.add_argument("--tsne-metric", default="euclidean")
+    parser.add_argument("--diffmap-n-comps", type=int, default=15)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -524,6 +586,8 @@ def main():
             cluster_method=args.cluster_method,
             embedding_method=args.embedding_method,
             use_rep=args.use_rep,
+            tsne_perplexity=args.tsne_perplexity,
+            diffmap_n_comps=args.diffmap_n_comps,
             source_path=input_file,
         ),
         logger,
@@ -538,6 +602,11 @@ def main():
         n_pcs=args.n_pcs,
         cluster_method=args.cluster_method,
         resolution=args.resolution,
+        umap_min_dist=args.umap_min_dist,
+        umap_spread=args.umap_spread,
+        tsne_perplexity=args.tsne_perplexity,
+        tsne_metric=args.tsne_metric,
+        diffmap_n_comps=args.diffmap_n_comps,
     )
     summary = build_summary(adata, cluster_key=args.cluster_method, cluster_method=args.cluster_method)
     input_contract, matrix_contract = propagate_singlecell_contracts(
@@ -556,6 +625,11 @@ def main():
         "n_neighbors": args.n_neighbors,
         "n_pcs": args.n_pcs,
         "resolution": args.resolution,
+        "umap_min_dist": args.umap_min_dist,
+        "umap_spread": args.umap_spread,
+        "tsne_perplexity": args.tsne_perplexity,
+        "tsne_metric": args.tsne_metric,
+        "diffmap_n_comps": args.diffmap_n_comps,
     }, output_dir)
     recipe = _build_visualization_recipe(summary)
     artifacts = render_plot_specs(adata, output_dir, recipe, CLUSTER_GALLERY_RENDERERS, context=gallery_context)
@@ -577,6 +651,11 @@ def main():
         "n_neighbors": args.n_neighbors,
         "n_pcs": args.n_pcs,
         "resolution": args.resolution,
+        "umap_min_dist": args.umap_min_dist,
+        "umap_spread": args.umap_spread,
+        "tsne_perplexity": args.tsne_perplexity,
+        "tsne_metric": args.tsne_metric,
+        "diffmap_n_comps": args.diffmap_n_comps,
     }
     write_report(output_dir, summary, params, input_file, gallery_context=gallery_context)
     write_reproducibility(output_dir, params, input_file, demo_mode=args.demo)

@@ -17,6 +17,11 @@ metadata:
       - "--n-neighbors"
       - "--n-pcs"
       - "--resolution"
+      - "--umap-min-dist"
+      - "--umap-spread"
+      - "--tsne-perplexity"
+      - "--tsne-metric"
+      - "--diffmap-n-comps"
     saves_h5ad: true
     requires_preprocessed: true
     legacy_aliases: [sc-dimred-cluster]
@@ -46,6 +51,11 @@ Main tuning knobs:
 - `--n-neighbors`: local neighborhood size
 - `--n-pcs`: number of PCA dimensions when the neighbor graph is built from `X_pca`
 - `--resolution`: cluster granularity
+
+Method-specific parameters:
+- `umap`: `--umap-min-dist`, `--umap-spread`
+- `tsne`: `--tsne-perplexity`, `--tsne-metric`
+- `diffmap`: `--diffmap-n-comps`
 
 Typical path:
 - if the object still has batch effects: `sc-preprocessing -> sc-batch-integration -> sc-clustering`

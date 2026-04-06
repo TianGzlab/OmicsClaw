@@ -15,10 +15,12 @@ Use this file when adding or refactoring preflight checks for scRNA skills.
 2. missing metadata
 3. method-specific prerequisites
 4. whether the requested question is scientifically ambiguous
+5. whether a method-specific parameter set must be surfaced instead of using one generic default
 
 ## Ask The User When
 
 - more than one `groupby`, `batch_key`, `sample_key`, `cluster_key`, or `cell_type_key` is plausible
+- more than one embedding / representation is plausible and the choice changes the result
 - reference or model choice changes the scientific meaning
 - a fallback would change the biological interpretation
 

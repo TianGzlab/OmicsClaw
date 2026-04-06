@@ -10,6 +10,7 @@ Every scRNA skill should declare:
 - whether it needs raw counts or normalized expression
 - where it expects them from (`layers["counts"]`, `X`, `raw`)
 - whether clustering / labels / batch metadata must already exist
+- if the skill has multiple methods, which parameters are shared and which parameters are method-specific
 
 ### Workflow Section
 
@@ -32,6 +33,7 @@ Use `processed.h5ad` as the standard output object name.
 - write `adata.uns["omicsclaw_matrix_contract"]`
 - ensure matrix semantics match `templates/singlecell/SC-MATRIX-CONTRACT.md`
 - ensure preflight follows `templates/singlecell/SC-PREFLIGHT-RULES.md`
+- if multiple methods exist, map method-specific CLI parameters explicitly instead of hiding them behind one generic parameter set
 
 ## Required Additions For Companion Docs
 
@@ -48,3 +50,4 @@ Do not do these:
 - assume `adata.X` always means normalized expression
 - silently use count-like `X` for normalized-only methods
 - persist `scaled_expression` as the public output meaning of `X`
+- expose only a generic parameter set when different methods have different real tuning knobs

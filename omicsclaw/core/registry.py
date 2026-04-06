@@ -915,6 +915,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "description": "Single-cell neighbors, low-dimensional embedding, and graph clustering from normalized or integrated embeddings",
         "allowed_extra_flags": {
             "--embedding-method", "--cluster-method", "--use-rep", "--n-neighbors", "--n-pcs", "--resolution",
+            "--umap-min-dist", "--umap-spread", "--tsne-perplexity", "--tsne-metric", "--diffmap-n-comps",
         },
         "saves_h5ad": True,
         "requires_preprocessed": True,
