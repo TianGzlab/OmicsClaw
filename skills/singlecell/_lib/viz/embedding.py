@@ -38,6 +38,17 @@ def make_categorical_palette(values: Iterable[str]) -> dict[str, str]:
     if not unique_values:
         return {}
 
+    # Keep binary doublet-style labels visually far apart instead of relying on tab20 ordering.
+    normalized = {value.lower() for value in unique_values}
+    if normalized <= {"singlet", "doublet"} and normalized:
+        palette = {
+            "Singlet": "#2B6CB0",
+            "Doublet": "#D1495B",
+            "singlet": "#2B6CB0",
+            "doublet": "#D1495B",
+        }
+        return {value: palette.get(value, palette.get(value.lower(), "#2B6CB0")) for value in unique_values}
+
     base = sns.color_palette("tab20", min(len(unique_values), 20))
     if len(unique_values) > 20:
         extra = sns.color_palette("husl", len(unique_values))
