@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 
@@ -26,6 +27,22 @@ def test_validate_server_security_allows_local_without_token():
     from omicsclaw.memory.server import _validate_server_security
 
     _validate_server_security("127.0.0.1", "")
+
+
+def test_memory_server_main_reports_missing_uvicorn(monkeypatch, capsys):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.memory import server
+
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        server.main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "uvicorn is not installed" in captured.out
+    assert 'pip install -e ".[memory]"' in captured.out
 
 
 def test_memory_server_docs_and_openapi_require_auth_when_token_set(monkeypatch, tmp_path):

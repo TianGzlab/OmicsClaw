@@ -56,6 +56,7 @@ logger = logging.getLogger("omicsclaw.app_server")
 __version__ = "0.1.0"
 DEFAULT_APP_API_HOST = "127.0.0.1"
 DEFAULT_APP_API_PORT = 8765
+_APP_SERVER_INSTALL_HINT = 'pip install -e ".[desktop]"'
 
 # ---------------------------------------------------------------------------
 # Lazy references to bot.core — resolved once at startup via lifespan
@@ -198,6 +199,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount autoagent optimization router
+try:
+    from omicsclaw.autoagent.api import router as optimize_router
+    app.include_router(optimize_router)
+except ImportError:
+    pass  # autoagent module not available
 
 
 # ---------------------------------------------------------------------------
@@ -3559,7 +3567,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None):
     """Run the server from command line."""
-    import uvicorn
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "ERROR: uvicorn is not installed. "
+            f"Install with: {_APP_SERVER_INSTALL_HINT}",
+            file=sys.stderr,
+        )
+        print("Minimal alternative: pip install fastapi uvicorn", file=sys.stderr)
+        raise SystemExit(1)
 
     args = _parse_args(argv)
 

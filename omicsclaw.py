@@ -25,6 +25,7 @@ MCP Server Management:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -60,6 +61,9 @@ RED = "\033[31m" if _COLOUR else ""
 CYAN = "\033[36m" if _COLOUR else ""
 RESET = "\033[0m" if _COLOUR else ""
 
+_APP_SERVER_INSTALL_HINT = 'pip install -e ".[desktop]"'
+_MEMORY_SERVER_INSTALL_HINT = 'pip install -e ".[memory]"'
+
 # ---------------------------------------------------------------------------
 # Skills and Domain metadata registry
 # ---------------------------------------------------------------------------
@@ -88,6 +92,35 @@ SPATIAL_PIPELINE = [
     "spatial-genes",
     "spatial-statistics",
 ]
+
+
+def _module_available(module_name: str) -> bool:
+    """Return True when a Python module is importable in this environment."""
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def _ensure_server_dependencies(
+    *,
+    command_name: str,
+    requirements: list[tuple[str, str]],
+    install_hint: str,
+) -> None:
+    """Fail fast with a clear install hint for optional server dependencies."""
+    missing = [pip_name for module_name, pip_name in requirements if not _module_available(module_name)]
+    if not missing:
+        return
+
+    print(
+        f"{RED}Error:{RESET} `{command_name}` requires optional dependencies that are not installed: "
+        f"{', '.join(missing)}",
+        file=sys.stderr,
+    )
+    print(f"Install with: {install_hint}", file=sys.stderr)
+    print("Minimal alternative: pip install fastapi uvicorn", file=sys.stderr)
+    raise SystemExit(1)
 
 # Canonical workflow order per domain — skills are displayed in this sequence.
 # Skills not listed here appear at the end in alphabetical order.
@@ -971,6 +1004,19 @@ def main():
     kb_list = kb_sub.add_parser("list", help="List knowledge topics")
     kb_list.add_argument("--domain", default=None, help="Filter by domain")
 
+    # optimize — autoagent parameter optimization
+    opt_p = sub.add_parser("optimize", help="Auto-optimize skill parameters via LLM meta-agent")
+    opt_p.add_argument("skill", help="Skill to optimize (e.g. sc-batch-integration)")
+    opt_p.add_argument("--input", dest="input_path")
+    opt_p.add_argument("--output", dest="output_dir")
+    opt_p.add_argument("--method", required=True, help="Method within the skill")
+    opt_p.add_argument("--max-trials", type=int, default=20, help="Maximum optimization trials")
+    opt_p.add_argument("--provider", default="", help="LLM provider for meta-agent")
+    opt_p.add_argument("--llm-model", default="", help="LLM model for meta-agent")
+    opt_p.add_argument("--batch-key", default=None)
+    opt_p.add_argument("--labels-key", default=None)
+    opt_p.add_argument("--demo", action="store_true")
+
     # run
     run_p = sub.add_parser("run", help="Run a skill")
     run_p.add_argument("skill", help="Skill alias (e.g. preprocess, domains) or 'spatial-pipeline'")
@@ -1060,7 +1106,9 @@ def main():
     # are not explicitly registered at the top-level CLI parser.
     args, unknown_args = parser.parse_known_args()
 
-    # For non-run commands, keep strict argument validation behavior.
+    # Only `run` consumes unknown args. All other commands, including
+    # `optimize`, must fail fast on unrecognized flags so users do not assume
+    # unsupported options were accepted.
     if getattr(args, "command", None) != "run" and unknown_args:
         parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
 
@@ -1070,6 +1118,73 @@ def main():
 
     if args.command == "list":
         list_skills(domain_filter=getattr(args, "domain", None))
+        sys.exit(0)
+
+    if args.command == "optimize":
+        from omicsclaw.autoagent import run_optimization
+
+        # Collect fixed params from CLI flags
+        fixed_params = {}
+        if getattr(args, "batch_key", None):
+            fixed_params["batch_key"] = args.batch_key
+        if getattr(args, "labels_key", None):
+            fixed_params["labels_key"] = args.labels_key
+
+        def _print_event(event_type: str, data: dict) -> None:
+            if event_type == "trial_start":
+                params_str = ", ".join(f"{k}={v}" for k, v in data.get("params", {}).items())
+                print(f"\n{BOLD}Trial #{data['trial_id']}{RESET}: [{params_str}]")
+            elif event_type == "trial_complete":
+                status = data.get("status", "")
+                score = data.get("score", 0)
+                color = GREEN if status in ("keep", "baseline") else RED if status == "discard" else YELLOW
+                print(f"  Score: {score:.4f}  Status: {color}{status}{RESET}")
+            elif event_type == "reasoning":
+                reasoning = data.get("reasoning", "")
+                if reasoning:
+                    short = reasoning[:120] + ("..." if len(reasoning) > 120 else "")
+                    print(f"  {CYAN}Reasoning:{RESET} {short}")
+            elif event_type == "progress":
+                completed = data.get("completed", 0)
+                total = data.get("total", 0)
+                best = data.get("best_score", "N/A")
+                if isinstance(best, float):
+                    best = f"{best:.4f}"
+                print(f"  [{completed}/{total}] Best: {best}")
+            elif event_type == "done":
+                improvement = data.get("improvement_pct", 0)
+                print(f"\n{GREEN}{BOLD}Optimization complete!{RESET}")
+                print(f"  Improvement: {improvement:+.1f}%")
+                best_trial = data.get("best_trial")
+                if best_trial:
+                    params_str = ", ".join(
+                        f"{k}={v}" for k, v in best_trial.get("params", {}).items()
+                    )
+                    print(f"  Best params: {params_str}")
+            elif event_type == "error":
+                print(f"{RED}Error:{RESET} {data.get('message', '')}")
+
+        result = run_optimization(
+            skill_name=args.skill,
+            method=args.method,
+            input_path=getattr(args, "input_path", "") or "",
+            output_dir=getattr(args, "output_dir", "") or "",
+            max_trials=args.max_trials,
+            fixed_params=fixed_params if fixed_params else None,
+            llm_provider=args.provider,
+            llm_model=args.llm_model,
+            demo=getattr(args, "demo", False),
+            on_event=_print_event,
+        )
+
+        if not result.get("success"):
+            print(f"\n{RED}Optimization failed:{RESET} {result.get('error', 'Unknown error')}")
+            sys.exit(1)
+
+        print(f"\n{BOLD}Results saved to:{RESET} {result.get('output_dir', '')}")
+        if result.get("reproduce_command"):
+            print(f"{BOLD}Reproduce best:{RESET}")
+            print(result["reproduce_command"])
         sys.exit(0)
 
     if args.command == "onboard":
@@ -1171,6 +1286,11 @@ def main():
             sys.exit(1)
 
     if args.command == "memory-server":
+        _ensure_server_dependencies(
+            command_name="memory-server",
+            requirements=[("fastapi", "fastapi"), ("uvicorn", "uvicorn")],
+            install_hint=_MEMORY_SERVER_INSTALL_HINT,
+        )
         import os
         if getattr(args, "host", None):
             os.environ["OMICSCLAW_MEMORY_HOST"] = args.host
@@ -1181,6 +1301,11 @@ def main():
         sys.exit(0)
 
     if args.command == "app-server":
+        _ensure_server_dependencies(
+            command_name="app-server",
+            requirements=[("fastapi", "fastapi"), ("uvicorn", "uvicorn")],
+            install_hint=_APP_SERVER_INSTALL_HINT,
+        )
         app_args: list[str] = []
         if getattr(args, "host", None):
             app_args.extend(["--host", args.host])

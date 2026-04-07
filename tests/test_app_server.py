@@ -88,6 +88,22 @@ def test_app_server_main_uses_default_contract(monkeypatch):
     assert captured["reload"] is False
 
 
+def test_app_server_main_reports_missing_uvicorn(monkeypatch, capsys):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        server.main([])
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "uvicorn is not installed" in captured.err
+    assert 'pip install -e ".[desktop]"' in captured.err
+
+
 def test_app_server_cli_dispatches(monkeypatch):
     oc = _load_omicsclaw_script()
     fake_server = ModuleType("omicsclaw.app.server")
@@ -98,6 +114,7 @@ def test_app_server_cli_dispatches(monkeypatch):
 
     fake_server.main = fake_main
     monkeypatch.setitem(sys.modules, "omicsclaw.app.server", fake_server)
+    monkeypatch.setattr(oc, "_ensure_server_dependencies", lambda **_: None)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -109,6 +126,36 @@ def test_app_server_cli_dispatches(monkeypatch):
 
     assert excinfo.value.code == 0
     assert captured["argv"] == ["--host", "0.0.0.0", "--port", "9123", "--reload"]
+
+
+def test_app_server_cli_fails_fast_when_uvicorn_missing(monkeypatch, capsys):
+    oc = _load_omicsclaw_script()
+    monkeypatch.setattr(oc, "_module_available", lambda name: name != "uvicorn")
+    monkeypatch.setattr(sys, "argv", ["omicsclaw.py", "app-server"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        oc.main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "`app-server` requires optional dependencies" in captured.err
+    assert "uvicorn" in captured.err
+    assert 'pip install -e ".[desktop]"' in captured.err
+
+
+def test_memory_server_cli_fails_fast_when_uvicorn_missing(monkeypatch, capsys):
+    oc = _load_omicsclaw_script()
+    monkeypatch.setattr(oc, "_module_available", lambda name: name != "uvicorn")
+    monkeypatch.setattr(sys, "argv", ["omicsclaw.py", "memory-server"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        oc.main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "`memory-server` requires optional dependencies" in captured.err
+    assert "uvicorn" in captured.err
+    assert 'pip install -e ".[memory]"' in captured.err
 
 
 @pytest.mark.asyncio
