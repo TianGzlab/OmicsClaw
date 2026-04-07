@@ -945,8 +945,8 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "legacy_aliases": ["sc-annotate"],
         "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-cell-annotation" / "sc_annotate.py",
         "demo_args": ["--demo"],
-        "description": "Cell type annotation (markers, CellTypist, PopV-style reference mapping, SingleR, scmap)",
-        "allowed_extra_flags": {"--method", "--reference", "--species", "--cluster-key", "--model"},
+        "description": "Cell type annotation (markers, CellTypist, PopV-style mapping, KNNPredict-style mapping, SingleR, scmap)",
+        "allowed_extra_flags": {"--method", "--reference", "--cluster-key", "--model", "--celltypist-majority-voting", "--no-celltypist-majority-voting"},
         "saves_h5ad": True,
     },
     # sc-trajectory: replaced by sc-pseudotime and sc-velocity

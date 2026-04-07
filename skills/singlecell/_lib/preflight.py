@@ -295,41 +295,156 @@ def preflight_sc_cell_annotation(
     method: str,
     model: str,
     reference: str,
-    cluster_key: str,
+    cluster_key: str | None,
+    celltypist_majority_voting: bool = False,
+    manual_map: str | None = None,
+    manual_map_file: str | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-cell-annotation")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
+    matrix_contract = get_matrix_contract(adata)
+    cluster_candidates: list[str] = []
+    primary_cluster_key = matrix_contract.get("primary_cluster_key")
+    if primary_cluster_key and primary_cluster_key in adata.obs.columns:
+        cluster_candidates.append(str(primary_cluster_key))
+    for key in _obs_candidates(adata, "cluster"):
+        if key not in cluster_candidates:
+            cluster_candidates.append(key)
+
     if method == "markers":
-        if cluster_key not in adata.obs.columns:
-            candidates = _obs_candidates(adata, "cluster")
-            if candidates:
+        if cluster_key:
+            if cluster_key not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "cluster_key",
+                        f"`--cluster-key {cluster_key}` was not found. Confirm which existing cluster/label column should guide marker-based annotation: {_format_candidates(cluster_candidates)}.",
+                        aliases=["cluster_key", "groupby"],
+                        flag="--cluster-key",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.add_guidance(
+                        "`markers` annotation will not auto-cluster implicitly; cluster assignments should come from `sc-clustering` or another explicit upstream step."
+                    )
+                    decision.block(
+                        "Marker-based annotation requires an existing cluster/label column in `adata.obs`. Run `sc-clustering` first."
+                    )
+            else:
+                decision.add_guidance(f"`markers` will use `cluster_key={cluster_key}`.")
+        else:
+            if len(cluster_candidates) > 1:
+                decision.require_field(
+                    "cluster_key",
+                    f"`markers` annotation needs a cluster/label column. Multiple candidates are available: {_format_candidates(cluster_candidates)}. Confirm which one should drive marker scoring.",
+                    aliases=["cluster_key", "groupby"],
+                    flag="--cluster-key",
+                    choices=cluster_candidates,
+                )
+            elif len(cluster_candidates) == 1:
                 decision.add_guidance(
-                    f"`--cluster-key {cluster_key}` was not found. Marker mode will auto-cluster unless you prefer an existing column such as {_format_candidates(candidates)}."
+                    f"`markers` annotation will use `{cluster_candidates[0]}` as the cluster column."
                 )
             else:
-                decision.add_guidance(
-                    "Marker mode will auto-cluster because no existing cluster column was found. If you already have trusted labels, pass them via `--cluster-key` instead."
+                decision.block(
+                    "Marker-based annotation needs an existing cluster/label column in `adata.obs`; it will not auto-cluster anymore. Run `sc-clustering` first."
                 )
+                decision.add_guidance(
+                    "`markers` annotation no longer auto-clusters implicitly; cluster assignments should come from `sc-clustering` or an equivalent upstream step."
+                )
+        if not _declared_x_is_normalized(adata) and matrix_looks_count_like(adata.X):
+            decision.require_confirmation(
+                "`markers` annotation expects normalized expression. Run `sc-preprocessing` first or confirm that the current matrix has already been transformed outside OmicsClaw."
+            )
+        decision.add_guidance(
+            "Marker-based annotation is best used after `sc-markers` or when you already have trusted lineage markers for the clustered groups."
+        )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=markers`, `cluster_key={cluster_key or (cluster_candidates[0] if len(cluster_candidates) == 1 else 'confirm')}`."
+        )
+        decision.add_guidance(
+            "After annotation, inspect the annotated embedding and label distribution; if labels are still ambiguous, revisit `sc-markers` or try a reference-based method."
+        )
         return decision
 
-    use_raw = _declared_raw_is_normalized(adata)
-    if not use_raw and not _declared_x_is_normalized(adata):
-        if method == "celltypist":
+    if method == "manual":
+        if cluster_key:
+            if cluster_key not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "cluster_key",
+                        f"`--cluster-key {cluster_key}` was not found. Confirm which existing cluster/label column should guide manual relabeling: {_format_candidates(cluster_candidates)}.",
+                        aliases=["cluster_key", "groupby"],
+                        flag="--cluster-key",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.block(
+                        "Manual annotation requires an existing cluster/label column in `adata.obs`. Run `sc-clustering` first."
+                    )
+            else:
+                decision.add_guidance(f"`manual` annotation will use `cluster_key={cluster_key}`.")
+        else:
+            if len(cluster_candidates) > 1:
+                decision.require_field(
+                    "cluster_key",
+                    f"`manual` annotation needs a cluster/label column. Multiple candidates are available: {_format_candidates(cluster_candidates)}. Confirm which one should be relabeled.",
+                    aliases=["cluster_key", "groupby"],
+                    flag="--cluster-key",
+                    choices=cluster_candidates,
+                )
+            elif len(cluster_candidates) == 1:
+                decision.add_guidance(
+                    f"`manual` annotation will use `{cluster_candidates[0]}` as the cluster column."
+                )
+            else:
+                decision.block(
+                    "Manual annotation requires an existing cluster/label column in `adata.obs`; it will not auto-cluster. Run `sc-clustering` first."
+                )
+
+        if manual_map and manual_map_file:
             decision.require_confirmation(
-                "`celltypist` currently sees count-like expression and would likely fall back to marker annotation. Run `sc-preprocessing` first or confirm that fallback is acceptable."
+                "Both `--manual-map` and `--manual-map-file` were provided. Confirm which one should take precedence."
             )
-        elif method == "popv":
+        elif not manual_map and not manual_map_file:
+            decision.require_field(
+                "manual_map",
+                "Manual annotation needs either `--manual-map '0=T cell;1,2=Myeloid'` or `--manual-map-file <csv/json/txt>`.",
+                aliases=["manual_map", "manual_labels", "mapping"],
+                flag="--manual-map",
+            )
+        elif manual_map_file and not Path(manual_map_file).exists():
+            decision.block(f"`--manual-map-file {manual_map_file}` was not found.")
+
+        decision.add_guidance(
+            "Manual annotation is the explicit relabeling path: it keeps the original cluster column and writes your chosen labels into `cell_type`."
+        )
+        decision.add_guidance(
+            "Current first-pass settings: `method=manual`. Mapping can be supplied inline with `--manual-map` or via `--manual-map-file`."
+        )
+        return decision
+
+    x_normalized = _declared_x_is_normalized(adata)
+    if not x_normalized:
+        if not matrix_looks_count_like(adata.X):
             decision.add_guidance(
-                "`popv` works best on log-normalized query expression aligned to a labeled reference. If matrix scale is uncertain, run `sc-preprocessing` first."
+                "This object does not declare a matrix contract yet, but `adata.X` does not look raw count-like, so annotation will treat it as normalized expression."
+            )
+        elif method == "celltypist":
+            decision.require_confirmation(
+                "`celltypist` expects normalized expression in `adata.X`. The current matrix still looks count-like, so it would likely fall back or misbehave. Run `sc-preprocessing` first or confirm the matrix state."
             )
         else:
             decision.block(
-                f"`{method}` expects log-normalized expression. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+                f"`{method}` expects log-normalized expression in `adata.X`. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
             )
 
     if method == "celltypist":
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. Annotation can still run per cell, but downstream summaries are easier to interpret if you later reuse one of: {_format_candidates(cluster_candidates)}."
+            )
         if model == "Immune_All_Low":
             decision.require_field(
                 "model",
@@ -342,19 +457,54 @@ def preflight_sc_cell_annotation(
             )
             if not valid_input:
                 decision.block(reason)
+        model_available, model_path = sc_annotation_utils.celltypist_model_available_locally(model)
+        if not model_available:
+            decision.require_field(
+                "allow_online_model_fetch",
+                f"`celltypist` model `{model}` is not present locally at `{model_path}`. Running this path would need to download the model through the CellTypist model hub. Confirm whether network fetch is acceptable, or provide a model already cached locally.",
+                value_type="boolean",
+                aliases=["allow_online_model_fetch", "allow_download", "download_model"],
+            )
+            decision.add_guidance(
+                "CellTypist models are typically downloaded into `~/.celltypist/data/models/`. If you want to stay offline, pre-download the model there and rerun."
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=celltypist`, `model={model}`, `celltypist_majority_voting={celltypist_majority_voting}`."
+        )
+        decision.add_guidance(
+            "If CellTypist fails or the matrix still looks incompatible, the wrapper may fall back to `markers` and should report that honestly."
+        )
+        decision.add_guidance(
+            "After CellTypist annotation, compare the labels against clusters or marker evidence before trusting rare cell states."
+        )
         return decision
 
-    if method == "popv":
+    if method in {"popv", "knnpredict"}:
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. `{method}` can still label cells, but cluster-level summaries are easier if you later confirm one of: {_format_candidates(cluster_candidates)}."
+            )
         ref_path = Path(reference)
         if reference == "HPCA":
             decision.require_field(
                 "reference",
-                "`popv` expects `--reference` to be a labeled H5AD path; the default `HPCA` atlas keyword is not valid for this wrapper path.",
+                f"`{method}` expects `--reference` to be a labeled H5AD path; the default `HPCA` atlas keyword is not valid for this wrapper path.",
                 aliases=["reference", "ref"],
             )
         elif not ref_path.exists():
             decision.block(
-                f"`popv` reference file was not found at {reference}. Provide a labeled H5AD reference via `--reference`."
+                f"`{method}` reference file was not found at {reference}. Provide a labeled H5AD reference via `--reference`."
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `reference={reference}`."
+        )
+        if method == "popv":
+            decision.add_guidance(
+                "After PopV-style mapping, inspect cluster-to-label agreement and gene-overlap notes before trusting the projected labels."
+            )
+        else:
+            decision.add_guidance(
+                "`knnpredict` is the lightweight AnnData-first reference mapping path inspired by SCOP KNNPredict. It is useful when you already have a labeled H5AD reference and want a simpler projection step."
             )
         return decision
 
@@ -363,6 +513,28 @@ def preflight_sc_cell_annotation(
             "reference",
             f"Confirm the reference atlas via `--reference`; the current default `HPCA` should not be used blindly for `{method}`.",
             aliases=["reference", "ref"],
+        )
+    if method in {"singler", "scmap"}:
+        if not Path(reference).exists():
+            cache_dir = sc_annotation_utils.experimenthub_cache_dir()
+            decision.require_field(
+                "allow_online_reference_fetch",
+                f"`{method}` with atlas selector `{reference}` may need to download reference data through celldex / ExperimentHub. The local cache is expected under `{cache_dir}`. Confirm whether online fetch is acceptable, or provide a local labeled H5AD via `--reference` instead.",
+                value_type="boolean",
+                aliases=["allow_online_reference_fetch", "allow_download", "download_reference"],
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `reference={reference}`."
+        )
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. The reference-based annotation can still run per cell, but cluster-level summaries are easier if you later reuse one of: {_format_candidates(cluster_candidates)}."
+            )
+        decision.add_guidance(
+            "After reference-based annotation, compare labels against clusters and known markers before moving to DE or communication analysis."
+        )
+        decision.add_guidance(
+            f"`{method}` currently uses celldex / ExperimentHub atlases in R. Even when the R packages are installed, this path can still fail in restricted-network or empty-cache environments."
         )
     return decision
 

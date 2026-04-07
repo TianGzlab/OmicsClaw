@@ -8,7 +8,9 @@ annotation visualization, summary statistics, and cross-method comparison.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -19,9 +21,32 @@ from anndata import AnnData
 if TYPE_CHECKING:
     pass
 
-from .adata_utils import select_count_like_expression_source
+from .adata_utils import (
+    infer_x_matrix_kind,
+    matrix_kind_is_normalized,
+    raw_matrix_kind,
+    select_count_like_expression_source,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def celltypist_model_available_locally(model: str) -> tuple[bool, str]:
+    """Return whether the requested CellTypist model already exists locally."""
+    try:
+        import celltypist
+    except Exception:
+        return False, ""
+
+    model_name = model if str(model).endswith(".pkl") else f"{model}.pkl"
+    model_dir = Path(getattr(celltypist.models, "models_path", Path.home() / ".celltypist" / "data" / "models"))
+    model_path = model_dir / model_name
+    return model_path.exists(), str(model_path)
+
+
+def experimenthub_cache_dir() -> str:
+    """Return the cache directory used by celldex / ExperimentHub helpers."""
+    return os.getenv("OMICSCLAW_EXPERIMENTHUB_CACHE", str(Path.home() / ".cache" / "omicsclaw" / "experimenthub"))
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +126,86 @@ def annotate_clusters_manual(
     return adata
 
 
+def parse_manual_annotation_map(mapping_text: str) -> Dict[str, str]:
+    """Parse a compact manual annotation mapping string.
+
+    Supported format examples:
+    - ``"0=T cell;1,2=Myeloid;3=NK"``
+    - one rule per line
+    """
+    if not str(mapping_text).strip():
+        raise ValueError("Manual annotation mapping is empty.")
+
+    mapping: dict[str, str] = {}
+    raw_items = []
+    for line in str(mapping_text).replace("\r", "\n").split("\n"):
+        raw_items.extend(part for part in line.split(";") if part.strip())
+
+    for item in raw_items:
+        if "=" not in item:
+            raise ValueError(
+                "Manual annotation entries must use `cluster=label` syntax, e.g. `0=T cell;1,2=Myeloid`."
+            )
+        left, right = item.split("=", 1)
+        label = str(right).strip()
+        if not label:
+            raise ValueError(f"Manual annotation entry `{item}` has an empty label.")
+        cluster_tokens = [token.strip() for token in str(left).split(",") if token.strip()]
+        if not cluster_tokens:
+            raise ValueError(f"Manual annotation entry `{item}` has no cluster IDs.")
+        for token in cluster_tokens:
+            mapping[str(token)] = label
+
+    if not mapping:
+        raise ValueError("No valid manual annotation mappings were parsed.")
+    return mapping
+
+
+def load_manual_annotation_map(path: str | Path) -> Dict[str, str]:
+    """Load a manual annotation mapping from JSON/CSV/TSV/text."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Manual annotation mapping file not found: {path}")
+
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            mapping: dict[str, str] = {}
+            for key, value in data.items():
+                for cluster_id in str(key).split(","):
+                    token = cluster_id.strip()
+                    if token:
+                        mapping[token] = str(value)
+            return mapping
+        if isinstance(data, list):
+            frame = pd.DataFrame(data)
+        else:
+            raise ValueError("JSON manual annotation file must be a dict or a list of mapping records.")
+    elif suffix in {".csv", ".tsv", ".txt"}:
+        sep = "\t" if suffix == ".tsv" else None
+        if suffix == ".txt":
+            return parse_manual_annotation_map(path.read_text(encoding="utf-8"))
+        frame = pd.read_csv(path, sep=sep)
+    else:
+        return parse_manual_annotation_map(path.read_text(encoding="utf-8"))
+
+    cluster_col = next((col for col in ("cluster", "cluster_id", "group", "source_cluster") if col in frame.columns), None)
+    label_col = next((col for col in ("cell_type", "label", "annotation", "target_label") if col in frame.columns), None)
+    if cluster_col is None or label_col is None:
+        raise ValueError("Manual annotation table must contain cluster/group and label/cell_type columns.")
+    mapping: dict[str, str] = {}
+    for _, row in frame.iterrows():
+        label = str(row[label_col]).strip()
+        for cluster_id in str(row[cluster_col]).split(","):
+            token = cluster_id.strip()
+            if token:
+                mapping[token] = label
+    if not mapping:
+        raise ValueError("Manual annotation mapping file did not produce any usable mappings.")
+    return mapping
+
+
 # ---------------------------------------------------------------------------
 # CellTypist annotation
 # ---------------------------------------------------------------------------
@@ -145,12 +250,6 @@ def annotate_with_celltypist(
 
     logger.info("Running CellTypist annotation (model=%s, majority_voting=%s)",
                 model, majority_voting)
-
-    # Download models if needed
-    try:
-        ct.models.download_models(force_update=False)
-    except Exception as exc:
-        logger.warning("Model download check failed: %s", exc)
 
     # Load model
     ct_model = ct.models.Model.load(model=model)
@@ -691,8 +790,21 @@ def compare_annotations(
 
 
 def build_celltypist_input_adata(adata: AnnData):
-    """Return an AnnData view whose X matches CellTypist official input expectations."""
-    if adata.raw is not None and adata.raw.shape == adata.shape:
+    """Return an AnnData view whose X matches current annotation input expectations.
+
+    OmicsClaw annotation workflows prefer normalized expression in ``adata.X``.
+    When ``adata.X`` lacks an explicit matrix contract but still looks usable,
+    it remains the first choice. Aligned ``adata.raw`` is only used when it is
+    explicitly declared as normalized and ``adata.X`` is not.
+    """
+    x_kind = infer_x_matrix_kind(adata, fallback="normalized_expression")
+    if matrix_kind_is_normalized(x_kind):
+        tmp = AnnData(X=adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy())
+        tmp.obs_names = adata.obs_names.copy()
+        tmp.var_names = adata.var_names.copy()
+        return tmp, "adata.X"
+    raw_kind = raw_matrix_kind(adata)
+    if adata.raw is not None and adata.raw.shape == adata.shape and matrix_kind_is_normalized(raw_kind):
         tmp = AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
         tmp.obs_names = adata.obs_names.copy()
         tmp.var_names = adata.raw.var_names.copy()
@@ -708,8 +820,14 @@ def build_celltypist_input_adata(adata: AnnData):
 # ---------------------------------------------------------------------------
 
 
-def _dense_expression_matrix(adata: AnnData, prefer_raw: bool = True) -> tuple[np.ndarray, pd.Index, str]:
-    use_raw = prefer_raw and adata.raw is not None and adata.raw.shape == adata.shape
+def _dense_expression_matrix(adata: AnnData, prefer_raw: bool = False) -> tuple[np.ndarray, pd.Index, str]:
+    raw_kind = raw_matrix_kind(adata)
+    use_raw = (
+        prefer_raw
+        and adata.raw is not None
+        and adata.raw.shape == adata.shape
+        and matrix_kind_is_normalized(raw_kind)
+    )
     if use_raw:
         matrix = adata.raw.X
         obs_source = "adata.raw"
@@ -725,6 +843,100 @@ def _dense_expression_matrix(adata: AnnData, prefer_raw: bool = True) -> tuple[n
         matrix = np.asarray(matrix)
 
     return matrix.astype(float, copy=False), pd.Index(var_names), obs_source
+
+
+def _apply_lightweight_reference_mapping(
+    adata: AnnData,
+    reference_adata: AnnData,
+    *,
+    cluster_key: str,
+    annotation_key: str,
+    prediction_key: str,
+    consensus_key: str,
+) -> dict:
+    """Apply AnnData-first cosine-centroid reference mapping."""
+    reference_label_key = _infer_reference_label_key(reference_adata)
+
+    query_matrix, query_vars, expression_source = _dense_expression_matrix(adata, prefer_raw=False)
+    ref_matrix, ref_vars, _ = _dense_expression_matrix(reference_adata, prefer_raw=False)
+
+    common_genes = query_vars.intersection(ref_vars)
+    if common_genes.empty:
+        raise ValueError(
+            "Reference mapping requires overlapping genes between query and reference; none were found."
+        )
+    sorted_genes = common_genes.sort_values()
+    query_idx = [query_vars.get_loc(gene) for gene in sorted_genes]
+    ref_idx = [ref_vars.get_loc(gene) for gene in sorted_genes]
+    query_view = query_matrix[:, query_idx]
+    ref_view = ref_matrix[:, ref_idx]
+
+    ref_labels = reference_adata.obs[reference_label_key].astype(str)
+    label_centroids = []
+    centroid_labels: list[str] = []
+    for label in sorted(ref_labels.unique(), key=str):
+        mask = ref_labels == label
+        if not mask.any():
+            continue
+        centroid = np.asarray(ref_view[mask.values].mean(axis=0)).reshape(-1)
+        label_centroids.append(centroid)
+        centroid_labels.append(label)
+
+    if not label_centroids:
+        raise ValueError("Reference needs at least one labeled cell type for mapping.")
+
+    centroids = np.vstack(label_centroids)
+    n_cells = query_view.shape[0]
+    n_centroids = centroids.shape[0]
+
+    query_norm = np.linalg.norm(query_view, axis=1)
+    centroid_norm = np.linalg.norm(centroids, axis=1)
+    centroid_norm = np.where(centroid_norm == 0, 1.0, centroid_norm)
+
+    scores = query_view @ centroids.T
+    norm_product = np.outer(np.where(query_norm == 0, 1.0, query_norm), centroid_norm)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        scores = np.divide(scores, norm_product)
+    scores = np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+
+    pick_idx = np.argmax(scores, axis=1)
+    best_scores = scores[np.arange(n_cells), pick_idx]
+    predicted_labels = [centroid_labels[idx] for idx in pick_idx]
+
+    predictions = pd.DataFrame({
+        "cell_id": adata.obs_names.astype(str),
+        prediction_key: predicted_labels,
+        "popv_score": best_scores.astype(float),
+    }, index=adata.obs_names.copy())
+    _apply_cluster_consensus(
+        adata,
+        predictions,
+        cluster_key=cluster_key,
+        annotation_key=annotation_key,
+        prediction_key=prediction_key,
+        consensus_key=consensus_key,
+    )
+    adata.uns["popv_predictions"] = predictions.copy()
+
+    logger.info(
+        "Reference centroid mapping labeled %d cells across %d reference labels using %d overlapping genes.",
+        n_cells,
+        n_centroids,
+        len(sorted_genes),
+    )
+
+    if cluster_key not in adata.obs.columns:
+        logger.warning(
+            "Cluster key %s not found; labels remain on a per-cell basis.",
+            cluster_key,
+        )
+
+    return {
+        "expression_source": expression_source,
+        "reference_label_key": reference_label_key,
+        "reference_cell_types": n_centroids,
+        "reference_gene_overlap": len(sorted_genes),
+    }
 
 
 def _infer_reference_label_key(adata: AnnData) -> str:
@@ -910,88 +1122,49 @@ def apply_popv_annotation(
         logger.warning("Official PopV path failed, falling back to lightweight reference mapping: %s", exc)
 
     reference_adata = sc.read_h5ad(reference_file)
-    reference_label_key = _infer_reference_label_key(reference_adata)
-
-    query_matrix, query_vars, expression_source = _dense_expression_matrix(adata)
-    ref_matrix, ref_vars, _ = _dense_expression_matrix(reference_adata)
-
-    common_genes = query_vars.intersection(ref_vars)
-    if common_genes.empty:
-        raise ValueError(
-            "PopV requires overlapping genes between query and reference; "
-            "none were found."
-        )
-    sorted_genes = common_genes.sort_values()
-    query_idx = [query_vars.get_loc(gene) for gene in sorted_genes]
-    ref_idx = [ref_vars.get_loc(gene) for gene in sorted_genes]
-    query_view = query_matrix[:, query_idx]
-    ref_view = ref_matrix[:, ref_idx]
-
-    ref_labels = reference_adata.obs[reference_label_key].astype(str)
-    label_centroids = []
-    centroid_labels: list[str] = []
-    for label in sorted(ref_labels.unique(), key=str):
-        mask = ref_labels == label
-        if not mask.any():
-            continue
-        centroid = np.asarray(ref_view[mask.values].mean(axis=0)).reshape(-1)
-        label_centroids.append(centroid)
-        centroid_labels.append(label)
-
-    if not label_centroids:
-        raise ValueError("Reference needs at least one labeled cell type for PopV mapping.")
-
-    centroids = np.vstack(label_centroids)
-    n_cells = query_view.shape[0]
-    n_centroids = centroids.shape[0]
-
-    query_norm = np.linalg.norm(query_view, axis=1)
-    centroid_norm = np.linalg.norm(centroids, axis=1)
-    centroid_norm = np.where(centroid_norm == 0, 1.0, centroid_norm)
-
-    scores = query_view @ centroids.T
-    norm_product = np.outer(np.where(query_norm == 0, 1.0, query_norm), centroid_norm)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        scores = np.divide(scores, norm_product)
-    scores = np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
-
-    pick_idx = np.argmax(scores, axis=1)
-    best_scores = scores[np.arange(n_cells), pick_idx]
-    predicted_labels = [centroid_labels[idx] for idx in pick_idx]
-
-    predictions = pd.DataFrame({
-        "cell_id": adata.obs_names.astype(str),
-        prediction_key: predicted_labels,
-        "popv_score": best_scores.astype(float),
-    }, index=adata.obs_names.copy())
-    _apply_cluster_consensus(
+    metadata = _apply_lightweight_reference_mapping(
         adata,
-        predictions,
+        reference_adata,
         cluster_key=cluster_key,
         annotation_key=annotation_key,
         prediction_key=prediction_key,
         consensus_key=consensus_key,
     )
-    adata.uns["popv_predictions"] = predictions.copy()
-
-    logger.info(
-        "PopV mapped %d cells to %d reference labels using %d overlapping genes.",
-        n_cells,
-        n_centroids,
-        len(sorted_genes),
-    )
-
-    if cluster_key not in adata.obs.columns:
-        logger.warning(
-            "Cluster key %s not found; PopV labels remain on a per-cell basis.",
-            cluster_key,
-        )
-
     return {
         "backend": "popv_lightweight",
-        "expression_source": expression_source,
-        "reference_label_key": reference_label_key,
-        "reference_cell_types": n_centroids,
-        "reference_gene_overlap": len(sorted_genes),
+        **metadata,
+        "reference_path": str(reference_file),
+    }
+
+
+def apply_knnpredict_annotation(
+    adata: AnnData,
+    reference_path: str,
+    *,
+    cluster_key: str = "leiden",
+    annotation_key: str = "cell_type",
+    prediction_key: str = "knnpredict_label",
+    consensus_key: str = "knnpredict_cluster_consensus",
+) -> dict:
+    """AnnData-first lightweight reference mapping inspired by SCOP KNNPredict."""
+    import scanpy as sc
+
+    reference_file = Path(reference_path)
+    if not reference_file.exists():
+        raise FileNotFoundError(
+            f"KNNPredict reference file {reference_file} does not exist. Provide a labeled reference in H5AD format."
+        )
+    reference_adata = sc.read_h5ad(reference_file)
+    metadata = _apply_lightweight_reference_mapping(
+        adata,
+        reference_adata,
+        cluster_key=cluster_key,
+        annotation_key=annotation_key,
+        prediction_key=prediction_key,
+        consensus_key=consensus_key,
+    )
+    return {
+        "backend": "knnpredict_lightweight",
+        **metadata,
         "reference_path": str(reference_file),
     }

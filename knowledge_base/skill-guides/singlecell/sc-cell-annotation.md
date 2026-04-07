@@ -10,130 +10,43 @@ priority: 0.8
 
 # OmicsClaw Skill Guide — SC Cell Annotation
 
-**Status**: implementation-aligned guide derived from the current OmicsClaw
-`sc-cell-annotation` skill. This is a wrapper guide for method choice and
-reference/model reasoning, not a claim that all upstream annotation features
-are already exposed.
+## When To Use It
 
-## Purpose
+Use this skill after clustering when the question becomes: “these clusters probably represent what cell types?”
 
-Use this guide when you need to decide:
-- whether marker-based or reference/model-based annotation is the better first pass
-- which parameters matter first in the current wrapper
-- how to explain current fallback behavior honestly
+Common OmicsClaw path:
 
-## Step 1: Inspect The Data First
+1. `sc-qc`
+2. `sc-preprocessing`
+3. optional `sc-batch-integration`
+4. `sc-clustering`
+5. `sc-cell-annotation`
+6. optionally return to `sc-markers` for supporting evidence
 
-Key properties to check:
-- **Cluster labels**:
-  - `markers` depends on a sensible `cluster_key`
-- **Reference / model availability**:
-  - CellTypist needs a real model choice
-  - reference-style paths need a trustworthy reference concept
-- **Expression state**:
-  - marker scoring, CellTypist, SingleR, and scmap should read log-normalized expression
-  - when `adata.raw` exists and matches the current cells/genes, treat it as the preferred source for annotation backends
-- **Input provenance**:
-  - if the object is external and count-vs-normalized state is unclear, recommend `sc-standardize-input` first
+## Method Choice
 
-Important implementation notes in current OmicsClaw:
-- implemented methods are `markers`, `celltypist`, `popv`, `singler`, and `scmap`
-- `singler` and `scmap` are available via the shared R bridge when the required R packages are installed
-- `model` is the key user-facing CellTypist selector
-- if CellTypist input validation or model execution fails, the wrapper may fall back to `markers` and records both requested and actual methods
+| Method | Best first use | Main public controls | Main caveat |
+|--------|----------------|----------------------|-------------|
+| `manual` | explicit relabeling when you already know what each cluster should be called | `cluster_key`, `manual_map` / `manual_map_file` | quality depends entirely on the supplied mapping |
+| `markers` | quick label proposal when clusters are already interpretable | `cluster_key` | depends strongly on upstream cluster quality |
+| `celltypist` | best first automated model-based annotation | `model`, `celltypist_majority_voting` | model choice is tissue-dependent |
+| `popv` | labeled H5AD reference mapping | `reference`, `cluster_key` | tries official PopV first, then falls back to lightweight mapping |
+| `knnpredict` | lightweight AnnData-first reference mapping | `reference`, `cluster_key` | quality depends entirely on the external reference |
+| `singler` | Bioconductor atlas-based annotation or local-reference mapping | `reference` | atlas keywords depend on R packages and cache/network; labeled local H5AD references are more stable |
+| `scmap` | reference projection through R | `reference` | atlas keywords depend on cache/network; labeled local H5AD references are more stable |
 
-## Step 2: Pick The Method Deliberately
+## How To Explain Parameters
 
-| Method | Best first use | Strong starting parameters | Main caveat |
-|--------|----------------|----------------------------|-------------|
-| **markers** | Fast baseline when clusters are already interpretable | `cluster_key` | Quality is limited by upstream clustering and marker quality; use log-normalized expression rather than counts |
-| **celltypist** | Best first automated model-based label transfer | `model` | Wrapper does not expose the full CellTypist tuning surface |
-| **popv** | Reference mapping when you already have a labeled atlas in H5AD format | `reference`, `cluster_key` | Current wrapper is PopV-style consensus mapping, not the full upstream popV package |
-| **singler** | Reference-based annotation through SingleR | `reference` | Requires an R environment with SingleR and celldex |
-| **scmap** | Cluster-level projection against a reference atlas | `reference` | Requires the R `scmap` stack and is only as good as the reference clusters |
+Start with:
+- which method is being used (`method`)
+- whether it depends on a cluster column (`cluster_key`)
+- whether the user is explicitly supplying a relabeling map (`manual_map` / `manual_map_file`)
+- whether it depends on a model (`model`) or a reference (`reference`)
+- whether CellTypist smoothing is enabled (`celltypist_majority_voting`)
 
-## Step 3: Always Show A Parameter Summary Before Running
+## What To Say After The Run
 
-```text
-About to run cell annotation
-  Method: celltypist
-  Parameters: model=Immune_All_Low
-  Note: reference-style paths read log-normalized expression, preferably from adata.raw.
-```
-
-## Step 4: Method-Specific Tuning Rules
-
-### Marker-Based
-
-Tune in this order:
-1. `cluster_key`
-
-Guidance:
-- use marker-based mode only when clusters already look biologically coherent
-
-### CellTypist
-
-Tune in this order:
-1. `model`
-
-Guidance:
-- choose the smallest model that matches the biology before trying bigger generic atlases
-
-Important warnings:
-- do not expose `majority_voting`, `mode`, or other CellTypist internals as current public OmicsClaw parameters
-- if the current matrix still looks count-like, do not present CellTypist as if it can run natively without either preprocessing first or explicitly accepting marker fallback
-
-### PopV
-
-Tune in this order:
-1. `reference`
-2. `cluster_key`
-
-Important warnings:
-- the current wrapper expects `reference` to be a labeled H5AD path, not a symbolic atlas name
-- gene overlap and label quality in the reference matter more than the method name
-- describe this path as reference mapping with cluster consensus, not as the full upstream popV ensemble unless that backend is actually present
-
-### SingleR
-
-Tune in this order:
-1. `reference`
-
-Important warnings:
-- ensure the requested reference is available in the current R environment
-- be explicit that this path depends on Bioconductor packages outside the Python environment
-- make the user confirm the reference choice instead of blindly running the default HPCA atlas on unknown biology
-
-### scmap
-
-Tune in this order:
-1. `reference`
-
-Important warnings:
-- use scmap for atlas projection, not as a substitute for marker reasoning when clusters are badly defined
-- keep the explanation clear that scmap is reference-driven and depends on the R bridge stack
-
-## Step 5: What To Say After The Run
-
-- If one label dominates everything: question reference/model mismatch before trusting the labels.
-- If marker-based labels look noisy: question cluster quality first.
-- If CellTypist fell back: explain why the fallback happened and make it explicit that the final labels came from `markers`, not CellTypist.
-- If SingleR cannot run: explain which R packages are missing instead of pretending marker mode is equivalent.
-- If scmap and SingleR disagree: report the disagreement and revisit the reference choice before forcing a single label story.
-
-## Step 6: Explain Outputs Using Method-Correct Language
-
-- describe `cell_type` as the standardized label column
-- describe `annotation_method` as the actual wrapper method used
-- when a fallback happened, describe the requested and executed methods separately
-- describe confidence only when the chosen backend truly produced one
-
-## Official References
-
-- https://celltypist.readthedocs.io/en/latest/celltypist.annotate.html
-- https://celltypist.readthedocs.io/en/latest/notebook/celltypist_tutorial.html
-- https://github.com/Teichlab/celltypist
-- https://pmc.ncbi.nlm.nih.gov/articles/PMC11631762/
-- https://docs.scvi-tools.org/en/1.3.3/tutorials/notebooks/multimodal/scarches_scvi_tools.html
-- https://bioconductor.org/packages/release/bioc/vignettes/SingleR/inst/doc/SingleR.html
-- https://bioconductor.org/packages/release/bioc/html/scmap.html
+- Check the annotated embedding and label distribution first.
+- If labels look implausible, question the reference/model before trusting the result.
+- If labels are still ambiguous, go back to `sc-markers` for supporting evidence.
+- If the next question is biological comparison between labeled groups, continue to `sc-de`.
