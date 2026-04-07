@@ -4,91 +4,72 @@ title: OmicsClaw Skill Guide — SC Doublet Detection
 doc_type: method-reference
 domains: [singlecell]
 related_skills: [sc-doublet-detection, sc-doublet]
-search_terms: [doublet detection, Scrublet, DoubletFinder, scDblFinder, expected doublet rate, tuning]
+search_terms: [doublet detection, Scrublet, DoubletDetection, DoubletFinder, scDblFinder, scds, expected doublet rate]
 priority: 0.8
 ---
 
 # OmicsClaw Skill Guide — SC Doublet Detection
 
-**Status**: implementation-aligned guide derived from the current OmicsClaw
-`sc-doublet-detection` skill. This guide explains the current wrapper surface,
-not every backend-specific parameter described upstream.
+## When To Use It
 
-## Purpose
+Use this skill when you have already reviewed basic QC and want to label likely multiplets before trusting final clusters, annotation, or DE results.
 
-Use this guide when you need to decide:
-- whether doublet detection should be run before clustering / annotation / DE
-- which backend is the most appropriate first pass
-- how to explain expected doublet rate and thresholding honestly
+Common OmicsClaw path:
 
-## Step 1: Inspect The Data First
+1. `sc-qc`
+2. `sc-doublet-detection`
+3. keep singlets if the calls look credible
+4. `sc-preprocessing`
+5. `sc-clustering`
 
-Key properties to check:
-- **Capture type**:
-  - droplet-based datasets are the primary use case
-- **Load / multiplexing context**:
-  - expected doublet burden depends on loading and sample design
-- **Current analysis stage**:
-  - doublet labeling is usually more useful before final annotation
-- **Input provenance**:
-  - if the object came from outside OmicsClaw, recommend `sc-standardize-input` first, then confirm the matrix used here is still raw count-like
+If the object is already preprocessed, the skill still works as long as raw counts are available in `layers["counts"]`, aligned `adata.raw`, or count-like `adata.X`.
 
-Important implementation notes in current OmicsClaw:
-- the wrapper exposes `scrublet`, `doubletfinder`, and `scdblfinder`
-- `threshold` only affects the Scrublet path
-- `doubletfinder` may fall back to `scdblfinder` if the R runtime fails
-- the wrapper annotates doublets; it does not automatically drop them
+## Method Selection
 
-## Step 2: Pick The Method Deliberately
+| Method | Best first use | Main public controls | Main caveat |
+|--------|----------------|----------------------|-------------|
+| `scrublet` | Default Python first pass | `expected_doublet_rate`, optional `batch_key`, optional `threshold` | `threshold` is Scrublet-only |
+| `doubletdetection` | Python consensus classifier from the SCOP method family | `doubletdetection_n_iters`, optional `doubletdetection_standard_scaling` | wrapper records `expected_doublet_rate` for context only |
+| `doubletfinder` | Seurat-style R path | `expected_doublet_rate` | may fall back to `scdblfinder` |
+| `scdblfinder` | clean Bioconductor default | `expected_doublet_rate` | advanced scDblFinder knobs stay hidden |
+| `scds` | score-family alternative from Bioconductor | `expected_doublet_rate`, `scds_mode` | wrapper converts the chosen score family into top-rate calls; `cxds` is the safest first pass in the current environment |
 
-| Method | Best first use | Strong starting parameters | Main caveat |
-|--------|----------------|----------------------------|-------------|
-| **scrublet** | Fast Python-native first pass | `expected_doublet_rate`, optional `threshold` | Threshold override only applies here |
-| **doubletfinder** | When an R-based Seurat-style path is explicitly desired | `expected_doublet_rate` | Current wrapper does not expose the full DoubletFinder tuning stack and may fall back to `scdblfinder` on runtime failure |
-| **scdblfinder** | Strong R/Bioconductor baseline with a simpler public surface | `expected_doublet_rate` | Wrapper hides many advanced scDblFinder options |
+## How To Explain Parameters To Users
 
-## Step 3: Always Show A Parameter Summary Before Running
+- Start with the **method**
+- Then explain the **one or two knobs that actually matter for that method**
+- Do not dump every backend parameter at once
 
-```text
-About to run doublet detection
-  Method: scrublet
-  Parameters: expected_doublet_rate=0.06, threshold=auto
-  Note: threshold override is only implemented for the Scrublet path.
-```
+Examples:
 
-## Step 4: Method-Specific Tuning Rules
+- `scrublet`
+  - `expected_doublet_rate`
+  - `batch_key` if captures/samples are mixed
+  - `threshold` only when automatic calls look clearly wrong
+- `doubletdetection`
+  - `doubletdetection_n_iters`
+  - optional `doubletdetection_standard_scaling`
+- `scds`
+  - `scds_mode`
+  - `expected_doublet_rate`
 
-### Shared first-pass rule
+## Output Interpretation
 
-Tune in this order:
-1. `expected_doublet_rate`
-2. `threshold` (Scrublet only)
+Standard output columns:
 
-Guidance:
-- `expected_doublet_rate` is the main shared scientific prior in the current wrapper
-- only use manual `threshold` when Scrublet’s automatic separation is clearly unsatisfactory
-- if the user selected an R method but also supplied a Scrublet-only `threshold`, stop and ask which behavior they actually want
+- `doublet_score`
+- `predicted_doublet`
+- `doublet_classification`
 
-Important warnings:
-- do not promise DoubletFinder `pK`, `pN`, or `nExp`; the wrapper does not expose them
-- do not promise scDblFinder sample-level / cluster-level fine controls; the wrapper does not expose them
+Interpret them this way:
 
-## Step 5: What To Say After The Run
+- `doublet_score`: backend-specific evidence score, not a universal probability
+- `predicted_doublet`: wrapper boolean call
+- `doublet_classification`: human-readable label
 
-- If many doublets are called: mention loading burden or sample complexity, not just “bad quality”.
-- If very few are called: mention the assumed expected rate and whether the threshold was conservative.
-- If `doubletfinder` fell back: explain both the requested and executed methods rather than presenting the result as native DoubletFinder output.
-- If users ask whether cells were removed: state clearly that the wrapper labels but does not auto-delete.
+## What To Say After The Run
 
-## Step 6: Explain Outputs Using Method-Correct Language
-
-- describe `doublet_score` as backend-specific evidence, not a universal probability
-- describe `predicted_doublet` as the wrapper’s boolean call
-- describe `doublet_classification` as the human-readable summary column
-
-## Official References
-
-- https://github.com/swolock/scrublet
-- https://github.com/chris-mcginnis-ucsf/DoubletFinder/blob/master/README.md
-- https://bioconductor.org/packages/release/bioc/vignettes/scDblFinder/inst/doc/scDblFinder.html
-- https://github.com/plger/scDblFinder/blob/devel/README.md
+- Review the histogram and embedding plots first
+- If many doublets localize to specific clusters or bridges, treat them as a real branch to inspect
+- If you accept the calls, keep singlets and rerun preprocessing / clustering for the final downstream object
+- If users ask whether OmicsClaw already removed the cells, answer clearly: **no, it only annotated them**

@@ -38,6 +38,17 @@ def make_categorical_palette(values: Iterable[str]) -> dict[str, str]:
     if not unique_values:
         return {}
 
+    # Keep binary doublet-style labels visually far apart instead of relying on tab20 ordering.
+    normalized = {value.lower() for value in unique_values}
+    if normalized <= {"singlet", "doublet"} and normalized:
+        palette = {
+            "Singlet": "#2B6CB0",
+            "Doublet": "#D1495B",
+            "singlet": "#2B6CB0",
+            "doublet": "#D1495B",
+        }
+        return {value: palette.get(value, palette.get(value.lower(), "#2B6CB0")) for value in unique_values}
+
     base = sns.color_palette("tab20", min(len(unique_values), 20))
     if len(unique_values) > 20:
         extra = sns.color_palette("husl", len(unique_values))
@@ -206,6 +217,69 @@ def plot_embedding_comparison(
 
     fig.suptitle(title, fontsize=17, y=1.02)
     fig.tight_layout()
+    return save_figure(fig, output_dir, filename)
+
+
+def plot_embedding_continuous(
+    adata,
+    output_dir: Union[str, Path],
+    *,
+    obsm_key: str,
+    color_key: str,
+    filename: str,
+    title: str,
+    subtitle: str | None = None,
+    point_size: float = 11,
+    alpha: float = 0.88,
+    cmap: str = "viridis",
+) -> Path | None:
+    """Plot one embedding colored by a continuous obs column."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output_dir = Path(output_dir)
+    if obsm_key not in adata.obsm or color_key not in adata.obs.columns:
+        logger.warning("Skipping %s because %s or %s is missing.", filename, obsm_key, color_key)
+        return None
+
+    values = pd.to_numeric(adata.obs[color_key], errors="coerce")
+    if values.isna().all():
+        logger.warning("Skipping %s because %s has no numeric values.", filename, color_key)
+        return None
+
+    apply_singlecell_theme()
+    frame = _build_embedding_frame(adata, obsm_key)
+    xcol, ycol = embedding_axis_labels(obsm_key)
+    frame[color_key] = values.to_numpy()
+    frame = frame.dropna(subset=[color_key])
+    if frame.empty:
+        logger.warning("Skipping %s because %s has no finite values.", filename, color_key)
+        return None
+
+    fig, ax = plt.subplots(figsize=(8.2, 6.4))
+    scatter = sns.scatterplot(
+        data=frame,
+        x=xcol,
+        y=ycol,
+        hue=color_key,
+        palette=cmap,
+        s=point_size,
+        linewidth=0,
+        alpha=alpha,
+        ax=ax,
+        legend=False,
+    )
+    ax.set_title(title, fontsize=17, pad=14)
+    if subtitle:
+        fig.text(0.125, 0.965, subtitle, fontsize=10, color="#4A5568", ha="left", va="top")
+    ax.set_xlabel(xcol)
+    ax.set_ylabel(ycol)
+    norm = plt.Normalize(vmin=float(frame[color_key].min()), vmax=float(frame[color_key].max()))
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.82, pad=0.02)
+    cbar.set_label(color_key)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     return save_figure(fig, output_dir, filename)
 
 

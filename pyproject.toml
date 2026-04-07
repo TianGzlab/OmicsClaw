@@ -123,6 +123,7 @@ spatial = [
 
 singlecell = [
     "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
+    "doubletdetection>=4.3.0",        # sc-doublet-detection: DoubletDetection
     "liana>=1.4.0",                   # sc-cell-communication: LIANA+
     "harmonypy>=0.0.9",               # sc-batch-integration: Harmony
     "bbknn>=1.5.0",                   # sc-batch-integration: BBKNN

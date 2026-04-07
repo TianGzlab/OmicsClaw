@@ -41,6 +41,7 @@ R_TIER_PACKAGES: dict[str, list[str]] = {
         "Seurat",
         "DoubletFinder",
         "scDblFinder",
+        "scds",
         "SingleCellExperiment",
     ],
     "singlecell-annotation": [
@@ -114,7 +115,7 @@ _BIOCONDUCTOR_PACKAGES: set[str] = {
     "DESeq2", "SingleCellExperiment", "SingleR", "celldex",
     "S4Vectors", "IRanges", "GenomicRanges",
     "clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db",
-    "scDblFinder", "batchelor", "sva", "SPARK",
+    "scDblFinder", "scds", "batchelor", "sva", "SPARK",
     "spacexr", "SPOTlight", "CARD", "numbat",
     "SoupX",
 }

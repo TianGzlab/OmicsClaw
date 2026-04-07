@@ -931,8 +931,12 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "legacy_aliases": ["sc-doublet"],
         "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-doublet-detection" / "sc_doublet.py",
         "demo_args": ["--demo"],
-        "description": "Doublet detection and removal (Scrublet, scDblFinder, DoubletFinder)",
-        "allowed_extra_flags": {"--method", "--expected-doublet-rate", "--threshold"},
+        "description": "Doublet detection annotation (Scrublet, DoubletDetection, scDblFinder, DoubletFinder, scds)",
+        "allowed_extra_flags": {
+            "--method", "--expected-doublet-rate", "--threshold", "--batch-key",
+            "--doubletdetection-n-iters", "--doubletdetection-standard-scaling", "--no-doubletdetection-standard-scaling",
+            "--scds-mode",
+        },
         "saves_h5ad": True,
     },
     "sc-cell-annotation": {

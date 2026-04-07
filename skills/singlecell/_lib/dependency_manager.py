@@ -37,6 +37,7 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
 
     # Doublet detection
     "scrublet": DependencyInfo("scrublet", "pip install scrublet", "Scrublet doublet detection"),
+    "doubletdetection": DependencyInfo("doubletdetection", "pip install doubletdetection", "DoubletDetection consensus doublet calling"),
 
     # Communication
     "liana": DependencyInfo("liana", "pip install liana", "LIANA+ L-R analysis"),

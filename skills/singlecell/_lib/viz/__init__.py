@@ -8,6 +8,12 @@ from .embedding import (
     plot_cluster_size_summary,
     plot_embedding_categorical,
     plot_embedding_comparison,
+    plot_embedding_continuous,
+)
+from .doublet import (
+    plot_doublet_call_summary,
+    plot_doublet_score_by_group,
+    plot_doublet_score_distribution,
 )
 from .qc import (
     plot_barcode_rank,
@@ -48,8 +54,12 @@ __all__ = [
     "make_categorical_palette",
     "plot_embedding_categorical",
     "plot_embedding_comparison",
+    "plot_embedding_continuous",
     "plot_cluster_size_summary",
     "plot_cluster_qc_heatmap",
+    "plot_doublet_score_distribution",
+    "plot_doublet_call_summary",
+    "plot_doublet_score_by_group",
     "plot_qc_violin",
     "plot_qc_scatter",
     "plot_qc_histograms",

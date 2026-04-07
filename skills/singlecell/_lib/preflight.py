@@ -593,6 +593,9 @@ def preflight_sc_doublet_detection(
     method: str,
     expected_doublet_rate: float,
     threshold: float | None = None,
+    batch_key: str | None = None,
+    doubletdetection_n_iters: int | None = None,
+    scds_mode: str | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-doublet-detection")
@@ -611,16 +614,79 @@ def preflight_sc_doublet_detection(
             aliases=["method"],
         )
 
+    if batch_key and batch_key not in adata.obs.columns:
+        batch_candidates = _obs_candidates(adata, "batch")
+        decision.require_field(
+            "batch_key",
+            f"`--batch-key {batch_key}` was not found. Available batch/sample-style columns include: {_format_candidates(batch_candidates)}.",
+            aliases=["batch_key", "batch", "sample_key"],
+            flag="--batch-key",
+            choices=batch_candidates,
+        )
+
+    if method == "doubletdetection":
+        if find_spec("doubletdetection") is None:
+            decision.block(
+                "`doubletdetection` requires the optional Python package `doubletdetection`, which is not installed in the current environment."
+            )
+        if doubletdetection_n_iters is not None and int(doubletdetection_n_iters) < 2:
+            decision.block("`--doubletdetection-n-iters` must be at least 2.")
+
     if "counts" not in adata.layers:
-        if _declared_x_is_count_like(adata):
+        if _aligned_raw_is_count_like(adata) or (raw_matrix_kind(adata) and matrix_kind_is_count_like(raw_matrix_kind(adata))):
+            decision.add_guidance(
+                "No explicit `layers['counts']` was found; doublet detection will use aligned `adata.raw` while preserving the current `adata.X` semantics."
+            )
+        elif _declared_x_is_count_like(adata):
             decision.add_guidance(
                 "No explicit `layers['counts']` was found; doublet detection will use count-like `adata.X`."
             )
         else:
             decision.block(
-                "Doublet detection requires raw count-like input in `layers['counts']` or count-like `adata.X`."
+                "Doublet detection requires raw count-like input in `layers['counts']`, aligned `adata.raw`, or count-like `adata.X`."
             )
 
+    batch_candidates = _obs_candidates(adata, "batch")
+    if method == "scrublet" and not batch_key and batch_candidates:
+        decision.add_guidance(
+            f"Potential capture/sample columns were detected: {_format_candidates(batch_candidates)}. For multi-capture droplet data, `scrublet` is often safer run per capture via `--batch-key`."
+        )
+
+    if any(col in adata.obs.columns for col in ("predicted_doublet", "doublet_score", "doublet_classification")):
+        decision.add_guidance(
+            "Existing doublet annotations were detected and will be overwritten by the selected method."
+        )
+
+    decision.add_guidance(
+        "Doublet detection is usually most helpful after QC review and before final clustering, annotation, or DE interpretation."
+    )
+
+    if method == "scrublet":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=scrublet`, `expected_doublet_rate={expected_doublet_rate}`, `threshold={threshold if threshold is not None else 'auto'}`."
+        )
+        if batch_key:
+            decision.add_guidance(f"`scrublet` will run per batch using `batch_key={batch_key}`.")
+    elif method == "doubletdetection":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=doubletdetection`, `doubletdetection_n_iters={doubletdetection_n_iters}`, `expected_doublet_rate` is recorded for context but does not control this backend's native classifier."
+        )
+    elif method == "scds":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=scds`, `expected_doublet_rate={expected_doublet_rate}`, `scds_mode={scds_mode}`."
+        )
+    else:
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `expected_doublet_rate={expected_doublet_rate}`."
+        )
+        if batch_key:
+            decision.add_guidance(
+                f"`batch_key={batch_key}` was provided, but the current `{method}` wrapper does not use it directly."
+            )
+
+    decision.add_guidance(
+        "This skill annotates doublets in `obs` but does not remove cells automatically. After review, keep singlets for downstream preprocessing/clustering if needed."
+    )
     return decision
 
 
