@@ -1004,7 +1004,10 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-markers" / "sc_markers.py",
         "demo_args": ["--demo"],
         "description": "Find marker genes for cell clusters using Wilcoxon, t-test, or logistic regression",
-        "allowed_extra_flags": {"--groupby", "--method", "--n-genes", "--n-top"},
+        "allowed_extra_flags": {
+            "--groupby", "--method", "--n-genes", "--n-top",
+            "--min-in-group-fraction", "--min-fold-change", "--max-out-group-fraction",
+        },
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },

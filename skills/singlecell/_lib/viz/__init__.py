@@ -10,6 +10,13 @@ from .embedding import (
     plot_embedding_comparison,
     plot_embedding_continuous,
 )
+from .markers import (
+    plot_marker_cluster_summary,
+    plot_marker_dotplot,
+    plot_marker_effect_summary,
+    plot_marker_fraction_scatter,
+    plot_marker_heatmap,
+)
 from .doublet import (
     plot_doublet_call_summary,
     plot_doublet_score_by_group,
@@ -57,6 +64,11 @@ __all__ = [
     "plot_embedding_continuous",
     "plot_cluster_size_summary",
     "plot_cluster_qc_heatmap",
+    "plot_marker_heatmap",
+    "plot_marker_dotplot",
+    "plot_marker_effect_summary",
+    "plot_marker_fraction_scatter",
+    "plot_marker_cluster_summary",
     "plot_doublet_score_distribution",
     "plot_doublet_call_summary",
     "plot_doublet_score_by_group",

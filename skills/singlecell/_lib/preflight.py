@@ -11,6 +11,7 @@ from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidanc
 
 from .adata_utils import (
     build_standardization_recommendation,
+    get_matrix_contract,
     get_input_contract,
     matrix_kind_is_count_like,
     matrix_kind_is_normalized,
@@ -1027,33 +1028,94 @@ def preflight_sc_filter(
 def preflight_sc_markers(
     adata: AnnData,
     *,
-    groupby: str,
+    groupby: str | None,
+    method: str,
+    n_genes: int | None,
+    n_top: int,
+    min_in_group_fraction: float,
+    min_fold_change: float,
+    max_out_group_fraction: float,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-markers")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
-    if groupby not in adata.obs.columns:
-        candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type")
-        if candidates:
+    matrix_contract = get_matrix_contract(adata)
+    primary_cluster_key = matrix_contract.get("primary_cluster_key")
+    candidates = []
+    if primary_cluster_key and primary_cluster_key in adata.obs.columns:
+        candidates.append(str(primary_cluster_key))
+    for key in _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type"):
+        if key not in candidates:
+            candidates.append(key)
+
+    if groupby:
+        if groupby not in adata.obs.columns:
             decision.require_field(
                 "groupby",
                 f"`--groupby {groupby}` was not found. Confirm which grouping column to use: {_format_candidates(candidates)}.",
                 aliases=["groupby", "cluster_key"],
+            )
+        elif adata.obs[groupby].astype(str).nunique(dropna=False) < 2:
+            decision.block(
+                f"`--groupby {groupby}` has fewer than two groups, so marker ranking would not be meaningful."
+            )
+    else:
+        if len(candidates) > 1:
+            decision.require_field(
+                "groupby",
+                f"`sc-markers` needs a grouping column. Multiple candidates are available: {_format_candidates(candidates)}. Confirm which one should drive marker ranking.",
+                aliases=["groupby", "cluster_key"],
+                choices=candidates,
+            )
+        elif len(candidates) == 1:
+            if adata.obs[candidates[0]].astype(str).nunique(dropna=False) < 2:
+                decision.block(
+                    f"`{candidates[0]}` has fewer than two groups, so marker ranking would not be meaningful."
+                )
+            decision.add_guidance(
+                f"`sc-markers` will use `{candidates[0]}` as the grouping column."
             )
         else:
             decision.block(
                 "Marker detection requires an existing grouping column in `adata.obs` such as `leiden` or `cell_type`."
             )
 
-    if _declared_raw_is_normalized(adata):
+    if _declared_x_is_normalized(adata):
+        pass
+    elif not matrix_looks_count_like(adata.X):
         decision.add_guidance(
-            "`sc-markers` will prefer `adata.raw` over `adata.X` when available. Make sure that is the expression state you want for marker ranking."
+            "This object does not declare a matrix contract yet, but `adata.X` does not look raw count-like, so marker ranking will treat it as normalized expression."
         )
-    elif not _declared_x_is_normalized(adata):
+    else:
         decision.require_confirmation(
             "Marker detection expects normalized expression, but this object currently looks count-like. Run `sc-preprocessing` first or confirm that you want to continue anyway."
         )
+
+    if n_top <= 0:
+        decision.block("`--n-top` must be greater than 0.")
+    if n_genes is not None and n_genes <= 0:
+        decision.block("`--n-genes` must be greater than 0 when provided.")
+    if min_in_group_fraction < 0 or min_in_group_fraction > 1:
+        decision.block("`--min-in-group-fraction` must be between 0 and 1.")
+    if max_out_group_fraction < 0 or max_out_group_fraction > 1:
+        decision.block("`--max-out-group-fraction` must be between 0 and 1.")
+
+    decision.add_guidance(
+        "`sc-markers` is usually the step after clustering and before final annotation. It ranks cluster-discriminative genes, not replicate-aware condition DE."
+    )
+    decision.add_guidance(
+        f"Current first-pass settings: `method={method}`, `n_genes={n_genes if n_genes is not None else 'all'}`, `n_top={n_top}`, `min_in_group_fraction={min_in_group_fraction}`, `min_fold_change={min_fold_change}`, `max_out_group_fraction={max_out_group_fraction}`."
+    )
+    if method == "wilcoxon":
+        decision.add_guidance("`wilcoxon` is the safest first-pass default for cluster marker ranking.")
+    elif method == "t-test":
+        decision.add_guidance("`t-test` is a more parametric alternative and is more sensitive to distributional assumptions.")
+    elif method == "logreg":
+        decision.add_guidance("`logreg` provides classification-style ranking and may emphasize discriminative genes rather than large fold changes.")
+    decision.add_guidance(
+        "After marker review, the usual next step is `sc-cell-annotation`; if the question is treated-vs-control rather than cluster identity, use `sc-de`."
+    )
 
     return decision
 

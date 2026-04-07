@@ -344,6 +344,12 @@ def test_preflight_sc_markers_requires_groupby_confirmation():
     decision = preflight_sc_markers(
         adata,
         groupby="leiden",
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
     )
 
     assert decision.status == "needs_user_input"
@@ -365,10 +371,45 @@ def test_preflight_sc_markers_requires_confirmation_on_qc_style_count_contract()
     decision = preflight_sc_markers(
         adata,
         groupby="leiden",
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
     )
 
     assert decision.status == "needs_user_input"
     assert any("expects normalized expression" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_markers_can_auto_use_single_primary_cluster_key():
+    adata = _adata(
+        x=np.array([[0.1, 0.2], [0.4, 0.5]], dtype=float),
+        obs={"louvain": ["0", "1"]},
+    )
+    record_matrix_contract(
+        adata,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-clustering",
+        primary_cluster_key="louvain",
+    )
+
+    decision = preflight_sc_markers(
+        adata,
+        groupby=None,
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
+    )
+
+    assert decision.status == "proceed_with_guidance"
+    assert any("will use `louvain`" in line for line in decision.guidance)
 
 
 def test_preflight_sc_grn_requires_full_db_bundle_confirmation():

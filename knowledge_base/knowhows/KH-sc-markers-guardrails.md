@@ -2,7 +2,7 @@
 doc_id: sc-markers-guardrails
 title: Single-Cell Marker Guardrails
 doc_type: knowhow
-critical_rule: MUST explain the cluster grouping and ranking method before running sc-markers
+critical_rule: MUST explain the grouping column and ranking method before running sc-markers
 domains: [singlecell]
 related_skills: [sc-markers]
 phases: [before_run, on_warning, after_run]
@@ -14,11 +14,11 @@ source_urls:
 
 # Single-Cell Marker Guardrails
 
-- **Inspect first**: confirm the grouping column really represents clusters or labels worth ranking against.
-- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` for object hygiene, but marker ranking still depends on a meaningful grouping column.
-- **Key wrapper controls**: explain `groupby`, `method`, `n_genes`, and `n_top` before running.
+- **Inspect first**: confirm that the grouping column truly represents clusters or labels worth ranking.
+- **Use normalized expression**: this workflow should rank markers from normalized `adata.X`, not silently switch to raw counts.
+- **Key wrapper controls**: explain `groupby`, `method`, `n_genes`, `n_top`, and the public filtering thresholds before running.
 - **Use method-correct language**: `wilcoxon`, `t-test`, and `logreg` are alternative ranking modes for the same cluster-marker question.
-- **Explain expression-source behavior honestly**: when `adata.raw` exists, the wrapper may prefer it automatically; do not hide that source choice from the user.
-- **Do not overclaim biological certainty**: top-ranked markers are candidate discriminative genes, not final cell-type labels by themselves.
-- **Do not invent unsupported thresholds**: this wrapper does not expose a large matrix of extra rank-gene parameters beyond the public flags above.
+- **Do not overclaim certainty**: top-ranked markers are candidate discriminative genes, not final cell-type labels by themselves.
+- **Do not confuse with condition DE**: if the user wants treated-vs-control, point them to `sc-de`.
+- **Point to the next step**: after reviewing markers, the usual next branch is `sc-cell-annotation`.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-markers.md`.
