@@ -116,7 +116,7 @@ def test_preflight_sc_cell_annotation_blocks_qc_style_count_contract_for_scmap()
     assert any("expects log-normalized expression" in line for line in decision.missing_requirements)
 
 
-def test_preflight_sc_cell_annotation_markers_can_auto_cluster_with_guidance():
+def test_preflight_sc_cell_annotation_markers_now_requires_existing_cluster_key():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
 
     decision = preflight_sc_cell_annotation(
@@ -127,8 +127,26 @@ def test_preflight_sc_cell_annotation_markers_can_auto_cluster_with_guidance():
         cluster_key="leiden",
     )
 
-    assert decision.status == "proceed_with_guidance"
+    assert decision.status == "blocked"
+    assert any("Run `sc-clustering` first" in line or "existing cluster/label column" in line for line in decision.missing_requirements)
     assert any("auto-cluster" in line for line in decision.guidance)
+
+
+def test_preflight_sc_cell_annotation_manual_requires_mapping():
+    adata = _adata(x=np.array([[0.1, 0.2], [0.4, 0.5]], dtype=float), obs={"louvain": ["0", "1"]})
+
+    decision = preflight_sc_cell_annotation(
+        adata,
+        method="manual",
+        model="Immune_All_Low",
+        reference="HPCA",
+        cluster_key="louvain",
+        manual_map=None,
+        manual_map_file=None,
+    )
+
+    assert decision.status == "needs_user_input"
+    assert any("--manual-map" in line or "Manual annotation needs either" in line for line in decision.confirmations)
 
 
 def test_preflight_sc_cell_communication_needs_label_confirmation():

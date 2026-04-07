@@ -10,6 +10,10 @@ from .embedding import (
     plot_embedding_comparison,
     plot_embedding_continuous,
 )
+from .annotation import (
+    plot_cell_type_count_barplot,
+    plot_cluster_annotation_heatmap,
+)
 from .markers import (
     plot_marker_cluster_summary,
     plot_marker_dotplot,
@@ -62,6 +66,8 @@ __all__ = [
     "plot_embedding_categorical",
     "plot_embedding_comparison",
     "plot_embedding_continuous",
+    "plot_cell_type_count_barplot",
+    "plot_cluster_annotation_heatmap",
     "plot_cluster_size_summary",
     "plot_cluster_qc_heatmap",
     "plot_marker_heatmap",
