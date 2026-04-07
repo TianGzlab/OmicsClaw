@@ -38,6 +38,7 @@ from omicsclaw.core.provider_registry import (
     PROVIDER_PRESETS,
     resolve_provider,
 )
+from omicsclaw.core.provider_runtime import set_active_provider_runtime
 
 _PROVIDER_DETECT_ORDER = PROVIDER_DETECT_ORDER
 
@@ -834,7 +835,16 @@ def init(
     else:
         LLM_PROVIDER_NAME = "openai"
 
-    kw: dict = {"api_key": resolved_key or api_key}
+    effective_api_key = str(resolved_key or api_key or "")
+    effective_base_url = str(resolved_url or "")
+    set_active_provider_runtime(
+        provider=LLM_PROVIDER_NAME,
+        base_url=effective_base_url,
+        model=OMICSCLAW_MODEL,
+        api_key=effective_api_key,
+    )
+
+    kw: dict = {"api_key": effective_api_key}
     if resolved_url:
         kw["base_url"] = resolved_url
     kw["timeout"] = _build_llm_timeout()

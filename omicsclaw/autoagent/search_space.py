@@ -57,6 +57,50 @@ class ParameterDef:
         return d
 
 
+@dataclass(frozen=True)
+class FixedParameterDef:
+    """A non-tunable method parameter that must stay fixed during optimization.
+
+    These parameters still matter for launchability. Some have defaults and can
+    be overridden; others are required runtime inputs that must be provided by
+    the caller before optimization can start.
+    """
+
+    name: str
+    param_type: str  # "float" | "int" | "bool" | "string"
+    required: bool
+    default: Any | None = None
+    has_default: bool = False
+    cli_flag: str = ""
+    tip: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "name": self.name,
+            "type": self.param_type,
+            "required": self.required,
+            "cli_flag": self.cli_flag,
+        }
+        if self.has_default:
+            d["default"] = self.default
+        if self.tip:
+            d["tip"] = self.tip
+        return d
+
+
+@dataclass(frozen=True)
+class MethodSurface:
+    """Concrete method capability derived from raw ``param_hints``."""
+
+    skill_name: str
+    method: str
+    tunable: list[ParameterDef]
+    fixed: list[FixedParameterDef]
+
+    def required_fixed_names(self) -> list[str]:
+        return [param.name for param in self.fixed if param.required]
+
+
 @dataclass
 class SearchSpace:
     """The full parameter surface that the meta-agent can explore.
@@ -99,48 +143,8 @@ class SearchSpace:
             here are removed from the tunable set.
         """
         fixed = dict(fixed_params or {})
-        params: list[str] = param_hints.get("params", [])
-        defaults: dict[str, Any] = param_hints.get("defaults", {})
-        tips_list: list[str] = param_hints.get("tips", [])
-
-        # Build a tip lookup keyed by param name
-        tip_map = _parse_tips(tips_list)
-
-        tunable: list[ParameterDef] = []
-        for pname in params:
-            if pname in fixed:
-                continue
-            default = defaults.get(pname)
-            if default is None:
-                continue
-
-            ptype = _infer_type(default)
-            low, high = _infer_range(ptype, default)
-            cli_flag = _param_to_cli_flag(pname)
-            tip = tip_map.get(pname, "")
-            choices = None
-
-            if ptype == "bool":
-                choices = [True, False]
-                low, high = None, None
-            elif ptype == "categorical":
-                # String params without a known set of valid values
-                # cannot be safely optimized — the LLM might hallucinate
-                # invalid values.  Skip them from the tunable set.
-                continue
-
-            tunable.append(
-                ParameterDef(
-                    name=pname,
-                    param_type=ptype,
-                    default=default,
-                    low=low,
-                    high=high,
-                    choices=choices,
-                    cli_flag=cli_flag,
-                    tip=tip,
-                )
-            )
+        method_surface = build_method_surface(skill_name, method, param_hints)
+        tunable = [param for param in method_surface.tunable if param.name not in fixed]
 
         return cls(
             skill_name=skill_name,
@@ -187,7 +191,78 @@ def _infer_type(value: Any) -> str:
         return "int"
     if isinstance(value, float):
         return "float"
-    return "categorical"
+    return "string"
+
+
+def build_method_surface(
+    skill_name: str,
+    method: str,
+    param_hints: dict[str, Any],
+) -> MethodSurface:
+    """Derive the real optimization surface from raw ``param_hints``.
+
+    The result is the single source of truth for:
+    - which parameters are actually tunable by the autoagent
+    - which parameters must be supplied as fixed runtime inputs
+    - which methods are genuinely launchable from the optimize UI
+    """
+    params: list[str] = param_hints.get("params", [])
+    defaults: dict[str, Any] = param_hints.get("defaults", {})
+    tips_list: list[str] = param_hints.get("tips", [])
+    tip_map = _parse_tips(tips_list)
+
+    tunable: list[ParameterDef] = []
+    fixed: list[FixedParameterDef] = []
+
+    for raw_name in params:
+        pname = str(raw_name).strip()
+        if not pname:
+            continue
+
+        has_default = pname in defaults and defaults.get(pname) is not None
+        default = defaults.get(pname)
+        inferred_type = _infer_type(default) if has_default else "string"
+        cli_flag = _param_to_cli_flag(pname)
+        tip = tip_map.get(pname, "")
+
+        if has_default and inferred_type in {"float", "int", "bool"}:
+            low, high = _infer_range(inferred_type, default)
+            choices = None
+            if inferred_type == "bool":
+                choices = [True, False]
+                low, high = None, None
+            tunable.append(
+                ParameterDef(
+                    name=pname,
+                    param_type=inferred_type,
+                    default=default,
+                    low=low,
+                    high=high,
+                    choices=choices,
+                    cli_flag=cli_flag,
+                    tip=tip,
+                )
+            )
+            continue
+
+        fixed.append(
+            FixedParameterDef(
+                name=pname,
+                param_type=inferred_type,
+                required=not has_default,
+                default=default,
+                has_default=has_default,
+                cli_flag=cli_flag,
+                tip=tip,
+            )
+        )
+
+    return MethodSurface(
+        skill_name=skill_name,
+        method=method,
+        tunable=tunable,
+        fixed=fixed,
+    )
 
 
 def _infer_range(

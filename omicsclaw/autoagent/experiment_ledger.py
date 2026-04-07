@@ -7,10 +7,14 @@ JSON Lines (``.jsonl``) file where every line is one :class:`TrialRecord`.
 from __future__ import annotations
 
 import json
+import logging
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +31,8 @@ class TrialRecord:
     duration_seconds: float = 0.0
     timestamp: str = ""
     error_output: str = ""  # stderr/stdout excerpt on crash (for diagnostics)
+    evaluation_success: bool | None = None
+    missing_metrics: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.timestamp:
@@ -51,6 +57,7 @@ class ExperimentLedger:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._records: list[TrialRecord] = []
+        self._lock = threading.Lock()
         if self.path.exists():
             self._load()
 
@@ -58,25 +65,29 @@ class ExperimentLedger:
 
     def append(self, record: TrialRecord) -> None:
         """Append a trial record to the ledger (in memory + on disk)."""
-        self._records.append(record)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record.to_dict(), default=str) + "\n")
+        with self._lock:
+            self._records.append(record)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record.to_dict(), default=str) + "\n")
 
     def all_trials(self) -> list[TrialRecord]:
         """Return all trial records (newest last)."""
-        return list(self._records)
+        with self._lock:
+            return list(self._records)
 
     def best_trial(self) -> TrialRecord | None:
         """Return the trial with the highest composite score (kept only)."""
-        kept = [r for r in self._records if r.status in ("baseline", "keep")]
+        with self._lock:
+            kept = [r for r in self._records if r.status in ("baseline", "keep")]
         if not kept:
             return None
         return max(kept, key=lambda r: r.composite_score)
 
     def kept_trials(self) -> list[TrialRecord]:
         """Return only trials with status ``keep`` or ``baseline``."""
-        return [r for r in self._records if r.status in ("baseline", "keep")]
+        with self._lock:
+            return [r for r in self._records if r.status in ("baseline", "keep")]
 
     def latest(self) -> TrialRecord | None:
         """Return the most recently appended trial."""
@@ -150,6 +161,12 @@ class ExperimentLedger:
                 f"score={r.composite_score:.4f}  params=[{params_str}]  "
                 f"metrics=[{metrics_str}]  ({r.duration_seconds:.1f}s)"
             )
+            if r.evaluation_success is False:
+                lines.append("       Evaluation failed: no declared metrics were readable.")
+            if r.missing_metrics:
+                lines.append(
+                    "       Missing metrics: " + ", ".join(r.missing_metrics)
+                )
             if r.reasoning:
                 lines.append(f"       Reasoning: {r.reasoning}")
         return "\n".join(lines)
@@ -162,7 +179,8 @@ class ExperimentLedger:
             text = self.path.read_text(encoding="utf-8")
         except OSError:
             return
-        for line in text.strip().splitlines():
+        skipped = 0
+        for lineno, line in enumerate(text.strip().splitlines(), 1):
             line = line.strip()
             if not line:
                 continue
@@ -170,7 +188,15 @@ class ExperimentLedger:
                 d = json.loads(line)
                 self._records.append(TrialRecord.from_dict(d))
             except (json.JSONDecodeError, TypeError):
-                continue
+                skipped += 1
+                logger.warning(
+                    "Skipping corrupted line %d in ledger %s", lineno, self.path,
+                )
+        if skipped:
+            logger.warning(
+                "Loaded %d trial(s) from %s, skipped %d corrupted line(s)",
+                len(self._records), self.path, skipped,
+            )
 
 
 def _fmt_val(v: Any) -> str:

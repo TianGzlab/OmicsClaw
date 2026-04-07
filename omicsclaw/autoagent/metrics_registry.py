@@ -358,12 +358,14 @@ def _canonicalize_skill_name(skill_name: str) -> str:
 
 
 def _has_optimizable_methods(param_hints: object) -> bool:
+    from omicsclaw.autoagent.search_space import build_method_surface
+
     if not isinstance(param_hints, dict):
         return False
-    for hints in param_hints.values():
+    for method_name, hints in param_hints.items():
         if not isinstance(hints, dict):
             continue
-        params = hints.get("params", [])
-        if isinstance(params, list) and any(str(param).strip() for param in params):
+        surface = build_method_surface("unknown-skill", str(method_name).strip(), hints)
+        if surface.tunable:
             return True
     return False

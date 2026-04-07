@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 import threading
 
@@ -90,6 +91,35 @@ def test_execute_trial_cancellation_terminates_active_process(monkeypatch, tmp_p
         assert fake_proc.returncode in {-15, -9}
 
 
+def test_params_to_cli_args_ignores_unknown_params(caplog):
+    from omicsclaw.autoagent.runner import _params_to_cli_args
+    from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+
+    search_space = SearchSpace(
+        skill_name="test-skill",
+        method="method",
+        tunable=[
+            ParameterDef(
+                name="alpha",
+                param_type="float",
+                default=1.0,
+                low=0.1,
+                high=5.0,
+                cli_flag="--alpha",
+            )
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        args = _params_to_cli_args(
+            {"alpha": 2.0, "hallucinated_knob": 9},
+            search_space,
+        )
+
+    assert args == ["--alpha", "2.0"]
+    assert "Ignoring unknown trial param hallucinated_knob" in caplog.text
+
+
 def test_build_reproduce_command_quotes_values_and_omits_false_boolean_flags():
     from omicsclaw.autoagent.reproduce import build_reproduce_command
 
@@ -166,6 +196,172 @@ def test_ask_llm_returns_real_error_message(monkeypatch, tmp_path):
     assert error == "LLM call failed: No LLM API key found"
 
 
+def test_run_trial_preserves_evaluator_diagnostics(monkeypatch, tmp_path):
+    from omicsclaw.autoagent.evaluator import EvaluationResult, Evaluator
+    from omicsclaw.autoagent.metrics_registry import MetricDef
+    from omicsclaw.autoagent.optimization_loop import OptimizationLoop
+    from omicsclaw.autoagent.runner import TrialExecution
+    from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+
+    metrics = {
+        "score": MetricDef(
+            source="result.json:summary.score",
+            direction="maximize",
+        ),
+        "batch_asw": MetricDef(
+            source="result.json:summary.batch_asw",
+            direction="maximize",
+        ),
+    }
+    search_space = SearchSpace(
+        skill_name="test-skill",
+        method="method",
+        tunable=[
+            ParameterDef(
+                name="alpha",
+                param_type="float",
+                default=1.0,
+                low=0.1,
+                high=5.0,
+                cli_flag="--alpha",
+            )
+        ],
+    )
+    loop = OptimizationLoop(
+        skill_name="test-skill",
+        method="method",
+        input_path="",
+        output_root=tmp_path / "optimize-eval-diagnostics",
+        search_space=search_space,
+        evaluator=Evaluator(metrics),
+        metrics=metrics,
+        max_trials=2,
+    )
+
+    monkeypatch.setattr(
+        "omicsclaw.autoagent.optimization_loop.execute_trial",
+        lambda **_kwargs: TrialExecution(
+            success=True,
+            output_dir=str(tmp_path / "trial_0000"),
+            duration_seconds=1.25,
+        ),
+    )
+    monkeypatch.setattr(
+        loop.evaluator,
+        "evaluate",
+        lambda *_args, **_kwargs: EvaluationResult(
+            composite_score=float("-inf"),
+            raw_metrics={},
+            success=False,
+            missing_metrics=["score", "batch_asw"],
+        ),
+    )
+
+    trial = loop._run_trial(
+        trial_id=0,
+        params={"alpha": 1.0},
+        description="baseline",
+    )
+
+    assert trial.status == "pending"
+    assert trial.composite_score == float("-inf")
+    assert trial.evaluation_success is False
+    assert trial.missing_metrics == ["score", "batch_asw"]
+
+
+def test_call_llm_reuses_active_provider_runtime(monkeypatch, tmp_path):
+    from omicsclaw.autoagent.evaluator import Evaluator
+    from omicsclaw.autoagent.metrics_registry import MetricDef
+    from omicsclaw.autoagent.optimization_loop import OptimizationLoop
+    from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+    from omicsclaw.core.provider_runtime import (
+        clear_active_provider_runtime,
+        set_active_provider_runtime,
+    )
+
+    metrics = {
+        "score": MetricDef(
+            source="result.json:summary.score",
+            direction="maximize",
+        )
+    }
+    search_space = SearchSpace(
+        skill_name="test-skill",
+        method="method",
+        tunable=[
+            ParameterDef(
+                name="alpha",
+                param_type="float",
+                default=1.0,
+                low=0.1,
+                high=5.0,
+                cli_flag="--alpha",
+            )
+        ],
+    )
+    loop = OptimizationLoop(
+        skill_name="test-skill",
+        method="method",
+        input_path="",
+        output_root=tmp_path / "optimize-active-runtime",
+        search_space=search_space,
+        evaluator=Evaluator(metrics),
+        metrics=metrics,
+        max_trials=2,
+    )
+
+    captured: dict[str, str | None] = {}
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key: str, base_url: str | None = None):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            self.chat = self
+            self.completions = self
+
+        def create(self, **kwargs):
+            captured["model"] = kwargs["model"]
+            return type(
+                "FakeResponse",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "FakeChoice",
+                            (),
+                            {
+                                "message": type(
+                                    "FakeMessage",
+                                    (),
+                                    {"content": '{"alpha": 2.0}'},
+                                )()
+                            },
+                        )()
+                    ]
+                },
+            )()
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    set_active_provider_runtime(
+        provider="deepseek",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        api_key="runtime-secret",
+    )
+
+    try:
+        response = loop._call_llm("Suggest params")
+    finally:
+        clear_active_provider_runtime()
+
+    assert response == '{"alpha": 2.0}'
+    assert captured == {
+        "api_key": "runtime-secret",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+    }
+
+
 def test_run_trial_records_stderr_for_crashed_trials(monkeypatch, tmp_path):
     from omicsclaw.autoagent.evaluator import Evaluator
     from omicsclaw.autoagent.metrics_registry import MetricDef
@@ -226,7 +422,10 @@ def test_run_trial_records_stderr_for_crashed_trials(monkeypatch, tmp_path):
     assert trial.error_output == "ValueError: bad param"
 
 
-def test_validate_and_clamp_params_parses_bool_strings_and_rejects_invalid_categories(tmp_path):
+def test_validate_and_clamp_params_parses_bool_strings_rejects_invalid_categories_and_drops_unknown_params(
+    tmp_path,
+    caplog,
+):
     from omicsclaw.autoagent.evaluator import Evaluator
     from omicsclaw.autoagent.metrics_registry import MetricDef
     from omicsclaw.autoagent.optimization_loop import OptimizationLoop
@@ -269,12 +468,94 @@ def test_validate_and_clamp_params_parses_bool_strings_and_rejects_invalid_categ
         max_trials=2,
     )
 
-    params = loop._validate_and_clamp_params({
-        "use_gpu": "false",
-        "mode": "turbo",
-    })
+    with caplog.at_level(logging.WARNING):
+        params = loop._validate_and_clamp_params({
+            "use_gpu": "false",
+            "mode": "turbo",
+            "hallucinated_knob": 123,
+        })
 
     assert params == {"use_gpu": False, "mode": "safe"}
+    assert "Discarding unknown LLM-suggested params" in caplog.text
+    assert "hallucinated_knob" in caplog.text
+
+
+def test_optimization_loop_fails_when_llm_suggests_only_unknown_params(monkeypatch, tmp_path):
+    from omicsclaw.autoagent.evaluator import Evaluator
+    from omicsclaw.autoagent.experiment_ledger import TrialRecord
+    from omicsclaw.autoagent.metrics_registry import MetricDef
+    from omicsclaw.autoagent.optimization_loop import OptimizationLoop
+    from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+
+    metrics = {
+        "score": MetricDef(
+            source="result.json:summary.score",
+            direction="maximize",
+        )
+    }
+    search_space = SearchSpace(
+        skill_name="test-skill",
+        method="method",
+        tunable=[
+            ParameterDef(
+                name="alpha",
+                param_type="float",
+                default=1.0,
+                low=0.1,
+                high=5.0,
+                cli_flag="--alpha",
+            )
+        ],
+    )
+    loop = OptimizationLoop(
+        skill_name="test-skill",
+        method="method",
+        input_path="",
+        output_root=tmp_path / "optimize-unknown-only",
+        search_space=search_space,
+        evaluator=Evaluator(metrics),
+        metrics=metrics,
+        max_trials=2,
+    )
+
+    def fake_run_trial(
+        trial_id: int,
+        params: dict[str, object],
+        description: str = "",
+        on_event=None,
+    ) -> TrialRecord:
+        assert trial_id == 0
+        return TrialRecord(
+            trial_id=trial_id,
+            params=params,
+            composite_score=1.0,
+            raw_metrics={"score": 1.0},
+            status="pending",
+            reasoning=description,
+        )
+
+    monkeypatch.setattr(loop, "_run_trial", fake_run_trial)
+    monkeypatch.setattr(
+        loop,
+        "_ask_llm",
+        lambda directive: {
+            "params": {"hallucinated_knob": 9},
+            "reasoning": "try a made-up parameter",
+        },
+    )
+
+    events: list[tuple[str, dict[str, object]]] = []
+    result = loop.run(on_event=lambda event_type, data: events.append((event_type, data)))
+
+    assert result.success is False
+    assert (
+        result.error_message
+        == "LLM suggestion contained no valid tunable parameters for test-skill/method. "
+        "Allowed params: alpha."
+    )
+    assert [event_type for event_type, _data in events].count("trial_start") == 0
+    assert len(result.ledger.all_trials()) == 1
+    assert result.ledger.all_trials()[0].params == {"alpha": 1.0}
 
 
 @pytest.mark.asyncio
@@ -447,6 +728,8 @@ async def test_optimize_start_streams_worker_thread_events(monkeypatch):
             method="harmony",
             cwd="/tmp/project-alpha",
             output_dir="/tmp/project-alpha/output/optimize_sc-batch-integration_harmony_custom",
+            provider_id="deepseek",
+            llm_model="deepseek-chat",
         )
     )
 
@@ -483,6 +766,8 @@ async def test_optimize_start_streams_worker_thread_events(monkeypatch):
         assert event_payloads["done"]["improvement_pct"] == 12.5
         assert captured["cwd"] == "/tmp/project-alpha"
         assert captured["output_dir"] == "/tmp/project-alpha/output/optimize_sc-batch-integration_harmony_custom"
+        assert captured["llm_provider"] == "deepseek"
+        assert captured["llm_model"] == "deepseek-chat"
 
         final_status = None
         for _ in range(100):
@@ -564,6 +849,84 @@ def test_optimization_loop_reports_llm_failure_without_done(monkeypatch, tmp_pat
     assert result.error_message == "LLM returned no suggestion"
     assert result.total_trials == 1
     assert "done" not in event_types
+
+
+def test_optimization_loop_emits_missing_metrics_in_trial_complete_and_done(monkeypatch, tmp_path):
+    from omicsclaw.autoagent.evaluator import Evaluator
+    from omicsclaw.autoagent.experiment_ledger import TrialRecord
+    from omicsclaw.autoagent.metrics_registry import MetricDef
+    from omicsclaw.autoagent.optimization_loop import OptimizationLoop
+    from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+
+    metrics = {
+        "score": MetricDef(
+            source="result.json:summary.score",
+            direction="maximize",
+        )
+    }
+    search_space = SearchSpace(
+        skill_name="test-skill",
+        method="method",
+        tunable=[
+            ParameterDef(
+                name="alpha",
+                param_type="float",
+                default=1.0,
+                low=0.1,
+                high=5.0,
+                cli_flag="--alpha",
+            )
+        ],
+    )
+    loop = OptimizationLoop(
+        skill_name="test-skill",
+        method="method",
+        input_path="",
+        output_root=tmp_path / "optimize-missing-metrics-events",
+        search_space=search_space,
+        evaluator=Evaluator(metrics),
+        metrics=metrics,
+        max_trials=1,
+    )
+
+    def fake_run_trial(
+        trial_id: int,
+        params: dict[str, object],
+        description: str = "",
+        on_event=None,
+    ) -> TrialRecord:
+        assert trial_id == 0
+        return TrialRecord(
+            trial_id=trial_id,
+            params=params,
+            composite_score=float("-inf"),
+            raw_metrics={},
+            status="pending",
+            reasoning=description,
+            evaluation_success=False,
+            missing_metrics=["score"],
+        )
+
+    monkeypatch.setattr(loop, "_run_trial", fake_run_trial)
+
+    events: list[tuple[str, dict[str, object]]] = []
+    result = loop.run(on_event=lambda event_type, data: events.append((event_type, data)))
+
+    # A baseline with -inf score means metrics extraction failed entirely.
+    # The loop now stops immediately with success=False rather than
+    # continuing with meaningless comparisons.
+    assert result.success is False
+    assert "non-finite baseline" in (result.error_message or "")
+
+    trial_complete_payload = next(
+        data for event_type, data in events if event_type == "trial_complete"
+    )
+    assert trial_complete_payload["evaluation_success"] is False
+    assert trial_complete_payload["missing_metrics"] == ["score"]
+
+    # An error event is emitted instead of a done event.
+    error_payload = next(data for event_type, data in events if event_type == "error")
+    assert "non-finite baseline" in error_payload["message"]
 
 
 def test_optimization_loop_stops_after_three_consecutive_crashes_without_done(monkeypatch, tmp_path):
@@ -865,6 +1228,10 @@ def test_run_optimization_returns_failure_summary_when_loop_fails(monkeypatch, t
                 status="baseline",
             )
             ledger.append(best_trial)
+            # Real _finalize_result emits error event on failure;
+            # simulate that here so the mock matches real behavior.
+            if on_event:
+                on_event("error", {"message": "LLM returned no suggestion"})
             return OptimizationResult(
                 best_trial=best_trial,
                 ledger=ledger,
@@ -889,6 +1256,7 @@ def test_run_optimization_returns_failure_summary_when_loop_fails(monkeypatch, t
     assert result["error"] == "LLM returned no suggestion"
     assert result["output_dir"].startswith(str(tmp_path))
     assert result["best_params"] == {"alpha": 1.0}
+    assert result["best_trial"]["params"] == {"alpha": 1.0}
     assert [event_type for event_type, _data in events] == ["error"]
 
 

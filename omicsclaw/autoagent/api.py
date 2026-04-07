@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from omicsclaw.autoagent.errors import OptimizationCancelled
+from omicsclaw.autoagent.search_space import build_method_surface
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,12 @@ from omicsclaw.autoagent.constants import SESSION_TTL_SECONDS as _SESSION_TTL_SE
 class OptimizeSessionRuntime:
     session_id: str
     loop: asyncio.AbstractEventLoop
-    queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    # Queue is created via __post_init__ to guarantee it belongs to the
+    # running event loop.  Do NOT use default_factory=asyncio.Queue here.
+    queue: asyncio.Queue[dict[str, Any]] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.queue = asyncio.Queue()
     cancel_event: threading.Event = field(default_factory=threading.Event)
     status: str = "running"
     result: dict[str, Any] | None = None
@@ -168,8 +174,13 @@ def _run_optimization_session(runtime: OptimizeSessionRuntime, req: "OptimizeReq
             output_dir=req.output_dir,
             max_trials=req.max_trials,
             fixed_params=req.fixed_params if req.fixed_params else None,
-            llm_provider=req.provider,
+            llm_provider=req.provider_id or req.provider,
             llm_model=req.llm_model,
+            llm_provider_config=(
+                req.provider_config.model_dump()
+                if req.provider_config is not None
+                else None
+            ),
             demo=req.demo,
             on_event=runtime.emit,
             cancel_event=runtime.cancel_event,
@@ -193,6 +204,13 @@ def _run_optimization_session(runtime: OptimizeSessionRuntime, req: "OptimizeReq
 # Request / Response models
 # ---------------------------------------------------------------------------
 
+class ProviderConfig(BaseModel):
+    provider: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
 class OptimizeRequest(BaseModel):
     session_id: str = ""
     skill: str
@@ -202,7 +220,9 @@ class OptimizeRequest(BaseModel):
     output_dir: str = ""
     max_trials: int = Field(default=20, ge=1, le=100)
     fixed_params: dict[str, Any] = Field(default_factory=dict)
-    provider: str = ""
+    provider: str = ""  # legacy fallback
+    provider_id: str = ""
+    provider_config: ProviderConfig | None = None
     llm_model: str = ""
     demo: bool = False
 
@@ -242,7 +262,10 @@ def _clean_string_list(value: object) -> list[str]:
     return result
 
 
-def _build_optimizable_methods(param_hints: object) -> list[dict[str, Any]]:
+def _build_optimizable_methods(
+    skill_name: str,
+    param_hints: object,
+) -> list[dict[str, Any]]:
     if not isinstance(param_hints, dict):
         return []
 
@@ -250,16 +273,15 @@ def _build_optimizable_methods(param_hints: object) -> list[dict[str, Any]]:
     for method_name, hints in param_hints.items():
         if not isinstance(hints, dict):
             continue
-        params_list = _clean_string_list(hints.get("params", []))
-        if not params_list:
+        surface = build_method_surface(skill_name, str(method_name).strip(), hints)
+        if not surface.tunable:
             continue
-        defaults = hints.get("defaults", {})
-        tips = _clean_string_list(hints.get("tips", []))
         methods.append({
-            "name": str(method_name).strip(),
-            "params": params_list,
-            "defaults": defaults if isinstance(defaults, dict) else {},
-            "tips": tips,
+            "name": surface.method,
+            "params": [param.name for param in surface.tunable],
+            "defaults": {param.name: param.default for param in surface.tunable},
+            "tips": [param.tip for param in surface.tunable if param.tip],
+            "fixed_params": [param.to_dict() for param in surface.fixed],
         })
     return methods
 
@@ -440,7 +462,7 @@ async def optimizable_skills():
     skills: list[dict[str, Any]] = []
 
     for skill_name, info in sorted(primary_skills, key=lambda item: item[0]):
-        methods = _build_optimizable_methods(info.get("param_hints", {}))
+        methods = _build_optimizable_methods(skill_name, info.get("param_hints", {}))
         if not methods:
             continue
 

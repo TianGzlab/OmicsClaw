@@ -36,8 +36,13 @@ def build_directive(
     7. **Failure Analysis** — patterns to look for
     8. **Output Format** — structured JSON
     """
+    import math
+
     best = ledger.best_trial()
-    best_score = f"{best.composite_score:.4f}" if best else "N/A"
+    if best is not None and math.isfinite(best.composite_score):
+        best_score = f"{best.composite_score:.4f}"
+    else:
+        best_score = "N/A"
     trials_run = len(ledger)
 
     sections = [

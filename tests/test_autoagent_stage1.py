@@ -82,12 +82,13 @@ class TestListOptimizable:
         assert "spatial-integrate" in names
         assert "spatial-integration" not in names
         assert "sc-clustering" not in names
+        assert "sc-cell-annotation" not in names
 
 
 # ---------------------------------------------------------------------------
 # search_space
 # ---------------------------------------------------------------------------
-from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace
+from omicsclaw.autoagent.search_space import ParameterDef, SearchSpace, build_method_surface
 
 
 class TestSearchSpace:
@@ -174,6 +175,27 @@ class TestSearchSpace:
         assert "batch_key" not in names
         assert "harmony_theta" in names
 
+    def test_build_method_surface_separates_tunable_and_fixed_inputs(self):
+        surface = build_method_surface(
+            "test",
+            "m",
+            {
+                "params": ["batch_key", "labels_key", "harmony_theta"],
+                "defaults": {"batch_key": "batch", "harmony_theta": 2.0},
+                "tips": [
+                    "--batch-key: batch column in adata.obs.",
+                    "--labels-key: label column in adata.obs.",
+                    "--harmony-theta: diversity penalty.",
+                ],
+            },
+        )
+
+        assert [param.name for param in surface.tunable] == ["harmony_theta"]
+        assert [param.name for param in surface.fixed] == ["batch_key", "labels_key"]
+        assert surface.fixed[0].required is False
+        assert surface.fixed[0].default == "batch"
+        assert surface.fixed[1].required is True
+
     def test_defaults_dict(self):
         ss = SearchSpace.from_param_hints(
             "test", "m", self.SAMPLE_HINTS,
@@ -209,12 +231,16 @@ class TestTrialRecord:
             composite_score=0.75,
             raw_metrics={"ilisi": 1.8},
             status="baseline",
+            evaluation_success=False,
+            missing_metrics=["clisi", "batch_asw"],
         )
         d = r.to_dict()
         r2 = TrialRecord.from_dict(d)
         assert r2.trial_id == 0
         assert r2.params == {"theta": 2.0}
         assert r2.composite_score == 0.75
+        assert r2.evaluation_success is False
+        assert r2.missing_metrics == ["clisi", "batch_asw"]
 
 
 class TestExperimentLedger:
@@ -286,10 +312,12 @@ class TestDirective:
             trial_id=0, params={"theta": 2.0}, composite_score=0.5,
             raw_metrics={"ilisi": 1.8}, status="baseline",
             reasoning="Initial baseline run",
+            missing_metrics=["clisi"],
         ))
         text = ledger.to_history_text()
         assert "Trial #0" in text
         assert "baseline" in text or "=" in text
+        assert "Missing metrics: clisi" in text
 
 
 # ---------------------------------------------------------------------------

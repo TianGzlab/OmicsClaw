@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1169,6 +1170,7 @@ def main():
             method=args.method,
             input_path=getattr(args, "input_path", "") or "",
             output_dir=getattr(args, "output_dir", "") or "",
+            cwd=os.getcwd(),
             max_trials=args.max_trials,
             fixed_params=fixed_params if fixed_params else None,
             llm_provider=args.provider,
@@ -1291,7 +1293,6 @@ def main():
             requirements=[("fastapi", "fastapi"), ("uvicorn", "uvicorn")],
             install_hint=_MEMORY_SERVER_INSTALL_HINT,
         )
-        import os
         if getattr(args, "host", None):
             os.environ["OMICSCLAW_MEMORY_HOST"] = args.host
         if getattr(args, "port", None):

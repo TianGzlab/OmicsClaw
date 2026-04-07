@@ -7,6 +7,7 @@ model as ``run_skill()`` in ``omicsclaw.py``.
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -19,6 +20,8 @@ from typing import Any
 
 from omicsclaw.autoagent.errors import OptimizationCancelled
 from omicsclaw.autoagent.search_space import SearchSpace
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -159,8 +162,16 @@ def _params_to_cli_args(
 
     for pname, pvalue in params.items():
         pdef = param_lookup.get(pname)
-        from omicsclaw.autoagent.constants import param_to_cli_flag
-        flag = pdef.cli_flag if pdef else param_to_cli_flag(pname)
+        if pdef is None:
+            logger.warning(
+                "Ignoring unknown trial param %s for %s/%s",
+                pname,
+                search_space.skill_name,
+                search_space.method,
+            )
+            continue
+
+        flag = pdef.cli_flag
 
         if isinstance(pvalue, bool):
             if pvalue:

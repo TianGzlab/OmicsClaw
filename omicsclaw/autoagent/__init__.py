@@ -58,6 +58,14 @@ def _resolve_optimization_output_root(
     return Path("output") / run_name
 
 
+def _is_missing_fixed_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    return False
+
+
 def run_optimization(
     skill_name: str,
     method: str,
@@ -68,6 +76,7 @@ def run_optimization(
     fixed_params: dict[str, Any] | None = None,
     llm_provider: str = "",
     llm_model: str = "",
+    llm_provider_config: dict[str, str] | None = None,
     demo: bool = False,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
     cancel_event: threading.Event | None = None,
@@ -82,7 +91,7 @@ def run_optimization(
     from omicsclaw.autoagent.metrics_registry import get_metrics_for_skill
     from omicsclaw.autoagent.optimization_loop import OptimizationLoop
     from omicsclaw.autoagent.reproduce import build_reproduce_command
-    from omicsclaw.autoagent.search_space import SearchSpace
+    from omicsclaw.autoagent.search_space import SearchSpace, build_method_surface
 
     # 1. Resolve metrics
     metrics = get_metrics_for_skill(skill_name, method)
@@ -122,8 +131,31 @@ def run_optimization(
         _emit_error_event(on_event, error_message)
         return {"success": False, "error": error_message}
 
+    method_surface = build_method_surface(skill_name, method, param_hints)
+    normalized_fixed_params = {
+        name: value
+        for name, value in (fixed_params or {}).items()
+        if not _is_missing_fixed_value(value)
+    }
+
+    missing_fixed = [
+        param.name
+        for param in method_surface.fixed
+        if param.required and param.name not in normalized_fixed_params
+    ]
+    if missing_fixed:
+        error_message = (
+            f"Missing required fixed parameters for {skill_name}/{method}: "
+            + ", ".join(missing_fixed)
+        )
+        _emit_error_event(on_event, error_message)
+        return {
+            "success": False,
+            "error": error_message,
+        }
+
     search_space = SearchSpace.from_param_hints(
-        skill_name, method, param_hints, fixed_params
+        skill_name, method, param_hints, normalized_fixed_params
     )
 
     if not search_space.tunable:
@@ -183,13 +215,14 @@ def run_optimization(
         max_trials=max_trials,
         llm_provider=llm_provider,
         llm_model=llm_model,
+        llm_provider_config=llm_provider_config,
         demo=demo,
         cancel_event=cancel_event,
     )
 
     result = loop.run(on_event=on_event)
-    if not result.success:
-        _emit_error_event(on_event, result.error_message or "Optimization failed")
+    # Note: _finalize_result now emits the error event itself when
+    # success=False, so we no longer need to emit it here.
 
     # 6. Build return summary
     summary: dict[str, Any] = {
@@ -205,6 +238,7 @@ def run_optimization(
     if not result.success:
         summary["error"] = result.error_message or "Optimization failed"
     if result.best_trial:
+        summary["best_trial"] = result.best_trial.to_dict()
         summary["best_trial_id"] = result.best_trial.trial_id
         summary["best_score"] = result.best_trial.composite_score
         summary["best_params"] = result.best_trial.params

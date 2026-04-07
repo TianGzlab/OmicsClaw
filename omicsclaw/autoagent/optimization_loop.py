@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -110,6 +109,7 @@ class OptimizationLoop:
         max_trials: int = 20,
         llm_provider: str = "",
         llm_model: str = "",
+        llm_provider_config: dict[str, str] | None = None,
         demo: bool = False,
         cancel_event: threading.Event | None = None,
     ) -> None:
@@ -123,6 +123,7 @@ class OptimizationLoop:
         self.max_trials = max_trials
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        self.llm_provider_config = dict(llm_provider_config or {})
         self.demo = demo
         self.cancel_event = cancel_event
 
@@ -162,11 +163,7 @@ class OptimizationLoop:
             baseline.status = "crash"  # preserve, do NOT overwrite to "baseline"
             self.ledger.append(baseline)
 
-            emit("trial_complete", {
-                "trial_id": 0, "score": baseline.composite_score,
-                "metrics": baseline.raw_metrics, "status": "crash",
-                "error_output": baseline.error_output,
-            })
+            emit("trial_complete", self._build_trial_complete_payload(baseline))
 
             # Build a useful error message from the real stderr output
             error_detail = "Baseline trial crashed — skill execution failed."
@@ -195,10 +192,7 @@ class OptimizationLoop:
         self.ledger.append(baseline)
         best = baseline
 
-        emit("trial_complete", {
-            "trial_id": 0, "score": baseline.composite_score,
-            "metrics": baseline.raw_metrics, "status": "baseline",
-        })
+        emit("trial_complete", self._build_trial_complete_payload(baseline))
         self._emit_progress(
             on_event,
             phase="baseline",
@@ -206,13 +200,23 @@ class OptimizationLoop:
             best_score=best.composite_score,
         )
 
-        # Warn if baseline produced non-finite metrics (skill ran but
+        # Stop if baseline produced non-finite metrics (skill ran but
         # metrics extraction failed — possibly wrong metric registry).
-        if math.isfinite(baseline.composite_score) is False:
-            logger.warning(
-                "Baseline trial succeeded but scored %s "
-                "(metrics may not be registered for this skill).",
-                baseline.composite_score,
+        # Continuing would make all judge comparisons meaningless.
+        if not math.isfinite(baseline.composite_score):
+            error_detail = (
+                f"Baseline trial succeeded but scored {baseline.composite_score} "
+                "(metrics may not be registered for this skill). "
+                "Cannot continue optimization with non-finite baseline."
+            )
+            logger.error(error_detail)
+            return self._finalize_result(
+                baseline=baseline,
+                best=baseline,
+                converged=False,
+                success=False,
+                error_message=error_detail,
+                on_event=on_event,
             )
 
         # Step 2: Iterative optimization
@@ -252,8 +256,39 @@ class OptimizationLoop:
                 converged = True
                 break
 
-            params = suggestion.get("params", {})
-            params = self._validate_and_clamp_params(params)
+            raw_params = suggestion.get("params", {})
+            if not isinstance(raw_params, dict):
+                error_message = (
+                    "LLM returned an invalid params payload of type "
+                    f"{type(raw_params).__name__}."
+                )
+                logger.warning(error_message)
+                return self._finalize_result(
+                    baseline=baseline,
+                    best=best,
+                    converged=converged,
+                    success=False,
+                    error_message=error_message,
+                    on_event=on_event,
+                )
+
+            params = self._validate_and_clamp_params(raw_params)
+            if not params:
+                allowed_params = ", ".join(sorted(p.name for p in self.search_space.tunable))
+                error_message = (
+                    f"LLM suggestion contained no valid tunable parameters for "
+                    f"{self.skill_name}/{self.method}. Allowed params: {allowed_params}."
+                )
+                logger.warning("%s Raw params=%s", error_message, raw_params)
+                return self._finalize_result(
+                    baseline=baseline,
+                    best=best,
+                    converged=converged,
+                    success=False,
+                    error_message=error_message,
+                    on_event=on_event,
+                )
+
             reasoning = suggestion.get("reasoning", "")
             emit("reasoning", {"trial_id": trial_id, "reasoning": reasoning})
 
@@ -279,18 +314,14 @@ class OptimizationLoop:
                 consecutive_crashes = 0
             elif trial_crashed:
                 consecutive_crashes += 1
-            else:
+            elif judgment.decision == "keep":
+                # Only reset on a successful keep — a mere "discard"
+                # does not indicate the system has recovered from crashes.
                 consecutive_crashes = 0
 
             self.ledger.append(trial)
 
-            emit("trial_complete", {
-                "trial_id": trial_id,
-                "score": trial.composite_score,
-                "metrics": trial.raw_metrics,
-                "status": trial.status,
-                **({"error_output": trial.error_output} if trial.error_output else {}),
-            })
+            emit("trial_complete", self._build_trial_complete_payload(trial))
             emit("trial_judgment", {
                 "trial_id": trial_id,
                 "decision": judgment.decision,
@@ -405,7 +436,22 @@ class OptimizationLoop:
             reasoning=description,
             output_dir=execution.output_dir,
             duration_seconds=execution.duration_seconds,
+            evaluation_success=eval_result.success,
+            missing_metrics=eval_result.missing_metrics,
         )
+
+    def _build_trial_complete_payload(self, trial: TrialRecord) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "trial_id": trial.trial_id,
+            "score": trial.composite_score,
+            "metrics": trial.raw_metrics,
+            "status": trial.status,
+            "evaluation_success": trial.evaluation_success,
+            "missing_metrics": trial.missing_metrics,
+        }
+        if trial.error_output:
+            payload["error_output"] = trial.error_output
+        return payload
 
     def _validate_and_clamp_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Validate and clamp LLM-suggested params to search space bounds.
@@ -414,12 +460,15 @@ class OptimizationLoop:
         - float/int: type coercion + range clamping
         - bool: proper parsing of string representations ("false", "0", "no" → False)
         - categorical: reject values not in choices, fall back to default
+        - unknown params: drop them so trial history matches real execution
         """
-        clamped = dict(params)
+        clamped: dict[str, Any] = {}
+        unknown_params: list[str] = []
         param_lookup = {p.name: p for p in self.search_space.tunable}
-        for pname, pvalue in list(clamped.items()):
+        for pname, pvalue in params.items():
             pdef = param_lookup.get(pname)
             if pdef is None:
+                unknown_params.append(pname)
                 continue
             # Type coercion
             try:
@@ -445,6 +494,14 @@ class OptimizationLoop:
             if pdef.high is not None and isinstance(pvalue, (int, float)):
                 pvalue = min(pdef.high, pvalue)
             clamped[pname] = pvalue
+
+        if unknown_params:
+            logger.warning(
+                "Discarding unknown LLM-suggested params for %s/%s: %s",
+                self.skill_name,
+                self.method,
+                ", ".join(sorted(set(unknown_params))),
+            )
         return clamped
 
     def _ask_llm(self, directive: str) -> tuple[dict[str, Any] | None, str]:
@@ -472,27 +529,44 @@ class OptimizationLoop:
 
     def _call_llm(self, directive: str) -> str:
         """Call the LLM via OpenAI-compatible API."""
-        from omicsclaw.core.provider_registry import resolve_provider
-
-        api_key_env = os.environ.get("LLM_API_KEY", "")
-        base_url, model, api_key = resolve_provider(
-            provider=self.llm_provider,
-            base_url="",
-            model=self.llm_model,
-            api_key="",
+        from omicsclaw.core.provider_runtime import (
+            provider_requires_api_key,
+            resolve_provider_runtime,
         )
 
-        if not api_key:
+        config_provider = str(self.llm_provider_config.get("provider", "") or "")
+        config_base_url = str(self.llm_provider_config.get("base_url", "") or "")
+        config_model = str(self.llm_provider_config.get("model", "") or "")
+        config_api_key = str(self.llm_provider_config.get("api_key", "") or "")
+        runtime = resolve_provider_runtime(
+            provider=config_provider or self.llm_provider,
+            base_url=config_base_url,
+            model=config_model or self.llm_model,
+            api_key=config_api_key,
+        )
+
+        if not runtime.model:
             raise RuntimeError(
-                "No LLM API key found. Set LLM_API_KEY or a provider-specific "
-                "key (e.g. DEEPSEEK_API_KEY) in your environment."
+                "No usable LLM model resolved for optimization. "
+                "Configure an OmicsClaw provider or choose a valid model first."
+            )
+
+        if provider_requires_api_key(runtime.provider) and not runtime.api_key:
+            raise RuntimeError(
+                "No usable LLM provider config resolved for optimization "
+                f"(provider={runtime.provider or 'unknown'}, source={runtime.source}). "
+                "Configure the provider in OmicsClaw-App settings or set the "
+                "matching environment variable."
             )
 
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key, base_url=base_url or None)
+        client = OpenAI(
+            api_key=runtime.api_key,
+            base_url=runtime.base_url or None,
+        )
         response = client.chat.completions.create(
-            model=model,
+            model=runtime.model,
             messages=[
                 {"role": "system", "content": "You are a parameter optimization agent. Respond ONLY with valid JSON."},
                 {"role": "user", "content": directive},
@@ -505,26 +579,55 @@ class OptimizationLoop:
     def _parse_llm_response(self, text: str) -> dict[str, Any] | None:
         """Parse the LLM response as JSON, handling markdown fences."""
         text = text.strip()
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # Remove first and last line (fences)
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines).strip()
+
+        # Strip markdown code fences: ```json ... ``` or ``` ... ```
+        # Only remove the opening and closing fence lines, not interior
+        # lines that happen to contain backticks inside strings.
+        import re
+
+        fence_match = re.search(
+            r"```(?:json|JSON)?\s*\n(.*?)```", text, re.DOTALL
+        )
+        if fence_match:
+            text = fence_match.group(1).strip()
 
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Try to find JSON object in the text
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                try:
-                    return json.loads(text[start : end + 1])
-                except json.JSONDecodeError:
-                    pass
-            logger.warning("Failed to parse LLM response as JSON: %s", text[:200])
-            return None
+            pass
+
+        # Try to extract the outermost balanced JSON object by finding
+        # the first '{' and matching it with the correct closing '}'.
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start : i + 1])
+                        except json.JSONDecodeError:
+                            break
+
+        logger.warning("Failed to parse LLM response as JSON: %s", text[:200])
+        return None
 
     def _write_summary(self, result: OptimizationResult) -> None:
         """Write a summary.json with the best parameters and run stats."""
@@ -540,6 +643,7 @@ class OptimizationLoop:
         if result.error_message:
             summary["error"] = result.error_message
         if best:
+            summary["best_trial"] = best.to_dict()
             summary["best_trial_id"] = best.trial_id
             summary["best_score"] = best.composite_score
             summary["best_params"] = best.params
@@ -589,25 +693,34 @@ class OptimizationLoop:
             error_message=error_message,
         )
 
-        self._raise_if_cancelled()
+        # Only check cancellation on success path — failure path must
+        # report the real error, not silently turn into a cancel.
+        if success:
+            self._raise_if_cancelled()
+
         self._write_summary(result)
 
-        if success and on_event:
-            if result.total_trials < self.max_trials:
-                self._emit_progress(
-                    on_event,
-                    phase="complete",
-                    completed=result.total_trials,
-                    total=result.total_trials,
-                    best_score=best.composite_score,
-                )
-            on_event("done", {
-                "best_trial": best.to_dict() if best else None,
-                "improvement_pct": result.improvement_pct,
-                "total_trials": result.total_trials,
-                "converged": converged,
-                "reproduce_command": self._build_reproduce_command(best) if best else "",
-            })
+        if on_event:
+            if success:
+                if result.total_trials < self.max_trials:
+                    self._emit_progress(
+                        on_event,
+                        phase="complete",
+                        completed=result.total_trials,
+                        total=result.total_trials,
+                        best_score=best.composite_score,
+                    )
+                on_event("done", {
+                    "best_trial": best.to_dict() if best else None,
+                    "improvement_pct": result.improvement_pct,
+                    "total_trials": result.total_trials,
+                    "converged": converged,
+                    "reproduce_command": self._build_reproduce_command(best) if best else "",
+                })
+            else:
+                on_event("error", {
+                    "message": error_message or "Optimization failed",
+                })
 
         return result
 
