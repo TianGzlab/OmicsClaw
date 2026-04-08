@@ -26,6 +26,13 @@ from .de import (
     plot_de_group_summary,
     plot_de_rank_panels,
 )
+from .enrichment import (
+    plot_enrichment_embedding_panels,
+    plot_group_mean_dotplot,
+    plot_group_mean_heatmap,
+    plot_pathway_score_distributions,
+    plot_top_gene_sets_bar,
+)
 from .doublet import (
     plot_doublet_call_summary,
     plot_doublet_score_by_group,
@@ -83,6 +90,11 @@ __all__ = [
     "plot_de_effect_summary",
     "plot_de_group_summary",
     "plot_de_rank_panels",
+    "plot_top_gene_sets_bar",
+    "plot_group_mean_heatmap",
+    "plot_group_mean_dotplot",
+    "plot_pathway_score_distributions",
+    "plot_enrichment_embedding_panels",
     "plot_doublet_score_distribution",
     "plot_doublet_call_summary",
     "plot_doublet_score_by_group",

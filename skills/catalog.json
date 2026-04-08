@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "generated_by": "scripts/generate_catalog.py",
-  "skill_count": 80,
+  "skill_count": 85,
   "skills": [
     {
       "name": "bulkrna-batch-correction",
@@ -882,8 +882,8 @@
     {
       "name": "sc-cell-annotation",
       "cli_alias": "sc-cell-annotation",
-      "description": "Annotate cell types from preprocessed scRNA-seq data using marker scoring, CellTypist, SingleR, or scmap through the shared Python/R backends.",
-      "version": "0.5.0",
+      "description": "Annotate cell types from normalized scRNA-seq data using marker scoring, CellTypist, PopV-style reference mapping, lightweight KNNPredict-style mapping, SingleR, or scmap through shared Python/R backends.",
+      "version": "0.9.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -893,6 +893,8 @@
         "singlecell",
         "annotation",
         "celltypist",
+        "popv",
+        "knnpredict",
         "singler",
         "scmap"
       ],
@@ -901,7 +903,7 @@
     {
       "name": "sc-cell-communication",
       "cli_alias": "sc-cell-communication",
-      "description": "Cell-cell communication analysis for annotated scRNA-seq data using a built-in ligand-receptor scorer, LIANA, CellPhoneDB, or a CellChat R path.",
+      "description": "Cell-cell communication analysis for annotated scRNA-seq data using a built-in ligand-receptor scorer, LIANA, CellPhoneDB, CellChat, or a NicheNet R path.",
       "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
@@ -914,7 +916,32 @@
         "ligand-receptor",
         "liana",
         "cellphonedb",
-        "cellchat"
+        "cellchat",
+        "nichenet"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-clustering",
+      "cli_alias": "sc-clustering",
+      "description": "Build the neighbor graph, run a low-dimensional embedding, and cluster single-cell data from a normalized scRNA AnnData object.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-clustering --demo",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "clustering",
+        "embedding",
+        "umap",
+        "tsne",
+        "diffmap",
+        "phate",
+        "leiden",
+        "louvain"
       ],
       "trigger_keywords": []
     },
@@ -934,6 +961,8 @@
         "count",
         "cellranger",
         "starsolo",
+        "simpleaf",
+        "kb-python",
         "fastq"
       ],
       "trigger_keywords": []
@@ -941,8 +970,8 @@
     {
       "name": "sc-de",
       "cli_alias": "sc-de",
-      "description": "Differential expression for single-cell RNA-seq using Scanpy marker tests or an R-backed DESeq2 pseudobulk path. The wrapper separates exploratory cluster-level marker ranking from sample-aware pseudobulk analysis.",
-      "version": "0.5.0",
+      "description": "Differential expression for single-cell RNA-seq using exploratory Scanpy ranking, R-backed MAST, or replicate-aware pseudobulk DESeq2. The wrapper separates cluster/group marker ranking from sample-aware condition DE.",
+      "version": "0.6.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -979,8 +1008,8 @@
     {
       "name": "sc-doublet-detection",
       "cli_alias": "sc-doublet-detection",
-      "description": "Detect putative doublets in single-cell RNA-seq data using Scrublet, DoubletFinder, or scDblFinder. The wrapper standardizes output columns and keeps the public parameter surface compact.",
-      "version": "0.5.0",
+      "description": "Annotate putative doublets in single-cell RNA-seq data using Scrublet, DoubletDetection, DoubletFinder, scDblFinder, or scds. The wrapper preserves the current AnnData matrix semantics, standardizes output columns in `obs`, and exports a reusable figure/table gallery.",
+      "version": "0.6.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -990,28 +1019,11 @@
         "singlecell",
         "doublet",
         "scrublet",
+        "doubletdetection",
         "doubletfinder",
         "scdblfinder",
+        "scds",
         "qc"
-      ],
-      "trigger_keywords": []
-    },
-    {
-      "name": "sc-enrichment",
-      "cli_alias": "sc-enrichment",
-      "description": "Single-cell gene-set activity scoring for annotated scRNA-seq data using the official AUCell Bioconductor implementation.",
-      "version": "0.1.0",
-      "status": "mvp",
-      "has_script": true,
-      "has_tests": true,
-      "has_demo": true,
-      "demo_command": "python omicsclaw.py run sc-enrichment --demo",
-      "tags": [
-        "singlecell",
-        "enrichment",
-        "pathway",
-        "geneset",
-        "aucell"
       ],
       "trigger_keywords": []
     },
@@ -1039,10 +1051,10 @@
       "name": "sc-filter",
       "cli_alias": "sc-filter",
       "description": "Filter cells and genes from single-cell RNA-seq AnnData objects using QC-derived thresholds or tissue presets. This wrapper removes low-quality cells/genes but does not normalize, cluster, or annotate the dataset.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "status": "mvp",
       "has_script": true,
-      "has_tests": false,
+      "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-filter --demo",
       "tags": [
@@ -1091,20 +1103,40 @@
       "trigger_keywords": []
     },
     {
-      "name": "sc-markers",
-      "cli_alias": "sc-markers",
-      "description": "Find cluster marker genes from single-cell data using Scanpy-backed Wilcoxon, t-test, or logistic-regression ranking.",
-      "version": "0.4.0",
+      "name": "sc-in-silico-perturbation",
+      "cli_alias": "sc-in-silico-perturbation",
+      "description": "In-silico perturbation analysis for scRNA-seq, currently using the official scTenifoldKnk R workflow on a wild-type expression matrix.",
+      "version": "0.1.0",
       "status": "mvp",
       "has_script": true,
-      "has_tests": false,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-in-silico-perturbation --demo",
+      "tags": [
+        "singlecell",
+        "virtual-knockout",
+        "grn",
+        "sctenifoldknk",
+        "perturbation"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-markers",
+      "cli_alias": "sc-markers",
+      "description": "Rank cluster marker genes from normalized single-cell AnnData using Scanpy-backed Wilcoxon, t-test, or logistic-regression methods. The wrapper standardizes outputs for downstream annotation and review.",
+      "version": "0.5.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-markers --demo",
       "tags": [
         "singlecell",
         "markers",
-        "differential-expression",
-        "annotation"
+        "cluster-markers",
+        "annotation",
+        "differential-expression"
       ],
       "trigger_keywords": []
     },
@@ -1127,10 +1159,70 @@
       "trigger_keywords": []
     },
     {
+      "name": "sc-pathway-scoring",
+      "cli_alias": "sc-pathway-scoring",
+      "description": "Single-cell pathway and gene-set activity scoring for preprocessed scRNA-seq data using AUCell or a lightweight normalized-expression module-score path.",
+      "version": "0.2.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-pathway-scoring --demo",
+      "tags": [
+        "singlecell",
+        "pathway-scoring",
+        "pathway",
+        "geneset",
+        "aucell",
+        "module-score"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-perturb",
+      "cli_alias": "sc-perturb",
+      "description": "Single-cell perturbation analysis for scRNA-seq perturbation screens using the official pertpy Mixscape workflow.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-perturb --demo",
+      "tags": [
+        "singlecell",
+        "perturbation",
+        "perturb-seq",
+        "crispr",
+        "mixscape",
+        "pertpy"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-perturb-prep",
+      "cli_alias": "sc-perturb-prep",
+      "description": "Prepare perturbation-ready scRNA AnnData objects by merging barcode-to-guide assignments into expression data and exporting a downstream-safe h5ad for `sc-perturb`.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-perturb-prep --demo",
+      "tags": [
+        "singlecell",
+        "perturbation",
+        "perturb-seq",
+        "crispr",
+        "sgrna",
+        "guide-assignment"
+      ],
+      "trigger_keywords": []
+    },
+    {
       "name": "sc-preprocessing",
       "cli_alias": "sc-preprocessing",
-      "description": "Main preprocessing step after counts and QC. Filters cells, normalizes expression, selects HVGs, and runs PCA, UMAP, and clustering.",
-      "version": "0.4.0",
+      "description": "Base scRNA preprocessing after QC: QC-aware filtering, normalization, highly variable gene selection, and PCA.",
+      "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -1142,15 +1234,16 @@
         "preprocessing",
         "qc",
         "normalization",
-        "clustering"
+        "hvg",
+        "pca"
       ],
       "trigger_keywords": []
     },
     {
       "name": "sc-pseudotime",
       "cli_alias": "sc-pseudotime",
-      "description": "Trajectory analysis for single-cell RNA-seq using Scanpy DPT or Palantir, plus a configurable correlation method for ranking trajectory-associated genes.",
-      "version": "0.3.0",
+      "description": "Trajectory analysis for single-cell RNA-seq using Scanpy DPT, Palantir, or VIA, plus a configurable correlation method for ranking trajectory-associated genes.",
+      "version": "0.4.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -1162,7 +1255,9 @@
         "pseudotime",
         "paga",
         "dpt",
-        "palantir"
+        "palantir",
+        "via",
+        "cellrank"
       ],
       "trigger_keywords": []
     },
@@ -1213,7 +1308,7 @@
       "version": "0.3.0",
       "status": "mvp",
       "has_script": true,
-      "has_tests": false,
+      "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-velocity --demo",
       "tags": [
@@ -1484,7 +1579,7 @@
     {
       "name": "spatial-preprocess",
       "cli_alias": "spatial-preprocess",
-      "description": "Load raw spatial transcriptomics data (Visium, Xenium, or converted h5ad inputs), run the current OmicsClaw scanpy-standard preprocessing workflow, and export a downstream-ready AnnData with explicit effective QC parameters plus a standardized preprocessing visualization contract.",
+      "description": "Load matrix-level spatial transcriptomics data (including raw_counts.h5ad from spatial-raw-processing), run the current OmicsClaw scanpy-standard preprocessing workflow, and export a downstream-ready AnnData with explicit effective QC parameters plus a standardized preprocessing visualization contract.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -1501,6 +1596,27 @@
         "umap",
         "visium",
         "xenium"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "spatial-raw-processing",
+      "cli_alias": "spatial-raw-processing",
+      "description": "Process barcoded spatial transcriptomics FASTQ pairs with st_pipeline, preserve upstream artifacts, convert the counts matrix into a standardized raw_counts.h5ad, and hand off cleanly to spatial-preprocess.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run spatial-raw-processing --demo",
+      "tags": [
+        "spatial",
+        "raw-processing",
+        "fastq",
+        "st_pipeline",
+        "visium",
+        "slideseq",
+        "upstream"
       ],
       "trigger_keywords": []
     },

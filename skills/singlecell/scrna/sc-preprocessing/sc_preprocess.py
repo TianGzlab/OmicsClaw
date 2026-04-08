@@ -57,7 +57,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     "scanpy": MethodConfig(
         name="scanpy",
         description="Scanpy preprocessing workflow",
-        dependencies=("scanpy", "igraph", "leidenalg"),
+        dependencies=("scanpy",),
     ),
     "seurat": MethodConfig(
         name="seurat",

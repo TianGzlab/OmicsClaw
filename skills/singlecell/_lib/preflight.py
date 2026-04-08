@@ -217,6 +217,19 @@ def _aligned_raw_is_count_like(adata: AnnData) -> bool:
     return matrix_looks_count_like(adata.raw.X)
 
 
+def _count_like_matrix_available(adata: AnnData) -> bool:
+    if "counts" in getattr(adata, "layers", {}):
+        layer_kind = get_matrix_contract(adata).get("layers", {}).get("counts")
+        if layer_kind:
+            return matrix_kind_is_count_like(layer_kind)
+        return matrix_looks_count_like(adata.layers["counts"])
+    if _aligned_raw_is_count_like(adata):
+        return True
+    if not x_matrix_kind(adata):
+        return matrix_looks_count_like(adata.X)
+    return matrix_kind_is_count_like(x_matrix_kind(adata))
+
+
 def preflight_sc_de(
     adata: AnnData,
     *,
@@ -1366,18 +1379,54 @@ def preflight_sc_grn(
     return decision
 
 
-def preflight_sc_enrichment(
+def preflight_sc_pathway_scoring(
     adata: AnnData,
     *,
+    method: str,
     gene_sets_path: str | None,
+    gene_set_db: str | None = None,
     groupby: str | None,
     source_path: str | None = None,
 ) -> PreflightDecision:
-    decision = PreflightDecision("sc-enrichment")
+    decision = PreflightDecision("sc-pathway-scoring")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
-    if not gene_sets_path:
-        decision.block("`sc-enrichment` requires `--gene-sets` unless `--demo` is used.")
+    if not gene_sets_path and not gene_set_db:
+        decision.block(
+            "`sc-pathway-scoring` requires either `--gene-sets <local.gmt>` or `--gene-set-db <hallmark|kegg|go_bp|...>` unless `--demo` is used."
+        )
+
+    if gene_set_db and find_spec("gseapy") is None:
+        decision.block(
+            "`--gene-set-db` needs the optional Python package `gseapy`, which is not installed in the current environment. Install it before using built-in pathway libraries."
+        )
+    elif gene_set_db:
+        decision.add_guidance(
+            f"`--gene-set-db {gene_set_db}` will try to resolve a built-in gene-set library automatically. The first run may need network access to download or refresh the library cache."
+        )
+
+    if method == "score_genes_py":
+        if not _normalized_expression_available(adata):
+            decision.block(
+                "`score_genes_py` requires normalized expression in `adata.X`. Run `sc-preprocessing` first."
+            )
+        else:
+            decision.add_guidance(
+                "`score_genes_py` is a lightweight module-scoring path for normalized expression and works best after `sc-preprocessing`."
+            )
+    else:
+        if _normalized_expression_available(adata):
+            decision.add_guidance(
+                "`aucell_r` will score pathway activity from the normalized expression already present in `adata.X`."
+            )
+        elif _count_like_matrix_available(adata):
+            decision.add_guidance(
+                "`aucell_r` can still score pathway activity from a count-like matrix by ranking genes within each cell, but grouped summaries are usually most interpretable after preprocessing or clustering."
+            )
+        else:
+            decision.block(
+                "`aucell_r` needs either normalized expression in `adata.X` or a usable count-like source."
+            )
 
     if groupby and groupby not in adata.obs.columns:
         candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type")
@@ -1392,6 +1441,24 @@ def preflight_sc_enrichment(
             decision.add_guidance(
                 f"`--groupby {groupby}` was not found, so this run would score gene sets per cell without grouped summaries."
             )
+    elif not groupby:
+        candidates = []
+        for family in ("cell_type", "cluster"):
+            for column in _obs_candidates(adata, family):
+                if column not in candidates:
+                    candidates.append(column)
+        if candidates:
+            decision.add_guidance(
+                f"No `--groupby` was provided. This run can still score each cell, and grouped summaries can use one of: {_format_candidates(candidates)}."
+            )
+        else:
+            decision.add_guidance(
+                "No label column was provided, so this run will focus on per-cell pathway scores rather than grouped summaries."
+            )
+
+    decision.add_guidance(
+        "This skill usually comes after `sc-preprocessing`, and often after `sc-clustering` or `sc-cell-annotation` when you want pathway summaries by cluster or cell type."
+    )
 
     return decision
 

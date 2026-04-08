@@ -33,35 +33,48 @@ logger = logging.getLogger(__name__)
 
 R_TIER_PACKAGES: dict[str, list[str]] = {
     # Single-cell
-    "singlecell-core": [
+    "singlecell-preprocessing": [
         "Seurat",
         "SingleCellExperiment",
+        "zellkonverter",
     ],
-    "singlecell-doublet": [
+    "singlecell-doublet-detection": [
         "Seurat",
         "DoubletFinder",
         "scDblFinder",
         "scds",
         "SingleCellExperiment",
+        "zellkonverter",
     ],
-    "singlecell-annotation": [
+    "singlecell-cell-annotation": [
         "SingleR",
+        "scmap",
         "celldex",
         "SingleCellExperiment",
+        "zellkonverter",
     ],
     "singlecell-ambient": [
         "Seurat",
         "SoupX",
     ],
-    "singlecell-integration": [
+    "singlecell-batch-integration": [
         "Seurat",
         "batchelor",
+        "SingleCellExperiment",
+        "zellkonverter",
     ],
     "singlecell-communication": [
         "CellChat",
     ],
     "singlecell-de": [
+        "MAST",
         "DESeq2",
+        "SingleCellExperiment",
+        "zellkonverter",
+    ],
+    "singlecell-enrichment": [
+        "AUCell",
+        "GSEABase",
     ],
     # Spatial
     "spatial-deconv": [
@@ -100,6 +113,12 @@ R_TIER_PACKAGES: dict[str, list[str]] = {
     ],
 }
 
+# Legacy aliases kept for compatibility with older tests / callers.
+R_TIER_PACKAGES.setdefault("singlecell-core", R_TIER_PACKAGES["singlecell-preprocessing"])
+R_TIER_PACKAGES.setdefault("singlecell-doublet", R_TIER_PACKAGES["singlecell-doublet-detection"])
+R_TIER_PACKAGES.setdefault("singlecell-annotation", R_TIER_PACKAGES["singlecell-cell-annotation"])
+R_TIER_PACKAGES.setdefault("singlecell-integration", R_TIER_PACKAGES["singlecell-batch-integration"])
+
 # Reverse mapping: R package → tier
 R_PACKAGE_TO_TIER: dict[str, str] = {}
 for _tier, _pkgs in R_TIER_PACKAGES.items():
@@ -117,7 +136,7 @@ _BIOCONDUCTOR_PACKAGES: set[str] = {
     "clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db",
     "scDblFinder", "scds", "batchelor", "sva", "SPARK",
     "spacexr", "SPOTlight", "CARD", "numbat",
-    "SoupX",
+    "SoupX", "scmap", "MAST", "AUCell", "GSEABase", "graph", "annotate",
 }
 
 # Packages installable from CRAN

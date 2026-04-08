@@ -4,7 +4,7 @@ title: Single-Cell Input Contract Guardrails
 doc_type: knowhow
 critical_rule: MUST decide whether the input can be standardized safely, whether key scientific parameters need user confirmation, or whether required metadata/content is missing and analysis must pause
 domains: [singlecell]
-related_skills: [sc-standardize-input, sc-qc, sc-preprocessing, sc-filter, sc-ambient-removal, sc-doublet-detection, sc-cell-annotation, sc-pseudotime, sc-velocity, sc-batch-integration, sc-de, sc-markers, sc-grn, sc-cell-communication, sc-enrichment]
+related_skills: [sc-standardize-input, sc-qc, sc-preprocessing, sc-filter, sc-ambient-removal, sc-doublet-detection, sc-cell-annotation, sc-pseudotime, sc-velocity, sc-batch-integration, sc-de, sc-markers, sc-grn, sc-cell-communication, sc-pathway-scoring]
 phases: [before_run, on_warning]
 search_terms: [singlecell input contract, standardize input, missing metadata, ask user, confirm parameters, insufficient data, 单细胞输入合同, 缺少元数据, 参数确认]
 priority: 1.0

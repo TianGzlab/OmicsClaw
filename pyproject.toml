@@ -147,6 +147,44 @@ singlecell-upstream = [
 ]
 
 # --------------------------------------------------------------------------- #
+# singlecell-clustering — optional clustering/embedding backends.             #
+# --------------------------------------------------------------------------- #
+singlecell-clustering = [
+    "python-igraph>=0.11.0",          # Leiden graph backend
+    "leidenalg>=0.10.0",              # Leiden clustering
+    "louvain>=0.8.0",                 # Louvain clustering
+    "phate>=1.0.11",                  # PHATE embedding
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-batch — optional batch integration stacks.                       #
+# --------------------------------------------------------------------------- #
+singlecell-batch = [
+    "harmonypy>=0.0.9",               # Harmony batch correction
+    "bbknn>=1.5.0",                   # BBKNN batch correction
+    "scanorama>=1.7.0",               # Scanorama batch correction
+    "scvi-tools>=1.0.0,<2.0",         # scVI / scANVI integration
+    "torch>=2.0.0,<3.0",              # PyTorch for scvi-tools
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-doublet — optional Python doublet detection stack.               #
+# R-backed doublet methods are checked at runtime instead.                    #
+# --------------------------------------------------------------------------- #
+singlecell-doublet = [
+    "scrublet>=0.2.3",                # Scrublet
+    "doubletdetection>=4.3.0",        # DoubletDetection
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-annotation — optional Python annotation backends.                #
+# R-backed atlas methods are checked at runtime instead.                      #
+# --------------------------------------------------------------------------- #
+singlecell-annotation = [
+    "celltypist>=1.6.0",              # CellTypist
+]
+
+# --------------------------------------------------------------------------- #
 # singlecell-velocity — Python-side velocity analysis stack.                  #
 # External CLIs such as STAR and velocyto remain manual installs.             #
 # --------------------------------------------------------------------------- #
@@ -154,12 +192,16 @@ singlecell-velocity = [
     "scvelo>=0.3.0",                  # sc-velocity: scVelo modeling
 ]
 
+singlecell-enrichment = [
+    "gseapy>=1.0.0",                  # sc-pathway-scoring: library-backed pathway scoring
+]
+
 # --------------------------------------------------------------------------- #
 # singlecell-full — convenience meta-extra for broader scRNA work.            #
 # Still excludes external CLIs and reference downloads.                       #
 # --------------------------------------------------------------------------- #
 singlecell-full = [
-    "omicsclaw[singlecell,singlecell-upstream,singlecell-velocity]",
+    "omicsclaw[singlecell,singlecell-upstream,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-velocity,singlecell-enrichment]",
 ]
 
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
@@ -180,7 +222,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #

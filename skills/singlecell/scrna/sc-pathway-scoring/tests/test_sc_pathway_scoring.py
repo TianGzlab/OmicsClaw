@@ -1,4 +1,4 @@
-"""Tests for the sc-enrichment skill."""
+"""Tests for the sc-pathway-scoring skill."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 
 from omicsclaw.core.r_script_runner import RScriptRunner
 
-SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_enrichment.py"
+SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_pathway_scoring.py"
 R_SCRIPTS_DIR = SKILL_SCRIPT.parent / "rscripts"
 
 
@@ -27,7 +27,21 @@ def _aucell_stack_available() -> bool:
 
 @pytest.fixture
 def tmp_output(tmp_path):
-    return tmp_path / "sc_enrichment_out"
+    return tmp_path / "sc_pathway_scoring_out"
+
+
+def test_score_genes_demo_mode(tmp_output):
+    result = subprocess.run(
+        [sys.executable, str(SKILL_SCRIPT), "--demo", "--method", "score_genes_py", "--output", str(tmp_output)],
+        capture_output=True,
+        text=True,
+        timeout=240,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert (tmp_output / "processed.h5ad").exists()
+    assert (tmp_output / "tables" / "enrichment_scores.csv").exists()
+    assert (tmp_output / "figure_data" / "manifest.json").exists()
 
 
 @pytest.mark.skipif(not _aucell_stack_available(), reason="AUCell R stack unavailable")
@@ -42,7 +56,7 @@ def test_demo_mode(tmp_output):
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
-    assert (tmp_output / "tables" / "aucell_scores.csv").exists()
+    assert (tmp_output / "tables" / "enrichment_scores.csv").exists()
     assert (tmp_output / "tables" / "top_pathways.csv").exists()
 
 
@@ -56,6 +70,6 @@ def test_demo_result_json(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     data = json.loads((tmp_output / "result.json").read_text())
-    assert data["skill"] == "sc-enrichment"
+    assert data["skill"] == "sc-pathway-scoring"
     assert data["summary"]["method"] == "aucell_r"
     assert "score_columns" in data["summary"]

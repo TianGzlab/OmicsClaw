@@ -11,7 +11,7 @@ from skills.singlecell._lib.preflight import (
     preflight_sc_cell_communication,
     preflight_sc_de,
     preflight_sc_doublet_detection,
-    preflight_sc_enrichment,
+    preflight_sc_pathway_scoring,
     preflight_sc_filter,
     preflight_sc_grn,
     preflight_sc_markers,
@@ -495,27 +495,45 @@ def test_preflight_sc_pseudotime_requires_cluster_key_confirmation():
     assert any("--cluster-key" in line for line in decision.confirmations)
 
 
-def test_preflight_sc_enrichment_blocks_without_gene_sets():
+def test_preflight_sc_pathway_scoring_blocks_without_gene_sets():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
 
-    decision = preflight_sc_enrichment(
+    decision = preflight_sc_pathway_scoring(
         adata,
+        method="aucell_r",
         gene_sets_path=None,
         groupby="leiden",
     )
 
     assert decision.status == "blocked"
-    assert any("requires `--gene-sets`" in line for line in decision.missing_requirements)
+    assert any("requires either `--gene-sets" in line for line in decision.missing_requirements)
 
 
-def test_preflight_sc_enrichment_guides_when_groupby_missing():
+def test_preflight_sc_pathway_scoring_guides_when_groupby_missing():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float), obs={"cell_type": ["T", "B"]})
+    adata.uns["omicsclaw_matrix_contract"] = {"X": "raw_counts", "raw": None, "layers": {}}
 
-    decision = preflight_sc_enrichment(
+    decision = preflight_sc_pathway_scoring(
         adata,
+        method="aucell_r",
         gene_sets_path="sets.gmt",
         groupby="leiden",
     )
 
     assert decision.status == "needs_user_input"
     assert any("grouped AUCell summaries would be skipped" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_pathway_scoring_blocks_score_genes_without_normalized_expression():
+    adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float), obs={"cell_type": ["T", "B"]})
+    adata.uns["omicsclaw_matrix_contract"] = {"X": "raw_counts", "raw": None, "layers": {}}
+
+    decision = preflight_sc_pathway_scoring(
+        adata,
+        method="score_genes_py",
+        gene_sets_path="sets.gmt",
+        groupby=None,
+    )
+
+    assert decision.status == "blocked"
+    assert any("requires normalized expression" in line for line in decision.missing_requirements)
