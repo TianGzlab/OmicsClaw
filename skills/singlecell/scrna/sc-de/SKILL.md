@@ -1,10 +1,10 @@
 ---
 name: sc-de
 description: >-
-  Differential expression for single-cell RNA-seq using Scanpy marker tests or
-  an R-backed DESeq2 pseudobulk path. The wrapper separates exploratory
-  cluster-level marker ranking from sample-aware pseudobulk analysis.
-version: 0.5.0
+  Differential expression for single-cell RNA-seq using exploratory Scanpy
+  ranking, R-backed MAST, or replicate-aware pseudobulk DESeq2. The wrapper
+  separates cluster/group marker ranking from sample-aware condition DE.
+version: 0.6.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, differential-expression, markers, wilcoxon, deseq2]
@@ -16,8 +16,13 @@ metadata:
       - "--group1"
       - "--group2"
       - "--groupby"
+      - "--log2fc-threshold"
+      - "--logreg-solver"
       - "--method"
       - "--n-top-genes"
+      - "--padj-threshold"
+      - "--pseudobulk-min-cells"
+      - "--pseudobulk-min-counts"
       - "--sample-key"
     param_hints:
       wilcoxon:
@@ -34,6 +39,13 @@ metadata:
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method t-test: Parametric alternative to Wilcoxon."
+      logreg:
+        priority: "groupby -> logreg_solver -> n_top_genes"
+        params: ["groupby", "logreg_solver", "n_top_genes"]
+        defaults: {groupby: "leiden", logreg_solver: "lbfgs", n_top_genes: 10}
+        requires: ["preprocessed_anndata", "scanpy"]
+        tips:
+          - "--method logreg: Logistic-regression ranking, useful when you want genes that best separate one group from the others."
       mast:
         priority: "groupby -> group1/group2 -> n_top_genes"
         params: ["groupby", "group1", "group2", "n_top_genes"]
@@ -42,9 +54,9 @@ metadata:
         tips:
           - "--method mast: R-backed MAST hurdle-model path on log-normalized expression."
       deseq2_r:
-        priority: "groupby -> group1/group2 -> sample_key -> celltype_key"
-        params: ["groupby", "group1", "group2", "sample_key", "celltype_key"]
-        defaults: {sample_key: "sample_id", celltype_key: "cell_type"}
+        priority: "groupby -> group1/group2 -> sample_key -> celltype_key -> pseudobulk thresholds"
+        params: ["groupby", "group1", "group2", "sample_key", "celltype_key", "pseudobulk_min_cells", "pseudobulk_min_counts"]
+        defaults: {sample_key: "sample_id", celltype_key: "cell_type", pseudobulk_min_cells: 10, pseudobulk_min_counts: 1000}
         requires: ["raw_counts_or_raw_layer", "biological_replicates", "R_DESeq2_stack"]
         tips:
           - "--method deseq2_r: Sample-aware pseudobulk path."
@@ -80,7 +92,7 @@ metadata:
 
 ## Core Capabilities
 
-1. **Four DE paths**: Wilcoxon, t-test, MAST, and DESeq2 pseudobulk.
+1. **Five DE paths**: Wilcoxon, t-test, logistic regression, MAST, and DESeq2 pseudobulk.
 2. **Separation of statistical questions**: exploratory single-cell ranking versus replicate-aware pseudobulk inference.
 3. **Matrix-aware contract**: normalized expression for ranking paths, raw counts for DESeq2 pseudobulk.
 4. **Direct DE figure exports**: marker dotplot and rank-gene summary where supported.
@@ -92,8 +104,9 @@ Implemented methods:
 
 1. `wilcoxon`
 2. `t-test`
-3. `mast` for R-backed hurdle-model DE
-4. `deseq2_r` for pseudobulk DE
+3. `logreg`
+4. `mast` for R-backed hurdle-model DE
+5. `deseq2_r` for pseudobulk DE
 
 ## Input Formats
 
@@ -104,18 +117,21 @@ Implemented methods:
 
 ### Input Expectations
 
-- Accepted input: preprocessed `.h5ad`
-- `wilcoxon`, `t-test`, and `mast` expect log-normalized expression, preferably in `adata.raw`
-- `deseq2_r` expects raw counts, preferably in `layers["counts"]`; it may read `adata.X` only when `X` itself is still an unnormalized count matrix, plus `group1`, `group2`, `sample_key`, and `celltype_key`
+- Accepted input: processed `.h5ad`
+- `wilcoxon`, `t-test`, `logreg`, and `mast` expect `X = normalized_expression`
+- `deseq2_r` expects raw counts, preferably in `layers["counts"]`, otherwise aligned raw counts in `adata.raw`, otherwise count-like `adata.X`
 - All methods require a grouping column in `obs`
+- If you want cluster markers, this skill usually comes **after `sc-clustering`**
+- If you want replicate-aware treated-vs-control DE, this skill usually comes **after `sc-cell-annotation`** or another step that defines `celltype_key`
 
 ## Workflow
 
-1. Validate the requested DE mode.
-2. Run Scanpy ranking or pseudobulk DESeq2.
-3. Export full and top-hit tables.
-4. Save `processed.h5ad`, `report.md`, and `result.json`.
-5. Record the chosen method and grouping variables for downstream traceability.
+1. Load the AnnData object and inspect the matrix contract.
+2. Preflight the statistical question: exploratory ranking vs replicate-aware condition DE.
+3. Validate matrix state and required metadata for the requested method.
+4. Run Scanpy ranking, MAST, or pseudobulk DESeq2.
+5. Export tables, figures, `figure_data`, and `processed.h5ad`.
+6. Record method metadata for downstream traceability.
 
 ## CLI Reference
 
@@ -128,21 +144,30 @@ python skills/singlecell/scrna/sc-de/sc_de.py \
   --group1 treated --group2 control --method t-test --output <dir>
 
 python skills/singlecell/scrna/sc-de/sc_de.py \
+  --input <processed.h5ad> --groupby leiden --method logreg \
+  --logreg-solver saga --output <dir>
+
+python skills/singlecell/scrna/sc-de/sc_de.py \
   --input <processed.h5ad> --method deseq2_r \
   --groupby condition --group1 treated --group2 control \
-  --sample-key sample_id --celltype-key cell_type --output <dir>
+  --sample-key sample_id --celltype-key cell_type \
+  --pseudobulk-min-cells 10 --pseudobulk-min-counts 1000 --output <dir>
 ```
 
 ## Public Parameters
 
 | Parameter | Role | Notes |
 |-----------|------|-------|
-| `--method` | DE backend | `wilcoxon`, `t-test`, `mast`, or `deseq2_r` |
+| `--method` | DE backend | `wilcoxon`, `t-test`, `logreg`, `mast`, or `deseq2_r` |
 | `--groupby` | grouping column | core comparison axis |
 | `--group1` / `--group2` | comparison levels | especially important for `mast` and `deseq2_r` |
 | `--n-top-genes` | compact export size | ranking-output control |
+| `--logreg-solver` | logistic-regression optimizer | `logreg` only |
 | `--sample-key` | replicate/sample column | required by `deseq2_r` |
 | `--celltype-key` | pseudobulk aggregation label | used by `deseq2_r` |
+| `--pseudobulk-min-cells` | minimum cells per pseudobulk bin | `deseq2_r` only |
+| `--pseudobulk-min-counts` | minimum counts per pseudobulk bin | `deseq2_r` only |
+| `--padj-threshold` / `--log2fc-threshold` | figure summary thresholds | mostly affects exported volcano/summary figures |
 
 ## Algorithm / Methodology
 
@@ -152,9 +177,10 @@ Current OmicsClaw exploratory DE includes:
 
 1. `wilcoxon`
 2. `t-test`
-3. `mast`
+3. `logreg`
+4. `mast`
 
-These paths answer the cluster-marker or group-ranking question on normalized expression, ideally from `adata.raw`.
+These paths answer the cluster-marker or group-ranking question on normalized expression from `adata.X`.
 
 ### Replicate-aware pseudobulk path
 
@@ -177,21 +203,29 @@ Successful runs write:
 - `result.json`
 - `tables/de_full.csv`
 - `tables/markers_top.csv`
+- `figure_data/manifest.json`
 - `reproducibility/commands.sh`
 
 ### Visualization Contract
 
 The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
 
-- `figures/marker_dotplot.png` when ranking outputs support it
-- `figures/rank_genes_groups.png` when ranking outputs support it
+- exploratory methods:
+  - `figures/marker_dotplot.png`
+  - `figures/rank_genes_groups.png`
+  - `figures/de_effect_summary.png`
+  - `figures/de_group_summary.png`
+- pseudobulk paths:
+  - `figures/pseudobulk_group_summary.png`
+  - per-celltype `*_volcano.png`
+  - per-celltype `*_ma.png`
 
 ### What Users Should Inspect First
 
 1. `report.md`
 2. `tables/de_full.csv`
 3. `tables/markers_top.csv`
-4. `figures/rank_genes_groups.png` when available
+4. `figures/de_group_summary.png` or pseudobulk summary figures
 5. `processed.h5ad`
 
 ## Current Limitations
@@ -203,6 +237,8 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 ## Safety And Guardrails
 
 - Distinguish exploratory marker-style DE from replicate-aware pseudobulk inference before running.
+- If the user only has a base-preprocessed object and wants cluster markers, point them to `sc-clustering` first.
+- If the user wants treated-vs-control inference without replicates, warn that exploratory DE is not replicate-aware.
 - `mast` and `deseq2_r` are real public methods but require their R stacks up front in the current wrapper.
 - Treat `sample_key` and `celltype_key` as part of the statistical design for `deseq2_r`, not as cosmetic metadata.
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-de-guardrails.md`.

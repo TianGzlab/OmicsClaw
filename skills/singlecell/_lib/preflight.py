@@ -167,6 +167,8 @@ def _add_standardization_guidance(
     source_path: str | None = None,
 ) -> None:
     contract = get_input_contract(adata)
+    if get_matrix_contract(adata):
+        return
     if not contract.get("standardized"):
         decision.add_guidance(
             build_standardization_recommendation(source_path=source_path, skill_name=decision.skill_name)
@@ -197,7 +199,13 @@ def _declared_raw_is_normalized(adata: AnnData) -> bool:
 
 
 def _normalized_expression_available(adata: AnnData) -> bool:
-    return _declared_x_is_normalized(adata) or _declared_raw_is_normalized(adata)
+    if _declared_x_is_normalized(adata) or _declared_raw_is_normalized(adata):
+        return True
+    if not x_matrix_kind(adata) and not matrix_looks_count_like(adata.X):
+        return True
+    if adata.raw is not None and adata.raw.shape == adata.shape and not raw_matrix_kind(adata):
+        return not matrix_looks_count_like(adata.raw.X)
+    return False
 
 
 def _aligned_raw_is_count_like(adata: AnnData) -> bool:
@@ -219,6 +227,10 @@ def preflight_sc_de(
     sample_key: str | None,
     celltype_key: str | None,
     source_path: str | None = None,
+    n_top_genes: int | None = None,
+    logreg_solver: str | None = None,
+    pseudobulk_min_cells: int | None = None,
+    pseudobulk_min_counts: int | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-de")
     _add_standardization_guidance(decision, adata, source_path=source_path)
@@ -227,6 +239,9 @@ def preflight_sc_de(
         decision.require_confirmation("Provide both `--group1` and `--group2`, or omit both for a full ranking run.")
 
     if method == "deseq2_r":
+        decision.add_guidance(
+            "This path is for replicate-aware condition DE after you already know the comparison groups and have real biological replicates."
+        )
         condition_candidates = _obs_candidates(adata, "condition")
         if not groupby or groupby == "leiden":
             hint = f" Candidate condition-like columns: {_format_candidates(condition_candidates)}." if condition_candidates else ""
@@ -275,15 +290,32 @@ def preflight_sc_de(
                 decision.block(
                     "`deseq2_r` needs raw count-like expression in `layers['counts']`, aligned `adata.raw`, or count-like `adata.X`."
                 )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=deseq2_r`, `groupby={groupby}`, `sample_key={sample_key or 'sample_id'}`, `celltype_key={celltype_key or 'cell_type'}`, `pseudobulk_min_cells={pseudobulk_min_cells}`, `pseudobulk_min_counts={pseudobulk_min_counts}`."
+        )
     else:
+        if not _normalized_expression_available(adata):
+            decision.block(
+                f"`{method}` expects log-normalized expression in `adata.X`. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+            )
         if groupby not in adata.obs.columns and not (groupby == "leiden" and "louvain" in adata.obs.columns):
             candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "condition")
             hint = f" Candidate grouping columns: {_format_candidates(candidates)}." if candidates else ""
-            decision.require_confirmation(f"`--groupby {groupby}` was not found in `adata.obs`." + hint)
-
-        if method == "mast" and not _normalized_expression_available(adata):
-            decision.block(
-                "`mast` expects log-normalized expression. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+            decision.require_confirmation(
+                f"`--groupby {groupby}` was not found in `adata.obs`."
+                + hint
+                + " If you want cluster markers, run `sc-clustering` first; if you want condition DE, point `--groupby` to the condition column."
+            )
+        decision.add_guidance(
+            "Exploratory single-cell DE usually comes after clustering or annotation, and before pathway enrichment or condition-focused follow-up."
+        )
+        if method == "logreg":
+            decision.add_guidance(
+                f"Current first-pass settings: `method=logreg`, `groupby={groupby}`, `n_top_genes={n_top_genes}`, `logreg_solver={logreg_solver}`."
+            )
+        else:
+            decision.add_guidance(
+                f"Current first-pass settings: `method={method}`, `groupby={groupby}`, `group1={group1}`, `group2={group2}`, `n_top_genes={n_top_genes}`."
             )
 
     return decision

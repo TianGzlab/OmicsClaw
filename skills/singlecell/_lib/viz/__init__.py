@@ -21,6 +21,11 @@ from .markers import (
     plot_marker_fraction_scatter,
     plot_marker_heatmap,
 )
+from .de import (
+    plot_de_effect_summary,
+    plot_de_group_summary,
+    plot_de_rank_panels,
+)
 from .doublet import (
     plot_doublet_call_summary,
     plot_doublet_score_by_group,
@@ -75,6 +80,9 @@ __all__ = [
     "plot_marker_effect_summary",
     "plot_marker_fraction_scatter",
     "plot_marker_cluster_summary",
+    "plot_de_effect_summary",
+    "plot_de_group_summary",
+    "plot_de_rank_panels",
     "plot_doublet_score_distribution",
     "plot_doublet_call_summary",
     "plot_doublet_score_by_group",

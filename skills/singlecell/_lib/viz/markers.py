@@ -15,6 +15,20 @@ from .embedding import make_categorical_palette
 logger = logging.getLogger(__name__)
 
 
+def _natural_group_order(values: list[str]) -> list[str]:
+    def _key(value: str) -> tuple[int, object]:
+        try:
+            num = float(value)
+            if num.is_integer():
+                return (0, int(num))
+            return (0, num)
+        except Exception:
+            return (1, value)
+
+    unique = list(dict.fromkeys(str(v) for v in values))
+    return sorted(unique, key=_key)
+
+
 def _choose_effect_column(markers: pd.DataFrame) -> str:
     if "logfoldchanges" in markers.columns:
         valid = pd.to_numeric(markers["logfoldchanges"], errors="coerce").notna()
@@ -273,7 +287,9 @@ def plot_marker_dotplot(
 
     top_df = _top_markers(markers, n_top)
     gene_blocks: list[tuple[str, list[str]]] = []
-    for group, group_df in top_df.groupby("group", sort=False, observed=False):
+    group_order = _natural_group_order(top_df["group"].astype(str).tolist())
+    for group in group_order:
+        group_df = top_df[top_df["group"].astype(str) == group]
         genes = [gene for gene in group_df["names"].astype(str).tolist() if gene in adata.var_names]
         genes = list(dict.fromkeys(genes))
         if genes:
@@ -283,7 +299,7 @@ def plot_marker_dotplot(
 
     apply_singlecell_theme()
 
-    ordered_groups = [str(value) for value in pd.Index(adata.obs[groupby].astype(str)).unique().tolist()]
+    ordered_groups = _natural_group_order(pd.Index(adata.obs[groupby].astype(str)).unique().tolist())
     gene_order: list[str] = []
     source_group_labels: list[str] = []
     block_midpoints: list[tuple[float, str]] = []

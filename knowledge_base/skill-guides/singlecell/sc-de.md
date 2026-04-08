@@ -33,13 +33,14 @@ Key properties to check:
 - **Cell-type restriction**:
   - pseudobulk paths often need a meaningful `celltype_key`
 - **Expression layer**:
-  - `wilcoxon`, `t-test`, and `mast` should use log-normalized expression, ideally `adata.raw`
-  - `deseq2_r` should use raw counts, ideally `layers["counts"]`; only use `adata.X` if `X` is still the unnormalized count matrix
+  - `wilcoxon`, `t-test`, `logreg`, and `mast` should use `X = normalized_expression`
+  - `deseq2_r` should use raw counts, ideally `layers["counts"]`; otherwise aligned raw counts in `adata.raw`, and only then count-like `adata.X`
 - **Input provenance**:
-  - if this is an external `.h5ad` and you are not sure where raw counts live, recommend `sc-standardize-input` first
+  - if this is an external `.h5ad`, confirm whether it is already normalized or still raw
+  - if the user wants cluster markers but no cluster column exists yet, run `sc-clustering` first
 
 Important implementation notes in current OmicsClaw:
-- `wilcoxon` and `t-test` are Scanpy exploratory paths
+- `wilcoxon`, `t-test`, and `logreg` are Scanpy exploratory paths
 - the current public wrapper exposes Scanpy exploratory tests, the R-backed `mast` path, and the DESeq2 pseudobulk path
 - `deseq2_r` is the wrapper’s replicate-aware pseudobulk path
 - the wrapper validates required R stacks before entering the `mast` or `deseq2_r` runtime
@@ -50,8 +51,9 @@ Important implementation notes in current OmicsClaw:
 |--------|----------------|----------------------------|-------------|
 | **wilcoxon** | Safest first-pass marker or group ranking | `groupby`, `n_top_genes` | Exploratory, not replicate-aware |
 | **t-test** | Parametric alternative for simple group ranking | `groupby`, `n_top_genes` | Still exploratory |
+| **logreg** | When you want genes that best separate one group from the rest | `groupby`, `logreg_solver`, `n_top_genes` | Still exploratory |
 | **mast** | When a hurdle-model single-cell test is preferred on log-normalized expression | `groupby`, `group1`, `group2`, `n_top_genes` | Needs the R MAST stack and still is not a replicate-aware pseudobulk design |
-| **deseq2_r** | Best formal path for replicate-aware condition DE | `groupby`, `group1`, `group2`, `sample_key`, `celltype_key` | Needs true replicate structure |
+| **deseq2_r** | Best formal path for replicate-aware condition DE | `groupby`, `group1`, `group2`, `sample_key`, `celltype_key`, `pseudobulk_min_cells`, `pseudobulk_min_counts` | Needs true replicate structure |
 
 ## Step 3: Always Show A Parameter Summary Before Running
 
@@ -71,9 +73,11 @@ Tune in this order:
 2. `method`
 3. `n_top_genes`
 4. `group1` / `group2`
+5. method-specific extras such as `logreg_solver`
 
 Guidance:
 - use these when the goal is fast ranking, not formal replicate-aware inference
+- if the user wants cluster markers and no cluster column exists yet, stop and run `sc-clustering` first
 
 ### DESeq2 pseudobulk
 
@@ -82,11 +86,13 @@ Tune in this order:
 2. `group1` / `group2`
 3. `sample_key`
 4. `celltype_key`
+5. `pseudobulk_min_cells` / `pseudobulk_min_counts`
 
 Guidance:
 - choose this path only when the user truly has replicate-level samples
 - `sample_key` and `celltype_key` are as important as the statistical method itself
 - do not silently accept the default `groupby=leiden` for pseudobulk condition DE; make the user confirm the real condition column
+- if pseudobulk aggregation returns no bins, lower the pseudobulk thresholds or revisit sample/cell-type definitions before blaming DESeq2
 
 Important warnings:
 - do not expose a free-form DESeq2 design formula as if the wrapper supports it
@@ -101,6 +107,7 @@ Tune in this order:
 Guidance:
 - use this path when users want an R-backed single-cell DE model on log-normalized expression
 - do not confuse it with the pseudobulk DESeq2 path; it answers a different statistical question
+- if the user only has raw counts, do `sc-preprocessing` first; if the user only has PCA-ready data without cluster labels, do `sc-clustering` first
 
 ## Step 5: What To Say After The Run
 
@@ -112,6 +119,7 @@ Guidance:
 ## Step 6: Explain Outputs Using Method-Correct Language
 
 - describe Scanpy results as ranked marker-style DE outputs
+- describe `logreg` specifically as classifier-style ranking, not a replicate-aware effect estimate
 - describe MAST results as single-cell hurdle-model DE outputs on log-normalized expression
 - describe DESeq2 results as pseudobulk replicate-aware inference
 - describe `de_full.csv` as the full result table and `markers_top.csv` as the condensed export
