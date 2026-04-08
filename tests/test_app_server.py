@@ -104,6 +104,27 @@ def test_app_server_main_reports_missing_uvicorn(monkeypatch, capsys):
     assert 'pip install -e ".[desktop]"' in captured.err
 
 
+def test_resolve_backend_init_config_prefers_documented_llm_namespace(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    monkeypatch.setenv("LLM_PROVIDER", "siliconflow")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
+    monkeypatch.setenv("LLM_API_KEY", "llm-key")
+    monkeypatch.setenv("OMICSCLAW_PROVIDER", "openai")
+    monkeypatch.setenv("OMICSCLAW_BASE_URL", "https://api.example.test/v1")
+    monkeypatch.setenv("OMICSCLAW_API_KEY", "legacy-key")
+    monkeypatch.setenv("OMICSCLAW_MODEL", "deepseek-ai/DeepSeek-V3")
+
+    assert server._resolve_backend_init_config() == {
+        "provider": "siliconflow",
+        "api_key": "llm-key",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3",
+    }
+
+
 def test_app_server_cli_dispatches(monkeypatch):
     oc = _load_omicsclaw_script()
     fake_server = ModuleType("omicsclaw.app.server")
@@ -340,6 +361,59 @@ async def test_chat_stream_emits_protocol_events_and_usage(monkeypatch):
     }
     assert captured_kwargs["policy_state"]["trusted"] is True
     assert captured_kwargs["policy_state"]["auto_approve_ask"] is True
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_omits_adaptive_thinking_from_provider_payload(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured_kwargs: dict[str, object] = {}
+
+    async def fake_llm_tool_loop(**kwargs):
+        captured_kwargs.update(kwargs)
+        await kwargs["on_stream_content"]("ok")
+        return "ok"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="siliconflow",
+        OMICSCLAW_MODEL="deepseek-ai/DeepSeek-V3",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-thinking-adaptive",
+            content="hello",
+            thinking={"type": "adaptive"},
+        )
+    )
+    await _read_streaming_response(response)
+
+    assert captured_kwargs["extra_api_params"] is None
+
+
+def test_build_thinking_extra_body_supports_enabled_and_disabled():
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    assert server._build_thinking_extra_body({"type": "enabled", "budgetTokens": 123}) == {
+        "type": "enabled",
+        "budget_tokens": 123,
+    }
+    assert server._build_thinking_extra_body({"type": "disabled"}) == {"type": "disabled"}
+    assert server._build_thinking_extra_body({"type": "adaptive"}) is None
 
 
 @pytest.mark.asyncio

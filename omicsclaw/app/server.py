@@ -73,6 +73,56 @@ def _get_core():
     return _core
 
 
+def _read_first_config_value(*keys: str) -> str:
+    for key in keys:
+        value = str(os.environ.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _resolve_backend_init_config() -> dict[str, str]:
+    """Resolve backend startup config from the documented env surface.
+
+    The local setup guide and `.env.example` use the `LLM_*` namespace.
+    Older desktop integrations may still populate `OMICSCLAW_*`, so we
+    support both and prefer the newer documented keys.
+    """
+    return {
+        "provider": _read_first_config_value("LLM_PROVIDER", "OMICSCLAW_PROVIDER"),
+        "api_key": _read_first_config_value("LLM_API_KEY", "OMICSCLAW_API_KEY"),
+        "base_url": _read_first_config_value("LLM_BASE_URL", "OMICSCLAW_BASE_URL"),
+        "model": _read_first_config_value("OMICSCLAW_MODEL"),
+    }
+
+
+def _build_thinking_extra_body(thinking: Any) -> dict[str, Any] | None:
+    """Normalize optional thinking controls for provider-compatible requests.
+
+    `adaptive` is a frontend-local UX state, not a portable provider contract.
+    Forwarding it directly breaks some OpenAI-compatible gateways (for example
+    SiliconFlow DeepSeek endpoints). In that state we omit the field entirely
+    and let the provider's default behavior apply.
+    """
+    if not isinstance(thinking, dict):
+        return None
+
+    thinking_type = str(thinking.get("type", "") or "").strip().lower()
+    if thinking_type == "enabled":
+        budget = thinking.get("budgetTokens", 10000)
+        try:
+            budget_tokens = int(budget)
+        except (TypeError, ValueError):
+            budget_tokens = 10000
+        return {"type": "enabled", "budget_tokens": budget_tokens}
+
+    if thinking_type == "disabled":
+        return {"type": "disabled"}
+
+    # `adaptive` means "use provider default" in the app today.
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Active session tracking (for abort support)
 # ---------------------------------------------------------------------------
@@ -114,10 +164,11 @@ async def lifespan(app: FastAPI):
         raise
 
     # Initialise the LLM client from environment / provider config
-    provider = os.getenv("OMICSCLAW_PROVIDER", "")
-    api_key = os.getenv("OMICSCLAW_API_KEY", "")
-    base_url = os.getenv("OMICSCLAW_BASE_URL", "")
-    model = os.getenv("OMICSCLAW_MODEL", "")
+    startup_config = _resolve_backend_init_config()
+    provider = startup_config["provider"]
+    api_key = startup_config["api_key"]
+    base_url = startup_config["base_url"]
+    model = startup_config["model"]
 
     core.init(
         api_key=api_key,
@@ -714,13 +765,9 @@ async def chat_stream(req: ChatRequest):
     if req.effort and req.effort in ("low", "medium", "high", "max"):
         extra_body["reasoning_effort"] = req.effort
 
-    if req.thinking and isinstance(req.thinking, dict):
-        thinking_type = req.thinking.get("type", "")
-        if thinking_type == "enabled":
-            budget = req.thinking.get("budgetTokens", 10000)
-            extra_body["thinking"] = {"type": "enabled", "budget_tokens": budget}
-        elif thinking_type == "adaptive":
-            extra_body["thinking"] = {"type": "adaptive"}
+    normalized_thinking = _build_thinking_extra_body(req.thinking)
+    if normalized_thinking:
+        extra_body["thinking"] = normalized_thinking
 
     if extra_body:
         extra_api_params["extra_body"] = extra_body
