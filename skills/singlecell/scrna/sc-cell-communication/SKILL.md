@@ -3,7 +3,7 @@ name: sc-cell-communication
 description: >-
   Cell-cell communication analysis for annotated scRNA-seq data using a built-in
   ligand-receptor scorer, LIANA, CellPhoneDB, CellChat, or a NicheNet R path.
-version: 0.2.0
+version: 0.3.0
 author: OmicsClaw Team
 license: MIT
 tags: [singlecell, communication, ligand-receptor, liana, cellphonedb, cellchat, nichenet]
@@ -12,15 +12,18 @@ metadata:
     domain: singlecell
     allowed_extra_flags:
       - "--cell-type-key"
-      - "--condition-key"
-      - "--condition-oi"
-      - "--condition-ref"
+      - "--cellchat-min-cells"
+      - "--cellchat-prob-type"
       - "--cellphonedb-counts-data"
       - "--cellphonedb-iterations"
       - "--cellphonedb-pvalue"
       - "--cellphonedb-threshold"
       - "--cellphonedb-threads"
+      - "--condition-key"
+      - "--condition-oi"
+      - "--condition-ref"
       - "--method"
+      - "--nichenet-lfc-cutoff"
       - "--nichenet-expression-pct"
       - "--nichenet-top-ligands"
       - "--receiver"
@@ -31,39 +34,40 @@ metadata:
         priority: "cell_type_key -> species"
         params: ["cell_type_key", "species"]
         defaults: {cell_type_key: "cell_type", species: "human"}
-        requires: ["cell_type_labels_in_obs"]
+        requires: ["normalized_expression", "cell_type_labels_in_obs"]
         tips:
-          - "--method builtin: Default lightweight scorer with a small curated ligand-receptor list."
+          - "--method builtin: Lightweight heuristic baseline. Good for a quick preview, but not a statistical communication test."
       liana:
         priority: "cell_type_key -> species"
         params: ["cell_type_key", "species"]
         defaults: {cell_type_key: "cell_type", species: "human"}
-        requires: ["liana", "cell_type_labels_in_obs"]
+        requires: ["normalized_expression", "liana", "cell_type_labels_in_obs"]
         tips:
-          - "--method liana: Uses LIANA rank aggregation when the Python package is installed."
+          - "--method liana: Best first rich backend in the current wrapper."
       cellphonedb:
         priority: "cell_type_key -> species -> cellphonedb_threshold -> cellphonedb_iterations"
         params: ["cell_type_key", "species", "cellphonedb_counts_data", "cellphonedb_iterations", "cellphonedb_threshold", "cellphonedb_threads", "cellphonedb_pvalue"]
         defaults: {cell_type_key: "cell_type", species: "human", cellphonedb_counts_data: "hgnc_symbol", cellphonedb_iterations: 1000, cellphonedb_threshold: 0.1, cellphonedb_threads: 4, cellphonedb_pvalue: 0.05}
-        requires: ["cellphonedb", "cell_type_labels_in_obs", "human_species"]
+        requires: ["normalized_expression", "cellphonedb", "cell_type_labels_in_obs", "human_species"]
         tips:
           - "--method cellphonedb: Uses the official CellPhoneDB statistical backend exposed by the current wrapper."
           - "--cellphonedb-threshold and --cellphonedb-iterations are the main public CellPhoneDB tuning knobs in OmicsClaw."
       cellchat_r:
-        priority: "cell_type_key -> species"
-        params: ["cell_type_key", "species"]
-        defaults: {cell_type_key: "cell_type", species: "human"}
-        requires: ["R_CellChat_stack", "cell_type_labels_in_obs"]
+        priority: "cell_type_key -> species -> cellchat_prob_type -> cellchat_min_cells"
+        params: ["cell_type_key", "species", "cellchat_prob_type", "cellchat_min_cells"]
+        defaults: {cell_type_key: "cell_type", species: "human", cellchat_prob_type: "triMean", cellchat_min_cells: 10}
+        requires: ["normalized_expression", "R_CellChat_stack", "cell_type_labels_in_obs"]
         tips:
-          - "--method cellchat_r: R-backed CellChat path."
+          - "--method cellchat_r: R-backed CellChat path with pathway and centrality outputs."
       nichenet_r:
-        priority: "cell_type_key -> condition_key -> receiver -> senders"
-        params: ["cell_type_key", "condition_key", "condition_oi", "condition_ref", "receiver", "senders", "nichenet_top_ligands", "nichenet_expression_pct", "species"]
-        defaults: {cell_type_key: "cell_type", condition_key: "condition", condition_oi: "stim", condition_ref: "ctrl", receiver: "", senders: "", nichenet_top_ligands: 20, nichenet_expression_pct: 0.10, species: "human"}
-        requires: ["R_nichenetr_stack", "cell_type_labels_in_obs", "condition_labels_in_obs", "human_species"]
+        priority: "cell_type_key -> condition_key -> receiver -> senders -> nichenet_top_ligands"
+        params: ["cell_type_key", "condition_key", "condition_oi", "condition_ref", "receiver", "senders", "nichenet_top_ligands", "nichenet_expression_pct", "nichenet_lfc_cutoff", "species"]
+        defaults: {cell_type_key: "cell_type", condition_key: "condition", condition_oi: "stim", condition_ref: "ctrl", receiver: "", senders: "", nichenet_top_ligands: 20, nichenet_expression_pct: 0.10, nichenet_lfc_cutoff: 0.25, species: "human"}
+        requires: ["raw_counts_available", "R_nichenetr_stack", "cell_type_labels_in_obs", "condition_labels_in_obs", "human_species"]
         tips:
           - "--method nichenet_r: R-backed NicheNet ligand prioritization path."
           - "--receiver and --senders are required because NicheNet needs explicit receiver and sender cell types."
+          - "--nichenet-lfc-cutoff changes the receiver-side DE genes used as the target program."
     saves_h5ad: true
     requires_preprocessed: true
     requires:
@@ -75,10 +79,7 @@ metadata:
     os: [macos, linux]
     install:
       - kind: pip
-        package: liana
-        bins: []
-      - kind: pip
-        package: cellphonedb
+        package: omicsclaw[singlecell-communication]
         bins: []
     trigger_keywords:
       - cell communication
@@ -102,9 +103,9 @@ metadata:
 
 1. **Five communication backends**: built-in scorer, LIANA, CellPhoneDB, CellChat, and NicheNet.
 2. **Shared grouping contract**: one `cell_type_key`-centric interface across all backends.
-3. **Stable interaction exports**: full interaction table plus top ranked pairs.
-4. **Standard figures**: interaction heatmap and top-interaction summary plot.
-5. **Downstream-ready export**: annotated `processed.h5ad`, report, structured result JSON, README, and reproducibility bundle.
+3. **Method-correct matrix handling**: LIANA / CellPhoneDB / CellChat use normalized expression, while NicheNet uses raw count-like input for receiver-vs-condition modeling.
+4. **Standard gallery**: sender-receiver heatmap, bubble summary, role summary, pathway summary, plus NicheNet ligand ranking.
+5. **Downstream-ready export**: annotated `processed.h5ad`, report, structured result JSON, README, `tables/`, `figure_data/`, and reproducibility bundle.
 
 ## Scope Boundary
 
@@ -133,11 +134,11 @@ The wrapper assumes you already have biologically meaningful labels in `obs`.
 
 ## Workflow
 
-1. Validate the cell-type key.
-2. Run the selected communication backend.
-3. Rank interactions and extract top pairs.
-4. Write interaction tables and summary plots.
-5. Save `processed.h5ad`, `report.md`, and `result.json`.
+1. Validate the grouping column and communication-specific prerequisites.
+2. Decide whether the method needs normalized expression or raw count-like input.
+3. Run the selected backend.
+4. Standardize ligand-receptor rows plus sender/receiver/pathway summaries.
+5. Write tables, `figure_data/`, gallery plots, `processed.h5ad`, `report.md`, and `result.json`.
 
 ## CLI Reference
 
@@ -158,7 +159,7 @@ python omicsclaw.py run sc-cell-communication \
 python omicsclaw.py run sc-cell-communication \
   --method nichenet_r --input data.h5ad --cell-type-key cell_type \
   --condition-key condition --condition-oi stim --condition-ref ctrl \
-  --receiver Monocyte --senders T_cell,B_cell --output out/
+  --receiver Monocyte --senders T_cell,B_cell --nichenet-lfc-cutoff 0.25 --output out/
 ```
 
 ## Public Parameters
@@ -169,6 +170,7 @@ python omicsclaw.py run sc-cell-communication \
 | `--cell-type-key` | grouping column | core public control across all methods |
 | `--species` | ligand-receptor resource selector | affects database interpretation and matching |
 | `--cellphonedb-*` | CellPhoneDB controls | used only by the `cellphonedb` path |
+| `--cellchat-prob-type`, `--cellchat-min-cells` | CellChat controls | used only by the `cellchat_r` path |
 | `--condition-*`, `--receiver`, `--senders`, `--nichenet-*` | NicheNet controls | used only by the `nichenet_r` path |
 
 ## Algorithm / Methodology
@@ -194,22 +196,22 @@ Current OmicsClaw LIANA path:
 Current OmicsClaw CellPhoneDB path:
 
 1. requires `species=human` in the current wrapper
-2. exports normalized expression and metadata through the official CellPhoneDB statistical API
+2. uses normalized expression and metadata through the official CellPhoneDB statistical API
 3. normalizes CellPhoneDB outputs back into the standard OmicsClaw interaction contract
 
 ### `cellchat_r`
 
 Current OmicsClaw CellChat path:
 
-1. exports the expression matrix through the shared H5AD bridge
+1. exports normalized expression through the shared H5AD bridge
 2. runs the R-backed CellChat workflow
-3. reimports ranked interactions into the standard output layout
+3. reimports ranked interactions, pathway summaries, centrality tables, and sender/receiver matrices
 
 ### `nichenet_r`
 
 Current OmicsClaw NicheNet path:
 
-1. exports a count-like matrix plus metadata through the shared H5AD bridge
+1. exports a raw count-like matrix plus metadata through the shared H5AD bridge
 2. runs the official `nichenetr` Seurat-wrapper style workflow in R
 3. prioritizes ligands for one receiver cell type across two conditions
 4. reimports ligand-receptor rows into the shared interaction table and also writes ligand-activity / ligand-target tables
@@ -230,11 +232,19 @@ Successful runs write:
 - `result.json`
 - `tables/lr_interactions.csv`
 - `tables/top_interactions.csv`
+- `tables/sender_receiver_summary.csv`
+- `tables/group_role_summary.csv`
+- `tables/pathway_summary.csv`
 - `figures/interaction_heatmap.png`
 - `figures/top_interactions.png`
+- `figures/source_target_bubble.png`
+- `figures/group_role_summary.png`
+- `figures/pathway_summary.png`
 - `tables/nichenet_ligand_activities.csv` when `--method nichenet_r`
 - `tables/nichenet_ligand_target_links.csv` when `--method nichenet_r`
 - `figures/nichenet_top_ligands.png` when `--method nichenet_r`
+- `tables/cellchat_pathways.csv`, `tables/cellchat_centrality.csv`, `tables/cellchat_count_matrix.csv`, and `tables/cellchat_weight_matrix.csv` when `--method cellchat_r`
+- `tables/cellphonedb_means.csv`, `tables/cellphonedb_pvalues.csv`, and `tables/cellphonedb_significant_means.csv` when `--method cellphonedb` returns them
 
 ### Visualization Contract
 
@@ -242,14 +252,19 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - `figures/interaction_heatmap.png`
 - `figures/top_interactions.png`
+- `figures/source_target_bubble.png`
+- `figures/group_role_summary.png`
+- `figures/pathway_summary.png`
+- `figures/nichenet_top_ligands.png` for `nichenet_r`
 
 ### What Users Should Inspect First
 
 1. `report.md`
 2. `figures/interaction_heatmap.png`
-3. `tables/top_interactions.csv`
-4. `tables/lr_interactions.csv`
-5. `processed.h5ad`
+3. `figures/source_target_bubble.png`
+4. `tables/top_interactions.csv`
+5. `tables/lr_interactions.csv`
+6. `processed.h5ad`
 
 ## Current Limitations
 

@@ -124,7 +124,6 @@ spatial = [
 singlecell = [
     "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
     "doubletdetection>=4.3.0",        # sc-doublet-detection: DoubletDetection
-    "liana>=1.4.0",                   # sc-cell-communication: LIANA+
     "harmonypy>=0.0.9",               # sc-batch-integration: Harmony
     "bbknn>=1.5.0",                   # sc-batch-integration: BBKNN
     "scanorama>=1.7.0",               # sc-batch-integration: Scanorama
@@ -185,6 +184,15 @@ singlecell-annotation = [
 ]
 
 # --------------------------------------------------------------------------- #
+# singlecell-communication — optional Python communication backends.          #
+# R-backed CellChat / NicheNet are checked at runtime instead.                #
+# --------------------------------------------------------------------------- #
+singlecell-communication = [
+    "liana>=1.4.0",                   # LIANA+ ligand-receptor inference
+    "cellphonedb>=5.0.0,<6.0",        # CellPhoneDB statistical backend
+]
+
+# --------------------------------------------------------------------------- #
 # singlecell-velocity — Python-side velocity analysis stack.                  #
 # External CLIs such as STAR and velocyto remain manual installs.             #
 # --------------------------------------------------------------------------- #
@@ -201,7 +209,7 @@ singlecell-enrichment = [
 # Still excludes external CLIs and reference downloads.                       #
 # --------------------------------------------------------------------------- #
 singlecell-full = [
-    "omicsclaw[singlecell,singlecell-upstream,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-velocity,singlecell-enrichment]",
+    "omicsclaw[singlecell,singlecell-upstream,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-velocity,singlecell-enrichment]",
 ]
 
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
@@ -222,7 +230,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #

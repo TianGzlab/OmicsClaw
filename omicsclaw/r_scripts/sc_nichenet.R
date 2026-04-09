@@ -2,9 +2,9 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 
-if (length(args) < 10) {
+if (length(args) < 13) {
   cat(
-    "Usage: Rscript sc_nichenet.R <h5ad_file> <output_dir> <cell_type_key> <condition_key> <condition_oi> <condition_ref> <receiver> <senders_csv> <top_ligands> <expression_pct>\n"
+    "Usage: Rscript sc_nichenet.R <h5ad_file> <output_dir> <cell_type_key> <condition_key> <condition_oi> <condition_ref> <receiver> <senders_csv> <top_ligands> <expression_pct> <lfc_cutoff> <lr_network_path> <weighted_networks_path>\n"
   )
   quit(status = 1)
 }
@@ -19,6 +19,9 @@ receiver <- args[7]
 senders <- strsplit(args[8], ",", fixed = TRUE)[[1]]
 top_ligands <- as.integer(args[9])
 expression_pct <- as.numeric(args[10])
+lfc_cutoff <- as.numeric(args[11])
+lr_network_path_arg <- args[12]
+weighted_networks_path_arg <- args[13]
 
 suppressPackageStartupMessages({
   library(zellkonverter)
@@ -30,26 +33,15 @@ suppressPackageStartupMessages({
 
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
-cache_dir <- file.path(path.expand("~"), ".cache", "omicsclaw", "nichenet")
-dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-
-download_if_missing <- function(url, dest) {
-  if (!file.exists(dest)) {
-    options(timeout = max(600, getOption("timeout")))
-    download.file(url, destfile = dest, mode = "wb", quiet = FALSE)
-  }
-  dest
-}
-
 load_nichenet_resources <- function() {
-  lr_network_path <- download_if_missing(
-    "https://zenodo.org/record/7074291/files/lr_network_human_21122021.rds",
-    file.path(cache_dir, "lr_network_human_21122021.rds")
-  )
-  weighted_networks_path <- download_if_missing(
-    "https://zenodo.org/record/7074291/files/weighted_networks_nsga2r_final.rds",
-    file.path(cache_dir, "weighted_networks_nsga2r_final.rds")
-  )
+  lr_network_path <- lr_network_path_arg
+  weighted_networks_path <- weighted_networks_path_arg
+  if (!file.exists(lr_network_path)) {
+    stop(sprintf("Missing NicheNet prior model: %s", lr_network_path))
+  }
+  if (!file.exists(weighted_networks_path)) {
+    stop(sprintf("Missing NicheNet weighted networks: %s", weighted_networks_path))
+  }
   list(
     lr_network = readRDS(lr_network_path),
     weighted_networks = readRDS(weighted_networks_path)
@@ -57,7 +49,7 @@ load_nichenet_resources <- function() {
 }
 
 tryCatch({
-  sce <- readH5AD(h5ad_file)
+  sce <- readH5AD(h5ad_file, reader = "R")
   expr <- SummarizedExperiment::assay(sce, "X")
   meta <- as.data.frame(SummarizedExperiment::colData(sce))
 
@@ -127,7 +119,7 @@ tryCatch({
     object = receiver_subset,
     ident.1 = condition_oi,
     ident.2 = condition_ref,
-    logfc.threshold = 0.25,
+    logfc.threshold = lfc_cutoff,
     min.pct = expression_pct,
     verbose = FALSE
   ) %>%

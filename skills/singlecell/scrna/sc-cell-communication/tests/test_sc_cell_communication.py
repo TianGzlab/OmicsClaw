@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 MODULE_TEXT = (Path(__file__).resolve().parent.parent / "sc_cell_communication.py").read_text(encoding="utf-8")
+VIZ_TEXT = (Path(__file__).resolve().parents[3] / "_lib" / "viz" / "communication.py").read_text(encoding="utf-8")
 
 
 def test_method_registry_includes_cellphonedb():
@@ -25,3 +26,12 @@ def test_nichenet_registry_and_cli_are_exposed():
     assert '--condition-key' in MODULE_TEXT
     assert '--receiver' in MODULE_TEXT
     assert '--senders' in MODULE_TEXT
+    assert '--nichenet-lfc-cutoff' in MODULE_TEXT
+
+
+def test_cellchat_params_and_figure_outputs_are_exposed():
+    assert '"cellchat_prob_type": "triMean"' in MODULE_TEXT
+    assert '"cellchat_min_cells": 10' in MODULE_TEXT
+    assert 'source_target_bubble.png' in VIZ_TEXT
+    assert 'group_role_summary.png' in VIZ_TEXT
+    assert 'pathway_summary.png' in VIZ_TEXT

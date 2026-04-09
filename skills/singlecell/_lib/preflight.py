@@ -591,15 +591,32 @@ def preflight_sc_cell_communication(
     cell_type_key: str,
     species: str,
     counts_data: str | None = None,
+    counts_data_explicit: bool = False,
+    cellphonedb_iterations: int | None = None,
+    cellphonedb_threshold: float | None = None,
+    cellphonedb_threads: int | None = None,
+    cellphonedb_pvalue: float | None = None,
+    cellchat_prob_type: str | None = None,
+    cellchat_min_cells: int | None = None,
     condition_key: str | None = None,
     condition_oi: str | None = None,
     condition_ref: str | None = None,
     receiver: str | None = None,
     senders: list[str] | None = None,
+    nichenet_top_ligands: int | None = None,
+    nichenet_expression_pct: float | None = None,
+    nichenet_lfc_cutoff: float | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
+    from pathlib import Path
+
+    from skills.singlecell._lib import dependency_manager as sc_dep_manager
+
     decision = PreflightDecision("sc-cell-communication")
     _add_standardization_guidance(decision, adata, source_path=source_path)
+    decision.add_guidance(
+        "`sc-cell-communication` usually comes after `sc-cell-annotation` or at least `sc-clustering`, because the grouping column defines the interacting cell groups."
+    )
 
     if cell_type_key not in adata.obs.columns:
         candidates = _obs_candidates(adata, "cell_type") + _obs_candidates(adata, "cluster")
@@ -614,11 +631,44 @@ def preflight_sc_cell_communication(
             decision.block(
                 "Cell-cell communication requires cell-type or cluster labels in `adata.obs`. Run annotation/clustering first or provide `--cell-type-key`."
             )
+        return decision
 
+    if method in {"builtin", "liana", "cellphonedb", "cellchat_r"} and not _normalized_expression_available(adata):
+        decision.block(
+            f"`{method}` expects normalized expression in `adata.X`. Run `sc-preprocessing` first, then reuse cluster/annotation labels for communication analysis."
+        )
+
+    if method == "liana" and not sc_dep_manager.is_available("liana"):
+        decision.block(
+            "`liana` is not installed. Install the communication stack with `pip install -e \".[singlecell-communication]\"`."
+        )
+
+    if method == "cellphonedb":
+        if not sc_dep_manager.is_available("cellphonedb"):
+            decision.block(
+                "`cellphonedb` is not installed. Install the communication stack with `pip install -e \".[singlecell-communication]\"`."
+            )
+        db_path = Path.home() / ".cache" / "omicsclaw" / "cellphonedb" / "v4.1.0" / "cellphonedb.zip"
+        if not db_path.exists():
+            decision.require_field(
+                "allow_online_db_fetch",
+                f"`cellphonedb` needs to download the official database to `{db_path}` on first use. Confirm whether online fetch is acceptable, or place the zip there manually before rerunning.",
+                value_type="boolean",
+                aliases=["allow_online_db_fetch", "allow_download", "download_cellphonedb_db"],
+            )
+        decision.add_guidance(
+            "Current first-pass CellPhoneDB settings: `cellphonedb_counts_data={}`, `cellphonedb_threshold={}`, `cellphonedb_iterations={}`, `cellphonedb_threads={}`, `cellphonedb_pvalue={}`.".format(
+                counts_data or "hgnc_symbol",
+                cellphonedb_threshold if cellphonedb_threshold is not None else 0.1,
+                cellphonedb_iterations if cellphonedb_iterations is not None else 1000,
+                cellphonedb_threads if cellphonedb_threads is not None else 4,
+                cellphonedb_pvalue if cellphonedb_pvalue is not None else 0.05,
+            )
+        )
     if method == "cellphonedb" and species != "human":
         decision.block("The current CellPhoneDB wrapper only supports `--species human`.")
 
-    if method == "cellphonedb" and (counts_data or "hgnc_symbol") == "hgnc_symbol":
+    if method == "cellphonedb" and (counts_data or "hgnc_symbol") == "hgnc_symbol" and not counts_data_explicit:
         decision.require_field(
             "cellphonedb_counts_data",
             "Confirm that your gene identifiers are HGNC symbols before using the default `--cellphonedb-counts-data hgnc_symbol`.",
@@ -626,14 +676,27 @@ def preflight_sc_cell_communication(
             aliases=["cellphonedb_counts_data", "counts_data"],
         )
 
-    if method == "cellchat_r" and not _normalized_expression_available(adata):
-        decision.require_confirmation(
-            "`cellchat_r` expects log-normalized expression; the current `adata.X` still looks count-like. Run `sc-preprocessing` first or confirm the matrix state."
-        )
+    if method == "cellchat_r":
+        if cellchat_prob_type:
+            decision.add_guidance(
+                f"Current CellChat settings: `cellchat_prob_type={cellchat_prob_type}`, `cellchat_min_cells={cellchat_min_cells or 10}`."
+            )
 
     if method == "nichenet_r":
         if species != "human":
             decision.block("The current NicheNet wrapper only supports `--species human`.")
+        cache_dir = Path.home() / ".cache" / "omicsclaw" / "nichenet"
+        required_files = [
+            cache_dir / "lr_network_human_21122021.rds",
+            cache_dir / "weighted_networks_nsga2r_final.rds",
+        ]
+        if any(not path.exists() for path in required_files):
+            decision.require_field(
+                "allow_online_reference_fetch",
+                f"`nichenet_r` needs to download prior-model resources into `{cache_dir}` on first use. Confirm whether online fetch is acceptable, or pre-populate those files manually.",
+                value_type="boolean",
+                aliases=["allow_online_reference_fetch", "allow_download", "download_nichenet_resources"],
+            )
         if condition_key not in adata.obs.columns:
             candidates = _obs_candidates(adata, "condition") + _obs_candidates(adata, "group")
             if candidates:
@@ -678,6 +741,23 @@ def preflight_sc_cell_communication(
                 decision.block(f"`--condition-oi {condition_oi}` was not found in `adata.obs['{condition_key}']`.")
             if condition_ref and condition_ref not in values:
                 decision.block(f"`--condition-ref {condition_ref}` was not found in `adata.obs['{condition_key}']`.")
+        decision.add_guidance(
+            "Current NicheNet settings: `receiver={}`, `senders={}`, `nichenet_top_ligands={}`, `nichenet_expression_pct={}`, `nichenet_lfc_cutoff={}`.".format(
+                receiver or "<receiver>",
+                ",".join(senders or []) or "<sender1,sender2>",
+                nichenet_top_ligands or 20,
+                nichenet_expression_pct if nichenet_expression_pct is not None else 0.1,
+                nichenet_lfc_cutoff if nichenet_lfc_cutoff is not None else 0.25,
+            )
+        )
+
+    if method in {"builtin", "liana", "cellphonedb", "cellchat_r"}:
+        decision.add_guidance(
+            "If your grouping column is still coarse clustering rather than final cell types, communication results are useful as a first pass but usually need marker/annotation validation."
+        )
+        decision.add_guidance(
+            "After communication analysis, common follow-up steps are `sc-markers`, `sc-de`, or `sc-enrichment` to explain sender/receiver biology."
+        )
 
     return decision
 

@@ -42,7 +42,8 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     "doubletdetection": DependencyInfo("doubletdetection", 'pip install -e ".[singlecell-doublet]"', "DoubletDetection consensus doublet calling"),
 
     # Communication
-    "liana": DependencyInfo("liana", "pip install liana", "LIANA+ L-R analysis"),
+    "liana": DependencyInfo("liana", 'pip install -e ".[singlecell-communication]"', "LIANA+ ligand-receptor analysis"),
+    "cellphonedb": DependencyInfo("cellphonedb", 'pip install -e ".[singlecell-communication]"', "CellPhoneDB statistical communication analysis"),
     "seaborn": DependencyInfo("seaborn", "pip install seaborn", "Statistical plotting"),
 
     # GRN

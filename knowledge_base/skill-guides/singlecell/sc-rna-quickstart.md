@@ -54,6 +54,7 @@ For a normal 10x scRNA project, the recommended path is:
 7. `sc-clustering`
 8. downstream analysis such as:
    - `sc-markers`
+   - `sc-cell-communication`
    - `sc-enrichment`
    - `sc-pathway-scoring`
    - `sc-cell-annotation`

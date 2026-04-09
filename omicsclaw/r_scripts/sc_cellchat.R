@@ -37,7 +37,7 @@ if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 tryCatch({
     cat(sprintf("Loading data from %s...\n", h5ad_file))
-    sce <- readH5AD(h5ad_file)
+    sce <- readH5AD(h5ad_file, reader = "R")
     counts <- SummarizedExperiment::assay(sce, "X")
     meta   <- as.data.frame(SummarizedExperiment::colData(sce))
 

@@ -65,6 +65,10 @@ R_TIER_PACKAGES: dict[str, list[str]] = {
     ],
     "singlecell-communication": [
         "CellChat",
+        "SingleCellExperiment",
+        "zellkonverter",
+        "nichenetr",
+        "Seurat",
     ],
     "singlecell-de": [
         "MAST",

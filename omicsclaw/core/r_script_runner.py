@@ -318,7 +318,15 @@ class RScriptRunner:
         runtime that differs from the current OmicsClaw environment.
         """
         env = os.environ.copy()
-        conda_prefix = env.get("CONDA_PREFIX")
+        resolved_prefix: str | None = None
+        r_exec_path = Path(self.r_executable)
+        if r_exec_path.is_absolute() and r_exec_path.name == "Rscript":
+            parent_prefix = r_exec_path.parent.parent
+            if parent_prefix.exists():
+                resolved_prefix = str(parent_prefix)
+        conda_prefix = resolved_prefix or env.get("CONDA_PREFIX") or (sys.prefix if Path(sys.prefix).exists() else None)
+        if conda_prefix:
+            env["CONDA_PREFIX"] = conda_prefix
 
         python_candidates: list[str] = []
         if conda_prefix:
