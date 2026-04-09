@@ -33,6 +33,15 @@ from .enrichment import (
     plot_pathway_score_distributions,
     plot_top_gene_sets_bar,
 )
+from .stat_enrichment import (
+    compute_running_score_curve,
+    plot_enrichment_enrichmap,
+    plot_enrichment_group_summary,
+    plot_enrichment_group_term_dotplot,
+    plot_enrichment_ridgeplot,
+    plot_enrichment_top_terms_bar,
+    plot_gsea_running_score_panels,
+)
 from .doublet import (
     plot_doublet_call_summary,
     plot_doublet_score_by_group,
@@ -95,6 +104,13 @@ __all__ = [
     "plot_group_mean_dotplot",
     "plot_pathway_score_distributions",
     "plot_enrichment_embedding_panels",
+    "plot_enrichment_top_terms_bar",
+    "plot_enrichment_group_term_dotplot",
+    "plot_enrichment_group_summary",
+    "plot_enrichment_enrichmap",
+    "plot_enrichment_ridgeplot",
+    "compute_running_score_curve",
+    "plot_gsea_running_score_panels",
     "plot_doublet_score_distribution",
     "plot_doublet_call_summary",
     "plot_doublet_score_by_group",

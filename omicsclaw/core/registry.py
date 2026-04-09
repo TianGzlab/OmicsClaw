@@ -1011,6 +1011,21 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
+    "sc-enrichment": {
+        "domain": "singlecell",
+        "alias": "sc-enrichment",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-enrichment" / "sc_enrichment.py",
+        "demo_args": ["--demo"],
+        "description": "Statistical GO/KEGG/Reactome/Hallmark enrichment on marker or DE rankings (ORA, preranked GSEA)",
+        "allowed_extra_flags": {
+            "--method", "--engine", "--groupby", "--ranking-method", "--gene-sets", "--gene-set-db", "--species",
+            "--top-terms", "--ora-padj-cutoff", "--ora-log2fc-cutoff", "--ora-max-genes",
+            "--gsea-ranking-metric", "--gsea-min-size", "--gsea-max-size", "--gsea-permutation-num",
+            "--gsea-weight", "--gsea-seed",
+        },
+        "requires_preprocessed": True,
+        "saves_h5ad": True,
+    },
     "sc-grn": {
         "domain": "singlecell",
         "alias": "sc-grn",

@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "generated_by": "scripts/generate_catalog.py",
-  "skill_count": 85,
+  "skill_count": 86,
   "skills": [
     {
       "name": "bulkrna-batch-correction",
@@ -1024,6 +1024,28 @@
         "scdblfinder",
         "scds",
         "qc"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-enrichment",
+      "cli_alias": "sc-enrichment",
+      "description": "Statistical enrichment analysis for single-cell RNA-seq using ORA or preranked GSEA on marker or differential-expression rankings. This skill is for GO/KEGG/Reactome/Hallmark term significance, not per-cell pathway activity scoring.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-enrichment --demo",
+      "tags": [
+        "singlecell",
+        "enrichment",
+        "ORA",
+        "GSEA",
+        "GO",
+        "KEGG",
+        "Reactome",
+        "Hallmark"
       ],
       "trigger_keywords": []
     },

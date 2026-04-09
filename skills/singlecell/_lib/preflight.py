@@ -1463,6 +1463,160 @@ def preflight_sc_pathway_scoring(
     return decision
 
 
+def preflight_sc_enrichment(
+    adata: AnnData,
+    *,
+    method: str,
+    engine: str,
+    groupby: str | None,
+    gene_sets_path: str | None,
+    gene_set_db: str | None = None,
+    gene_set_from_markers: str | None = None,
+    marker_group: str | None = None,
+    marker_top_n: str | None = None,
+    source_mode: str | None = None,
+    source_path: str | None = None,
+    ranking_method: str | None = None,
+    demo: bool = False,
+) -> PreflightDecision:
+    decision = PreflightDecision("sc-enrichment")
+    _add_standardization_guidance(decision, adata, source_path=source_path)
+
+    if not demo and not gene_sets_path and not gene_set_db and not gene_set_from_markers:
+        decision.block(
+            "`sc-enrichment` needs a gene-set source. Provide one of: `--gene-sets <local.gmt/json>`, `--gene-set-db <hallmark|kegg|go_bp|...>`, or `--gene-set-from-markers <sc-markers-output>` unless `--demo` is used."
+        )
+
+    if gene_set_db and find_spec("gseapy") is None:
+        decision.block(
+            "`--gene-set-db` needs the optional Python package `gseapy`, which is not installed in the current environment."
+        )
+    elif gene_set_db:
+        decision.add_guidance(
+            f"`--gene-set-db {gene_set_db}` will try to resolve a built-in gene-set library automatically. The first run may need network access to populate the local cache."
+        )
+
+    if gene_set_from_markers:
+        decision.add_guidance(
+            "`--gene-set-from-markers` will convert marker genes into one or more custom gene sets for enrichment."
+        )
+        if marker_group:
+            decision.add_guidance(
+                f"Only marker group(s) `{marker_group}` will be turned into gene sets."
+            )
+        else:
+            decision.add_guidance(
+                "No `--marker-group` was provided, so each marker group in the source table will become its own gene set."
+            )
+        if marker_top_n:
+            decision.add_guidance(
+                f"Marker-derived gene sets will keep `marker_top_n={marker_top_n}` per group."
+            )
+
+    decision.add_guidance(
+        "`sc-enrichment` does statistical term enrichment on marker or DE rankings. If you want per-cell pathway activity scores instead, use `sc-pathway-scoring`."
+    )
+
+    r_missing: list[str] = []
+    if engine in {"auto", "r"}:
+        try:
+            from omicsclaw.core.r_dependency_manager import check_r_tier
+
+            _, r_missing = check_r_tier("singlecell-enrichment")
+        except Exception:
+            r_missing = ["clusterProfiler", "enrichplot"]
+
+    if engine == "r":
+        if r_missing:
+            decision.block(
+                "R enrichment engine needs the singlecell enrichment R stack. "
+                f"Missing packages: {', '.join(r_missing)}."
+            )
+        decision.add_guidance(
+            "`--engine r` will use the clusterProfiler / enrichplot stack and can emit richer statistical enrichment figures such as enrichmap and ridgeplot."
+        )
+    elif engine == "auto":
+        if r_missing:
+            decision.add_guidance(
+                "The R clusterProfiler stack is not fully available, so `engine=auto` would fall back to the Python implementation. "
+                f"Missing R packages: {', '.join(r_missing)}."
+            )
+        else:
+            decision.add_guidance(
+                "The R clusterProfiler stack is available, so `engine=auto` will prefer the richer clusterProfiler / enrichplot implementation."
+            )
+        decision.add_guidance(
+            "`--engine auto` will prefer the R clusterProfiler path when its packages are installed, and otherwise fall back to the Python implementation."
+        )
+    else:
+        decision.add_guidance(
+            "`--engine python` keeps the run fully in Python and does not require the R clusterProfiler stack."
+        )
+
+    if source_mode in {"markers_table", "de_table"}:
+        decision.add_guidance(
+            f"This run will reuse an exported ranking table from `{source_mode}` instead of recomputing markers."
+        )
+    else:
+        if not _normalized_expression_available(adata):
+            decision.block(
+                "`sc-enrichment` auto-ranking expects normalized expression in `adata.X`. Run `sc-preprocessing` first, or provide an output directory from `sc-markers` / `sc-de`."
+            )
+
+        cluster_candidates = []
+        for family in ("cluster", "cell_type"):
+            for column in _obs_candidates(adata, family):
+                if column not in cluster_candidates:
+                    cluster_candidates.append(column)
+
+        if groupby:
+            if groupby not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "groupby",
+                        f"`--groupby {groupby}` was not found. Confirm which cluster/label column should drive automatic ranking: {_format_candidates(cluster_candidates)}.",
+                        aliases=["groupby", "cluster_key"],
+                        flag="--groupby",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.block(
+                        "Automatic enrichment from h5ad needs a cluster/cell-type column in `adata.obs`. Run `sc-clustering` first or provide an output directory from `sc-markers` / `sc-de`."
+                    )
+        elif cluster_candidates:
+            decision.add_guidance(
+                f"No `--groupby` was provided, so automatic ranking will use `{cluster_candidates[0]}`. Other plausible columns: {_format_candidates(cluster_candidates)}."
+            )
+        else:
+            decision.block(
+                "Automatic enrichment from h5ad needs a cluster/cell-type column in `adata.obs`. Run `sc-clustering` first or provide an output directory from `sc-markers` / `sc-de`."
+            )
+
+        if source_mode == "auto_cluster_ranking":
+            decision.add_guidance(
+                f"This run will first compute cluster-vs-rest rankings with `ranking_method={ranking_method or 'wilcoxon'}` and then run `{method}` on those rankings."
+            )
+
+    if method == "ora":
+        decision.add_guidance(
+            "ORA is the right first choice when you already have a thresholded marker or DEG list and want the most enriched terms quickly."
+        )
+    else:
+        decision.add_guidance(
+            "GSEA keeps the full ranked gene list, so it is better when subtle coordinated shifts matter more than hard DEG thresholds."
+        )
+        if source_mode == "markers_table":
+            decision.add_guidance(
+                "A plain marker table is usually thresholded, so this wrapper may rebuild a fuller ranking from `processed.h5ad` for GSEA."
+            )
+
+    decision.add_guidance(
+        "Typical workflow: `sc-clustering` or `sc-de` -> `sc-enrichment` -> interpret terms; use `sc-pathway-scoring` only when you want per-cell signature activity."
+    )
+
+    return decision
+
+
 def apply_preflight(decision: PreflightDecision, logger) -> None:
     """Emit user-facing guidance and raise on blocking conditions."""
     decision.emit(logger)

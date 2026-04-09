@@ -28,6 +28,7 @@ Typical order:
 4. interpret pathway activity, then continue to `sc-de` or refined annotation if needed
 
 If the user only says “do enrichment”, first explain that this wrapper scores pathway activity **per cell**, then optionally summarizes it by a label column.
+If the user actually wants GO / KEGG / Reactome term **significance**, redirect them to `sc-enrichment` instead.
 
 ## Step 2: Check The Gene-Set Source
 

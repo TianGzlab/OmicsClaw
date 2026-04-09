@@ -102,6 +102,13 @@ _FALLBACK_KEYWORD_MAPS = {
         "cell communication": "sc-cell-communication",
         "ligand receptor": "sc-cell-communication",
         "cellchat": "sc-cell-communication",
+        "single-cell enrichment": "sc-enrichment",
+        "single cell enrichment": "sc-enrichment",
+        "cluster enrichment": "sc-enrichment",
+        "marker enrichment": "sc-enrichment",
+        "cluster gsea": "sc-enrichment",
+        "pathway scoring": "sc-pathway-scoring",
+        "signature score": "sc-pathway-scoring",
     },
     "genomics": {
         "variant call": "genomics-variant-calling",

@@ -20,5 +20,5 @@ source_urls:
 - **Use method-correct language**: `wilcoxon`, `t-test`, and `logreg` are alternative ranking modes for the same cluster-marker question.
 - **Do not overclaim certainty**: top-ranked markers are candidate discriminative genes, not final cell-type labels by themselves.
 - **Do not confuse with condition DE**: if the user wants treated-vs-control, point them to `sc-de`.
-- **Point to the next step**: after reviewing markers, the usual next branch is `sc-cell-annotation`.
+- **Point to the next step**: after reviewing markers, the usual next branches are `sc-cell-annotation` and `sc-enrichment`.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-markers.md`.

@@ -59,7 +59,7 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
 
     # DE
     "pydeseq2": DependencyInfo("pydeseq2", "pip install pydeseq2", "DESeq2 in Python"),
-    "gseapy": DependencyInfo("gseapy", 'pip install -e ".[singlecell-enrichment]"', "Library-backed pathway gene sets"),
+    "gseapy": DependencyInfo("gseapy", 'pip install -e ".[singlecell-enrichment]"', "Single-cell statistical enrichment and pathway-library resolution"),
 }
 
 

@@ -72,9 +72,13 @@ R_TIER_PACKAGES: dict[str, list[str]] = {
         "SingleCellExperiment",
         "zellkonverter",
     ],
-    "singlecell-enrichment": [
+    "singlecell-pathway-scoring": [
         "AUCell",
         "GSEABase",
+    ],
+    "singlecell-enrichment": [
+        "clusterProfiler",
+        "enrichplot",
     ],
     # Spatial
     "spatial-deconv": [

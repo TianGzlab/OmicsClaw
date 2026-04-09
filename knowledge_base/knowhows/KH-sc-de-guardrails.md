@@ -24,4 +24,5 @@ source_urls:
 - **Stop for pseudobulk design gaps**: do not run `deseq2_r` until the user has confirmed the condition column, both contrast groups, the replicate column, and the cell-type column.
 - **Stop for clustering gaps**: do not pretend you can produce cluster markers when the object has no cluster/label column yet; send the user to `sc-clustering` first.
 - **Be honest about runtime dependencies**: `mast` and `deseq2_r` are real public R-backed methods and require their corresponding R stacks; if those stacks are missing, fail clearly instead of implying the method still ran.
+- **Point to the next step**: DE results usually flow into `sc-enrichment` for statistical term interpretation, or `sc-pathway-scoring` when the user instead wants per-cell signature activity.
 - **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-de.md`.

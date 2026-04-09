@@ -193,7 +193,7 @@ singlecell-velocity = [
 ]
 
 singlecell-enrichment = [
-    "gseapy>=1.0.0",                  # sc-pathway-scoring: library-backed pathway scoring
+    "gseapy>=1.0.0",                  # sc-enrichment / sc-pathway-scoring: gene-set libraries and enrichment helpers
 ]
 
 # --------------------------------------------------------------------------- #
