@@ -15,7 +15,7 @@ import pytest
 from omicsclaw.autoagent import run_harness_evolution
 from omicsclaw.autoagent.edit_surface import build_sc_preprocessing_surface
 from omicsclaw.autoagent.evaluator import Evaluator
-from omicsclaw.autoagent.harness_loop import HarnessLoop
+from omicsclaw.autoagent.harness_loop import HarnessLoop, HarnessResult
 from omicsclaw.autoagent.metrics_registry import (
     SC_PREPROCESSING_METRICS,
     get_metrics_for_skill,
@@ -356,6 +356,58 @@ class TestHarnessLoopIntegration:
 
 
 class TestHarnessEvolutionEntryPoint:
+    def test_spatial_domains_uses_explicit_surface(self, monkeypatch, tmp_path):
+        captured: dict[str, object] = {}
+
+        fake_registry = MagicMock()
+        fake_registry.skills = {
+            "spatial-domains": {
+                "param_hints": {
+                    "cellcharter": {
+                        "params": ["n_domains", "auto_k", "n_layers"],
+                        "defaults": {
+                            "n_domains": 7,
+                            "auto_k": False,
+                            "n_layers": 3,
+                        },
+                    }
+                }
+            }
+        }
+        fake_registry.load_all = lambda: None
+
+        class FakeLoop:
+            def __init__(self, *args, **kwargs):
+                captured["surface"] = kwargs["surface"]
+                captured["output_root"] = kwargs["output_root"]
+
+            def run(self, on_event=None):
+                return HarnessResult(
+                    success=True,
+                    total_iterations=1,
+                )
+
+        monkeypatch.setattr(
+            "omicsclaw.autoagent.metrics_registry.get_metrics_for_skill",
+            lambda *_args, **_kwargs: SC_PREPROCESSING_METRICS,
+        )
+        monkeypatch.setattr("omicsclaw.core.registry.registry", fake_registry)
+        monkeypatch.setattr("omicsclaw.autoagent.harness_loop.HarnessLoop", FakeLoop)
+
+        result = run_harness_evolution(
+            skill_name="spatial-domains",
+            method="cellcharter",
+            cwd=str(tmp_path),
+        )
+
+        assert result["success"] is True
+        surface = captured["surface"]
+        assert surface.explicit_files == [
+            "skills/spatial/spatial-domains/SKILL.md",
+            "skills/spatial/spatial-domains/spatial_domains.py",
+            "skills/spatial/_lib/domains.py",
+        ]
+
     def test_rejects_explicit_files_that_escape_project_root(self):
         fake_registry = MagicMock()
         fake_registry.skills = {

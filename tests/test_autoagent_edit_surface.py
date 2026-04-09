@@ -16,6 +16,7 @@ from omicsclaw.autoagent.edit_surface import (
     EditLevel,
     EditSurface,
     build_sc_preprocessing_surface,
+    build_spatial_domains_surface,
 )
 
 
@@ -180,3 +181,19 @@ class TestMVPSurface:
 
         # Rejected: infrastructure
         assert not surface.is_editable("omicsclaw/autoagent/judge.py")
+
+    def test_spatial_domains_surface(self, tmp_path):
+        surface = build_spatial_domains_surface(tmp_path, method="cellcharter")
+
+        assert surface.max_level == 2
+        assert surface.explicit_files == [
+            "skills/spatial/spatial-domains/SKILL.md",
+            "skills/spatial/spatial-domains/spatial_domains.py",
+            "skills/spatial/_lib/domains.py",
+        ]
+
+        assert surface.is_editable("skills/spatial/spatial-domains/SKILL.md")
+        assert surface.is_editable("skills/spatial/spatial-domains/spatial_domains.py")
+        assert surface.is_editable("skills/spatial/_lib/domains.py")
+        assert not surface.is_editable("skills/spatial/_lib/dependency_manager.py")
+        assert not surface.is_editable("skills/spatial-domains/cellcharter/SKILL.md")

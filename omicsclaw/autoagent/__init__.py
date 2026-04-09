@@ -373,7 +373,11 @@ def run_harness_evolution(
     Returns a summary dict with harness-specific fields plus shared
     autoagent status metadata.
     """
-    from omicsclaw.autoagent.edit_surface import EditSurface, build_sc_preprocessing_surface
+    from omicsclaw.autoagent.edit_surface import (
+        EditSurface,
+        build_sc_preprocessing_surface,
+        build_spatial_domains_surface,
+    )
     from omicsclaw.autoagent.evaluator import Evaluator
     from omicsclaw.autoagent.harness_loop import HarnessLoop
     from omicsclaw.autoagent.metrics_registry import get_metrics_for_skill
@@ -426,6 +430,11 @@ def run_harness_evolution(
     try:
         if skill_name == "sc-preprocessing" and explicit_files is None:
             surface = build_sc_preprocessing_surface(project_root)
+        elif skill_name == "spatial-domains" and explicit_files is None:
+            surface = build_spatial_domains_surface(
+                project_root,
+                method=method,
+            )
         elif explicit_files:
             surface = EditSurface(
                 max_level=surface_level,

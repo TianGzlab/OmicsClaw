@@ -318,6 +318,14 @@ class HarnessLoop:
                 patch = parse_patch_response(response_text)
             except ValueError as exc:
                 logger.warning("Failed to parse LLM patch: %s", exc)
+                self._record_iteration_rejection_without_trial(
+                    emit,
+                    iteration=iteration,
+                    params=baseline_params,
+                    reasoning="",
+                    reason=str(exc),
+                    stage="parse",
+                )
                 consecutive_failures += 1
                 if consecutive_failures >= CONSECUTIVE_CRASH_LIMIT:
                     promotion = self._promote_workspace(workspace, accepted_files)
@@ -366,10 +374,30 @@ class HarnessLoop:
                         gate_failures=["validation"],
                         error_summary=validation.error_summary,
                     )
+                    self._record_iteration_rejection_without_trial(
+                        emit,
+                        iteration=iteration,
+                        params=baseline_params,
+                        reasoning=patch.reasoning,
+                        reason=validation.error_summary,
+                        stage="validation",
+                    )
                     consecutive_failures += 1
                     patches_rejected += 1
                     if consecutive_failures >= CONSECUTIVE_CRASH_LIMIT:
-                        break
+                        promotion = self._promote_workspace(workspace, accepted_files)
+                        return self._finalize(
+                            baseline, best, converged, patches_accepted,
+                            patches_rejected, accepted_files, accepted_patches,
+                            promotion=promotion,
+                            workspace=workspace,
+                            success=False,
+                            error_message=(
+                                f"{CONSECUTIVE_CRASH_LIMIT} consecutive patch "
+                                "validation failures."
+                            ),
+                            on_event=on_event,
+                        )
                     continue
 
                 try:
@@ -381,10 +409,30 @@ class HarnessLoop:
                         gate_failures=["apply"],
                         error_summary=str(exc),
                     )
+                    self._record_iteration_rejection_without_trial(
+                        emit,
+                        iteration=iteration,
+                        params=baseline_params,
+                        reasoning=patch.reasoning,
+                        reason=str(exc),
+                        stage="apply",
+                    )
                     consecutive_failures += 1
                     patches_rejected += 1
                     if consecutive_failures >= CONSECUTIVE_CRASH_LIMIT:
-                        break
+                        promotion = self._promote_workspace(workspace, accepted_files)
+                        return self._finalize(
+                            baseline, best, converged, patches_accepted,
+                            patches_rejected, accepted_files, accepted_patches,
+                            promotion=promotion,
+                            workspace=workspace,
+                            success=False,
+                            error_message=(
+                                f"{CONSECUTIVE_CRASH_LIMIT} consecutive patch "
+                                "application failures."
+                            ),
+                            on_event=on_event,
+                        )
                     continue
 
                 self._raise_if_cancelled()
@@ -684,6 +732,49 @@ class HarnessLoop:
             error_summary=error_summary,
             target_files=[d.file for d in patch.diffs],
         ))
+
+    def _record_iteration_rejection_without_trial(
+        self,
+        emit: Callable[[str, dict[str, Any]], None],
+        *,
+        iteration: int,
+        params: dict[str, Any],
+        reasoning: str,
+        reason: str,
+        stage: str,
+    ) -> TrialRecord:
+        """Record and emit a rejected iteration that failed before execution.
+
+        Validation / patch-application / parse failures never reach
+        ``trial_start`` or the evaluator, but the frontend still needs a
+        terminal event so the iteration does not remain stuck in ``pending``.
+        """
+        record = TrialRecord(
+            trial_id=iteration,
+            params=dict(params),
+            composite_score=float("-inf"),
+            status="discard",
+            reasoning=reasoning,
+            error_output=reason,
+        )
+        self.ledger.append(record)
+        emit("trial_judgment", {
+            "trial_id": iteration,
+            "iteration": iteration,
+            "decision": "discard",
+            "reason": reason,
+            "new_best": False,
+            "stage": stage,
+        })
+        emit("trial_complete", {
+            "trial_id": iteration,
+            "iteration": iteration,
+            "score": None,
+            "status": record.status,
+            "error": reason,
+            "stage": stage,
+        })
+        return record
 
     def _finalize(
         self,

@@ -352,3 +352,27 @@ def build_sc_preprocessing_surface(project_root: Path) -> EditSurface:
             "skills/singlecell/_lib/qc.py",
         ],
     )
+
+
+def build_spatial_domains_surface(
+    project_root: Path,
+    *,
+    method: str = "",
+) -> EditSurface:
+    """Build the bounded surface for spatial-domains evolution.
+
+    ``spatial-domains`` routes most algorithm logic through the shared
+    ``skills/spatial/_lib/domains.py`` module rather than a per-method folder.
+    Exposing these canonical files prevents the Meta-Agent from hallucinating
+    non-existent paths like ``skills/spatial-domains/cellcharter/...``.
+    """
+    _ = method.strip().lower()
+    return EditSurface(
+        max_level=2,
+        project_root=Path(project_root),
+        explicit_files=[
+            "skills/spatial/spatial-domains/SKILL.md",
+            "skills/spatial/spatial-domains/spatial_domains.py",
+            "skills/spatial/_lib/domains.py",
+        ],
+    )

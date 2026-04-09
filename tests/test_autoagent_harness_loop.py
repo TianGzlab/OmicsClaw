@@ -386,7 +386,7 @@ class TestHarnessLoopEvolution:
         assert result.converged
 
     def test_validation_failure_recorded(self, tmp_path):
-        """Invalid patch (outside surface) is rejected and recorded."""
+        """Invalid patches emit terminal discard events instead of hanging."""
         surface = _make_surface(tmp_path)
         output_root = tmp_path / "output"
 
@@ -415,14 +415,81 @@ class TestHarnessLoopEvolution:
             }],
             "reasoning": "Try to modify frozen file.",
         })
+        events: list[tuple[str, dict[str, object]]] = []
 
         with mock_patch(
             "omicsclaw.autoagent.harness_loop.execute_trial", mock_execute,
         ), mock_patch.object(loop, "_call_llm", return_value=bad_patch):
-            result = loop.run()
+            result = loop.run(
+                on_event=lambda event_type, data: events.append((event_type, data))
+            )
 
         assert result.patches_rejected >= 1
         assert len(loop.failure_bank) >= 1
+        assert len(loop.ledger.all_trials()) == 3
+
+        rejected_complete = [
+            data
+            for event_type, data in events
+            if event_type == "trial_complete" and int(data["trial_id"]) > 0
+        ]
+        assert len(rejected_complete) == 2
+        assert all(data["status"] == "discard" for data in rejected_complete)
+        assert all(data["stage"] == "validation" for data in rejected_complete)
+        assert all("cannot be edited" in str(data["error"]) for data in rejected_complete)
+
+        rejected_judgment = [
+            data
+            for event_type, data in events
+            if event_type == "trial_judgment" and int(data["trial_id"]) > 0
+        ]
+        assert len(rejected_judgment) == 2
+        assert all(data["decision"] == "discard" for data in rejected_judgment)
+        assert all(data["stage"] == "validation" for data in rejected_judgment)
+
+    def test_validation_failure_limit_returns_error(self, tmp_path):
+        """Three consecutive validation failures terminate the run as an error."""
+        surface = _make_surface(tmp_path)
+        output_root = tmp_path / "output"
+
+        loop = HarnessLoop(
+            skill_name="test-skill",
+            method="scanpy",
+            input_path="",
+            output_root=output_root,
+            surface=surface,
+            evaluator=_make_evaluator(),
+            search_space=_make_search_space(),
+            demo=True,
+            max_iterations=3,
+        )
+
+        def mock_execute(*args, **kwargs):
+            od = kwargs.get("output_dir") or args[2]
+            return _make_trial_execution(Path(od), success=True, score=0.5)
+
+        bad_patch = json.dumps({
+            "patch_plan": {"target_files": ["skills/not-real/file.py"]},
+            "diffs": [{
+                "file": "skills/not-real/file.py",
+                "hunks": [{"old_code": "x", "new_code": "y"}],
+            }],
+            "reasoning": "Target a path that does not exist.",
+        })
+
+        events: list[tuple[str, dict[str, object]]] = []
+
+        with mock_patch(
+            "omicsclaw.autoagent.harness_loop.execute_trial", mock_execute,
+        ), mock_patch.object(loop, "_call_llm", return_value=bad_patch):
+            result = loop.run(
+                on_event=lambda event_type, data: events.append((event_type, data))
+            )
+
+        assert result.success is False
+        assert result.error_message == "3 consecutive patch validation failures."
+        assert len(loop.ledger.all_trials()) == 4
+        assert [event_type for event_type, _data in events].count("error") == 1
 
     def test_harness_summary_written(self, tmp_path):
         """harness_summary.json is written to output_root."""
