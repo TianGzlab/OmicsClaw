@@ -378,6 +378,192 @@ def _is_spatial_skill(skill_name: str) -> bool:
     return "spatial" in skill_name
 
 
+# ---------------------------------------------------------------------------
+# Preprocessing metrics
+# ---------------------------------------------------------------------------
+
+
+def _compute_preprocessing_metrics(
+    adata,
+    skill_name: str,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, float]:
+    """cell_retention, n_hvgs, n_genes_after from a preprocessed adata."""
+    result: dict[str, float] = {}
+
+    result["n_genes_after"] = float(adata.n_vars)
+
+    # HVG count
+    if "highly_variable" in adata.var.columns:
+        result["n_hvgs"] = float(adata.var["highly_variable"].sum())
+
+    # Cell retention — compare to raw count if available
+    n_obs_raw = None
+    for key in ("n_obs_raw", "n_obs_before_qc", "raw_n_obs"):
+        if key in adata.uns:
+            n_obs_raw = adata.uns[key]
+            break
+    if n_obs_raw is None and "raw" in dir(adata) and adata.raw is not None:
+        n_obs_raw = adata.raw.n_obs
+    if n_obs_raw is not None and n_obs_raw > 0:
+        result["cell_retention"] = round(adata.n_obs / float(n_obs_raw), 4)
+    else:
+        # No raw reference — report 1.0 (cannot measure loss)
+        result["cell_retention"] = 1.0
+
+    # PCA dimensions (bonus)
+    if "X_pca" in adata.obsm:
+        result["n_pcs"] = float(adata.obsm["X_pca"].shape[1])
+
+    return result
+
+
+_register_strategy(
+    ["sc-preprocessing", "sc-preprocess", "spatial-preprocess"],
+    _compute_preprocessing_metrics,
+)
+
+
+# ---------------------------------------------------------------------------
+# Differential expression metrics
+# ---------------------------------------------------------------------------
+
+
+def _compute_de_metrics(
+    adata,
+    skill_name: str,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, float]:
+    """n_de_genes, n_significant, n_marker_hits from rank_genes_groups."""
+    if "rank_genes_groups" not in adata.uns:
+        logger.info("No rank_genes_groups in adata for %s", skill_name)
+        return {}
+
+    import pandas as pd
+
+    try:
+        rgg = adata.uns["rank_genes_groups"]
+        names = pd.DataFrame(rgg["names"])
+        pvals_adj = pd.DataFrame(rgg["pvals_adj"]) if "pvals_adj" in rgg else None
+        logfoldchanges = pd.DataFrame(rgg["logfoldchanges"]) if "logfoldchanges" in rgg else None
+    except Exception as exc:
+        logger.debug("Failed to parse rank_genes_groups: %s", exc)
+        return {}
+
+    n_de_genes = float(names.size)
+    result: dict[str, float] = {"n_de_genes": n_de_genes}
+
+    fdr_threshold = float(params.get("fdr_threshold", 0.05))
+    log2fc_threshold = float(params.get("log2fc_threshold", 1.0))
+
+    if pvals_adj is not None:
+        sig_mask = pvals_adj < fdr_threshold
+        result["n_significant"] = float(sig_mask.sum().sum())
+
+        if logfoldchanges is not None:
+            fc_mask = logfoldchanges.abs() > log2fc_threshold
+            result["n_marker_hits"] = float((sig_mask & fc_mask).sum().sum())
+
+    return result
+
+
+_register_strategy(
+    ["sc-de", "spatial-de"],
+    _compute_de_metrics,
+)
+
+
+# ---------------------------------------------------------------------------
+# Marker gene metrics
+# ---------------------------------------------------------------------------
+
+
+def _compute_marker_metrics(
+    adata,
+    skill_name: str,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, float]:
+    """n_markers, n_clusters from rank_genes_groups."""
+    if "rank_genes_groups" not in adata.uns:
+        logger.info("No rank_genes_groups in adata for %s", skill_name)
+        return {}
+
+    import pandas as pd
+
+    try:
+        rgg = adata.uns["rank_genes_groups"]
+        names = pd.DataFrame(rgg["names"])
+    except Exception as exc:
+        logger.debug("Failed to parse rank_genes_groups: %s", exc)
+        return {}
+
+    # n_markers = total non-empty names across all groups
+    n_markers = float((names != "").sum().sum())
+    n_clusters = float(names.shape[1])
+
+    return {"n_markers": n_markers, "n_clusters": n_clusters}
+
+
+_register_strategy(
+    ["sc-markers"],
+    _compute_marker_metrics,
+)
+
+
+# ---------------------------------------------------------------------------
+# Deconvolution metrics
+# ---------------------------------------------------------------------------
+
+
+def _compute_deconv_metrics(
+    adata,
+    skill_name: str,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, float]:
+    """n_cell_types, n_common_genes from deconvolution output."""
+    result: dict[str, float] = {}
+
+    # Look for proportion matrix in obsm
+    proportion_key = None
+    for key in adata.obsm:
+        if "proportion" in key.lower() or "deconv" in key.lower():
+            proportion_key = key
+            break
+
+    if proportion_key is not None:
+        proportions = np.asarray(adata.obsm[proportion_key])
+        # n_cell_types = columns with non-negligible proportions
+        col_sums = proportions.sum(axis=0)
+        result["n_cell_types"] = float((col_sums > 0.01).sum())
+    else:
+        # Fallback: check obs columns for cell type proportions
+        prop_cols = [c for c in adata.obs.columns
+                     if adata.obs[c].dtype in ("float64", "float32")
+                     and not c.startswith("n_")
+                     and c not in ("total_counts", "pct_counts_mt")]
+        if prop_cols:
+            result["n_cell_types"] = float(len(prop_cols))
+
+    result["n_common_genes"] = float(adata.n_vars)
+
+    return result
+
+
+_register_strategy(
+    ["spatial-deconv", "spatial-deconvolution"],
+    _compute_deconv_metrics,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _compute_spatial_local_purity(
     adata,
     label_col: str,
