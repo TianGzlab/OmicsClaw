@@ -34,6 +34,11 @@ Use this guide when the user says something like:
 This guide is intentionally opinionated and focuses on the current mainstream
 OmicsClaw scRNA path.
 
+Important beginner distinction:
+
+- `sc-enrichment` = statistical GO / KEGG / Hallmark term enrichment on marker or DE rankings
+- `sc-pathway-scoring` = per-cell pathway / signature activity scoring
+
 ## The Default Route
 
 For a normal 10x scRNA project, the recommended path is:
@@ -48,6 +53,10 @@ For a normal 10x scRNA project, the recommended path is:
    - `sc-batch-integration` if there are multiple batches / donors / libraries
 7. `sc-clustering`
 8. downstream analysis such as:
+   - `sc-markers`
+   - `sc-cell-communication`
+   - `sc-enrichment`
+   - `sc-pathway-scoring`
    - `sc-cell-annotation`
    - `sc-de`
    - `sc-pseudotime`

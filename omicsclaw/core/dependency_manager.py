@@ -58,7 +58,13 @@ DOMAIN_TIERS = {
     "pysal": "spatial",
 
     # Single-cell domain dependencies
-    "scrublet": "singlecell",
+    "scrublet": "singlecell-doublet",
+    "doubletdetection": "singlecell-doublet",
+    "celltypist": "singlecell-annotation",
+    "louvain": "singlecell-clustering",
+    "phate": "singlecell-clustering",
+    "igraph": "singlecell-clustering",
+    "leidenalg": "singlecell-clustering",
     "multiqc": "singlecell-upstream",
     "kb_python": "singlecell-upstream",
     "scvelo": "singlecell-velocity",
@@ -107,7 +113,12 @@ def get_installed_tiers() -> dict[str, bool]:
         "core": importlib.util.find_spec("scanpy") is not None,
         "spatial-domains": importlib.util.find_spec("SpaGCN") is not None and importlib.util.find_spec("torch") is not None,
         "spatial": importlib.util.find_spec("scvi") is not None,
-        "singlecell": importlib.util.find_spec("scrublet") is not None,
+        "singlecell": importlib.util.find_spec("scanpy") is not None,
+        "singlecell-clustering": importlib.util.find_spec("igraph") is not None and importlib.util.find_spec("leidenalg") is not None,
+        "singlecell-batch": importlib.util.find_spec("harmonypy") is not None or importlib.util.find_spec("bbknn") is not None or importlib.util.find_spec("scanorama") is not None or importlib.util.find_spec("scvi") is not None,
+        "singlecell-doublet": importlib.util.find_spec("scrublet") is not None or importlib.util.find_spec("doubletdetection") is not None,
+        "singlecell-annotation": importlib.util.find_spec("celltypist") is not None,
+        "singlecell-enrichment": importlib.util.find_spec("gseapy") is not None,
         "genomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only
         "proteomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only
         "metabolomics": importlib.util.find_spec("pandas") is not None,  # Uses core deps only

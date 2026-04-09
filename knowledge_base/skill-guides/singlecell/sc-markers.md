@@ -10,83 +10,38 @@ priority: 0.8
 
 # OmicsClaw Skill Guide — SC Markers
 
-**Status**: implementation-aligned guide derived from the current OmicsClaw
-`sc-markers` skill. This guide is about cluster-level marker ranking, not
-replicate-aware condition DE.
+## When To Use It
 
-## Purpose
+Use this skill after clustering when you want to know which genes best distinguish each cluster or label.
 
-Use this guide when you need to decide:
-- whether the user wants cluster markers or condition DE
-- which ranking method is the best first pass
-- which output parameters matter for interpretation
+Common OmicsClaw path:
 
-## Step 1: Inspect The Data First
+1. `sc-qc`
+2. `sc-preprocessing`
+3. optional `sc-batch-integration`
+4. `sc-clustering`
+5. `sc-markers`
+6. `sc-cell-annotation`
 
-Key properties to check:
-- **Grouping column**:
-  - `groupby` should represent meaningful clusters or labels
-- **Upstream clustering quality**:
-  - poor clusters lead to poor markers
-- **Expression state**:
-  - the wrapper expects preprocessed single-cell data
-- **Expression source**:
-  - if `adata.raw` exists, the wrapper may use it instead of `adata.X`; mention that explicitly
+## Method Choice
 
-Important implementation notes in current OmicsClaw:
-- methods are `wilcoxon`, `t-test`, and `logreg`
-- `groupby` is the core scientific parameter
-- `n_genes` and `n_top` mainly control exported results and visualization scope
+| Method | Best first use | Main public controls | Main caveat |
+|--------|----------------|----------------------|-------------|
+| `wilcoxon` | safest first-pass cluster markers | `groupby`, `n_genes`, `n_top`, marker filters | exploratory, not replicate-aware |
+| `t-test` | parametric alternative | `groupby`, `n_genes`, `n_top`, marker filters | more sensitive to assumptions |
+| `logreg` | discriminative feature ranking | `groupby`, `n_genes`, `n_top`, marker filters | do not over-sell as a minimal marker-panel selector |
 
-## Step 2: Pick The Method Deliberately
+## How To Explain Parameters
 
-| Method | Best first use | Strong starting parameters | Main caveat |
-|--------|----------------|----------------------------|-------------|
-| **wilcoxon** | Safest first-pass cluster marker ranking | `groupby`, `n_genes`, `n_top` | Still exploratory, not replicate-aware |
-| **t-test** | Parametric alternative when users want a simple mean-shift test | `groupby`, `n_genes`, `n_top` | More sensitive to distribution assumptions |
-| **logreg** | When users want classification-style marker ranking | `groupby`, `n_genes`, `n_top` | Do not oversell as minimal marker-panel selection |
+Start with:
+- which grouping column will be ranked (`groupby`)
+- which ranking mode will be used (`method`)
+- how many genes will be exported (`n_genes`, `n_top`)
+- how strict the exported marker filter will be (`min_in_group_fraction`, `min_fold_change`, `max_out_group_fraction`)
 
-## Step 3: Always Show A Parameter Summary Before Running
+## What To Say After The Run
 
-```text
-About to run cluster marker discovery
-  Method: wilcoxon
-  Parameters: groupby=leiden, n_genes=all, n_top=10
-  Note: this skill is for cluster markers, not replicate-aware condition DE.
-```
-
-## Step 4: Method-Specific Tuning Rules
-
-Tune in this order:
-1. `groupby`
-2. `method`
-3. `n_genes`
-4. `n_top`
-
-Guidance:
-- treat `groupby` as the most important decision because it defines the biological comparison
-- start with `wilcoxon` unless the user has a strong reason to prefer another ranking mode
-- use `n_genes` to control export breadth
-- use `n_top` to control summary tables and plots
-- if `groupby` is not obviously the main clustering column, stop and ask instead of guessing
-
-Important warnings:
-- do not present this as condition-aware DE
-- do not claim low-level Scanpy ranking knobs are publicly exposed here
-
-## Step 5: What To Say After The Run
-
-- If markers look weak: question cluster quality before blaming the ranking test.
-- If too many markers are exported: reduce `n_genes` or rely on `n_top` for summaries.
-- If users want treated-vs-control DE: redirect them to `sc-de`.
-
-## Step 6: Explain Outputs Using Method-Correct Language
-
-- describe marker tables as cluster-discriminative genes
-- describe the heatmap/dotplot as visualization summaries, not validation by themselves
-- describe `adata_with_markers.h5ad` as the same AnnData with marker-related metadata preserved for reuse
-
-## Official References
-
-- https://scanpy.readthedocs.io/en/stable/api/scanpy.tl.rank_genes_groups.html
-- https://scanpy.readthedocs.io/en/1.9.x/generated/scanpy.tl.rank_genes_groups.html
+- Review the top marker table and dotplot first.
+- If markers look weak, question cluster quality before blaming the test.
+- If users want formal treated-vs-control results, redirect to `sc-de`.
+- If cluster identity is still unclear, continue to `sc-cell-annotation` with these markers in hand.

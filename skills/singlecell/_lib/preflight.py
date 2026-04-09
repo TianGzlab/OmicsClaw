@@ -11,6 +11,7 @@ from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidanc
 
 from .adata_utils import (
     build_standardization_recommendation,
+    get_matrix_contract,
     get_input_contract,
     matrix_kind_is_count_like,
     matrix_kind_is_normalized,
@@ -166,6 +167,8 @@ def _add_standardization_guidance(
     source_path: str | None = None,
 ) -> None:
     contract = get_input_contract(adata)
+    if get_matrix_contract(adata):
+        return
     if not contract.get("standardized"):
         decision.add_guidance(
             build_standardization_recommendation(source_path=source_path, skill_name=decision.skill_name)
@@ -196,7 +199,13 @@ def _declared_raw_is_normalized(adata: AnnData) -> bool:
 
 
 def _normalized_expression_available(adata: AnnData) -> bool:
-    return _declared_x_is_normalized(adata) or _declared_raw_is_normalized(adata)
+    if _declared_x_is_normalized(adata) or _declared_raw_is_normalized(adata):
+        return True
+    if not x_matrix_kind(adata) and not matrix_looks_count_like(adata.X):
+        return True
+    if adata.raw is not None and adata.raw.shape == adata.shape and not raw_matrix_kind(adata):
+        return not matrix_looks_count_like(adata.raw.X)
+    return False
 
 
 def _aligned_raw_is_count_like(adata: AnnData) -> bool:
@@ -206,6 +215,19 @@ def _aligned_raw_is_count_like(adata: AnnData) -> bool:
     if kind:
         return matrix_kind_is_count_like(kind)
     return matrix_looks_count_like(adata.raw.X)
+
+
+def _count_like_matrix_available(adata: AnnData) -> bool:
+    if "counts" in getattr(adata, "layers", {}):
+        layer_kind = get_matrix_contract(adata).get("layers", {}).get("counts")
+        if layer_kind:
+            return matrix_kind_is_count_like(layer_kind)
+        return matrix_looks_count_like(adata.layers["counts"])
+    if _aligned_raw_is_count_like(adata):
+        return True
+    if not x_matrix_kind(adata):
+        return matrix_looks_count_like(adata.X)
+    return matrix_kind_is_count_like(x_matrix_kind(adata))
 
 
 def preflight_sc_de(
@@ -218,6 +240,10 @@ def preflight_sc_de(
     sample_key: str | None,
     celltype_key: str | None,
     source_path: str | None = None,
+    n_top_genes: int | None = None,
+    logreg_solver: str | None = None,
+    pseudobulk_min_cells: int | None = None,
+    pseudobulk_min_counts: int | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-de")
     _add_standardization_guidance(decision, adata, source_path=source_path)
@@ -226,6 +252,9 @@ def preflight_sc_de(
         decision.require_confirmation("Provide both `--group1` and `--group2`, or omit both for a full ranking run.")
 
     if method == "deseq2_r":
+        decision.add_guidance(
+            "This path is for replicate-aware condition DE after you already know the comparison groups and have real biological replicates."
+        )
         condition_candidates = _obs_candidates(adata, "condition")
         if not groupby or groupby == "leiden":
             hint = f" Candidate condition-like columns: {_format_candidates(condition_candidates)}." if condition_candidates else ""
@@ -274,15 +303,32 @@ def preflight_sc_de(
                 decision.block(
                     "`deseq2_r` needs raw count-like expression in `layers['counts']`, aligned `adata.raw`, or count-like `adata.X`."
                 )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=deseq2_r`, `groupby={groupby}`, `sample_key={sample_key or 'sample_id'}`, `celltype_key={celltype_key or 'cell_type'}`, `pseudobulk_min_cells={pseudobulk_min_cells}`, `pseudobulk_min_counts={pseudobulk_min_counts}`."
+        )
     else:
+        if not _normalized_expression_available(adata):
+            decision.block(
+                f"`{method}` expects log-normalized expression in `adata.X`. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+            )
         if groupby not in adata.obs.columns and not (groupby == "leiden" and "louvain" in adata.obs.columns):
             candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "condition")
             hint = f" Candidate grouping columns: {_format_candidates(candidates)}." if candidates else ""
-            decision.require_confirmation(f"`--groupby {groupby}` was not found in `adata.obs`." + hint)
-
-        if method == "mast" and not _normalized_expression_available(adata):
-            decision.block(
-                "`mast` expects log-normalized expression. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+            decision.require_confirmation(
+                f"`--groupby {groupby}` was not found in `adata.obs`."
+                + hint
+                + " If you want cluster markers, run `sc-clustering` first; if you want condition DE, point `--groupby` to the condition column."
+            )
+        decision.add_guidance(
+            "Exploratory single-cell DE usually comes after clustering or annotation, and before pathway enrichment or condition-focused follow-up."
+        )
+        if method == "logreg":
+            decision.add_guidance(
+                f"Current first-pass settings: `method=logreg`, `groupby={groupby}`, `n_top_genes={n_top_genes}`, `logreg_solver={logreg_solver}`."
+            )
+        else:
+            decision.add_guidance(
+                f"Current first-pass settings: `method={method}`, `groupby={groupby}`, `group1={group1}`, `group2={group2}`, `n_top_genes={n_top_genes}`."
             )
 
     return decision
@@ -294,41 +340,156 @@ def preflight_sc_cell_annotation(
     method: str,
     model: str,
     reference: str,
-    cluster_key: str,
+    cluster_key: str | None,
+    celltypist_majority_voting: bool = False,
+    manual_map: str | None = None,
+    manual_map_file: str | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-cell-annotation")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
+    matrix_contract = get_matrix_contract(adata)
+    cluster_candidates: list[str] = []
+    primary_cluster_key = matrix_contract.get("primary_cluster_key")
+    if primary_cluster_key and primary_cluster_key in adata.obs.columns:
+        cluster_candidates.append(str(primary_cluster_key))
+    for key in _obs_candidates(adata, "cluster"):
+        if key not in cluster_candidates:
+            cluster_candidates.append(key)
+
     if method == "markers":
-        if cluster_key not in adata.obs.columns:
-            candidates = _obs_candidates(adata, "cluster")
-            if candidates:
+        if cluster_key:
+            if cluster_key not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "cluster_key",
+                        f"`--cluster-key {cluster_key}` was not found. Confirm which existing cluster/label column should guide marker-based annotation: {_format_candidates(cluster_candidates)}.",
+                        aliases=["cluster_key", "groupby"],
+                        flag="--cluster-key",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.add_guidance(
+                        "`markers` annotation will not auto-cluster implicitly; cluster assignments should come from `sc-clustering` or another explicit upstream step."
+                    )
+                    decision.block(
+                        "Marker-based annotation requires an existing cluster/label column in `adata.obs`. Run `sc-clustering` first."
+                    )
+            else:
+                decision.add_guidance(f"`markers` will use `cluster_key={cluster_key}`.")
+        else:
+            if len(cluster_candidates) > 1:
+                decision.require_field(
+                    "cluster_key",
+                    f"`markers` annotation needs a cluster/label column. Multiple candidates are available: {_format_candidates(cluster_candidates)}. Confirm which one should drive marker scoring.",
+                    aliases=["cluster_key", "groupby"],
+                    flag="--cluster-key",
+                    choices=cluster_candidates,
+                )
+            elif len(cluster_candidates) == 1:
                 decision.add_guidance(
-                    f"`--cluster-key {cluster_key}` was not found. Marker mode will auto-cluster unless you prefer an existing column such as {_format_candidates(candidates)}."
+                    f"`markers` annotation will use `{cluster_candidates[0]}` as the cluster column."
                 )
             else:
-                decision.add_guidance(
-                    "Marker mode will auto-cluster because no existing cluster column was found. If you already have trusted labels, pass them via `--cluster-key` instead."
+                decision.block(
+                    "Marker-based annotation needs an existing cluster/label column in `adata.obs`; it will not auto-cluster anymore. Run `sc-clustering` first."
                 )
+                decision.add_guidance(
+                    "`markers` annotation no longer auto-clusters implicitly; cluster assignments should come from `sc-clustering` or an equivalent upstream step."
+                )
+        if not _declared_x_is_normalized(adata) and matrix_looks_count_like(adata.X):
+            decision.require_confirmation(
+                "`markers` annotation expects normalized expression. Run `sc-preprocessing` first or confirm that the current matrix has already been transformed outside OmicsClaw."
+            )
+        decision.add_guidance(
+            "Marker-based annotation is best used after `sc-markers` or when you already have trusted lineage markers for the clustered groups."
+        )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=markers`, `cluster_key={cluster_key or (cluster_candidates[0] if len(cluster_candidates) == 1 else 'confirm')}`."
+        )
+        decision.add_guidance(
+            "After annotation, inspect the annotated embedding and label distribution; if labels are still ambiguous, revisit `sc-markers` or try a reference-based method."
+        )
         return decision
 
-    use_raw = _declared_raw_is_normalized(adata)
-    if not use_raw and not _declared_x_is_normalized(adata):
-        if method == "celltypist":
+    if method == "manual":
+        if cluster_key:
+            if cluster_key not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "cluster_key",
+                        f"`--cluster-key {cluster_key}` was not found. Confirm which existing cluster/label column should guide manual relabeling: {_format_candidates(cluster_candidates)}.",
+                        aliases=["cluster_key", "groupby"],
+                        flag="--cluster-key",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.block(
+                        "Manual annotation requires an existing cluster/label column in `adata.obs`. Run `sc-clustering` first."
+                    )
+            else:
+                decision.add_guidance(f"`manual` annotation will use `cluster_key={cluster_key}`.")
+        else:
+            if len(cluster_candidates) > 1:
+                decision.require_field(
+                    "cluster_key",
+                    f"`manual` annotation needs a cluster/label column. Multiple candidates are available: {_format_candidates(cluster_candidates)}. Confirm which one should be relabeled.",
+                    aliases=["cluster_key", "groupby"],
+                    flag="--cluster-key",
+                    choices=cluster_candidates,
+                )
+            elif len(cluster_candidates) == 1:
+                decision.add_guidance(
+                    f"`manual` annotation will use `{cluster_candidates[0]}` as the cluster column."
+                )
+            else:
+                decision.block(
+                    "Manual annotation requires an existing cluster/label column in `adata.obs`; it will not auto-cluster. Run `sc-clustering` first."
+                )
+
+        if manual_map and manual_map_file:
             decision.require_confirmation(
-                "`celltypist` currently sees count-like expression and would likely fall back to marker annotation. Run `sc-preprocessing` first or confirm that fallback is acceptable."
+                "Both `--manual-map` and `--manual-map-file` were provided. Confirm which one should take precedence."
             )
-        elif method == "popv":
+        elif not manual_map and not manual_map_file:
+            decision.require_field(
+                "manual_map",
+                "Manual annotation needs either `--manual-map '0=T cell;1,2=Myeloid'` or `--manual-map-file <csv/json/txt>`.",
+                aliases=["manual_map", "manual_labels", "mapping"],
+                flag="--manual-map",
+            )
+        elif manual_map_file and not Path(manual_map_file).exists():
+            decision.block(f"`--manual-map-file {manual_map_file}` was not found.")
+
+        decision.add_guidance(
+            "Manual annotation is the explicit relabeling path: it keeps the original cluster column and writes your chosen labels into `cell_type`."
+        )
+        decision.add_guidance(
+            "Current first-pass settings: `method=manual`. Mapping can be supplied inline with `--manual-map` or via `--manual-map-file`."
+        )
+        return decision
+
+    x_normalized = _declared_x_is_normalized(adata)
+    if not x_normalized:
+        if not matrix_looks_count_like(adata.X):
             decision.add_guidance(
-                "`popv` works best on log-normalized query expression aligned to a labeled reference. If matrix scale is uncertain, run `sc-preprocessing` first."
+                "This object does not declare a matrix contract yet, but `adata.X` does not look raw count-like, so annotation will treat it as normalized expression."
+            )
+        elif method == "celltypist":
+            decision.require_confirmation(
+                "`celltypist` expects normalized expression in `adata.X`. The current matrix still looks count-like, so it would likely fall back or misbehave. Run `sc-preprocessing` first or confirm the matrix state."
             )
         else:
             decision.block(
-                f"`{method}` expects log-normalized expression. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
+                f"`{method}` expects log-normalized expression in `adata.X`. Run `sc-preprocessing` first or provide a processed h5ad with normalized expression."
             )
 
     if method == "celltypist":
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. Annotation can still run per cell, but downstream summaries are easier to interpret if you later reuse one of: {_format_candidates(cluster_candidates)}."
+            )
         if model == "Immune_All_Low":
             decision.require_field(
                 "model",
@@ -341,19 +502,54 @@ def preflight_sc_cell_annotation(
             )
             if not valid_input:
                 decision.block(reason)
+        model_available, model_path = sc_annotation_utils.celltypist_model_available_locally(model)
+        if not model_available:
+            decision.require_field(
+                "allow_online_model_fetch",
+                f"`celltypist` model `{model}` is not present locally at `{model_path}`. Running this path would need to download the model through the CellTypist model hub. Confirm whether network fetch is acceptable, or provide a model already cached locally.",
+                value_type="boolean",
+                aliases=["allow_online_model_fetch", "allow_download", "download_model"],
+            )
+            decision.add_guidance(
+                "CellTypist models are typically downloaded into `~/.celltypist/data/models/`. If you want to stay offline, pre-download the model there and rerun."
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method=celltypist`, `model={model}`, `celltypist_majority_voting={celltypist_majority_voting}`."
+        )
+        decision.add_guidance(
+            "If CellTypist fails or the matrix still looks incompatible, the wrapper may fall back to `markers` and should report that honestly."
+        )
+        decision.add_guidance(
+            "After CellTypist annotation, compare the labels against clusters or marker evidence before trusting rare cell states."
+        )
         return decision
 
-    if method == "popv":
+    if method in {"popv", "knnpredict"}:
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. `{method}` can still label cells, but cluster-level summaries are easier if you later confirm one of: {_format_candidates(cluster_candidates)}."
+            )
         ref_path = Path(reference)
         if reference == "HPCA":
             decision.require_field(
                 "reference",
-                "`popv` expects `--reference` to be a labeled H5AD path; the default `HPCA` atlas keyword is not valid for this wrapper path.",
+                f"`{method}` expects `--reference` to be a labeled H5AD path; the default `HPCA` atlas keyword is not valid for this wrapper path.",
                 aliases=["reference", "ref"],
             )
         elif not ref_path.exists():
             decision.block(
-                f"`popv` reference file was not found at {reference}. Provide a labeled H5AD reference via `--reference`."
+                f"`{method}` reference file was not found at {reference}. Provide a labeled H5AD reference via `--reference`."
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `reference={reference}`."
+        )
+        if method == "popv":
+            decision.add_guidance(
+                "After PopV-style mapping, inspect cluster-to-label agreement and gene-overlap notes before trusting the projected labels."
+            )
+        else:
+            decision.add_guidance(
+                "`knnpredict` is the lightweight AnnData-first reference mapping path inspired by SCOP KNNPredict. It is useful when you already have a labeled H5AD reference and want a simpler projection step."
             )
         return decision
 
@@ -362,6 +558,28 @@ def preflight_sc_cell_annotation(
             "reference",
             f"Confirm the reference atlas via `--reference`; the current default `HPCA` should not be used blindly for `{method}`.",
             aliases=["reference", "ref"],
+        )
+    if method in {"singler", "scmap"}:
+        if not Path(reference).exists():
+            cache_dir = sc_annotation_utils.experimenthub_cache_dir()
+            decision.require_field(
+                "allow_online_reference_fetch",
+                f"`{method}` with atlas selector `{reference}` may need to download reference data through celldex / ExperimentHub. The local cache is expected under `{cache_dir}`. Confirm whether online fetch is acceptable, or provide a local labeled H5AD via `--reference` instead.",
+                value_type="boolean",
+                aliases=["allow_online_reference_fetch", "allow_download", "download_reference"],
+            )
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `reference={reference}`."
+        )
+        if cluster_key and cluster_key not in adata.obs.columns and cluster_candidates:
+            decision.add_guidance(
+                f"`--cluster-key {cluster_key}` was not found. The reference-based annotation can still run per cell, but cluster-level summaries are easier if you later reuse one of: {_format_candidates(cluster_candidates)}."
+            )
+        decision.add_guidance(
+            "After reference-based annotation, compare labels against clusters and known markers before moving to DE or communication analysis."
+        )
+        decision.add_guidance(
+            f"`{method}` currently uses celldex / ExperimentHub atlases in R. Even when the R packages are installed, this path can still fail in restricted-network or empty-cache environments."
         )
     return decision
 
@@ -373,15 +591,32 @@ def preflight_sc_cell_communication(
     cell_type_key: str,
     species: str,
     counts_data: str | None = None,
+    counts_data_explicit: bool = False,
+    cellphonedb_iterations: int | None = None,
+    cellphonedb_threshold: float | None = None,
+    cellphonedb_threads: int | None = None,
+    cellphonedb_pvalue: float | None = None,
+    cellchat_prob_type: str | None = None,
+    cellchat_min_cells: int | None = None,
     condition_key: str | None = None,
     condition_oi: str | None = None,
     condition_ref: str | None = None,
     receiver: str | None = None,
     senders: list[str] | None = None,
+    nichenet_top_ligands: int | None = None,
+    nichenet_expression_pct: float | None = None,
+    nichenet_lfc_cutoff: float | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
+    from pathlib import Path
+
+    from skills.singlecell._lib import dependency_manager as sc_dep_manager
+
     decision = PreflightDecision("sc-cell-communication")
     _add_standardization_guidance(decision, adata, source_path=source_path)
+    decision.add_guidance(
+        "`sc-cell-communication` usually comes after `sc-cell-annotation` or at least `sc-clustering`, because the grouping column defines the interacting cell groups."
+    )
 
     if cell_type_key not in adata.obs.columns:
         candidates = _obs_candidates(adata, "cell_type") + _obs_candidates(adata, "cluster")
@@ -396,11 +631,44 @@ def preflight_sc_cell_communication(
             decision.block(
                 "Cell-cell communication requires cell-type or cluster labels in `adata.obs`. Run annotation/clustering first or provide `--cell-type-key`."
             )
+        return decision
 
+    if method in {"builtin", "liana", "cellphonedb", "cellchat_r"} and not _normalized_expression_available(adata):
+        decision.block(
+            f"`{method}` expects normalized expression in `adata.X`. Run `sc-preprocessing` first, then reuse cluster/annotation labels for communication analysis."
+        )
+
+    if method == "liana" and not sc_dep_manager.is_available("liana"):
+        decision.block(
+            "`liana` is not installed. Install the communication stack with `pip install -e \".[singlecell-communication]\"`."
+        )
+
+    if method == "cellphonedb":
+        if not sc_dep_manager.is_available("cellphonedb"):
+            decision.block(
+                "`cellphonedb` is not installed. Install the communication stack with `pip install -e \".[singlecell-communication]\"`."
+            )
+        db_path = Path.home() / ".cache" / "omicsclaw" / "cellphonedb" / "v4.1.0" / "cellphonedb.zip"
+        if not db_path.exists():
+            decision.require_field(
+                "allow_online_db_fetch",
+                f"`cellphonedb` needs to download the official database to `{db_path}` on first use. Confirm whether online fetch is acceptable, or place the zip there manually before rerunning.",
+                value_type="boolean",
+                aliases=["allow_online_db_fetch", "allow_download", "download_cellphonedb_db"],
+            )
+        decision.add_guidance(
+            "Current first-pass CellPhoneDB settings: `cellphonedb_counts_data={}`, `cellphonedb_threshold={}`, `cellphonedb_iterations={}`, `cellphonedb_threads={}`, `cellphonedb_pvalue={}`.".format(
+                counts_data or "hgnc_symbol",
+                cellphonedb_threshold if cellphonedb_threshold is not None else 0.1,
+                cellphonedb_iterations if cellphonedb_iterations is not None else 1000,
+                cellphonedb_threads if cellphonedb_threads is not None else 4,
+                cellphonedb_pvalue if cellphonedb_pvalue is not None else 0.05,
+            )
+        )
     if method == "cellphonedb" and species != "human":
         decision.block("The current CellPhoneDB wrapper only supports `--species human`.")
 
-    if method == "cellphonedb" and (counts_data or "hgnc_symbol") == "hgnc_symbol":
+    if method == "cellphonedb" and (counts_data or "hgnc_symbol") == "hgnc_symbol" and not counts_data_explicit:
         decision.require_field(
             "cellphonedb_counts_data",
             "Confirm that your gene identifiers are HGNC symbols before using the default `--cellphonedb-counts-data hgnc_symbol`.",
@@ -408,14 +676,27 @@ def preflight_sc_cell_communication(
             aliases=["cellphonedb_counts_data", "counts_data"],
         )
 
-    if method == "cellchat_r" and not _normalized_expression_available(adata):
-        decision.require_confirmation(
-            "`cellchat_r` expects log-normalized expression; the current `adata.X` still looks count-like. Run `sc-preprocessing` first or confirm the matrix state."
-        )
+    if method == "cellchat_r":
+        if cellchat_prob_type:
+            decision.add_guidance(
+                f"Current CellChat settings: `cellchat_prob_type={cellchat_prob_type}`, `cellchat_min_cells={cellchat_min_cells or 10}`."
+            )
 
     if method == "nichenet_r":
         if species != "human":
             decision.block("The current NicheNet wrapper only supports `--species human`.")
+        cache_dir = Path.home() / ".cache" / "omicsclaw" / "nichenet"
+        required_files = [
+            cache_dir / "lr_network_human_21122021.rds",
+            cache_dir / "weighted_networks_nsga2r_final.rds",
+        ]
+        if any(not path.exists() for path in required_files):
+            decision.require_field(
+                "allow_online_reference_fetch",
+                f"`nichenet_r` needs to download prior-model resources into `{cache_dir}` on first use. Confirm whether online fetch is acceptable, or pre-populate those files manually.",
+                value_type="boolean",
+                aliases=["allow_online_reference_fetch", "allow_download", "download_nichenet_resources"],
+            )
         if condition_key not in adata.obs.columns:
             candidates = _obs_candidates(adata, "condition") + _obs_candidates(adata, "group")
             if candidates:
@@ -460,6 +741,23 @@ def preflight_sc_cell_communication(
                 decision.block(f"`--condition-oi {condition_oi}` was not found in `adata.obs['{condition_key}']`.")
             if condition_ref and condition_ref not in values:
                 decision.block(f"`--condition-ref {condition_ref}` was not found in `adata.obs['{condition_key}']`.")
+        decision.add_guidance(
+            "Current NicheNet settings: `receiver={}`, `senders={}`, `nichenet_top_ligands={}`, `nichenet_expression_pct={}`, `nichenet_lfc_cutoff={}`.".format(
+                receiver or "<receiver>",
+                ",".join(senders or []) or "<sender1,sender2>",
+                nichenet_top_ligands or 20,
+                nichenet_expression_pct if nichenet_expression_pct is not None else 0.1,
+                nichenet_lfc_cutoff if nichenet_lfc_cutoff is not None else 0.25,
+            )
+        )
+
+    if method in {"builtin", "liana", "cellphonedb", "cellchat_r"}:
+        decision.add_guidance(
+            "If your grouping column is still coarse clustering rather than final cell types, communication results are useful as a first pass but usually need marker/annotation validation."
+        )
+        decision.add_guidance(
+            "After communication analysis, common follow-up steps are `sc-markers`, `sc-de`, or `sc-enrichment` to explain sender/receiver biology."
+        )
 
     return decision
 
@@ -593,6 +891,9 @@ def preflight_sc_doublet_detection(
     method: str,
     expected_doublet_rate: float,
     threshold: float | None = None,
+    batch_key: str | None = None,
+    doubletdetection_n_iters: int | None = None,
+    scds_mode: str | None = None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-doublet-detection")
@@ -611,16 +912,79 @@ def preflight_sc_doublet_detection(
             aliases=["method"],
         )
 
+    if batch_key and batch_key not in adata.obs.columns:
+        batch_candidates = _obs_candidates(adata, "batch")
+        decision.require_field(
+            "batch_key",
+            f"`--batch-key {batch_key}` was not found. Available batch/sample-style columns include: {_format_candidates(batch_candidates)}.",
+            aliases=["batch_key", "batch", "sample_key"],
+            flag="--batch-key",
+            choices=batch_candidates,
+        )
+
+    if method == "doubletdetection":
+        if find_spec("doubletdetection") is None:
+            decision.block(
+                "`doubletdetection` requires the optional Python package `doubletdetection`, which is not installed in the current environment."
+            )
+        if doubletdetection_n_iters is not None and int(doubletdetection_n_iters) < 2:
+            decision.block("`--doubletdetection-n-iters` must be at least 2.")
+
     if "counts" not in adata.layers:
-        if _declared_x_is_count_like(adata):
+        if _aligned_raw_is_count_like(adata) or (raw_matrix_kind(adata) and matrix_kind_is_count_like(raw_matrix_kind(adata))):
+            decision.add_guidance(
+                "No explicit `layers['counts']` was found; doublet detection will use aligned `adata.raw` while preserving the current `adata.X` semantics."
+            )
+        elif _declared_x_is_count_like(adata):
             decision.add_guidance(
                 "No explicit `layers['counts']` was found; doublet detection will use count-like `adata.X`."
             )
         else:
             decision.block(
-                "Doublet detection requires raw count-like input in `layers['counts']` or count-like `adata.X`."
+                "Doublet detection requires raw count-like input in `layers['counts']`, aligned `adata.raw`, or count-like `adata.X`."
             )
 
+    batch_candidates = _obs_candidates(adata, "batch")
+    if method == "scrublet" and not batch_key and batch_candidates:
+        decision.add_guidance(
+            f"Potential capture/sample columns were detected: {_format_candidates(batch_candidates)}. For multi-capture droplet data, `scrublet` is often safer run per capture via `--batch-key`."
+        )
+
+    if any(col in adata.obs.columns for col in ("predicted_doublet", "doublet_score", "doublet_classification")):
+        decision.add_guidance(
+            "Existing doublet annotations were detected and will be overwritten by the selected method."
+        )
+
+    decision.add_guidance(
+        "Doublet detection is usually most helpful after QC review and before final clustering, annotation, or DE interpretation."
+    )
+
+    if method == "scrublet":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=scrublet`, `expected_doublet_rate={expected_doublet_rate}`, `threshold={threshold if threshold is not None else 'auto'}`."
+        )
+        if batch_key:
+            decision.add_guidance(f"`scrublet` will run per batch using `batch_key={batch_key}`.")
+    elif method == "doubletdetection":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=doubletdetection`, `doubletdetection_n_iters={doubletdetection_n_iters}`, `expected_doublet_rate` is recorded for context but does not control this backend's native classifier."
+        )
+    elif method == "scds":
+        decision.add_guidance(
+            f"Current first-pass settings: `method=scds`, `expected_doublet_rate={expected_doublet_rate}`, `scds_mode={scds_mode}`."
+        )
+    else:
+        decision.add_guidance(
+            f"Current first-pass settings: `method={method}`, `expected_doublet_rate={expected_doublet_rate}`."
+        )
+        if batch_key:
+            decision.add_guidance(
+                f"`batch_key={batch_key}` was provided, but the current `{method}` wrapper does not use it directly."
+            )
+
+    decision.add_guidance(
+        "This skill annotates doublets in `obs` but does not remove cells automatically. After review, keep singlets for downstream preprocessing/clustering if needed."
+    )
     return decision
 
 
@@ -961,33 +1325,94 @@ def preflight_sc_filter(
 def preflight_sc_markers(
     adata: AnnData,
     *,
-    groupby: str,
+    groupby: str | None,
+    method: str,
+    n_genes: int | None,
+    n_top: int,
+    min_in_group_fraction: float,
+    min_fold_change: float,
+    max_out_group_fraction: float,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-markers")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
-    if groupby not in adata.obs.columns:
-        candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type")
-        if candidates:
+    matrix_contract = get_matrix_contract(adata)
+    primary_cluster_key = matrix_contract.get("primary_cluster_key")
+    candidates = []
+    if primary_cluster_key and primary_cluster_key in adata.obs.columns:
+        candidates.append(str(primary_cluster_key))
+    for key in _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type"):
+        if key not in candidates:
+            candidates.append(key)
+
+    if groupby:
+        if groupby not in adata.obs.columns:
             decision.require_field(
                 "groupby",
                 f"`--groupby {groupby}` was not found. Confirm which grouping column to use: {_format_candidates(candidates)}.",
                 aliases=["groupby", "cluster_key"],
+            )
+        elif adata.obs[groupby].astype(str).nunique(dropna=False) < 2:
+            decision.block(
+                f"`--groupby {groupby}` has fewer than two groups, so marker ranking would not be meaningful."
+            )
+    else:
+        if len(candidates) > 1:
+            decision.require_field(
+                "groupby",
+                f"`sc-markers` needs a grouping column. Multiple candidates are available: {_format_candidates(candidates)}. Confirm which one should drive marker ranking.",
+                aliases=["groupby", "cluster_key"],
+                choices=candidates,
+            )
+        elif len(candidates) == 1:
+            if adata.obs[candidates[0]].astype(str).nunique(dropna=False) < 2:
+                decision.block(
+                    f"`{candidates[0]}` has fewer than two groups, so marker ranking would not be meaningful."
+                )
+            decision.add_guidance(
+                f"`sc-markers` will use `{candidates[0]}` as the grouping column."
             )
         else:
             decision.block(
                 "Marker detection requires an existing grouping column in `adata.obs` such as `leiden` or `cell_type`."
             )
 
-    if _declared_raw_is_normalized(adata):
+    if _declared_x_is_normalized(adata):
+        pass
+    elif not matrix_looks_count_like(adata.X):
         decision.add_guidance(
-            "`sc-markers` will prefer `adata.raw` over `adata.X` when available. Make sure that is the expression state you want for marker ranking."
+            "This object does not declare a matrix contract yet, but `adata.X` does not look raw count-like, so marker ranking will treat it as normalized expression."
         )
-    elif not _declared_x_is_normalized(adata):
+    else:
         decision.require_confirmation(
             "Marker detection expects normalized expression, but this object currently looks count-like. Run `sc-preprocessing` first or confirm that you want to continue anyway."
         )
+
+    if n_top <= 0:
+        decision.block("`--n-top` must be greater than 0.")
+    if n_genes is not None and n_genes <= 0:
+        decision.block("`--n-genes` must be greater than 0 when provided.")
+    if min_in_group_fraction < 0 or min_in_group_fraction > 1:
+        decision.block("`--min-in-group-fraction` must be between 0 and 1.")
+    if max_out_group_fraction < 0 or max_out_group_fraction > 1:
+        decision.block("`--max-out-group-fraction` must be between 0 and 1.")
+
+    decision.add_guidance(
+        "`sc-markers` is usually the step after clustering and before final annotation. It ranks cluster-discriminative genes, not replicate-aware condition DE."
+    )
+    decision.add_guidance(
+        f"Current first-pass settings: `method={method}`, `n_genes={n_genes if n_genes is not None else 'all'}`, `n_top={n_top}`, `min_in_group_fraction={min_in_group_fraction}`, `min_fold_change={min_fold_change}`, `max_out_group_fraction={max_out_group_fraction}`."
+    )
+    if method == "wilcoxon":
+        decision.add_guidance("`wilcoxon` is the safest first-pass default for cluster marker ranking.")
+    elif method == "t-test":
+        decision.add_guidance("`t-test` is a more parametric alternative and is more sensitive to distributional assumptions.")
+    elif method == "logreg":
+        decision.add_guidance("`logreg` provides classification-style ranking and may emphasize discriminative genes rather than large fold changes.")
+    decision.add_guidance(
+        "After marker review, the usual next step is `sc-cell-annotation`; if the question is treated-vs-control rather than cluster identity, use `sc-de`."
+    )
 
     return decision
 
@@ -1034,18 +1459,54 @@ def preflight_sc_grn(
     return decision
 
 
-def preflight_sc_enrichment(
+def preflight_sc_pathway_scoring(
     adata: AnnData,
     *,
+    method: str,
     gene_sets_path: str | None,
+    gene_set_db: str | None = None,
     groupby: str | None,
     source_path: str | None = None,
 ) -> PreflightDecision:
-    decision = PreflightDecision("sc-enrichment")
+    decision = PreflightDecision("sc-pathway-scoring")
     _add_standardization_guidance(decision, adata, source_path=source_path)
 
-    if not gene_sets_path:
-        decision.block("`sc-enrichment` requires `--gene-sets` unless `--demo` is used.")
+    if not gene_sets_path and not gene_set_db:
+        decision.block(
+            "`sc-pathway-scoring` requires either `--gene-sets <local.gmt>` or `--gene-set-db <hallmark|kegg|go_bp|...>` unless `--demo` is used."
+        )
+
+    if gene_set_db and find_spec("gseapy") is None:
+        decision.block(
+            "`--gene-set-db` needs the optional Python package `gseapy`, which is not installed in the current environment. Install it before using built-in pathway libraries."
+        )
+    elif gene_set_db:
+        decision.add_guidance(
+            f"`--gene-set-db {gene_set_db}` will try to resolve a built-in gene-set library automatically. The first run may need network access to download or refresh the library cache."
+        )
+
+    if method == "score_genes_py":
+        if not _normalized_expression_available(adata):
+            decision.block(
+                "`score_genes_py` requires normalized expression in `adata.X`. Run `sc-preprocessing` first."
+            )
+        else:
+            decision.add_guidance(
+                "`score_genes_py` is a lightweight module-scoring path for normalized expression and works best after `sc-preprocessing`."
+            )
+    else:
+        if _normalized_expression_available(adata):
+            decision.add_guidance(
+                "`aucell_r` will score pathway activity from the normalized expression already present in `adata.X`."
+            )
+        elif _count_like_matrix_available(adata):
+            decision.add_guidance(
+                "`aucell_r` can still score pathway activity from a count-like matrix by ranking genes within each cell, but grouped summaries are usually most interpretable after preprocessing or clustering."
+            )
+        else:
+            decision.block(
+                "`aucell_r` needs either normalized expression in `adata.X` or a usable count-like source."
+            )
 
     if groupby and groupby not in adata.obs.columns:
         candidates = _obs_candidates(adata, "cluster") + _obs_candidates(adata, "cell_type")
@@ -1060,6 +1521,178 @@ def preflight_sc_enrichment(
             decision.add_guidance(
                 f"`--groupby {groupby}` was not found, so this run would score gene sets per cell without grouped summaries."
             )
+    elif not groupby:
+        candidates = []
+        for family in ("cell_type", "cluster"):
+            for column in _obs_candidates(adata, family):
+                if column not in candidates:
+                    candidates.append(column)
+        if candidates:
+            decision.add_guidance(
+                f"No `--groupby` was provided. This run can still score each cell, and grouped summaries can use one of: {_format_candidates(candidates)}."
+            )
+        else:
+            decision.add_guidance(
+                "No label column was provided, so this run will focus on per-cell pathway scores rather than grouped summaries."
+            )
+
+    decision.add_guidance(
+        "This skill usually comes after `sc-preprocessing`, and often after `sc-clustering` or `sc-cell-annotation` when you want pathway summaries by cluster or cell type."
+    )
+
+    return decision
+
+
+def preflight_sc_enrichment(
+    adata: AnnData,
+    *,
+    method: str,
+    engine: str,
+    groupby: str | None,
+    gene_sets_path: str | None,
+    gene_set_db: str | None = None,
+    gene_set_from_markers: str | None = None,
+    marker_group: str | None = None,
+    marker_top_n: str | None = None,
+    source_mode: str | None = None,
+    source_path: str | None = None,
+    ranking_method: str | None = None,
+    demo: bool = False,
+) -> PreflightDecision:
+    decision = PreflightDecision("sc-enrichment")
+    _add_standardization_guidance(decision, adata, source_path=source_path)
+
+    if not demo and not gene_sets_path and not gene_set_db and not gene_set_from_markers:
+        decision.block(
+            "`sc-enrichment` needs a gene-set source. Provide one of: `--gene-sets <local.gmt/json>`, `--gene-set-db <hallmark|kegg|go_bp|...>`, or `--gene-set-from-markers <sc-markers-output>` unless `--demo` is used."
+        )
+
+    if gene_set_db and find_spec("gseapy") is None:
+        decision.block(
+            "`--gene-set-db` needs the optional Python package `gseapy`, which is not installed in the current environment."
+        )
+    elif gene_set_db:
+        decision.add_guidance(
+            f"`--gene-set-db {gene_set_db}` will try to resolve a built-in gene-set library automatically. The first run may need network access to populate the local cache."
+        )
+
+    if gene_set_from_markers:
+        decision.add_guidance(
+            "`--gene-set-from-markers` will convert marker genes into one or more custom gene sets for enrichment."
+        )
+        if marker_group:
+            decision.add_guidance(
+                f"Only marker group(s) `{marker_group}` will be turned into gene sets."
+            )
+        else:
+            decision.add_guidance(
+                "No `--marker-group` was provided, so each marker group in the source table will become its own gene set."
+            )
+        if marker_top_n:
+            decision.add_guidance(
+                f"Marker-derived gene sets will keep `marker_top_n={marker_top_n}` per group."
+            )
+
+    decision.add_guidance(
+        "`sc-enrichment` does statistical term enrichment on marker or DE rankings. If you want per-cell pathway activity scores instead, use `sc-pathway-scoring`."
+    )
+
+    r_missing: list[str] = []
+    if engine in {"auto", "r"}:
+        try:
+            from omicsclaw.core.r_dependency_manager import check_r_tier
+
+            _, r_missing = check_r_tier("singlecell-enrichment")
+        except Exception:
+            r_missing = ["clusterProfiler", "enrichplot"]
+
+    if engine == "r":
+        if r_missing:
+            decision.block(
+                "R enrichment engine needs the singlecell enrichment R stack. "
+                f"Missing packages: {', '.join(r_missing)}."
+            )
+        decision.add_guidance(
+            "`--engine r` will use the clusterProfiler / enrichplot stack and can emit richer statistical enrichment figures such as enrichmap and ridgeplot."
+        )
+    elif engine == "auto":
+        if r_missing:
+            decision.add_guidance(
+                "The R clusterProfiler stack is not fully available, so `engine=auto` would fall back to the Python implementation. "
+                f"Missing R packages: {', '.join(r_missing)}."
+            )
+        else:
+            decision.add_guidance(
+                "The R clusterProfiler stack is available, so `engine=auto` will prefer the richer clusterProfiler / enrichplot implementation."
+            )
+        decision.add_guidance(
+            "`--engine auto` will prefer the R clusterProfiler path when its packages are installed, and otherwise fall back to the Python implementation."
+        )
+    else:
+        decision.add_guidance(
+            "`--engine python` keeps the run fully in Python and does not require the R clusterProfiler stack."
+        )
+
+    if source_mode in {"markers_table", "de_table"}:
+        decision.add_guidance(
+            f"This run will reuse an exported ranking table from `{source_mode}` instead of recomputing markers."
+        )
+    else:
+        if not _normalized_expression_available(adata):
+            decision.block(
+                "`sc-enrichment` auto-ranking expects normalized expression in `adata.X`. Run `sc-preprocessing` first, or provide an output directory from `sc-markers` / `sc-de`."
+            )
+
+        cluster_candidates = []
+        for family in ("cluster", "cell_type"):
+            for column in _obs_candidates(adata, family):
+                if column not in cluster_candidates:
+                    cluster_candidates.append(column)
+
+        if groupby:
+            if groupby not in adata.obs.columns:
+                if cluster_candidates:
+                    decision.require_field(
+                        "groupby",
+                        f"`--groupby {groupby}` was not found. Confirm which cluster/label column should drive automatic ranking: {_format_candidates(cluster_candidates)}.",
+                        aliases=["groupby", "cluster_key"],
+                        flag="--groupby",
+                        choices=cluster_candidates,
+                    )
+                else:
+                    decision.block(
+                        "Automatic enrichment from h5ad needs a cluster/cell-type column in `adata.obs`. Run `sc-clustering` first or provide an output directory from `sc-markers` / `sc-de`."
+                    )
+        elif cluster_candidates:
+            decision.add_guidance(
+                f"No `--groupby` was provided, so automatic ranking will use `{cluster_candidates[0]}`. Other plausible columns: {_format_candidates(cluster_candidates)}."
+            )
+        else:
+            decision.block(
+                "Automatic enrichment from h5ad needs a cluster/cell-type column in `adata.obs`. Run `sc-clustering` first or provide an output directory from `sc-markers` / `sc-de`."
+            )
+
+        if source_mode == "auto_cluster_ranking":
+            decision.add_guidance(
+                f"This run will first compute cluster-vs-rest rankings with `ranking_method={ranking_method or 'wilcoxon'}` and then run `{method}` on those rankings."
+            )
+
+    if method == "ora":
+        decision.add_guidance(
+            "ORA is the right first choice when you already have a thresholded marker or DEG list and want the most enriched terms quickly."
+        )
+    else:
+        decision.add_guidance(
+            "GSEA keeps the full ranked gene list, so it is better when subtle coordinated shifts matter more than hard DEG thresholds."
+        )
+        if source_mode == "markers_table":
+            decision.add_guidance(
+                "A plain marker table is usually thresholded, so this wrapper may rebuild a fuller ranking from `processed.h5ad` for GSEA."
+            )
+
+    decision.add_guidance(
+        "Typical workflow: `sc-clustering` or `sc-de` -> `sc-enrichment` -> interpret terms; use `sc-pathway-scoring` only when you want per-cell signature activity."
+    )
 
     return decision
 

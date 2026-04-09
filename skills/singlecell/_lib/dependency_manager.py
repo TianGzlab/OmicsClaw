@@ -21,25 +21,29 @@ class DependencyInfo:
 
 DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
     # Deep learning
-    "scvi-tools": DependencyInfo("scvi", "pip install scvi-tools", "scVI variational inference"),
-    "torch": DependencyInfo("torch", "pip install torch", "PyTorch"),
+    "scvi-tools": DependencyInfo("scvi", 'pip install -e ".[singlecell-batch]"', "scVI variational inference"),
+    "torch": DependencyInfo("torch", 'pip install -e ".[singlecell-batch]"', "PyTorch"),
     "cellbender": DependencyInfo("cellbender", "pip install cellbender", "CellBender ambient RNA removal"),
 
     # Integration
-    "harmonypy": DependencyInfo("harmonypy", "pip install harmonypy", "Harmony batch correction"),
-    "bbknn": DependencyInfo("bbknn", "pip install bbknn", "BBKNN batch correction"),
-    "scanorama": DependencyInfo("scanorama", "pip install scanorama", "Scanorama integration"),
-    "louvain": DependencyInfo("louvain", "pip install louvain", "Louvain graph clustering"),
-    "phate": DependencyInfo("phate", "pip install phate", "PHATE nonlinear embedding"),
+    "harmonypy": DependencyInfo("harmonypy", 'pip install -e ".[singlecell-batch]"', "Harmony batch correction"),
+    "bbknn": DependencyInfo("bbknn", 'pip install -e ".[singlecell-batch]"', "BBKNN batch correction"),
+    "scanorama": DependencyInfo("scanorama", 'pip install -e ".[singlecell-batch]"', "Scanorama integration"),
+    "louvain": DependencyInfo("louvain", 'pip install -e ".[singlecell-clustering]"', "Louvain graph clustering"),
+    "phate": DependencyInfo("phate", 'pip install -e ".[singlecell-clustering]"', "PHATE nonlinear embedding"),
+    "igraph": DependencyInfo("igraph", 'pip install -e ".[singlecell-clustering]"', "igraph graph backend"),
+    "leidenalg": DependencyInfo("leidenalg", 'pip install -e ".[singlecell-clustering]"', "Leiden clustering backend"),
 
     # Annotation
-    "celltypist": DependencyInfo("celltypist", "pip install celltypist", "CellTypist annotation"),
+    "celltypist": DependencyInfo("celltypist", 'pip install -e ".[singlecell-annotation]"', "CellTypist annotation"),
 
     # Doublet detection
-    "scrublet": DependencyInfo("scrublet", "pip install scrublet", "Scrublet doublet detection"),
+    "scrublet": DependencyInfo("scrublet", 'pip install -e ".[singlecell-doublet]"', "Scrublet doublet detection"),
+    "doubletdetection": DependencyInfo("doubletdetection", 'pip install -e ".[singlecell-doublet]"', "DoubletDetection consensus doublet calling"),
 
     # Communication
-    "liana": DependencyInfo("liana", "pip install liana", "LIANA+ L-R analysis"),
+    "liana": DependencyInfo("liana", 'pip install -e ".[singlecell-communication]"', "LIANA+ ligand-receptor analysis"),
+    "cellphonedb": DependencyInfo("cellphonedb", 'pip install -e ".[singlecell-communication]"', "CellPhoneDB statistical communication analysis"),
     "seaborn": DependencyInfo("seaborn", "pip install seaborn", "Statistical plotting"),
 
     # GRN
@@ -56,6 +60,7 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
 
     # DE
     "pydeseq2": DependencyInfo("pydeseq2", "pip install pydeseq2", "DESeq2 in Python"),
+    "gseapy": DependencyInfo("gseapy", 'pip install -e ".[singlecell-enrichment]"', "Single-cell statistical enrichment and pathway-library resolution"),
 }
 
 

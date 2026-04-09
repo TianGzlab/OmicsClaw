@@ -9,6 +9,16 @@ h5ad_file  <- args[1]
 output_dir <- args[2]
 reference  <- if (length(args) >= 3) args[3] else "HPCA"
 
+infer_label_key <- function(sce) {
+    candidates <- c("cell_type", "celltype", "label", "annotation", "cell_type_label")
+    for (candidate in candidates) {
+        if (candidate %in% colnames(colData(sce))) {
+            return(candidate)
+        }
+    }
+    stop("Reference H5AD must contain a label column such as cell_type or annotation")
+}
+
 suppressPackageStartupMessages({
     library(scmap)
     library(celldex)
@@ -18,29 +28,44 @@ suppressPackageStartupMessages({
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-cache_dir <- file.path(path.expand("~"), ".cache", "omicsclaw", "experimenthub")
+cache_dir <- Sys.getenv("OMICSCLAW_EXPERIMENTHUB_CACHE", unset = file.path(tempdir(), "omicsclaw", "experimenthub"))
 dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 Sys.setenv(EXPERIMENT_HUB_CACHE = cache_dir)
 options(timeout = max(600, getOption("timeout")))
 
 tryCatch({
-    sce <- readH5AD(h5ad_file)
+    sce <- readH5AD(h5ad_file, reader = "R")
+    if (!"counts" %in% SummarizedExperiment::assayNames(sce) && "X" %in% SummarizedExperiment::assayNames(sce)) {
+        SummarizedExperiment::assay(sce, "counts") <- SummarizedExperiment::assay(sce, "X")
+    }
     if (!"logcounts" %in% SummarizedExperiment::assayNames(sce)) {
         SummarizedExperiment::assay(sce, "logcounts") <- SummarizedExperiment::assay(sce, "X")
     }
     rowData(sce)$feature_symbol <- rownames(sce)
 
-    ref_data <- switch(reference,
-        HPCA = celldex::HumanPrimaryCellAtlasData(),
-        Blueprint_Encode = celldex::BlueprintEncodeData(),
-        Monaco = celldex::MonacoImmuneData(),
-        Mouse = celldex::MouseRNAseqData(),
-        stop(sprintf("Unsupported scmap reference: %s", reference))
-    )
-    ref_data <- as(ref_data, "SingleCellExperiment")
+    if (file.exists(reference)) {
+        ref_data <- readH5AD(reference, reader = "R")
+        label_key <- infer_label_key(ref_data)
+        if (!"counts" %in% SummarizedExperiment::assayNames(ref_data) && "X" %in% SummarizedExperiment::assayNames(ref_data)) {
+            SummarizedExperiment::assay(ref_data, "counts") <- SummarizedExperiment::assay(ref_data, "X")
+        }
+        if (!"logcounts" %in% SummarizedExperiment::assayNames(ref_data) && "X" %in% SummarizedExperiment::assayNames(ref_data)) {
+            SummarizedExperiment::assay(ref_data, "logcounts") <- SummarizedExperiment::assay(ref_data, "X")
+        }
+    } else {
+        ref_data <- switch(reference,
+            HPCA = celldex::HumanPrimaryCellAtlasData(),
+            Blueprint_Encode = celldex::BlueprintEncodeData(),
+            Monaco = celldex::MonacoImmuneData(),
+            Mouse = celldex::MouseRNAseqData(),
+            stop(sprintf("Unsupported scmap reference: %s", reference))
+        )
+        ref_data <- as(ref_data, "SingleCellExperiment")
+        label_key <- "label.main"
+    }
     rowData(ref_data)$feature_symbol <- rownames(ref_data)
     ref_data <- scmap::selectFeatures(ref_data, suppress_plot = TRUE)
-    ref_data <- scmap::indexCluster(ref_data, cluster_col = "label.main")
+    ref_data <- scmap::indexCluster(ref_data, cluster_col = label_key)
 
     res <- scmap::scmapCluster(
         projection = sce,

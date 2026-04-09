@@ -142,6 +142,8 @@ List all available skills with status (ready/planned) and descriptions.
 | integration, batch correction, harmony | sc-batch-integration | Batch correction |
 | differential expression, pseudobulk | sc-de | Differential expression |
 | marker genes, find markers | sc-markers | Marker gene detection |
+| cluster enrichment, marker enrichment, single-cell gsea | sc-enrichment | Statistical enrichment on marker / DE rankings |
+| pathway scoring, signature score | sc-pathway-scoring | Per-cell pathway / signature activity scoring |
 | gene regulatory network, grn, pyscenic | sc-grn | Gene regulatory network |
 
 ### Genomics Keywords → Skills

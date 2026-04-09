@@ -29,6 +29,9 @@ def test_demo_mode(tmp_output):
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
+    assert (tmp_output / "processed.h5ad").exists()
+    assert (tmp_output / "tables" / "doublet_calls.csv").exists()
+    assert (tmp_output / "figure_data" / "manifest.json").exists()
 
 
 def test_demo_report_content(tmp_output):
@@ -57,3 +60,4 @@ def test_demo_result_json(tmp_output):
     data = json.loads((tmp_output / "result.json").read_text())
     assert data["skill"] == "sc-doublet-detection"
     assert "summary" in data
+    assert "visualization" in data["data"]

@@ -35,7 +35,7 @@ def find_all_cluster_markers(
     use_raw: bool | None = None,
     layer: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Find marker genes for all clusters (one-vs-rest).
+    """Find marker genes for all groups (one-vs-rest).
 
     Runs :func:`scanpy.tl.rank_genes_groups` followed by
     :func:`scanpy.tl.filter_rank_genes_groups` to produce a filtered
@@ -44,7 +44,7 @@ def find_all_cluster_markers(
     Parameters
     ----------
     adata
-        AnnData with log-normalized data in ``adata.raw`` or ``adata.X``.
+        AnnData with normalized expression in ``adata.X``.
     cluster_key
         Column in ``adata.obs`` containing cluster labels.
     method
@@ -59,7 +59,8 @@ def find_all_cluster_markers(
     max_out_group_fraction
         Maximum fraction of cells outside the group expressing the gene.
     use_raw
-        Use ``adata.raw`` for the test.
+        Use ``adata.raw`` for the test. OmicsClaw marker workflows now prefer
+        normalized ``adata.X`` by default.
     layer
         Layer to use instead of ``X``.
 
@@ -86,7 +87,7 @@ def find_all_cluster_markers(
 
     # --- Run rank_genes_groups ---
     if use_raw is None:
-        use_raw = adata.raw is not None and adata.raw.shape == adata.shape
+        use_raw = False
 
     kwargs: dict = dict(
         groupby=cluster_key,
@@ -120,6 +121,9 @@ def find_all_cluster_markers(
             markers_df = sc.get.rank_genes_groups_df(adata, group=None, key=result_key)
             # Drop rows where gene name is NaN (filtered out)
             markers_df = markers_df.dropna(subset=["names"])
+            if markers_df.empty:
+                logger.warning("Filtered marker table is empty; falling back to unfiltered rank_genes_groups output.")
+                markers_df = sc.get.rank_genes_groups_df(adata, group=None)
         else:
             markers_df = sc.get.rank_genes_groups_df(adata, group=None)
     except Exception as exc:
@@ -133,7 +137,7 @@ def find_all_cluster_markers(
             logger.info("  Percentage-of-cells data available")
 
     n_total = len(markers_df)
-    n_per_cluster = markers_df.groupby("group").size()
+    n_per_cluster = markers_df.groupby("group", observed=False).size()
     logger.info(
         "  Total markers: %d (per cluster: min=%d, max=%d, median=%d)",
         n_total,

@@ -11,7 +11,7 @@ from skills.singlecell._lib.preflight import (
     preflight_sc_cell_communication,
     preflight_sc_de,
     preflight_sc_doublet_detection,
-    preflight_sc_enrichment,
+    preflight_sc_pathway_scoring,
     preflight_sc_filter,
     preflight_sc_grn,
     preflight_sc_markers,
@@ -116,7 +116,7 @@ def test_preflight_sc_cell_annotation_blocks_qc_style_count_contract_for_scmap()
     assert any("expects log-normalized expression" in line for line in decision.missing_requirements)
 
 
-def test_preflight_sc_cell_annotation_markers_can_auto_cluster_with_guidance():
+def test_preflight_sc_cell_annotation_markers_now_requires_existing_cluster_key():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
 
     decision = preflight_sc_cell_annotation(
@@ -127,8 +127,26 @@ def test_preflight_sc_cell_annotation_markers_can_auto_cluster_with_guidance():
         cluster_key="leiden",
     )
 
-    assert decision.status == "proceed_with_guidance"
+    assert decision.status == "blocked"
+    assert any("Run `sc-clustering` first" in line or "existing cluster/label column" in line for line in decision.missing_requirements)
     assert any("auto-cluster" in line for line in decision.guidance)
+
+
+def test_preflight_sc_cell_annotation_manual_requires_mapping():
+    adata = _adata(x=np.array([[0.1, 0.2], [0.4, 0.5]], dtype=float), obs={"louvain": ["0", "1"]})
+
+    decision = preflight_sc_cell_annotation(
+        adata,
+        method="manual",
+        model="Immune_All_Low",
+        reference="HPCA",
+        cluster_key="louvain",
+        manual_map=None,
+        manual_map_file=None,
+    )
+
+    assert decision.status == "needs_user_input"
+    assert any("--manual-map" in line or "Manual annotation needs either" in line for line in decision.confirmations)
 
 
 def test_preflight_sc_cell_communication_needs_label_confirmation():
@@ -344,6 +362,12 @@ def test_preflight_sc_markers_requires_groupby_confirmation():
     decision = preflight_sc_markers(
         adata,
         groupby="leiden",
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
     )
 
     assert decision.status == "needs_user_input"
@@ -365,10 +389,45 @@ def test_preflight_sc_markers_requires_confirmation_on_qc_style_count_contract()
     decision = preflight_sc_markers(
         adata,
         groupby="leiden",
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
     )
 
     assert decision.status == "needs_user_input"
     assert any("expects normalized expression" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_markers_can_auto_use_single_primary_cluster_key():
+    adata = _adata(
+        x=np.array([[0.1, 0.2], [0.4, 0.5]], dtype=float),
+        obs={"louvain": ["0", "1"]},
+    )
+    record_matrix_contract(
+        adata,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-clustering",
+        primary_cluster_key="louvain",
+    )
+
+    decision = preflight_sc_markers(
+        adata,
+        groupby=None,
+        method="wilcoxon",
+        n_genes=None,
+        n_top=10,
+        min_in_group_fraction=0.25,
+        min_fold_change=0.25,
+        max_out_group_fraction=0.5,
+    )
+
+    assert decision.status == "proceed_with_guidance"
+    assert any("will use `louvain`" in line for line in decision.guidance)
 
 
 def test_preflight_sc_grn_requires_full_db_bundle_confirmation():
@@ -436,27 +495,45 @@ def test_preflight_sc_pseudotime_requires_cluster_key_confirmation():
     assert any("--cluster-key" in line for line in decision.confirmations)
 
 
-def test_preflight_sc_enrichment_blocks_without_gene_sets():
+def test_preflight_sc_pathway_scoring_blocks_without_gene_sets():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
 
-    decision = preflight_sc_enrichment(
+    decision = preflight_sc_pathway_scoring(
         adata,
+        method="aucell_r",
         gene_sets_path=None,
         groupby="leiden",
     )
 
     assert decision.status == "blocked"
-    assert any("requires `--gene-sets`" in line for line in decision.missing_requirements)
+    assert any("requires either `--gene-sets" in line for line in decision.missing_requirements)
 
 
-def test_preflight_sc_enrichment_guides_when_groupby_missing():
+def test_preflight_sc_pathway_scoring_guides_when_groupby_missing():
     adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float), obs={"cell_type": ["T", "B"]})
+    adata.uns["omicsclaw_matrix_contract"] = {"X": "raw_counts", "raw": None, "layers": {}}
 
-    decision = preflight_sc_enrichment(
+    decision = preflight_sc_pathway_scoring(
         adata,
+        method="aucell_r",
         gene_sets_path="sets.gmt",
         groupby="leiden",
     )
 
     assert decision.status == "needs_user_input"
     assert any("grouped AUCell summaries would be skipped" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_pathway_scoring_blocks_score_genes_without_normalized_expression():
+    adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float), obs={"cell_type": ["T", "B"]})
+    adata.uns["omicsclaw_matrix_contract"] = {"X": "raw_counts", "raw": None, "layers": {}}
+
+    decision = preflight_sc_pathway_scoring(
+        adata,
+        method="score_genes_py",
+        gene_sets_path="sets.gmt",
+        groupby=None,
+    )
+
+    assert decision.status == "blocked"
+    assert any("requires normalized expression" in line for line in decision.missing_requirements)
