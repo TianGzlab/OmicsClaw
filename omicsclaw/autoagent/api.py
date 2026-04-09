@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from omicsclaw.autoagent.errors import OptimizationCancelled
 from omicsclaw.autoagent.search_space import build_method_surface
@@ -33,7 +33,31 @@ _sessions: dict[str, "OptimizeSessionRuntime"] = {}
 
 # Completed sessions are kept for this many seconds so /status and
 # /results can still query them, then reaped to prevent memory leak.
-from omicsclaw.autoagent.constants import SESSION_TTL_SECONDS as _SESSION_TTL_SECONDS
+from collections import deque
+
+from omicsclaw.autoagent.constants import (
+    API_RATE_LIMIT_PER_MINUTE,
+    SESSION_TTL_SECONDS as _SESSION_TTL_SECONDS,
+)
+
+# Simple sliding-window rate limiter for /start endpoint.
+_start_timestamps: deque[float] = deque()
+_rate_lock = threading.Lock()
+
+
+def _check_rate_limit() -> None:
+    """Raise HTTP 429 if /start request rate exceeds the limit."""
+    now = time.monotonic()
+    cutoff = now - 60.0
+    with _rate_lock:
+        while _start_timestamps and _start_timestamps[0] < cutoff:
+            _start_timestamps.popleft()
+        if len(_start_timestamps) >= API_RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(
+                429,
+                detail=f"Rate limit exceeded: max {API_RATE_LIMIT_PER_MINUTE} optimization starts per minute.",
+            )
+        _start_timestamps.append(now)
 
 
 @dataclass
@@ -78,6 +102,11 @@ class OptimizeSessionRuntime:
 
     def mark_done(self, result: dict[str, Any]) -> None:
         with self._lock:
+            if not isinstance(result, dict) or "success" not in result:
+                logger.warning(
+                    "mark_done received malformed result (missing 'success' key), wrapping"
+                )
+                result = {"success": False, "error": "Malformed result", "raw": result}
             self.result = result
             self.status = "done"
             self.finished_at = time.monotonic()
@@ -177,7 +206,7 @@ def _run_optimization_session(runtime: OptimizeSessionRuntime, req: "OptimizeReq
             llm_provider=req.provider_id or req.provider,
             llm_model=req.llm_model,
             llm_provider_config=(
-                req.provider_config.model_dump()
+                req.provider_config.to_llm_config()
                 if req.provider_config is not None
                 else None
             ),
@@ -206,9 +235,18 @@ def _run_optimization_session(runtime: OptimizeSessionRuntime, req: "OptimizeReq
 
 class ProviderConfig(BaseModel):
     provider: str = ""
-    api_key: str = ""
+    api_key: SecretStr = SecretStr("")
     base_url: str = ""
     model: str = ""
+
+    def to_llm_config(self) -> dict[str, str]:
+        """Export as plain dict with the api_key revealed (for internal use)."""
+        return {
+            "provider": self.provider,
+            "api_key": self.api_key.get_secret_value(),
+            "base_url": self.base_url,
+            "model": self.model,
+        }
 
 
 class OptimizeRequest(BaseModel):
@@ -312,6 +350,7 @@ async def optimize_start(req: OptimizeRequest):
     Returns an SSE stream with events:
     - trial_start, trial_complete, trial_judgment, reasoning, progress, done, error
     """
+    _check_rate_limit()
     _reap_finished_sessions()
     session_id = _resolve_session_id(req.session_id)
     if session_id in _sessions:

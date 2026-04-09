@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from omicsclaw.autoagent.directive import build_directive
-from omicsclaw.autoagent.errors import OptimizationCancelled
+from omicsclaw.autoagent.errors import MetricConfigError, OptimizationCancelled
 from omicsclaw.autoagent.evaluator import EvaluationResult, Evaluator
 from omicsclaw.autoagent.experiment_ledger import ExperimentLedger, TrialRecord
 from omicsclaw.autoagent.judge import JudgmentResult, judge
@@ -289,6 +289,32 @@ class OptimizationLoop:
                     on_event=on_event,
                 )
 
+            # Deduplicate: skip if these exact params were already tried.
+            prior = self.ledger.all_trials()
+            if any(t.params == params for t in prior):
+                consecutive_duplicates = getattr(self, "_consecutive_duplicates", 0) + 1
+                self._consecutive_duplicates = consecutive_duplicates
+                logger.info(
+                    "Trial %d skipped: duplicate params (already tried). "
+                    "Consecutive duplicates: %d",
+                    trial_id, consecutive_duplicates,
+                )
+                dup_record = TrialRecord(
+                    trial_id=trial_id,
+                    params=params,
+                    composite_score=float("-inf"),
+                    status="discard",
+                    reasoning="Duplicate params — already tried.",
+                    output_dir="",
+                )
+                self.ledger.append(dup_record)
+                emit("trial_complete", self._build_trial_complete_payload(dup_record))
+                if consecutive_duplicates >= CONSECUTIVE_CRASH_LIMIT:
+                    converged = True
+                    break
+                continue
+            self._consecutive_duplicates = 0
+
             reasoning = suggestion.get("reasoning", "")
             emit("reasoning", {"trial_id": trial_id, "reasoning": reasoning})
 
@@ -305,7 +331,11 @@ class OptimizationLoop:
             trial_crashed = trial.status == "crash"
 
             # Judge keep/discard
-            judgment = judge(trial, best, self.ledger, baseline_params=baseline_params)
+            judgment = judge(
+                trial, best, self.ledger,
+                baseline_params=baseline_params,
+                metrics=self.evaluator.metrics,
+            )
             if not trial_crashed:
                 trial.status = judgment.decision
 
@@ -425,7 +455,32 @@ class OptimizationLoop:
             )
 
         self._raise_if_cancelled()
-        eval_result = self.evaluator.evaluate(Path(execution.output_dir), params=params)
+        try:
+            eval_result = self.evaluator.evaluate(Path(execution.output_dir), params=params)
+        except MetricConfigError as exc:
+            logger.error("Metric config error for trial %d: %s", trial_id, exc)
+            return TrialRecord(
+                trial_id=trial_id,
+                params=params,
+                composite_score=float("-inf"),
+                status="crash",
+                reasoning=description,
+                output_dir=execution.output_dir,
+                duration_seconds=execution.duration_seconds,
+                error_output=f"MetricConfigError: {exc}",
+            )
+        except Exception as exc:
+            logger.error("Evaluation failed for trial %d: %s", trial_id, exc)
+            return TrialRecord(
+                trial_id=trial_id,
+                params=params,
+                composite_score=float("-inf"),
+                status="crash",
+                reasoning=description,
+                output_dir=execution.output_dir,
+                duration_seconds=execution.duration_seconds,
+                error_output=f"Evaluation error: {exc}",
+            )
 
         return TrialRecord(
             trial_id=trial_id,
@@ -474,8 +529,14 @@ class OptimizationLoop:
             try:
                 if pdef.param_type == "float":
                     pvalue = float(pvalue)
+                    if not math.isfinite(pvalue):
+                        pvalue = pdef.default
                 elif pdef.param_type == "int":
-                    pvalue = int(round(float(pvalue)))
+                    fval = float(pvalue)
+                    if not math.isfinite(fval):
+                        pvalue = pdef.default
+                    else:
+                        pvalue = int(round(fval))
                 elif pdef.param_type == "bool":
                     pvalue = parse_bool(pvalue)
                 elif pdef.param_type == "categorical":
@@ -486,7 +547,7 @@ class OptimizationLoop:
                             pname, pvalue, pdef.choices, pdef.default,
                         )
                         pvalue = pdef.default
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 pvalue = pdef.default
             # Range clamping for numeric types
             if pdef.low is not None and isinstance(pvalue, (int, float)):
@@ -529,105 +590,23 @@ class OptimizationLoop:
 
     def _call_llm(self, directive: str) -> str:
         """Call the LLM via OpenAI-compatible API."""
-        from omicsclaw.core.provider_runtime import (
-            provider_requires_api_key,
-            resolve_provider_runtime,
-        )
+        from omicsclaw.autoagent.llm_client import call_llm
 
-        config_provider = str(self.llm_provider_config.get("provider", "") or "")
-        config_base_url = str(self.llm_provider_config.get("base_url", "") or "")
-        config_model = str(self.llm_provider_config.get("model", "") or "")
-        config_api_key = str(self.llm_provider_config.get("api_key", "") or "")
-        runtime = resolve_provider_runtime(
-            provider=config_provider or self.llm_provider,
-            base_url=config_base_url,
-            model=config_model or self.llm_model,
-            api_key=config_api_key,
-        )
-
-        if not runtime.model:
-            raise RuntimeError(
-                "No usable LLM model resolved for optimization. "
-                "Configure an OmicsClaw provider or choose a valid model first."
-            )
-
-        if provider_requires_api_key(runtime.provider) and not runtime.api_key:
-            raise RuntimeError(
-                "No usable LLM provider config resolved for optimization "
-                f"(provider={runtime.provider or 'unknown'}, source={runtime.source}). "
-                "Configure the provider in OmicsClaw-App settings or set the "
-                "matching environment variable."
-            )
-
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=runtime.api_key,
-            base_url=runtime.base_url or None,
-        )
-        response = client.chat.completions.create(
-            model=runtime.model,
-            messages=[
-                {"role": "system", "content": "You are a parameter optimization agent. Respond ONLY with valid JSON."},
-                {"role": "user", "content": directive},
-            ],
+        return call_llm(
+            directive,
+            system_prompt="You are a parameter optimization agent. Respond ONLY with valid JSON.",
             temperature=0.7,
             max_tokens=1024,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            llm_provider_config=self.llm_provider_config,
         )
-        return response.choices[0].message.content or ""
 
     def _parse_llm_response(self, text: str) -> dict[str, Any] | None:
         """Parse the LLM response as JSON, handling markdown fences."""
-        text = text.strip()
+        from omicsclaw.autoagent.llm_client import parse_json_from_llm
 
-        # Strip markdown code fences: ```json ... ``` or ``` ... ```
-        # Only remove the opening and closing fence lines, not interior
-        # lines that happen to contain backticks inside strings.
-        import re
-
-        fence_match = re.search(
-            r"```(?:json|JSON)?\s*\n(.*?)```", text, re.DOTALL
-        )
-        if fence_match:
-            text = fence_match.group(1).strip()
-
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract the outermost balanced JSON object by finding
-        # the first '{' and matching it with the correct closing '}'.
-        start = text.find("{")
-        if start != -1:
-            depth = 0
-            in_string = False
-            escape = False
-            for i in range(start, len(text)):
-                ch = text[i]
-                if escape:
-                    escape = False
-                    continue
-                if ch == "\\":
-                    escape = True
-                    continue
-                if ch == '"':
-                    in_string = not in_string
-                    continue
-                if in_string:
-                    continue
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start : i + 1])
-                        except json.JSONDecodeError:
-                            break
-
-        logger.warning("Failed to parse LLM response as JSON: %s", text[:200])
-        return None
+        return parse_json_from_llm(text)
 
     def _write_summary(self, result: OptimizationResult) -> None:
         """Write a summary.json with the best parameters and run stats."""

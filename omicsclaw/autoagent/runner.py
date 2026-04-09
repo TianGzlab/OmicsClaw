@@ -89,8 +89,10 @@ def execute_trial(
     if cancel_event and cancel_event.is_set():
         raise OptimizationCancelled("Optimization cancelled before trial start")
 
-    # Execute
-    env = os.environ.copy()
+    # Execute — only forward whitelisted env vars to avoid leaking secrets.
+    from omicsclaw.autoagent.constants import SUBPROCESS_ENV_WHITELIST
+
+    env = {k: v for k, v in os.environ.items() if k in SUBPROCESS_ENV_WHITELIST}
     env["PYTHONPATH"] = str(omicsclaw_dir) + os.pathsep + env.get("PYTHONPATH", "")
 
     t0 = time.time()

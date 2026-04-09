@@ -364,7 +364,8 @@ async def test_chat_stream_emits_protocol_events_and_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_omits_adaptive_thinking_from_provider_payload(monkeypatch):
+async def test_chat_stream_omits_adaptive_thinking_for_siliconflow(monkeypatch):
+    """SiliconFlow gateway rejects non-standard thinking types — adaptive must omit."""
     pytest.importorskip("fastapi")
 
     from omicsclaw.app import server
@@ -403,17 +404,129 @@ async def test_chat_stream_omits_adaptive_thinking_from_provider_payload(monkeyp
     assert captured_kwargs["extra_api_params"] is None
 
 
-def test_build_thinking_extra_body_supports_enabled_and_disabled():
+@pytest.mark.asyncio
+async def test_chat_stream_enables_adaptive_thinking_for_deepseek(monkeypatch):
+    """DeepSeek native API supports thinking — adaptive must enable it."""
     pytest.importorskip("fastapi")
 
     from omicsclaw.app import server
 
-    assert server._build_thinking_extra_body({"type": "enabled", "budgetTokens": 123}) == {
+    captured_kwargs: dict[str, object] = {}
+
+    async def fake_llm_tool_loop(**kwargs):
+        captured_kwargs.update(kwargs)
+        await kwargs["on_stream_content"]("ok")
+        return "ok"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="deepseek",
+        OMICSCLAW_MODEL="deepseek-chat",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-thinking-deepseek",
+            content="hello",
+            thinking={"type": "adaptive"},
+        )
+    )
+    await _read_streaming_response(response)
+
+    extra = captured_kwargs["extra_api_params"]
+    assert extra is not None
+    assert extra["extra_body"]["thinking"] == {
         "type": "enabled",
-        "budget_tokens": 123,
+        "budget_tokens": 10000,
     }
-    assert server._build_thinking_extra_body({"type": "disabled"}) == {"type": "disabled"}
-    assert server._build_thinking_extra_body({"type": "adaptive"}) is None
+
+
+def test_build_thinking_extra_body_explicit_enabled_and_disabled():
+    """Explicit enabled/disabled are always honoured regardless of provider."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    # enabled — any provider
+    assert server._build_thinking_extra_body(
+        {"type": "enabled", "budgetTokens": 123},
+        provider="siliconflow",
+    ) == {"type": "enabled", "budget_tokens": 123}
+
+    assert server._build_thinking_extra_body(
+        {"type": "enabled", "budgetTokens": 500},
+        provider="deepseek",
+    ) == {"type": "enabled", "budget_tokens": 500}
+
+    # disabled — any provider
+    assert server._build_thinking_extra_body(
+        {"type": "disabled"}, provider="deepseek",
+    ) == {"type": "disabled"}
+
+
+def test_build_thinking_extra_body_adaptive_per_provider():
+    """Adaptive mode enables thinking only for supported providers/models."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    adaptive = {"type": "adaptive"}
+
+    # Native provider → enabled
+    result = server._build_thinking_extra_body(adaptive, provider="deepseek")
+    assert result == {"type": "enabled", "budget_tokens": 10000}
+
+    # Incompatible provider → omit
+    assert server._build_thinking_extra_body(adaptive, provider="siliconflow") is None
+
+    # Gateway with thinking-capable model → enabled
+    result = server._build_thinking_extra_body(
+        adaptive, provider="openrouter", model="deepseek/deepseek-chat-v3-0324",
+    )
+    assert result == {"type": "enabled", "budget_tokens": 10000}
+
+    result = server._build_thinking_extra_body(
+        adaptive, provider="nvidia", model="deepseek-ai/deepseek-r1",
+    )
+    assert result == {"type": "enabled", "budget_tokens": 10000}
+
+    # Gateway with non-thinking model → omit
+    assert server._build_thinking_extra_body(
+        adaptive, provider="openrouter", model="anthropic/claude-3-opus",
+    ) is None
+
+    # Unknown provider, unknown model → omit
+    assert server._build_thinking_extra_body(adaptive, provider="ollama", model="llama3") is None
+
+    # No provider, no model → omit (safe default)
+    assert server._build_thinking_extra_body(adaptive) is None
+
+    # Custom budget with adaptive on native provider
+    result = server._build_thinking_extra_body(
+        {"type": "adaptive", "budgetTokens": 5000}, provider="deepseek",
+    )
+    assert result == {"type": "enabled", "budget_tokens": 5000}
+
+
+def test_build_thinking_extra_body_invalid_inputs():
+    """Non-dict / empty inputs return None."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    assert server._build_thinking_extra_body(None) is None
+    assert server._build_thinking_extra_body("enabled") is None
+    assert server._build_thinking_extra_body(42) is None
+    assert server._build_thinking_extra_body({}) is None
 
 
 @pytest.mark.asyncio

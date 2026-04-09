@@ -96,30 +96,100 @@ def _resolve_backend_init_config() -> dict[str, str]:
     }
 
 
-def _build_thinking_extra_body(thinking: Any) -> dict[str, Any] | None:
+# ---------------------------------------------------------------------------
+# Provider-aware thinking support
+# ---------------------------------------------------------------------------
+
+# Providers whose APIs natively accept the ``thinking`` extra-body parameter.
+# For these, ``adaptive`` maps to ``enabled`` with a sensible default budget.
+_THINKING_NATIVE_PROVIDERS: frozenset[str] = frozenset({
+    "deepseek",
+})
+
+# Providers where the ``thinking`` extra-body parameter is known to cause
+# gateway errors (e.g. SiliconFlow rejects ``{"type": "adaptive"}``).
+# For explicit ``enabled`` requests we still attempt delivery — the user
+# made a deliberate choice and should see the provider error if it fails.
+_THINKING_INCOMPATIBLE_PROVIDERS: frozenset[str] = frozenset({
+    "siliconflow",
+})
+
+# Model-name substrings that imply thinking / reasoning support.  Used for
+# gateway providers (openrouter, nvidia, volcengine, …) whose capability
+# depends on which upstream model is selected rather than the gateway itself.
+_THINKING_CAPABLE_MODEL_PATTERNS: tuple[str, ...] = (
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "deepseek-chat",
+    "deepseek-v3",
+)
+
+_DEFAULT_THINKING_BUDGET: int = 10000
+
+
+def _parse_thinking_budget(thinking: dict) -> int:
+    budget = thinking.get("budgetTokens", _DEFAULT_THINKING_BUDGET)
+    try:
+        return int(budget)
+    except (TypeError, ValueError):
+        return _DEFAULT_THINKING_BUDGET
+
+
+def _build_thinking_extra_body(
+    thinking: Any,
+    *,
+    provider: str = "",
+    model: str = "",
+) -> dict[str, Any] | None:
     """Normalize optional thinking controls for provider-compatible requests.
 
-    `adaptive` is a frontend-local UX state, not a portable provider contract.
-    Forwarding it directly breaks some OpenAI-compatible gateways (for example
-    SiliconFlow DeepSeek endpoints). In that state we omit the field entirely
-    and let the provider's default behavior apply.
+    The ``adaptive`` thinking type is a frontend UX concept, not a portable
+    provider contract.  This function resolves it to a concrete action based
+    on the active provider and model:
+
+    * **Native providers** (e.g. ``deepseek``): ``adaptive`` → ``enabled``
+      with a default budget so that reasoning tokens are always generated.
+    * **Incompatible providers** (e.g. ``siliconflow``): ``adaptive`` → omit
+      the field entirely to avoid gateway errors.
+    * **Gateway providers** (e.g. ``openrouter``, ``nvidia``): check whether
+      the selected *model* name matches a known thinking-capable pattern; if
+      so, enable thinking; otherwise omit.
+    * **Unknown providers**: omit (safe default).
+
+    Explicit ``enabled`` / ``disabled`` choices from the user are always
+    honoured regardless of provider.
     """
     if not isinstance(thinking, dict):
         return None
 
     thinking_type = str(thinking.get("type", "") or "").strip().lower()
+
+    # -- Explicit user choices: always honour ---------------------------------
     if thinking_type == "enabled":
-        budget = thinking.get("budgetTokens", 10000)
-        try:
-            budget_tokens = int(budget)
-        except (TypeError, ValueError):
-            budget_tokens = 10000
-        return {"type": "enabled", "budget_tokens": budget_tokens}
+        return {"type": "enabled", "budget_tokens": _parse_thinking_budget(thinking)}
 
     if thinking_type == "disabled":
         return {"type": "disabled"}
 
-    # `adaptive` means "use provider default" in the app today.
+    # -- Adaptive: resolve per provider/model ---------------------------------
+    provider_lower = provider.strip().lower()
+
+    # 1) Known-incompatible gateways → omit
+    if provider_lower in _THINKING_INCOMPATIBLE_PROVIDERS:
+        return None
+
+    # 2) Native thinking providers → enable
+    if provider_lower in _THINKING_NATIVE_PROVIDERS:
+        return {"type": "enabled", "budget_tokens": _parse_thinking_budget(thinking)}
+
+    # 3) Gateway / unknown providers → check model name for thinking support
+    model_lower = (model or "").strip().lower()
+    if model_lower and any(
+        pattern in model_lower for pattern in _THINKING_CAPABLE_MODEL_PATTERNS
+    ):
+        return {"type": "enabled", "budget_tokens": _parse_thinking_budget(thinking)}
+
+    # 4) Unrecognised provider + model → safe default: omit
     return None
 
 
@@ -485,11 +555,30 @@ def _tool_names_from_permission_suggestions(
 def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> dict[str, Any]:
     prompt_tokens = int(getattr(response_usage, "prompt_tokens", 0) or 0)
     completion_tokens = int(getattr(response_usage, "completion_tokens", 0) or 0)
+
+    # Extract cache tokens from all known provider formats:
+    #   OpenAI:    prompt_tokens_details.cached_tokens / .cache_creation_tokens
+    #   DeepSeek:  prompt_cache_hit_tokens (top-level)
+    #   Anthropic: cache_read_input_tokens / cache_creation_input_tokens (top-level)
     prompt_details = getattr(response_usage, "prompt_tokens_details", None)
     cache_read_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
     cache_creation_tokens = int(
         getattr(prompt_details, "cache_creation_tokens", 0) or 0
     )
+    # DeepSeek: prompt_cache_hit_tokens
+    if not cache_read_tokens:
+        cache_read_tokens = int(
+            getattr(response_usage, "prompt_cache_hit_tokens", 0) or 0
+        )
+    # Anthropic: cache_read_input_tokens / cache_creation_input_tokens
+    if not cache_read_tokens:
+        cache_read_tokens = int(
+            getattr(response_usage, "cache_read_input_tokens", 0) or 0
+        )
+    if not cache_creation_tokens:
+        cache_creation_tokens = int(
+            getattr(response_usage, "cache_creation_input_tokens", 0) or 0
+        )
 
     usage_totals["input_tokens"] += prompt_tokens
     usage_totals["output_tokens"] += completion_tokens
@@ -765,7 +854,12 @@ async def chat_stream(req: ChatRequest):
     if req.effort and req.effort in ("low", "medium", "high", "max"):
         extra_body["reasoning_effort"] = req.effort
 
-    normalized_thinking = _build_thinking_extra_body(req.thinking)
+    effective_model = model_override or core.OMICSCLAW_MODEL
+    normalized_thinking = _build_thinking_extra_body(
+        req.thinking,
+        provider=core.LLM_PROVIDER_NAME,
+        model=effective_model,
+    )
     if normalized_thinking:
         extra_body["thinking"] = normalized_thinking
 
@@ -790,7 +884,7 @@ async def chat_stream(req: ChatRequest):
         "cache_read_input_tokens": 0.0,
         "cache_creation_input_tokens": 0.0,
     }
-    usage_payload: dict[str, Any] | None = None
+    usage_payload: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
     current_policy_state = _set_session_permission_profile(
         session_id,
         req.permission_profile,

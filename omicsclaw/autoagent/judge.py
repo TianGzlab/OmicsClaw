@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from omicsclaw.autoagent.constants import SCORE_DIFF_EPSILON
-
 from omicsclaw.autoagent.experiment_ledger import ExperimentLedger, TrialRecord
+from omicsclaw.autoagent.metrics_registry import MetricDef
 
 
 @dataclass
@@ -45,6 +45,7 @@ def judge(
     best: TrialRecord,
     ledger: ExperimentLedger,
     baseline_params: dict[str, Any] | None = None,
+    metrics: dict[str, MetricDef] | None = None,
 ) -> JudgmentResult:
     """Apply AutoAgent keep/discard rules to a trial.
 
@@ -81,7 +82,7 @@ def judge(
             decision="discard",
             reason="Both trial and current best have non-finite scores.",
             new_best=False,
-            learning_signal=_regression_signal(trial, best),
+            learning_signal=_regression_signal(trial, best, metrics),
         )
 
     if trial_finite and not best_finite:
@@ -91,7 +92,7 @@ def judge(
             reason=f"Trial achieved finite score ({trial_score:.4f}) "
             f"while previous best was non-finite.",
             new_best=True,
-            learning_signal=_improvement_signal(trial, best),
+            learning_signal=_improvement_signal(trial, best, metrics),
         )
 
     if not trial_finite and best_finite:
@@ -100,7 +101,7 @@ def judge(
             decision="discard",
             reason=f"Trial score is non-finite; best remains {best_score:.4f}.",
             new_best=False,
-            learning_signal=_regression_signal(trial, best),
+            learning_signal=_regression_signal(trial, best, metrics),
         )
 
     # Both finite from here
@@ -113,7 +114,7 @@ def judge(
             reason=f"Score improved: {best_score:.4f} → {trial_score:.4f} "
             f"(+{score_diff:.4f})",
             new_best=True,
-            learning_signal=_improvement_signal(trial, best),
+            learning_signal=_improvement_signal(trial, best, metrics),
         )
 
     # Rule 2: Same score, simpler change → keep (simplicity criterion)
@@ -136,7 +137,7 @@ def judge(
         reason=f"Score did not improve: best={best_score:.4f}, "
         f"trial={trial_score:.4f} ({score_diff:+.4f})",
         new_best=False,
-        learning_signal=_regression_signal(trial, best),
+        learning_signal=_regression_signal(trial, best, metrics),
     )
 
 
@@ -145,7 +146,11 @@ def judge(
 # ---------------------------------------------------------------------------
 
 
-def _improvement_signal(trial: TrialRecord, best: TrialRecord) -> str:
+def _improvement_signal(
+    trial: TrialRecord,
+    best: TrialRecord,
+    metrics: dict[str, MetricDef] | None = None,
+) -> str:
     """Describe what improved when a trial beats the current best."""
     lines: list[str] = []
     for metric_name in trial.raw_metrics:
@@ -153,17 +158,26 @@ def _improvement_signal(trial: TrialRecord, best: TrialRecord) -> str:
         old_val = best.raw_metrics.get(metric_name)
         if new_val is not None and old_val is not None:
             diff = new_val - old_val
-            direction = "↑" if diff > 0 else "↓"
+            mdef = (metrics or {}).get(metric_name)
+            if mdef and mdef.direction == "minimize":
+                is_improved = diff < 0
+            else:
+                is_improved = diff > 0
+            label = "improved" if is_improved else "regressed"
             lines.append(
                 f"  {metric_name}: {old_val:.4f} → {new_val:.4f} "
-                f"({direction} {abs(diff):.4f})"
+                f"({label}, Δ={diff:+.4f})"
             )
     if not lines:
         return "Score improved but individual metric comparison unavailable."
     return "Metric changes:\n" + "\n".join(lines)
 
 
-def _regression_signal(trial: TrialRecord, best: TrialRecord) -> str:
+def _regression_signal(
+    trial: TrialRecord,
+    best: TrialRecord,
+    metrics: dict[str, MetricDef] | None = None,
+) -> str:
     """Describe what regressed when a trial is discarded."""
     improved: list[str] = []
     regressed: list[str] = []
@@ -174,10 +188,19 @@ def _regression_signal(trial: TrialRecord, best: TrialRecord) -> str:
             diff = new_val - old_val
             entry = f"{metric_name}: {old_val:.4f} → {new_val:.4f}"
             if abs(diff) > 1e-6:
-                if diff > 0:
-                    improved.append(entry)
+                mdef = (metrics or {}).get(metric_name)
+                if mdef and mdef.direction == "minimize":
+                    # minimize: decrease is good
+                    if diff < 0:
+                        improved.append(entry)
+                    else:
+                        regressed.append(entry)
                 else:
-                    regressed.append(entry)
+                    # maximize (default): increase is good
+                    if diff > 0:
+                        improved.append(entry)
+                    else:
+                        regressed.append(entry)
 
     parts: list[str] = []
     if improved:

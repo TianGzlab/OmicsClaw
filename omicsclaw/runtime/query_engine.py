@@ -307,13 +307,13 @@ async def _materialize_message_from_stream(
     tool_calls_dict: dict[int, MaterializedToolCall] = {}
 
     async for chunk in response:
+        if chunk.usage:
+            _record_usage(
+                chunk.usage,
+                callbacks,
+                on_usage_delta=on_usage_delta,
+            )
         if not chunk.choices:
-            if chunk.usage:
-                _record_usage(
-                    chunk.usage,
-                    callbacks,
-                    on_usage_delta=on_usage_delta,
-                )
             continue
 
         delta = chunk.choices[0].delta

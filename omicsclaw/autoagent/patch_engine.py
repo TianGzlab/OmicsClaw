@@ -240,6 +240,14 @@ def apply_patch(
 
         for hunk in diff.hunks:
             if hunk.old_code in content:
+                occurrence_count = content.count(hunk.old_code)
+                if occurrence_count > 1:
+                    raise ValueError(
+                        f"Ambiguous hunk: old_code appears {occurrence_count} "
+                        f"times in {surface_path.rel_path}. Provide more "
+                        f"surrounding context in old_code to disambiguate. "
+                        f"(first 80 chars: {hunk.old_code[:80]!r})"
+                    )
                 content = content.replace(hunk.old_code, hunk.new_code, 1)
             else:
                 # Try whitespace-normalized matching
@@ -299,44 +307,14 @@ def backup_files(
 
 
 def _parse_json(text: str) -> dict[str, Any] | None:
-    """Parse JSON, handling edge cases."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    """Parse JSON, handling edge cases.
 
-    # Extract outermost balanced JSON object
-    start = text.find("{")
-    if start == -1:
-        return None
+    Delegates to the shared :func:`~omicsclaw.autoagent.llm_client.parse_json_from_llm`
+    implementation.
+    """
+    from omicsclaw.autoagent.llm_client import parse_json_from_llm
 
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if escape:
-            escape = False
-            continue
-        if ch == "\\":
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(text[start: i + 1])
-                except json.JSONDecodeError:
-                    return None
-
-    return None
+    return parse_json_from_llm(text)
 
 
 def _normalize_ws(s: str) -> str:

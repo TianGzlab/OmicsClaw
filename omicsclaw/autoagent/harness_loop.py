@@ -29,7 +29,7 @@ from omicsclaw.autoagent.constants import (
     ERROR_OUTPUT_MAX_CHARS,
 )
 from omicsclaw.autoagent.edit_surface import EditSurface
-from omicsclaw.autoagent.errors import OptimizationCancelled
+from omicsclaw.autoagent.errors import MetricConfigError, OptimizationCancelled
 from omicsclaw.autoagent.evaluator import Evaluator
 from omicsclaw.autoagent.experiment_ledger import ExperimentLedger, TrialRecord
 from omicsclaw.autoagent.failure_memory import FailureBank, FailureRecord
@@ -414,7 +414,9 @@ class HarnessLoop:
 
                 prior_best_score = best.composite_score
                 judgment = judge(
-                    trial, best, self.ledger, baseline_params=baseline_params,
+                    trial, best, self.ledger,
+                    baseline_params=baseline_params,
+                    metrics=self.evaluator.metrics,
                 )
                 if trial.status != "crash":
                     trial.status = judgment.decision
@@ -566,9 +568,37 @@ class HarnessLoop:
             )
             return record, trace
 
-        eval_result = self.evaluator.evaluate(
-            Path(execution.output_dir), params=params,
-        )
+        try:
+            eval_result = self.evaluator.evaluate(
+                Path(execution.output_dir), params=params,
+            )
+        except MetricConfigError as exc:
+            logger.error("Metric config error for trial %d: %s", trial_id, exc)
+            record = TrialRecord(
+                trial_id=trial_id,
+                params=params,
+                composite_score=float("-inf"),
+                status="crash",
+                reasoning=description,
+                output_dir=execution.output_dir,
+                duration_seconds=execution.duration_seconds,
+                error_output=f"MetricConfigError: {exc}",
+            )
+            return record, trace
+        except Exception as exc:
+            logger.error("Evaluation failed for trial %d: %s", trial_id, exc)
+            record = TrialRecord(
+                trial_id=trial_id,
+                params=params,
+                composite_score=float("-inf"),
+                status="crash",
+                reasoning=description,
+                output_dir=execution.output_dir,
+                duration_seconds=execution.duration_seconds,
+                error_output=f"Evaluation error: {exc}",
+            )
+            return record, trace
+
         # Enrich trace with evaluation metrics
         trace.quality.quality_metrics = dict(eval_result.raw_metrics)
 
@@ -588,54 +618,21 @@ class HarnessLoop:
 
     def _call_llm(self, directive: str) -> str:
         """Call the LLM via OpenAI-compatible API."""
-        from omicsclaw.core.provider_runtime import (
-            provider_requires_api_key,
-            resolve_provider_runtime,
-        )
+        from omicsclaw.autoagent.llm_client import call_llm
 
-        config_provider = str(self.llm_provider_config.get("provider", "") or "")
-        config_base_url = str(self.llm_provider_config.get("base_url", "") or "")
-        config_model = str(self.llm_provider_config.get("model", "") or "")
-        config_api_key = str(self.llm_provider_config.get("api_key", "") or "")
-        runtime = resolve_provider_runtime(
-            provider=config_provider or self.llm_provider,
-            base_url=config_base_url,
-            model=config_model or self.llm_model,
-            api_key=config_api_key,
-        )
-
-        if not runtime.model:
-            raise RuntimeError(
-                "No usable LLM model resolved for harness evolution."
-            )
-        if provider_requires_api_key(runtime.provider) and not runtime.api_key:
-            raise RuntimeError(
-                f"No API key for provider {runtime.provider or 'unknown'}."
-            )
-
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=runtime.api_key,
-            base_url=runtime.base_url or None,
-        )
-        response = client.chat.completions.create(
-            model=runtime.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a harness engineer for OmicsClaw. "
-                        "You modify skill code to improve analysis quality. "
-                        "Respond ONLY with valid JSON following the specified format."
-                    ),
-                },
-                {"role": "user", "content": directive},
-            ],
+        return call_llm(
+            directive,
+            system_prompt=(
+                "You are a harness engineer for OmicsClaw. "
+                "You modify skill code to improve analysis quality. "
+                "Respond ONLY with valid JSON following the specified format."
+            ),
             temperature=0.4,
             max_tokens=4096,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            llm_provider_config=self.llm_provider_config,
         )
-        return response.choices[0].message.content or ""
 
     def _record_failure(
         self,

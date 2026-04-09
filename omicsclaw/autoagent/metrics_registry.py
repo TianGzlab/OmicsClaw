@@ -35,6 +35,8 @@ class MetricDef:
     weight: float = 1.0
     column: str | None = None
     description: str = ""
+    range_min: float = 0.0
+    range_max: float = 1.0
 
     def __post_init__(self) -> None:
         if self.direction not in ("maximize", "minimize"):
@@ -43,6 +45,10 @@ class MetricDef:
             )
         if self.weight <= 0:
             raise ValueError(f"weight must be > 0, got {self.weight}")
+        if self.range_max <= self.range_min:
+            raise ValueError(
+                f"range_max ({self.range_max}) must be > range_min ({self.range_min})"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -55,12 +61,16 @@ LISI_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.4,
         description="Integration LISI — higher means better batch mixing",
+        range_min=1.0,
+        range_max=5.0,
     ),
     "mean_clisi": MetricDef(
         source="result.json:summary.mean_clisi",
         direction="minimize",
         weight=0.3,
         description="Cell-type LISI — lower means better cell-type separation",
+        range_min=1.0,
+        range_max=5.0,
     ),
 }
 
@@ -70,12 +80,16 @@ ASW_METRICS: dict[str, MetricDef] = {
         direction="minimize",
         weight=0.15,
         description="Batch ASW — closer to 0 means better batch mixing",
+        range_min=-1.0,
+        range_max=1.0,
     ),
     "celltype_asw": MetricDef(
         source="result.json:summary.celltype_asw",
         direction="maximize",
         weight=0.15,
         description="Cell-type ASW — higher means better cell-type separation",
+        range_min=-1.0,
+        range_max=1.0,
     ),
 }
 
@@ -93,6 +107,8 @@ BATCH_MIXING_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.3,
         description="Improvement in batch mixing relative to pre-integration",
+        range_min=-1.0,
+        range_max=1.0,
     ),
 }
 
@@ -106,18 +122,24 @@ SPATIAL_DE_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.4,
         description="Total DE gene entries detected",
+        range_min=0,
+        range_max=5000,
     ),
     "n_significant": MetricDef(
         source="result.json:summary.n_significant",
         direction="maximize",
         weight=0.4,
         description="Genes passing adjusted p-value threshold",
+        range_min=0,
+        range_max=5000,
     ),
     "n_marker_hits": MetricDef(
         source="result.json:summary.n_marker_hits",
         direction="maximize",
         weight=0.2,
         description="Genes passing both significance and effect-size thresholds",
+        range_min=0,
+        range_max=1000,
     ),
 }
 
@@ -127,6 +149,8 @@ BULKRNA_DE_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.5,
         description="Number of significant DE genes",
+        range_min=0,
+        range_max=5000,
     ),
     "frac_significant": MetricDef(
         source="result.json:summary.frac_significant",
@@ -143,12 +167,16 @@ SC_MARKERS_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.6,
         description="Number of marker genes identified across all clusters",
+        range_min=0,
+        range_max=5000,
     ),
     "n_clusters": MetricDef(
         source="result.json:summary.n_clusters",
         direction="maximize",
         weight=0.4,
         description="Number of clusters with markers found",
+        range_min=0,
+        range_max=50,
     ),
 }
 
@@ -160,6 +188,8 @@ ANNOTATION_CONFIDENCE_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.5,
         description="Number of distinct cell types annotated",
+        range_min=0,
+        range_max=50,
     ),
     "mean_confidence": MetricDef(
         source="result.json:summary.mean_confidence",
@@ -176,12 +206,16 @@ DECONVOLUTION_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.5,
         description="Number of cell types deconvolved",
+        range_min=0,
+        range_max=50,
     ),
     "n_common_genes": MetricDef(
         source="result.json:summary.n_common_genes",
         direction="maximize",
         weight=0.5,
         description="Genes shared between spatial and reference data",
+        range_min=0,
+        range_max=20000,
     ),
 }
 
@@ -191,6 +225,8 @@ SPATIAL_DOMAIN_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.4,
         description="Silhouette coefficient — higher means tighter, well-separated domains",
+        range_min=-1.0,
+        range_max=1.0,
     ),
     "mean_local_purity": MetricDef(
         source="result.json:summary.mean_local_purity",
@@ -203,6 +239,8 @@ SPATIAL_DOMAIN_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.2,
         description="Calinski-Harabasz index — higher means better-defined clusters",
+        range_min=0,
+        range_max=1000,
     ),
 }
 
@@ -215,6 +253,8 @@ SC_CLUSTERING_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=1.0,
         description="Number of clusters identified",
+        range_min=0,
+        range_max=50,
     ),
 }
 
@@ -230,12 +270,16 @@ SC_PREPROCESSING_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.3,
         description="Number of highly variable genes selected",
+        range_min=0,
+        range_max=5000,
     ),
     "n_genes_after": MetricDef(
         source="result.json:summary.n_genes",
         direction="maximize",
         weight=0.3,
         description="Number of genes remaining after filtering",
+        range_min=0,
+        range_max=30000,
     ),
 }
 
@@ -245,12 +289,16 @@ COEXPRESSION_METRICS: dict[str, MetricDef] = {
         direction="maximize",
         weight=0.5,
         description="Number of co-expression modules detected",
+        range_min=0,
+        range_max=50,
     ),
     "soft_power": MetricDef(
         source="result.json:summary.soft_power",
         direction="maximize",
         weight=0.5,
         description="Soft-thresholding power selected for scale-free topology",
+        range_min=1,
+        range_max=30,
     ),
 }
 

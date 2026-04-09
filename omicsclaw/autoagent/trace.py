@@ -56,6 +56,7 @@ class DataShapeTrace:
     n_vars_before: int = 0
     n_obs_after: int = 0
     n_vars_after: int = 0
+    n_obs_before_known: bool = False
     layers: list[str] = field(default_factory=list)
     obs_columns: list[str] = field(default_factory=list)
     var_columns: list[str] = field(default_factory=list)
@@ -333,6 +334,8 @@ class TraceCollector:
             trace.n_obs_before = _int_or(summary, "n_cells_before", 0) or _int_or(
                 summary, "initial_cells", 0
             )
+            if "n_cells_before" in summary or "initial_cells" in summary:
+                trace.n_obs_before_known = True
             trace.n_vars_before = _int_or(summary, "n_genes_before", 0) or _int_or(
                 summary, "initial_genes", 0
             )

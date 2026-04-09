@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from omicsclaw.autoagent.errors import MetricConfigError
 from omicsclaw.autoagent.metrics_registry import MetricDef
 from omicsclaw.autoagent.result_contract import normalize_result_payload
 
@@ -116,7 +117,14 @@ class Evaluator:
                 missing.append(name)
 
         if not raw:
-            # adata computed metrics but none match the registry — fall back
+            if computed:
+                # adata produced metrics but none match the registry — config error
+                raise MetricConfigError(
+                    f"adata metrics were computed ({list(computed.keys())}) but "
+                    f"none match the declared metrics ({list(self.metrics.keys())}). "
+                    f"Check metrics_registry for this skill."
+                )
+            # adata computation itself produced nothing — fall back to result.json
             return None
 
         # Use the SAME direction/weight scoring as the result.json path.
@@ -143,6 +151,16 @@ class Evaluator:
                 missing.append(name)
 
         if not raw:
+            # Distinguish "no result.json" from "result.json exists but
+            # fields don't match" — the latter is a config error.
+            result_path = output_dir / "result.json"
+            if result_path.exists():
+                raise MetricConfigError(
+                    f"result.json exists but none of the declared metrics "
+                    f"({list(self.metrics.keys())}) were found. "
+                    f"Missing: {missing}. Check that metric source paths in "
+                    f"metrics_registry match the skill's result.json structure."
+                )
             return EvaluationResult(
                 composite_score=float("-inf"),
                 raw_metrics=raw,
@@ -159,7 +177,13 @@ class Evaluator:
         )
 
     def _compute_composite_from_metricdefs(self, raw: dict[str, float]) -> float:
-        """Weighted sum using MetricDef direction and weight."""
+        """Weighted sum of range-normalized metrics.
+
+        Each raw metric is scaled to [0, 1] using its ``range_min``/``range_max``,
+        then ``direction="minimize"`` metrics are flipped (1 - normalized) so that
+        higher always means better.  This ensures that the ``weight`` field
+        reflects true importance regardless of each metric's native scale.
+        """
         total_weight = 0.0
         weighted_sum = 0.0
 
@@ -167,9 +191,17 @@ class Evaluator:
             if name not in raw:
                 continue
             value = raw[name]
+            # Normalize to [0, 1] using declared range
+            span = mdef.range_max - mdef.range_min
+            if span > 0:
+                normalized = (value - mdef.range_min) / span
+                normalized = max(0.0, min(1.0, normalized))
+            else:
+                normalized = 0.5
+            # Flip minimize metrics so higher = better
             if mdef.direction == "minimize":
-                value = -value
-            weighted_sum += value * mdef.weight
+                normalized = 1.0 - normalized
+            weighted_sum += normalized * mdef.weight
             total_weight += mdef.weight
 
         if total_weight == 0.0:

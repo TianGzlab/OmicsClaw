@@ -33,8 +33,8 @@ class ParameterDef:
     name: str
     param_type: str  # "float" | "int" | "bool" | "categorical"
     default: Any
-    low: float | None = None
-    high: float | None = None
+    low: float | int | None = None
+    high: float | int | None = None
     choices: list[Any] | None = None
     cli_flag: str = ""
     tip: str = ""
@@ -268,7 +268,7 @@ def build_method_surface(
 def _infer_range(
     param_type: str,
     default: Any,
-) -> tuple[float | None, float | None]:
+) -> tuple[float | int | None, float | int | None]:
     """Infer a reasonable search range from the default value."""
     if param_type == "float":
         d = float(default)
@@ -284,7 +284,7 @@ def _infer_range(
             return (0, 10)
         low = max(1, d // 4)
         high = d * 4
-        return (float(low), float(high))
+        return (low, high)
 
     return (None, None)
 

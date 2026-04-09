@@ -313,7 +313,7 @@ def test_call_llm_reuses_active_provider_runtime(monkeypatch, tmp_path):
     captured: dict[str, str | None] = {}
 
     class FakeOpenAI:
-        def __init__(self, *, api_key: str, base_url: str | None = None):
+        def __init__(self, *, api_key: str, base_url: str | None = None, **_kwargs):
             captured["api_key"] = api_key
             captured["base_url"] = base_url
             self.chat = self

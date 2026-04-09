@@ -24,6 +24,30 @@ ERROR_OUTPUT_MAX_CHARS = 1500
 SESSION_TTL_SECONDS = 300
 """Keep finished API sessions for this long before reaping (5 min)."""
 
+LLM_CALL_TIMEOUT_SECONDS = 120
+"""Maximum wall-clock time for a single LLM API call (2 min)."""
+
+LLM_MAX_RETRIES = 3
+"""Maximum number of retries for transient LLM API failures."""
+
+LLM_RETRY_BASE_SECONDS = 2.0
+"""Base delay (seconds) for exponential backoff on LLM retries."""
+
+SUBPROCESS_ENV_WHITELIST: frozenset[str] = frozenset({
+    "PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE",
+    "PYTHONPATH", "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV",
+    "TMPDIR", "TMP", "TEMP", "SHELL",
+    "R_HOME", "R_LIBS", "R_LIBS_USER", "JAVA_HOME",
+})
+"""Environment variables passed to trial subprocesses.
+
+Only these variables are forwarded from the parent environment to avoid
+leaking secrets (API keys, tokens) into skill subprocess environments.
+"""
+
+API_RATE_LIMIT_PER_MINUTE = 30
+"""Maximum optimization start requests per minute per API instance."""
+
 SILHOUETTE_SAMPLE_SIZE = 5000
 """Max cells to sample for silhouette score computation."""
 

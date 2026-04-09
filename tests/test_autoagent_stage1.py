@@ -292,8 +292,7 @@ class TestDirective:
             max_trials=5,
         )
 
-        assert "weighted sum of metric values" in directive
-        assert "normalized metrics" not in directive
+        assert "weighted sum of **normalized** metric values" in directive
 
     def test_format_table(self, tmp_path):
         path = tmp_path / "ledger.jsonl"
@@ -383,6 +382,8 @@ class TestEvaluator:
                 source="result.json:summary.clisi",
                 direction="minimize",
                 weight=1.0,
+                range_min=0.0,
+                range_max=10.0,
             ),
         }
         ev = Evaluator(metrics)
@@ -447,7 +448,13 @@ class TestEvaluator:
             "celltype_asw",
         }
         assert "n_batches" not in result.raw_metrics
-        assert round(result.composite_score, 2) == 0.59
+        # After range normalization:
+        # mean_ilisi=2.0 → (2-1)/(5-1)=0.25 (max) → 0.25
+        # mean_clisi=1.0 → (1-1)/(5-1)=0.0 (min→flip) → 1.0
+        # batch_asw=0.2 → (0.2+1)/(1+1)=0.6 (min→flip) → 0.4
+        # celltype_asw=0.8 → (0.8+1)/(1+1)=0.9 (max) → 0.9
+        # composite = (0.25*0.4 + 1.0*0.3 + 0.4*0.15 + 0.9*0.15) / 1.0 = 0.595
+        assert abs(result.composite_score - 0.595) < 0.001
 
     def test_sc_preprocessing_result_json_aliases_are_normalized(self, tmp_path):
         out = self._make_output_dir(tmp_path, {

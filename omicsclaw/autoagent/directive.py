@@ -107,15 +107,17 @@ def _section_metrics(metrics: dict[str, MetricDef]) -> str:
     lines.append("Your suggested parameters will be scored using these metrics:")
     lines.append("")
     for name, m in metrics.items():
+        range_info = f", range: [{m.range_min}, {m.range_max}]"
         lines.append(
-            f"  - **{name}**: {m.direction} (weight={m.weight})"
+            f"  - **{name}**: {m.direction} (weight={m.weight}{range_info})"
         )
         if m.description:
             lines.append(f"    {m.description}")
     lines.append("")
     lines.append(
-        "The composite score is a weighted sum of metric values "
-        "(minimization metrics are flipped so higher is always better)."
+        "The composite score is a weighted sum of **normalized** metric values "
+        "(each metric is scaled to 0-1 based on its typical range, then "
+        "minimization metrics are flipped so higher is always better)."
     )
     return "\n".join(lines)
 

@@ -152,12 +152,21 @@ def gate_cell_retention(
     n_before = trace.data_shape.n_obs_before
     n_after = trace.data_shape.n_obs_after
 
-    # Skip if no before-count is available (can't judge)
-    if n_before == 0:
+    # Skip if the pre-filter count was never recorded (unknown).
+    # If it was explicitly recorded as 0, the gate should fail.
+    if n_before == 0 and not trace.data_shape.n_obs_before_known:
         return GateResult(
             name="cell_retention",
             passed=True,
             message="Skipped: no pre-filter cell count available.",
+        )
+    if n_before == 0 and trace.data_shape.n_obs_before_known:
+        return GateResult(
+            name="cell_retention",
+            passed=False,
+            message="Input data has 0 cells (n_obs_before=0).",
+            value=0.0,
+            threshold=min_retention,
         )
 
     passed = rate >= min_retention
