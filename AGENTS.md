@@ -48,6 +48,7 @@ python omicsclaw.py run spatial-preprocess --demo
 | `oc interactive -p "<prompt>"` | **Single-shot mode (non-interactive)** |
 | `oc interactive --session <id>` | **Resume a previous session** |
 | `oc tui` | Alias for `interactive --ui tui` |
+| `oc app-server` | Start the FastAPI backend used by OmicsClaw-App / web frontends |
 | `oc mcp list` | List configured MCP servers |
 | `oc mcp add <name> <cmd> [args]` | Add an MCP server |
 | `oc mcp remove <name>` | Remove an MCP server |
@@ -178,6 +179,20 @@ oc memory-server
 ```
 
 The memory API binds to `127.0.0.1:8766` by default. If you bind it to a non-local interface, set `OMICSCLAW_MEMORY_API_TOKEN` as well.
+
+## Desktop / Web App Backend
+
+OmicsClaw also exposes a FastAPI backend for desktop and browser frontends such as OmicsClaw-App.
+
+```bash
+# Install the frontend/backend bridge dependencies
+pip install -e ".[desktop]"
+
+# Start the app backend on the shared frontend contract port
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+The app backend binds to `127.0.0.1:8765` by default and serves chat streaming, skills, providers, MCP, outputs, bridge control, and memory proxy endpoints for the frontend.
 
 ### Configuration (Environment Variables)
 

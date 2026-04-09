@@ -13,6 +13,8 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 
+from omicsclaw.version import __version__
+
 # Guard: FastAPI is optional
 try:
     from fastapi import FastAPI
@@ -26,6 +28,7 @@ except ImportError:
 
 DEFAULT_MEMORY_API_HOST = "127.0.0.1"
 DEFAULT_MEMORY_API_PORT = 8766
+_MEMORY_SERVER_INSTALL_HINT = 'pip install -e ".[memory]"'
 
 
 def _is_local_bind_host(host: str) -> bool:
@@ -68,7 +71,7 @@ def _build_app():
     app = FastAPI(
         title="OmicsClaw Memory API",
         description="Graph-based memory system for OmicsClaw multi-omics platform",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -130,6 +133,7 @@ def _build_app():
                 "status": "ok" if db_status == "connected" else "degraded",
                 "database": db_status,
                 "service": "omicsclaw-memory",
+                "version": __version__,
             },
             status_code=status_code,
         )
@@ -145,10 +149,17 @@ def main():
     """Entry point for running the memory API server."""
     if not _HAS_FASTAPI:
         print("ERROR: FastAPI is not installed.")
-        print("Install with: pip install fastapi uvicorn")
+        print(f"Install with: {_MEMORY_SERVER_INSTALL_HINT}")
+        print("Minimal alternative: pip install fastapi uvicorn")
         raise SystemExit(1)
 
-    import uvicorn
+    try:
+        import uvicorn
+    except ImportError:
+        print("ERROR: uvicorn is not installed.")
+        print(f"Install with: {_MEMORY_SERVER_INSTALL_HINT}")
+        print("Minimal alternative: pip install fastapi uvicorn")
+        raise SystemExit(1)
 
     host = os.getenv("OMICSCLAW_MEMORY_HOST", DEFAULT_MEMORY_API_HOST)
     port = int(os.getenv("OMICSCLAW_MEMORY_PORT", str(DEFAULT_MEMORY_API_PORT)))

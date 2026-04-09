@@ -137,7 +137,16 @@ To use the graph-memory REST API and dashboard backend:
 pip install -e ".[memory]"
 ```
 
-### 7. Research and autonomous extras
+### 7. Desktop / web frontend backend
+
+To drive OmicsClaw-App or any compatible local web frontend:
+
+```bash
+pip install -e ".[desktop]"
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+### 8. Research and autonomous extras
 
 For research-pipeline or notebook-style auxiliary workflows:
 
@@ -146,7 +155,7 @@ pip install -e ".[research]"
 pip install -e ".[autonomous]"
 ```
 
-### 8. Development tools
+### 9. Development tools
 
 ```bash
 pip install -e ".[dev]"
@@ -233,6 +242,14 @@ oc memory-server
 ```
 
 By default this binds to `127.0.0.1:8766`. If you bind the memory API to a non-local interface, you must also set `OMICSCLAW_MEMORY_API_TOKEN`.
+
+If you installed desktop frontend support:
+
+```bash
+oc app-server
+```
+
+By default this binds to `127.0.0.1:8765`.
 
 ## Interactive and Workspace Features
 

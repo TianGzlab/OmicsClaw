@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omicsclaw"
-version = "0.1.0"
+version = "0.1.1"
 description = "OmicsClaw: Multi-omics analysis platform with skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq domains"
 readme = "README.md"
 license = {text = "MIT"}
@@ -326,6 +326,21 @@ memory = [
     "requests>=2.31.0",
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
+]
+
+# --------------------------------------------------------------------------- #
+# desktop — OmicsClaw-App / web frontend backend dependencies                 #
+# --------------------------------------------------------------------------- #
+desktop = [
+    "aiosqlite>=0.19.0",
+    "sqlalchemy>=1.4.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "cryptography>=41.0.0",
+    "requests>=2.31.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
 ]
 
 # --------------------------------------------------------------------------- #

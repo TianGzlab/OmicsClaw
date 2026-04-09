@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ from omicsclaw.core.provider_registry import (
     PROVIDER_PRESETS,
     resolve_provider,
 )
+from omicsclaw.core.provider_runtime import set_active_provider_runtime
 
 _PROVIDER_DETECT_ORDER = PROVIDER_DETECT_ORDER
 
@@ -51,7 +53,44 @@ OMICSCLAW_PY = OMICSCLAW_DIR / "omicsclaw.py"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
-PYTHON = sys.executable
+
+
+def get_skill_runner_python() -> str:
+    """Return the Python executable used for skill subprocesses.
+
+    By default this is the current interpreter, but advanced deployments can
+    override it with ``OMICSCLAW_RUN_PYTHON`` when the app server itself runs
+    in a lighter environment than the scientific analysis stack.
+    """
+    candidate = str(os.getenv("OMICSCLAW_RUN_PYTHON", "") or "").strip()
+    if not candidate:
+        return sys.executable
+
+    expanded = os.path.expanduser(candidate)
+    if os.path.sep in expanded or (os.path.altsep and os.path.altsep in expanded):
+        resolved_path = Path(expanded)
+        if resolved_path.exists():
+            return str(resolved_path.resolve())
+        logging.getLogger("omicsclaw.bot").warning(
+            "OMICSCLAW_RUN_PYTHON=%s does not exist; falling back to sys.executable=%s",
+            candidate,
+            sys.executable,
+        )
+        return sys.executable
+
+    resolved = shutil.which(expanded)
+    if resolved:
+        return resolved
+
+    logging.getLogger("omicsclaw.bot").warning(
+        "OMICSCLAW_RUN_PYTHON=%s was not found on PATH; falling back to sys.executable=%s",
+        candidate,
+        sys.executable,
+    )
+    return sys.executable
+
+
+PYTHON = get_skill_runner_python()
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_PHOTO_BYTES = 20 * 1024 * 1024
@@ -796,7 +835,16 @@ def init(
     else:
         LLM_PROVIDER_NAME = "openai"
 
-    kw: dict = {"api_key": resolved_key or api_key}
+    effective_api_key = str(resolved_key or api_key or "")
+    effective_base_url = str(resolved_url or "")
+    set_active_provider_runtime(
+        provider=LLM_PROVIDER_NAME,
+        base_url=effective_base_url,
+        model=OMICSCLAW_MODEL,
+        api_key=effective_api_key,
+    )
+
+    kw: dict = {"api_key": effective_api_key}
     if resolved_url:
         kw["base_url"] = resolved_url
     kw["timeout"] = _build_llm_timeout()
@@ -1446,7 +1494,7 @@ async def _run_omics_skill_step(
         unique_suffix=uuid.uuid4().hex[:8],
     )
 
-    cmd = [PYTHON, str(OMICSCLAW_PY), "run", skill_key]
+    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "run", skill_key]
     if mode == "demo":
         cmd.append("--demo")
     elif input_path:
@@ -1940,7 +1988,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     )
 
     # Build command
-    cmd = [PYTHON, str(OMICSCLAW_PY), "run"]
+    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "run"]
     if skill_key == "pipeline":
         cmd.append("spatial-pipeline")
     else:
@@ -2351,7 +2399,7 @@ async def execute_parse_literature(args: dict) -> str:
     if not lit_script.exists():
         return "Error: literature parsing skill not found."
 
-    cmd = [PYTHON, str(lit_script)]
+    cmd = [get_skill_runner_python(), str(lit_script)]
     cmd.extend(["--input", input_value])
     cmd.extend(["--input-type", input_type])
     cmd.extend(["--output", str(out_dir)])
@@ -3022,6 +3070,99 @@ async def execute_remember(args: dict, session_id: str = None) -> str:
         return f"Error saving memory: {e}"
 
 
+async def execute_recall(args: dict, session_id: str = None) -> str:
+    """Retrieve memories from persistent storage."""
+    if not memory_store:
+        return "Memory system not enabled."
+
+    try:
+        mem_type = args.get("memory_type", "")
+        query = args.get("query", "")
+
+        if query:
+            # Full-text search across memories
+            memories = await memory_store.search_memories(
+                session_id or "", query, memory_type=mem_type or None
+            )
+        elif mem_type:
+            # List by type
+            memories = await memory_store.get_memories(
+                session_id or "", mem_type, limit=int(args.get("limit", 10))
+            )
+        else:
+            # Return all recent memories
+            memories = await memory_store.get_memories(
+                session_id or "", limit=int(args.get("limit", 10))
+            )
+
+        if not memories:
+            return "No memories found."
+
+        parts = []
+        for m in memories:
+            if hasattr(m, "memory_type"):
+                if m.memory_type == "preference":
+                    parts.append(f"[preference] {m.key}: {m.value} (scope: {m.domain})")
+                elif m.memory_type == "insight":
+                    confidence = "confirmed" if m.confidence == "user_confirmed" else "predicted"
+                    parts.append(f"[insight] {m.entity_type} {m.entity_id}: {m.biological_label} ({confidence})")
+                elif m.memory_type == "project_context":
+                    ctx_parts = []
+                    if m.project_goal:
+                        ctx_parts.append(f"Goal: {m.project_goal}")
+                    if m.species:
+                        ctx_parts.append(f"Species: {m.species}")
+                    if m.tissue_type:
+                        ctx_parts.append(f"Tissue: {m.tissue_type}")
+                    if m.disease_model:
+                        ctx_parts.append(f"Disease: {m.disease_model}")
+                    parts.append(f"[project_context] {' | '.join(ctx_parts)}")
+                elif m.memory_type == "dataset":
+                    parts.append(f"[dataset] {m.file_path} ({m.preprocessing_state})")
+                elif m.memory_type == "analysis":
+                    parts.append(f"[analysis] {m.skill} ({m.method}) - {m.status}")
+                else:
+                    parts.append(f"[{m.memory_type}] {m.model_dump_json()}")
+
+        return f"Found {len(parts)} memories:\n" + "\n".join(parts)
+
+    except Exception as e:
+        logger.error(f"Memory recall failed: {e}", exc_info=True)
+        return f"Error recalling memory: {e}"
+
+
+async def execute_forget(args: dict, session_id: str = None) -> str:
+    """Delete a specific memory by searching for it."""
+    if not memory_store:
+        return "Memory system not enabled."
+
+    memory_id = args.get("memory_id", "")
+    query = args.get("query", "")
+
+    if not memory_id and not query:
+        return "Error: provide either 'memory_id' or 'query' to identify the memory to forget."
+
+    try:
+        search_term = memory_id or query
+        memories = await memory_store.search_memories(session_id or "", search_term)
+
+        if not memories:
+            return f"No memory found matching '{search_term}'."
+
+        # Delete the first match
+        target = memories[0]
+        from omicsclaw.memory.compat import _TYPE_TO_DOMAIN, _memory_to_uri_path
+        domain = _TYPE_TO_DOMAIN.get(target.memory_type, "core")
+        path = _memory_to_uri_path(target)
+        uri = f"{domain}://{path}"
+        await memory_store._client.forget(uri)
+        return f"✓ Forgotten: {uri}"
+
+    except Exception as e:
+        logger.error(f"Memory forget failed: {e}", exc_info=True)
+        return f"Error forgetting memory: {e}"
+
+
 async def execute_consult_knowledge(args: dict, **kwargs) -> str:
     """Query the OmicsClaw knowledge base for analysis guidance."""
     try:
@@ -3289,6 +3430,8 @@ def _available_tool_executors() -> dict[str, object]:
         "remove_file": execute_remove_file,
         "get_file_size": execute_get_file_size,
         "remember": execute_remember,
+        "recall": execute_recall,
+        "forget": execute_forget,
         "consult_knowledge": execute_consult_knowledge,
         "resolve_capability": execute_resolve_capability,
         "create_omics_skill": execute_create_omics_skill,
@@ -3344,13 +3487,103 @@ def _sanitize_tool_history(history: list[dict], warn: bool = True) -> list[dict]
     return _runtime_sanitize_tool_history(history, warn=warn)
 
 
+def _normalize_tool_callback_args(callback, args: tuple) -> tuple:
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return args
+
+    positional_capacity = 0
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+            return args
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional_capacity += 1
+    return args[:positional_capacity]
+
+
 async def _emit_tool_callback(callback, *args) -> None:
     if not callback:
         return
+    callback_args = _normalize_tool_callback_args(callback, args)
     if asyncio.iscoroutinefunction(callback):
-        await callback(*args)
+        await callback(*callback_args)
     else:
-        callback(*args)
+        callback(*callback_args)
+
+
+def _coerce_timeout_seconds(value) -> int | None:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return max(1, round(seconds))
+
+
+def _extract_timeout_seconds_from_text(text: str) -> int | None:
+    if not text:
+        return None
+
+    patterns = (
+        r"timed out after (?P<seconds>\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds)\b",
+        r"timeout after (?P<seconds>\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds)\b",
+    )
+    lowered = text.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lowered, re.IGNORECASE)
+        if not match:
+            continue
+        seconds = _coerce_timeout_seconds(match.group("seconds"))
+        if seconds is not None:
+            return seconds
+    return None
+
+
+def _extract_tool_timeout_seconds(execution_result, display_output) -> int | None:
+    error = getattr(execution_result, "error", None)
+    if error is not None:
+        for attr_name in (
+            "timeout",
+            "timeout_seconds",
+            "elapsed_seconds",
+            "elapsed_time_seconds",
+            "seconds",
+        ):
+            seconds = _coerce_timeout_seconds(getattr(error, attr_name, None))
+            if seconds is not None:
+                return seconds
+
+        seconds = _extract_timeout_seconds_from_text(str(error))
+        if seconds is not None:
+            return seconds
+
+    display_text = str(display_output or "")
+    if "timed out" in display_text.lower() or "timeout" in display_text.lower():
+        return _extract_timeout_seconds_from_text(display_text)
+
+    return None
+
+
+def _build_tool_result_callback_metadata(execution_result, display_output) -> dict[str, object]:
+    timeout_seconds = _extract_tool_timeout_seconds(execution_result, display_output)
+    metadata: dict[str, object] = {
+        "status": getattr(execution_result, "status", ""),
+        "success": bool(getattr(execution_result, "success", False)),
+        "is_error": bool(not getattr(execution_result, "success", False) or timeout_seconds),
+    }
+
+    error = getattr(execution_result, "error", None)
+    if error is not None:
+        metadata["error_type"] = type(error).__name__
+    if timeout_seconds is not None:
+        metadata["timed_out"] = True
+        metadata["elapsed_seconds"] = timeout_seconds
+    return metadata
 
 
 def _build_bot_query_engine_callbacks(
@@ -3361,6 +3594,8 @@ def _build_bot_query_engine_callbacks(
     on_tool_call,
     on_tool_result,
     on_stream_content,
+    on_stream_reasoning,
+    request_tool_approval,
     logger_obj,
     audit_fn,
     deep_learning_methods: set[str],
@@ -3480,7 +3715,12 @@ def _build_bot_query_engine_callbacks(
                         display_output = f"{notice}\n{display_output}"
                 except Exception:
                     pass
-            await _emit_tool_callback(on_tool_result, func_name, display_output)
+            await _emit_tool_callback(
+                on_tool_result,
+                func_name,
+                display_output,
+                _build_tool_result_callback_metadata(execution_result, display_output),
+            )
 
     def on_llm_error(exc: Exception) -> str:
         logger_obj.error(f"LLM API error: {exc}")
@@ -3489,8 +3729,10 @@ def _build_bot_query_engine_callbacks(
     return QueryEngineCallbacks(
         accumulate_usage=usage_accumulator,
         on_stream_content=on_stream_content,
+        on_stream_reasoning=on_stream_reasoning,
         before_tool=before_tool,
         after_tool=after_tool,
+        request_tool_approval=request_tool_approval,
         on_llm_error=on_llm_error,
     )
 
@@ -3551,6 +3793,16 @@ async def llm_tool_loop(
     on_tool_call=None,
     on_tool_result=None,
     on_stream_content=None,
+    on_stream_reasoning=None,
+    # Per-request runtime overrides (desktop app frontend)
+    model_override: str = "",
+    extra_api_params: dict | None = None,
+    max_tokens_override: int = 0,
+    system_prompt_append: str = "",
+    mode: str = "",
+    usage_accumulator=None,
+    request_tool_approval=None,
+    policy_state=None,
 ) -> str:
     """
     Run the LLM tool-use loop:
@@ -3785,6 +4037,18 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     session_id = chat_context.session_id
     system_prompt = chat_context.system_prompt
 
+    # Apply per-request system prompt additions
+    if system_prompt_append:
+        system_prompt = system_prompt.rstrip() + "\n\n" + system_prompt_append.strip()
+    if mode and mode != "ask":
+        _mode_hints = {
+            "code": "You are in code mode. Prefer writing and editing code to accomplish the user's goals.",
+            "plan": "You are in plan mode. Create detailed plans and explain your reasoning before taking action.",
+        }
+        hint = _mode_hints.get(mode, "")
+        if hint:
+            system_prompt = system_prompt.rstrip() + "\n\n## Mode\n" + hint
+
     tool_runtime = _build_tool_runtime()
     hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
     callbacks = _build_bot_query_engine_callbacks(
@@ -3794,10 +4058,16 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_stream_content=on_stream_content,
+        on_stream_reasoning=on_stream_reasoning,
+        request_tool_approval=request_tool_approval,
         logger_obj=logger,
         audit_fn=audit,
         deep_learning_methods=DEEP_LEARNING_METHODS,
-        usage_accumulator=_accumulate_usage,
+        usage_accumulator=usage_accumulator or _accumulate_usage,
+    )
+    resolved_policy_state = ToolPolicyState.from_mapping(
+        policy_state,
+        surface=platform or "bot",
     )
     return await run_query_engine(
         llm=llm,
@@ -3807,7 +4077,7 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             system_prompt=system_prompt,
             user_message_content=chat_context.user_message_content,
             surface=platform or "bot",
-            policy_state=ToolPolicyState(surface=platform or "bot"),
+            policy_state=resolved_policy_state,
             hook_runtime=hook_runtime,
             tool_runtime_context={
                 "omicsclaw_dir": str(OMICSCLAW_DIR),
@@ -3819,10 +4089,11 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         transcript_store=transcript_store,
         tool_result_store=tool_result_store,
         config=QueryEngineConfig(
-            model=OMICSCLAW_MODEL,
+            model=model_override or OMICSCLAW_MODEL,
             max_iterations=MAX_TOOL_ITERATIONS,
-            max_tokens=8192,
+            max_tokens=max_tokens_override if max_tokens_override > 0 else 8192,
             llm_error_types=(APIError,),
+            extra_api_params=extra_api_params or {},
         ),
         callbacks=callbacks,
     )

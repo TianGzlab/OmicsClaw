@@ -116,6 +116,8 @@ async def test_consult_knowledge_ui_callback_receives_refresh_notice():
         on_tool_call=None,
         on_tool_result=lambda tool_name, result: observed.append((tool_name, result)),
         on_stream_content=None,
+        on_stream_reasoning=None,
+        request_tool_approval=None,
         logger_obj=logging.getLogger("test.bot.callbacks"),
         audit_fn=lambda *_args, **_kwargs: None,
         deep_learning_methods=set(),
@@ -171,6 +173,8 @@ async def test_policy_blocked_tool_audits_and_emits_result():
         on_tool_call=None,
         on_tool_result=lambda tool_name, result: observed_results.append((tool_name, result)),
         on_stream_content=None,
+        on_stream_reasoning=None,
+        request_tool_approval=None,
         logger_obj=logging.getLogger("test.bot.policy"),
         audit_fn=audit_fn,
         deep_learning_methods=set(),
@@ -222,3 +226,73 @@ async def test_policy_blocked_tool_audits_and_emits_result():
         ("write_file", "[tool policy blocked]\nreason: approval required")
     ]
     assert any(event == "tool_policy_blocked" for event, _payload in audit_events)
+
+
+@pytest.mark.asyncio
+async def test_after_tool_emits_timeout_metadata_when_callback_accepts_it():
+    observed_results: list[tuple[str, str, dict[str, object]]] = []
+
+    callbacks = _build_bot_query_engine_callbacks(
+        chat_id="chat-3",
+        progress_fn=None,
+        progress_update_fn=None,
+        on_tool_call=None,
+        on_tool_result=(
+            lambda tool_name, result, metadata: observed_results.append(
+                (tool_name, result, metadata)
+            )
+        ),
+        on_stream_content=None,
+        on_stream_reasoning=None,
+        request_tool_approval=None,
+        logger_obj=logging.getLogger("test.bot.timeout"),
+        audit_fn=lambda *_args, **_kwargs: None,
+        deep_learning_methods=set(),
+        usage_accumulator=None,
+    )
+
+    request = ToolExecutionRequest(
+        call_id="call-timeout",
+        name="notebook_add_execute",
+        arguments={"source": "sleep(999)"},
+        spec=ToolSpec(
+            name="notebook_add_execute",
+            description="execute notebook cell",
+            parameters={"type": "object", "properties": {}},
+            read_only=False,
+        ),
+        executor=lambda _args: "ignored",
+    )
+
+    class ToolTimeoutError(Exception):
+        def __init__(self, timeout: int):
+            super().__init__(f"Timed out after {timeout}s")
+            self.timeout = timeout
+
+    result = ToolExecutionResult(
+        request=request,
+        output="Cell execution timed out after 91s",
+        success=False,
+        error=ToolTimeoutError(91),
+    )
+
+    await callbacks.after_tool(
+        result,
+        SimpleNamespace(content="Cell execution timed out after 91s"),
+        {},
+    )
+
+    assert observed_results == [
+        (
+            "notebook_add_execute",
+            "Cell execution timed out after 91s",
+            {
+                "status": "completed",
+                "success": False,
+                "is_error": True,
+                "error_type": "ToolTimeoutError",
+                "timed_out": True,
+                "elapsed_seconds": 91,
+            },
+        )
+    ]

@@ -247,6 +247,13 @@ class ChangesetStore:
         self._remove_changeset()
         return count
 
+    def discard_all(self) -> int:
+        """Drop the entire changeset pool after rollback/discard."""
+        data = self._load()
+        count = len(self._changed_rows(data))
+        self._remove_changeset()
+        return count
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

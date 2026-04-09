@@ -451,13 +451,17 @@ def summarize_filter_statistics(
     n_cells_after = int(adata_after.n_obs)
     n_genes_before = int(adata_before.n_vars)
     n_genes_after = int(adata_after.n_vars)
+    cell_retention_rate = n_cells_after / max(n_cells_before, 1)
+    gene_retention_rate = n_genes_after / max(n_genes_before, 1)
     return {
         "n_cells_before": n_cells_before,
         "n_cells_after": n_cells_after,
-        "cells_retained_pct": round(100 * n_cells_after / max(n_cells_before, 1), 2),
+        "cell_retention_rate": round(cell_retention_rate, 4),
+        "cells_retained_pct": round(100 * cell_retention_rate, 2),
         "n_genes_before": n_genes_before,
         "n_genes_after": n_genes_after,
-        "genes_retained_pct": round(100 * n_genes_after / max(n_genes_before, 1), 2),
+        "gene_retention_rate": round(gene_retention_rate, 4),
+        "genes_retained_pct": round(100 * gene_retention_rate, 2),
         "filter_stats": {str(key): int(value) for key, value in filter_stats.items()},
     }
 

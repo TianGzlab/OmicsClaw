@@ -838,6 +838,7 @@ def build_summary(adata, method: str) -> dict:
         "n_cells": int(adata.n_obs),
         "n_genes": int(adata.n_vars),
         "n_hvg": n_hvg,
+        "n_hvgs": n_hvg,
         "n_pcs_used": n_pcs_used,
     }
 
@@ -845,8 +846,40 @@ def build_summary(adata, method: str) -> dict:
 def merge_filter_summary(summary: dict, filter_summary: dict) -> dict:
     """Merge shared filtering context into the preprocessing summary."""
     merged = dict(summary)
-    merged["n_cells_before_filter"] = int(filter_summary.get("n_cells_before", summary.get("n_cells", 0)))
-    merged["n_genes_before_filter"] = int(filter_summary.get("n_genes_before", summary.get("n_genes", 0)))
+    n_cells_before = int(
+        filter_summary.get("n_cells_before", summary.get("n_cells", 0))
+    )
+    n_genes_before = int(
+        filter_summary.get("n_genes_before", summary.get("n_genes", 0))
+    )
+    merged["n_cells_before"] = n_cells_before
+    merged["n_genes_before"] = n_genes_before
+    merged["n_cells_before_filter"] = n_cells_before
+    merged["n_genes_before_filter"] = n_genes_before
+    if "n_cells_after" in filter_summary:
+        merged["n_cells_after"] = int(filter_summary["n_cells_after"])
+    if "n_genes_after" in filter_summary:
+        merged["n_genes_after"] = int(filter_summary["n_genes_after"])
+    if "cell_retention_rate" in filter_summary:
+        merged["cell_retention_rate"] = float(filter_summary["cell_retention_rate"])
+    elif n_cells_before > 0:
+        merged["cell_retention_rate"] = merged["n_cells"] / n_cells_before
+    if "cells_retained_pct" in filter_summary:
+        merged["cells_retained_pct"] = float(filter_summary["cells_retained_pct"])
+    elif "cell_retention_rate" in merged:
+        merged["cells_retained_pct"] = round(
+            float(merged["cell_retention_rate"]) * 100, 2
+        )
+    if "gene_retention_rate" in filter_summary:
+        merged["gene_retention_rate"] = float(filter_summary["gene_retention_rate"])
+    elif n_genes_before > 0:
+        merged["gene_retention_rate"] = merged["n_genes"] / n_genes_before
+    if "genes_retained_pct" in filter_summary:
+        merged["genes_retained_pct"] = float(filter_summary["genes_retained_pct"])
+    elif "gene_retention_rate" in merged:
+        merged["genes_retained_pct"] = round(
+            float(merged["gene_retention_rate"]) * 100, 2
+        )
     merged["filter_stats"] = dict(filter_summary.get("filter_stats", {}))
     merged["qc_metrics_reused"] = bool(filter_summary.get("qc_metrics_reused", False))
     if "input_preparation" in filter_summary:

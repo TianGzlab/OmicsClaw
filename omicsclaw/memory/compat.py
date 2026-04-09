@@ -79,7 +79,7 @@ class Session(BaseModel):
     """User session across bot restarts."""
     session_id: str
     user_id: str
-    platform: Literal["telegram", "feishu", "cli", "tui"]
+    platform: Literal["telegram", "feishu", "cli", "tui", "app"]
     created_at: datetime = Field(default_factory=_utcnow)
     last_activity: datetime = Field(default_factory=_utcnow)
     preferences: dict[str, Any] = Field(default_factory=dict)

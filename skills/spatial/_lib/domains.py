@@ -854,13 +854,11 @@ def identify_domains_cellcharter(
     from .dependency_manager import require
     import gc
     import inspect
-    import cellcharter as cc
-    import squidpy as sq
     from sklearn.metrics import adjusted_rand_score
     from collections import defaultdict
 
-    require("cellcharter", feature="CellCharter spatial domain identification")
-    require("squidpy", feature="CellCharter (spatial graph construction)")
+    cc = require("cellcharter", feature="CellCharter spatial domain identification")
+    sq = require("squidpy", feature="CellCharter (spatial graph construction)")
 
     logger.info(
         "Running CellCharter (n_domains=%s, n_layers=%d, use_rep=%s, auto_k=%s) ...",

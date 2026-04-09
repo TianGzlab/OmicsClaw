@@ -7,6 +7,7 @@ Optionally loads tools via langchain_mcp_adapters (if installed).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -88,9 +89,98 @@ def _interpolate(value: Any) -> Any:
     return value
 
 
-def load_mcp_config() -> dict[str, Any]:
-    """Load and interpolate MCP config from YAML."""
-    return _interpolate(_load_raw())
+def _string_dict(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, item in value.items():
+        text_key = str(key or "").strip()
+        if not text_key:
+            continue
+        result[text_key] = str(item or "")
+    return result
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _enabled_flag(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+    return bool(value)
+
+
+def _normalize_server_config(
+    server: Any,
+    *,
+    interpolate: bool,
+) -> dict[str, Any] | None:
+    if not isinstance(server, dict):
+        return None
+
+    payload = _interpolate(server) if interpolate else dict(server)
+    target = str(payload.get("command") or payload.get("url") or "").strip()
+    transport = str(payload.get("transport") or payload.get("type") or "").strip()
+    if not transport and target:
+        transport = _infer_transport(target)
+
+    entry: dict[str, Any] = {
+        "transport": transport,
+        "enabled": _enabled_flag(payload.get("enabled", True)),
+    }
+
+    command = str(payload.get("command", "") or "").strip()
+    if command:
+        entry["command"] = command
+
+    url = str(payload.get("url", "") or "").strip()
+    if url:
+        entry["url"] = url
+
+    args = _string_list(payload.get("args"))
+    if args:
+        entry["args"] = args
+
+    env = _string_dict(payload.get("env"))
+    if env:
+        entry["env"] = env
+
+    headers = _string_dict(payload.get("headers"))
+    if headers:
+        entry["headers"] = headers
+
+    tools = _string_list(payload.get("tools"))
+    if tools:
+        entry["tools"] = tools
+
+    return entry
+
+
+def load_mcp_config(*, include_disabled: bool = False) -> dict[str, Any]:
+    """Load runtime-ready MCP config from YAML.
+
+    By default disabled entries are excluded so runtime loading and prompt
+    probing do not activate servers the frontend has marked as disabled.
+    """
+    raw = _load_raw()
+    normalized: dict[str, Any] = {}
+    for name, server in raw.items():
+        normalized_entry = _normalize_server_config(server, interpolate=True)
+        if normalized_entry is None:
+            continue
+        if not include_disabled and not normalized_entry.get("enabled", True):
+            continue
+        normalized[str(name)] = normalized_entry
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +192,12 @@ def list_mcp_servers() -> list[dict[str, Any]]:
     raw = _load_raw()
     result = []
     for name, cfg in raw.items():
-        entry = {"name": name, **cfg}
+        normalized = _normalize_server_config(cfg, interpolate=False)
+        if normalized is None:
+            continue
+        entry = {"name": name, **normalized}
         result.append(entry)
+    result.sort(key=lambda entry: str(entry.get("name", "")))
     return result
 
 
@@ -114,6 +208,8 @@ def add_mcp_server(
     extra_args: list[str] | None = None,
     transport: str | None = None,
     env: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    enabled: bool | None = None,
     tools: list[str] | None = None,
 ) -> dict[str, Any]:
     """Add or replace an MCP server.
@@ -124,6 +220,8 @@ def add_mcp_server(
         extra_args: Additional args for stdio command
         transport: Transport type (auto-detected from target if None)
         env: Environment variables for stdio (KEY=VALUE pairs)
+        headers: HTTP/SSE request headers for remote transports
+        enabled: Persisted runtime toggle (False disables prompt/tool loading)
         tools: Tool allowlist (None = all)
 
     Returns:
@@ -138,14 +236,18 @@ def add_mcp_server(
         )
 
     entry: dict[str, Any] = {"transport": transport}
+    if enabled is not None:
+        entry["enabled"] = bool(enabled)
 
     if transport == "stdio":
         entry["command"] = target
         entry["args"] = list(extra_args) if extra_args else []
         if env:
-            entry["env"] = env
+            entry["env"] = _string_dict(env)
     else:
         entry["url"] = target
+        if headers:
+            entry["headers"] = _string_dict(headers)
 
     if tools:
         entry["tools"] = tools
@@ -224,7 +326,10 @@ async def load_mcp_tools_as_openai_functions() -> list[dict]:
 
 
 def _build_mcp_connection(server: dict[str, Any]) -> dict[str, Any] | None:
-    transport = str(server.get("transport", "") or "").strip()
+    if not _enabled_flag(server.get("enabled", True)):
+        return None
+
+    transport = str(server.get("transport", "") or server.get("type", "") or "").strip()
     if transport == "stdio":
         return {
             "transport": "stdio",
@@ -233,10 +338,13 @@ def _build_mcp_connection(server: dict[str, Any]) -> dict[str, Any] | None:
             **({"env": server["env"]} if "env" in server else {}),
         }
     if transport in {"http", "streamable_http", "sse", "websocket"}:
-        return {
+        connection = {
             "transport": transport,
             "url": server.get("url", ""),
         }
+        if isinstance(server.get("headers"), dict) and server["headers"]:
+            connection["headers"] = _string_dict(server["headers"])
+        return connection
     return None
 
 
@@ -289,7 +397,7 @@ async def load_active_mcp_server_entries_for_prompt() -> tuple[dict[str, Any], .
         return ()
 
     cache_key = tuple(
-        f"{name}:{cfg.get('transport', '')}:{cfg.get('url', '')}:{cfg.get('command', '')}:{','.join(cfg.get('args', []) or [])}"
+        f"{name}:{json.dumps(cfg, sort_keys=True, ensure_ascii=False)}"
         for name, cfg in sorted(config.items())
     )
     now = time.monotonic()

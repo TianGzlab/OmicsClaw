@@ -120,6 +120,7 @@ Important CLI entrypoints:
 - `oc run <skill> ...`
 - `oc interactive`
 - `oc tui`
+- `oc app-server`
 - `oc mcp list|add|remove|config`
 - `oc memory-server`
 - `oc onboard` for project `.env` bootstrap across LLM, runtime, memory, and bot-channel configuration

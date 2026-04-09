@@ -138,4 +138,6 @@ workspace/
 
 # Local references / external tools (user-downloaded, large)
 resources/
+
+# Codex config (local only)
 .codex

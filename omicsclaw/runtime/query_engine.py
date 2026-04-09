@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from omicsclaw.common.user_guidance import (
     extract_user_guidance_payloads,
@@ -20,14 +20,19 @@ from .events import (
 )
 from .hook_payloads import SessionHookPayload, ToolHookPayload
 from .hooks import HOOK_MODE_CONTEXT, HOOK_MODE_NOTICE
-from .policy import evaluate_tool_policy
+from .policy import TOOL_POLICY_REQUIRE_APPROVAL, evaluate_tool_policy
 from .hooks import LifecycleHookRuntime
 from .policy_state import ToolPolicyState
 from .tool_execution_hooks import (
     build_default_tool_execution_hooks,
     merge_tool_execution_hooks,
 )
-from .tool_orchestration import ToolExecutionRequest, ToolExecutionResult, execute_tool_requests
+from .tool_orchestration import (
+    EXECUTION_STATUS_POLICY_BLOCKED,
+    ToolExecutionRequest,
+    ToolExecutionResult,
+    execute_tool_requests,
+)
 from .tool_registry import ToolRuntime
 from .tool_result_store import ToolResultRecord, ToolResultStore
 from .transcript_store import TranscriptStore
@@ -87,8 +92,10 @@ class QueryEngineContext:
 class QueryEngineCallbacks:
     accumulate_usage: Callable[[Any], Any] | None = None
     on_stream_content: Callable[[str], Any] | None = None
+    on_stream_reasoning: Callable[[str], Any] | None = None
     before_tool: Callable[[ToolExecutionRequest], Any] | None = None
     after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = None
+    request_tool_approval: Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None = None
     on_llm_error: Callable[[Exception], Any] | None = None
 
 
@@ -101,6 +108,7 @@ class QueryEngineConfig:
     context_compaction: ContextCompactionConfig = field(
         default_factory=ContextCompactionConfig
     )
+    extra_api_params: dict[str, Any] = field(default_factory=dict)
 
 
 def _extract_completion_tokens(response_usage, delta) -> int:
@@ -159,6 +167,54 @@ def _merge_response_segments(segments: list[str], current: str) -> str:
     return "\n\n".join(merged)
 
 
+def _normalize_permission_resolution(
+    raw: Any,
+    *,
+    request: ToolExecutionRequest,
+    fallback_surface: str,
+) -> tuple[str, dict[str, Any] | None, ToolPolicyState | None, str, bool]:
+    if raw is None:
+        return ("deny", None, None, "", False)
+
+    if isinstance(raw, str):
+        behavior = raw.strip().lower()
+        if behavior in {"allow", "deny"}:
+            return (behavior, None, None, "", False)
+        return ("deny", None, None, raw.strip(), False)
+
+    if not isinstance(raw, Mapping):
+        return ("deny", None, None, "", False)
+
+    behavior = str(raw.get("behavior") or raw.get("decision") or "").strip().lower()
+    if behavior not in {"allow", "deny"}:
+        behavior = "deny"
+
+    updated_arguments_raw = raw.get("updated_arguments")
+    if updated_arguments_raw is None:
+        updated_arguments_raw = raw.get("updated_input")
+    updated_arguments = (
+        dict(updated_arguments_raw)
+        if isinstance(updated_arguments_raw, Mapping)
+        else None
+    )
+
+    policy_state_raw = raw.get("policy_state")
+    policy_state = (
+        ToolPolicyState.from_mapping(
+            policy_state_raw,
+            surface=str(
+                ((request.runtime_context or {}).get("surface") or fallback_surface or "")
+            ).strip(),
+        )
+        if policy_state_raw is not None
+        else None
+    )
+
+    message = str(raw.get("message", "") or "").strip()
+    persist = bool(raw.get("persist", False))
+    return (behavior, updated_arguments, policy_state, message, persist)
+
+
 def _build_preflight_interruption_message(text: str | None) -> str:
     payloads = extract_user_guidance_payloads(text)
     if not payloads:
@@ -172,6 +228,56 @@ def _build_preflight_interruption_message(text: str | None) -> str:
     if not relevant:
         return ""
     return render_guidance_block([], payloads=relevant, title="Important follow-up")
+
+
+def _extract_text_fragments(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, Mapping):
+        for key in ("text", "content", "summary", "reasoning"):
+            fragment = value.get(key)
+            if isinstance(fragment, str) and fragment:
+                return [fragment]
+        return []
+    if isinstance(value, (list, tuple)):
+        fragments: list[str] = []
+        for item in value:
+            fragments.extend(_extract_text_fragments(item))
+        return fragments
+    for attr in ("text", "content", "summary", "reasoning"):
+        fragment = getattr(value, attr, None)
+        if isinstance(fragment, str) and fragment:
+            return [fragment]
+    return []
+
+
+def _extract_stream_delta_chunks(delta: Any) -> tuple[list[str], list[str]]:
+    text_chunks: list[str] = []
+    reasoning_chunks: list[str] = []
+
+    content = getattr(delta, "content", None)
+    if isinstance(content, str):
+        text_chunks.append(content)
+    elif content is not None:
+        parts = content if isinstance(content, (list, tuple)) else [content]
+        for part in parts:
+            part_type = ""
+            if isinstance(part, Mapping):
+                part_type = str(part.get("type", "") or "").strip().lower()
+            else:
+                part_type = str(getattr(part, "type", "") or "").strip().lower()
+            fragments = _extract_text_fragments(part)
+            if part_type in {"reasoning", "thinking", "summary"}:
+                reasoning_chunks.extend(fragments)
+            else:
+                text_chunks.extend(fragments)
+
+    for attr in ("reasoning", "reasoning_content", "thinking"):
+        reasoning_chunks.extend(_extract_text_fragments(getattr(delta, attr, None)))
+
+    return text_chunks, reasoning_chunks
 
 
 def _materialize_message_from_choice_message(message) -> MaterializedMessage:
@@ -201,20 +307,24 @@ async def _materialize_message_from_stream(
     tool_calls_dict: dict[int, MaterializedToolCall] = {}
 
     async for chunk in response:
+        if chunk.usage:
+            _record_usage(
+                chunk.usage,
+                callbacks,
+                on_usage_delta=on_usage_delta,
+            )
         if not chunk.choices:
-            if chunk.usage:
-                _record_usage(
-                    chunk.usage,
-                    callbacks,
-                    on_usage_delta=on_usage_delta,
-                )
             continue
 
         delta = chunk.choices[0].delta
-        if delta.content:
-            final_content += delta.content
+        text_chunks, reasoning_chunks = _extract_stream_delta_chunks(delta)
+        for reasoning_chunk in reasoning_chunks:
+            if callbacks.on_stream_reasoning:
+                await _maybe_await(callbacks.on_stream_reasoning(reasoning_chunk))
+        for text_chunk in text_chunks:
+            final_content += text_chunk
             if callbacks.on_stream_content:
-                await _maybe_await(callbacks.on_stream_content(delta.content))
+                await _maybe_await(callbacks.on_stream_content(text_chunk))
 
         if delta.tool_calls:
             for tc_chunk in delta.tool_calls:
@@ -315,6 +425,7 @@ async def run_query_engine(
     budget_tracker = create_token_budget_tracker(context.token_budget)
     accumulated_response_segments: list[str] = []
     has_attempted_reactive_compact = False
+    current_policy_state = context.policy_state
     pipeline_workspace = str(
         (tool_runtime_context or {}).get("pipeline_workspace", "") or ""
     ).strip()
@@ -350,6 +461,8 @@ async def run_query_engine(
                 kwargs = {}
                 if callbacks.on_stream_content is not None:
                     kwargs = {"stream": True, "stream_options": {"include_usage": True}}
+                if config.extra_api_params:
+                    kwargs.update(config.extra_api_params)
 
                 try:
                     response = await llm.chat.completions.create(
@@ -447,7 +560,7 @@ async def run_query_engine(
                 "session_id": context.session_id,
                 "chat_id": context.chat_id,
                 "surface": context.surface,
-                "policy_state": context.policy_state,
+                "policy_state": current_policy_state,
             }
             if tool_runtime_context:
                 runtime_context.update(tool_runtime_context)
@@ -488,6 +601,84 @@ async def run_query_engine(
             execution_requests.append(request)
 
         execution_results = await execute_tool_requests(execution_requests)
+        if callbacks.request_tool_approval is not None:
+            resolved_execution_results: list[ToolExecutionResult] = []
+            for execution_result in execution_results:
+                request = execution_result.request
+                if (
+                    execution_result.status == EXECUTION_STATUS_POLICY_BLOCKED
+                    and execution_result.policy_decision is not None
+                    and execution_result.policy_decision.action
+                    == TOOL_POLICY_REQUIRE_APPROVAL
+                ):
+                    resolution = await _maybe_await(
+                        callbacks.request_tool_approval(request, execution_result)
+                    )
+                    (
+                        approval_behavior,
+                        updated_arguments,
+                        updated_policy_state,
+                        deny_message,
+                        approval_persist,
+                    ) = _normalize_permission_resolution(
+                        resolution,
+                        request=request,
+                        fallback_surface=context.surface,
+                    )
+                    if approval_behavior == "allow":
+                        base_policy_state = ToolPolicyState.from_mapping(
+                            (request.runtime_context or {}).get("policy_state"),
+                            surface=context.surface,
+                        )
+                        effective_policy_state = updated_policy_state
+                        if effective_policy_state is None:
+                            effective_policy_state = ToolPolicyState(
+                                surface=base_policy_state.surface or context.surface,
+                                trusted=base_policy_state.trusted,
+                                background=base_policy_state.background,
+                                auto_approve_ask=base_policy_state.auto_approve_ask,
+                                approved_tool_names=(
+                                    base_policy_state.approved_tool_names
+                                    | frozenset({request.name})
+                                ),
+                            )
+                        approved_runtime_context = dict(request.runtime_context or {})
+                        approved_runtime_context["policy_state"] = effective_policy_state
+                        approved_request = ToolExecutionRequest(
+                            call_id=request.call_id,
+                            name=request.name,
+                            arguments=(
+                                updated_arguments
+                                if updated_arguments is not None
+                                else request.arguments
+                            ),
+                            spec=request.spec,
+                            executor=request.executor,
+                            runtime_context=approved_runtime_context,
+                            policy_decision=evaluate_tool_policy(
+                                request.name,
+                                request.spec,
+                                runtime_context=approved_runtime_context,
+                            ),
+                        )
+                        execution_result = (
+                            await execute_tool_requests([approved_request])
+                        )[0]
+                        if updated_policy_state is not None and approval_persist:
+                            current_policy_state = updated_policy_state
+                    elif deny_message:
+                        execution_result = ToolExecutionResult(
+                            request=request,
+                            output=deny_message,
+                            success=False,
+                            error=execution_result.error,
+                            status=execution_result.status,
+                            policy_decision=execution_result.policy_decision,
+                            trace=execution_result.trace,
+                        )
+                resolved_execution_results.append(execution_result)
+            execution_results = resolved_execution_results
+
         interruption_message = ""
         for execution_result in execution_results:
             request = execution_result.request

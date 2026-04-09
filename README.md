@@ -294,6 +294,14 @@ cd frontend && npm install && npm run dev
 
 The memory API now binds to `127.0.0.1:8766` by default. If you need to expose it beyond localhost, set both `OMICSCLAW_MEMORY_HOST` and `OMICSCLAW_MEMORY_API_TOKEN`.
 
+**Desktop / web frontend backend:**
+```bash
+pip install -e ".[desktop]"
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+The app backend binds to `127.0.0.1:8765` by default and provides the HTTP/SSE contract used by OmicsClaw-App.
+
 **What it remembers:**
 - 📁 **Datasets** — File paths, platforms (Visium/Xenium), dimensions, preprocessing state
 - 📊 **Analyses** — Methods used, parameters, execution time, lineage (parent → child)

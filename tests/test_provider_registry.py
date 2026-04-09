@@ -4,6 +4,7 @@ from omicsclaw.core.provider_registry import (
     PROVIDER_CHOICES,
     PROVIDER_DETECT_ORDER,
     PROVIDER_PRESETS,
+    build_provider_registry_entries,
     detect_provider_from_env,
     get_langchain_llm,
     resolve_provider,
@@ -14,6 +15,21 @@ def test_provider_choices_match_registry_keys():
     assert PROVIDER_CHOICES == tuple(PROVIDER_PRESETS.keys())
     assert "nvidia" in PROVIDER_CHOICES
     assert PROVIDER_CHOICES[-2:] == ("ollama", "custom")
+
+
+def test_build_provider_registry_entries_exposes_display_metadata():
+    entries = build_provider_registry_entries()
+
+    assert [entry["name"] for entry in entries] == list(PROVIDER_PRESETS.keys())
+
+    deepseek = next(entry for entry in entries if entry["name"] == "deepseek")
+    assert deepseek["display_name"] == "DeepSeek"
+    assert deepseek["tier"] == "primary"
+    assert "deepseek-chat" in deepseek["models"]
+
+    custom = next(entry for entry in entries if entry["name"] == "custom")
+    assert custom["display_name"] == "Custom Endpoint"
+    assert custom["models"] == []
 
 
 def test_detect_provider_from_env_prefers_explicit_provider(monkeypatch):

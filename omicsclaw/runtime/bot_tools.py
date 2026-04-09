@@ -501,6 +501,70 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("memory", "knowledge"),
         ),
         ToolSpec(
+            name="recall",
+            description=(
+                "Retrieve information from persistent memory. Use this to recall: "
+                "user preferences, biological insights, project context, dataset info, "
+                "and analysis history saved in previous conversations. "
+                "You can search by keyword or list memories by type."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Search query to find specific memories. "
+                            "E.g. 'language preference', 'cluster annotations', 'species'."
+                        ),
+                    },
+                    "memory_type": {
+                        "type": "string",
+                        "enum": ["preference", "insight", "project_context", "dataset", "analysis"],
+                        "description": "Optional: filter by memory type.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of memories to return (default: 10).",
+                    },
+                },
+            },
+            surfaces=("bot",),
+            context_params=("session_id",),
+            read_only=True,
+            concurrency_safe=True,
+            policy_tags=("memory", "knowledge"),
+        ),
+        ToolSpec(
+            name="forget",
+            description=(
+                "Remove a specific memory from persistent storage. "
+                "Use when user explicitly asks to forget or remove a saved preference, "
+                "insight, or other memory. Provide a query or memory_id to identify "
+                "which memory to remove."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "The memory_id of the memory to forget (if known).",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Search query to find the memory to forget.",
+                    },
+                },
+            },
+            surfaces=("bot",),
+            context_params=("session_id",),
+            read_only=False,
+            concurrency_safe=False,
+            result_policy=RESULT_POLICY_MEMORY_WRITE,
+            risk_level=RISK_LEVEL_MEDIUM,
+            policy_tags=("memory", "knowledge"),
+        ),
+        ToolSpec(
             name="consult_knowledge",
             description=(
                 "Query the OmicsClaw knowledge base for analysis guidance. "

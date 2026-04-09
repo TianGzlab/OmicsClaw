@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 from omicsclaw.extensions import (
     ExtensionManifest,
@@ -65,6 +66,30 @@ class _FakeResponse:
         self.choices = [_FakeChoice(message)]
 
 
+class _FakeStreamChunk:
+    def __init__(self, *, delta=None, usage=None):
+        self.usage = usage
+        if delta is None:
+            self.choices = []
+        else:
+            self.choices = [SimpleNamespace(delta=delta)]
+
+
+class _FakeStreamResponse:
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def __aiter__(self):
+        self._iter = iter(self._chunks)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
 class _FakeLLM:
     def __init__(self, responses=None, error=None, events=None):
         if events is not None:
@@ -101,6 +126,7 @@ class _FakeUsage:
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
         self.total_tokens = total_tokens or (prompt_tokens + completion_tokens)
+
 
 
 def test_run_query_engine_executes_tools_and_records_transcript(tmp_path):
@@ -210,6 +236,57 @@ def test_run_query_engine_uses_llm_error_callback(tmp_path):
     assert result == "handled: boom"
 
 
+def test_run_query_engine_streams_reasoning_and_text(tmp_path):
+    llm = _FakeLLM(
+        events=[
+            _FakeStreamResponse(
+                [
+                    _FakeStreamChunk(
+                        delta=SimpleNamespace(
+                            content="Hello ",
+                            reasoning="plan first ",
+                            tool_calls=None,
+                        ),
+                    ),
+                    _FakeStreamChunk(
+                        delta=SimpleNamespace(content="world", tool_calls=None)
+                    ),
+                    _FakeStreamChunk(usage=_FakeUsage(prompt_tokens=1, completion_tokens=2)),
+                ]
+            )
+        ]
+    )
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+    runtime = ToolRegistry([]).build_runtime({})
+    observed_text: list[str] = []
+    observed_reasoning: list[str] = []
+
+    result = asyncio.run(
+        run_query_engine(
+            llm=llm,
+            context=QueryEngineContext(
+                chat_id="chat-stream",
+                session_id="session-stream",
+                system_prompt="SYSTEM",
+                user_message_content="hello",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(model="fake-model", llm_error_types=(_FakeAPIError,)),
+            callbacks=QueryEngineCallbacks(
+                on_stream_content=observed_text.append,
+                on_stream_reasoning=observed_reasoning.append,
+            ),
+        )
+    )
+
+    assert result == "Hello world"
+    assert observed_text == ["Hello ", "world"]
+    assert observed_reasoning == ["plan first "]
+
+
 def test_run_query_engine_records_policy_blocked_tool_results(tmp_path):
     observed = {"calls": 0}
 
@@ -271,6 +348,91 @@ def test_run_query_engine_records_policy_blocked_tool_results(tmp_path):
     assert history[2]["role"] == "tool"
     assert history[2]["tool_call_id"] == "call-writer"
     assert "[tool policy blocked]" in history[2]["content"]
+
+
+def test_run_query_engine_retries_policy_blocked_tool_after_approval(tmp_path):
+    observed = {"calls": 0, "approvals": []}
+
+    async def writer_executor(args):
+        observed["calls"] += 1
+        return f"written:{args['path']}"
+
+    runtime = ToolRegistry(
+        [
+            ToolSpec(
+                name="writer",
+                description="Writer tool",
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                },
+                approval_mode=APPROVAL_MODE_ASK,
+                writes_workspace=True,
+            )
+        ]
+    ).build_runtime({"writer": writer_executor})
+
+    llm = _FakeLLM(
+        [
+            _FakeResponse(
+                _FakeMessage(
+                    content="",
+                    tool_calls=[
+                        _FakeToolCall(
+                            "call-writer",
+                            "writer",
+                            json.dumps({"path": "/tmp/original.txt"}),
+                        )
+                    ],
+                )
+            ),
+            _FakeResponse(_FakeMessage(content="done", tool_calls=None)),
+        ]
+    )
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+
+    async def request_tool_approval(request, execution_result):
+        observed["approvals"].append((request.call_id, execution_result.status))
+        return {
+            "behavior": "allow",
+            "updated_input": {"path": "/tmp/approved.txt"},
+            "policy_state": {
+                "surface": "cli",
+                "approved_tool_names": ["writer"],
+            },
+            "persist": True,
+        }
+
+    result = asyncio.run(
+        run_query_engine(
+            llm=llm,
+            context=QueryEngineContext(
+                chat_id="chat-approved",
+                session_id="session-approved",
+                system_prompt="SYSTEM",
+                user_message_content="please write a file",
+                surface="cli",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(model="fake-model", llm_error_types=(_FakeAPIError,)),
+            callbacks=QueryEngineCallbacks(
+                request_tool_approval=request_tool_approval,
+            ),
+        )
+    )
+
+    assert result == "done"
+    assert observed["calls"] == 1
+    assert observed["approvals"] == [("call-writer", "policy_blocked")]
+    records = result_store.get_records("chat-approved")
+    assert len(records) == 1
+    assert records[0].content == "written:/tmp/approved.txt"
+    history = transcript_store.get_history("chat-approved")
+    assert history[2]["role"] == "tool"
+    assert history[2]["content"] == "written:/tmp/approved.txt"
 
 
 def test_run_query_engine_applies_session_context_hooks_and_tool_notices(tmp_path):

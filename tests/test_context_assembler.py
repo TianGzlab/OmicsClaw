@@ -461,6 +461,41 @@ def test_load_active_mcp_server_entries_for_prompt_filters_per_server(monkeypatc
     )
 
 
+def test_mcp_runtime_config_skips_disabled_entries_and_forwards_headers(monkeypatch):
+    monkeypatch.setenv("MCP_AUTH", "Bearer token")
+    monkeypatch.setattr(
+        _mcp,
+        "_load_raw",
+        lambda: {
+            "disabled-remote": {
+                "transport": "sse",
+                "url": "https://disabled.example/sse",
+                "headers": {"Authorization": "${MCP_AUTH}"},
+                "enabled": False,
+            },
+            "secure-remote": {
+                "transport": "http",
+                "url": "https://enabled.example/mcp",
+                "headers": {"Authorization": "${MCP_AUTH}"},
+            },
+        },
+    )
+
+    runtime_config = _mcp.load_mcp_config()
+    all_config = _mcp.load_mcp_config(include_disabled=True)
+    connection = _mcp._build_mcp_connection(all_config["secure-remote"])
+
+    assert "disabled-remote" not in runtime_config
+    assert all_config["disabled-remote"]["enabled"] is False
+    assert all_config["secure-remote"]["headers"] == {"Authorization": "Bearer token"}
+    assert connection == {
+        "transport": "http",
+        "url": "https://enabled.example/mcp",
+        "headers": {"Authorization": "Bearer token"},
+    }
+    assert _mcp._build_mcp_connection(all_config["disabled-remote"]) is None
+
+
 def test_assemble_chat_context_forwards_knowledge_guidance_to_prompt_builder(monkeypatch):
     calls = {"prompt": None}
 

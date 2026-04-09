@@ -294,6 +294,14 @@ cd frontend && npm install && npm run dev
 
 默认情况下，Memory API 监听在 `127.0.0.1:8766`。如果需要暴露到本机之外，请同时配置 `OMICSCLAW_MEMORY_HOST` 和 `OMICSCLAW_MEMORY_API_TOKEN`。
 
+**桌面 / Web 前端后端：**
+```bash
+pip install -e ".[desktop]"
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+该后端默认监听 `127.0.0.1:8765`，提供 OmicsClaw-App 所使用的 HTTP / SSE 接口。
+
 **系统会记录的内容包括：**
 
 - 📁 **数据集**：文件路径、平台类型（Visium / Xenium）、数据维度、预处理状态

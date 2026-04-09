@@ -157,6 +157,31 @@ class ChannelManager:
             health.record_failure(str(e))
             logger.error(f"Failed to start channel '{name}': {e}", exc_info=True)
 
+    async def start_channel(self, name: str) -> None:
+        """Start a single already-registered channel.
+
+        Safe to call while the manager is running — the consumer/dispatcher
+        loops will pick up the new channel automatically.
+        """
+        channel = self._channels.get(name)
+        if channel is None:
+            raise ValueError(f"Channel '{name}' is not registered")
+        if channel._running:
+            return  # already running
+        await self._start_one(name, channel)
+
+    async def stop_channel(self, name: str) -> None:
+        """Stop and unregister a single channel.
+
+        If no channels remain, the manager keeps running (caller decides
+        whether to tear it down).
+        """
+        channel = self._channels.get(name)
+        if channel is None:
+            return
+        await self._stop_one(name, channel)
+        self.unregister(name)
+
     async def stop_all(self) -> None:
         """Stop all channels and background tasks."""
         self._running = False

@@ -9,9 +9,30 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, TypedDict
 
 ProviderPreset = tuple[str, str, str]
+ProviderTier = Literal["primary", "aggregator", "local"]
+
+
+class ProviderDisplayMetadata(TypedDict):
+    display_name: str
+    description: str
+    description_zh: str
+    tier: ProviderTier
+    models: tuple[str, ...]
+
+
+class ProviderRegistryEntry(TypedDict):
+    name: str
+    base_url: str
+    default_model: str
+    env_key: str
+    display_name: str
+    description: str
+    description_zh: str
+    tier: ProviderTier
+    models: list[str]
 
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
@@ -64,6 +85,111 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     "custom": ("", "", ""),
 }
 
+PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
+    "deepseek": {
+        "display_name": "DeepSeek",
+        "description": "Cost-effective reasoning model",
+        "description_zh": "高性价比推理模型",
+        "tier": "primary",
+        "models": ("deepseek-chat", "deepseek-reasoner"),
+    },
+    "openai": {
+        "display_name": "OpenAI",
+        "description": "GPT-4o and o-series models",
+        "description_zh": "GPT-4o 及 o 系列模型",
+        "tier": "primary",
+        "models": ("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"),
+    },
+    "anthropic": {
+        "display_name": "Anthropic",
+        "description": "Claude Sonnet and Opus",
+        "description_zh": "Claude Sonnet 和 Opus",
+        "tier": "primary",
+        "models": ("claude-sonnet-4-5-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001"),
+    },
+    "gemini": {
+        "display_name": "Google Gemini",
+        "description": "Gemini Flash and Pro",
+        "description_zh": "Gemini Flash 和 Pro",
+        "tier": "primary",
+        "models": ("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"),
+    },
+    "nvidia": {
+        "display_name": "NVIDIA NIM",
+        "description": "Hosted inference on NVIDIA infrastructure",
+        "description_zh": "NVIDIA 基础设施托管推理",
+        "tier": "primary",
+        "models": (
+            "deepseek-ai/deepseek-r1",
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+        ),
+    },
+    "siliconflow": {
+        "display_name": "SiliconFlow",
+        "description": "China-optimized multi-model hosting",
+        "description_zh": "国内优化的多模型托管平台",
+        "tier": "aggregator",
+        "models": ("deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct"),
+    },
+    "openrouter": {
+        "display_name": "OpenRouter",
+        "description": "Multi-model gateway",
+        "description_zh": "多模型网关",
+        "tier": "aggregator",
+        "models": (
+            "deepseek/deepseek-chat-v3-0324",
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4o",
+            "google/gemini-2.5-flash",
+        ),
+    },
+    "volcengine": {
+        "display_name": "Volcengine",
+        "description": "ByteDance Doubao models",
+        "description_zh": "字节跳动豆包模型",
+        "tier": "aggregator",
+        "models": ("doubao-1.5-pro-256k", "doubao-1.5-pro-32k", "doubao-lite-32k"),
+    },
+    "dashscope": {
+        "display_name": "DashScope",
+        "description": "Alibaba Qwen models",
+        "description_zh": "阿里巴巴通义千问模型",
+        "tier": "aggregator",
+        "models": ("qwen-max", "qwen-plus", "qwen-turbo", "qwen-long"),
+    },
+    "zhipu": {
+        "display_name": "Zhipu AI",
+        "description": "GLM-4 series models",
+        "description_zh": "GLM-4 系列模型",
+        "tier": "aggregator",
+        "models": ("glm-4-flash", "glm-4-plus", "glm-4-long", "glm-4-air"),
+    },
+    "ollama": {
+        "display_name": "Ollama",
+        "description": "Local models — no API key needed",
+        "description_zh": "本地模型，无需 API Key",
+        "tier": "local",
+        "models": (
+            "qwen2.5:7b",
+            "qwen2.5:14b",
+            "qwen2.5:32b",
+            "llama3.3:70b",
+            "deepseek-r1:7b",
+            "deepseek-r1:14b",
+            "deepseek-r1:32b",
+            "gemma3:12b",
+        ),
+    },
+    "custom": {
+        "display_name": "Custom Endpoint",
+        "description": "Any OpenAI-compatible API",
+        "description_zh": "任意 OpenAI 兼容接口",
+        "tier": "local",
+        "models": tuple(),
+    },
+}
+
 PROVIDER_DETECT_ORDER: tuple[str, ...] = (
     "deepseek",
     "openai",
@@ -78,6 +204,45 @@ PROVIDER_DETECT_ORDER: tuple[str, ...] = (
 )
 
 PROVIDER_CHOICES: tuple[str, ...] = tuple(PROVIDER_PRESETS.keys())
+
+
+def get_provider_display_metadata(provider_name: str) -> ProviderDisplayMetadata:
+    metadata = PROVIDER_DISPLAY_METADATA.get(provider_name)
+    if metadata is not None:
+        return metadata
+
+    label = str(provider_name or "").strip()
+    return {
+        "display_name": label or provider_name,
+        "description": "",
+        "description_zh": "",
+        "tier": "local",
+        "models": tuple(),
+    }
+
+
+def build_provider_registry_entries(
+    provider_presets: Mapping[str, ProviderPreset] = PROVIDER_PRESETS,
+) -> list[ProviderRegistryEntry]:
+    entries: list[ProviderRegistryEntry] = []
+    for name, (base_url, default_model, env_key) in provider_presets.items():
+        metadata = get_provider_display_metadata(name)
+        models = list(dict.fromkeys([
+            *metadata["models"],
+            *((default_model,) if default_model else tuple()),
+        ]))
+        entries.append({
+            "name": name,
+            "base_url": base_url,
+            "default_model": default_model,
+            "env_key": env_key,
+            "display_name": metadata["display_name"],
+            "description": metadata["description"],
+            "description_zh": metadata["description_zh"],
+            "tier": metadata["tier"],
+            "models": models,
+        })
+    return entries
 
 
 def detect_provider_from_env(
