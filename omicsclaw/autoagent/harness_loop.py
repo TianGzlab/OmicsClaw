@@ -178,7 +178,12 @@ class HarnessLoop:
 
         # ---- Step 1: Baseline (unmodified code) ----
         self._raise_if_cancelled()
-        emit("progress", {"phase": "baseline", "iteration": 0})
+        self._emit_progress(
+            emit,
+            phase="baseline",
+            completed=0,
+            iteration=0,
+        )
 
         baseline_params = self.search_space.defaults_dict()
         baseline, baseline_trace = self._run_and_trace(
@@ -216,9 +221,17 @@ class HarnessLoop:
 
         emit("trial_complete", {
             "trial_id": 0,
+            "iteration": 0,
             "score": baseline.composite_score,
             "status": "baseline",
         })
+        self._emit_progress(
+            emit,
+            phase="baseline",
+            completed=1,
+            best_score=baseline.composite_score,
+            iteration=0,
+        )
 
         if not math.isfinite(baseline.composite_score):
             return self._finalize(
@@ -249,12 +262,13 @@ class HarnessLoop:
 
         for iteration in range(1, self.max_iterations + 1):
             self._raise_if_cancelled()
-            emit("progress", {
-                "phase": "evolving",
-                "iteration": iteration,
-                "total": self.max_iterations,
-                "best_score": best.composite_score,
-            })
+            self._emit_progress(
+                emit,
+                phase="evolving",
+                completed=iteration,
+                best_score=best.composite_score,
+                iteration=iteration,
+            )
 
             # Build directive
             gate_verdict = run_hard_gates(
@@ -275,7 +289,11 @@ class HarnessLoop:
 
             # Ask LLM for patch
             self._raise_if_cancelled()
-            emit("reasoning", {"iteration": iteration, "phase": "asking_llm"})
+            emit("reasoning", {
+                "trial_id": iteration,
+                "iteration": iteration,
+                "phase": "asking_llm",
+            })
 
             try:
                 response_text = self._call_llm(directive)
@@ -316,6 +334,7 @@ class HarnessLoop:
 
             if patch.converged:
                 emit("reasoning", {
+                    "trial_id": iteration,
                     "iteration": iteration,
                     "reasoning": patch.reasoning,
                 })
@@ -323,6 +342,7 @@ class HarnessLoop:
                 break
 
             emit("reasoning", {
+                "trial_id": iteration,
                 "iteration": iteration,
                 "reasoning": patch.reasoning,
                 "diff_summary": patch.diff_summary,
@@ -368,7 +388,12 @@ class HarnessLoop:
                     continue
 
                 self._raise_if_cancelled()
-                emit("trial_start", {"iteration": iteration, "files": modified})
+                emit("trial_start", {
+                    "trial_id": iteration,
+                    "iteration": iteration,
+                    "files": modified,
+                    "params": {},
+                })
 
                 trial, trial_trace = self._run_and_trace(
                     trial_id=iteration,
@@ -400,11 +425,13 @@ class HarnessLoop:
                     self.ledger.append(trial)
 
                     emit("trial_judgment", {
+                        "trial_id": iteration,
                         "iteration": iteration,
                         "decision": "discard",
                         "reason": gate_result.summary(),
                     })
                     emit("trial_complete", {
+                        "trial_id": iteration,
                         "iteration": iteration,
                         "score": trial.composite_score,
                         "status": trial.status,
@@ -447,11 +474,13 @@ class HarnessLoop:
                         patches_rejected += 1
                         self.ledger.append(trial)
                         emit("trial_judgment", {
+                            "trial_id": iteration,
                             "iteration": iteration,
                             "decision": "discard",
                             "reason": f"Failed to record accepted patch: {exc}",
                         })
                         emit("trial_complete", {
+                            "trial_id": iteration,
                             "iteration": iteration,
                             "score": trial.composite_score,
                             "status": trial.status,
@@ -485,12 +514,14 @@ class HarnessLoop:
 
                 self.ledger.append(trial)
                 emit("trial_judgment", {
+                    "trial_id": iteration,
                     "iteration": iteration,
                     "decision": judgment.decision,
                     "reason": judgment.reason,
                     "new_best": judgment.new_best,
                 })
                 emit("trial_complete", {
+                    "trial_id": iteration,
                     "iteration": iteration,
                     "score": trial.composite_score,
                     "status": trial.status,
@@ -734,7 +765,11 @@ class HarnessLoop:
         if on_event:
             if success:
                 on_event("done", {
+                    "best_trial": best.to_dict() if best else None,
+                    "best_score": best.composite_score if best else None,
                     "improvement_pct": result.improvement_pct,
+                    "total_trials": result.total_iterations,
+                    "total_iterations": result.total_iterations,
                     "patches_accepted": patches_accepted,
                     "patches_rejected": patches_rejected,
                     "converged": converged,
@@ -746,6 +781,34 @@ class HarnessLoop:
                 on_event("error", {"message": error_message or "Failed"})
 
         return result
+
+    def _emit_progress(
+        self,
+        emit: Callable[[str, dict[str, Any]], None],
+        *,
+        phase: str,
+        completed: int,
+        total: int | None = None,
+        best_score: float | None = None,
+        iteration: int | None = None,
+    ) -> None:
+        """Emit progress in a shape compatible with the older optimize UI.
+
+        The frontend that consumes ``/optimize`` was originally built against
+        ``OptimizationLoop`` and expects ``completed``/``total`` fields rather
+        than harness-specific ``iteration`` names. Emit both so the harness UI
+        stays backwards compatible while still exposing iteration semantics.
+        """
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "completed": completed,
+            "total": total if total is not None else self.max_iterations,
+        }
+        if best_score is not None:
+            payload["best_score"] = best_score
+        if iteration is not None:
+            payload["iteration"] = iteration
+        emit("progress", payload)
 
     def _promote_workspace(
         self,

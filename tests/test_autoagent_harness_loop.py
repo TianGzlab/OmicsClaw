@@ -457,3 +457,71 @@ class TestHarnessLoopEvolution:
         summary = json.loads(summary_path.read_text())
         assert summary["success"] is True
         assert summary["skill"] == "test-skill"
+
+    def test_emits_frontend_compatible_progress_and_trial_ids(self, tmp_path):
+        """Harness SSE payloads include the legacy optimize UI fields."""
+        surface = _make_surface(tmp_path)
+        output_root = tmp_path / "output"
+
+        loop = HarnessLoop(
+            skill_name="test-skill",
+            method="scanpy",
+            input_path="",
+            output_root=output_root,
+            surface=surface,
+            evaluator=_make_evaluator(),
+            search_space=_make_search_space(),
+            demo=True,
+            max_iterations=2,
+        )
+
+        call_count = [0]
+
+        def mock_execute(*args, **kwargs):
+            od = kwargs.get("output_dir") or args[2]
+            call_count[0] += 1
+            score = 0.5 if call_count[0] == 1 else 0.8
+            return _make_trial_execution(Path(od), success=True, score=score)
+
+        llm_response = json.dumps({
+            "patch_plan": {
+                "target_files": ["skills/test/test.py"],
+                "description": "Improve threshold",
+            },
+            "diffs": [{
+                "file": "skills/test/test.py",
+                "hunks": [{
+                    "old_code": "min_genes=200",
+                    "new_code": "min_genes=300",
+                }],
+            }],
+            "reasoning": "Higher threshold for better filtering.",
+        })
+
+        events: list[tuple[str, dict[str, object]]] = []
+
+        with mock_patch(
+            "omicsclaw.autoagent.harness_loop.execute_trial", mock_execute,
+        ), mock_patch.object(loop, "_call_llm", return_value=llm_response):
+            result = loop.run(on_event=lambda event_type, data: events.append((event_type, data)))
+
+        assert result.success
+
+        progress_events = [data for event_type, data in events if event_type == "progress"]
+        assert [int(data["completed"]) for data in progress_events[:3]] == [0, 1, 1]
+        assert [int(data["total"]) for data in progress_events[:3]] == [2, 2, 2]
+
+        trial_start = next(data for event_type, data in events if event_type == "trial_start")
+        assert trial_start["trial_id"] == 1
+        assert trial_start["iteration"] == 1
+
+        trial_complete_events = [data for event_type, data in events if event_type == "trial_complete"]
+        assert trial_complete_events[0]["trial_id"] == 0
+        assert trial_complete_events[1]["trial_id"] == 1
+
+        trial_judgment = next(data for event_type, data in events if event_type == "trial_judgment")
+        assert trial_judgment["trial_id"] == 1
+
+        done_event = next(data for event_type, data in events if event_type == "done")
+        assert int(done_event["total_trials"]) >= 1
+        assert done_event["best_trial"]["trial_id"] == 1

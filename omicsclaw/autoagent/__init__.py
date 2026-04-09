@@ -370,13 +370,14 @@ def run_harness_evolution(
         Optional explicit file whitelist. Paths must stay inside the
         project root and cannot include frozen infrastructure.
 
-    Returns a summary dict compatible with the optimization API.
+    Returns a summary dict with harness-specific fields plus shared
+    autoagent status metadata.
     """
     from omicsclaw.autoagent.edit_surface import EditSurface, build_sc_preprocessing_surface
     from omicsclaw.autoagent.evaluator import Evaluator
     from omicsclaw.autoagent.harness_loop import HarnessLoop
     from omicsclaw.autoagent.metrics_registry import get_metrics_for_skill
-    from omicsclaw.autoagent.search_space import SearchSpace, build_method_surface
+    from omicsclaw.autoagent.search_space import SearchSpace
 
     # 1. Resolve project root
     project_root = Path(__file__).resolve().parents[2]

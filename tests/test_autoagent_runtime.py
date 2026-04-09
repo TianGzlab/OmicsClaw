@@ -1185,9 +1185,9 @@ def test_run_harness_evolution_returns_failure_summary_when_loop_fails(monkeypat
     from types import SimpleNamespace
 
     import omicsclaw.autoagent as autoagent_pkg
-    from omicsclaw.autoagent.experiment_ledger import ExperimentLedger, TrialRecord
+    from omicsclaw.autoagent.experiment_ledger import TrialRecord
+    from omicsclaw.autoagent.harness_loop import HarnessResult
     from omicsclaw.autoagent.metrics_registry import MetricDef
-    from omicsclaw.autoagent.optimization_loop import OptimizationResult
 
     monkeypatch.setattr(
         "omicsclaw.autoagent.metrics_registry.get_metrics_for_skill",
@@ -1219,7 +1219,6 @@ def test_run_harness_evolution_returns_failure_summary_when_loop_fails(monkeypat
             self.output_root = kwargs["output_root"]
 
         def run(self, on_event=None):
-            ledger = ExperimentLedger(self.output_root / "experiment_ledger.jsonl")
             best_trial = TrialRecord(
                 trial_id=0,
                 params={"alpha": 1.0},
@@ -1227,22 +1226,19 @@ def test_run_harness_evolution_returns_failure_summary_when_loop_fails(monkeypat
                 raw_metrics={"score": 1.0},
                 status="baseline",
             )
-            ledger.append(best_trial)
-            # Real _finalize_result emits error event on failure;
-            # simulate that here so the mock matches real behavior.
+            # Real HarnessLoop emits an error event on failure before returning.
             if on_event:
                 on_event("error", {"message": "LLM returned no suggestion"})
-            return OptimizationResult(
+            return HarnessResult(
                 best_trial=best_trial,
-                ledger=ledger,
                 improvement_pct=0.0,
-                total_trials=1,
+                total_iterations=1,
                 converged=False,
                 success=False,
                 error_message="LLM returned no suggestion",
             )
 
-    monkeypatch.setattr("omicsclaw.autoagent.optimization_loop.OptimizationLoop", FakeLoop)
+    monkeypatch.setattr("omicsclaw.autoagent.harness_loop.HarnessLoop", FakeLoop)
 
     events: list[tuple[str, dict[str, object]]] = []
     result = autoagent_pkg.run_harness_evolution(
@@ -1254,9 +1250,10 @@ def test_run_harness_evolution_returns_failure_summary_when_loop_fails(monkeypat
 
     assert result["success"] is False
     assert result["error"] == "LLM returned no suggestion"
+    assert result["mode"] == "harness_evolution"
     assert result["output_dir"].startswith(str(tmp_path))
-    assert result["best_params"] == {"alpha": 1.0}
-    assert result["best_trial"]["params"] == {"alpha": 1.0}
+    assert result["best_score"] == 1.0
+    assert result["best_metrics"] == {"score": 1.0}
     assert [event_type for event_type, _data in events] == ["error"]
 
 
