@@ -72,6 +72,7 @@ _MEMORY_SERVER_INSTALL_HINT = 'pip install -e ".[memory]"'
 if str(OMICSCLAW_DIR) not in sys.path:
     sys.path.insert(0, str(OMICSCLAW_DIR))
 
+from omicsclaw import __version__
 from omicsclaw.common.report import (
     build_output_dir_name,
     extract_method_name,
@@ -861,12 +862,16 @@ def _resolve_workspace(
 
 class OmicsClawParser(argparse.ArgumentParser):
     """Custom parser for beautiful OmicsClaw CLI help output."""
-    
+
     def print_help(self, file=None):
         if file is None:
             file = sys.stdout
 
-        print(f"\n{BOLD}{CYAN}⬡ OmicsClaw{RESET} — AI-powered Multi-Omics Analysis Platform\n", file=file)
+        print(
+            f"\n{BOLD}{CYAN}⬡ OmicsClaw{RESET} v{__version__} — "
+            "AI-powered Multi-Omics Analysis Platform\n",
+            file=file,
+        )
         print(f"{BOLD}Usage:{RESET} oc <command> [options]\n", file=file)
 
         print(f"{BOLD}{YELLOW}🌟 Core Commands{RESET}", file=file)
@@ -874,6 +879,7 @@ class OmicsClawParser(argparse.ArgumentParser):
         print(f"  {GREEN}tui        {RESET}  Advanced full-screen Textual interface", file=file)
         print(f"  {GREEN}list       {RESET}  List all 50+ available analysis skills", file=file)
         print(f"  {GREEN}run        {RESET}  Execute a specific skill (e.g., 'oc run preprocess')", file=file)
+        print(f"  {GREEN}version    {RESET}  Show the current OmicsClaw version", file=file)
 
         print(f"\n{BOLD}{BLUE}🔧 Utility Commands{RESET}", file=file)
         print(f"  {GREEN}mcp           {RESET}  Manage external Model Context Protocol (MCP) servers", file=file)
@@ -888,6 +894,7 @@ class OmicsClawParser(argparse.ArgumentParser):
         print(f"  {GREEN}-m, --mode {RESET}  Workspace mode: {CYAN}daemon{RESET} (persistent) | {CYAN}run{RESET} (isolated per-session)", file=file)
         print(f"  {GREEN}-n, --name {RESET}  Name for run session directory (requires --mode run)", file=file)
         print(f"  {GREEN}--workspace{RESET}  Override workspace directory for this session", file=file)
+        print(f"  {GREEN}-V, --version{RESET}  Show the current OmicsClaw version", file=file)
 
         print(f"\n{BOLD}For specific command help, use:{RESET} oc <command> --help\n", file=file)
 
@@ -904,7 +911,15 @@ def main():
         description="OmicsClaw — Multi-Omics Skills Runner",
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"OmicsClaw {__version__}",
+    )
     sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("version", help="Show the current OmicsClaw version")
 
     # list
     list_p = sub.add_parser("list", help="List available skills")
@@ -1115,6 +1130,10 @@ def main():
 
     if args.command is None:
         parser.print_help()
+        sys.exit(0)
+
+    if args.command == "version":
+        print(f"OmicsClaw {__version__}")
         sys.exit(0)
 
     if args.command == "list":

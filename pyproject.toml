@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omicsclaw"
-version = "0.1.0"
+dynamic = ["version"]
 description = "OmicsClaw: Multi-omics analysis platform with skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq domains"
 readme = "README.md"
 license = {text = "MIT"}
@@ -448,6 +448,9 @@ target-version = "py311"
 where = ["."]
 include = ["omicsclaw", "omicsclaw.*", "skills.*._lib", "skills.*._lib.*"]
 exclude = ["tests", "tests.*", "output", "sessions"]
+
+[tool.setuptools.dynamic]
+version = {attr = "omicsclaw.__version__"}
 
 [tool.setuptools.package-data]
 omicsclaw = ["py.typed"]

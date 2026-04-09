@@ -13,6 +13,8 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 
+from omicsclaw.version import __version__
+
 # Guard: FastAPI is optional
 try:
     from fastapi import FastAPI
@@ -69,7 +71,7 @@ def _build_app():
     app = FastAPI(
         title="OmicsClaw Memory API",
         description="Graph-based memory system for OmicsClaw multi-omics platform",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -131,6 +133,7 @@ def _build_app():
                 "status": "ok" if db_status == "connected" else "degraded",
                 "database": db_status,
                 "service": "omicsclaw-memory",
+                "version": __version__,
             },
             status_code=status_code,
         )
