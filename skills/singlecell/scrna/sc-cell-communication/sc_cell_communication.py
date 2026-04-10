@@ -11,9 +11,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "omicsclaw_mpl"))
-
 import matplotlib
 matplotlib.use("Agg")
 import numpy as np

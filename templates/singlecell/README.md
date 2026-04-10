@@ -12,7 +12,8 @@ Recommended reading order:
 2. `SC-METHOD-MATRIX-RULES.md`
 3. `SC-PREFLIGHT-RULES.md`
 4. `SC-OUTPUT-CONTRACT.md`
-5. `SC-SKILL-TEMPLATE.md`
+5. `SC-USER-EXPERIENCE-RULES.md`
+6. `SC-SKILL-TEMPLATE.md`
 
 Keep using the generic `templates/SKILL-TEMPLATE.md` for shared OmicsClaw structure.
 This folder only adds single-cell-specific rules that should not pollute other domains.

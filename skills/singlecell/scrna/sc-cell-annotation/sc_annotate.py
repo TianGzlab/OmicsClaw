@@ -12,8 +12,8 @@ import tempfile
 import sys
 from pathlib import Path
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/omicsclaw_mpl")
-os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/omicsclaw_numba_cache")
+from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs as _ensure_runtime_cache_dirs
+_ensure_runtime_cache_dirs()
 
 import matplotlib
 matplotlib.use("Agg")
@@ -158,6 +158,34 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 
 SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
 
+BUILTIN_MARKERS_HUMAN: dict[str, list[str]] = {
+    # --- Blood / PBMC ---
+    "CD4+ T cell": ["CD3D", "CD3E", "CD4", "IL7R"],
+    "CD8+ T cell": ["CD3D", "CD3E", "CD8A", "CD8B"],
+    "Regulatory T cell": ["FOXP3", "IL2RA", "CTLA4"],
+    "B cell": ["MS4A1", "CD79A", "CD79B", "CD19"],
+    "Plasma cell": ["MZB1", "SDC1", "IGHA1", "JCHAIN"],
+    "NK cell": ["GNLY", "NKG7", "KLRD1", "NCAM1"],
+    "CD14+ Monocyte": ["CD14", "LYZ", "S100A9", "S100A8"],
+    "CD16+ Monocyte": ["FCGR3A", "MS4A7"],
+    "Dendritic cell": ["FCER1A", "CD1C", "CLEC10A"],
+    "Platelet": ["PPBP", "PF4"],
+    # --- Brain ---
+    "Neuron": ["SNAP25", "SYT1", "RBFOX3", "STMN2"],
+    "Astrocyte": ["AQP4", "GFAP", "SLC1A3"],
+    "Oligodendrocyte": ["MBP", "PLP1", "MOG"],
+    "Microglia": ["CX3CR1", "P2RY12", "CSF1R"],
+    "OPC": ["PDGFRA", "CSPG4", "OLIG2"],
+    # --- General tissue / stroma ---
+    "Epithelial": ["EPCAM", "KRT18", "KRT19"],
+    "Fibroblast": ["COL1A1", "COL1A2", "DCN", "LUM"],
+    "Endothelial": ["PECAM1", "VWF", "CDH5"],
+    "Smooth muscle cell": ["ACTA2", "TAGLN", "MYH11"],
+    "Macrophage": ["CD68", "CD163", "MRC1"],
+    "Mast cell": ["KIT", "TPSAB1", "TPSB2"],
+}
+
+# Legacy alias kept for backward compatibility in tests/external callers
 PBMC_MARKERS = {
     "CD4 T": ["CD3D", "CD4"],
     "CD8 T": ["CD3D", "CD8A"],
@@ -165,6 +193,66 @@ PBMC_MARKERS = {
     "NK": ["GNLY", "NKG7"],
     "Monocyte": ["CD14", "LYZ"],
 }
+
+
+def _load_marker_file(path: str | Path) -> dict[str, list[str]]:
+    """Load custom marker genes from a JSON or CSV file.
+
+    JSON format::
+
+        {"T cell": ["CD3D", "CD3E"], "B cell": ["MS4A1", "CD79A"]}
+
+    CSV format (two columns, no header or header ``cell_type,markers``)::
+
+        T cell,CD3D;CD3E;CD4
+        B cell,MS4A1;CD79A
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Marker file not found: {p}")
+    text = p.read_text(encoding="utf-8").strip()
+    if p.suffix == ".json":
+        markers = json.loads(text)
+    else:
+        markers: dict[str, list[str]] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.lower().startswith("cell_type"):
+                continue
+            parts = line.split(",", 1)
+            if len(parts) != 2:
+                continue
+            cell_type = parts[0].strip().strip('"').strip("'")
+            genes = [g.strip().strip('"').strip("'") for g in parts[1].replace(";", ",").split(",") if g.strip()]
+            if cell_type and genes:
+                markers[cell_type] = genes
+    if not markers:
+        raise ValueError(f"No valid marker entries found in {p}")
+    return markers
+
+
+def _detect_species_hint(var_names) -> str:
+    """Heuristic species detection from gene naming convention.
+
+    Human genes: UPPER (CD3D, MS4A1).  Mouse genes: Title case (Cd3d, Ms4a1).
+    """
+    sample = list(var_names[:min(500, len(var_names))])
+    if not sample:
+        return "unknown"
+    upper_count = sum(1 for g in sample if g == g.upper())
+    title_count = sum(1 for g in sample if g != g.upper() and g[0].isupper())
+    ratio_upper = upper_count / len(sample)
+    ratio_title = title_count / len(sample)
+    if ratio_upper > 0.7:
+        return "human"
+    if ratio_title > 0.5:
+        return "mouse"
+    return "unknown"
+
+
+def _build_case_insensitive_map(var_names) -> dict[str, str]:
+    """Map UPPER gene names -> actual var_names for case-insensitive matching."""
+    return {g.upper(): g for g in var_names}
 
 
 # ---------------------------------------------------------------------------
@@ -232,19 +320,77 @@ def _resolve_cluster_key(adata, cluster_key: str | None) -> str | None:
     return candidates[0] if candidates else None
 
 
-def annotate_markers(adata, markers=None, cluster_key: str = "leiden"):
-    """Marker-based annotation."""
-    if markers is None:
-        markers = PBMC_MARKERS
+def annotate_markers(adata, markers=None, cluster_key: str = "leiden", marker_file: str | None = None):
+    """Marker-based annotation with gene-overlap detection and species awareness."""
+    # ---- 1. Resolve marker source ----
+    if marker_file:
+        markers = _load_marker_file(marker_file)
+        marker_source = f"custom file: {marker_file}"
+    elif markers is not None:
+        marker_source = "caller-provided"
+    else:
+        markers = BUILTIN_MARKERS_HUMAN
+        marker_source = "built-in (human, multi-tissue)"
+
     expression_source, expr = "adata.X", adata
 
     if cluster_key not in adata.obs:
         raise ValueError(
-            f"Marker-based annotation requires an existing cluster/label column. `{cluster_key}` was not found in adata.obs."
+            f"Marker-based annotation requires an existing cluster/label column. "
+            f"`{cluster_key}` was not found in adata.obs."
         )
 
-    cluster_annotations = {}
-    expr_var_names = expr.var_names
+    # ---- 2. Gene overlap diagnostic ----
+    all_marker_genes = sorted({g for genes in markers.values() for g in genes})
+    expr_var_names = set(expr.var_names)
+    matched_genes = [g for g in all_marker_genes if g in expr_var_names]
+    overlap_rate = len(matched_genes) / len(all_marker_genes) if all_marker_genes else 0.0
+
+    case_remap: dict[str, str] | None = None
+    species_hint = _detect_species_hint(expr.var_names)
+
+    if overlap_rate == 0:
+        # Attempt case-insensitive rescue (human markers vs mouse gene names)
+        upper_map = _build_case_insensitive_map(expr.var_names)
+        case_matched = [g for g in all_marker_genes if g.upper() in upper_map]
+        if case_matched:
+            case_remap = {g: upper_map[g.upper()] for g in all_marker_genes if g.upper() in upper_map}
+            logger.warning(
+                "0/%d marker genes matched by exact name, but %d/%d matched case-insensitively. "
+                "Dataset appears to use %s gene naming (detected species: %s). "
+                "Proceeding with case-insensitive matching.",
+                len(all_marker_genes), len(case_matched), len(all_marker_genes),
+                "Title-case" if species_hint == "mouse" else "non-UPPER",
+                species_hint,
+            )
+        else:
+            logger.warning(
+                "NONE of the %d built-in marker genes were found in the dataset (%d genes). "
+                "Detected species hint: %s. Marker source: %s.\n"
+                "  This usually means the built-in markers do not match your tissue/organism.\n"
+                "  Solutions:\n"
+                "    1. Provide custom markers:  --marker-file markers.json\n"
+                "    2. Use CellTypist:          --method celltypist --model <model_name>\n"
+                "    3. Use reference mapping:    --method knnpredict --reference <ref.h5ad>\n"
+                "  See SKILL.md 'Reference Data Guide' for download instructions.",
+                len(all_marker_genes), len(expr_var_names), species_hint, marker_source,
+            )
+    elif overlap_rate < 0.3:
+        logger.warning(
+            "Only %d/%d (%.0f%%) marker genes found in the dataset. "
+            "Annotation quality may be limited. Species hint: %s.",
+            len(matched_genes), len(all_marker_genes), overlap_rate * 100, species_hint,
+        )
+    else:
+        logger.info(
+            "Marker gene overlap: %d/%d (%.0f%%). Species hint: %s. Source: %s.",
+            len(matched_genes), len(all_marker_genes), overlap_rate * 100,
+            species_hint, marker_source,
+        )
+
+    # ---- 3. Score each cluster ----
+    cluster_annotations: dict[str, str] = {}
+    cluster_scores: dict[str, float] = {}
     for cluster in adata.obs[cluster_key].astype(str).unique():
         cluster_mask = adata.obs[cluster_key].astype(str) == cluster
         cluster_data = adata[cluster_mask]
@@ -252,24 +398,57 @@ def annotate_markers(adata, markers=None, cluster_key: str = "leiden"):
         best_type = "Unknown"
         best_score = 0.0
         for cell_type, marker_genes in markers.items():
-            available = [g for g in marker_genes if g in expr_var_names]
+            if case_remap:
+                available = [case_remap[g] for g in marker_genes if g in case_remap]
+            else:
+                available = [g for g in marker_genes if g in expr_var_names]
             if not available:
                 continue
-            scores = np.asarray(cluster_data[:, available].X.mean()).item()
-            if scores > best_score:
-                best_score = float(scores)
+            score = float(np.asarray(cluster_data[:, available].X.mean()).item())
+            if score > best_score:
+                best_score = score
                 best_type = cell_type
 
         cluster_annotations[cluster] = best_type
+        cluster_scores[cluster] = best_score
+
+    # ---- 4. Detect all-Unknown and warn ----
+    unknown_clusters = [c for c, t in cluster_annotations.items() if t == "Unknown"]
+    if len(unknown_clusters) == len(cluster_annotations):
+        logger.error(
+            "ALL %d clusters were annotated as 'Unknown' — the markers did not match any genes "
+            "in this dataset. This is almost certainly because the built-in markers are not "
+            "appropriate for your tissue type or organism.\n"
+            "  Recommended actions:\n"
+            "    1. --marker-file markers.json   (provide tissue-specific markers)\n"
+            "    2. --method celltypist --model <model>   (100+ pre-trained models)\n"
+            "       Run: python -c \"import celltypist; celltypist.models.models_description()\" to list models\n"
+            "    3. --method knnpredict --reference <ref.h5ad>   (your own labeled reference)\n"
+            "  See SKILL.md 'Reference Data Guide' for details.",
+            len(cluster_annotations),
+        )
+    elif unknown_clusters:
+        logger.warning(
+            "%d/%d clusters annotated as 'Unknown' (clusters: %s). "
+            "Consider providing more specific markers via --marker-file.",
+            len(unknown_clusters), len(cluster_annotations),
+            ", ".join(unknown_clusters[:10]),
+        )
 
     adata.obs["cell_type"] = adata.obs[cluster_key].astype(str).map(cluster_annotations)
-    adata.obs["annotation_score"] = np.nan
+    adata.obs["annotation_score"] = adata.obs[cluster_key].astype(str).map(cluster_scores).astype(float)
     _record_annotation_execution(
         adata,
         requested_method="markers",
         actual_method="markers",
     )
-    logger.info("Annotated %d clusters", len(cluster_annotations))
+    logger.info(
+        "Annotated %d clusters (%d cell types, %d Unknown). Marker source: %s.",
+        len(cluster_annotations),
+        len(set(cluster_annotations.values()) - {"Unknown"}),
+        len(unknown_clusters),
+        marker_source,
+    )
     return _annotation_summary(
         adata,
         requested_method="markers",
@@ -541,7 +720,7 @@ _METHOD_DISPATCH = {
         manual_map=args.manual_map,
         manual_map_file=args.manual_map_file,
     ),
-    "markers": lambda adata, args: annotate_markers(adata, cluster_key=args.cluster_key),
+    "markers": lambda adata, args: annotate_markers(adata, cluster_key=args.cluster_key, marker_file=getattr(args, "marker_file", None)),
     "celltypist": lambda adata, args: annotate_celltypist(adata, args.model, majority_voting=bool(args.celltypist_majority_voting)),
     "popv": lambda adata, args: annotate_popv(adata, args.reference, cluster_key=args.cluster_key),
     "knnpredict": lambda adata, args: annotate_knnpredict(adata, args.reference, cluster_key=args.cluster_key),
@@ -885,6 +1064,48 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     for k, v in params.items():
         body_lines.append(f"- `{k}`: {v}")
 
+    # Detect all-Unknown and add targeted guidance
+    unk_count = summary.get("cell_type_counts", {}).get("Unknown", 0)
+    total_types = len(summary.get("cell_type_counts", {}))
+    if unk_count and unk_count == total_types:
+        body_lines.extend([
+            "",
+            "## ⚠ Troubleshooting: All Cells Labeled Unknown\n",
+            "All clusters were annotated as **Unknown**. This means the marker genes used do not match",
+            "the genes in your dataset. Common causes and solutions:\n",
+            "### Cause 1: Wrong tissue type",
+            "The default built-in markers cover blood (PBMC), brain, and general tissue (human).",
+            "If your data is from a different tissue, provide custom markers:\n",
+            "```bash",
+            "# Create a JSON file with markers for your tissue:",
+            '# my_markers.json: {"Hepatocyte": ["ALB","APOB"], "Cholangiocyte": ["KRT19","SOX9"]}',
+            f"python {SCRIPT_REL_PATH} --input <data.h5ad> --output <dir> --method markers --marker-file my_markers.json",
+            "```\n",
+            "### Cause 2: Mouse or non-human organism",
+            "Built-in markers use human gene symbols (UPPERCASE). Mouse genes are Title case (Cd3d vs CD3D).",
+            "The skill attempts automatic case-insensitive matching, but for best results:\n",
+            "```bash",
+            "# Use CellTypist with a mouse-specific model:",
+            f"python {SCRIPT_REL_PATH} --input <data.h5ad> --output <dir> --method celltypist --model Mouse_Isocortex_Hippocampus.pkl",
+            "```\n",
+            "### Cause 3: Try a different annotation method",
+            "- **CellTypist** (no reference needed, 100+ pretrained models):",
+            '  `python -c "import celltypist; celltypist.models.models_description()"` to list models',
+            "- **knnpredict / popv** (needs a labeled reference H5AD):",
+            "  Download from [CZ CELLxGENE](https://cellxgene.cziscience.com/)",
+            "- **singler / scmap** (needs R environment):",
+            "  Uses celldex atlases (HPCA, ImmGen, etc.)\n",
+        ])
+    elif unk_count:
+        body_lines.extend([
+            "",
+            f"## Note: {unk_count} of {total_types} Cell Types are Unknown\n",
+            "Some clusters could not be confidently assigned. Consider:",
+            "- Providing more tissue-specific markers via `--marker-file`",
+            "- Using a different annotation method (celltypist, knnpredict)",
+            "- Reviewing cluster quality with `sc-markers`\n",
+        ])
+
     body_lines.extend(
         [
             "",
@@ -953,6 +1174,7 @@ def main():
     parser.add_argument("--cluster-key", default=None, help="Cluster/label column for marker summaries and marker-based annotation")
     parser.add_argument("--manual-map", default=None, help="Inline manual mapping like '0=T cell;1,2=Myeloid'")
     parser.add_argument("--manual-map-file", default=None, help="Path to manual mapping file (json/csv/tsv/txt)")
+    parser.add_argument("--marker-file", default=None, help="Path to custom marker gene file (JSON or CSV) for the markers method")
     parser.add_argument(
         "--celltypist-majority-voting",
         action=argparse.BooleanOptionalAction,
@@ -1046,6 +1268,25 @@ def main():
     logger.info("Saved to %s", output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
+
+    # Diagnostic fields for bot/agent to detect annotation quality issues
+    _unk = summary.get("cell_type_counts", {}).get("Unknown", 0)
+    _total = len(summary.get("cell_type_counts", {}))
+    _all_unknown = _unk > 0 and _unk == _total
+    annotation_diagnostics = {
+        "unknown_count": _unk,
+        "total_type_count": _total,
+        "all_unknown": _all_unknown,
+    }
+    if _all_unknown:
+        annotation_diagnostics["suggested_actions"] = [
+            "Provide custom marker genes via --marker-file markers.json",
+            "Switch to CellTypist: --method celltypist --model <tissue_model>.pkl",
+            "Use a labeled reference: --method knnpredict --reference <ref.h5ad>",
+            "List CellTypist models: python -c \"import celltypist; celltypist.models.models_description()\"",
+            "Download references from https://cellxgene.cziscience.com/",
+        ]
+
     result_data = {
         "method": summary.get("actual_method", method),
         "requested_method": summary.get("requested_method", method),
@@ -1056,6 +1297,7 @@ def main():
         "input_contract": input_contract,
         "matrix_contract": matrix_contract,
         **summary,
+        "annotation_diagnostics": annotation_diagnostics,
         "visualization": {
             "recipe_id": "standard-sc-cell-annotation-gallery",
             "cluster_column": gallery_context.get("cluster_key"),
@@ -1072,9 +1314,42 @@ def main():
     }
     write_standard_run_artifacts(output_dir, result_payload, summary)
 
+    # ---- User-facing stdout summary (small-white-friendly) ----
+    n_types = summary["n_cell_types"]
+    unk_count = summary.get("cell_type_counts", {}).get("Unknown", 0)
+    total_types = len(summary.get("cell_type_counts", {}))
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
-    print(f"Annotation complete: {summary['n_cell_types']} cell types identified")
+    print(f"  Method: {summary.get('actual_method', method)}")
+    print(f"  Cell types identified: {n_types}")
+    if summary.get("used_fallback"):
+        print(f"  NOTE: Requested '{summary.get('requested_method')}' but fell back to "
+              f"'{summary.get('actual_method')}' — {summary.get('fallback_reason', 'see log')}")
+    if unk_count and unk_count == total_types:
+        print()
+        print("  *** ALL cells were labeled 'Unknown' — annotation did not work for this dataset. ***")
+        print("  This usually means the built-in marker genes don't match your tissue or organism.")
+        print()
+        print("  How to fix:")
+        print("    Option 1 — Provide your own markers (easiest):")
+        print('      Create a JSON file, e.g. my_markers.json:')
+        print('        {"T cell": ["CD3D","CD3E"], "Epithelial": ["EPCAM","KRT18"]}')
+        print("      Then rerun:")
+        print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method markers --marker-file my_markers.json")
+        print()
+        print("    Option 2 — Use CellTypist (100+ pretrained models, no reference needed):")
+        print("      List available models:")
+        print('        python -c "import celltypist; celltypist.models.models_description()"')
+        print("      Pick a model for your tissue, then:")
+        print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method celltypist --model Immune_All_Low.pkl")
+        print()
+        print("    Option 3 — Use a labeled reference dataset:")
+        print("      Download a reference H5AD from https://cellxgene.cziscience.com/")
+        print("      Then:")
+        print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method knnpredict --reference ref.h5ad")
+        print()
+    elif unk_count:
+        print(f"  WARNING: {unk_count}/{total_types} cell types are 'Unknown'. Consider providing more specific markers via --marker-file.")
 
 
 if __name__ == "__main__":
