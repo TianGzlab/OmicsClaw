@@ -1099,8 +1099,21 @@ def apply_popv_annotation(
     reference_file = Path(reference_path)
     if not reference_file.exists():
         raise FileNotFoundError(
-            f"PopV reference file {reference_file} does not exist. "
-            "Provide a labeled reference in H5AD format via --reference."
+            f"PopV reference file '{reference_file}' does not exist.\n"
+            "The popv method requires a labeled reference H5AD file with a 'cell_type' column in .obs.\n"
+            "\n"
+            "How to get a reference:\n"
+            "  1. Download from CZ CELLxGENE Census: https://cellxgene.cziscience.com/\n"
+            "     - Search for your tissue/organism, download as .h5ad\n"
+            "  2. Use the Human Cell Atlas: https://www.humancellatlas.org/\n"
+            "  3. For mouse: Tabula Muris https://tabula-muris.ds.czbiohub.org/\n"
+            "\n"
+            "Then run:\n"
+            "  --method popv --reference /path/to/your_reference.h5ad\n"
+            "\n"
+            "Alternative methods that don't need a reference file:\n"
+            "  --method markers --marker-file my_markers.json  (custom marker genes)\n"
+            "  --method celltypist --model <model_name>.pkl    (pretrained models, no reference needed)"
         )
 
     try:
@@ -1152,7 +1165,21 @@ def apply_knnpredict_annotation(
     reference_file = Path(reference_path)
     if not reference_file.exists():
         raise FileNotFoundError(
-            f"KNNPredict reference file {reference_file} does not exist. Provide a labeled reference in H5AD format."
+            f"KNNPredict reference file '{reference_file}' does not exist.\n"
+            "The knnpredict method requires a labeled reference H5AD file with a 'cell_type' column in .obs.\n"
+            "\n"
+            "How to get a reference:\n"
+            "  1. Download from CZ CELLxGENE Census: https://cellxgene.cziscience.com/\n"
+            "     - Search for your tissue/organism, download as .h5ad\n"
+            "  2. Use the Human Cell Atlas: https://www.humancellatlas.org/\n"
+            "  3. For mouse: Tabula Muris https://tabula-muris.ds.czbiohub.org/\n"
+            "\n"
+            "Then run:\n"
+            "  --method knnpredict --reference /path/to/your_reference.h5ad\n"
+            "\n"
+            "Alternative methods that don't need a reference file:\n"
+            "  --method markers --marker-file my_markers.json  (custom marker genes)\n"
+            "  --method celltypist --model <model_name>.pkl    (pretrained models, no reference needed)"
         )
     reference_adata = sc.read_h5ad(reference_file)
     metadata = _apply_lightweight_reference_mapping(

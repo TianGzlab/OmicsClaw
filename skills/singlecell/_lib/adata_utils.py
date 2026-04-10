@@ -10,9 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-
 import scanpy as sc
 
 if TYPE_CHECKING:
