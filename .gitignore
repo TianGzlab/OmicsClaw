@@ -39,7 +39,16 @@ sessions/
 
 # Superpowers (internal skills)
 superpowers/
-docs/superpowers/
+docs/superpowers/**
+!docs/superpowers/
+!docs/superpowers/README.md
+!docs/superpowers/playbooks/
+!docs/superpowers/playbooks/*.md
+!docs/superpowers/plans/
+!docs/superpowers/plans/README.md
+!docs/superpowers/specs/
+!docs/superpowers/specs/README.md
+!docs/superpowers/specs/2026-04-10-repository-spec-migration.md
 
 # User data (large, not committed)
 data/*

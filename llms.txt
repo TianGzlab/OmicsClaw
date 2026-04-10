@@ -15,6 +15,8 @@ All processing happens locally. No genetic or spatial data leaves the machine.
 - **SpatialSession**: A JSON state tracker for multi-skill workflows (stored in `profiles/`).
 - **omicsclaw.py**: The central CLI runner that registers skills, filters flags, and dispatches subprocesses.
 - **Orchestrator**: `spatial-orchestrator` routes natural-language queries or file extensions to the right skill.
+- **README.md**: The repository's living memory for project context, milestones, and contributor-visible decisions.
+- **SPEC.md**: The repository maintenance and AI development contract for coding agents.
 
 ---
 
@@ -174,9 +176,12 @@ All tests use `--demo` mode. Each skill has at minimum:
 | File | Purpose |
 |------|---------|
 | `omicsclaw.py` | CLI runner, SKILLS registry, security filter |
+| `README.md` | Project overview and living memory for major decisions |
+| `SPEC.md` | Repository maintenance and AI development contract |
 | `skills/catalog.json` | Machine-readable skill index (auto-generated) |
 | `CLAUDE.md` | AI agent routing instructions for Claude |
 | `AGENTS.md` | AI coding agent guide (Codex, Cursor, Devin, etc.) |
+| `docs/superpowers/README.md` | Workflow playbook index plus dated plans/specs |
 | `pyproject.toml` | Package metadata, dependency source of truth, scripts, optional extras |
 | `docs/architecture.md` | System architecture deep-dive |
 | `llms.txt` | This file — LLM-optimised summary |

@@ -2,6 +2,22 @@
 
 This guide is for AI coding agents working on the OmicsClaw codebase.
 
+## Repository Working Contract
+
+Before any complex repository maintenance, feature, or refactor task, read
+`README.md` first for project context and prior decisions. Then read this
+`AGENTS.md`, root `SPEC.md`, and the directly relevant code/docs.
+
+Core rules:
+
+- Reply in the user's language, usually Chinese or English.
+- Stay concise, practical, and execution-focused.
+- Use `docs/superpowers/playbooks/` as the repository's on-demand workflow
+  guidance for debugging, TDD, planning, parallelization, verification,
+  code review, and branch completion.
+- When you make an important decision or complete a meaningful milestone,
+  update `README.md` while preserving its existing structure.
+
 ## Project Overview
 
 OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial transcriptomics, single-cell omics, genomics, proteomics, and metabolomics. Each skill is a self-contained module that performs a specific analysis task via CLI or Python API. All processing is local-first. Design is inspired by [ClawBio](https://github.com/ClawBio/ClawBio).
@@ -120,7 +136,10 @@ OmicsClaw/
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
+├── docs/                       # Project docs, including AI workflow support
+│   └── superpowers/            # Playbooks plus dated plans/specs for agents
 ├── SOUL.md                     # Bot/CLI persona (OmicsBot)
+├── SPEC.md                     # Repository maintenance + AI development contract
 ├── templates/SKILL-TEMPLATE.md # Template for new skills
 ├── examples/                   # Shared demo data
 ├── sessions/                   # SpatialSession JSONs
@@ -151,6 +170,18 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 6. Register stable aliases in `omicsclaw/core/registry.py` (or rely on dynamic discovery)
 7. Add test path to `pytest.ini`
 8. Regenerate catalog: `python scripts/generate_catalog.py`
+
+## Development Workflow Playbooks
+
+For repository development work, consult these playbooks on demand:
+
+- `docs/superpowers/playbooks/skill_systematic_debugging.md`
+- `docs/superpowers/playbooks/skill_test_driven_development.md`
+- `docs/superpowers/playbooks/skill_verification_before_completion.md`
+- `docs/superpowers/playbooks/skill_writing_plans.md`
+- `docs/superpowers/playbooks/skill_dispatching_parallel_agents.md`
+- `docs/superpowers/playbooks/skill_requesting_code_review.md`
+- `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
 
 ## Graph Memory System
 
