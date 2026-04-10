@@ -51,8 +51,9 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
 
     # Trajectory
     "scvelo": DependencyInfo("scvelo", "pip install scvelo", "RNA velocity"),
-    "cellrank": DependencyInfo("cellrank", "pip install cellrank", "CellRank trajectory"),
-    "palantir": DependencyInfo("palantir", "pip install palantir", "Palantir pseudotime"),
+    "cellrank": DependencyInfo("cellrank", 'pip install -e ".[singlecell-pseudotime]"', "CellRank trajectory"),
+    "palantir": DependencyInfo("palantir", 'pip install -e ".[singlecell-pseudotime]"', "Palantir pseudotime"),
+    "pyVIA": DependencyInfo("pyVIA", 'pip install -e ".[singlecell-pseudotime]"', "VIA pseudotime"),
 
     # Multiome
     "muon": DependencyInfo("muon", "pip install muon", "Multi-omics analysis"),

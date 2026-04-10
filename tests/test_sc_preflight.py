@@ -464,11 +464,21 @@ def test_preflight_sc_pseudotime_requires_root_confirmation():
         x=np.array([[10, 1], [8, 2], [5, 0]], dtype=float),
         obs={"leiden": ["0", "0", "1"]},
     )
+    adata.obsm["X_pca"] = np.array([[0.1, 0.2], [0.0, 0.4], [1.1, 1.2]], dtype=float)
+    record_matrix_contract(
+        adata,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+        layers={},
+        producer_skill="sc-preprocessing",
+        primary_cluster_key="leiden",
+    )
 
     decision = preflight_sc_pseudotime(
         adata,
         method="dpt",
         cluster_key="leiden",
+        use_rep=None,
         root_cluster=None,
         root_cell=None,
     )
@@ -482,17 +492,82 @@ def test_preflight_sc_pseudotime_requires_cluster_key_confirmation():
         x=np.array([[10, 1], [8, 2], [5, 0]], dtype=float),
         obs={"cell_type": ["A", "A", "B"]},
     )
+    adata.obsm["X_pca"] = np.array([[0.1, 0.2], [0.0, 0.4], [1.1, 1.2]], dtype=float)
+    record_matrix_contract(
+        adata,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+        layers={},
+        producer_skill="sc-preprocessing",
+    )
 
     decision = preflight_sc_pseudotime(
         adata,
         method="dpt",
         cluster_key="leiden",
+        use_rep=None,
         root_cluster="A",
         root_cell=None,
     )
 
     assert decision.status == "needs_user_input"
     assert any("--cluster-key" in line for line in decision.confirmations)
+
+
+def test_preflight_sc_pseudotime_blocks_count_oriented_input():
+    adata = _adata(
+        x=np.array([[10, 1], [8, 2], [5, 0]], dtype=float),
+        obs={"leiden": ["0", "0", "1"]},
+    )
+    adata.obsm["X_pca"] = np.array([[0.1, 0.2], [0.0, 0.4], [1.1, 1.2]], dtype=float)
+    record_matrix_contract(
+        adata,
+        x_kind="raw_counts",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-qc",
+    )
+
+    decision = preflight_sc_pseudotime(
+        adata,
+        method="dpt",
+        cluster_key="leiden",
+        use_rep="X_pca",
+        root_cluster="0",
+        root_cell=None,
+    )
+
+    assert decision.status == "blocked"
+    assert any("expects normalized expression" in line for line in decision.missing_requirements)
+
+
+def test_preflight_sc_pseudotime_requires_use_rep_when_multiple_embeddings_exist():
+    adata = _adata(
+        x=np.array([[1.0, 0.1], [0.9, 0.2], [0.4, 0.8]], dtype=float),
+        obs={"leiden": ["0", "0", "1"]},
+    )
+    adata.obsm["X_pca"] = np.array([[0.1, 0.2], [0.0, 0.4], [1.1, 1.2]], dtype=float)
+    adata.obsm["X_harmony"] = np.array([[0.2, 0.1], [0.1, 0.3], [1.0, 1.1]], dtype=float)
+    record_matrix_contract(
+        adata,
+        x_kind="normalized_expression",
+        raw_kind="raw_counts_snapshot",
+        layers={"counts": "raw_counts"},
+        producer_skill="sc-batch-integration",
+        primary_cluster_key="leiden",
+    )
+
+    decision = preflight_sc_pseudotime(
+        adata,
+        method="dpt",
+        cluster_key="leiden",
+        use_rep=None,
+        root_cluster="0",
+        root_cell=None,
+    )
+
+    assert decision.status == "needs_user_input"
+    assert any(field["key"] == "use_rep" for field in decision.pending_fields)
 
 
 def test_preflight_sc_pathway_scoring_blocks_without_gene_sets():

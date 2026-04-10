@@ -131,6 +131,7 @@ singlecell = [
     "arboreto>=0.1.6",                # sc-grn: GRNBoost2
     "cellrank>=2.0.0,<3.0",           # sc-pseudotime / sc-velocity downstream
     "palantir>=1.0.0",                # sc-pseudotime: Palantir
+    "pyVIA>=0.2.4",                   # sc-pseudotime: VIA
     "pydeseq2>=0.4.0",                # sc-de pseudobulk Python path
     "louvain>=0.8.0",                 # sc-clustering: Louvain backend
 ]
@@ -153,6 +154,15 @@ singlecell-clustering = [
     "leidenalg>=0.10.0",              # Leiden clustering
     "louvain>=0.8.0",                 # Louvain clustering
     "phate>=1.0.11",                  # PHATE embedding
+]
+
+# --------------------------------------------------------------------------- #
+# singlecell-pseudotime — optional trajectory / fate backends.                #
+# --------------------------------------------------------------------------- #
+singlecell-pseudotime = [
+    "cellrank>=2.0.0,<3.0",           # CellRank trajectory inference
+    "palantir>=1.0.0",                # Palantir pseudotime
+    "pyVIA>=0.2.4",                   # VIA pseudotime
 ]
 
 # --------------------------------------------------------------------------- #
@@ -209,7 +219,7 @@ singlecell-enrichment = [
 # Still excludes external CLIs and reference downloads.                       #
 # --------------------------------------------------------------------------- #
 singlecell-full = [
-    "omicsclaw[singlecell,singlecell-upstream,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-velocity,singlecell-enrichment]",
+    "omicsclaw[singlecell,singlecell-upstream,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-velocity,singlecell-enrichment]",
 ]
 
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
@@ -230,7 +240,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #

@@ -197,6 +197,7 @@ def run_palantir_pseudotime(
     *,
     early_cell: str,
     terminal_states: dict[str, str] | None = None,
+    use_rep: str | None = None,
     knn: int = 30,
     n_components: int = 10,
     num_waypoints: int = 1200,
@@ -212,6 +213,12 @@ def run_palantir_pseudotime(
 
     if early_cell not in adata.obs_names:
         raise ValueError(f"Palantir early_cell '{early_cell}' not found in adata.obs_names")
+
+    if use_rep:
+        if use_rep not in adata.obsm:
+            raise ValueError(f"Embedding `{use_rep}` not found in adata.obsm for Palantir.")
+        if use_rep != "X_pca":
+            adata.obsm["X_pca"] = np.asarray(adata.obsm[use_rep], dtype=float)
 
     if "DM_EigenVectors" not in adata.obsm:
         logger.info("Running Palantir diffusion maps with n_components=%s", n_components)
@@ -370,6 +377,7 @@ def run_via_pseudotime(
     root_cell: int | None = None,
     root_cluster: str | None = None,
     cluster_key: str = "leiden",
+    use_rep: str | None = None,
     knn: int = 30,
     n_components: int = 10,
     seed: int = 20,
@@ -445,7 +453,12 @@ def run_via_pseudotime(
             raise ValueError(f"Root cluster '{root_cluster_text}' not found in {cluster_key}")
         root_idx = int(np.where(cluster_values == root_cluster_text)[0][0])
 
-    if "X_pca" in adata.obsm:
+    if use_rep:
+        if use_rep not in adata.obsm:
+            raise ValueError(f"Embedding `{use_rep}` not found in adata.obsm for VIA.")
+        embedding = np.asarray(adata.obsm[use_rep][:, : max(2, n_components)], dtype=float)
+        embedding_key = use_rep
+    elif "X_pca" in adata.obsm:
         embedding = np.asarray(adata.obsm["X_pca"][:, : max(2, n_components)], dtype=float)
         embedding_key = "X_pca"
     else:
@@ -529,6 +542,7 @@ def resolve_palantir_early_cell(
     root_cell: int | None = None,
     root_cluster: str | None = None,
     cluster_key: str = "leiden",
+    use_rep: str | None = None,
 ) -> str:
     """Resolve an explicit early cell for the Palantir workflow."""
     import palantir
@@ -548,6 +562,12 @@ def resolve_palantir_early_cell(
     if root_cluster_text not in set(labels):
         raise ValueError(f"Root cluster '{root_cluster_text}' not found in {cluster_key}")
 
+    if use_rep:
+        if use_rep not in adata.obsm:
+            raise ValueError(f"Embedding `{use_rep}` not found in adata.obsm for Palantir.")
+        if use_rep != "X_pca":
+            adata.obsm["X_pca"] = np.asarray(adata.obsm[use_rep], dtype=float)
+
     if "DM_EigenVectors" not in adata.obsm:
         palantir.utils.run_diffusion_maps(adata, n_components=10)
     if "DM_EigenVectors_multiscaled" not in adata.obsm:
@@ -563,7 +583,7 @@ def find_trajectory_genes(
     method: str = "pearson",
     copy: bool = False,
 ) -> pd.DataFrame:
-    """Find genes correlated with pseudotime (trajectory genes).
+    """Find genes correlated with pseudotime using the current normalized expression matrix.
 
     Parameters
     ----------
@@ -589,9 +609,10 @@ def find_trajectory_genes(
 
     pseudotime = adata.obs[pseudotime_key].values
 
-    # Get expression matrix; prefer log-normalized raw when available
-    matrix = adata.raw.X if adata.raw is not None and adata.raw.shape == adata.shape else adata.X
-    var_names = adata.raw.var_names if adata.raw is not None and adata.raw.shape == adata.shape else adata.var_names
+    # For scRNA trajectory analysis we intentionally rank genes on the active
+    # normalized expression matrix instead of falling back to raw counts.
+    matrix = adata.X
+    var_names = adata.var_names
     if hasattr(matrix, "toarray"):
         X = matrix.toarray()
     else:

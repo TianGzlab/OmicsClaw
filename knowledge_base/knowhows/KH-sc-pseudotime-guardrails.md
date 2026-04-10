@@ -2,28 +2,22 @@
 doc_id: sc-pseudotime-guardrails
 title: Single-Cell Pseudotime Guardrails
 doc_type: knowhow
-critical_rule: MUST explain the root choice and distinguish the trajectory method from the trajectory-gene correlation method before running sc-pseudotime
+critical_rule: MUST explain the start state and the active trajectory representation before running sc-pseudotime
 domains: [singlecell]
 related_skills: [sc-pseudotime]
 phases: [before_run, on_warning, after_run]
-search_terms: [pseudotime, DPT, PAGA, diffusion map, Palantir, VIA, CellRank, root cluster, trajectory genes, 单细胞拟时序, 轨迹, 调参]
+search_terms: [pseudotime, trajectory, root cluster, root cell, DPT, Palantir, VIA, CellRank, Slingshot]
 priority: 1.0
-source_urls:
-  - https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.paga.html
-  - https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.diffmap.html
-  - https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.dpt.html
-  - https://pypi.org/project/pyVIA/
-  - https://github.com/ShobiStassen/VIA
-  - https://cellrank.readthedocs.io/
 ---
 
 # Single-Cell Pseudotime Guardrails
 
-- **Inspect first**: verify the cluster labels and whether the user has a biologically defensible root cluster or root cell.
-- **Standardize external inputs first when provenance is unclear**: recommend `sc-standardize-input` for object hygiene, but pseudotime still needs a real cluster column and a defensible root choice.
-- **Key wrapper controls**: explain `method`, `cluster_key`, `root_cluster`, `root_cell`, `n_dcs`, `n_genes`, and `corr_method` before running.
-- **Use method-correct language**: in the current wrapper, `method` selects the trajectory algorithm (`dpt`, `palantir`, `via`, or `cellrank`), while `corr_method` only controls how trajectory-associated genes are ranked afterward.
-- **Do not flatten methods into one story**: DPT gives scalar ordering, Palantir adds entropy/fate probabilities, VIA adds graph terminal-state discovery, and CellRank adds macrostates / fate probabilities on top of a transition kernel.
-- **Do not hide root selection**: if the root is uncertain, say that explicitly instead of pretending pseudotime direction is fixed by the algorithm alone.
-- **Stop when the trajectory start state is underspecified**: do not run pseudotime blindly if both `root_cluster` and `root_cell` are absent and no human choice has been confirmed.
-- **For detailed parameter strategies**: see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.
+- Always explain that pseudotime needs a biologically defensible start state.
+- Always explain that `use_rep` changes the result; do not silently pick among multiple integrated embeddings.
+- Treat `method` and `corr_method` as different concepts.
+- Block count-oriented input; pseudotime should run on normalized expression.
+- If the user has not clustered yet, point them to `sc-clustering` first.
+- If the user has multiple integrated embeddings, stop and ask which one should drive the trajectory.
+- For `cellrank`, say clearly that this is about macrostates / terminal-state inference, not only a scalar pseudotime.
+- For `slingshot_r`, say clearly that this is branch-focused lineage inference through the R bridge.
+- For longer method guidance and parameter interpretation, see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.
