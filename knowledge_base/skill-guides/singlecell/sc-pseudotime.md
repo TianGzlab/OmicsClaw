@@ -4,99 +4,60 @@ title: OmicsClaw Skill Guide — SC Pseudotime
 doc_type: method-reference
 domains: [singlecell]
 related_skills: [sc-pseudotime]
-search_terms: [pseudotime, DPT, PAGA, diffusion map, Palantir, VIA, CellRank, root cluster, trajectory genes, tuning]
+search_terms: [pseudotime, trajectory, DPT, Palantir, VIA, CellRank, Slingshot, root cluster, use_rep]
 priority: 0.8
 ---
 
 # OmicsClaw Skill Guide — SC Pseudotime
 
-**Status**: implementation-aligned guide derived from the current OmicsClaw
-`sc-pseudotime` skill. This guide separates the trajectory method itself from
-the trajectory-gene ranking method used afterward.
+## What This Step Means
 
-## Purpose
+`sc-pseudotime` is the trajectory step after clustering. It orders cells along a continuous process and then ranks genes associated with that ordering.
 
-Use this guide when you need to decide:
-- whether DPT is the right trajectory path for the current dataset
-- how to explain root choice correctly
-- which parameters matter most in the current wrapper
+This is not the same as:
+- clustering
+- annotation
+- differential expression
 
-## Step 1: Inspect The Data First
+It is specifically about *directional progression*.
 
-Key properties to check:
-- **Cluster labels**:
-  - `cluster_key` must exist and be biologically interpretable
-- **Graph readiness**:
-  - neighbors should exist or be recomputable
-- **Root knowledge**:
-  - a biologically plausible root cluster or root cell is often the most important human choice
-- **Input provenance**:
-  - if the object is external, recommend `sc-standardize-input` first, but make clear that standardization does not choose the root for pseudotime
+## What Users Must Decide
 
-Important implementation notes in current OmicsClaw:
-- trajectory `method` is currently `dpt`, `palantir`, `via`, or `cellrank`
-- `corr_method` is not a trajectory algorithm; it only ranks trajectory genes after pseudotime is inferred
-- the wrapper bundles PAGA, diffusion map, and DPT into one execution path
-- the wrapper now uses shared preflight checks, so missing cluster columns or missing root choice should be clarified before the run rather than left to opaque failures
+1. which label column defines the state space (`cluster_key`)
+2. which embedding / representation should drive the trajectory (`use_rep`)
+3. which state is the beginning (`root_cluster` or `root_cell`)
+4. which method matches the biological question (`dpt`, `palantir`, `via`, `cellrank`, `slingshot_r`)
 
-## Step 2: Pick The Method Deliberately
+## Method Cheat Sheet
 
-| Method | Best first use | Strong starting parameters | Main caveat |
-|--------|----------------|----------------------------|-------------|
-| **dpt** | Classic Scanpy pseudotime after clustering and graph construction | `cluster_key`, `root_cluster`, `n_dcs`, `corr_method` | Root choice still governs directionality |
-| **palantir** | waypoint-based pseudotime with entropy and fate probabilities | `root_cluster`/`root_cell`, `palantir_knn`, `palantir_num_waypoints` | heavier dependency and explicit root required |
-| **via** | graph-based pseudotime with automatic terminal-state discovery | `root_cluster`/`root_cell`, `via_knn` | optional pyVIA dependency and embedding-quality sensitivity |
-| **cellrank** | fate-oriented trajectory analysis with macrostates and terminal states | `root_cluster`/`root_cell`, `cellrank_n_states`, `cellrank_schur_components`, `cellrank_frac_to_keep` | heavier kernel decomposition and fate outputs depend on kernel choice |
+| Method | Use when | Key user-facing defaults |
+|--------|----------|--------------------------|
+| `dpt` | you want a classic first-pass pseudotime | `use_rep=X_umap`, `n_neighbors=15`, `n_pcs=50`, `n_dcs=10` |
+| `palantir` | you want entropy / terminal-state probabilities | `palantir_knn=30`, `palantir_n_components=10`, `palantir_num_waypoints=1200` |
+| `via` | you want graph-based branch discovery | `via_knn=30`, `via_seed=20` |
+| `cellrank` | you want macrostates or fate probabilities | `cellrank_n_states=3`, `cellrank_schur_components=20`, `cellrank_frac_to_keep=0.3` |
+| `slingshot_r` | you want explicit lineage curves | optional `end_clusters`, branch-aware curve output |
 
-## Step 3: Always Show A Parameter Summary Before Running
+## How To Explain `use_rep`
 
-```text
-About to run pseudotime analysis
-  Method: cellrank
-  Parameters: cluster_key=leiden, root_cluster=0, n_dcs=10, n_genes=50, corr_method=pearson
-  Note: corr_method only affects trajectory-gene ranking after DPT is computed.
-```
+- `X_umap`: current default first-pass trajectory view in the wrapper
+- `X_pca`: alternative baseline trajectory on the preprocessing PCA
+- `X_harmony`, `X_scvi`, `X_scanvi`, `X_scanorama`: use these when the user already decided to trust an integrated representation
 
-## Step 4: Method-Specific Tuning Rules
+Do not say “embedding only affects plotting”.  
+For pseudotime, `use_rep` changes the graph and therefore the trajectory itself.
 
-Tune in this order:
-1. `cluster_key`
-2. `root_cluster` or `root_cell`
-3. `n_dcs`
-4. `n_genes`
-5. `corr_method`
-6. `cellrank_n_states` / `cellrank_schur_components` / `cellrank_frac_to_keep` when using CellRank
+## How To Explain Outputs
 
-Guidance:
-- choose `root_cluster` or `root_cell` before touching numeric tuning
-- use `n_dcs` to control how much diffusion structure is retained for DPT
-- use `n_genes` to control how many trajectory-associated genes are exported
-- use `corr_method` only to change the downstream ranking rule
+- `pseudotime_embedding.png`: pseudotime laid onto a display embedding
+- `pseudotime_distribution_by_group.png`: whether different clusters occupy different trajectory ranges
+- `trajectory_gene_heatmap.png`: top genes ordered by pseudotime
+- `trajectory_gene_trends.png`: smooth expression trends for the top trajectory genes
+- `fate_probability_heatmap.png`: only when the backend returns lineage/fate probabilities
+- `lineage_curves.png`: only for Slingshot
 
-Important warnings:
-- do not describe `pearson` or `spearman` as pseudotime methods
-- do not describe VIA as diffusion pseudotime; it is a separate graph-based trajectory framework
-- do not expose Scanpy / CellRank parameters that the wrapper does not currently forward
+## Usual Next Steps
 
-## Step 5: What To Say After The Run
-
-- If pseudotime looks biologically reversed: revisit root choice first.
-- If trajectory genes are unstable: revisit `corr_method` only after confirming the trajectory itself makes sense.
-- If branch structure looks implausible: question upstream clustering or neighbor graph quality.
-
-## Step 6: Explain Outputs Using Method-Correct Language
-
-- describe PAGA as coarse cluster connectivity
-- describe DPT as pseudotemporal ordering from the chosen root
-- describe CellRank as macrostate / terminal-state / fate inference built on a transition kernel
-- describe trajectory genes as genes correlated with inferred pseudotime in the current wrapper
-
-## Official References
-
-- https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.paga.html
-- https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.diffmap.html
-- https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.dpt.html
-- https://github.com/ShobiStassen/VIA
-- https://pypi.org/project/pyVIA/
-- https://cellrank.readthedocs.io/
-- https://scanpy.readthedocs.io/en/latest/tutorials/trajectories/paga-paul15.html
+- use `sc-pathway-scoring` to see whether known programs rise or fall along the trajectory
+- use `sc-enrichment` to interpret trajectory-associated genes statistically
+- revisit `sc-cell-annotation` if the inferred start state looks biologically backwards

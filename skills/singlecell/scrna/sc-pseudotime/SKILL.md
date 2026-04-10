@@ -1,25 +1,31 @@
 ---
 name: sc-pseudotime
 description: >-
-  Trajectory analysis for single-cell RNA-seq using Scanpy DPT, Palantir, or VIA,
-  plus a configurable correlation method for ranking trajectory-associated
-  genes.
-version: 0.4.0
+  Single-cell pseudotime and lineage inference after clustering, with DPT,
+  Palantir, VIA, CellRank, or Slingshot plus post-hoc trajectory gene ranking.
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, trajectory, pseudotime, paga, dpt, palantir, via, cellrank]
+tags: [singlecell, pseudotime, trajectory, dpt, palantir, via, cellrank, slingshot]
 metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--cluster-key"
-      - "--corr-method"
       - "--method"
+      - "--cluster-key"
+      - "--use-rep"
+      - "--root-cluster"
+      - "--root-cell"
+      - "--end-clusters"
+      - "--n-neighbors"
+      - "--n-pcs"
       - "--n-dcs"
       - "--n-genes"
+      - "--corr-method"
       - "--palantir-knn"
-      - "--palantir-max-iterations"
+      - "--palantir-n-components"
       - "--palantir-num-waypoints"
+      - "--palantir-max-iterations"
       - "--palantir-seed"
       - "--via-knn"
       - "--via-seed"
@@ -27,204 +33,173 @@ metadata:
       - "--cellrank-schur-components"
       - "--cellrank-frac-to-keep"
       - "--cellrank-use-velocity"
-      - "--root-cell"
-      - "--root-cluster"
     param_hints:
       dpt:
-        priority: "cluster_key -> root_cluster/root_cell -> n_dcs -> n_genes -> corr_method"
-        params: ["cluster_key", "root_cluster", "root_cell", "n_dcs", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", n_dcs: 10, n_genes: 50, corr_method: "pearson"}
-        requires: ["neighbors_graph", "cluster_labels_in_obs", "scanpy"]
-        tips:
-          - "--method dpt: Public analysis method for the current wrapper."
-          - "--corr-method: Used only for ranking trajectory genes after pseudotime has been estimated."
+        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> n_neighbors -> n_pcs -> n_dcs -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "n_neighbors", "n_pcs", "n_dcs", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", n_neighbors: 15, n_pcs: 50, n_dcs: 10, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "cluster_labels_in_obs", "trajectory_representation"]
       palantir:
-        priority: "cluster_key -> root_cluster/root_cell -> palantir_knn -> palantir_num_waypoints -> palantir_max_iterations -> corr_method"
-        params: ["cluster_key", "root_cluster", "root_cell", "palantir_knn", "palantir_num_waypoints", "palantir_max_iterations", "palantir_seed", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", palantir_knn: 30, palantir_num_waypoints: 1200, palantir_max_iterations: 25, palantir_seed: 20, n_genes: 50, corr_method: "pearson"}
-        requires: ["palantir", "cluster_labels_in_obs", "explicit_root_choice"]
-        tips:
-          - "--method palantir: Official Palantir AnnData workflow."
-          - "--root-cluster or --root-cell is required for the current Palantir wrapper."
+        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> palantir_knn -> palantir_n_components -> palantir_num_waypoints -> palantir_max_iterations -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "palantir_knn", "palantir_n_components", "palantir_num_waypoints", "palantir_max_iterations", "palantir_seed", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", palantir_knn: 30, palantir_n_components: 10, palantir_num_waypoints: 1200, palantir_max_iterations: 25, palantir_seed: 20, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "palantir", "explicit_root_choice"]
+      via:
+        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> via_knn -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "via_knn", "via_seed", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", via_knn: 30, via_seed: 20, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "pyVIA", "explicit_root_choice"]
+      cellrank:
+        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> cellrank_n_states -> cellrank_schur_components -> cellrank_frac_to_keep -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "cellrank_n_states", "cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", cellrank_n_states: 3, cellrank_schur_components: 20, cellrank_frac_to_keep: 0.3, cellrank_use_velocity: false, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "cellrank", "explicit_root_choice"]
+      slingshot_r:
+        priority: "cluster_key -> use_rep -> root_cluster -> end_clusters -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "end_clusters", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", end_clusters: null, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "slingshot", "SingleCellExperiment", "zellkonverter", "explicit_root_choice"]
     saves_h5ad: true
     requires_preprocessed: true
-    requires:
-      bins: [python3]
-      env: []
-      config: []
-    emoji: "S"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: scanpy
-        bins: []
-      - kind: pip
-        package: palantir
-        bins: []
     trigger_keywords:
-      - trajectory
       - pseudotime
+      - trajectory
+      - lineage
       - diffusion pseudotime
-      - dpt
       - palantir
-      - paga
-      - cell fate
-      - diffusion map
+      - via
+      - cellrank
+      - slingshot
 ---
 
 # Single-Cell Pseudotime
 
-## Why This Exists
+## What This Skill Does
 
-- Without it: users often conflate trajectory estimation with downstream gene ranking.
-- With it: the wrapper separates the trajectory method from the trajectory-gene correlation method.
-- Why OmicsClaw: one contract bundles PAGA, diffusion map, DPT, and export tables.
+`sc-pseudotime` is the trajectory step after clustering. It takes a normalized, cluster-labeled AnnData object, picks a start state, infers a trajectory, then ranks genes associated with that trajectory.
 
-## Core Capabilities
+This skill answers questions like:
+- which cluster should be treated as the start of a biological transition
+- how cells order along a continuous trajectory
+- which genes change most strongly along that ordering
+- whether the method also supports branch or fate information
 
-1. **Two explicit trajectory paths**: Scanpy DPT and Palantir, both with separate post-hoc gene ranking.
-2. **Transparent root control**: root cluster or root cell can be supplied explicitly.
-3. **Trajectory-specific exports**: pseudotime AnnData, trajectory-gene table, and direct figure outputs.
-4. **Clear separation of concerns**: trajectory estimation and correlation-based gene ranking are documented as different steps.
-5. **Downstream-ready export**: writes `adata_with_trajectory.h5ad`, report, result JSON, README, and notebook artifacts.
+## What Should Usually Come Before It
 
-## Scope Boundary
+- `sc-preprocessing`
+- if needed, `sc-batch-integration`
+- `sc-clustering`
+- optionally `sc-cell-annotation` if the user wants to define the start state by biology instead of just cluster number
 
-Implemented analysis method:
+If the user only says “do pseudotime”, the first thing to explain is:
+- pseudotime needs a biologically defensible start state
+- pseudotime should usually use the same representation that drove clustering or integration
+
+## Matrix / State Requirements
+
+- `X` must represent `normalized_expression`
+- a cluster or label column must already exist in `adata.obs`
+- at least one trajectory representation must exist; the current wrapper defaults to `X_umap` when it is already present, otherwise it falls back to integrated or PCA embeddings such as `X_harmony`, `X_scvi`, `X_scanvi`, `X_scanorama`, or `X_pca`
+- `layers["counts"]` may still exist, but trajectory-gene ranking is performed on normalized `adata.X`
+
+## Public Methods
 
 1. `dpt`
 2. `palantir`
 3. `via`
 4. `cellrank`
+5. `slingshot_r`
 
-Separate post-hoc trajectory-gene ranking methods:
+## Beginner-Friendly Method Summary
 
-1. `pearson`
-2. `spearman`
+| Method | Best first use | What it adds |
+|--------|----------------|--------------|
+| `dpt` | most users’ first trajectory pass | classic diffusion pseudotime after graph construction |
+| `palantir` | when entropy / fate probabilities are important | waypoint-based pseudotime and terminal-state probabilities |
+| `via` | when users want graph-based terminal-state discovery | fast graph trajectory with branch-aware outputs |
+| `cellrank` | when users explicitly want macrostates or fate inference | transition-kernel / fate model on top of a graph |
+| `slingshot_r` | when users want explicit branch curves | lineage-centric branch inference through the R bridge |
 
-## Input Formats
+## Key Parameters
 
-| Format | Extension / form | Current wrapper support | Notes |
-|--------|------------------|-------------------------|-------|
-| AnnData | `.h5ad` | preferred | most realistic preprocessed-input path |
-| Shared-loader formats | `.h5`, `.loom`, `.csv`, `.tsv`, 10x directory | technically loadable | still need graph / cluster state to be meaningful |
-| Demo | `--demo` | yes | bundled fallback |
+### Always important
 
-### Input Expectations
+- `--method`
+- `--cluster-key`
+- `--use-rep`
+- `--root-cluster` or `--root-cell`
+- `--n-genes`
+- `--corr-method`
 
-- Required metadata: a cluster column such as `leiden`.
-- Expected upstream state: neighbor graph available or recomputable.
-- Root choice matters scientifically; the wrapper does not infer biological direction for you.
+### Method-specific
+
+- `dpt`
+  - `--n-neighbors`
+  - `--n-pcs`
+  - `--n-dcs`
+- `palantir`
+  - `--palantir-knn`
+  - `--palantir-n-components`
+  - `--palantir-num-waypoints`
+  - `--palantir-max-iterations`
+  - `--palantir-seed`
+- `via`
+  - `--via-knn`
+  - `--via-seed`
+- `cellrank`
+  - `--cellrank-n-states`
+  - `--cellrank-schur-components`
+  - `--cellrank-frac-to-keep`
+  - `--cellrank-use-velocity`
+- `slingshot_r`
+  - `--end-clusters`
 
 ## Workflow
 
-1. Validate cluster labels and graph availability.
-2. Run PAGA.
-3. Run diffusion map and DPT pseudotime.
-4. Rank trajectory-associated genes with `--corr-method`.
-5. Save `adata_with_trajectory.h5ad`, figures, tables, `report.md`, and `result.json`.
-
-## CLI Reference
-
-```bash
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input <data.h5ad> --method dpt --cluster-key leiden --output <dir>
-
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input <data.h5ad> --method dpt --root-cluster 0 \
-  --n-dcs 10 --n-genes 50 --corr-method spearman --output <dir>
-
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input <data.h5ad> --method palantir --root-cluster 0 \
-  --palantir-knn 30 --palantir-num-waypoints 1200 --output <dir>
-```
-
-## Public Parameters
-
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--method` | trajectory backend | current public values are `dpt`, `palantir`, `via`, and `cellrank` |
-| `--cluster-key` | grouping column | used for root selection and summaries |
-| `--root-cluster` | root cluster choice | recommended when the start population is known |
-| `--root-cell` | root cell override | cell-level alternative to `root-cluster` |
-| `--n-dcs` | diffusion components | affects diffusion-map dimensionality |
-| `--n-genes` | ranked trajectory-gene count | output-size control |
-| `--corr-method` | post-hoc gene ranking method | `pearson` or `spearman` |
-| `--palantir-knn` | Palantir graph size | used only by `palantir` |
-| `--palantir-num-waypoints` | Palantir waypoint count | used only by `palantir` |
-| `--palantir-max-iterations` | Palantir convergence cap | used only by `palantir` |
-| `--via-knn` | VIA graph size | used only by `via` |
-| `--via-seed` | VIA random seed | used only by `via` |
-| `--cellrank-n-states` | CellRank macrostates | used only by `cellrank` |
-| `--cellrank-schur-components` | CellRank Schur decomposition size | used only by `cellrank` |
-| `--cellrank-frac-to-keep` | CellRank pseudotime kernel sparsification | used only by `cellrank` |
-| `--cellrank-use-velocity` | prefer VelocityKernel when available | used only by `cellrank` |
-
-## Algorithm / Methodology
-
-Current OmicsClaw `sc-pseudotime` runs either:
-
-### `dpt`
-
-1. graph validation or recomputation
-2. PAGA graph abstraction
-3. diffusion map construction
-4. DPT pseudotime estimation from the chosen root
-5. post-hoc trajectory-gene ranking using `corr_method`
-
-### `palantir`
-
-1. root resolution from `root_cluster` or `root_cell`
-2. Palantir diffusion maps and multiscale manifold construction
-3. Palantir pseudotime / entropy / fate-probability inference
-4. post-hoc trajectory-gene ranking using `corr_method`
-
-Important implementation notes:
-
-- `method` selects the trajectory algorithm.
-- `corr_method` only changes how trajectory-associated genes are ranked after pseudotime is estimated.
+1. load
+2. preflight
+3. verify normalized matrix state and trajectory representation
+4. resolve root cluster or root cell
+5. run method
+6. rank trajectory-associated genes with `corr_method`
+7. write `processed.h5ad`
+8. render figures, tables, and `figure_data`
 
 ## Output Contract
 
 Successful runs write:
 
-- `adata_with_trajectory.h5ad`
+- `processed.h5ad`
 - `report.md`
 - `result.json`
 - `tables/trajectory_genes.csv`
-- `figures/paga_graph.png`
-- `figures/pseudotime_umap.png`
-- `figures/diffusion_components*.png`
-- `figures/trajectory_gene_heatmap.png`
+- `tables/pseudotime_cells.csv`
+- `tables/trajectory_summary.csv`
+- `figure_data/`
+- `figures/`
 
-### Visualization Contract
+Common figures include:
 
-The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
+- `pseudotime_embedding.png`
+- `pseudotime_distribution_by_group.png`
+- `trajectory_gene_heatmap.png`
+- `trajectory_gene_trends.png`
+- `fate_probability_heatmap.png` when available
+- `paga_graph.png` for `dpt`
+- `lineage_curves.png` for `slingshot_r`
 
-- `figures/paga_graph.png`
-- `figures/pseudotime_umap.png`
-- `figures/diffusion_components.png`
-- `figures/trajectory_gene_heatmap.png`
+## Usual Next Steps
 
-### What Users Should Inspect First
+- `sc-pathway-scoring` for lineage signatures
+- `sc-enrichment` for statistical pathway interpretation of trajectory genes
+- `sc-de` if the user wants condition-level testing after states are stabilized
 
-1. `report.md`
-2. `figures/pseudotime_umap.png`
-3. `figures/paga_graph.png`
-4. `tables/trajectory_genes.csv`
-5. `adata_with_trajectory.h5ad`
+## Current Guardrails
 
-## Current Limitations
+- do not run pseudotime on raw counts
+- do not hide the start state
+- do not flatten `method` and `corr_method` into one story
+- do not silently switch representations when multiple plausible embeddings exist
 
-- `palantir` currently requires an explicit root choice in OmicsClaw.
-- `via` requires the optional `pyVIA` dependency and an explicit root choice.
-- `cellrank` requires the optional `cellrank` dependency and is intended for terminal-state / fate analysis, not just scalar ordering.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
-
-## Safety And Guardrails
-
-- Root choice is scientific input, not a cosmetic parameter; state it explicitly before the run.
-- `corr_method` changes only the post-hoc gene-ranking step, not the trajectory algorithm itself.
-- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-pseudotime-guardrails.md`.
-- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.
+For short guardrails see `knowledge_base/knowhows/KH-sc-pseudotime-guardrails.md`.  
+For longer method guidance see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.

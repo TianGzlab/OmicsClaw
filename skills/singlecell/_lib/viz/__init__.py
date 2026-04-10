@@ -59,6 +59,13 @@ from .doublet import (
     plot_doublet_score_by_group,
     plot_doublet_score_distribution,
 )
+from .pseudotime import (
+    plot_fate_probability_heatmap,
+    plot_pseudotime_distribution_by_group,
+    plot_pseudotime_embedding,
+    plot_slingshot_curves,
+    plot_trajectory_gene_trends,
+)
 from .qc import (
     plot_barcode_rank,
     plot_highest_expr_genes,
@@ -136,6 +143,11 @@ __all__ = [
     "plot_doublet_score_distribution",
     "plot_doublet_call_summary",
     "plot_doublet_score_by_group",
+    "plot_pseudotime_embedding",
+    "plot_pseudotime_distribution_by_group",
+    "plot_trajectory_gene_trends",
+    "plot_fate_probability_heatmap",
+    "plot_slingshot_curves",
     "plot_qc_violin",
     "plot_qc_scatter",
     "plot_qc_histograms",

@@ -1,31 +1,30 @@
 #!/usr/bin/env python3
-"""Single-Cell Pseudotime Analysis - DPT and Palantir trajectory inference.
+"""Single-cell pseudotime and lineage inference."""
 
-Usage:
-    python sc_pseudotime.py --input <data.h5ad> --output <dir> --root-cluster <cluster>
-    python sc_pseudotime.py --demo --output <dir>
-
-This skill performs core trajectory analysis using methods available in scanpy:
-- PAGA graph for cluster connectivity
-- Diffusion map for dimensionality reduction
-- DPT pseudotime for temporal ordering
-- Trajectory gene identification
-"""
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
+import shlex
 import sys
+import tempfile
 from pathlib import Path
 
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
 import matplotlib
+
 matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
+import scanpy as sc
 
-# Fix for anndata >= 0.11 with StringArray
 try:
     import anndata
+
     anndata.settings.allow_write_nullable_strings = True
 except Exception:
     pass
@@ -34,28 +33,145 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import (
-    generate_report_header,
     generate_report_footer,
+    generate_report_header,
     load_result_json,
     write_output_readme,
     write_result_json,
 )
-from omicsclaw.common.checksums import sha256_file
-from skills.singlecell._lib.method_config import (
-    MethodConfig,
-    validate_method_choice,
-)
-from skills.singlecell._lib.viz_utils import save_figure
+from omicsclaw.core.r_dependency_manager import check_r_tier, suggest_r_install
+from omicsclaw.core.r_script_runner import RScriptRunner
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_pseudotime
 from skills.singlecell._lib import trajectory as sc_traj
+from skills.singlecell._lib.adata_utils import (
+    ensure_input_contract,
+    get_matrix_contract,
+    infer_x_matrix_kind,
+    propagate_singlecell_contracts,
+    store_analysis_metadata,
+)
+from skills.singlecell._lib.dependency_manager import install_hint, is_available
+from skills.singlecell._lib.export import save_h5ad
+from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
+from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_pseudotime
+from skills.singlecell._lib.viz import (
+    plot_fate_probability_heatmap,
+    plot_pseudotime_distribution_by_group,
+    plot_pseudotime_embedding,
+    plot_slingshot_curves,
+    plot_trajectory_gene_trends,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-pseudotime"
-SKILL_VERSION = "0.4.0"
+SKILL_VERSION = "0.5.0"
+SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py"
+R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+
+METHOD_REGISTRY: dict[str, MethodConfig] = {
+    "dpt": MethodConfig(
+        name="dpt",
+        description="Scanpy DPT on a graph built from the chosen representation",
+        dependencies=("scanpy",),
+    ),
+    "palantir": MethodConfig(
+        name="palantir",
+        description="Palantir pseudotime with diffusion maps, entropy, and fate probabilities",
+        dependencies=("palantir",),
+    ),
+    "via": MethodConfig(
+        name="via",
+        description="VIA graph-based pseudotime with terminal-state discovery",
+        dependencies=("pyVIA",),
+    ),
+    "cellrank": MethodConfig(
+        name="cellrank",
+        description="CellRank macrostate and fate inference on a transition kernel",
+        dependencies=("cellrank",),
+    ),
+    "slingshot_r": MethodConfig(
+        name="slingshot_r",
+        description="Slingshot lineage inference through the R bridge",
+        dependencies=(),
+    ),
+}
+
+METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
+    "dpt": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "n_neighbors": 15,
+        "n_pcs": 50,
+        "n_dcs": 10,
+        "n_genes": 50,
+        "corr_method": "pearson",
+    },
+    "palantir": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "n_neighbors": 15,
+        "n_pcs": 50,
+        "n_genes": 50,
+        "corr_method": "pearson",
+        "palantir_knn": 30,
+        "palantir_n_components": 10,
+        "palantir_num_waypoints": 1200,
+        "palantir_max_iterations": 25,
+        "palantir_seed": 20,
+    },
+    "via": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "n_neighbors": 15,
+        "n_pcs": 50,
+        "n_genes": 50,
+        "corr_method": "pearson",
+        "via_knn": 30,
+        "via_seed": 20,
+    },
+    "cellrank": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "n_neighbors": 15,
+        "n_pcs": 50,
+        "n_dcs": 10,
+        "n_genes": 50,
+        "corr_method": "pearson",
+        "cellrank_n_states": 3,
+        "cellrank_schur_components": 20,
+        "cellrank_frac_to_keep": 0.3,
+        "cellrank_use_velocity": False,
+    },
+    "slingshot_r": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "end_clusters": None,
+        "n_genes": 50,
+        "corr_method": "pearson",
+    },
+}
+
+METHOD_PARAM_KEYS: dict[str, tuple[str, ...]] = {
+    "dpt": ("n_neighbors", "n_pcs", "n_dcs"),
+    "palantir": ("palantir_knn", "palantir_n_components", "palantir_num_waypoints", "palantir_max_iterations", "palantir_seed"),
+    "via": ("via_knn", "via_seed"),
+    "cellrank": ("cellrank_n_states", "cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity"),
+    "slingshot_r": ("end_clusters",),
+}
 
 
 def _prepare_via_runtime() -> None:
@@ -109,437 +225,724 @@ def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary
         notebook_path = write_analysis_notebook(
             output_dir,
             skill_alias=SKILL_NAME,
-            description="PAGA and DPT-based pseudotime trajectory analysis for scRNA-seq.",
+            description="Single-cell pseudotime and lineage inference.",
             result_payload=result_payload,
             preferred_method=summary.get("method", "dpt"),
             script_path=Path(__file__).resolve(),
             actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
         )
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover
         logger.warning("Failed to write analysis notebook: %s", exc)
 
     try:
         write_output_readme(
             output_dir,
             skill_alias=SKILL_NAME,
-            description="PAGA and DPT-based pseudotime trajectory analysis for scRNA-seq.",
+            description="Single-cell pseudotime and lineage inference.",
             result_payload=result_payload,
             preferred_method=summary.get("method", "dpt"),
             notebook_path=notebook_path,
         )
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover
         logger.warning("Failed to write README.md: %s", exc)
 
-# ---------------------------------------------------------------------------
-# Method registry
-# ---------------------------------------------------------------------------
 
-METHOD_REGISTRY: dict[str, MethodConfig] = {
-    "dpt": MethodConfig(
-        name="dpt",
-        description="PAGA + Diffusion Pseudotime (scanpy built-in)",
-        dependencies=("scanpy",),
-    ),
-    "palantir": MethodConfig(
-        name="palantir",
-        description="Palantir pseudotime with diffusion maps and waypoint sampling",
-        dependencies=("palantir",),
-    ),
-    "via": MethodConfig(
-        name="via",
-        description="VIA pseudotime with automatic terminal-state inference",
-        dependencies=("pyVIA",),
-    ),
-    "cellrank": MethodConfig(
-        name="cellrank",
-        description="CellRank fate mapping with GPCCA on pseudotime/connectivity kernels",
-        dependencies=("cellrank",),
-    ),
-}
-
-SUPPORTED_METHODS = tuple(METHOD_REGISTRY.keys())
-METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
-    "dpt": {
-        "cluster_key": "leiden",
-        "root_cluster": None,
-        "root_cell": None,
-        "n_dcs": 10,
-        "n_genes": 50,
-        "corr_method": "pearson",
-    },
-    "palantir": {
-        "cluster_key": "leiden",
-        "root_cluster": None,
-        "root_cell": None,
-        "n_dcs": 10,
-        "n_genes": 50,
-        "corr_method": "pearson",
-        "palantir_knn": 30,
-        "palantir_num_waypoints": 1200,
-        "palantir_max_iterations": 25,
-        "palantir_seed": 20,
-    },
-    "via": {
-        "cluster_key": "leiden",
-        "root_cluster": None,
-        "root_cell": None,
-        "n_dcs": 10,
-        "n_genes": 50,
-        "corr_method": "pearson",
-        "via_knn": 30,
-        "via_seed": 20,
-    },
-    "cellrank": {
-        "cluster_key": "leiden",
-        "root_cluster": None,
-        "root_cell": None,
-        "n_dcs": 10,
-        "n_genes": 50,
-        "corr_method": "pearson",
-        "cellrank_n_states": 3,
-        "cellrank_schur_components": 20,
-        "cellrank_frac_to_keep": 0.3,
-        "cellrank_use_velocity": False,
-    },
-}
-
-# ---------------------------------------------------------------------------
-# Method dispatch table
-# ---------------------------------------------------------------------------
-
-# Currently only DPT is supported; dispatch kept for future methods.
-_METHOD_DISPATCH = {
-    "dpt": "dpt",
-    "palantir": "palantir",
-    "via": "via",
-    "cellrank": "cellrank",
-}
+def _candidate_reps(adata) -> list[str]:
+    preferred = [key for key in ("X_umap", "X_harmony", "X_scvi", "X_scanvi", "X_scanorama", "X_pca") if key in adata.obsm]
+    if preferred:
+        return preferred
+    return [str(key) for key in adata.obsm.keys() if str(key).startswith("X_") and str(key) not in {"X_umap", "X_tsne", "X_diffmap"}]
 
 
-def generate_trajectory_figures(
-    adata,
-    trajectory_genes: pd.DataFrame,
+def _candidate_display_embeddings(adata) -> list[str]:
+    preferred = [key for key in ("X_umap", "X_tsne", "X_phate", "X_diffmap", "X_pca") if key in adata.obsm]
+    return preferred or [str(key) for key in adata.obsm.keys() if str(key).startswith("X_")]
+
+
+def _resolve_use_rep(adata, requested: str | None) -> str:
+    if requested:
+        if requested not in adata.obsm:
+            raise ValueError(f"Embedding `{requested}` was not found in adata.obsm.")
+        return requested
+    candidates = _candidate_reps(adata)
+    if not candidates:
+        raise ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")
+    return candidates[0]
+
+
+def _resolve_display_embedding(adata, use_rep: str) -> str:
+    candidates = _candidate_display_embeddings(adata)
+    return candidates[0] if candidates else use_rep
+
+
+def _resolve_root_cell(adata, root_cell: str | None) -> int | None:
+    if root_cell is None:
+        return None
+    token = str(root_cell).strip()
+    if token == "":
+        return None
+    if token in set(adata.obs_names.astype(str)):
+        return int(np.where(adata.obs_names.astype(str) == token)[0][0])
+    if token.isdigit():
+        idx = int(token)
+        if 0 <= idx < adata.n_obs:
+            return idx
+    raise ValueError(f"`--root-cell {root_cell}` was not found. Provide a valid obs_name or integer cell index.")
+
+
+def _parse_end_clusters(end_clusters: str | None) -> list[str] | None:
+    if not end_clusters:
+        return None
+    values = [token.strip() for token in str(end_clusters).split(",") if token.strip()]
+    return values or None
+
+
+def _ensure_normalized_demo(adata) -> None:
+    ensure_input_contract(adata, standardized=True)
+    contract = get_matrix_contract(adata)
+    if contract.get("X") != "normalized_expression":
+        propagate_singlecell_contracts(
+            adata,
+            adata,
+            producer_skill=SKILL_NAME,
+            x_kind="normalized_expression",
+            raw_kind=contract.get("raw"),
+            primary_cluster_key="leiden" if "leiden" in adata.obs.columns else None,
+        )
+
+
+def get_demo_data():
+    adata, _ = sc_io.load_repo_demo_data("pbmc3k_processed")
+    if "leiden" not in adata.obs.columns:
+        if "louvain" in adata.obs.columns:
+            adata.obs["leiden"] = adata.obs["louvain"].astype(str)
+        else:
+            sc.pp.neighbors(adata)
+            sc.tl.umap(adata)
+            try:
+                sc.tl.leiden(adata, resolution=0.8)
+            except Exception:
+                sc.tl.louvain(adata, resolution=0.8)
+                adata.obs["leiden"] = adata.obs["louvain"].astype(str)
+    _ensure_normalized_demo(adata)
+    return adata
+
+
+def _prepare_input_adata(input_path: Path):
+    adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME, preserve_all=True)
+    ensure_input_contract(adata, source_path=str(input_path))
+    return adata
+
+
+def _ensure_neighbors_for_rep(adata, *, use_rep: str, n_neighbors: int, n_pcs: int) -> None:
+    if use_rep == "X_pca":
+        sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
+    else:
+        sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep=use_rep)
+
+
+def _build_pseudotime_points_table(adata, *, pseudotime_key: str, cluster_key: str, display_key: str) -> pd.DataFrame:
+    coords = np.asarray(adata.obsm[display_key])
+    return pd.DataFrame(
+        {
+            "cell_id": adata.obs_names.astype(str),
+            "display_embedding": display_key,
+            "coord1": coords[:, 0],
+            "coord2": coords[:, 1],
+            cluster_key: adata.obs[cluster_key].astype(str).to_numpy(),
+            "pseudotime": pd.to_numeric(adata.obs[pseudotime_key], errors="coerce").to_numpy(),
+        }
+    )
+
+
+def _build_fate_summary_table(adata, *, cluster_key: str, obsm_key: str) -> pd.DataFrame:
+    if obsm_key not in adata.obsm:
+        return pd.DataFrame()
+    matrix = np.asarray(adata.obsm[obsm_key], dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        return pd.DataFrame()
+    columns = [f"lineage_{i+1}" for i in range(matrix.shape[1])]
+    frame = pd.DataFrame(matrix, columns=columns, index=adata.obs_names.astype(str))
+    frame["group"] = adata.obs[cluster_key].astype(str).to_numpy()
+    return frame.groupby("group", observed=False)[columns].mean().reset_index()
+
+
+def _write_figure_data(
     output_dir: Path,
     *,
-    method: str,
-    cluster_key: str,
-    pseudotime_key: str,
-) -> list[str]:
-    """Generate trajectory visualization figures."""
-    figures = []
+    points_df: pd.DataFrame,
+    trajectory_genes: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    fate_df: pd.DataFrame | None = None,
+    curves_df: pd.DataFrame | None = None,
+) -> dict[str, str]:
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "pseudotime_points": "pseudotime_points.csv",
+        "trajectory_genes": "trajectory_genes.csv",
+        "summary": "trajectory_summary.csv",
+    }
+    points_df.to_csv(figure_data_dir / files["pseudotime_points"], index=False)
+    trajectory_genes.to_csv(figure_data_dir / files["trajectory_genes"], index=False)
+    summary_df.to_csv(figure_data_dir / files["summary"], index=False)
+
+    if fate_df is not None and not fate_df.empty:
+        files["fate_probabilities"] = "fate_probabilities.csv"
+        fate_df.to_csv(figure_data_dir / files["fate_probabilities"], index=False)
+    if curves_df is not None and not curves_df.empty:
+        files["slingshot_curves"] = "slingshot_curves.csv"
+        curves_df.to_csv(figure_data_dir / files["slingshot_curves"], index=False)
+
+    manifest = {"skill": SKILL_NAME, "available_files": files}
+    (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return files
+
+
+def _write_figure_manifest(output_dir: Path, figure_paths: list[str]) -> None:
+    manifest = {
+        "skill": SKILL_NAME,
+        "recipe_id": "standard-sc-pseudotime-gallery",
+        "figures": [{"filename": Path(path).name, "path": str(path)} for path in figure_paths],
+    }
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
+    (figures_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def _write_tables(
+    output_dir: Path,
+    *,
+    points_df: pd.DataFrame,
+    trajectory_genes: pd.DataFrame,
+    summary_df: pd.DataFrame,
+    fate_df: pd.DataFrame | None = None,
+    curves_df: pd.DataFrame | None = None,
+) -> dict[str, str]:
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "trajectory_genes": "trajectory_genes.csv",
+        "pseudotime_cells": "pseudotime_cells.csv",
+        "summary": "trajectory_summary.csv",
+    }
+    trajectory_genes.to_csv(tables_dir / files["trajectory_genes"], index=False)
+    points_df.to_csv(tables_dir / files["pseudotime_cells"], index=False)
+    summary_df.to_csv(tables_dir / files["summary"], index=False)
+    if fate_df is not None and not fate_df.empty:
+        files["fate_probabilities"] = "fate_probabilities.csv"
+        fate_df.to_csv(tables_dir / files["fate_probabilities"], index=False)
+    if curves_df is not None and not curves_df.empty:
+        files["slingshot_curves"] = "slingshot_curves.csv"
+        curves_df.to_csv(tables_dir / files["slingshot_curves"], index=False)
+    return files
+
+
+def _write_report(output_dir: Path, *, summary: dict, params: dict, input_file: str | None, top_genes: pd.DataFrame) -> None:
+    header = generate_report_header(
+        title="Single-Cell Pseudotime Report",
+        skill_name=SKILL_NAME,
+        input_files=[Path(input_file)] if input_file else None,
+        extra_metadata={
+            "Method": str(summary.get("method", "dpt")),
+            "Backend": str(summary.get("backend", summary.get("method", "dpt"))),
+            "Cells": str(summary.get("n_cells", "N/A")),
+            "Clusters": str(summary.get("n_clusters", "N/A")),
+            "Trajectory genes": str(summary.get("n_trajectory_genes", 0)),
+        },
+    )
+
+    body = [
+        "## Summary\n",
+        f"- **Method**: `{summary.get('method', 'dpt')}`",
+        f"- **Backend**: `{summary.get('backend', summary.get('method', 'dpt'))}`",
+        f"- **Cluster key**: `{summary.get('cluster_key', 'leiden')}`",
+        f"- **Graph / trajectory representation**: `{summary.get('use_rep', 'X_pca')}`",
+        f"- **Display embedding**: `{summary.get('display_embedding', 'X_umap')}`",
+        f"- **Root cluster**: `{summary.get('root_cluster', 'not set')}`",
+        f"- **Root cell**: `{summary.get('root_cell_name', summary.get('root_cell', 'not set'))}`",
+        f"- **Pseudotime range**: `{summary.get('pseudotime_min', 0):.3f}` to `{summary.get('pseudotime_max', 1):.3f}`",
+        f"- **Trajectory genes exported**: `{summary.get('n_trajectory_genes', 0)}`",
+        "",
+        "## Beginner Notes\n",
+        "- This skill should usually be run after `sc-clustering`, when cluster labels and a biologically plausible start state are known.",
+        "- `method` changes the trajectory model itself; `corr_method` only changes how trajectory-associated genes are ranked afterwards.",
+        "- `use_rep` is a first-class choice. If you clustered on Harmony or scVI embeddings, use the same representation here unless you have a strong reason to switch.",
+        "",
+        "## Effective Parameters\n",
+        f"- `cluster_key`: {params['cluster_key']}",
+        f"- `use_rep`: {params['use_rep']}",
+        f"- `root_cluster`: {params.get('root_cluster')}",
+        f"- `root_cell`: {params.get('root_cell')}",
+        f"- `n_genes`: {params['n_genes']}",
+        f"- `corr_method`: {params['corr_method']}",
+    ]
+    for key in METHOD_PARAM_KEYS.get(summary["method"], ()):
+        body.append(f"- `{key}`: {params.get(key)}")
+
+    body.extend(
+        [
+            "",
+            "## What To Inspect First\n",
+            "- `figures/pseudotime_embedding.png` — whether the inferred ordering is biologically plausible.",
+            "- `figures/pseudotime_distribution_by_group.png` — whether different groups occupy distinct trajectory regions.",
+            "- `tables/trajectory_genes.csv` — top genes associated with the inferred trajectory.",
+            "- `processed.h5ad` — trajectory-aware object for downstream interpretation.",
+            "",
+            "## Top Trajectory Genes\n",
+            "| Gene | Correlation | P-value |",
+            "|------|-------------|---------|",
+        ]
+    )
+    for _, row in top_genes.head(20).iterrows():
+        body.append(f"| {row.get('gene','NA')} | {float(row.get('correlation', 0)):.3f} | {float(row.get('pvalue', 1)):.2e} |")
+
+    body.extend(
+        [
+            "",
+            "## Recommended Next Steps\n",
+            "- Check marker and annotation context to decide whether the root choice should be revised.",
+            "- Use `sc-pathway-scoring` to score lineage signatures along pseudotime.",
+            "- Use `sc-enrichment` on trajectory-associated genes if you want statistical pathway interpretation.",
+        ]
+    )
+
+    report = header + "\n".join(body) + "\n" + generate_report_footer()
+    (output_dir / "report.md").write_text(report, encoding="utf-8")
+
+
+def _write_reproducibility(output_dir: Path, *, params: dict, input_file: str | None, demo_mode: bool) -> None:
+    repro_dir = output_dir / "reproducibility"
+    repro_dir.mkdir(exist_ok=True)
+    command_parts = ["python", SCRIPT_REL_PATH]
+    if demo_mode:
+        command_parts.append("--demo")
+    elif input_file:
+        command_parts.extend(["--input", input_file])
+    command_parts.extend(["--output", str(output_dir), "--method", str(params["method"])])
+    for key in (
+        "cluster_key",
+        "use_rep",
+        "root_cluster",
+        "root_cell",
+        "end_clusters",
+        "n_neighbors",
+        "n_pcs",
+        "n_dcs",
+        "n_genes",
+        "corr_method",
+        "palantir_knn",
+        "palantir_n_components",
+        "palantir_num_waypoints",
+        "palantir_max_iterations",
+        "palantir_seed",
+        "via_knn",
+        "via_seed",
+        "cellrank_n_states",
+        "cellrank_schur_components",
+        "cellrank_frac_to_keep",
+    ):
+        value = params.get(key)
+        if value not in (None, "", False):
+            command_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+    if params.get("cellrank_use_velocity"):
+        command_parts.append("--cellrank-use-velocity")
+    command = " ".join(shlex.quote(part) for part in command_parts)
+    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
+
+    packages = ["scanpy", "anndata", "numpy", "pandas", "matplotlib", "seaborn"]
+    if params["method"] == "palantir":
+        packages.append("palantir")
+    if params["method"] == "via":
+        packages.append("pyVIA")
+    if params["method"] == "cellrank":
+        packages.append("cellrank")
+    _write_repro_requirements(repro_dir, packages)
+
+
+def _run_dpt(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+    root_cell_idx: int | None,
+    n_neighbors: int,
+    n_pcs: int,
+    n_dcs: int,
+) -> tuple[object, dict]:
+    _ensure_neighbors_for_rep(adata, use_rep=use_rep, n_neighbors=n_neighbors, n_pcs=n_pcs)
+    sc_traj.run_paga_analysis(adata, cluster_key=cluster_key, n_neighbors=n_neighbors)
+    diffmap_result = sc_traj.run_diffusion_map(adata, n_comps=max(15, n_dcs + 5), n_dcs=n_dcs)
+    dpt_result = sc_traj.run_dpt_pseudotime(
+        adata,
+        root_cell_indices=[root_cell_idx] if root_cell_idx is not None else None,
+        root_cluster=root_cluster,
+        cluster_key=cluster_key,
+        n_dcs=n_dcs,
+    )
+    summary = {
+        "backend": "dpt",
+        "pseudotime_key": "dpt_pseudotime",
+        "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
+        "root_cell_name": str(adata.obs_names[int(dpt_result["root_cells"][0])]) if dpt_result["root_cells"] else None,
+        "n_diffusion_components": int(diffmap_result["diffmap"].shape[1]),
+    }
+    return adata, summary
+
+
+def _run_palantir(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+    root_cell_idx: int | None,
+    palantir_knn: int,
+    palantir_n_components: int,
+    palantir_num_waypoints: int,
+    palantir_max_iterations: int,
+    palantir_seed: int,
+) -> tuple[object, dict]:
+    early_cell = sc_traj.resolve_palantir_early_cell(
+        adata,
+        root_cell=root_cell_idx,
+        root_cluster=root_cluster,
+        cluster_key=cluster_key,
+        use_rep=use_rep,
+    )
+    result = sc_traj.run_palantir_pseudotime(
+        adata,
+        early_cell=early_cell,
+        use_rep=use_rep,
+        knn=palantir_knn,
+        n_components=palantir_n_components,
+        num_waypoints=palantir_num_waypoints,
+        max_iterations=palantir_max_iterations,
+        seed=palantir_seed,
+    )
+    if "palantir_fate_probabilities" in adata.obsm:
+        adata.obsm["trajectory_fate_probabilities"] = np.asarray(adata.obsm["palantir_fate_probabilities"], dtype=float)
+    summary = {
+        "backend": "palantir",
+        "pseudotime_key": "palantir_pseudotime",
+        "root_cell": int(np.where(adata.obs_names.astype(str) == str(early_cell))[0][0]),
+        "root_cell_name": str(early_cell),
+        "mean_entropy": float(np.nanmean(result["entropy"])) if result.get("entropy") is not None else None,
+        "n_terminal_states": int(result["fate_probabilities"].shape[1]) if result.get("fate_probabilities") is not None else 0,
+        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
+    }
+    return adata, summary
+
+
+def _run_via(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+    root_cell_idx: int | None,
+    via_knn: int,
+    via_seed: int,
+    n_dcs: int,
+) -> tuple[object, dict]:
+    result = sc_traj.run_via_pseudotime(
+        adata,
+        root_cell=root_cell_idx,
+        root_cluster=root_cluster,
+        cluster_key=cluster_key,
+        use_rep=use_rep,
+        knn=via_knn,
+        n_components=max(2, n_dcs),
+        seed=via_seed,
+    )
+    if "via_fate_probabilities" in adata.obsm:
+        adata.obsm["trajectory_fate_probabilities"] = np.asarray(adata.obsm["via_fate_probabilities"], dtype=float)
+    summary = {
+        "backend": result.get("method", "via"),
+        "pseudotime_key": "via_pseudotime",
+        "root_cell": int(result["root_cell"]),
+        "root_cell_name": str(result["root_cell_name"]),
+        "n_terminal_states": int(len(result.get("terminal_clusters", []))),
+        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
+    }
+    return adata, summary
+
+
+def _run_cellrank(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+    root_cell_idx: int | None,
+    n_neighbors: int,
+    n_pcs: int,
+    n_dcs: int,
+    cellrank_n_states: int,
+    cellrank_schur_components: int,
+    cellrank_frac_to_keep: float,
+    cellrank_use_velocity: bool,
+) -> tuple[object, dict]:
+    _ensure_neighbors_for_rep(adata, use_rep=use_rep, n_neighbors=n_neighbors, n_pcs=n_pcs)
+    result = sc_traj.run_cellrank_pseudotime(
+        adata,
+        root_cell=root_cell_idx,
+        root_cluster=root_cluster,
+        cluster_key=cluster_key,
+        n_states=cellrank_n_states,
+        schur_components=cellrank_schur_components,
+        frac_to_keep=cellrank_frac_to_keep,
+        use_velocity=cellrank_use_velocity,
+        n_dcs=n_dcs,
+    )
+    if result.get("fate_probabilities") is not None:
+        adata.obsm["trajectory_fate_probabilities"] = np.asarray(result["fate_probabilities"], dtype=float)
+    summary = {
+        "backend": "cellrank",
+        "pseudotime_key": "dpt_pseudotime",
+        "root_cell": result.get("root_cell"),
+        "root_cell_name": result.get("root_cell_name"),
+        "n_terminal_states": int(len(result.get("terminal_states", []))),
+        "n_macrostates": int(result.get("n_macrostates", 0)),
+        "kernel_mode": result.get("kernel_mode"),
+        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
+    }
+    return adata, summary
+
+
+def _run_slingshot_r(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+    end_clusters: list[str] | None,
+) -> tuple[object, dict, pd.DataFrame]:
+    required = ["slingshot", "SingleCellExperiment", "zellkonverter"]
+    installed, missing = check_r_tier("singlecell-pseudotime")
+    del installed  # quiet lint
+    missing_required = [pkg for pkg in required if pkg in missing]
+    if missing_required:
+        raise ImportError(
+            "Slingshot R dependencies are missing: "
+            + ", ".join(missing_required)
+            + "\nInstall with:\n"
+            + suggest_r_install(missing_required)
+        )
+
+    runner = RScriptRunner(scripts_dir=R_SCRIPTS_DIR, timeout=7200)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_slingshot_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_dir = tmpdir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        save_h5ad(adata, input_h5ad, compression=None)
+        runner.run_script(
+            "sc_slingshot_pseudotime.R",
+            args=[
+                str(input_h5ad),
+                str(output_dir),
+                cluster_key,
+                use_rep,
+                root_cluster or "",
+                ",".join(end_clusters or []),
+            ],
+            expected_outputs=["slingshot_pseudotime.csv", "slingshot_branches.csv", "slingshot_curves.csv"],
+            output_dir=output_dir,
+        )
+        pseudotime_df = pd.read_csv(output_dir / "slingshot_pseudotime.csv")
+        branch_df = pd.read_csv(output_dir / "slingshot_branches.csv")
+        curves_df = pd.read_csv(output_dir / "slingshot_curves.csv")
+
+    pseudotime_df["cell_id"] = pseudotime_df["cell_id"].astype(str)
+    pseudotime_df = pseudotime_df.drop_duplicates(subset="cell_id", keep="first")
+    pseudotime_df = pseudotime_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
+    adata.obs["slingshot_pseudotime"] = pd.to_numeric(pseudotime_df["slingshot_pseudotime"], errors="coerce").to_numpy()
+    for col in pseudotime_df.columns:
+        if col == "slingshot_pseudotime":
+            continue
+        adata.obs[f"slingshot_{col}"] = pd.to_numeric(pseudotime_df[col], errors="coerce").to_numpy()
+
+    branch_df["cell_id"] = branch_df["cell_id"].astype(str)
+    branch_df = branch_df.drop_duplicates(subset="cell_id", keep="first")
+    branch_df = branch_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
+    for col in branch_df.columns:
+        adata.obs[f"slingshot_branch_{col}"] = branch_df[col].astype(str).to_numpy()
+
+    adata.uns["slingshot_trajectory"] = {
+        "use_rep": use_rep,
+        "cluster_key": cluster_key,
+        "start_cluster": root_cluster,
+        "end_clusters": end_clusters or [],
+        "n_lineages": int(max(1, len([col for col in pseudotime_df.columns if col != "slingshot_pseudotime"]))),
+    }
+    summary = {
+        "backend": "slingshot_r",
+        "pseudotime_key": "slingshot_pseudotime",
+        "root_cell": None,
+        "root_cell_name": None,
+        "n_lineages": int(max(1, len([col for col in pseudotime_df.columns if col != "slingshot_pseudotime"]))),
+    }
+    return adata, summary, curves_df
+
+
+def _render_figures(
+    adata,
+    *,
+    output_dir: Path,
+    method: str,
+    cluster_key: str,
+    use_rep: str,
+    display_embedding: str,
+    pseudotime_key: str,
+    trajectory_genes: pd.DataFrame,
+    root_cell_name: str | None,
+    fate_summary_df: pd.DataFrame,
+    curves_df: pd.DataFrame | None,
+) -> list[str]:
+    figures: list[str] = []
+    figure_path = plot_pseudotime_embedding(
+        adata,
+        output_dir,
+        obsm_key=display_embedding,
+        pseudotime_key=pseudotime_key,
+        title=f"{method.replace('_r', '').upper()} pseudotime",
+        root_cell_name=root_cell_name,
+    )
+    if figure_path:
+        figures.append(str(figure_path))
+
+    distribution_df = pd.DataFrame(
+        {
+            cluster_key: adata.obs[cluster_key].astype(str).to_numpy(),
+            pseudotime_key: pd.to_numeric(adata.obs[pseudotime_key], errors="coerce").to_numpy(),
+        }
+    )
+    figure_path = plot_pseudotime_distribution_by_group(
+        distribution_df,
+        output_dir,
+        group_col=cluster_key,
+        pseudotime_col=pseudotime_key,
+    )
+    if figure_path:
+        figures.append(str(figure_path))
+
+    figure_path = sc_traj.plot_trajectory_gene_heatmap(
+        adata,
+        trajectory_genes,
+        output_dir=output_dir / "figures",
+        pseudotime_key=pseudotime_key,
+        n_genes=min(30, len(trajectory_genes)),
+        title="Trajectory-associated gene heatmap",
+    )
+    if figure_path:
+        figures.append(str(figure_path))
+
+    figure_path = plot_trajectory_gene_trends(
+        adata,
+        trajectory_genes,
+        output_dir,
+        pseudotime_key=pseudotime_key,
+    )
+    if figure_path:
+        figures.append(str(figure_path))
 
     if method == "dpt":
-        try:
-            logger.info("Generating PAGA graph...")
-            fig_path = sc_traj.plot_paga_graph(
-                adata,
-                output_dir=figures_dir,
-                cluster_key=cluster_key,
-                title="PAGA Connectivity Graph",
-            )
-            if fig_path:
-                figures.append(fig_path)
-        except Exception as e:
-            logger.warning(f"PAGA graph plot failed: {e}")
-
-    # Pseudotime UMAP
-    try:
-        logger.info("Generating pseudotime UMAP...")
-        fig_path = sc_traj.plot_pseudotime_umap(
+        figure_path = sc_traj.plot_paga_graph(
             adata,
-            output_dir=figures_dir,
-            pseudotime_key=pseudotime_key,
-            title=f"{method.upper()} Pseudotime",
+            output_dir=output_dir / "figures",
+            cluster_key=cluster_key,
+            title="PAGA connectivity graph",
         )
-        if fig_path:
-            figures.append(fig_path)
-    except Exception as e:
-        logger.warning(f"Pseudotime UMAP plot failed: {e}")
+        if figure_path:
+            figures.append(str(figure_path))
+        figures.extend(sc_traj.plot_diffusion_components(adata, output_dir=output_dir / "figures", n_components=3))
 
-    # Diffusion components
-    try:
-        logger.info("Generating diffusion component plots...")
-        fig_paths = sc_traj.plot_diffusion_components(
-            adata,
-            output_dir=figures_dir,
-            n_components=3,
-        )
-        figures.extend(fig_paths)
-    except Exception as e:
-        logger.warning(f"Diffusion component plots failed: {e}")
+    if not fate_summary_df.empty:
+        figure_path = plot_fate_probability_heatmap(fate_summary_df, output_dir)
+        if figure_path:
+            figures.append(str(figure_path))
 
-    # Trajectory gene heatmap
-    try:
-        logger.info("Generating trajectory gene heatmap...")
-        fig_path = sc_traj.plot_trajectory_gene_heatmap(
-            adata,
-            trajectory_genes,
-            output_dir=figures_dir,
-            pseudotime_key=pseudotime_key,
-            n_genes=30,
-            title="Trajectory-Associated Genes",
+    if curves_df is not None and not curves_df.empty:
+        points_df = _build_pseudotime_points_table(adata, pseudotime_key=pseudotime_key, cluster_key=cluster_key, display_key=use_rep)
+        figure_path = plot_slingshot_curves(
+            points_df,
+            curves_df,
+            output_dir,
+            basis_name=use_rep.replace("X_", "").upper(),
+            group_col=cluster_key,
         )
-        if fig_path:
-            figures.append(fig_path)
-    except Exception as e:
-        logger.warning(f"Trajectory gene heatmap failed: {e}")
+        if figure_path:
+            figures.append(str(figure_path))
 
     return figures
 
 
-def write_pseudotime_report(
-    output_dir: Path,
-    summary: dict,
-    params: dict,
-    input_file: str | None,
-    top_genes: pd.DataFrame,
-) -> None:
-    """Write pseudotime analysis report."""
-    backend = str(summary.get("backend", summary.get("method", "NA")))
-    header = generate_report_header(
-        title="Single-Cell Pseudotime Analysis Report",
-        skill_name=SKILL_NAME,
-        input_files=[Path(input_file)] if input_file else None,
-        extra_metadata={
-            "Method": str(params.get("method", "dpt")),
-            "Backend": backend,
-            "Root Cluster": str(params.get("root_cluster", "auto")),
-            "N Clusters": str(summary.get("n_clusters", "N/A")),
-            "Trajectory Genes": str(summary.get("n_trajectory_genes", 0)),
-        },
-    )
-
-    body_lines = [
-        "## Summary\n",
-        f"- **Requested method**: {params.get('method', 'dpt')}",
-        f"- **Execution backend**: {backend}",
-        f"- **Root cluster**: {params.get('root_cluster', 'auto-detected')}",
-        f"- **Root cell**: {summary.get('root_cell_name', summary.get('root_cell', 'N/A'))}",
-        f"- **Number of clusters**: {summary.get('n_clusters', 'N/A')}",
-        f"- **Trajectory genes found**: {summary.get('n_trajectory_genes', 0)}",
-        f"- **Pseudotime range**: [{summary.get('pseudotime_min', 0):.3f}, {summary.get('pseudotime_max', 1):.3f}]",
-        "",
-        "## Methods\n",
-    ]
-    if params.get("method") == "dpt":
-        body_lines.extend(
-            [
-                "### PAGA (Partition-based Graph Abstraction)",
-                "PAGA estimates connectivity between clusters by quantifying the connectivity",
-                "of the underlying single-cell graph at each cluster resolution.\n",
-                "### Diffusion Map",
-                "Diffusion maps provide a non-linear dimensionality reduction that preserves",
-                "the underlying manifold structure of the data.\n",
-                "### DPT (Diffusion Pseudotime)",
-                "DPT uses random walks on the diffusion graph to estimate pseudotemporal",
-                "ordering of cells from a root cell.\n",
-            ]
-        )
-    elif params.get("method") == "palantir":
-        body_lines.extend(
-            [
-                "### Palantir",
-                "Palantir computes diffusion maps, determines a multiscale manifold, and",
-                "uses waypoint sampling to infer pseudotime, entropy, and fate probabilities.\n",
-            ]
-        )
-        if summary.get("mean_entropy") is not None:
-            body_lines.append(f"- **Mean Palantir entropy**: {summary['mean_entropy']:.4f}")
-        if summary.get("n_terminal_states") is not None:
-            body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
-        body_lines.append("")
-    elif params.get("method") == "via":
-        body_lines.extend(
-            [
-                "### VIA",
-                "VIA builds a graph-based trajectory with automatic terminal-state discovery.",
-                "When the upstream pyVIA backend is unstable on the current environment,",
-                "OmicsClaw keeps the command successful by falling back to a diffusion-pseudotime-compatible path.\n",
-            ]
-        )
-        if summary.get("n_terminal_states") is not None:
-            body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
-        body_lines.append("")
-    else:
-        body_lines.extend(
-            [
-                "### CellRank",
-                "CellRank fits a transition kernel on the single-cell graph and uses GPCCA",
-                "to summarize macrostates, terminal states, and fate probabilities.\n",
-            ]
-        )
-        if summary.get("kernel_mode") is not None:
-            body_lines.append(f"- **Kernel mode**: {summary['kernel_mode']}")
-        if summary.get("n_macrostates") is not None:
-            body_lines.append(f"- **Macrostates**: {summary['n_macrostates']}")
-        if summary.get("n_terminal_states") is not None:
-            body_lines.append(f"- **Terminal states with fate probabilities**: {summary['n_terminal_states']}")
-        body_lines.append("")
-    body_lines.extend(["", "## Top Trajectory Genes\n"])
-
-    # Add top genes table
-    body_lines.append("| Gene | Correlation | P-value |")
-    body_lines.append("|------|-------------|---------|")
-    for _, row in top_genes.head(20).iterrows():
-        gene = row.get("gene", "N/A")
-        corr = row.get("correlation", 0)
-        pval = row.get("pvalue", 1)
-        body_lines.append(f"| {gene} | {corr:.3f} | {pval:.2e} |")
-    body_lines.append("")
-
-    body_lines.extend([
-        "## Parameters\n",
-        f"- `--method`: {params.get('method', 'dpt')}",
-        f"- `--cluster-key`: {params.get('cluster_key', 'leiden')}",
-        f"- `--root-cluster`: {params.get('root_cluster', 'auto')}",
-        f"- `--n-dcs`: {params.get('n_dcs', 10)}",
-        f"- `--n-genes`: {params.get('n_genes', 50)}",
-        f"- `--corr-method`: {params.get('corr_method', 'pearson')}",
-        "",
-        "## Output Files\n",
-        "- `adata_with_trajectory.h5ad` — AnnData with pseudotime and diffusion map",
-        "- `figures/pseudotime_umap.png` — Pseudotime on UMAP",
-        "- `figures/diffusion_components.png` — Diffusion map components",
-        "- `figures/trajectory_gene_heatmap.png` — Heatmap of trajectory genes",
-        "- `tables/trajectory_genes.csv` — All trajectory-associated genes",
-        "",
-        "## Interpretation\n",
-        "- **Pseudotime** represents the inferred temporal ordering (0 = root, 1 = terminal)",
-        "- **Trajectory genes** are correlated with pseudotime and may drive transitions",
-        "",
-    ])
-    if params.get("method") == "dpt":
-        body_lines.insert(body_lines.index("- `figures/pseudotime_umap.png` — Pseudotime on UMAP"), "- `figures/paga_graph.png` — PAGA connectivity graph")
-        body_lines.insert(body_lines.index("- **Trajectory genes** are correlated with pseudotime and may drive transitions"), "- **PAGA edges** show significant connectivity between clusters")
-
-    footer = generate_report_footer()
-    report = header + "\n" + "\n".join(body_lines) + "\n" + footer
-
-    (output_dir / "report.md").write_text(report)
+def _summary_table(summary: dict) -> pd.DataFrame:
+    rows = []
+    for key, value in summary.items():
+        if isinstance(value, (dict, list)):
+            continue
+        rows.append({"metric": key, "value": value})
+    return pd.DataFrame(rows)
 
 
-def generate_demo_data():
-    """Generate demo data with trajectory structure."""
-    import scanpy as sc
-
-    logger.info("Generating demo data with trajectory structure...")
-
-    try:
-        adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
-        logger.info("Loaded demo dataset: %s", demo_path or "scanpy-pbmc3k")
-        # Quick preprocessing
-        sc.pp.filter_cells(adata, min_genes=200)
-        sc.pp.filter_genes(adata, min_cells=3)
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-        sc.pp.pca(adata)
-        sc.pp.neighbors(adata)
-        sc.tl.umap(adata)
-
-        # Try leiden clustering
-        try:
-            sc.tl.leiden(adata, resolution=0.8)
-        except ImportError:
-            logger.warning("leidenalg not installed, using kmeans")
-            from sklearn.cluster import KMeans
-            kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
-            adata.obs['leiden'] = pd.Categorical(
-                kmeans.fit_predict(adata.obsm['X_pca'][:, :30]).astype(str)
-            )
-
-        logger.info(f"Generated: {adata.n_obs} cells x {adata.n_vars} genes, {adata.obs['leiden'].nunique()} clusters")
-    except Exception as e:
-        logger.warning(f"Failed to load local/scanpy pbmc3k: {e}. Generating synthetic data.")
-        np.random.seed(42)
-        n_cells, n_genes = 500, 1000
-        counts = np.random.negative_binomial(2, 0.02, size=(n_cells, n_genes))
-        adata = sc.AnnData(
-            X=counts.astype(np.float32),
-            obs=pd.DataFrame(index=[f"cell_{i}" for i in range(n_cells)]),
-            var=pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)]),
-        )
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        sc.pp.pca(adata)
-        sc.pp.neighbors(adata)
-        sc.tl.umap(adata)
-
-        from sklearn.cluster import KMeans
-        kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
-        adata.obs['leiden'] = pd.Categorical(kmeans.fit_predict(adata.obsm['X_pca'][:, :30]).astype(str))
-
-    return adata
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Single-Cell Pseudotime Analysis")
-    parser.add_argument("--input", dest="input_path", help="Input AnnData file (.h5ad)")
-    parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
-    parser.add_argument("--demo", action="store_true", help="Run with demo data")
-    parser.add_argument("--cluster-key", default="leiden", help="Cluster key (default: leiden)")
-    parser.add_argument("--root-cluster", default=None, help="Root cluster for pseudotime")
-    parser.add_argument("--root-cell", type=int, default=None, help="Root cell index")
-    parser.add_argument("--n-dcs", type=int, default=10, help="Number of diffusion components")
-    parser.add_argument("--n-genes", type=int, default=50, help="Number of trajectory genes")
-    parser.add_argument(
-        "--method",
-        dest="analysis_method",
-        default="dpt",
-        choices=list(METHOD_REGISTRY.keys()),
-        help="Trajectory analysis method (default: dpt)",
-    )
-    parser.add_argument(
-        "--analysis-method",
-        dest="analysis_method",
-        choices=list(METHOD_REGISTRY.keys()),
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--corr-method",
-        default="pearson",
-        choices=["pearson", "spearman"],
-        help="Correlation method for trajectory gene ranking",
-    )
-    parser.add_argument("--palantir-knn", type=int, default=30, help="Palantir kNN graph size")
-    parser.add_argument("--palantir-num-waypoints", type=int, default=1200, help="Palantir waypoint count")
-    parser.add_argument("--palantir-max-iterations", type=int, default=25, help="Palantir maximum pseudotime iterations")
-    parser.add_argument("--palantir-seed", type=int, default=20, help="Palantir random seed")
-    parser.add_argument("--via-knn", type=int, default=30, help="VIA kNN graph size")
-    parser.add_argument("--via-seed", type=int, default=20, help="VIA random seed")
-    parser.add_argument("--cellrank-n-states", type=int, default=3, help="CellRank number of macrostates")
-    parser.add_argument("--cellrank-schur-components", type=int, default=20, help="CellRank Schur components")
-    parser.add_argument("--cellrank-frac-to-keep", type=float, default=0.3, help="CellRank pseudotime kernel sparsification")
-    parser.add_argument("--cellrank-use-velocity", action="store_true", help="Prefer CellRank VelocityKernel when velocity layers are available")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Single-Cell Pseudotime")
+    parser.add_argument("--input", dest="input_path")
+    parser.add_argument("--output", dest="output_dir", required=True)
+    parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--method", default="dpt", choices=list(METHOD_REGISTRY.keys()))
+    parser.add_argument("--cluster-key", default="leiden")
+    parser.add_argument("--use-rep", default=None)
+    parser.add_argument("--root-cluster", default=None)
+    parser.add_argument("--root-cell", default=None, help="Root cell obs_name or integer index")
+    parser.add_argument("--end-clusters", default=None, help="Comma-separated terminal clusters for methods that support them")
+    parser.add_argument("--n-neighbors", type=int, default=15)
+    parser.add_argument("--n-pcs", type=int, default=50)
+    parser.add_argument("--n-dcs", type=int, default=10)
+    parser.add_argument("--n-genes", type=int, default=50)
+    parser.add_argument("--corr-method", default="pearson", choices=["pearson", "spearman"])
+    parser.add_argument("--palantir-knn", type=int, default=30)
+    parser.add_argument("--palantir-n-components", type=int, default=10)
+    parser.add_argument("--palantir-num-waypoints", type=int, default=1200)
+    parser.add_argument("--palantir-max-iterations", type=int, default=25)
+    parser.add_argument("--palantir-seed", type=int, default=20)
+    parser.add_argument("--via-knn", type=int, default=30)
+    parser.add_argument("--via-seed", type=int, default=20)
+    parser.add_argument("--cellrank-n-states", type=int, default=3)
+    parser.add_argument("--cellrank-schur-components", type=int, default=20)
+    parser.add_argument("--cellrank-frac-to-keep", type=float, default=0.3)
+    parser.add_argument("--cellrank-use-velocity", action="store_true")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    tables_dir = output_dir / "tables"
-    tables_dir.mkdir(exist_ok=True)
 
-    # Load data
     if args.demo:
-        adata = generate_demo_data()
+        adata = get_demo_data()
         input_file = None
     else:
         if not args.input_path:
-            parser.error("--input required when not using --demo")
+            parser.error("--input is required unless --demo is used")
         input_path = Path(args.input_path)
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
-        logger.info(f"Loading: {input_path}")
-        adata = sc_io.smart_load(input_path, skill_name=SKILL_NAME)
+        adata = _prepare_input_adata(input_path)
         input_file = str(input_path)
+    logger.info("Input object: %s cells x %s genes", adata.n_obs, adata.n_vars)
 
-    logger.info(f"Input: {adata.n_obs} cells x {adata.n_vars} genes")
+    if args.method == "via":
+        _prepare_via_runtime()
+    method = validate_method_choice(args.method, METHOD_REGISTRY)
     apply_preflight(
         preflight_sc_pseudotime(
             adata,
-            method=args.analysis_method,
+            method=method,
             cluster_key=args.cluster_key,
+            use_rep=args.use_rep,
             root_cluster=args.root_cluster,
             root_cell=args.root_cell,
             source_path=input_file,
@@ -547,282 +950,233 @@ def main():
         logger,
     )
 
-    # Check cluster key
     if args.cluster_key not in adata.obs.columns:
-        logger.error(f"Cluster key '{args.cluster_key}' not found in adata.obs")
-        logger.info(f"Available columns: {list(adata.obs.columns)}")
-        raise ValueError(f"Column '{args.cluster_key}' not found")
+        raise ValueError(f"`{args.cluster_key}` was not found in adata.obs.")
 
-    # Ensure neighbors are computed
-    import scanpy as sc
-    if "neighbors" not in adata.uns:
-        logger.info("Computing neighbor graph...")
-        sc.pp.neighbors(adata)
-    if "X_umap" not in adata.obsm:
-        logger.info("Computing UMAP for trajectory visualizations...")
-        sc.tl.umap(adata)
+    x_kind = get_matrix_contract(adata).get("X") or infer_x_matrix_kind(adata)
+    if x_kind != "normalized_expression":
+        raise ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")
 
-    # Validate analysis method & check dependencies
-    if args.analysis_method == "via":
-        _prepare_via_runtime()
-    analysis_method = validate_method_choice(args.analysis_method, METHOD_REGISTRY)
+    use_rep = _resolve_use_rep(adata, args.use_rep)
+    display_embedding = _resolve_display_embedding(adata, use_rep)
+    root_cell_idx = _resolve_root_cell(adata, args.root_cell)
+    end_clusters = _parse_end_clusters(args.end_clusters)
+    logger.info("Running %s with cluster_key=%s, use_rep=%s, display_embedding=%s", method, args.cluster_key, use_rep, display_embedding)
 
-    params = dict(METHOD_PARAM_DEFAULTS[analysis_method])
+    params = dict(METHOD_PARAM_DEFAULTS[method])
     params.update(
         {
-            "method": analysis_method,
+            "method": method,
             "cluster_key": args.cluster_key,
+            "use_rep": use_rep,
             "root_cluster": args.root_cluster,
             "root_cell": args.root_cell,
+            "end_clusters": args.end_clusters,
+            "n_neighbors": args.n_neighbors,
+            "n_pcs": args.n_pcs,
             "n_dcs": args.n_dcs,
             "n_genes": args.n_genes,
             "corr_method": args.corr_method,
+            "palantir_knn": args.palantir_knn,
+            "palantir_n_components": args.palantir_n_components,
+            "palantir_num_waypoints": args.palantir_num_waypoints,
+            "palantir_max_iterations": args.palantir_max_iterations,
+            "palantir_seed": args.palantir_seed,
+            "via_knn": args.via_knn,
+            "via_seed": args.via_seed,
+            "cellrank_n_states": args.cellrank_n_states,
+            "cellrank_schur_components": args.cellrank_schur_components,
+            "cellrank_frac_to_keep": args.cellrank_frac_to_keep,
+            "cellrank_use_velocity": bool(args.cellrank_use_velocity),
         }
     )
-    if analysis_method == "palantir":
-        params.update(
-            {
-                "palantir_knn": args.palantir_knn,
-                "palantir_num_waypoints": args.palantir_num_waypoints,
-                "palantir_max_iterations": args.palantir_max_iterations,
-                "palantir_seed": args.palantir_seed,
-            }
-        )
-    elif analysis_method == "via":
-        params.update(
-            {
-                "via_knn": args.via_knn,
-                "via_seed": args.via_seed,
-            }
-        )
-    elif analysis_method == "cellrank":
-        params.update(
-            {
-                "cellrank_n_states": args.cellrank_n_states,
-                "cellrank_schur_components": args.cellrank_schur_components,
-                "cellrank_frac_to_keep": args.cellrank_frac_to_keep,
-                "cellrank_use_velocity": args.cellrank_use_velocity,
-            }
-        )
 
-    pseudotime_key = "dpt_pseudotime"
-    if analysis_method == "dpt":
-        logger.info("Running PAGA analysis...")
-        sc_traj.run_paga_analysis(adata, cluster_key=args.cluster_key)
-
-        logger.info("Running diffusion map...")
-        diffmap_result = sc_traj.run_diffusion_map(adata, n_comps=max(15, args.n_dcs + 5))
-
-        logger.info("Running DPT pseudotime...")
-        dpt_result = sc_traj.run_dpt_pseudotime(
-            adata,
-            root_cell_indices=[args.root_cell] if args.root_cell is not None else None,
-            root_cluster=args.root_cluster,
+    working = adata.copy()
+    curves_df = pd.DataFrame()
+    method_summary: dict[str, object]
+    if method == "dpt":
+        logger.info("Starting DPT workflow...")
+        working, method_summary = _run_dpt(
+            working,
+            use_rep=use_rep,
             cluster_key=args.cluster_key,
+            root_cluster=args.root_cluster,
+            root_cell_idx=root_cell_idx,
+            n_neighbors=args.n_neighbors,
+            n_pcs=args.n_pcs,
             n_dcs=args.n_dcs,
         )
-        summary = {
-            "method": analysis_method,
-            "backend": analysis_method,
-            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
-            "n_trajectory_genes": 0,
-            "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
-            "root_cell_name": str(adata.obs_names[int(dpt_result["root_cells"][0])]) if dpt_result["root_cells"] else None,
-            "pseudotime_min": float(adata.obs["dpt_pseudotime"].min()),
-            "pseudotime_max": float(adata.obs["dpt_pseudotime"].max()),
-            "n_diffusion_components": diffmap_result["diffmap"].shape[1],
-        }
-    elif analysis_method == "palantir":
-        logger.info("Resolving Palantir early cell...")
-        early_cell_name = sc_traj.resolve_palantir_early_cell(
-            adata,
-            root_cell=args.root_cell,
-            root_cluster=args.root_cluster,
+    elif method == "palantir":
+        logger.info("Starting Palantir workflow...")
+        working, method_summary = _run_palantir(
+            working,
+            use_rep=use_rep,
             cluster_key=args.cluster_key,
-        )
-        logger.info("Running Palantir analysis...")
-        palantir_result = sc_traj.run_palantir_pseudotime(
-            adata,
-            early_cell=early_cell_name,
-            knn=args.palantir_knn,
-            n_components=max(5, args.n_dcs),
-            num_waypoints=args.palantir_num_waypoints,
-            max_iterations=args.palantir_max_iterations,
-            seed=args.palantir_seed,
-        )
-        pseudotime_key = "palantir_pseudotime"
-        fate_probs = palantir_result.get("fate_probabilities")
-        summary = {
-            "method": analysis_method,
-            "backend": analysis_method,
-            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
-            "n_trajectory_genes": 0,
-            "root_cell": int(np.where(adata.obs_names == early_cell_name)[0][0]),
-            "root_cell_name": early_cell_name,
-            "pseudotime_min": float(adata.obs[pseudotime_key].min()),
-            "pseudotime_max": float(adata.obs[pseudotime_key].max()),
-            "n_diffusion_components": int(np.asarray(adata.obsm["DM_EigenVectors"]).shape[1]) if "DM_EigenVectors" in adata.obsm else 0,
-            "mean_entropy": float(np.nanmean(palantir_result["entropy"])) if palantir_result.get("entropy") is not None else None,
-            "n_terminal_states": int(fate_probs.shape[1]) if fate_probs is not None else None,
-        }
-    elif analysis_method == "via":
-        logger.info("Running VIA analysis...")
-        via_result = sc_traj.run_via_pseudotime(
-            adata,
-            root_cell=args.root_cell,
             root_cluster=args.root_cluster,
-            cluster_key=args.cluster_key,
-            knn=args.via_knn,
-            n_components=max(2, args.n_dcs),
-            seed=args.via_seed,
+            root_cell_idx=root_cell_idx,
+            palantir_knn=args.palantir_knn,
+            palantir_n_components=args.palantir_n_components,
+            palantir_num_waypoints=args.palantir_num_waypoints,
+            palantir_max_iterations=args.palantir_max_iterations,
+            palantir_seed=args.palantir_seed,
         )
-        pseudotime_key = "via_pseudotime"
-        fate_probs = via_result.get("fate_probabilities")
-        summary = {
-            "method": analysis_method,
-            "backend": via_result.get("method", analysis_method),
-            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
-            "n_trajectory_genes": 0,
-            "root_cell": int(via_result["root_cell"]),
-            "root_cell_name": str(via_result["root_cell_name"]),
-            "pseudotime_min": float(np.nanmin(adata.obs[pseudotime_key].to_numpy())),
-            "pseudotime_max": float(np.nanmax(adata.obs[pseudotime_key].to_numpy())),
-            "n_diffusion_components": int(max(2, args.n_dcs)),
-            "n_terminal_states": int(fate_probs.shape[1]) if fate_probs is not None and hasattr(fate_probs, "shape") and len(fate_probs.shape) == 2 else None,
-        }
+    elif method == "via":
+        logger.info("Starting VIA workflow...")
+        working, method_summary = _run_via(
+            working,
+            use_rep=use_rep,
+            cluster_key=args.cluster_key,
+            root_cluster=args.root_cluster,
+            root_cell_idx=root_cell_idx,
+            via_knn=args.via_knn,
+            via_seed=args.via_seed,
+            n_dcs=args.n_dcs,
+        )
+    elif method == "cellrank":
+        logger.info("Starting CellRank workflow...")
+        working, method_summary = _run_cellrank(
+            working,
+            use_rep=use_rep,
+            cluster_key=args.cluster_key,
+            root_cluster=args.root_cluster,
+            root_cell_idx=root_cell_idx,
+            n_neighbors=args.n_neighbors,
+            n_pcs=args.n_pcs,
+            n_dcs=args.n_dcs,
+            cellrank_n_states=args.cellrank_n_states,
+            cellrank_schur_components=args.cellrank_schur_components,
+            cellrank_frac_to_keep=args.cellrank_frac_to_keep,
+            cellrank_use_velocity=bool(args.cellrank_use_velocity),
+        )
     else:
-        logger.info("Running CellRank analysis...")
-        cellrank_result = sc_traj.run_cellrank_pseudotime(
-            adata,
-            root_cell=args.root_cell,
-            root_cluster=args.root_cluster,
+        logger.info("Starting Slingshot R workflow...")
+        working, method_summary, curves_df = _run_slingshot_r(
+            working,
+            use_rep=use_rep,
             cluster_key=args.cluster_key,
-            n_states=args.cellrank_n_states,
-            schur_components=args.cellrank_schur_components,
-            frac_to_keep=args.cellrank_frac_to_keep,
-            use_velocity=args.cellrank_use_velocity,
-            n_dcs=args.n_dcs,
+            root_cluster=args.root_cluster,
+            end_clusters=end_clusters,
         )
-        pseudotime_key = "dpt_pseudotime"
-        fate_probs = cellrank_result.get("fate_probabilities")
-        summary = {
-            "method": analysis_method,
-            "backend": analysis_method,
-            "n_clusters": int(adata.obs[args.cluster_key].nunique()),
-            "n_trajectory_genes": 0,
-            "root_cell": int(cellrank_result["root_cell"]) if cellrank_result.get("root_cell") is not None else None,
-            "root_cell_name": str(cellrank_result["root_cell_name"]) if cellrank_result.get("root_cell_name") is not None else None,
-            "pseudotime_min": float(np.nanmin(adata.obs[pseudotime_key].to_numpy())),
-            "pseudotime_max": float(np.nanmax(adata.obs[pseudotime_key].to_numpy())),
-            "n_diffusion_components": int(args.n_dcs),
-            "n_terminal_states": int(len(cellrank_result.get("terminal_states", []))),
-            "n_macrostates": int(cellrank_result.get("n_macrostates", 0)),
-            "kernel_mode": cellrank_result.get("kernel_mode"),
-        }
-        driver_genes = cellrank_result.get("driver_genes", {})
-        if driver_genes:
-            driver_rows = []
-            for lineage, genes in driver_genes.items():
-                for rank, gene in enumerate(genes, start=1):
-                    driver_rows.append({"lineage": lineage, "rank": rank, "gene": gene})
-            pd.DataFrame(driver_rows).to_csv(tables_dir / "cellrank_driver_genes.csv", index=False)
-            summary["n_driver_genes"] = int(len(driver_rows))
 
-    logger.info("Finding trajectory genes...")
+    pseudotime_key = str(method_summary["pseudotime_key"])
+    working.obs["pseudotime"] = pd.to_numeric(working.obs[pseudotime_key], errors="coerce")
+    working.uns["omicsclaw_pseudotime"] = {
+        "method": method,
+        "pseudotime_key": pseudotime_key,
+        "display_embedding": display_embedding,
+        "use_rep": use_rep,
+        "cluster_key": args.cluster_key,
+        "root_cluster": args.root_cluster,
+        "root_cell": method_summary.get("root_cell"),
+        "root_cell_name": method_summary.get("root_cell_name"),
+    }
+
     trajectory_genes = sc_traj.find_trajectory_genes(
-        adata,
+        working,
         pseudotime_key=pseudotime_key,
         n_genes=args.n_genes,
         method=args.corr_method,
     )
-    summary["n_trajectory_genes"] = len(trajectory_genes)
+    logger.info("Trajectory gene ranking complete: %s genes", len(trajectory_genes))
 
-    logger.info(f"Found {len(trajectory_genes)} trajectory-associated genes")
+    fate_summary_df = pd.DataFrame()
+    fate_obsm_key = method_summary.get("fate_obsm_key")
+    if isinstance(fate_obsm_key, str):
+        fate_summary_df = _build_fate_summary_table(working, cluster_key=args.cluster_key, obsm_key=fate_obsm_key)
 
-    # Generate figures
-    logger.info("Generating figures...")
-    generate_trajectory_figures(
-        adata,
-        trajectory_genes,
-        output_dir,
-        method=analysis_method,
+    figures = _render_figures(
+        working,
+        output_dir=output_dir,
+        method=method,
         cluster_key=args.cluster_key,
+        use_rep=use_rep,
+        display_embedding=display_embedding,
         pseudotime_key=pseudotime_key,
+        trajectory_genes=trajectory_genes,
+        root_cell_name=method_summary.get("root_cell_name"),
+        fate_summary_df=fate_summary_df,
+        curves_df=curves_df,
     )
+    _write_figure_manifest(output_dir, figures)
+    logger.info("Rendered %s trajectory figures", len(figures))
 
-    trajectory_genes.to_csv(tables_dir / "trajectory_genes.csv", index=False)
-    logger.info(f"  Saved: tables/trajectory_genes.csv")
-
-    # Write report
-    logger.info("Writing report...")
-    write_pseudotime_report(output_dir, summary, params, input_file, trajectory_genes)
-
-    # Save data
-    output_h5ad = output_dir / "adata_with_trajectory.h5ad"
-    from skills.singlecell._lib.adata_utils import store_analysis_metadata
-    store_analysis_metadata(adata, SKILL_NAME, analysis_method, params)
-    adata.write_h5ad(output_h5ad)
-    logger.info(f"Saved: {output_h5ad}")
-
-    # Reproducibility
-    repro_dir = output_dir / "reproducibility"
-    repro_dir.mkdir(exist_ok=True)
-
-    cmd = f"python sc_pseudotime.py --output {output_dir} --cluster-key {args.cluster_key}"
-    if input_file:
-        cmd += f" --input {input_file}"
-    if args.root_cluster:
-        cmd += f" --root-cluster {args.root_cluster}"
-    cmd += (
-        f" --n-dcs {args.n_dcs} --n-genes {args.n_genes}"
-        f" --method {analysis_method} --corr-method {args.corr_method}"
-    )
-    if args.root_cell is not None:
-        cmd += f" --root-cell {args.root_cell}"
-    if analysis_method == "palantir":
-        cmd += (
-            f" --palantir-knn {args.palantir_knn}"
-            f" --palantir-num-waypoints {args.palantir_num_waypoints}"
-            f" --palantir-max-iterations {args.palantir_max_iterations}"
-            f" --palantir-seed {args.palantir_seed}"
-        )
-    if analysis_method == "via":
-        cmd += f" --via-knn {args.via_knn} --via-seed {args.via_seed}"
-    if analysis_method == "cellrank":
-        cmd += (
-            f" --cellrank-n-states {args.cellrank_n_states}"
-            f" --cellrank-schur-components {args.cellrank_schur_components}"
-            f" --cellrank-frac-to-keep {args.cellrank_frac_to_keep}"
-        )
-        if args.cellrank_use_velocity:
-            cmd += " --cellrank-use-velocity"
-    (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{cmd}\n")
-    packages = ["scanpy", "anndata", "numpy", "pandas", "matplotlib"]
-    if analysis_method == "palantir":
-        packages.append("palantir")
-    if analysis_method == "via":
-        packages.append("pyVIA")
-    if analysis_method == "cellrank":
-        packages.extend(["cellrank", "pygpcca"])
-    _write_repro_requirements(repro_dir, packages)
-
-    # Result.json
-    checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
-    result_data = {"params": params}
-    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
-    result_payload = load_result_json(output_dir) or {
-        "skill": SKILL_NAME,
-        "summary": summary,
-        "data": result_data,
+    summary = {
+        "method": method,
+        "backend": method_summary.get("backend", method),
+        "cluster_key": args.cluster_key,
+        "use_rep": use_rep,
+        "display_embedding": display_embedding,
+        "root_cluster": args.root_cluster,
+        "root_cell": method_summary.get("root_cell"),
+        "root_cell_name": method_summary.get("root_cell_name"),
+        "n_cells": int(working.n_obs),
+        "n_clusters": int(working.obs[args.cluster_key].astype(str).nunique()),
+        "n_trajectory_genes": int(len(trajectory_genes)),
+        "pseudotime_min": float(np.nanmin(pd.to_numeric(working.obs[pseudotime_key], errors="coerce"))),
+        "pseudotime_max": float(np.nanmax(pd.to_numeric(working.obs[pseudotime_key], errors="coerce"))),
+        **{key: value for key, value in method_summary.items() if key not in {"pseudotime_key", "root_cell", "root_cell_name", "backend", "fate_obsm_key"}},
     }
+
+    points_df = _build_pseudotime_points_table(working, pseudotime_key=pseudotime_key, cluster_key=args.cluster_key, display_key=display_embedding)
+    summary_df = _summary_table(summary)
+    table_files = _write_tables(
+        output_dir,
+        points_df=points_df,
+        trajectory_genes=trajectory_genes,
+        summary_df=summary_df,
+        fate_df=fate_summary_df,
+        curves_df=curves_df,
+    )
+    figure_data_files = _write_figure_data(
+        output_dir,
+        points_df=points_df,
+        trajectory_genes=trajectory_genes,
+        summary_df=summary_df,
+        fate_df=fate_summary_df,
+        curves_df=curves_df,
+    )
+
+    propagate_singlecell_contracts(
+        adata,
+        working,
+        producer_skill=SKILL_NAME,
+        x_kind="normalized_expression",
+        raw_kind=get_matrix_contract(working).get("raw"),
+        primary_cluster_key=args.cluster_key,
+    )
+    store_analysis_metadata(working, SKILL_NAME, method, params)
+    output_h5ad = output_dir / "processed.h5ad"
+    save_h5ad(working, output_h5ad)
+    logger.info("Saved processed object to %s", output_h5ad)
+
+    _write_report(output_dir, summary=summary, params=params, input_file=input_file, top_genes=trajectory_genes)
+    _write_reproducibility(output_dir, params=params, input_file=input_file, demo_mode=bool(args.demo))
+
+    checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
+    result_data = {
+        "params": params,
+        "output_files": {
+            "processed_h5ad": "processed.h5ad",
+            "report": "report.md",
+            "tables": table_files,
+            "figure_data": figure_data_files,
+            "figures": [Path(path).name for path in figures],
+        },
+        "visualization": {
+            "display_embedding": display_embedding,
+            "pseudotime_key": pseudotime_key,
+        },
+    }
+    write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+    result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
     write_standard_run_artifacts(output_dir, result_payload, summary)
 
-    # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
-    print(f"{'='*60}")
-    print(f"  Root cluster: {params.get('root_cluster', 'auto')}")
-    print(f"  Clusters: {summary['n_clusters']}")
+    print(f"{'=' * 60}")
+    print(f"  Method: {method}")
+    print(f"  Graph representation: {use_rep}")
+    print(f"  Display embedding: {display_embedding}")
     print(f"  Trajectory genes: {len(trajectory_genes)}")
     print(f"  Output: {output_dir}")
 

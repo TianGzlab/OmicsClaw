@@ -80,6 +80,11 @@ R_TIER_PACKAGES: dict[str, list[str]] = {
         "AUCell",
         "GSEABase",
     ],
+    "singlecell-pseudotime": [
+        "slingshot",
+        "SingleCellExperiment",
+        "zellkonverter",
+    ],
     "singlecell-enrichment": [
         "clusterProfiler",
         "enrichplot",
@@ -142,7 +147,7 @@ _BIOCONDUCTOR_PACKAGES: set[str] = {
     "DESeq2", "SingleCellExperiment", "SingleR", "celldex",
     "S4Vectors", "IRanges", "GenomicRanges",
     "clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db",
-    "scDblFinder", "scds", "batchelor", "sva", "SPARK",
+    "scDblFinder", "scds", "batchelor", "sva", "SPARK", "slingshot",
     "spacexr", "SPOTlight", "CARD", "numbat",
     "SoupX", "scmap", "MAST", "AUCell", "GSEABase", "graph", "annotate",
 }

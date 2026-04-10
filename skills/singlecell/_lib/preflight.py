@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidance_payload
+from omicsclaw.core.r_dependency_manager import check_r_tier, suggest_r_install
 
 from .adata_utils import (
     build_standardization_recommendation,
     get_matrix_contract,
     get_input_contract,
+    infer_x_matrix_kind,
     matrix_kind_is_count_like,
     matrix_kind_is_normalized,
     matrix_looks_count_like,
@@ -20,6 +22,7 @@ from .adata_utils import (
     x_matrix_kind,
 )
 from . import annotation as sc_annotation_utils
+from . import dependency_manager as sc_dep_manager
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -1119,12 +1122,21 @@ def preflight_sc_pseudotime(
     *,
     method: str,
     cluster_key: str,
+    use_rep: str | None,
     root_cluster: str | None,
-    root_cell: int | None,
+    root_cell: str | None,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-pseudotime")
     _add_standardization_guidance(decision, adata, source_path=source_path)
+
+    matrix_contract = get_matrix_contract(adata)
+    x_kind = matrix_contract.get("X") or infer_x_matrix_kind(adata, fallback="raw_counts")
+    if x_kind != "normalized_expression":
+        decision.block(
+            "`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first, and if you need integration-aware trajectories use the integrated representation from `sc-batch-integration`."
+        )
+        return decision
 
     if cluster_key not in adata.obs.columns:
         candidates = _obs_candidates(adata, "cluster")
@@ -1139,6 +1151,36 @@ def preflight_sc_pseudotime(
             decision.block(
                 "Pseudotime requires a cluster column in `adata.obs`. Run `sc-preprocessing` first or provide `--cluster-key`."
             )
+
+    rep_candidates = [
+        key
+        for key in ("X_harmony", "X_scvi", "X_scanvi", "X_scanorama", "X_pca")
+        if key in getattr(adata, "obsm", {})
+    ]
+    if use_rep:
+        if use_rep not in getattr(adata, "obsm", {}):
+            decision.require_field(
+                "use_rep",
+                f"`--use-rep {use_rep}` was not found. Available representations include: {_format_candidates(rep_candidates)}.",
+                aliases=["use_rep", "embedding", "representation"],
+                flag="--use-rep",
+                choices=rep_candidates,
+            )
+    else:
+        if not rep_candidates:
+            decision.block(
+                "`sc-pseudotime` needs a graph/trajectory representation such as `X_pca`, `X_harmony`, or `X_scvi`. Run `sc-preprocessing` or `sc-batch-integration` first."
+            )
+        elif len(rep_candidates) > 1:
+            decision.require_field(
+                "use_rep",
+                f"Multiple trajectory representations are available: {_format_candidates(rep_candidates)}. Confirm which one should drive pseudotime.",
+                aliases=["use_rep", "embedding", "representation"],
+                flag="--use-rep",
+                choices=rep_candidates,
+            )
+        else:
+            decision.add_guidance(f"`sc-pseudotime` will use `{rep_candidates[0]}` for graph / trajectory inference.")
 
     if root_cluster is None and root_cell is None:
         decision.require_field(
@@ -1157,29 +1199,73 @@ def preflight_sc_pseudotime(
                 flag="--root-cluster",
             )
 
+    decision.add_guidance(
+        "`sc-pseudotime` is usually the step after `sc-clustering`. Use it when you already have cluster labels and a biologically defensible start state."
+    )
+    decision.add_guidance(
+        "Current first-pass settings: "
+        f"`method={method}`, `cluster_key={cluster_key}`, `use_rep={use_rep or (rep_candidates[0] if len(rep_candidates) == 1 else 'needs confirmation')}`. "
+        "This skill will not guess the biological start state for you."
+    )
+
     if method == "palantir":
         decision.add_guidance(
             "`palantir` is available here, but it is heavier than DPT and should be chosen deliberately when users want waypoint-based pseudotime."
         )
+        decision.add_guidance(
+            "Method-specific defaults: `palantir_knn=30`, `palantir_n_components=10`, `palantir_num_waypoints=1200`, `palantir_max_iterations=25`."
+        )
         if find_spec("palantir") is None:
-            decision.block("`palantir` was requested but the Python package `palantir` is not installed in the current environment.")
+            decision.block(
+                "`palantir` was requested but the Python package `palantir` is not installed.\n"
+                + sc_dep_manager.install_hint("palantir")
+            )
     if method == "via":
         decision.add_guidance(
             "`via` is intended for graph-based trajectory inference with automatic terminal-state discovery; keep the root choice explicit and do not present it as a generic replacement for every pseudotime workflow."
         )
+        decision.add_guidance("Method-specific defaults: `via_knn=30`, `via_seed=20`.")
         if find_spec("pyVIA") is None:
-            decision.block("`via` was requested but the Python package `pyVIA` is not installed in the current environment.")
+            decision.block(
+                "`via` was requested but the Python package `pyVIA` is not installed.\n"
+                + sc_dep_manager.install_hint("pyVIA")
+            )
     if method == "cellrank":
         decision.add_guidance(
             "`cellrank` is intended for macrostate and fate-probability inference on top of a transition kernel; use it when users explicitly want terminal states or lineage probabilities."
         )
+        decision.add_guidance(
+            "Method-specific defaults: `cellrank_n_states=3`, `cellrank_schur_components=20`, `cellrank_frac_to_keep=0.3`. `cellrank_use_velocity` only helps when velocity layers exist."
+        )
         if find_spec("cellrank") is None:
-            decision.block("`cellrank` was requested but the Python package `cellrank` is not installed in the current environment.")
+            decision.block(
+                "`cellrank` was requested but the Python package `cellrank` is not installed.\n"
+                + sc_dep_manager.install_hint("cellrank")
+            )
+    if method == "dpt":
+        decision.add_guidance("Method-specific defaults: `n_neighbors=15`, `n_pcs=50`, `n_dcs=10`.")
+    if method == "slingshot_r":
+        decision.add_guidance(
+            "`slingshot_r` is a branch-aware lineage method through the R bridge. Use it when users want explicit lineages rather than only a single scalar ordering."
+        )
+        decision.add_guidance(
+            "Method-specific defaults: `end_clusters` optional; if omitted, Slingshot will infer terminal branches from the cluster graph."
+        )
+        _, missing = check_r_tier("singlecell-pseudotime")
+        required = [pkg for pkg in ("slingshot", "SingleCellExperiment", "zellkonverter") if pkg in missing]
+        if required:
+            decision.block(
+                "Slingshot R dependencies are missing: " + ", ".join(required) + "\n" + suggest_r_install(required)
+            )
 
     if "neighbors" not in adata.uns:
         decision.add_guidance(
-            "Neighbor graph is missing; `sc-pseudotime` will compute it automatically, but results are more stable after `sc-preprocessing`."
+            "Neighbor graph is missing; `sc-pseudotime` will compute it automatically from the chosen representation."
         )
+
+    decision.add_guidance(
+        "After pseudotime, the usual next steps are trajectory gene interpretation, `sc-pathway-scoring` for lineage signatures, or `sc-enrichment` for statistical pathway interpretation."
+    )
 
     return decision
 
