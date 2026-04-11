@@ -59,6 +59,11 @@ metadata:
         params: ["cluster_key", "use_rep", "root_cluster", "end_clusters", "n_genes", "corr_method"]
         defaults: {cluster_key: "leiden", end_clusters: null, n_genes: 50, corr_method: "pearson"}
         requires: ["normalized_expression", "slingshot", "SingleCellExperiment", "zellkonverter", "explicit_root_choice"]
+      monocle3_r:
+        priority: "cluster_key -> use_rep -> root_cluster -> corr_method"
+        params: ["cluster_key", "use_rep", "root_cluster", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", root_cluster: null, n_genes: 50, corr_method: "pearson"}
+        requires: ["normalized_expression", "monocle3", "SingleCellExperiment", "zellkonverter"]
     saves_h5ad: true
     requires_preprocessed: true
     trigger_keywords:
@@ -69,6 +74,7 @@ metadata:
       - palantir
       - via
       - cellrank
+      - monocle3
       - slingshot
 ---
 
@@ -109,6 +115,7 @@ If the user only says “do pseudotime”, the first thing to explain is:
 3. `via`
 4. `cellrank`
 5. `slingshot_r`
+6. `monocle3_r`
 
 ## Beginner-Friendly Method Summary
 
@@ -119,6 +126,9 @@ If the user only says “do pseudotime”, the first thing to explain is:
 | `via` | when users want graph-based terminal-state discovery | fast graph trajectory with branch-aware outputs |
 | `cellrank` | when users explicitly want macrostates or fate inference | transition-kernel / fate model on top of a graph |
 | `slingshot_r` | when users want explicit branch curves | lineage-centric branch inference through the R bridge |
+| `monocle3_r` | when users want principal graph trajectory with branching | Monocle3 principal graph trajectory and pseudotime via R bridge. Produces monocle3_pseudotime in obs and MST trajectory edges. Requires monocle3 R package. |
+
+**Note on monocle3_r root selection**: monocle3_r auto-selects the root principal node by finding the principal graph node nearest to the centroid of the `--root-cluster` cells in UMAP space. If `--root-cluster` is not specified, the largest cluster is used. Pass `--root-cluster <name>` to control trajectory direction.
 
 ## Key Parameters
 
@@ -153,6 +163,21 @@ If the user only says “do pseudotime”, the first thing to explain is:
   - `--cellrank-use-velocity`
 - `slingshot_r`
   - `--end-clusters`
+- `monocle3_r`
+  - `--root-cluster` (auto-selects largest cluster if not specified)
+
+### Usage Examples
+
+```bash
+# Monocle3 pseudotime demo
+python omicsclaw.py run sc-pseudotime --demo --method monocle3_r --output /tmp/monocle3_demo
+
+# Monocle3 pseudotime with user data
+python omicsclaw.py run sc-pseudotime --input <processed.h5ad> --method monocle3_r --cluster-key leiden --output <dir>
+
+# Monocle3 with explicit root cluster
+python omicsclaw.py run sc-pseudotime --input <processed.h5ad> --method monocle3_r --cluster-key cell_type --root-cluster "HSC" --output <dir>
+```
 
 ## Workflow
 
@@ -187,6 +212,7 @@ Common figures include:
 - `fate_probability_heatmap.png` when available
 - `paga_graph.png` for `dpt`
 - `lineage_curves.png` for `slingshot_r`
+- `monocle3_trajectory_graph.png` for `monocle3_r`
 
 ## Usual Next Steps
 

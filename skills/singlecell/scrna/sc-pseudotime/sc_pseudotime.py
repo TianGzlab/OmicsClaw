@@ -98,6 +98,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="Slingshot lineage inference through the R bridge",
         dependencies=(),
     ),
+    "monocle3_r": MethodConfig(
+        name="monocle3_r",
+        description="Monocle3 principal graph trajectory and pseudotime via R bridge",
+        dependencies=(),
+    ),
 }
 
 METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
@@ -163,6 +168,14 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "n_genes": 50,
         "corr_method": "pearson",
     },
+    "monocle3_r": {
+        "cluster_key": "leiden",
+        "use_rep": None,
+        "root_cluster": None,
+        "root_cell": None,
+        "n_genes": 50,
+        "corr_method": "pearson",
+    },
 }
 
 METHOD_PARAM_KEYS: dict[str, tuple[str, ...]] = {
@@ -171,6 +184,7 @@ METHOD_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "via": ("via_knn", "via_seed"),
     "cellrank": ("cellrank_n_states", "cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity"),
     "slingshot_r": ("end_clusters",),
+    "monocle3_r": (),
 }
 
 
@@ -788,6 +802,96 @@ def _run_slingshot_r(
     return adata, summary, curves_df
 
 
+def _run_monocle3_r(
+    adata,
+    *,
+    use_rep: str,
+    cluster_key: str,
+    root_cluster: str | None,
+) -> tuple[object, dict, pd.DataFrame]:
+    """Run Monocle3 principal graph pseudotime via R bridge."""
+    import warnings
+
+    required = ["monocle3", "SingleCellExperiment", "zellkonverter"]
+    installed, missing = check_r_tier("singlecell-pseudotime")
+    del installed
+    missing_required = [pkg for pkg in required if pkg in missing]
+    if missing_required:
+        raise ImportError(
+            "Monocle3 R dependencies are missing: "
+            + ", ".join(missing_required)
+            + "\nInstall with:\n"
+            + suggest_r_install(missing_required)
+        )
+
+    runner = RScriptRunner(scripts_dir=R_SCRIPTS_DIR, timeout=2400)
+    with tempfile.TemporaryDirectory(prefix="omicsclaw_monocle3_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_h5ad = tmpdir / "input.h5ad"
+        output_sub = tmpdir / "output"
+        output_sub.mkdir(parents=True, exist_ok=True)
+        save_h5ad(adata, input_h5ad, compression=None)
+
+        r_cluster_key = cluster_key
+        r_use_rep = use_rep if use_rep else "X_umap"
+        r_root_cluster = root_cluster or "auto"
+        r_root_pr_nodes = "auto"
+
+        runner.run_script(
+            "sc_monocle3_r.R",
+            args=[
+                str(input_h5ad),
+                str(output_sub),
+                r_cluster_key,
+                r_use_rep,
+                r_root_cluster,
+                r_root_pr_nodes,
+            ],
+            expected_outputs=["monocle3_pseudotime.csv"],
+            output_dir=output_sub,
+        )
+
+        pt_csv = output_sub / "monocle3_pseudotime.csv"
+        traj_csv = output_sub / "monocle3_trajectory.csv"
+
+        pt_df = pd.read_csv(pt_csv) if pt_csv.exists() else pd.DataFrame()
+        traj_df = pd.read_csv(traj_csv) if traj_csv.exists() else pd.DataFrame()
+
+    n_with_pt = 0
+    if not pt_df.empty and "monocle3_pseudotime" in pt_df.columns:
+        pt_df["cell_id"] = pt_df["cell_id"].astype(str)
+        pt_df = pt_df.drop_duplicates(subset="cell_id", keep="first")
+        pt_df_indexed = pt_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
+
+        adata.obs["monocle3_pseudotime"] = pd.to_numeric(
+            pt_df_indexed["monocle3_pseudotime"], errors="coerce"
+        ).to_numpy()
+        if "monocle3_cluster" in pt_df_indexed.columns:
+            adata.obs["monocle3_cluster"] = (
+                pt_df_indexed["monocle3_cluster"].astype(str).to_numpy()
+            )
+        if "monocle3_partition" in pt_df_indexed.columns:
+            adata.obs["monocle3_partition"] = (
+                pt_df_indexed["monocle3_partition"].astype(str).to_numpy()
+            )
+        n_with_pt = int(adata.obs["monocle3_pseudotime"].notna().sum())
+    else:
+        warnings.warn("Monocle3 pseudotime CSV was empty or missing expected columns")
+        adata.obs["monocle3_pseudotime"] = np.nan
+
+    if not traj_df.empty:
+        adata.uns["monocle3_trajectory"] = traj_df.to_dict(orient="list")
+
+    summary = {
+        "backend": "monocle3_r",
+        "pseudotime_key": "monocle3_pseudotime",
+        "root_cell": None,
+        "root_cell_name": None,
+        "n_cells_with_pseudotime": n_with_pt,
+    }
+    return adata, summary, traj_df
+
+
 def _render_figures(
     adata,
     *,
@@ -866,16 +970,49 @@ def _render_figures(
             figures.append(str(figure_path))
 
     if curves_df is not None and not curves_df.empty:
-        points_df = _build_pseudotime_points_table(adata, pseudotime_key=pseudotime_key, cluster_key=cluster_key, display_key=use_rep)
-        figure_path = plot_slingshot_curves(
-            points_df,
-            curves_df,
-            output_dir,
-            basis_name=use_rep.replace("X_", "").upper(),
-            group_col=cluster_key,
-        )
-        if figure_path:
-            figures.append(str(figure_path))
+        if method == "monocle3_r" and {"x_start", "y_start", "x_end", "y_end"}.issubset(curves_df.columns):
+            # Monocle3 trajectory edges overlay on pseudotime embedding
+            try:
+                import matplotlib.pyplot as plt
+
+                fig_dir = output_dir / "figures"
+                fig_dir.mkdir(parents=True, exist_ok=True)
+                emb_key = display_embedding
+                if emb_key in adata.obsm:
+                    coords = adata.obsm[emb_key][:, :2]
+                    pt_vals = pd.to_numeric(adata.obs[pseudotime_key], errors="coerce").to_numpy()
+                    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+                    sc_plot = ax.scatter(
+                        coords[:, 0], coords[:, 1], c=pt_vals, cmap="viridis",
+                        s=5, alpha=0.6, edgecolors="none",
+                    )
+                    for _, row in curves_df.iterrows():
+                        ax.plot(
+                            [row["x_start"], row["x_end"]],
+                            [row["y_start"], row["y_end"]],
+                            color="black", linewidth=1.5, alpha=0.8,
+                        )
+                    plt.colorbar(sc_plot, ax=ax, label="Monocle3 pseudotime")
+                    ax.set_title("Monocle3 trajectory graph")
+                    ax.set_xlabel(f"{emb_key.replace('X_', '').upper()} 1")
+                    ax.set_ylabel(f"{emb_key.replace('X_', '').upper()} 2")
+                    traj_path = fig_dir / "monocle3_trajectory_graph.png"
+                    fig.savefig(traj_path, dpi=150, bbox_inches="tight")
+                    plt.close(fig)
+                    figures.append(str(traj_path))
+            except Exception as exc:
+                logger.warning("Failed to plot monocle3 trajectory overlay: %s", exc)
+        else:
+            points_df = _build_pseudotime_points_table(adata, pseudotime_key=pseudotime_key, cluster_key=cluster_key, display_key=use_rep)
+            figure_path = plot_slingshot_curves(
+                points_df,
+                curves_df,
+                output_dir,
+                basis_name=use_rep.replace("X_", "").upper(),
+                group_col=cluster_key,
+            )
+            if figure_path:
+                figures.append(str(figure_path))
 
     return figures
 
@@ -1054,6 +1191,14 @@ def main() -> None:
             cellrank_schur_components=args.cellrank_schur_components,
             cellrank_frac_to_keep=args.cellrank_frac_to_keep,
             cellrank_use_velocity=bool(args.cellrank_use_velocity),
+        )
+    elif method == "monocle3_r":
+        logger.info("Starting Monocle3 R workflow...")
+        working, method_summary, curves_df = _run_monocle3_r(
+            working,
+            use_rep=use_rep,
+            cluster_key=args.cluster_key,
+            root_cluster=args.root_cluster,
         )
     else:
         logger.info("Starting Slingshot R workflow...")
