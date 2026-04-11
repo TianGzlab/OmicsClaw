@@ -336,6 +336,16 @@ desktop = [
     "sqlalchemy>=1.4.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
+    # python-multipart is required by FastAPI's File / Form parsing.
+    # The /notebook/files/upload endpoint in omicsclaw.app.notebook.router
+    # uses `File(...)`, so without this import omicsclaw.app.server
+    # crashes at MODULE LOAD TIME (not first request time). Caught by
+    # the bundled-runtime smoke test: `python -m omicsclaw.app.server
+    # --help` imports the module, which imports the notebook router,
+    # which decorates /files/upload, which eagerly validates that
+    # multipart is installed. See OmicsClaw-App/scripts/build-backend-
+    # runtime.py for the smoke test that caught this.
+    "python-multipart>=0.0.9",
     "cryptography>=41.0.0",
     "requests>=2.31.0",
     "openai>=1.0.0",
