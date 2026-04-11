@@ -69,6 +69,7 @@ SUMMARY_FRAME_KEYS = {
     "top_df",
     "ligand_activity_df",
     "ligand_target_links_df",
+    "ligand_receptors_df",
     "pathway_df",
     "centrality_df",
     "count_matrix_df",
@@ -991,6 +992,20 @@ def generate_figures(output_dir: Path, summary: dict) -> list[str]:
         role_df=role_df,
         pathway_summary_df=pathway_summary_df,
     )
+
+    # Write figures/manifest.json
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    fig_manifest: dict[str, str] = {}
+    for fig_path_str in figures:
+        fig_p = Path(fig_path_str)
+        if fig_p.exists():
+            fig_manifest[fig_p.stem] = fig_p.name
+    (figures_dir / "manifest.json").write_text(
+        json.dumps({"skill": SKILL_NAME, "figures": fig_manifest}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
     return figures
 
 
@@ -1050,6 +1065,33 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
             body_lines.append(
                 f"| {row['ligand']} | {row['receptor']} | {row['source']} | {row['target']} | {row['score']:.4f} |"
             )
+
+    # Troubleshooting section when degenerate
+    if summary.get("n_interactions_tested", 0) == 0:
+        body_lines.extend([
+            "",
+            "## Troubleshooting: No Interactions Detected\n",
+            "### Cause 1: Gene name mismatch",
+            "The ligand-receptor database expects HGNC symbols (e.g., TGFB1, CXCL12) for human data.",
+            "If your data uses Ensembl IDs, convert first:",
+            "```",
+            "python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --from ensembl --to symbol --output mapped/",
+            "```",
+            "",
+            "### Cause 2: Cell type labels are missing or numeric",
+            f"Column `{summary['cell_type_key']}` may contain numeric cluster IDs instead of meaningful cell type names.",
+            "Run annotation first:",
+            "```",
+            "python omicsclaw.py run sc-cell-annotation --input data.h5ad --output anno_out/",
+            "```",
+            "",
+            "### Cause 3: Too few cells per group",
+            "Some cell types may have too few cells for communication scoring. Try merging rare clusters.",
+            "",
+            "### Alternative methods",
+            "- `--method liana` uses a larger curated LR database and may capture more interactions.",
+            "- `--method cellphonedb` runs permutation-based significance testing (human only).",
+        ])
 
     body_lines.extend(["", "## Parameters\n"])
     for k, v in params.items():
@@ -1293,6 +1335,7 @@ def main():
             source_path=input_file,
         ),
         logger,
+        demo_mode=args.demo,
     )
     summary = run_communication(
         adata,
@@ -1315,6 +1358,24 @@ def main():
         nichenet_expression_pct=args.nichenet_expression_pct,
         nichenet_lfc_cutoff=args.nichenet_lfc_cutoff,
     )
+    # --- Degenerate output detection (UX guardrail) ---
+    _n_interactions = summary.get("n_interactions_tested", 0)
+    _degenerate = _n_interactions == 0
+    if _degenerate:
+        print()
+        print("  *** NO interactions were detected — communication analysis produced empty results. ***")
+        print("  This usually means the gene names in your data do not overlap with the ligand-receptor database,")
+        print("  or the cell type grouping has too few cells per group.")
+        print()
+        print("  How to fix:")
+        print(f"    Option 1 — Check that '--cell-type-key {args.cell_type_key}' has meaningful labels (not numeric IDs).")
+        print("      Example: python omicsclaw.py run sc-cell-annotation --input data.h5ad --output anno_out/")
+        print("    Option 2 — Use a richer method that queries a larger LR database:")
+        print("      Example: python omicsclaw.py run sc-cell-communication --method liana --input data.h5ad --output out/")
+        print("    Option 3 — Verify gene names are HGNC symbols (human) or standard gene symbols (mouse).")
+        print("      If Ensembl IDs, convert first: python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --from ensembl --to symbol --output mapped/")
+        print()
+
     params = {
         "method": method,
         "cell_type_key": args.cell_type_key,
@@ -1406,6 +1467,21 @@ def main():
     adata.write_h5ad(output_h5ad)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
+
+    # Communication diagnostics for bot/agent
+    communication_diagnostics: dict[str, object] = {
+        "no_interactions": _degenerate,
+        "n_interactions_tested": _n_interactions,
+        "n_significant": summary.get("n_significant", 0),
+    }
+    if _degenerate:
+        communication_diagnostics["suggested_actions"] = [
+            f"Check that '--cell-type-key {args.cell_type_key}' has meaningful cell type labels",
+            "Try a richer method: --method liana",
+            "Verify gene names are HGNC symbols (human) or standard symbols (mouse)",
+            "Run sc-cell-annotation first if labels are missing",
+        ]
+
     result_data = {
         "requested_method": summary.get("requested_method", method),
         "executed_method": summary.get("executed_method", method),
@@ -1415,10 +1491,12 @@ def main():
         "score_semantics": summary.get("score_semantics"),
         "significance_semantics": summary.get("significance_semantics"),
         "available_figure_data": summary.get("figure_data_files", []),
+        "communication_diagnostics": communication_diagnostics,
         "params": params,
         "input_contract": propagated_input,
         "matrix_contract": propagated_matrix,
     }
+    result_data["next_steps"] = []
     write_result_json(
         output_dir,
         SKILL_NAME,
@@ -1441,6 +1519,11 @@ def main():
         f"{summary['n_interactions_tested']} interactions tested "
         f"(requested={summary.get('requested_method', method)}, executed={summary.get('executed_method', method)})"
     )
+
+    # --- Next-step guidance ---
+    print()
+    print("▶ Analysis complete. Further exploration:")
+    print(f"  • sc-grn: python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

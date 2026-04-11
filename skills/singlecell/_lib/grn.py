@@ -633,9 +633,13 @@ def plot_regulon_activity_umap(
     # Get top regulons by variance
     top_regulons = auc_matrix.var().nlargest(n_top).index.tolist()
 
-    # Add AUC scores to adata
+    # Add AUC scores to adata with a prefix to avoid name collisions
+    # with var_names (e.g. TF "NFkB1" may also be a gene name).
+    obs_keys: list[str] = []
     for regulon in top_regulons:
-        adata.obs[regulon] = auc_matrix.loc[adata.obs_names, regulon]
+        key = f"_auc_{regulon}"
+        adata.obs[key] = auc_matrix.loc[adata.obs_names, regulon].values
+        obs_keys.append(key)
 
     try:
         # Plot
@@ -644,16 +648,17 @@ def plot_regulon_activity_umap(
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
         axes = axes.flatten() if n_top > 1 else [axes]
 
-        for i, regulon in enumerate(top_regulons):
+        for i, (regulon, key) in enumerate(zip(top_regulons, obs_keys)):
             if i >= len(axes):
                 break
             sc.pl.umap(
                 adata,
-                color=regulon,
+                color=key,
                 ax=axes[i],
                 show=False,
                 cmap="viridis",
             )
+            axes[i].set_title(regulon)
 
         # Hide empty axes
         for i in range(len(top_regulons), len(axes)):
@@ -672,9 +677,9 @@ def plot_regulon_activity_umap(
 
     finally:
         # Clean up adata.obs
-        for regulon in top_regulons:
-            if regulon in adata.obs.columns:
-                del adata.obs[regulon]
+        for key in obs_keys:
+            if key in adata.obs.columns:
+                del adata.obs[key]
 
     return figures
 

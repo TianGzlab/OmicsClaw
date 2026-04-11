@@ -378,6 +378,25 @@ def main() -> None:
         multiqc_execution=multiqc_execution,
     )
 
+    # --- Degenerate output detection ---
+    diagnostics: dict = {"degenerate": False, "suggested_actions": []}
+    low_q30_samples = per_sample_df[per_sample_df["q30_pct"] < 70]
+    if not per_sample_df.empty and per_sample_df["q30_pct"].mean() < 70:
+        diagnostics["degenerate"] = True
+        diagnostics["low_q30"] = True
+        diagnostics["suggested_actions"].append(
+            "Mean Q30 is below 70%. Consider re-sequencing or trimming adapters before counting."
+        )
+    if not low_q30_samples.empty:
+        diagnostics["low_q30_samples"] = low_q30_samples["sample_id"].tolist()
+
+    if per_file_df.empty:
+        diagnostics["degenerate"] = True
+        diagnostics["no_files"] = True
+        diagnostics["suggested_actions"].append(
+            "No FASTQ files were summarized. Check input path and file naming patterns."
+        )
+
     result_data = {
         "method": "fastqc",
         "selected_sample": selected_sample.sample_id if selected_sample is not None else "demo",
@@ -405,7 +424,24 @@ def main() -> None:
             "fastqc_command": list(fastqc_execution.command) if fastqc_execution else [],
             "multiqc_command": list(multiqc_execution.command) if multiqc_execution else [],
         },
+        "output_files": {
+            "figures": [
+                "figures/fastq_q30_summary.png",
+                "figures/per_base_quality.png",
+                "figures/fastq_file_quality.png",
+                "figures/fastq_read_structure.png",
+            ],
+            "tables": [
+                f"tables/{table_files['per_file']}",
+                f"tables/{table_files['per_sample']}",
+                f"tables/{table_files['per_base']}",
+            ],
+        },
+        "fastq_qc_diagnostics": diagnostics,
     }
+    result_data["next_steps"] = [
+        {"skill": "sc-count", "reason": "Generate count matrix from aligned reads", "priority": "recommended"},
+    ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, "")
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
     write_standard_run_artifacts(
@@ -418,6 +454,14 @@ def main() -> None:
         actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
     )
 
+    # --- stdout guidance ---
+    if diagnostics["degenerate"]:
+        print()
+        print("  *** QC WARNING: potential quality issues detected ***")
+        for action in diagnostics["suggested_actions"]:
+            print(f"    - {action}")
+        print()
+
     print(f"\n{'=' * 60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'=' * 60}")
@@ -427,6 +471,9 @@ def main() -> None:
     print(f"  Mean sample Q30: {summary['mean_q30_pct']:.2f}%")
     print(f"  FastQC used: {summary['fastqc_used']}")
     print(f"  MultiQC used: {summary['multiqc_used']}")
+    print()
+    print("▶ Next step: Run sc-count to generate a count matrix")
+    print(f"  python omicsclaw.py run sc-count --input <fastq_dir> --output <dir>")
 
 
 if __name__ == "__main__":

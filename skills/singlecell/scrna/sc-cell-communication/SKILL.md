@@ -282,3 +282,8 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 - State clearly that `cellphonedb` is human-only in the current wrapper.
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-cell-communication-guardrails.md`.
 - For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-cell-communication.md`.
+
+## Workflow Position
+
+**Upstream:** sc-clustering or sc-cell-annotation
+**Downstream:** Terminal analysis. Consider: sc-grn (gene regulatory networks)

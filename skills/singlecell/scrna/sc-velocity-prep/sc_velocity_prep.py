@@ -264,6 +264,7 @@ def _write_report(
     input_file: str | None,
     artifact_info: dict[str, object],
     layer_summary: pd.DataFrame,
+    velocity_prep_diagnostics: dict | None = None,
 ) -> None:
     header = generate_report_header(
         title="Single-Cell Velocity Prep Report",
@@ -290,6 +291,31 @@ def _write_report(
     lines.extend(["", "## Source Artifacts\n"])
     for key, value in artifact_info.items():
         lines.append(f"- **{key}**: {value}")
+
+    # Troubleshooting section when degenerate
+    if velocity_prep_diagnostics and velocity_prep_diagnostics.get("degenerate"):
+        lines.extend([
+            "",
+            "## Troubleshooting: Degenerate Velocity Prep Output\n",
+            "The velocity preparation produced layers that may not support downstream velocity estimation.\n",
+        ])
+        if not velocity_prep_diagnostics.get("has_spliced") or not velocity_prep_diagnostics.get("has_unspliced"):
+            lines.extend([
+                "### Missing velocity layers",
+                "One or both of the required layers (spliced, unspliced) are missing.",
+                "Ensure the input source contains velocity-compatible data.\n",
+            ])
+        if velocity_prep_diagnostics.get("unspliced_total_molecules", 0) == 0:
+            lines.extend([
+                "### Zero unspliced molecules",
+                "The unspliced layer has no molecules. This usually means the GTF annotation",
+                "lacks intron information, or the alignment did not capture intronic reads.\n",
+                "**Fix**: Use a GTF that includes intron annotations, or try STARsolo with Velocyto:\n",
+                "```bash",
+                "oc run sc-velocity-prep --input <dir> --method starsolo --output <dir>",
+                "```\n",
+            ])
+        lines.append("")
 
     lines.extend(
         [
@@ -487,6 +513,73 @@ def main() -> None:
 
     layer_summary = _layer_summary_df(output_adata)
     gene_summary = _top_velocity_genes_df(output_adata)
+
+    # ---------------------------------------------------------------------------
+    # Degenerate output detection
+    # ---------------------------------------------------------------------------
+    velocity_prep_diagnostics: dict = {}
+    is_degenerate = False
+
+    has_spliced = "spliced" in output_adata.layers
+    has_unspliced = "unspliced" in output_adata.layers
+    spliced_total = float(layer_summary.loc[layer_summary["layer"] == "spliced", "molecules"].sum()) if has_spliced else 0.0
+    unspliced_total = float(layer_summary.loc[layer_summary["layer"] == "unspliced", "molecules"].sum()) if has_unspliced else 0.0
+    n_genes_with_signal = len(gene_summary) if not gene_summary.empty else 0
+
+    velocity_prep_diagnostics["has_spliced"] = has_spliced
+    velocity_prep_diagnostics["has_unspliced"] = has_unspliced
+    velocity_prep_diagnostics["spliced_total_molecules"] = spliced_total
+    velocity_prep_diagnostics["unspliced_total_molecules"] = unspliced_total
+    velocity_prep_diagnostics["n_genes_with_signal"] = n_genes_with_signal
+
+    if not has_spliced or not has_unspliced:
+        is_degenerate = True
+        velocity_prep_diagnostics["degenerate"] = True
+        velocity_prep_diagnostics["suggested_actions"] = [
+            "Ensure input contains velocity-compatible layers (spliced/unspliced)",
+            "For Cell Ranger BAM: oc run sc-velocity-prep --input <dir> --method velocyto --gtf <genes.gtf>",
+            "For STARsolo: oc run sc-velocity-prep --input <dir> --method starsolo",
+        ]
+    elif spliced_total == 0 and unspliced_total == 0:
+        is_degenerate = True
+        velocity_prep_diagnostics["degenerate"] = True
+        velocity_prep_diagnostics["suggested_actions"] = [
+            "Both spliced and unspliced layers have zero total molecules",
+            "Check that the input BAM/loom contains real count data",
+            "Verify the GTF annotation matches the genome used for alignment",
+        ]
+    elif unspliced_total == 0:
+        is_degenerate = True
+        velocity_prep_diagnostics["degenerate"] = True
+        velocity_prep_diagnostics["suggested_actions"] = [
+            "Unspliced layer has zero molecules — velocity estimation will fail downstream",
+            "This may indicate the GTF annotation lacks intron information",
+            "Try a different GTF or use STARsolo with Velocyto feature: --method starsolo",
+        ]
+    else:
+        velocity_prep_diagnostics["degenerate"] = False
+
+    if is_degenerate:
+        logger.warning("Degenerate velocity-prep output detected: spliced=%.0f unspliced=%.0f genes=%d",
+                        spliced_total, unspliced_total, n_genes_with_signal)
+        print()
+        print("  *** WARNING: Velocity prep output appears degenerate. ***")
+        if not has_spliced or not has_unspliced:
+            print("  Missing velocity layers: spliced=%s unspliced=%s" % (has_spliced, has_unspliced))
+        elif unspliced_total == 0:
+            print("  Unspliced layer has zero molecules — downstream velocity estimation will fail.")
+        else:
+            print("  Both spliced and unspliced layers have zero total molecules.")
+        print()
+        print("  How to fix:")
+        print("    Option 1 — Re-run with a correct GTF that includes intron annotations:")
+        print("      oc run sc-velocity-prep --input <dir> --method velocyto --gtf <genes.gtf> --output <dir>")
+        print("    Option 2 — Use STARsolo with Velocyto feature:")
+        print("      oc run sc-velocity-prep --input <dir> --method starsolo --output <dir>")
+        print("    Option 3 — Use a pre-existing loom file with velocity layers:")
+        print("      oc run sc-velocity-prep --input <sample.loom> --method velocyto --output <dir>")
+        print()
+
     table_files = _export_tables(output_dir, layer_summary, gene_summary)
     plot_velocity_layer_summary(layer_summary, output_dir)
     plot_velocity_layer_fraction(layer_summary, output_dir)
@@ -555,7 +648,7 @@ def main() -> None:
         "spliced_layer_present": "spliced" in output_adata.layers,
         "unspliced_layer_present": "unspliced" in output_adata.layers,
     }
-    _write_report(output_dir, summary=summary, input_file=input_file, artifact_info=artifact_info, layer_summary=layer_summary)
+    _write_report(output_dir, summary=summary, input_file=input_file, artifact_info=artifact_info, layer_summary=layer_summary, velocity_prep_diagnostics=velocity_prep_diagnostics)
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).is_file() else ""
     result_data = {
@@ -571,6 +664,7 @@ def main() -> None:
         },
         "input_contract": contract,
         "matrix_contract": matrix_contract,
+        "velocity_prep_diagnostics": velocity_prep_diagnostics,
         "artifacts": artifact_info,
         "output_h5ad": "processed.h5ad",
         "output_files": {
@@ -586,6 +680,9 @@ def main() -> None:
         },
         "execution": list(execution.command) if execution is not None else [],
     }
+    result_data["next_steps"] = [
+        {"skill": "sc-velocity", "reason": "Run RNA velocity estimation on prepared data", "priority": "recommended"},
+    ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
     write_standard_run_artifacts(
@@ -606,6 +703,11 @@ def main() -> None:
     print(f"  Velocity-ready genes: {summary['n_genes']:,}")
     print(f"  Output object: {output_h5ad}")
     print(f"  Base h5ad merged: {summary['used_base_h5ad']}")
+
+    # --- Next-step guidance ---
+    print()
+    print("▶ Next step: Run sc-velocity for RNA velocity analysis")
+    print(f"  python omicsclaw.py run sc-velocity --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

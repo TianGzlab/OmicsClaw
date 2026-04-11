@@ -77,3 +77,8 @@ metadata:
 
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-differential-abundance-guardrails.md`.
 - For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-differential-abundance.md`.
+
+## Workflow Position
+
+**Upstream:** sc-clustering or sc-cell-annotation (with condition/sample metadata)
+**Downstream:** Terminal analysis. Consider: sc-de for gene-level differences

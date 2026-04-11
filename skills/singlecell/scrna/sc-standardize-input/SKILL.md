@@ -3,7 +3,7 @@ name: sc-standardize-input
 description: >-
   Start here if you already have an external single-cell h5ad. Fixes the AnnData
   contract so downstream OmicsClaw scRNA skills can use it safely.
-version: 0.1.0
+version: 0.2.0
 author: OmicsClaw
 license: MIT
 tags: [singlecell, scrna, input, standardization, anndata, preprocessing]
@@ -23,21 +23,29 @@ metadata:
       - input contract
 ---
 
-# 🧱 Single-Cell Input Standardization
+# Single-Cell Input Standardization
 
 You are **SC Standardize Input**, the OmicsClaw skill for explicitly exporting
 the same canonical AnnData contract that downstream scRNA skills should use
 internally when they auto-prepare compatible inputs.
 
+## Data / State Requirements
+
+- **Input**: Any single-cell data file (.h5ad, .h5, .loom, .csv, .tsv, or 10X mtx directory)
+- **Matrix expectation**: Raw counts preferred; the skill searches `layers['counts']`, `adata.raw`, and `adata.X` for count-like data
+- **No upstream step required**: This is the first step in the pipeline
+- **No clustering or labels required**
+
 ## What This Skill Does
 
 1. loads user input through the shared single-cell loader
-2. chooses the best available count-like expression source (`layers['counts']`, `adata.raw`, or `adata.X`)
-3. standardizes feature names for downstream QC and analysis
-4. ensures `adata.layers['counts']` exists as the canonical raw-count layer
-5. writes a count-like snapshot to `adata.raw`
-6. records provenance and matrix semantics in `adata.uns['omicsclaw_input_contract']` and `adata.uns['omicsclaw_matrix_contract']`
-7. saves a downstream-ready `processed.h5ad`
+2. auto-detects species from gene name conventions (UPPER = human, Title = mouse)
+3. chooses the best available count-like expression source (`layers['counts']`, `adata.raw`, or `adata.X`)
+4. standardizes feature names for downstream QC and analysis
+5. ensures `adata.layers['counts']` exists as the canonical raw-count layer
+6. writes a count-like snapshot to `adata.raw`
+7. records provenance and matrix semantics in `adata.uns['omicsclaw_input_contract']` and `adata.uns['omicsclaw_matrix_contract']`
+8. saves a downstream-ready `processed.h5ad`
 
 ## What This Skill Does Not Do
 
@@ -54,11 +62,52 @@ Run this skill explicitly when:
 - gene identifiers may need harmonization before QC or downstream scRNA skills
 - you want to inspect or save the canonicalized object itself before running analysis
 
+## Workflow
+
+1. **Load**: read input via shared multi-format loader
+2. **Preflight**: validate non-empty input; detect species
+3. **Canonicalize**: select best count-like matrix, standardize gene names
+4. **Persist contracts**: write `omicsclaw_input_contract` and `omicsclaw_matrix_contract`
+5. **Export**: save `processed.h5ad`
+6. **Report**: generate `report.md` and `result.json` with diagnostics
+
 ## CLI
 
 ```bash
-python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py \
-  --input <data.h5ad> --output <dir>
+# Basic usage (species auto-detected)
+python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir>
 
-oc run sc-standardize-input --input <data.h5ad> --output <dir>
+# Explicit species
+python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir> --species mouse
+
+# Demo mode
+python omicsclaw.py run sc-standardize-input --demo --output /tmp/demo
 ```
+
+## Parameters
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--input` | (required unless `--demo`) | Input file path |
+| `--output` | (required) | Output directory |
+| `--species` | `auto` | Species hint: `auto`, `human`, or `mouse` |
+| `--demo` | false | Run with built-in PBMC3K demo data |
+
+## Output Contract
+
+- `adata.X` = `raw_counts`
+- `adata.layers['counts']` = `raw_counts`
+- `adata.raw` = `raw_counts_snapshot`
+- `adata.uns['omicsclaw_matrix_contract']` records all of the above explicitly
+
+## Workflow Position
+
+- **Upstream step**: Used when input comes from external tools (not from `sc-count`); converts arbitrary formats into the OmicsClaw canonical contract
+- **Usual next step**: `sc-qc` for quality assessment
+
+## Next Step
+
+After standardization, run one of:
+- `sc-qc` to compute and visualize quality control metrics
+- `sc-preprocessing` to normalize, find HVGs, compute PCA/UMAP, and cluster
+- `sc-doublet-detection` if doublet removal is needed before preprocessing

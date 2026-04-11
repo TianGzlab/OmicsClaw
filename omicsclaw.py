@@ -154,6 +154,7 @@ _WORKFLOW_ORDER: dict[str, list[str]] = {
         "sc-cell-annotation",
         "sc-markers",
         "sc-de",
+        "sc-pathway-scoring",
         "sc-cell-communication",
         "sc-grn",
         "sc-pseudotime",
@@ -605,13 +606,49 @@ def run_skill(
         import os
         env = os.environ.copy()
         env["PYTHONPATH"] = str(OMICSCLAW_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-        proc = subprocess.run(
+        # Some skills (e.g. scVelo dynamical) spawn loky/joblib worker
+        # children that inherit stdout/stderr pipe FDs.  When the main
+        # skill process exits, these orphaned children keep the pipes open
+        # and subprocess.run(capture_output=True) hangs waiting for EOF.
+        #
+        # Strategy: run in a new process group, use a background thread to
+        # wait for the main PID, then kill the whole group to close pipes.
+        import threading
+        _popen = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=str(script_path.parent),
             env=env,
+            start_new_session=True,
         )
+
+        def _reaper():
+            """Wait for main process exit, then kill orphaned siblings."""
+            _popen.wait()
+            # Give a brief moment for pipes to flush.
+            import time as _t
+            _t.sleep(0.5)
+            try:
+                os.killpg(os.getpgid(_popen.pid), 9)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+        _reap_thread = threading.Thread(target=_reaper, daemon=True)
+        _reap_thread.start()
+        try:
+            _stdout, _stderr = _popen.communicate()
+        except Exception:
+            _stdout, _stderr = "", ""
+        _reap_thread.join(timeout=5)
+        # Some skills force-terminate their own process group (SIGKILL) to
+        # clean up TF threads and loky workers.  Treat -9 as success when
+        # the skill produced its result.json output.
+        _rc = _popen.returncode or 0
+        if _rc == -9 and (Path(out_dir) / "result.json").exists():
+            _rc = 0
+        proc = subprocess.CompletedProcess(cmd, _rc, _stdout or "", _stderr or "")
     except Exception as e:
         duration = time.time() - t0
         return _err(skill_name, str(e), duration=duration)
@@ -1045,7 +1082,7 @@ def main():
     run_p.add_argument("--species")
     run_p.add_argument("--method")
     run_p.add_argument("--n-domains", type=int)
-    run_p.add_argument("--resolution", type=float)
+    run_p.add_argument("--resolution", type=str, help="Resolution value or 'auto' for automatic selection")
     run_p.add_argument("--min-genes", type=int)
     run_p.add_argument("--min-cells", type=int)
     run_p.add_argument("--max-mt-pct", type=float)

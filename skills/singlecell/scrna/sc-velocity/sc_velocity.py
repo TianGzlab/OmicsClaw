@@ -425,6 +425,8 @@ def write_velocity_report(
     summary: dict,
     params: dict,
     input_file: str | None,
+    *,
+    velocity_diagnostics: dict | None = None,
 ) -> None:
     """Write velocity analysis report."""
     header = generate_report_header(
@@ -480,6 +482,51 @@ def write_velocity_report(
         body_lines.append("- `figures/latent_time_umap.png` — Latent time on UMAP")
         body_lines.append("- `figures/latent_time_distribution.png` — Distribution of latent time values")
 
+    # Troubleshooting section when degenerate
+    if velocity_diagnostics and velocity_diagnostics.get("degenerate"):
+        body_lines.extend([
+            "",
+            "## Troubleshooting: Degenerate Velocity Output\n",
+            "The velocity analysis produced results that may not be meaningful.\n",
+        ])
+        if velocity_diagnostics.get("all_zero_velocity"):
+            body_lines.extend([
+                "### All velocity vectors are zero",
+                "scVelo could not estimate meaningful velocity from the spliced/unspliced layers.",
+                "This often happens with synthetic or very noisy data.\n",
+                "**Fix**: Use real spliced/unspliced data from `velocyto` or `STARsolo`:",
+                "```bash",
+                "oc run sc-velocity-prep --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>",
+                "```\n",
+            ])
+        if velocity_diagnostics.get("nan_fraction", 0) > 0.5:
+            body_lines.extend([
+                f"### High NaN fraction ({velocity_diagnostics['nan_fraction']*100:.0f}%)",
+                "The velocity fitting failed for many genes. This may indicate insufficient",
+                "signal in the spliced/unspliced layers or too few cells.\n",
+                "**Fix**: Try the dynamical model which can sometimes recover more signal:",
+                "```bash",
+                "oc run sc-velocity --input <data.h5ad> --method scvelo_dynamical --output <dir>",
+                "```\n",
+            ])
+        if velocity_diagnostics.get("n_velocity_genes", 0) == 0:
+            body_lines.extend([
+                "### No genes with non-zero velocity",
+                "The spliced/unspliced signal may be too weak for velocity estimation.\n",
+                "**Fix**: Ensure proper upstream preprocessing:",
+                "```bash",
+                "oc run sc-preprocessing --input <data.h5ad> --output <dir>",
+                "oc run sc-velocity-prep --input <dir>/processed.h5ad --output <dir2>",
+                "```\n",
+            ])
+        body_lines.extend([
+            "### Alternative methods",
+            "- `--method scvelo_dynamical`: fits a full splicing kinetics model",
+            "- `--method scvelo_stochastic`: faster but may miss weak signal",
+            "- `--method scvelo_steady_state`: simplest approximation",
+            "",
+        ])
+
     body_lines.extend([
         "",
         "## Requirements\n",
@@ -510,10 +557,10 @@ def generate_demo_data():
         adata, demo_path = sc_io.load_repo_demo_data("pbmc3k_raw")
         logger.info("Loaded demo dataset: %s", demo_path or "scanpy-pbmc3k")
         adata = adata.copy()
-        if adata.n_obs > 500:
-            adata = adata[:500, :500].copy()
-        elif adata.n_vars > 500:
-            adata = adata[:, :500].copy()
+        if adata.n_obs > 300:
+            adata = adata[:300, :].copy()
+        if adata.n_vars > 200:
+            adata = adata[:, :200].copy()
         if hasattr(adata.X, "toarray"):
             base_counts = adata.X.toarray().astype(np.float32)
         else:
@@ -524,8 +571,8 @@ def generate_demo_data():
         adata.X = spliced
     except Exception:
         np.random.seed(42)
-        n_cells = 500
-        n_genes = 500
+        n_cells = 300
+        n_genes = 200
         spliced = np.random.negative_binomial(5, 0.1, size=(n_cells, n_genes)).astype(np.float32)
         unspliced = np.random.negative_binomial(2, 0.15, size=(n_cells, n_genes)).astype(np.float32)
         adata = sc.AnnData(
@@ -544,7 +591,7 @@ def generate_demo_data():
     sc.pp.filter_genes(adata, min_cells=10)
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
-    sc.pp.highly_variable_genes(adata, n_top_genes=500)
+    sc.pp.highly_variable_genes(adata, n_top_genes=min(200, adata.n_vars))
     sc.pp.pca(adata)
     sc.pp.neighbors(adata)
 
@@ -638,6 +685,7 @@ def main():
             source_path=input_file,
         ),
         logger,
+        demo_mode=args.demo,
     )
 
     # Parameters
@@ -658,6 +706,71 @@ def main():
     if velocity_result is None:
         logger.error("Velocity analysis failed")
         sys.exit(1)
+
+    # ---------------------------------------------------------------------------
+    # Degenerate output detection
+    # ---------------------------------------------------------------------------
+    velocity_diagnostics: dict = {}
+    is_degenerate = False
+
+    if "velocity" in adata.layers:
+        vel = adata.layers["velocity"]
+        if hasattr(vel, "toarray"):
+            vel = vel.toarray()
+        vel = np.asarray(vel, dtype=np.float32)
+
+        all_zero = np.allclose(vel, 0)
+        nan_frac = float(np.isnan(vel).sum()) / max(vel.size, 1)
+        n_velocity_genes = int((np.abs(vel).sum(axis=0) > 0).sum())
+
+        velocity_diagnostics["all_zero_velocity"] = bool(all_zero)
+        velocity_diagnostics["nan_fraction"] = round(nan_frac, 4)
+        velocity_diagnostics["n_velocity_genes"] = n_velocity_genes
+        velocity_diagnostics["n_total_genes"] = int(adata.n_vars)
+
+        if all_zero or nan_frac > 0.5 or n_velocity_genes == 0:
+            is_degenerate = True
+            velocity_diagnostics["degenerate"] = True
+            velocity_diagnostics["suggested_actions"] = [
+                "Check that spliced/unspliced layers contain real count data (not all zeros)",
+                "Try dynamical mode: --method scvelo_dynamical",
+                "Ensure input has been preprocessed: sc-preprocessing -> sc-velocity-prep -> sc-velocity",
+                "Re-run sc-velocity-prep with real BAM/loom data instead of synthetic layers",
+            ]
+            logger.warning("Degenerate velocity output detected (all_zero=%s, nan_frac=%.2f, velocity_genes=%d)",
+                           all_zero, nan_frac, n_velocity_genes)
+            print()
+            print("  *** WARNING: Velocity output appears degenerate. ***")
+            if all_zero:
+                print("  All velocity vectors are zero — scVelo could not estimate meaningful velocity.")
+            if nan_frac > 0.5:
+                print(f"  {nan_frac*100:.0f}% of velocity values are NaN — fitting may have failed.")
+            if n_velocity_genes == 0:
+                print("  No genes have non-zero velocity — the spliced/unspliced signal may be too weak.")
+            print()
+            print("  How to fix:")
+            print("    Option 1 — Use real spliced/unspliced data from velocyto or STARsolo:")
+            print("      oc run sc-velocity-prep --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
+            print("    Option 2 — Try the dynamical model which may recover more signal:")
+            print("      oc run sc-velocity --input <data.h5ad> --method scvelo_dynamical --output <dir>")
+            print("    Option 3 — Check upstream preprocessing (normalize, HVG, PCA, neighbors):")
+            print("      oc run sc-preprocessing --input <data.h5ad> --output <dir>")
+            print()
+        else:
+            velocity_diagnostics["degenerate"] = False
+    else:
+        is_degenerate = True
+        velocity_diagnostics = {
+            "degenerate": True,
+            "all_zero_velocity": True,
+            "nan_fraction": 1.0,
+            "n_velocity_genes": 0,
+            "n_total_genes": int(adata.n_vars),
+            "suggested_actions": [
+                "Velocity layer was not created — check scVelo logs above for errors",
+                "Ensure spliced/unspliced layers have sufficient signal",
+            ],
+        }
 
     # Summary
     has_latent_time = "latent_time" in adata.obs.columns
@@ -691,7 +804,7 @@ def main():
 
     # Write report
     logger.info("Writing report...")
-    write_velocity_report(output_dir, summary, params, input_file)
+    write_velocity_report(output_dir, summary, params, input_file, velocity_diagnostics=velocity_diagnostics)
 
     # Save data
     if "counts" not in adata.layers:
@@ -722,6 +835,7 @@ def main():
         "input_contract": adata.uns.get("omicsclaw_input_contract", {}),
         "matrix_contract": matrix_contract,
         "output_h5ad": "processed.h5ad",
+        "velocity_diagnostics": velocity_diagnostics,
         "visualization": {
             "recipe_id": "standard-sc-velocity-gallery",
             "available_figure_data": table_files,
@@ -731,6 +845,7 @@ def main():
             "compatibility_aliases": [str(path) for path in alias_paths],
         },
     }
+    result_data["next_steps"] = []
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
@@ -756,6 +871,23 @@ def main():
     print(f"  Latent time: {'Yes' if has_latent_time else 'No'}")
     print(f"  Output: {output_dir}")
 
+    # --- Next-step guidance ---
+    print()
+    print("▶ Analysis complete. Further exploration:")
+    print(f"  • sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  • sc-cytotrace:  python omicsclaw.py run sc-cytotrace --input {output_dir}/processed.h5ad --output <dir>")
+
 
 if __name__ == "__main__":
     main()
+    # TensorFlow (loaded transitively) spawns hundreds of threads that block
+    # on futex during interpreter shutdown, and loky workers inherit pipe FDs
+    # that prevent the parent subprocess.run from seeing EOF.  Kill the
+    # entire process group to force a clean exit.
+    import os, sys, signal
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.killpg(os.getpgid(os.getpid()), signal.SIGKILL)
+    except Exception:
+        os._exit(0)

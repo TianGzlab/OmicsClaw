@@ -77,7 +77,7 @@ metadata:
 1. **Three entry paths**: lightweight subtraction, CellBender, and SoupX.
 2. **Method-aware input contract**: raw `.h5` for CellBender, paired 10x directories for SoupX, AnnData for the simple path.
 3. **Method-aware diagnostics**: shared-barcode comparison, count-distribution, and CellBender barcode-rank diagnostics when applicable.
-4. **Dual output contract for CellBender**: preserves native CellBender matrix/log artifacts and also writes `corrected.h5ad` for downstream OmicsClaw skills.
+4. **Dual output contract for CellBender**: preserves native CellBender matrix/log artifacts and also writes `processed.h5ad` for downstream OmicsClaw skills.
 5. **Honest fallback behavior**: when SoupX prerequisites are absent, the current wrapper can fall back to the simple method instead of pretending full SoupX execution happened.
 
 ## Scope Boundary
@@ -117,7 +117,7 @@ The wrapper does not currently expose the full upstream CellBender or SoupX para
 2. Validate the selected correction path.
 3. Run the requested method or fall back when required inputs are absent.
 4. Generate method-aware diagnostics, using shared barcodes for direct before/after comparison when needed.
-5. Write `corrected.h5ad`, figures, `report.md`, `result.json`, and preserved method-specific artifacts.
+5. Write `processed.h5ad`, figures, `report.md`, `result.json`, and preserved method-specific artifacts.
 
 ## CLI Reference
 
@@ -173,7 +173,7 @@ Current OmicsClaw `cellbender` path:
 1. requires a raw 10x `.h5`
 2. passes `expected_cells` into the CellBender CLI
 3. preserves native CellBender matrix/log outputs under `cellbender_output/`
-4. reimports the corrected filtered matrix into the OmicsClaw output contract as `corrected.h5ad`
+4. reimports the corrected filtered matrix into the OmicsClaw output contract as `processed.h5ad`
 
 Important implementation note:
 
@@ -195,7 +195,7 @@ Important implementation note:
 
 Successful runs write:
 
-- `corrected.h5ad`
+- `processed.h5ad`
 - `report.md`
 - `result.json`
 - `figures/count_distribution.png`
@@ -223,13 +223,13 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 1. `report.md`
 2. `cellbender_output/` native outputs when the method is `cellbender`
 3. `figures/barcode_rank.png` or `figures/count_distribution.png`
-4. `corrected.h5ad`
+4. `processed.h5ad`
 
 ## Current Limitations
 
 - The wrapper writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - `simple` is an OmicsClaw fallback, not an upstream CellBender/SoupX equivalent.
-- `corrected.h5ad` is a downstream convenience export, not CellBender's native primary file format.
+- `processed.h5ad` is a downstream convenience export, not CellBender's native primary file format.
 - The wrapper will try to load many common single-cell formats through OmicsClaw's smart loader, but sophisticated methods still require their true raw 10x side inputs.
 
 ## Safety And Guardrails
@@ -239,3 +239,8 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 - Enforce the real input contract: `cellbender` needs `--raw-h5`, and `soupx` needs both raw and filtered matrix directories.
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-ambient-removal-guardrails.md`.
 - For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-ambient-removal.md`.
+
+## Workflow Position
+
+**Upstream:** Raw count matrix (e.g., from CellRanger)
+**Downstream:** sc-qc (with cleaned counts)

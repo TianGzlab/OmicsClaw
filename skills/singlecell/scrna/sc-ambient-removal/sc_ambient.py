@@ -33,7 +33,10 @@ from omicsclaw.common.report import (
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import ambient as sc_ambient_utils
 from skills.singlecell._lib.adata_utils import (
+    ensure_input_contract,
     get_input_contract,
+    get_matrix_contract,
+    record_matrix_contract,
     select_count_like_expression_source,
     store_analysis_metadata,
 )
@@ -465,7 +468,7 @@ def apply_soupx_result(adata, corrected_matrix, cells, genes, contamination):
     return adata
 
 
-def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_file: str | None) -> None:
+def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_file: str | None, *, degenerate_diag: dict | None = None) -> None:
     requested_method = str(summary.get("requested_method", params.get("method", summary["method"])))
     executed_method = str(summary.get("executed_method", summary["method"]))
     shared_barcode_count = int(summary.get("shared_barcode_count", 0))
@@ -505,7 +508,7 @@ def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_fi
     body_lines.extend([
         "",
         "## Outputs\n",
-        f"- **OmicsClaw downstream export**: `{output_bundle.get('corrected_h5ad', 'corrected.h5ad')}`",
+        f"- **OmicsClaw downstream export**: `{output_bundle.get('processed_h5ad', 'processed.h5ad')}`",
         f"- **Machine-readable summary**: `{output_bundle.get('result_json', 'result.json')}`",
         f"- **Human-readable report**: `{output_bundle.get('report_md', 'report.md')}`",
     ])
@@ -521,7 +524,7 @@ def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_fi
             "### Method-specific artifacts",
         ])
         if executed_method == "cellbender":
-            body_lines.append("- `corrected.h5ad` is OmicsClaw's wrapped AnnData export for downstream skills.")
+            body_lines.append("- `processed.h5ad` is OmicsClaw's wrapped AnnData export for downstream skills.")
             body_lines.append("- The files below are the original CellBender-style matrix and log artifacts preserved under `cellbender_output/`.")
         for name, rel_path in method_outputs.items():
             body_lines.append(f"- `{name}`: `{rel_path}`")
@@ -531,7 +534,7 @@ def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_fi
         "## Methods\n",
         "### CellBender (Recommended for 10X data)",
         "CellBender uses a deep generative model to estimate and remove ambient RNA contamination.",
-        "OmicsClaw preserves the original CellBender matrix outputs and additionally writes `corrected.h5ad` for downstream interoperability.",
+        "OmicsClaw preserves the original CellBender matrix outputs and additionally writes `processed.h5ad` for downstream interoperability.",
         "",
         "### SoupX (R)",
         "SoupX estimates the ambient RNA profile from raw/filtered 10X matrices and subtracts it from filtered counts.",
@@ -541,8 +544,158 @@ def write_ambient_report(output_dir: Path, summary: dict, params: dict, input_fi
         "",
     ])
 
+    # Troubleshooting section for degenerate output
+    if degenerate_diag and degenerate_diag.get("degenerate"):
+        body_lines.extend([
+            "## Troubleshooting: Ambient Removal Output Issues\n",
+        ])
+        for issue in degenerate_diag.get("issues", []):
+            body_lines.append(f"- **Issue**: {issue}")
+        body_lines.append("")
+        for i, action in enumerate(degenerate_diag.get("suggested_actions", []), 1):
+            body_lines.append(f"### Fix {i}")
+            body_lines.append(f"{action}")
+            body_lines.append("")
+
     footer = generate_report_footer()
     (output_dir / "report.md").write_text(header + "\n".join(body_lines) + "\n" + footer)
+
+
+def _ensure_output_contract(adata, *, source_path: str | None) -> tuple[dict, dict]:
+    """Write omicsclaw_input_contract and omicsclaw_matrix_contract into adata.uns."""
+    input_contract = ensure_input_contract(adata, source_path=source_path)
+    existing = get_matrix_contract(adata)
+
+    # After ambient removal, X contains corrected counts (count-like)
+    x_kind = "raw_counts"
+    layers = dict(existing.get("layers") or {})
+
+    if "counts" in adata.layers:
+        layers["counts"] = "raw_counts"
+
+    raw_kind = existing.get("raw")
+    if adata.raw is not None:
+        raw_kind = "raw_counts_snapshot"
+    elif "counts" in adata.layers:
+        # Create raw snapshot from pre-correction counts
+        try:
+            raw_snapshot = sc.AnnData(
+                X=adata.layers["counts"].copy(),
+                obs=adata.obs.copy(),
+                var=adata.var.copy(),
+            )
+            raw_snapshot.obs_names = adata.obs_names.copy()
+            raw_snapshot.var_names = adata.var_names.copy()
+            adata.raw = raw_snapshot
+            raw_kind = "raw_counts_snapshot"
+        except Exception:
+            pass
+
+    matrix_contract = record_matrix_contract(
+        adata,
+        x_kind=x_kind,
+        raw_kind=raw_kind,
+        layers=layers,
+        producer_skill=SKILL_NAME,
+    )
+    return input_contract, matrix_contract
+
+
+def _detect_degenerate_output(adata, *, summary: dict) -> dict:
+    """Detect degenerate ambient removal output and return diagnostic info."""
+    diagnostics: dict = {
+        "degenerate": False,
+        "issues": [],
+        "suggested_actions": [],
+    }
+
+    mean_after = summary.get("mean_counts_after", 0)
+    mean_before = summary.get("mean_counts_before", 1)
+    reduction_pct = summary.get("count_reduction_pct", 0)
+
+    # Check: all zeros after correction
+    if mean_after < 1e-6:
+        diagnostics["degenerate"] = True
+        diagnostics["all_zero"] = True
+        diagnostics["issues"].append("All counts are zero after correction.")
+        diagnostics["suggested_actions"].extend([
+            "Lower the contamination fraction: --contamination 0.02",
+            "Check if input already had very low counts — run sc-qc first",
+        ])
+
+    # Check: excessive removal (>50% reduction is suspicious)
+    if reduction_pct > 50:
+        diagnostics["issues"].append(
+            f"Ambient removal reduced counts by {reduction_pct:.1f}%, which is unusually high."
+        )
+        diagnostics["suggested_actions"].append(
+            "Consider lowering --contamination (default 0.05). "
+            "Typical ambient contamination is 2-10%."
+        )
+
+    # Check: no reduction at all
+    if abs(reduction_pct) < 0.01 and mean_before > 0:
+        diagnostics["issues"].append("No counts were removed — correction had no effect.")
+        diagnostics["suggested_actions"].append(
+            "Verify the input contains raw counts (not already corrected). "
+            "Run sc-qc to inspect the count distribution."
+        )
+
+    # Check: very few cells
+    if adata.n_obs < 10:
+        diagnostics["issues"].append(f"Only {adata.n_obs} cells in output — very small dataset.")
+        diagnostics["suggested_actions"].append(
+            "Check input file — ambient removal expects a full count matrix."
+        )
+
+    if diagnostics["issues"]:
+        diagnostics["degenerate"] = True
+
+    return diagnostics
+
+
+def _write_figures_manifest(output_dir: Path, figure_files: list[str]) -> None:
+    """Write figures/manifest.json listing all generated figure files."""
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "skill": SKILL_NAME,
+        "available_files": {
+            Path(f).stem: Path(f).name for f in figure_files
+        },
+    }
+    (figures_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _write_figure_data(output_dir: Path, adata_before, adata_after, *, summary: dict) -> dict:
+    """Write figure_data/ CSV files and manifest.json for downstream customization."""
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(parents=True, exist_ok=True)
+
+    files: dict[str, str] = {}
+
+    # Per-cell count summary
+    before_counts = np.asarray(adata_before.X.sum(axis=1)).ravel()
+    after_counts = np.asarray(adata_after.X.sum(axis=1)).ravel()
+
+    count_summary = pd.DataFrame({
+        "mean_before": [float(before_counts.mean())],
+        "mean_after": [float(after_counts.mean())],
+        "reduction_pct": [summary.get("count_reduction_pct", 0)],
+        "contamination_estimate": [summary.get("contamination_estimate", 0)],
+        "method": [summary.get("executed_method", "simple")],
+    })
+    files["correction_summary"] = "correction_summary.csv"
+    count_summary.to_csv(figure_data_dir / files["correction_summary"], index=False)
+
+    (figure_data_dir / "manifest.json").write_text(
+        json.dumps({"skill": SKILL_NAME, "available_files": files}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return files
 
 
 def main():
@@ -582,6 +735,7 @@ def main():
             source_path=input_file,
         ),
         logger,
+        demo_mode=args.demo,
     )
     adata_before = adata.copy()
     mean_before = np.array(adata.X.sum(axis=1)).flatten().mean()
@@ -690,7 +844,7 @@ def main():
         "count_reduction_pct": float((1 - mean_after / max(mean_before, 1e-8)) * 100),
         "shared_barcode_count": int(shared_before_counts.size),
         "output_bundle": {
-            "corrected_h5ad": "corrected.h5ad",
+            "processed_h5ad": "processed.h5ad",
             "report_md": "report.md",
             "result_json": "result.json",
             "method_specific": method_outputs,
@@ -706,8 +860,18 @@ def main():
     if simple_input_warnings:
         input_preparation.setdefault("warnings", []).extend(simple_input_warnings)
 
+    # --- Degenerate output detection ---
+    degenerate_diag = _detect_degenerate_output(adata, summary=summary)
+
     figures = generate_ambient_figures(adata_before, adata, output_dir, method=method)
     summary["output_bundle"]["figures"] = [str(Path(fig).relative_to(output_dir)) for fig in figures]
+
+    # --- Write figures/manifest.json ---
+    figure_rel_paths = summary["output_bundle"]["figures"]
+    _write_figures_manifest(output_dir, figure_rel_paths)
+
+    # --- Write figure_data/ ---
+    figure_data_files = _write_figure_data(output_dir, adata_before, adata, summary=summary)
 
     repro_dir = output_dir / "reproducibility"
     repro_dir.mkdir(exist_ok=True)
@@ -733,8 +897,10 @@ def main():
         ["scanpy", "anndata", "numpy", "pandas", "matplotlib"],
     )
 
-    output_h5ad = output_dir / "corrected.h5ad"
+    # --- Write contracts and processed.h5ad ---
+    input_contract, matrix_contract = _ensure_output_contract(adata, source_path=input_file)
     store_analysis_metadata(adata, SKILL_NAME, summary["executed_method"], params)
+    output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(adata, output_h5ad)
     logger.info("Saved to %s", output_h5ad)
 
@@ -749,9 +915,18 @@ def main():
         "fallback_used": bool(summary.get("fallback_used")),
         "fallback_reason": summary.get("fallback_reason"),
         "params": params,
+        "input_contract": input_contract,
+        "matrix_contract": matrix_contract,
         "input_preparation": input_preparation,
         "output_bundle": summary.get("output_bundle", {}),
+        "visualization": {
+            "available_figure_data": figure_data_files,
+        },
+        "ambient_diagnostics": degenerate_diag,
     }
+    result_data["next_steps"] = [
+        {"skill": "sc-qc", "reason": "Re-compute QC metrics after ambient RNA removal", "priority": "recommended"},
+    ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
@@ -766,8 +941,20 @@ def main():
             summary["output_bundle"]["analysis_notebook"] = candidate
             break
     result_data["output_bundle"] = summary.get("output_bundle", {})
-    write_ambient_report(output_dir, summary, params, input_file)
+    write_ambient_report(output_dir, summary, params, input_file, degenerate_diag=degenerate_diag)
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+
+    # --- Degenerate output stdout guidance ---
+    if degenerate_diag.get("degenerate"):
+        print()
+        print("  *** WARNING: Ambient removal output may be problematic. ***")
+        for issue in degenerate_diag.get("issues", []):
+            print(f"  - {issue}")
+        print()
+        print("  How to fix:")
+        for i, action in enumerate(degenerate_diag.get("suggested_actions", []), 1):
+            print(f"    Option {i}: {action}")
+        print()
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")
@@ -775,6 +962,11 @@ def main():
         f"Ambient correction complete: requested={summary['requested_method']}, "
         f"executed={summary['executed_method']}, contamination ~ {summary['contamination_estimate']:.1%}"
     )
+
+    # --- Next-step guidance ---
+    print()
+    print("▶ Next step: Run sc-qc with the cleaned counts")
+    print(f"  python omicsclaw.py run sc-qc --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

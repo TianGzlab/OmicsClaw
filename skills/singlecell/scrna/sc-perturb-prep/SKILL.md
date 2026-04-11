@@ -68,12 +68,44 @@ metadata:
 - For real perturbation FASTQ, users still need an upstream guide-assignment pipeline such as Cell Ranger Feature Barcode / CRISPR Guide Capture or a CROP-seq mapping workflow.
 - The output is designed to feed directly into `sc-perturb`.
 
+## Data / State Requirements
+
+- **Matrix**: accepts raw counts or normalized expression; canonicalization stores raw counts in `layers["counts"]` and `adata.raw`
+- **X semantic**: output `X` is `raw_counts` (aligned with count-oriented output convention)
+- **No preprocessing required**: this skill operates on raw or minimally processed data
+
+## Upstream Step
+
+You need a barcode-to-sgRNA mapping file from an upstream guide assignment pipeline (e.g., Cell Ranger Feature Barcode, CRISPR Guide Capture, or a CROP-seq workflow).
+
+## Downstream Step
+
+After this skill, run `sc-perturb` for Mixscape perturbation analysis, or `sc-preprocessing` if you need clustering/UMAP first.
+
+## Workflow
+
+1. Load expression data and mapping file (or generate demo)
+2. Filter to gene-expression features only
+3. Collapse sgRNA assignments per barcode
+4. Annotate perturbation labels in `adata.obs`
+5. Canonicalize AnnData (contract metadata)
+6. Detect degenerate output (zero assigned, all control, single perturbation)
+7. Persist `processed.h5ad` with contract metadata
+8. Render gallery and export tables
+
 ## Outputs
 
-- `processed.h5ad`
+- `processed.h5ad` (canonical output with contract metadata)
 - `tables/perturbation_assignments.csv`
 - `tables/assignment_status_counts.csv`
 - `tables/perturbation_counts.csv`
 - `tables/dropped_multi_guide_cells.csv` when applicable
 - `figures/perturbation_counts.png`
+- `figure_data/` (plot-ready CSVs)
+- `reproducibility/commands.sh`
 - `result.json` and `report.md`
+
+## Workflow Position
+
+**Upstream:** Raw perturbation data (expression + sgRNA assignments)
+**Downstream:** sc-perturb (perturbation analysis)

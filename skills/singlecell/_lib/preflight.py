@@ -494,10 +494,8 @@ def preflight_sc_cell_annotation(
                 f"`--cluster-key {cluster_key}` was not found. Annotation can still run per cell, but downstream summaries are easier to interpret if you later reuse one of: {_format_candidates(cluster_candidates)}."
             )
         if model == "Immune_All_Low":
-            decision.require_field(
-                "model",
-                "Confirm the CellTypist model via `--model`; the current default `Immune_All_Low` is not appropriate for every tissue.",
-                aliases=["model", "celltypist_model"],
+            decision.add_guidance(
+                "Using the default CellTypist model `Immune_All_Low`. Pass `--model <name>` to override for non-immune tissues."
             )
         else:
             valid_input, reason = sc_annotation_utils.validate_celltypist_input_matrix(
@@ -1783,7 +1781,20 @@ def preflight_sc_enrichment(
     return decision
 
 
-def apply_preflight(decision: PreflightDecision, logger) -> None:
-    """Emit user-facing guidance and raise on blocking conditions."""
+def apply_preflight(decision: PreflightDecision, logger, *, demo_mode: bool = False) -> None:
+    """Emit user-facing guidance and raise on blocking conditions.
+
+    When *demo_mode* is ``True``, confirmation-level blocks (``needs_user_input``)
+    are downgraded to guidance so that ``--demo`` runs proceed without interactive
+    input.  Hard ``blocked`` status is **not** downgraded because it typically
+    indicates genuinely missing data layers or packages.
+    """
+    if demo_mode and decision.status == "needs_user_input":
+        # In demo mode, treat user-confirmation prompts as non-blocking guidance.
+        for msg in decision.confirmations:
+            decision.guidance.append(f"[demo auto-accepted] {msg}")
+        decision.confirmations.clear()
+        decision.pending_fields.clear()
+        decision.status = "proceed_with_guidance"
     decision.emit(logger)
     decision.raise_if_blocking()

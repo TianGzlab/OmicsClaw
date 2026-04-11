@@ -297,3 +297,8 @@ Recommended user guidance:
 - Do not auto-install counting backends during a normal run.
 - If a backend binary is missing, prompt the user to install it explicitly in the active environment or module system.
 - Reference files are also user-managed resources; OmicsClaw should guide users to `resources/singlecell/references/...` or accept explicit local paths, but should not silently download large references during execution.
+
+## Workflow Position
+
+- **Optional upstream step**: `sc-fastq-qc` for read-level quality assessment before counting
+- **Usual next step**: `sc-qc` for quality assessment, or `sc-multi-count` if merging multiple samples

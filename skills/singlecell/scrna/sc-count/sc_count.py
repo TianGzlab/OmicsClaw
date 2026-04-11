@@ -567,6 +567,29 @@ def main() -> None:
     }
     _write_report(output_dir, summary=summary, input_file=input_file, backend_summary=backend_summary, artifacts=artifacts)
 
+    # --- Degenerate output detection ---
+    diagnostics: dict = {"degenerate": False, "suggested_actions": []}
+    if summary["n_cells"] == 0:
+        diagnostics["degenerate"] = True
+        diagnostics["zero_cells"] = True
+        diagnostics["suggested_actions"].extend([
+            "No cells retained after filtering. Check raw matrix or use --method with a different backend.",
+            "If using Cell Ranger, inspect the web_summary.html for cell calling issues.",
+            "Consider running sc-ambient-removal (CellBender) on the raw matrix first.",
+        ])
+    elif summary["median_counts"] < 100:
+        diagnostics["low_counts"] = True
+        diagnostics["suggested_actions"].append(
+            f"Median counts per barcode is very low ({summary['median_counts']:.0f}). "
+            "This may indicate shallow sequencing or poor library quality."
+        )
+    if summary["n_genes"] == 0:
+        diagnostics["degenerate"] = True
+        diagnostics["zero_genes"] = True
+        diagnostics["suggested_actions"].append(
+            "No genes detected. Check reference genome compatibility."
+        )
+
     checksum = sha256_file(input_file) if input_file and Path(input_file).is_file() else ""
     result_data = {
         "method": args.method if not args.demo else "demo",
@@ -596,7 +619,12 @@ def main() -> None:
             "compatibility_aliases": [str(path) for path in alias_paths],
         },
         "execution": list(execution.command) if execution is not None else [],
+        "count_diagnostics": diagnostics,
     }
+    result_data["next_steps"] = [
+        {"skill": "sc-multi-count", "reason": "Merge multiple samples into one object", "priority": "optional"},
+        {"skill": "sc-qc", "reason": "Compute QC metrics for the count matrix", "priority": "recommended"},
+    ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
     write_standard_run_artifacts(
@@ -609,6 +637,14 @@ def main() -> None:
         actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
     )
 
+    # --- stdout guidance ---
+    if diagnostics["degenerate"]:
+        print()
+        print("  *** COUNT WARNING: degenerate output detected ***")
+        for action in diagnostics["suggested_actions"]:
+            print(f"    - {action}")
+        print()
+
     print(f"\n{'=' * 60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'=' * 60}")
@@ -618,6 +654,14 @@ def main() -> None:
     print(f"  Standardized output: {output_h5ad}")
     if artifacts is not None:
         print(f"  Backend artifacts: {artifacts.run_dir}")
+    print()
+    print("ℹ Optional upstream: Run sc-fastq-qc first for read-level QC")
+    print()
+    print("▶ Next step:")
+    print("  - Multiple samples? → sc-multi-count to merge")
+    print("    python omicsclaw.py run sc-multi-count --input sample1/processed.h5ad --input sample2/processed.h5ad --output <dir>")
+    print("  - Single sample? → sc-qc for quality assessment")
+    print(f"    python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

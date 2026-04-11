@@ -230,3 +230,8 @@ Recommended user guidance:
 
 - Do not auto-install scVelo during a normal skill run; if it is missing, ask the user to install the velocity extra explicitly.
 - If `spliced` / `unspliced` layers are missing, direct users to `sc-velocity-prep` and clearly state that upstream BAM/STAR tools remain manual installs.
+
+## Workflow Position
+
+**Upstream:** sc-velocity-prep
+**Downstream:** Terminal analysis. Consider: sc-pseudotime, sc-cytotrace

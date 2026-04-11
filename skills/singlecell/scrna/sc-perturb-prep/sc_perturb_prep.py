@@ -113,7 +113,7 @@ def _write_reproducibility(output_dir: Path, args: argparse.Namespace, input_fil
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
 
 
-def _write_report(output_dir: Path, summary: dict, params: dict, input_file: str | None) -> None:
+def _write_report(output_dir: Path, summary: dict, params: dict, input_file: str | None, diagnostics: dict | None = None) -> None:
     header = generate_report_header(
         title="Single-Cell Perturbation Preparation Report",
         skill_name=SKILL_NAME,
@@ -147,6 +147,36 @@ def _write_report(output_dir: Path, summary: dict, params: dict, input_file: str
         "- `tables/dropped_multi_guide_cells.csv` (when present)",
         "- `figures/perturbation_counts.png`",
     ]
+
+    # Troubleshooting section for degenerate output
+    if diagnostics:
+        if diagnostics.get("zero_assigned"):
+            lines.extend([
+                "",
+                "## Troubleshooting: Zero cells assigned",
+                "",
+                "### Cause 1: Barcode format mismatch",
+                "The barcodes in the mapping file may not match `adata.obs_names` (e.g., '-1' suffix difference).",
+                "",
+                "### Cause 2: Wrong barcode column",
+                "Try `--barcode-column <column_name>` if the mapping file uses a non-standard header.",
+            ])
+        elif diagnostics.get("all_control"):
+            lines.extend([
+                "",
+                "## Troubleshooting: All cells labeled as control",
+                "",
+                "The `--control-patterns` may be too broad and matching all sgRNA names.",
+                "Try narrowing the patterns: `--control-patterns NT,NTC`",
+            ])
+        elif diagnostics.get("single_perturbation"):
+            lines.extend([
+                "",
+                "## Troubleshooting: Only one perturbation label detected",
+                "",
+                "Expected at least 2 labels (control + target). Check the mapping file contains multiple targets.",
+            ])
+
     (output_dir / "report.md").write_text(header + "\n".join(lines) + "\n" + generate_report_footer(), encoding="utf-8")
 
 
@@ -263,6 +293,12 @@ def main() -> int:
     ).fillna(0).astype(int)
     feature_table.to_csv(tables_dir / "feature_type_summary.csv", index=False)
 
+    # Save figure data for downstream customization
+    figure_data_dir = output_dir / "figure_data"
+    figure_data_dir.mkdir(exist_ok=True)
+    perturb_counts.to_csv(figure_data_dir / "perturbation_counts.csv", index=False)
+    status_counts.to_csv(figure_data_dir / "assignment_status_counts.csv", index=False)
+
     if not perturb_counts.empty:
         fig, ax = plt.subplots(figsize=(8, 4))
         perturb_counts.head(20).plot.bar(x="perturbation", y="n_cells", ax=ax, color="#1f78b4")
@@ -275,6 +311,48 @@ def main() -> int:
 
     output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(standardized, output_h5ad)
+
+    # --- Degenerate output detection ---
+    n_assigned = int(standardized.n_obs)
+    n_perts = int(standardized.obs[args.pert_key].astype(str).nunique())
+    n_control = int((standardized.obs[args.pert_key].astype(str) == args.control_label).sum())
+    prep_diagnostics: dict = {
+        "zero_assigned": n_assigned == 0,
+        "all_control": n_assigned > 0 and n_control == n_assigned,
+        "single_perturbation": n_perts <= 1,
+        "suggested_actions": [],
+    }
+    if n_assigned == 0:
+        prep_diagnostics["suggested_actions"] = [
+            "Check that barcode format in mapping file matches adata.obs_names",
+            "Try --barcode-column <column> if the mapping file uses a non-standard header",
+            "Verify the mapping file is not empty or malformed",
+        ]
+        print()
+        print("  *** ZERO cells were assigned after merging — no barcodes matched. ***")
+        print("  This usually means the barcode format in the mapping file does not match adata.obs_names.")
+        print()
+        print("  How to fix:")
+        print("    Option 1 - Check barcode format (e.g., '-1' suffix vs no suffix)")
+        print("    Option 2 - Specify the barcode column explicitly:")
+        print("      --barcode-column <column_name>")
+        print()
+    elif n_perts <= 1:
+        prep_diagnostics["suggested_actions"] = [
+            "Check the mapping file contains multiple perturbation targets",
+            "Verify --control-patterns does not match all sgRNAs",
+        ]
+        print()
+        print(f"  *** Only {n_perts} perturbation label(s) found — expected at least 2 (control + target). ***")
+        print()
+    elif prep_diagnostics["all_control"]:
+        prep_diagnostics["suggested_actions"] = [
+            "Verify --control-patterns is not too broad (matching all sgRNAs)",
+            "Check that target-gene column or sgRNA naming convention is correct",
+        ]
+        print()
+        print("  *** ALL cells were labeled as control — no perturbation targets detected. ***")
+        print()
 
     summary = {
         "method": METHOD_NAME,
@@ -298,20 +376,28 @@ def main() -> int:
         "demo_mode": bool(args.demo),
     }
 
+    data_payload: dict = {
+        "params": params,
+        "outputs": {
+            "processed_h5ad": str(output_h5ad),
+            "assignments": str(tables_dir / "perturbation_assignments.csv"),
+            "assignment_status_counts": str(tables_dir / "assignment_status_counts.csv"),
+            "perturbation_counts": str(tables_dir / "perturbation_counts.csv"),
+        },
+        "matrix_contract": standardized.uns.get("omicsclaw_matrix_contract", {}),
+    }
+    if prep_diagnostics.get("suggested_actions"):
+        data_payload["prep_diagnostics"] = prep_diagnostics
+
+    data_payload["next_steps"] = [
+        {"skill": "sc-perturb", "reason": "Run perturbation analysis on prepared data", "priority": "recommended"},
+    ]
     write_result_json(
         output_dir,
         SKILL_NAME,
         SKILL_VERSION,
         summary,
-        {
-            "params": params,
-            "outputs": {
-                "processed_h5ad": str(output_h5ad),
-                "assignments": str(tables_dir / "perturbation_assignments.csv"),
-                "assignment_status_counts": str(tables_dir / "assignment_status_counts.csv"),
-                "perturbation_counts": str(tables_dir / "perturbation_counts.csv"),
-            },
-        },
+        data_payload,
         input_checksum=input_checksum,
     )
     result_payload = load_result_json(output_dir) or {
@@ -319,7 +405,7 @@ def main() -> int:
         "summary": summary,
         "data": {"params": params},
     }
-    _write_report(output_dir, summary, params, input_file)
+    _write_report(output_dir, summary, params, input_file, prep_diagnostics)
     _write_reproducibility(output_dir, args, input_file)
     write_output_readme(
         output_dir,
@@ -329,6 +415,12 @@ def main() -> int:
         preferred_method=METHOD_NAME,
     )
     logger.info("Done: %s", output_dir)
+
+    # --- Next-step guidance ---
+    print()
+    print("▶ Next step: Run sc-perturb for perturbation analysis")
+    print(f"  python omicsclaw.py run sc-perturb --input {output_dir}/processed.h5ad --output <dir>")
+
     return 0
 
 

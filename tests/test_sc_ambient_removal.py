@@ -60,7 +60,7 @@ def test_simple_uses_counts_layer_when_x_is_not_count_like(tmp_path):
         "layers.counts" in warning for warning in payload["data"]["input_preparation"]["warnings"]
     )
 
-    corrected = ad.read_h5ad(output_dir / "corrected.h5ad")
+    corrected = ad.read_h5ad(output_dir / "processed.h5ad")
     np.testing.assert_allclose(np.asarray(corrected.layers["counts"]), counts)
 
 
@@ -103,7 +103,7 @@ def test_simple_uses_adata_raw_when_no_counts_layer(tmp_path):
     payload = json.loads((output_dir / "result.json").read_text())
     assert payload["data"]["params"]["simple_expression_source"] == "adata.raw"
 
-    corrected = ad.read_h5ad(output_dir / "corrected.h5ad")
+    corrected = ad.read_h5ad(output_dir / "processed.h5ad")
     np.testing.assert_allclose(np.asarray(corrected.layers["counts"]), raw_counts)
 
 

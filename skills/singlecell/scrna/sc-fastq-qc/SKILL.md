@@ -209,3 +209,8 @@ Recommended user guidance:
 - Do not auto-download these tools during a normal skill run.
 - If `fastqc` or `multiqc` is missing, tell the user how to install them in the active environment or on `PATH`.
 - For shared lab machines, recommend a dedicated scRNA upstream environment rather than mixing these tools into every OmicsClaw workflow environment.
+
+## Workflow Position
+
+- **Upstream step**: None (this is the first step in the scRNA workflow)
+- **Usual next step**: `sc-count` to generate a count matrix from FASTQs

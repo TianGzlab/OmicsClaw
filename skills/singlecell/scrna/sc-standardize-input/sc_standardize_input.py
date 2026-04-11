@@ -30,14 +30,18 @@ from omicsclaw.common.report import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, store_analysis_metadata
+from skills.singlecell._lib.adata_utils import (
+    canonicalize_singlecell_adata,
+    infer_qc_species,
+    store_analysis_metadata,
+)
 from skills.singlecell._lib.export import save_h5ad
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-standardize-input"
-SKILL_VERSION = "0.1.0"
+SKILL_VERSION = "0.2.0"
 METHOD_NAME = "canonical_ann_data"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py"
 
@@ -77,7 +81,78 @@ def _build_standardized_adata(adata, *, species: str):
     )
 
 
-def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> None:
+def _detect_diagnostics(summary: dict) -> dict:
+    """Detect degenerate or suspicious output and return diagnostic info."""
+    diagnostics: dict = {
+        "degenerate": False,
+        "issues": [],
+        "suggested_actions": [],
+    }
+
+    if summary["n_cells"] == 0:
+        diagnostics["degenerate"] = True
+        diagnostics["issues"].append("No cells in output")
+        diagnostics["suggested_actions"].extend([
+            "Check that the input file contains cell barcodes/observations",
+            "If using a count matrix CSV, ensure cells are rows (or use --transpose if genes are rows)",
+        ])
+
+    if summary["n_genes"] == 0:
+        diagnostics["degenerate"] = True
+        diagnostics["issues"].append("No genes in output")
+        diagnostics["suggested_actions"].extend([
+            "Check that the input file contains gene/feature columns",
+            "If using a count matrix CSV, ensure genes are columns (or use --transpose if genes are rows)",
+        ])
+
+    if summary.get("warnings"):
+        for w in summary["warnings"]:
+            if "No mitochondrial genes" in w:
+                diagnostics["issues"].append("No mitochondrial genes detected")
+                diagnostics["suggested_actions"].append(
+                    "If data is mouse, use: --species mouse"
+                )
+            if "No ribosomal genes" in w:
+                diagnostics["issues"].append("No ribosomal genes detected")
+
+    if summary.get("species_auto_detected") and summary.get("species_auto_detected") != summary.get("species"):
+        diagnostics["issues"].append(
+            f"Auto-detected species ({summary['species_auto_detected']}) differs from "
+            f"specified species ({summary['species']})"
+        )
+        diagnostics["suggested_actions"].append(
+            f"Consider using: --species {summary['species_auto_detected']}"
+        )
+
+    return diagnostics
+
+
+def _print_ux_guidance(summary: dict, diagnostics: dict) -> None:
+    """Print actionable guidance to stdout when issues are detected."""
+    if diagnostics["degenerate"]:
+        print()
+        print("  *** STANDARDIZATION PRODUCED DEGENERATE OUTPUT ***")
+        print(f"  Cells: {summary['n_cells']}, Genes: {summary['n_genes']}")
+        print()
+        print("  How to fix:")
+        for i, action in enumerate(diagnostics["suggested_actions"], 1):
+            print(f"    Option {i}: {action}")
+        print()
+
+    elif diagnostics["issues"]:
+        print()
+        print("  Warnings detected during standardization:")
+        for issue in diagnostics["issues"]:
+            print(f"    - {issue}")
+        if diagnostics["suggested_actions"]:
+            print()
+            print("  Suggestions:")
+            for i, action in enumerate(diagnostics["suggested_actions"], 1):
+                print(f"    {i}. {action}")
+        print()
+
+
+def _write_report(output_dir: Path, summary: dict, input_file: str | None, diagnostics: dict) -> None:
     header = generate_report_header(
         title="Single-Cell Input Standardization Report",
         skill_name=SKILL_NAME,
@@ -96,6 +171,12 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> No
         f"- **Total cells**: {summary['n_cells']:,}",
         f"- **Total genes**: {summary['n_genes']:,}",
         f"- **Species hint**: {summary['species']}",
+    ]
+
+    if summary.get("species_auto_detected"):
+        lines.append(f"- **Species auto-detected**: {summary['species_auto_detected']}")
+
+    lines.extend([
         f"- **Expression source selected**: {summary['expression_source']}",
         f"- **Gene identifiers selected**: {summary['gene_name_source']}",
         "- **Canonical counts layer**: `adata.layers['counts']`",
@@ -112,7 +193,7 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> No
         "- `adata.uns['omicsclaw_matrix_contract']`: explicit matrix semantics for `X`, `raw`, and `layers`",
         "",
         "## Warnings\n",
-    ]
+    ])
 
     warnings = summary.get("warnings", [])
     if warnings:
@@ -120,6 +201,31 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None) -> No
             lines.append(f"- {item}")
     else:
         lines.append("- No standardization warnings were emitted.")
+
+    # Troubleshooting section when diagnostics detect issues
+    if diagnostics.get("degenerate") or diagnostics.get("issues"):
+        lines.extend([
+            "",
+            "## Troubleshooting\n",
+        ])
+        if diagnostics["degenerate"]:
+            lines.append("### Degenerate Output Detected\n")
+            lines.append("The standardization produced an empty or near-empty object. Common causes:\n")
+            lines.append("1. **Wrong input format**: The file may not contain single-cell data.")
+            lines.append("2. **Transposed matrix**: Genes and cells may be swapped in a CSV/TSV input.")
+            lines.append("3. **Corrupted file**: The input file may be incomplete or damaged.\n")
+
+        if diagnostics["issues"]:
+            lines.append("### Issues Detected\n")
+            for issue in diagnostics["issues"]:
+                lines.append(f"- {issue}")
+            lines.append("")
+
+        if diagnostics["suggested_actions"]:
+            lines.append("### Suggested Fixes\n")
+            for i, action in enumerate(diagnostics["suggested_actions"], 1):
+                lines.append(f"{i}. {action}")
+            lines.append("")
 
     lines.extend([
         "",
@@ -141,7 +247,7 @@ def main() -> None:
     parser.add_argument("--input", dest="input_path", help="Input AnnData or count-like matrix path")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
-    parser.add_argument("--species", default="human", choices=["human", "mouse"], help="Species hint for gene symbol prefix detection")
+    parser.add_argument("--species", default="auto", choices=["human", "mouse", "auto"], help="Species hint (default: auto-detect from gene names)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -155,7 +261,20 @@ def main() -> None:
             parser.error("--input required when not using --demo")
         input_path = Path(args.input_path)
         if not input_path.exists():
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+            raise FileNotFoundError(
+                f"Input file not found: {input_path}\n"
+                "\n"
+                "Supported input formats:\n"
+                "  - .h5ad (AnnData)\n"
+                "  - .h5 (10X Genomics HDF5)\n"
+                "  - .loom (Loom format)\n"
+                "  - .csv / .tsv (count matrix)\n"
+                "  - directory (10X mtx output)\n"
+                "\n"
+                "Example:\n"
+                f"  python omicsclaw.py run sc-standardize-input --input your_data.h5ad --output {output_dir}\n"
+                "  python omicsclaw.py run sc-standardize-input --demo --output /tmp/demo"
+            )
         adata = sc_io.smart_load(
             input_path,
             suggest_standardize=False,
@@ -166,7 +285,60 @@ def main() -> None:
         input_file = str(input_path)
 
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
-    standardized, prepared, contract = _build_standardized_adata(adata, species=args.species)
+
+    # Species auto-detection
+    species_auto_detected = infer_qc_species(adata, default="human")
+    if args.species == "auto":
+        species = species_auto_detected
+        logger.info("Auto-detected species: %s", species)
+    else:
+        species = args.species
+        if species != species_auto_detected:
+            logger.warning(
+                "Specified species '%s' differs from auto-detected '%s'. "
+                "Using specified value. If QC metrics look wrong, try: --species %s",
+                species, species_auto_detected, species_auto_detected,
+            )
+
+    # Preflight: check input is not empty
+    if adata.n_obs == 0:
+        print()
+        print("  *** INPUT FILE CONTAINS NO CELLS ***")
+        print("  The loaded object has 0 observations (cells).")
+        print()
+        print("  How to fix:")
+        print("    Option 1: Check that the input file is a valid single-cell dataset")
+        print("    Option 2: If using a CSV, cells should be rows and genes should be columns")
+        print(f"    Option 3: Try the demo first: python omicsclaw.py run sc-standardize-input --demo --output {output_dir}")
+        print()
+
+    if adata.n_vars == 0:
+        print()
+        print("  *** INPUT FILE CONTAINS NO GENES ***")
+        print("  The loaded object has 0 variables (genes/features).")
+        print()
+        print("  How to fix:")
+        print("    Option 1: Check that the input file is a valid single-cell dataset")
+        print("    Option 2: If using a CSV, genes should be columns and cells should be rows")
+        print()
+
+    try:
+        standardized, prepared, contract = _build_standardized_adata(adata, species=species)
+    except ValueError as exc:
+        # Enhance the error message with actionable guidance
+        print()
+        print("  *** STANDARDIZATION FAILED: no count-like matrix found ***")
+        print(f"  Error: {exc}")
+        print()
+        print("  How to fix:")
+        print("    Option 1: Ensure your data has raw counts in adata.X, adata.layers['counts'], or adata.raw")
+        print("    Option 2: If your data is already normalized (log-transformed), you may need to provide")
+        print("              the original raw count matrix separately")
+        print("    Option 3: Check if your data was exported from a tool that stores counts in a non-standard location")
+        print(f"    Option 4: Try the demo: python omicsclaw.py run sc-standardize-input --demo --output {output_dir}")
+        print()
+        raise
+
     matrix_contract = {
         "X": "raw_counts",
         "raw": "raw_counts_snapshot",
@@ -179,7 +351,8 @@ def main() -> None:
         "method": METHOD_NAME,
         "n_cells": int(standardized.n_obs),
         "n_genes": int(standardized.n_vars),
-        "species": args.species,
+        "species": species,
+        "species_auto_detected": species_auto_detected,
         "expression_source": prepared.expression_source,
         "gene_name_source": prepared.gene_name_source,
         "warnings": prepared.warnings,
@@ -187,19 +360,27 @@ def main() -> None:
         "input_contract_version": contract.get("version", ""),
     }
 
-    store_analysis_metadata(standardized, SKILL_NAME, METHOD_NAME, {"species": args.species})
+    # Detect degenerate output and build diagnostics
+    diagnostics = _detect_diagnostics(summary)
+
+    store_analysis_metadata(standardized, SKILL_NAME, METHOD_NAME, {"species": species})
     output_h5ad = output_dir / "processed.h5ad"
     save_h5ad(standardized, output_h5ad)
     logger.info("Saved: %s", output_h5ad)
 
-    _write_report(output_dir, summary, input_file)
-    _write_reproducibility(output_dir, input_file, demo_mode=args.demo, species=args.species)
+    _write_report(output_dir, summary, input_file, diagnostics)
+    _write_reproducibility(output_dir, input_file, demo_mode=args.demo, species=species)
 
     result_data = {
         **summary,
         "input_contract": contract,
         "matrix_contract": matrix_contract,
+        "standardization_diagnostics": diagnostics,
     }
+    result_data["next_steps"] = [
+        {"skill": "sc-qc", "reason": "Compute QC metrics on standardized data", "priority": "recommended"},
+    ]
+    result_data["preprocessing_state_after"] = "standardized"
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
@@ -211,17 +392,26 @@ def main() -> None:
         preferred_method=METHOD_NAME,
     )
 
+    # Print UX guidance if issues detected
+    _print_ux_guidance(summary, diagnostics)
+
     print(f"\n{'=' * 60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'=' * 60}")
     print(f"  Output directory: {output_dir}")
     print(f"  Cells standardized: {summary['n_cells']:,}")
     print(f"  Genes standardized: {summary['n_genes']:,}")
+    print(f"  Species: {species}" + (f" (auto-detected)" if args.species == "auto" else ""))
     print(f"  Expression source: {summary['expression_source']}")
     print(f"  Gene names source: {summary['gene_name_source']}")
     print("  Canonical output: processed.h5ad")
     if summary["warnings"]:
         print(f"  Warnings: {len(summary['warnings'])}")
+    if diagnostics["issues"]:
+        print(f"  Issues: {len(diagnostics['issues'])} (see report.md for details)")
+    print()
+    print("▶ Next step: Run sc-qc for quality assessment")
+    print(f"  python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

@@ -948,6 +948,10 @@ def _infer_reference_label_key(adata: AnnData) -> str:
         "cell_type_label",
         "celltype_label",
         "annotation_label",
+        "leiden",
+        "louvain",
+        "clusters",
+        "cluster",
     ]
     lower_candidates = {name.lower(): name for name in candidates}
     existing = {name.lower(): name for name in adata.obs.columns}

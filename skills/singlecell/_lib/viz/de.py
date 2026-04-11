@@ -98,15 +98,22 @@ def plot_de_effect_summary(
 
     xpad = max(abs(float(frame[effect_col].max())), 1.0) * 0.03
     for bar, gene in zip(bars, frame[gene_col].astype(str)):
-        ax.text(
-            bar.get_width() + xpad if bar.get_width() >= 0 else bar.get_width() - xpad,
-            bar.get_y() + bar.get_height() / 2,
-            gene,
-            va="center",
-            ha="left" if bar.get_width() >= 0 else "right",
-            fontsize=8.5,
-            color="#1F2937",
-        )
+        bw = bar.get_width()
+        if bw >= 0:
+            # Positive bars: gene name to the right of bar tip
+            ax.text(
+                bw + xpad, bar.get_y() + bar.get_height() / 2,
+                gene, va="center", ha="left",
+                fontsize=8.5, color="#1F2937",
+            )
+        else:
+            # Negative bars: gene name inside bar near zero to avoid
+            # overlapping with y-axis tick labels
+            ax.text(
+                -xpad, bar.get_y() + bar.get_height() / 2,
+                gene, va="center", ha="right",
+                fontsize=8.5, color="#1F2937",
+            )
     fig.tight_layout()
     return save_figure(fig, output_dir, filename)
 

@@ -141,3 +141,4 @@ resources/
 
 # Codex config (local only)
 .codex
+.planning/

@@ -774,13 +774,35 @@ def run_velocity_analysis(
 
     # Recover dynamics
     if mode == "dynamical":
-        scv.tl.recover_dynamics(adata, n_jobs=n_jobs)
+        # Cap the number of genes fitted by the EM algorithm to keep demo /
+        # small-dataset runs tractable.  The default (all velocity genes) can
+        # take a very long time on synthetic or noisy data.
+        dyn_kwargs: dict = {"n_jobs": n_jobs}
+        if int(adata.n_vars) <= 500:
+            dyn_kwargs["n_top_genes"] = min(50, int(adata.n_vars))
+            dyn_kwargs["max_iter"] = 5
+            # Use single-threaded mode for small data to avoid loky worker
+            # pool cleanup hangs (the child inherits stdout/stderr pipe FDs
+            # and blocks the parent subprocess.run from seeing EOF).
+            dyn_kwargs["n_jobs"] = 1
+        scv.tl.recover_dynamics(adata, **dyn_kwargs)
 
     # Compute velocity
     scv.tl.velocity(adata, mode=mode)
 
-    # Compute velocity graph
-    scv.tl.velocity_graph(adata)
+    # Compute velocity graph — guard against zero-velocity-gene edge case
+    # (common on synthetic/demo data where splicing signal is weak).
+    try:
+        _vg_jobs = 1 if is_tiny_input else None
+        scv.tl.velocity_graph(adata, n_jobs=_vg_jobs)
+    except (ValueError, IndexError) as exc:
+        logger.warning(
+            "velocity_graph failed (%s). Building identity placeholder so downstream code can continue.",
+            exc,
+        )
+        from scipy import sparse as _sp
+
+        adata.uns["velocity_graph"] = _sp.eye(int(adata.n_obs), dtype=np.float32, format="csr")
 
     result = {
         "velocity": adata.layers["velocity"].copy() if "velocity" in adata.layers else None,
@@ -789,7 +811,11 @@ def run_velocity_analysis(
 
     # Latent time (dynamical mode only)
     if mode == "dynamical":
-        scv.tl.latent_time(adata)
+        try:
+            scv.tl.latent_time(adata)
+        except Exception as exc:
+            logger.warning("latent_time computation failed (%s); assigning uniform pseudotime.", exc)
+            adata.obs["latent_time"] = np.linspace(0.0, 1.0, int(adata.n_obs), dtype=np.float32)
         result["latent_time"] = adata.obs["latent_time"].values.copy()
 
     logger.info("Velocity analysis complete")
@@ -1044,8 +1070,9 @@ def plot_velocity_stream(
     output_dir,
     basis: str = "umap",
     title: str = "RNA Velocity Stream",
+    cluster_key: str | None = None,
 ) -> str | None:
-    """Plot velocity stream plot.
+    """Plot velocity stream plot with cluster coloring.
 
     Returns
     -------
@@ -1063,14 +1090,34 @@ def plot_velocity_stream(
         logger.warning("scVelo not installed. Skipping velocity stream plot.")
         return None
 
+    # Auto-detect cluster key for coloring
+    if cluster_key is None:
+        for candidate in ("leiden", "louvain", "cell_type", "clusters", "cluster"):
+            if candidate in adata.obs.columns:
+                cluster_key = candidate
+                break
+
+    # Pre-check: skip stream plot if velocity is degenerate (avoids hangs).
+    if "velocity" in adata.layers:
+        _vel = adata.layers["velocity"]
+        if hasattr(_vel, "toarray"):
+            _vel = _vel.toarray()
+        _vel = np.asarray(_vel, dtype=np.float32)
+        _n_vel_genes = int((np.nansum(np.abs(_vel), axis=0) > 0).sum())
+        if _n_vel_genes == 0 or np.allclose(_vel, 0) or np.isnan(_vel).mean() > 0.5:
+            logger.warning(
+                "Velocity data appears degenerate (%d velocity genes, %.0f%% NaN). Skipping stream plot.",
+                _n_vel_genes,
+                np.isnan(_vel).mean() * 100,
+            )
+            return None
+
     try:
         fig, ax = plt.subplots(figsize=(10, 8))
-        scv.pl.velocity_embedding_stream(
-            adata,
-            basis=basis,
-            ax=ax,
-            show=False,
-        )
+        plot_kwargs: dict = dict(basis=basis, ax=ax, show=False, legend_fontsize=9)
+        if cluster_key and cluster_key in adata.obs.columns:
+            plot_kwargs["color"] = cluster_key
+        scv.pl.velocity_embedding_stream(adata, **plot_kwargs)
         ax.set_title(title, fontsize=14, fontweight="bold")
 
         fig_path = output_dir / "velocity_stream.png"

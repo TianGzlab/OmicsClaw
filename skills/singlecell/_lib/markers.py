@@ -149,6 +149,218 @@ def find_all_cluster_markers(
     return markers_df
 
 
+# ---------------------------------------------------------------------------
+# COSG marker discovery (cosine-similarity-based specificity scoring)
+# ---------------------------------------------------------------------------
+
+def _cosg_select_top_n(scores: np.ndarray, n_top: int) -> np.ndarray:
+    """Return indices of top-n scores in descending order."""
+    reference_indices = np.arange(scores.shape[0], dtype=int)
+    partition = np.argpartition(scores, -n_top)[-n_top:]
+    partial_indices = np.argsort(scores[partition])[::-1]
+    return reference_indices[partition][partial_indices]
+
+
+def find_cosg_markers(
+    adata: "AnnData",
+    cluster_key: str = "leiden",
+    n_genes: int = 50,
+    mu: float = 1.0,
+    remove_lowly_expressed: bool = False,
+    expressed_pct: float = 0.1,
+    use_raw: bool = False,
+    layer: Optional[str] = None,
+) -> pd.DataFrame:
+    """Find marker genes using COSG (COSine-similarity-based marker Gene identification).
+
+    COSG scores genes by how specifically their expression pattern aligns with
+    a given cluster indicator vector, penalized by expression in other clusters.
+
+    Adapted from Dai et al., Briefings in Bioinformatics 2022.
+
+    Parameters
+    ----------
+    adata
+        AnnData with expression data.
+    cluster_key
+        Column in ``adata.obs`` containing cluster labels.
+    n_genes
+        Number of top marker genes per cluster.
+    mu
+        Specificity penalty (0-1). Higher values penalize expression in
+        non-target clusters more strongly.
+    remove_lowly_expressed
+        Filter genes expressed in fewer than ``expressed_pct`` of target cells.
+    expressed_pct
+        Minimum fraction of expressing cells when low-expression filtering is on.
+    use_raw
+        Whether to use ``adata.raw`` for expression.
+    layer
+        Layer to use instead of ``X``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Marker table with columns: ``group``, ``names``, ``scores``,
+        ``logfoldchanges``.
+    """
+    from scipy import sparse
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    if cluster_key not in adata.obs.columns:
+        raise ValueError(
+            f"Cluster key '{cluster_key}' not found in adata.obs. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
+
+    # Resolve expression matrix
+    if layer is not None:
+        if use_raw:
+            raise ValueError("Cannot specify `layer` and have `use_raw=True`.")
+        cellxgene = adata.layers[layer]
+    else:
+        if use_raw and adata.raw is not None:
+            cellxgene = adata.raw.X
+        else:
+            cellxgene = adata.X
+
+    # Get var_names from matching source
+    if use_raw and adata.raw is not None and layer is None:
+        var_names = adata.raw.var_names
+    else:
+        var_names = adata.var_names
+
+    group_info = adata.obs[cluster_key]
+    groups_order = np.unique(group_info)
+    n_cluster = len(groups_order)
+    n_cell = cellxgene.shape[0]
+
+    logger.info(
+        "COSG: finding markers for %d clusters (key=%s, mu=%.2f, n_genes=%d)",
+        n_cluster, cluster_key, mu, n_genes,
+    )
+
+    # Build cluster indicator matrix (n_cluster x n_cell)
+    cluster_mat = np.zeros((n_cluster, n_cell))
+    for order_i, group_i in enumerate(groups_order):
+        idx_i = (group_info == group_i).values
+        cluster_mat[order_i, idx_i] = 1
+
+    # Compute cosine similarity (genes x clusters)
+    is_sparse = sparse.issparse(cellxgene)
+    if is_sparse:
+        from scipy.sparse import csr_matrix
+        cluster_mat_sp = csr_matrix(cluster_mat)
+        cosine_sim = cosine_similarity(X=cellxgene.T, Y=cluster_mat_sp, dense_output=False)
+
+        pos_nonzero = cosine_sim.nonzero()
+        genexlambda = cosine_sim.multiply(cosine_sim)
+        e_power2_sum = genexlambda.sum(axis=1)
+
+        if mu == 1:
+            genexlambda[pos_nonzero] = genexlambda[pos_nonzero] / (
+                np.repeat(e_power2_sum, genexlambda.shape[1], axis=1)[pos_nonzero]
+            )
+        else:
+            genexlambda[pos_nonzero] = genexlambda[pos_nonzero] / (
+                (1 - mu) * genexlambda[pos_nonzero]
+                + mu * np.repeat(e_power2_sum, genexlambda.shape[1], axis=1)[pos_nonzero]
+            )
+        genexlambda[pos_nonzero] = np.multiply(
+            genexlambda[pos_nonzero], cosine_sim[pos_nonzero]
+        )
+    else:
+        cosine_sim = cosine_similarity(X=cellxgene.T, Y=cluster_mat, dense_output=True)
+        pos_nonzero = cosine_sim != 0
+        e_power2 = np.multiply(cosine_sim, cosine_sim)
+        e_power2_sum = np.sum(e_power2, axis=1)
+        e_power2[pos_nonzero] = np.true_divide(
+            e_power2[pos_nonzero],
+            (1 - mu) * e_power2[pos_nonzero]
+            + mu * np.dot(
+                e_power2_sum.reshape(-1, 1),
+                np.ones((1, e_power2.shape[1])),
+            )[pos_nonzero],
+        )
+        e_power2[pos_nonzero] = np.multiply(e_power2[pos_nonzero], cosine_sim[pos_nonzero])
+        genexlambda = e_power2
+
+    # Compute per-group means for log fold change
+    group_means = {}
+    all_mean = None
+    for order_i, group_i in enumerate(groups_order):
+        mask = (group_info == group_i).values
+        X_mask = cellxgene[mask]
+        if is_sparse:
+            group_means[group_i] = np.asarray(X_mask.mean(axis=0)).ravel()
+        else:
+            group_means[group_i] = np.mean(X_mask, axis=0)
+    # Overall mean for rest
+    if is_sparse:
+        all_mean = np.asarray(cellxgene.mean(axis=0)).ravel()
+    else:
+        all_mean = np.mean(cellxgene, axis=0)
+
+    # Non-zero helpers for lowly expressed filtering
+    if is_sparse:
+        cellxgene_for_nnz = cellxgene.copy()
+        cellxgene_for_nnz.eliminate_zeros()
+        get_nonzeros = lambda X: X.getnnz(axis=0)
+    else:
+        get_nonzeros = lambda X: np.count_nonzero(X, axis=0)
+
+    # Extract top genes per cluster
+    effective_n_genes = n_genes
+    all_rows = []
+    for order_i, group_i in enumerate(groups_order):
+        if is_sparse:
+            scores = genexlambda[:, order_i].toarray().ravel()
+        else:
+            scores = genexlambda[:, order_i]
+
+        # Filter lowly expressed
+        if remove_lowly_expressed:
+            mask = (group_info == group_i).values
+            n_cells_expressed = get_nonzeros(cellxgene[mask] if not is_sparse else cellxgene_for_nnz[mask])
+            n_cells_i = np.sum(mask)
+            scores[n_cells_expressed < n_cells_i * expressed_pct] = -1
+
+        cur_n = min(effective_n_genes, len(scores))
+        top_indices = _cosg_select_top_n(scores, cur_n)
+
+        # Compute log fold changes
+        mean_group = group_means[group_i]
+        # Mean of rest
+        mask = (group_info == group_i).values
+        n_in = np.sum(mask)
+        n_total = len(group_info)
+        mean_rest = (all_mean * n_total - mean_group * n_in) / max(n_total - n_in, 1)
+        foldchanges = (np.expm1(mean_group) + 1e-9) / (np.expm1(mean_rest) + 1e-9)
+        logfc = np.log2(foldchanges)
+
+        for idx in top_indices:
+            all_rows.append({
+                "group": str(group_i),
+                "names": var_names[idx],
+                "scores": float(scores[idx]),
+                "logfoldchanges": float(logfc[idx]),
+                "pvals": 0.0,       # COSG is score-based, no p-values
+                "pvals_adj": 0.0,
+            })
+
+    markers_df = pd.DataFrame(all_rows)
+    n_total = len(markers_df)
+    n_per_cluster = markers_df.groupby("group", observed=False).size()
+    logger.info(
+        "  COSG complete: %d markers (per cluster: min=%d, max=%d, median=%d)",
+        n_total,
+        int(n_per_cluster.min()) if len(n_per_cluster) else 0,
+        int(n_per_cluster.max()) if len(n_per_cluster) else 0,
+        int(n_per_cluster.median()) if len(n_per_cluster) else 0,
+    )
+    return markers_df
+
+
 def find_markers_for_cluster(
     adata: AnnData,
     cluster: str,
