@@ -288,6 +288,14 @@ def main() -> int:
     figures_dir.mkdir(exist_ok=True)
     tables_dir.mkdir(exist_ok=True)
 
+    # -- Auto-fallback: if seacells is requested but not installed, use kmeans --
+    if args.method == "seacells":
+        try:
+            import SEACells  # noqa: F401
+        except ImportError:
+            logger.warning("SEACells package not installed. Falling back to --method kmeans.")
+            args.method = "kmeans"
+
     # -- Load data --
     if args.demo:
         adata = make_demo_metacell_adata(seed=args.seed)
