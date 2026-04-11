@@ -2,8 +2,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+# NOTE: sklearn is imported lazily inside __init__ / search (not at
+# module load time). This matters because omicsclaw.knowledge is
+# pulled into the import chain of omicsclaw.app.server via
+# omicsclaw.runtime → hooks → extensions → validators → knowledge →
+# retriever → semantic_index. The desktop-app slim runtime
+# (OmicsClaw-App/scripts/build-backend-runtime.py) installs omicsclaw
+# with `--no-deps` and deliberately does NOT ship sklearn — users
+# who need knowledge-semantic search install the scientific stack
+# themselves on demand. Keeping sklearn as a top-level import here
+# would break `python -m omicsclaw.app.server --help` in the slim
+# bundle. See OmicsClaw-App/docs/bundled-backend.md for the contract.
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +50,8 @@ class KnowledgeSemanticIndex:
     _CACHE: dict[tuple[object, ...], "KnowledgeSemanticIndex"] = {}
 
     def __init__(self, rows: list[dict]):
+        from sklearn.feature_extraction.text import TfidfVectorizer  # noqa: PLC0415
+
         self._rows = list(rows)
         corpus = [_build_row_text(row) for row in self._rows]
         self._vectorizer = TfidfVectorizer(
@@ -74,6 +85,8 @@ class KnowledgeSemanticIndex:
         doc_type: Optional[str] = None,
         limit: int = 5,
     ) -> list[SemanticSearchHit]:
+        from sklearn.metrics.pairwise import cosine_similarity  # noqa: PLC0415
+
         query_text = _normalize_text(query)
         if not query_text or self._matrix is None or not self._rows:
             return []
