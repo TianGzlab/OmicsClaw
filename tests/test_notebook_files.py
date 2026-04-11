@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -278,6 +279,26 @@ class TestDeleteNotebook:
             delete_notebook(str(tmp_path), "../../etc/passwd.ipynb")
 
 
+class TestResolveWorkspaceNotebookTarget:
+    def test_rejects_untrusted_absolute_path_without_workspace(self, monkeypatch, tmp_path: Path):
+        from omicsclaw.app import server
+        from omicsclaw.app.notebook.nb_files import resolve_workspace_notebook_target
+
+        trusted = tmp_path / "trusted"
+        trusted.mkdir()
+        rogue_dir = tmp_path / "rogue"
+        rogue_dir.mkdir()
+        rogue = rogue_dir / "rogue.ipynb"
+        rogue.write_text("{}")
+
+        fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[trusted])
+        monkeypatch.setattr(server, "_core", fake_core, raising=False)
+        monkeypatch.delenv("OMICSCLAW_WORKSPACE", raising=False)
+
+        with pytest.raises(ValueError, match="outside the trusted scope"):
+            resolve_workspace_notebook_target(str(rogue), None)
+
+
 # ---------------------------------------------------------------------------
 # FastAPI router integration (uses TestClient, no kernel required)
 # ---------------------------------------------------------------------------
@@ -295,21 +316,90 @@ def _import_client():
     return TestClient(app)
 
 
-class TestNotebookFilesRouter:
-    def test_list_empty_directory_returns_empty(self, tmp_path: Path):
-        client = _import_client()
-        resp = client.get(f"/notebook/files/list?root={tmp_path}")
-        assert resp.status_code == 200
-        assert resp.json() == {"files": [], "root": str(tmp_path)}
+@pytest.fixture
+def trust_tmp_path(monkeypatch, tmp_path: Path):
+    """Treat ``tmp_path`` as a trusted workspace for the duration of a test.
 
-    def test_list_returns_sorted_files(self, tmp_path: Path):
-        (tmp_path / "beta.ipynb").write_text("{}")
-        (tmp_path / "alpha.ipynb").write_text("{}")
-        client = _import_client()
+    The notebook file layer is fail-closed: without a trusted scope,
+    `_validate_workspace` refuses everything. Router tests that just
+    want a throwaway workspace bind OMICSCLAW_WORKSPACE here so each
+    test's ``tmp_path`` is implicitly authorized.
+    """
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(tmp_path))
+    yield tmp_path
 
-        resp = client.get(f"/notebook/files/list?root={tmp_path}")
-        assert resp.status_code == 200
-        assert resp.json()["files"] == ["alpha.ipynb", "beta.ipynb"]
+
+class TestWorkspaceScopeEnforcement:
+    def test_validate_workspace_fails_closed_when_no_trusted_roots_configured(
+        self, monkeypatch, tmp_path: Path
+    ):
+        from omicsclaw.app import server
+        from omicsclaw.app.notebook.nb_files import _validate_workspace
+
+        monkeypatch.delenv("OMICSCLAW_WORKSPACE", raising=False)
+        monkeypatch.delenv("OMICSCLAW_DATA_DIRS", raising=False)
+        monkeypatch.setattr(server, "_core", SimpleNamespace(TRUSTED_DATA_DIRS=[]), raising=False)
+
+        with pytest.raises(ValueError, match="scope is not configured"):
+            _validate_workspace(str(tmp_path))
+
+    def test_resolve_workspace_and_target_fails_closed_without_trust(
+        self, monkeypatch, tmp_path: Path
+    ):
+        from omicsclaw.app import server
+        from omicsclaw.app.notebook.nb_files import _resolve_workspace_and_target
+
+        rogue = tmp_path / "rogue.ipynb"
+        rogue.write_text("{}")
+        monkeypatch.delenv("OMICSCLAW_WORKSPACE", raising=False)
+        monkeypatch.delenv("OMICSCLAW_DATA_DIRS", raising=False)
+        monkeypatch.setattr(server, "_core", SimpleNamespace(TRUSTED_DATA_DIRS=[]), raising=False)
+
+        with pytest.raises(ValueError, match="scope is not configured"):
+            _resolve_workspace_and_target(None, str(rogue))
+
+
+class TestListWorkspaceNotebooks:
+    def test_reports_lower_bound_total_when_hard_cap_truncates_walk(
+        self, monkeypatch, tmp_path: Path
+    ):
+        from omicsclaw.app import server
+        from omicsclaw.app.notebook import nb_files
+
+        monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(tmp_path))
+        monkeypatch.setattr(
+            server,
+            "_core",
+            SimpleNamespace(TRUSTED_DATA_DIRS=[tmp_path]),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            nb_files,
+            "_list_workspace_notebooks_hard_cap",
+            lambda max_results: 3,
+        )
+
+        for name in ("a.ipynb", "b.ipynb", "c.ipynb", "d.ipynb"):
+            (tmp_path / name).write_text("{}")
+
+        listing = nb_files.list_workspace_notebooks(str(tmp_path), max_results=2)
+
+        assert listing["has_more"] is True
+        # The walker stopped early at the hard cap, so this is only a
+        # lower bound. The explicit exactness bit is what lets the UI
+        # phrase the banner honestly instead of implying a real total.
+        assert listing["total_found"] == 3
+        assert listing["total_found_exact"] is False
+        assert len(listing["notebooks"]) == 2
+
+
+class TestNotebookUploadRouter:
+    """/files/upload is the last remaining /files/* route. It is pure
+    bytes-in-JSON-out and doesn't touch the trusted workspace model."""
+
+    @pytest.fixture(autouse=True)
+    def _trust(self, trust_tmp_path):
+        yield
 
     def test_upload_returns_parsed_cells(self, tmp_path: Path):
         raw = _make_ipynb_bytes(
@@ -353,125 +443,250 @@ class TestNotebookFilesRouter:
         )
         assert resp.status_code == 400
 
-    def test_open_returns_cells_for_existing_file(self, tmp_path: Path):
-        raw = _make_ipynb_bytes([{"cell_type": "code", "source": "1 + 1"}])
-        (tmp_path / "nb.ipynb").write_bytes(raw)
-        client = _import_client()
 
-        resp = client.post(
-            "/notebook/files/open",
-            json={"root": str(tmp_path), "filename": "nb.ipynb"},
-        )
+class TestNotebookWorkspaceCrudRouter:
+    """Router tests for the workspace-scoped /notebook/{list,open,create,save,delete}
+    endpoints. Every request uses the single ``workspace + path`` contract —
+    the legacy ``root + filename`` shape has been removed."""
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["filename"] == "nb.ipynb"
-        assert len(body["cells"]) == 1
-        assert body["cells"][0]["source"] == "1 + 1"
+    @pytest.fixture(autouse=True)
+    def _trust(self, trust_tmp_path):
+        yield
 
-    def test_open_404_for_missing_file(self, tmp_path: Path):
-        client = _import_client()
-        resp = client.post(
-            "/notebook/files/open",
-            json={"root": str(tmp_path), "filename": "nope.ipynb"},
-        )
-        assert resp.status_code == 404
-
-    def test_open_rejects_path_escape(self, tmp_path: Path):
-        client = _import_client()
-        resp = client.post(
-            "/notebook/files/open",
-            json={"root": str(tmp_path), "filename": "../../etc/passwd.ipynb"},
-        )
-        assert resp.status_code == 400
-
-
-class TestNotebookCrudRouter:
-    """Router tests for the flat /notebook/{list,open,create,save,delete} CRUD endpoints."""
-
-    def test_list_endpoint_returns_sorted_files(self, tmp_path: Path):
+    def test_list_endpoint_returns_truncation_metadata(self, tmp_path: Path):
         (tmp_path / "second.ipynb").write_text("{}")
         (tmp_path / "first.ipynb").write_text("{}")
         client = _import_client()
 
-        resp = client.get(f"/notebook/list?root={tmp_path}")
+        resp = client.get("/notebook/list", params={"workspace": str(tmp_path)})
         assert resp.status_code == 200
-        assert resp.json()["files"] == ["first.ipynb", "second.ipynb"]
+        body = resp.json()
+        # New shape: {root, notebooks, has_more, total_found,
+        # total_found_exact}
+        assert body["total_found"] == 2
+        assert body["total_found_exact"] is True
+        assert body["has_more"] is False
+        assert {nb["name"] for nb in body["notebooks"]} == {"first", "second"}
 
     def test_create_endpoint_writes_empty_notebook(self, tmp_path: Path):
+        target = tmp_path / "brand_new.ipynb"
         client = _import_client()
         resp = client.post(
             "/notebook/create",
-            json={"root": str(tmp_path), "filename": "brand_new.ipynb"},
+            json={"workspace": str(tmp_path), "path": str(target)},
         )
         assert resp.status_code == 200
-        assert (tmp_path / "brand_new.ipynb").exists()
+        assert target.exists()
 
     def test_create_endpoint_409_on_conflict(self, tmp_path: Path):
-        (tmp_path / "dup.ipynb").write_text("{}")
+        target = tmp_path / "dup.ipynb"
+        target.write_text("{}")
         client = _import_client()
         resp = client.post(
             "/notebook/create",
-            json={"root": str(tmp_path), "filename": "dup.ipynb"},
+            json={"workspace": str(tmp_path), "path": str(target)},
         )
         assert resp.status_code == 409
 
-    def test_open_endpoint_returns_cells(self, tmp_path: Path):
-        raw = _make_ipynb_bytes([{"cell_type": "code", "source": "x = 7"}])
-        (tmp_path / "o.ipynb").write_bytes(raw)
+    def test_open_endpoint_returns_notebook(self, tmp_path: Path):
+        from omicsclaw.app.notebook.nb_files import save_workspace_notebook
+
+        target = tmp_path / "o.ipynb"
+        save_workspace_notebook(
+            str(tmp_path),
+            str(target),
+            {
+                "cells": [
+                    {"id": "c1", "cell_type": "code", "source": "x = 7"}
+                ],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            },
+        )
         client = _import_client()
 
-        resp = client.post(
+        resp = client.get(
             "/notebook/open",
-            json={"root": str(tmp_path), "filename": "o.ipynb"},
+            params={"workspace": str(tmp_path), "path": str(target)},
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body["cells"]) == 1
-        assert body["cells"][0]["source"] == "x = 7"
+        assert body["notebook"]["cells"][0]["source"] == "x = 7"
 
     def test_save_endpoint_round_trip(self, tmp_path: Path):
-        from omicsclaw.app.notebook.nb_files import parse_ipynb_bytes
-
+        target = tmp_path / "saved.ipynb"
         client = _import_client()
         resp = client.post(
             "/notebook/save",
             json={
-                "root": str(tmp_path),
-                "filename": "saved.ipynb",
-                "cells": [
-                    {"cell_type": "markdown", "source": "# H"},
-                    {"cell_type": "code", "source": "y = 9"},
-                ],
+                "workspace": str(tmp_path),
+                "path": str(target),
+                "notebook": {
+                    "cells": [
+                        {"id": "m1", "cell_type": "markdown", "source": "# H"},
+                        {"id": "c1", "cell_type": "code", "source": "y = 9"},
+                    ],
+                    "metadata": {"kernelspec": {"name": "python3"}},
+                    "nbformat": 4,
+                    "nbformat_minor": 5,
+                },
             },
         )
         assert resp.status_code == 200
 
-        cells = parse_ipynb_bytes((tmp_path / "saved.ipynb").read_bytes())
-        assert [c["cell_type"] for c in cells] == ["markdown", "code"]
+        saved = json.loads(target.read_text())
+        assert [c["cell_type"] for c in saved["cells"]] == ["markdown", "code"]
+        # Kernelspec metadata round-trips — the legacy save path used to
+        # rebuild empty metadata on this shape, which was a correctness
+        # regression we are specifically guarding against here.
+        assert saved["metadata"]["kernelspec"]["name"] == "python3"
 
     def test_delete_endpoint_removes_file(self, tmp_path: Path):
-        (tmp_path / "trash.ipynb").write_text("{}")
+        target = tmp_path / "trash.ipynb"
+        target.write_text("{}")
         client = _import_client()
         resp = client.post(
             "/notebook/delete",
-            json={"root": str(tmp_path), "filename": "trash.ipynb"},
+            json={"workspace": str(tmp_path), "path": str(target)},
         )
         assert resp.status_code == 200
-        assert not (tmp_path / "trash.ipynb").exists()
+        assert not target.exists()
 
     def test_delete_endpoint_404_for_missing_file(self, tmp_path: Path):
         client = _import_client()
         resp = client.post(
             "/notebook/delete",
-            json={"root": str(tmp_path), "filename": "ghost.ipynb"},
+            json={
+                "workspace": str(tmp_path),
+                "path": str(tmp_path / "ghost.ipynb"),
+            },
         )
         assert resp.status_code == 404
 
     def test_create_rejects_path_escape(self, tmp_path: Path):
         client = _import_client()
+        escape = tmp_path.parent / "evil.ipynb"
         resp = client.post(
             "/notebook/create",
-            json={"root": str(tmp_path), "filename": "../evil.ipynb"},
+            json={"workspace": str(tmp_path), "path": str(escape)},
         )
         assert resp.status_code == 400
+
+    # ── rename ────────────────────────────────────────────────────────
+
+    def test_rename_endpoint_renames_in_place(self, tmp_path: Path):
+        src = tmp_path / "old.ipynb"
+        src.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "fresh.ipynb",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        expected = tmp_path / "fresh.ipynb"
+        assert body["path"] == str(expected)
+        assert expected.exists()
+        assert not src.exists()
+
+    def test_rename_endpoint_auto_appends_ipynb_extension(self, tmp_path: Path):
+        src = tmp_path / "bare.ipynb"
+        src.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "renamed",
+            },
+        )
+        assert resp.status_code == 200
+        assert (tmp_path / "renamed.ipynb").exists()
+
+    def test_rename_endpoint_409_on_conflict(self, tmp_path: Path):
+        src = tmp_path / "a.ipynb"
+        src.write_text("{}")
+        conflict = tmp_path / "b.ipynb"
+        conflict.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "b.ipynb",
+            },
+        )
+        assert resp.status_code == 409
+        # Neither file should be disturbed on a conflict.
+        assert src.exists()
+        assert conflict.exists()
+
+    def test_rename_endpoint_rejects_path_separator(self, tmp_path: Path):
+        src = tmp_path / "a.ipynb"
+        src.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "sub/dir/evil.ipynb",
+            },
+        )
+        assert resp.status_code == 400
+        assert src.exists()
+
+    def test_rename_endpoint_rejects_non_ipynb_source(self, tmp_path: Path):
+        src = tmp_path / "notebook.txt"
+        src.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "fresh.ipynb",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_rename_endpoint_404_for_missing_source(self, tmp_path: Path):
+        client = _import_client()
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(tmp_path / "ghost.ipynb"),
+                "new_name": "later.ipynb",
+            },
+        )
+        assert resp.status_code == 404
+
+    def test_rename_endpoint_same_name_is_noop(self, tmp_path: Path):
+        src = tmp_path / "stay.ipynb"
+        src.write_text("{}")
+        client = _import_client()
+
+        resp = client.post(
+            "/notebook/rename",
+            json={
+                "workspace": str(tmp_path),
+                "path": str(src),
+                "new_name": "stay.ipynb",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["path"] == str(src)
+        assert src.exists()

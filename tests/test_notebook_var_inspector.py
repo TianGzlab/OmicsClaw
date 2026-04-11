@@ -331,6 +331,38 @@ class TestScriptExecutionSafety:
         assert result["type"] == "dataframe"
         assert result["shape"][0] == 4
 
+
+
+    def test_adata_slot_whole_obs_respects_max_rows_and_cols(self):
+        pytest.importorskip("anndata")
+        import numpy as np
+        import pandas as pd
+        from anndata import AnnData
+
+        from omicsclaw.app.notebook.var_inspector import (
+            build_adata_slot_script,
+            parse_var_detail_payload,
+        )
+
+        obs = pd.DataFrame(
+            {
+                "cluster": ["a", "b", "a", "c", "d"],
+                "sample": ["s1", "s1", "s2", "s2", "s3"],
+                "score": [1, 2, 3, 4, 5],
+            }
+        )
+        adata = AnnData(X=np.eye(5), obs=obs)
+        ns = {"adata": adata}
+
+        script = build_adata_slot_script("adata", "obs", "", max_rows=3, max_cols=1)
+        stdout = self._run_script(script, ns)
+        result = parse_var_detail_payload(stdout)
+
+        assert result["type"] == "dataframe"
+        assert result["shape"] == [5, 3]
+        assert len(result["table"]["data"]) == 3
+        assert len(result["table"]["columns"]) == 1
+
     def test_adata_slot_obsm_roundtrip(self):
         pytest.importorskip("anndata")
         import numpy as np
@@ -350,3 +382,50 @@ class TestScriptExecutionSafety:
         result = parse_var_detail_payload(stdout)
 
         assert result["type"] in {"dataframe", "content"}
+
+
+    def test_adata_slot_dotted_var_name_roundtrip(self):
+        pytest.importorskip("anndata")
+        import numpy as np
+        import pandas as pd
+        from anndata import AnnData
+        from types import SimpleNamespace
+
+        from omicsclaw.app.notebook.var_inspector import (
+            build_adata_slot_script,
+            parse_var_detail_payload,
+        )
+
+        adata = AnnData(X=np.eye(4), obs=pd.DataFrame({"cluster": ["a", "b", "a", "c"]}))
+        ns = {"holder": SimpleNamespace(adata=adata)}
+
+        script = build_adata_slot_script("holder.adata", "obs", "cluster")
+        stdout = self._run_script(script, ns)
+        result = parse_var_detail_payload(stdout)
+
+        assert result["type"] == "dataframe"
+        assert result["name"] == "holder.adata.obs['cluster']"
+        assert result["shape"] == [4, 1]
+
+    def test_adata_slot_obsm_preview_respects_row_and_col_limits(self):
+        pytest.importorskip("anndata")
+        import numpy as np
+        from anndata import AnnData
+
+        from omicsclaw.app.notebook.var_inspector import (
+            build_adata_slot_script,
+            parse_var_detail_payload,
+        )
+
+        adata = AnnData(X=np.eye(5))
+        adata.obsm["X_umap"] = np.arange(10).reshape(5, 2).astype(float)
+        ns = {"adata": adata}
+
+        script = build_adata_slot_script("adata", "obsm", "X_umap", max_rows=3, max_cols=1)
+        stdout = self._run_script(script, ns)
+        result = parse_var_detail_payload(stdout)
+
+        assert result["type"] == "dataframe"
+        assert result["shape"] == [5, 2]
+        assert result["table"]["columns"] == ["0"]
+        assert len(result["table"]["data"]) == 3

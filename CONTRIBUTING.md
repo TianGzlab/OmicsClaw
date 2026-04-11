@@ -273,6 +273,7 @@ AI coding agents should follow the same workflow, plus:
 3. Read [`AGENTS.md`](AGENTS.md) for project structure and conventions
 4. Read the target skill's `SKILL.md` before modifying code
 5. Use the matching workflow playbooks in [`docs/superpowers/playbooks/`](docs/superpowers/playbooks/README.md) when debugging, planning, writing tests, verifying completion, parallelizing work, requesting code review, or finishing a branch
+   Treat them as process constraints, not optional tips.
 6. Use `python omicsclaw.py list` to verify skills load correctly
 7. Run `python -m pytest -v` to confirm all tests pass
 8. Update `README.md` if the work introduces an important decision, milestone, or lasting contributor workflow change

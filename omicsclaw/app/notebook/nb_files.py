@@ -32,8 +32,10 @@ __all__ = [
     "list_workspace_notebooks",
     "open_workspace_notebook",
     "create_workspace_notebook",
+    "create_workspace_notebook_at",
     "save_workspace_notebook",
     "delete_workspace_notebook",
+    "rename_workspace_notebook",
 ]
 
 # Cell types the frontend is allowed to round-trip through save/open.
@@ -256,6 +258,17 @@ _NOTEBOOKS_SUBDIR = "notebooks"
 _MAX_AUTO_SUFFIX = 999
 
 
+def _list_workspace_notebooks_hard_cap(max_results: int) -> int:
+    """Upper bound for how many matches the recursive walker may collect.
+
+    The UI only renders `max_results`, but the walk needs some headroom
+    so it can sort by mtime before truncating. When this cap is hit the
+    reported `total_found` becomes a lower bound rather than an exact
+    total, which the caller surfaces explicitly via `total_found_exact`.
+    """
+    return max(max_results * 4, 2000)
+
+
 def derive_notebook_id(file_path: str) -> str:
     target = str(Path(file_path).expanduser().resolve())
     return "nbk_" + hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
@@ -396,6 +409,18 @@ def _empty_notebook(language: str = "python") -> dict[str, Any]:
     }
 
 
+def _atomic_write_text(target: Path, text: str) -> None:
+    tmp_path = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, target)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _trusted_workspace_roots() -> list[Path]:
     roots: list[Path] = []
     current_workspace = str(os.environ.get("OMICSCLAW_WORKSPACE", "") or "").strip()
@@ -471,8 +496,18 @@ def _validate_workspace(workspace: str) -> Path:
     if not workspace_real.is_dir():
         raise ValueError("workspace is not a directory")
 
+    # Fail-closed scope model: if no trusted roots are configured, we
+    # refuse to authorize *any* workspace rather than silently letting
+    # every absolute existing directory through. Callers get a clear
+    # signal to configure OMICSCLAW_WORKSPACE / OMICSCLAW_DATA_DIRS or
+    # have the app_server publish TRUSTED_DATA_DIRS.
     trusted_roots = _trusted_workspace_roots()
-    if trusted_roots and not any(_is_inside(workspace_real, root) for root in trusted_roots):
+    if not trusted_roots:
+        raise ValueError(
+            "workspace scope is not configured; set OMICSCLAW_WORKSPACE "
+            "or OMICSCLAW_DATA_DIRS before opening a notebook"
+        )
+    if not any(_is_inside(workspace_real, root) for root in trusted_roots):
         raise ValueError("workspace is outside the trusted scope")
 
     return workspace_real
@@ -503,6 +538,17 @@ def _resolve_workspace_and_target(workspace: str | None, target: str) -> tuple[P
 
     target_real = _realpath_or_ancestor(target_path)
     trusted_roots = _trusted_workspace_roots()
+    if not trusted_roots:
+        # Mirror `_validate_workspace`: no scope → refuse everything. The
+        # old fallback message mentioned "workspace is required" which
+        # would lead users to try just passing a workspace — but if no
+        # trusted roots are configured, even that won't work, so surface
+        # the real cause up-front.
+        raise ValueError(
+            "workspace scope is not configured; set OMICSCLAW_WORKSPACE "
+            "or OMICSCLAW_DATA_DIRS before opening a notebook"
+        )
+
     best_workspace: Path | None = None
     best_length = -1
     for root in trusted_roots:
@@ -513,17 +559,44 @@ def _resolve_workspace_and_target(workspace: str | None, target: str) -> tuple[P
                 best_length = length
 
     if best_workspace is None:
-        best_workspace = target_real.parent.resolve()
+        raise ValueError("path is outside the trusted scope")
 
     return best_workspace, target_real
 
 
-def list_workspace_notebooks(workspace: str) -> list[dict[str, Any]]:
+def list_workspace_notebooks(
+    workspace: str,
+    max_results: int = _MAX_RESULTS,
+    max_depth: int = _MAX_DEPTH,
+) -> dict[str, Any]:
+    """Enumerate ``.ipynb`` files under ``workspace``.
+
+    Returns ``{notebooks, has_more, total_found, total_found_exact}``.
+    Callers previously received just a list — that shape silently
+    dropped the least-recent notebooks once the walker hit its hard
+    cap, because the sort by mtime happened AFTER truncation. This
+    version collects every match first, sorts by mtime DESC, and only
+    then slices — so the "top N most recent" guarantee the UI
+    advertises is actually upheld — and surfaces ``has_more`` /
+    ``total_found`` plus an exactness bit so the frontend can show a
+    truthful truncation banner instead of silently lying about what's in
+    the workspace.
+
+    ``max_results`` and ``max_depth`` remain tunable knobs with their
+    historical defaults (500 / 6) for backwards compatibility. The
+    walker still skips VCS / build directories via ``_IGNORED_DIRS``.
+    """
     workspace_real = Path(resolve_workspace_root(workspace))
-    results: list[dict[str, Any]] = []
+    hard_cap = _list_workspace_notebooks_hard_cap(max_results)
+    collected: list[dict[str, Any]] = []
+    overflowed = False
 
     def walk(current_dir: Path, depth: int) -> None:
-        if depth > _MAX_DEPTH or len(results) >= _MAX_RESULTS:
+        nonlocal overflowed
+        if depth > max_depth:
+            return
+        if len(collected) >= hard_cap:
+            overflowed = True
             return
         try:
             entries = list(current_dir.iterdir())
@@ -531,7 +604,8 @@ def list_workspace_notebooks(workspace: str) -> list[dict[str, Any]]:
             return
 
         for entry in entries:
-            if len(results) >= _MAX_RESULTS:
+            if len(collected) >= hard_cap:
+                overflowed = True
                 return
             name = entry.name
             if name.startswith(".") and name != ".":
@@ -546,7 +620,7 @@ def list_workspace_notebooks(workspace: str) -> list[dict[str, Any]]:
                     if not _is_inside(real_entry, workspace_real):
                         continue
                     stat = real_entry.stat()
-                    results.append({
+                    collected.append({
                         "path": str(real_entry),
                         "relativePath": real_entry.relative_to(workspace_real).as_posix(),
                         "name": real_entry.stem,
@@ -557,8 +631,17 @@ def list_workspace_notebooks(workspace: str) -> list[dict[str, Any]]:
                 continue
 
     walk(workspace_real, 0)
-    results.sort(key=lambda item: float(item.get("mtime", 0)), reverse=True)
-    return results
+    collected.sort(key=lambda item: float(item.get("mtime", 0)), reverse=True)
+    total_found = len(collected)
+    total_found_exact = not overflowed
+    notebooks = collected[:max_results]
+    has_more = overflowed or total_found > max_results
+    return {
+        "notebooks": notebooks,
+        "has_more": has_more,
+        "total_found": total_found,
+        "total_found_exact": total_found_exact,
+    }
 
 
 def open_workspace_notebook(path: str, workspace: str | None = None) -> tuple[str, str, dict[str, Any]]:
@@ -601,6 +684,25 @@ def create_workspace_notebook(workspace: str) -> str:
     raise OSError(f"Could not pick a free Untitled-N name (1..{_MAX_AUTO_SUFFIX} all taken)")
 
 
+def create_workspace_notebook_at(workspace: str, path: str) -> str:
+    workspace_real = _validate_workspace(workspace)
+    target_real = _resolve_target_in_workspace(workspace_real, path)
+    if target_real.suffix.lower() != ".ipynb":
+        raise ValueError("File must end with .ipynb")
+
+    parent = target_real.parent
+    if not parent.exists():
+        raise FileNotFoundError("Parent directory does not exist")
+    if not parent.is_dir():
+        raise ValueError("Parent path is not a directory")
+    if target_real.exists():
+        raise FileExistsError(f"notebook already exists: {target_real}")
+
+    with open(target_real, "x", encoding="utf-8") as handle:
+        handle.write(_serialize_notebook(_empty_notebook()))
+    return str(target_real)
+
+
 def save_workspace_notebook(workspace: str, path: str, notebook: dict[str, Any]) -> str:
     workspace_real = _validate_workspace(workspace)
     target_real = _resolve_target_in_workspace(workspace_real, path)
@@ -613,7 +715,7 @@ def save_workspace_notebook(workspace: str, path: str, notebook: dict[str, Any])
     if not parent.is_dir():
         raise ValueError("Parent path is not a directory")
 
-    target_real.write_text(_serialize_notebook(notebook), encoding="utf-8")
+    _atomic_write_text(target_real, _serialize_notebook(notebook))
     return str(target_real)
 
 
@@ -628,3 +730,67 @@ def delete_workspace_notebook(workspace: str, path: str) -> str:
         raise ValueError("Path is not a regular file")
     target_real.unlink()
     return str(target_real)
+
+
+def rename_workspace_notebook(
+    workspace: str,
+    path: str,
+    new_name: str,
+) -> str:
+    """Rename ``path`` to ``new_name`` inside the same directory.
+
+    ``new_name`` is just the target filename (basename), not a full path
+    — rename deliberately does not support moving across directories.
+    We auto-append ``.ipynb`` if the caller omitted it, reject any path
+    separators or ``..`` segments, and use ``os.replace`` which is
+    atomic on a single filesystem. Conflicts raise ``FileExistsError``
+    so the router can surface them as HTTP 409.
+
+    The source must be inside the trusted ``workspace`` and must be an
+    existing regular file with a ``.ipynb`` suffix. The destination is
+    resolved against the source's parent directory and re-checked
+    against the workspace scope to defeat symlink escapes.
+    """
+    workspace_real = _validate_workspace(workspace)
+    src_real = _resolve_target_in_workspace(workspace_real, path)
+    if src_real.suffix.lower() != ".ipynb":
+        raise ValueError("File must end with .ipynb")
+    if not src_real.exists():
+        raise FileNotFoundError("notebook not found")
+    if not src_real.is_file():
+        raise ValueError("Path is not a regular file")
+
+    if not isinstance(new_name, str):
+        raise ValueError("new_name must be a string")
+    cleaned = new_name.strip()
+    if not cleaned:
+        raise ValueError("new_name is required")
+    # Reject anything that looks like an attempt to move across
+    # directories. Rename is same-parent only — callers that want a
+    # move can delete + recreate.
+    if "/" in cleaned or "\\" in cleaned or cleaned in (".", ".."):
+        raise ValueError("new_name must not contain path separators")
+    if cleaned.startswith(".."):
+        raise ValueError("new_name must not start with '..'")
+    # Auto-append .ipynb so the UI can accept bare filenames.
+    if not cleaned.lower().endswith(".ipynb"):
+        cleaned = cleaned + ".ipynb"
+
+    dst_real = (src_real.parent / cleaned).resolve()
+    # Same directory? cheap check against the parent; also re-validate
+    # against the workspace so a symlink inside new_name can't push us
+    # outside the trusted scope.
+    if dst_real.parent != src_real.parent:
+        raise ValueError("new_name must not contain path separators")
+    if not _is_inside(dst_real, workspace_real):
+        raise ValueError("target path escapes the workspace")
+
+    if dst_real == src_real:
+        # No-op rename: report the current path back so callers don't
+        # have to special-case this on their side.
+        return str(src_real)
+    if dst_real.exists():
+        raise FileExistsError(f"notebook already exists: {dst_real}")
+
+    os.replace(src_real, dst_real)
+    return str(dst_real)

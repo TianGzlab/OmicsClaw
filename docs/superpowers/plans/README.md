@@ -5,8 +5,12 @@ development work.
 
 ## Tracked Entries
 
-- Add future dated plan files here as they become part of the maintained repo
-  history.
+- [2026-04-11-app-backend-authority-convergence.md](2026-04-11-app-backend-authority-convergence.md)
+  — converge notebook file APIs, runtime config ownership, and backend launch
+  discovery under the upstream backend contract.
+- [2026-04-11-native-app-notebook-backend.md](2026-04-11-native-app-notebook-backend.md)
+  — migrate interactive notebook backend ownership into upstream
+  `omicsclaw.app.server` and remove OmicsClaw-App wrapper ownership.
 
 ## Conventions
 

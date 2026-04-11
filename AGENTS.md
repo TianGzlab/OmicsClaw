@@ -15,6 +15,8 @@ Core rules:
 - Use `docs/superpowers/playbooks/` as the repository's on-demand workflow
   guidance for debugging, TDD, planning, parallelization, verification,
   code review, and branch completion.
+- Treat those playbooks as binding workflow guardrails with iron laws, red
+  flags, and required evidence, not as optional summaries.
 - When you make an important decision or complete a meaningful milestone,
   update `README.md` while preserving its existing structure.
 

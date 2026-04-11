@@ -55,6 +55,7 @@ except ValueError:
     IDLE_KERNEL_TTL_SECONDS = 900.0
 
 IDLE_REAPER_INTERVAL_SECONDS = 60.0
+INTROSPECTION_IDLE_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -400,12 +401,19 @@ class NotebookKernelManager:
                 )
             )
             collected = []
+            deadline = time.monotonic() + INTROSPECTION_IDLE_TIMEOUT_SECONDS
             try:
                 while True:
                     try:
                         msg = await client.get_iopub_msg(timeout=1.0)
                     except queue.Empty:
                         if not await _async_kernel_alive(handle.km):
+                            break
+                        if time.monotonic() >= deadline:
+                            log.warning(
+                                "[notebook] inspect timed out waiting for idle on %s",
+                                notebook_id,
+                            )
                             break
                         continue
                     except Exception as exc:
@@ -501,12 +509,19 @@ class NotebookKernelManager:
                 )
             )
             collected: list[str] = []
+            deadline = time.monotonic() + INTROSPECTION_IDLE_TIMEOUT_SECONDS
             try:
                 while True:
                     try:
                         msg = await client.get_iopub_msg(timeout=1.0)
                     except queue.Empty:
                         if not await _async_kernel_alive(handle.km):
+                            break
+                        if time.monotonic() >= deadline:
+                            log.warning(
+                                "[notebook] run_stdout_script timed out waiting for idle on %s",
+                                notebook_id,
+                            )
                             break
                         continue
                     except Exception as exc:
@@ -572,11 +587,17 @@ class NotebookKernelManager:
                     return "", "idle" if alive else "dead"
 
                 collected: list[str] = []
+                deadline = time.monotonic() + INTROSPECTION_IDLE_TIMEOUT_SECONDS
                 while True:
                     try:
                         msg = client.get_iopub_msg(timeout=1)
                     except queue.Empty:
                         if not _sync_kernel_alive(live.session.km):
+                            break
+                        if time.monotonic() >= deadline:
+                            log.warning(
+                                "[notebook] live run_stdout_script timed out waiting for idle"
+                            )
                             break
                         continue
                     except Exception as exc:
@@ -792,6 +813,15 @@ class NotebookKernelManager:
                         try:
                             msg = client.get_iopub_msg(timeout=1)
                         except queue.Empty:
+                            if not _sync_kernel_alive(live.session.km):
+                                emit(
+                                    _make_error_event(
+                                        cell_id,
+                                        "DeadKernel",
+                                        "Kernel died before execution completed",
+                                    )
+                                )
+                                break
                             continue
                         except Exception as exc:
                             emit(_make_error_event(cell_id, type(exc).__name__, str(exc)))
@@ -847,6 +877,7 @@ class NotebookKernelManager:
                 return _make_missing_inspect_payload(kernel_status="dead")
 
             with live.state.lock:
+                live.state.status = "busy"
                 live.state.touch()
                 client = live.session.kc
                 msg_id = client.execute(
@@ -857,10 +888,19 @@ class NotebookKernelManager:
                     stop_on_error=False,
                 )
                 collected: list[str] = []
+                deadline = time.monotonic() + INTROSPECTION_IDLE_TIMEOUT_SECONDS
                 while True:
                     try:
                         msg = client.get_iopub_msg(timeout=1)
                     except queue.Empty:
+                        if not _sync_kernel_alive(live.session.km):
+                            break
+                        if time.monotonic() >= deadline:
+                            log.warning(
+                                "[notebook] live inspect timed out waiting for idle on %s",
+                                notebook_id,
+                            )
+                            break
                         continue
                     except Exception as exc:
                         log.warning(
@@ -889,12 +929,13 @@ class NotebookKernelManager:
                 except Exception:
                     pass
 
+                alive = _sync_kernel_alive(live.session.km)
                 live.state.touch()
-                live.state.status = "busy" if live.state.status == "busy" else "idle"
+                live.state.status = "idle" if alive else "dead"
                 joined = "".join(collected)
                 return _make_inspect_payload(
                     _parse_inspect_payload(joined),
-                    kernel_status="busy" if live.state.status == "busy" else "idle",
+                    kernel_status="idle" if alive else "dead",
                 )
 
         return await asyncio.to_thread(inspect)

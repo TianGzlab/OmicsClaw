@@ -307,11 +307,17 @@ _VAR_DETAIL_BODY = r"""
                     "var_columns": _var_pack["keys"],
                     "var_columns_total": _var_pack["total"],
                     "obsm_keys": _obsm_pack["keys"],
+                    "obsm_keys_total": _obsm_pack["total"],
                     "varm_keys": _varm_pack["keys"],
+                    "varm_keys_total": _varm_pack["total"],
                     "obsp_keys": _obsp_pack["keys"],
+                    "obsp_keys_total": _obsp_pack["total"],
                     "varp_keys": _varp_pack["keys"],
+                    "varp_keys_total": _varp_pack["total"],
                     "layers": _layers_pack["keys"],
+                    "layers_total": _layers_pack["total"],
                     "uns_keys": _uns_pack["keys"],
+                    "uns_keys_total": _uns_pack["total"],
                 },
             })
             return
@@ -348,10 +354,18 @@ _ADATA_SLOT_BODY = r"""
         print(_begin + encoded + _end)
 
     _ns = globals()
-    if _name not in _ns:
+    _parts = _name.split(".")
+    _head = _parts[0]
+    if _head not in _ns:
         _emit({"type": "missing", "name": _name})
         return
-    _obj = _ns[_name]
+    _obj = _ns[_head]
+    try:
+        for _p in _parts[1:]:
+            _obj = getattr(_obj, _p)
+    except AttributeError as _exc:
+        _emit({"type": "error", "name": _name, "error": str(_exc)})
+        return
     if type(_obj).__name__ != "AnnData":
         _emit({
             "type": "error",
@@ -424,9 +438,9 @@ _ADATA_SLOT_BODY = r"""
             _arr = _slot_obj[_key]
             _shape = list(_arr.shape) if hasattr(_arr, "shape") else []
             if hasattr(_arr, "toarray"):
-                _preview = _arr[:10, :10].toarray()
+                _preview = _arr[:_max_rows, :_max_cols].toarray()
             elif isinstance(_arr, _np.ndarray):
-                _preview = _arr[: min(10, _arr.shape[0]), : min(10, _arr.shape[1] if _arr.ndim > 1 else 1)]
+                _preview = _arr[: min(_max_rows, _arr.shape[0]), : min(_max_cols, _arr.shape[1] if _arr.ndim > 1 else 1)]
                 if _arr.ndim == 1:
                     _preview = _preview.reshape(-1, 1)
             else:
@@ -465,9 +479,11 @@ _ADATA_SLOT_BODY = r"""
             _layer = _slot_obj[_key]
             _shape = list(_layer.shape) if hasattr(_layer, "shape") else []
             if hasattr(_layer, "toarray"):
-                _preview = _layer[:10, :10].toarray()
+                _preview = _layer[:_max_rows, :_max_cols].toarray()
             elif isinstance(_layer, _np.ndarray):
-                _preview = _layer[:10, :10]
+                _preview = _layer[: min(_max_rows, _layer.shape[0]), : min(_max_cols, _layer.shape[1] if _layer.ndim > 1 else 1)]
+                if getattr(_layer, "ndim", 2) == 1:
+                    _preview = _preview.reshape(-1, 1)
             else:
                 _preview = None
             if _preview is not None:

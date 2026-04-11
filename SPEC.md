@@ -33,7 +33,19 @@ and human contributors doing maintenance or development work in OmicsClaw.
 
 OmicsClaw does not currently ship these as runtime-loaded tool skills. In this
 repository, they are implemented as workflow playbooks under
-`docs/superpowers/playbooks/` and should be consulted on demand:
+`docs/superpowers/playbooks/`.
+
+These playbooks are not lightweight reminders. They are repository-level
+workflow contracts adapted from the reference `feishu_agent` skills. Each one
+should define:
+
+- a core principle
+- an iron law or non-negotiable gate
+- when to use and when not to use it
+- red flags and anti-rationalization checks
+- required outputs or evidence
+
+For any non-trivial code task, load the matching playbook before touching code:
 
 - Debugging → `docs/superpowers/playbooks/skill_systematic_debugging.md`
 - TDD → `docs/superpowers/playbooks/skill_test_driven_development.md`
@@ -46,6 +58,15 @@ repository, they are implemented as workflow playbooks under
 - Branch completion →
   `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
 
+Typical workflow chaining:
+
+1. If the task is multi-step or ambiguous, use the planning playbook first.
+2. If behavior changes, use TDD unless the task is clearly exempt.
+3. If something fails, switch to systematic debugging before proposing fixes.
+4. Before claiming success, use completion verification.
+5. For substantial or risky changes, use code review before merge or push.
+6. When wrapping up branch work, use the branch-finish playbook.
+
 Additional rules:
 
 - Do not overengineer.
@@ -53,6 +74,8 @@ Additional rules:
   public API, or repository contract requires them.
 - Prefer the smallest clear change that solves the current problem.
 - Verify the affected behavior before declaring work complete.
+- Violating the letter of a workflow playbook is usually violating its spirit;
+  treat these playbooks as binding process guardrails, not optional advice.
 
 ## Repository Maintenance
 

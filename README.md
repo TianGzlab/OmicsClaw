@@ -656,6 +656,8 @@ shared repo-level spec:
 - Use the workflow playbooks indexed in
   [docs/superpowers/README.md](docs/superpowers/README.md) as needed for
   planning, debugging, TDD, verification, code review, and branch completion.
+- Treat those playbooks as workflow contracts with iron laws and verification
+  gates, not as lightweight tips.
 - Update `README.md` when a change introduces an important decision,
   milestone, or lasting contributor workflow change.
 
