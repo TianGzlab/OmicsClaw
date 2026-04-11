@@ -42,7 +42,7 @@
 - [x] **SK-10**: velocity.R — VelocityPlot（RNA velocity stream/grid 图）
 
 ### All skills (wiring)
-- [ ] **SK-11**: 把 --r-enhanced flag 接入所有需要的 skill（sc-cell-annotation, sc-de, sc-markers, sc-enrichment, sc-pseudotime, sc-cell-communication, sc-velocity, sc-differential-abundance, sc-preprocessing, sc-batch-integration, sc-clustering, sc-grn）
+- [x] **SK-11**: 把 --r-enhanced flag 接入所有需要的 skill（sc-cell-annotation, sc-de, sc-markers, sc-enrichment, sc-pseudotime, sc-cell-communication, sc-velocity, sc-differential-abundance, sc-preprocessing, sc-batch-integration, sc-clustering, sc-grn）
 
 ## Completion Criteria
 
@@ -94,7 +94,7 @@
 | SK-08 | Phase 17 | Complete |
 | SK-09 | Phase 17 | Complete |
 | SK-10 | Phase 17 | Complete |
-| SK-11 | Phase 18 | Pending |
+| SK-11 | Phase 18 | Complete |
 
 ---
 *Last updated: 2026-04-11 after milestone v2.0 roadmap creation*
