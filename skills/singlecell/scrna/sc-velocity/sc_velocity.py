@@ -76,6 +76,8 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-velocity/sc_velocity.py"
 # Value = output filename (written to figures/r_enhanced/)
 R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_velocity": "r_velocity.png",
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
 }
 
 

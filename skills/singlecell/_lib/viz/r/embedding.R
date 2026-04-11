@@ -13,11 +13,28 @@
 #' @param params Named list. Optional: color_by (column name, default "cell_type").
 plot_embedding_discrete <- function(data_dir, out_path, params) {
   tryCatch({
-    csv_path <- file.path(data_dir, "annotation_embedding_points.csv")
-    if (!file.exists(csv_path)) {
-      stop("annotation_embedding_points.csv not found in ", data_dir)
+    # Try multiple CSV sources for embedding coordinates
+    candidates <- c("annotation_embedding_points.csv", "pseudotime_points.csv",
+                     "embedding_points.csv")
+    csv_path <- NULL
+    for (f in candidates) {
+      p <- file.path(data_dir, f)
+      if (file.exists(p)) { csv_path <- p; break }
+    }
+    if (is.null(csv_path)) {
+      stop("No embedding CSV found. Expected: ", paste(candidates, collapse=", "))
     }
     df <- read.csv(csv_path, stringsAsFactors = FALSE)
+
+    # Normalize coordinate column names to dim1/dim2
+    if (!"dim1" %in% colnames(df) && "coord1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "coord1"] <- "dim1"
+      colnames(df)[colnames(df) == "coord2"] <- "dim2"
+    }
+    if (!"dim1" %in% colnames(df) && "UMAP_1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "UMAP_1"] <- "dim1"
+      colnames(df)[colnames(df) == "UMAP_2"] <- "dim2"
+    }
 
     # Determine color column
     color_col <- params[["color_by"]]
@@ -81,27 +98,52 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
 #' @param params Named list. Optional: feature (column name, default "annotation_score").
 plot_embedding_feature <- function(data_dir, out_path, params) {
   tryCatch({
-    csv_path <- file.path(data_dir, "annotation_embedding_points.csv")
-    if (!file.exists(csv_path)) {
-      stop("annotation_embedding_points.csv not found in ", data_dir)
+    candidates <- c("annotation_embedding_points.csv", "pseudotime_points.csv",
+                     "embedding_points.csv")
+    csv_path <- NULL
+    for (f in candidates) {
+      p <- file.path(data_dir, f)
+      if (file.exists(p)) { csv_path <- p; break }
+    }
+    if (is.null(csv_path)) {
+      stop("No embedding CSV found. Expected: ", paste(candidates, collapse=", "))
     }
     df <- read.csv(csv_path, stringsAsFactors = FALSE)
 
-    # Determine feature column
+    # Normalize coordinate column names
+    if (!"dim1" %in% colnames(df) && "coord1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "coord1"] <- "dim1"
+      colnames(df)[colnames(df) == "coord2"] <- "dim2"
+    }
+    if (!"dim1" %in% colnames(df) && "UMAP_1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "UMAP_1"] <- "dim1"
+      colnames(df)[colnames(df) == "UMAP_2"] <- "dim2"
+    }
+
+    # Determine feature column — try multiple common names
     feature_col <- params[["feature"]]
     if (is.null(feature_col) || !feature_col %in% colnames(df)) {
-      if ("annotation_score" %in% colnames(df)) {
-        feature_col <- "annotation_score"
+      feature_candidates <- c("annotation_score", "pseudotime", "dpt_pseudotime",
+                              "score", "doublet_score", "velocity_magnitude")
+      feature_col <- intersect(feature_candidates, colnames(df))
+      if (length(feature_col) == 0) {
+        # Try any numeric column that isn't a coordinate
+        skip <- c("cell_id", "dim1", "dim2", "coord1", "coord2", "UMAP_1", "UMAP_2")
+        num_cols <- setdiff(colnames(df), skip)
+        num_cols <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) || all(grepl("^[0-9.eE+-]+$", x[!is.na(x)])))]
+        if (length(num_cols) > 0) feature_col <- num_cols[1]
+        else stop("No continuous feature column found \u2014 pass feature=<colname>")
       } else {
-        stop("No continuous feature column found \u2014 pass feature=<colname>")
+        feature_col <- feature_col[1]
       }
     }
 
-    # Convert to numeric, warn on NAs
+    # Convert to numeric, filter Inf, warn on NAs
     df[[feature_col]] <- suppressWarnings(as.numeric(df[[feature_col]]))
+    df[[feature_col]][!is.finite(df[[feature_col]])] <- NA
     n_na <- sum(is.na(df[[feature_col]]))
     if (n_na > 0) {
-      cat("WARNING:", n_na, "NA values in", feature_col, "- shown as grey\n",
+      cat("WARNING:", n_na, "NA/Inf values in", feature_col, "- shown as grey\n",
           file = stderr())
     }
 

@@ -39,6 +39,8 @@ SKILL_VERSION = "0.1.0"
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
+    "plot_cell_barplot": "r_cell_barplot.png",
 }
 
 

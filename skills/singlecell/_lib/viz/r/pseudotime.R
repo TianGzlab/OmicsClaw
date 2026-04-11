@@ -245,3 +245,105 @@ plot_pseudotime_dynamic <- function(data_dir, out_path, params) {
     quit(status = 1)
   })
 }
+
+
+# ---- Function 3: plot_pseudotime_heatmap ----
+
+#' DynamicHeatmap: gene expression binned along pseudotime.
+#'
+#' Reads pseudotime_points.csv and gene_expression.csv.
+#' Bins cells by pseudotime, computes mean expression per bin per gene,
+#' and renders a heatmap with genes on rows and pseudotime bins on columns.
+#'
+#' @param data_dir Character. figure_data/ directory.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. Optional: n_genes (default 30), n_bins (default 50).
+plot_pseudotime_heatmap <- function(data_dir, out_path, params) {
+  tryCatch({
+    pt_csv <- file.path(data_dir, "pseudotime_points.csv")
+    expr_csv <- file.path(data_dir, "gene_expression.csv")
+
+    if (!file.exists(pt_csv) || !file.exists(expr_csv)) {
+      stop("Need both pseudotime_points.csv and gene_expression.csv in ", data_dir)
+    }
+
+    pt_df <- read.csv(pt_csv, stringsAsFactors = FALSE)
+    expr_df <- read.csv(expr_csv, stringsAsFactors = FALSE)
+
+    # Find pseudotime column
+    pt_col <- intersect(c("pseudotime", "dpt_pseudotime", "palantir_pseudotime"),
+                        colnames(pt_df))
+    if (length(pt_col) == 0) stop("No pseudotime column found")
+    pt_col <- pt_col[1]
+
+    # Merge pseudotime with expression, filter Inf/NA
+    merged <- merge(expr_df, pt_df[, c("cell_id", pt_col)], by = "cell_id")
+    merged <- merged[!is.na(merged[[pt_col]]) & is.finite(merged[[pt_col]]), ]
+    if (nrow(merged) == 0) stop("No cells with valid (finite) pseudotime and expression")
+
+    # Select top genes (by variance across pseudotime)
+    n_genes <- as.integer(params[["n_genes"]] %||% 30)
+    n_bins <- as.integer(params[["n_bins"]] %||% 50)
+
+    gene_var <- aggregate(expression ~ gene, data = merged, FUN = var)
+    gene_var <- gene_var[order(-gene_var$expression), ]
+    top_genes <- head(gene_var$gene, n_genes)
+    merged <- merged[merged$gene %in% top_genes, ]
+
+    # Bin cells by pseudotime
+    merged$pt_bin <- cut(merged[[pt_col]],
+                         breaks = seq(0, max(merged[[pt_col]], na.rm = TRUE) * 1.001,
+                                      length.out = n_bins + 1),
+                         labels = FALSE, include.lowest = TRUE)
+
+    # Compute mean expression per gene × bin
+    mat <- aggregate(expression ~ gene + pt_bin, data = merged, FUN = mean)
+
+    # Scale per gene (z-score)
+    gene_means <- aggregate(expression ~ gene, data = mat, FUN = mean)
+    gene_sds <- aggregate(expression ~ gene, data = mat, FUN = sd)
+    colnames(gene_means)[2] <- "gene_mean"
+    colnames(gene_sds)[2] <- "gene_sd"
+    mat <- merge(mat, gene_means, by = "gene")
+    mat <- merge(mat, gene_sds, by = "gene")
+    mat$z <- (mat$expression - mat$gene_mean) / pmax(mat$gene_sd, 1e-6)
+    mat$z <- pmin(pmax(mat$z, -3), 3)  # Clamp to [-3, 3]
+
+    # Order genes by peak pseudotime position
+    peak_bin <- aggregate(expression ~ gene, data = mat, FUN = function(x) {
+      which.max(x)
+    })
+    peak_bin <- peak_bin[order(peak_bin$expression), ]
+    mat$gene <- factor(mat$gene, levels = peak_bin$gene)
+
+    # Build heatmap
+    p <- ggplot(mat, aes(x = pt_bin, y = gene, fill = z)) +
+      geom_tile() +
+      scale_fill_gradient2(
+        low = "#2166AC", mid = "white", high = "#B2182B",
+        midpoint = 0, name = "Z-score",
+        limits = c(-3, 3),
+        guide = guide_colorbar(frame.colour = "black", ticks.colour = "black")
+      ) +
+      scale_x_continuous(
+        expand = expansion(0, 0),
+        breaks = c(1, round(n_bins / 2), n_bins),
+        labels = c("Early", "Mid", "Late")
+      ) +
+      labs(x = "Pseudotime", y = "",
+           title = "Gene dynamics along pseudotime") +
+      theme_omics() +
+      theme(
+        axis.text.y = element_text(size = 7, face = "italic"),
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+      )
+
+    height <- max(5, length(top_genes) * 0.25 + 2)
+    ggsave_standard(p, out_path, width = 10, height = height)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}

@@ -78,6 +78,9 @@ R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
 R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_pseudotime_lineage": "r_pseudotime_lineage.png",
     "plot_pseudotime_dynamic": "r_pseudotime_dynamic.png",
+    "plot_pseudotime_heatmap": "r_pseudotime_heatmap.png",
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
 }
 
 

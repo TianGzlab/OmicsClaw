@@ -72,6 +72,7 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py"
 R_ENHANCED_PLOTS = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_embedding_feature": "r_embedding_feature.png",
+    "plot_feature_violin": "r_feature_violin.png",
 }
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
