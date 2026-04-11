@@ -66,6 +66,27 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-grn"
 SKILL_VERSION = "0.2.0"
 
+# R Enhanced plotting configuration
+R_ENHANCED_PLOTS = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+}
+
+
+def _render_r_enhanced(output_dir: Path, figure_data_dir: Path, r_enhanced: bool) -> list[str]:
+    """Render R Enhanced plots if requested. Returns list of generated paths."""
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths: list[str] = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     try:
@@ -693,6 +714,7 @@ def main():
     parser.add_argument("--n-jobs", type=int, default=4, help="Number of parallel jobs")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--cluster-key", dest="cluster_key", default="leiden", help="Cluster key for grouping (default: leiden)")
+    parser.add_argument("--r-enhanced", action="store_true", help="Generate R Enhanced plots (requires R + ggplot2)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -928,6 +950,7 @@ def main():
         result_data["fallback_reason"] = fallback_reason
 
     result_data["next_steps"] = []
+    result_data["r_enhanced_figures"] = []
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
@@ -935,6 +958,14 @@ def main():
         "data": result_data,
     }
     write_standard_run_artifacts(output_dir, result_payload, summary)
+
+    # R Enhanced plots
+    r_enhanced_figures = _render_r_enhanced(
+        output_dir, output_dir / "figure_data", args.r_enhanced
+    )
+    if r_enhanced_figures:
+        result_data["r_enhanced_figures"] = r_enhanced_figures
+        write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
 
     # Summary
     print(f"\n{'='*60}")

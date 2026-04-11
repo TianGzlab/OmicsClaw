@@ -36,6 +36,27 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-metacell"
 SKILL_VERSION = "0.1.0"
 
+# R Enhanced plotting configuration
+R_ENHANCED_PLOTS = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+}
+
+
+def _render_r_enhanced(output_dir: Path, figure_data_dir: Path, r_enhanced: bool) -> list[str]:
+    """Render R Enhanced plots if requested. Returns list of generated paths."""
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths: list[str] = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Single-cell metacell construction")
@@ -49,6 +70,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--min-iter", type=int, default=10)
     p.add_argument("--max-iter", type=int, default=30)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--r-enhanced", action="store_true", help="Generate R Enhanced plots (requires R + ggplot2)")
     return p.parse_args()
 
 
@@ -430,6 +452,7 @@ def main() -> int:
         {"skill": "sc-de", "reason": "Differential expression at metacell resolution", "priority": "optional"},
         {"skill": "sc-enrichment", "reason": "Pathway enrichment on metacell signatures", "priority": "optional"},
     ]
+    result_data["r_enhanced_figures"] = []
     write_result_json(
         output_dir,
         SKILL_NAME,
@@ -438,6 +461,17 @@ def main() -> int:
         result_data,
         input_checksum=input_checksum,
     )
+
+    # -- R Enhanced plots --
+    r_enhanced_figures = _render_r_enhanced(
+        output_dir, output_dir / "figure_data", args.r_enhanced
+    )
+    if r_enhanced_figures:
+        result_data["r_enhanced_figures"] = r_enhanced_figures
+        write_result_json(
+            output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data,
+            input_checksum=input_checksum,
+        )
 
     # -- Report --
     _write_report(output_dir, summary, params, input_path, diagnostics, preflight_warnings)

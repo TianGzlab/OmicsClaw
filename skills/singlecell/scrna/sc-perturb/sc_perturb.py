@@ -40,6 +40,28 @@ SKILL_NAME = "sc-perturb"
 SKILL_VERSION = "0.1.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-perturb/sc_perturb.py"
 
+# R Enhanced plotting configuration
+R_ENHANCED_PLOTS = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
+}
+
+
+def _render_r_enhanced(output_dir: Path, figure_data_dir: Path, r_enhanced: bool) -> list[str]:
+    """Render R Enhanced plots if requested. Returns list of generated paths."""
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths: list[str] = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Single-cell perturbation analysis")
@@ -55,6 +77,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--pval-cutoff", type=float, default=0.05)
     p.add_argument("--perturbation-type", type=str, default="KO")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--r-enhanced", action="store_true", help="Generate R Enhanced plots (requires R + ggplot2)")
     return p.parse_args()
 
 
@@ -356,6 +379,7 @@ def main() -> int:
         {"skill": "sc-de", "reason": "Differential expression between perturbed and control cells", "priority": "optional"},
         {"skill": "sc-enrichment", "reason": "Pathway enrichment on perturbation effects", "priority": "optional"},
     ]
+    data_payload["r_enhanced_figures"] = []
     write_result_json(
         output_dir,
         SKILL_NAME,
@@ -364,6 +388,18 @@ def main() -> int:
         data_payload,
         input_checksum=input_checksum,
     )
+
+    # R Enhanced plots
+    r_enhanced_figures = _render_r_enhanced(
+        output_dir, output_dir / "figure_data", args.r_enhanced
+    )
+    if r_enhanced_figures:
+        data_payload["r_enhanced_figures"] = r_enhanced_figures
+        write_result_json(
+            output_dir, SKILL_NAME, SKILL_VERSION, summary, data_payload,
+            input_checksum=input_checksum,
+        )
+
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
         "summary": summary,
