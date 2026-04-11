@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: R Enhanced Gallery
 status: executing
-stopped_at: Completed 15-01-PLAN.md (gsea_r method for sc-enrichment)
-last_updated: "2026-04-11T08:13:37.807Z"
-last_activity: 2026-04-11 — Phase 15 Plan 02 complete (proportion_test_r for sc-differential-abundance)
+stopped_at: Completed 15-03-PLAN.md (gsva_r method for sc-enrichment)
+last_updated: "2026-04-11T08:42:00Z"
+last_activity: 2026-04-11 — Phase 15 Plan 03 complete (gsva_r method for sc-enrichment)
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_plans: 7
+  percent: 88
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 15 of 18 (R Analysis Methods)
-Plan: 02 complete
+Plan: 03 complete
 Status: Phase 15 in progress
-Last activity: 2026-04-11 — Phase 15 Plan 02 complete (proportion_test_r for sc-differential-abundance)
+Last activity: 2026-04-11 — Phase 15 Plan 03 complete (gsva_r method for sc-enrichment)
 
 Progress: [██████████] 100%
 
@@ -52,6 +52,7 @@ Progress: [██████████] 100%
 | Phase 14 P01 | 354s | 2 tasks | 1 files |
 | Phase 15 P02 | 261s | 2 tasks | 3 files |
 | Phase 15 P01 | 560 | 2 tasks | 3 files |
+| Phase 15 P03 | 1593s | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Progress: [██████████] 100%
 - [Phase 15]: proportion_test_r uses CSV metadata exchange (not h5ad) since only cell labels needed
 - [Phase 15]: gsea_r bypasses engine resolution with dedicated R bridge dispatch path
 - [Phase 15]: R_SCRIPTS_PROJECT_DIR for project-level R scripts vs R_SCRIPTS_DIR for local skill rscripts
+- [Phase 15]: GSVA 2.0.7 uses gsvaParam() (lowercase) not GSVAParam(); BPPARAM on gsva() call not constructor
+- [Phase 15]: gsva_r gets dedicated early-exit path in main() — bypasses gene set resolution entirely (R handles gene sets)
+- [Phase 15]: magick R package needs LIBRARY_PATH=/usr/lib/x86_64-linux-gnu for conda linker to find system ImageMagick
 
 ### Pending Todos
 
@@ -82,6 +86,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T08:13:37.802Z
-Stopped at: Completed 15-01-PLAN.md (gsea_r method for sc-enrichment)
+Last session: 2026-04-11T08:42:00Z
+Stopped at: Completed 15-03-PLAN.md (gsva_r method for sc-enrichment)
 Resume file: None
