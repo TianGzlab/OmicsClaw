@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: R Enhanced Gallery
 status: completed
-stopped_at: Completed 14-02-PLAN.md (marker heatmap R renderer)
-last_updated: "2026-04-11T07:48:57.035Z"
-last_activity: 2026-04-11 — Phase 13 Plan 01 complete (R Enhanced framework foundation)
+stopped_at: Completed 14-01-PLAN.md (shared embedding R renderers)
+last_updated: "2026-04-11T07:49:20Z"
+last_activity: 2026-04-11 — Phase 14 Plan 01 complete (embedding discrete + feature renderers)
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** R 分析方法补全 + R Enhanced 绘图能力，让每个 skill 都能用 R 画出高质量图
-**Current focus:** Phase 13 — R Enhanced Framework Foundation
+**Current focus:** Phase 14 — Shared Embedding and Marker Plots
 
 ## Current Position
 
-Phase: 13 of 18 (R Enhanced Framework Foundation)
-Plan: 01 complete
-Status: Plan 13-01 complete, ready for next plan
-Last activity: 2026-04-11 — Phase 13 Plan 01 complete (R Enhanced framework foundation)
+Phase: 14 of 18 (Shared Embedding and Marker Plots)
+Plan: 01 complete (all Phase 14 plans done)
+Status: Phase 14 complete, ready for Phase 15
+Last activity: 2026-04-11 — Phase 14 Plan 01 complete (embedding discrete + feature renderers)
 
 Progress: [██████████] 100%
 
@@ -49,6 +49,7 @@ Progress: [██████████] 100%
 *Updated after each plan completion*
 | Phase 13 P02 | 102s | 2 tasks | 2 files |
 | Phase 14 P02 | 295s | 2 tasks | 2 files |
+| Phase 14 P01 | 354s | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,7 @@ Progress: [██████████] 100%
 - scop functions require Seurat objects — must extract ggplot2 patterns, not call scop directly
 - [Phase 13]: R Enhanced checklist is optional section; template uses lazy import of call_r_plot
 - [Phase 14]: ComplexHeatmap uses base R graphics (png/dev.off) not ggplot2 ggsave_standard
+- [Phase 14]: Embedding renderers use geom_text(check_overlap=TRUE) for centroid labels, avoiding ggrepel dependency
 
 ### Pending Todos
 
@@ -75,6 +77,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T07:48:57.030Z
-Stopped at: Completed 14-02-PLAN.md (marker heatmap R renderer)
+Last session: 2026-04-11T07:49:20Z
+Stopped at: Completed 14-01-PLAN.md (shared embedding R renderers)
 Resume file: None
