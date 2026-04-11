@@ -35,8 +35,8 @@
 - [x] **SK-07**: pseudotime.R — DynamicPlot（基因沿拟时序表达趋势 + CI ribbon，Python 无等效）
 
 ### sc-cell-communication
-- [ ] **SK-08**: communication.R — CCCHeatmap（细胞通讯热图/点图）
-- [ ] **SK-09**: communication.R — CCCNetworkPlot（通讯网络图，ggplot2 arc layout）
+- [x] **SK-08**: communication.R — CCCHeatmap（细胞通讯热图/点图）
+- [x] **SK-09**: communication.R — CCCNetworkPlot（通讯网络图，ggplot2 arc layout）
 
 ### sc-velocity
 - [x] **SK-10**: velocity.R — VelocityPlot（RNA velocity stream/grid 图）
@@ -91,8 +91,8 @@
 | SK-05 | Phase 16 | Complete |
 | SK-06 | Phase 16 | Complete |
 | SK-07 | Phase 16 | Complete |
-| SK-08 | Phase 17 | Pending |
-| SK-09 | Phase 17 | Pending |
+| SK-08 | Phase 17 | Complete |
+| SK-09 | Phase 17 | Complete |
 | SK-10 | Phase 17 | Complete |
 | SK-11 | Phase 18 | Pending |
 

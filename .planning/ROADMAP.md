@@ -218,7 +218,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 17-01-PLAN.md — de.R: volcano plot (SK-01) + FeatureHeatmap (SK-02)
-- [ ] 17-02-PLAN.md — communication.R: CCCHeatmap (SK-08) + CCCNetworkPlot (SK-09)
+- [x] 17-02-PLAN.md — communication.R: CCCHeatmap (SK-08) + CCCNetworkPlot (SK-09)
 - [x] 17-03-PLAN.md — velocity.R: VelocityPlot grid mode (SK-10)
 **UI hint**: yes
 
@@ -255,7 +255,7 @@ Plans:
 | 14. Shared Embedding and Marker Plots | v2.0 | 1/2 | In Progress|  |
 | 15. R Analysis Methods | v2.0 | 2/4 | In Progress|  |
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 2/2 | Complete   | 2026-04-11 |
-| 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 2/3 | In Progress|  |
+| 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 3/3 | Complete   | 2026-04-11 |
 | 18. Skill Wiring --r-enhanced Flag | v2.0 | 0/? | Not started | - |
 
 ---
