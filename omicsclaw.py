@@ -1323,7 +1323,13 @@ def main():
     if args.command == "app-server":
         _ensure_server_dependencies(
             command_name="app-server",
-            requirements=[("fastapi", "fastapi"), ("uvicorn", "uvicorn")],
+            requirements=[
+                ("fastapi", "fastapi"),
+                ("uvicorn", "uvicorn"),
+                ("nbformat", "nbformat"),
+                ("jupyter_client", "jupyter_client"),
+                ("ipykernel", "ipykernel"),
+            ],
             install_hint=_APP_SERVER_INSTALL_HINT,
         )
         app_args: list[str] = []

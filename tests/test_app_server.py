@@ -104,6 +104,32 @@ def test_app_server_main_reports_missing_uvicorn(monkeypatch, capsys):
     assert 'pip install -e ".[desktop]"' in captured.err
 
 
+def test_app_server_mounts_native_notebook_routes():
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    route_paths = {getattr(route, "path", "") for route in server.app.routes}
+
+    assert "/notebook/kernel/start" in route_paths
+    assert "/notebook/kernel/stop" in route_paths
+    assert "/notebook/kernel/interrupt" in route_paths
+    assert "/notebook/kernel/status" in route_paths
+    assert "/notebook/execute" in route_paths
+    assert "/notebook/complete" in route_paths
+    assert "/notebook/inspect" in route_paths
+    assert "/notebook/list" in route_paths
+    assert "/notebook/open" in route_paths
+    assert "/notebook/create" in route_paths
+    assert "/notebook/save" in route_paths
+    assert "/notebook/delete" in route_paths
+    assert "/notebook/var_detail" in route_paths
+    assert "/notebook/adata_slot" in route_paths
+    assert "/notebook/files/upload" in route_paths
+    assert "/notebook/files/list" in route_paths
+    assert "/notebook/files/open" in route_paths
+
+
 def test_register_optional_kg_router_mounts_embedded_routes(monkeypatch, tmp_path):
     pytest.importorskip("fastapi")
 
@@ -157,6 +183,226 @@ def test_register_optional_kg_router_mounts_embedded_routes(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert response.json() == {
         "workspace": str((workspace_root / ".omicsclaw" / "knowledge").resolve())
+    }
+
+
+def test_notebook_file_routes_round_trip_through_backend_router(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from omicsclaw.app import server
+    from omicsclaw.app.notebook.router import router as notebook_router
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[workspace])
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
+
+    app = FastAPI()
+    app.include_router(notebook_router, prefix="/notebook")
+    client = TestClient(app)
+
+    create_response = client.post("/notebook/create", json={"workspace": str(workspace)})
+    assert create_response.status_code == 200
+    created_path = create_response.json()["path"]
+
+    list_response = client.get("/notebook/list", params={"workspace": str(workspace)})
+    assert list_response.status_code == 200
+    listed_paths = {entry["path"] for entry in list_response.json()["notebooks"]}
+    assert created_path in listed_paths
+
+    open_response = client.get("/notebook/open", params={"path": created_path})
+    assert open_response.status_code == 200
+    opened_payload = open_response.json()
+    assert opened_payload["path"] == created_path
+    assert opened_payload["workspace"] == str(workspace.resolve())
+    assert isinstance(opened_payload["notebook"]["cells"], list)
+
+    save_response = client.post(
+        "/notebook/save",
+        json={
+            "workspace": str(workspace),
+            "path": created_path,
+            "notebook": {
+                **opened_payload["notebook"],
+                "cells": [],
+            },
+        },
+    )
+    assert save_response.status_code == 200
+    assert save_response.json()["path"] == created_path
+
+    delete_response = client.post(
+        "/notebook/delete",
+        json={"workspace": str(workspace), "path": created_path},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["path"] == created_path
+
+    list_after_delete = client.get("/notebook/list", params={"workspace": str(workspace)})
+    assert list_after_delete.status_code == 200
+    listed_after_delete = {entry["path"] for entry in list_after_delete.json()["notebooks"]}
+    assert created_path not in listed_after_delete
+
+
+def test_notebook_kernel_routes_accept_workspace_file_contract(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import importlib
+
+    from omicsclaw.app import server
+    from omicsclaw.app.notebook import nb_files
+
+    notebook_router_module = importlib.import_module("omicsclaw.app.notebook.router")
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    notebook_path = workspace / "analysis.ipynb"
+    notebook_path.write_text(
+        json.dumps({"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}),
+        encoding="utf-8",
+    )
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[workspace])
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
+
+    seen: dict[str, dict[str, object]] = {}
+
+    class DummyManager:
+        async def start(self, notebook_id, cwd=None, file_path=None):
+            seen["start"] = {
+                "notebook_id": notebook_id,
+                "cwd": cwd,
+                "file_path": file_path,
+            }
+            return {"notebook_id": notebook_id, "running": True, "cwd": cwd}
+
+        async def status(self, notebook_id, file_path=None):
+            seen["status"] = {
+                "notebook_id": notebook_id,
+                "file_path": file_path,
+            }
+            return {"notebook_id": notebook_id, "running": False, "kernel_status": "missing"}
+
+    monkeypatch.setattr(
+        notebook_router_module,
+        "get_kernel_manager",
+        lambda: DummyManager(),
+    )
+
+    app = FastAPI()
+    app.include_router(notebook_router_module.router, prefix="/notebook")
+    client = TestClient(app)
+
+    expected_id = nb_files.derive_notebook_id(str(notebook_path))
+    expected_path = str(notebook_path.resolve())
+    expected_cwd = str(workspace.resolve())
+
+    start_response = client.post(
+        "/notebook/kernel/start",
+        json={"workspace": str(workspace), "file_path": str(notebook_path)},
+    )
+    assert start_response.status_code == 200
+    assert seen["start"] == {
+        "notebook_id": expected_id,
+        "cwd": expected_cwd,
+        "file_path": expected_path,
+    }
+
+    status_response = client.get(
+        "/notebook/kernel/status",
+        params={"workspace": str(workspace), "file_path": str(notebook_path)},
+    )
+    assert status_response.status_code == 200
+    assert seen["status"] == {
+        "notebook_id": expected_id,
+        "file_path": expected_path,
+    }
+
+
+def test_notebook_execute_route_accepts_workspace_file_contract(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import importlib
+
+    from omicsclaw.app import server
+    from omicsclaw.app.notebook import nb_files
+
+    notebook_router_module = importlib.import_module("omicsclaw.app.notebook.router")
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    notebook_path = workspace / "analysis.ipynb"
+    notebook_path.write_text(
+        json.dumps({"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}),
+        encoding="utf-8",
+    )
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[workspace])
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
+
+    seen: dict[str, object] = {}
+
+    class DummyManager:
+        async def execute_stream(self, notebook_id, cell_id, code, cwd=None, file_path=None):
+            seen.update({
+                "notebook_id": notebook_id,
+                "cell_id": cell_id,
+                "code": code,
+                "cwd": cwd,
+                "file_path": file_path,
+            })
+            yield {
+                "type": "execute_reply",
+                "data": {
+                    "cell_id": cell_id,
+                    "status": "ok",
+                    "execution_count": 1,
+                },
+            }
+
+    monkeypatch.setattr(
+        notebook_router_module,
+        "get_kernel_manager",
+        lambda: DummyManager(),
+    )
+
+    app = FastAPI()
+    app.include_router(notebook_router_module.router, prefix="/notebook")
+    client = TestClient(app)
+
+    expected_id = nb_files.derive_notebook_id(str(notebook_path))
+    expected_path = str(notebook_path.resolve())
+    expected_cwd = str(workspace.resolve())
+
+    response = client.post(
+        "/notebook/execute",
+        json={
+            "workspace": str(workspace),
+            "file_path": str(notebook_path),
+            "cell_id": "cell-1",
+            "code": "print('hi')",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert '"type": "execute_reply"' in response.text
+    assert seen == {
+        "notebook_id": expected_id,
+        "cell_id": "cell-1",
+        "code": "print('hi')",
+        "cwd": expected_cwd,
+        "file_path": expected_path,
     }
 
 

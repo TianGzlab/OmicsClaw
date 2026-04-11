@@ -37,6 +37,9 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
+from omicsclaw.app.notebook.live_session import install_live_session_support
+from omicsclaw.app.notebook.router import router as notebook_router
 from omicsclaw.runtime.policy_state import ToolPolicyState
 from omicsclaw.version import __version__
 
@@ -317,6 +320,7 @@ async def lifespan(app: FastAPI):
         core.LLM_PROVIDER_NAME,
         core.OMICSCLAW_MODEL,
     )
+    install_live_session_support()
 
     # Optionally expose MemoryClient for browse/search endpoints
     try:
@@ -366,6 +370,11 @@ async def lifespan(app: FastAPI):
         task.cancel()
     _active_sessions.clear()
 
+    try:
+        await get_kernel_manager().shutdown_all()
+    except Exception as exc:
+        logger.warning("Notebook kernel shutdown failed during app shutdown: %s", exc)
+
     if _memory_client:
         await _memory_client.close()
 
@@ -396,6 +405,8 @@ except ImportError:
     pass  # autoagent module not available
 
 _register_optional_kg_router(app)
+
+app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
 
 
 # ---------------------------------------------------------------------------
@@ -1639,6 +1650,23 @@ async def chat_session_permission_profile(req: SessionPermissionProfileRequest):
 
 
 # ---------------------------------------------------------------------------
+# GET /workspace — current runtime workspace configuration
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace")
+async def get_workspace():
+    core = _get_core()
+    trusted_dirs = [str(d) for d in getattr(core, "TRUSTED_DATA_DIRS", [])]
+    workspace = str(os.environ.get("OMICSCLAW_WORKSPACE", "") or "").strip()
+    if not workspace and trusted_dirs:
+        workspace = trusted_dirs[0]
+    return {
+        "workspace": workspace or None,
+        "trusted_dirs": trusted_dirs,
+    }
+
+
+# ---------------------------------------------------------------------------
 # PUT /workspace — sync default project directory from frontend
 # ---------------------------------------------------------------------------
 
@@ -2609,6 +2637,45 @@ async def get_settings():
     }
 
 
+def _claude_settings_path() -> Path:
+    return Path.home() / ".claude" / "settings.json"
+
+
+def _read_claude_settings() -> dict[str, Any]:
+    settings_path = _claude_settings_path()
+    try:
+        if not settings_path.exists():
+            return {}
+        parsed = json.loads(settings_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _write_claude_settings(settings: dict[str, Any]) -> None:
+    settings_path = _claude_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(settings, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+class ClaudeSettingsRequest(BaseModel):
+    settings: dict[str, Any]
+
+
+@app.get("/claude/settings")
+async def get_claude_settings():
+    return {"settings": _read_claude_settings()}
+
+
+@app.put("/claude/settings")
+async def put_claude_settings(req: ClaudeSettingsRequest):
+    _write_claude_settings(req.settings)
+    return {"success": True}
+
+
 # ---------------------------------------------------------------------------
 # GET /providers — list all supported LLM providers
 # ---------------------------------------------------------------------------
@@ -2814,6 +2881,7 @@ async def mcp_list_servers():
             "extra_args": srv.get("args", []),
             "args": srv.get("args", []),
             "env": srv.get("env", {}),
+            "headers": srv.get("headers", {}),
             "header_keys": sorted((srv.get("headers") or {}).keys()),
             "tools": srv.get("tools"),
         })
@@ -2871,19 +2939,12 @@ async def mcp_remove_server(name: str):
         raise HTTPException(500, detail=str(exc))
 
 
-@app.post("/mcp/sync")
-async def mcp_sync_from_frontend(request: Request):
-    """
-    Sync MCP servers from frontend config files into OmicsClaw's mcp.yaml.
-    Accepts the merged config from the frontend and reconciles.
-    """
+def _reconcile_mcp_servers(incoming: Any) -> dict[str, Any]:
     try:
         from omicsclaw.interactive._mcp import add_mcp_server, list_mcp_servers, remove_mcp_server
     except ImportError:
         raise HTTPException(503, detail="MCP module not available")
 
-    body = await request.json()
-    incoming = body.get("mcpServers")
     if incoming is None:
         raise HTTPException(400, detail="mcpServers is required")
     if not isinstance(incoming, dict):
@@ -2946,6 +3007,24 @@ async def mcp_sync_from_frontend(request: Request):
         synced += 1
 
     return {"ok": True, "synced": synced, "removed": removed}
+
+
+class McpReplaceRequest(BaseModel):
+    mcpServers: dict[str, Any]
+
+
+@app.put("/mcp/servers")
+async def mcp_replace_servers(req: McpReplaceRequest):
+    return _reconcile_mcp_servers(req.mcpServers)
+
+
+@app.post("/mcp/sync")
+async def mcp_sync_from_frontend(request: Request):
+    """
+    Backward-compatible bulk MCP replace endpoint.
+    """
+    body = await request.json()
+    return _reconcile_mcp_servers(body.get("mcpServers"))
 
 
 # ---------------------------------------------------------------------------
