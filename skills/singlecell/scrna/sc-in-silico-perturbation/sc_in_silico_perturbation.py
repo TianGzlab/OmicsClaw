@@ -51,6 +51,26 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-in-silico-perturbation"
 SKILL_VERSION = "0.2.0"
 
+R_ENHANCED_PLOTS: dict[str, str] = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
+}
+
+
+def _render_r_enhanced(output_dir: Path, figure_data_dir: Path, r_enhanced: bool) -> list[str]:
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths: list[str] = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -87,6 +107,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--td-k", type=int, default=2)
     p.add_argument("--ma-dim", type=int, default=2)
     p.add_argument("--n-cores", type=int, default=1)
+    p.add_argument("--r-enhanced", action="store_true", default=False,
+                   help="Generate R-enhanced figures via ggplot2 renderers")
     return p.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -644,6 +666,8 @@ def main() -> int:
     result_data["next_steps"] = [
         {"skill": "sc-enrichment", "reason": "Pathway enrichment on predicted perturbation effects", "priority": "optional"},
     ]
+    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced)
+    result_data["r_enhanced_figures"] = r_enhanced_figures
     write_result_json(
         output_dir,
         SKILL_NAME,

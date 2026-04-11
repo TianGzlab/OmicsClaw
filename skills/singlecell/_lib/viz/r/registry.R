@@ -75,7 +75,8 @@ R_PLOT_REGISTRY <- list(
   plot_cell_proportion       = plot_cell_proportion,
   plot_enrichment_dotplot    = plot_enrichment_dotplot,
   plot_enrichment_lollipop   = plot_enrichment_lollipop,
-  plot_pseudotime_heatmap    = plot_pseudotime_heatmap
+  plot_pseudotime_heatmap    = plot_pseudotime_heatmap,
+  plot_ccc_bubble            = plot_ccc_bubble
 )
 
 # ---- CLI dispatcher (runs only when script is invoked directly) ----
