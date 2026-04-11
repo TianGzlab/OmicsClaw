@@ -9,7 +9,7 @@
 ## R Analysis Methods
 
 - [ ] **RM-01**: monocle3_r 方法接入 sc-pseudotime（安装 monocle3 + R bridge + 结果 merge 回 adata + Python 标准画图）
-- [ ] **RM-02**: gsea_r 方法接入 sc-enrichment（用已装的 fgsea/clusterProfiler + R bridge + 结果 merge + Python 标准画图）
+- [x] **RM-02**: gsea_r 方法接入 sc-enrichment（用已装的 fgsea/clusterProfiler + R bridge + 结果 merge + Python 标准画图）
 - [ ] **RM-03**: gsva_r 方法接入 sc-enrichment（安装 GSVA + R bridge + group-level pathway score + Python 标准画图）
 - [ ] **RM-04**: proportion_test_r 方法接入 sc-differential-abundance（纯 base R permutation test + R bridge + Python 标准画图）
 
@@ -78,7 +78,7 @@
 | FW-02 | Phase 13 | Pending |
 | FW-03 | Phase 13 | Complete |
 | RM-01 | Phase 15 | Pending |
-| RM-02 | Phase 15 | Pending |
+| RM-02 | Phase 15 | Complete |
 | RM-03 | Phase 15 | Pending |
 | RM-04 | Phase 15 | Pending |
 | SP-01 | Phase 14 | Pending |

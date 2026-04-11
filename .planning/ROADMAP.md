@@ -185,8 +185,8 @@ Plans:
   4. `--method proportion_test_r` in sc-differential-abundance runs base R permutation test, p-values are written to result, and Python standard plot is generated
 **Plans**: 4 plans
 Plans:
-- [ ] 15-01-PLAN.md — gsea_r: clusterProfiler + fgsea R bridge → sc-enrichment (RM-02)
-- [ ] 15-02-PLAN.md — proportion_test_r: base-R permutation test → sc-differential-abundance (RM-04)
+- [x] 15-01-PLAN.md — gsea_r: clusterProfiler + fgsea R bridge → sc-enrichment (RM-02)
+- [x] 15-02-PLAN.md — proportion_test_r: base-R permutation test → sc-differential-abundance (RM-04)
 - [ ] 15-03-PLAN.md — gsva_r: GSVA install + group-level scoring → sc-enrichment (RM-03)
 - [ ] 15-04-PLAN.md — monocle3_r: monocle3 install + principal graph → sc-pseudotime (RM-01)
 
@@ -247,7 +247,7 @@ Plans:
 | 12. 最终验证 | v1.0 | - | Complete | 2026-04-10 |
 | 13. R Enhanced Framework Foundation | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 14. Shared Embedding and Marker Plots | v2.0 | 1/2 | In Progress|  |
-| 15. R Analysis Methods | v2.0 | 0/4 | Not started | - |
+| 15. R Analysis Methods | v2.0 | 2/4 | In Progress|  |
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 0/? | Not started | - |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 0/? | Not started | - |
 | 18. Skill Wiring --r-enhanced Flag | v2.0 | 0/? | Not started | - |
