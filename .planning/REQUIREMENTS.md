@@ -22,8 +22,8 @@
 ## R Enhanced Skill-Specific Plots
 
 ### sc-de / sc-markers
-- [ ] **SK-01**: de.R — DEtestPlot volcano（ggplot2 增强版 volcano plot，labeled top genes）
-- [ ] **SK-02**: de.R — FeatureHeatmap（ComplexHeatmap 表达热图）
+- [x] **SK-01**: de.R — DEtestPlot volcano（ggplot2 增强版 volcano plot，labeled top genes）
+- [x] **SK-02**: de.R — FeatureHeatmap（ComplexHeatmap 表达热图）
 
 ### sc-enrichment
 - [x] **SK-03**: enrichment.R — EnrichmentPlot bar/dot（富集分析条形/点图）
@@ -39,7 +39,7 @@
 - [ ] **SK-09**: communication.R — CCCNetworkPlot（通讯网络图，ggplot2 arc layout）
 
 ### sc-velocity
-- [ ] **SK-10**: velocity.R — VelocityPlot（RNA velocity stream/grid 图）
+- [x] **SK-10**: velocity.R — VelocityPlot（RNA velocity stream/grid 图）
 
 ### All skills (wiring)
 - [ ] **SK-11**: 把 --r-enhanced flag 接入所有需要的 skill（sc-cell-annotation, sc-de, sc-markers, sc-enrichment, sc-pseudotime, sc-cell-communication, sc-velocity, sc-differential-abundance, sc-preprocessing, sc-batch-integration, sc-clustering, sc-grn）
@@ -84,8 +84,8 @@
 | SP-01 | Phase 14 | Pending |
 | SP-02 | Phase 14 | Pending |
 | SP-03 | Phase 14 | Complete |
-| SK-01 | Phase 17 | Pending |
-| SK-02 | Phase 17 | Pending |
+| SK-01 | Phase 17 | Complete |
+| SK-02 | Phase 17 | Complete |
 | SK-03 | Phase 16 | Complete |
 | SK-04 | Phase 16 | Complete |
 | SK-05 | Phase 16 | Complete |
@@ -93,7 +93,7 @@
 | SK-07 | Phase 16 | Complete |
 | SK-08 | Phase 17 | Pending |
 | SK-09 | Phase 17 | Pending |
-| SK-10 | Phase 17 | Pending |
+| SK-10 | Phase 17 | Complete |
 | SK-11 | Phase 18 | Pending |
 
 ---
