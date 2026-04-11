@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # sc_gsea_r.R — clusterProfiler GSEA via fgsea backend
 #
-# CLI: Rscript sc_gsea_r.R <de_csv> <output_dir> [species] [db] [score_type]
+# CLI: Rscript sc_gsea_r.R <de_csv> <output_dir> [species] [db] [score_type] [min_size] [max_size]
 #
 # de_csv columns: gene, avg_log2FC, and a group column (auto-detected)
 # Output: gsea_r_results.csv with columns:
@@ -19,6 +19,8 @@ output_dir  <- args[2]
 species     <- if (length(args) >= 3) args[3] else "Homo_sapiens"
 db          <- if (length(args) >= 4) args[4] else "GO_BP"
 score_type  <- if (length(args) >= 5) args[5] else "std"
+min_gs_size <- as.integer(if (length(args) >= 6) args[6] else 10)
+max_gs_size <- as.integer(if (length(args) >= 7) args[7] else 500)
 
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
@@ -255,8 +257,8 @@ tryCatch({
         res <- clusterProfiler::gseKEGG(
           geneList    = entrez_ranks,
           organism    = kegg_organism,
-          minGSSize   = 10,
-          maxGSSize   = 500,
+          minGSSize   = min_gs_size,
+          maxGSSize   = max_gs_size,
           pvalueCutoff = 1.0,
           scoreType   = score_type,
           verbose     = FALSE
@@ -265,8 +267,8 @@ tryCatch({
         res <- clusterProfiler::GSEA(
           geneList   = ranks,
           TERM2GENE  = term2gene,
-          minGSSize  = 10,
-          maxGSSize  = 500,
+          minGSSize  = min_gs_size,
+          maxGSSize  = max_gs_size,
           pvalueCutoff = 1.0,
           scoreType  = score_type,
           by         = "fgsea",
@@ -339,8 +341,8 @@ tryCatch({
           res <- clusterProfiler::GSEA(
             geneList   = ranks,
             TERM2GENE  = synthetic_t2g,
-            minGSSize  = 5,
-            maxGSSize  = 500,
+            minGSSize  = min_gs_size,
+            maxGSSize  = max_gs_size,
             pvalueCutoff = 1.0,
             scoreType  = score_type,
             by         = "fgsea",

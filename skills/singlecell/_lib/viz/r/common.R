@@ -8,8 +8,9 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(scales)
   library(RColorBrewer)
-  library(viridis)
 })
+.HAS_VIRIDIS <- requireNamespace("viridis", quietly = TRUE)
+if (.HAS_VIRIDIS) suppressPackageStartupMessages(library(viridis))
 
 # ---- Theme ----
 
@@ -40,7 +41,8 @@ theme_omics <- function(base_size = 11) {
 #' @return Character vector of hex color strings.
 omics_palette <- function(n, type = "categorical") {
   if (type == "continuous") {
-    return(viridis::viridis(n, direction = 1))
+    if (.HAS_VIRIDIS) return(viridis::viridis(n, direction = 1))
+    return(colorRampPalette(c("#440154", "#31688E", "#35B779", "#FDE725"))(n))
   }
   # categorical
 

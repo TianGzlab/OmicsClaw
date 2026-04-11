@@ -164,8 +164,8 @@ plot_ccc_network <- function(data_dir, out_path, params) {
   tryCatch({
     df <- .load_ccc_data(data_dir)
 
-    # Filter to positive scores
-    df <- df[df$score > 0, ]
+    # Filter to positive scores and remove self-loops (geom_curve requires distinct endpoints)
+    df <- df[df$score > 0 & df$source != df$target, ]
 
     # Apply min_score filter
     min_score <- as.numeric(params[["min_score"]] %||% 0)

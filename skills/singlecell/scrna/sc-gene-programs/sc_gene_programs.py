@@ -372,6 +372,14 @@ def main() -> int:
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
 
+    # ---- Auto-fallback: if cnmf is requested but not installed, use nmf ----
+    if args.method == "cnmf":
+        try:
+            import cnmf  # noqa: F401
+        except ImportError:
+            logger.warning("cnmf package not installed. Falling back to --method nmf (sklearn NMF).")
+            args.method = "nmf"
+
     # ---- Load data ----
     if args.demo:
         adata = make_demo_gene_program_adata(seed=args.seed)

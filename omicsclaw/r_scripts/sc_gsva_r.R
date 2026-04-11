@@ -24,6 +24,8 @@ species        <- if (length(args) >= 3) args[3] else "Homo_sapiens"
 db             <- if (length(args) >= 4) args[4] else "GO_BP"
 gsva_method    <- if (length(args) >= 5) args[5] else "gsva"
 group_by       <- if (length(args) >= 6) args[6] else "group"
+min_gs_size    <- as.integer(if (length(args) >= 7) args[7] else 5)
+max_gs_size    <- as.integer(if (length(args) >= 8) args[8] else 500)
 
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
@@ -157,13 +159,13 @@ tryCatch({
 
   param <- switch(gsva_method,
     "gsva"   = gsvaParam(exprData = expr_matrix, geneSets = gene_sets,
-                         minSize = 5, maxSize = 500),
+                         minSize = min_gs_size, maxSize = max_gs_size),
     "ssgsea" = ssgseaParam(exprData = expr_matrix, geneSets = gene_sets,
-                           minSize = 5),
+                           minSize = min_gs_size),
     "zscore" = zscoreParam(exprData = expr_matrix, geneSets = gene_sets,
-                           minSize = 5),
+                           minSize = min_gs_size),
     # default to gsva
-    gsvaParam(exprData = expr_matrix, geneSets = gene_sets, minSize = 5, maxSize = 500)
+    gsvaParam(exprData = expr_matrix, geneSets = gene_sets, minSize = min_gs_size, maxSize = max_gs_size)
   )
   # CRITICAL: SerialParam() prevents OOM from parallel workers
   gsva_scores <- gsva(param, BPPARAM = SerialParam())

@@ -125,6 +125,12 @@ def build_sample_celltype_table(
 ) -> pd.DataFrame:
     obs = adata.obs[[sample_key, celltype_key]].copy()
     table = pd.crosstab(obs[sample_key], obs[celltype_key]).sort_index()
+    # Convert CategoricalIndex to plain Index — avoids pandas InvalidIndexError
+    # when downstream code does join/slice on the crosstab result.
+    if hasattr(table.index, "categories"):
+        table.index = table.index.astype(str)
+    if hasattr(table.columns, "categories"):
+        table.columns = table.columns.astype(str)
     table.index.name = sample_key
     return table
 
