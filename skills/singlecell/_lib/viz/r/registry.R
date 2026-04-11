@@ -21,6 +21,8 @@ script_dir <- .get_script_dir()
 
 # ---- Source common.R first (absolute path) ----
 source(file.path(script_dir, "common.R"))
+source(file.path(script_dir, "embedding.R"))
+source(file.path(script_dir, "markers.R"))
 
 # ---- Test stub renderer ----
 # Minimal ggplot2 scatter that proves the Python -> R round-trip works.
@@ -47,7 +49,10 @@ plot_test_scatter <- function(data_dir, out_path, params) {
 
 # ---- Registry ----
 R_PLOT_REGISTRY <- list(
-  plot_test_scatter = plot_test_scatter
+  plot_test_scatter       = plot_test_scatter,
+  plot_embedding_discrete = plot_embedding_discrete,
+  plot_embedding_feature  = plot_embedding_feature,
+  plot_marker_heatmap     = plot_marker_heatmap
 )
 
 # ---- CLI dispatcher (runs only when script is invoked directly) ----
