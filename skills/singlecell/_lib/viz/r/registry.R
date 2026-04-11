@@ -25,6 +25,9 @@ source(file.path(script_dir, "embedding.R"))
 source(file.path(script_dir, "markers.R"))
 source(file.path(script_dir, "pseudotime.R"))
 source(file.path(script_dir, "enrichment.R"))
+source(file.path(script_dir, "velocity.R"))
+source(file.path(script_dir, "communication.R"))
+source(file.path(script_dir, "de.R"))
 
 # ---- Test stub renderer ----
 # Minimal ggplot2 scatter that proves the Python -> R round-trip works.
@@ -59,7 +62,12 @@ R_PLOT_REGISTRY <- list(
   plot_pseudotime_dynamic = plot_pseudotime_dynamic,
   plot_enrichment_bar     = plot_enrichment_bar,
   plot_gsea_mountain      = plot_gsea_mountain,
-  plot_gsea_nes_heatmap   = plot_gsea_nes_heatmap
+  plot_gsea_nes_heatmap   = plot_gsea_nes_heatmap,
+  plot_velocity           = plot_velocity,
+  plot_de_volcano         = plot_de_volcano,
+  plot_de_heatmap         = plot_de_heatmap,
+  plot_ccc_heatmap        = plot_ccc_heatmap,
+  plot_ccc_network        = plot_ccc_network
 )
 
 # ---- CLI dispatcher (runs only when script is invoked directly) ----

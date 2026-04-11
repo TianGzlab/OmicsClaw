@@ -55,8 +55,9 @@ plot_velocity <- function(data_dir, out_path, params) {
       plot_type <- if (has_umap) "grid" else "scatter"
     }
 
-    n_bins <- as.integer(params[["n_bins"]])
-    if (is.na(n_bins) || n_bins < 2) n_bins <- 20L
+    n_bins_raw <- params[["n_bins"]]
+    n_bins <- if (is.null(n_bins_raw)) 20L else as.integer(n_bins_raw)
+    if (length(n_bins) == 0 || is.na(n_bins) || n_bins < 2) n_bins <- 20L
 
     # ---- Scatter fallback (no UMAP) ----
     if (!has_umap || plot_type == "scatter") {
