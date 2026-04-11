@@ -17,7 +17,7 @@
 
 - [ ] **SP-01**: embedding.R — CellDimPlot 等效（ggplot2 scatter + 配色 + 标签），读 figure_data embedding CSV
 - [ ] **SP-02**: embedding.R — FeatureDimPlot 等效（连续值 scatter + viridis 配色），读 figure_data embedding CSV
-- [ ] **SP-03**: markers.R — GroupHeatmap 等效（ComplexHeatmap 分组热图），读 figure_data marker CSV
+- [x] **SP-03**: markers.R — GroupHeatmap 等效（ComplexHeatmap 分组热图），读 figure_data marker CSV
 
 ## R Enhanced Skill-Specific Plots
 
@@ -83,7 +83,7 @@
 | RM-04 | Phase 15 | Pending |
 | SP-01 | Phase 14 | Pending |
 | SP-02 | Phase 14 | Pending |
-| SP-03 | Phase 14 | Pending |
+| SP-03 | Phase 14 | Complete |
 | SK-01 | Phase 17 | Pending |
 | SK-02 | Phase 17 | Pending |
 | SK-03 | Phase 16 | Pending |

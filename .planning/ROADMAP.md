@@ -172,7 +172,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [ ] 14-01-PLAN.md — embedding.R: discrete cell-type scatter + continuous feature overlay (SP-01, SP-02)
-- [ ] 14-02-PLAN.md — markers.R: ComplexHeatmap grouped marker heatmap (SP-03)
+- [x] 14-02-PLAN.md — markers.R: ComplexHeatmap grouped marker heatmap (SP-03)
 
 ### Phase 15: R Analysis Methods
 **Goal**: Users can run 4 new R-backed analysis methods (monocle3, gsea, gsva, proportion_test) that produce results merged back into the AnnData object
@@ -241,7 +241,7 @@ Plans:
 | 11. 标准化 sc-standardize-input | v1.0 | - | Complete | 2026-04-10 |
 | 12. 最终验证 | v1.0 | - | Complete | 2026-04-10 |
 | 13. R Enhanced Framework Foundation | v2.0 | 2/2 | Complete   | 2026-04-11 |
-| 14. Shared Embedding and Marker Plots | v2.0 | 0/2 | Not started | - |
+| 14. Shared Embedding and Marker Plots | v2.0 | 1/2 | In Progress|  |
 | 15. R Analysis Methods | v2.0 | 0/? | Not started | - |
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 0/? | Not started | - |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 0/? | Not started | - |
