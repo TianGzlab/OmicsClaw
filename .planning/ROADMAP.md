@@ -234,7 +234,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 18-01-PLAN.md — Group A: 8 skills with dedicated R renderers (sc-cell-annotation, sc-de, sc-markers, sc-enrichment, sc-pseudotime, sc-cell-communication, sc-velocity, sc-differential-abundance)
-- [ ] 18-02-PLAN.md — Group B first half: 6 skills with shared embedding renderers (sc-preprocessing, sc-batch-integration, sc-clustering, sc-doublet-detection, sc-qc, sc-pathway-scoring)
+- [x] 18-02-PLAN.md — Group B first half: 6 skills with shared embedding renderers (sc-preprocessing, sc-batch-integration, sc-clustering, sc-doublet-detection, sc-qc, sc-pathway-scoring)
 - [x] 18-03-PLAN.md — Group B second half: 5 skills (sc-grn, sc-gene-programs, sc-metacell, sc-perturb, sc-cytotrace) + docs/R-DEPENDENCIES.md
 
 ---
@@ -260,7 +260,7 @@ Plans:
 | 15. R Analysis Methods | v2.0 | 2/4 | In Progress|  |
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 3/3 | Complete   | 2026-04-11 |
-| 18. Skill Wiring --r-enhanced Flag | v2.0 | 2/3 | In Progress|  |
+| 18. Skill Wiring --r-enhanced Flag | v2.0 | 3/3 | Complete   | 2026-04-11 |
 
 ---
 *Last updated: 2026-04-11 after Phase 18 plan creation*
