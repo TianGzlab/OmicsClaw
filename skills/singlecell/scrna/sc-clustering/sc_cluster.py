@@ -56,6 +56,11 @@ SKILL_NAME = "sc-clustering"
 SKILL_VERSION = "0.1.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-clustering/sc_cluster.py"
 
+R_ENHANCED_PLOTS = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
+}
+
 
 def _candidate_embeddings(adata) -> list[str]:
     preferred = [key for key in ("X_pca", "X_harmony", "X_scvi", "X_scanvi", "X_scanorama") if key in adata.obsm]
@@ -783,6 +788,21 @@ def get_demo_data():
     return adata
 
 
+def _render_r_enhanced(output_dir, figure_data_dir, r_enhanced):
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
+
 def main():
     parser = argparse.ArgumentParser(description="Single-Cell Clustering")
     parser.add_argument("--input", dest="input_path")
@@ -802,6 +822,7 @@ def main():
     parser.add_argument("--diffmap-n-comps", type=int, default=15)
     parser.add_argument("--phate-knn", type=int, default=15)
     parser.add_argument("--phate-decay", type=int, default=40)
+    parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -964,6 +985,8 @@ def main():
         {"skill": "sc-pseudotime", "reason": "Optional: infer developmental trajectories", "priority": "optional"},
     ]
     result_data["preprocessing_state_after"] = "clustered"
+    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced)
+    result_data["r_enhanced_figures"] = r_enhanced_figures
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
     write_output_readme(

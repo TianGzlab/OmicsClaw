@@ -49,6 +49,11 @@ SKILL_NAME = "sc-batch-integration"
 SKILL_VERSION = "0.4.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-batch-integration/sc_integrate.py"
 
+R_ENHANCED_PLOTS = {
+    "plot_embedding_discrete": "r_embedding_discrete.png",
+    "plot_embedding_feature": "r_embedding_feature.png",
+}
+
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "harmony": MethodConfig(
         name="harmony",
@@ -872,6 +877,21 @@ def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = F
     )
 
 
+def _render_r_enhanced(output_dir, figure_data_dir, r_enhanced):
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
+
 def main():
     parser = argparse.ArgumentParser(description="Single-Cell Batch Integration")
     parser.add_argument("--input", dest="input_path")
@@ -892,6 +912,7 @@ def main():
     parser.add_argument("--simba-n-components", type=int, default=None)
     parser.add_argument("--simba-k", type=int, default=None)
     parser.add_argument("--simba-num-workers", type=int, default=None)
+    parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -1039,6 +1060,8 @@ def main():
         {"skill": "sc-clustering", "reason": "Identify cell clusters on integrated embedding", "priority": "recommended"},
     ]
     result_data["preprocessing_state_after"] = "normalized"
+    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced)
+    result_data["r_enhanced_figures"] = r_enhanced_figures
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
