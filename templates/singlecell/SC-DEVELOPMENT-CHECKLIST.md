@@ -63,3 +63,14 @@ Use this checklist before saying a single-cell skill is aligned with OmicsClaw.
 - [ ] error messages for missing references include download URLs and alternative methods
 - [ ] knowledge_base skill-guide includes troubleshooting for the most common failure mode
 - [ ] fallbacks are transparent: logged at WARNING, recorded in summary, shown in stdout and report.md
+
+## R Enhanced Plots (optional, only if skill supports --r-enhanced)
+
+- [ ] `--r-enhanced` argparse flag added to skill's argument parser
+- [ ] `R_ENHANCED_PLOTS` dict defined at module level: maps renderer name → output filename (e.g. `"plot_cell_dim": "r_cell_dim.png"`)
+- [ ] `_render_r_enhanced(output_dir, figure_data_dir, r_enhanced)` called after `_render_figures()` — never before
+- [ ] R Enhanced figures written to `figures/r_enhanced/` subdirectory (not mixed with Python figures)
+- [ ] `call_r_plot()` is the only entry point — imported from `skills.singlecell._lib.viz.r`
+- [ ] R failure produces a Python `warnings.warn()` only — Python figures are unaffected and already on disk
+- [ ] result.json includes R Enhanced figures with `"backend": "r_enhanced"` tag
+- [ ] Each renderer name in `R_ENHANCED_PLOTS` is registered in `skills/singlecell/_lib/viz/r/registry.R`'s `R_PLOT_REGISTRY` dict before the skill ships
