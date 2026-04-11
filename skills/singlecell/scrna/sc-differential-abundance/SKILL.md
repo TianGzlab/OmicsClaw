@@ -34,9 +34,12 @@ metadata:
 
 ## Current Methods
 
-1. `milo`
-2. `sccoda`
-3. `simple` (exploratory proportion screen)
+| Method | Description | Dependencies |
+|---|---|---|
+| `milo` | Neighborhood-level DA using Milo (replicate-aware) | pertpy |
+| `sccoda` | Bayesian compositional analysis | pertpy |
+| `simple` | Exploratory proportion screen (no replicates needed) | statsmodels |
+| `proportion_test_r` | Monte Carlo permutation test for cell type proportion changes. Produces obs_log2FD with bootstrap 95% CI per cell type per comparison. | base R only |
 
 ## Key Inputs
 
@@ -59,11 +62,22 @@ metadata:
 | `--prop` | Milo neighborhood sampling fraction |
 | `--n-neighbors` | KNN size if a graph must be rebuilt |
 
+## Usage Examples
+
+```bash
+# Proportion test (R, no external deps)
+python omicsclaw.py run sc-differential-abundance --demo --method proportion_test_r --output /tmp/prop_test_demo
+
+# Milo (replicate-aware)
+python omicsclaw.py run sc-differential-abundance --demo --method milo --output /tmp/milo_demo
+```
+
 ## Notes
 
 - `milo` is the preferred neighborhood-level DA path when replicate structure is available.
 - `sccoda` is a compositional Bayesian path and requires a reference cell type concept.
 - `simple` is not a replacement for replicate-aware DA; it is a lightweight fallback.
+- `proportion_test_r` uses base R only (zero installs needed). It runs a Monte Carlo permutation test and produces lollipop plots with bootstrap confidence intervals.
 
 ## Outputs
 

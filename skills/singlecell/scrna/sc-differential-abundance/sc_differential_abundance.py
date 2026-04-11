@@ -63,8 +63,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = "sc-differential-abundance"
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.3.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py"
+R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +341,153 @@ def _write_reproducibility(output_dir: Path, params: dict, input_file: str | Non
 
 
 # ---------------------------------------------------------------------------
+# proportion_test_r (R bridge)
+# ---------------------------------------------------------------------------
+
+def _run_proportion_test_r(adata, condition_key: str, cell_type_key: str, output_dir: Path, params: dict) -> dict:
+    """Run base-R Monte Carlo permutation test via RScriptRunner."""
+    import warnings
+    from omicsclaw.core.r_script_runner import RScriptRunner, RScriptError
+
+    r_script = R_SCRIPTS_DIR / "sc_proportion_test_r.R"
+    if not r_script.exists():
+        raise FileNotFoundError(f"R script not found: {r_script}")
+
+    r_work_dir = output_dir / "r_work"
+    r_work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Export cell metadata for R (cell_id + relevant columns only)
+    meta_cols = [cell_type_key, condition_key]
+    meta_df = adata.obs[meta_cols].copy().reset_index()
+    meta_df.columns = ["cell_id"] + meta_cols
+    meta_csv = r_work_dir / "cell_meta.csv"
+    meta_df.to_csv(meta_csv, index=False)
+
+    comparison = params.get("contrast", None) or "auto"
+    n_perm = str(params.get("n_permutations", 1000))
+
+    runner = RScriptRunner(timeout=300)
+    result_csv = r_work_dir / "proportion_test_results.csv"
+    r_success = True
+    try:
+        runner.run_script(
+            r_script,
+            args=[str(meta_csv), str(r_work_dir), cell_type_key,
+                  condition_key, comparison, n_perm],
+            expected_outputs=["proportion_test_results.csv"],
+            output_dir=r_work_dir,
+        )
+    except (RScriptError, FileNotFoundError) as exc:
+        warnings.warn(f"proportion_test_r R script failed: {exc}")
+        r_success = False
+
+    result_df = pd.DataFrame()
+    if r_success and result_csv.exists():
+        try:
+            result_df = pd.read_csv(result_csv)
+        except Exception as exc:
+            warnings.warn(f"Could not read proportion_test_r results: {exc}")
+
+    # Store in adata.uns
+    if not result_df.empty:
+        adata.uns["proportion_test_r_results"] = result_df.to_dict(orient="list")
+
+    return {
+        "method": "proportion_test_r",
+        "backend": "base_R",
+        "r_success": r_success,
+        "n_comparisons": int(result_df["comparison"].nunique()) if not result_df.empty else 0,
+        "n_cell_types": int(result_df["clusters"].nunique()) if not result_df.empty else 0,
+        "n_significant": int((result_df["FDR"] < 0.05).sum()) if not result_df.empty and "FDR" in result_df.columns else 0,
+    }
+
+
+def _plot_proportion_test_r(result_df: pd.DataFrame, output_dir: Path) -> list[dict]:
+    """Generate lollipop plot with bootstrap CI error bars from R output."""
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    plots: list[dict] = []
+
+    if result_df.empty:
+        # Placeholder figure for empty results
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.text(0.5, 0.5, "No proportion test results available",
+                ha="center", va="center", fontsize=12, color="#999999")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        out_path = figures_dir / "proportion_test_r_no_results.png"
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        plots.append({
+            "plot_id": "proportion_test_r_no_results",
+            "role": "result",
+            "backend": "python",
+            "renderer": "proportion_test_r_lollipop",
+            "filename": "proportion_test_r_no_results.png",
+            "title": "Proportion Test (no results)",
+            "description": "No valid results from R permutation test.",
+            "status": "rendered",
+            "path": str(out_path),
+        })
+        return plots
+
+    # One plot per comparison
+    for comp_name, comp_df in result_df.groupby("comparison"):
+        comp_df = comp_df.sort_values("obs_log2FD", ascending=True).copy()
+        n_types = len(comp_df)
+
+        fig, ax = plt.subplots(figsize=(8, max(3, 0.35 * n_types)))
+
+        colors = ["#D73027" if fdr < 0.05 else "#999999" for fdr in comp_df["FDR"]]
+        y_pos = np.arange(n_types)
+
+        # Error bars (bootstrap CI)
+        xerr_lo = comp_df["obs_log2FD"].values - comp_df["boot_CI_2.5"].values
+        xerr_hi = comp_df["boot_CI_97.5"].values - comp_df["obs_log2FD"].values
+        xerr = np.array([xerr_lo, xerr_hi])
+        # Clamp negative error bar widths to 0
+        xerr = np.maximum(xerr, 0)
+
+        ax.errorbar(
+            comp_df["obs_log2FD"].values, y_pos,
+            xerr=xerr,
+            fmt="none", ecolor="#666666", elinewidth=1, capsize=3,
+        )
+        ax.scatter(
+            comp_df["obs_log2FD"].values, y_pos,
+            c=colors, s=60, zorder=5, edgecolors="white", linewidths=0.5,
+        )
+        ax.axvline(0, color="black", linestyle="--", linewidth=0.8, alpha=0.6)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(comp_df["clusters"].values)
+        ax.set_xlabel("Observed log2(Fold Difference)")
+        ax.set_title(f"Proportion Test: {comp_name}")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        fig.tight_layout()
+
+        safe_name = str(comp_name).replace(" ", "_")
+        out_path = figures_dir / f"proportion_test_r_{safe_name}.png"
+        fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        plots.append({
+            "plot_id": f"proportion_test_r_{safe_name}",
+            "role": "result",
+            "backend": "python",
+            "renderer": "proportion_test_r_lollipop",
+            "filename": f"proportion_test_r_{safe_name}.png",
+            "title": f"Proportion Test: {comp_name}",
+            "description": f"Lollipop plot with bootstrap 95% CI. Red = FDR < 0.05.",
+            "status": "rendered",
+            "path": str(out_path),
+        })
+
+    return plots
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -348,7 +496,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--input", type=str, default=None)
     p.add_argument("--output", type=str, required=True)
     p.add_argument("--demo", action="store_true")
-    p.add_argument("--method", type=str, default="milo", choices=["milo", "sccoda", "simple"])
+    p.add_argument("--method", type=str, default="milo", choices=["milo", "sccoda", "simple", "proportion_test_r"])
     p.add_argument("--condition-key", type=str, default="condition")
     p.add_argument("--sample-key", type=str, default="sample")
     p.add_argument("--cell-type-key", type=str, default="cell_type")
@@ -358,6 +506,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--prop", type=float, default=0.1)
     p.add_argument("--n-neighbors", type=int, default=30)
     p.add_argument("--min-count", type=int, default=10)
+    p.add_argument("--n-permutations", type=int, default=1000, help="Permutations for proportion_test_r")
     return p.parse_args()
 
 
@@ -499,6 +648,20 @@ def main() -> int:
             "n_nhoods": int(len(nhood)),
             "n_significant": int((nhood.get("SpatialFDR", pd.Series(dtype=float)) <= args.fdr).sum()) if not nhood.empty else 0,
         })
+
+    elif args.method == "proportion_test_r":
+        prop_params = {
+            "contrast": args.contrast,
+            "n_permutations": args.n_permutations,
+        }
+        prop_summary = _run_proportion_test_r(adata, args.condition_key, args.cell_type_key, output_dir, prop_params)
+        result_df = pd.DataFrame(adata.uns.get("proportion_test_r_results", {}))
+        if not result_df.empty:
+            result_df.to_csv(tables_dir / "proportion_test_results.csv", index=False)
+            result_tables["proportion_test_results"] = "tables/proportion_test_results.csv"
+        prop_plots = _plot_proportion_test_r(result_df, output_dir)
+        figures.extend(prop_plots)
+        summary.update(prop_summary)
 
     else:  # sccoda
         mdata, effect_df = run_sccoda_da(
