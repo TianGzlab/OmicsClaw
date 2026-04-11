@@ -100,6 +100,11 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         description="Gene set enrichment analysis via clusterProfiler + fgsea (R bridge)",
         dependencies=(),
     ),
+    "gsva_r": MethodConfig(
+        name="gsva_r",
+        description="Gene Set Variation Analysis (group-level pathway scores) via GSVA R bridge",
+        dependencies=(),
+    ),
 }
 
 
@@ -687,6 +692,147 @@ def _run_gsea_r(adata, ranking_df: pd.DataFrame, output_dir: Path, params: dict)
     }
 
 
+def _export_group_expr_for_gsva(adata, groupby: str, output_dir: Path) -> Path:
+    """Average expression per group, exported as CSV rows=groups, cols=genes."""
+    groups = adata.obs[groupby].astype(str).unique().tolist()
+    X = adata.X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    rows = {}
+    for grp in groups:
+        mask = adata.obs[groupby].astype(str) == grp
+        rows[grp] = np.asarray(X[mask]).mean(axis=0)
+    group_expr_df = pd.DataFrame(rows, index=adata.var_names).T  # groups x genes
+    csv_path = output_dir / "group_expr_for_gsva.csv"
+    group_expr_df.to_csv(csv_path)
+    return csv_path
+
+
+def _run_gsva_r(adata, groupby: str, output_dir: Path, params: dict) -> tuple[pd.DataFrame, dict]:
+    """Run GSVA group-level pathway scoring via R bridge. Returns (scores_df_long, summary_dict)."""
+    import warnings
+
+    from omicsclaw.core.r_script_runner import RScriptError, RScriptRunner
+
+    r_script = R_SCRIPTS_PROJECT_DIR / "sc_gsva_r.R"
+    if not r_script.exists():
+        raise FileNotFoundError(f"R script not found: {r_script}")
+
+    r_work_dir = output_dir / "r_work_gsva"
+    r_work_dir.mkdir(parents=True, exist_ok=True)
+
+    group_expr_csv = _export_group_expr_for_gsva(adata, groupby, r_work_dir)
+
+    species_map = {"human": "Homo_sapiens", "mouse": "Mus_musculus"}
+    species = species_map.get(params.get("species", "human"), params.get("species", "Homo_sapiens"))
+    db = params.get("gene_set_db", "GO_BP") or "GO_BP"
+    db_map = {"go_bp": "GO_BP", "kegg": "KEGG", "reactome": "Reactome"}
+    db = db_map.get(db.lower(), db)
+    gsva_method = params.get("gsva_method", "gsva")
+
+    runner = RScriptRunner(timeout=1800)  # GSVA can be slow on large gene sets
+    result_csv = r_work_dir / "gsva_r_scores.csv"
+    r_success = True
+    try:
+        runner.run_script(
+            r_script,
+            args=[str(group_expr_csv), str(r_work_dir), species, db, gsva_method, groupby],
+            expected_outputs=["gsva_r_scores.csv"],
+            output_dir=r_work_dir,
+        )
+    except (RScriptError, FileNotFoundError) as exc:
+        warnings.warn(f"gsva_r R script failed (Python figures unaffected): {exc}")
+        r_success = False
+
+    scores_df = pd.DataFrame()
+    if r_success and result_csv.exists():
+        try:
+            scores_df = pd.read_csv(result_csv)
+        except Exception as exc:
+            warnings.warn(f"Could not read gsva_r scores: {exc}")
+
+    if not scores_df.empty:
+        adata.uns["gsva_r_scores"] = scores_df.to_dict(orient="list")
+
+    return scores_df, {
+        "method": "gsva_r",
+        "r_success": r_success,
+        "n_pathways": int(scores_df["pathway"].nunique()) if not scores_df.empty else 0,
+        "n_groups": int(scores_df["group"].nunique()) if not scores_df.empty else 0,
+        "species": species,
+        "db": db,
+        "gsva_method": gsva_method,
+        "warnings": [] if r_success else ["R gsva_r script did not succeed; heatmap may be empty."],
+    }
+
+
+def _plot_gsva_heatmap(scores_df: pd.DataFrame, output_dir: Path) -> list[dict]:
+    """Plot a heatmap of GSVA scores (pathways x groups). Returns figure metadata list."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figures_dir = output_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    fig_path = figures_dir / "gsva_r_heatmap.png"
+    fig_meta: list[dict] = []
+
+    if scores_df.empty:
+        # Write a placeholder figure
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "GSVA scores unavailable\n(R script did not produce results)",
+                ha="center", va="center", fontsize=12, color="gray")
+        ax.set_axis_off()
+        fig.savefig(fig_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        fig_meta.append({"name": "gsva_r_heatmap", "path": str(fig_path), "placeholder": True})
+        return fig_meta
+
+    # Pivot to wide format: pathways x groups
+    try:
+        wide = scores_df.pivot(index="pathway", columns="group", values="gsva_score")
+    except Exception:
+        wide = scores_df.pivot_table(index="pathway", columns="group", values="gsva_score", aggfunc="mean")
+
+    # Sort by variance to keep top 30 most variable pathways
+    if len(wide) > 30:
+        row_var = wide.var(axis=1).sort_values(ascending=False)
+        wide = wide.loc[row_var.index[:30]]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(wide.columns) * 0.8), max(4, len(wide) * 0.3)))
+    try:
+        import seaborn as sns
+
+        sns.heatmap(
+            wide,
+            cmap="RdBu_r",
+            center=0,
+            ax=ax,
+            xticklabels=True,
+            yticklabels=True,
+            linewidths=0.5,
+            cbar_kws={"label": "GSVA score"},
+        )
+    except ImportError:
+        im = ax.imshow(wide.values, cmap="RdBu_r", aspect="auto")
+        ax.set_xticks(range(len(wide.columns)))
+        ax.set_xticklabels(wide.columns, rotation=45, ha="right")
+        ax.set_yticks(range(len(wide.index)))
+        ax.set_yticklabels(wide.index)
+        plt.colorbar(im, ax=ax, label="GSVA score")
+
+    ax.set_title("GSVA Pathway Activity Scores", fontsize=12)
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    plt.tight_layout()
+    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    fig_meta.append({"name": "gsva_r_heatmap", "path": str(fig_path), "placeholder": False})
+    logger.info("GSVA heatmap saved to %s", fig_path)
+    return fig_meta
+
+
 def _build_group_summary(enrich_df: pd.DataFrame, *, fdr_threshold: float) -> pd.DataFrame:
     if enrich_df.empty:
         return pd.DataFrame(columns=["group", "n_terms", "n_significant", "top_term", "top_abs_score", "best_pvalue_adj"])
@@ -876,6 +1022,12 @@ def _write_report(
                 f"- `ora_max_genes`: {params['ora_max_genes']}",
             ]
         )
+    elif params["method"] == "gsva_r":
+        lines.extend(
+            [
+                f"- `gsva_method`: {params.get('gsva_method', 'gsva')}",
+            ]
+        )
     else:
         lines.extend(
             [
@@ -944,6 +1096,8 @@ def _write_reproducibility(output_dir: Path, *, params: dict, input_file: str | 
     if params["method"] == "ora":
         for key in ("ora_padj_cutoff", "ora_log2fc_cutoff", "ora_max_genes"):
             parts.extend([f"--{key.replace('_', '-')}", str(params[key])])
+    elif params["method"] == "gsva_r":
+        pass  # gsva_r uses R-side gene sets; no extra CLI params needed
     else:
         for key in ("gsea_ranking_metric", "gsea_min_size", "gsea_max_size", "gsea_permutation_num", "gsea_weight", "gsea_seed"):
             parts.extend([f"--{key.replace('_', '-')}", str(params[key])])
@@ -1011,6 +1165,91 @@ def main() -> None:
         logger,
         demo_mode=args.demo,
     )
+
+    # --- gsva_r: dedicated R bridge path (bypasses gene set resolution entirely) ---
+    if method == "gsva_r":
+        resolved_groupby = source_meta.get("groupby") or args.groupby
+        if not resolved_groupby:
+            resolved_groupby, _, _ = _resolve_groupby(adata, args.groupby)
+        if not resolved_groupby:
+            raise ValueError("gsva_r needs a groupby column. Use --groupby <column>.")
+        gsva_params = {
+            "species": args.species,
+            "gene_set_db": args.gene_set_db,
+            "gsva_method": "gsva",
+        }
+        gsva_scores_df, gsva_meta = _run_gsva_r(adata, resolved_groupby, output_dir, gsva_params)
+        gsva_plots = _plot_gsva_heatmap(gsva_scores_df, output_dir)
+
+        # Save processed h5ad
+        source_matrix_contract = get_matrix_contract(adata)
+        input_contract, matrix_contract = propagate_singlecell_contracts(
+            adata,
+            adata,
+            producer_skill=SKILL_NAME,
+            x_kind=source_matrix_contract.get("X") or infer_x_matrix_kind(adata),
+            raw_kind=source_matrix_contract.get("raw"),
+            primary_cluster_key=source_matrix_contract.get("primary_cluster_key") or resolved_groupby,
+        )
+        store_analysis_metadata(adata, SKILL_NAME, method, {"method": method, "groupby": resolved_groupby, **gsva_params})
+        output_h5ad = output_dir / "processed.h5ad"
+        save_h5ad(adata, output_h5ad)
+
+        # Write tables
+        tables_dir = output_dir / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        if not gsva_scores_df.empty:
+            gsva_scores_df.to_csv(tables_dir / "gsva_r_scores.csv", index=False)
+
+        summary = {
+            "method": "gsva_r",
+            "ranking_source": source_meta.get("ranking_source"),
+            "upstream_skill": source_meta.get("upstream_skill"),
+            "groupby": resolved_groupby,
+            "n_groups": gsva_meta.get("n_groups", 0),
+            "n_gene_sets_available": 0,
+            "n_terms_tested": gsva_meta.get("n_pathways", 0),
+            "n_significant_terms": gsva_meta.get("n_pathways", 0),
+            "engine_summary": "r.gsva_r",
+            "requested_engine": "r",
+            "resolved_engine": "r.gsva_r",
+            "requested_source": gsva_meta.get("db", "GO_BP"),
+            "resolved_source": gsva_meta.get("db", "GO_BP"),
+            "library_mode": "r_gsva_r",
+            "warnings": list(gsva_meta.get("warnings", [])),
+            "fdr_threshold": 0.05,
+            "r_success": gsva_meta.get("r_success", False),
+            "n_pathways": gsva_meta.get("n_pathways", 0),
+        }
+
+        # Write report
+        _write_report(output_dir, summary=summary, params={"method": method, "groupby": resolved_groupby, **gsva_params},
+                       input_file=input_file, group_summary_df=pd.DataFrame())
+        _write_reproducibility(output_dir, params={"method": method, "groupby": resolved_groupby, **gsva_params},
+                                input_file=input_file, demo=args.demo)
+
+        checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
+        result_data = {
+            "params": {"method": method, "groupby": resolved_groupby, **gsva_params},
+            "input_contract": input_contract,
+            "matrix_contract": matrix_contract,
+            "requested_source": gsva_meta.get("db", "GO_BP"),
+            "resolved_source": gsva_meta.get("db", "GO_BP"),
+            "library_mode": "r_gsva_r",
+            "visualization": {"available_figure_data": [p["path"] for p in gsva_plots]},
+            "ranking_source": source_meta,
+        }
+        result_data["next_steps"] = [
+            {"skill": "sc-cell-communication", "reason": "Explore ligand-receptor interactions between cell types", "priority": "optional"},
+        ]
+        write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
+        result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
+        write_standard_run_artifacts(output_dir, result_payload, summary)
+
+        print(f"Success: {SKILL_NAME}")
+        print(f"  Output: {output_dir}")
+        print(f"GSVA complete: method=gsva_r, groups={gsva_meta.get('n_groups', 0)}, pathways={gsva_meta.get('n_pathways', 0)}")
+        return
 
     gene_sets, resolved_gene_sets_path, gene_set_meta = _resolve_gene_sets(
         demo=args.demo,

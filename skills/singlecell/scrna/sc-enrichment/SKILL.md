@@ -230,6 +230,14 @@ python omicsclaw.py run sc-enrichment \
   --input <sc-de-output-dir> \
   --method gsea_r \
   --output <dir>
+
+# gsva_r: GSVA group-level pathway activity scores via R bridge
+python omicsclaw.py run sc-enrichment --demo --method gsva_r --output /tmp/gsva_r_demo
+python omicsclaw.py run sc-enrichment \
+  --input <processed.h5ad> \
+  --method gsva_r \
+  --groupby leiden \
+  --output <dir>
 ```
 
 ## Methods
@@ -239,12 +247,13 @@ python omicsclaw.py run sc-enrichment \
 | `ora` | Over-representation analysis on positive markers / DE genes. | gseapy (Python) |
 | `gsea` | Preranked gene set enrichment on full marker / DE rankings. | gseapy (Python) |
 | `gsea_r` | Gene set enrichment analysis via clusterProfiler + fgsea R bridge. Requires ranked DE/marker input. Produces NES scores per group. | fgsea 1.32.4, clusterProfiler 4.14.0 (pre-installed in conda env) |
+| `gsva_r` | Gene Set Variation Analysis producing group-level pathway activity scores. Requires GSVA R package (installed via BiocManager). Outputs pathway x group score matrix stored in adata.uns. | GSVA >= 2.0 (install on first use) |
 
 ## Public Parameters
 
 | Parameter | Role |
 |-----------|------|
-| `--method` | `ora`, `gsea`, or `gsea_r` |
+| `--method` | `ora`, `gsea`, `gsea_r`, or `gsva_r` |
 | `--engine` | `auto`, `python`, or `r` |
 | `--gene-sets` | local GMT/JSON gene-set file |
 | `--gene-set-db` | built-in library key (`hallmark`, `kegg`, `go_bp`, `reactome`, …) |
