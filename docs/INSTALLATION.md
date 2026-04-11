@@ -296,6 +296,8 @@ Notes:
 
 ## R Dependencies
 
+For R Enhanced plotting dependencies (ggplot2, ComplexHeatmap, monocle3, GSVA, etc.), see [docs/R-DEPENDENCIES.md](R-DEPENDENCIES.md).
+
 Some skills rely on R packages invoked through subprocess-based R workflows.
 
 Install R first:
