@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: R Enhanced Gallery
 status: executing
-stopped_at: Completed 15-03-PLAN.md (gsva_r method for sc-enrichment)
-last_updated: "2026-04-11T08:42:00Z"
+stopped_at: Completed 16-01-PLAN.md (pseudotime.R LineagePlot + DynamicPlot renderers)
+last_updated: "2026-04-11T09:42:17.237Z"
 last_activity: 2026-04-11 — Phase 15 Plan 03 complete (gsva_r method for sc-enrichment)
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 7
-  percent: 88
+  completed_phases: 3
+  total_plans: 13
+  completed_plans: 9
+  percent: 69
 ---
 
 # Project State
@@ -53,6 +53,8 @@ Progress: [██████████] 100%
 | Phase 15 P02 | 261s | 2 tasks | 3 files |
 | Phase 15 P01 | 560 | 2 tasks | 3 files |
 | Phase 15 P03 | 1593s | 2 tasks | 3 files |
+| Phase 16 P02 | 219 | 2 tasks | 2 files |
+| Phase 16 P01 | 223s | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -73,6 +75,8 @@ Progress: [██████████] 100%
 - [Phase 15]: GSVA 2.0.7 uses gsvaParam() (lowercase) not GSVAParam(); BPPARAM on gsva() call not constructor
 - [Phase 15]: gsva_r gets dedicated early-exit path in main() — bypasses gene set resolution entirely (R handles gene sets)
 - [Phase 15]: magick R package needs LIBRARY_PATH=/usr/lib/x86_64-linux-gnu for conda linker to find system ImageMagick
+- [Phase 16]: patchwork is optional for GSEA mountain plot; NES heatmap uses base R pivot (no tidyr)
+- [Phase 16]: Loess fallback for trajectory curves when no slingshot_curves.csv; synthetic expression fallback in DynamicPlot for demo
 
 ### Pending Todos
 
@@ -86,6 +90,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-11T08:42:00Z
-Stopped at: Completed 15-03-PLAN.md (gsva_r method for sc-enrichment)
+Last session: 2026-04-11T09:42:14.668Z
+Stopped at: Completed 16-01-PLAN.md (pseudotime.R LineagePlot + DynamicPlot renderers)
 Resume file: None

@@ -26,13 +26,13 @@
 - [ ] **SK-02**: de.R — FeatureHeatmap（ComplexHeatmap 表达热图）
 
 ### sc-enrichment
-- [ ] **SK-03**: enrichment.R — EnrichmentPlot bar/dot（富集分析条形/点图）
-- [ ] **SK-04**: enrichment.R — GSEAPlot line（经典 GSEA mountain plot + running score）
-- [ ] **SK-05**: enrichment.R — GSEAPlot comparison（多组 NES heatmap）
+- [x] **SK-03**: enrichment.R — EnrichmentPlot bar/dot（富集分析条形/点图）
+- [x] **SK-04**: enrichment.R — GSEAPlot line（经典 GSEA mountain plot + running score）
+- [x] **SK-05**: enrichment.R — GSEAPlot comparison（多组 NES heatmap）
 
 ### sc-pseudotime
-- [ ] **SK-06**: pseudotime.R — LineagePlot（轨迹曲线 + loess 平滑叠加在 embedding 上）
-- [ ] **SK-07**: pseudotime.R — DynamicPlot（基因沿拟时序表达趋势 + CI ribbon，Python 无等效）
+- [x] **SK-06**: pseudotime.R — LineagePlot（轨迹曲线 + loess 平滑叠加在 embedding 上）
+- [x] **SK-07**: pseudotime.R — DynamicPlot（基因沿拟时序表达趋势 + CI ribbon，Python 无等效）
 
 ### sc-cell-communication
 - [ ] **SK-08**: communication.R — CCCHeatmap（细胞通讯热图/点图）
@@ -86,11 +86,11 @@
 | SP-03 | Phase 14 | Complete |
 | SK-01 | Phase 17 | Pending |
 | SK-02 | Phase 17 | Pending |
-| SK-03 | Phase 16 | Pending |
-| SK-04 | Phase 16 | Pending |
-| SK-05 | Phase 16 | Pending |
-| SK-06 | Phase 16 | Pending |
-| SK-07 | Phase 16 | Pending |
+| SK-03 | Phase 16 | Complete |
+| SK-04 | Phase 16 | Complete |
+| SK-05 | Phase 16 | Complete |
+| SK-06 | Phase 16 | Complete |
+| SK-07 | Phase 16 | Complete |
 | SK-08 | Phase 17 | Pending |
 | SK-09 | Phase 17 | Pending |
 | SK-10 | Phase 17 | Pending |

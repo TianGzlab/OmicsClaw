@@ -202,8 +202,8 @@ Plans:
   5. enrichment.R GSEAPlot comparison outputs a multi-group NES heatmap
 **Plans**: 2 plans
 Plans:
-- [ ] 16-01-PLAN.md — pseudotime.R: LineagePlot (trajectory + loess) + DynamicPlot (gene trend + CI ribbon) (SK-06, SK-07)
-- [ ] 16-02-PLAN.md — enrichment.R: EnrichmentPlot bar + GSEAPlot mountain + GSEAPlot NES heatmap (SK-03, SK-04, SK-05)
+- [x] 16-01-PLAN.md — pseudotime.R: LineagePlot (trajectory + loess) + DynamicPlot (gene trend + CI ribbon) (SK-06, SK-07)
+- [x] 16-02-PLAN.md — enrichment.R: EnrichmentPlot bar + GSEAPlot mountain + GSEAPlot NES heatmap (SK-03, SK-04, SK-05)
 
 ### Phase 17: CCC, Velocity, and DE R Enhanced Plots
 **Goal**: sc-cell-communication, sc-velocity, sc-de, and sc-markers skills generate R Enhanced plots that enhance visualization of interactions, dynamics, and differential expression
@@ -254,7 +254,7 @@ Plans:
 | 13. R Enhanced Framework Foundation | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 14. Shared Embedding and Marker Plots | v2.0 | 1/2 | In Progress|  |
 | 15. R Analysis Methods | v2.0 | 2/4 | In Progress|  |
-| 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 0/2 | Not started | - |
+| 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 0/? | Not started | - |
 | 18. Skill Wiring --r-enhanced Flag | v2.0 | 0/? | Not started | - |
 
