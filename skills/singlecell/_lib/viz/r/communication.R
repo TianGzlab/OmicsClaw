@@ -269,3 +269,84 @@ plot_ccc_network <- function(data_dir, out_path, params) {
     quit(status = 1)
   })
 }
+
+# ---- Function 3: plot_ccc_bubble ----
+
+#' Ligand-receptor bubble matrix (CCCHeatmap bubble variant).
+#'
+#' Reads top_interactions.csv. Shows top L-R pairs as a bubble matrix:
+#' rows = ligand-receptor pairs, columns = source->target cell type pairs,
+#' size = score, color = -log10(pvalue) or score.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. Optional: top_n (default 30).
+plot_ccc_bubble <- function(data_dir, out_path, params) {
+  tryCatch({
+    csv_path <- file.path(data_dir, "top_interactions.csv")
+    if (!file.exists(csv_path)) {
+      stop("top_interactions.csv not found in ", data_dir)
+    }
+
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+    if (nrow(df) == 0) stop("Empty interactions table")
+
+    top_n <- as.integer(params[["top_n"]] %||% 30)
+    df <- df[df$score > 0, ]
+    df <- head(df[order(-df$score), ], top_n)
+
+    # Build pair labels
+    df$lr_pair <- paste0(df$ligand, " -> ", df$receptor)
+    df$cell_pair <- paste0(df$source, " -> ", df$target)
+
+    # Handle pvalue: use -log10(pvalue) for color if available
+    if ("pvalue" %in% colnames(df) && !all(is.na(df$pvalue))) {
+      df$pvalue <- as.numeric(df$pvalue)
+      df$color_val <- -log10(df$pvalue + 1e-300)
+      color_name <- "-log10(p)"
+    } else {
+      df$color_val <- df$score
+      color_name <- "Score"
+    }
+
+    # Order LR pairs by mean score (descending)
+    lr_order <- aggregate(score ~ lr_pair, data = df, FUN = mean)
+    lr_order <- lr_order$lr_pair[order(-lr_order$score)]
+    df$lr_pair <- factor(df$lr_pair, levels = rev(lr_order))
+
+    # Order cell pairs by frequency
+    cp_order <- names(sort(table(df$cell_pair), decreasing = TRUE))
+    df$cell_pair <- factor(df$cell_pair, levels = cp_order)
+
+    n_lr <- length(unique(df$lr_pair))
+    n_cp <- length(unique(df$cell_pair))
+
+    p <- ggplot(df, aes(x = cell_pair, y = lr_pair)) +
+      geom_point(aes(size = score, fill = color_val),
+                 shape = 21, color = "black", stroke = 0.3) +
+      scale_size_continuous(range = c(2, 7), name = "Score",
+                            breaks = scales::breaks_extended(n = 4)) +
+      scale_fill_gradientn(
+        name = color_name,
+        colours = c("#FEE8C8", "#FDBB84", "#E34A33", "#B2182B"),
+        guide = guide_colorbar(frame.colour = "black", ticks.colour = "black")
+      ) +
+      labs(x = "Cell pair (source -> target)",
+           y = "Ligand -> Receptor",
+           title = "Ligand-receptor interaction bubble matrix") +
+      theme_omics() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.text.y = element_text(size = 7),
+        panel.grid.major = element_line(colour = "grey90", linewidth = 0.2)
+      )
+
+    w <- max(7, n_cp * 0.8 + 3)
+    h <- max(5, n_lr * 0.3 + 2)
+    ggsave_standard(p, out_path, width = w, height = h)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
