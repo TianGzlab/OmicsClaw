@@ -237,6 +237,35 @@ Plans:
 - [x] 18-02-PLAN.md — Group B first half: 6 skills with shared embedding renderers (sc-preprocessing, sc-batch-integration, sc-clustering, sc-doublet-detection, sc-qc, sc-pathway-scoring)
 - [x] 18-03-PLAN.md — Group B second half: 5 skills (sc-grn, sc-gene-programs, sc-metacell, sc-perturb, sc-cytotrace) + docs/R-DEPENDENCIES.md
 
+### Phase 19: scop 绘图搬运 — 高优先新 Renderer
+**Goal**: 从 scop 搬运高优先级绘图函数，补全 OmicsClaw 缺失的常用可视化：密度图、比例检验图、CCC 统计图、Sankey 等
+**Depends on**: Phase 13, Phase 17
+**Requirements**: SCOP-01, SCOP-02, SCOP-03, SCOP-04
+**Success Criteria** (what must be TRUE):
+  1. plot_cell_density: 细胞密度分布图（按 group/pseudotime），CellDensityPlot 等效
+  2. plot_proportion_test: 比例检验结果图（FDR 标注 + log2FD），ProportionTestPlot 等效
+  3. plot_ccc_stat: CCC 统计图（bar + violin + comparison），CCCStatPlot 核心 3 种
+  4. plot_cell_sankey: 细胞类型转换 Sankey 图，CellStatPlot sankey 等效
+  5. plot_feature_cor: 特征相关性散点/热图，FeatureCorPlot 等效
+  6. plot_cytotrace: CytoTRACE 分化潜能可视化，CytoTRACEPlot 等效
+  7. 所有新 renderer 注册到 registry.R，对应 skill 的 R_ENHANCED_PLOTS 更新
+**Plans**: 3 plans
+Plans:
+- [ ] 19-01-PLAN.md — density.R + sankey.R + stat.R proportion_test 扩展 (SCOP-01, SCOP-02, SCOP-04)
+- [ ] 19-02-PLAN.md — communication.R CCC stat 扩展 + correlation.R + cytotrace.R (SCOP-03)
+- [ ] 19-03-PLAN.md — registry.R 注册 + Python wiring (figure_data 补全 + R_ENHANCED_PLOTS 更新)
+
+### Phase 20: scop 绘图搬运 — 增强现有 Renderer
+**Goal**: 增强 OmicsClaw 现有 renderer 的功能，对齐 scop 的高级特性：enrichment network/enrichmap、DE manhattan、GroupHeatmap 高级功能
+**Depends on**: Phase 19
+**Requirements**: SCOP-05, SCOP-06, SCOP-07
+**Success Criteria** (what must be TRUE):
+  1. enrichment.R: 新增 network 和 enrichmap 可视化（EnrichmentPlot network 等效）
+  2. de.R: 新增 Manhattan plot 类型（DEtestPlot manhattan 等效）
+  3. pseudotime.R: DynamicPlot 增强 — 支持多 lineage 对比
+  4. communication.R: CCCNetworkPlot 增强 — 支持 bipartite/diff 模式
+**Plans**: TBD
+
 ---
 
 ## Progress
@@ -261,6 +290,8 @@ Plans:
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 3/3 | Complete   | 2026-04-11 |
 | 18. Skill Wiring --r-enhanced Flag | v2.0 | 3/3 | Complete   | 2026-04-11 |
+| 19. scop 绘图搬运 — 高优先新 Renderer | v2.0 | 0/3 | Not Started |  |
+| 20. scop 绘图搬运 — 增强现有 Renderer | v2.0 | 0/? | Not Started |  |
 
 ---
-*Last updated: 2026-04-11 after Phase 18 plan creation*
+*Last updated: 2026-04-12 after Phase 19 plans created*
