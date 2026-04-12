@@ -1182,6 +1182,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("top_terms", args.top_terms, min_val=1)
+    v.fraction("ora_padj_cutoff", args.ora_padj_cutoff)
+    v.non_negative("ora_log2fc_cutoff", args.ora_log2fc_cutoff)
+    v.positive("ora_max_genes", args.ora_max_genes, min_val=1)
+    v.positive("gsea_min_size", args.gsea_min_size, min_val=1)
+    v.positive("gsea_max_size", args.gsea_max_size, min_val=1)
+    v.min_max_consistent("gsea_min_size", args.gsea_min_size, "gsea_max_size", args.gsea_max_size)
+    v.positive("gsea_permutation_num", args.gsea_permutation_num, min_val=1)
+    v.fraction("fdr_threshold", args.fdr_threshold)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

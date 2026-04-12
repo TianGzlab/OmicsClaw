@@ -322,6 +322,17 @@ def main():
     )
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("n_top", args.n_top, min_val=1)
+    v.positive("n_genes", args.n_genes, min_val=1)
+    v.in_range("min_in_group_fraction", args.min_in_group_fraction, low=0, high=1)
+    v.in_range("max_out_group_fraction", args.max_out_group_fraction, low=0, high=1)
+    v.non_negative("min_fold_change", args.min_fold_change)
+    v.in_range("mu", args.mu, low=0, high=1)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
