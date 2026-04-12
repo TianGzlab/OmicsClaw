@@ -533,6 +533,19 @@ def main():
                         help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.non_negative("min_genes", args.min_genes)
+    v.non_negative("max_genes", args.max_genes)
+    v.non_negative("min_counts", args.min_counts)
+    v.non_negative("max_counts", args.max_counts)
+    v.non_negative("min_cells", args.min_cells)
+    v.percentage("max_mt_percent", args.max_mt_percent)
+    v.min_max_consistent("min_genes", args.min_genes, "max_genes", args.max_genes)
+    v.min_max_consistent("min_counts", args.min_counts, "max_counts", args.max_counts)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

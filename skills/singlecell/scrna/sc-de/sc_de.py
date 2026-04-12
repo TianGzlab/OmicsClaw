@@ -632,6 +632,16 @@ def main():
     )
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("n_top_genes", args.n_top_genes, min_val=1)
+    v.fraction("padj_threshold", args.padj_threshold)
+    v.non_negative("log2fc_threshold", args.log2fc_threshold)
+    v.non_negative("pseudobulk_min_cells", args.pseudobulk_min_cells)
+    v.non_negative("pseudobulk_min_counts", args.pseudobulk_min_counts)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -551,6 +551,17 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.fraction("fdr", args.fdr)
+    v.positive("n_neighbors", args.n_neighbors, min_val=2)
+    v.non_negative("min_count", args.min_count)
+    v.positive("n_permutations", args.n_permutations, min_val=1)
+    v.in_range("prop", args.prop, low=0, high=1)
+    v.check()
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = output_dir / "figures"
