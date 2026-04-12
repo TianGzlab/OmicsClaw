@@ -88,6 +88,8 @@ _R_ENHANCED_SHARED: dict[str, str] = {
     "plot_enrichment_bar": "r_enrichment_bar.png",
     "plot_enrichment_dotplot": "r_enrichment_dotplot.png",
     "plot_enrichment_lollipop": "r_enrichment_lollipop.png",
+    "plot_enrichment_network": "r_enrichment_network.png",
+    "plot_enrichment_enrichmap": "r_enrichment_enrichmap.png",
 }
 _R_ENHANCED_GSEA: dict[str, str] = {
     "plot_gsea_mountain": "r_gsea_mountain.png",

@@ -75,6 +75,8 @@ R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_ccc_stat_bar": "r_ccc_stat_bar.png",
     "plot_ccc_stat_violin": "r_ccc_stat_violin.png",
     "plot_ccc_stat_scatter": "r_ccc_stat_scatter.png",
+    "plot_ccc_bipartite": "r_ccc_bipartite.png",
+    "plot_ccc_diff_network": "r_ccc_diff_network.png",
 }
 
 

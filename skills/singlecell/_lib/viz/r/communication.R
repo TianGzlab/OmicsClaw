@@ -568,3 +568,399 @@ plot_ccc_stat_scatter <- function(data_dir, out_path, params) {
     quit(status = 1)
   })
 }
+
+# ---- Function 7: plot_ccc_bipartite ----
+
+#' Ligand-focused bipartite network layout for cell-cell communication.
+#'
+#' Three-column layout: sender cell types (left) -> ligand/receptor pairs
+#' (center) -> receiver cell types (right). Edges connect through the
+#' focused ligand-receptor pair, with width proportional to score.
+#'
+#' Reads top_interactions.csv. Required columns: source, target, ligand,
+#' receptor, score.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Absolute path for output PNG.
+#' @param params Named list. Optional: ligand (default auto-detect highest
+#'   total score), top_n (default 20).
+plot_ccc_bipartite <- function(data_dir, out_path, params) {
+  tryCatch({
+    csv_path <- file.path(data_dir, "top_interactions.csv")
+    if (!file.exists(csv_path)) {
+      stop("top_interactions.csv not found in ", data_dir)
+    }
+
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+    required <- c("source", "target", "ligand", "receptor", "score")
+    missing <- setdiff(required, colnames(df))
+    if (length(missing) > 0) {
+      stop("Missing required columns in top_interactions.csv: ",
+           paste(missing, collapse = ", "))
+    }
+
+    df$score <- as.numeric(df$score)
+    df <- df[!is.na(df$score) & df$score > 0, ]
+    df <- df[!is.na(df$ligand) & nzchar(df$ligand), ]
+    if (nrow(df) == 0) stop("No valid interactions with ligand info found")
+
+    # Select focus ligand: user param or auto-detect by highest total score
+    focus_ligand <- params[["ligand"]]
+    if (is.null(focus_ligand) || !focus_ligand %in% df$ligand) {
+      lig_scores <- aggregate(score ~ ligand, data = df, FUN = sum)
+      focus_ligand <- lig_scores$ligand[which.max(lig_scores$score)]
+    }
+
+    # Filter to focus ligand
+    df <- df[df$ligand == focus_ligand, ]
+
+    # Keep top_n edges by score (T-20-05 mitigation: cap edge count)
+    top_n <- as.integer(params[["top_n"]] %||% 20)
+    if (nrow(df) > top_n) {
+      df <- df[order(-df$score), ][seq_len(top_n), ]
+    }
+
+    if (nrow(df) == 0) {
+      p <- ggplot() +
+        annotate("text", x = 0.5, y = 0.5,
+                 label = paste0("No interactions for ligand: ", focus_ligand),
+                 size = 5, color = "grey50") +
+        theme_void()
+      ggsave_standard(p, out_path, width = 8, height = 6)
+      return(invisible(NULL))
+    }
+
+    # Extract unique entities
+    senders <- sort(unique(df$source))
+    receptors <- sort(unique(df$receptor))
+    receivers <- sort(unique(df$target))
+    all_cell_types <- sort(unique(c(senders, receivers)))
+
+    # Build node positions: 3-column layout (x = 0, 0.5, 1)
+    # Left column: senders, evenly spaced
+    n_send <- length(senders)
+    sender_y <- if (n_send == 1) 0.5 else seq(0.85, 0.15, length.out = n_send)
+    sender_nodes <- data.frame(
+      label = senders, x = 0, y = sender_y,
+      node_type = "sender", stringsAsFactors = FALSE
+    )
+
+    # Center column: ligand at top, receptors below
+    n_rec <- length(receptors)
+    lig_y <- 0.9
+    rec_y <- if (n_rec == 1) 0.4 else seq(0.7, 0.15, length.out = n_rec)
+    center_nodes <- rbind(
+      data.frame(label = focus_ligand, x = 0.5, y = lig_y,
+                 node_type = "ligand", stringsAsFactors = FALSE),
+      data.frame(label = receptors, x = 0.5, y = rec_y,
+                 node_type = "receptor", stringsAsFactors = FALSE)
+    )
+
+    # Right column: receivers, evenly spaced
+    n_recv <- length(receivers)
+    recv_y <- if (n_recv == 1) 0.5 else seq(0.85, 0.15, length.out = n_recv)
+    receiver_nodes <- data.frame(
+      label = receivers, x = 1, y = recv_y,
+      node_type = "receiver", stringsAsFactors = FALSE
+    )
+
+    node_df <- rbind(sender_nodes, center_nodes, receiver_nodes)
+
+    # Palette for cell types
+    cell_pal <- omics_palette(length(all_cell_types))
+    names(cell_pal) <- all_cell_types
+
+    # Node colors: cell types get palette colors, LR nodes are white with grey border
+    node_df$fill <- ifelse(
+      node_df$node_type %in% c("sender", "receiver"),
+      cell_pal[node_df$label],
+      "white"
+    )
+    node_df$border <- ifelse(
+      node_df$node_type %in% c("ligand", "receptor"),
+      "grey50",
+      cell_pal[node_df$label]
+    )
+
+    # Build node position lookup
+    node_pos <- node_df
+    rownames(node_pos) <- paste0(node_pos$node_type, "::", node_pos$label)
+
+    # Scale edge width by score
+    score_range <- range(df$score)
+    if (diff(score_range) > 0) {
+      df$lwd <- scales::rescale(df$score, to = c(0.3, 2.5))
+    } else {
+      df$lwd <- rep(1, nrow(df))
+    }
+
+    # Build 3 edge segments per interaction:
+    # 1. sender -> ligand, 2. ligand -> receptor, 3. receptor -> receiver
+    edge_list <- list()
+    for (i in seq_len(nrow(df))) {
+      s_key <- paste0("sender::", df$source[i])
+      l_key <- paste0("ligand::", focus_ligand)
+      r_key <- paste0("receptor::", df$receptor[i])
+      v_key <- paste0("receiver::", df$target[i])
+
+      s_pos <- node_pos[s_key, ]
+      l_pos <- node_pos[l_key, ]
+      r_pos <- node_pos[r_key, ]
+      v_pos <- node_pos[v_key, ]
+
+      edge_col <- cell_pal[df$source[i]]
+      edge_list[[length(edge_list) + 1]] <- data.frame(
+        x = s_pos$x, y = s_pos$y, xend = l_pos$x, yend = l_pos$y,
+        lwd = df$lwd[i], edge_col = edge_col, stringsAsFactors = FALSE
+      )
+      edge_list[[length(edge_list) + 1]] <- data.frame(
+        x = l_pos$x, y = l_pos$y, xend = r_pos$x, yend = r_pos$y,
+        lwd = df$lwd[i], edge_col = "grey40", stringsAsFactors = FALSE
+      )
+      edge_list[[length(edge_list) + 1]] <- data.frame(
+        x = r_pos$x, y = r_pos$y, xend = v_pos$x, yend = v_pos$y,
+        lwd = df$lwd[i], edge_col = cell_pal[df$target[i]],
+        stringsAsFactors = FALSE
+      )
+    }
+    edge_df <- do.call(rbind, edge_list)
+
+    # Separate node subsets for plotting
+    cell_nodes <- node_df[node_df$node_type %in% c("sender", "receiver"), ]
+    lr_nodes <- node_df[node_df$node_type %in% c("ligand", "receptor"), ]
+
+    # Build plot
+    p <- ggplot() +
+      # Edges
+      geom_segment(
+        data = edge_df,
+        aes(x = x, y = y, xend = xend, yend = yend),
+        color = edge_df$edge_col,
+        linewidth = edge_df$lwd,
+        alpha = 0.6,
+        lineend = "round"
+      ) +
+      # Cell type nodes (circles)
+      geom_point(
+        data = cell_nodes,
+        aes(x = x, y = y),
+        fill = cell_nodes$fill, color = cell_nodes$border,
+        shape = 21, size = 6, stroke = 1.2
+      ) +
+      # LR nodes (squares)
+      geom_point(
+        data = lr_nodes,
+        aes(x = x, y = y),
+        fill = "white", color = "grey50",
+        shape = 22, size = 5, stroke = 1
+      ) +
+      # Labels: senders on the left
+      geom_text(
+        data = node_df[node_df$node_type == "sender", ],
+        aes(x = x - 0.06, y = y, label = label),
+        hjust = 1, size = 3, check_overlap = TRUE
+      ) +
+      # Labels: receivers on the right
+      geom_text(
+        data = node_df[node_df$node_type == "receiver", ],
+        aes(x = x + 0.06, y = y, label = label),
+        hjust = 0, size = 3, check_overlap = TRUE
+      ) +
+      # Labels: LR nodes above
+      geom_text(
+        data = lr_nodes,
+        aes(x = x, y = y + 0.04, label = label),
+        hjust = 0.5, size = 2.8, fontface = "italic"
+      ) +
+      # Column headers
+      annotate("text", x = 0, y = 1.0, label = "Senders",
+               size = 3.5, fontface = "bold") +
+      annotate("text", x = 0.5, y = 1.0, label = "L-R pairs",
+               size = 3.5, fontface = "bold") +
+      annotate("text", x = 1, y = 1.0, label = "Receivers",
+               size = 3.5, fontface = "bold") +
+      coord_cartesian(xlim = c(-0.3, 1.3), ylim = c(0.05, 1.05), clip = "off") +
+      theme_void() +
+      labs(title = paste0("Bipartite CCC network (ligand: ", focus_ligand, ")"))
+
+    n_rows <- max(n_send, n_rec, n_recv)
+    plot_height <- max(5, n_rows * 0.6 + 2)
+    ggsave_standard(p, out_path, width = 9, height = plot_height)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
+
+# ---- Function 8: plot_ccc_diff_network ----
+
+#' Differential CCC network between conditions.
+#'
+#' Shows changes in cell-cell communication between two conditions as a
+#' circular network. Edges colored by direction of change: red = increased,
+#' blue = decreased. Width proportional to |score_diff|.
+#'
+#' CSV input: ccc_diff_network.csv (preferred) or sender_receiver_summary.csv
+#' with a "condition" column (fallback). Graceful skip if neither available.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Absolute path for output PNG.
+#' @param params Named list. Optional: min_diff (default 0), top_n (default 20).
+plot_ccc_diff_network <- function(data_dir, out_path, params) {
+  tryCatch({
+    diff_csv <- file.path(data_dir, "ccc_diff_network.csv")
+    sr_csv <- file.path(data_dir, "sender_receiver_summary.csv")
+
+    df <- NULL
+
+    # Primary: read ccc_diff_network.csv
+    if (file.exists(diff_csv)) {
+      raw <- read.csv(diff_csv, stringsAsFactors = FALSE)
+      if (nrow(raw) > 0 && all(c("source", "target", "score_diff") %in% colnames(raw))) {
+        df <- raw[, c("source", "target", "score_diff")]
+        df$score_diff <- as.numeric(df$score_diff)
+      }
+    }
+
+    # Fallback: compute diff from sender_receiver_summary with condition column
+    if (is.null(df) && file.exists(sr_csv)) {
+      raw <- read.csv(sr_csv, stringsAsFactors = FALSE)
+      if ("condition" %in% colnames(raw) && nrow(raw) > 0) {
+        conditions <- unique(raw$condition)
+        if (length(conditions) >= 2) {
+          cond_a <- conditions[1]
+          cond_b <- conditions[2]
+          raw$score <- as.numeric(raw$score)
+          df_a <- raw[raw$condition == cond_a, c("source", "target", "score")]
+          df_b <- raw[raw$condition == cond_b, c("source", "target", "score")]
+          colnames(df_a)[3] <- "score_a"
+          colnames(df_b)[3] <- "score_b"
+          df <- merge(df_a, df_b, by = c("source", "target"), all = TRUE)
+          df$score_a[is.na(df$score_a)] <- 0
+          df$score_b[is.na(df$score_b)] <- 0
+          df$score_diff <- df$score_b - df$score_a
+        }
+      }
+    }
+
+    # Graceful exit if no diff data
+    if (is.null(df) || nrow(df) == 0) {
+      cat("WARNING: No differential CCC data found. Skipping plot.\n")
+      return(invisible(NULL))
+    }
+
+    # Filter: remove self-loops and apply min_diff threshold
+    df <- df[df$source != df$target, ]
+    min_diff <- as.numeric(params[["min_diff"]] %||% 0)
+    df <- df[abs(df$score_diff) > min_diff, ]
+    df <- df[!is.na(df$score_diff) & is.finite(df$score_diff), ]
+
+    if (nrow(df) == 0) {
+      p <- ggplot() +
+        annotate("text", x = 0, y = 0,
+                 label = "No differential interactions above threshold",
+                 size = 5, color = "grey50") +
+        coord_equal() + theme_void() +
+        labs(title = "Differential CCC Network")
+      ggsave_standard(p, out_path, width = 8, height = 8)
+      return(invisible(NULL))
+    }
+
+    # Keep top_n edges by |score_diff|
+    top_n <- as.integer(params[["top_n"]] %||% 20)
+    if (nrow(df) > top_n) {
+      df <- df[order(-abs(df$score_diff)), ][seq_len(top_n), ]
+    }
+
+    # Direction: positive = increased, negative = decreased
+    df$direction <- ifelse(df$score_diff > 0, "Increased", "Decreased")
+
+    # Arrange nodes in a circle
+    all_types <- sort(unique(c(df$source, df$target)))
+    n_types <- length(all_types)
+    angles <- 2 * pi * (seq_len(n_types) - 1) / n_types
+    node_df <- data.frame(
+      cell_type = all_types,
+      x = cos(angles),
+      y = sin(angles),
+      stringsAsFactors = FALSE
+    )
+
+    # Node sizes: proportional to total |score_diff|
+    out_sums <- aggregate(abs(score_diff) ~ source, data = df, FUN = sum)
+    colnames(out_sums) <- c("cell_type", "out_diff")
+    in_sums <- aggregate(abs(score_diff) ~ target, data = df, FUN = sum)
+    colnames(in_sums) <- c("cell_type", "in_diff")
+    node_df <- merge(node_df, out_sums, by = "cell_type", all.x = TRUE)
+    node_df <- merge(node_df, in_sums, by = "cell_type", all.x = TRUE)
+    node_df$out_diff[is.na(node_df$out_diff)] <- 0
+    node_df$in_diff[is.na(node_df$in_diff)] <- 0
+    node_df$total_diff <- node_df$out_diff + node_df$in_diff
+
+    # Node colors
+    pal <- omics_palette(n_types)
+    names(pal) <- all_types
+
+    # Build edge data with coordinates
+    edge_df <- df
+    edge_df <- merge(edge_df,
+                     node_df[, c("cell_type", "x", "y")],
+                     by.x = "source", by.y = "cell_type")
+    colnames(edge_df)[colnames(edge_df) == "x"] <- "x_from"
+    colnames(edge_df)[colnames(edge_df) == "y"] <- "y_from"
+    edge_df <- merge(edge_df,
+                     node_df[, c("cell_type", "x", "y")],
+                     by.x = "target", by.y = "cell_type")
+    colnames(edge_df)[colnames(edge_df) == "x"] <- "x_to"
+    colnames(edge_df)[colnames(edge_df) == "y"] <- "y_to"
+
+    # Edge width proportional to |score_diff|
+    diff_range <- range(abs(edge_df$score_diff))
+    if (diff(diff_range) > 0) {
+      edge_df$lwd <- scales::rescale(abs(edge_df$score_diff), to = c(0.3, 3))
+    } else {
+      edge_df$lwd <- rep(1, nrow(edge_df))
+    }
+
+    # Build plot
+    p <- ggplot() +
+      # Edges colored by direction
+      geom_curve(
+        data = edge_df,
+        aes(x = x_from, y = y_from, xend = x_to, yend = y_to,
+            color = direction, linewidth = lwd),
+        curvature = 0.25, alpha = 0.6,
+        arrow = arrow(length = unit(0.1, "inches"), type = "closed")
+      ) +
+      scale_color_manual(
+        values = c("Increased" = "#E41A1C", "Decreased" = "#377EB8"),
+        name = "Direction"
+      ) +
+      scale_linewidth_identity() +
+      # Nodes
+      ggnewscale::new_scale_color() +
+      geom_point(
+        data = node_df,
+        aes(x = x, y = y, size = total_diff, color = cell_type)
+      ) +
+      scale_size_continuous(range = c(3, 12), name = "Total |diff|") +
+      scale_color_manual(values = pal, name = "Cell Type") +
+      # Labels outside circle
+      geom_text(
+        data = node_df,
+        aes(x = x * 1.18, y = y * 1.18, label = cell_type),
+        size = 3, check_overlap = TRUE
+      ) +
+      coord_equal() +
+      theme_void() +
+      theme(legend.position = "right") +
+      labs(title = "Differential CCC Network")
+
+    ggsave_standard(p, out_path, width = 8, height = 8)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}

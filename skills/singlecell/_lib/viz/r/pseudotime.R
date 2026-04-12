@@ -132,9 +132,14 @@ plot_pseudotime_lineage <- function(data_dir, out_path, params) {
 #' absolute correlation, merges with per-cell expression, and plots loess
 #' trends with confidence-interval ribbons faceted per gene.
 #'
+#' Multi-lineage support: when gene_expression.csv or pseudotime_points.csv
+#' contains a "lineage" column, each lineage gets its own loess curve overlaid
+#' on the same panel (per gene). If no lineage column, behavior is unchanged.
+#'
 #' @param data_dir Character. Directory containing pseudotime_points.csv and trajectory_genes.csv.
 #' @param out_path Character. Absolute path for output PNG.
-#' @param params Named list. Optional: n_genes (default 5).
+#' @param params Named list. Optional: n_genes (default 5),
+#'   compare_lineages ("true"/"false", default "true" -- overlay lineages vs facet).
 plot_pseudotime_dynamic <- function(data_dir, out_path, params) {
   tryCatch({
     # --- Step 1: Read CSVs ---
@@ -200,45 +205,138 @@ plot_pseudotime_dynamic <- function(data_dir, out_path, params) {
     if (!"cell_id" %in% colnames(pts_df)) {
       pts_df$cell_id <- paste0("cell_", seq_len(nrow(pts_df)))
     }
+
+    # Detect lineage column: check expression data first, then pseudotime points
+    has_lineage <- FALSE
+    lineage_source <- NULL
+    if ("lineage" %in% colnames(expr_df)) {
+      has_lineage <- TRUE
+      lineage_source <- "expr"
+    } else if ("lineage" %in% colnames(pts_df)) {
+      has_lineage <- TRUE
+      lineage_source <- "pts"
+    }
+
+    # Build merge columns: always include pseudotime, optionally lineage from pts
+    merge_cols <- c("cell_id", "pseudotime")
+    if (has_lineage && lineage_source == "pts") {
+      merge_cols <- c(merge_cols, "lineage")
+    }
     df_long <- merge(
       expr_df,
-      pts_df[, c("cell_id", "pseudotime")],
+      pts_df[, intersect(merge_cols, colnames(pts_df)), drop = FALSE],
       by = "cell_id"
     )
     if (nrow(df_long) == 0) stop("No cells matched between expression and pseudotime data")
+
+    # If lineage came from pts_df merge, it's now in df_long already.
+    # If lineage came from expr_df, it's already in df_long from the left side.
+    # Re-check after merge
+    has_lineage <- "lineage" %in% colnames(df_long) &&
+      length(unique(df_long$lineage[!is.na(df_long$lineage)])) > 1
 
     # Ensure gene is a factor with consistent ordering
     df_long$gene <- factor(df_long$gene, levels = top_genes)
 
     # --- Step 5: Plot with stat_smooth CI ribbon ---
-    # T-16a-02 mitigation: sample per gene for loess performance
-    if (nrow(df_long) > 5000 * n_genes) {
-      df_long <- do.call(rbind, lapply(split(df_long, df_long$gene), function(sub) {
-        if (nrow(sub) > 5000) sub[sample(nrow(sub), 5000), ] else sub
-      }))
+    # T-16a-02 mitigation: sample per gene (and lineage) for loess performance
+    if (has_lineage) {
+      df_long$lineage <- as.factor(df_long$lineage)
+      n_lineages <- length(levels(df_long$lineage))
+      max_per_group <- 5000
+      df_long <- do.call(rbind, lapply(
+        split(df_long, interaction(df_long$gene, df_long$lineage, drop = TRUE)),
+        function(sub) {
+          if (nrow(sub) > max_per_group) sub[sample(nrow(sub), max_per_group), ] else sub
+        }
+      ))
+    } else {
+      if (nrow(df_long) > 5000 * n_genes) {
+        df_long <- do.call(rbind, lapply(split(df_long, df_long$gene), function(sub) {
+          if (nrow(sub) > 5000) sub[sample(nrow(sub), 5000), ] else sub
+        }))
+      }
     }
 
-    p <- ggplot(df_long, aes(x = pseudotime, y = expression, group = gene)) +
-      geom_point(aes(color = gene), size = 0.3, alpha = 0.3, show.legend = FALSE) +
-      stat_smooth(
-        aes(color = gene, fill = gene),
-        method = "loess", formula = y ~ x, span = 0.75,
-        geom = "smooth", alpha = 0.25, linewidth = 1
-      ) +
-      scale_color_manual(values = omics_palette(n_genes)) +
-      scale_fill_manual(values = omics_palette(n_genes), guide = "none") +
-      facet_wrap(~gene, scales = "free_y") +
-      labs(
-        title = "Gene dynamics over pseudotime",
-        subtitle = subtitle_text,
-        x = "Pseudotime", y = "Normalized expression",
-        color = "Gene"
-      ) +
-      theme_omics() +
-      theme(legend.position = "none")
+    # --- Step 5b: Build plot ---
+    if (has_lineage) {
+      # Multi-lineage mode: overlay per-lineage curves on each gene facet
+      compare_lineages <- tolower(params[["compare_lineages"]] %||% "true")
+      lineage_pal <- omics_palette(n_lineages)
 
-    plot_width <- max(8, n_genes * 2.5)
-    ggsave_standard(p, out_path, width = plot_width, height = 5, dpi = 200)
+      if (compare_lineages == "true") {
+        # Overlay: lineages share same facet per gene, different colored curves
+        p <- ggplot(df_long, aes(x = pseudotime, y = expression)) +
+          geom_point(aes(color = lineage), size = 0.3, alpha = 0.3,
+                     show.legend = FALSE) +
+          stat_smooth(
+            aes(color = lineage, fill = lineage,
+                group = interaction(gene, lineage)),
+            method = "loess", formula = y ~ x, span = 0.75,
+            geom = "smooth", alpha = 0.2, linewidth = 1
+          ) +
+          scale_color_manual(values = lineage_pal) +
+          scale_fill_manual(values = lineage_pal, guide = "none") +
+          facet_wrap(~gene, scales = "free_y") +
+          labs(
+            title = "Gene dynamics over pseudotime (multi-lineage)",
+            subtitle = subtitle_text,
+            x = "Pseudotime", y = "Normalized expression",
+            color = "Lineage"
+          ) +
+          theme_omics() +
+          theme(legend.position = "bottom")
+      } else {
+        # Separate facets: facet by gene + lineage
+        p <- ggplot(df_long, aes(x = pseudotime, y = expression)) +
+          geom_point(aes(color = lineage), size = 0.3, alpha = 0.3,
+                     show.legend = FALSE) +
+          stat_smooth(
+            aes(color = lineage, fill = lineage),
+            method = "loess", formula = y ~ x, span = 0.75,
+            geom = "smooth", alpha = 0.2, linewidth = 1
+          ) +
+          scale_color_manual(values = lineage_pal) +
+          scale_fill_manual(values = lineage_pal, guide = "none") +
+          facet_wrap(~ gene + lineage, scales = "free_y") +
+          labs(
+            title = "Gene dynamics over pseudotime (per lineage)",
+            subtitle = subtitle_text,
+            x = "Pseudotime", y = "Normalized expression",
+            color = "Lineage"
+          ) +
+          theme_omics() +
+          theme(legend.position = "bottom")
+      }
+
+      plot_width <- max(8, n_genes * 2.5)
+      plot_height <- 5
+    } else {
+      # Original single-lineage behavior (backward compatible)
+      p <- ggplot(df_long, aes(x = pseudotime, y = expression, group = gene)) +
+        geom_point(aes(color = gene), size = 0.3, alpha = 0.3, show.legend = FALSE) +
+        stat_smooth(
+          aes(color = gene, fill = gene),
+          method = "loess", formula = y ~ x, span = 0.75,
+          geom = "smooth", alpha = 0.25, linewidth = 1
+        ) +
+        scale_color_manual(values = omics_palette(n_genes)) +
+        scale_fill_manual(values = omics_palette(n_genes), guide = "none") +
+        facet_wrap(~gene, scales = "free_y") +
+        labs(
+          title = "Gene dynamics over pseudotime",
+          subtitle = subtitle_text,
+          x = "Pseudotime", y = "Normalized expression",
+          color = "Gene"
+        ) +
+        theme_omics() +
+        theme(legend.position = "none")
+
+      plot_width <- max(8, n_genes * 2.5)
+      plot_height <- 5
+    }
+
+    ggsave_standard(p, out_path, width = plot_width, height = plot_height, dpi = 200)
 
   }, error = function(e) {
     cat("ERROR:", conditionMessage(e), "\n", file = stderr())
