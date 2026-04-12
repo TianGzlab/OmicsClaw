@@ -47,11 +47,16 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
       if ("cell_type" %in% colnames(df)) {
         color_col <- "cell_type"
       } else {
-        # First non-coordinate, non-id column
-        skip <- c("cell_id", "dim1", "dim2")
+        # Skip coordinates, IDs, and metadata columns that are not group labels
+        skip <- c("cell_id", "dim1", "dim2", "coord1", "coord2",
+                  "UMAP_1", "UMAP_2", "UMAP1", "UMAP2", "embedding_key")
         candidates <- setdiff(colnames(df), skip)
         if (length(candidates) == 0) stop("No categorical column found for coloring")
-        color_col <- candidates[1]
+        # Prefer known cluster column names
+        preferred <- c("leiden", "louvain", "cluster", "seurat_clusters",
+                       "cell_type", "group", "condition", "sample")
+        hit <- intersect(preferred, candidates)
+        color_col <- if (length(hit) > 0) hit[1] else candidates[1]
       }
     }
 
@@ -59,9 +64,11 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
     n_groups <- nlevels(df[[color_col]])
     pal <- omics_palette(n_groups)
 
-    # Compute centroids for labels
+    # Compute centroids for labels — use the column name directly in the formula
+    # NOTE: aggregate(formula) with df[[col]] creates a literal column name like
+    # "df[[color_col]]"; instead use reformulate() to build the formula correctly.
     centroids <- aggregate(
-      cbind(dim1, dim2) ~ df[[color_col]],
+      reformulate(color_col, response = "cbind(dim1, dim2)"),
       data = df,
       FUN = mean
     )

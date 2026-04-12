@@ -25,16 +25,21 @@
   }
 
   # Fold change column
+  # Use logfoldchanges only when >= 60% of values are non-NA; otherwise fall
+  # back to scores so the volcano x-axis is populated for all genes.
   fc_col <- NULL
   fc_is_scores <- FALSE
-  if ("logfoldchanges" %in% cols && !all(is.na(df[["logfoldchanges"]]))) {
+  .valid_frac <- function(x) mean(!is.na(suppressWarnings(as.numeric(x))))
+  if ("logfoldchanges" %in% cols && .valid_frac(df[["logfoldchanges"]]) >= 0.6) {
     fc_col <- "logfoldchanges"
-  } else if ("log2fc" %in% cols && !all(is.na(df[["log2fc"]]))) {
+  } else if ("log2fc" %in% cols && .valid_frac(df[["log2fc"]]) >= 0.6) {
     fc_col <- "log2fc"
   } else if ("scores" %in% cols) {
     fc_col <- "scores"
     fc_is_scores <- TRUE
-    message("Warning: Using 'scores' as fold-change proxy (log2FC not available)")
+    message("Note: logfoldchanges coverage < 60% — using 'scores' as x-axis proxy")
+  } else if ("logfoldchanges" %in% cols && !all(is.na(df[["logfoldchanges"]]))) {
+    fc_col <- "logfoldchanges"
   } else {
     stop("CSV missing fold-change column: expected 'logfoldchanges', 'log2fc', or 'scores'")
   }

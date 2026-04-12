@@ -74,13 +74,15 @@ plot_marker_heatmap <- function(data_dir, out_path, params) {
     cluster_order <- unique(df$group)
     df$group <- factor(df$group, levels = cluster_order)
 
-    # Pivot to wide matrix: genes as rows, clusters as columns
+    # Pivot to wide matrix: genes as rows, clusters as columns.
+    # Use NA fill (not 0) so genes absent from a cluster are visually distinct
+    # from genes with zero logFC — only the source-cluster column carries a value.
     wide <- pivot_wider(
       df,
       id_cols     = "names",
       names_from  = "group",
       values_from = all_of(val_col),
-      values_fill = 0,
+      values_fill = NA_real_,
       values_fn   = mean
     )
     wide <- as.data.frame(wide)
@@ -96,23 +98,25 @@ plot_marker_heatmap <- function(data_dir, out_path, params) {
     # Column split factor for per-cluster slicing
     col_split <- factor(colnames(mat), levels = colnames(mat))
 
-    # Blue-white-red diverging color function
-    mat_min <- min(mat, na.rm = TRUE)
+    # Color scale: white-to-red for positive logFC values (marker genes are
+    # upregulated by definition in one-vs-rest tests). NA cells rendered gray.
     mat_max <- max(mat, na.rm = TRUE)
-    # Handle edge case where all values are same sign
-    if (mat_min >= 0) {
-      col_fun <- colorRamp2(c(0, mat_max), c("white", "#D6604D"))
-    } else if (mat_max <= 0) {
-      col_fun <- colorRamp2(c(mat_min, 0), c("#2166AC", "white"))
-    } else {
+    mat_min <- min(mat[!is.na(mat)], na.rm = TRUE)
+    if (mat_min < 0) {
+      # Mixed direction: diverging blue-white-red
       col_fun <- colorRamp2(c(mat_min, 0, mat_max), c("#2166AC", "white", "#D6604D"))
+    } else {
+      # All positive (typical one-vs-rest markers): white-to-red
+      col_fun <- colorRamp2(c(0, mat_max), c("white", "#D6604D"))
     }
 
-    # Build heatmap
+    # Build heatmap — NA cells shown in light gray to highlight the diagonal
+    # pattern where each gene's logFC is only filled in its source cluster
     ht <- Heatmap(
       mat,
       name                 = val_col,
       col                  = col_fun,
+      na_col               = "#E8E8E8",
       column_split         = col_split,
       cluster_rows         = FALSE,
       cluster_columns      = FALSE,

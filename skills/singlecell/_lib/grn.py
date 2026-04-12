@@ -730,13 +730,27 @@ def plot_regulon_heatmap(
         else:
             mean_auc = auc_subset.T
 
+        # Z-score normalize per regulon (row) so each regulon has mean=0, std=1.
+        # This fixes the "all solid red" issue when raw AUC values have a large
+        # absolute offset but small relative variance.
+        from scipy.stats import zscore as _zscore
+        plot_data = mean_auc.copy()
+        row_std = plot_data.std(axis=1)
+        # Only z-score rows that have non-zero variance; leave flat rows at 0
+        nz_mask = row_std > 1e-10
+        if nz_mask.any():
+            plot_data.loc[nz_mask] = plot_data.loc[nz_mask].apply(
+                lambda row: (row - row.mean()) / row.std(), axis=1
+            )
+        plot_data.loc[~nz_mask] = 0.0
+
         # Plot
         fig, ax = plt.subplots(figsize=(12, max(8, n_top * 0.4)))
 
         sns.heatmap(
-            mean_auc,
+            plot_data,
             cmap="RdBu_r",
-            center=0.5,
+            center=0.0,
             ax=ax,
             xticklabels=True,
             yticklabels=True,

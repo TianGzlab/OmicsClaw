@@ -391,21 +391,77 @@ def _build_gene_expression_csv(
         return None
 
 
+def _build_volcano_df(full_df: pd.DataFrame, n_top: int, *, gene_col: str = "names") -> pd.DataFrame:
+    """Build a bidirectional top-N per group dataframe for the R volcano plot.
+
+    Takes the top-N upregulated (highest score) AND top-N downregulated genes
+    per group so the volcano renderer can display Up, Down, and NS points on
+    both sides of the x-axis.
+
+    When logfoldchanges coverage is < 60% (common with scanpy rank_genes_groups
+    for large gene sets), falls back to using scores as the axis proxy: top-N
+    by score = "Up" candidates, bottom-N by score = "Down" candidates.
+    """
+    if full_df.empty or "group" not in full_df.columns:
+        return full_df
+
+    fc_col = "logfoldchanges" if "logfoldchanges" in full_df.columns else None
+    score_col = "scores" if "scores" in full_df.columns else None
+
+    # Check whether logfoldchanges has sufficient coverage (≥60%) to be useful
+    fc_coverage = 0.0
+    if fc_col is not None:
+        fc_coverage = pd.to_numeric(full_df[fc_col], errors="coerce").notna().mean()
+
+    frames: list[pd.DataFrame] = []
+
+    if fc_coverage >= 0.6:
+        # Enough FC values: top-N upregulated by score + bottom-N by FC
+        for _group, gdf in full_df.groupby("group", observed=False):
+            sort_col = score_col if score_col else fc_col
+            top_up = gdf.nlargest(n_top, sort_col, keep="first")
+            top_down = gdf.nsmallest(n_top, fc_col, keep="first")
+            top_down = top_down[pd.to_numeric(top_down[fc_col], errors="coerce").fillna(0) < 0]
+            combined = pd.concat([top_up, top_down], ignore_index=True).drop_duplicates(subset=[gene_col])
+            frames.append(combined)
+    elif score_col is not None:
+        # Sparse FC: use scores bidirectionally (top-N = Up, bottom-N = Down)
+        for _group, gdf in full_df.groupby("group", observed=False):
+            top_up = gdf.nlargest(n_top, score_col, keep="first")
+            top_down = gdf.nsmallest(n_top, score_col, keep="first")
+            # Exclude any overlap
+            combined = pd.concat([top_up, top_down], ignore_index=True).drop_duplicates(subset=[gene_col])
+            frames.append(combined)
+    else:
+        # No score or fc: plain head
+        return full_df.groupby("group", observed=False).head(n_top).copy()
+
+    return pd.concat(frames, ignore_index=True) if frames else full_df.iloc[0:0].copy()
+
+
 def _write_figure_data(
     output_dir: Path,
     *,
     exploratory_top: pd.DataFrame | None = None,
+    full_df: pd.DataFrame | None = None,
     group_summary: pd.DataFrame | None = None,
     pseudobulk_summary: pd.DataFrame | None = None,
     adata=None,
     gene_col: str = "names",
+    n_top: int = 10,
 ) -> None:
     figure_data_dir = output_dir / "figure_data"
     figure_data_dir.mkdir(exist_ok=True)
     manifest: dict[str, str] = {}
     if exploratory_top is not None and not exploratory_top.empty:
+        # Use full_df to export bidirectional (Up + Down) data for R volcano
+        volcano_df = (
+            _build_volcano_df(full_df, n_top, gene_col=gene_col)
+            if full_df is not None and not full_df.empty
+            else exploratory_top
+        )
         path = figure_data_dir / "de_top_markers.csv"
-        exploratory_top.to_csv(path, index=False)
+        volcano_df.to_csv(path, index=False)
         manifest["de_top_markers"] = path.name
     if group_summary is not None and not group_summary.empty:
         path = figure_data_dir / "de_group_summary.csv"
@@ -515,7 +571,15 @@ def generate_scanpy_figures(adata, full_df: pd.DataFrame, top_df: pd.DataFrame, 
     except Exception as exc:
         logger.warning("DE group summary failed: %s", exc)
 
-    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df, adata=adata, gene_col="names")
+    _write_figure_data(
+        output_dir,
+        exploratory_top=top_df,
+        full_df=full_df,
+        group_summary=summary_df,
+        adata=adata,
+        gene_col="names",
+        n_top=n_top_genes,
+    )
     return figures
 
 
@@ -542,7 +606,14 @@ def generate_tabular_de_figures(
             figures.append(str(p))
     except Exception as exc:
         logger.warning("DE group summary failed: %s", exc)
-    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df, adata=adata, gene_col=gene_col)
+    _write_figure_data(
+        output_dir,
+        exploratory_top=top_df,
+        full_df=full_df,
+        group_summary=summary_df,
+        adata=adata,
+        gene_col=gene_col,
+    )
     return figures
 
 

@@ -36,24 +36,32 @@ plot_feature_violin <- function(data_dir, out_path, params) {
       df <- df[df$gene %in% top_genes, ]
       df$gene <- factor(df$gene, levels = top_genes)
 
-      # Try to get group info from embedding CSV
-      embed_csv <- file.path(data_dir, "annotation_embedding_points.csv")
-      if (!file.exists(embed_csv)) {
-        embed_csv <- file.path(data_dir, "pseudotime_points.csv")
-      }
-      if (file.exists(embed_csv)) {
-        embed <- read.csv(embed_csv, stringsAsFactors = FALSE)
-        group_col <- intersect(c("cell_type", "group", "cluster", "leiden", "louvain"),
-                               colnames(embed))
-        if (length(group_col) > 0) {
-          embed_merge <- embed[, c("cell_id", group_col[1]), drop = FALSE]
-          colnames(embed_merge)[2] <- "group"
-          df <- merge(df, embed_merge, by = "cell_id", all.x = TRUE)
+      # Use inline cluster column if present (e.g. sc-grn exports it directly),
+      # otherwise fall back to embedding CSVs.
+      inline_group_col <- intersect(c("cluster", "cell_type", "group", "leiden", "louvain"),
+                                    colnames(df))
+      if (length(inline_group_col) > 0) {
+        df$group <- as.character(df[[inline_group_col[1]]])
+      } else {
+        embed_csv <- file.path(data_dir, "annotation_embedding_points.csv")
+        if (!file.exists(embed_csv)) {
+          embed_csv <- file.path(data_dir, "pseudotime_points.csv")
+        }
+        if (file.exists(embed_csv)) {
+          embed <- read.csv(embed_csv, stringsAsFactors = FALSE)
+          group_col <- intersect(c("cell_type", "group", "cluster", "leiden", "louvain"),
+                                 colnames(embed))
+          if (length(group_col) > 0) {
+            embed_merge <- embed[, c("cell_id", group_col[1]), drop = FALSE]
+            colnames(embed_merge)[2] <- "group"
+            df <- merge(df, embed_merge, by = "cell_id", all.x = TRUE)
+            df$group <- as.character(df$group)
+          } else {
+            df$group <- "All"
+          }
         } else {
           df$group <- "All"
         }
-      } else {
-        df$group <- "All"
       }
 
       p <- ggplot(df, aes(x = group, y = expression, fill = group)) +
@@ -139,22 +147,29 @@ plot_feature_boxplot <- function(data_dir, out_path, params) {
       df <- df[df$gene %in% top_genes, ]
       df$gene <- factor(df$gene, levels = top_genes)
 
-      # Try group info
-      embed_csv <- file.path(data_dir, "annotation_embedding_points.csv")
-      if (!file.exists(embed_csv)) embed_csv <- file.path(data_dir, "pseudotime_points.csv")
-      if (file.exists(embed_csv)) {
-        embed <- read.csv(embed_csv, stringsAsFactors = FALSE)
-        group_col <- intersect(c("cell_type", "group", "cluster", "leiden", "louvain"),
-                               colnames(embed))
-        if (length(group_col) > 0) {
-          embed_merge <- embed[, c("cell_id", group_col[1]), drop = FALSE]
-          colnames(embed_merge)[2] <- "group"
-          df <- merge(df, embed_merge, by = "cell_id", all.x = TRUE)
+      # Use inline cluster column if present, otherwise fall back to embedding CSVs.
+      inline_group_col <- intersect(c("cluster", "cell_type", "group", "leiden", "louvain"),
+                                    colnames(df))
+      if (length(inline_group_col) > 0) {
+        df$group <- as.character(df[[inline_group_col[1]]])
+      } else {
+        embed_csv <- file.path(data_dir, "annotation_embedding_points.csv")
+        if (!file.exists(embed_csv)) embed_csv <- file.path(data_dir, "pseudotime_points.csv")
+        if (file.exists(embed_csv)) {
+          embed <- read.csv(embed_csv, stringsAsFactors = FALSE)
+          group_col <- intersect(c("cell_type", "group", "cluster", "leiden", "louvain"),
+                                 colnames(embed))
+          if (length(group_col) > 0) {
+            embed_merge <- embed[, c("cell_id", group_col[1]), drop = FALSE]
+            colnames(embed_merge)[2] <- "group"
+            df <- merge(df, embed_merge, by = "cell_id", all.x = TRUE)
+            df$group <- as.character(df$group)
+          } else {
+            df$group <- "All"
+          }
         } else {
           df$group <- "All"
         }
-      } else {
-        df$group <- "All"
       }
 
       p <- ggplot(df, aes(x = group, y = expression, fill = group)) +
