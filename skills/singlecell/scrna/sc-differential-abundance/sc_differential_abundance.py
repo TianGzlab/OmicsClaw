@@ -705,6 +705,10 @@ def main() -> int:
         if not result_df.empty:
             result_df.to_csv(tables_dir / "proportion_test_results.csv", index=False)
             result_tables["proportion_test_results"] = "tables/proportion_test_results.csv"
+            # Also export to figure_data/ for R Enhanced plot_proportion_test renderer
+            fd_dir = output_dir / "figure_data"
+            fd_dir.mkdir(parents=True, exist_ok=True)
+            result_df.to_csv(fd_dir / "proportion_test_results.csv", index=False)
         prop_plots = _plot_proportion_test_r(result_df, output_dir)
         figures.extend(prop_plots)
         summary.update(prop_summary)
