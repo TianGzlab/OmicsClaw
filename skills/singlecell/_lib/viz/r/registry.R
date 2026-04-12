@@ -91,7 +91,9 @@ R_PLOT_REGISTRY <- list(
   plot_cytotrace_boxplot     = plot_cytotrace_boxplot,
   plot_enrichment_network    = plot_enrichment_network,
   plot_enrichment_enrichmap  = plot_enrichment_enrichmap,
-  plot_de_manhattan          = plot_de_manhattan
+  plot_de_manhattan          = plot_de_manhattan,
+  plot_ccc_bipartite         = plot_ccc_bipartite,
+  plot_ccc_diff_network      = plot_ccc_diff_network
 )
 
 # ---- CLI dispatcher (runs only when script is invoked directly) ----
