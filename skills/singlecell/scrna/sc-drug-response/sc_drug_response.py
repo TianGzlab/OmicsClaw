@@ -153,7 +153,7 @@ def preflight_cadrres(model_dir: Path, drug_db: str) -> None:
 
 
 def preflight_data(adata: anndata.AnnData, cluster_key: str) -> None:
-    """Validate input data has required metadata."""
+    """Validate input data has required metadata and gene nomenclature."""
     if cluster_key not in adata.obs.columns:
         candidates = [c for c in adata.obs.columns if adata.obs[c].dtype.name == "category" or adata.obs[c].nunique() < 50]
         raise ValueError(
@@ -166,6 +166,37 @@ def preflight_data(adata: anndata.AnnData, cluster_key: str) -> None:
         logger.warning(
             "Only %d group found in '%s'. Drug response comparison across clusters "
             "will be less informative.", n_groups, cluster_key
+        )
+
+    # Gene nomenclature check: drug targets use HGNC symbols
+    all_targets = sorted({g for genes in _BUILTIN_DRUG_TARGETS.values() for g in genes})
+    var_set = set(adata.var_names.astype(str))
+    overlap = [g for g in all_targets if g in var_set]
+    pct = len(overlap) / len(all_targets) * 100 if all_targets else 0
+    if pct == 0:
+        sample_genes = list(adata.var_names[:5])
+        looks_ensembl = any(str(g).startswith("ENSG") or str(g).startswith("ENSMUSG") for g in sample_genes)
+        msg = (
+            f"0% overlap between drug target genes and your gene names.\n"
+            f"  Drug targets expect HGNC symbols (e.g., BRCA1, EGFR, TP53).\n"
+            f"  Your gene names look like: {sample_genes}\n"
+        )
+        if looks_ensembl:
+            msg += (
+                "  Your data uses Ensembl IDs. Convert first:\n"
+                "    python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --output mapped/ --from ensembl --to symbol\n"
+            )
+        else:
+            msg += (
+                "  Check whether your gene names are symbols, Ensembl IDs, or another format.\n"
+                "  Use sc-standardize-input to canonicalize gene names.\n"
+            )
+        raise ValueError(msg)
+    elif pct < 20:
+        logger.warning(
+            "Low overlap (%.0f%%) between drug target genes and your data (%d/%d). "
+            "Results may be unreliable. Check gene nomenclature.",
+            pct, len(overlap), len(all_targets),
         )
 
 

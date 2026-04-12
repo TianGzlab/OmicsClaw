@@ -10,6 +10,7 @@
 | **Matrix** | Normalized expression (log1p-transformed) |
 | **Layers** | `layers["counts"]` recommended for CaDRReS |
 | **Metadata** | Cluster labels in `.obs` (leiden, louvain, or custom) |
+| **Gene names** | HGNC symbols required (e.g., BRCA1, EGFR). Ensembl IDs will fail — run `sc-standardize-input` or `bulkrna-geneid-mapping` first |
 | **Upstream** | `sc-preprocessing` must be completed first |
 | **Reference** | `cadrres` method requires pretrained model files (see Reference Data Guide) |
 

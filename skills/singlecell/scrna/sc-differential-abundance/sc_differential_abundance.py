@@ -525,9 +525,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output", type=str, required=True)
     p.add_argument("--demo", action="store_true")
     p.add_argument("--method", type=str, default="milo", choices=["milo", "sccoda", "simple", "proportion_test_r"])
-    p.add_argument("--condition-key", type=str, default="condition")
-    p.add_argument("--sample-key", type=str, default="sample")
-    p.add_argument("--cell-type-key", type=str, default="cell_type")
+    p.add_argument("--condition-key", type=str, default="condition",
+                    help="obs column for condition/treatment groups (common: 'condition', 'treatment', 'disease', 'group')")
+    p.add_argument("--sample-key", type=str, default="sample",
+                    help="obs column for biological replicates (common: 'sample', 'batch', 'donor', 'patient', 'replicate')")
+    p.add_argument("--cell-type-key", type=str, default="cell_type",
+                    help="obs column for cell type labels (common: 'cell_type', 'celltype', 'annotation', 'leiden')")
     p.add_argument("--contrast", type=str, default=None, help="Example: control vs stim")
     p.add_argument("--reference-cell-type", type=str, default="automatic")
     p.add_argument("--fdr", type=float, default=0.05)
@@ -548,6 +551,17 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.fraction("fdr", args.fdr)
+    v.positive("n_neighbors", args.n_neighbors, min_val=2)
+    v.non_negative("min_count", args.min_count)
+    v.positive("n_permutations", args.n_permutations, min_val=1)
+    v.in_range("prop", args.prop, low=0, high=1)
+    v.check()
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = output_dir / "figures"

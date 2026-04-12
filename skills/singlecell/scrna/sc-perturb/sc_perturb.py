@@ -200,6 +200,15 @@ def _write_reproducibility(output_dir: Path, args: argparse.Namespace, input_pat
 
 def main() -> int:
     args = _parse_args()
+
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("n_neighbors", args.n_neighbors, min_val=2)
+    v.non_negative("logfc_threshold", args.logfc_threshold)
+    v.fraction("pval_cutoff", args.pval_cutoff)
+    v.check()
+
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     tables_dir = output_dir / "tables"

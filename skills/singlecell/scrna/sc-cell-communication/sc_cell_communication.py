@@ -1311,6 +1311,18 @@ def main():
     args = parser.parse_args()
     counts_data_explicit = "--cellphonedb-counts-data" in sys.argv
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("cellphonedb_iterations", args.cellphonedb_iterations, min_val=1)
+    v.in_range("cellphonedb_threshold", args.cellphonedb_threshold, low=0, high=1)
+    v.positive("cellphonedb_threads", args.cellphonedb_threads, min_val=1)
+    v.fraction("cellphonedb_pvalue", args.cellphonedb_pvalue)
+    v.positive("cellchat_min_cells", args.cellchat_min_cells, min_val=1)
+    v.positive("nichenet_top_ligands", args.nichenet_top_ligands, min_val=1)
+    v.non_negative("nichenet_lfc_cutoff", args.nichenet_lfc_cutoff)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     method = validate_method_choice(args.method, METHOD_REGISTRY, fallback=DEFAULT_METHOD)

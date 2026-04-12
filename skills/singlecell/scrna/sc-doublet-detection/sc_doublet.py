@@ -279,6 +279,7 @@ def detect_doublets_doubletdetection(
     *,
     n_iters: int,
     standard_scaling: bool,
+    random_state: int = 0,
 ) -> dict:
     doubletdetection = sc_dep_manager.require("doubletdetection", feature="doublet detection")
     export, expression_source, _ = _build_count_like_export_adata(adata)
@@ -286,7 +287,7 @@ def detect_doublets_doubletdetection(
         n_iters=n_iters,
         clustering_algorithm="leiden",
         standard_scaling=standard_scaling,
-        random_state=0,
+        random_state=random_state,
         verbose=False,
         n_jobs=1,
     )
@@ -817,6 +818,7 @@ def _dispatch_detection(adata, args, method: str) -> dict:
             adata,
             n_iters=args.doubletdetection_n_iters,
             standard_scaling=bool(args.doubletdetection_standard_scaling),
+            random_state=args.random_state,
         )
     if method == "doubletfinder":
         return detect_doublets_doubletfinder(adata, expected_doublet_rate=args.expected_doublet_rate)
@@ -863,6 +865,8 @@ def main():
         default=False,
     )
     parser.add_argument("--scds-mode", choices=["hybrid", "cxds", "bcds"], default="cxds")
+    parser.add_argument("--random-state", type=int, default=0,
+                        help="Random seed for DoubletDetection (default: 0)")
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 

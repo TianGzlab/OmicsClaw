@@ -827,6 +827,19 @@ def main():
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("n_neighbors", args.n_neighbors, min_val=2)
+    v.positive("n_pcs", args.n_pcs, min_val=1)
+    if args.resolution != "auto":
+        res_val = float(args.resolution)
+        v.in_range("resolution", res_val, low=0, high=50, low_exclusive=True)
+    v.positive("tsne_perplexity", args.tsne_perplexity, min_val=1)
+    v.positive("diffmap_n_comps", args.diffmap_n_comps, min_val=2)
+    v.positive("phate_knn", args.phate_knn, min_val=2)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

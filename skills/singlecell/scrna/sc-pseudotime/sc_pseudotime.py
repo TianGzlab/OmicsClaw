@@ -1090,6 +1090,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # -- Parameter validation --
+    from skills.singlecell._lib.param_validators import ParamValidator
+    v = ParamValidator(SKILL_NAME)
+    v.positive("n_neighbors", args.n_neighbors, min_val=2)
+    v.positive("n_pcs", args.n_pcs, min_val=1)
+    v.positive("n_dcs", args.n_dcs, min_val=1)
+    v.positive("n_genes", args.n_genes, min_val=1)
+    v.positive("palantir_knn", args.palantir_knn, min_val=2)
+    v.positive("palantir_num_waypoints", args.palantir_num_waypoints, min_val=1)
+    v.positive("via_knn", args.via_knn, min_val=2)
+    v.check()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
