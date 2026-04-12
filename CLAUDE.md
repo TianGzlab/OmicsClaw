@@ -263,10 +263,10 @@ After running a skill, users can re-render R Enhanced plots with adjusted parame
 ### When to use replot
 | User says | Action |
 |---|---|
-| "图不好看" / "enhance the plot" | `replot <skill> --output <dir>` |
-| "显示更多基因" / "show top 30" | `replot <skill> --output <dir> --top-n 30` |
-| "只重画 volcano" | `replot <skill> --output <dir> --renderer plot_de_volcano` |
-| "列出可以调的参数" | `replot <skill> --output <dir> --list-renderers` |
+| "enhance the plot" / "make it prettier" | `replot <skill> --output <dir>` |
+| "show top 30 genes" / "label more genes" | `replot <skill> --output <dir> --top-n 30` |
+| "only redo the volcano plot" | `replot <skill> --output <dir> --renderer plot_de_volcano` |
+| "what parameters can I adjust?" | `replot <skill> --output <dir> --list-renderers` |
 
 ### Replot CLI
 ```bash
