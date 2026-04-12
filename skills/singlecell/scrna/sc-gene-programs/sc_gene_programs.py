@@ -53,8 +53,8 @@ SKILL_VERSION = "0.2.0"
 
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+    # gene-programs exports program usage as gene_expression.csv (programs as features).
+    # No UMAP/embedding data — embedding renderers are not appropriate here.
     "plot_feature_violin": "r_feature_violin.png",
     "plot_feature_cor": "r_feature_cor.png",
 }
@@ -279,6 +279,23 @@ def _write_figure_data(
         corr = usage_df.corr()
         files["program_correlation"] = "program_correlation.csv"
         corr.to_csv(fd_dir / files["program_correlation"])
+
+    # Write gene_expression.csv in long format for plot_feature_violin / plot_feature_cor.
+    # Pivots program_usage wide -> long, treating each program as a "gene" feature.
+    if not usage_df.empty:
+        try:
+            # Sample cells to keep CSV manageable
+            sample_n = min(len(usage_df), 1000)
+            sampled = usage_df.sample(n=sample_n, random_state=42) if len(usage_df) > sample_n else usage_df
+            # usage_df index is cell_id
+            long_rows = []
+            for prog in sampled.columns:
+                for cell_id, val in sampled[prog].items():
+                    long_rows.append({"cell_id": str(cell_id), "gene": prog, "expression": float(val)})
+            pd.DataFrame(long_rows).to_csv(fd_dir / "gene_expression.csv", index=False)
+            files["gene_expression"] = "gene_expression.csv"
+        except Exception:
+            pass
 
     manifest = {"skill": SKILL_NAME, "available_files": files}
     (fd_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

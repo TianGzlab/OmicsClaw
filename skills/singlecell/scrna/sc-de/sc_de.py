@@ -349,12 +349,55 @@ def run_de_mast_method(adata, *, groupby: str, group1: str | None, group2: str |
     }
 
 
+def _build_gene_expression_csv(
+    adata,
+    gene_list: list[str],
+    max_cells: int = 2000,
+) -> pd.DataFrame | None:
+    """Build long-format gene expression CSV for R correlation renderer.
+
+    Returns DataFrame with columns: cell_id, gene, expression.
+    Subsamples to ``max_cells`` if the dataset is large.
+    """
+    try:
+        import scipy.sparse as sp
+
+        genes_in_adata = [g for g in gene_list if g in adata.var_names]
+        if len(genes_in_adata) < 2:
+            return None
+
+        # Subsample cells to keep CSV manageable
+        n_cells = adata.n_obs
+        if n_cells > max_cells:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(n_cells, size=max_cells, replace=False)
+            sub = adata[idx, genes_in_adata]
+        else:
+            sub = adata[:, genes_in_adata]
+
+        X = sub.X
+        if sp.issparse(X):
+            X = X.toarray()
+
+        cell_ids = sub.obs_names.tolist()
+        records = []
+        for gi, gene in enumerate(genes_in_adata):
+            for ci, cell_id in enumerate(cell_ids):
+                records.append({"cell_id": cell_id, "gene": gene, "expression": float(X[ci, gi])})
+        return pd.DataFrame(records)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("gene_expression.csv build failed: %s", exc)
+        return None
+
+
 def _write_figure_data(
     output_dir: Path,
     *,
     exploratory_top: pd.DataFrame | None = None,
     group_summary: pd.DataFrame | None = None,
     pseudobulk_summary: pd.DataFrame | None = None,
+    adata=None,
+    gene_col: str = "names",
 ) -> None:
     figure_data_dir = output_dir / "figure_data"
     figure_data_dir.mkdir(exist_ok=True)
@@ -371,6 +414,16 @@ def _write_figure_data(
         path = figure_data_dir / "pseudobulk_summary.csv"
         pseudobulk_summary.to_csv(path, index=False)
         manifest["pseudobulk_summary"] = path.name
+
+    # Export gene_expression.csv for R correlation renderer (plot_feature_cor)
+    if adata is not None and exploratory_top is not None and not exploratory_top.empty:
+        top_genes = exploratory_top[gene_col].dropna().unique().tolist()[:20]
+        gene_expr_df = _build_gene_expression_csv(adata, top_genes)
+        if gene_expr_df is not None and not gene_expr_df.empty:
+            path = figure_data_dir / "gene_expression.csv"
+            gene_expr_df.to_csv(path, index=False)
+            manifest["gene_expression"] = path.name
+
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
@@ -461,7 +514,7 @@ def generate_scanpy_figures(adata, full_df: pd.DataFrame, top_df: pd.DataFrame, 
     except Exception as exc:
         logger.warning("DE group summary failed: %s", exc)
 
-    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df)
+    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df, adata=adata, gene_col="names")
     return figures
 
 
@@ -472,6 +525,7 @@ def generate_tabular_de_figures(
     *,
     group_col: str,
     gene_col: str,
+    adata=None,
 ) -> list[str]:
     figures: list[str] = []
     summary_df = _group_summary(full_df, top_df, group_col=group_col, gene_col=gene_col)
@@ -487,7 +541,7 @@ def generate_tabular_de_figures(
             figures.append(str(p))
     except Exception as exc:
         logger.warning("DE group summary failed: %s", exc)
-    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df)
+    _write_figure_data(output_dir, exploratory_top=top_df, group_summary=summary_df, adata=adata, gene_col=gene_col)
     return figures
 
 
@@ -723,7 +777,7 @@ def main():
         top_df = full_df.sort_values(["padj", "pvalue"], na_position="last").groupby("group", observed=False).head(args.n_top_genes)
         full_df.to_csv(tables_dir / "de_full.csv", index=False)
         top_df.to_csv(tables_dir / "markers_top.csv", index=False)
-        generate_tabular_de_figures(full_df, top_df, output_dir, group_col="group", gene_col="gene")
+        generate_tabular_de_figures(full_df, top_df, output_dir, group_col="group", gene_col="gene", adata=adata)
     else:
         full_df, summary = run_de_scanpy(
             adata,

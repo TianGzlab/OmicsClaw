@@ -53,9 +53,10 @@ SKILL_NAME = "sc-preprocessing"
 SKILL_VERSION = "0.4.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py"
 
-R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+R_ENHANCED_PLOTS: dict[str, str] = {
+    # sc-preprocessing runs before clustering — no cluster labels yet.
+    # HVG expression summary is the most useful R Enhanced view at this stage.
+    "plot_feature_violin": "r_hvg_violin.png",
 }
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
@@ -618,6 +619,45 @@ def _export_figure_data(adata, output_dir: Path, summary: dict, recipe: Visualiz
         if isinstance(df, pd.DataFrame) and not df.empty:
             df.to_csv(figure_data_dir / filename, index=False)
             available_files[key] = filename
+
+    # Write embedding_points.csv for plot_embedding_discrete/feature R renderers.
+    # At preprocessing stage UMAP is not yet computed; use PC1/PC2 as proxy dimensions.
+    pca_df = context.get("pca_embedding_df")
+    if isinstance(pca_df, pd.DataFrame) and not pca_df.empty and "PC1" in pca_df.columns and "PC2" in pca_df.columns:
+        embed_df = pca_df[["cell_id", "PC1", "PC2"]].copy()
+        embed_df = embed_df.rename(columns={"PC1": "dim1", "PC2": "dim2"})
+        # Add cluster col from adata.obs if available
+        if adata is not None:
+            for col in ("leiden", "louvain", "cluster"):
+                if col in adata.obs.columns:
+                    id_to_col = adata.obs[col].astype(str).to_dict()
+                    embed_df["cluster"] = embed_df["cell_id"].map(id_to_col).fillna("unknown")
+                    break
+        embed_df.to_csv(figure_data_dir / "embedding_points.csv", index=False)
+        available_files["embedding_points"] = "embedding_points.csv"
+
+    # Write gene_expression.csv (long format) for plot_feature_violin.
+    # Exports top HVGs expression per cell, sampled to keep CSV size reasonable.
+    if adata is not None and "highly_variable" in adata.var.columns:
+        try:
+            import scipy.sparse as sp
+            hvg_genes = adata.var_names[adata.var["highly_variable"]].tolist()[:20]
+            if len(hvg_genes) >= 2:
+                n_cells = adata.n_obs
+                rng = np.random.default_rng(42)
+                idx = rng.choice(n_cells, size=min(n_cells, 1000), replace=False)
+                sub = adata[idx, hvg_genes]
+                X = sub.X
+                if sp.issparse(X):
+                    X = X.toarray()
+                records = []
+                for gi, gene in enumerate(hvg_genes):
+                    for ci, cell_id in enumerate(sub.obs_names.tolist()):
+                        records.append({"cell_id": cell_id, "gene": gene, "expression": float(X[ci, gi])})
+                pd.DataFrame(records).to_csv(figure_data_dir / "gene_expression.csv", index=False)
+                available_files["gene_expression"] = "gene_expression.csv"
+        except Exception as exc:
+            logger.warning("gene_expression.csv export failed: %s", exc)
 
     manifest = {
         "skill": SKILL_NAME,

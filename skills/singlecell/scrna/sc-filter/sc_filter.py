@@ -67,8 +67,9 @@ SKILL_NAME = "sc-filter"
 SKILL_VERSION = "0.4.0"
 
 R_ENHANCED_PLOTS: dict[str, str] = {
+    # sc-filter runs before clustering — no cell-type compositions yet.
+    # plot_feature_violin reads gene_expression.csv (QC metrics in long format).
     "plot_feature_violin": "r_feature_violin.png",
-    "plot_cell_barplot": "r_cell_barplot.png",
 }
 
 
@@ -367,6 +368,23 @@ def generate_filter_figures(_adata, output_dir: Path, *, gallery_context: dict) 
     gallery_context["retention_df"].to_csv(figures_dir / "retention_summary.csv", index=False)
     gallery_context["state_df"].to_csv(figures_dir / "filter_state.csv", index=False)
     gallery_context["reason_df"].to_csv(figures_dir / "filter_reasons.csv", index=False)
+
+    # Write gene_expression.csv in long format for plot_feature_violin R renderer.
+    # Uses QC metric columns from filter_state.csv (n_genes_by_counts, total_counts, etc.)
+    state_df = gallery_context.get("state_df")
+    if isinstance(state_df, pd.DataFrame) and not state_df.empty:
+        metric_cols = [c for c in state_df.columns if c not in ("state",) and state_df[c].dtype.kind in ("f", "i", "u")]
+        if metric_cols:
+            # Add a synthetic cell_id index if not present
+            if "cell_id" not in state_df.columns:
+                state_df = state_df.copy()
+                state_df.insert(0, "cell_id", [f"cell_{i}" for i in range(len(state_df))])
+            long_rows = []
+            for col in metric_cols:
+                for _, row in state_df[["cell_id", col]].iterrows():
+                    long_rows.append({"cell_id": row["cell_id"], "gene": col, "expression": row[col]})
+            pd.DataFrame(long_rows).to_csv(figures_dir / "gene_expression.csv", index=False)
+            gallery_context["figure_data_files"]["gene_expression"] = "gene_expression.csv"
     (figures_dir / "manifest.json").write_text(
         json.dumps(
             {

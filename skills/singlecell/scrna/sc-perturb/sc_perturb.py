@@ -42,8 +42,9 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-perturb/sc_perturb.py"
 
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+    # sc-perturb exports cell_type_counts.csv (class counts) for barplot renderer.
+    # No UMAP/embedding CSV — embedding renderers not appropriate here.
+    "plot_cell_barplot": "r_perturbation_barplot.png",
 }
 
 
@@ -285,6 +286,28 @@ def main() -> int:
     # Save figure data for downstream customization
     global_counts.to_csv(figure_data_dir / "mixscape_global_classes.csv", index=False)
     class_counts.to_csv(figure_data_dir / "mixscape_class_counts.csv", index=False)
+
+    # Write cell_type_counts.csv for plot_cell_barplot R renderer.
+    # Renames 'class' -> 'cell_type' and adds proportion_pct column.
+    try:
+        ct_df = class_counts.rename(columns={"class": "cell_type"}).copy()
+        total = ct_df["n_cells"].sum()
+        ct_df["proportion_pct"] = (ct_df["n_cells"] / total * 100).round(2) if total > 0 else 0.0
+        ct_df.to_csv(figure_data_dir / "cell_type_counts.csv", index=False)
+    except Exception:
+        pass
+
+    manifest = {
+        "skill": SKILL_NAME,
+        "available_files": {
+            "mixscape_class_counts": "mixscape_class_counts.csv",
+            "mixscape_global_classes": "mixscape_global_classes.csv",
+            "cell_type_counts": "cell_type_counts.csv",
+        },
+    }
+    (figure_data_dir / "manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2), encoding="utf-8"
+    )
 
     fig, ax = plt.subplots(figsize=(8, 4))
     global_counts.plot.bar(x="global_class", y="n_cells", ax=ax, color="#1f78b4")

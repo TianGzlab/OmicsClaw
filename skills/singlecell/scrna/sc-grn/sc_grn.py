@@ -68,8 +68,10 @@ SKILL_VERSION = "0.2.0"
 
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+    # sc-grn exports AUC scores as gene_expression.csv (regulons as features).
+    # No UMAP/embedding CSV — embedding renderers not appropriate here.
+    "plot_feature_violin": "r_regulon_violin.png",
+    "plot_feature_cor": "r_regulon_cor.png",
 }
 
 
@@ -213,6 +215,20 @@ def _write_figure_data(
     if auc_matrix.shape[1] > 0:
         files["auc_matrix"] = "auc_matrix.csv"
         auc_matrix.to_csv(figure_data_dir / files["auc_matrix"])
+
+        # Write gene_expression.csv in long format for plot_feature_violin/plot_feature_cor.
+        # Pivots AUC matrix wide -> long, treating each regulon/TF as a "gene" feature.
+        try:
+            sample_n = min(len(auc_matrix), 1000)
+            sampled = auc_matrix.sample(n=sample_n, random_state=42) if len(auc_matrix) > sample_n else auc_matrix
+            long_rows = []
+            for tf in sampled.columns:
+                for cell_id, val in sampled[tf].items():
+                    long_rows.append({"cell_id": str(cell_id), "gene": tf, "expression": float(val)})
+            pd.DataFrame(long_rows).to_csv(figure_data_dir / "gene_expression.csv", index=False)
+            files["gene_expression"] = "gene_expression.csv"
+        except Exception:
+            pass
 
     manifest = {"skill": SKILL_NAME, "available_files": files}
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

@@ -50,10 +50,10 @@ SKILL_VERSION = "0.4.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-batch-integration/sc_integrate.py"
 
 R_ENHANCED_PLOTS = {
+    # batch-integration exports umap_points.csv with batch/cluster labels.
+    # plot_embedding_discrete colors by batch or cluster column.
+    # plot_cell_barplot and plot_cell_sankey removed — no cell_type_counts.csv here.
     "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
-    "plot_cell_barplot": "r_cell_barplot.png",
-    "plot_cell_sankey": "r_cell_sankey.png",
 }
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {

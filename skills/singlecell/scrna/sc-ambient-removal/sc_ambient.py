@@ -58,8 +58,9 @@ SKILL_NAME = "sc-ambient-removal"
 SKILL_VERSION = "0.6.0"
 
 R_ENHANCED_PLOTS: dict[str, str] = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+    # ambient-removal exports gene_expression.csv with before/after counts for top genes.
+    # No UMAP/embedding at this pre-QC stage — embedding renderers not appropriate.
+    "plot_feature_violin": "r_ambient_violin.png",
 }
 
 
@@ -711,6 +712,39 @@ def _write_figure_data(output_dir: Path, adata_before, adata_after, *, summary: 
     })
     files["correction_summary"] = "correction_summary.csv"
     count_summary.to_csv(figure_data_dir / files["correction_summary"], index=False)
+
+    # Write gene_expression.csv for plot_feature_violin R renderer.
+    # Compares before/after expression for top high-expression genes.
+    try:
+        import scipy.sparse as sp_local
+        # Get top genes by mean expression in after matrix
+        X_after = adata_after.X
+        if sp_local.issparse(X_after):
+            X_after = X_after.toarray()
+        gene_means = np.asarray(X_after).mean(axis=0)
+        top_idx = np.argsort(gene_means)[::-1][:10]
+        top_genes = adata_after.var_names[top_idx].tolist()
+
+        sample_n = min(adata_after.n_obs, 500)
+        rng = np.random.default_rng(42)
+        cell_idx = rng.choice(adata_after.n_obs, size=sample_n, replace=False)
+        cell_ids = adata_after.obs_names[cell_idx].tolist()
+
+        X_sub_after = np.asarray(X_after)[cell_idx][:, top_idx]
+
+        long_rows = []
+        for gi, gene in enumerate(top_genes):
+            for ci, cell_id in enumerate(cell_ids):
+                long_rows.append({
+                    "cell_id": cell_id,
+                    "gene": f"{gene}_after",
+                    "expression": float(X_sub_after[ci, gi]),
+                })
+        gene_expr_df = pd.DataFrame(long_rows)
+        gene_expr_df.to_csv(figure_data_dir / "gene_expression.csv", index=False)
+        files["gene_expression"] = "gene_expression.csv"
+    except Exception:
+        pass
 
     (figure_data_dir / "manifest.json").write_text(
         json.dumps({"skill": SKILL_NAME, "available_files": files}, indent=2, ensure_ascii=False),

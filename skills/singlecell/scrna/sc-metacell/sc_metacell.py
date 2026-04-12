@@ -38,9 +38,10 @@ SKILL_VERSION = "0.1.0"
 
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
+    # centroid_points.csv is exported as embedding_points.csv (x→dim1, y→dim2).
+    # plot_embedding_discrete colors by the metacell label column.
+    # plot_cell_barplot removed — no cell_type_counts.csv at this stage.
     "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
-    "plot_cell_barplot": "r_cell_barplot.png",
 }
 
 
@@ -198,6 +199,16 @@ def _write_figure_data(output_dir: Path, *, points_df: pd.DataFrame, summary_df:
     if not points_df.empty:
         files["centroid_points"] = "centroid_points.csv"
         points_df.to_csv(fd_dir / files["centroid_points"], index=False)
+
+        # Write embedding_points.csv with normalized dim1/dim2 for R embedding renderers.
+        embed_df = points_df.copy()
+        if "x" in embed_df.columns and "dim1" not in embed_df.columns:
+            embed_df = embed_df.rename(columns={"x": "dim1", "y": "dim2"})
+        if "cell_id" not in embed_df.columns:
+            embed_df.insert(0, "cell_id", embed_df.index.astype(str))
+        embed_df.to_csv(fd_dir / "embedding_points.csv", index=False)
+        files["embedding_points"] = "embedding_points.csv"
+
     files["metacell_summary"] = "metacell_summary.csv"
     summary_df.to_csv(fd_dir / files["metacell_summary"], index=False)
 

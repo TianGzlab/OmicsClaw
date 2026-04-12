@@ -62,9 +62,9 @@ DEFAULT_METHOD = "aucell_r"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py"
 
 R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
-    "plot_feature_violin": "r_feature_violin.png",
+    # pathway-scoring exports gene_expression.csv (pathway score per cell, long format).
+    # No UMAP/embedding CSV — embedding renderers not appropriate at this stage.
+    "plot_feature_violin": "r_pathway_violin.png",
 }
 R_SCRIPTS_DIR = Path(__file__).resolve().parent / "rscripts"
 SHARED_PARAM_KEYS = ("method", "gene_sets", "groupby", "top_pathways")
@@ -744,6 +744,19 @@ def _write_figure_data(output_dir: Path, summary: dict, overlap_df: pd.DataFrame
             keep_index = not isinstance(data.index, pd.RangeIndex)
             data.to_csv(output_path, index=keep_index)
             manifest[filename] = output_path.name
+
+    # Write gene_expression.csv for plot_feature_violin renderer.
+    # Renames gene_set -> gene and score -> expression from top_pathway_scores_long.csv.
+    long_df = summary.get("top_pathway_scores_long_df", pd.DataFrame())
+    if isinstance(long_df, pd.DataFrame) and not long_df.empty:
+        try:
+            expr_df = long_df[["cell_id", "gene_set", "score"]].rename(
+                columns={"gene_set": "gene", "score": "expression"}
+            )
+            expr_df.to_csv(figure_data_dir / "gene_expression.csv", index=False)
+            manifest["gene_expression.csv"] = "gene_expression.csv"
+        except Exception:
+            pass
 
     (figure_data_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 

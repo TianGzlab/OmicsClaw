@@ -52,9 +52,10 @@ SKILL_NAME = "sc-qc"
 SKILL_VERSION = "0.2.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-qc/sc_qc.py"
 
-R_ENHANCED_PLOTS = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_cell_barplot": "r_cell_barplot.png",
+R_ENHANCED_PLOTS: dict[str, str] = {
+    # sc-qc runs before clustering — no embeddings or cell-type compositions yet.
+    # plot_feature_violin reads qc_metrics_per_cell.csv written by _export_figure_data.
+    "plot_feature_violin": "r_qc_violin.png",
 }
 QC_METHOD = "qc_metrics"
 METHOD_PARAM_DEFAULTS = {
@@ -298,6 +299,20 @@ def _export_figure_data(output_dir: Path, summary: dict, recipe: VisualizationRe
         if isinstance(df, pd.DataFrame) and not df.empty:
             df.to_csv(figure_data_dir / filename, index=False)
             available_files[key] = filename
+
+    # Write gene_expression.csv in long format for plot_feature_violin R renderer.
+    # Pivots qc_metrics_per_cell wide -> long so metrics appear as "genes" (features).
+    qc_df = context.get("qc_metrics_df")
+    if isinstance(qc_df, pd.DataFrame) and not qc_df.empty and "cell_id" in qc_df.columns:
+        metric_cols = [c for c in qc_df.columns if c != "cell_id"]
+        if metric_cols:
+            long_rows = []
+            for col in metric_cols:
+                for _, row in qc_df[["cell_id", col]].iterrows():
+                    long_rows.append({"cell_id": row["cell_id"], "gene": col, "expression": row[col]})
+            long_df = pd.DataFrame(long_rows)
+            long_df.to_csv(figure_data_dir / "gene_expression.csv", index=False)
+            available_files["gene_expression"] = "gene_expression.csv"
 
     manifest = {
         "skill": SKILL_NAME,

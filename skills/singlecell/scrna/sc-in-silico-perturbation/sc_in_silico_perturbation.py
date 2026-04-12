@@ -52,8 +52,9 @@ SKILL_NAME = "sc-in-silico-perturbation"
 SKILL_VERSION = "0.2.0"
 
 R_ENHANCED_PLOTS: dict[str, str] = {
-    "plot_embedding_discrete": "r_embedding_discrete.png",
-    "plot_embedding_feature": "r_embedding_feature.png",
+    # sc-ISP exports diff_regulation.csv as de_top_markers.csv alias for volcano.
+    # No UMAP/embedding CSV at this stage.
+    "plot_de_volcano": "r_isp_volcano.png",
 }
 
 
@@ -423,6 +424,28 @@ def _write_figure_data(output_dir: Path, diff_df: pd.DataFrame) -> dict[str, str
         fname = "diff_regulation.csv"
         diff_df.to_csv(fd_dir / fname, index=False)
         files["diff_regulation"] = fname
+
+        # Write de_top_markers.csv alias for plot_de_volcano renderer.
+        # Maps ISP columns to expected DE column schema.
+        try:
+            alias_df = diff_df.copy()
+            # Rename to scanpy-style DE columns expected by de.R
+            col_map = {}
+            if "gene" in alias_df.columns and "names" not in alias_df.columns:
+                col_map["gene"] = "names"
+            if "FC" in alias_df.columns and "logfoldchanges" not in alias_df.columns:
+                col_map["FC"] = "logfoldchanges"
+            if "p.adj" in alias_df.columns and "pvals_adj" not in alias_df.columns:
+                col_map["p.adj"] = "pvals_adj"
+            elif "p_value" in alias_df.columns and "pvals_adj" not in alias_df.columns:
+                col_map["p_value"] = "pvals_adj"
+            if col_map:
+                alias_df = alias_df.rename(columns=col_map)
+            alias_df["group"] = "KO"
+            alias_df.to_csv(fd_dir / "de_top_markers.csv", index=False)
+            files["de_top_markers"] = "de_top_markers.csv"
+        except Exception:
+            pass
 
     manifest = {"skill": SKILL_NAME, "available_files": files}
     (fd_dir / "manifest.json").write_text(

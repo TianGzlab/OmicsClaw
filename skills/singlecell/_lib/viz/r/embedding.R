@@ -15,7 +15,8 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
   tryCatch({
     # Try multiple CSV sources for embedding coordinates
     candidates <- c("annotation_embedding_points.csv", "pseudotime_points.csv",
-                     "embedding_points.csv")
+                     "embedding_points.csv", "cytotrace_embedding.csv",
+                     "umap_points.csv")
     csv_path <- NULL
     for (f in candidates) {
       p <- file.path(data_dir, f)
@@ -34,6 +35,10 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
     if (!"dim1" %in% colnames(df) && "UMAP_1" %in% colnames(df)) {
       colnames(df)[colnames(df) == "UMAP_1"] <- "dim1"
       colnames(df)[colnames(df) == "UMAP_2"] <- "dim2"
+    }
+    if (!"dim1" %in% colnames(df) && "UMAP1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "UMAP1"] <- "dim1"
+      colnames(df)[colnames(df) == "UMAP2"] <- "dim2"
     }
 
     # Determine color column
@@ -99,7 +104,8 @@ plot_embedding_discrete <- function(data_dir, out_path, params) {
 plot_embedding_feature <- function(data_dir, out_path, params) {
   tryCatch({
     candidates <- c("annotation_embedding_points.csv", "pseudotime_points.csv",
-                     "embedding_points.csv")
+                     "embedding_points.csv", "cytotrace_embedding.csv",
+                     "umap_points.csv")
     csv_path <- NULL
     for (f in candidates) {
       p <- file.path(data_dir, f)
@@ -119,6 +125,10 @@ plot_embedding_feature <- function(data_dir, out_path, params) {
       colnames(df)[colnames(df) == "UMAP_1"] <- "dim1"
       colnames(df)[colnames(df) == "UMAP_2"] <- "dim2"
     }
+    if (!"dim1" %in% colnames(df) && "UMAP1" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "UMAP1"] <- "dim1"
+      colnames(df)[colnames(df) == "UMAP2"] <- "dim2"
+    }
 
     # Determine feature column — try multiple common names
     feature_col <- params[["feature"]]
@@ -130,7 +140,9 @@ plot_embedding_feature <- function(data_dir, out_path, params) {
         # Try any numeric column that isn't a coordinate
         skip <- c("cell_id", "dim1", "dim2", "coord1", "coord2", "UMAP_1", "UMAP_2")
         num_cols <- setdiff(colnames(df), skip)
-        num_cols <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) || all(grepl("^[0-9.eE+-]+$", x[!is.na(x)])))]
+        if (length(num_cols) > 0) {
+          num_cols <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) || all(grepl("^[0-9.eE+-]+$", x[!is.na(x)])))]
+        }
         if (length(num_cols) > 0) feature_col <- num_cols[1]
         else stop("No continuous feature column found \u2014 pass feature=<colname>")
       } else {

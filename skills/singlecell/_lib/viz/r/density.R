@@ -21,7 +21,8 @@ plot_cell_density <- function(data_dir, out_path, params) {
     csv_candidates <- c(
       "pseudotime_points.csv",
       "annotation_embedding_points.csv",
-      "embedding_points.csv"
+      "embedding_points.csv",
+      "cytotrace_embedding.csv"
     )
     csv_path <- NULL
     for (f in csv_candidates) {
