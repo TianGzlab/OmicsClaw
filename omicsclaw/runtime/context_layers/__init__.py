@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,10 +83,20 @@ KnowhowLoader = Callable[..., str]
 
 
 def load_base_persona(soul_md: Path = DEFAULT_SOUL_MD) -> str:
+    # Primary: __file__-based resolution (works for source-tree installs)
     if soul_md.exists():
         soul = soul_md.read_text(encoding="utf-8")
         LOGGER.info("Loaded SOUL.md (%d chars)", len(soul))
         return soul
+
+    # Fallback: check OMICSCLAW_DIR (works for pip-installed / bundled)
+    env_dir = os.environ.get("OMICSCLAW_DIR", "").strip()
+    if env_dir:
+        alt = Path(env_dir) / "SOUL.md"
+        if alt.exists():
+            soul = alt.read_text(encoding="utf-8")
+            LOGGER.info("Loaded SOUL.md from OMICSCLAW_DIR (%d chars)", len(soul))
+            return soul
 
     LOGGER.warning("SOUL.md not found, using fallback prompt")
     return (
