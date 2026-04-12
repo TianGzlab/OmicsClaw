@@ -251,8 +251,8 @@ Plans:
   7. 所有新 renderer 注册到 registry.R，对应 skill 的 R_ENHANCED_PLOTS 更新
 **Plans**: 3 plans
 Plans:
-- [ ] 19-01-PLAN.md — density.R + sankey.R + stat.R proportion_test 扩展 (SCOP-01, SCOP-02, SCOP-04)
-- [ ] 19-02-PLAN.md — communication.R CCC stat 扩展 + correlation.R + cytotrace.R (SCOP-03)
+- [x] 19-01-PLAN.md — density.R + sankey.R + stat.R proportion_test 扩展 (SCOP-01, SCOP-02, SCOP-04)
+- [x] 19-02-PLAN.md — communication.R CCC stat 扩展 + correlation.R + cytotrace.R (SCOP-03)
 - [ ] 19-03-PLAN.md — registry.R 注册 + Python wiring (figure_data 补全 + R_ENHANCED_PLOTS 更新)
 
 ### Phase 20: scop 绘图搬运 — 增强现有 Renderer
@@ -290,7 +290,7 @@ Plans:
 | 16. Trajectory and Enrichment R Enhanced Plots | v2.0 | 2/2 | Complete   | 2026-04-11 |
 | 17. CCC, Velocity, and DE R Enhanced Plots | v2.0 | 3/3 | Complete   | 2026-04-11 |
 | 18. Skill Wiring --r-enhanced Flag | v2.0 | 3/3 | Complete   | 2026-04-11 |
-| 19. scop 绘图搬运 — 高优先新 Renderer | v2.0 | 0/3 | Not Started |  |
+| 19. scop 绘图搬运 — 高优先新 Renderer | v2.0 | 2/3 | In Progress|  |
 | 20. scop 绘图搬运 — 增强现有 Renderer | v2.0 | 0/? | Not Started |  |
 
 ---
