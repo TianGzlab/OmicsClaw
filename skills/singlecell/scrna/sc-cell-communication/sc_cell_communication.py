@@ -72,6 +72,9 @@ R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_ccc_heatmap": "r_ccc_heatmap.png",
     "plot_ccc_network": "r_ccc_network.png",
     "plot_ccc_bubble": "r_ccc_bubble.png",
+    "plot_ccc_stat_bar": "r_ccc_stat_bar.png",
+    "plot_ccc_stat_violin": "r_ccc_stat_violin.png",
+    "plot_ccc_stat_scatter": "r_ccc_stat_scatter.png",
 }
 
 

@@ -29,6 +29,10 @@ source(file.path(script_dir, "velocity.R"))
 source(file.path(script_dir, "communication.R"))
 source(file.path(script_dir, "de.R"))
 source(file.path(script_dir, "stat.R"))
+source(file.path(script_dir, "density.R"))
+source(file.path(script_dir, "sankey.R"))
+source(file.path(script_dir, "correlation.R"))
+source(file.path(script_dir, "cytotrace.R"))
 
 # ---- Test stub renderer ----
 # Minimal ggplot2 scatter that proves the Python -> R round-trip works.
@@ -76,7 +80,15 @@ R_PLOT_REGISTRY <- list(
   plot_enrichment_dotplot    = plot_enrichment_dotplot,
   plot_enrichment_lollipop   = plot_enrichment_lollipop,
   plot_pseudotime_heatmap    = plot_pseudotime_heatmap,
-  plot_ccc_bubble            = plot_ccc_bubble
+  plot_ccc_bubble            = plot_ccc_bubble,
+  plot_cell_density          = plot_cell_density,
+  plot_proportion_test       = plot_proportion_test,
+  plot_cell_sankey           = plot_cell_sankey,
+  plot_ccc_stat_bar          = plot_ccc_stat_bar,
+  plot_ccc_stat_violin       = plot_ccc_stat_violin,
+  plot_ccc_stat_scatter      = plot_ccc_stat_scatter,
+  plot_feature_cor           = plot_feature_cor,
+  plot_cytotrace_boxplot     = plot_cytotrace_boxplot
 )
 
 # ---- CLI dispatcher (runs only when script is invoked directly) ----

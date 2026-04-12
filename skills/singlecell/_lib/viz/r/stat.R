@@ -340,3 +340,98 @@ plot_cell_proportion <- function(data_dir, out_path, params) {
     quit(status = 1)
   })
 }
+
+# ---- Function 5: plot_proportion_test ----
+
+#' Pointrange plot for proportion test results with FDR annotation.
+#'
+#' Reads proportion_test_results.csv from figure_data/.
+#' Shows observed log2 fold difference per cell type with bootstrap CI
+#' and significance coloring based on FDR threshold.
+#'
+#' Adapted from scop ProportionTestPlot.R pattern.
+#'
+#' @param data_dir Character. figure_data/ directory.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. Optional: FDR_threshold (default 0.05),
+#'   fold_threshold (default 1.5, used as log2(fold_threshold)).
+plot_proportion_test <- function(data_dir, out_path, params) {
+  tryCatch({
+    # ---- 1. Read CSV ----
+    csv_path <- file.path(data_dir, "proportion_test_results.csv")
+    if (!file.exists(csv_path)) {
+      stop("proportion_test_results.csv not found in ", data_dir)
+    }
+
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+    if (nrow(df) == 0) stop("proportion_test_results.csv is empty")
+
+    # ---- 2. Validate required columns ----
+    required_cols <- c("clusters", "obs_log2FD", "boot_CI_2.5", "boot_CI_97.5", "FDR")
+    missing_cols <- setdiff(required_cols, colnames(df))
+    if (length(missing_cols) > 0) {
+      stop("Missing required columns: ", paste(missing_cols, collapse = ", "),
+           ". Available: ", paste(colnames(df), collapse = ", "))
+    }
+
+    # ---- 3. Compute significance ----
+    FDR_threshold <- as.numeric(params[["FDR_threshold"]] %||% 0.05)
+    fold_threshold <- as.numeric(params[["fold_threshold"]] %||% 1.5)
+    log2FD_threshold <- log2(fold_threshold)
+
+    df$significance <- ifelse(
+      df$FDR < FDR_threshold & abs(df$obs_log2FD) > log2FD_threshold,
+      "Significant", "n.s."
+    )
+    df$significance <- factor(df$significance,
+                              levels = c("Significant", "n.s."))
+
+    # Order clusters by obs_log2FD (descending)
+    cluster_order <- df$clusters[order(df$obs_log2FD, decreasing = TRUE)]
+    # Handle duplicate cluster names (from multiple comparisons)
+    cluster_order <- unique(cluster_order)
+    df$clusters <- factor(df$clusters, levels = cluster_order)
+
+    # ---- 4. Build plot ----
+    p <- ggplot(df, aes(x = clusters, y = obs_log2FD)) +
+      geom_pointrange(
+        aes(ymin = boot_CI_2.5, ymax = boot_CI_97.5, color = significance),
+        size = 0.8
+      ) +
+      geom_hline(yintercept = log2FD_threshold,
+                 linetype = "dashed", color = "grey50") +
+      geom_hline(yintercept = -log2FD_threshold,
+                 linetype = "dashed", color = "grey50") +
+      geom_hline(yintercept = 0, color = "black") +
+      scale_color_manual(
+        name = "Significance",
+        values = c("Significant" = "#E41A1C", "n.s." = "grey60")
+      ) +
+      coord_flip() +
+      labs(x = "Cell Type", y = "log2(Fold Difference)",
+           title = "Proportion Test") +
+      theme_omics() +
+      theme(legend.position = "bottom")
+
+    # Add subtitle if comparison info is available
+    if ("comparison" %in% colnames(df)) {
+      comparisons <- unique(df$comparison)
+      if (length(comparisons) == 1) {
+        p <- p + labs(subtitle = comparisons[1])
+      }
+    } else if (all(c("group1", "group2") %in% colnames(df))) {
+      g1 <- unique(df$group1)[1]
+      g2 <- unique(df$group2)[1]
+      p <- p + labs(subtitle = paste0(g2, " vs ", g1))
+    }
+
+    # Dynamic sizing
+    n_clusters <- length(unique(df$clusters))
+    plot_width <- max(6, n_clusters * 0.5 + 2)
+    ggsave_standard(p, out_path, width = 7, height = plot_width)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}

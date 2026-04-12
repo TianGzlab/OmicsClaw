@@ -81,6 +81,7 @@ R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_pseudotime_heatmap": "r_pseudotime_heatmap.png",
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_embedding_feature": "r_embedding_feature.png",
+    "plot_cell_density": "r_cell_density.png",
 }
 
 

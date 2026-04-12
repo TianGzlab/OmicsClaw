@@ -1,6 +1,6 @@
-# communication.R -- CCCHeatmap and CCCNetworkPlot renderers for OmicsClaw R Enhanced
-# Reads: figure_data/sender_receiver_summary.csv (or top_interactions.csv fallback)
-# Provides: plot_ccc_heatmap, plot_ccc_network
+# communication.R -- CCC renderers for OmicsClaw R Enhanced
+# Reads: figure_data/sender_receiver_summary.csv, top_interactions.csv, group_role_summary.csv, pathway_summary.csv
+# Provides: plot_ccc_heatmap, plot_ccc_network, plot_ccc_bubble, plot_ccc_stat_bar, plot_ccc_stat_violin, plot_ccc_stat_scatter
 # Registered in: registry.R
 
 # ---- Internal helper: load CCC data ----
@@ -344,6 +344,224 @@ plot_ccc_bubble <- function(data_dir, out_path, params) {
     w <- max(7, n_cp * 0.8 + 3)
     h <- max(5, n_lr * 0.3 + 2)
     ggsave_standard(p, out_path, width = w, height = h)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
+
+# ---- Function 4: plot_ccc_stat_bar ----
+
+#' Horizontal bar chart of top signaling interactions or pathways.
+#'
+#' Reads top_interactions.csv (or pathway_summary.csv when grouping by pathway).
+#' Aggregates by pathway or source->target pair and plots horizontal bars
+#' ordered by score descending.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. Optional: top_n (default 15),
+#'   group_by ("pathway" or "pair", default auto-detect).
+plot_ccc_stat_bar <- function(data_dir, out_path, params) {
+  tryCatch({
+    top_n <- as.integer(params[["top_n"]] %||% 15)
+    group_by <- params[["group_by"]] %||% NULL
+
+    # Auto-detect: if pathway_summary.csv exists and group_by is "pathway", use it
+    pathway_csv <- file.path(data_dir, "pathway_summary.csv")
+    interactions_csv <- file.path(data_dir, "top_interactions.csv")
+
+    if (!is.null(group_by) && group_by == "pathway" && file.exists(pathway_csv)) {
+      df <- read.csv(pathway_csv, stringsAsFactors = FALSE)
+      if (nrow(df) == 0) stop("Empty pathway_summary.csv")
+      df$score <- as.numeric(df$mean_score)
+      df$label <- df$pathway
+      plot_title <- "Top signaling pathways"
+    } else if (file.exists(interactions_csv)) {
+      raw <- read.csv(interactions_csv, stringsAsFactors = FALSE)
+      if (nrow(raw) == 0) stop("Empty top_interactions.csv")
+      raw$score <- as.numeric(raw$score)
+
+      # Auto-detect group_by
+      if (is.null(group_by)) {
+        group_by <- if ("pathway" %in% colnames(raw)) "pathway" else "pair"
+      }
+
+      if (group_by == "pathway" && "pathway" %in% colnames(raw)) {
+        df <- aggregate(score ~ pathway, data = raw, FUN = sum)
+        df$label <- df$pathway
+        plot_title <- "Top signaling pathways"
+      } else {
+        raw$pair <- paste0(raw$source, " -> ", raw$target)
+        df <- aggregate(score ~ pair, data = raw, FUN = sum)
+        df$label <- df$pair
+        plot_title <- "Top signaling interactions"
+      }
+    } else {
+      stop("No CCC data found. Expected top_interactions.csv or ",
+           "pathway_summary.csv in ", data_dir)
+    }
+
+    # Order by score descending and keep top_n
+    df <- df[order(-df$score), ]
+    df <- head(df, top_n)
+    df$label <- factor(df$label, levels = rev(df$label))
+
+    n_bars <- nrow(df)
+    pal <- omics_palette(n_bars)
+
+    p <- ggplot(df, aes(x = label, y = score, fill = label)) +
+      geom_bar(stat = "identity", width = 0.7) +
+      coord_flip() +
+      scale_fill_manual(values = pal, guide = "none") +
+      labs(x = "", y = "Aggregated score", title = plot_title) +
+      theme_omics() +
+      theme(panel.grid.major.y = element_blank())
+
+    h <- max(4, n_bars * 0.35 + 1.5)
+    ggsave_standard(p, out_path, width = 8, height = h)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
+
+# ---- Function 5: plot_ccc_stat_violin ----
+
+#' Violin plot of interaction score distributions across cell type pairs.
+#'
+#' Reads top_interactions.csv. Shows violin + jitter of scores faceted by
+#' source or target cell type.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. Optional: facet_by ("source" or "target", default "source"),
+#'   top_n (default 20).
+plot_ccc_stat_violin <- function(data_dir, out_path, params) {
+  tryCatch({
+    csv_path <- file.path(data_dir, "top_interactions.csv")
+    if (!file.exists(csv_path)) {
+      stop("top_interactions.csv not found in ", data_dir)
+    }
+
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+    if (nrow(df) == 0) stop("Empty top_interactions.csv")
+
+    facet_by <- params[["facet_by"]] %||% "source"
+    if (!facet_by %in% c("source", "target")) facet_by <- "source"
+    top_n <- as.integer(params[["top_n"]] %||% 20)
+
+    df$score <- as.numeric(df$score)
+    df <- df[!is.na(df$score) & df$score > 0, ]
+
+    # Keep top_n interactions by score
+    if (nrow(df) > top_n) {
+      df <- df[order(-df$score), ][seq_len(top_n), ]
+    }
+
+    # Determine x-axis and facet variables
+    if (facet_by == "source") {
+      x_var <- "target"
+      facet_var <- "source"
+    } else {
+      x_var <- "source"
+      facet_var <- "target"
+    }
+
+    n_facets <- length(unique(df[[facet_var]]))
+    pal <- omics_palette(n_facets)
+    names(pal) <- sort(unique(df[[facet_var]]))
+
+    p <- ggplot(df, aes(x = .data[[x_var]], y = score, fill = .data[[facet_var]])) +
+      geom_violin(trim = TRUE, alpha = 0.7, scale = "width") +
+      geom_jitter(width = 0.15, size = 0.5, alpha = 0.3) +
+      scale_fill_manual(values = pal, name = facet_by) +
+      labs(
+        x = x_var,
+        y = "Interaction score",
+        title = paste0("Score distribution by ", facet_by)
+      ) +
+      theme_omics() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    # Add faceting only if more than 1 unique facet level
+    if (n_facets > 1) {
+      p <- p + facet_wrap(as.formula(paste0("~ ", facet_var)),
+                          scales = "free_x")
+    }
+
+    w <- max(6, n_facets * 3 + 1)
+    h <- 5
+    ggsave_standard(p, out_path, width = min(w, 16), height = h)
+
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
+
+# ---- Function 6: plot_ccc_stat_scatter ----
+
+#' Outgoing vs incoming signaling strength scatter plot.
+#'
+#' Reads group_role_summary.csv. Each point is a cell type, positioned by
+#' outgoing (x) and incoming (y) signaling strength. Quadrant lines drawn
+#' at median values.
+#'
+#' @param data_dir Character. Directory containing CCC CSV files.
+#' @param out_path Character. Output PNG path.
+#' @param params Named list. (currently no user-facing params)
+plot_ccc_stat_scatter <- function(data_dir, out_path, params) {
+  tryCatch({
+    role_csv <- file.path(data_dir, "group_role_summary.csv")
+    sr_csv <- file.path(data_dir, "sender_receiver_summary.csv")
+
+    if (file.exists(role_csv)) {
+      df <- read.csv(role_csv, stringsAsFactors = FALSE)
+      if (nrow(df) == 0) stop("Empty group_role_summary.csv")
+    } else if (file.exists(sr_csv)) {
+      # Fallback: compute from sender_receiver_summary.csv
+      raw <- read.csv(sr_csv, stringsAsFactors = FALSE)
+      if (nrow(raw) == 0) stop("Empty sender_receiver_summary.csv")
+      raw$score <- as.numeric(raw$score)
+      out_agg <- aggregate(score ~ source, data = raw, FUN = sum)
+      colnames(out_agg) <- c("cell_type", "outgoing_score")
+      in_agg <- aggregate(score ~ target, data = raw, FUN = sum)
+      colnames(in_agg) <- c("cell_type", "incoming_score")
+      df <- merge(out_agg, in_agg, by = "cell_type", all = TRUE)
+      df$outgoing_score[is.na(df$outgoing_score)] <- 0
+      df$incoming_score[is.na(df$incoming_score)] <- 0
+    } else {
+      stop("No role data found. Expected group_role_summary.csv or ",
+           "sender_receiver_summary.csv in ", data_dir)
+    }
+
+    df$outgoing_score <- as.numeric(df$outgoing_score)
+    df$incoming_score <- as.numeric(df$incoming_score)
+
+    n_types <- nrow(df)
+    pal <- omics_palette(n_types)
+
+    med_out <- median(df$outgoing_score, na.rm = TRUE)
+    med_in <- median(df$incoming_score, na.rm = TRUE)
+
+    p <- ggplot(df, aes(x = outgoing_score, y = incoming_score, color = cell_type)) +
+      geom_point(size = 4) +
+      geom_text(aes(label = cell_type),
+                check_overlap = TRUE, vjust = -0.8, size = 3) +
+      geom_hline(yintercept = med_in, linetype = "dashed", color = "grey60") +
+      geom_vline(xintercept = med_out, linetype = "dashed", color = "grey60") +
+      scale_color_manual(values = pal, guide = "none") +
+      labs(
+        x = "Outgoing signaling strength",
+        y = "Incoming signaling strength",
+        title = "Cell type signaling role"
+      ) +
+      theme_omics()
+
+    ggsave_standard(p, out_path, width = 7, height = 6)
 
   }, error = function(e) {
     cat("ERROR:", conditionMessage(e), "\n", file = stderr())

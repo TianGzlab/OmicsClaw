@@ -57,6 +57,8 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py"
 R_ENHANCED_PLOTS = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_embedding_feature": "r_embedding_feature.png",
+    "plot_cytotrace_boxplot": "r_cytotrace_boxplot.png",
+    "plot_cell_density": "r_cell_density.png",
 }
 
 
@@ -596,6 +598,29 @@ def main():
     tables_dir.mkdir(exist_ok=True)
     scores_df = adata.obs[["cytotrace_score", "cytotrace_potency", "cytotrace_gene_count"]].copy()
     scores_df.to_csv(tables_dir / "cytotrace_scores.csv")
+
+    # Export embedding + cytotrace scores to figure_data/ for R Enhanced renderers
+    fd_dir = output_dir / "figure_data"
+    fd_dir.mkdir(parents=True, exist_ok=True)
+    embed_df = pd.DataFrame(index=adata.obs_names)
+    # Add embedding coordinates
+    if "X_umap" in adata.obsm:
+        embed_df["dim1"] = adata.obsm["X_umap"][:, 0]
+        embed_df["dim2"] = adata.obsm["X_umap"][:, 1]
+    elif "X_pca" in adata.obsm:
+        embed_df["dim1"] = adata.obsm["X_pca"][:, 0]
+        embed_df["dim2"] = adata.obsm["X_pca"][:, 1]
+    # Add cell type if available
+    for ct_col in ["cell_type", "leiden", "louvain", "cluster"]:
+        if ct_col in adata.obs.columns:
+            embed_df["cell_type"] = adata.obs[ct_col].values
+            break
+    # Add cytotrace columns
+    for col in ["cytotrace_score", "cytotrace_potency", "cytotrace_gene_count"]:
+        if col in adata.obs.columns:
+            embed_df[col] = adata.obs[col].values
+    embed_df.index.name = "cell_id"
+    embed_df.to_csv(fd_dir / "cytotrace_embedding.csv")
 
     # Params
     params = {

@@ -71,6 +71,7 @@ R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_de_volcano": "r_de_volcano.png",
     "plot_de_heatmap": "r_de_heatmap.png",
     "plot_feature_violin": "r_feature_violin.png",
+    "plot_feature_cor": "r_feature_cor.png",
 }
 
 

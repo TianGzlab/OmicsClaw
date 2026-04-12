@@ -53,6 +53,7 @@ R_ENHANCED_PLOTS = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_embedding_feature": "r_embedding_feature.png",
     "plot_cell_barplot": "r_cell_barplot.png",
+    "plot_cell_sankey": "r_cell_sankey.png",
 }
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
