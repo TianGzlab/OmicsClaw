@@ -37,9 +37,16 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
-from omicsclaw.app.notebook.live_session import install_live_session_support
-from omicsclaw.app.notebook.router import router as notebook_router
+try:
+    from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
+    from omicsclaw.app.notebook.live_session import install_live_session_support
+    from omicsclaw.app.notebook.router import router as notebook_router
+    _NOTEBOOK_AVAILABLE = True
+except ImportError as _nb_err:
+    _NOTEBOOK_AVAILABLE = False
+    get_kernel_manager = None  # type: ignore[assignment]
+    install_live_session_support = None  # type: ignore[assignment]
+    notebook_router = None  # type: ignore[assignment]
 from omicsclaw.runtime.policy_state import ToolPolicyState
 from omicsclaw.version import __version__
 
@@ -320,7 +327,10 @@ async def lifespan(app: FastAPI):
         core.LLM_PROVIDER_NAME,
         core.OMICSCLAW_MODEL,
     )
-    install_live_session_support()
+    if _NOTEBOOK_AVAILABLE:
+        install_live_session_support()
+    else:
+        logger.info("Notebook module not available (non-fatal): %s", _nb_err)
 
     # Optionally expose MemoryClient for browse/search endpoints
     try:
@@ -370,10 +380,11 @@ async def lifespan(app: FastAPI):
         task.cancel()
     _active_sessions.clear()
 
-    try:
-        await get_kernel_manager().shutdown_all()
-    except Exception as exc:
-        logger.warning("Notebook kernel shutdown failed during app shutdown: %s", exc)
+    if _NOTEBOOK_AVAILABLE:
+        try:
+            await get_kernel_manager().shutdown_all()
+        except Exception as exc:
+            logger.warning("Notebook kernel shutdown failed during app shutdown: %s", exc)
 
     if _memory_client:
         await _memory_client.close()
@@ -406,7 +417,8 @@ except ImportError:
 
 _register_optional_kg_router(app)
 
-app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
+if _NOTEBOOK_AVAILABLE:
+    app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
 
 
 # ---------------------------------------------------------------------------
