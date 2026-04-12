@@ -57,6 +57,8 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py"
 R_ENHANCED_PLOTS = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_embedding_feature": "r_embedding_feature.png",
+    "plot_cytotrace_boxplot": "r_cytotrace_boxplot.png",
+    "plot_cell_density": "r_cell_density.png",
 }
 
 

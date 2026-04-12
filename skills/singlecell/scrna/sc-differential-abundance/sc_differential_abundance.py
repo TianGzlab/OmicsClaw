@@ -73,6 +73,8 @@ R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
 R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_embedding_discrete": "r_embedding_discrete.png",
     "plot_cell_barplot": "r_cell_barplot.png",
+    "plot_proportion_test": "r_proportion_test.png",
+    "plot_cell_density": "r_cell_density.png",
 }
 
 

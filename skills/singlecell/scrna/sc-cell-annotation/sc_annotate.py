@@ -75,6 +75,7 @@ R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_embedding_feature": "r_embedding_feature.png",
     "plot_cell_barplot": "r_cell_barplot.png",
     "plot_cell_proportion": "r_cell_proportion.png",
+    "plot_cell_sankey": "r_cell_sankey.png",
 }
 
 
