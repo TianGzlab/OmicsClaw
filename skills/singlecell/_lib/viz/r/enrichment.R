@@ -507,3 +507,445 @@ plot_enrichment_lollipop <- function(data_dir, out_path, params) {
     quit(status = 1)
   })
 }
+
+
+# ---------------------------------------------------------------------------
+# Function 6: plot_enrichment_network
+# ---------------------------------------------------------------------------
+#' Enrichment gene-term network graph (bipartite network).
+#'
+#' Visualises the relationship between enriched terms and their associated
+#' genes as a bipartite graph. Term nodes are sized by gene count and colored
+#' by -log10(padj). Gene nodes are small grey labels.
+#'
+#' Requires the igraph package; exits gracefully (status 0) if unavailable.
+#'
+#' @param data_dir Character. Directory containing enrichment_results.csv.
+#' @param out_path Character. Absolute path for output PNG.
+#' @param params Named list. Optional: top_n (default 10), group, padj_cutoff (default 0.05).
+plot_enrichment_network <- function(data_dir, out_path, params) {
+  tryCatch({
+    # ---- igraph guard ----
+    if (!requireNamespace("igraph", quietly = TRUE)) {
+      cat("WARNING: igraph not installed -- skipping enrichment network\n",
+          file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Read CSV ----
+    csv_path <- file.path(data_dir, "enrichment_results.csv")
+    if (!file.exists(csv_path)) {
+      csv_path <- file.path(data_dir, "top_terms.csv")
+    }
+    if (!file.exists(csv_path)) {
+      cat("ERROR: No enrichment CSV found in ", data_dir, "\n",
+          sep = "", file = stderr())
+      quit(status = 1)
+    }
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+
+    # ---- Parameters ----
+    top_n       <- as.integer(params[["top_n"]] %||% "10")
+    padj_cutoff <- as.numeric(params[["padj_cutoff"]] %||% "0.05")
+    group_use   <- params[["group"]]
+
+    # ---- Filter group ----
+    if ("group" %in% colnames(df)) {
+      if (is.null(group_use) || !group_use %in% df$group) {
+        group_use <- df$group[1]
+      }
+      df <- df[df$group == group_use, , drop = FALSE]
+    }
+
+    # ---- Standardize p-value column ----
+    if (!"pvalue_adj" %in% colnames(df) && "pvalue" %in% colnames(df)) {
+      df$pvalue_adj <- df$pvalue
+    }
+    if ("pvalue_adj" %in% colnames(df)) {
+      df$pvalue_adj <- as.numeric(df$pvalue_adj)
+      df <- df[!is.na(df$pvalue_adj) & df$pvalue_adj < padj_cutoff, , drop = FALSE]
+    }
+
+    if (nrow(df) == 0) {
+      cat("WARNING: No significant terms to plot\n", file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Detect gene column ----
+    gene_col <- NULL
+    for (cand in c("genes", "geneID", "leading_edge")) {
+      if (cand %in% colnames(df) && !all(is.na(df[[cand]]))) {
+        gene_col <- cand
+        break
+      }
+    }
+    if (is.null(gene_col)) {
+      cat("WARNING: No gene column found (genes/geneID/leading_edge) -- skipping network\n",
+          file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Sort and take top N ----
+    df$neg_log_padj <- -log10(df$pvalue_adj + 1e-300)
+    df <- df[order(df$neg_log_padj, decreasing = TRUE), ]
+    df <- head(df, top_n)
+
+    # ---- Parse gene lists ----
+    df$gene_list <- lapply(df[[gene_col]], function(x) {
+      genes <- unlist(strsplit(as.character(x), "[/,;]"))
+      trimws(genes[nzchar(trimws(genes))])
+    })
+    df$gene_count <- sapply(df$gene_list, length)
+    df <- df[df$gene_count > 0, , drop = FALSE]
+    if (nrow(df) == 0) {
+      cat("WARNING: No terms with parseable genes\n", file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Truncate long term names ----
+    df$term_short <- ifelse(nchar(df$term) > 45,
+                            paste0(substr(df$term, 1, 42), "..."),
+                            df$term)
+
+    # ---- Build bipartite graph ----
+    edges_list <- lapply(seq_len(nrow(df)), function(i) {
+      data.frame(from = df$term_short[i],
+                 to   = df$gene_list[[i]],
+                 stringsAsFactors = FALSE)
+    })
+    edges <- do.call(rbind, edges_list)
+
+    all_genes <- unique(edges$to)
+    nodes_term <- data.frame(
+      name  = df$term_short,
+      class = "term",
+      metric = df$neg_log_padj,
+      node_size = df$gene_count,
+      stringsAsFactors = FALSE
+    )
+    nodes_gene <- data.frame(
+      name  = all_genes,
+      class = "gene",
+      metric = 0,
+      node_size = 1,
+      stringsAsFactors = FALSE
+    )
+    nodes <- rbind(nodes_term, nodes_gene)
+
+    graph <- igraph::graph_from_data_frame(d = edges,
+                                           vertices = nodes,
+                                           directed = FALSE)
+    layout <- igraph::layout_with_fr(graph)
+    df_nodes <- nodes
+    df_nodes$dim1 <- layout[, 1]
+    df_nodes$dim2 <- layout[, 2]
+
+    # ---- Build edge coordinates ----
+    rownames(df_nodes) <- df_nodes$name
+    df_edges <- edges
+    df_edges$from_dim1 <- df_nodes[df_edges$from, "dim1"]
+    df_edges$from_dim2 <- df_nodes[df_edges$from, "dim2"]
+    df_edges$to_dim1   <- df_nodes[df_edges$to, "dim1"]
+    df_edges$to_dim2   <- df_nodes[df_edges$to, "dim2"]
+
+    term_nodes <- df_nodes[df_nodes$class == "term", , drop = FALSE]
+    gene_nodes <- df_nodes[df_nodes$class == "gene", , drop = FALSE]
+
+    # ---- Plot ----
+    p <- ggplot() +
+      geom_segment(data = df_edges,
+                   aes(x = from_dim1, y = from_dim2,
+                       xend = to_dim1, yend = to_dim2),
+                   color = "grey70", alpha = 0.5, linewidth = 0.3) +
+      geom_point(data = term_nodes,
+                 aes(x = dim1, y = dim2,
+                     size = node_size, fill = metric),
+                 shape = 21, color = "black", stroke = 0.5) +
+      scale_fill_viridis_c(option = "plasma", name = "-log10(padj)") +
+      scale_size_continuous(range = c(4, 12), name = "Gene count") +
+      geom_point(data = gene_nodes,
+                 aes(x = dim1, y = dim2),
+                 size = 1.5, color = "grey30", shape = 16)
+
+    # Label gene nodes
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        data = gene_nodes,
+        aes(x = dim1, y = dim2, label = name),
+        size = 2.2, color = "grey30", max.overlaps = 30,
+        segment.size = 0.2, segment.color = "grey60"
+      )
+    } else {
+      p <- p + geom_text(data = gene_nodes,
+                         aes(x = dim1, y = dim2, label = name),
+                         size = 2.2, color = "grey30", nudge_y = 0.3)
+    }
+
+    # Label term nodes
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        data = term_nodes,
+        aes(x = dim1, y = dim2, label = name),
+        size = 3, fontface = "bold", max.overlaps = 20,
+        segment.size = 0.3, segment.color = "grey50",
+        point.size = NA, force = 5
+      )
+    } else {
+      p <- p + geom_text(data = term_nodes,
+                         aes(x = dim1, y = dim2, label = name),
+                         size = 3, fontface = "bold", nudge_y = 0.5)
+    }
+
+    p <- p +
+      labs(title = paste0("Enrichment Network"),
+           x = NULL, y = NULL) +
+      theme_omics() +
+      theme(axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_blank(),
+            panel.grid.major.y = element_blank())
+
+    ggsave_standard(p, out_path, width = 10, height = 9)
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
+
+
+# ---------------------------------------------------------------------------
+# Function 7: plot_enrichment_enrichmap
+# ---------------------------------------------------------------------------
+#' Enrichment term similarity map (clustered term network).
+#'
+#' Clusters enriched terms by gene overlap (Jaccard similarity) and displays
+#' them as a network. Edges represent shared genes, node size = gene count,
+#' node color = cluster membership. Top terms per cluster are labeled.
+#'
+#' Requires the igraph package; exits gracefully (status 0) if unavailable.
+#'
+#' @param data_dir Character. Directory containing enrichment_results.csv.
+#' @param out_path Character. Absolute path for output PNG.
+#' @param params Named list. Optional: top_n (default 50), group,
+#'   min_similarity (default 0.1), padj_cutoff (default 0.05).
+plot_enrichment_enrichmap <- function(data_dir, out_path, params) {
+  tryCatch({
+    # ---- igraph guard ----
+    if (!requireNamespace("igraph", quietly = TRUE)) {
+      cat("WARNING: igraph not installed -- skipping enrichmap\n",
+          file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Read CSV ----
+    csv_path <- file.path(data_dir, "enrichment_results.csv")
+    if (!file.exists(csv_path)) {
+      csv_path <- file.path(data_dir, "top_terms.csv")
+    }
+    if (!file.exists(csv_path)) {
+      cat("ERROR: No enrichment CSV found in ", data_dir, "\n",
+          sep = "", file = stderr())
+      quit(status = 1)
+    }
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+
+    # ---- Parameters ----
+    top_n          <- as.integer(params[["top_n"]] %||% "50")
+    padj_cutoff    <- as.numeric(params[["padj_cutoff"]] %||% "0.05")
+    min_similarity <- as.numeric(params[["min_similarity"]] %||% "0.1")
+    group_use      <- params[["group"]]
+
+    # ---- Filter group ----
+    if ("group" %in% colnames(df)) {
+      if (is.null(group_use) || !group_use %in% df$group) {
+        group_use <- df$group[1]
+      }
+      df <- df[df$group == group_use, , drop = FALSE]
+    }
+
+    # ---- Standardize p-value column ----
+    if (!"pvalue_adj" %in% colnames(df) && "pvalue" %in% colnames(df)) {
+      df$pvalue_adj <- df$pvalue
+    }
+    if ("pvalue_adj" %in% colnames(df)) {
+      df$pvalue_adj <- as.numeric(df$pvalue_adj)
+      df <- df[!is.na(df$pvalue_adj) & df$pvalue_adj < padj_cutoff, , drop = FALSE]
+    }
+
+    if (nrow(df) == 0) {
+      cat("WARNING: No significant terms to plot\n", file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Detect gene column ----
+    gene_col <- NULL
+    for (cand in c("genes", "geneID", "leading_edge")) {
+      if (cand %in% colnames(df) && !all(is.na(df[[cand]]))) {
+        gene_col <- cand
+        break
+      }
+    }
+    if (is.null(gene_col)) {
+      cat("WARNING: No gene column found -- skipping enrichmap\n",
+          file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Sort and take top N ----
+    df$neg_log_padj <- -log10(df$pvalue_adj + 1e-300)
+    df <- df[order(df$neg_log_padj, decreasing = TRUE), ]
+    df <- head(df, top_n)
+
+    # ---- Parse gene lists ----
+    df$gene_list <- lapply(df[[gene_col]], function(x) {
+      genes <- unlist(strsplit(as.character(x), "[/,;]"))
+      trimws(genes[nzchar(trimws(genes))])
+    })
+    df$gene_count <- sapply(df$gene_list, length)
+    df <- df[df$gene_count > 0, , drop = FALSE]
+
+    if (nrow(df) < 2) {
+      cat("WARNING: Need at least 2 terms for enrichmap\n", file = stderr())
+      quit(status = 0)
+    }
+
+    # ---- Truncate long term names ----
+    df$term_short <- ifelse(nchar(df$term) > 45,
+                            paste0(substr(df$term, 1, 42), "..."),
+                            df$term)
+    # Ensure uniqueness
+    if (anyDuplicated(df$term_short)) {
+      df$term_short <- make.unique(df$term_short, sep = " ")
+    }
+
+    # ---- Build term-term similarity (Jaccard) ----
+    n_terms <- nrow(df)
+    edge_from <- character(0)
+    edge_to   <- character(0)
+    edge_wt   <- numeric(0)
+    for (i in seq_len(n_terms - 1)) {
+      for (j in (i + 1):n_terms) {
+        inter <- length(intersect(df$gene_list[[i]], df$gene_list[[j]]))
+        union_n <- length(union(df$gene_list[[i]], df$gene_list[[j]]))
+        if (union_n > 0) {
+          jacc <- inter / union_n
+          if (jacc >= min_similarity) {
+            edge_from <- c(edge_from, df$term_short[i])
+            edge_to   <- c(edge_to,   df$term_short[j])
+            edge_wt   <- c(edge_wt,   jacc)
+          }
+        }
+      }
+    }
+
+    # ---- Build graph ----
+    nodes <- data.frame(
+      name       = df$term_short,
+      gene_count = df$gene_count,
+      metric     = df$neg_log_padj,
+      stringsAsFactors = FALSE
+    )
+
+    if (length(edge_from) == 0) {
+      # No edges above threshold -- still render nodes without edges
+      edges <- data.frame(from = character(0), to = character(0),
+                          weight = numeric(0), stringsAsFactors = FALSE)
+      graph <- igraph::graph_from_data_frame(d = edges, vertices = nodes,
+                                             directed = FALSE)
+    } else {
+      edges <- data.frame(from = edge_from, to = edge_to,
+                          weight = edge_wt, stringsAsFactors = FALSE)
+      graph <- igraph::graph_from_data_frame(d = edges, vertices = nodes,
+                                             directed = FALSE)
+    }
+
+    layout <- igraph::layout_with_fr(graph)
+    nodes$dim1 <- layout[, 1]
+    nodes$dim2 <- layout[, 2]
+
+    # ---- Cluster ----
+    if (igraph::ecount(graph) > 0) {
+      clusters <- igraph::cluster_fast_greedy(graph)
+      nodes$cluster <- factor(paste0("C", clusters$membership))
+    } else {
+      nodes$cluster <- factor(paste0("C", seq_len(nrow(nodes))))
+    }
+
+    # ---- Select top 3 labels per cluster ----
+    label_nodes <- do.call(rbind, lapply(split(nodes, nodes$cluster), function(cl) {
+      cl <- cl[order(-cl$metric), ]
+      head(cl, 3)
+    }))
+
+    nodes$label <- ifelse(nodes$name %in% label_nodes$name, nodes$name, NA)
+
+    # ---- Edge coordinates ----
+    rownames(nodes) <- nodes$name
+    if (nrow(edges) > 0) {
+      df_edges <- edges
+      df_edges$from_dim1 <- nodes[df_edges$from, "dim1"]
+      df_edges$from_dim2 <- nodes[df_edges$from, "dim2"]
+      df_edges$to_dim1   <- nodes[df_edges$to, "dim1"]
+      df_edges$to_dim2   <- nodes[df_edges$to, "dim2"]
+      df_edges$alpha_val <- scales::rescale(df_edges$weight, to = c(0.15, 0.7))
+    } else {
+      df_edges <- NULL
+    }
+
+    # ---- Plot ----
+    n_clusters <- length(unique(nodes$cluster))
+    cluster_colors <- omics_palette(max(n_clusters, 3))[seq_len(n_clusters)]
+
+    p <- ggplot()
+
+    if (!is.null(df_edges) && nrow(df_edges) > 0) {
+      p <- p + geom_segment(data = df_edges,
+                            aes(x = from_dim1, y = from_dim2,
+                                xend = to_dim1, yend = to_dim2,
+                                alpha = alpha_val),
+                            color = "grey50", linewidth = 0.4,
+                            show.legend = FALSE) +
+        scale_alpha_identity()
+    }
+
+    p <- p +
+      geom_point(data = nodes,
+                 aes(x = dim1, y = dim2,
+                     size = gene_count, fill = cluster),
+                 shape = 21, color = "black", stroke = 0.4) +
+      scale_fill_manual(values = cluster_colors, name = "Cluster") +
+      scale_size_continuous(range = c(3, 10), name = "Gene count")
+
+    # Labels
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        data = nodes[!is.na(nodes$label), , drop = FALSE],
+        aes(x = dim1, y = dim2, label = label),
+        size = 2.8, max.overlaps = 30,
+        segment.size = 0.25, segment.color = "grey50",
+        fontface = "bold"
+      )
+    } else {
+      p <- p + geom_text(
+        data = nodes[!is.na(nodes$label), , drop = FALSE],
+        aes(x = dim1, y = dim2, label = label),
+        size = 2.8, fontface = "bold", nudge_y = 0.3
+      )
+    }
+
+    p <- p +
+      labs(title = "Enrichment Map (term similarity)",
+           x = NULL, y = NULL) +
+      theme_omics() +
+      theme(axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            axis.line = element_blank(),
+            panel.grid.major.y = element_blank())
+
+    fig_size <- max(8, sqrt(nrow(nodes)) * 1.5 + 4)
+    ggsave_standard(p, out_path, width = fig_size, height = fig_size)
+  }, error = function(e) {
+    cat("ERROR:", conditionMessage(e), "\n", file = stderr())
+    quit(status = 1)
+  })
+}
