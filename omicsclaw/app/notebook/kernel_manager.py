@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import queue
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -972,13 +973,38 @@ class NotebookKernelManager:
 
         return await asyncio.to_thread(complete)
 
+    @staticmethod
+    def _ensure_kernelspec() -> None:
+        """Register the ipykernel 'python3' kernelspec if missing.
+
+        When the server runs in a venv where ipykernel is installed but
+        the kernelspec was never registered (no ``python -m ipykernel
+        install``), jupyter_client raises ``NoSuchKernel``. This one-time
+        check avoids that by registering into ``sys.prefix``.
+        """
+        try:
+            from jupyter_client.kernelspec import KernelSpecManager
+            ksm = KernelSpecManager()
+            if "python3" in ksm.find_kernel_specs():
+                return
+        except Exception:
+            pass
+
+        log.info("[notebook] python3 kernelspec not found, registering via ipykernel")
+        try:
+            import ipykernel.kernelspec as iks
+            iks.install(kernel_spec_manager=None, user=False, prefix=sys.prefix)
+        except Exception as exc:
+            log.warning("[notebook] failed to auto-register kernelspec: %s", exc)
+
     async def _start_kernel(
         self, notebook_id: str, cwd: Optional[str]
     ) -> KernelHandle:
         log.info(
             "[notebook] starting kernel for %s (cwd=%s)", notebook_id, cwd
         )
-        km = AsyncKernelManager()
+        self._ensure_kernelspec()
+        km = AsyncKernelManager(kernel_name="python3")
         await km.start_kernel(cwd=cwd) if cwd else await km.start_kernel()
 
         client = km.client()
