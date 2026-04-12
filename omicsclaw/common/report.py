@@ -336,3 +336,58 @@ def write_result_json(
     result_path = output_dir / "result.json"
     result_path.write_text(json.dumps(envelope, indent=2, default=str))
     return result_path
+
+
+def write_replot_hint(
+    output_dir: str | Path,
+    skill_alias: str,
+) -> None:
+    """Patch result.json with a ``replot`` hint block (idempotent).
+
+    Reads the existing result.json (if present), injects a top-level
+    ``replot`` key describing available R Enhanced renderers and their
+    default parameters, then writes it back.  Called after
+    :func:`write_result_json` from any skill that has R Enhanced plots.
+
+    The ``replot`` block is purely informational — it lets users (and
+    downstream tooling) discover the ``python omicsclaw.py replot``
+    command without reading source code.
+    """
+    output_dir = Path(output_dir)
+    result_path = output_dir / "result.json"
+    if not result_path.exists():
+        return
+
+    try:
+        envelope = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+
+    # Lazy import to avoid circular deps at module load time.
+    try:
+        from skills.singlecell._lib.viz.r.renderer_params import (
+            RENDERER_PARAMS,
+            SKILL_RENDERERS,
+        )
+    except ImportError:
+        return
+
+    renderers = SKILL_RENDERERS.get(skill_alias)
+    if not renderers:
+        return
+
+    renderer_info: dict[str, Any] = {}
+    for rname in renderers:
+        schema = RENDERER_PARAMS.get(rname, {})
+        renderer_info[rname] = {
+            "params": {k: v["default"] for k, v in schema.items() if v.get("default") is not None}
+        }
+
+    envelope["replot"] = {
+        "available": True,
+        "command": f"python omicsclaw.py replot {skill_alias} --output {output_dir}",
+        "renderers": renderer_info,
+    }
+
+    result_path.write_text(json.dumps(envelope, indent=2, default=str))
+

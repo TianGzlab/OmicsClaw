@@ -32,6 +32,8 @@ When the user asks a question, match it to a skill and act:
 
 ### Single-Cell Omics (17 skills)
 
+> All single-cell skills support R Enhanced re-rendering via `python omicsclaw.py replot <skill> --output <dir>`. See the **Re-rendering Plots (replot)** section below for details.
+
 | User Intent | Skill | Action |
 |---|---|---|
 | FASTQ QC, raw read quality, FastQC, MultiQC, read-level QC, scRNA FASTQ | `skills/singlecell/scrna/sc-fastq-qc/` | Run `python omicsclaw.py run sc-fastq-qc` |
@@ -51,6 +53,7 @@ When the user asks a question, match it to a skill and act:
 | grn, gene regulatory, scenic, pyscenic, regulon, transcription factor, grnboost | `skills/singlecell/scrna/sc-grn/` | Run `python omicsclaw.py run sc-grn` |
 | cell communication, cell-cell communication, ligand receptor, cellchat, liana | `skills/singlecell/scrna/sc-cell-communication/` | Run `python omicsclaw.py run sc-cell-communication` |
 | drug response, drug sensitivity, CaDRReS, pharmacogenomics, IC50, scDrug | `skills/singlecell/scrna/sc-drug-response/` | Run `python omicsclaw.py run sc-drug-response` |
+| re-render plot, enhance plot, 图不好看, 重画, adjust plot parameters, tune visualization | (any completed skill output dir) | Run `python omicsclaw.py replot <skill> --output <dir>` |
 
 ### Genomics (10 skills)
 
@@ -246,6 +249,44 @@ python omicsclaw.py run bulkrna-trajblend --input <counts.csv> --reference <scre
 
 # List all available skills
 python omicsclaw.py list
+```
+
+## Re-rendering Plots (replot)
+
+After running a skill, users can re-render R Enhanced plots with adjusted parameters without re-running the analysis.
+
+### Three-tier visualization flow
+1. **First run**: `python omicsclaw.py run sc-de --input data.h5ad --output dir/` → Python standard figures
+2. **R Enhanced**: `python omicsclaw.py replot sc-de --output dir/` → ggplot2 R Enhanced figures from existing figure_data/
+3. **Parameter tuning**: `python omicsclaw.py replot sc-de --output dir/ --renderer plot_de_volcano --top-n 30`
+
+### When to use replot
+| User says | Action |
+|---|---|
+| "图不好看" / "enhance the plot" | `replot <skill> --output <dir>` |
+| "显示更多基因" / "show top 30" | `replot <skill> --output <dir> --top-n 30` |
+| "只重画 volcano" | `replot <skill> --output <dir> --renderer plot_de_volcano` |
+| "列出可以调的参数" | `replot <skill> --output <dir> --list-renderers` |
+
+### Replot CLI
+```bash
+# Re-render all R Enhanced plots for a completed skill
+python omicsclaw.py replot sc-de --output /path/to/output/
+
+# List available renderers and tunable parameters
+python omicsclaw.py replot sc-de --output /path/to/output/ --list-renderers
+
+# Re-render specific renderer with custom parameters
+python omicsclaw.py replot sc-de --output /path/to/output/ --renderer plot_de_volcano --top-n 30 --dpi 300
+
+# Common plot parameters (forwarded to R renderers)
+# --top-n N         Number of top items to show
+# --font-size N     Base font size in points
+# --width N         Figure width in inches
+# --height N        Figure height in inches
+# --dpi N           Output resolution (default 300)
+# --palette NAME    Color palette name
+# --title TEXT      Custom plot title
 ```
 
 ## Demo Data

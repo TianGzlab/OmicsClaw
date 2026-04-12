@@ -1072,6 +1072,24 @@ def main():
     kb_list = kb_sub.add_parser("list", help="List knowledge topics")
     kb_list.add_argument("--domain", default=None, help="Filter by domain")
 
+    # replot — re-render R Enhanced plots from existing figure_data
+    replot_p = sub.add_parser("replot", help="Re-render R Enhanced plots from existing output directory")
+    replot_p.add_argument("skill", help="Skill alias (e.g. sc-de)")
+    replot_p.add_argument("--output", dest="output_dir", required=True,
+                          help="Existing output directory (must contain figure_data/)")
+    replot_p.add_argument("--renderer", default=None,
+                          help="Specific renderer to run (default: all for this skill)")
+    replot_p.add_argument("--list-renderers", action="store_true",
+                          help="List available renderers and their parameters, then exit")
+    # Plot parameters forwarded as key=value to R
+    replot_p.add_argument("--top-n", type=int, dest="top_n")
+    replot_p.add_argument("--font-size", type=int, dest="font_size")
+    replot_p.add_argument("--width", type=int, dest="width")
+    replot_p.add_argument("--height", type=int, dest="height")
+    replot_p.add_argument("--palette", type=str, dest="palette")
+    replot_p.add_argument("--dpi", type=int, dest="dpi")
+    replot_p.add_argument("--title", type=str, dest="title")
+
     # optimize — autoagent parameter optimization
     opt_p = sub.add_parser("optimize", help="Auto-optimize skill parameters via LLM meta-agent")
     opt_p.add_argument("skill", help="Skill to optimize (e.g. sc-batch-integration)")
@@ -1202,6 +1220,130 @@ def main():
 
     if args.command == "list":
         list_skills(domain_filter=getattr(args, "domain", None))
+        sys.exit(0)
+
+    if args.command == "replot":
+        from skills.singlecell._lib.viz.r import call_r_plot
+        from skills.singlecell._lib.viz.r.renderer_params import RENDERER_PARAMS, SKILL_RENDERERS
+
+        skill_alias = resolve_skill_alias(args.skill)
+
+        # --list-renderers: print schema and exit
+        if args.list_renderers:
+            renderers = SKILL_RENDERERS.get(skill_alias)
+            if not renderers:
+                print(f"{YELLOW}No R Enhanced renderers registered for '{skill_alias}'.{RESET}")
+                sys.exit(0)
+            print(f"\n{BOLD}R Enhanced renderers for {CYAN}{skill_alias}{RESET}{BOLD}:{RESET}\n")
+            for rname in renderers:
+                schema = RENDERER_PARAMS.get(rname, {})
+                print(f"  {CYAN}{rname}{RESET}")
+                if schema:
+                    for pname, pinfo in schema.items():
+                        default = pinfo.get("default")
+                        default_str = f" (default: {default})" if default is not None else ""
+                        print(f"    --{pname.replace('_', '-'):<22} [{pinfo['type']}]{default_str}  {pinfo['desc']}")
+                else:
+                    print("    (no tunable parameters)")
+                print()
+            sys.exit(0)
+
+        # Validate output directory
+        out_dir = Path(args.output_dir).resolve()
+        figure_data_dir = out_dir / "figure_data"
+        if not out_dir.exists():
+            print(f"{RED}Error:{RESET} output directory does not exist: {out_dir}", file=sys.stderr)
+            sys.exit(1)
+        if not figure_data_dir.exists():
+            print(f"{RED}Error:{RESET} figure_data/ not found in {out_dir}", file=sys.stderr)
+            print("Re-run the original skill first to generate figure_data/.", file=sys.stderr)
+            sys.exit(1)
+
+        # Determine renderers to run
+        all_renderers = SKILL_RENDERERS.get(skill_alias)
+        if not all_renderers:
+            print(f"{YELLOW}Warning:{RESET} No R Enhanced renderers registered for '{skill_alias}'.")
+            sys.exit(0)
+
+        if args.renderer:
+            if args.renderer not in all_renderers:
+                print(
+                    f"{RED}Error:{RESET} Renderer '{args.renderer}' is not registered for '{skill_alias}'.\n"
+                    f"Available: {', '.join(all_renderers)}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            renderers_to_run = [args.renderer]
+        else:
+            renderers_to_run = all_renderers
+
+        # Collect plot params from CLI (only set ones)
+        plot_params: dict[str, str] = {}
+        _replot_param_map = {
+            "top_n":     "top_n",
+            "font_size": "font_size",
+            "width":     "width",
+            "height":    "height",
+            "palette":   "palette",
+            "dpi":       "dpi",
+            "title":     "title",
+        }
+        for attr, param_key in _replot_param_map.items():
+            val = getattr(args, attr, None)
+            if val is not None:
+                plot_params[param_key] = str(val)
+
+        # Run renderers
+        r_figures_dir = out_dir / "figures" / "r_enhanced"
+        r_figures_dir.mkdir(parents=True, exist_ok=True)
+
+        succeeded: list[str] = []
+        failed: list[str] = []
+
+        print(f"\n{BOLD}Replotting {skill_alias} ({len(renderers_to_run)} renderer(s))...{RESET}\n")
+        for renderer in renderers_to_run:
+            # Determine output filename: reuse original name from SKILL_RENDERERS lookup,
+            # or fall back to <renderer>.png
+            # We need the filename — import the skill module lazily to get R_ENHANCED_PLOTS
+            filename = f"{renderer}.png"
+            skill_info = SKILLS.get(skill_alias)
+            if skill_info:
+                script_path = skill_info.get("script")
+                if script_path and Path(script_path).exists():
+                    try:
+                        import importlib.util as _ilu
+                        _spec = _ilu.spec_from_file_location("_skill_mod", str(script_path))
+                        _mod = _ilu.module_from_spec(_spec)
+                        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+                        r_enhanced_plots = getattr(_mod, "R_ENHANCED_PLOTS", {})
+                        if renderer in r_enhanced_plots:
+                            filename = r_enhanced_plots[renderer]
+                    except Exception:
+                        pass  # fall back to default filename
+
+            out_path = r_figures_dir / filename
+            print(f"  {DIM}{renderer}{RESET} → {out_path.name} ...", end=" ", flush=True)
+            import warnings as _warnings
+            with _warnings.catch_warnings(record=True) as caught:
+                _warnings.simplefilter("always")
+                call_r_plot(renderer, figure_data_dir, out_path, params=plot_params or None)
+
+            if out_path.exists():
+                print(f"{GREEN}ok{RESET}")
+                succeeded.append(str(out_path))
+            else:
+                warn_msg = str(caught[-1].message) if caught else "unknown error"
+                print(f"{YELLOW}skipped{RESET}  ({warn_msg[:80]})")
+                failed.append(renderer)
+
+        print()
+        print(f"  {GREEN}{len(succeeded)} succeeded{RESET}", end="")
+        if failed:
+            print(f"  {YELLOW}{len(failed)} skipped{RESET}: {', '.join(failed)}")
+        else:
+            print()
+        if succeeded:
+            print(f"  Figures: {r_figures_dir}")
         sys.exit(0)
 
     if args.command == "optimize":
