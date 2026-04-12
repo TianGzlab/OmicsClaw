@@ -71,6 +71,7 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-cell-communication/sc_cell_communi
 R_ENHANCED_PLOTS: dict[str, str] = {
     "plot_ccc_heatmap": "r_ccc_heatmap.png",
     "plot_ccc_network": "r_ccc_network.png",
+    "plot_ccc_bubble": "r_ccc_bubble.png",
 }
 
 

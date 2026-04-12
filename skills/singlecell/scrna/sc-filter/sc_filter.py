@@ -66,6 +66,26 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-filter"
 SKILL_VERSION = "0.4.0"
 
+R_ENHANCED_PLOTS: dict[str, str] = {
+    "plot_feature_violin": "r_feature_violin.png",
+    "plot_cell_barplot": "r_cell_barplot.png",
+}
+
+
+def _render_r_enhanced(output_dir: Path, figure_data_dir: Path, r_enhanced: bool) -> list[str]:
+    if not r_enhanced:
+        return []
+    from skills.singlecell._lib.viz.r import call_r_plot
+    r_figures_dir = output_dir / "figures" / "r_enhanced"
+    r_figures_dir.mkdir(parents=True, exist_ok=True)
+    r_figure_paths: list[str] = []
+    for renderer, filename in R_ENHANCED_PLOTS.items():
+        out_path = r_figures_dir / filename
+        call_r_plot(renderer, figure_data_dir, out_path)
+        if out_path.exists():
+            r_figure_paths.append(str(out_path))
+    return r_figure_paths
+
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     try:
@@ -509,6 +529,8 @@ def main():
     parser.add_argument("--tissue", type=str, default=None,
                         choices=["pbmc", "brain", "tumor", "heart", "kidney", "liver", "lung"],
                         help="Use tissue-specific thresholds")
+    parser.add_argument("--r-enhanced", action="store_true", default=False,
+                        help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -651,6 +673,8 @@ def main():
         {"skill": "sc-ambient-removal", "reason": "Optional: remove ambient RNA contamination", "priority": "optional"},
     ]
     result_data["preprocessing_state_after"] = "filtered"
+    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced)
+    result_data["r_enhanced_figures"] = r_enhanced_figures
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {
         "skill": SKILL_NAME,
