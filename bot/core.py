@@ -203,13 +203,15 @@ def format_skills_table(plain: bool = False) -> str:
     """
     skill_registry = _skill_registry()
 
-    # Group skills by domain
+    # Group canonical skills by domain (exclude legacy alias duplicates)
     domain_skills: dict[str, list[tuple[str, dict]]] = {}
     for alias, info in skill_registry.skills.items():
+        if alias != info.get("alias", alias):
+            continue  # skip legacy alias pointers
         d = info.get("domain", "other")
         domain_skills.setdefault(d, []).append((alias, info))
 
-    total = len(skill_registry.skills)
+    total = sum(len(v) for v in domain_skills.values())
     if plain:
         lines = [f"OmicsClaw Skills ({total} total)", "=" * 40, ""]
     else:

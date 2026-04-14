@@ -1152,6 +1152,48 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "requires_preprocessed": True,
         "saves_h5ad": True,
     },
+    "sc-fastq-qc": {
+        "domain": "singlecell",
+        "alias": "sc-fastq-qc",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-fastq-qc" / "sc_fastq_qc.py",
+        "demo_args": ["--demo"],
+        "description": "Raw FASTQ read quality assessment (FastQC/MultiQC + Python fallback)",
+        "allowed_extra_flags": {"--read2", "--sample", "--threads", "--max-reads", "--r-enhanced"},
+        "saves_h5ad": False,
+    },
+    "sc-count": {
+        "domain": "singlecell",
+        "alias": "sc-count",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-count" / "sc_count.py",
+        "demo_args": ["--demo"],
+        "description": "FASTQ to count matrix (Cell Ranger, STARsolo, SimpleAF, kb-python)",
+        "allowed_extra_flags": {
+            "--backend", "--reference", "--t2g", "--sample", "--read2",
+            "--threads", "--chemistry",
+        },
+        "saves_h5ad": True,
+    },
+    "sc-multi-count": {
+        "domain": "singlecell",
+        "alias": "sc-multi-count",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-multi-count" / "sc_multi_count.py",
+        "demo_args": ["--demo"],
+        "description": "Merge multiple single-sample count matrices into one AnnData with sample labels",
+        "allowed_extra_flags": {"--sample-key", "--r-enhanced"},
+        "saves_h5ad": True,
+    },
+    "sc-velocity-prep": {
+        "domain": "singlecell",
+        "alias": "sc-velocity-prep",
+        "script": SKILLS_DIR / "singlecell" / "scrna" / "sc-velocity-prep" / "sc_velocity_prep.py",
+        "demo_args": ["--demo"],
+        "description": "Prepare spliced/unspliced layers for RNA velocity (velocyto, STARsolo)",
+        "allowed_extra_flags": {
+            "--method", "--gtf", "--base-h5ad", "--reference",
+            "--sample", "--read2", "--threads",
+        },
+        "saves_h5ad": True,
+    },
     # sc-multiome: script not yet implemented
     # -----------------------------------------------------------------------
     # Genomics domain

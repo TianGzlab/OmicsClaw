@@ -341,6 +341,7 @@ def write_result_json(
 def write_replot_hint(
     output_dir: str | Path,
     skill_alias: str,
+    _r_enhanced_plots=None,  # deprecated: now auto-resolved from SKILL_RENDERERS
 ) -> None:
     """Patch result.json with a ``replot`` hint block (idempotent).
 
@@ -353,41 +354,45 @@ def write_replot_hint(
     downstream tooling) discover the ``python omicsclaw.py replot``
     command without reading source code.
     """
-    output_dir = Path(output_dir)
-    result_path = output_dir / "result.json"
-    if not result_path.exists():
-        return
-
     try:
-        envelope = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
+        output_dir = Path(output_dir)
+        result_path = output_dir / "result.json"
+        if not result_path.exists():
+            return
 
-    # Lazy import to avoid circular deps at module load time.
-    try:
-        from skills.singlecell._lib.viz.r.renderer_params import (
-            RENDERER_PARAMS,
-            SKILL_RENDERERS,
-        )
-    except ImportError:
-        return
+        try:
+            envelope = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
 
-    renderers = SKILL_RENDERERS.get(skill_alias)
-    if not renderers:
-        return
+        # Lazy import to avoid circular deps at module load time.
+        try:
+            from skills.singlecell._lib.viz.r.renderer_params import (
+                RENDERER_PARAMS,
+                SKILL_RENDERERS,
+            )
+        except ImportError:
+            return
 
-    renderer_info: dict[str, Any] = {}
-    for rname in renderers:
-        schema = RENDERER_PARAMS.get(rname, {})
-        renderer_info[rname] = {
-            "params": {k: v["default"] for k, v in schema.items() if v.get("default") is not None}
+        renderers = SKILL_RENDERERS.get(skill_alias)
+        if not renderers:
+            return
+
+        renderer_info: dict[str, Any] = {}
+        for rname in renderers:
+            schema = RENDERER_PARAMS.get(rname, {})
+            renderer_info[rname] = {
+                "params": {k: v["default"] for k, v in schema.items() if v.get("default") is not None}
+            }
+
+        envelope["replot"] = {
+            "available": True,
+            "command": f"python omicsclaw.py replot {skill_alias} --output {output_dir}",
+            "renderers": renderer_info,
         }
 
-    envelope["replot"] = {
-        "available": True,
-        "command": f"python omicsclaw.py replot {skill_alias} --output {output_dir}",
-        "renderers": renderer_info,
-    }
-
-    result_path.write_text(json.dumps(envelope, indent=2, default=str))
+        result_path.write_text(json.dumps(envelope, indent=2, default=str))
+    except Exception:
+        # write_replot_hint is informational only — never crash the skill over it
+        pass
 
