@@ -2424,17 +2424,27 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                 f"\n[Other available outputs not requested: {', '.join(unsent)}.]"
             )
     elif not return_media and all_names:
+        # Emit absolute paths wrapped in backticks so the desktop UI's
+        # `injectInlineImages` regex can render them as inline <img>
+        # elements when the LLM quotes them verbatim in later replies.
         hints = []
         if figure_names:
-            hints.append(f"Figures: {', '.join(figure_names)}")
+            paths = "\n  ".join(f"- `{out_dir / n}`" for n in figure_names)
+            hints.append("Figures:\n  " + paths)
         if table_names:
-            hints.append(f"Tables: {', '.join(table_names)}")
+            paths = "\n  ".join(f"- `{out_dir / n}`" for n in table_names)
+            hints.append("Tables:\n  " + paths)
         if notebook_names:
-            hints.append(f"Notebooks: {', '.join(notebook_names)}")
+            paths = "\n  ".join(f"- `{out_dir / n}`" for n in notebook_names)
+            hints.append("Notebooks:\n  " + paths)
         result_text += (
             "\n\n---\n"
-            f"[Available outputs: {'; '.join(hints)}. "
-            "Tell the user they can request specific figures, tables, or notebooks by name if interested.]"
+            "[Available outputs (absolute paths):\n"
+            + "\n".join(hints)
+            + "\n\nWhen the user asks to see a figure, quote its backtick path verbatim "
+            "(e.g. `/abs/path/to/figure.png`) in your reply — the UI renders any "
+            "backtick-quoted image path as an inline preview. Do NOT call "
+            "list_directory or other tools to locate these files.]"
         )
 
     # Stage 2+4: Emit AdvisoryEvent and resolve post-execution knowledge
