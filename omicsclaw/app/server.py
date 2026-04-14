@@ -42,8 +42,13 @@ try:
     from omicsclaw.app.notebook.live_session import install_live_session_support
     from omicsclaw.app.notebook.router import router as notebook_router
     _NOTEBOOK_AVAILABLE = True
+    _NOTEBOOK_IMPORT_ERROR: str = ""
 except ImportError as _nb_err:
+    # NOTE: ``_nb_err`` is scoped to this except block (Python 3 deletes
+    # exception bindings on exit, PEP 3134). Persist the message to a
+    # module-level variable so the lifespan log on startup can surface it.
     _NOTEBOOK_AVAILABLE = False
+    _NOTEBOOK_IMPORT_ERROR = str(_nb_err)
     get_kernel_manager = None  # type: ignore[assignment]
     install_live_session_support = None  # type: ignore[assignment]
     notebook_router = None  # type: ignore[assignment]
@@ -169,7 +174,29 @@ def _resolve_backend_init_config() -> dict[str, str]:
         "api_key": _read_first_config_value("LLM_API_KEY", "OMICSCLAW_API_KEY"),
         "base_url": _read_first_config_value("LLM_BASE_URL", "OMICSCLAW_BASE_URL"),
         "model": _read_first_config_value("OMICSCLAW_MODEL"),
+        "auth_mode": (
+            _read_first_config_value("LLM_AUTH_MODE") or "api_key"
+        ).strip().lower(),
+        "ccproxy_port": _read_first_config_value("CCPROXY_PORT") or "11435",
     }
+
+
+def _current_app_server_port() -> int:
+    """Return the effective app-server port for this process."""
+    raw = str(os.getenv("OMICSCLAW_APP_PORT", "") or "").strip()
+    try:
+        return int(raw or DEFAULT_APP_API_PORT)
+    except (TypeError, ValueError):
+        return DEFAULT_APP_API_PORT
+
+
+def _oauth_port_conflict_message(ccproxy_port: int, app_port: int) -> str:
+    return (
+        f"ccproxy_port ({ccproxy_port}) conflicts with the OmicsClaw "
+        f"app-server port ({app_port}). Pick a different port "
+        f"(default: 11435) via the CCPROXY_PORT env var or the "
+        f"ccproxy_port field in the request body."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -315,12 +342,33 @@ async def lifespan(app: FastAPI):
     api_key = startup_config["api_key"]
     base_url = startup_config["base_url"]
     model = startup_config["model"]
+    auth_mode = startup_config.get("auth_mode", "api_key")
+    try:
+        ccproxy_port = int(startup_config.get("ccproxy_port", "11435") or "11435")
+    except (TypeError, ValueError):
+        ccproxy_port = 11435
 
+    if str(auth_mode or "").strip().lower() == "oauth":
+        app_port = _current_app_server_port()
+        if ccproxy_port == app_port:
+            logger.warning(
+                "Falling back to auth_mode='api_key' at startup — %s",
+                _oauth_port_conflict_message(ccproxy_port, app_port),
+            )
+            auth_mode = "api_key"
+
+    # Bootstrap (not user-initiated): if OAuth setup fails — e.g. stale
+    # LLM_AUTH_MODE=oauth in .env but ccproxy uninstalled — log a warning
+    # and fall back to api_key mode instead of crashing the entire server.
+    # The user can still reach the UI and fix the config.
     core.init(
         api_key=api_key,
         base_url=base_url or None,
         model=model,
         provider=provider,
+        auth_mode=auth_mode,
+        ccproxy_port=ccproxy_port,
+        strict_oauth=False,
     )
     logger.info(
         "OmicsClaw core initialised: provider=%s model=%s",
@@ -330,7 +378,10 @@ async def lifespan(app: FastAPI):
     if _NOTEBOOK_AVAILABLE:
         install_live_session_support()
     else:
-        logger.info("Notebook module not available (non-fatal): %s", _nb_err)
+        logger.info(
+            "Notebook module not available (non-fatal): %s",
+            _NOTEBOOK_IMPORT_ERROR or "(import failed without message)",
+        )
 
     # Optionally expose MemoryClient for browse/search endpoints
     try:
@@ -920,23 +971,7 @@ async def chat_stream(req: ChatRequest):
             provider=pc.provider,
         )
     elif req.provider_id and req.provider_id.lower() != core.LLM_PROVIDER_NAME.lower():
-        # Frontend selected a different provider — switch to it.
-        # API key is auto-resolved from environment variables by core.init().
-        try:
-            core.init(provider=req.provider_id, model=req.model or "")
-            # Persist to .env so the choice survives a restart
-            env_path = _get_omicsclaw_env_path()
-            if env_path:
-                updates: dict[str, str] = {"LLM_PROVIDER": req.provider_id}
-                if req.model:
-                    updates["OMICSCLAW_MODEL"] = req.model
-                _update_env_file(env_path, updates)
-            logger.info(
-                "Auto-switched provider=%s model=%s (from chat request)",
-                core.LLM_PROVIDER_NAME, core.OMICSCLAW_MODEL,
-            )
-        except Exception as exc:
-            logger.warning("Provider switch to %s failed: %s", req.provider_id, exc)
+        _apply_chat_provider_switch(core, req.provider_id, req.model or "")
 
     # --- Build per-request runtime overrides from frontend controls ---
     model_override = req.model or ""
@@ -2772,15 +2807,30 @@ async def list_providers():
             for name, (base_url, default_model, env_key) in PROVIDER_PRESETS.items()
         ]
 
+    try:
+        from omicsclaw.core.ccproxy_manager import provider_supports_oauth
+    except ImportError:
+        def provider_supports_oauth(_name: str) -> bool:  # type: ignore[no-redef]
+            return False
+
+    oauth_statuses = _cached_oauth_statuses()
+
     for entry in provider_entries:
         name = str(entry.get("name", "") or "")
         env_key = str(entry.get("env_key", "") or "")
         credential_source = _provider_configuration_source(name, env_key, core.LLM_PROVIDER_NAME)
+        oauth_supported = provider_supports_oauth(name)
         providers.append({
             **entry,
             "configured": bool(credential_source),
             "configured_via": credential_source or None,
             "active": name == core.LLM_PROVIDER_NAME,
+            "oauth_supported": oauth_supported,
+            "oauth_authenticated": (
+                oauth_statuses.get(name, {}).get("authenticated", False)
+                if oauth_supported
+                else False
+            ),
         })
 
     return {
@@ -2788,6 +2838,45 @@ async def list_providers():
         "current": core.LLM_PROVIDER_NAME,
         "current_model": core.OMICSCLAW_MODEL,
     }
+
+
+# ---------------------------------------------------------------------------
+# OAuth status cache — avoids subprocess-spawning on every /providers poll
+# ---------------------------------------------------------------------------
+
+_OAUTH_STATUS_CACHE: dict[str, object] = {"ts": 0.0, "data": {}}
+_OAUTH_STATUS_TTL_SECONDS: float = 30.0
+
+
+def _cached_oauth_statuses() -> dict[str, dict[str, object]]:
+    """Return per-provider OAuth status, refreshed at most every 30s.
+
+    Returns ``{}`` if ccproxy is not installed — the ``/providers`` endpoint
+    then falls back to ``oauth_authenticated: False`` uniformly.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    if (now - float(_OAUTH_STATUS_CACHE["ts"])) < _OAUTH_STATUS_TTL_SECONDS:
+        return _OAUTH_STATUS_CACHE["data"]  # type: ignore[return-value]
+
+    result: dict[str, dict[str, object]] = {}
+    try:
+        from omicsclaw.core.ccproxy_manager import (
+            OAUTH_PROVIDERS,
+            check_ccproxy_auth,
+            is_ccproxy_available,
+        )
+        if is_ccproxy_available():
+            for p in OAUTH_PROVIDERS.values():
+                ok, msg = check_ccproxy_auth(p.ccproxy_target)
+                result[p.omics_name] = {"authenticated": ok, "message": msg}
+    except Exception:
+        result = {}
+
+    _OAUTH_STATUS_CACHE["ts"] = now
+    _OAUTH_STATUS_CACHE["data"] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2799,28 +2888,74 @@ class ProviderSwitchRequest(BaseModel):
     api_key: str = ""
     base_url: str = ""
     model: str = ""
+    auth_mode: str = "api_key"  # "api_key" | "oauth"
+    ccproxy_port: int = 11435
 
 
 @app.put("/providers")
 async def switch_provider(req: ProviderSwitchRequest):
-    """Switch the active LLM provider. Re-initializes the core LLM client."""
+    """Switch the active LLM provider. Re-initializes the core LLM client.
+
+    When ``auth_mode="oauth"`` is requested (valid only for ``anthropic``
+    / ``openai``), the backend spawns/reuses a local ccproxy server and
+    routes requests through it — no API key is required.
+    """
     core = _get_core()
 
     # Validate provider name
     try:
         from omicsclaw.core.provider_registry import PROVIDER_PRESETS
+        from omicsclaw.core.ccproxy_manager import provider_supports_oauth
         if req.provider not in PROVIDER_PRESETS and req.provider != "custom":
             raise HTTPException(400, detail=f"Unknown provider: {req.provider}")
     except ImportError:
-        pass
+        def provider_supports_oauth(_name: str) -> bool:  # type: ignore[no-redef]
+            return False
 
-    # Re-init core with new provider
+    # Validate auth mode
+    auth_mode = str(req.auth_mode or "api_key").strip().lower()
+    if auth_mode not in ("api_key", "oauth"):
+        raise HTTPException(
+            400, detail=f"Invalid auth_mode: {req.auth_mode} (expected api_key|oauth)"
+        )
+    if auth_mode == "oauth" and not provider_supports_oauth(req.provider):
+        raise HTTPException(
+            400,
+            detail=(
+                f"auth_mode=oauth is not supported for provider '{req.provider}'. "
+                "Supported: anthropic, openai"
+            ),
+        )
+
+    # Reject ccproxy_port == app-server's own port: ccproxy serve would
+    # fail to bind (the app-server already owns the port), leaving the
+    # switch attempt in a broken half-state.
+    requested_port = int(req.ccproxy_port or 11435)
+    if auth_mode == "oauth":
+        app_port = _current_app_server_port()
+        if requested_port == app_port:
+            raise HTTPException(
+                400,
+                detail=_oauth_port_conflict_message(requested_port, app_port),
+            )
+
+    # Re-init core with new provider. When auth_mode=oauth, api_key can be
+    # empty — ccproxy supplies the OAuth token. core.init() will raise if
+    # ccproxy is missing or unauthenticated.
+    api_key = req.api_key if req.api_key else os.environ.get("LLM_API_KEY", "")
+    if auth_mode == "oauth":
+        api_key = ""  # force ccproxy sentinel path inside core.init
     try:
         core.init(
-            api_key=req.api_key or os.environ.get("LLM_API_KEY", ""),
+            api_key=api_key,
             base_url=req.base_url or None,
             model=req.model,
             provider=req.provider,
+            auth_mode=auth_mode,
+            ccproxy_port=requested_port,
+            # Explicit user action via PUT /providers: fail loudly so the
+            # frontend can surface a precise error message.
+            strict_oauth=True,
         )
     except Exception as exc:
         raise HTTPException(500, detail=f"Failed to switch provider: {exc}")
@@ -2828,21 +2963,234 @@ async def switch_provider(req: ProviderSwitchRequest):
     # Persist to .env
     env_path = _get_omicsclaw_env_path()
     if env_path:
-        updates: dict[str, str] = {"LLM_PROVIDER": req.provider}
-        if req.model:
-            updates["OMICSCLAW_MODEL"] = req.model
+        updates: dict[str, str] = {
+            "LLM_PROVIDER": core.LLM_PROVIDER_NAME or req.provider,
+            "LLM_AUTH_MODE": auth_mode,
+        }
+        if core.OMICSCLAW_MODEL:
+            updates["OMICSCLAW_MODEL"] = core.OMICSCLAW_MODEL
         if req.api_key:
             updates["LLM_API_KEY"] = req.api_key
-        if req.base_url:
+        if req.base_url and auth_mode != "oauth":
             updates["LLM_BASE_URL"] = req.base_url
-        _update_env_file(env_path, updates)
+        remove_keys: set[str] = set()
+        if auth_mode == "oauth":
+            updates["CCPROXY_PORT"] = str(requested_port)
+            remove_keys.add("LLM_BASE_URL")
+        else:
+            remove_keys.add("CCPROXY_PORT")
+            if req.provider != "custom" and not req.base_url:
+                remove_keys.add("LLM_BASE_URL")
+        _update_env_file(env_path, updates, remove_keys=remove_keys)
 
-    logger.info("Switched to provider=%s model=%s", core.LLM_PROVIDER_NAME, core.OMICSCLAW_MODEL)
+    logger.info(
+        "Switched to provider=%s model=%s auth_mode=%s",
+        core.LLM_PROVIDER_NAME,
+        core.OMICSCLAW_MODEL,
+        auth_mode,
+    )
 
     return {
         "ok": True,
         "provider": core.LLM_PROVIDER_NAME,
         "model": core.OMICSCLAW_MODEL,
+        "auth_mode": auth_mode,
+    }
+
+
+# ---------------------------------------------------------------------------
+# OAuth endpoints — Claude Pro/Max + OpenAI Codex login via ccproxy
+# ---------------------------------------------------------------------------
+
+
+def _resolve_oauth_provider_alias(name: str) -> str:
+    """Resolve any CLI/omics/ccproxy alias → OmicsClaw canonical name.
+
+    Delegates to ``ccproxy_manager.normalize_oauth_provider`` (the single
+    source of truth) and re-raises as HTTP 400 for FastAPI callers.
+    """
+    from omicsclaw.core.ccproxy_manager import normalize_oauth_provider
+    try:
+        return normalize_oauth_provider(name)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc))
+
+
+# Proxy env vars httpx / requests / curl honor. Listed in both the lower-
+# and upper-case forms the stdlib / httpx actually consult.
+_PROXY_ENV_VAR_NAMES: tuple[str, ...] = (
+    "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+    "ALL_PROXY", "all_proxy",
+)
+
+
+def _empty_proxy_env_vars() -> list[str]:
+    """Return proxy env var names currently set to the empty string.
+
+    Empty-string values (``HTTPS_PROXY=""``) are httpx's #1 footgun: it
+    treats them as "proxy configured with empty URL" and raises
+    ``ValueError: Unknown scheme for proxy URL URL('')`` the moment any
+    httpx client is constructed. This is exactly what happens when users
+    launch the server with ``NO_PROXY=* HTTPS_PROXY= HTTP_PROXY= ...`` to
+    bypass a system proxy — the emptiness propagates into every subprocess
+    we spawn, including ``ccproxy auth login``.
+    """
+    return [v for v in _PROXY_ENV_VAR_NAMES if os.environ.get(v, None) == ""]
+
+
+def _wrap_with_env_unset(command: str, vars_to_unset: list[str]) -> str:
+    """Prefix ``command`` with ``env -u VAR ...`` for each name in
+    ``vars_to_unset``. Returns ``command`` unchanged if the list is empty.
+    """
+    if not vars_to_unset:
+        return command
+    unset_flags = " ".join(f"-u {v}" for v in vars_to_unset)
+    return f"env {unset_flags} {command}"
+
+
+def _require_ccproxy_available() -> None:
+    try:
+        from omicsclaw.core.ccproxy_manager import (
+            ccproxy_diagnostic_hint,
+            is_ccproxy_available,
+            oauth_install_hint,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            500, detail=f"ccproxy_manager import failed: {exc}"
+        )
+    if not is_ccproxy_available():
+        raise HTTPException(
+            400,
+            detail=(
+                "ccproxy is not installed (from the server process's "
+                "perspective).\n\n"
+                f"{ccproxy_diagnostic_hint()}\n\n"
+                f"Install: {oauth_install_hint()}"
+            ),
+        )
+
+
+@app.get("/auth/{provider}/status")
+async def oauth_status(provider: str):
+    """Return the current OAuth credential status for ``provider``.
+
+    Cached up to 30s. Does not start ccproxy serve mode.
+    """
+    omics_name = _resolve_oauth_provider_alias(provider)
+    _require_ccproxy_available()
+    from omicsclaw.core.ccproxy_manager import check_ccproxy_auth
+    # check_ccproxy_auth accepts any alias; pass canonical for clarity.
+    ok, msg = check_ccproxy_auth(omics_name)
+    # invalidate cache so the next /providers poll reflects this probe
+    _OAUTH_STATUS_CACHE["ts"] = 0.0
+    return {"provider": omics_name, "authenticated": ok, "message": msg}
+
+
+@app.post("/auth/{provider}/login")
+async def oauth_login(provider: str):
+    """Return the shell command the user should run to complete OAuth.
+
+    We intentionally do NOT spawn ``ccproxy auth login`` on the server
+    process's behalf — it triggers an interactive browser flow, and the
+    only machine whose filesystem needs the resulting credentials is the
+    one where the backend's ``ccproxy serve`` will read them from (its own
+    host). For Docker / remote deployments, the user must SSH or
+    ``docker exec`` into the backend host before running this command;
+    logging in on a different machine writes the credentials to the wrong
+    filesystem and leaves the backend unauthenticated.
+    """
+    omics_name = _resolve_oauth_provider_alias(provider)
+    _require_ccproxy_available()
+    from omicsclaw.core.ccproxy_manager import get_oauth_provider
+
+    target = get_oauth_provider(omics_name).ccproxy_target
+    empty_proxies = _empty_proxy_env_vars()
+    base_cmd = f"ccproxy auth login {target}"
+    response: dict[str, object] = {
+        "provider": omics_name,
+        "command": _wrap_with_env_unset(base_cmd, empty_proxies),
+        "hint": (
+            "Run this command on the host where the OmicsClaw backend is "
+            "running. For Docker or remote deployments, SSH or `docker "
+            "exec` into that host first — ccproxy stores OAuth credentials "
+            "on whatever machine executes the login, and the backend reads "
+            "them from its own host."
+        ),
+    }
+    if empty_proxies:
+        response["warning"] = (
+            f"Backend detected empty proxy env vars "
+            f"({', '.join(empty_proxies)}) inherited by the server process. "
+            "httpx inside ccproxy would reject these as invalid proxy URLs "
+            "('Unknown scheme for proxy URL URL(\"\")'). The command above "
+            "prepends `env -u` to neutralize them for the ccproxy subprocess. "
+            "Long-term, unset them in your shell config so every terminal "
+            "starts clean."
+        )
+    return response
+
+
+@app.post("/auth/{provider}/logout")
+async def oauth_logout(provider: str):
+    """Invoke ``ccproxy auth logout`` for the given provider."""
+    omics_name = _resolve_oauth_provider_alias(provider)
+    _require_ccproxy_available()
+    from omicsclaw.core.ccproxy_manager import (
+        ccproxy_executable,
+        clear_ccproxy_env,
+        get_oauth_provider,
+    )
+    from omicsclaw.core.provider_runtime import (
+        clear_active_provider_runtime,
+        get_active_provider_runtime,
+    )
+    import subprocess as _sp
+
+    target = get_oauth_provider(omics_name).ccproxy_target
+    try:
+        result = _sp.run(
+            [ccproxy_executable(), "auth", "logout", target],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"Failed to run ccproxy logout: {exc}")
+
+    # Clear ccproxy env injection so subsequent API-key requests don't
+    # keep routing through the (now logged-out) local proxy.
+    clear_ccproxy_env(omics_name)
+    runtime = get_active_provider_runtime()
+    if runtime is not None and runtime.auth_mode == "oauth" and runtime.provider == omics_name:
+        clear_active_provider_runtime()
+        try:
+            core = _get_core()
+            core.llm = None
+            # Drop the provider display state too. Otherwise the frontend
+            # would keep showing this (now credential-less) OAuth provider
+            # as active, and the next chat request would land on
+            # `llm is None` without any hint that re-auth is required.
+            core.LLM_PROVIDER_NAME = ""
+            core.OMICSCLAW_MODEL = ""
+        except Exception:
+            pass
+
+        # Persist the fallback so a restart doesn't re-enter oauth mode
+        # with stale LLM_AUTH_MODE=oauth / CCPROXY_PORT in .env.
+        env_path = _get_omicsclaw_env_path()
+        if env_path:
+            _update_env_file(
+                env_path,
+                {"LLM_AUTH_MODE": "api_key"},
+                remove_keys={"CCPROXY_PORT"},
+            )
+
+    _OAUTH_STATUS_CACHE["ts"] = 0.0  # invalidate cache
+    return {
+        "provider": omics_name,
+        "ok": result.returncode == 0,
+        "message": (result.stdout + result.stderr).strip() or "logged out",
     }
 
 
@@ -3415,11 +3763,23 @@ def _get_omicsclaw_env_path() -> Path:
         return Path.cwd() / ".env"
 
 
-def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
+def _update_env_file(
+    env_path: Path,
+    updates: dict[str, str],
+    *,
+    remove_keys: set[str] | None = None,
+) -> None:
     """Update key=value pairs in a .env file, preserving comments and order."""
     lines = []
     if env_path.exists():
         lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    effective_remove_keys = {
+        str(key).strip()
+        for key in (remove_keys or set())
+        if str(key).strip()
+    }
+    effective_remove_keys.difference_update(updates.keys())
 
     updated_keys: set[str] = set()
     new_lines = []
@@ -3431,6 +3791,8 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
         raw_key = stripped.split("=", 1)[0].strip()
         if raw_key.startswith("export "):
             raw_key = raw_key[7:].strip()
+        if raw_key in effective_remove_keys:
+            continue
         if raw_key in updates:
             new_lines.append(f"{raw_key}={updates[raw_key]}")
             updated_keys.add(raw_key)
@@ -3446,8 +3808,51 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
 
     for key, value in updates.items():
         os.environ[key] = str(value)
+    for key in effective_remove_keys:
+        os.environ.pop(key, None)
 
-    logger.info("Updated %d key(s) in %s", len(updates), env_path)
+    logger.info(
+        "Updated %d key(s) and removed %d key(s) in %s",
+        len(updates),
+        len(effective_remove_keys),
+        env_path,
+    )
+
+
+def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None:
+    """Re-init ``core`` for a chat-initiated provider change and persist it.
+
+    Extracted from ``chat_stream`` so the persistence rules are unit-testable.
+    The chat request path has no ``auth_mode`` field, so ``core.init`` here
+    always lands in ``api_key`` mode; we must clear any stale
+    ``LLM_AUTH_MODE=oauth`` / ``CCPROXY_PORT`` in ``.env`` that belonged to
+    a prior OAuth session, otherwise a restart would rebuild an invalid
+    ``new_provider + oauth`` combination.
+    """
+    try:
+        core.init(provider=provider_id, model=model)
+    except Exception as exc:
+        logger.warning("Provider switch to %s failed: %s", provider_id, exc)
+        return
+
+    env_path = _get_omicsclaw_env_path()
+    if env_path:
+        updates: dict[str, str] = {
+            "LLM_PROVIDER": provider_id,
+            "LLM_AUTH_MODE": "api_key",
+        }
+        if getattr(core, "OMICSCLAW_MODEL", ""):
+            updates["OMICSCLAW_MODEL"] = core.OMICSCLAW_MODEL
+        remove_keys: set[str] = {"CCPROXY_PORT"}
+        if provider_id != "custom":
+            remove_keys.add("LLM_BASE_URL")
+        _update_env_file(env_path, updates, remove_keys=remove_keys)
+
+    logger.info(
+        "Auto-switched provider=%s model=%s (from chat request)",
+        getattr(core, "LLM_PROVIDER_NAME", provider_id),
+        getattr(core, "OMICSCLAW_MODEL", ""),
+    )
 
 
 # ---- Pydantic models for bridge endpoints --------------------------------
@@ -3881,6 +4286,8 @@ def main(argv: list[str] | None = None):
         raise SystemExit(1)
 
     args = _parse_args(argv)
+    os.environ["OMICSCLAW_APP_HOST"] = args.host
+    os.environ["OMICSCLAW_APP_PORT"] = str(args.port)
 
     logger.info("Starting OmicsClaw app backend on %s:%d", args.host, args.port)
     uvicorn.run(

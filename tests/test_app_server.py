@@ -88,6 +88,26 @@ def test_app_server_main_uses_default_contract(monkeypatch):
     assert captured["reload"] is False
 
 
+def test_app_server_main_exports_effective_port_to_env(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured: dict[str, object] = {}
+    fake_uvicorn = SimpleNamespace(
+        run=lambda app_ref, **kwargs: captured.update({"app_ref": app_ref, **kwargs})
+    )
+    monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+    monkeypatch.delenv("OMICSCLAW_APP_PORT", raising=False)
+    monkeypatch.delenv("OMICSCLAW_APP_HOST", raising=False)
+
+    server.main(["--host", "127.0.0.1", "--port", "9000"])
+
+    assert captured["port"] == 9000
+    assert os.environ["OMICSCLAW_APP_PORT"] == "9000"
+    assert os.environ["OMICSCLAW_APP_HOST"] == "127.0.0.1"
+
+
 def test_app_server_main_reports_missing_uvicorn(monkeypatch, capsys):
     pytest.importorskip("fastapi")
 
@@ -720,6 +740,8 @@ def test_resolve_backend_init_config_prefers_documented_llm_namespace(monkeypatc
         "api_key": "llm-key",
         "base_url": "https://api.siliconflow.cn/v1",
         "model": "deepseek-ai/DeepSeek-V3",
+        "auth_mode": "api_key",
+        "ccproxy_port": "11435",
     }
 
 

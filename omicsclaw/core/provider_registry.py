@@ -220,6 +220,24 @@ PROVIDER_DETECT_ORDER: tuple[str, ...] = (
 
 PROVIDER_CHOICES: tuple[str, ...] = tuple(PROVIDER_PRESETS.keys())
 
+# Providers that intentionally allow wide/open model identifier spaces.
+# For these, OmicsClaw must not auto-rewrite model names just because they
+# resemble another provider's default model.
+MODEL_NORMALIZATION_EXEMPT_PROVIDERS: frozenset[str] = frozenset({
+    "custom",
+    "ollama",
+    "openrouter",
+    "siliconflow",
+    "nvidia",
+})
+
+
+# --------------------------------------------------------------------------- #
+# OAuth support was previously declared here. It now lives entirely in
+# ``omicsclaw.core.ccproxy_manager`` (the only module that actually runs
+# ccproxy) — see the ``OAUTH_PROVIDERS`` table there. This module stays
+# dependency-light and OAuth-agnostic per its original design.
+
 
 def get_provider_display_metadata(provider_name: str) -> ProviderDisplayMetadata:
     metadata = PROVIDER_DISPLAY_METADATA.get(provider_name)
@@ -282,6 +300,52 @@ def detect_provider_from_env(
     return ""
 
 
+def normalize_model_for_provider(
+    provider: str = "",
+    model: str = "",
+    *,
+    base_url: str = "",
+    provider_presets: Mapping[str, ProviderPreset] = PROVIDER_PRESETS,
+    exempt_providers: frozenset[str] = MODEL_NORMALIZATION_EXEMPT_PROVIDERS,
+) -> tuple[str, str]:
+    """Normalize obviously stale cross-provider default-model leftovers.
+
+    This is intentionally conservative:
+
+    - only runs when a concrete provider is selected
+    - never rewrites models for custom/local/gateway-style providers
+    - never rewrites when the user supplied a custom base URL
+    - only rewrites when the model exactly matches another provider's default
+
+    Returns ``(normalized_model, matched_foreign_provider)`` where the second
+    value is empty when no normalization was needed.
+    """
+    provider_key = str(provider or "").strip().lower()
+    candidate_model = str(model or "").strip()
+    explicit_base_url = str(base_url or "").strip()
+
+    if not provider_key or not candidate_model:
+        return candidate_model, ""
+    if explicit_base_url or provider_key in exempt_providers:
+        return candidate_model, ""
+
+    current = provider_presets.get(provider_key)
+    if current is None:
+        return candidate_model, ""
+
+    current_default_model = str(current[1] or "").strip()
+    if not current_default_model or candidate_model == current_default_model:
+        return candidate_model, ""
+
+    for other_name, (_, other_default_model, _) in provider_presets.items():
+        if other_name == provider_key:
+            continue
+        if candidate_model == str(other_default_model or "").strip():
+            return current_default_model, other_name
+
+    return candidate_model, ""
+
+
 def resolve_provider(
     provider: str = "",
     base_url: str = "",
@@ -326,6 +390,12 @@ def resolve_provider(
     )
     resolved_url = str(base_url or env_base_url or preset_url or "") or None
     resolved_model = str(model or preset_model or "deepseek-chat")
+    resolved_model, _normalized_from = normalize_model_for_provider(
+        provider_key,
+        resolved_model,
+        base_url=base_url or env_base_url,
+        provider_presets=provider_presets,
+    )
 
     if not resolved_key and preset_key_env:
         resolved_key = str(source.get(preset_key_env, "") or "")

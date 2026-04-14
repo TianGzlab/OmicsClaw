@@ -182,9 +182,24 @@ OMICSCLAW_MODEL=your-model-name
 LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
+**6. OAuth via ccproxy (Claude Pro/Max or OpenAI Codex):**
+```env
+LLM_PROVIDER=anthropic
+LLM_AUTH_MODE=oauth
+CCPROXY_PORT=11435
+```
+Complete login once with `python omicsclaw.py auth login claude` (or `openai`).
+Keep `CCPROXY_PORT` different from the app backend port `8765`.
+
 > 📖 **Full Provider List:** See `.env.example` for instructions on configuring other engines like NVIDIA NIM, OpenRouter, DashScope, and custom endpoints.
 >
 > 📖 **Bot / channel config:** See [bot/README.md](bot/README.md) and [bot/CHANNELS_SETUP.md](bot/CHANNELS_SETUP.md) for messaging channel credentials, allowlists, and runtime controls.
+
+> **Provider/model normalization:** if a restart finds a stale cross-provider
+> combination such as `LLM_PROVIDER=anthropic` with
+> `OMICSCLAW_MODEL=deepseek-chat`, OmicsClaw keeps the selected provider as the
+> routing authority and resets the model to that provider's default unless you
+> explicitly configured a custom `*_BASE_URL` / `LLM_BASE_URL`.
 
 </details>
 

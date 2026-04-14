@@ -241,6 +241,29 @@ singlecell-full = [
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
 singlecell-r-bridge = []
 
+# --------------------------------------------------------------------------- #
+# oauth — ccproxy-backed OAuth login for Claude Pro/Max and OpenAI Codex      #
+# subscriptions. Lets users route anthropic/openai calls through a local      #
+# ccproxy server instead of supplying an API key. Triggered by CLI            #
+# `omicsclaw auth login claude|openai` and runtime flag `--auth-mode oauth`.  #
+#                                                                             #
+# KNOWN BENIGN PIP WARNING:                                                   #
+#   Installing this extra alongside the `spatial-trajectory` /                #
+#   `singlecell-pseudotime` extras (which depend on cellrank → pygpcca) may   #
+#   print:                                                                    #
+#     ERROR: pygpcca 1.0.4 requires jinja2==3.0.3, but you have jinja2 3.1.x. #
+#   Root cause: ccproxy-api pulls fastapi[standard] which requires            #
+#   jinja2>=3.1.5, while pygpcca 1.0.4 over-pins jinja2==3.0.3. pygpcca 1.0.4 #
+#   is the latest release on PyPI (no upstream fix available) and still       #
+#   functions correctly with jinja2 3.1.x in practice. The warning is pip     #
+#   metadata noise — the install succeeds and both OAuth and trajectory       #
+#   analysis continue to work. Safe to ignore.                                #
+# --------------------------------------------------------------------------- #
+oauth = [
+    "ccproxy-api>=0.2.7,<0.3",
+    "httpx>=0.27",
+]
+
 genomics = []
 
 proteomics = []
@@ -256,7 +279,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna,oauth]"
 ]
 
 # --------------------------------------------------------------------------- #
