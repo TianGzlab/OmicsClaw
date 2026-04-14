@@ -24,6 +24,12 @@ preserve the reference skills' core design:
 
 Recent additions:
 
+- `plans/2026-04-14-provider-model-normalization.md` — normalize stale
+  cross-provider model leftovers so backend status surfaces stop exposing
+  contradictory provider/model pairs
+- `plans/2026-04-14-oauth-runtime-hardening.md` — harden OAuth logout/runtime
+  cleanup, provider config persistence, and ccproxy/app-server port conflict
+  handling
 - `plans/2026-04-11-app-backend-authority-convergence.md` — converge notebook
   file ownership, runtime config authority, and backend launch discovery
   around the upstream backend contract

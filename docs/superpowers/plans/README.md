@@ -5,6 +5,12 @@ development work.
 
 ## Tracked Entries
 
+- [2026-04-14-provider-model-normalization.md](2026-04-14-provider-model-normalization.md)
+  — normalize stale cross-provider model leftovers so backend status surfaces
+  expose a coherent provider/model pair.
+- [2026-04-14-oauth-runtime-hardening.md](2026-04-14-oauth-runtime-hardening.md)
+  — harden OAuth logout/runtime cleanup, provider config persistence, and
+  ccproxy/app-server port conflict handling.
 - [2026-04-11-app-backend-authority-convergence.md](2026-04-11-app-backend-authority-convergence.md)
   — converge notebook file APIs, runtime config ownership, and backend launch
   discovery under the upstream backend contract.

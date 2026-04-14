@@ -64,8 +64,14 @@ logger = logging.getLogger("omicsclaw.runner")
 
 def _resolve_bootstrap_llm_config(
     env: Mapping[str, str] | None = None,
-) -> tuple[str, str | None, str, str]:
-    """Resolve the effective LLM bootstrap config from environment variables."""
+) -> tuple[str, str | None, str, str, str, int]:
+    """Resolve the effective LLM bootstrap config from environment variables.
+
+    Returns ``(provider, base_url, model, api_key, auth_mode, ccproxy_port)``.
+    ``auth_mode`` is ``"oauth"`` when ``LLM_AUTH_MODE=oauth`` is set, else
+    ``"api_key"`` (default). ``ccproxy_port`` comes from ``CCPROXY_PORT`` or
+    falls back to 11435.
+    """
     source = os.environ if env is None else env
     explicit_provider = str(source.get("LLM_PROVIDER", "") or "").strip().lower()
     detected_provider = detect_provider_from_env(env=source)
@@ -78,7 +84,23 @@ def _resolve_bootstrap_llm_config(
         api_key=str(source.get("LLM_API_KEY", "") or ""),
         env=source,
     )
-    return effective_provider, resolved_url, resolved_model, resolved_key
+
+    auth_mode = (
+        str(source.get("LLM_AUTH_MODE", "") or "").strip().lower() or "api_key"
+    )
+    try:
+        ccproxy_port = int(source.get("CCPROXY_PORT", "11435") or "11435")
+    except (TypeError, ValueError):
+        ccproxy_port = 11435
+
+    return (
+        effective_provider,
+        resolved_url,
+        resolved_model,
+        resolved_key,
+        auth_mode,
+        ccproxy_port,
+    )
 
 
 def _build_telegram_channel():
@@ -305,19 +327,27 @@ async def _run_channels(channel_names: list[str], health_port: int = 0) -> None:
     from bot.channels.manager import ChannelManager
 
     # Initialize core LLM engine
-    provider, base_url, model, api_key = _resolve_bootstrap_llm_config()
-    if not api_key and provider != "ollama":
+    provider, base_url, model, api_key, auth_mode, ccproxy_port = (
+        _resolve_bootstrap_llm_config()
+    )
+    # OAuth mode doesn't need an API key — ccproxy supplies the OAuth token.
+    if not api_key and provider != "ollama" and auth_mode != "oauth":
         print(
             "Error: no LLM API key resolved. Set LLM_API_KEY or a provider-specific key "
             "(for example DEEPSEEK_API_KEY). See bot/README.md for setup."
         )
         sys.exit(1)
 
+    # Bootstrap context: if OAuth setup fails, warn and degrade to
+    # api_key mode rather than blocking bot startup entirely.
     core.init(
         api_key=api_key,
         base_url=base_url,
         model=model,
         provider=provider,
+        auth_mode=auth_mode,
+        ccproxy_port=ccproxy_port,
+        strict_oauth=False,
     )
 
     # Build manager with middleware

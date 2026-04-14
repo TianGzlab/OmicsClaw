@@ -36,6 +36,7 @@ from omicsclaw.core.llm_timeout import (
 from omicsclaw.core.provider_registry import (
     PROVIDER_DETECT_ORDER,
     PROVIDER_PRESETS,
+    normalize_model_for_provider,
     resolve_provider,
 )
 from omicsclaw.core.provider_runtime import set_active_provider_runtime
@@ -923,6 +924,9 @@ def init(
     base_url: str | None = None,
     model: str = "",
     provider: str = "",
+    auth_mode: str = "api_key",
+    ccproxy_port: int = 11435,
+    strict_oauth: bool = True,
 ):
     """Initialise the shared LLM client. Call once at startup.
 
@@ -932,8 +936,36 @@ def init(
 
     When ``api_key`` is empty, the key is auto-resolved from provider-
     specific environment variables (e.g. DEEPSEEK_API_KEY for deepseek).
+
+    When ``auth_mode="oauth"`` (only valid for ``anthropic`` / ``openai``),
+    requests are routed through a local ``ccproxy`` server instead of
+    using an API key — requires ``pip install 'omicsclaw[oauth]'`` and a
+    prior ``omicsclaw auth login`` step.
+
+    ``strict_oauth``:
+        - ``True`` (default, for explicit caller action such as ``PUT
+          /providers`` or CLI ``auth login``): any OAuth setup failure
+          (missing ccproxy, unauthenticated, unsupported provider) raises
+          ``RuntimeError`` so the user sees the problem immediately.
+        - ``False`` (for server lifespan / bot bootstrap): degrade to
+          ``api_key`` mode with a loud warning if OAuth can't be set up.
+          This prevents a stale ``LLM_AUTH_MODE=oauth`` in ``.env`` from
+          blocking the app-server from starting at all.
     """
     global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
+
+    auth_mode_normalized = str(auth_mode or "api_key").strip().lower() or "api_key"
+
+    # Clear any stale ccproxy-injected env vars BEFORE resolve_provider()
+    # reads them — otherwise a prior OAuth session's ANTHROPIC_BASE_URL /
+    # sentinel key would silently pin the next API-key mode request to the
+    # local ccproxy endpoint (Bug 3: OAuth pollutes API-key mode).
+    try:
+        from omicsclaw.core.ccproxy_manager import clear_ccproxy_env
+        clear_ccproxy_env()
+    except Exception:
+        # ccproxy_manager is optional; missing module just means no cleanup needed.
+        pass
 
     resolved_url, resolved_model, resolved_key = resolve_provider(
         provider=provider,
@@ -941,6 +973,20 @@ def init(
         model=model,
         api_key=api_key,
     )
+    if model and str(resolved_model).strip() != str(model).strip():
+        _normalized_model, normalized_from_provider = normalize_model_for_provider(
+            provider,
+            model,
+            base_url=base_url or "",
+        )
+        logger.warning(
+            "Normalized stale model '%s' for provider '%s' to '%s' "
+            "(matched default model of '%s')",
+            model,
+            provider,
+            resolved_model,
+            normalized_from_provider or "another provider",
+        )
     OMICSCLAW_MODEL = resolved_model
 
     # Determine display name for the provider
@@ -959,16 +1005,67 @@ def init(
 
     effective_api_key = str(resolved_key or api_key or "")
     effective_base_url = str(resolved_url or "")
-    set_active_provider_runtime(
+
+    # Validate / set up OAuth if requested. Under strict_oauth=True any
+    # failure raises; under strict_oauth=False we log and degrade to
+    # api_key mode so a stale LLM_AUTH_MODE=oauth doesn't break startup.
+    if auth_mode_normalized == "oauth":
+        from omicsclaw.core.ccproxy_manager import (
+            OAUTH_PROVIDERS,
+            maybe_start_ccproxy,
+            provider_supports_oauth,
+        )
+
+        def _oauth_failed(reason: str) -> None:
+            """Either raise (strict) or warn-and-fall-back to api_key."""
+            nonlocal auth_mode_normalized
+            if strict_oauth:
+                raise RuntimeError(reason)
+            logger.warning(
+                "Falling back to auth_mode='api_key' — %s. "
+                "Set LLM_AUTH_MODE=api_key in your .env to silence this "
+                "warning, or install / authenticate ccproxy.",
+                reason,
+            )
+            auth_mode_normalized = "api_key"
+
+        if not provider_supports_oauth(LLM_PROVIDER_NAME):
+            _oauth_failed(
+                f"auth_mode='oauth' is not supported for provider "
+                f"'{LLM_PROVIDER_NAME}' (supported: "
+                f"{sorted(OAUTH_PROVIDERS.keys())})"
+            )
+        else:
+
+            try:
+                maybe_start_ccproxy(
+                    anthropic_oauth=(LLM_PROVIDER_NAME == "anthropic"),
+                    openai_oauth=(LLM_PROVIDER_NAME == "openai"),
+                    port=int(ccproxy_port),
+                )
+            except RuntimeError as exc:
+                _oauth_failed(str(exc))
+
+    runtime = set_active_provider_runtime(
         provider=LLM_PROVIDER_NAME,
         base_url=effective_base_url,
         model=OMICSCLAW_MODEL,
         api_key=effective_api_key,
+        # Use the normalized mode — which may have been downgraded to
+        # api_key above if strict_oauth=False and OAuth setup failed.
+        auth_mode=auth_mode_normalized,
+        ccproxy_port=int(ccproxy_port),
     )
 
+    # Use the runtime's resolved base_url / api_key — for OAuth these are
+    # the local ccproxy endpoint + sentinel, for API key mode they are the
+    # resolved cloud values (unchanged from pre-OAuth behavior).
+    effective_api_key = runtime.api_key or effective_api_key
+    effective_base_url = runtime.base_url or effective_base_url
+
     kw: dict = {"api_key": effective_api_key}
-    if resolved_url:
-        kw["base_url"] = resolved_url
+    if effective_base_url:
+        kw["base_url"] = effective_base_url
     kw["timeout"] = _build_llm_timeout()
     try:
         llm = AsyncOpenAI(**kw)
@@ -984,7 +1081,8 @@ def init(
 
     logger.info(
         f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
-        f"model={OMICSCLAW_MODEL}, base_url={resolved_url or '(default)'}"
+        f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
+        f"auth_mode={auth_mode_normalized}"
     )
 
     # Memory initialization — uses the new graph-based memory system

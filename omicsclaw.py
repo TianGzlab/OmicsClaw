@@ -124,6 +124,93 @@ def _ensure_server_dependencies(
     print("Minimal alternative: pip install fastapi uvicorn", file=sys.stderr)
     raise SystemExit(1)
 
+
+def _oauth_cli_choices() -> list[str]:
+    """argparse ``choices`` for the ``auth`` subcommand's provider argument.
+
+    Derived from ``OAUTH_PROVIDERS`` at parser-build time. Falls back to a
+    minimal hardcoded set if ccproxy_manager is unavailable (the command
+    will then error out gracefully inside the handler).
+    """
+    try:
+        from omicsclaw.core.ccproxy_manager import oauth_cli_aliases
+        return oauth_cli_aliases()
+    except Exception:
+        return ["claude", "anthropic", "openai", "codex"]
+
+
+def _handle_auth_command(args) -> None:
+    """Dispatch ``omicsclaw auth {login,logout,status} [claude|openai]``.
+
+    Thin wrapper over the ``ccproxy`` CLI: we only handle provider-name
+    aliasing (``claude`` → ``claude_api``, ``openai`` → ``codex``) and a
+    multi-provider status view. All OAuth flow logic lives in ccproxy.
+    """
+    try:
+        from omicsclaw.core.ccproxy_manager import (
+            OAUTH_PROVIDERS,
+            ccproxy_diagnostic_hint,
+            ccproxy_executable,
+            check_ccproxy_auth,
+            get_oauth_provider,
+            is_ccproxy_available,
+            oauth_install_hint,
+        )
+    except Exception as exc:
+        print(f"{RED}Error importing ccproxy_manager: {exc}{RESET}", file=sys.stderr)
+        sys.exit(2)
+
+    if not is_ccproxy_available():
+        print(
+            f"{RED}ccproxy is not installed (from this Python's perspective).{RESET}",
+            file=sys.stderr,
+        )
+        print(ccproxy_diagnostic_hint(), file=sys.stderr)
+        print(f"Install: {CYAN}{oauth_install_hint()}{RESET}", file=sys.stderr)
+        sys.exit(2)
+
+    op = getattr(args, "auth_command", None)
+    target_alias = getattr(args, "provider", None)
+
+    if op is None:
+        print(
+            f"Usage: {CYAN}python omicsclaw.py auth [login|logout|status] "
+            f"[claude|openai]{RESET}"
+        )
+        sys.exit(1)
+
+    if op == "status" and not target_alias:
+        print(f"\n{BOLD}ccproxy OAuth status{RESET}")
+        print(f"{BOLD}{'=' * 50}{RESET}")
+        for p in OAUTH_PROVIDERS.values():
+            ok, msg = check_ccproxy_auth(p.ccproxy_target)
+            mark = f"{GREEN}OK{RESET}" if ok else f"{YELLOW}--{RESET}"
+            print(f"  [{mark}] {p.omics_name:<10} {msg}")
+        sys.exit(0)
+
+    if not target_alias:
+        print(
+            f"{RED}Error:{RESET} `{op}` requires a provider "
+            f"(one of: claude, openai).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Look up the full provider row from any alias (claude/anthropic/codex/
+    # openai/claude_api). get_oauth_provider raises ValueError for unknown
+    # aliases — the argparse choices already reject those, but belt-and-
+    # braces is cheap here.
+    try:
+        provider = get_oauth_provider(target_alias)
+    except ValueError as exc:
+        print(f"{RED}Error:{RESET} {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    import subprocess as _sp
+
+    rc = _sp.call([ccproxy_executable(), "auth", op, provider.ccproxy_target])
+    sys.exit(rc)
+
 # Canonical workflow order per domain — skills are displayed in this sequence.
 # Skills not listed here appear at the end in alphabetical order.
 _WORKFLOW_ORDER: dict[str, list[str]] = {
@@ -1039,6 +1126,24 @@ def main():
     # mcp config — show config file path
     mcp_sub.add_parser("config", help="Show MCP config file path")
 
+    # auth — manage OAuth login for Claude Pro/Max and OpenAI Codex via ccproxy
+    auth_p = sub.add_parser(
+        "auth",
+        help="Manage OAuth login for Claude Pro/Max and OpenAI Codex (via ccproxy)",
+    )
+    auth_sub = auth_p.add_subparsers(dest="auth_command")
+    for _op in ("login", "logout", "status"):
+        _p = auth_sub.add_parser(_op, help=f"{_op.capitalize()} OAuth credentials")
+        _p.add_argument(
+            "provider",
+            nargs="?",
+            # Accept any alias of any OAuth-capable provider. Derived from
+            # the ``OAUTH_PROVIDERS`` single source of truth in
+            # ccproxy_manager, so adding a new row there auto-extends CLI.
+            choices=_oauth_cli_choices(),
+            help="Target provider (claude|anthropic|openai|codex; omit for `status` to show both)",
+        )
+
     # memory-server — start graph memory REST API
     mem_p = sub.add_parser("memory-server", help="Start the graph memory REST API server")
     mem_p.add_argument("--host", default=None, help="Host to bind (default: 127.0.0.1)")
@@ -1516,6 +1621,10 @@ def main():
         else:
             print(f"Usage: python omicsclaw.py mcp [list|add|remove|config]")
             sys.exit(1)
+
+    if args.command == "auth":
+        _handle_auth_command(args)
+        return
 
     if args.command == "memory-server":
         _ensure_server_dependencies(

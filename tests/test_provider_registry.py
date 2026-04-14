@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from omicsclaw.core.provider_registry import (
+    MODEL_NORMALIZATION_EXEMPT_PROVIDERS,
     PROVIDER_CHOICES,
     PROVIDER_DETECT_ORDER,
     PROVIDER_PRESETS,
     build_provider_registry_entries,
     detect_provider_from_env,
     get_langchain_llm,
+    normalize_model_for_provider,
     resolve_provider,
 )
 
@@ -82,6 +84,63 @@ def test_resolve_provider_custom_preserves_explicit_endpoint(monkeypatch):
     assert resolved_url == "https://custom.example.com/v1"
     assert resolved_model == "custom-model"
     assert resolved_key == "generic-key"
+
+
+def test_normalize_model_for_provider_rewrites_foreign_default_model():
+    normalized, foreign_provider = normalize_model_for_provider(
+        provider="anthropic",
+        model="deepseek-chat",
+    )
+
+    assert normalized == PROVIDER_PRESETS["anthropic"][1]
+    assert foreign_provider == "deepseek"
+
+
+def test_normalize_model_for_provider_skips_gateway_and_local_providers():
+    for provider in MODEL_NORMALIZATION_EXEMPT_PROVIDERS:
+        normalized, foreign_provider = normalize_model_for_provider(
+            provider=provider,
+            model="deepseek-chat",
+        )
+        assert normalized == "deepseek-chat"
+        assert foreign_provider == ""
+
+
+def test_normalize_model_for_provider_skips_explicit_custom_base_url():
+    normalized, foreign_provider = normalize_model_for_provider(
+        provider="anthropic",
+        model="deepseek-chat",
+        base_url="https://proxy.example.test/v1",
+    )
+
+    assert normalized == "deepseek-chat"
+    assert foreign_provider == ""
+
+
+def test_resolve_provider_normalizes_stale_foreign_default_model(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    resolved_url, resolved_model, resolved_key = resolve_provider(
+        provider="anthropic",
+        model="deepseek-chat",
+    )
+
+    assert resolved_url == PROVIDER_PRESETS["anthropic"][0]
+    assert resolved_model == PROVIDER_PRESETS["anthropic"][1]
+    assert resolved_key == "sk-ant-test"
+
+
+def test_resolve_provider_keeps_gateway_model_names(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    resolved_url, resolved_model, resolved_key = resolve_provider(
+        provider="openrouter",
+        model="deepseek-chat",
+    )
+
+    assert resolved_url == PROVIDER_PRESETS["openrouter"][0]
+    assert resolved_model == "deepseek-chat"
+    assert resolved_key == "sk-or-test"
 
 
 def test_get_langchain_llm_uses_openai_compatible_kwargs(monkeypatch):
