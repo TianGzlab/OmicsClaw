@@ -532,8 +532,8 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Next step: Use metacell AnnData for downstream analysis:")
-    print(f"  • sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

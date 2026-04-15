@@ -569,16 +569,16 @@ def main() -> None:
         if not has_spliced or not has_unspliced:
             print("  Missing velocity layers: spliced=%s unspliced=%s" % (has_spliced, has_unspliced))
         elif unspliced_total == 0:
-            print("  Unspliced layer has zero molecules — downstream velocity estimation will fail.")
+            print("  Unspliced layer has zero molecules - downstream velocity estimation will fail.")
         else:
             print("  Both spliced and unspliced layers have zero total molecules.")
         print()
         print("  How to fix:")
-        print("    Option 1 — Re-run with a correct GTF that includes intron annotations:")
+        print("    Option 1 - Re-run with a correct GTF that includes intron annotations:")
         print("      oc run sc-velocity-prep --input <dir> --method velocyto --gtf <genes.gtf> --output <dir>")
-        print("    Option 2 — Use STARsolo with Velocyto feature:")
+        print("    Option 2 - Use STARsolo with Velocyto feature:")
         print("      oc run sc-velocity-prep --input <dir> --method starsolo --output <dir>")
-        print("    Option 3 — Use a pre-existing loom file with velocity layers:")
+        print("    Option 3 - Use a pre-existing loom file with velocity layers:")
         print("      oc run sc-velocity-prep --input <sample.loom> --method velocyto --output <dir>")
         print()
 
