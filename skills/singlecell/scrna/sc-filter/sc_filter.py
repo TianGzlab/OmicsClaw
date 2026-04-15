@@ -463,11 +463,11 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
 
     retention = summary['cells_retained_pct']
     if retention < 50:
-        body_lines.append("⚠️ **Warning**: Low retention rate (< 50%). Check QC thresholds and data quality.")
+        body_lines.append("[!] **Warning**: Low retention rate (< 50%). Check QC thresholds and data quality.")
     elif retention < 70:
         body_lines.append("⚡ **Note**: Moderate retention rate (50-70%). Review filtering parameters.")
     else:
-        body_lines.append("✅ Good retention rate (> 70%).")
+        body_lines.append("[ok] Good retention rate (> 70%).")
 
     body_lines.extend([
         "",
@@ -621,7 +621,7 @@ def main():
         )
     if not had_qc_metrics:
         print()
-        print("ℹ No QC metrics found. Computing automatically.")
+        print("[i] No QC metrics found. Computing automatically.")
         print("  Tip: Run sc-qc first for detailed QC visualization.")
         print()
     working_adata = sc_qc_utils.ensure_qc_metrics(working_adata, species=species, inplace=True)
@@ -720,14 +720,14 @@ def main():
     print(f"\n{'='*60}")
     print(f"Success: {SKILL_NAME} v{SKILL_VERSION}")
     print(f"{'='*60}")
-    print(f"  Cells: {summary['n_cells_before']:,} → {summary['n_cells_after']:,} ({summary['cells_retained_pct']}%)")
-    print(f"  Genes: {summary['n_genes_before']:,} → {summary['n_genes_after']:,} ({summary['genes_retained_pct']}%)")
+    print(f"  Cells: {summary['n_cells_before']:,} -> {summary['n_cells_after']:,} ({summary['cells_retained_pct']}%)")
+    print(f"  Genes: {summary['n_genes_before']:,} -> {summary['n_genes_after']:,} ({summary['genes_retained_pct']}%)")
     print(f"  Output: {output_dir}")
     print()
-    print("▶ Next step: Run sc-preprocessing for normalization, HVG selection, and PCA")
+    print(">> Next step: Run sc-preprocessing for normalization, HVG selection, and PCA")
     print(f"  python omicsclaw.py run sc-preprocessing --input {output_h5ad} --output <dir>")
     print()
-    print("ℹ Optional: Run sc-doublet-detection or sc-ambient-removal before preprocessing")
+    print("[i] Optional: Run sc-doublet-detection or sc-ambient-removal before preprocessing")
 
 
 if __name__ == "__main__":

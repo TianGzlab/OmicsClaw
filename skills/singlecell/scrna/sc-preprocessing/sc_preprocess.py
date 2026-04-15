@@ -1120,10 +1120,10 @@ def main():
     print(f"  Output: {output_dir}")
     print(f"Preprocessing complete: {summary['n_cells']} cells, {summary['n_hvg']} HVGs, PCA ready")
     print()
-    print("▶ Next step:")
-    print("  - Multiple batches? → sc-batch-integration")
+    print(">> Next step:")
+    print("  - Multiple batches? -> sc-batch-integration")
     print(f"    python omicsclaw.py run sc-batch-integration --input {output_h5ad} --output <dir>")
-    print("  - Single batch? → sc-clustering")
+    print("  - Single batch? -> sc-clustering")
     print(f"    python omicsclaw.py run sc-clustering --input {output_h5ad} --output <dir>")
 
 

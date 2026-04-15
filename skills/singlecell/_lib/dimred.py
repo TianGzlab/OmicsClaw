@@ -184,7 +184,7 @@ def suggest_n_pcs(
     cumvar = np.cumsum(adata.uns["pca"]["variance_ratio"])
     hits = np.where(cumvar >= target_variance)[0]
     if len(hits) > 0:
-        n_pcs = int(hits[0]) + 1  # 0-indexed → count
+        n_pcs = int(hits[0]) + 1  # 0-indexed -> count
     else:
         n_pcs = len(cumvar)
         logger.info(

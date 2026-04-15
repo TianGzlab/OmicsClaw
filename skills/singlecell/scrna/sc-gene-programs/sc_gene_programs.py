@@ -612,7 +612,7 @@ def main() -> int:
     print()
 
     # --- Next-step guidance ---
-    print("▶ Next steps:")
+    print(">> Next steps:")
     print(f"  • sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
     print(f"  • sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
 

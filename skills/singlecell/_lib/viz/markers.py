@@ -124,7 +124,7 @@ def plot_marker_effect_summary(
     if top_df.empty:
         return None
 
-    top_df["label"] = top_df["group"].astype(str) + " · " + top_df["names"].astype(str)
+    top_df["label"] = top_df["group"].astype(str) + " | " + top_df["names"].astype(str)
     palette = make_categorical_palette(top_df["group"].astype(str).tolist())
     colors = [palette.get(str(group), QC_PALETTE["counts"]) for group in top_df["group"]]
 

@@ -74,7 +74,7 @@ def plot_de_effect_summary(
         return None
 
     frame = frame.groupby("group", observed=False).head(n_top).copy()
-    frame["label"] = frame["group"].astype(str) + " · " + frame[gene_col].astype(str)
+    frame["label"] = frame["group"].astype(str) + " | " + frame[gene_col].astype(str)
     palette = make_categorical_palette(frame["group"].astype(str).tolist())
     colors = [palette.get(str(group), QC_PALETTE["bar"]) for group in frame["group"]]
 
@@ -89,7 +89,7 @@ def plot_de_effect_summary(
     ordered_groups = _natural_group_order(frame["group"].astype(str).tolist())
     group_positions = {}
     for idx, label in enumerate(frame["label"].tolist()):
-        group = str(label).split(" · ", 1)[0]
+        group = str(label).split(" | ", 1)[0]
         group_positions.setdefault(group, []).append(idx)
     for group in ordered_groups[:-1]:
         if group in group_positions:

@@ -38,7 +38,7 @@ SKILL_VERSION = "0.1.0"
 
 # R Enhanced plotting configuration
 R_ENHANCED_PLOTS = {
-    # centroid_points.csv is exported as embedding_points.csv (x→dim1, y→dim2).
+    # centroid_points.csv is exported as embedding_points.csv (x->dim1, y->dim2).
     # plot_embedding_discrete colors by the metacell label column.
     # plot_cell_barplot removed — no cell_type_counts.csv at this stage.
     "plot_embedding_discrete": "r_embedding_discrete.png",
@@ -531,7 +531,7 @@ def main() -> int:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Use metacell AnnData for downstream analysis:")
+    print(">> Next step: Use metacell AnnData for downstream analysis:")
     print(f"  • sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
     print(f"  • sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
 

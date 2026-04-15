@@ -1422,7 +1422,7 @@ def main() -> None:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next steps:")
+    print(">> Next steps:")
     print(f"  • sc-velocity:      python omicsclaw.py run sc-velocity --input {output_dir}/processed.h5ad --output <dir>")
     print(f"  • sc-gene-programs: python omicsclaw.py run sc-gene-programs --input {output_dir}/processed.h5ad --output <dir>")
 

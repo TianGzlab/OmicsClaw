@@ -918,7 +918,7 @@ def main() -> None:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete.")
+    print(">> Analysis complete.")
 
 
 def _generate_demo_cadrres_scores(

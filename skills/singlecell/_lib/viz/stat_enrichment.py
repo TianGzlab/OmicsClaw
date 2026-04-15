@@ -52,7 +52,7 @@ def plot_enrichment_top_terms_bar(
     palette = sns.color_palette("tab20", n_colors=max(plot_df["group"].nunique(), 3))
     ordered_groups = _sort_groups(plot_df["group"].dropna().unique().tolist())
     group_to_color = {group: palette[idx % len(palette)] for idx, group in enumerate(ordered_groups)}
-    plot_df["y_label"] = plot_df.apply(lambda row: f"{_display_group_label(row['group'])} · {row['term']}", axis=1)
+    plot_df["y_label"] = plot_df.apply(lambda row: f"{_display_group_label(row['group'])} | {row['term']}", axis=1)
 
     fig, ax = plt.subplots(figsize=(11, max(5.5, 0.45 * len(plot_df))))
     sns.barplot(
@@ -287,7 +287,7 @@ def plot_enrichment_ridgeplot(
         if hits.empty:
             continue
         hits["value"] = pd.to_numeric(hits[metric], errors="coerce")
-        hits["group_term"] = f"{_display_group_label(group)} · {term}"
+        hits["group_term"] = f"{_display_group_label(group)} | {term}"
         rows.extend(hits[["group_term", "value"]].dropna().to_dict(orient="records"))
 
     if not rows:

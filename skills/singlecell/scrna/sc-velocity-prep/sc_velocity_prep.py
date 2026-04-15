@@ -708,7 +708,7 @@ def main() -> None:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-velocity for RNA velocity analysis")
+    print(">> Next step: Run sc-velocity for RNA velocity analysis")
     print(f"  python omicsclaw.py run sc-velocity --input {output_dir}/processed.h5ad --output <dir>")
 
 

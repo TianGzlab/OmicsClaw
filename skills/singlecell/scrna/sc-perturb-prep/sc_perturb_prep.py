@@ -420,7 +420,7 @@ def main() -> int:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-perturb for perturbation analysis")
+    print(">> Next step: Run sc-perturb for perturbation analysis")
     print(f"  python omicsclaw.py run sc-perturb --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
