@@ -1459,6 +1459,8 @@ def main():
             else:
                 warn_msg = str(caught[-1].message) if caught else "unknown error"
                 print(f"{YELLOW}skipped{RESET}  ({warn_msg[:80]})")
+                # Write full error to stderr so bot subprocess can classify it
+                print(warn_msg, file=sys.stderr)
                 failed.append(renderer)
 
         print()
@@ -1469,6 +1471,9 @@ def main():
             print()
         if succeeded:
             print(f"  Figures: {r_figures_dir}")
+        # Exit 2 when all renderers failed — signals R env issue to bot
+        if failed and not succeeded:
+            sys.exit(2)
         sys.exit(0)
 
     if args.command == "optimize":
