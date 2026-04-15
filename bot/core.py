@@ -792,6 +792,96 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         logger.warning(f"Auto-capture analysis failed: {e}")
 
 
+_ENV_ERROR_PATTERNS: list[tuple[str, str]] = [
+    # Specific patterns first — prevent generic ImportError from shadowing them
+    (r"compiled using NumPy 1\.x",                    "NumPy 版本冲突"),
+    (r"cannot be run in\s+NumPy\s+\d",               "NumPy 版本冲突"),
+    (r"downgrade to ['\"]?numpy[<>=]",                "NumPy 版本冲突"),
+    (r"CUDA.*out of memory|out of memory.*CUDA",      "GPU 显存不足"),
+    (r"Rscript[:\s]+command not found",               "R 未安装或不在 PATH 中"),
+    (r"cannot find R",                                "R 未安装或不在 PATH 中"),
+    (r"No space left on device",                      "服务器磁盘空间不足"),
+    (r"(?<!\w)Killed(?!\w)",                          "进程被 OOM Killer 终止（内存不足）"),
+    (r"cannot allocate.*memory|MemoryError",          "内存不足"),
+    # Generic package errors last
+    (r"ModuleNotFoundError",                          "缺少 Python 包"),
+    (r"ImportError",                                  "缺少 Python 包（版本冲突或未安装）"),
+]
+
+
+def _extract_env_snippet(full_err: str) -> str:
+    """Show the beginning (package/file name) and end (error message) of stderr.
+
+    The beginning often contains the offending package import, while the end
+    contains the actual error type. Showing both gives admins actionable context.
+    """
+    lines = [l for l in full_err.strip().splitlines() if l.strip()]
+    if len(lines) <= 15:
+        return full_err.strip()
+    head = "\n".join(lines[:6])
+    tail = "\n".join(lines[-8:])
+    return f"{head}\n...\n{tail}"
+
+
+def _extract_fix_hint(label: str, err: str) -> str:
+    """Return a specific, actionable fix command based on the error type and content."""
+    if "NumPy" in label:
+        return "pip install 'numpy<2'  # 或: conda install 'numpy<2'"
+    if "R 未安装" in label:
+        return "conda install -c conda-forge r-base  # 或: sudo apt install r-base"
+    if "磁盘" in label:
+        return "df -h  # 检查磁盘空间，清理 output/ 或 /tmp 下的大文件"
+    if "OOM" in label:
+        return "增加服务器内存，或减小输入数据规模后重试"
+    if "GPU" in label:
+        return "减少 batch_size，或在 extra_args 中加 --device cpu 使用 CPU 模式"
+    if "内存不足" in label:
+        return "增加服务器内存，或减小输入数据规模后重试"
+    # For missing packages: try to extract the module name
+    m = re.search(r"No module named ['\"]?([a-zA-Z0-9_\-\.]+)['\"]?", err)
+    if m:
+        pkg = m.group(1).split(".")[0]
+        return f"pip install {pkg}  # 或: conda install {pkg}"
+    return "pip install <缺少的包名>  # 检查上方报错确认具体包名"
+
+
+def _classify_env_error(err: str) -> str | None:
+    """Return a user-friendly message if the error is environment-related, else None."""
+    for pattern, label in _ENV_ERROR_PATTERNS:
+        if re.search(pattern, err, re.IGNORECASE):
+            snippet = _extract_env_snippet(err)
+            fix = _extract_fix_hint(label, err)
+            return (
+                f"**环境错误（不是你的数据问题）: {label}**\n\n"
+                "分析环境有配置问题，你的数据文件完全没问题。\n\n"
+                f"**修复方法（在终端运行）:**\n```\n{fix}\n```\n\n"
+                f"**技术详情:**\n```\n{snippet}\n```"
+            )
+    return None
+
+
+async def _resolve_last_output_dir(session_id: str, skill: str) -> Path | None:
+    """Find the most recent completed output directory for a skill from session memory."""
+    if not memory_store or not session_id:
+        return None
+    try:
+        from omicsclaw.memory.compat import AnalysisMemory
+        analyses = await memory_store.get_memories(session_id, "analysis", limit=20)
+        for mem in analyses:
+            if (
+                isinstance(mem, AnalysisMemory)
+                and mem.skill == skill
+                and mem.output_path
+                and getattr(mem, "status", None) == "completed"
+            ):
+                p = Path(mem.output_path)
+                if p.exists():
+                    return p
+    except Exception as e:
+        logger.debug(f"_resolve_last_output_dir failed: {e}")
+    return None
+
+
 def _read_result_json(out_dir: Path) -> dict | None:
     """Read result.json from the skill output directory, return parsed dict or None."""
     result_path = out_dir / "result.json"
@@ -2335,6 +2425,10 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         # Capture failed analysis to memory (so we remember what was tried)
         if session_id:
             await _auto_capture_analysis(session_id, skill_key, args, None, False)
+        # Environment errors take priority — user needs to know it's not their data
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
         if guidance_block and "preflight check failed" in err.lower():
             return (payload_prefix + "\n" if payload_prefix else "") + guidance_block
         if guidance_block:
@@ -2545,27 +2639,31 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
     """Re-render R Enhanced plots from an existing skill output directory."""
     skill_key = args.get("skill", "")
-    output_path_arg = args.get("output_path", "")
+    output_path_arg = args.get("output_path", "").strip()
     renderer = args.get("renderer", "")
     return_media = str(args.get("return_media", "all")).strip().lower()
 
     if not skill_key:
         return "Error: 'skill' is required (e.g. 'sc-qc', 'sc-de')."
-    if not output_path_arg:
-        return "Error: 'output_path' is required — provide the output directory from the previous skill run."
 
-    # Resolve output directory
-    out_dir = Path(output_path_arg).resolve()
-    if not out_dir.exists():
-        # Try searching inside OUTPUT_DIR
-        candidate = OUTPUT_DIR / output_path_arg
-        if candidate.exists():
-            out_dir = candidate.resolve()
-        else:
-            return (
-                f"Output directory not found: '{output_path_arg}'\n\n"
-                f"Provide the full path returned by the previous {skill_key} run."
-            )
+    # Resolve output directory — explicit path > session history fallback
+    out_dir: Path | None = None
+    if output_path_arg:
+        out_dir = Path(output_path_arg).resolve()
+        if not out_dir.exists():
+            candidate = OUTPUT_DIR / output_path_arg
+            if candidate.exists():
+                out_dir = candidate.resolve()
+            else:
+                out_dir = None
+    if out_dir is None and session_id:
+        out_dir = await _resolve_last_output_dir(session_id, skill_key)
+    if out_dir is None or not out_dir.exists():
+        return (
+            f"Cannot find output directory for `{skill_key}`.\n\n"
+            "Please provide the `output_path` from a previous skill run, "
+            f"or run the skill first: `omicsclaw(skill='{skill_key}', mode='...')`"
+        )
 
     figure_data_dir = out_dir / "figure_data"
     if not figure_data_dir.exists():
@@ -2609,6 +2707,9 @@ async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int 
 
     if proc.returncode != 0:
         err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
         return f"replot {skill_key} failed (exit {proc.returncode}):\n{err}"
 
     # Collect generated R Enhanced figures
@@ -2856,6 +2957,9 @@ async def execute_parse_literature(args: dict) -> str:
 
     if proc.returncode != 0:
         err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
         return f"Literature parsing failed (exit {proc.returncode}):\n{err}"
 
     # Read report
