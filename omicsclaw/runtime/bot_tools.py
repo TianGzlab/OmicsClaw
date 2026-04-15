@@ -150,7 +150,12 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                 "(sc-qc, sc-de, sc-markers, sc-preprocessing, sc-clustering, etc.). "
                 "output_path is the output directory from a previous omicsclaw call. "
                 "If output_path is unknown, omit it — OmicsClaw will auto-resolve from session history. "
-                "By default returns all generated R Enhanced figures."
+                "By default returns all generated R Enhanced figures. "
+                "IMPORTANT: If this tool returns an error or reports that no figures were generated, "
+                "relay the error message and fix instructions directly to the user. "
+                "Do NOT fall back to custom_analysis_execute, Python plotting, or any other tool "
+                "to substitute for R Enhanced. Only use alternative plotting tools if the user "
+                "explicitly requests it (e.g. 'use Python instead', 'draw it with matplotlib')."
             ),
             parameters={
                 "type": "object",

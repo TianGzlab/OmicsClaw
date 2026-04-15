@@ -800,6 +800,7 @@ _ENV_ERROR_PATTERNS: list[tuple[str, str]] = [
     (r"CUDA.*out of memory|out of memory.*CUDA",      "GPU 显存不足"),
     (r"Rscript[:\s]+command not found",               "R 未安装或不在 PATH 中"),
     (r"cannot find R",                                "R 未安装或不在 PATH 中"),
+    (r"there is no package called",                   "缺少 R 包"),
     (r"No space left on device",                      "服务器磁盘空间不足"),
     (r"(?<!\w)Killed(?!\w)",                          "进程被 OOM Killer 终止（内存不足）"),
     (r"cannot allocate.*memory|MemoryError",          "内存不足"),
@@ -837,7 +838,14 @@ def _extract_fix_hint(label: str, err: str) -> str:
         return "减少 batch_size，或在 extra_args 中加 --device cpu 使用 CPU 模式"
     if "内存不足" in label:
         return "增加服务器内存，或减小输入数据规模后重试"
-    # For missing packages: try to extract the module name
+    # For missing R packages
+    if "R 包" in label:
+        r_pkgs = re.findall(r"there is no package called '([^']+)'", err)
+        if r_pkgs:
+            install_cmd = ", ".join(f'"{p}"' for p in r_pkgs)
+            return f"Rscript -e 'install.packages(c({install_cmd}))'"
+        return "Rscript -e 'install.packages(\"<包名>\")' # 检查上方报错确认具体包名"
+    # For missing Python packages: try to extract the module name
     m = re.search(r"No module named ['\"]?([a-zA-Z0-9_\-\.]+)['\"]?", err)
     if m:
         pkg = m.group(1).split(".")[0]
@@ -2722,10 +2730,47 @@ async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int 
             figure_names.append(f.name)
 
     if not figure_names:
+        # R renderer may have silently failed (exit 0 but no PNG produced).
+        # Check stderr for environment errors and give the user a fix command.
+        env_msg = _classify_env_error(stderr_str) if stderr_str else None
+        if env_msg:
+            return env_msg
+
+        # Check for common R-side warnings/errors in stderr that _classify_env_error missed
+        r_hints: list[str] = []
+        if "there is no package called" in stderr_str:
+            import re as _re
+            pkgs = _re.findall(r"there is no package called '([^']+)'", stderr_str)
+            if pkgs:
+                install_cmd = ", ".join(f'"{p}"' for p in pkgs)
+                r_hints.append(
+                    f"**R 缺少依赖包:** {', '.join(pkgs)}\n\n"
+                    f"**修复方法（在终端运行）:**\n"
+                    f"```\nRscript -e 'install.packages(c({install_cmd}))'\n```"
+                )
+        if "Rscript" in stderr_str and ("not found" in stderr_str or "No such file" in stderr_str):
+            r_hints.append(
+                "**Rscript 未安装或不在 PATH 中。**\n\n"
+                "**修复方法:**\n"
+                "```\nsudo apt install r-base  # Ubuntu/Debian\n# 或 conda install -c conda-forge r-base\n```"
+            )
+
+        if r_hints:
+            return (
+                f"**R Enhanced 渲染失败（不是你的数据问题）**\n\n"
+                + "\n\n".join(r_hints)
+                + f"\n\n修复后重试: 再次要求 replot {skill_key} 即可。"
+            )
+
+        # Generic fallback — no identifiable cause
+        stderr_snippet = stderr_str[-500:].strip() if stderr_str else ""
+        detail = f"\n\n**stderr:**\n```\n{stderr_snippet}\n```" if stderr_snippet else ""
         return (
-            f"replot {skill_key} completed but no R Enhanced figures were generated.\n"
+            f"replot {skill_key} 完成但没有生成 R Enhanced 图片。\n"
             f"Output: {out_dir}\n\n"
-            f"The skill may not have R Enhanced renderers, or figure_data may be incomplete."
+            f"可能原因: 该技能没有 R Enhanced 渲染器，或 figure_data 不完整。"
+            f"{detail}\n\n"
+            f"请告诉用户具体情况，不要自行尝试其他绘图工具替代。"
         )
 
     # Queue figures for delivery
