@@ -818,10 +818,10 @@ def main():
     print(f"  - reproducibility/analysis_notebook.ipynb")
     print(f"\nNote: No cells were filtered. Use sc-filter or sc-preprocessing skill for filtering.")
     print()
-    print("▶ Next step: Run sc-filter to remove low-quality cells")
+    print(">> Next step: Run sc-filter to remove low-quality cells")
     print(f"  python omicsclaw.py run sc-filter --input {output_h5ad} --output <dir>")
     print()
-    print("ℹ Optional: Run sc-doublet-detection before filtering")
+    print("[i] Optional: Run sc-doublet-detection before filtering")
     print(f"  python omicsclaw.py run sc-doublet-detection --input {output_h5ad} --output <dir>")
 
 

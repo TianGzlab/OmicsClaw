@@ -1083,7 +1083,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-clustering on the integrated object")
+    print(">> Next step: Run sc-clustering on the integrated object")
     print(f"  python omicsclaw.py run sc-clustering --input {output_dir}/processed.h5ad --output <dir>")
 
 

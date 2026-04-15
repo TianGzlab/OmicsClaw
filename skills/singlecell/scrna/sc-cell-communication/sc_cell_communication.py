@@ -1583,7 +1583,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete. Further exploration:")
+    print(">> Analysis complete. Further exploration:")
     print(f"  • sc-grn: python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
 
 

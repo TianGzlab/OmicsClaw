@@ -657,12 +657,12 @@ def main() -> None:
     if artifacts is not None:
         print(f"  Backend artifacts: {artifacts.run_dir}")
     print()
-    print("ℹ Optional upstream: Run sc-fastq-qc first for read-level QC")
+    print("[i] Optional upstream: Run sc-fastq-qc first for read-level QC")
     print()
-    print("▶ Next step:")
-    print("  - Multiple samples? → sc-multi-count to merge")
+    print(">> Next step:")
+    print("  - Multiple samples? -> sc-multi-count to merge")
     print("    python omicsclaw.py run sc-multi-count --input sample1/processed.h5ad --input sample2/processed.h5ad --output <dir>")
-    print("  - Single sample? → sc-qc for quality assessment")
+    print("  - Single sample? -> sc-qc for quality assessment")
     print(f"    python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
 
 

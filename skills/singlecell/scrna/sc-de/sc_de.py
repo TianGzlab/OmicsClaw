@@ -943,7 +943,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-enrichment for pathway enrichment on DE results")
+    print(">> Next step: Run sc-enrichment for pathway enrichment on DE results")
     print(f"  python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
 
 

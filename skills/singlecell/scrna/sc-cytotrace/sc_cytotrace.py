@@ -688,7 +688,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete. Further exploration:")
+    print(">> Analysis complete. Further exploration:")
     print(f"  • sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
     print(f"  • sc-velocity:   python omicsclaw.py run sc-velocity --input {output_dir}/processed.h5ad --output <dir>")
 

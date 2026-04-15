@@ -1424,7 +1424,7 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     if unk_count and unk_count == total_types:
         body_lines.extend([
             "",
-            "## ⚠ Troubleshooting: All Cells Labeled Unknown\n",
+            "## [!] Troubleshooting: All Cells Labeled Unknown\n",
             "All clusters were annotated as **Unknown**. This means the marker genes used do not match",
             "the genes in your dataset. Common causes and solutions:\n",
             "### Cause 1: Wrong tissue type",
@@ -1761,7 +1761,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next steps:")
+    print(">> Next steps:")
     print(f"  • sc-markers: python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
     print(f"  • sc-de:      python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
 

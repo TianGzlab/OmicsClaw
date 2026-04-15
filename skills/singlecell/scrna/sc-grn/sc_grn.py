@@ -1020,7 +1020,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete.")
+    print(">> Analysis complete.")
 
 
 if __name__ == "__main__":

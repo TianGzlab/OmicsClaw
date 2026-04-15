@@ -527,7 +527,7 @@ def main() -> None:
     print(f"  Total genes: {summary['n_genes']:,}")
     print(f"  Standardized output: {output_h5ad}")
     print()
-    print("▶ Next step: Run sc-qc for quality assessment")
+    print(">> Next step: Run sc-qc for quality assessment")
     print(f"  python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
 
 

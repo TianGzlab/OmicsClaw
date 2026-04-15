@@ -412,7 +412,7 @@ def main() -> None:
     if diagnostics["issues"]:
         print(f"  Issues: {len(diagnostics['issues'])} (see report.md for details)")
     print()
-    print("▶ Next step: Run sc-qc for quality assessment")
+    print(">> Next step: Run sc-qc for quality assessment")
     print(f"  python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
 
 
