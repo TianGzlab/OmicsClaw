@@ -24,8 +24,9 @@ metadata:
       - "--r-enhanced"
     param_hints:
       scrublet:
-        priority: "expected_doublet_rate -> batch_key -> threshold"
-        params: ["expected_doublet_rate", "batch_key", "threshold"]
+        priority: "expected_doublet_rate -> batch_key"
+        params: ["expected_doublet_rate", "batch_key"]
+        advanced_params: ["threshold"]
         defaults: {expected_doublet_rate: 0.06, threshold: auto}
         requires: ["scrublet", "raw_count_like_input"]
         tips:

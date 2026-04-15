@@ -28,28 +28,32 @@ metadata:
     param_hints:
       umap:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "umap_min_dist", "umap_spread"]
+        params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
+        advanced_params: ["n_pcs", "umap_min_dist", "umap_spread"]
         defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, umap_min_dist: 0.5, umap_spread: 1.0}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
           - "`use_rep` is the most important selector if multiple embeddings are available."
       tsne:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "tsne_perplexity", "tsne_metric"]
+        params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
+        advanced_params: ["n_pcs", "tsne_perplexity", "tsne_metric"]
         defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, tsne_perplexity: 30.0, tsne_metric: euclidean}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
           - "`tsne` is mainly for visualization; the clustering still comes from the neighbor graph."
       diffmap:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "diffmap_n_comps"]
+        params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
+        advanced_params: ["n_pcs", "diffmap_n_comps"]
         defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, diffmap_n_comps: 15}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
           - "`diffmap` often emphasizes continuous trajectories more than compact clusters."
       phate:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "phate_knn", "phate_decay"]
+        params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
+        advanced_params: ["n_pcs", "phate_knn", "phate_decay"]
         defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, phate_knn: 15, phate_decay: 40}
         requires: ["normalized_expression", "embedding_or_pca", "phate"]
         tips:

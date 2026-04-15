@@ -2194,11 +2194,17 @@ def _build_method_preview(
 
 
 def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
-    """Build a parameter summary block from SKILL.md-declared param_hints.
+    """Build a two-tier parameter card from SKILL.md-declared param_hints.
 
     Reads ``param_hints`` from the registry (loaded from each skill's SKILL.md
     YAML frontmatter). Returns a markdown-formatted string to prepend to the
     tool result. Returns empty string if the skill has no hints for *method*.
+
+    Two-tier layout (when SKILL.md declares ``advanced_params``):
+    - 核心参数: everyday knobs the user should know about
+    - 高级参数: filter/threshold/algorithm-tuning params, shown but not
+      highlighted, so power users can discover them without overwhelming
+      first-time users
 
     Adding hints for a new skill or method requires only editing its SKILL.md —
     no changes to bot/core.py are needed.
@@ -2215,19 +2221,37 @@ def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
         if arg.startswith("--") and i + 1 < len(cmd) and not cmd[i + 1].startswith("--"):
             params_found[arg.lstrip("-").replace("-", "_")] = cmd[i + 1]
 
-    # Build the hint block
-    lines = [
-        f"📋 **Running {skill_key} with method={method_lower}**",
-        "",
-        "**Current Parameters:**",
-    ]
-    for key in tip_info.get("params", []):
-        lines.append(f"  - `{key}`: {params_found.get(key, 'default')}")
+    defaults_map: dict = tip_info.get("defaults", {})
+
+    def _fmt_param(key: str) -> str:
+        """Return key=value — actual cmd value if present, else declared default."""
+        if key in params_found:
+            return f"{key}={params_found[key]}"
+        dval = defaults_map.get(key)
+        return f"{key}={dval}" if dval is not None else f"{key}=default"
+
+    core_keys: list[str] = tip_info.get("params", [])
+    adv_keys: list[str] = tip_info.get("advanced_params", [])
+
+    lines = [f"📋 **{skill_key} · {method_lower}**", ""]
+
+    if core_keys:
+        lines.append("核心参数: " + " | ".join(_fmt_param(k) for k in core_keys))
+    if adv_keys:
+        lines.append("高级参数: " + " | ".join(_fmt_param(k) for k in adv_keys))
+
+    priority = tip_info.get("priority", "")
+    if priority:
+        lines.append(f"调参优先级: {priority.replace(' -> ', ' → ')}")
+
+    for t in tip_info.get("tips", []):
+        lines.append(f"  · {t}")
 
     lines.append("")
-    lines.append(f"**Tuning Priority:** {tip_info.get('priority', 'N/A')}")
-    for t in tip_info.get("tips", []):
-        lines.append(f"  - {t}")
+    lines.append(
+        "[PARAM CARD: show the parameter lines above verbatim to the user — "
+        "do not paraphrase, abbreviate, or omit the 高级参数 line]"
+    )
     lines.append("")
     return "\n".join(lines)
 

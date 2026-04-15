@@ -29,35 +29,40 @@ metadata:
       wilcoxon:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
-        defaults: {groupby: "leiden", n_top_genes: 10}
+        advanced_params: ["padj_threshold", "log2fc_threshold"]
+        defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method wilcoxon: Default exploratory marker-ranking path."
       t-test:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
-        defaults: {groupby: "leiden", n_top_genes: 10}
+        advanced_params: ["padj_threshold", "log2fc_threshold"]
+        defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method t-test: Parametric alternative to Wilcoxon."
       logreg:
         priority: "groupby -> logreg_solver -> n_top_genes"
         params: ["groupby", "logreg_solver", "n_top_genes"]
-        defaults: {groupby: "leiden", logreg_solver: "lbfgs", n_top_genes: 10}
+        advanced_params: ["padj_threshold", "log2fc_threshold"]
+        defaults: {groupby: "leiden", logreg_solver: "lbfgs", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
           - "--method logreg: Logistic-regression ranking, useful when you want genes that best separate one group from the others."
       mast:
         priority: "groupby -> group1/group2 -> n_top_genes"
         params: ["groupby", "group1", "group2", "n_top_genes"]
-        defaults: {groupby: "leiden", n_top_genes: 10}
+        advanced_params: ["padj_threshold", "log2fc_threshold"]
+        defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["R_MAST_stack", "log_normalized_expression_matrix"]
         tips:
           - "--method mast: R-backed MAST hurdle-model path on log-normalized expression."
       deseq2_r:
-        priority: "groupby -> group1/group2 -> sample_key -> celltype_key -> pseudobulk thresholds"
-        params: ["groupby", "group1", "group2", "sample_key", "celltype_key", "pseudobulk_min_cells", "pseudobulk_min_counts"]
-        defaults: {sample_key: "sample_id", celltype_key: "cell_type", pseudobulk_min_cells: 10, pseudobulk_min_counts: 1000}
+        priority: "groupby -> group1/group2 -> sample_key -> celltype_key"
+        params: ["groupby", "group1", "group2", "sample_key", "celltype_key"]
+        advanced_params: ["pseudobulk_min_cells", "pseudobulk_min_counts", "padj_threshold", "log2fc_threshold"]
+        defaults: {sample_key: "sample_id", celltype_key: "cell_type", pseudobulk_min_cells: 10, pseudobulk_min_counts: 1000, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["raw_counts_or_raw_layer", "biological_replicates", "R_DESeq2_stack"]
         tips:
           - "--method deseq2_r: Sample-aware pseudobulk path."
