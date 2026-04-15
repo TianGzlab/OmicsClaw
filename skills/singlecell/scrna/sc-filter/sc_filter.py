@@ -146,6 +146,8 @@ def build_public_params(args) -> dict:
         "max_mt_percent": args.max_mt_percent,
         "min_cells": args.min_cells,
         "tissue": args.tissue,
+        "remove_doublets": args.remove_doublets,
+        "doublet_score_threshold": args.doublet_score_threshold,
     }
 
 
@@ -201,6 +203,7 @@ def _prepare_filter_gallery_context(adata_before, adata_after, summary: dict, pa
         "max_counts_removed": "Above max counts",
         "mt_removed": "Above MT threshold",
         "outliers_removed": "Existing outlier flag",
+        "doublets_removed": "Doublet (sc-doublet-detection)",
     }
     reason_df = pd.DataFrame(
         [
@@ -448,6 +451,18 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
     if params.get('max_mt_percent'):
         body_lines.append(f"- **Max MT%**: {params['max_mt_percent']}%")
     body_lines.append(f"- **Min cells per gene**: {params['min_cells']}")
+    # Doublet removal status
+    doublets_removed = summary.get('filter_stats', {}).get('doublets_removed', 0)
+    if params.get('remove_doublets', True):
+        if doublets_removed > 0:
+            body_lines.append(f"- **Doublet removal**: enabled — removed {doublets_removed:,} doublets")
+        else:
+            body_lines.append(
+                "- **Doublet removal**: enabled — no doublet columns found "
+                "(run sc-doublet-detection upstream to activate)"
+            )
+    else:
+        body_lines.append("- **Doublet removal**: disabled (--no-remove-doublets)")
 
     # Filter breakdown
     body_lines.extend(["", "## Cells Removed By Filter\n"])
@@ -548,6 +563,13 @@ def main():
     parser.add_argument("--tissue", type=str, default=None,
                         choices=["pbmc", "brain", "tumor", "heart", "kidney", "liver", "lung"],
                         help="Use tissue-specific thresholds")
+    parser.add_argument("--no-remove-doublets", dest="remove_doublets", action="store_false",
+                        default=True,
+                        help="Disable automatic doublet removal (doublets are removed by default when "
+                             "predicted_doublet / doublet_score columns from sc-doublet-detection are present)")
+    parser.add_argument("--doublet-score-threshold", type=float, default=0.25,
+                        help="Score cutoff used when only doublet_score (not predicted_doublet) is available "
+                             "(default: 0.25)")
     parser.add_argument("--r-enhanced", action="store_true", default=False,
                         help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
@@ -593,6 +615,8 @@ def main():
             min_genes=args.min_genes,
             max_genes=args.max_genes,
             min_cells=args.min_cells,
+            remove_doublets=args.remove_doublets,
+            doublet_score_threshold=args.doublet_score_threshold,
             source_path=input_file,
         ),
         logger,
@@ -637,6 +661,8 @@ def main():
         max_mt_percent=args.max_mt_percent,
         min_cells=args.min_cells,
         tissue=args.tissue,
+        filter_doublets=args.remove_doublets,
+        doublet_score_threshold=args.doublet_score_threshold,
     )
     summary["workflow"] = "threshold_filtering"
     summary["qc_metrics_reused"] = bool(had_qc_metrics)

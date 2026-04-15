@@ -91,6 +91,8 @@ SHARED_PUBLIC_PARAM_KEYS = (
     "max_mt_pct",
     "n_top_hvg",
     "n_pcs",
+    "remove_doublets",
+    "doublet_score_threshold",
 )
 METHOD_SPECIFIC_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "scanpy": ("normalization_target_sum", "scanpy_hvg_flavor"),
@@ -108,6 +110,8 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "n_pcs": 50,
         "scanpy_hvg_flavor": "seurat",
         "normalization_target_sum": 10000.0,
+        "remove_doublets": True,
+        "doublet_score_threshold": 0.25,
     },
     "seurat": {
         "method": "seurat",
@@ -119,6 +123,8 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "seurat_normalize_method": "LogNormalize",
         "seurat_scale_factor": 10000.0,
         "seurat_hvg_method": "vst",
+        "remove_doublets": True,
+        "doublet_score_threshold": 0.25,
     },
     "sctransform": {
         "method": "sctransform",
@@ -128,6 +134,8 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "n_top_hvg": 3000,
         "n_pcs": 50,
         "sctransform_regress_mt": True,
+        "remove_doublets": True,
+        "doublet_score_threshold": 0.25,
     },
     "pearson_residuals": {
         "method": "pearson_residuals",
@@ -138,6 +146,8 @@ METHOD_PARAM_DEFAULTS: dict[str, dict[str, object]] = {
         "n_pcs": 50,
         "pearson_hvg_flavor": "seurat_v3",
         "pearson_theta": 100.0,
+        "remove_doublets": True,
+        "doublet_score_threshold": 0.25,
     },
 }
 
@@ -498,6 +508,8 @@ def prepare_preprocessing_input(
         min_genes=int(effective_params["min_genes"]),
         min_cells=int(effective_params["min_cells"]),
         max_mt_percent=float(effective_params["max_mt_pct"]),
+        filter_doublets=bool(effective_params.get("remove_doublets", True)),
+        doublet_score_threshold=float(effective_params.get("doublet_score_threshold", 0.25)),
     )
     filter_summary["qc_metrics_reused"] = bool(had_qc_metrics)
     filter_summary["input_preparation"] = {
@@ -745,6 +757,9 @@ def write_report(
         },
     )
 
+    doublets_removed = summary.get("filter_stats", {}).get("doublets_removed", 0)
+    remove_doublets = effective_params.get("remove_doublets", True)
+
     body_lines = [
         "## Summary\n",
         f"- **Method**: {summary['method']}",
@@ -754,6 +769,18 @@ def write_report(
         f"- **Genes before filter**: {summary.get('n_genes_before_filter', summary['n_genes'])}",
         f"- **HVGs selected**: {summary['n_hvg']}",
         f"- **QC metrics reused**: {summary.get('qc_metrics_reused', False)}",
+    ]
+    if remove_doublets:
+        if doublets_removed > 0:
+            body_lines.append(f"- **Doublets removed**: {doublets_removed:,} (sc-doublet-detection)")
+        else:
+            body_lines.append(
+                "- **Doublet removal**: enabled — no doublet columns found "
+                "(run sc-doublet-detection before sc-preprocessing to activate)"
+            )
+    else:
+        body_lines.append("- **Doublet removal**: disabled (--no-remove-doublets)")
+    body_lines.extend([
         "",
         "## Default Gallery\n",
         "- `figures/manifest.json` records the standard Python gallery.",
@@ -765,7 +792,7 @@ def write_report(
         f"- `counts layer`: {context.get('matrix_contract', {}).get('layers', {}).get('counts')}",
         "",
         "## Effective Parameters\n",
-    ]
+    ])
     for key, value in effective_params.items():
         body_lines.append(f"- `{key}`: {value}")
 
@@ -981,6 +1008,12 @@ def main():
     parser.add_argument("--seurat-scale-factor", type=float, default=None)
     parser.add_argument("--seurat-hvg-method", choices=["vst", "mvp", "disp"], default=None)
     parser.add_argument("--sctransform-regress-mt", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--no-remove-doublets", dest="remove_doublets", action="store_false",
+                        default=True,
+                        help="Disable automatic doublet removal (active when predicted_doublet / doublet_score "
+                             "columns from sc-doublet-detection are present)")
+    parser.add_argument("--doublet-score-threshold", type=float, default=None,
+                        help="Score cutoff for doublet removal when only doublet_score is available (default: 0.25)")
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 

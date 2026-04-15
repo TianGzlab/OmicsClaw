@@ -1312,10 +1312,37 @@ def preflight_sc_preprocessing(
                 "Preprocessing expects raw count-like input. Provide an unnormalized count matrix or use the shared canonicalization path first."
             )
 
-    if "predicted_doublet" not in adata.obs.columns and "doublet_score" not in adata.obs.columns:
-        decision.add_guidance(
-            "`sc-preprocessing` does not remove doublets automatically. If doublets are a concern, consider `sc-doublet-detection` before downstream interpretation."
-        )
+    remove_doublets = bool(params.get("remove_doublets", True))
+    doublet_score_threshold = float(params.get("doublet_score_threshold", 0.25))
+    has_predicted = "predicted_doublet" in adata.obs.columns
+    has_score = "doublet_score" in adata.obs.columns
+    if remove_doublets:
+        if has_predicted:
+            n_doublets = int(adata.obs["predicted_doublet"].astype(bool).sum())
+            decision.add_guidance(
+                f"`predicted_doublet` column detected ({n_doublets:,} doublets flagged by sc-doublet-detection). "
+                "These will be automatically removed during the QC filtering step."
+            )
+        elif has_score:
+            n_doublets = int((adata.obs["doublet_score"] >= doublet_score_threshold).sum())
+            decision.require_confirmation(
+                f"`doublet_score` column detected — {n_doublets:,} cells score >= {doublet_score_threshold} "
+                f"and will be removed. The threshold is a judgment call: confirm {doublet_score_threshold} is acceptable, "
+                "or rerun with `--doublet-score-threshold <value>` to adjust. "
+                "(Pass `--no-remove-doublets` to skip doublet removal entirely.)"
+            )
+        else:
+            decision.add_guidance(
+                "No doublet columns found (`predicted_doublet` / `doublet_score`). "
+                "Doublet removal will be skipped. "
+                "Run `sc-doublet-detection` before `sc-preprocessing` to enable automatic doublet removal."
+            )
+    else:
+        if has_predicted or has_score:
+            decision.add_guidance(
+                "Doublet removal is disabled (`--no-remove-doublets`). "
+                "Doublet labels are present but will NOT be used to filter cells."
+            )
 
     batch_candidates = _obs_candidates(adata, "batch")
     if batch_candidates:
@@ -1357,6 +1384,8 @@ def preflight_sc_filter(
     min_genes: int | None = None,
     max_genes: int | None = None,
     min_cells: int | None = None,
+    remove_doublets: bool = True,
+    doublet_score_threshold: float = 0.25,
     source_path: str | None = None,
 ) -> PreflightDecision:
     decision = PreflightDecision("sc-filter")
@@ -1402,6 +1431,37 @@ def preflight_sc_filter(
         decision.add_guidance(
             f"`--tissue {tissue}` will override the wrapper defaults for `min_genes`, `max_genes`, and `max_mt_percent`."
         )
+
+    # Doublet removal guidance
+    has_predicted = "predicted_doublet" in adata.obs.columns
+    has_score = "doublet_score" in adata.obs.columns
+    if remove_doublets:
+        if has_predicted:
+            n_doublets = int(adata.obs["predicted_doublet"].astype(bool).sum())
+            decision.add_guidance(
+                f"`predicted_doublet` column detected ({n_doublets:,} doublets flagged by sc-doublet-detection). "
+                "These will be automatically removed during filtering."
+            )
+        elif has_score:
+            n_doublets = int((adata.obs["doublet_score"] >= doublet_score_threshold).sum())
+            decision.require_confirmation(
+                f"`doublet_score` column detected — {n_doublets:,} cells score >= {doublet_score_threshold} "
+                f"and will be removed. The threshold is a judgment call: confirm {doublet_score_threshold} is acceptable, "
+                "or rerun with `--doublet-score-threshold <value>` to adjust. "
+                "(Pass `--no-remove-doublets` to skip doublet removal entirely.)"
+            )
+        else:
+            decision.add_guidance(
+                "No doublet columns found (`predicted_doublet` / `doublet_score`). "
+                "Doublet removal will be skipped. "
+                "Run `sc-doublet-detection` before `sc-filter` to enable automatic doublet removal."
+            )
+    else:
+        if has_predicted or has_score:
+            decision.add_guidance(
+                "Doublet removal is disabled (`--no-remove-doublets`). "
+                "Doublet labels are present but will NOT be used to filter cells."
+            )
 
     return decision
 

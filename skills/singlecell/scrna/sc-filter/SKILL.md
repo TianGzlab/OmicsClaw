@@ -185,7 +185,7 @@ The current wrapper writes a standard recipe-driven gallery:
 
 - Explain the effective thresholds before running, especially when `--tissue` presets are used.
 - Treat tissue presets as wrapper heuristics rather than universal biology rules.
-- This skill filters cells and genes only; it does not normalize, cluster, or remove doublets automatically.
+- **Doublet removal is automatic** when `predicted_doublet` or `doublet_score` columns (written by `sc-doublet-detection`) are present in `adata.obs`. Pass `--no-remove-doublets` to disable. Use `--doublet-score-threshold` (default 0.25) to tune the score cutoff when only `doublet_score` is available.
 - For short execution guardrails, see `knowledge_base/knowhows/KH-sc-filter-guardrails.md`.
 - For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-filter.md`.
 
@@ -209,6 +209,8 @@ The current wrapper writes a standard recipe-driven gallery:
 | `--max-mt-percent` | float | `20.0` | Maximum mitochondrial percentage per cell | Must be in [0, 100] |
 | `--min-cells` | int | `3` | Minimum cells expressing a retained gene | Must be >= 0 |
 | `--tissue` | enum | none | OmicsClaw tissue preset: `pbmc`, `brain`, `tumor`, `heart`, `kidney`, `liver`, `lung` | — |
+| `--no-remove-doublets` | flag | off | Disable automatic doublet removal (doublets are removed by default when `predicted_doublet` / `doublet_score` columns are present) | — |
+| `--doublet-score-threshold` | float | `0.25` | Score cutoff when only `doublet_score` is available (requires upstream `sc-doublet-detection`) | Must be in [0, 1] |
 | `--r-enhanced` | flag | `false` | Generate R Enhanced figures via ggplot2 renderers | — |
 
 ## R Enhanced Plots
