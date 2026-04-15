@@ -147,7 +147,7 @@ This skill does not:
 After this skill:
 - if batch/sample effects are expected: run `sc-batch-integration`
 - otherwise: run `sc-clustering`
-- if doublets are a concern, run `sc-doublet-detection` before interpreting downstream results
+- **doublet removal**: `sc-preprocessing` removes doublets automatically during filtering when `predicted_doublet` or `doublet_score` columns (from `sc-doublet-detection`) are present. Pass `--no-remove-doublets` to opt out. Run `sc-doublet-detection` → `sc-preprocessing` to activate.
 
 ## Output Contract
 
@@ -189,6 +189,8 @@ Successful runs write:
 | `--seurat-scale-factor` | float | `10000.0` | Seurat scale factor (seurat only) | — |
 | `--seurat-hvg-method` | enum | `vst` | Seurat HVG method: `vst`, `mvp`, `disp` (seurat only) | — |
 | `--sctransform-regress-mt` / `--no-sctransform-regress-mt` | bool | `true` | Regress out mitochondrial percentage in SCTransform (sctransform only) | — |
+| `--no-remove-doublets` | flag | off | Disable automatic doublet removal (active when `predicted_doublet` / `doublet_score` columns from `sc-doublet-detection` are present) | — |
+| `--doublet-score-threshold` | float | `0.25` | Score cutoff when only `doublet_score` is available | Must be in [0, 1] |
 | `--r-enhanced` | flag | `false` | Generate R Enhanced figures via ggplot2 renderers | — |
 
 ## R Enhanced Plots
