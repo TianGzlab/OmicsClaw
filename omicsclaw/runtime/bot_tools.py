@@ -139,6 +139,56 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("analysis", "workflow"),
         ),
         ToolSpec(
+            name="replot_skill",
+            description=(
+                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory. "
+                "Use this ONLY when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
+                "'make it prettier', or 'replot'. "
+                "The skill must have been run first (via the omicsclaw tool). "
+                "R Enhanced is currently supported for single-cell scRNA skills only "
+                "(sc-qc, sc-de, sc-markers, sc-preprocessing, sc-clustering, etc.). "
+                "By default returns all generated R Enhanced figures."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill": {
+                        "type": "string",
+                        "description": "Skill alias to replot (e.g. 'sc-qc', 'sc-de', 'sc-markers').",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Full path to the output directory from the previous skill run.",
+                    },
+                    "renderer": {
+                        "type": "string",
+                        "description": "Optional: run only a specific renderer (e.g. 'plot_feature_violin'). Omit to run all renderers.",
+                    },
+                    "return_media": {
+                        "type": "string",
+                        "description": "Filter for which R Enhanced figures to send. Default: 'all'. Use a keyword to filter (e.g. 'violin').",
+                    },
+                    "top_n": {"type": "integer", "description": "Number of top items to label/show."},
+                    "font_size": {"type": "integer", "description": "Base font size in points."},
+                    "width": {"type": "integer", "description": "Figure width in inches."},
+                    "height": {"type": "integer", "description": "Figure height in inches."},
+                    "dpi": {"type": "integer", "description": "Output resolution (default 300)."},
+                    "palette": {"type": "string", "description": "Color palette name."},
+                    "title": {"type": "string", "description": "Custom plot title."},
+                },
+                "required": ["skill", "output_path"],
+            },
+            surfaces=("bot",),
+            context_params=("session_id", "chat_id"),
+            read_only=False,
+            concurrency_safe=False,
+            result_policy=RESULT_POLICY_SUMMARY_OR_MEDIA,
+            progress_policy=PROGRESS_POLICY_ANALYSIS,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("analysis", "workflow"),
+        ),
+        ToolSpec(
             name="save_file",
             description="Save a file that was sent via messaging to a specific folder. Default: OmicsClaw data/ directory.",
             parameters={

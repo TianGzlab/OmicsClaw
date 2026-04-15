@@ -2538,6 +2538,128 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 
 
 # ---------------------------------------------------------------------------
+# execute_replot_skill
+# ---------------------------------------------------------------------------
+
+
+async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
+    """Re-render R Enhanced plots from an existing skill output directory."""
+    skill_key = args.get("skill", "")
+    output_path_arg = args.get("output_path", "")
+    renderer = args.get("renderer", "")
+    return_media = str(args.get("return_media", "all")).strip().lower()
+
+    if not skill_key:
+        return "Error: 'skill' is required (e.g. 'sc-qc', 'sc-de')."
+    if not output_path_arg:
+        return "Error: 'output_path' is required — provide the output directory from the previous skill run."
+
+    # Resolve output directory
+    out_dir = Path(output_path_arg).resolve()
+    if not out_dir.exists():
+        # Try searching inside OUTPUT_DIR
+        candidate = OUTPUT_DIR / output_path_arg
+        if candidate.exists():
+            out_dir = candidate.resolve()
+        else:
+            return (
+                f"Output directory not found: '{output_path_arg}'\n\n"
+                f"Provide the full path returned by the previous {skill_key} run."
+            )
+
+    figure_data_dir = out_dir / "figure_data"
+    if not figure_data_dir.exists():
+        return (
+            f"figure_data/ not found in {out_dir}\n\n"
+            f"Re-run {skill_key} first to generate the figure data needed for R Enhanced plots."
+        )
+
+    # Build command
+    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "replot", skill_key, "--output", str(out_dir)]
+    if renderer:
+        cmd.extend(["--renderer", renderer])
+
+    # Pass optional plot params
+    plot_param_map = {
+        "top_n": "--top-n",
+        "font_size": "--font-size",
+        "width": "--width",
+        "height": "--height",
+        "palette": "--palette",
+        "dpi": "--dpi",
+        "title": "--title",
+    }
+    for key, flag in plot_param_map.items():
+        val = args.get(key)
+        if val is not None:
+            cmd.extend([flag, str(val)])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        stdout_str = stdout_bytes.decode(errors="replace")
+        stderr_str = stderr_bytes.decode(errors="replace")
+    except Exception:
+        import traceback as _tb
+        return f"replot crashed:\n{_tb.format_exc()[-1500:]}"
+
+    if proc.returncode != 0:
+        err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        return f"replot {skill_key} failed (exit {proc.returncode}):\n{err}"
+
+    # Collect generated R Enhanced figures
+    r_enhanced_dir = out_dir / "figures" / "r_enhanced"
+    figure_names = []
+    media_items = []
+    if r_enhanced_dir.exists():
+        for f in sorted(r_enhanced_dir.rglob("*.png")):
+            media_items.append({"type": "photo", "path": str(f)})
+            figure_names.append(f.name)
+
+    if not figure_names:
+        return (
+            f"replot {skill_key} completed but no R Enhanced figures were generated.\n"
+            f"Output: {out_dir}\n\n"
+            f"The skill may not have R Enhanced renderers, or figure_data may be incomplete."
+        )
+
+    # Queue figures for delivery
+    if return_media and media_items and session_id:
+        if return_media == "all":
+            filtered = media_items
+        else:
+            keywords = [k.strip() for k in return_media.split(",") if k.strip()]
+            filtered = [
+                item for item in media_items
+                if any(kw in Path(item["path"]).stem.lower() for kw in keywords)
+            ]
+        if filtered:
+            pending_media[session_id] = pending_media.get(session_id, []) + filtered
+            sent_names = [Path(item["path"]).name for item in filtered]
+            result = (
+                f"R Enhanced re-render complete for **{skill_key}**.\n\n"
+                f"{len(sent_names)} figure(s) generated: {', '.join(sent_names)}\n"
+                f"Figures saved to: {r_enhanced_dir}"
+            )
+            result += (
+                f"\n\n---\n[MEDIA DELIVERY: {len(sent_names)} R Enhanced figure(s) queued: "
+                f"{', '.join(sent_names)}. They will be delivered automatically.]"
+            )
+            return result
+
+    # No session — return paths for inline rendering
+    hints = "\n".join(f"- `{r_enhanced_dir / n}`" for n in figure_names)
+    return (
+        f"R Enhanced re-render complete for **{skill_key}**.\n\n"
+        f"{len(figure_names)} figure(s) generated:\n{hints}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # execute_save_file
 # ---------------------------------------------------------------------------
 
@@ -3717,6 +3839,7 @@ async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
 def _available_tool_executors() -> dict[str, object]:
     executors = {
         "omicsclaw": execute_omicsclaw,
+        "replot_skill": execute_replot_skill,
         "save_file": execute_save_file,
         "write_file": execute_write_file,
         "generate_audio": execute_generate_audio,
