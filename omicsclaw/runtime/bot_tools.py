@@ -141,12 +141,15 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ToolSpec(
             name="replot_skill",
             description=(
-                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory. "
-                "Use this ONLY when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
+                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory "
+                "WITHOUT re-running the analysis. "
+                "Use this when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
                 "'make it prettier', or 'replot'. "
                 "The skill must have been run first (via the omicsclaw tool). "
                 "R Enhanced is currently supported for single-cell scRNA skills only "
                 "(sc-qc, sc-de, sc-markers, sc-preprocessing, sc-clustering, etc.). "
+                "output_path is the output directory from a previous omicsclaw call. "
+                "If output_path is unknown, omit it — OmicsClaw will auto-resolve from session history. "
                 "By default returns all generated R Enhanced figures."
             ),
             parameters={
@@ -158,7 +161,10 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                     },
                     "output_path": {
                         "type": "string",
-                        "description": "Full path to the output directory from the previous skill run.",
+                        "description": (
+                            "Full path to the output directory from the previous skill run. "
+                            "Omit to auto-resolve from session history."
+                        ),
                     },
                     "renderer": {
                         "type": "string",
@@ -176,7 +182,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                     "palette": {"type": "string", "description": "Color palette name."},
                     "title": {"type": "string", "description": "Custom plot title."},
                 },
-                "required": ["skill", "output_path"],
+                "required": ["skill"],
             },
             surfaces=("bot",),
             context_params=("session_id", "chat_id"),
