@@ -1538,8 +1538,8 @@ def main() -> None:
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Further exploration:")
-    print(f"  • sc-cell-communication: python omicsclaw.py run sc-cell-communication --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-grn:                python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-cell-communication: python omicsclaw.py run sc-cell-communication --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-grn:                python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

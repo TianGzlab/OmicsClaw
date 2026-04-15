@@ -331,7 +331,7 @@ def main() -> int:
             "Verify the mapping file is not empty or malformed",
         ]
         print()
-        print("  *** ZERO cells were assigned after merging — no barcodes matched. ***")
+        print("  *** ZERO cells were assigned after merging - no barcodes matched. ***")
         print("  This usually means the barcode format in the mapping file does not match adata.obs_names.")
         print()
         print("  How to fix:")
@@ -345,7 +345,7 @@ def main() -> int:
             "Verify --control-patterns does not match all sgRNAs",
         ]
         print()
-        print(f"  *** Only {n_perts} perturbation label(s) found — expected at least 2 (control + target). ***")
+        print(f"  *** Only {n_perts} perturbation label(s) found - expected at least 2 (control + target). ***")
         print()
     elif prep_diagnostics["all_control"]:
         prep_diagnostics["suggested_actions"] = [
@@ -353,7 +353,7 @@ def main() -> int:
             "Check that target-gene column or sgRNA naming convention is correct",
         ]
         print()
-        print("  *** ALL cells were labeled as control — no perturbation targets detected. ***")
+        print("  *** ALL cells were labeled as control - no perturbation targets detected. ***")
         print()
 
     summary = {

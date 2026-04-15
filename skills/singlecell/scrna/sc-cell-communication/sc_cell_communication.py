@@ -1414,16 +1414,16 @@ def main():
     _degenerate = _n_interactions == 0
     if _degenerate:
         print()
-        print("  *** NO interactions were detected — communication analysis produced empty results. ***")
+        print("  *** NO interactions were detected - communication analysis produced empty results. ***")
         print("  This usually means the gene names in your data do not overlap with the ligand-receptor database,")
         print("  or the cell type grouping has too few cells per group.")
         print()
         print("  How to fix:")
-        print(f"    Option 1 — Check that '--cell-type-key {args.cell_type_key}' has meaningful labels (not numeric IDs).")
+        print(f"    Option 1 - Check that '--cell-type-key {args.cell_type_key}' has meaningful labels (not numeric IDs).")
         print("      Example: python omicsclaw.py run sc-cell-annotation --input data.h5ad --output anno_out/")
-        print("    Option 2 — Use a richer method that queries a larger LR database:")
+        print("    Option 2 - Use a richer method that queries a larger LR database:")
         print("      Example: python omicsclaw.py run sc-cell-communication --method liana --input data.h5ad --output out/")
-        print("    Option 3 — Verify gene names are HGNC symbols (human) or standard gene symbols (mouse).")
+        print("    Option 3 - Verify gene names are HGNC symbols (human) or standard gene symbols (mouse).")
         print("      If Ensembl IDs, convert first: python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --from ensembl --to symbol --output mapped/")
         print()
 
@@ -1584,7 +1584,7 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Further exploration:")
-    print(f"  • sc-grn: python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-grn: python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

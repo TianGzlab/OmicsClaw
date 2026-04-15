@@ -36,6 +36,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+
+def _configure_stdio_error_handling(*streams: Any) -> None:
+    """Avoid hard failures when a terminal cannot encode Unicode output."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(errors="backslashreplace")
+        except (OSError, ValueError):
+            continue
+
+
+_configure_stdio_error_handling()
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------

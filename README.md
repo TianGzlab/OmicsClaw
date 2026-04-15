@@ -64,6 +64,7 @@
 - **🔒 Privacy-First** — All processing is local; memory stores metadata only (no raw data uploads).
 - **🎯 Smart Routing** — Natural language routed to the appropriate analysis automatically.
 - **🧬 Multi-Omics Coverage** — 72 predefined skills across spatial, single-cell, genomics, proteomics, metabolomics, bulk RNA-seq, literature and orchestration.
+- **🖨️ Console-Safe Output** — The CLI now escapes non-encodable terminal output, and the single-cell RNA terminal guidance stays ASCII-friendly so Windows GBK consoles fail soft instead of crashing.
 
 **What makes it different:**
 
