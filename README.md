@@ -320,21 +320,11 @@ The app backend binds to `127.0.0.1:8765` by default and provides the HTTP/SSE c
 
 If `omicsclaw_kg` is installed or available from a source checkout via `OMICSCLAW_KG_SOURCE_DIR=/path/to/OmicsClaw-KG`, the same `oc app-server` process also mounts the embedded `/kg/*` routes used by the KG Explorer. The frontend dev server now proxies `/kg` to the app backend by default instead of a separate `omicsclaw-kg http serve` process.
 
-**Remote control-plane API (MVP-1, consumed by OmicsClaw-App):**
+**Remote control-plane API (used by OmicsClaw-App remote mode):**
 
-The `omicsclaw/remote/` package mounts the contract used by the desktop App when running in **remote mode** (control plane on the laptop, execution plane on a server). Workspace-scoped state is stored under `<workspace>/.omicsclaw/remote/{datasets,jobs}/`.
+The `omicsclaw/remote/` package powers OmicsClaw-App when the UI runs locally but execution happens on another machine. It covers connection checks, datasets, job lifecycle and SSE logs, artifacts, and session resume. Workspace-scoped state lives under `<workspace>/.omicsclaw/remote/`.
 
-| Method | Path | Status |
-|---|---|---|
-| POST | `/connections/test` | implemented (version + GPU + disk extras) |
-| GET | `/env/doctor` | implemented (JSON of `oc doctor`) |
-| GET / POST | `/datasets`, `/datasets/upload`, `/datasets/import-remote` | implemented (multipart ≤1 GiB; larger files via `import-remote` after scp/rsync; `execution_target` is required; deduplication is scoped by `(checksum, execution_target)`; missing files are surfaced as `status="stale"`) |
-| POST / GET | `/jobs`, `/jobs/{id}`, `/jobs/{id}/cancel`, `/jobs/{id}/retry` | persistence implemented; jobs record the resolved workspace + optional session id; stub failures persist `stdout.log` plus `diagnostics/env_doctor.json` and `diagnostics/stdout.log` under the job artifact root; orphaned `running` jobs are reconciled best-effort per job and retried on later workspace touches if diagnostics persistence partially fails; execution still ends in `executor_not_implemented` until the upstream Executor abstraction lands |
-| GET | `/jobs/{id}/events` | read-only SSE stream of persisted lifecycle state (`job_queued` / `job_started` / `job_log` / `job_failed` / `job_canceled` / `done`) |
-| GET | `/artifacts?job_id=`, `/artifacts/{id}/download` | implemented (Range-aware via `FileResponse`; rejects unsafe `job_id` / `artifact_id` traversal; exposes persisted diagnostics artifacts for failed jobs) |
-| POST | `/sessions/{id}/resume` | implemented (returns active job ids for that session only) |
-
-Contract pinned by `tests/test_remote_routes_contract.py`. Wire-format source of truth is `omicsclaw/remote/schemas.py`.
+For setup and operational details, see [docs/remote-connection-guide.md](docs/remote-connection-guide.md).
 
 **What it remembers:**
 - 📁 **Datasets** — File paths, platforms (Visium/Xenium), dimensions, preprocessing state
@@ -604,39 +594,14 @@ Skills communicate via standardized formats (`.h5ad`, `.vcf`, `.mzML`, `.csv`) a
 
 ### Remote Mode Integration
 
-OmicsClaw-App can operate in **remote mode**, forwarding jobs, datasets, and artifact requests to the Python backend via the remote control-plane API (`omicsclaw/remote/`).
+OmicsClaw-App can run in **remote mode**: keep the App on your laptop, run `oc app-server` near the data, and let the backend own datasets, jobs, logs, and artifacts over the remote control plane.
 
-**Environment variables:**
+**Minimal backend config:**
+- `OMICSCLAW_WORKSPACE` points to the backend workspace and is required.
+- `OMICSCLAW_REMOTE_AUTH_TOKEN` enables bearer-token auth and should be set whenever the service is reachable beyond localhost.
+- For large datasets, prefer copying files to the server first and importing them from path instead of browser upload.
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `OMICSCLAW_WORKSPACE` | Backend workspace directory | Required |
-| `OMICSCLAW_REMOTE_AUTH_TOKEN` | Bearer token for remote auth | Unset (no auth) |
-
-**Wire contract alignment:**
-
-The App and backend use different field names for the same concepts. Translation is handled by adapter modules in `OmicsClaw-App/src/lib/`:
-
-| Backend field | App field | Notes |
-|---|---|---|
-| `job_id` | `id` | |
-| `dataset_id` | `id` | |
-| `error` | `error_message` | `null` → `""` |
-| `created_at` | `submitted_at` | |
-| `inputs` (dict) | `inputs` (JSON string) | |
-| `artifact_id` | composite of `job_id:relative_path` | |
-
-SSE events are also translated: backend `job_queued/started/log/succeeded/failed/canceled/done` → App `job_snapshot/status/log/artifact_created/job_finished`.
-
-Remote chat turns now use that same control plane: the App submits a queued backend `chat` display job first, `/chat/stream` binds to that `job_id`, and the bound job's lifecycle plus `stdout.log` are updated directly by the backend so resume/reconnect can reattach to the active turn.
-
-**Testing:** Wire-shape contract is pinned in `OmicsClaw-App/src/__tests__/unit/remote-wire-contract.test.ts`. Local-mode tests (`datasets.test.ts`, `jobs.test.ts`, `jobs-client.test.ts`) are explicitly scoped to App-local SQLite and are unaffected by backend schema changes.
-
-**Known limitations (MVP):**
-- `PUT /api/jobs/[id]` returns 405 in remote mode (backend has no general update endpoint)
-- `DELETE /api/jobs/[id]` returns 501 for remote-only jobs
-- Multipart file uploads buffer in memory before forwarding (large-file streaming deferred)
-- `proxyRetryJob` returns minimal metadata for the new job (SSE fills real state quickly)
+For the full setup flow, SSH tunnel pattern, and current operational caveats, see [docs/remote-connection-guide.md](docs/remote-connection-guide.md).
 
 ## 📱 Channels Integration — Memory-Enabled Conversational Interface
 

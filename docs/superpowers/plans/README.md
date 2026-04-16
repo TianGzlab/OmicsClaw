@@ -5,6 +5,10 @@ development work.
 
 ## Tracked Entries
 
+- [2026-04-16-remote-connection-guide-refresh.md](2026-04-16-remote-connection-guide-refresh.md)
+  — refresh the remote connection guide so it matches the current
+  `oc app-server` + remote control-plane behavior after the latest backend
+  optimizations.
 - [2026-04-15-remote-contract-hardening.md](2026-04-15-remote-contract-hardening.md)
   — harden the new remote control-plane contract so session ownership, job
   state transitions, and metadata stay truthful before the real Executor lands.
