@@ -53,6 +53,12 @@ except ImportError as _nb_err:
     install_live_session_support = None  # type: ignore[assignment]
     notebook_router = None  # type: ignore[assignment]
 from omicsclaw.runtime.policy_state import ToolPolicyState
+from omicsclaw.remote.routers.jobs import (
+    append_job_stdout_line,
+    bind_chat_stream_job,
+    finalize_chat_stream_job,
+)
+from omicsclaw.remote.storage import resolve_workspace
 from omicsclaw.version import __version__
 
 # ---------------------------------------------------------------------------
@@ -471,6 +477,10 @@ _register_optional_kg_router(app)
 if _NOTEBOOK_AVAILABLE:
     app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
 
+# Remote control-plane API consumed by OmicsClaw-App (see omicsclaw/remote/).
+from omicsclaw.remote.app_integration import register_remote_routers  # noqa: E402
+register_remote_routers(app)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -487,6 +497,7 @@ class ProviderConfig(BaseModel):
 class ChatRequest(BaseModel):
     """POST /chat/stream body."""
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    job_id: str = ""
     content: str
     workspace: str = ""
     pipeline_workspace: str = ""
@@ -957,6 +968,34 @@ async def chat_stream(req: ChatRequest):
     """
     core = _get_core()
     session_id = req.session_id
+    bound_remote_job_id = str(req.job_id or "").strip()
+    bound_remote_workspace: Path | None = None
+    if bound_remote_job_id:
+        try:
+            bound_remote_workspace = resolve_workspace()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            bound_job = bind_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                session_id=session_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # ``bind_chat_stream_job`` intentionally passes through
+        # already-canceled jobs so the cancel handler can finalize them
+        # without clobbering state — but that's not a valid input for
+        # starting the tool loop. Bail with 409 so the caller drops the
+        # request instead of running a chat turn whose job row is
+        # permanently ``canceled``.
+        if bound_job.status == "canceled":
+            raise HTTPException(
+                status_code=409,
+                detail=f"chat stream job was canceled before bind: {bound_remote_job_id}",
+            )
 
     # If a provider config override is supplied, re-init the core.
     # NOTE: In a production multi-tenant setup you would scope this per-request
@@ -1091,7 +1130,32 @@ async def chat_stream(req: ChatRequest):
         "output_style": req.output_style or "",
     }
 
+    def _finalize_bound_remote_job(status: str, error: str | None = None) -> None:
+        if not bound_remote_workspace or not bound_remote_job_id:
+            return
+        try:
+            finalize_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                status=status,  # type: ignore[arg-type]
+                error=error,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to finalize bound remote chat job %s with status %s",
+                bound_remote_job_id,
+                status,
+            )
+
     async def _queue_event(event_type: str, data: Any) -> None:
+        if (
+            bound_remote_workspace is not None
+            and bound_remote_job_id
+            and event_type == "tool_output"
+            and isinstance(data, str)
+        ):
+            for line in data.splitlines():
+                append_job_stdout_line(bound_remote_workspace, bound_remote_job_id, line)
         await queue.put({"type": event_type, "data": data})
 
     def _current_tool_use_id(tool_name: str) -> str:
@@ -1562,11 +1626,14 @@ async def chat_stream(req: ChatRequest):
                     default=str,
                 ),
             )
+            _finalize_bound_remote_job("succeeded")
         except asyncio.CancelledError:
             await _queue_event("error", "Session aborted")
+            _finalize_bound_remote_job("canceled", error="session_aborted")
         except Exception as exc:
             logger.exception("llm_tool_loop error for session %s", session_id)
             await _queue_event("error", str(exc))
+            _finalize_bound_remote_job("failed", error=str(exc))
         finally:
             for permission_request_id in list(permission_request_ids):
                 pending = _pending_permission_requests.pop(permission_request_id, None)

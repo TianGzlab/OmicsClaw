@@ -5,6 +5,9 @@ development work.
 
 ## Tracked Entries
 
+- [2026-04-15-remote-contract-hardening.md](2026-04-15-remote-contract-hardening.md)
+  — harden the new remote control-plane contract so session ownership, job
+  state transitions, and metadata stay truthful before the real Executor lands.
 - [2026-04-14-provider-model-normalization.md](2026-04-14-provider-model-normalization.md)
   — normalize stale cross-provider model leftovers so backend status surfaces
   expose a coherent provider/model pair.

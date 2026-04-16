@@ -24,6 +24,9 @@ preserve the reference skills' core design:
 
 Recent additions:
 
+- `plans/2026-04-15-remote-contract-hardening.md` — harden the new remote
+  control-plane contract so session ownership, job state transitions, and
+  persisted metadata stay truthful before the real Executor lands
 - `plans/2026-04-14-provider-model-normalization.md` — normalize stale
   cross-provider model leftovers so backend status surfaces stop exposing
   contradictory provider/model pairs

@@ -984,6 +984,149 @@ async def test_chat_stream_emits_protocol_events_and_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_updates_bound_remote_chat_job_lifecycle(monkeypatch, tmp_path: Path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.remote.schemas import Job
+    from omicsclaw.remote.storage import jobs_root, utc_now_iso
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
+
+    job_dir = jobs_root(workspace) / "job-chat-1"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    queued = Job(
+        job_id="job-chat-1",
+        session_id="session-chat-1",
+        skill="chat",
+        status="queued",
+        workspace=str(workspace),
+        inputs={},
+        params={"job_kind": "chat_stream", "display_name": "chat turn"},
+        created_at=utc_now_iso(),
+    )
+    (job_dir / "job.json").write_text(queued.model_dump_json(), encoding="utf-8")
+
+    async def fake_llm_tool_loop(**kwargs):
+        await kwargs["on_tool_call"]("task_update", {"task_id": "t1", "status": "in_progress"})
+        await kwargs["on_tool_result"]("task_update", "updated")
+        await kwargs["on_stream_content"]("remote chat output")
+        return "remote chat output"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {"task_update": object()},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-chat-1",
+            content="hello",
+            workspace=str(workspace),
+            job_id="job-chat-1",
+        )
+    )
+    await _read_streaming_response(response)
+
+    final_job = Job.model_validate_json((job_dir / "job.json").read_text(encoding="utf-8"))
+    assert final_job.status == "succeeded"
+    assert final_job.started_at
+    assert final_job.finished_at
+    stdout_text = (job_dir / "stdout.log").read_text(encoding="utf-8")
+    assert "Starting task_update" in stdout_text
+    assert "Completed task_update" in stdout_text
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_rejects_bind_when_job_already_canceled(monkeypatch, tmp_path: Path):
+    """Regression: ``bind_chat_stream_job`` intentionally passes canceled jobs
+    through so the cancel handler can finalize them without clobbering state.
+    Before this guard, ``chat_stream`` discarded that return value and marched
+    on into the tool loop, executing a full chat turn whose job row was
+    permanently ``canceled`` — backend state and actual execution forked.
+    The handler must bail with 409 instead.
+    """
+    pytest.importorskip("fastapi")
+
+    from fastapi import HTTPException
+
+    from omicsclaw.app import server
+    from omicsclaw.remote.schemas import Job
+    from omicsclaw.remote.storage import jobs_root, utc_now_iso
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
+
+    job_dir = jobs_root(workspace) / "job-chat-canceled"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    canceled = Job(
+        job_id="job-chat-canceled",
+        session_id="session-chat-canceled",
+        skill="chat",
+        status="canceled",
+        workspace=str(workspace),
+        inputs={},
+        params={"job_kind": "chat_stream", "display_name": "chat turn"},
+        created_at=utc_now_iso(),
+        finished_at=utc_now_iso(),
+    )
+    (job_dir / "job.json").write_text(canceled.model_dump_json(), encoding="utf-8")
+
+    tool_loop_ran = False
+
+    async def fake_llm_tool_loop(**kwargs):
+        nonlocal tool_loop_ran
+        tool_loop_ran = True
+        return ""
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server.chat_stream(
+            server.ChatRequest(
+                session_id="session-chat-canceled",
+                content="hello",
+                workspace=str(workspace),
+                job_id="job-chat-canceled",
+            )
+        )
+
+    assert excinfo.value.status_code == 409
+    assert "canceled" in str(excinfo.value.detail).lower()
+    assert not tool_loop_ran, "tool loop must not run for a pre-canceled job"
+
+    # Job row must remain canceled — the guard explicitly avoids clobbering.
+    final_job = Job.model_validate_json((job_dir / "job.json").read_text(encoding="utf-8"))
+    assert final_job.status == "canceled"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_surfaces_provider_switch_failure(monkeypatch):
     """When provider switch fails, chat_stream must raise HTTPException instead
     of silently falling back to the previous provider. Without this the UI
