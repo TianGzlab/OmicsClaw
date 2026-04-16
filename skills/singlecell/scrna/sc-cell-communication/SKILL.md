@@ -46,23 +46,26 @@ metadata:
         tips:
           - "--method liana: Best first rich backend in the current wrapper."
       cellphonedb:
-        priority: "cell_type_key -> species -> cellphonedb_threshold -> cellphonedb_iterations"
-        params: ["cell_type_key", "species", "cellphonedb_counts_data", "cellphonedb_iterations", "cellphonedb_threshold", "cellphonedb_threads", "cellphonedb_pvalue"]
+        priority: "cell_type_key -> species"
+        params: ["cell_type_key", "species"]
+        advanced_params: ["cellphonedb_threshold", "cellphonedb_iterations", "cellphonedb_pvalue", "cellphonedb_threads", "cellphonedb_counts_data"]
         defaults: {cell_type_key: "cell_type", species: "human", cellphonedb_counts_data: "hgnc_symbol", cellphonedb_iterations: 1000, cellphonedb_threshold: 0.1, cellphonedb_threads: 4, cellphonedb_pvalue: 0.05}
         requires: ["normalized_expression", "cellphonedb", "cell_type_labels_in_obs", "human_species"]
         tips:
           - "--method cellphonedb: Uses the official CellPhoneDB statistical backend exposed by the current wrapper."
           - "--cellphonedb-threshold and --cellphonedb-iterations are the main public CellPhoneDB tuning knobs in OmicsClaw."
       cellchat_r:
-        priority: "cell_type_key -> species -> cellchat_prob_type -> cellchat_min_cells"
-        params: ["cell_type_key", "species", "cellchat_prob_type", "cellchat_min_cells"]
+        priority: "cell_type_key -> species"
+        params: ["cell_type_key", "species"]
+        advanced_params: ["cellchat_prob_type", "cellchat_min_cells"]
         defaults: {cell_type_key: "cell_type", species: "human", cellchat_prob_type: "triMean", cellchat_min_cells: 10}
         requires: ["normalized_expression", "R_CellChat_stack", "cell_type_labels_in_obs"]
         tips:
           - "--method cellchat_r: R-backed CellChat path with pathway and centrality outputs."
       nichenet_r:
-        priority: "cell_type_key -> condition_key -> receiver -> senders -> nichenet_top_ligands"
-        params: ["cell_type_key", "condition_key", "condition_oi", "condition_ref", "receiver", "senders", "nichenet_top_ligands", "nichenet_expression_pct", "nichenet_lfc_cutoff", "species"]
+        priority: "cell_type_key -> condition_key -> receiver -> senders"
+        params: ["cell_type_key", "condition_key", "condition_oi", "condition_ref", "receiver", "senders"]
+        advanced_params: ["nichenet_top_ligands", "nichenet_expression_pct", "nichenet_lfc_cutoff", "species"]
         defaults: {cell_type_key: "cell_type", condition_key: "condition", condition_oi: "stim", condition_ref: "ctrl", receiver: "", senders: "", nichenet_top_ligands: 20, nichenet_expression_pct: 0.10, nichenet_lfc_cutoff: 0.25, species: "human"}
         requires: ["raw_counts_available", "R_nichenetr_stack", "cell_type_labels_in_obs", "condition_labels_in_obs", "human_species"]
         tips:

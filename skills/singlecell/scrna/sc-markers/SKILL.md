@@ -24,22 +24,25 @@ metadata:
     param_hints:
       wilcoxon:
         priority: "groupby -> n_genes -> n_top"
-        params: ["groupby", "n_genes", "n_top", "min_in_group_fraction", "min_fold_change", "max_out_group_fraction"]
-        defaults: {n_genes: all, n_top: 10, min_in_group_fraction: 0.25, min_fold_change: 0.25, max_out_group_fraction: 0.5}
+        params: ["groupby", "n_genes", "n_top"]
+        advanced_params: ["min_fold_change", "min_in_group_fraction", "max_out_group_fraction"]
+        defaults: {n_genes: all, n_top: 10, min_fold_change: 0.25, min_in_group_fraction: 0.25, max_out_group_fraction: 0.5}
         requires: ["normalized_expression", "group_labels_in_obs"]
         tips:
           - "--method wilcoxon: safest first-pass default for cluster marker ranking."
       t-test:
         priority: "groupby -> n_genes -> n_top"
-        params: ["groupby", "n_genes", "n_top", "min_in_group_fraction", "min_fold_change", "max_out_group_fraction"]
-        defaults: {n_genes: all, n_top: 10, min_in_group_fraction: 0.25, min_fold_change: 0.25, max_out_group_fraction: 0.5}
+        params: ["groupby", "n_genes", "n_top"]
+        advanced_params: ["min_fold_change", "min_in_group_fraction", "max_out_group_fraction"]
+        defaults: {n_genes: all, n_top: 10, min_fold_change: 0.25, min_in_group_fraction: 0.25, max_out_group_fraction: 0.5}
         requires: ["normalized_expression", "group_labels_in_obs"]
         tips:
           - "--method t-test: parametric alternative when users want a simple mean-shift test."
       logreg:
         priority: "groupby -> n_genes -> n_top"
-        params: ["groupby", "n_genes", "n_top", "min_in_group_fraction", "min_fold_change", "max_out_group_fraction"]
-        defaults: {n_genes: all, n_top: 10, min_in_group_fraction: 0.25, min_fold_change: 0.25, max_out_group_fraction: 0.5}
+        params: ["groupby", "n_genes", "n_top"]
+        advanced_params: ["min_fold_change", "min_in_group_fraction", "max_out_group_fraction"]
+        defaults: {n_genes: all, n_top: 10, min_fold_change: 0.25, min_in_group_fraction: 0.25, max_out_group_fraction: 0.5}
         requires: ["normalized_expression", "group_labels_in_obs"]
         tips:
           - "--method logreg: classification-style ranking for discriminative genes."
