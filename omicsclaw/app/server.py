@@ -1861,6 +1861,86 @@ async def set_workspace(req: WorkspaceRequest):
 
 
 # ---------------------------------------------------------------------------
+# GET /files/browse — directory browser for remote-runtime folder pickers
+# ---------------------------------------------------------------------------
+#
+# Desktop clients need to let the user pick a workspace directory that
+# lives on THIS host (the backend's filesystem), not on the client's
+# local machine. The App's local `/api/files/browse` only works for
+# co-located backends; when the backend is on a remote SSH runtime the
+# App proxies here instead.
+#
+# Read-only. Authorization is the same bearer-token middleware the rest
+# of the app_server already enforces, plus OS filesystem permissions
+# (we can only surface what the backend process itself can read). The
+# endpoint deliberately does NOT consult TRUSTED_DATA_DIRS — the user
+# is in the middle of PICKING a workspace, so gating by trust would
+# prevent the first-time-pick flow. `PUT /workspace` does the
+# is_dir() + absolute-path validation when the choice is committed.
+
+@app.get("/files/browse")
+async def browse_directories(path: Optional[str] = None):
+    """List subdirectories under `path` (or $HOME when omitted).
+
+    Response shape matches the App's existing local
+    `/api/files/browse` route so `<FolderPicker/>` can consume either
+    implementation interchangeably.
+    """
+    base_raw = (path or "").strip()
+    try:
+        base = Path(base_raw).expanduser() if base_raw else Path.home()
+        base = base.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    directories: list[dict[str, Any]] = []
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+
+    for entry in entries:
+        # Skip dotfiles to match the App's local implementation — users
+        # expect the same filter on both sides, and cluttered pickers
+        # get ignored.
+        if entry.name.startswith("."):
+            continue
+        is_symlink = entry.is_symlink()
+        try:
+            is_dir = entry.is_dir()  # follows symlinks
+        except OSError:
+            continue
+        if not is_dir:
+            continue
+        item: dict[str, Any] = {
+            "name": entry.name,
+            "path": str(entry),
+            "isSymbolicLink": is_symlink,
+        }
+        if is_symlink:
+            try:
+                item["targetPath"] = str(entry.resolve())
+            except OSError:
+                # Broken symlink — skip rather than return a bogus entry.
+                continue
+        directories.append(item)
+
+    directories.sort(key=lambda d: d["name"].lower())
+
+    parent_path = str(base.parent) if str(base.parent) != str(base) else None
+    return {
+        "current": str(base),
+        "parent": parent_path,
+        "directories": directories,
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
 
