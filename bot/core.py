@@ -1170,13 +1170,31 @@ def get_tools() -> list[dict]:
 
 def _build_bot_tool_context() -> BotToolContext:
     skill_names = tuple(list(_skill_registry().skills.keys()) + ["auto"])
-    skill_descriptions = [
-        f"{alias} ({info.get('description', alias)})"
-        for alias, info in _iter_primary_skill_entries()
-    ]
+    # Pre-render the compact domain briefing once per tool-registry build so
+    # we don't pay repeated registry scans inside build_bot_tool_specs. The
+    # old flat skill_desc_text (88 "alias (description)" entries) is no
+    # longer embedded in the LLM-facing tool description — it ballooned to
+    # ~4k tokens. The briefing is ~500 tokens and stable across turns.
+    from omicsclaw.core.domain_briefing import build_domain_briefing
+    briefing = build_domain_briefing(
+        lead_in=(
+            "OmicsClaw dispatches multi-omics analysis across 7 domains. "
+            "Each line below summarizes a domain and lists a few representative skills."
+        ),
+        trailing_hint=(
+            "The `skill` parameter accepts any canonical skill alias or legacy alias "
+            "(resolved automatically). For the complete skill list of one domain, "
+            "call the `list_skills_in_domain` tool (preferred, paginated) or read "
+            "`skills/<domain>/INDEX.md` on disk. "
+            "Prefer skill='auto' with a natural-language `query` to let the capability "
+            "resolver pick the best match programmatically."
+        ),
+        ensure_loaded=False,  # _skill_registry() above already loaded
+    )
     return BotToolContext(
         skill_names=skill_names,
-        skill_desc_text=", ".join(skill_descriptions),
+        skill_desc_text="",  # retained for backward-compat; no longer used
+        domain_briefing=briefing,
     )
 
 
@@ -2131,6 +2149,58 @@ def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
     return "\n".join(lines)
 
 
+# If the top-1 capability candidate and top-2 score within this gap, we do
+# NOT blindly execute — instead the tool returns a disambiguation list so the
+# LLM re-invokes with a specific skill. Calibrated against
+# ``capability_resolver._candidate_score`` output magnitudes (single keyword
+# match is worth ~0.85 points; an alias hit is worth ~10).
+_AUTO_DISAMBIGUATE_GAP = 2.0
+
+
+def _format_auto_disambiguation(decision, query_text: str) -> str:
+    """Return a human-readable disambiguation block for close-tie auto routing."""
+    candidates = list(decision.skill_candidates or [])[:3]
+    if not candidates:
+        return ""
+    reg = _skill_registry()
+    lines = [
+        "🤔 **Auto-routing found multiple close candidates** — I won't execute yet.",
+        f"Query: `{query_text.strip()[:200]}`",
+        "",
+        "**Top candidates (score — higher is better):**",
+    ]
+    for i, c in enumerate(candidates, 1):
+        info = reg.skills.get(c.skill, {}) or {}
+        desc = (info.get("description") or "").strip().replace("\n", " ")
+        if len(desc) > 140:
+            desc = desc[:137] + "…"
+        reason = c.reasons[0] if c.reasons else ""
+        lines.append(f"{i}. `{c.skill}` (score {c.score:.2f}) — {desc}")
+        if reason:
+            lines.append(f"   matched: {reason}")
+    lines.extend([
+        "",
+        "**Next step:** re-invoke `omicsclaw` with `skill='<chosen alias above>'` "
+        "and the same `mode`/`query`. Pick based on the user's data modality "
+        "(H&E+coordinates → spatial; h5ad single-cell counts → singlecell; "
+        "bulk counts csv → bulkrna; raw MS/LC-MS → proteomics/metabolomics).",
+    ])
+    return "\n".join(lines)
+
+
+def _format_auto_route_banner(decision) -> str:
+    """Return a short banner prepended to tool output when auto routing chose a skill."""
+    chosen = decision.chosen_skill
+    conf = float(getattr(decision, "confidence", 0.0) or 0.0)
+    candidates = list(decision.skill_candidates or [])
+    alts = [c.skill for c in candidates[1:3] if c.skill != chosen]
+    alt_str = f" Close alternatives: {', '.join(alts)}." if alts else ""
+    return (
+        f"📍 Auto-routed to `{chosen}` (confidence {conf:.2f}).{alt_str} "
+        "If this doesn't match the user's intent, re-invoke with an explicit `skill`.\n---\n"
+    )
+
+
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
     """Execute an OmicsClaw skill via subprocess (waits until completion)."""
     skill_key = args.get("skill", "auto")
@@ -2139,6 +2209,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     method = args.get("method", "")
     data_type = args.get("data_type", "")
     file_path_arg = args.get("file_path", "")
+    # Banner prepended to successful-execution output when we auto-routed.
+    # Empty when the caller passed a specific skill.
+    auto_route_banner: str = ""
 
     # --- Resolve input file for path mode ---
     resolved_path: Path | None = None
@@ -2193,7 +2266,25 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
                         "This request is asking to add a reusable OmicsClaw skill.\n\n"
                         "Use create_omics_skill instead of auto-running an analysis skill."
                     )
+                # Close-tie disambiguation: refuse to execute when top-1 and
+                # top-2 candidates are within _AUTO_DISAMBIGUATE_GAP, so the
+                # LLM (or user) picks between them explicitly. Costs one extra
+                # tool round but avoids running a multi-minute analysis on the
+                # wrong skill.
+                cands = list(decision.skill_candidates or [])
+                if len(cands) >= 2:
+                    gap = float(cands[0].score) - float(cands[1].score)
+                    if gap < _AUTO_DISAMBIGUATE_GAP:
+                        logger.info(
+                            "Auto-routing refused to execute: close tie "
+                            "%s (%.2f) vs %s (%.2f), gap=%.2f < %.2f",
+                            cands[0].skill, cands[0].score,
+                            cands[1].skill, cands[1].score,
+                            gap, _AUTO_DISAMBIGUATE_GAP,
+                        )
+                        return _format_auto_disambiguation(decision, query or capability_input)
                 skill_key = decision.chosen_skill
+                auto_route_banner = _format_auto_route_banner(decision)
                 logger.info(
                     "Auto-routed via capability resolver to: %s (%s, %.2f)",
                     skill_key,
@@ -2334,12 +2425,12 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         if session_id:
             await _auto_capture_analysis(session_id, skill_key, args, None, False)
         if guidance_block and "preflight check failed" in err.lower():
-            return (payload_prefix + "\n" if payload_prefix else "") + guidance_block
+            return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + guidance_block
         if guidance_block:
             rendered = guidance_block + f"\n\n---\n{skill_key} failed (exit {proc.returncode}):\n{err}"
-            return (payload_prefix + "\n" if payload_prefix else "") + rendered
+            return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + rendered
         plain = f"{skill_key} failed (exit {proc.returncode}):\n{err}"
-        return (payload_prefix + "\n" if payload_prefix else "") + plain
+        return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + plain
 
     # Collect report + figures from output directory
     return_media = str(args.get("return_media", "")).strip().lower()
@@ -2441,6 +2532,8 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         result_text = guidance_block + "\n\n---\n" + result_text
     if payload_prefix:
         result_text = payload_prefix + "\n" + result_text
+    if auto_route_banner:
+        result_text = auto_route_banner + result_text
     notebook_path = out_dir / "reproducibility" / "analysis_notebook.ipynb"
     if notebook_path.exists():
         result_text += (
@@ -3556,6 +3649,30 @@ async def execute_resolve_capability(args: dict, **kwargs) -> str:
         return f"Error resolving capability: {e}"
 
 
+async def execute_list_skills_in_domain(args: dict, **kwargs) -> str:
+    """Return a markdown listing of all skills in a single OmicsClaw domain.
+
+    Lazy counterpart to the 7-domain briefing embedded in the ``omicsclaw``
+    tool description: the LLM pays the per-domain detail only when it
+    actually needs it.
+    """
+    try:
+        from omicsclaw.runtime.skill_listing import list_skills_in_domain
+
+        domain = args.get("domain", "")
+        if not domain:
+            return (
+                "Error: 'domain' parameter is required. "
+                "Pick one of: spatial, singlecell, genomics, proteomics, "
+                "metabolomics, bulkrna, orchestrator."
+            )
+        filter_text = args.get("filter", "") or ""
+        return list_skills_in_domain(domain, filter_text)
+    except Exception as e:
+        logger.error(f"list_skills_in_domain failed: {e}", exc_info=True)
+        return f"Error listing skills: {e}"
+
+
 async def execute_create_omics_skill(args: dict, **kwargs) -> str:
     """Create a new OmicsClaw skill scaffold inside the repository."""
     try:
@@ -3734,6 +3851,7 @@ def _available_tool_executors() -> dict[str, object]:
         "forget": execute_forget,
         "consult_knowledge": execute_consult_knowledge,
         "resolve_capability": execute_resolve_capability,
+        "list_skills_in_domain": execute_list_skills_in_domain,
         "create_omics_skill": execute_create_omics_skill,
         "web_method_search": execute_web_method_search,
         "custom_analysis_execute": execute_custom_analysis_execute,

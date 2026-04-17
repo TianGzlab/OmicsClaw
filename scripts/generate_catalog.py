@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -114,9 +115,29 @@ def generate_catalog() -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate skills/catalog.json from SKILL.md frontmatter")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--apply", action="store_true", help="Write catalog.json (default behavior)")
+    group.add_argument("--check", action="store_true", help="Exit 1 if catalog.json is out of date")
+    args = parser.parse_args()
+
     catalog = generate_catalog()
     out_path = SKILLS_DIR / "catalog.json"
-    out_path.write_text(json.dumps(catalog, indent=2))
+    expected = json.dumps(catalog, indent=2)
+
+    if args.check:
+        current = out_path.read_text() if out_path.exists() else ""
+        if current.rstrip() != expected.rstrip():
+            print(
+                "ERROR: skills/catalog.json is out of date.\n"
+                "       Run: python scripts/generate_catalog.py --apply",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"skills/catalog.json is up to date ({catalog['skill_count']} skills).")
+        return
+
+    out_path.write_text(expected)
     print(f"Generated {out_path} with {catalog['skill_count']} skills")
 
 

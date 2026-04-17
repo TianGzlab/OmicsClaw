@@ -1,0 +1,8 @@
+{
+  "claude_md_routing_block_chars": 17380,
+  "claude_md_full_chars": 29468,
+  "orchestrator_skill_md_chars": 12540,
+  "bot_tool_description_chars": 16640,
+  "bot_tool_skill_enum_chars": 1902,
+  "bot_tool_spec_json_chars": 20885
+}
