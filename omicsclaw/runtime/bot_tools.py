@@ -21,16 +21,61 @@ from .tool_spec import (
 @dataclass(frozen=True, slots=True)
 class BotToolContext:
     skill_names: tuple[str, ...]
-    skill_desc_text: str
+    # ``skill_desc_text`` is retained for backward compatibility with older
+    # callers/tests, but is no longer embedded verbatim in the tool
+    # description. The LLM now receives a compact 7-domain briefing built
+    # from ``omicsclaw.core.domain_briefing`` instead.
+    skill_desc_text: str = ""
+    domain_briefing: str = ""
+
+
+def _resolve_domain_briefing(context: BotToolContext) -> str:
+    """Return the briefing text, computing it lazily if not preset.
+
+    Allows tests to inject a pre-rendered briefing (cheap, deterministic),
+    while production callers can omit it and let the registry render.
+    """
+    if context.domain_briefing:
+        return context.domain_briefing
+    try:
+        from omicsclaw.core.domain_briefing import build_domain_briefing
+        return build_domain_briefing(
+            lead_in=(
+                "OmicsClaw dispatches multi-omics analysis across 7 domains. "
+                "Each line below summarizes a domain and lists a few representative skills."
+            ),
+            trailing_hint=(
+                "The `skill` parameter accepts any canonical skill alias or legacy alias "
+                "(resolved automatically). For the complete skill list of one domain, "
+                "call the `list_skills_in_domain` tool (preferred, paginated) or read "
+                "`skills/<domain>/INDEX.md` on disk. "
+                "Prefer skill='auto' with a natural-language `query` to let the capability "
+                "resolver pick the best match programmatically."
+            ),
+        )
+    except Exception:
+        # Fallback when registry isn't importable (e.g. partial test envs).
+        return context.skill_desc_text
 
 
 def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
+    briefing = _resolve_domain_briefing(context)
     specs = [
         ToolSpec(
             name="omicsclaw",
             description=(
-                f"Run an OmicsClaw multi-omics analysis skill. Available canonical skills: {context.skill_desc_text}. "
-                "Legacy aliases are also accepted and resolved automatically. "
+                "Run an OmicsClaw multi-omics analysis skill.\n\n"
+                f"{briefing}\n\n"
+                "### Routing policy (read before picking `skill`)\n"
+                "PREFER `skill='auto'` together with `query=<user's request verbatim>`. "
+                "The capability resolver scores all skills by trigger keywords, description "
+                "overlap, file extension, and method mentions, then picks the best match "
+                "deterministically (no extra LLM call). Pass a specific `skill` name ONLY when: "
+                "(a) the user explicitly named that skill, or "
+                "(b) a prior auto-routing result asked you to disambiguate by re-invoking "
+                "with a chosen candidate. "
+                "If auto-routing detects close candidates, the tool will return a short list "
+                "of alternatives instead of executing — re-invoke with the right `skill`.\n\n"
                 "Use mode='demo' to run with built-in synthetic data. "
                 "Use mode='file' when the user has sent an omics data file. "
                 "If `sc-batch-integration` recommends upstream preparation and the user explicitly agrees, "
@@ -49,6 +94,11 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                     "skill": {
                         "type": "string",
                         "enum": list(context.skill_names),
+                        "description": (
+                            "Skill alias to run. Default to 'auto' and pass `query`; "
+                            "use a specific alias only if the user named it or auto-routing "
+                            "asked you to disambiguate."
+                        ),
                     },
                     "mode": {
                         "type": "string",
@@ -205,6 +255,46 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             risk_level=RISK_LEVEL_MEDIUM,
             writes_workspace=True,
             policy_tags=("analysis", "workflow"),
+        ),
+        ToolSpec(
+            name="list_skills_in_domain",
+            description=(
+                "Lazy-load the full skill list for one OmicsClaw domain. "
+                "Call this ONLY when the 7-domain briefing in the `omicsclaw` tool "
+                "description isn't enough to pick a skill, or when the user asks "
+                "'what tools do you have for <domain>?'. The result is a markdown "
+                "block with each skill's alias, one-line description, and trigger "
+                "keywords. For most routing, prefer `omicsclaw(skill='auto', query=...)` "
+                "— the resolver picks the right skill without this extra round-trip."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": [
+                            "spatial", "singlecell", "genomics",
+                            "proteomics", "metabolomics", "bulkrna",
+                            "orchestrator",
+                        ],
+                        "description": "Which domain's skills to list.",
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": (
+                            "Optional case-insensitive substring. Matches against "
+                            "skill alias, description, and trigger keywords. "
+                            "Omit to see the whole domain."
+                        ),
+                    },
+                },
+                "required": ["domain"],
+            },
+            surfaces=("bot",),
+            read_only=True,
+            concurrency_safe=True,
+            result_policy=RESULT_POLICY_KNOWLEDGE_REFERENCE,
+            policy_tags=("knowledge", "reference", "routing"),
         ),
         ToolSpec(
             name="save_file",

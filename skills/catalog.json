@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "generated_by": "scripts/generate_catalog.py",
-  "skill_count": 86,
+  "skill_count": 89,
   "skills": [
     {
       "name": "bulkrna-batch-correction",
@@ -904,7 +904,7 @@
       "name": "sc-cell-communication",
       "cli_alias": "sc-cell-communication",
       "description": "Cell-cell communication analysis for annotated scRNA-seq data using a built-in ligand-receptor scorer, LIANA, CellPhoneDB, CellChat, or a NicheNet R path.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -968,6 +968,26 @@
       "trigger_keywords": []
     },
     {
+      "name": "sc-cytotrace",
+      "cli_alias": "sc-cytotrace",
+      "description": "Predict cell differentiation potency from scRNA-seq data using gene expression complexity as a proxy for stemness.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-cytotrace --demo",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "cytotrace",
+        "potency",
+        "differentiation",
+        "stemness"
+      ],
+      "trigger_keywords": []
+    },
+    {
       "name": "sc-de",
       "cli_alias": "sc-de",
       "description": "Differential expression for single-cell RNA-seq using exploratory Scanpy ranking, R-backed MAST, or replicate-aware pseudobulk DESeq2. The wrapper separates cluster/group marker ranking from sample-aware condition DE.",
@@ -1025,6 +1045,19 @@
         "scds",
         "qc"
       ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-drug-response",
+      "cli_alias": "sc-drug-response",
+      "description": "",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-drug-response --demo",
+      "tags": [],
       "trigger_keywords": []
     },
     {
@@ -1091,7 +1124,7 @@
       "name": "sc-gene-programs",
       "cli_alias": "sc-gene-programs",
       "description": "Discover de novo gene programs and per-cell usage scores from scRNA-seq data using cNMF-compatible or NMF workflows.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -1127,8 +1160,8 @@
     {
       "name": "sc-in-silico-perturbation",
       "cli_alias": "sc-in-silico-perturbation",
-      "description": "In-silico perturbation analysis for scRNA-seq, currently using the official scTenifoldKnk R workflow on a wild-type expression matrix.",
-      "version": "0.1.0",
+      "description": "In-silico perturbation analysis for scRNA-seq. Simulates the effect of knocking out a target gene and identifies differentially regulated genes.",
+      "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -1138,8 +1171,8 @@
         "singlecell",
         "virtual-knockout",
         "grn",
-        "sctenifoldknk",
-        "perturbation"
+        "perturbation",
+        "sctenifoldknk"
       ],
       "trigger_keywords": []
     },
@@ -1177,6 +1210,26 @@
         "metacell",
         "seacells",
         "compression"
+      ],
+      "trigger_keywords": []
+    },
+    {
+      "name": "sc-multi-count",
+      "cli_alias": "sc-multi-count",
+      "description": "Merge multiple single-sample scRNA-seq count matrices (from sc-count) into one downstream-ready AnnData with sample labels.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-multi-count --demo",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "count",
+        "merge",
+        "multi-sample",
+        "aggregate"
       ],
       "trigger_keywords": []
     },
@@ -1264,8 +1317,8 @@
     {
       "name": "sc-pseudotime",
       "cli_alias": "sc-pseudotime",
-      "description": "Trajectory analysis for single-cell RNA-seq using Scanpy DPT, Palantir, or VIA, plus a configurable correlation method for ranking trajectory-associated genes.",
-      "version": "0.4.0",
+      "description": "Single-cell pseudotime and lineage inference after clustering, with DPT, Palantir, VIA, CellRank, or Slingshot plus post-hoc trajectory gene ranking.",
+      "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": true,
@@ -1273,13 +1326,13 @@
       "demo_command": "python omicsclaw.py run sc-pseudotime --demo",
       "tags": [
         "singlecell",
-        "trajectory",
         "pseudotime",
-        "paga",
+        "trajectory",
         "dpt",
         "palantir",
         "via",
-        "cellrank"
+        "cellrank",
+        "slingshot"
       ],
       "trigger_keywords": []
     },
@@ -1307,7 +1360,7 @@
       "name": "sc-standardize-input",
       "cli_alias": "sc-standardize-input",
       "description": "Start here if you already have an external single-cell h5ad. Fixes the AnnData contract so downstream OmicsClaw scRNA skills can use it safely.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
       "has_tests": false,

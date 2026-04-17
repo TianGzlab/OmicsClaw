@@ -25,115 +25,43 @@ When the user asks a question, match it to a skill and act:
 
 <!-- ROUTING-TABLE-START -->
 
-### Spatial Transcriptomics (15 skills)
+When the user asks an analysis question, match it to a skill and act. OmicsClaw covers 7 domains; pick one, then consult its INDEX for the full skill list if the briefing below isn't enough.
 
-| User Intent | Skill | Action |
+- **spatial** (17 skills — Spatial Transcriptomics)
+  Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, domain detection, SVG, deconvolution, cell communication, trajectories, CNV.
+  Key skills: spatial-preprocess, spatial-domains, spatial-de, spatial-deconv, spatial-communication
+- **singlecell** (30 skills — Single-Cell Omics)
+  scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, normalize→HVG→PCA→UMAP→cluster, annotation, DE, trajectory, velocity, GRN, CCC.
+  Key skills: sc-preprocessing, sc-cell-annotation, sc-de, sc-batch-integration, sc-pseudotime
+- **genomics** (10 skills — Genomics)
+  Bulk DNA-seq: FASTQ QC, alignment, SNV/indel/SV/CNV calling, VCF ops, variant annotation, phasing, de novo assembly, ATAC/ChIP peak calling.
+  Key skills: genomics-alignment, genomics-variant-calling, genomics-variant-annotation, genomics-sv-detection
+- **proteomics** (8 skills — Proteomics)
+  Mass spec proteomics: raw MS QC, peptide/protein ID, LFQ/TMT/DIA quantification, differential abundance, PTM, pathway enrichment.
+  Key skills: proteomics-identification, proteomics-quantification, proteomics-de, proteomics-enrichment
+- **metabolomics** (8 skills — Metabolomics)
+  LC-MS metabolomics: XCMS preprocessing, peak detection, metabolite annotation (SIRIUS/GNPS), normalization, DE, pathway enrichment.
+  Key skills: metabolomics-peak-detection, metabolomics-annotation, metabolomics-de, metabolomics-pathway-enrichment
+- **bulkrna** (13 skills — Bulk RNA-seq)
+  Bulk RNA-seq: FASTQ QC, alignment, count QC, DE (DESeq2), enrichment, splicing, WGCNA, deconvolution, PPI, survival, TrajBlend bulk-to-sc.
+  Key skills: bulkrna-de, bulkrna-enrichment, bulkrna-coexpression, bulkrna-deconvolution, bulkrna-survival
+- **orchestrator** (2 skills — Orchestrator)
+  Meta tooling: multi-omics query routing and skill scaffolding. Not an analysis — dispatches to the right domain skill.
+  Key skills: orchestrator, omics-skill-builder
+
+### Full per-domain skill list
+
+| Domain | Skills | Full index |
 |---|---|---|
-| preprocess, QC, normalize, visium, xenium, merfish, slide-seq, load spatial data | `skills/spatial/spatial-preprocess/` | Run `python omicsclaw.py run spatial-preprocessing` |
-| spatial domain, tissue region, niche, SpaGCN, STAGATE | `skills/spatial/spatial-domains/` | Run `python omicsclaw.py run spatial-domain-identification` |
-| cell type annotation, annotate cell types, Tangram, scANVI, CellAssign, marker genes | `skills/spatial/spatial-annotate/` | Run `python omicsclaw.py run spatial-cell-annotation` |
-| deconvolution, cell proportion, cell type proportion, Cell2Location, RCTD, CARD | `skills/spatial/spatial-deconv/` | Run `python omicsclaw.py run spatial-deconvolution` |
-| spatial statistics, autocorrelation, Moran, Ripley, neighborhood enrichment, spatial pattern, co-occurrence, nhood enrichment | `skills/spatial/spatial-statistics/` | Run `python omicsclaw.py run spatial-statistics` |
-| spatially variable gene, spatial gene, SVG, SpatialDE, SPARK-X, spatial pattern, Moran, spatial autocorrelation | `skills/spatial/spatial-genes/` | Run `python omicsclaw.py run spatial-svg-detection` |
-| differential expression, marker gene, DE, Wilcoxon, group comparison | `skills/spatial/spatial-de/` | Run `python omicsclaw.py run spatial-de` |
-| condition comparison, pseudobulk, DESeq2, experimental conditions, treatment vs control | `skills/spatial/spatial-condition/` | Run `python omicsclaw.py run spatial-condition-comparison` |
-| cell communication, ligand receptor, cell-cell interaction, LIANA, CellPhoneDB, FastCCC | `skills/spatial/spatial-communication/` | Run `python omicsclaw.py run spatial-cell-communication` |
-| RNA velocity, cellular dynamics, scVelo, VeloVI, spliced unspliced | `skills/spatial/spatial-velocity/` | Run `python omicsclaw.py run spatial-velocity` |
-| trajectory, pseudotime, DPT, diffusion pseudotime, CellRank, Palantir, cell fate | `skills/spatial/spatial-trajectory/` | Run `python omicsclaw.py run spatial-trajectory` |
-| pathway enrichment, GSEA, gene set enrichment, ORA, GO, KEGG, Reactome | `skills/spatial/spatial-enrichment/` | Run `python omicsclaw.py run spatial-enrichment` |
-| copy number variation, CNV, inferCNV, chromosomal aberration, cancer clone | `skills/spatial/spatial-cnv/` | Run `python omicsclaw.py run spatial-cnv` |
-| multi-sample integration, batch correction, Harmony, BBKNN, Scanorama, merge samples | `skills/spatial/spatial-integrate/` | Run `python omicsclaw.py run spatial-integration` |
-| spatial registration, slice alignment, PASTE, STalign, multi-slice, coordinate alignment | `skills/spatial/spatial-register/` | Run `python omicsclaw.py run spatial-registration` |
+| Spatial Transcriptomics | 17 | [`skills/spatial/INDEX.md`](skills/spatial/INDEX.md) |
+| Single-Cell Omics | 30 | [`skills/singlecell/INDEX.md`](skills/singlecell/INDEX.md) |
+| Genomics | 10 | [`skills/genomics/INDEX.md`](skills/genomics/INDEX.md) |
+| Proteomics | 8 | [`skills/proteomics/INDEX.md`](skills/proteomics/INDEX.md) |
+| Metabolomics | 8 | [`skills/metabolomics/INDEX.md`](skills/metabolomics/INDEX.md) |
+| Bulk RNA-seq | 13 | [`skills/bulkrna/INDEX.md`](skills/bulkrna/INDEX.md) |
+| Orchestration | 2 | [`skills/orchestrator/INDEX.md`](skills/orchestrator/INDEX.md) |
 
-### Single-Cell Omics (17 skills)
-
-> All single-cell skills support R Enhanced re-rendering via `python omicsclaw.py replot <skill> --output <dir>`. See the **Re-rendering Plots (replot)** section below for details.
-
-| User Intent | Skill | Action |
-|---|---|---|
-| FASTQ QC, raw read quality, FastQC, MultiQC, read-level QC, scRNA FASTQ | `skills/singlecell/scrna/sc-fastq-qc/` | Run `python omicsclaw.py run sc-fastq-qc` |
-| count matrix, Cell Ranger, STARsolo, FASTQ to adata, generate count, simpleaf, kb-python | `skills/singlecell/scrna/sc-count/` | Run `python omicsclaw.py run sc-count` |
-| multi-sample count, merge count matrices, aggregate samples, combine count outputs | `skills/singlecell/scrna/sc-multi-count/` | Run `python omicsclaw.py run sc-multi-count` |
-| QC metrics, quality control, calculate QC, QC visualization, violin plots QC, mitochondrial percentage, n genes per cell | `skills/singlecell/scrna/sc-qc/` | Run `python omicsclaw.py run sc-qc` |
-| filter cells, cell filtering, gene filtering, remove low quality, QC filtering, tissue-specific thresholds | `skills/singlecell/scrna/sc-filter/` | Run `python omicsclaw.py run sc-filter` |
-| ambient RNA, ambient removal, cellbender, contamination, background RNA | `skills/singlecell/scrna/sc-ambient-removal/` | Run `python omicsclaw.py run sc-ambient-removal` |
-| single cell preprocess, scRNA preprocessing, QC filter normalize, clustering UMAP PCA | `skills/singlecell/scrna/sc-preprocessing/` | Run `python omicsclaw.py run sc-preprocessing` |
-| doublet detection, doublet removal, Scrublet, DoubletFinder, scDblFinder | `skills/singlecell/scrna/sc-doublet-detection/` | Run `python omicsclaw.py run sc-doublet-detection` |
-| cell type annotation, annotate cells, CellTypist, SingleR, marker gene annotation | `skills/singlecell/scrna/sc-cell-annotation/` | Run `python omicsclaw.py run sc-cell-annotation` |
-| trajectory, pseudotime, diffusion pseudotime, dpt, paga, cell fate, diffusion map | `skills/singlecell/scrna/sc-pseudotime/` | Run `python omicsclaw.py run sc-pseudotime` |
-| rna velocity, velocity, scvelo, spliced unspliced, cellular dynamics, velovi, velocity pseudotime | `skills/singlecell/scrna/sc-velocity/` | Run `python omicsclaw.py run sc-velocity` |
-| batch integration, batch effect, Harmony, scVI, BBKNN, merge samples | `skills/singlecell/scrna/sc-batch-integration/` | Run `python omicsclaw.py run sc-batch-integration` |
-| differential expression, marker genes, DE analysis, Wilcoxon, MAST, group comparison, pseudo-bulk | `skills/singlecell/scrna/sc-de/` | Run `python omicsclaw.py run sc-de` |
-| marker genes, find markers, differential expression, cluster markers, cell type markers | `skills/singlecell/scrna/sc-markers/` | Run `python omicsclaw.py run sc-markers` |
-| grn, gene regulatory, scenic, pyscenic, regulon, transcription factor, grnboost | `skills/singlecell/scrna/sc-grn/` | Run `python omicsclaw.py run sc-grn` |
-| cell communication, cell-cell communication, ligand receptor, cellchat, liana | `skills/singlecell/scrna/sc-cell-communication/` | Run `python omicsclaw.py run sc-cell-communication` |
-| drug response, drug sensitivity, CaDRReS, pharmacogenomics, IC50, scDrug | `skills/singlecell/scrna/sc-drug-response/` | Run `python omicsclaw.py run sc-drug-response` |
-| re-render plot, enhance plot, 图不好看, 重画, adjust plot parameters, tune visualization | (any completed skill output dir) | Run `python omicsclaw.py replot <skill> --output <dir>` |
-
-### Genomics (10 skills)
-
-| User Intent | Skill | Action |
-|---|---|---|
-| sequencing QC, FastQC, read quality, adapter trimming, fastp | `skills/genomics/genomics-qc/` | Run `python omicsclaw.py run genomics-qc` |
-| alignment, BWA, Bowtie2, Minimap2, map reads | `skills/genomics/genomics-alignment/` | Run `python omicsclaw.py run genomics-alignment` |
-| variant calling, SNV, indel, GATK, DeepVariant, FreeBayes, Mutect2, VQSR | `skills/genomics/genomics-variant-calling/` | Run `python omicsclaw.py run genomics-variant-calling` |
-| structural variant, SV, Manta, Delly, Lumpy, Sniffles | `skills/genomics/genomics-sv-detection/` | Run `python omicsclaw.py run genomics-sv-detection` |
-| CNV, copy number, amplification, deletion, CNVkit | `skills/genomics/genomics-cnv-calling/` | Run `python omicsclaw.py run genomics-cnv-calling` |
-| VCF, bcftools, variant filter, merge VCF | `skills/genomics/genomics-vcf-operations/` | Run `python omicsclaw.py run genomics-vcf-operations` |
-| variant annotation, VEP, snpEff, ANNOVAR, functional effect | `skills/genomics/genomics-variant-annotation/` | Run `python omicsclaw.py run genomics-variant-annotation` |
-| genome assembly, de novo, SPAdes, Megahit, Flye, Canu | `skills/genomics/genomics-assembly/` | Run `python omicsclaw.py run genomics-assembly` |
-| epigenomics, ATAC-seq, ChIP-seq, peak calling, MACS, motif, chromatin | `skills/genomics/genomics-epigenomics/` | Run `python omicsclaw.py run genomics-epigenomics` |
-| haplotype phasing, WhatsHap, SHAPEIT, Eagle, phasing | `skills/genomics/genomics-phasing/` | Run `python omicsclaw.py run genomics-phasing` |
-
-### Proteomics (8 skills)
-
-| User Intent | Skill | Action |
-|---|---|---|
-| MS QC, mass spec QC, PTXQC, rawTools | `skills/proteomics/proteomics-ms-qc/` | Run `python omicsclaw.py run proteomics-ms-qc` |
-| peptide identification, database search, MaxQuant, MS-GF+, Comet, Mascot | `skills/proteomics/proteomics-identification/` | Run `python omicsclaw.py run proteomics-identification` |
-| protein quantification, LFQ, TMT, DIA, DIA-NN, Skyline | `skills/proteomics/proteomics-quantification/` | Run `python omicsclaw.py run proteomics-quantification` |
-| differential abundance, protein expression, MSstats, limma, volcano | `skills/proteomics/proteomics-de/` | Run `python omicsclaw.py run proteomics-de` |
-| PTM, phosphorylation, acetylation, ubiquitination, modification, motif | `skills/proteomics/proteomics-ptm/` | Run `python omicsclaw.py run proteomics-ptm` |
-| proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler, GO enrichment | `skills/proteomics/proteomics-enrichment/` | Run `python omicsclaw.py run proteomics-enrichment` |
-| structural proteomics, cross-linking MS, XL-MS, XlinkX, pLink, xiSEARCH | `skills/proteomics/proteomics-structural/` | Run `python omicsclaw.py run proteomics-structural` |
-| data import, convert proteomics, format conversion | `skills/proteomics/proteomics-data-import/` | Run `python omicsclaw.py run proteomics-data-import` |
-
-### Metabolomics (8 skills)
-
-| User Intent | Skill | Action |
-|---|---|---|
-| xcms, metabolomics preprocessing, LC-MS, peak detection, RT alignment | `skills/metabolomics/metabolomics-xcms-preprocessing/` | Run `python omicsclaw.py run metabolomics-xcms-preprocessing` |
-| peak detection, feature detection, XCMS, MZmine, MS-DIAL, peak picking | `skills/metabolomics/metabolomics-peak-detection/` | Run `python omicsclaw.py run metabolomics-peak-detection` |
-| metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID | `skills/metabolomics/metabolomics-annotation/` | Run `python omicsclaw.py run metabolomics-annotation` |
-| metabolomics quantification, imputation, feature quantification, missing values | `skills/metabolomics/metabolomics-quantification/` | Run `python omicsclaw.py run metabolomics-quantification` |
-| metabolomics normalization, scaling, NOREVA, TIC normalization | `skills/metabolomics/metabolomics-normalization/` | Run `python omicsclaw.py run metabolomics-normalization` |
-| metabolomics differential, PLS-DA, volcano plot, biomarker, OPLS-DA | `skills/metabolomics/metabolomics-de/` | Run `python omicsclaw.py run metabolomics-de` |
-| metabolomics pathway, KEGG, MetaboAnalyst, enrichment, mummichog | `skills/metabolomics/metabolomics-pathway-enrichment/` | Run `python omicsclaw.py run metabolomics-pathway-enrichment` |
-| metabolomics statistics, multivariate, PCA, clustering | `skills/metabolomics/metabolomics-statistics/` | Run `python omicsclaw.py run metabolomics-statistics` |
-
-### Bulk RNA-seq (13 skills)
-
-| User Intent | Skill | Action |
-|---|---|---|
-| bulk QC, library size, count matrix, sample quality, gene detection, RNA-seq quality, count QC | `skills/bulkrna/bulkrna-qc/` | Run `python omicsclaw.py run bulkrna-qc` |
-| differential expression, DE analysis, DESeq2, volcano plot, fold change, DEGs, bulk DE | `skills/bulkrna/bulkrna-de/` | Run `python omicsclaw.py run bulkrna-de` |
-| alternative splicing, splicing analysis, PSI, rMATS, SUPPA2, exon skipping, differential splicing | `skills/bulkrna/bulkrna-splicing/` | Run `python omicsclaw.py run bulkrna-splicing` |
-| bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment, KEGG, bulk pathway | `skills/bulkrna/bulkrna-enrichment/` | Run `python omicsclaw.py run bulkrna-enrichment` |
-| bulk deconvolution, cell type proportion, NNLS, CIBERSORTx, bulk deconv, cell fraction | `skills/bulkrna/bulkrna-deconvolution/` | Run `python omicsclaw.py run bulkrna-deconvolution` |
-| coexpression, WGCNA, gene network, co-expression modules, hub genes, gene modules | `skills/bulkrna/bulkrna-coexpression/` | Run `python omicsclaw.py run bulkrna-coexpression` |
-| batch correction, ComBat, batch effect, harmonize, multi-cohort, batch removal | `skills/bulkrna/bulkrna-batch-correction/` | Run `python omicsclaw.py run bulkrna-batch-correction` |
-| gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs | `skills/bulkrna/bulkrna-geneid-mapping/` | Run `python omicsclaw.py run bulkrna-geneid-mapping` |
-| PPI, protein interaction, STRING, network, hub gene, interactome | `skills/bulkrna/bulkrna-ppi-network/` | Run `python omicsclaw.py run bulkrna-ppi-network` |
-| survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome | `skills/bulkrna/bulkrna-survival/` | Run `python omicsclaw.py run bulkrna-survival` |
-| FASTQ QC, read quality, Phred, FastQC, adapter, GC content, Q20, Q30 | `skills/bulkrna/bulkrna-read-qc/` | Run `python omicsclaw.py run bulkrna-read-qc` |
-| RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC | `skills/bulkrna/bulkrna-read-alignment/` | Run `python omicsclaw.py run bulkrna-read-alignment` |
-| trajblend, trajectory, bulk to single cell, interpolation, bulk2single, VAE, deconvolution trajectory | `skills/bulkrna/bulkrna-trajblend/` | Run `python omicsclaw.py run bulkrna-trajblend` |
-
-### Orchestration (1 skills)
-
-| User Intent | Skill | Action |
-|---|---|---|
-| Multi-omics query routing across all domains (spatial, single-cell, genomics, proteomics, metabolomics, bulk RNA-seq) | `skills/orchestrator/` | Run `python omicsclaw.py run orchestrator` |
+> Auto-generated by `scripts/generate_routing_table.py`. Pass `--full` to emit the legacy per-skill routing tables inline.
 <!-- ROUTING-TABLE-END -->
 
 ## How to Use a Skill
