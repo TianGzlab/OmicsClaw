@@ -72,7 +72,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     ),
     "dashscope": (
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "qwen-max",
+        "qwen3-max",
         "DASHSCOPE_API_KEY",
     ),
     "moonshot": (
@@ -160,10 +160,17 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
     },
     "dashscope": {
         "display_name": "DashScope",
-        "description": "Alibaba Qwen 3 models",
-        "description_zh": "阿里巴巴通义千问 Qwen3 模型",
+        "description": "Alibaba Qwen3 / Qwen3.6 models (Max, Plus, Coder, QwQ)",
+        "description_zh": "阿里巴巴通义千问 Qwen3 / Qwen3.6 系列（Max、Plus、Coder、QwQ）",
         "tier": "aggregator",
-        "models": ("qwen3-coder-plus", "qwen3-235b-a22b", "qwen-max", "qwq-plus"),
+        "models": (
+            "qwen3-max",
+            "qwen3.6-plus",
+            "qwen3-coder-plus",
+            "qwq-plus",
+            "qwen3.5-flash",
+            "qwen-turbo-latest",
+        ),
     },
     "moonshot": {
         "display_name": "Moonshot",
