@@ -53,6 +53,12 @@ except ImportError as _nb_err:
     install_live_session_support = None  # type: ignore[assignment]
     notebook_router = None  # type: ignore[assignment]
 from omicsclaw.runtime.policy_state import ToolPolicyState
+from omicsclaw.remote.routers.jobs import (
+    append_job_stdout_line,
+    bind_chat_stream_job,
+    finalize_chat_stream_job,
+)
+from omicsclaw.remote.storage import resolve_workspace
 from omicsclaw.version import __version__
 
 # ---------------------------------------------------------------------------
@@ -471,6 +477,10 @@ _register_optional_kg_router(app)
 if _NOTEBOOK_AVAILABLE:
     app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
 
+# Remote control-plane API consumed by OmicsClaw-App (see omicsclaw/remote/).
+from omicsclaw.remote.app_integration import register_remote_routers  # noqa: E402
+register_remote_routers(app)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -487,6 +497,7 @@ class ProviderConfig(BaseModel):
 class ChatRequest(BaseModel):
     """POST /chat/stream body."""
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    job_id: str = ""
     content: str
     workspace: str = ""
     pipeline_workspace: str = ""
@@ -957,6 +968,34 @@ async def chat_stream(req: ChatRequest):
     """
     core = _get_core()
     session_id = req.session_id
+    bound_remote_job_id = str(req.job_id or "").strip()
+    bound_remote_workspace: Path | None = None
+    if bound_remote_job_id:
+        try:
+            bound_remote_workspace = resolve_workspace()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            bound_job = bind_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                session_id=session_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # ``bind_chat_stream_job`` intentionally passes through
+        # already-canceled jobs so the cancel handler can finalize them
+        # without clobbering state — but that's not a valid input for
+        # starting the tool loop. Bail with 409 so the caller drops the
+        # request instead of running a chat turn whose job row is
+        # permanently ``canceled``.
+        if bound_job.status == "canceled":
+            raise HTTPException(
+                status_code=409,
+                detail=f"chat stream job was canceled before bind: {bound_remote_job_id}",
+            )
 
     # If a provider config override is supplied, re-init the core.
     # NOTE: In a production multi-tenant setup you would scope this per-request
@@ -1091,7 +1130,32 @@ async def chat_stream(req: ChatRequest):
         "output_style": req.output_style or "",
     }
 
+    def _finalize_bound_remote_job(status: str, error: str | None = None) -> None:
+        if not bound_remote_workspace or not bound_remote_job_id:
+            return
+        try:
+            finalize_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                status=status,  # type: ignore[arg-type]
+                error=error,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to finalize bound remote chat job %s with status %s",
+                bound_remote_job_id,
+                status,
+            )
+
     async def _queue_event(event_type: str, data: Any) -> None:
+        if (
+            bound_remote_workspace is not None
+            and bound_remote_job_id
+            and event_type == "tool_output"
+            and isinstance(data, str)
+        ):
+            for line in data.splitlines():
+                append_job_stdout_line(bound_remote_workspace, bound_remote_job_id, line)
         await queue.put({"type": event_type, "data": data})
 
     def _current_tool_use_id(tool_name: str) -> str:
@@ -1562,11 +1626,14 @@ async def chat_stream(req: ChatRequest):
                     default=str,
                 ),
             )
+            _finalize_bound_remote_job("succeeded")
         except asyncio.CancelledError:
             await _queue_event("error", "Session aborted")
+            _finalize_bound_remote_job("canceled", error="session_aborted")
         except Exception as exc:
             logger.exception("llm_tool_loop error for session %s", session_id)
             await _queue_event("error", str(exc))
+            _finalize_bound_remote_job("failed", error=str(exc))
         finally:
             for permission_request_id in list(permission_request_ids):
                 pending = _pending_permission_requests.pop(permission_request_id, None)
@@ -1790,6 +1857,86 @@ async def set_workspace(req: WorkspaceRequest):
         "workspace": ws,
         "trusted_dirs": [str(d) for d in core.TRUSTED_DATA_DIRS],
         "workspace_env": os.environ.get("OMICSCLAW_WORKSPACE", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /files/browse — directory browser for remote-runtime folder pickers
+# ---------------------------------------------------------------------------
+#
+# Desktop clients need to let the user pick a workspace directory that
+# lives on THIS host (the backend's filesystem), not on the client's
+# local machine. The App's local `/api/files/browse` only works for
+# co-located backends; when the backend is on a remote SSH runtime the
+# App proxies here instead.
+#
+# Read-only. Authorization is the same bearer-token middleware the rest
+# of the app_server already enforces, plus OS filesystem permissions
+# (we can only surface what the backend process itself can read). The
+# endpoint deliberately does NOT consult TRUSTED_DATA_DIRS — the user
+# is in the middle of PICKING a workspace, so gating by trust would
+# prevent the first-time-pick flow. `PUT /workspace` does the
+# is_dir() + absolute-path validation when the choice is committed.
+
+@app.get("/files/browse")
+async def browse_directories(path: Optional[str] = None):
+    """List subdirectories under `path` (or $HOME when omitted).
+
+    Response shape matches the App's existing local
+    `/api/files/browse` route so `<FolderPicker/>` can consume either
+    implementation interchangeably.
+    """
+    base_raw = (path or "").strip()
+    try:
+        base = Path(base_raw).expanduser() if base_raw else Path.home()
+        base = base.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    directories: list[dict[str, Any]] = []
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+
+    for entry in entries:
+        # Skip dotfiles to match the App's local implementation — users
+        # expect the same filter on both sides, and cluttered pickers
+        # get ignored.
+        if entry.name.startswith("."):
+            continue
+        is_symlink = entry.is_symlink()
+        try:
+            is_dir = entry.is_dir()  # follows symlinks
+        except OSError:
+            continue
+        if not is_dir:
+            continue
+        item: dict[str, Any] = {
+            "name": entry.name,
+            "path": str(entry),
+            "isSymbolicLink": is_symlink,
+        }
+        if is_symlink:
+            try:
+                item["targetPath"] = str(entry.resolve())
+            except OSError:
+                # Broken symlink — skip rather than return a bogus entry.
+                continue
+        directories.append(item)
+
+    directories.sort(key=lambda d: d["name"].lower())
+
+    parent_path = str(base.parent) if str(base.parent) != str(base) else None
+    return {
+        "current": str(base),
+        "parent": parent_path,
+        "directories": directories,
     }
 
 

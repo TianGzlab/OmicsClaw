@@ -320,6 +320,12 @@ The app backend binds to `127.0.0.1:8765` by default and provides the HTTP/SSE c
 
 If `omicsclaw_kg` is installed or available from a source checkout via `OMICSCLAW_KG_SOURCE_DIR=/path/to/OmicsClaw-KG`, the same `oc app-server` process also mounts the embedded `/kg/*` routes used by the KG Explorer. The frontend dev server now proxies `/kg` to the app backend by default instead of a separate `omicsclaw-kg http serve` process.
 
+**Remote control-plane API (used by OmicsClaw-App remote mode):**
+
+The `omicsclaw/remote/` package powers OmicsClaw-App when the UI runs locally but execution happens on another machine. It covers connection checks, datasets, job lifecycle and SSE logs, artifacts, and session resume. Workspace-scoped state lives under `<workspace>/.omicsclaw/remote/`.
+
+For setup and operational details, see [docs/remote-connection-guide.md](docs/remote-connection-guide.md).
+
 **What it remembers:**
 - 📁 **Datasets** — File paths, platforms (Visium/Xenium), dimensions, preprocessing state
 - 📊 **Analyses** — Methods used, parameters, execution time, lineage (parent → child)
@@ -585,6 +591,17 @@ skills/<domain>/<skill>/
 Skills communicate via standardized formats (`.h5ad`, `.vcf`, `.mzML`, `.csv`) and can be chained into pipelines.
 
 </details>
+
+### Remote Mode Integration
+
+OmicsClaw-App can run in **remote mode**: keep the App on your laptop, run `oc app-server` near the data, and let the backend own datasets, jobs, logs, and artifacts over the remote control plane.
+
+**Minimal backend config:**
+- `OMICSCLAW_WORKSPACE` points to the backend workspace and is required.
+- `OMICSCLAW_REMOTE_AUTH_TOKEN` enables bearer-token auth and should be set whenever the service is reachable beyond localhost.
+- For large datasets, prefer copying files to the server first and importing them from path instead of browser upload.
+
+For the full setup flow, SSH tunnel pattern, and current operational caveats, see [docs/remote-connection-guide.md](docs/remote-connection-guide.md).
 
 ## 📱 Channels Integration — Memory-Enabled Conversational Interface
 
