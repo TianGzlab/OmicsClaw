@@ -49,6 +49,17 @@ def test_detect_provider_from_env_uses_detection_order(monkeypatch):
     assert detect_provider_from_env() == PROVIDER_DETECT_ORDER[0]
 
 
+def test_dashscope_preset_exposes_latest_qwen_models():
+    entries = build_provider_registry_entries()
+    dashscope = next(entry for entry in entries if entry["name"] == "dashscope")
+
+    assert dashscope["default_model"] == "qwen3-max"
+    assert dashscope["models"][0] == "qwen3-max"
+    assert "qwen3.6-plus" in dashscope["models"]
+    assert "qwen3-coder-plus" in dashscope["models"]
+    assert "qwen3-235b-a22b" not in dashscope["models"]
+
+
 def test_resolve_provider_uses_provider_specific_defaults(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://internal.deepseek.example/v1")
