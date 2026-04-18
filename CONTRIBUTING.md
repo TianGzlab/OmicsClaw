@@ -255,14 +255,62 @@ skills/<domain>/<name>/                 → registry.load_all() discovers the di
 
 ## Supported Domains
 
-| Domain | Directory | Current Skills |
-|--------|-----------|---------------|
-| Spatial Transcriptomics | `skills/spatial/` | 16 skills |
-| Single-Cell Omics | `skills/singlecell/` | 13 skills |
-| Genomics | `skills/genomics/` | 10 skills |
-| Proteomics | `skills/proteomics/` | 8 skills |
-| Metabolomics | `skills/metabolomics/` | 8 skills |
-| Bulk RNA-seq | `skills/bulkrna/` | 13 skills |
+For an always-current count, see the auto-generated sections in
+[`CLAUDE.md`](CLAUDE.md) (between `<!-- ROUTING-TABLE-START -->` markers)
+and [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md).
+
+| Domain | Directory |
+|--------|-----------|
+| Spatial Transcriptomics | `skills/spatial/` |
+| Single-Cell Omics | `skills/singlecell/` |
+| Genomics | `skills/genomics/` |
+| Proteomics | `skills/proteomics/` |
+| Metabolomics | `skills/metabolomics/` |
+| Bulk RNA-seq | `skills/bulkrna/` |
+
+### Keeping skill-derived docs in sync
+
+After adding, renaming, or removing a skill (or editing SKILL.md frontmatter
+that appears in routing tables), regenerate the derived docs so humans and
+LLMs see consistent numbers:
+
+```bash
+python scripts/sync_skill_docs.py --apply     # regenerate all four
+python scripts/sync_skill_docs.py --check     # CI-style drift check
+```
+
+This wraps four generators:
+- `generate_routing_table.py` → `CLAUDE.md` routing table (compact 7-domain briefing)
+- `generate_orchestrator_counts.py` → `skills/orchestrator/SKILL.md`
+- `generate_catalog.py` → `skills/catalog.json`
+- `generate_domain_index.py` → `skills/<domain>/INDEX.md` (lazy-load detail)
+
+The `docs-consistency` CI job runs `--check` on every PR and will fail
+if any of these files are stale.
+
+### Routing-context token budget
+
+The bot's LLM-facing tool registry ships with every turn. To prevent slow
+growth, the repo pins a ceiling per-metric:
+
+```bash
+python scripts/measure_routing_tokens.py                 # report sizes
+python scripts/measure_routing_tokens.py --save X.json   # snapshot
+python scripts/check_routing_budget.py                   # fail if over ceiling
+```
+
+CI runs `check_routing_budget.py`. If you add a new bot tool or expand an
+existing tool's description, the check may fail — in that case:
+
+1. Run `measure_routing_tokens.py` locally and eyeball the diff vs
+   `build/routing-baselines/after_stage4.json`.
+2. If the new cost is justified, raise the relevant ceiling in
+   `build/routing-baselines/ceiling.json` and explain why in the PR.
+3. If the growth is accidental (forgot to trim a description), fix it.
+
+See `docs/` and the Stage 2-4 refactor comments in `omicsclaw/runtime/`
+for the 3-layer routing architecture (domain briefing → per-domain index →
+chosen-skill prefetch) that keeps this budget achievable.
 
 ## For AI Agents Contributing Skills
 

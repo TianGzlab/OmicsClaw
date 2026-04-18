@@ -410,36 +410,89 @@ _HARDCODED_DOMAINS = {
         "name": "Spatial Transcriptomics",
         "primary_data_types": ["h5ad", "h5", "zarr", "loom"],
         "skill_count": 17,
+        "summary": (
+            "Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, "
+            "domain detection, SVG, deconvolution, cell communication, trajectories, CNV."
+        ),
+        "representative_skills": [
+            "spatial-preprocess", "spatial-domains", "spatial-de",
+            "spatial-deconv", "spatial-communication",
+        ],
     },
     "singlecell": {
         "name": "Single-Cell Omics",
         "primary_data_types": ["h5ad", "h5", "loom", "mtx"],
         "skill_count": 14,
+        "summary": (
+            "scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, "
+            "normalize→HVG→PCA→UMAP→cluster, annotation, DE, trajectory, velocity, GRN, CCC."
+        ),
+        "representative_skills": [
+            "sc-preprocessing", "sc-cell-annotation", "sc-de",
+            "sc-batch-integration", "sc-pseudotime",
+        ],
     },
     "genomics": {
         "name": "Genomics",
         "primary_data_types": ["vcf", "bam", "cram", "fasta", "fastq", "bed"],
         "skill_count": 10,
+        "summary": (
+            "Bulk DNA-seq: FASTQ QC, alignment, SNV/indel/SV/CNV calling, VCF ops, "
+            "variant annotation, phasing, de novo assembly, ATAC/ChIP peak calling."
+        ),
+        "representative_skills": [
+            "genomics-alignment", "genomics-variant-calling",
+            "genomics-variant-annotation", "genomics-sv-detection",
+        ],
     },
     "proteomics": {
         "name": "Proteomics",
         "primary_data_types": ["mzml", "mzxml", "csv"],
         "skill_count": 8,
+        "summary": (
+            "Mass spec proteomics: raw MS QC, peptide/protein ID, LFQ/TMT/DIA "
+            "quantification, differential abundance, PTM, pathway enrichment."
+        ),
+        "representative_skills": [
+            "proteomics-identification", "proteomics-quantification",
+            "proteomics-de", "proteomics-enrichment",
+        ],
     },
     "metabolomics": {
         "name": "Metabolomics",
         "primary_data_types": ["mzml", "cdf", "csv"],
         "skill_count": 8,
+        "summary": (
+            "LC-MS metabolomics: XCMS preprocessing, peak detection, metabolite "
+            "annotation (SIRIUS/GNPS), normalization, DE, pathway enrichment."
+        ),
+        "representative_skills": [
+            "metabolomics-peak-detection", "metabolomics-annotation",
+            "metabolomics-de", "metabolomics-pathway-enrichment",
+        ],
     },
     "bulkrna": {
         "name": "Bulk RNA-seq",
         "primary_data_types": ["csv", "tsv", "fastq", "bam"],
         "skill_count": 13,
+        "summary": (
+            "Bulk RNA-seq: FASTQ QC, alignment, count QC, DE (DESeq2), enrichment, "
+            "splicing, WGCNA, deconvolution, PPI, survival, TrajBlend bulk-to-sc."
+        ),
+        "representative_skills": [
+            "bulkrna-de", "bulkrna-enrichment", "bulkrna-coexpression",
+            "bulkrna-deconvolution", "bulkrna-survival",
+        ],
     },
     "orchestrator": {
         "name": "Orchestrator",
         "primary_data_types": ["*"],
         "skill_count": 1,
+        "summary": (
+            "Meta tooling: multi-omics query routing and skill scaffolding. "
+            "Not an analysis — dispatches to the right domain skill."
+        ),
+        "representative_skills": ["orchestrator", "omics-skill-builder"],
     },
 }
 
