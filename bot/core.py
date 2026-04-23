@@ -4455,6 +4455,21 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     session_id = chat_context.session_id
     system_prompt = chat_context.system_prompt
 
+    # Identity anchor: many open-source / distilled models will claim to be
+    # Claude or GPT when asked about their base model because of training-data
+    # contamination. Tell them the truth about what is actually serving them,
+    # using the per-request model override when the frontend provided one.
+    effective_model = (model_override or OMICSCLAW_MODEL or "").strip()
+    effective_provider = (LLM_PROVIDER_NAME or "").strip()
+    if effective_model and effective_provider:
+        system_prompt = system_prompt.rstrip() + (
+            "\n\n## Underlying model identity\n"
+            f"You are powered by the LLM `{effective_model}` served via the `{effective_provider}` provider. "
+            "If the user asks which model or provider backs you, answer truthfully with these exact names. "
+            "Do NOT claim to be Claude, GPT, Gemini, DeepSeek, or any other assistant unless it matches the names above. "
+            "Do NOT claim to be built by Anthropic, OpenAI, or Google unless the provider above matches."
+        )
+
     # Apply per-request system prompt additions
     if system_prompt_append:
         system_prompt = system_prompt.rstrip() + "\n\n" + system_prompt_append.strip()
