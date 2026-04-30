@@ -1,0 +1,107 @@
+# OmicsClaw analysis environment
+#
+# Owns everything that pip cannot install reliably:
+#   - bioinformatics CLIs (samtools, STAR, fastqc, bwa, ...)
+#   - R 4.3 + CRAN + Bioconductor packages
+#   - C/C++ build toolchain (for pip's compiled deps + future tools/ vendoring)
+#
+# Owns NOTHING from pyproject.toml — Python deps are pip's responsibility,
+# installed by 0_setup_env.sh Tier 2 via `pip install -e ".[full]"`.
+#
+# Channel order: conda-forge first (broad scientific), bioconda second
+# (genomics specific). This file is designed for strict channel priority —
+# enforce via `conda config --set channel_priority strict` or by passing
+# `--strict-channel-priority` to env create. 0_setup_env.sh handles this.
+name: OmicsClaw
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  # ────────── Tier 0: Python interpreter + build toolchain ──────────
+  - python=3.11
+  - pip
+  - gxx_linux-64=12.*
+  - sysroot_linux-64=2.17
+  - cmake
+  - make
+  - autoconf
+  - automake
+  - libtool
+  - pkg-config
+  - git
+
+  # ────────── Tier 1: bioinformatics CLIs (pip can't ship these) ──────────
+  # Alignment
+  - samtools
+  - bcftools
+  - bwa
+  - bwa-mem2
+  - bowtie2
+  - minimap2
+  - hisat2
+  - star
+  # QC
+  - fastqc
+  - fastp
+  - trim-galore
+  # Variant calling / postprocessing
+  - gatk4
+  - picard
+  # Peak calling (genomics-epigenomics)
+  - macs3
+  # NOTE: cnvkit (genomics-cnv-calling) is NOT bundled — bioconda only
+  # ships 0.9.8 which crashes on pandas>=2.0; newer versions' joblib<1.0
+  # transitive dep conflicts with macs3's scikit-learn (joblib>=1.0). Users
+  # who need cnvkit should install it in a dedicated env.
+  # Single-cell / RNA upstream
+  - simpleaf
+  # NOTE: velocyto has no Python 3.11 build on bioconda (only 3.6–3.10,
+  # 3.12) — installed via pip ("velocyto>=0.17.17") in Tier 2.1.
+  # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
+  # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
+
+  # ────────── Tier 2: R 4.3 + CRAN packages (replaces install_r_dependencies.R, CRAN section) ──────────
+  - r-base=4.3
+  - r-devtools
+  - r-biocmanager
+  - r-dplyr
+  - r-ggplot2
+  - r-matrix
+  - r-seurat
+  - r-sctransform
+  - r-harmony
+  - r-soupx
+  - r-openxlsx
+  - r-hgnchelper
+  - r-nmf
+  - r-mclust
+  - r-survival
+  - r-msigdbr
+  - r-ashr
+
+  # ────────── Tier 3: Bioconductor packages (replaces install_r_dependencies.R, Bioc section) ──────────
+  - bioconductor-singlecellexperiment
+  - bioconductor-scran
+  - bioconductor-scuttle
+  - bioconductor-singler
+  - bioconductor-celldex
+  - bioconductor-scdblfinder
+  - bioconductor-batchelor
+  - bioconductor-muscat
+  - bioconductor-spatialexperiment
+  - bioconductor-zellkonverter
+  - bioconductor-spotlight
+  - bioconductor-deseq2
+  - bioconductor-apeglm
+  - bioconductor-edger
+  - bioconductor-limma
+  - bioconductor-sva
+  - bioconductor-clusterprofiler
+  # WGCNA is published on CRAN, not Bioconductor — use r-wgcna
+  - r-wgcna
+
+  # NOTE: 6 GitHub-only R packages (spacexr/RCTD, CARD, CellChat, numbat,
+  # SPARK, DoubletFinder) are NOT in this file — they have no bioconda
+  # equivalent. They are installed via `devtools::install_github` in
+  # 0_setup_env.sh Tier 3.

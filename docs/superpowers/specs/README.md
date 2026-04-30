@@ -6,6 +6,9 @@ durable OmicsClaw development work.
 ## Tracked Records
 
 - [2026-04-10-repository-spec-migration.md](2026-04-10-repository-spec-migration.md)
+- [2026-04-30-conda-env-management-design.md](2026-04-30-conda-env-management-design.md)
+  — Mamba-first, four-tier conda install replacing the pip+venv +
+  `install_r_dependencies.R` setup; vendored-tool framework added as stub.
 
 ## Conventions
 

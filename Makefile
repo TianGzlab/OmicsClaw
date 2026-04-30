@@ -1,10 +1,27 @@
-.PHONY: demo test list demo-all catalog demo-orchestrator demo-bulkrna \
+.PHONY: setup-env setup-env-name \
+        demo test list demo-all catalog demo-orchestrator demo-bulkrna \
         install install-spatial-domains install-full install-dev \
         install-oc oc-link \
         bot-telegram bot-feishu bot-multi bot-list \
         memory-server
 
-## ── Virtual-environment + installation targets ──────────────────────────────
+## ── Conda environment (recommended, full functionality) ──────────────
+## Single-command install of R 4.3, ~30 R packages, ~15 bioconda CLIs,
+## OmicsClaw (editable), and all Python optional extras.
+## Requires mamba (recommended) or conda — install Miniforge:
+##   https://github.com/conda-forge/miniforge
+
+setup-env:
+	bash 0_setup_env.sh
+
+# Use a custom env name: `make setup-env-name NAME=foo`
+NAME ?= OmicsClaw
+setup-env-name:
+	bash 0_setup_env.sh "$(NAME)"
+
+## ── Legacy lightweight venv path (Python-only skills) ────────────────────────
+## NOTE: this path does NOT install R, samtools, STAR, fastqc, etc.
+## For full functionality use:  make setup-env  (or: bash 0_setup_env.sh)
 
 venv:
 	python3 -m venv .venv

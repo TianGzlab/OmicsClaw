@@ -5,6 +5,9 @@ development work.
 
 ## Tracked Entries
 
+- [2026-04-30-conda-env-management-plan.md](2026-04-30-conda-env-management-plan.md)
+  — implement the four-tier mamba-first conda install (`environment.yml`,
+  `0_setup_env.sh`, vendoring stub, removal of `install_r_dependencies.R`).
 - [2026-04-16-remote-connection-guide-refresh.md](2026-04-16-remote-connection-guide-refresh.md)
   — refresh the remote connection guide so it matches the current
   `oc app-server` + remote control-plane behavior after the latest backend

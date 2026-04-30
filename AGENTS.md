@@ -29,27 +29,34 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 ## Setup
 
 ```bash
-cd /data1/TianLab/zhouwg/project/OmicsClaw
-pip install -e .
+cd /path/to/OmicsClaw
 
-# Add optional extras only when needed
-# pip install -e ".[interactive]"
-# pip install -e ".[tui]"
-# pip install -e ".[memory]"
-# pip install -e ".[full]"
+# Recommended: full conda-primary install (R + CLIs + Python in one shot)
+bash 0_setup_env.sh
+conda activate OmicsClaw
+
+# Lightweight alternative (Python-only skills, no R or external CLIs):
+# pip install -e .
+# pip install -e ".[interactive]" / ".[tui]" / ".[memory]" / ".[full]"
 
 python omicsclaw.py list   # or: oc list
 python omicsclaw.py run spatial-preprocess --demo
 ```
 
-> **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
-> are available system-wide. `oc` is registered via `[project.scripts]` in
-> `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
-> `omicsclaw`. No PATH tricks needed.
+> **`oc` short alias**: After installing OmicsClaw (either path), both
+> `omicsclaw` and `oc` commands are available system-wide via the
+> `[project.scripts]` entry in `pyproject.toml`.
 >
-> **Dependency source of truth**: Root dependency management lives in
-> `pyproject.toml`. The repository does not use a root `requirements.txt` as a
-> primary install entrypoint.
+> **Dependency source of truth**:
+> - **Python deps** live in `pyproject.toml` (used by both install paths).
+> - **R packages, bioinformatics CLIs, build toolchain** live in
+>   `environment.yml` (conda path only).
+> - **GitHub-only R packages** are installed inline by `0_setup_env.sh`
+>   Tier 3 (`devtools::install_github` for spacexr, CARD, CellChat, numbat,
+>   SPARK, DoubletFinder).
+>
+> The repository does not use a root `requirements.txt` as a primary
+> install entrypoint.
 
 ## Commands
 
