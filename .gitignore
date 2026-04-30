@@ -51,6 +51,7 @@ docs/superpowers/**
 !docs/superpowers/specs/README.md
 !docs/superpowers/specs/2026-04-10-repository-spec-migration.md
 !docs/superpowers/specs/2026-04-30-conda-env-management-design.md
+!docs/superpowers/specs/2026-04-30-llm-catalog-modernization-design.md
 !docs/superpowers/plans/2026-04-30-conda-env-management-plan.md
 
 # User data (large, not committed)
