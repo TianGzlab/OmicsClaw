@@ -50,10 +50,12 @@ dependencies:
   - picard
   # Peak calling / CNV (epigenomics + genomics-cnv-calling skills)
   - macs3
-  - cnvkit>=0.9.10  # 0.9.10+ required: 0.9.8 uses pandas.Int64Index removed in pandas 2.0
+  - cnvkit  # solver picks 0.9.8 (only noarch build); 0_setup_env.sh Tier 2 reinstalls via
+            # pip install "cnvkit>=0.9.10" which fixes the pandas.Int64Index breakage
   # Single-cell / RNA upstream
   - simpleaf
-  - velocyto.py
+  # NOTE: velocyto.py has no Python 3.11 build on bioconda (only 3.6–3.10, 3.12);
+  #       installed via pip in 0_setup_env.sh Tier 2 instead.
   # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
   # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
 
