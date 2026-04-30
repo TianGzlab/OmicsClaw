@@ -48,14 +48,16 @@ dependencies:
   # Variant calling / postprocessing
   - gatk4
   - picard
-  # Peak calling / CNV (epigenomics + genomics-cnv-calling skills)
+  # Peak calling (genomics-epigenomics)
   - macs3
-  - cnvkit  # solver picks 0.9.8 (only noarch build); 0_setup_env.sh Tier 2 reinstalls via
-            # pip install "cnvkit>=0.9.10" which fixes the pandas.Int64Index breakage
+  # NOTE: cnvkit (genomics-cnv-calling) is NOT bundled — bioconda only
+  # ships 0.9.8 which crashes on pandas>=2.0; newer versions' joblib<1.0
+  # transitive dep conflicts with macs3's scikit-learn (joblib>=1.0). Users
+  # who need cnvkit should install it in a dedicated env.
   # Single-cell / RNA upstream
   - simpleaf
-  # NOTE: velocyto.py has no Python 3.11 build on bioconda (only 3.6–3.10, 3.12);
-  #       installed via pip in 0_setup_env.sh Tier 2 instead.
+  # NOTE: velocyto has no Python 3.11 build on bioconda (only 3.6–3.10,
+  # 3.12) — installed via pip ("velocyto>=0.17.17") in Tier 2.1.
   # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
   # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
 
