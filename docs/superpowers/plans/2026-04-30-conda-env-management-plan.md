@@ -76,14 +76,18 @@ dependencies:
   # Variant calling / postprocessing
   - gatk4
   - picard
-  # Peak calling / CNV (epigenomics + genomics-cnv-calling skills)
+  # Peak calling (genomics-epigenomics)
   - macs3
-  - cnvkit
+  # NOTE: cnvkit (genomics-cnv-calling) is NOT bundled — bioconda only
+  # ships 0.9.8 which crashes on pandas>=2.0; newer versions' joblib<1.0
+  # transitive dep conflicts with macs3's scikit-learn (joblib>=1.0). Users
+  # who need cnvkit should install it in a dedicated env.
   # Single-cell / RNA upstream
   - simpleaf
-  - velocyto.py
+  # NOTE: velocyto has no Python 3.11 build on bioconda (only 3.6–3.10,
+  # 3.12) — installed via pip ("velocyto>=0.17.17") in Tier 2.1.
   # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
-  # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
+  # (singlecell-upstream extra) — they are pip-installed in Tier 2.0 instead.
 
   # ────────── Tier 2: R 4.3 + CRAN packages (replaces install_r_dependencies.R, CRAN section) ──────────
   - r-base=4.3
@@ -323,16 +327,21 @@ git commit -m "feat(env): add 0_setup_env.sh Tier 1 (env create/update)"
 echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
 "$INSTALLER" run -n "$ENV_NAME" pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 
-# Tier 2.1: tools that have no bioconda Python 3.11 build, OR whose conda
-# version has a known runtime bug. Surfaced by T2 validation:
-#   - velocyto.py: no py3.11 conda build on bioconda (only 3.6–3.10, 3.12)
-#   - cnvkit: bioconda ships 0.9.8 which crashes on pandas>=2.0
-#            (pandas.Int64Index removed); 0.9.10+ has the fix
-echo "[setup_env] Tier 2.1: pip install velocyto.py + cnvkit upgrade"
-"$INSTALLER" run -n "$ENV_NAME" pip install --upgrade \
-    "velocyto>=0.17.17" \
-    "cnvkit>=0.9.10"
+# Tier 2.1: tools that have no bioconda Python 3.11 build (surfaced by T2
+# validation):
+#   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
+#                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
+echo "[setup_env] Tier 2.1: pip install velocyto"
+"$INSTALLER" run -n "$ENV_NAME" pip install "velocyto>=0.17.17"
 echo "[setup_env] ✔ Tier 2 complete"
+
+# NOTE on cnvkit (genomics-cnv-calling skill): bioconda ships only 0.9.8
+# which crashes on pandas>=2.0 (uses removed pandas.Int64Index). Newer
+# versions (0.9.10+) have the fix but their joblib<1.0 transitive dep
+# conflicts with macs3's scikit-learn requirement of joblib>=1.0. cnvkit
+# is therefore NOT bundled; users who need it should install it in a
+# separate dedicated env to avoid corrupting macs3. Same pattern as
+# cellranger (proprietary), documented at the skill level.
 ```
 
 - [ ] **Step 2: Run the full script.**
