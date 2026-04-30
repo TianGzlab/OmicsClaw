@@ -126,3 +126,42 @@ for (p in gh_pkgs) {
 cat("[r-extras] all 6 GitHub R packages OK\n")
 RSCRIPT
 echo "[setup_env] ✔ Tier 3 complete"
+
+# ----- Tier 4: vendored binaries → $CONDA_PREFIX/bin (stub) ----------
+# No tools are vendored today. To add one:
+#   1. add a build block to 0_build_vendored_tools.sh
+#   2. add `link_if_exists "$TOOLS_DIR/<tool>/<binary>"` below
+
+link_if_exists() {
+    local src="$1"
+    local name
+    name="$(basename "$src")"
+    if [ -e "$src" ]; then
+        chmod +x "$src" 2>/dev/null || true
+        ln -sf "$src" "$ENV_BIN/$name"
+        echo "  ✔ linked $name"
+    else
+        echo "  ⚠ skipped $name (not found at $src)"
+    fi
+}
+
+echo "[setup_env] Tier 4: linking vendored tools (currently empty stub)"
+# Add link_if_exists calls here when vendoring real tools.
+echo "[setup_env] ✔ Tier 4 complete (no tools vendored)"
+
+# ----- summary ------------------------------------------------------
+
+cat <<EOF
+
+[setup_env] ✔ env '$ENV_NAME' is ready.
+
+  conda activate $ENV_NAME
+
+To rebuild from scratch:
+  $INSTALLER env remove -n $ENV_NAME -y
+  bash 0_setup_env.sh
+
+To vendor a new tool (currently no vendored tools):
+  see tools/README.md and 0_build_vendored_tools.sh
+
+EOF
