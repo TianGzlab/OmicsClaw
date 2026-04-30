@@ -85,17 +85,32 @@ OmicsClaw ships two install paths. Pick whichever fits your needs.
 
 A single command provisions R 4.3 + ~30 R packages, ~15 bioinformatics CLIs (samtools, STAR, fastqc, bwa, bowtie2, minimap2, bcftools, gatk4, picard, simpleaf, fastp, trim-galore, macs3, multiqc, kb-python, velocyto, …), OmicsClaw itself (editable), and all Python optional extras.
 
-```bash
-# 1. Install Miniforge if you don't have it (mamba is bundled, recommended)
-#    https://github.com/conda-forge/miniforge
+**Prerequisite** — `conda` on PATH. If you don't have it yet, install [Miniforge](https://github.com/conda-forge/miniforge): it defaults to the `conda-forge` channel, ships under Apache-2.0 (commercial-use friendly), and bundles `mamba` for fast solves. (`0_setup_env.sh` auto-uses `mamba` if present and falls back to `conda` otherwise.)
 
-# 2. Clone and bootstrap
+<details>
+<summary><b>🆕 Install Miniforge — one-time setup</b></summary>
+
+**Linux & macOS** (auto-detects `x86_64`, `aarch64`, Apple Silicon):
+
+```bash
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash "Miniforge3-$(uname)-$(uname -m).sh"   # accept license; answer "yes" to run conda init
+exec "$SHELL"                                # reload shell so `conda` is on PATH
+conda --version && mamba --version           # verify
+```
+
+**Windows**: download the `.exe` from the [Miniforge releases page](https://github.com/conda-forge/miniforge/releases/latest), run the GUI installer, then run subsequent commands from "Miniforge Prompt".
+
+</details>
+
+```bash
+# 1. Clone and bootstrap
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
 bash 0_setup_env.sh           # creates conda env "OmicsClaw"
 conda activate OmicsClaw
 
-# 3. Verify
+# 2. Verify
 omicsclaw env                 # or: python omicsclaw.py env
 ```
 

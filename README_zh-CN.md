@@ -77,10 +77,51 @@
 
 ## 📦 安装
 
-为减少依赖冲突，建议在虚拟环境中安装。可使用标准 `venv`，也可以使用 `uv`。
+OmicsClaw 提供两种安装路径，按需选择。
 
-<details open>
-<summary>🪛 创建虚拟环境（推荐）</summary>
+### 🥇 Conda（推荐 —— 全功能）
+
+一条命令即可装好 R 4.3 + ~30 个 R 包、~15 个生信命令行工具（samtools、STAR、fastqc、bwa、bowtie2、minimap2、bcftools、gatk4、picard、simpleaf、fastp、trim-galore、macs3、multiqc、kb-python、velocyto……）、OmicsClaw 本体（editable 模式），以及全部 Python 可选扩展。
+
+**先决条件** —— PATH 上需要有 `conda`。如果当前还没有，建议安装 [Miniforge](https://github.com/conda-forge/miniforge)：默认走 `conda-forge` 源、Apache-2.0 协议（商用友好）、内置 `mamba` 加速求解。（`0_setup_env.sh` 会优先使用 `mamba`，无 `mamba` 时回退到 `conda`。）
+
+<details>
+<summary><b>🆕 安装 Miniforge —— 一次性</b></summary>
+
+**Linux 与 macOS**（自动识别 `x86_64`、`aarch64`、Apple Silicon）：
+
+```bash
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash "Miniforge3-$(uname)-$(uname -m).sh"   # 同意 license；conda init 处选 "yes"
+exec "$SHELL"                                # 重启 shell 使 `conda` 进入 PATH
+conda --version && mamba --version           # 验证
+```
+
+**Windows**：从 [Miniforge releases 页](https://github.com/conda-forge/miniforge/releases/latest) 下载 `.exe` 安装器，按 GUI 提示安装，后续命令在「Miniforge Prompt」里执行。
+
+</details>
+
+```bash
+# 1. 克隆并执行 bootstrap
+git clone https://github.com/TianGzlab/OmicsClaw.git
+cd OmicsClaw
+bash 0_setup_env.sh           # 创建名为 "OmicsClaw" 的 conda 环境
+conda activate OmicsClaw
+
+# 2. 验证
+omicsclaw env                 # 或：python omicsclaw.py env
+```
+
+脚本**幂等** —— 重复执行会就地更新现有环境。如需自定义环境名：`bash 0_setup_env.sh my_env_name`。
+
+> **提示**：`cnvkit`（用于 `genomics-cnv-calling`）**未预装**，因为其新版本依赖与 `macs3` 冲突。如需使用，请在单独的环境里安装。
+
+### 🪶 venv（轻量 —— 仅 Python 技能）
+
+适用于只需要 **LLM / 路由 / 对话** 等接口、不跑分析的用户。该路径**不会安装 R、samtools、STAR、fastqc 等**，依赖这些工具的技能在运行时会报「tool not on PATH」。
+
+<details>
+<summary>使用 venv 安装</summary>
 
 **方案 A：使用 `venv`**
 ```bash
@@ -101,8 +142,7 @@ uv venv
 source .venv/bin/activate
 ```
 
-</details>
-
+**安装 OmicsClaw**：
 ```bash
 # 克隆仓库
 git clone https://github.com/TianGzlab/OmicsClaw.git
@@ -122,7 +162,9 @@ pip install -r bot/requirements.txt
 - `pip install -e ".[spatial-domains]"`：安装 SpaGCN / STAGATE 相关深度学习依赖
 - `pip install -e ".[full]"`：安装所有领域依赖和可选方法后端
 
-可随时运行 `python omicsclaw.py env` 检查安装状态。
+</details>
+
+*随时通过 `omicsclaw env` 或 `python omicsclaw.py env` 查看安装状态。*
 
 ## 🔑 配置
 
