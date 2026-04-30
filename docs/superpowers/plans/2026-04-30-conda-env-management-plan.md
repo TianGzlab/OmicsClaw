@@ -320,8 +320,18 @@ git commit -m "feat(env): add 0_setup_env.sh Tier 1 (env create/update)"
 # pyproject.toml owns all Python deps. Running pip inside the env
 # attaches them to the Tier 1 Python interpreter.
 
-echo "[setup_env] Tier 2: pip install -e \".[full,singlecell-upstream]\""
+echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
 "$INSTALLER" run -n "$ENV_NAME" pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
+
+# Tier 2.1: tools that have no bioconda Python 3.11 build, OR whose conda
+# version has a known runtime bug. Surfaced by T2 validation:
+#   - velocyto.py: no py3.11 conda build on bioconda (only 3.6–3.10, 3.12)
+#   - cnvkit: bioconda ships 0.9.8 which crashes on pandas>=2.0
+#            (pandas.Int64Index removed); 0.9.10+ has the fix
+echo "[setup_env] Tier 2.1: pip install velocyto.py + cnvkit upgrade"
+"$INSTALLER" run -n "$ENV_NAME" pip install --upgrade \
+    "velocyto>=0.17.17" \
+    "cnvkit>=0.9.10"
 echo "[setup_env] ✔ Tier 2 complete"
 ```
 
