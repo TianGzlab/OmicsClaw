@@ -131,6 +131,19 @@ class TestDefaultFeatures:
         feats = get_default_features("siliconflow", "Pro/zai-org/GLM-5")
         assert feats["extra_body"]["enable_thinking"] is False
 
+    def test_default_features_no_overwrite(self):
+        # Invariant I2: returned dict is fresh per call. Mutating one call's
+        # result must NOT affect a subsequent call (so callers can use
+        # dict.setdefault safely).
+        d1 = get_default_features("anthropic", "claude-opus-4-7")
+        d1["sentinel"] = True
+        d2 = get_default_features("anthropic", "claude-opus-4-7")
+        assert "sentinel" not in d2
+        # Nested dicts are also fresh
+        d2["thinking"]["__poison__"] = True
+        d3 = get_default_features("anthropic", "claude-opus-4-7")
+        assert "__poison__" not in d3["thinking"]
+
     def test_unknown_provider_empty(self):
         assert get_default_features("custom", "any-model") == {}
 
@@ -164,3 +177,24 @@ class TestListing:
             "deepseek",
         }
         assert expected.issubset(providers)
+
+
+class TestNeverRaises:
+    def test_resolve_model_with_non_string_provider(self):
+        # Invariant I4: never raises into callers
+        info = resolve_model(42, "model")  # type: ignore[arg-type]
+        assert info.model_id == "model"
+
+    def test_resolve_model_with_non_string_model(self):
+        info = resolve_model("anthropic", 42)  # type: ignore[arg-type]
+        assert info.provider == "anthropic"
+
+    def test_resolve_model_with_none_provider(self):
+        info = resolve_model(None, "claude-opus-4-7")  # type: ignore[arg-type]
+        assert info.model_id == "claude-opus-4-7"
+
+    def test_list_models_with_non_string_provider(self):
+        assert list_models_for_provider(42) == []  # type: ignore[arg-type]
+
+    def test_get_default_features_with_non_string(self):
+        assert get_default_features(42, 99) == {}  # type: ignore[arg-type]

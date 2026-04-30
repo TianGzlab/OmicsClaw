@@ -179,8 +179,8 @@ def get_default_features(
 
     Never raises.
     """
-    p = (provider or "").strip().lower()
-    m = (model or "").strip()
+    p = (str(provider) if provider is not None else "").strip().lower()
+    m = (str(model) if model is not None else "").strip()
     m_lower = m.lower()
     on_localhost = _is_localhost(base_url)
 
@@ -218,8 +218,8 @@ def resolve_model(provider: str, model: str) -> ModelInfo:
     if no entry matched), so callers can use it as a passthrough.
     Never raises.
     """
-    p = (provider or "").strip().lower()
-    m = (model or "").strip()
+    p = (str(provider) if provider is not None else "").strip().lower()
+    m = (str(model) if model is not None else "").strip()
 
     short_name = m
     model_id = m
@@ -242,7 +242,7 @@ def resolve_model(provider: str, model: str) -> ModelInfo:
 
 def list_models_for_provider(provider: str) -> list[ModelInfo]:
     """Return every catalog entry for ``provider``, in registry order."""
-    p = (provider or "").strip().lower()
+    p = (str(provider) if provider is not None else "").strip().lower()
     return [
         ModelInfo(
             short_name=short_name,
