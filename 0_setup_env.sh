@@ -40,16 +40,32 @@ fi
 
 # ----- Tier 1: declarative env from bioconda + conda-forge ----------
 
+# Env-existence check matches by name (column 1 of `env list`). Envs
+# created with --prefix in custom locations are listed by absolute path
+# and won't match here — that's intentional; this script manages named
+# envs only.
+#
+# CONDA_CHANNEL_PRIORITY=strict prefixes both create and update because
+# `mamba env create`/`mamba env update` (libmamba env subcommand) do NOT
+# accept --strict-channel-priority as a CLI flag in mamba 1.5.x; the env
+# var is the supported way to enforce strict priority for env subcommands.
 if "$INSTALLER" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     echo "[setup_env] env '$ENV_NAME' already exists — updating from environment.yml"
-    "$INSTALLER" env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
+    CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
 else
     echo "[setup_env] creating env '$ENV_NAME' from environment.yml"
-    "$INSTALLER" env create -n "$ENV_NAME" -f "$ENV_FILE"
+    CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env create -n "$ENV_NAME" -f "$ENV_FILE"
 fi
 
 # Resolve the env prefix once — needed by later tiers.
-ENV_PREFIX="$("$INSTALLER" run -n "$ENV_NAME" python -c 'import sys; print(sys.prefix)')"
+# --no-capture-output: avoid stdout buffering on some mamba versions.
+ENV_PREFIX="$("$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
+    python -c 'import sys; print(sys.prefix)')"
+if [ -z "$ENV_PREFIX" ] || [ ! -d "$ENV_PREFIX" ]; then
+    echo "[setup_env] ✖ failed to resolve env prefix for '$ENV_NAME'" >&2
+    echo "  ($INSTALLER run returned: '$ENV_PREFIX')" >&2
+    exit 1
+fi
 ENV_BIN="$ENV_PREFIX/bin"
 echo "[setup_env] env prefix: $ENV_PREFIX"
 
