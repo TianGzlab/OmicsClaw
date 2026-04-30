@@ -5,7 +5,6 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from omicsclaw.core.llm_patches import (
     apply_deepseek_reasoning_passback,
@@ -87,7 +86,7 @@ class TestDeepseekPassback:
 
 
 class TestDiscoverOllamaModelsSync:
-    def test_returns_models_on_200(self, monkeypatch):
+    def test_returns_models_on_200(self):
         fake_resp = MagicMock(status_code=200)
         fake_resp.json.return_value = {
             "models": [{"name": "qwen2.5:7b"}, {"name": "llama3.3:70b"}]
@@ -154,3 +153,23 @@ class TestDiscoverOllamaModelsAsync:
                 discover_ollama_models_async("http://127.0.0.1:11434")
             )
         assert result == []
+
+    def test_returns_models_on_200(self):
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {
+            "models": [{"name": "qwen2.5:7b"}, {"name": "llama3.3:70b"}]
+        }
+
+        async def fake_get(*args, **kwargs):
+            return fake_resp
+
+        client = MagicMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = False
+        client.get = fake_get
+
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                discover_ollama_models_async("http://127.0.0.1:11434")
+            )
+        assert result == ["qwen2.5:7b", "llama3.3:70b"]
