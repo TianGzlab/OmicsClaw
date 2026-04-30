@@ -195,7 +195,8 @@ def validate_r_environment(
         raise ImportError(
             "[OmicsClaw] R is not available.\n"
             "Install R (>= 4.3) and ensure 'Rscript' is on your PATH.\n"
-            "Then run: Rscript install_r_dependencies.R"
+            "The recommended path is `bash 0_setup_env.sh` which provisions\n"
+            "R 4.3 and all required packages via mamba/conda."
         )
 
     if required_r_packages:
@@ -206,7 +207,8 @@ def validate_r_environment(
         if missing:
             raise ImportError(
                 f"[OmicsClaw] Missing R packages: {', '.join(missing)}.\n"
-                f"Install with: Rscript install_r_dependencies.R\n"
+                f"The recommended path is `bash 0_setup_env.sh` which provisions\n"
+                f"R 4.3 and all required packages via mamba/conda.\n"
                 f"Or manually: Rscript -e 'BiocManager::install(c({', '.join(repr(p) for p in missing)}))'"
             )
 

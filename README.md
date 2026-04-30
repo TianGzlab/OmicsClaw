@@ -576,7 +576,7 @@ OmicsClaw/
 ├── tests/                    # Integration tests
 ├── sessions/                 # Session storage for workflow state
 ├── Makefile                  # Build tasks, shortcuts and runners map
-└── install_r_dependencies.R  # R libraries installation script
+└── 0_setup_env.sh            # One-command environment setup (mamba + pip + R + vendored tools)
 ```
 
 **Each skill is self-contained:**

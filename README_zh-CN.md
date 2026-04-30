@@ -557,7 +557,7 @@ OmicsClaw/
 ├── tests/                    # 集成与回归测试
 ├── sessions/                 # 会话状态存储
 ├── Makefile                  # 构建与快捷命令
-└── install_r_dependencies.R  # R 依赖安装脚本
+└── 0_setup_env.sh            # 一键环境安装（mamba + pip + R + 外部工具）
 ```
 
 **每个技能都是自包含的：**

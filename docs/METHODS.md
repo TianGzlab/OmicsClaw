@@ -279,7 +279,7 @@ pip install "rpy2>=3.5.0,<3.7" anndata2ri
 
 ```bash
 # From the OmicsClaw project root:
-Rscript install_r_dependencies.R
+bash 0_setup_env.sh
 ```
 
 This installs `spacexr` (RCTD), `CARD`, `SPOTlight`, `CellChat`, `numbat`, and
@@ -344,7 +344,7 @@ Proportions are stored in `adata.obsm["rctd_proportions"]` and written to
 |-------|-------|-----|
 | `rpy2 not found` | rpy2 not installed | `pip install "rpy2>=3.5.0,<3.7"` |
 | `R_HOME not set` | R not on PATH | `export R_HOME=$(R RHOME)` |
-| `package 'spacexr' not found` | spacexr not installed in R | `Rscript install_r_dependencies.R` |
+| `package 'spacexr' not found` | spacexr not installed in R | `bash 0_setup_env.sh` |
 | `Error in .check_types` | Reference counts are not integers | ensure `adata.X` stores raw integer counts |
 | `minimum_mean_moleculecount` warning | Sparse reference (< 25 cells/type) | filter rare cell types or use `full` mode |
 
