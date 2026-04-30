@@ -398,7 +398,7 @@ def resolve_provider(
         else ""
     )
     resolved_url = str(base_url or env_base_url or preset_url or "") or None
-    resolved_model = str(model or preset_model or "deepseek-chat")
+    resolved_model = str(model or preset_model or "deepseek-v4-flash")
     resolved_model, _normalized_from = normalize_model_for_provider(
         provider_key,
         resolved_model,
