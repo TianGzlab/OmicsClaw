@@ -50,7 +50,7 @@ dependencies:
   - picard
   # Peak calling / CNV (epigenomics + genomics-cnv-calling skills)
   - macs3
-  - cnvkit
+  - cnvkit>=0.9.10  # 0.9.10+ required: 0.9.8 uses pandas.Int64Index removed in pandas 2.0
   # Single-cell / RNA upstream
   - simpleaf
   - velocyto.py
