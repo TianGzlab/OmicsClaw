@@ -1,3 +1,8 @@
+# OmicsClaw Python deps live here.
+# R packages, bioinformatics CLIs (samtools/STAR/fastqc/...), and the build
+# toolchain are declared in environment.yml and installed by 0_setup_env.sh.
+# See docs/superpowers/specs/2026-04-30-conda-env-management-design.md.
+
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
