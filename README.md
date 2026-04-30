@@ -79,53 +79,57 @@
 
 ## 📦 Installation
 
-To prevent dependency conflicts, we strongly recommend installing OmicsClaw inside a virtual environment. You can use either the standard `venv` or the ultra-fast `uv`.
+OmicsClaw ships two install paths. Pick whichever fits your needs.
 
-<details open>
-<summary> 🪛 Setup Virtual Environment (Highly Recommended)</summary>
+### 🥇 Conda (recommended — full functionality)
 
-**Option A: Using standard venv**
+A single command provisions R 4.3 + ~30 R packages, ~15 bioinformatics CLIs (samtools, STAR, fastqc, bwa, bowtie2, minimap2, bcftools, gatk4, picard, simpleaf, fastp, trim-galore, macs3, multiqc, kb-python, velocyto, …), OmicsClaw itself (editable), and all Python optional extras.
+
+```bash
+# 1. Install Miniforge if you don't have it (mamba is bundled, recommended)
+#    https://github.com/conda-forge/miniforge
+
+# 2. Clone and bootstrap
+git clone https://github.com/TianGzlab/OmicsClaw.git
+cd OmicsClaw
+bash 0_setup_env.sh           # creates conda env "OmicsClaw"
+conda activate OmicsClaw
+
+# 3. Verify
+omicsclaw env                 # or: python omicsclaw.py env
+```
+
+The script is **idempotent** — re-running it updates the env in place. For a custom env name: `bash 0_setup_env.sh my_env_name`.
+
+> **Heads-up**: `cnvkit` (used by `genomics-cnv-calling`) is **not bundled** because its newer-version dependencies conflict with `macs3`. Install it in a separate dedicated env if you need it.
+
+### 🪶 venv (lightweight — Python-only skills)
+
+For users who only need the **LLM/routing/chat surfaces** and do not run analyses. This path **does not install R, samtools, STAR, fastqc, etc.** — skills that depend on those will report "tool not on PATH" at runtime.
+
+<details>
+<summary>Setup with venv</summary>
+
 ```bash
 # 1. Create a virtual environment
 python3 -m venv .venv
-
-# 2. Activate it
 source .venv/bin/activate
+
+# 2. Install OmicsClaw
+pip install -e .
+# Optional: pip install -e ".[interactive]" / ".[tui]" / ".[memory]" / ".[full]"
+# Optional: pip install -r bot/requirements.txt   # for messaging channels
 ```
 
-**Option B: Using uv (Ultrafast)**
-```bash
-# 1. Install uv (if you don't have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+Or via Makefile:
 
-# 2. Create and activate virtual environment
-uv venv
-source .venv/bin/activate
+```bash
+make venv && make setup
 ```
 
 </details>
 
-```bash
-# Clone the repository
-git clone https://github.com/TianGzlab/OmicsClaw.git
-cd OmicsClaw
-
-# Install core system operations
-pip install -e .
-
-# Optional: Install Interactive TUI & Bot capabilities
-# Includes prompt-toolkit/Textual plus the LLM client stack used by interactive mode
-pip install -e ".[tui]"
-pip install -r bot/requirements.txt  # If you want messaging channels
-```
-
-**Advanced installation tiers:**
-- `pip install -e .` — Core system operations
-- `pip install -e ".[<domain>]"` — Where `<domain>` is `spatial`, `singlecell`, `genomics`, `proteomics`, `metabolomics`, or `bulkrna`
-- `pip install -e ".[spatial-domains]"` — Standalone Deep Learning Layer for `SpaGCN` and `STAGATE`
-- `pip install -e ".[full]"` — All domain extras and optional method backends across all domains
-
-*Check your installation status anytime with `python omicsclaw.py env`.*
+*Check your installation status anytime with `omicsclaw env` or `python omicsclaw.py env`.*
 
 ## 🔑 Configuration
 
