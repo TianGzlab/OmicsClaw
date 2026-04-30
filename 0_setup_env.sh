@@ -96,3 +96,33 @@ echo "[setup_env] ✔ Tier 2 complete"
 # is therefore NOT bundled; users who need it should install it in a
 # separate dedicated env to avoid corrupting macs3. Same pattern as
 # cellranger (proprietary), documented at the skill level.
+
+# ----- Tier 3: GitHub-only R packages (no bioconda equivalent) ----------
+# Idempotent: requireNamespace() skips already-installed packages.
+# Compiles run inside the activated env so they pick up Tier 1's gxx +
+# sysroot + R headers automatically. r-devtools is in environment.yml.
+
+echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
+"$INSTALLER" run -n "$ENV_NAME" --no-capture-output Rscript - <<'RSCRIPT'
+gh_pkgs <- list(
+  c("spacexr",       "dmcable/spacexr"),
+  c("CARD",          "YMa-lab/CARD"),
+  c("CellChat",      "jinworks/CellChat"),
+  c("numbat",        "kharchenkolab/numbat"),
+  c("SPARK",         "xzhoulab/SPARK"),
+  c("DoubletFinder", "chris-mcginnis-ucsf/DoubletFinder")
+)
+for (p in gh_pkgs) {
+  if (requireNamespace(p[1], quietly = TRUE)) {
+    cat(sprintf("[r-extras] %s already installed — skipping\n", p[1]))
+  } else {
+    cat(sprintf("[r-extras] installing %s from GitHub:%s\n", p[1], p[2]))
+    devtools::install_github(p[2], upgrade = "never", quiet = TRUE)
+    if (!requireNamespace(p[1], quietly = TRUE)) {
+      stop(sprintf("[r-extras] FAILED to install %s", p[1]))
+    }
+  }
+}
+cat("[r-extras] all 6 GitHub R packages OK\n")
+RSCRIPT
+echo "[setup_env] ✔ Tier 3 complete"
