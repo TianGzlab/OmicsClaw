@@ -100,6 +100,12 @@ def call_llm(
             "matching environment variable."
         )
 
+    if OpenAI is None:
+        raise ImportError(
+            "The 'openai' SDK is required for autoagent LLM calls. "
+            "Install it with: pip install openai"
+        )
+
     client = OpenAI(
         api_key=runtime.api_key,
         base_url=runtime.base_url or None,
