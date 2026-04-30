@@ -60,7 +60,14 @@ class TestGetLangchainLlmConsumesCatalog:
         )
         assert captured.get("thinking") == {"type": "adaptive"}
 
-    def test_anthropic_respects_caller_thinking_override(self, monkeypatch):
+    def test_anthropic_thinking_set_when_no_override_provided(self, monkeypatch):
+        # Today's get_langchain_llm signature does not expose a thinking
+        # kwarg, so caller-override is not testable through this surface.
+        # We verify the catalog default fires when not overridden — i.e.
+        # the dict.setdefault semantics produce a thinking entry.
+        # When the signature grows a thinking parameter or **kwargs, add
+        # a sibling test that supplies thinking={"type": "disabled"} and
+        # asserts the catalog default is suppressed.
         captured = {}
 
         class _FakeAnthropic:
@@ -69,10 +76,6 @@ class TestGetLangchainLlmConsumesCatalog:
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
-        # The caller doesn't currently expose a thinking kwarg, so this
-        # asserts the default still fires. Future callers can pass
-        # thinking= in kwargs and it must override; the implementation
-        # uses dict.setdefault.
         get_langchain_llm(
             provider="anthropic",
             model="claude-sonnet-4-6",
