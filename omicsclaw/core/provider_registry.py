@@ -37,8 +37,8 @@ class ProviderRegistryEntry(TypedDict):
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     # --- Tier 1: Primary providers ---
-    "deepseek": ("https://api.deepseek.com", "deepseek-chat", "DEEPSEEK_API_KEY"),
-    "openai": ("", "gpt-5.4", "OPENAI_API_KEY"),
+    "deepseek": ("https://api.deepseek.com", "deepseek-v4-flash", "DEEPSEEK_API_KEY"),
+    "openai": ("", "gpt-5.5", "OPENAI_API_KEY"),
     "anthropic": (
         "https://api.anthropic.com/v1/",
         "claude-sonnet-4-6",
@@ -46,7 +46,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     ),
     "gemini": (
         "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
         "GOOGLE_API_KEY",
     ),
     "nvidia": (
@@ -57,7 +57,7 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     # --- Tier 2: Third-party aggregators ---
     "siliconflow": (
         "https://api.siliconflow.cn/v1",
-        "Pro/MiniMaxAI/MiniMax-M2.5",
+        "Pro/zai-org/GLM-5",
         "SILICONFLOW_API_KEY",
     ),
     "openrouter": (
@@ -72,17 +72,17 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     ),
     "dashscope": (
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "qwen3-max",
+        "qwen3.6-plus",
         "DASHSCOPE_API_KEY",
     ),
     "moonshot": (
         "https://api.moonshot.cn/v1",
-        "kimi-k2.5",
+        "kimi-k2.6",
         "MOONSHOT_API_KEY",
     ),
     "zhipu": (
         "https://open.bigmodel.cn/api/paas/v4",
-        "glm-5",
+        "glm-5.1",
         "ZHIPU_API_KEY",
     ),
     # --- Tier 3: Local & custom ---
@@ -93,31 +93,31 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
 PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
     "deepseek": {
         "display_name": "DeepSeek",
-        "description": "Cost-effective reasoning model",
-        "description_zh": "高性价比推理模型",
+        "description": "DeepSeek V4 series — cost-effective reasoning",
+        "description_zh": "DeepSeek V4 系列 — 高性价比推理",
         "tier": "primary",
-        "models": ("deepseek-chat", "deepseek-reasoner"),
+        "models": ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"),
     },
     "openai": {
         "display_name": "OpenAI",
-        "description": "GPT-5 and Codex series models",
-        "description_zh": "GPT-5 及 Codex 系列模型",
+        "description": "GPT-5.5 and Codex series models",
+        "description_zh": "GPT-5.5 及 Codex 系列模型",
         "tier": "primary",
-        "models": ("gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex", "gpt-5", "gpt-5-mini"),
+        "models": ("gpt-5.5-pro", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "gpt-5-mini"),
     },
     "anthropic": {
         "display_name": "Anthropic",
-        "description": "Claude Opus, Sonnet and Haiku",
-        "description_zh": "Claude Opus、Sonnet 和 Haiku",
+        "description": "Claude Opus 4.7, Sonnet 4.6 and Haiku 4.5",
+        "description_zh": "Claude Opus 4.7、Sonnet 4.6 和 Haiku 4.5",
         "tier": "primary",
-        "models": ("claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"),
+        "models": ("claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"),
     },
     "gemini": {
         "display_name": "Google Gemini",
-        "description": "Gemini 3 and 2.5 series",
-        "description_zh": "Gemini 3 和 2.5 系列",
+        "description": "Gemini 3.1 / 3 / 2.5 series",
+        "description_zh": "Gemini 3.1 / 3 / 2.5 系列",
         "tier": "primary",
-        "models": ("gemini-3.1-pro", "gemini-3-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+        "models": ("gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"),
     },
     "nvidia": {
         "display_name": "NVIDIA NIM",
@@ -136,7 +136,7 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
         "description": "China-optimized multi-model hosting",
         "description_zh": "国内优化的多模型托管平台",
         "tier": "aggregator",
-        "models": ("Pro/MiniMaxAI/MiniMax-M2.5", "Pro/zai-org/GLM-5", "Pro/moonshotai/Kimi-K2.5", "Pro/zai-org/GLM-4.7"),
+        "models": ("Pro/zai-org/GLM-5", "Pro/MiniMaxAI/MiniMax-M2.5", "Pro/moonshotai/Kimi-K2.5", "Pro/zai-org/GLM-4.7"),
     },
     "openrouter": {
         "display_name": "OpenRouter",
@@ -145,10 +145,13 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
         "tier": "aggregator",
         "models": (
             "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-opus-4.7",
+            "openai/gpt-5.5",
             "openai/gpt-5.4",
             "google/gemini-3.1-pro-preview",
-            "moonshotai/kimi-k2.5",
+            "moonshotai/kimi-k2.6",
             "minimax/minimax-m2.7",
+            "deepseek/deepseek-v4-pro",
         ),
     },
     "volcengine": {
@@ -160,29 +163,28 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
     },
     "dashscope": {
         "display_name": "DashScope",
-        "description": "Alibaba Qwen3 / Qwen3.6 models (Max, Plus, Coder, QwQ)",
-        "description_zh": "阿里巴巴通义千问 Qwen3 / Qwen3.6 系列（Max、Plus、Coder、QwQ）",
+        "description": "Alibaba Qwen3.6 / Qwen3 models (Plus, Max, Coder, QwQ)",
+        "description_zh": "阿里巴巴通义千问 Qwen3.6 / Qwen3 系列（Plus、Max、Coder、QwQ）",
         "tier": "aggregator",
         "models": (
-            "qwen3-max",
             "qwen3.6-plus",
+            "qwen3-max",
             "qwen3-coder-plus",
+            "qwen3-235b-a22b",
             "qwq-plus",
-            "qwen3.5-flash",
-            "qwen-turbo-latest",
         ),
     },
     "moonshot": {
         "display_name": "Moonshot",
-        "description": "Kimi K2 series models",
-        "description_zh": "月之暗面 Kimi K2 系列模型",
+        "description": "Kimi K2.6 / K2.5 series models",
+        "description_zh": "月之暗面 Kimi K2.6 / K2.5 系列模型",
         "tier": "aggregator",
-        "models": ("kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo", "moonshot-v1-auto"),
+        "models": ("kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "moonshot-v1-auto"),
     },
     "zhipu": {
         "display_name": "Zhipu AI",
-        "description": "GLM-5 series models",
-        "description_zh": "智谱 GLM-5 系列模型",
+        "description": "GLM-5.1 / GLM-5 series models",
+        "description_zh": "智谱 GLM-5.1 / GLM-5 系列模型",
         "tier": "aggregator",
         "models": ("glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7"),
     },
@@ -489,6 +491,13 @@ def get_langchain_llm(
         env=source,
     )
 
+    # Lazy import — keep this module dependency-light at import time.
+    from omicsclaw.core.llm_models import get_default_features
+
+    default_features = get_default_features(
+        provider_key, resolved_model, base_url=resolved_url or "",
+    )
+
     if provider_key == "anthropic":
         if anthropic_cls is None:
             from langchain_anthropic import ChatAnthropic as anthropic_cls
@@ -505,6 +514,9 @@ def get_langchain_llm(
             anthropic_kwargs["timeout"] = effective_anthropic_timeout
         if resolved_url:
             anthropic_kwargs["anthropic_api_url"] = resolved_url
+        # Catalog defaults (thinking) — only set when not localhost ccproxy
+        for k, v in default_features.items():
+            anthropic_kwargs.setdefault(k, v)
         return anthropic_cls(**anthropic_kwargs)
 
     if openai_cls is None:
@@ -521,4 +533,17 @@ def get_langchain_llm(
         openai_kwargs["timeout"] = timeout
     if resolved_url:
         openai_kwargs["openai_api_base"] = resolved_url
+    # Catalog defaults (extra_body.reasoning_effort / include_thoughts /
+    # reasoning / enable_thinking) — caller's existing extra_body wins.
+    if default_features:
+        existing_extra = openai_kwargs.get("extra_body") or {}
+        new_extra = dict(default_features.get("extra_body") or {})
+        new_extra.update(existing_extra)  # caller wins on conflict
+        if new_extra:
+            openai_kwargs["extra_body"] = new_extra
+        # Forward any non-extra_body keys from defaults (none today, future-proof)
+        for k, v in default_features.items():
+            if k == "extra_body":
+                continue
+            openai_kwargs.setdefault(k, v)
     return openai_cls(**openai_kwargs)
