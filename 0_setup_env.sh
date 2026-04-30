@@ -70,3 +70,29 @@ ENV_BIN="$ENV_PREFIX/bin"
 echo "[setup_env] env prefix: $ENV_PREFIX"
 
 echo "[setup_env] ✔ Tier 1 complete"
+
+# ----- Tier 2: OmicsClaw editable + Python optional extras ----------
+# pyproject.toml owns all Python deps. Running pip inside the env
+# attaches them to the Tier 1 Python interpreter.
+
+echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
+"$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
+    pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
+
+# Tier 2.1: tools that have no bioconda Python 3.11 build (surfaced by T2
+# validation):
+#   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
+#                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
+echo "[setup_env] Tier 2.1: pip install velocyto"
+"$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
+    pip install "velocyto>=0.17.17"
+
+echo "[setup_env] ✔ Tier 2 complete"
+
+# NOTE on cnvkit (genomics-cnv-calling skill): bioconda ships only 0.9.8
+# which crashes on pandas>=2.0 (uses removed pandas.Int64Index). Newer
+# versions (0.9.10+) have the fix but their joblib<1.0 transitive dep
+# conflicts with macs3's scikit-learn requirement of joblib>=1.0. cnvkit
+# is therefore NOT bundled; users who need it should install it in a
+# separate dedicated env to avoid corrupting macs3. Same pattern as
+# cellranger (proprietary), documented at the skill level.
