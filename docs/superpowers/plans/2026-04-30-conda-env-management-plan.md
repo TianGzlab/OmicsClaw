@@ -36,9 +36,10 @@
 # Owns NOTHING from pyproject.toml — Python deps are pip's responsibility,
 # installed by 0_setup_env.sh Tier 2 via `pip install -e ".[full]"`.
 #
-# Channel order matters: conda-forge first (broad scientific), bioconda
-# second (genomics specific). Channel priority strict to avoid R-package
-# conflicts between conda-forge's R rebuilds and bioconda's r-* mirror.
+# Channel order: conda-forge first (broad scientific), bioconda second
+# (genomics specific). This file is designed for strict channel priority —
+# enforce via `conda config --set channel_priority strict` or by passing
+# `--strict-channel-priority` to env create. 0_setup_env.sh handles this.
 name: OmicsClaw
 channels:
   - conda-forge
@@ -70,16 +71,19 @@ dependencies:
   - star
   # QC
   - fastqc
-  - multiqc
   - fastp
   - trim-galore
   # Variant calling / postprocessing
   - gatk4
   - picard
+  # Peak calling / CNV (epigenomics + genomics-cnv-calling skills)
+  - macs3
+  - cnvkit
   # Single-cell / RNA upstream
   - simpleaf
-  - kb-python
   - velocyto.py
+  # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
+  # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
 
   # ────────── Tier 2: R 4.3 + CRAN packages (replaces install_r_dependencies.R, CRAN section) ──────────
   - r-base=4.3
@@ -116,9 +120,10 @@ dependencies:
   - bioconductor-apeglm
   - bioconductor-edger
   - bioconductor-limma
-  - bioconductor-wgcna
   - bioconductor-sva
   - bioconductor-clusterprofiler
+  # WGCNA is published on CRAN, not Bioconductor — use r-wgcna
+  - r-wgcna
 
   # NOTE: 6 GitHub-only R packages (spacexr/RCTD, CARD, CellChat, numbat,
   # SPARK, DoubletFinder) are NOT in this file — they have no bioconda
@@ -315,8 +320,8 @@ git commit -m "feat(env): add 0_setup_env.sh Tier 1 (env create/update)"
 # pyproject.toml owns all Python deps. Running pip inside the env
 # attaches them to the Tier 1 Python interpreter.
 
-echo "[setup_env] Tier 2: pip install -e \".[full]\""
-"$INSTALLER" run -n "$ENV_NAME" pip install -e "$PROJECT_ROOT[full]"
+echo "[setup_env] Tier 2: pip install -e \".[full,singlecell-upstream]\""
+"$INSTALLER" run -n "$ENV_NAME" pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 echo "[setup_env] ✔ Tier 2 complete"
 ```
 
