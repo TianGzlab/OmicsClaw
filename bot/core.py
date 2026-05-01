@@ -330,7 +330,7 @@ def audit(event: str, **kwargs):
 # ---------------------------------------------------------------------------
 
 llm: AsyncOpenAI | None = None
-OMICSCLAW_MODEL: str = "deepseek-chat"
+OMICSCLAW_MODEL: str = PROVIDER_PRESETS["deepseek"][1]
 LLM_PROVIDER_NAME: str = ""
 
 MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))

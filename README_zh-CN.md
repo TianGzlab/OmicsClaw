@@ -227,6 +227,13 @@ LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 >
 > 📖 **Bot / 通道配置：** 参见 [bot/README.md](bot/README.md) 和 [bot/CHANNELS_SETUP.md](bot/CHANNELS_SETUP.md)。
 
+> **服务商 / 模型归一化：** 如果重启时发现过期的跨服务商组合，例如
+> `LLM_PROVIDER=anthropic` 搭配 `OMICSCLAW_MODEL=deepseek-chat`，OmicsClaw
+> 会以所选服务商为准，并把模型重置为该服务商默认值，除非你显式配置了
+> 自定义 `*_BASE_URL` / `LLM_BASE_URL`。已废弃的 DeepSeek 默认模型
+>（`deepseek-chat` / `deepseek-reasoner`）也会迁移到当前 DeepSeek 默认值
+> `deepseek-v4-flash`。
+
 </details>
 
 ## ⚡ 快速开始

@@ -203,6 +203,29 @@ def test_run_onboard_writes_core_runtime_and_channel_config(monkeypatch, tmp_pat
     assert "ACTIVE_CHANNELS=" not in saved
 
 
+def test_configure_llm_replaces_legacy_deepseek_default(monkeypatch, tmp_path):
+    fake_questionary = _FakeQuestionary(
+        select=["deepseek"],
+        text=[
+            "",
+        ],
+        password=[""],
+        confirm=[False, False],
+    )
+    onboard = _load_onboard(monkeypatch, tmp_path, fake_questionary)
+
+    env_vars = {
+        "LLM_PROVIDER": "deepseek",
+        "OMICSCLAW_MODEL": "deepseek-chat",
+        "LLM_API_KEY": "old-key",
+    }
+    ok, provider = onboard._configure_llm(env_vars)
+
+    assert ok is True
+    assert provider == "deepseek"
+    assert env_vars["OMICSCLAW_MODEL"] == "deepseek-v4-flash"
+
+
 def test_run_onboard_switches_wechat_backend_and_clears_conflicting_env(monkeypatch, tmp_path):
     env_path = tmp_path / ".env"
     env_path.write_text(

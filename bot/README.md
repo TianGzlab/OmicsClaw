@@ -232,16 +232,17 @@ OmicsClaw supports **12 LLM providers** through a unified OpenAI-compatible inte
 
 | Provider | `LLM_PROVIDER` | Default Model | API Key Env Var |
 |---|---|---|---|
-| DeepSeek | `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
-| OpenAI | `openai` | `gpt-4o` | `OPENAI_API_KEY` |
-| Anthropic | `anthropic` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
-| Google Gemini | `gemini` | `gemini-2.5-flash` | `GOOGLE_API_KEY` |
-| NVIDIA NIM | `nvidia` | `deepseek-ai/deepseek-r1` | `NVIDIA_API_KEY` |
-| SiliconFlow | `siliconflow` | `DeepSeek-V3` | `SILICONFLOW_API_KEY` |
-| OpenRouter | `openrouter` | `deepseek-chat-v3` | `OPENROUTER_API_KEY` |
-| Volcengine 火山引擎 | `volcengine` | `doubao-1.5-pro-256k` | `VOLCENGINE_API_KEY` |
-| DashScope 阿里云 | `dashscope` | `qwen-max` | `DASHSCOPE_API_KEY` |
-| Zhipu AI 智谱 | `zhipu` | `glm-4-flash` | `ZHIPU_API_KEY` |
+| DeepSeek | `deepseek` | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
+| OpenAI | `openai` | `gpt-5.5` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini` | `gemini-3-flash-preview` | `GOOGLE_API_KEY` |
+| NVIDIA NIM | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `NVIDIA_API_KEY` |
+| SiliconFlow | `siliconflow` | `Pro/zai-org/GLM-5` | `SILICONFLOW_API_KEY` |
+| OpenRouter | `openrouter` | `anthropic/claude-sonnet-4.6` | `OPENROUTER_API_KEY` |
+| Volcengine 火山引擎 | `volcengine` | `doubao-seed-2-0-pro-260215` | `VOLCENGINE_API_KEY` |
+| DashScope 阿里云 | `dashscope` | `qwen3.6-plus` | `DASHSCOPE_API_KEY` |
+| Moonshot | `moonshot` | `kimi-k2.6` | `MOONSHOT_API_KEY` |
+| Zhipu AI 智谱 | `zhipu` | `glm-5.1` | `ZHIPU_API_KEY` |
 | Ollama (local) | `ollama` | `qwen2.5:7b` | *(none)* |
 | Custom endpoint | `custom` | *(set `OMICSCLAW_MODEL`)* | *(set `LLM_API_KEY`)* |
 
@@ -275,7 +276,7 @@ NVIDIA_API_KEY=nvapi-xxxxxxxx
 
 # Alibaba DashScope (Qwen)
 DASHSCOPE_API_KEY=sk-xxxxxxxx
-OMICSCLAW_MODEL=qwen-max
+OMICSCLAW_MODEL=qwen3.6-plus
 
 # Local Ollama
 LLM_PROVIDER=ollama
@@ -293,7 +294,7 @@ You can also override the auto-configured defaults:
 ```bash
 LLM_PROVIDER=deepseek
 LLM_API_KEY=sk-xxxxx
-OMICSCLAW_MODEL=deepseek-reasoner   # Use R1 instead of default V3
+OMICSCLAW_MODEL=deepseek-v4-pro   # Use Pro instead of default Flash
 ```
 
 ---

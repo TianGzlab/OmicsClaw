@@ -218,7 +218,9 @@ Keep `CCPROXY_PORT` different from the app backend port `8765`.
 > combination such as `LLM_PROVIDER=anthropic` with
 > `OMICSCLAW_MODEL=deepseek-chat`, OmicsClaw keeps the selected provider as the
 > routing authority and resets the model to that provider's default unless you
-> explicitly configured a custom `*_BASE_URL` / `LLM_BASE_URL`.
+> explicitly configured a custom `*_BASE_URL` / `LLM_BASE_URL`. Deprecated
+> DeepSeek defaults (`deepseek-chat` / `deepseek-reasoner`) are likewise
+> migrated to the current DeepSeek default `deepseek-v4-flash`.
 
 </details>
 

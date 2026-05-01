@@ -71,6 +71,19 @@ def test_resolve_provider_uses_provider_specific_defaults(monkeypatch):
     assert resolved_key == "deepseek-key"
 
 
+def test_resolve_provider_replaces_legacy_deepseek_models_with_current_default(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+
+    for legacy_model in ("deepseek-chat", "deepseek-reasoner"):
+        _resolved_url, resolved_model, resolved_key = resolve_provider(
+            provider="deepseek",
+            model=legacy_model,
+        )
+
+        assert resolved_model == "deepseek-v4-flash"
+        assert resolved_key == "deepseek-key"
+
+
 def test_resolve_provider_auto_detects_specific_key(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)

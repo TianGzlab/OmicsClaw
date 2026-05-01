@@ -240,6 +240,10 @@ MODEL_NORMALIZATION_EXEMPT_PROVIDERS: frozenset[str] = frozenset({
     "nvidia",
 })
 
+DEPRECATED_PROVIDER_DEFAULT_MODELS: dict[str, frozenset[str]] = {
+    "deepseek": frozenset({"deepseek-chat", "deepseek-reasoner"}),
+}
+
 
 # --------------------------------------------------------------------------- #
 # OAuth support was previously declared here. It now lives entirely in
@@ -345,6 +349,9 @@ def normalize_model_for_provider(
     current_default_model = str(current[1] or "").strip()
     if not current_default_model or candidate_model == current_default_model:
         return candidate_model, ""
+
+    if candidate_model in DEPRECATED_PROVIDER_DEFAULT_MODELS.get(provider_key, frozenset()):
+        return current_default_model, provider_key
 
     for other_name, (_, other_default_model, _) in provider_presets.items():
         if other_name == provider_key:
