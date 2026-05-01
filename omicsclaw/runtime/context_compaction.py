@@ -545,3 +545,38 @@ def prepare_model_messages(
         estimated_chars=estimate_prompt_chars(prompt, messages),
         applied_stages=tuple(applied_stages),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionEvent:
+    """One compaction occurrence — emitted to the chat surface as a toast."""
+    messages_compressed: int
+    tokens_saved_estimate: int
+    applied_stages: tuple[str, ...]
+
+
+def build_compaction_status_payload(event: CompactionEvent) -> dict[str, Any]:
+    """Build the CodePilot-shape SSE 'status' payload for a compaction event.
+
+    Returned dict is the JSON object that goes inside the SSE
+    ``data`` field; the caller json.dumps it.
+    """
+    if event.tokens_saved_estimate > 0:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            f"messages summarized, ~{event.tokens_saved_estimate:,} tokens saved"
+        )
+    else:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            "messages summarized"
+        )
+    return {
+        "notification": True,
+        "subtype": "context_compressed",
+        "message": msg,
+        "stats": {
+            "messagesCompressed": event.messages_compressed,
+            "tokensSaved": event.tokens_saved_estimate,
+        },
+    }
