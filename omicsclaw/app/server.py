@@ -1605,6 +1605,12 @@ async def chat_stream(req: ChatRequest):
                 except Exception as mcp_exc:
                     logger.warning("Failed to load MCP servers: %s", mcp_exc)
 
+            from omicsclaw.app._compaction_event_bridge import (
+                make_compaction_event_handler,
+            )
+
+            on_context_compacted = make_compaction_event_handler(queue)
+
             result = await core.llm_tool_loop(
                 chat_id=session_id,
                 user_content=user_content,
@@ -1618,6 +1624,7 @@ async def chat_stream(req: ChatRequest):
                 on_tool_result=on_tool_result,
                 on_stream_content=on_stream_content,
                 on_stream_reasoning=on_stream_reasoning,
+                on_context_compacted=on_context_compacted,
                 usage_accumulator=usage_accumulator,
                 request_tool_approval=request_tool_approval,
                 policy_state=current_policy_state.to_dict(),
