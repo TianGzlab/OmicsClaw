@@ -402,6 +402,17 @@ class TranscriptStore:
         self.messages_by_chat.pop(chat_id, None)
         self.access_by_chat.pop(chat_id, None)
 
+    def replace_history(
+        self, chat_id: int | str, messages: list[dict[str, Any]]
+    ) -> None:
+        """Replace the persisted history for ``chat_id`` with ``messages``.
+
+        Used by on-demand compaction so the compacted transcript persists
+        across the next request rather than being recomputed each turn.
+        """
+        self.messages_by_chat[chat_id] = list(messages)
+        self.touch(chat_id)
+
     def touch(self, chat_id: int | str, *, at: float | None = None) -> None:
         self.access_by_chat[chat_id] = time.time() if at is None else at
 
@@ -427,10 +438,13 @@ class TranscriptStore:
         *,
         content: str,
         tool_calls: list[dict] | None = None,
+        reasoning_content: str | None = None,
     ) -> dict:
         message: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
             message["tool_calls"] = tool_calls
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
         self.get_or_create(chat_id).append(message)
         return message
 

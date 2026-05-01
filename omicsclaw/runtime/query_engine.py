@@ -9,6 +9,7 @@ from omicsclaw.common.user_guidance import (
     extract_user_guidance_payloads,
     render_guidance_block,
 )
+from omicsclaw.core.llm_patches import apply_deepseek_reasoning_passback
 
 from .context_compaction import ContextCompactionConfig, prepare_model_messages
 from .events import (
@@ -73,6 +74,7 @@ class MaterializedToolCall:
 class MaterializedMessage:
     content: str | None
     tool_calls: list[MaterializedToolCall] | None
+    reasoning_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +111,10 @@ class QueryEngineConfig:
         default_factory=ContextCompactionConfig
     )
     extra_api_params: dict[str, Any] = field(default_factory=dict)
+    # DeepSeek thinking-mode endpoints reject requests where any historical
+    # assistant message lacks ``reasoning_content``. Set to True for the
+    # ``deepseek`` provider so the chat path mirrors the autoagent passback.
+    deepseek_reasoning_passback: bool = False
 
 
 def _extract_completion_tokens(response_usage, delta) -> int:
@@ -291,9 +297,16 @@ def _materialize_message_from_choice_message(message) -> MaterializedMessage:
             )
             for tc in message.tool_calls
         ]
+    reasoning_content: str | None = None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(message, attr, None)
+        if isinstance(value, str) and value:
+            reasoning_content = value
+            break
     return MaterializedMessage(
         content=getattr(message, "content", None),
         tool_calls=tool_calls,
+        reasoning_content=reasoning_content,
     )
 
 
@@ -304,6 +317,7 @@ async def _materialize_message_from_stream(
     on_usage_delta: Callable[[Any, Any], None] | None = None,
 ) -> MaterializedMessage:
     final_content = ""
+    final_reasoning = ""
     tool_calls_dict: dict[int, MaterializedToolCall] = {}
     # Some OpenAI-compatible proxies (ccproxy, LiteLLM, some Gemini transports)
     # emit cumulative `chunk.usage` on every chunk, not just the terminal one.
@@ -320,6 +334,7 @@ async def _materialize_message_from_stream(
         delta = chunk.choices[0].delta
         text_chunks, reasoning_chunks = _extract_stream_delta_chunks(delta)
         for reasoning_chunk in reasoning_chunks:
+            final_reasoning += reasoning_chunk
             if callbacks.on_stream_reasoning:
                 await _maybe_await(callbacks.on_stream_reasoning(reasoning_chunk))
         for text_chunk in text_chunks:
@@ -351,6 +366,7 @@ async def _materialize_message_from_stream(
     return MaterializedMessage(
         content=final_content or None,
         tool_calls=tool_calls,
+        reasoning_content=final_reasoning or None,
     )
 
 
@@ -460,6 +476,8 @@ async def run_query_engine(
         )
         request_system_prompt = prepared_messages.system_prompt
         request_messages = prepared_messages.messages
+        if config.deepseek_reasoning_passback:
+            request_messages = apply_deepseek_reasoning_passback(request_messages)
         try:
             while True:
                 kwargs = {}
@@ -511,6 +529,10 @@ async def run_query_engine(
                     ):
                         request_system_prompt = reactive_messages.system_prompt
                         request_messages = reactive_messages.messages
+                        if config.deepseek_reasoning_passback:
+                            request_messages = apply_deepseek_reasoning_passback(
+                                request_messages
+                            )
                         continue
                     raise
         except config.llm_error_types as exc:
@@ -535,6 +557,7 @@ async def run_query_engine(
             context.chat_id,
             content=last_message.content or "",
             tool_calls=assistant_tool_calls,
+            reasoning_content=last_message.reasoning_content,
         )
 
         if not last_message.tool_calls:
