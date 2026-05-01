@@ -27,7 +27,7 @@ def test_build_provider_registry_entries_exposes_display_metadata():
     deepseek = next(entry for entry in entries if entry["name"] == "deepseek")
     assert deepseek["display_name"] == "DeepSeek"
     assert deepseek["tier"] == "primary"
-    assert "deepseek-chat" in deepseek["models"]
+    assert deepseek["models"] == ["deepseek-v4-flash", "deepseek-v4-pro"]
 
     custom = next(entry for entry in entries if entry["name"] == "custom")
     assert custom["display_name"] == "Custom Endpoint"

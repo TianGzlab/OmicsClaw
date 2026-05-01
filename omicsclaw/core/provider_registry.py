@@ -96,7 +96,7 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
         "description": "DeepSeek V4 series — cost-effective reasoning",
         "description_zh": "DeepSeek V4 系列 — 高性价比推理",
         "tier": "primary",
-        "models": ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"),
+        "models": ("deepseek-v4-flash", "deepseek-v4-pro"),
     },
     "openai": {
         "display_name": "OpenAI",
