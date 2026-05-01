@@ -786,42 +786,64 @@ def _extract_blocked_path(arguments: dict[str, Any]) -> str:
 # Multimodal content helpers
 # ---------------------------------------------------------------------------
 
-def _build_multimodal_content(text: str, files: list[dict]) -> str | list[dict]:
+def _resolve_uploads_dir(workspace: str) -> Path:
+    """Pick the directory used to persist chat attachments for this turn.
+
+    Priority:
+    1. ``<workspace>/.uploads`` when the request supplied a workspace.
+    2. ``<core.DATA_DIR>/.uploads`` as the fallback so the desktop app
+       always has a writable location even before the user picks a
+       workspace.
+    """
+    if workspace:
+        return Path(workspace) / ".uploads"
+    core = _get_core()
+    return Path(core.DATA_DIR) / ".uploads"
+
+
+def _register_attachment_for_session(session_id: str, meta: dict) -> None:
+    """Mirror the Telegram/Feishu pattern: stash the saved path in the
+    shared ``bot.core.received_files`` registry so existing tools
+    (parse_literature, the omicsclaw skill runner with mode='file') can
+    pick it up without the model having to specify the path explicitly.
+    """
+    if not session_id:
+        return
+    core = _get_core()
+    core.received_files[session_id] = {
+        "path": meta["path"],
+        "filename": meta["filename"],
+        "mime": meta.get("mime", ""),
+    }
+
+
+def _build_multimodal_content(
+    text: str,
+    files: list[dict],
+    *,
+    session_id: str = "",
+    workspace: str = "",
+) -> str | list[dict]:
     """Convert text + FileAttachment list to OpenAI multimodal content.
 
-    Returns a plain ``str`` when no images are present (text files are
-    inlined as context), or a ``list[dict]`` with ``image_url`` blocks
-    when images are attached.
+    Delegates to :mod:`omicsclaw.app._attachments`. Non-image files are
+    saved to disk and referenced by absolute path in the user message
+    so the model can use ``parse_literature`` / ``inspect_file`` /
+    ``omicsclaw`` skill tools to open them. Images are forwarded inline
+    as multimodal ``image_url`` blocks (and also saved to disk for tool
+    access).
     """
-    import base64 as _b64
+    from omicsclaw.app._attachments import build_chat_content
 
-    image_parts: list[dict] = []
-    text_addendum: list[str] = []
-
-    for f in files:
-        mime = f.get("type", "application/octet-stream")
-        name = f.get("name", "file")
-        data = f.get("data", "")
-
-        if mime.startswith("image/"):
-            image_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{data}"},
-            })
-        else:
-            try:
-                decoded = _b64.b64decode(data).decode("utf-8", errors="replace")
-                text_addendum.append(f"### File: {name}\n```\n{decoded[:50000]}\n```")
-            except Exception:
-                text_addendum.append(f"### File: {name}\n(binary, {f.get('size', 0)} bytes)")
-
-    full_text = text
-    if text_addendum:
-        full_text = text + "\n\n" + "\n\n".join(text_addendum)
-
-    if image_parts:
-        return [{"type": "text", "text": full_text}] + image_parts
-    return full_text
+    uploads_dir = _resolve_uploads_dir(workspace)
+    return build_chat_content(
+        text,
+        files,
+        uploads_dir=uploads_dir,
+        on_file_saved=lambda meta: _register_attachment_for_session(
+            session_id, meta
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1054,10 +1076,19 @@ async def chat_stream(req: ChatRequest):
 
     max_tokens_override = 16384 if req.context_1m else 0
 
-    # Convert file attachments to multimodal content
+    # Convert file attachments to multimodal content. Non-image files are
+    # saved to disk under the active workspace's ``.uploads`` directory and
+    # registered in ``core.received_files`` so the model can locate them
+    # via the existing tool surface (parse_literature, omicsclaw skill
+    # runner with mode='file', etc.).
     user_content: str | list = req.content
     if req.files:
-        user_content = _build_multimodal_content(req.content, req.files)
+        user_content = _build_multimodal_content(
+            req.content,
+            req.files,
+            session_id=session_id,
+            workspace=req.workspace,
+        )
 
     # asyncio.Queue bridges callbacks (invoked inside llm_tool_loop's task)
     # to the SSE generator running in the response.
