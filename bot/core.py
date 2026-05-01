@@ -4018,6 +4018,7 @@ def _build_bot_query_engine_callbacks(
     audit_fn,
     deep_learning_methods: set[str],
     usage_accumulator,
+    on_context_compacted=None,
 ):
     notified_methods: set[str] = set()
 
@@ -4152,6 +4153,7 @@ def _build_bot_query_engine_callbacks(
         after_tool=after_tool,
         request_tool_approval=request_tool_approval,
         on_llm_error=on_llm_error,
+        on_context_compacted=on_context_compacted,
     )
 
 
@@ -4212,6 +4214,7 @@ async def llm_tool_loop(
     on_tool_result=None,
     on_stream_content=None,
     on_stream_reasoning=None,
+    on_context_compacted=None,
     # Per-request runtime overrides (desktop app frontend)
     model_override: str = "",
     extra_api_params: dict | None = None,
@@ -4590,6 +4593,7 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         audit_fn=audit,
         deep_learning_methods=DEEP_LEARNING_METHODS,
         usage_accumulator=usage_accumulator or _accumulate_usage,
+        on_context_compacted=on_context_compacted,
     )
     resolved_policy_state = ToolPolicyState.from_mapping(
         policy_state,
