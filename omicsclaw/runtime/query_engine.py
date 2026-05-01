@@ -11,7 +11,12 @@ from omicsclaw.common.user_guidance import (
 )
 from omicsclaw.core.llm_patches import apply_deepseek_reasoning_passback
 
-from .context_compaction import ContextCompactionConfig, prepare_model_messages
+from .context_budget import estimate_message_size
+from .context_compaction import (
+    CompactionEvent,
+    ContextCompactionConfig,
+    prepare_model_messages,
+)
 from .events import (
     EVENT_SESSION_RESUME,
     EVENT_SESSION_START,
@@ -99,6 +104,7 @@ class QueryEngineCallbacks:
     after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = None
     request_tool_approval: Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None = None
     on_llm_error: Callable[[Exception], Any] | None = None
+    on_context_compacted: Callable[["CompactionEvent"], Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +398,38 @@ async def _materialize_message(
     return _materialize_message_from_choice_message(response.choices[0].message)
 
 
+async def _emit_compaction_event(
+    *,
+    callbacks: QueryEngineCallbacks,
+    pre_chars: int,
+    post_chars: int,
+    history_len: int,
+    kept_len: int,
+    applied_stages: tuple[str, ...],
+) -> None:
+    """Build a CompactionEvent and dispatch via the callback.
+
+    Failures in the user-supplied callback are logged at WARNING and
+    swallowed — compaction itself succeeded; failing to notify must
+    not abort the turn.
+    """
+    saved_chars = max(0, pre_chars - post_chars)
+    omitted = max(0, history_len - kept_len)
+    event = CompactionEvent(
+        messages_compressed=omitted,
+        tokens_saved_estimate=int(saved_chars / 3.5),
+        applied_stages=applied_stages,
+    )
+    try:
+        await _maybe_await(callbacks.on_context_compacted(event))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "on_context_compacted callback raised; ignoring.",
+            exc_info=True,
+        )
+
+
 async def run_query_engine(
     *,
     llm,
@@ -465,6 +503,7 @@ async def run_query_engine(
     last_message: MaterializedMessage | None = None
     for _ in range(config.max_iterations):
         history = transcript_store.prepare_history(context.chat_id)
+        pre_chars = sum(estimate_message_size(m) for m in history)
         prepared_messages = prepare_model_messages(
             system_prompt=system_prompt,
             history=history,
@@ -478,6 +517,15 @@ async def run_query_engine(
         request_messages = prepared_messages.messages
         if config.deepseek_reasoning_passback:
             request_messages = apply_deepseek_reasoning_passback(request_messages)
+        if prepared_messages.applied_stages and callbacks.on_context_compacted:
+            await _emit_compaction_event(
+                callbacks=callbacks,
+                pre_chars=pre_chars,
+                post_chars=prepared_messages.estimated_chars,
+                history_len=len(history),
+                kept_len=len(prepared_messages.messages),
+                applied_stages=prepared_messages.applied_stages,
+            )
         try:
             while True:
                 kwargs = {}
@@ -509,6 +557,7 @@ async def run_query_engine(
                     ):
                         raise
 
+                    reactive_pre_chars = sum(estimate_message_size(m) for m in history)
                     reactive_messages = prepare_model_messages(
                         system_prompt=system_prompt,
                         history=history,
@@ -532,6 +581,15 @@ async def run_query_engine(
                         if config.deepseek_reasoning_passback:
                             request_messages = apply_deepseek_reasoning_passback(
                                 request_messages
+                            )
+                        if callbacks.on_context_compacted:
+                            await _emit_compaction_event(
+                                callbacks=callbacks,
+                                pre_chars=reactive_pre_chars,
+                                post_chars=reactive_messages.estimated_chars,
+                                history_len=len(history),
+                                kept_len=len(reactive_messages.messages),
+                                applied_stages=reactive_messages.applied_stages,
                             )
                         continue
                     raise
