@@ -28,10 +28,45 @@ def test_build_provider_registry_entries_exposes_display_metadata():
     assert deepseek["display_name"] == "DeepSeek"
     assert deepseek["tier"] == "primary"
     assert deepseek["models"] == ["deepseek-v4-flash", "deepseek-v4-pro"]
+    assert deepseek["model_metadata"] == [
+        {"id": "deepseek-v4-flash", "context_window": 1_000_000},
+        {"id": "deepseek-v4-pro", "context_window": 1_000_000},
+    ]
+
+    openai = next(entry for entry in entries if entry["name"] == "openai")
+    assert openai["model_metadata"][0] == {
+        "id": "gpt-5.5-pro",
+        "context_window": 1_050_000,
+    }
+    assert {
+        item["id"]: item["context_window"]
+        for item in openai["model_metadata"]
+    }["gpt-5.4-mini"] == 400_000
+
+    gemini = next(entry for entry in entries if entry["name"] == "gemini")
+    assert {
+        item["id"]: item["context_window"]
+        for item in gemini["model_metadata"]
+    }["gemini-3-flash-preview"] == 1_048_576
+
+    nvidia = next(entry for entry in entries if entry["name"] == "nvidia")
+    assert {
+        item["id"]: item["context_window"]
+        for item in nvidia["model_metadata"]
+    }["nvidia/nemotron-3-super-120b-a12b"] == 1_000_000
+
+    moonshot = next(entry for entry in entries if entry["name"] == "moonshot")
+    moonshot_windows = {
+        item["id"]: item["context_window"]
+        for item in moonshot["model_metadata"]
+    }
+    assert moonshot_windows["kimi-k2.6"] == 262_144
+    assert "moonshot-v1-auto" not in moonshot_windows
 
     custom = next(entry for entry in entries if entry["name"] == "custom")
     assert custom["display_name"] == "Custom Endpoint"
     assert custom["models"] == []
+    assert custom["model_metadata"] == []
 
 
 def test_detect_provider_from_env_prefers_explicit_provider(monkeypatch):

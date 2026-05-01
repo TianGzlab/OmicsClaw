@@ -28,8 +28,8 @@ class TestResolveModel:
         # Unknown short_name → empty info but model_id preserved
         assert info.model_id == "claude-fictional-9-9"
         assert info.provider == "anthropic"
-        # Family-substring still finds claude- → 1M
-        assert info.context_window == 1_000_000
+        # Unknown models should not inherit guessed family-level windows.
+        assert info.context_window is None
 
     def test_unknown_provider_returns_empty(self):
         info = resolve_model("nonexistent", "some-model")
@@ -48,6 +48,68 @@ class TestResolveModel:
 
 
 class TestContextWindow:
+    @pytest.mark.parametrize(
+        ("model", "expected"),
+        [
+            ("deepseek-v4-flash", 1_000_000),
+            ("deepseek-v4-pro", 1_000_000),
+            ("gpt-5.5-pro", 1_050_000),
+            ("gpt-5.5", 1_050_000),
+            ("gpt-5.4", 1_050_000),
+            ("gpt-5.4-mini", 400_000),
+            ("gpt-5.3-codex", 400_000),
+            ("gpt-5", 400_000),
+            ("gpt-5-mini", 400_000),
+            ("claude-opus-4-7", 1_000_000),
+            ("claude-opus-4-6", 1_000_000),
+            ("claude-sonnet-4-6", 1_000_000),
+            ("claude-sonnet-4-5", 200_000),
+            ("claude-haiku-4-5", 200_000),
+            ("gemini-3.1-pro-preview", 1_048_576),
+            ("gemini-3-flash-preview", 1_048_576),
+            ("gemini-2.5-pro", 1_048_576),
+            ("gemini-2.5-flash", 1_048_576),
+            ("nvidia/nemotron-3-super-120b-a12b", 1_000_000),
+            ("deepseek-ai/deepseek-v3.2", 131_072),
+            ("moonshotai/kimi-k2.5", 262_144),
+            ("qwen/qwen3.5-397b-a17b", 262_144),
+            ("Pro/zai-org/GLM-5", 202_752),
+            ("Pro/MiniMaxAI/MiniMax-M2.5", 196_608),
+            ("Pro/moonshotai/Kimi-K2.5", 262_144),
+            ("Pro/zai-org/GLM-4.7", 202_752),
+            ("anthropic/claude-sonnet-4.6", 1_000_000),
+            ("anthropic/claude-opus-4.7", 1_000_000),
+            ("openai/gpt-5.5", 1_050_000),
+            ("openai/gpt-5.4", 1_050_000),
+            ("google/gemini-3.1-pro-preview", 1_048_576),
+            ("moonshotai/kimi-k2.6", 262_142),
+            ("minimax/minimax-m2.7", 196_608),
+            ("deepseek/deepseek-v4-pro", 1_048_576),
+            ("doubao-seed-2-0-pro-260215", 1_000_000),
+            ("doubao-seed-2-0-lite-260215", 1_000_000),
+            ("doubao-1.5-pro-256k", 256_000),
+            ("doubao-1.5-thinking-pro", 256_000),
+            ("qwen3.6-plus", 1_000_000),
+            ("qwen3-max", 262_144),
+            ("qwen3-coder-plus", 1_000_000),
+            ("qwen3-235b-a22b", 131_072),
+            ("qwq-plus", 131_072),
+            ("kimi-k2.6", 262_144),
+            ("kimi-k2.5", 262_144),
+            ("kimi-k2-thinking", 262_144),
+            ("glm-5.1", 202_752),
+            ("glm-5", 202_752),
+            ("glm-5-turbo", 202_752),
+            ("glm-4.7", 202_752),
+        ],
+    )
+    def test_supported_provider_models_have_verified_context_windows(
+        self,
+        model,
+        expected,
+    ):
+        assert get_context_window(model) == expected
+
     def test_exact_match_overrides_family(self):
         # claude-haiku-4-5 is 200K not 1M (exception to claude- family)
         assert get_context_window("claude-haiku-4-5") == 200_000
@@ -56,16 +118,16 @@ class TestContextWindow:
         assert get_context_window("qwen3.6-27b") == 262_000
 
     def test_family_match_claude(self):
-        assert get_context_window("claude-opus-4-7-20260101") == 1_000_000
+        assert get_context_window("claude-opus-4-7-20260101") is None
 
     def test_family_match_gpt55(self):
         assert get_context_window("gpt-5.5-pro") == 1_050_000
 
     def test_family_match_kimi_k2(self):
-        assert get_context_window("kimi-k2-thinking-turbo") == 262_000
+        assert get_context_window("kimi-k2-thinking-turbo") is None
 
     def test_family_match_deepseek_v4(self):
-        assert get_context_window("deepseek-v4-pro") == 1_050_000
+        assert get_context_window("deepseek-v4-pro") == 1_000_000
 
     def test_family_match_qwen36_closed(self):
         assert get_context_window("qwen3.6-plus") == 1_000_000
@@ -177,6 +239,19 @@ class TestListing:
             "deepseek",
         }
         assert expected.issubset(providers)
+
+    def test_catalog_models_all_have_verified_context_windows(self):
+        missing = [
+            (provider, model)
+            for _short_name, model, provider in MODEL_CATALOG
+            if get_context_window(model) is None
+        ]
+
+        assert missing == []
+
+    def test_removed_unverified_moonshot_v1_alias_is_not_catalogued(self):
+        assert all(model != "moonshot-v1-auto" for _short, model, _provider in MODEL_CATALOG)
+        assert get_context_window("moonshot-v1-auto") is None
 
 
 class TestNeverRaises:

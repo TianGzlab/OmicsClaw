@@ -15,6 +15,11 @@ ProviderPreset = tuple[str, str, str]
 ProviderTier = Literal["primary", "aggregator", "local"]
 
 
+class ModelMetadata(TypedDict):
+    id: str
+    context_window: int | None
+
+
 class ProviderDisplayMetadata(TypedDict):
     display_name: str
     description: str
@@ -33,6 +38,7 @@ class ProviderRegistryEntry(TypedDict):
     description_zh: str
     tier: ProviderTier
     models: list[str]
+    model_metadata: list[ModelMetadata]
 
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
@@ -179,7 +185,7 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
         "description": "Kimi K2.6 / K2.5 series models",
         "description_zh": "月之暗面 Kimi K2.6 / K2.5 系列模型",
         "tier": "aggregator",
-        "models": ("kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "moonshot-v1-auto"),
+        "models": ("kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"),
     },
     "zhipu": {
         "display_name": "Zhipu AI",
@@ -270,6 +276,8 @@ def get_provider_display_metadata(provider_name: str) -> ProviderDisplayMetadata
 def build_provider_registry_entries(
     provider_presets: Mapping[str, ProviderPreset] = PROVIDER_PRESETS,
 ) -> list[ProviderRegistryEntry]:
+    from omicsclaw.core.llm_models import get_context_window
+
     entries: list[ProviderRegistryEntry] = []
     for name, (base_url, default_model, env_key) in provider_presets.items():
         metadata = get_provider_display_metadata(name)
@@ -277,6 +285,10 @@ def build_provider_registry_entries(
             *metadata["models"],
             *((default_model,) if default_model else tuple()),
         ]))
+        model_metadata: list[ModelMetadata] = [
+            {"id": model, "context_window": get_context_window(model)}
+            for model in models
+        ]
         entries.append({
             "name": name,
             "base_url": base_url,
@@ -287,6 +299,7 @@ def build_provider_registry_entries(
             "description_zh": metadata["description_zh"],
             "tier": metadata["tier"],
             "models": models,
+            "model_metadata": model_metadata,
         })
     return entries
 

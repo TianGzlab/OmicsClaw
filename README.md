@@ -226,6 +226,15 @@ Keep `CCPROXY_PORT` different from the app backend port `8765`.
 > explicitly configured a custom `*_BASE_URL` / `LLM_BASE_URL`. Deprecated
 > DeepSeek defaults (`deepseek-chat` / `deepseek-reasoner`) are likewise
 > migrated to the current DeepSeek default `deepseek-v4-flash`.
+>
+> **Model context windows:** `omicsclaw/core/llm_models.py` is the static source
+> of truth for verified context-window values. Built-in hosted models are kept
+> only when their provider-published window or gateway limit can be verified.
+> `GET /providers` exposes those values as `model_metadata` beside the stable
+> `models` list so desktop clients can display context usage from backend
+> metadata instead of guessing from model name prefixes. Unknown custom/local
+> model IDs intentionally return no context window until a provider-published
+> value is added to the catalog.
 
 </details>
 

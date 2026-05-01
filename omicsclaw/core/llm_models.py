@@ -82,7 +82,6 @@ MODEL_CATALOG: list[tuple[str, str, str]] = [
     ("kimi-k2.6",        "kimi-k2.6",        "moonshot"),
     ("kimi-k2.5",        "kimi-k2.5",        "moonshot"),
     ("kimi-k2-thinking", "kimi-k2-thinking", "moonshot"),
-    ("moonshot-v1-auto", "moonshot-v1-auto", "moonshot"),
     # zhipu
     ("glm-5.1",     "glm-5.1",     "zhipu"),
     ("glm-5",       "glm-5",       "zhipu"),
@@ -100,23 +99,77 @@ MODEL_CATALOG: list[tuple[str, str, str]] = [
 # Context window table
 # ---------------------------------------------------------------------------
 
-# Exact-name overrides, lowercased. Wins over family substring matches.
+# Exact-name overrides, lowercased. Values are provider-published context
+# windows or current model-gateway limits verified from official model catalogs.
 _KNOWN_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
-    "qwen3.6-27b":      262_000,
-    "qwen3.6-35b-a3b":  262_000,
+    # DeepSeek
+    "deepseek-v4-flash": 1_000_000,
+    "deepseek-v4-pro": 1_000_000,
+    "deepseek-chat": 1_000_000,
+    "deepseek-reasoner": 1_000_000,
+    # OpenAI
+    "gpt-5.5-pro": 1_050_000,
+    "gpt-5.5": 1_050_000,
+    "gpt-5.4": 1_050_000,
+    "gpt-5.4-mini": 400_000,
+    "gpt-5.3-codex": 400_000,
+    "gpt-5": 400_000,
+    "gpt-5-mini": 400_000,
+    # Anthropic
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-sonnet-4-5": 200_000,
     "claude-haiku-4-5": 200_000,
+    # Google Gemini
+    "gemini-3.1-pro-preview": 1_048_576,
+    "gemini-3-flash-preview": 1_048_576,
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
+    # NVIDIA NIM
+    "nvidia/nemotron-3-super-120b-a12b": 1_000_000,
+    "deepseek-ai/deepseek-v3.2": 131_072,
+    "moonshotai/kimi-k2.5": 262_144,
+    "qwen/qwen3.5-397b-a17b": 262_144,
+    # SiliconFlow
+    "pro/zai-org/glm-5": 202_752,
+    "pro/minimaxai/minimax-m2.5": 196_608,
+    "pro/moonshotai/kimi-k2.5": 262_144,
+    "pro/zai-org/glm-4.7": 202_752,
+    # OpenRouter
+    "anthropic/claude-sonnet-4.6": 1_000_000,
+    "anthropic/claude-opus-4.7": 1_000_000,
+    "openai/gpt-5.5": 1_050_000,
+    "openai/gpt-5.4": 1_050_000,
+    "google/gemini-3.1-pro-preview": 1_048_576,
+    "moonshotai/kimi-k2.6": 262_142,
+    "minimax/minimax-m2.7": 196_608,
+    "deepseek/deepseek-v4-pro": 1_048_576,
+    # Volcengine
+    "doubao-seed-2-0-pro-260215": 1_000_000,
+    "doubao-seed-2-0-lite-260215": 1_000_000,
+    "doubao-seed-2-0-code-preview-260215": 1_000_000,
+    "doubao-1.5-pro-256k": 256_000,
+    "doubao-1.5-thinking-pro": 256_000,
+    # DashScope
+    "qwen3.6-plus": 1_000_000,
+    "qwen3.6-27b": 262_000,
+    "qwen3.6-35b-a3b": 262_000,
+    "qwen3-max": 262_144,
+    "qwen-max": 262_144,
+    "qwen3-coder-plus": 1_000_000,
+    "qwen3-235b-a22b": 131_072,
+    "qwq-plus": 131_072,
+    # Moonshot
+    "kimi-k2.6": 262_144,
+    "kimi-k2.5": 262_144,
+    "kimi-k2-thinking": 262_144,
+    # Zhipu / Z.AI
+    "glm-5.1": 202_752,
+    "glm-5": 202_752,
+    "glm-5-turbo": 202_752,
+    "glm-4.7": 202_752,
 }
-
-# Family-level substring fallbacks. Order matters — first match wins.
-_KNOWN_MODEL_FAMILIES: list[tuple[str, int]] = [
-    ("claude-",       1_000_000),  # via context-1m beta header
-    ("gpt-5.5",       1_050_000),
-    ("kimi-k2",         262_000),
-    ("glm-5",           203_000),
-    ("deepseek-v4",   1_050_000),
-    ("qwen3.6",       1_000_000),
-    ("doubao-seed-2", 1_000_000),
-]
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +201,8 @@ def _is_localhost(base_url: str) -> bool:
 def get_context_window(model: str | None) -> int | None:
     """Return the context-window for a model_id (or short name).
 
-    Priority: exact lowercased match → final ``/``-segment exact match →
-    family-level substring match. Returns ``None`` if nothing matches.
+    Priority: exact lowercased match → final ``/``-segment exact match.
+    Returns ``None`` if nothing matches.
     """
     if not model or not isinstance(model, str):
         return None
@@ -159,9 +212,6 @@ def get_context_window(model: str | None) -> int | None:
     short = lowered.split("/")[-1]
     if short != lowered and short in _KNOWN_MODEL_CONTEXT_WINDOWS:
         return _KNOWN_MODEL_CONTEXT_WINDOWS[short]
-    for pattern, window in _KNOWN_MODEL_FAMILIES:
-        if pattern in lowered:
-            return window
     return None
 
 

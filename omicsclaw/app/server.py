@@ -2970,6 +2970,11 @@ async def list_providers():
                 "description_zh": "",
                 "tier": "local",
                 "models": [default_model] if default_model else [],
+                "model_metadata": (
+                    [{"id": default_model, "context_window": None}]
+                    if default_model
+                    else []
+                ),
             }
             for name, (base_url, default_model, env_key) in PROVIDER_PRESETS.items()
         ]
