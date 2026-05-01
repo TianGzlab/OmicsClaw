@@ -887,10 +887,32 @@ async def test_health_reports_runtime_python_and_dependency_status(monkeypatch):
     assert payload["python_version"]
     assert payload["skill_python_executable"] == "/opt/analysis/bin/python"
     assert payload["omicsclaw_dir"] == "/tmp/omicsclaw-project"
+    assert payload["launch_id"] == ""
     assert payload["dependencies"] == {
         "cellcharter": True,
         "squidpy": False,
     }
+
+
+def test_health_echoes_desktop_launch_id(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    fake_core = SimpleNamespace(
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        _primary_skill_count=lambda: 42,
+        get_skill_runner_python=lambda: sys.executable,
+        OMICSCLAW_DIR=ROOT,
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "launch-123")
+
+    payload = asyncio.run(server.health())
+
+    assert payload["launch_id"] == "launch-123"
 
 
 @pytest.mark.asyncio

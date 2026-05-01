@@ -610,6 +610,7 @@ def _runtime_health_payload(core: Any) -> dict[str, Any]:
         "python_version": platform.python_version(),
         "skill_python_executable": skill_python,
         "omicsclaw_dir": omicsclaw_dir,
+        "launch_id": str(os.getenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "") or ""),
         "dependencies": {
             "cellcharter": _module_available("cellcharter"),
             "squidpy": _module_available("squidpy"),

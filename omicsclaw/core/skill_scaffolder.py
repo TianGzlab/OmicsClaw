@@ -5,13 +5,13 @@ from __future__ import annotations
 import ast
 from dataclasses import asdict, dataclass, field
 import json
+import os
 import re
 import shutil
 from pathlib import Path
 import textwrap
 from typing import Iterable
 
-import omicsclaw
 from omicsclaw.common.manifest import StepRecord
 from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.verification import (
@@ -26,7 +26,14 @@ from omicsclaw.runtime.verification import (
 )
 
 
-OMICSCLAW_DIR = Path(omicsclaw.__file__).resolve().parent.parent
+def _resolve_omicsclaw_dir() -> Path:
+    override = str(os.getenv("OMICSCLAW_DIR", "") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path(__file__).resolve().parents[2]
+
+
+OMICSCLAW_DIR = _resolve_omicsclaw_dir()
 SKILLS_DIR = OMICSCLAW_DIR / "skills"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 SKILL_TEMPLATE_PATH = OMICSCLAW_DIR / "templates" / "SKILL-TEMPLATE.md"

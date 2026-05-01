@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import time
 
@@ -11,6 +13,30 @@ from omicsclaw.core.skill_scaffolder import (
     find_latest_autonomous_analysis,
     infer_skill_name,
 )
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_skill_scaffolder_import_does_not_require_package_file():
+    code = """
+import importlib
+import omicsclaw
+
+omicsclaw.__file__ = None
+scaffolder = importlib.import_module("omicsclaw.core.skill_scaffolder")
+assert scaffolder.OMICSCLAW_DIR.name == "OmicsClaw"
+assert scaffolder.SKILLS_DIR.name == "skills"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_infer_skill_name_falls_back_to_request_tokens():

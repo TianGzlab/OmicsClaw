@@ -65,6 +65,11 @@
 - **🎯 Smart Routing** — Natural language routed to the appropriate analysis automatically.
 - **🧬 Multi-Omics Coverage** — 72 predefined skills across spatial, single-cell, genomics, proteomics, metabolomics, bulk RNA-seq, literature and orchestration.
 
+> **Desktop backend health:** `oc app-server` includes an optional
+> `launch_id` in `/health` when started with `OMICSCLAW_DESKTOP_LAUNCH_ID`.
+> OmicsClaw Desktop uses this process handshake to avoid mistaking a stale
+> backend already listening on port 8765 for the newly launched backend.
+
 **What makes it different:**
 
 | Traditional Tools | OmicsClaw |

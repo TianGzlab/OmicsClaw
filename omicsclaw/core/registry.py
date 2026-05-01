@@ -7,16 +7,23 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
-import omicsclaw
 from omicsclaw.core.lazy_metadata import LazySkillMetadata
 
 logger = logging.getLogger(__name__)
 
+def _resolve_omicsclaw_dir() -> Path:
+    override = str(os.getenv("OMICSCLAW_DIR", "") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path(__file__).resolve().parents[2]
+
+
 # Base directories
-OMICSCLAW_DIR = Path(omicsclaw.__file__).resolve().parent.parent
+OMICSCLAW_DIR = _resolve_omicsclaw_dir()
 SKILLS_DIR = OMICSCLAW_DIR / "skills"
 
 
