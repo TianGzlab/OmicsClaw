@@ -115,12 +115,12 @@ spatial-domains = [
 # --------------------------------------------------------------------------- #
 spatial = [
     "torch>=2.0.0,<3.0",
-    "scvi-tools>=1.0.0,<2.0",        # Cell2Location, scANVI, VeloVI, scVI
+    "scvi-tools>=1.4.0,<2.0",        # Cell2Location, scANVI, VeloVI, scVI
     "GraphST>=1.1.0",                 # spatial-domains: GraphST method
     "torch_geometric",                # spatial-domains: STAGATE dependency
     "cellcharter>=0.2.0",             # spatial-domains: CellCharter method
     "tangram-sc>=1.0.0",              # spatial-annotate: Tangram method
-    "cell2location>=0.1.4",           # spatial-deconv: Cell2Location method
+    "cell2location>=0.1.5,<0.2",      # spatial-deconv: Cell2Location method
     "flashdeconv>=0.1.0",             # spatial-deconv: FlashDeconv method
     "scvelo>=0.2.5",                  # spatial-velocity: scVelo
     "liana",                          # spatial-communication: LIANA+ method
@@ -193,7 +193,7 @@ singlecell-batch = [
     "harmonypy>=0.0.9",               # Harmony batch correction
     "bbknn>=1.5.0",                   # BBKNN batch correction
     "scanorama>=1.7.0",               # Scanorama batch correction
-    "scvi-tools>=1.0.0,<2.0",         # scVI / scANVI integration
+    "scvi-tools>=1.4.0,<2.0",         # scVI / scANVI integration
     "torch>=2.0.0,<3.0",              # PyTorch for scvi-tools
 ]
 
@@ -293,7 +293,7 @@ full = [
 # --------------------------------------------------------------------------- #
 spatial-velocity = [
     "scvelo>=0.2.5",                  # RNA velocity (scVelo)
-    "scvi-tools>=1.0.0,<2.0",        # VeloVI method
+    "scvi-tools>=1.4.0,<2.0",        # VeloVI method
 ]
 
 spatial-cnv = [
@@ -323,14 +323,14 @@ spatial-registration = [
 
 spatial-annotate = [
     "tangram-sc>=1.0.0",              # Tangram cell type annotation
-    "scvi-tools>=1.0.0,<2.0",        # scANVI, CellAssign methods
+    "scvi-tools>=1.4.0,<2.0",        # scANVI, CellAssign methods
     "torch>=2.0.0,<3.0",             # PyTorch (required by scvi-tools)
 ]
 
 spatial-deconv = [
     "flashdeconv>=0.1.0",            # FlashDeconv: fast CPU deconvolution
-    "cell2location>=0.1.4",          # Cell2Location: Bayesian spatial deconvolution
-    "scvi-tools>=1.0.0,<2.0",        # DestVI (CondSCVI+DestVI) and Stereoscope
+    "cell2location>=0.1.5,<0.2",     # Cell2Location: Bayesian spatial deconvolution
+    "scvi-tools>=1.4.0,<2.0",        # DestVI (CondSCVI+DestVI) and Stereoscope
     "tangram-sc>=1.0.0",             # Tangram: deep learning cell-to-spot mapping
     "torch>=2.0.0,<3.0",             # PyTorch backend for scvi-tools and Tangram
 ]
@@ -359,7 +359,7 @@ spatial-r-bridge = []
 
 # --------------------------------------------------------------------------- #
 # banksy — isolated because pybanksy requires numpy<2.0, which conflicts with #
-# pydeseq2, jax, and other packages in the full tier.                         #
+# pydeseq2, scvi-tools, and other packages in the full tier.                  #
 # Install in a separate environment or before installing full.                #
 # --------------------------------------------------------------------------- #
 banksy = [

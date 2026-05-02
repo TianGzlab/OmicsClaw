@@ -131,6 +131,12 @@ Tier 2 的 pip 安装还会设置
 包元数据仍引用已废弃的 `sklearn` PyPI 占位包。OmicsClaw 自身依赖的是正确的
 `scikit-learn` 包；该变量只用于允许 SpaGCN 的旧传递依赖元数据完成解析。
 
+完整 Python 依赖会把 `scvi-tools` 限定在 Python 3.11+ 兼容线
+（`>=1.4.0,<2.0`），并使用 `cell2location>=0.1.5,<0.2`。旧的
+`scvi-tools` 1.3.x 元数据会拉入很宽的 `jax<0.7.0` / `jaxlib<0.7.0`
+约束，在部分 PyPI 镜像上会导致 pip 回溯大量 `jax` 版本并报
+`resolution-too-deep`。
+
 如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
 但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，包括只显示
 路径、不显示名称的匿名 env-list 行，并使用 `env update -p <prefix>` 继续更新。

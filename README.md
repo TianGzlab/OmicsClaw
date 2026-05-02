@@ -136,6 +136,12 @@ because the upstream `SpaGCN` package metadata still references the deprecated
 `scikit-learn` package; this flag only allows SpaGCN's legacy transitive
 metadata to resolve.
 
+The full Python dependency set keeps `scvi-tools` on the Python 3.11+ line
+(`>=1.4.0,<2.0`) and `cell2location>=0.1.5,<0.2`. Older `scvi-tools` 1.3.x
+metadata pulls broad `jax<0.7.0` / `jaxlib<0.7.0` constraints, which can make
+pip backtrack through many `jax` releases and fail with
+`resolution-too-deep` on some package mirrors.
+
 If a previous interrupted run left a complete prefix at
 `<conda-root>/envs/OmicsClaw` but `conda info --envs` does not list it by name,
 the script detects that prefix, including anonymous env-list rows that show
