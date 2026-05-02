@@ -162,6 +162,9 @@ target R 4.4/4.5 while the main OmicsClaw env remains on R 4.3.
 Tier 3's other GitHub R package roots (`spacexr`, `CellChat`, `numbat`,
 `SPARK`, and `DoubletFinder`) also have their conda-resolvable direct
 `Depends`/`Imports`/`LinkingTo` dependencies preinstalled in `environment.yml`.
+Their GitHub installs do not re-run R dependency resolution and skip
+vignettes/manuals, so setup is not affected by current CRAN transitive drift
+such as `CellChat -> ggpubr -> doBy -> forecast` on the R 4.3 baseline.
 The only known residual source-build risk on the R 4.3 line is `numbat`'s
 `hahmmr`/`scistreer` dependency pair: conda-forge/bioconda currently expose
 cached builds for R 4.4+, while OmicsClaw keeps the main env on R 4.3 for now.

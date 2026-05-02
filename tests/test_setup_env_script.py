@@ -126,11 +126,24 @@ def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
 
     cran_install = 'install.packages("wrMisc"'
-    github_install = "devtools::install_github(p[2]"
+    github_install = "    devtools::install_github("
 
     assert cran_install in setup_script
     assert github_install in setup_script
+    assert "p[2]," in setup_script
     assert setup_script.index(cran_install) < setup_script.index(github_install)
+
+
+def test_setup_env_installs_github_r_packages_without_dependency_resolution_or_vignettes():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+    install_call = "    devtools::install_github("
+
+    assert install_call in setup_script
+    assert "p[2]," in setup_script
+    assert "dependencies = FALSE" in setup_script
+    assert "build_vignettes = FALSE" in setup_script
+    assert "build_manual = FALSE" in setup_script
 
 
 def test_conda_forge_wrmisc_builds_do_not_target_r43():

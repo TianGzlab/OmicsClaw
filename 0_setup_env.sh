@@ -278,6 +278,11 @@ echo "[setup_env] ✔ Tier 2 complete"
 # sysroot + R headers automatically. r-devtools is in environment.yml.
 # wrMisc is installed from CRAN here instead of conda because conda-forge's
 # current r-wrmisc builds require R 4.4/4.5, while the main env stays on R 4.3.
+# GitHub package installs intentionally skip dependency resolution and
+# vignettes/manuals. Hard runtime/build deps are owned by environment.yml and
+# the wrMisc CRAN preflight above; letting devtools resolve dependencies here
+# can pull current CRAN transitive chains such as CellChat -> ggpubr -> doBy ->
+# forecast, which drifts outside the supported R 4.3 conda baseline.
 
 echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
 env_run Rscript - <<'RSCRIPT'
@@ -303,7 +308,14 @@ for (p in gh_pkgs) {
     cat(sprintf("[r-extras] %s already installed — skipping\n", p[1]))
   } else {
     cat(sprintf("[r-extras] installing %s from GitHub:%s\n", p[1], p[2]))
-    devtools::install_github(p[2], upgrade = "never", quiet = TRUE)
+    devtools::install_github(
+      p[2],
+      dependencies = FALSE,
+      upgrade = "never",
+      build_vignettes = FALSE,
+      build_manual = FALSE,
+      quiet = FALSE
+    )
     if (!requireNamespace(p[1], quietly = TRUE)) {
       stop(sprintf("[r-extras] FAILED to install %s", p[1]))
     }
