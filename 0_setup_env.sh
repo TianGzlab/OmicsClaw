@@ -318,6 +318,46 @@ echo "[setup_env] Tier 4: linking vendored tools (currently empty stub)"
 # Add link_if_exists calls here when vendoring real tools.
 echo "[setup_env] ✔ Tier 4 complete (no tools vendored)"
 
+# ----- Tier 5: optional sub-environments (Layer 4) -----------------
+# Tools whose dependency pins conflict with the main env live in dedicated
+# sub-envs named `omicsclaw_<tool>`, invoked at runtime via subprocess
+# bridge (see omicsclaw/core/external_env.py).
+#
+# Bootstrap is opt-in: pass `--with-banksy` (or set OMICSCLAW_WITH_BANKSY=1)
+# to install. Default skips to keep base-install fast.
+
+bootstrap_subenv() {
+    local sub_name="$1"
+    local sub_yml="$2"
+    if [ ! -f "$sub_yml" ]; then
+        echo "[setup_env] ⚠ sub-env file missing: $sub_yml" >&2
+        return 1
+    fi
+    if "$INSTALLER" env list | awk '{print $1}' | grep -qx "$sub_name"; then
+        echo "[setup_env] sub-env '$sub_name' exists — updating"
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$sub_name" -f "$sub_yml" --prune
+    else
+        echo "[setup_env] creating sub-env '$sub_name'"
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env create -n "$sub_name" -f "$sub_yml"
+    fi
+}
+
+# Detect --with-banksy in any positional position (after $ENV_NAME = $1).
+WITH_BANKSY=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-banksy) WITH_BANKSY=1 ;;
+    esac
+done
+
+if [ "${OMICSCLAW_WITH_BANKSY:-0}" = "1" ] || [ "$WITH_BANKSY" = "1" ]; then
+    echo "[setup_env] Tier 5: bootstrapping omicsclaw_banksy sub-env"
+    bootstrap_subenv "omicsclaw_banksy" "$PROJECT_ROOT/environments/banksy.yml"
+    echo "[setup_env] ✔ Tier 5 (banksy) complete"
+else
+    echo "[setup_env] Tier 5 skipped (set OMICSCLAW_WITH_BANKSY=1 or pass --with-banksy to enable banksy)"
+fi
+
 # ----- summary ------------------------------------------------------
 
 cat <<EOF

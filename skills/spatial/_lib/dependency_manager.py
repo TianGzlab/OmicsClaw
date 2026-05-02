@@ -78,8 +78,10 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
         "Graph self-supervised contrastive learning (GraphST)"
     ),
     "pybanksy": DependencyInfo(
-        "banksy", "pip install pybanksy",
-        "Spatial domain identification (BANKSY)"
+        "banksy",
+        "BANKSY runs in the omicsclaw_banksy sub-env (numpy<2.0). "
+        "Bootstrap once: bash 0_setup_env.sh --with-banksy",
+        "Spatial domain identification (BANKSY, Layer-4 sub-env)",
     ),
     "cellcharter": DependencyInfo(
         "cellcharter", "pip install cellcharter",
