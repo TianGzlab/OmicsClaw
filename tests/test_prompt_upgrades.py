@@ -74,3 +74,29 @@ class TestSkillContractDoingTasksInjection:
 
     def test_owasp_present(self, skill_contract_text: str):
         assert "OWASP-class vulnerabilities" in skill_contract_text
+
+
+@pytest.fixture
+def output_format_text_default_bot() -> str:
+    from omicsclaw.runtime.output_styles import render_output_style_layer
+    return render_output_style_layer(style_name="default", surface="bot")
+
+
+class TestOutputFormatEfficiencyInjection:
+    def test_lead_with_answer_present(self, output_format_text_default_bot: str):
+        assert "Lead with the answer" in output_format_text_default_bot
+
+    def test_one_sentence_rule_present(self, output_format_text_default_bot: str):
+        assert "one sentence, don't use three" in output_format_text_default_bot
+
+    def test_milestones_rule_present(self, output_format_text_default_bot: str):
+        assert "natural milestones" in output_format_text_default_bot
+
+    def test_prose_only_caveat_present(self, output_format_text_default_bot: str):
+        assert "applies to your prose only" in output_format_text_default_bot
+
+    def test_efficiency_section_present_for_other_profiles(self):
+        from omicsclaw.runtime.output_styles import render_output_style_layer
+        for style in ("scientific-brief", "teaching", "pipeline-operator"):
+            text = render_output_style_layer(style_name=style, surface="bot")
+            assert "Lead with the answer" in text, f"style={style} missing efficiency section"
