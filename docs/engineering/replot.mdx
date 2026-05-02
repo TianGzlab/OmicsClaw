@@ -1,0 +1,65 @@
+---
+title: "R Enhanced 重绘 - 不重跑分析也能调图"
+description: "Replot 让你在 skill 跑完后调整 R Enhanced 图的参数（top-N、字号、配色）而无需重跑底层分析，复用已存的 figure_data。"
+keywords: ["replot", "R Enhanced", "ggplot2", "figure 重绘", "OmicsClaw"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么需要 replot
+
+**重跑成本高**：一个 skill 首跑可能需要几分钟到几十分钟；仅因为图样式调整就重跑全部分析，代价远超收益。
+
+**算 / 出图 解耦**：skill 算完后同时落标准 Python 图和 `figure_data/` 目录；replot 只读取 `figure_data/` 生成 R Enhanced 图，两者完全解耦，是系统设计原则。
+
+**三层可视化流**：首跑生成 Python 标准图 → `replot` 生成 R Enhanced 高质量图 → 带参数的 `replot` 微调 renderer / top-N / 配色，层层递进，按需使用。
+
+## 启用前 / 启用后
+
+| 维度 | 无 replot | 有 replot |
+|---|---|---|
+| 改 top-N | 重跑整个 skill | `replot --top-n 30` 秒级 |
+| 改配色 | 修改源代码 | `replot --palette viridis` |
+| 改 DPI / 大小 | 修改源代码 | `replot --dpi 300 --width 10` |
+| 同一份分析多种图 | 拷贝代码修改 | `replot --renderer plot_de_volcano` |
+
+## CLI 示例
+
+重绘 `spatial-de` 输出目录中所有 R Enhanced 图（最简形式）：
+
+```bash
+python omicsclaw.py replot spatial-de --output /path/to/output/
+```
+
+列出该 skill 所有可用 renderer 及其可调参数：
+
+```bash
+python omicsclaw.py replot spatial-de --output /path/to/output/ --list-renderers
+```
+
+只重绘火山图，并将展示基因数调为 30：
+
+```bash
+python omicsclaw.py replot spatial-de --output /path/to/output/ \
+  --renderer plot_de_volcano --top-n 30
+```
+
+切换配色并增大字号、提高 DPI：
+
+```bash
+python omicsclaw.py replot spatial-de --output /path/to/output/ \
+  --palette RdBu --font-size 14 --dpi 300
+```
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| 报找不到 `figure_data` | skill 首跑未成功生成产物 | 检查首跑是否报错 |
+| R 报缺少依赖包 | R Enhanced 依赖未安装 | 见 [`R-DEPENDENCIES.md`](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md) |
+| `--top-n` 不生效 | 该 renderer 不接受此参数 | 先用 `--list-renderers` 确认 |
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview)
+- [Memory 系统](/docs/engineering/memory)
+- [远程执行模式](/docs/engineering/remote-execution)
