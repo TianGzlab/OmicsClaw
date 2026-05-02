@@ -223,6 +223,9 @@ oauth = [
     # httpx moved to environment.yml Tier 4
 ]
 
+# These three extras are placeholders for future domain-specific Python
+# packages. Currently empty — domain skills run via the core stack
+# (scanpy/anndata/scipy/etc., installed by environment.yml Tier 4).
 genomics = []
 
 proteomics = []

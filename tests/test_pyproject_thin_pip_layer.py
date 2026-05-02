@@ -9,8 +9,14 @@ from packaging.requirements import Requirement
 ROOT = Path(__file__).resolve().parents[1]
 
 # Packages that MUST be installed via conda/mamba, NOT listed in pyproject.
-# cellphonedb is intentionally absent — it's marked `unknown` in the Task 0
-# audit and stays in pyproject pending network re-verification.
+# Pip-only packages (no conda recipe at Task 0 audit) are NOT in CONDA_OWNED
+# and stay in pyproject: SpaGCN, GraphST, cellcharter, paste-bio, flashdeconv,
+# fastccc, pyVIA, pybanksy, ccproxy-api, tangram-sc, deepagents,
+# opendataloader-pdf, torch_geometric, liana, phate, python-multipart, langchain*,
+# langgraph*, tavily-python, markdownify, pypdf, textual.
+# 'unknown' packages (Task 0 audit could not classify): cell2location,
+# cellphonedb, infercnvpy, SpatialDE — also absent from CONDA_OWNED, pending
+# network re-audit.
 CONDA_OWNED = {
     "scanpy", "anndata", "squidpy", "numpy", "pandas", "scipy",
     "scikit-learn", "matplotlib", "seaborn", "pillow", "scikit-misc",
