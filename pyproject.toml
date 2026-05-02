@@ -130,7 +130,7 @@ singlecell-upstream = [
 # singlecell-clustering — optional clustering/embedding backends.             #
 # --------------------------------------------------------------------------- #
 singlecell-clustering = [
-    "python-igraph>=0.11.0",          # Leiden graph backend
+    # python-igraph moved to environment.yml Tier 4
     # leidenalg moved to environment.yml Tier 4
     # louvain moved to environment.yml Tier 4
     "phate>=1.0.11",                  # PHATE embedding

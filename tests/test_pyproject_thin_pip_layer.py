@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONDA_OWNED = {
     "scanpy", "anndata", "squidpy", "numpy", "pandas", "scipy",
     "scikit-learn", "matplotlib", "seaborn", "pillow", "scikit-misc",
-    "igraph", "leidenalg", "louvain", "umap-learn", "pydantic",
+    "igraph", "python-igraph", "leidenalg", "louvain", "umap-learn", "pydantic",
     "nbformat", "jupyter-client", "ipykernel", "rich", "greenlet",
     "prompt-toolkit", "questionary", "pyyaml", "aiosqlite", "sqlalchemy",
     "fastapi", "uvicorn", "cryptography", "requests", "openai",
