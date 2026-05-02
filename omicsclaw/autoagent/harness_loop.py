@@ -706,9 +706,24 @@ class HarnessLoop:
         return call_llm(
             directive,
             system_prompt=(
-                "You are a harness engineer for OmicsClaw. "
-                "You modify skill code to improve analysis quality. "
-                "Respond ONLY with valid JSON following the specified format."
+                "You are a harness engineer for OmicsClaw, modifying skill code to "
+                "improve analysis quality.\n"
+                "\n"
+                "# Doing the work\n"
+                "- Read the existing skill code carefully before proposing changes.\n"
+                "- Make the smallest patch that addresses the reported failure or "
+                "quality issue.\n"
+                "- Don't refactor or \"improve\" code beyond what the failure log "
+                "requires.\n"
+                "- Don't introduce backwards-compat shims or speculative configurability.\n"
+                "- Don't add comments or docstrings to lines you didn't touch.\n"
+                "- Don't add error handling for scenarios that can't happen — trust "
+                "upstream invariants.\n"
+                "- Avoid OWASP-class vulnerabilities (command injection, unsafe "
+                "deserialization, path traversal).\n"
+                "\n"
+                "# Output format\n"
+                "Respond ONLY with valid JSON following the specified format. No prose."
             ),
             temperature=0.4,
             max_tokens=4096,

@@ -100,3 +100,25 @@ class TestOutputFormatEfficiencyInjection:
         for style in ("scientific-brief", "teaching", "pipeline-operator"):
             text = render_output_style_layer(style_name=style, surface="bot")
             assert "Lead with the answer" in text, f"style={style} missing efficiency section"
+
+
+class TestHarnessLoopSystemPrompt:
+    def test_smallest_patch_directive_present(self):
+        import inspect
+        from omicsclaw.autoagent.harness_loop import HarnessLoop
+        source = inspect.getsource(HarnessLoop._call_llm)
+        assert "smallest patch" in source
+
+    def test_owasp_present(self):
+        import inspect
+        from omicsclaw.autoagent.harness_loop import HarnessLoop
+        source = inspect.getsource(HarnessLoop._call_llm)
+        assert "OWASP-class vulnerabilities" in source
+
+    def test_json_only_contract_preserved(self):
+        import inspect
+        from omicsclaw.autoagent.harness_loop import HarnessLoop
+        source = inspect.getsource(HarnessLoop._call_llm)
+        # The strict JSON-output contract is what the parser depends on.
+        assert "Respond ONLY with valid JSON" in source
+        assert "No prose" in source
