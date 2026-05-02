@@ -62,3 +62,18 @@ def test_cellrank_no_longer_in_pyproject_pip_layer():
             assert Requirement(dep).name != "cellrank", (
                 f"cellrank must live in environment.yml only, found in [{extra}]"
             )
+
+
+def test_full_extra_excludes_oauth_to_avoid_trajectory_ccproxy_resolver_conflict():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    full_requirements = [
+        Requirement(dependency)
+        for dependency in pyproject["project"]["optional-dependencies"]["full"]
+    ]
+
+    assert "oauth" in pyproject["project"]["optional-dependencies"]
+    assert len(full_requirements) == 1
+    assert full_requirements[0].name == "omicsclaw"
+    assert "spatial-trajectory" in full_requirements[0].extras
+    assert "singlecell-pseudotime" in full_requirements[0].extras
+    assert "oauth" not in full_requirements[0].extras

@@ -237,7 +237,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna,oauth]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #
