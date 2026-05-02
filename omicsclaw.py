@@ -590,6 +590,7 @@ def run_skill(
         return _run_spatial_pipeline(
             input_path=input_path,
             output_dir=output_dir,
+            demo=demo,
             session_path=session_path,
         )
 
@@ -808,11 +809,12 @@ def run_skill(
 def _run_spatial_pipeline(
     input_path: str | None = None,
     output_dir: str | None = None,
+    demo: bool = False,
     session_path: str | None = None,
 ) -> dict:
     """Run the standard spatial analysis pipeline end-to-end."""
-    if not input_path and not session_path:
-        return _err("spatial-pipeline", "Requires --input or --session.")
+    if not input_path and not session_path and not demo:
+        return _err("spatial-pipeline", "Requires --input, --demo, or --session.")
 
     if output_dir:
         out_dir = Path(output_dir)
@@ -831,6 +833,8 @@ def _run_spatial_pipeline(
             skill_name=skill_name,
             input_path=current_input,
             output_dir=str(skill_out),
+            # Only the first step needs --demo; later steps consume the chained processed.h5ad.
+            demo=demo and current_input is None,
             session_path=session_path,
         )
         all_results[skill_name] = {
