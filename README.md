@@ -147,6 +147,11 @@ The `singlecell-upstream` helper stack also pins the MultiQC logging leaf
 dependencies (`multiqc>=1.33,<2.0`, `coloredlogs>=15.0.1,<16.0`,
 `humanfriendly>=10.0,<11.0`) so pip does not backtrack into older
 `humanfriendly` wheels while resolving `multiqc`.
+Trajectory dependencies keep CellRank on the latest Python 3.11-compatible
+line (`>=2.0.7,<2.1`), skipping CellRank 2.1+ releases that require Python
+3.12+. The `full` extra is analysis-focused and intentionally excludes
+`oauth`/`ccproxy-api`; install `pip install -e ".[oauth]"` separately, or use
+`pip install -e ".[full,oauth]"` when you explicitly need OAuth support.
 
 If a previous interrupted run left a complete prefix at
 `<conda-root>/envs/OmicsClaw` but `conda info --envs` does not list it by name,
@@ -246,6 +251,8 @@ LLM_PROVIDER=anthropic
 LLM_AUTH_MODE=oauth
 CCPROXY_PORT=11435
 ```
+Install the optional runtime first with `pip install -e ".[oauth]"` if it was
+not included during setup.
 Complete login once with `python omicsclaw.py auth login claude` (or `openai`).
 Keep `CCPROXY_PORT` different from the app backend port `8765`.
 

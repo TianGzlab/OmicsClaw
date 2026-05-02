@@ -126,7 +126,7 @@ spatial = [
     "liana",                          # spatial-communication: LIANA+ method
     "cellphonedb>=5.0.0,<6.0",        # spatial-communication: CellPhoneDB
     "fastccc>=0.1.0",                 # spatial-communication: FastCCC (requires Python >=3.11)
-    "cellrank>=2.0.0,<3.0",           # spatial-trajectory: CellRank
+    "cellrank>=2.0.7,<2.1",           # spatial-trajectory: CellRank
     "palantir>=1.0.0",                # spatial-trajectory: Palantir
     "gseapy>=1.0.0",                  # spatial-enrichment: GSEA/Enrichr/ssGSEA
     "SpatialDE>=1.1.3",               # spatial-genes: SpatialDE method
@@ -150,7 +150,7 @@ singlecell = [
     "scanorama>=1.7.0",               # sc-batch-integration: Scanorama
     "celltypist>=1.6.0",              # sc-cell-annotation: CellTypist
     "arboreto>=0.1.6",                # sc-grn: GRNBoost2
-    "cellrank>=2.0.0,<3.0",           # sc-pseudotime / sc-velocity downstream
+    "cellrank>=2.0.7,<2.1",           # sc-pseudotime / sc-velocity downstream
     "palantir>=1.0.0",                # sc-pseudotime: Palantir
     "pyVIA>=0.2.4",                   # sc-pseudotime: VIA
     "pydeseq2>=0.4.0",                # sc-de pseudobulk Python path
@@ -183,7 +183,7 @@ singlecell-clustering = [
 # singlecell-pseudotime — optional trajectory / fate backends.                #
 # --------------------------------------------------------------------------- #
 singlecell-pseudotime = [
-    "cellrank>=2.0.0,<3.0",           # CellRank trajectory inference
+    "cellrank>=2.0.7,<2.1",           # CellRank trajectory inference
     "palantir>=1.0.0",                # Palantir pseudotime
     "pyVIA>=0.2.4",                   # VIA pseudotime
 ]
@@ -286,7 +286,7 @@ bulkrna = [
 # Tier 4: full — all optional analysis methods across all domains             #
 # --------------------------------------------------------------------------- #
 full = [
-    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna,oauth]"
+    "omicsclaw[spatial,spatial-domains,spatial-annotate,spatial-deconv,spatial-trajectory,spatial-genes,spatial-statistics,spatial-condition,spatial-velocity,spatial-cnv,spatial-enrichment,spatial-communication,spatial-integration,spatial-registration,spatial-r-bridge,singlecell,singlecell-clustering,singlecell-pseudotime,singlecell-batch,singlecell-doublet,singlecell-annotation,singlecell-communication,singlecell-enrichment,singlecell-r-bridge,genomics,proteomics,metabolomics,bulkrna]"
 ]
 
 # --------------------------------------------------------------------------- #
@@ -338,7 +338,7 @@ spatial-deconv = [
 ]
 
 spatial-trajectory = [
-    "cellrank>=2.0.0,<3.0",          # CellRank trajectory inference
+    "cellrank>=2.0.7,<2.1",          # CellRank trajectory inference
     "palantir>=1.0.0",                # Palantir trajectory inference
 ]
 

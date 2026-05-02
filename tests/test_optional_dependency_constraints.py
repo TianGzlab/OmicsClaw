@@ -62,3 +62,29 @@ def test_singlecell_upstream_constraints_avoid_multiqc_leaf_backtracking():
     assert humanfriendly.specifier.contains(Version("10.0"))
     assert not humanfriendly.specifier.contains(Version("9.2"))
     assert not humanfriendly.specifier.contains(Version("11.0"))
+
+
+def test_cellrank_constraints_skip_python312_only_releases():
+    requirements = _optional_requirements_by_name("cellrank")
+
+    assert requirements
+    for extra_name, requirement in requirements:
+        assert requirement.specifier.contains(Version("2.0.7")), extra_name
+        assert not requirement.specifier.contains(Version("2.0.6")), extra_name
+        assert not requirement.specifier.contains(Version("2.1.0")), extra_name
+        assert not requirement.specifier.contains(Version("2.2.0")), extra_name
+
+
+def test_full_extra_excludes_oauth_to_avoid_trajectory_ccproxy_resolver_conflict():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    full_requirements = [
+        Requirement(dependency)
+        for dependency in pyproject["project"]["optional-dependencies"]["full"]
+    ]
+
+    assert "oauth" in pyproject["project"]["optional-dependencies"]
+    assert len(full_requirements) == 1
+    assert full_requirements[0].name == "omicsclaw"
+    assert "spatial-trajectory" in full_requirements[0].extras
+    assert "singlecell-pseudotime" in full_requirements[0].extras
+    assert "oauth" not in full_requirements[0].extras

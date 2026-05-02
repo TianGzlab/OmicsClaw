@@ -142,6 +142,11 @@ Tier 2 的 pip 安装还会设置
 （`multiqc>=1.33,<2.0`、`coloredlogs>=15.0.1,<16.0`、
 `humanfriendly>=10.0,<11.0`），避免 pip 在解析 `multiqc` 时回溯到旧的
 `humanfriendly` wheel。
+轨迹分析依赖会把 CellRank 限定在最新的 Python 3.11 兼容线
+（`>=2.0.7,<2.1`），跳过要求 Python 3.12+ 的 CellRank 2.1+ 版本。
+`full` extra 只覆盖分析依赖，默认不包含 `oauth` / `ccproxy-api`；如需
+OAuth，请单独运行 `pip install -e ".[oauth]"`，或在明确需要时使用
+`pip install -e ".[full,oauth]"`。
 
 如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
 但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，包括只显示
