@@ -220,8 +220,13 @@ OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
 # or:
 bash 0_setup_env.sh --with-banksy
 
-# CUDA users: after the default install, override the CPU pytorch build:
+# CUDA users: after the default install, override the CPU pytorch build.
+# Pick the pytorch-cuda version that matches your driver (12.1 / 11.8 / etc.):
 mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+
+# Verify CUDA is wired up:
+mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+# Expected: True <cuda_version>
 ```
 
 End-to-end smoke test on a fresh machine: `bash scripts/smoke_test_setup.sh`.

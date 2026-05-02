@@ -111,17 +111,27 @@ place via `mamba env update --prune`. If the prune step fails (rare, usually due
 to a locked prefix or a partially-installed package), remove and rebuild:
 `mamba env remove -n OmicsClaw -y && bash 0_setup_env.sh`.
 
-## Open questions
+## Open questions (resolved 2026-05-02 post-merge audit)
 
-- liana / liana-py — bioconda has it (1.7.1, noarch). Move to mamba in Task 1.
-- tangram-sc — confirmed no conda recipe; stays pip_only.
-- torch — needs the `pytorch` conda channel (not bioconda/conda-forge). Add to environment.yml explicitly in Task 1.
+All four `unknown` packages and `liana` were re-audited via direct
+`https://api.anaconda.org/package/<channel>/<pkg>` queries (the Nexus conda
+proxy on this machine still returned HTTP 502, but `conda.anaconda.org` is
+directly reachable):
 
-**Verify before Task 1 finalizes:** the audit's offline mode could not classify
-`cell2location`, `cellphonedb`, `infercnvpy`, `spatialde` (`unknown` rows in
-the CSV). All four have a non-trivial chance of being on bioconda; Task 1
-should re-run `mamba search -c bioconda <pkg>` on a network-connected machine
-for each before deciding whether to lift them or leave them in pyproject.
+- **`cell2location` / `cellphonedb` / `infercnvpy` / `SpatialDE`** — both
+  `bioconda` and `conda-forge` return HTTP 404. Confirmed pip-only; they
+  stay in `pyproject.toml` and are explicitly excluded from `CONDA_OWNED`.
+  `tests/test_pyproject_thin_pip_layer.py` retains the docstring note that
+  records this conclusion.
+- **`liana`** — `bioconda::liana` 1.7.1 (noarch) is in lockstep with PyPI
+  (versions 1.4.0 → 1.7.1 all available; bioconda mirrors PyPI 1:1). Lifted
+  to `environment.yml` Tier 4 with pin `liana>=1.7.1` and removed from
+  `pyproject.toml` `[spatial]`, `[singlecell-communication]`,
+  `[spatial-communication]`. Boundary test gains `"liana"` in `CONDA_OWNED`.
+- **`tangram-sc`** — confirmed no conda recipe; stays pip_only.
+- **`torch`** — needs the `pytorch` conda channel (not bioconda/conda-forge),
+  but `pytorch` itself is on `conda-forge` and is the default lift in
+  `environment.yml`; CUDA users follow the README override.
 
 ## Audit run notes
 
@@ -149,6 +159,8 @@ Tasks 0–8 (12 commits) are done. The branch ships:
 - `scripts/smoke_test_setup.sh` end-to-end validates the build on a clean machine.
 
 Known follow-ups (out of scope for this branch):
-- The four `unknown` packages from Task 0 (cell2location, cellphonedb, infercnvpy, SpatialDE) need re-audit on a network-connected machine; if any have a usable bioconda build, lift them to Tier 4.
-- `liana` is `mamba_ok` per the audit but conda recipe may lag PyPI — leave for follow-up audit.
 - The smoke test must be run end-to-end on a working network before tagging a release; this branch only exercises code paths that don't require live conda channels.
+
+Resolved by the post-merge follow-up commit (2026-05-02):
+- The four `unknown` packages from Task 0 (cell2location, cellphonedb, infercnvpy, SpatialDE) were re-audited via the anaconda.org REST API and confirmed to be 404 on both bioconda and conda-forge. They stay in `pyproject.toml` (genuinely pip-only).
+- `liana` was confirmed to be at parity with PyPI on bioconda (1.7.1 noarch). Lifted to `environment.yml` Tier 4.

@@ -9,14 +9,14 @@ from packaging.requirements import Requirement
 ROOT = Path(__file__).resolve().parents[1]
 
 # Packages that MUST be installed via conda/mamba, NOT listed in pyproject.
-# Pip-only packages (no conda recipe at Task 0 audit) are NOT in CONDA_OWNED
-# and stay in pyproject: SpaGCN, GraphST, cellcharter, paste-bio, flashdeconv,
-# fastccc, pyVIA, pybanksy, ccproxy-api, tangram-sc, deepagents,
-# opendataloader-pdf, torch_geometric, liana, phate, python-multipart, langchain*,
-# langgraph*, tavily-python, markdownify, pypdf, textual.
-# 'unknown' packages (Task 0 audit could not classify): cell2location,
-# cellphonedb, infercnvpy, SpatialDE — also absent from CONDA_OWNED, pending
-# network re-audit.
+# Pip-only packages (no conda recipe) stay in pyproject: SpaGCN, GraphST,
+# cellcharter, paste-bio, flashdeconv, fastccc, pyVIA, pybanksy, ccproxy-api,
+# tangram-sc, deepagents, opendataloader-pdf, torch_geometric, phate,
+# python-multipart, langchain*, langgraph*, tavily-python, markdownify, pypdf,
+# textual.
+# Post-merge follow-up audit (2026-05-02) confirmed cell2location, cellphonedb,
+# infercnvpy, and SpatialDE return HTTP 404 on both bioconda and conda-forge —
+# they are genuinely pip-only and stay in pyproject.
 CONDA_OWNED = {
     "scanpy", "anndata", "squidpy", "numpy", "pandas", "scipy",
     "scikit-learn", "matplotlib", "seaborn", "pillow", "scikit-misc",
@@ -28,7 +28,7 @@ CONDA_OWNED = {
     "torch", "pytorch", "pytorch-cpu",
     "jinja2", "nbconvert", "beautifulsoup4",
     "scvi-tools", "scvelo", "cellrank",
-    "harmonypy", "bbknn", "scanorama", "celltypist",
+    "harmonypy", "bbknn", "scanorama", "celltypist", "liana",
     "gseapy", "pydeseq2", "scrublet", "doubletdetection", "arboreto",
     "palantir", "multiqc", "kb-python", "esda", "libpysal", "pysal",
     "pot",

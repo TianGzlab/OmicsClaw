@@ -197,6 +197,9 @@ dependencies:
   - scanorama>=1.7.0
   # Cell typing / communication
   - celltypist>=1.6.0
+  - liana>=1.7.1                # bioconda noarch; tracks PyPI 1:1.
+                                # Was in `pyproject.toml` until the post-merge
+                                # follow-up audit confirmed parity.
   # Enrichment / differential expression
   - gseapy>=1.0.0
   - pydeseq2>=0.4.0

@@ -233,7 +233,12 @@ OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
 bash 0_setup_env.sh --with-banksy
 
 # CUDA 用户：默认装好后再覆盖 CPU 版 pytorch
+# pytorch-cuda 版本需匹配本机驱动（12.1 / 11.8 等）：
 mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+
+# 装好后验证一下 CUDA 是否真的接上：
+mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+# 预期：True <cuda_version>
 ```
 
 新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。
