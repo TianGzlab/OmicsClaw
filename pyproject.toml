@@ -163,7 +163,9 @@ singlecell = [
 # NOT installed here and must be installed manually into the active env/PATH. #
 # --------------------------------------------------------------------------- #
 singlecell-upstream = [
-    "multiqc>=1.33",                  # sc-fastq-qc: MultiQC report aggregation
+    "multiqc>=1.33,<2.0",             # sc-fastq-qc: MultiQC report aggregation
+    "coloredlogs>=15.0.1,<16.0",      # MultiQC transitive dep; narrow resolver leaf
+    "humanfriendly>=10.0,<11.0",      # coloredlogs transitive dep; avoids py2-era backtracking
     "kb-python>=0.29.0",              # sc-count: kb-python pseudoalignment backend
 ]
 

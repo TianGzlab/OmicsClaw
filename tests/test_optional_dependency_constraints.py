@@ -39,3 +39,26 @@ def test_cell2location_constraint_avoids_old_scvi_tools_floor():
         assert requirement.specifier.contains(Version("0.1.5")), extra_name
         assert not requirement.specifier.contains(Version("0.1.4")), extra_name
         assert not requirement.specifier.contains(Version("0.2.0")), extra_name
+
+
+def test_singlecell_upstream_constraints_avoid_multiqc_leaf_backtracking():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    upstream = {
+        Requirement(dependency).name: Requirement(dependency)
+        for dependency in pyproject["project"]["optional-dependencies"]["singlecell-upstream"]
+    }
+
+    multiqc = upstream["multiqc"]
+    assert multiqc.specifier.contains(Version("1.33"))
+    assert not multiqc.specifier.contains(Version("1.32"))
+    assert not multiqc.specifier.contains(Version("2.0"))
+
+    coloredlogs = upstream["coloredlogs"]
+    assert coloredlogs.specifier.contains(Version("15.0.1"))
+    assert not coloredlogs.specifier.contains(Version("14.0"))
+    assert not coloredlogs.specifier.contains(Version("16.0"))
+
+    humanfriendly = upstream["humanfriendly"]
+    assert humanfriendly.specifier.contains(Version("10.0"))
+    assert not humanfriendly.specifier.contains(Version("9.2"))
+    assert not humanfriendly.specifier.contains(Version("11.0"))
