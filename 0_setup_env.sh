@@ -85,6 +85,22 @@ list_conda_info_json() {
     "$INSTALLER" info --json
 }
 
+candidate_prefixes_from_env_list() {
+    printf '%s\n' "$ENV_LIST_OUTPUT" | awk -v env_name="$ENV_NAME" '
+        /^[[:space:]]*($|#)/ { next }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^\//) {
+                    n = split($i, parts, "/")
+                    if (parts[n] == env_name) {
+                        print $i
+                    }
+                }
+            }
+        }
+    '
+}
+
 candidate_env_dirs() {
     if [ -n "${CONDA_ENVS_PATH:-}" ]; then
         printf '%s\n' "$CONDA_ENVS_PATH" | tr ':' '\n'
@@ -109,21 +125,39 @@ for path in data.get("envs_dirs", []):
     printf '%s\n' "$HOME/.conda/envs"
 }
 
+check_prefix_candidate() {
+    prefix="$1"
+    [ -n "$prefix" ] || return 1
+    if [ -d "$prefix/conda-meta" ]; then
+        ENV_PREFIX_CANDIDATE="$prefix"
+        return 0
+    fi
+    if [ -e "$prefix" ]; then
+        echo "[setup_env] ✖ found incomplete conda env prefix: $prefix" >&2
+        echo "  It exists but is not a registered/complete conda env." >&2
+        echo "  Remove or repair it, then re-run:" >&2
+        echo "    $INSTALLER env remove -p '$prefix' -y" >&2
+        return 2
+    fi
+    return 1
+}
+
 find_named_prefix() {
+    while IFS= read -r prefix; do
+        check_prefix_candidate "$prefix"
+        case $? in
+            0) return 0 ;;
+            2) return 2 ;;
+        esac
+    done < <(candidate_prefixes_from_env_list | awk 'NF && !seen[$0]++')
+
     while IFS= read -r env_dir; do
         [ -n "$env_dir" ] || continue
-        prefix="$env_dir/$ENV_NAME"
-        if [ -d "$prefix/conda-meta" ]; then
-            printf '%s\n' "$prefix"
-            return 0
-        fi
-        if [ -e "$prefix" ]; then
-            echo "[setup_env] ✖ found incomplete conda env prefix: $prefix" >&2
-            echo "  It exists but is not a registered/complete conda env." >&2
-            echo "  Remove or repair it, then re-run:" >&2
-            echo "    $INSTALLER env remove -p '$prefix' -y" >&2
-            exit 1
-        fi
+        check_prefix_candidate "$env_dir/$ENV_NAME"
+        case $? in
+            0) return 0 ;;
+            2) return 2 ;;
+        esac
     done < <(candidate_env_dirs | awk 'NF && !seen[$0]++')
     return 1
 }
@@ -143,19 +177,30 @@ ENV_LIST_OUTPUT="$(list_conda_envs)" || {
     exit 1
 }
 
+ENV_PREFIX_CANDIDATE=""
 ENV_TARGET_MODE="name"
 ENV_TARGET_VALUE="$ENV_NAME"
 if printf '%s\n' "$ENV_LIST_OUTPUT" | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     echo "[setup_env] env '$ENV_NAME' already exists — updating from environment.yml"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
-elif ENV_PREFIX_CANDIDATE="$(find_named_prefix)"; then
+else
+    if find_named_prefix; then
+        FIND_PREFIX_STATUS=0
+    else
+        FIND_PREFIX_STATUS=$?
+    fi
+    if [ "$FIND_PREFIX_STATUS" -eq 2 ]; then
+        exit 1
+    fi
+    if [ "$FIND_PREFIX_STATUS" -eq 0 ]; then
     ENV_TARGET_MODE="prefix"
     ENV_TARGET_VALUE="$ENV_PREFIX_CANDIDATE"
     echo "[setup_env] env prefix '$ENV_TARGET_VALUE' exists but is not listed by name — updating by prefix"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -p "$ENV_TARGET_VALUE" -f "$ENV_FILE" --prune
-else
+    else
     echo "[setup_env] creating env '$ENV_NAME' from environment.yml"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env create -n "$ENV_NAME" -f "$ENV_FILE"
+    fi
 fi
 
 # Resolve the env prefix once — needed by later tiers.

@@ -138,10 +138,10 @@ metadata to resolve.
 
 If a previous interrupted run left a complete prefix at
 `<conda-root>/envs/OmicsClaw` but `conda info --envs` does not list it by name,
-the script detects that prefix and updates it with `env update -p <prefix>`.
-If the prefix directory exists without `conda-meta`, it is treated as an
-incomplete environment; remove or repair that directory, then re-run the
-script.
+the script detects that prefix, including anonymous env-list rows that show
+only the path, and updates it with `env update -p <prefix>`. If the prefix
+directory exists without `conda-meta`, it is treated as an incomplete
+environment; remove or repair that directory, then re-run the script.
 
 > **Heads-up**: `cnvkit` (used by `genomics-cnv-calling`) is **not bundled** because its newer-version dependencies conflict with `macs3`. Install it in a separate dedicated env if you need it.
 
