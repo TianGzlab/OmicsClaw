@@ -1,0 +1,93 @@
+---
+title: "OmicsClaw 整体架构"
+description: "OmicsClaw 由 5 层组成：用户接口（CLI / Bot / 桌面端）→ 编排器 → skill 注册表 → 88 个 skill → 数据层。各层通过明确接口通信。"
+keywords: ["OmicsClaw 架构", "skill system", "orchestrator", "agent architecture"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么是这个架构
+
+**独立 skill**：每个分析能力封装为一个 skill 单元，包含独立的 `SKILL.md` 契约、Python 脚本和可选测试。独立边界使单个 skill 可以独立测试、替换或升级，而不影响其他 skill。
+
+**编排器路由**：OmicsClaw 当前包含 88 个 skill，覆盖 7 个组学领域。用户不应该记住所有 skill 名称和参数，orchestrator 通过自然语言意图识别自动完成 skill 选择和参数补全。
+
+**多种用户接口**：不同用户在不同场景下使用相同的 skill 系统——命令行用户通过 `omicsclaw.py` 直接调用，机器人用户通过 Telegram / Feishu 对话触发，桌面端用户通过 App 界面操作。三种接口共享同一套 skill 注册表，结果格式完全一致。
+
+## 五层架构 ASCII 图
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 1. 用户接口层                                                │
+│    CLI (omicsclaw.py)  ·  Bot (Telegram + Feishu)  ·  App    │
+├──────────────────────────────────────────────────────────────┤
+│ 2. 编排层 (orchestrator)                                     │
+│    自然语言意图 → skill 选择 → 参数补全                      │
+├──────────────────────────────────────────────────────────────┤
+│ 3. Skill 注册表                                              │
+│    88 个 SKILL.md + 入口脚本，按 7 个 domain 分组            │
+├──────────────────────────────────────────────────────────────┤
+│ 4. Skill 执行层                                              │
+│    Python (Scanpy / Squidpy / pyDESeq2 / ...)                │
+│    R Enhanced (ggplot2 重绘)                                 │
+├──────────────────────────────────────────────────────────────┤
+│ 5. 数据与产物层                                              │
+│    输入: h5ad / counts / FASTQ / mzML                        │
+│    输出: figures + figure_data + report.md                   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## 启用前 / 启用后
+
+| 维度 | 自己写 pipeline | 用 OmicsClaw |
+|---|---|---|
+| 用户负担 | 每个工具记一套 CLI | 一条命令统一入口 |
+| 复用度 | 每个项目重写逻辑 | skill 作为组件复用 |
+| 一致性 | 各人风格不统一 | 模板化报告输出 |
+| 故障隔离 | 一处 bug 全局崩溃 | skill 级别边界隔离 |
+
+## 关键调用链：从 `omicsclaw.py run X` 到产出
+
+```
+┌──────────────────────────────────────────────┐
+│  omicsclaw.py 入口 — argparse + dispatch     │
+└──────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────┐
+│  omicsclaw/core/registry.py 加载             │
+│  发现 SKILL.md + 入口脚本                    │
+└──────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────┐
+│  cmd 拼接                                    │
+│  python skills/<domain>/<skill>/<script>.py  │
+│  + --demo 等 flags                           │
+└──────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────┐
+│  subprocess 执行 skill 脚本                  │
+└──────────────────────────────────────────────┘
+                       ▼
+┌──────────────────────────────────────────────┐
+│  输出落到 output/<skill>_<timestamp>/        │
+└──────────────────────────────────────────────┘
+```
+
+示例命令：
+
+```bash
+python omicsclaw.py run spatial-preprocess --demo --output /tmp/demo_out
+```
+
+## 故障排查
+
+| 症状 | 可能原因 | 解决 |
+|---|---|---|
+| `omicsclaw.py list` 报 skill 找不到 | conda 环境未激活 | `conda activate OmicsClaw` |
+| 某 skill 缺 R 依赖 | R Enhanced 依赖未装 | 见 [R-DEPENDENCIES.md](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md) |
+| Bot 无响应 | `.env` 缺 `LLM_API_KEY` | 见 [ecosystem/chat-bot](/docs/ecosystem/chat-bot) |
+
+## 下一步阅读
+
+- [技能系统](/docs/architecture/skill-system) — skill 的注册与发现机制
+- [编排器](/docs/architecture/orchestrator) — 路由是怎么做的
+- [七大组学：空间转录组](/docs/domains/spatial) — 第一个完整领域
