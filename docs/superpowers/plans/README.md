@@ -5,6 +5,10 @@ development work.
 
 ## Tracked Entries
 
+- [2026-05-02-mintlify-docs.md](2026-05-02-mintlify-docs.md)
+  — implement the Mintlify Chinese docs site (20 pages across 7 groups)
+  modeled on `repo_learn/langcli/docs`; archive existing English MDs to
+  `docs/_legacy/`.
 - [2026-04-30-conda-env-management-plan.md](2026-04-30-conda-env-management-plan.md)
   — implement the four-tier mamba-first conda install (`environment.yml`,
   `0_setup_env.sh`, vendoring stub, removal of `install_r_dependencies.R`).
