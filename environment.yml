@@ -153,6 +153,13 @@ dependencies:
   - seaborn>=0.11.0
   - pillow>=8.0.0
   - scikit-misc>=0.5.0
+  - cython>=0.29                # Build-time dep for legacy pip packages whose
+                                # setup.py imports Cython without declaring it
+                                # in [build-system].requires (notably velocyto
+                                # 0.17.17, installed by 0_setup_env.sh Tier 2.1
+                                # via `pip install --no-build-isolation`). Pure-
+                                # Python at runtime; harmless to ship in the
+                                # main env.
   # Graph / clustering / embedding
   - python-igraph>=0.11.0
   - leidenalg>=0.10.0
