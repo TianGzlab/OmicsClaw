@@ -119,6 +119,13 @@ omicsclaw env                 # 或：python omicsclaw.py env
 
 脚本**幂等** —— 重复执行会就地更新现有环境。如需自定义环境名：`bash 0_setup_env.sh my_env_name`。
 
+在共享 conda 安装上，`0_setup_env.sh` 默认把 `CONDA_PKGS_DIRS` 设为
+`~/.conda/pkgs`，避免 libmamba 去清理或重新解压系统级 base 缓存
+（例如 `/share/.../miniconda3/pkgs`）里的包。如果你想用其它可写缓存，
+可在运行脚本前设置 `CONDA_PKGS_DIRS=/path/to/pkgs`。如果安装失败信息是
+镜像 SSL timeout，请重试或切换 conda channel / 镜像；这属于网络问题，
+不是包缓存权限问题。
+
 > **提示**：`cnvkit`（用于 `genomics-cnv-calling`）**未预装**，因为其新版本依赖与 `macs3` 冲突。如需使用，请在单独的环境里安装。
 
 ### 🪶 venv（轻量 —— 仅 Python 技能）

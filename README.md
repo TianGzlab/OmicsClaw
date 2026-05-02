@@ -121,6 +121,14 @@ omicsclaw env                 # or: python omicsclaw.py env
 
 The script is **idempotent** — re-running it updates the env in place. For a custom env name: `bash 0_setup_env.sh my_env_name`.
 
+On shared conda installations, `0_setup_env.sh` defaults `CONDA_PKGS_DIRS` to
+`~/.conda/pkgs` so libmamba does not try to clean or re-extract packages under
+a system-owned base cache such as `/share/.../miniconda3/pkgs`. To use a
+different writable cache, set `CONDA_PKGS_DIRS=/path/to/pkgs` before running
+the script. If installation fails with an SSL timeout from a mirror, retry or
+switch conda channels/mirrors; that is a network issue rather than a package
+cache permission issue.
+
 > **Heads-up**: `cnvkit` (used by `genomics-cnv-calling`) is **not bundled** because its newer-version dependencies conflict with `macs3`. Install it in a separate dedicated env if you need it.
 
 ### 🪶 venv (lightweight — Python-only skills)

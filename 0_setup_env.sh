@@ -38,6 +38,19 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+# Shared conda installations often put the base package cache first
+# (`$CONDA_ROOT/pkgs`). libmamba may try to remove/re-extract stale package
+# directories there and fail with "Permission denied" for non-admin users.
+# Unless the user explicitly configured CONDA_PKGS_DIRS, use a private cache.
+if [ -z "${CONDA_PKGS_DIRS:-}" ]; then
+    CONDA_PKGS_DIRS="${HOME}/.conda/pkgs"
+    export CONDA_PKGS_DIRS
+    mkdir -p "$CONDA_PKGS_DIRS"
+    echo "[setup_env] using private conda package cache: $CONDA_PKGS_DIRS"
+else
+    echo "[setup_env] using configured conda package cache: $CONDA_PKGS_DIRS"
+fi
+
 # ----- Tier 1: declarative env from bioconda + conda-forge ----------
 
 # Env-existence check matches by name (column 1 of `conda info --envs` /
