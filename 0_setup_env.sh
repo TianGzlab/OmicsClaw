@@ -40,16 +40,39 @@ fi
 
 # ----- Tier 1: declarative env from bioconda + conda-forge ----------
 
-# Env-existence check matches by name (column 1 of `env list`). Envs
-# created with --prefix in custom locations are listed by absolute path
-# and won't match here — that's intentional; this script manages named
-# envs only.
+# Env-existence check matches by name (column 1 of `conda info --envs` /
+# `mamba info --envs`). Envs created with --prefix in custom locations are
+# listed by absolute path and won't match here — that's intentional; this
+# script manages named envs only.
+#
+# Keep env listing separate from the installer. Some older Python-based mamba
+# builds crash on `mamba env list` with:
+#   AttributeError: 'Namespace' object has no attribute 'func'
+# `conda info --envs` is the stable metadata path when conda is available;
+# mamba remains the preferred installer for create/update/run below.
 #
 # CONDA_CHANNEL_PRIORITY=strict prefixes both create and update because
 # `mamba env create`/`mamba env update` (libmamba env subcommand) do NOT
 # accept --strict-channel-priority as a CLI flag in mamba 1.5.x; the env
 # var is the supported way to enforce strict priority for env subcommands.
-if "$INSTALLER" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+list_conda_envs() {
+    if command -v conda >/dev/null 2>&1 && conda info --envs; then
+        return 0
+    fi
+    if "$INSTALLER" info --envs; then
+        return 0
+    fi
+    "$INSTALLER" env list
+}
+
+ENV_LIST_OUTPUT="$(list_conda_envs)" || {
+    echo "[setup_env] ✖ failed to list conda environments." >&2
+    echo "  Try: conda info --envs" >&2
+    echo "  If mamba reports \"Namespace object has no attribute func\", update mamba or keep conda on PATH." >&2
+    exit 1
+}
+
+if printf '%s\n' "$ENV_LIST_OUTPUT" | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     echo "[setup_env] env '$ENV_NAME' already exists — updating from environment.yml"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
 else

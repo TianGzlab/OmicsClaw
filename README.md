@@ -90,7 +90,7 @@ OmicsClaw ships two install paths. Pick whichever fits your needs.
 
 A single command provisions R 4.3 + ~30 R packages, ~15 bioinformatics CLIs (samtools, STAR, fastqc, bwa, bowtie2, minimap2, bcftools, gatk4, picard, simpleaf, fastp, trim-galore, macs3, multiqc, kb-python, velocyto, …), OmicsClaw itself (editable), and all Python optional extras.
 
-**Prerequisite** — `conda` on PATH. If you don't have it yet, install [Miniforge](https://github.com/conda-forge/miniforge): it defaults to the `conda-forge` channel, ships under Apache-2.0 (commercial-use friendly), and bundles `mamba` for fast solves. (`0_setup_env.sh` auto-uses `mamba` if present and falls back to `conda` otherwise.)
+**Prerequisite** — `conda` on PATH. If you don't have it yet, install [Miniforge](https://github.com/conda-forge/miniforge): it defaults to the `conda-forge` channel, ships under Apache-2.0 (commercial-use friendly), and bundles `mamba` for fast solves. (`0_setup_env.sh` auto-uses `mamba` for environment create/update when present and falls back to `conda` otherwise. Environment discovery uses `conda info --envs` when available, avoiding older Python-based `mamba env list` parser crashes.)
 
 <details>
 <summary><b>🆕 Install Miniforge — one-time setup</b></summary>

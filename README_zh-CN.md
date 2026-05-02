@@ -88,7 +88,7 @@ OmicsClaw 提供两种安装路径，按需选择。
 
 一条命令即可装好 R 4.3 + ~30 个 R 包、~15 个生信命令行工具（samtools、STAR、fastqc、bwa、bowtie2、minimap2、bcftools、gatk4、picard、simpleaf、fastp、trim-galore、macs3、multiqc、kb-python、velocyto……）、OmicsClaw 本体（editable 模式），以及全部 Python 可选扩展。
 
-**先决条件** —— PATH 上需要有 `conda`。如果当前还没有，建议安装 [Miniforge](https://github.com/conda-forge/miniforge)：默认走 `conda-forge` 源、Apache-2.0 协议（商用友好）、内置 `mamba` 加速求解。（`0_setup_env.sh` 会优先使用 `mamba`，无 `mamba` 时回退到 `conda`。）
+**先决条件** —— PATH 上需要有 `conda`。如果当前还没有，建议安装 [Miniforge](https://github.com/conda-forge/miniforge)：默认走 `conda-forge` 源、Apache-2.0 协议（商用友好）、内置 `mamba` 加速求解。（`0_setup_env.sh` 会优先用 `mamba` 创建/更新环境，无 `mamba` 时回退到 `conda`。环境发现优先使用 `conda info --envs`，以避开旧 Python 版 `mamba env list` 的解析器崩溃。）
 
 <details>
 <summary><b>🆕 安装 Miniforge —— 一次性</b></summary>
