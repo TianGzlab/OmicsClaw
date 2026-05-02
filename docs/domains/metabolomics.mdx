@@ -1,0 +1,62 @@
+---
+title: "代谢组学 - metabolomics · 8 skills"
+description: "LC-MS 代谢组学：XCMS 预处理、峰检测、代谢物注释（SIRIUS/GNPS）、归一化、差异分析、通路富集。"
+keywords: ["metabolomics", "代谢组学", "LC-MS", "XCMS", "SIRIUS", "GNPS"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+代谢组学域覆盖基于 LC-MS 的小分子代谢物完整分析链路：从原始 .mzML 数据的 XCMS 预处理、峰检测与特征对齐，到代谢物注释（SIRIUS/GNPS/MetFrag）、归一化、统计分析、差异分析与通路富集，与 GC-MS、NMR 及空间代谢组（MALDI imaging）方法不同，本域专注液相色谱-质谱驱动的高通量代谢物鉴定与定量。
+
+## 典型分析流程 ASCII 图
+
+```text
+LC-MS 原始数据 (.mzML)
+   │
+   ▼
+metabolomics-xcms-preprocessing  ← XCMS 预处理（峰检测 / RT 校正）
+   │
+   ▼
+metabolomics-peak-detection      ← 峰检测与特征对齐（XCMS / MZmine）
+   │
+   ▼
+metabolomics-annotation          ← 代谢物注释 (SIRIUS / GNPS)
+   │
+   ▼
+metabolomics-quantification      ← 特征定量与缺失值填补
+   │
+   ▼
+metabolomics-normalization       ← 归一化与数据转换
+   │
+   ├─→ metabolomics-statistics     ← 多变量统计（PCA / PLS-DA）
+   ├─→ metabolomics-de             ← 差异分析
+   └─→ metabolomics-pathway-enrichment  ← 通路富集
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| metabolomics-xcms-preprocessing | XCMS 预处理 | `python omicsclaw.py run metabolomics-xcms-preprocessing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-xcms-preprocessing/SKILL.md) |
+| metabolomics-peak-detection | 峰检测对齐 | `python omicsclaw.py run metabolomics-peak-detection --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-peak-detection/SKILL.md) |
+| metabolomics-annotation | 代谢物注释 | `python omicsclaw.py run metabolomics-annotation --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-annotation/SKILL.md) |
+| metabolomics-quantification | 特征定量填补 | `python omicsclaw.py run metabolomics-quantification --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-quantification/SKILL.md) |
+| metabolomics-normalization | 归一化转换 | `python omicsclaw.py run metabolomics-normalization --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-normalization/SKILL.md) |
+| metabolomics-statistics | 多变量统计 | `python omicsclaw.py run metabolomics-statistics --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-statistics/SKILL.md) |
+| metabolomics-de | 差异丰度分析 | `python omicsclaw.py run metabolomics-de --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-de/SKILL.md) |
+| metabolomics-pathway-enrichment | 通路富集分析 | `python omicsclaw.py run metabolomics-pathway-enrichment --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/metabolomics/metabolomics-pathway-enrichment/SKILL.md) |
+
+## 何时不适用本领域
+
+- **GC-MS（气相色谱）**：部分 skill 可用，但主要为 LC-MS 设计
+- **NMR 代谢组**：不覆盖
+- **空间代谢组（MALDI imaging）**：不覆盖
+- **蛋白组（大分子）**：用 [蛋白组学](/docs/domains/proteomics)
+
+## 下一步阅读
+
+- [蛋白组学](/docs/domains/proteomics)
+- [Bulk RNA-seq](/docs/domains/bulkrna)
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)
