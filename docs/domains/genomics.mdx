@@ -1,0 +1,67 @@
+---
+title: "基因组学 - genomics · 10 skills"
+description: "Bulk DNA-seq 全流程：FASTQ QC、比对、SNV/Indel/SV/CNV calling、VCF 操作、变异注释、phasing、de novo 组装、ATAC/ChIP peak calling。"
+keywords: ["genomics", "DNA-seq", "variant calling", "SNV", "SV", "CNV", "ATAC-seq", "ChIP-seq"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+基因组学域覆盖 bulk DNA-seq 完整链路：从原始 FASTQ 质控与比对，到 SNV/Indel/SV/CNV 变异检测、VCF 操作、功能注释与单倍型 phasing，以及 ATAC/ChIP peak calling 和 de novo 组装。与 bulkrna/singlecell 域的区别在于：本域分析 DNA 层面的遗传变异与染色质可及性，而非转录层面的表达量。
+
+## 典型分析流程 ASCII 图
+
+```text
+FASTQ (DNA-seq)
+   │
+   ▼
+genomics-qc           ← FASTQ QC (FastQC / fastp / MultiQC)
+   │
+   ▼
+genomics-alignment    ← 比对 (BWA-MEM / Bowtie2 / Minimap2) → BAM
+   │
+   ├─→ genomics-variant-calling    ← SNV / Indel (GATK / DeepVariant)
+   │       │
+   │       ▼
+   │   genomics-vcf-operations     ← VCF 过滤 / 统计 (bcftools)
+   │       │
+   │       ▼
+   │   genomics-variant-annotation ← 功能注释 (VEP / SnpEff)
+   │       │
+   │       ▼
+   │   genomics-phasing            ← 单倍型 phasing (WhatsHap / SHAPEIT5)
+   │
+   ├─→ genomics-sv-detection       ← 结构变异 (Manta / Delly / Sniffles)
+   ├─→ genomics-cnv-calling        ← 拷贝数 (CNVkit / Control-FREEC)
+   ├─→ genomics-epigenomics        ← ATAC / ChIP peak calling (MACS3)
+   └─→ genomics-assembly           ← de novo 组装 (SPAdes / Flye)
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| genomics-qc | FASTQ 质控 | `python omicsclaw.py run genomics-qc --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-qc/SKILL.md) |
+| genomics-alignment | 比对 → BAM | `python omicsclaw.py run genomics-alignment --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-alignment/SKILL.md) |
+| genomics-variant-calling | SNV / Indel 检测 | `python omicsclaw.py run genomics-variant-calling --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-variant-calling/SKILL.md) |
+| genomics-sv-detection | 结构变异检测 | `python omicsclaw.py run genomics-sv-detection --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-sv-detection/SKILL.md) |
+| genomics-cnv-calling | 拷贝数变异 | `python omicsclaw.py run genomics-cnv-calling --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-cnv-calling/SKILL.md) |
+| genomics-vcf-operations | VCF 过滤统计 | `python omicsclaw.py run genomics-vcf-operations --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-vcf-operations/SKILL.md) |
+| genomics-variant-annotation | 变异功能注释 | `python omicsclaw.py run genomics-variant-annotation --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-variant-annotation/SKILL.md) |
+| genomics-phasing | 单倍型 phasing | `python omicsclaw.py run genomics-phasing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-phasing/SKILL.md) |
+| genomics-epigenomics | ATAC/ChIP peak calling | `python omicsclaw.py run genomics-epigenomics --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-epigenomics/SKILL.md) |
+| genomics-assembly | de novo 基因组组装 | `python omicsclaw.py run genomics-assembly --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/genomics/genomics-assembly/SKILL.md) |
+
+## 何时不适用本领域
+
+- **RNA 层面分析**：用 [bulkrna](/docs/domains/bulkrna) 或 [singlecell](/docs/domains/singlecell)
+- **scDNA-seq（单细胞 DNA）**：不覆盖
+- **群体遗传学（GWAS / 系统发育）**：不覆盖
+- **元基因组（metagenomics）**：不覆盖
+
+## 下一步阅读
+
+- [Bulk RNA-seq](/docs/domains/bulkrna)
+- [单细胞组学](/docs/domains/singlecell)
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)
