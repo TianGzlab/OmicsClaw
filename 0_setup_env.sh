@@ -253,8 +253,14 @@ fi
 # Tier 2.1: tools that have no bioconda Python 3.11 build:
 #   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
 #                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
-echo "[setup_env] Tier 2.1: pip install velocyto"
-env_run pip install "velocyto>=0.17.17"
+#                  velocyto 0.17.17 (latest, 2020) imports numpy at the top
+#                  of setup.py without declaring it in [build-system].requires.
+#                  Under PEP 517 build isolation, pip's temp build env has no
+#                  numpy and the install fails. --no-build-isolation makes the
+#                  build reuse the active env, where Tier 4 has already
+#                  installed numpy via mamba.
+echo "[setup_env] Tier 2.1: pip install velocyto (--no-build-isolation)"
+env_run pip install --no-build-isolation "velocyto>=0.17.17"
 
 echo "[setup_env] ✔ Tier 2 complete"
 
