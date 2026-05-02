@@ -94,6 +94,8 @@ curl http://127.0.0.1:8765/env/doctor \
 > `oc app-server` 是 OmicsClaw-App 所有后端能力的统一入口：remote control-plane、notebook 路由、可选的 KG 路由都挂在这个进程上，不需要再起额外 daemon。
 >
 > **后台运行**：`nohup oc app-server ... &`、`tmux`、`screen`、`systemd --user` 均可；断开 SSH 后服务继续。
+>
+> **避免每次 SSH 后忘记启动**：在 Runtime profile 里填 **Auto-start Command**（见 Step 2 表格），App 激活该 runtime 时会在 SSH 通道里自动 `nohup oc app-server ... &` 起来，并轮询监听端口直到 ok。失败会带可读错误显示在 Runtimes 卡片，不再是 `Backend probe failed: fetch failed`。
 
 ### Step 2 — 在 Runtimes 页面新建 Remote Runtime
 
@@ -111,6 +113,7 @@ curl http://127.0.0.1:8765/env/doctor \
 | SSH User | `ssh_user` | zhouwg | 远端 Linux 用户名 |
 | SSH Key Path | `ssh_key_path` | `~/.ssh/id_ed25519` | 本机私钥**绝对路径**（App 不管理密钥生命周期） |
 | Remote Port | `remote_port` | 8765 | 远端 `oc app-server` 监听端口；默认 8765 |
+| Auto-start Command | `remote_bootstrap_command` | `bash -lc 'cd ~/omicsclaw && nohup oc app-server --host 127.0.0.1 --port 8765 > app-server.log 2>&1 &'` | **可选** —— 激活该 profile 时若远端端口尚未监听，App 通过 SSH exec 跑这条命令并轮询直到端口可用（默认 15 s 内）。**留空 = 旧行为**（你必须在 Step 1 手动起 `oc app-server`）。仅在 SSH 模式下生效。 |
 
 4. 保存 → 回到 Runtimes 列表 → 选中该条 → 点 **"Run Ping"**
    - App 会先通过隧道 `GET /health`
