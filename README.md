@@ -129,6 +129,13 @@ the script. If installation fails with an SSL timeout from a mirror, retry or
 switch conda channels/mirrors; that is a network issue rather than a package
 cache permission issue.
 
+Tier 2 also sets
+`SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True` during the pip install
+because the upstream `SpaGCN` package metadata still references the deprecated
+`sklearn` PyPI placeholder. OmicsClaw itself depends on the correct
+`scikit-learn` package; this flag only allows SpaGCN's legacy transitive
+metadata to resolve.
+
 > **Heads-up**: `cnvkit` (used by `genomics-cnv-calling`) is **not bundled** because its newer-version dependencies conflict with `macs3`. Install it in a separate dedicated env if you need it.
 
 ### 🪶 venv (lightweight — Python-only skills)

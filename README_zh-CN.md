@@ -126,6 +126,11 @@ omicsclaw env                 # 或：python omicsclaw.py env
 镜像 SSL timeout，请重试或切换 conda channel / 镜像；这属于网络问题，
 不是包缓存权限问题。
 
+Tier 2 的 pip 安装还会设置
+`SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True`，因为上游 `SpaGCN`
+包元数据仍引用已废弃的 `sklearn` PyPI 占位包。OmicsClaw 自身依赖的是正确的
+`scikit-learn` 包；该变量只用于允许 SpaGCN 的旧传递依赖元数据完成解析。
+
 > **提示**：`cnvkit`（用于 `genomics-cnv-calling`）**未预装**，因为其新版本依赖与 `macs3` 冲突。如需使用，请在单独的环境里安装。
 
 ### 🪶 venv（轻量 —— 仅 Python 技能）

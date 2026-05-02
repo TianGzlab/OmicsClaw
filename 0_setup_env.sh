@@ -112,6 +112,10 @@ echo "[setup_env] ✔ Tier 1 complete"
 # attaches them to the Tier 1 Python interpreter.
 
 echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
+if [ -z "${SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL:-}" ]; then
+    export SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True
+    echo "[setup_env] allowing deprecated sklearn placeholder for upstream SpaGCN metadata"
+fi
 "$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
     pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 
