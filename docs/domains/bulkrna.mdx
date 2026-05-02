@@ -1,0 +1,68 @@
+---
+title: "Bulk RNA-seq - bulkrna · 13 skills"
+description: "Bulk RNA-seq 全流程：FASTQ QC、比对、计数 QC、DE（DESeq2/edgeR）、富集、剪接、WGCNA、解卷积、PPI、生存分析、TrajBlend bulk-to-sc。"
+keywords: ["bulk RNA-seq", "DESeq2", "差异表达", "WGCNA", "deconvolution", "survival"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+Bulk RNA-seq 域覆盖从原始 FASTQ 到生物学结论的完整链路：FASTQ 质控、比对统计、计数矩阵 QC、差异表达（DESeq2）、通路富集、可变剪接、WGCNA 共表达网络、细胞类型解卷积、PPI 网络、生存分析及 TrajBlend bulk-to-sc 轨迹插值，区别于单细胞域的无单细胞分辨率样本级统计分析。
+
+## 典型分析流程 ASCII 图
+
+```text
+FASTQ
+   │
+   ▼
+bulkrna-read-qc            ← FASTQ QC
+   │
+   ▼
+bulkrna-read-alignment     ← STAR / HISAT2 → counts
+   │
+   ▼
+bulkrna-qc                 ← 计数矩阵 QC
+   │
+   ├─→ bulkrna-geneid-mapping    ← 基因 ID 转换
+   ├─→ bulkrna-batch-correction  ← 批次效应校正
+   ├─→ bulkrna-de                ← 差异表达 (DESeq2)
+   ├─→ bulkrna-splicing          ← 可变剪接
+   ├─→ bulkrna-coexpression      ← WGCNA 共表达
+   ├─→ bulkrna-deconvolution     ← bulk → 细胞类型比例
+   ├─→ bulkrna-enrichment        ← 通路富集
+   ├─→ bulkrna-ppi-network       ← PPI 网络
+   ├─→ bulkrna-survival          ← 生存分析
+   └─→ bulkrna-trajblend         ← bulk → sc 轨迹插值
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| bulkrna-read-qc | FASTQ 质控 | `python omicsclaw.py run bulkrna-read-qc --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-read-qc/SKILL.md) |
+| bulkrna-read-alignment | 比对统计分析 | `python omicsclaw.py run bulkrna-read-alignment --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-read-alignment/SKILL.md) |
+| bulkrna-qc | 计数矩阵质控 | `python omicsclaw.py run bulkrna-qc --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-qc/SKILL.md) |
+| bulkrna-geneid-mapping | 基因 ID 转换 | `python omicsclaw.py run bulkrna-geneid-mapping --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-geneid-mapping/SKILL.md) |
+| bulkrna-batch-correction | 批次效应校正 | `python omicsclaw.py run bulkrna-batch-correction --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-batch-correction/SKILL.md) |
+| bulkrna-de | 差异表达分析 | `python omicsclaw.py run bulkrna-de --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-de/SKILL.md) |
+| bulkrna-splicing | 可变剪接分析 | `python omicsclaw.py run bulkrna-splicing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-splicing/SKILL.md) |
+| bulkrna-coexpression | WGCNA 共表达 | `python omicsclaw.py run bulkrna-coexpression --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-coexpression/SKILL.md) |
+| bulkrna-deconvolution | 细胞类型解卷积 | `python omicsclaw.py run bulkrna-deconvolution --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-deconvolution/SKILL.md) |
+| bulkrna-enrichment | 通路富集分析 | `python omicsclaw.py run bulkrna-enrichment --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-enrichment/SKILL.md) |
+| bulkrna-ppi-network | PPI 网络分析 | `python omicsclaw.py run bulkrna-ppi-network --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-ppi-network/SKILL.md) |
+| bulkrna-survival | 生存分析 | `python omicsclaw.py run bulkrna-survival --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-survival/SKILL.md) |
+| bulkrna-trajblend | bulk→sc 轨迹插值 | `python omicsclaw.py run bulkrna-trajblend --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/bulkrna/bulkrna-trajblend/SKILL.md) |
+
+## 何时不适用本领域
+
+- **单细胞数据** → 用 [单细胞组学](/docs/domains/singlecell)
+- **空间转录组** → 用 [空间转录组](/docs/domains/spatial)
+- **DNA-seq** → 用 [基因组学](/docs/domains/genomics)
+- **小 RNA / lncRNA 专门分析** → 部分 skill 可用，但非主场景
+
+## 下一步阅读
+
+- [单细胞组学](/docs/domains/singlecell)
+- [基因组学](/docs/domains/genomics)
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)
