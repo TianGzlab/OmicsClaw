@@ -39,10 +39,11 @@ bash 0_build_vendored_tools.sh
 
 当前该脚本为存根（stub），尚未编译任何工具，执行后立即返回。待后续在 `tools/` 下添加上游工具时，重新运行此步骤以完成编译和链接。
 
-### 4. 激活并验证
+环境激活会持续整个 shell 会话；下面的步骤无需再次激活。
+
+### 4. 验证安装
 
 ```bash
-conda activate OmicsClaw
 python omicsclaw.py list
 ```
 
@@ -50,22 +51,21 @@ python omicsclaw.py list
 
 ## 第一次调用：跑 demo
 
-`--demo` 模式使用内置的合成数据集（无需提供任何输入文件），适合快速验证安装是否正常。下面的命令会依次执行 spatial-preprocess → spatial-domains → spatial-de → spatial-genes → spatial-statistics 完整链路：
+`--demo` 模式使用内置的合成数据集（无需提供任何输入文件），适合快速验证安装是否正常。下面的命令运行空间转录组预处理技能：
 
 ```bash
-python omicsclaw.py run spatial-pipeline --demo
+python omicsclaw.py run spatial-preprocess --demo --output /tmp/quickstart_demo
 ```
 
 终端输出示例：
 
 ```
-[OmicsClaw] routing → spatial-pipeline
-[spatial-preprocess] running on demo data …
-[spatial-domains]    leiden clustering …
-[spatial-de]         marker gene detection …
-[spatial-genes]      spatially variable genes …
-[spatial-statistics] spatial statistics …
-[OmicsClaw] report written to: /tmp/omicsclaw_demo/spatial-pipeline/
+Running Spatial Transcriptomics skill: spatial-preprocess (demo mode)
+Output: /tmp/quickstart_demo
+
+INFO: Demo file not found, generating synthetic data
+INFO: Saved processed data: /tmp/quickstart_demo/processed.h5ad
+Preprocessing complete: 180 cells, 3 clusters
 ```
 
 输出目录下包含各步骤的 HTML 报告和图像文件。
