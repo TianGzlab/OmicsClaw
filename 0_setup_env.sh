@@ -78,6 +78,64 @@ list_conda_envs() {
     "$INSTALLER" env list
 }
 
+list_conda_info_json() {
+    if command -v conda >/dev/null 2>&1 && conda info --json; then
+        return 0
+    fi
+    "$INSTALLER" info --json
+}
+
+candidate_env_dirs() {
+    if [ -n "${CONDA_ENVS_PATH:-}" ]; then
+        printf '%s\n' "$CONDA_ENVS_PATH" | tr ':' '\n'
+    fi
+    if command -v python >/dev/null 2>&1; then
+        list_conda_info_json 2>/dev/null | python -c 'import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for path in data.get("envs_dirs", []):
+    print(path)
+' || true
+    fi
+    if [ -n "${CONDA_ROOT:-}" ]; then
+        printf '%s\n' "$CONDA_ROOT/envs"
+    fi
+    if command -v conda >/dev/null 2>&1; then
+        conda_root="$(cd "$(dirname "$(command -v conda)")/.." && pwd)"
+        printf '%s\n' "$conda_root/envs"
+    fi
+    printf '%s\n' "$HOME/.conda/envs"
+}
+
+find_named_prefix() {
+    while IFS= read -r env_dir; do
+        [ -n "$env_dir" ] || continue
+        prefix="$env_dir/$ENV_NAME"
+        if [ -d "$prefix/conda-meta" ]; then
+            printf '%s\n' "$prefix"
+            return 0
+        fi
+        if [ -e "$prefix" ]; then
+            echo "[setup_env] ✖ found incomplete conda env prefix: $prefix" >&2
+            echo "  It exists but is not a registered/complete conda env." >&2
+            echo "  Remove or repair it, then re-run:" >&2
+            echo "    $INSTALLER env remove -p '$prefix' -y" >&2
+            exit 1
+        fi
+    done < <(candidate_env_dirs | awk 'NF && !seen[$0]++')
+    return 1
+}
+
+env_run() {
+    if [ "$ENV_TARGET_MODE" = "prefix" ]; then
+        "$INSTALLER" run -p "$ENV_TARGET_VALUE" --no-capture-output "$@"
+    else
+        "$INSTALLER" run -n "$ENV_TARGET_VALUE" --no-capture-output "$@"
+    fi
+}
+
 ENV_LIST_OUTPUT="$(list_conda_envs)" || {
     echo "[setup_env] ✖ failed to list conda environments." >&2
     echo "  Try: conda info --envs" >&2
@@ -85,9 +143,16 @@ ENV_LIST_OUTPUT="$(list_conda_envs)" || {
     exit 1
 }
 
+ENV_TARGET_MODE="name"
+ENV_TARGET_VALUE="$ENV_NAME"
 if printf '%s\n' "$ENV_LIST_OUTPUT" | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     echo "[setup_env] env '$ENV_NAME' already exists — updating from environment.yml"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
+elif ENV_PREFIX_CANDIDATE="$(find_named_prefix)"; then
+    ENV_TARGET_MODE="prefix"
+    ENV_TARGET_VALUE="$ENV_PREFIX_CANDIDATE"
+    echo "[setup_env] env prefix '$ENV_TARGET_VALUE' exists but is not listed by name — updating by prefix"
+    CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -p "$ENV_TARGET_VALUE" -f "$ENV_FILE" --prune
 else
     echo "[setup_env] creating env '$ENV_NAME' from environment.yml"
     CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env create -n "$ENV_NAME" -f "$ENV_FILE"
@@ -95,8 +160,7 @@ fi
 
 # Resolve the env prefix once — needed by later tiers.
 # --no-capture-output: avoid stdout buffering on some mamba versions.
-ENV_PREFIX="$("$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
-    python -c 'import sys; print(sys.prefix)')"
+ENV_PREFIX="$(env_run python -c 'import sys; print(sys.prefix)')"
 if [ -z "$ENV_PREFIX" ] || [ ! -d "$ENV_PREFIX" ]; then
     echo "[setup_env] ✖ failed to resolve env prefix for '$ENV_NAME'" >&2
     echo "  ($INSTALLER run returned: '$ENV_PREFIX')" >&2
@@ -116,16 +180,14 @@ if [ -z "${SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL:-}" ]; then
     export SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True
     echo "[setup_env] allowing deprecated sklearn placeholder for upstream SpaGCN metadata"
 fi
-"$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
-    pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
+env_run pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 
 # Tier 2.1: tools that have no bioconda Python 3.11 build (surfaced by T2
 # validation):
 #   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
 #                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
 echo "[setup_env] Tier 2.1: pip install velocyto"
-"$INSTALLER" run -n "$ENV_NAME" --no-capture-output \
-    pip install "velocyto>=0.17.17"
+env_run pip install "velocyto>=0.17.17"
 
 echo "[setup_env] ✔ Tier 2 complete"
 
@@ -143,7 +205,7 @@ echo "[setup_env] ✔ Tier 2 complete"
 # sysroot + R headers automatically. r-devtools is in environment.yml.
 
 echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
-"$INSTALLER" run -n "$ENV_NAME" --no-capture-output Rscript - <<'RSCRIPT'
+env_run Rscript - <<'RSCRIPT'
 gh_pkgs <- list(
   c("spacexr",       "dmcable/spacexr"),
   c("CARD",          "YMa-lab/CARD"),

@@ -131,6 +131,11 @@ Tier 2 的 pip 安装还会设置
 包元数据仍引用已废弃的 `sklearn` PyPI 占位包。OmicsClaw 自身依赖的是正确的
 `scikit-learn` 包；该变量只用于允许 SpaGCN 的旧传递依赖元数据完成解析。
 
+如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
+但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，并使用
+`env update -p <prefix>` 继续更新。如果 prefix 目录存在但没有 `conda-meta`，
+脚本会把它视为不完整环境；删除或修复该目录后再重新运行脚本。
+
 > **提示**：`cnvkit`（用于 `genomics-cnv-calling`）**未预装**，因为其新版本依赖与 `macs3` 冲突。如需使用，请在单独的环境里安装。
 
 ### 🪶 venv（轻量 —— 仅 Python 技能）

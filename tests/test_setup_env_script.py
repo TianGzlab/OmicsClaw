@@ -331,3 +331,127 @@ def test_setup_env_allows_upstream_spagcn_sklearn_placeholder(tmp_path):
     calls = log_path.read_text(encoding="utf-8")
     assert "pip install -e" in calls
     assert "SKLEARN_ALLOW=True" in calls
+
+
+def test_setup_env_updates_existing_named_prefix_missing_from_env_list(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    fake_bin = tmp_path / "bin"
+    fake_home = tmp_path / "home"
+    envs_dir = tmp_path / "miniconda3" / "envs"
+    fake_prefix = envs_dir / "OmicsClaw"
+    fake_prefix_bin = fake_prefix / "bin"
+    log_path = tmp_path / "calls.log"
+    fake_bin.mkdir()
+    fake_prefix_bin.mkdir(parents=True)
+    (fake_prefix / "conda-meta").mkdir()
+
+    (fake_bin / "mamba").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'mamba %s\\n' "$*" >> "$OMICSCLAW_FAKE_LOG"
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--envs" ]; then
+                cat <<EOF
+            # conda environments:
+            #
+            base                     /fake/base
+            EOF
+                exit 0
+            fi
+
+            if [ "${1:-}" = "env" ] && [ "${2:-}" = "update" ]; then
+                if [ "${3:-}" = "-p" ] && [ "${4:-}" = "$OMICSCLAW_FAKE_PREFIX" ]; then
+                    exit 0
+                fi
+                echo "expected update by prefix for unlisted env prefix" >&2
+                exit 15
+            fi
+
+            if [ "${1:-}" = "env" ] && [ "${2:-}" = "create" ]; then
+                echo "CondaValueError: prefix already exists: $OMICSCLAW_FAKE_PREFIX" >&2
+                exit 16
+            fi
+
+            if [ "${1:-}" = "run" ]; then
+                if printf '%s\\n' "$*" | grep -q -- "-p $OMICSCLAW_FAKE_PREFIX"; then
+                    if printf '%s\\n' "$*" | grep -q ' python -c '; then
+                        echo "$OMICSCLAW_FAKE_PREFIX"
+                        exit 0
+                    fi
+                    if printf '%s\\n' "$*" | grep -q 'pip install -e'; then
+                        exit 0
+                    fi
+                    if printf '%s\\n' "$*" | grep -q ' Rscript '; then
+                        cat >/dev/null
+                        exit 0
+                    fi
+                    exit 0
+                fi
+                echo "expected run by prefix for unlisted env prefix" >&2
+                exit 17
+            fi
+
+            echo "unexpected mamba command: $*" >&2
+            exit 99
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "conda").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'conda %s\\n' "$*" >> "$OMICSCLAW_FAKE_LOG"
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--envs" ]; then
+                cat <<EOF
+            # conda environments:
+            #
+            base                     /fake/base
+            EOF
+                exit 0
+            fi
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--json" ]; then
+                cat <<EOF
+            {"envs_dirs": ["$OMICSCLAW_FAKE_ENVS_DIR"]}
+            EOF
+                exit 0
+            fi
+
+            echo "unexpected conda command: $*" >&2
+            exit 99
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "mamba").chmod(0o755)
+    (fake_bin / "conda").chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(fake_home),
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "OMICSCLAW_FAKE_ENVS_DIR": str(envs_dir),
+            "OMICSCLAW_FAKE_LOG": str(log_path),
+            "OMICSCLAW_FAKE_PREFIX": str(fake_prefix),
+        }
+    )
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert f"mamba env update -p {fake_prefix}" in calls
+    assert "mamba env create -n OmicsClaw" not in calls
+    assert f"mamba run -p {fake_prefix}" in calls
