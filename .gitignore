@@ -55,6 +55,7 @@ docs/superpowers/**
 !docs/superpowers/plans/2026-04-30-conda-env-management-plan.md
 !docs/superpowers/plans/2026-04-30-llm-catalog-modernization-plan.md
 !docs/superpowers/plans/2026-05-02-mamba-first-env-management.md
+!docs/superpowers/plans/2026-05-02-github-r-package-preflight.md
 !docs/superpowers/specs/2026-05-02-mamba-first-env-design.md
 !docs/superpowers/specs/conda-availability-2026-05-02.csv
 

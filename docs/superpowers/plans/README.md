@@ -5,6 +5,10 @@ development work.
 
 ## Tracked Entries
 
+- [2026-05-02-github-r-package-preflight.md](2026-05-02-github-r-package-preflight.md)
+  — audit Tier 3 GitHub-only R package dependency closures and preinstall
+  conda-resolvable install-time dependencies to avoid avoidable CRAN/Bioc
+  source builds.
 - [2026-05-02-mintlify-docs.md](2026-05-02-mintlify-docs.md)
   — implement the Mintlify Chinese docs site (20 pages across 7 groups)
   modeled on `repo_learn/langcli/docs`; archive existing English MDs to

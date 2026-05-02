@@ -147,6 +147,14 @@ Tier 2 的 pip 安装还会设置
 `full` extra 只覆盖分析依赖，默认不包含 `oauth` / `ccproxy-api`；如需
 OAuth，请单独运行 `pip install -e ".[oauth]"`，或在明确需要时使用
 `pip install -e ".[full,oauth]"`。
+CARD 的 CRAN 空间依赖链（`units`、`sf`、`concaveman`）也通过 conda
+预装为 `r-units`、`r-sf`、`r-concaveman`，这样 Tier 3 安装
+`YMa-lab/CARD` 时不会再临时从源码编译这些重型地理空间包。
+Tier 3 其他 GitHub R 根包（`spacexr`、`CellChat`、`numbat`、`SPARK`、
+`DoubletFinder`）的 conda 可解析直接 `Depends` / `Imports` / `LinkingTo`
+依赖也已前置到 `environment.yml`。R 4.3 主环境下目前唯一已知残余源码构建风险是
+`numbat` 的 `hahmmr` / `scistreer` 依赖：conda-forge / bioconda 当前缓存可见
+构建为 R 4.4+，而 OmicsClaw 暂时保持主环境在 R 4.3。
 
 如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
 但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，包括只显示

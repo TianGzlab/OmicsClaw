@@ -87,8 +87,102 @@ dependencies:
   - r-survival
   - r-msigdbr
   - r-ashr
+  # CARD's GitHub installer otherwise pulls these CRAN spatial deps from
+  # source, which requires UDUNITS2/GDAL/GEOS/PROJ toolchain probing.
+  - r-units
+  - r-sf
+  - r-concaveman
+  # Other direct install-time deps for the Tier 3 GitHub R packages. Keeping
+  # them in conda avoids devtools compiling large CRAN dependency chains while
+  # installing spacexr, CARD, CellChat, numbat, SPARK, and DoubletFinder.
+  - r-readr
+  - r-pals
+  - r-doparallel
+  - r-foreach
+  - r-quadprog
+  - r-tibble
+  - r-reshape2
+  - r-knitr
+  - r-rmarkdown
+  - r-fields
+  - r-mgcv
+  - r-compquadform
+  - r-rfast
+  - r-locfdr
+  - r-metafor
+  - r-data.table
+  - r-rcpp
+  - r-rcpparmadillo
+  - r-mcmcpack
+  - r-wrmisc
+  - r-sp
+  - r-rann
+  - r-rcolorbrewer
+  - r-nnls
+  - r-scatterpie
+  - r-ggcorrplot
+  - r-pbmcapply
+  - r-rcppml
+  - r-spatstat.random
+  - r-gtools
+  - r-rcppeigen
+  - r-cowplot
+  - r-igraph
+  - r-future
+  - r-future.apply
+  - r-pbapply
+  - r-irlba
+  - r-ggalluvial
+  - r-stringr
+  - r-svglite
+  - r-ggrepel
+  - r-circlize
+  - r-rspectra
+  - r-reticulate
+  - r-scales
+  - r-sna
+  - r-fnn
+  - r-shape
+  - r-magrittr
+  - r-patchwork
+  - r-colorspace
+  - r-plyr
+  - r-ggpubr
+  - r-ggnetwork
+  - r-plotly
+  - r-shiny
+  - r-bslib
+  - r-collapse
+  - r-ape
+  - r-catools
+  - r-dendextend
+  - r-ggraph
+  - r-glue
+  - r-logger
+  - r-optparse
+  - r-paralleldist
+  - r-purrr
+  - r-rhpcblasctl
+  - r-r.utils
+  - r-tidygraph
+  - r-tidyr
+  - r-vcfr
+  - r-roptim
+  - r-matlab
+  - r-pracma
+  - r-kernsmooth
+  - r-rocr
+  - r-seuratobject
+  - r-zoo
 
   # ────────── Tier 3: Bioconductor packages (replaces install_r_dependencies.R, Bioc section) ──────────
+  - bioconductor-biocgenerics
+  - bioconductor-biocneighbors
+  - bioconductor-complexheatmap
+  - bioconductor-genomicranges
+  - bioconductor-ggtree
+  - bioconductor-iranges
+  - bioconductor-summarizedexperiment
   - bioconductor-singlecellexperiment
   - bioconductor-scran
   - bioconductor-scuttle

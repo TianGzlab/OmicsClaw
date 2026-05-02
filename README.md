@@ -152,6 +152,16 @@ line (`>=2.0.7,<2.1`), skipping CellRank 2.1+ releases that require Python
 3.12+. The `full` extra is analysis-focused and intentionally excludes
 `oauth`/`ccproxy-api`; install `pip install -e ".[oauth]"` separately, or use
 `pip install -e ".[full,oauth]"` when you explicitly need OAuth support.
+CARD's CRAN spatial dependency chain (`units`, `sf`, `concaveman`) is also
+preinstalled through conda as `r-units`, `r-sf`, and `r-concaveman`, so Tier 3
+does not need to compile those heavy geospatial packages from source while
+installing `YMa-lab/CARD`.
+Tier 3's other GitHub R package roots (`spacexr`, `CellChat`, `numbat`,
+`SPARK`, and `DoubletFinder`) also have their conda-resolvable direct
+`Depends`/`Imports`/`LinkingTo` dependencies preinstalled in `environment.yml`.
+The only known residual source-build risk on the R 4.3 line is `numbat`'s
+`hahmmr`/`scistreer` dependency pair: conda-forge/bioconda currently expose
+cached builds for R 4.4+, while OmicsClaw keeps the main env on R 4.3 for now.
 
 If a previous interrupted run left a complete prefix at
 `<conda-root>/envs/OmicsClaw` but `conda info --envs` does not list it by name,

@@ -5,6 +5,120 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import yaml
+
+
+def test_environment_yml_preinstalls_card_cran_spatial_dependencies():
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    dependencies = {
+        dep.lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+
+    assert {"r-units", "r-sf", "r-concaveman"} <= dependencies
+
+
+def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    dependencies = {
+        dep.split("=")[0].lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+
+    expected = {
+        "bioconductor-biocgenerics",
+        "bioconductor-biocneighbors",
+        "bioconductor-complexheatmap",
+        "bioconductor-genomicranges",
+        "bioconductor-ggtree",
+        "bioconductor-iranges",
+        "bioconductor-summarizedexperiment",
+        "r-ape",
+        "r-bslib",
+        "r-catools",
+        "r-circlize",
+        "r-colorspace",
+        "r-compquadform",
+        "r-collapse",
+        "r-cowplot",
+        "r-data.table",
+        "r-dendextend",
+        "r-doparallel",
+        "r-fields",
+        "r-fnn",
+        "r-foreach",
+        "r-future",
+        "r-future.apply",
+        "r-ggalluvial",
+        "r-ggcorrplot",
+        "r-ggnetwork",
+        "r-ggpubr",
+        "r-ggraph",
+        "r-ggrepel",
+        "r-glue",
+        "r-gtools",
+        "r-igraph",
+        "r-irlba",
+        "r-kernsmooth",
+        "r-knitr",
+        "r-locfdr",
+        "r-logger",
+        "r-magrittr",
+        "r-matlab",
+        "r-mcmcpack",
+        "r-metafor",
+        "r-mgcv",
+        "r-nnls",
+        "r-optparse",
+        "r-pals",
+        "r-paralleldist",
+        "r-patchwork",
+        "r-pbapply",
+        "r-pbmcapply",
+        "r-plotly",
+        "r-plyr",
+        "r-pracma",
+        "r-purrr",
+        "r-quadprog",
+        "r-r.utils",
+        "r-rann",
+        "r-rcolorbrewer",
+        "r-rcpp",
+        "r-rcpparmadillo",
+        "r-rcppeigen",
+        "r-rcppml",
+        "r-readr",
+        "r-reshape2",
+        "r-reticulate",
+        "r-rfast",
+        "r-rhpcblasctl",
+        "r-rmarkdown",
+        "r-rocr",
+        "r-roptim",
+        "r-rspectra",
+        "r-scales",
+        "r-scatterpie",
+        "r-seuratobject",
+        "r-shape",
+        "r-shiny",
+        "r-sna",
+        "r-sp",
+        "r-spatstat.random",
+        "r-stringr",
+        "r-svglite",
+        "r-tibble",
+        "r-tidygraph",
+        "r-tidyr",
+        "r-vcfr",
+        "r-wrmisc",
+        "r-zoo",
+    }
+    assert expected <= dependencies
+
 
 def test_setup_env_falls_back_when_mamba_env_listing_is_broken(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
