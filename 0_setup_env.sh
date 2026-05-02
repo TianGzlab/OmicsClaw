@@ -276,8 +276,10 @@ echo "[setup_env] ✔ Tier 2 complete"
 # Idempotent: requireNamespace() skips already-installed packages.
 # Compiles run inside the activated env so they pick up Tier 1's gxx +
 # sysroot + R headers automatically. r-devtools is in environment.yml.
-# wrMisc is installed from CRAN here instead of conda because conda-forge's
-# current r-wrmisc builds require R 4.4/4.5, while the main env stays on R 4.3.
+# wrMisc and NMF are installed/updated from CRAN here instead of conda:
+# conda-forge's current r-wrmisc builds require R 4.4/4.5, while the main env
+# stays on R 4.3; conda-forge's R 4.3 r-nmf build is still 0.21.0, while
+# CellChat requires NMF >= 0.23.0.
 # GitHub package installs intentionally skip dependency resolution and
 # vignettes/manuals. Hard runtime/build deps are owned by environment.yml and
 # the wrMisc CRAN preflight above; letting devtools resolve dependencies here
@@ -287,13 +289,51 @@ echo "[setup_env] ✔ Tier 2 complete"
 echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
 env_run Rscript - <<'RSCRIPT'
 options(repos = c(CRAN = Sys.getenv("CRAN_MIRROR", "https://cloud.r-project.org")))
-if (!requireNamespace("wrMisc", quietly = TRUE)) {
-  cat("[r-extras] installing wrMisc from CRAN\n")
-  install.packages("wrMisc", quiet = TRUE)
-  if (!requireNamespace("wrMisc", quietly = TRUE)) {
-    stop("[r-extras] FAILED to install wrMisc")
-  }
+
+installed_package_version <- function(pkg) {
+  tryCatch(packageVersion(pkg), error = function(e) NULL)
 }
+
+ensure_cran_package <- function(pkg, min_version = NULL) {
+  current_version <- installed_package_version(pkg)
+  minimum_version <- if (is.null(min_version)) NULL else package_version(min_version)
+  needs_install <- is.null(current_version)
+  if (!needs_install && !is.null(minimum_version)) {
+    needs_install <- current_version < minimum_version
+  }
+  if (!needs_install) {
+    cat(sprintf("[r-extras] %s OK", pkg))
+    if (!is.null(minimum_version)) {
+      cat(sprintf(" (version %s >= %s)", as.character(current_version), min_version))
+    }
+    cat("\n")
+    return(invisible(TRUE))
+  }
+
+  if (is.null(min_version)) {
+    cat(sprintf("[r-extras] installing %s from CRAN\n", pkg))
+  } else {
+    current <- if (is.null(current_version)) "missing" else as.character(current_version)
+    cat(sprintf("[r-extras] installing %s >= %s from CRAN (current: %s)\n", pkg, min_version, current))
+  }
+  install.packages(pkg, dependencies = NA, quiet = FALSE)
+  current_version <- installed_package_version(pkg)
+  if (is.null(current_version)) {
+    stop(sprintf("[r-extras] FAILED to install %s", pkg))
+  }
+  if (!is.null(minimum_version) && current_version < minimum_version) {
+    stop(sprintf(
+      "[r-extras] FAILED to install %s >= %s (installed: %s)",
+      pkg,
+      min_version,
+      as.character(current_version)
+    ))
+  }
+  invisible(TRUE)
+}
+
+ensure_cran_package("wrMisc")
+ensure_cran_package("NMF", "0.23.0")
 
 gh_pkgs <- list(
   c("spacexr",       "dmcable/spacexr"),

@@ -156,9 +156,10 @@ CARD's CRAN spatial dependency chain (`units`, `sf`, `concaveman`) is also
 preinstalled through conda as `r-units`, `r-sf`, and `r-concaveman`, so Tier 3
 does not need to compile those heavy geospatial packages from source while
 installing `YMa-lab/CARD`.
-CARD's lightweight `wrMisc` import is installed from CRAN in Tier 3 instead of
-being listed as conda `r-wrmisc`, because current conda-forge `r-wrmisc` builds
-target R 4.4/4.5 while the main OmicsClaw env remains on R 4.3.
+CARD's lightweight `wrMisc` import and CellChat's `NMF>=0.23.0` requirement
+are installed from CRAN in Tier 3 instead of relying only on conda packages:
+current conda-forge `r-wrmisc` builds target R 4.4/4.5, while conda-forge's
+R 4.3 `r-nmf` build is still 0.21.0 and CellChat requires at least 0.23.0.
 Tier 3's other GitHub R package roots (`spacexr`, `CellChat`, `numbat`,
 `SPARK`, and `DoubletFinder`) also have their conda-resolvable direct
 `Depends`/`Imports`/`LinkingTo` dependencies preinstalled in `environment.yml`.

@@ -125,13 +125,28 @@ def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
     repo_root = Path(__file__).resolve().parents[1]
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
 
-    cran_install = 'install.packages("wrMisc"'
+    cran_install = 'ensure_cran_package("wrMisc")'
     github_install = "    devtools::install_github("
 
     assert cran_install in setup_script
     assert github_install in setup_script
     assert "p[2]," in setup_script
     assert setup_script.index(cran_install) < setup_script.index(github_install)
+
+
+def test_setup_env_upgrades_nmf_before_github_r_packages():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+
+    nmf_check = 'ensure_cran_package("NMF", "0.23.0")'
+    package_version_check = "current_version < minimum_version"
+    nmf_install = "install.packages(pkg"
+    github_install = "    devtools::install_github("
+
+    assert nmf_check in setup_script
+    assert package_version_check in setup_script
+    assert nmf_install in setup_script
+    assert setup_script.index(nmf_check) < setup_script.index(github_install)
 
 
 def test_setup_env_installs_github_r_packages_without_dependency_resolution_or_vignettes():
