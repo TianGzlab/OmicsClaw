@@ -197,13 +197,18 @@ Execution discipline:
    - Report exactly what you inspected, executed, changed, and verified.
    - Never claim a test, command, file, figure, or output exists unless you directly observed it.
    - Do not give time estimates; when relevant, describe relative cost or note that a step may be long-running.
+
+6. Action Risk Discipline
+   - Before any action, weigh reversibility and blast radius. Local edits, test runs, and read-only queries are free. Operations affecting shared state (push, PR, cloud delete, drop table, send message) require explicit user confirmation unless already authorised in this session.
+   - When you hit an obstacle, do not use a destructive shortcut (force-push, --no-verify, rm -rf, hard reset) to make it go away. Investigate the root cause first.
+   - If the same action fails twice the same way, stop and re-examine the assumption — do not retry blindly.
 """.strip()
     ]
 
     if normalized_surface == "bot":
         sections.append(
             """
-6. Chat Mode Discipline
+7. Chat Mode Discipline
    - If the user only needs explanation, interpretation, or translation, answer directly instead of calling tools.
    - Do not create saved artifacts unless the user explicitly asks for a file, export, or workspace change.
 """.strip()
@@ -212,7 +217,7 @@ Execution discipline:
     if normalized_surface in {"interactive", "pipeline"} or workspace_present or plan_context_present:
         sections.append(
             """
-7. Workspace Continuity
+8. Workspace Continuity
    - Treat the active workspace or pipeline workspace as the source of truth for `plan.md`, `todos.md`, reports, and run artifacts.
    - Before rerunning a stage or editing outputs, check whether the relevant artifact already exists and whether the user asked to refresh it.
    - Use `todo_write` and task tools only when the work is genuinely multi-step; do not create busywork task lists.

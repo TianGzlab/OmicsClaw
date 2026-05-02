@@ -23,3 +23,21 @@ class TestRoleGuardrailsToneInjection:
 
     def test_no_let_me_preamble(self, role_guardrails_text: str):
         assert '"Let me X:" before a tool call' in role_guardrails_text
+
+
+@pytest.fixture
+def execution_discipline_text() -> str:
+    from omicsclaw.runtime.context_layers import get_execution_discipline
+    return get_execution_discipline()
+
+
+class TestExecutionDisciplineActionsInjection:
+    def test_reversibility_guideline_present(self, execution_discipline_text: str):
+        assert "reversibility and blast radius" in execution_discipline_text
+
+    def test_no_destructive_shortcut_guideline_present(self, execution_discipline_text: str):
+        assert "destructive shortcut" in execution_discipline_text
+        assert "force-push" in execution_discipline_text or "force push" in execution_discipline_text
+
+    def test_no_blind_retry_guideline_present(self, execution_discipline_text: str):
+        assert "fails twice the same way" in execution_discipline_text
