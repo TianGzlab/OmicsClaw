@@ -21,6 +21,8 @@ dependencies:
   # ────────── Tier 0: Python interpreter + build toolchain ──────────
   - python=3.11
   - pip
+  - uv                          # PubGrub-resolver pip front-end; used by
+                                # 0_setup_env.sh Tier 2 for the thin pip layer.
   - gxx_linux-64=12.*
   - sysroot_linux-64=2.17
   - cmake
@@ -105,3 +107,103 @@ dependencies:
   # SPARK, DoubletFinder) are NOT in this file — they have no bioconda
   # equivalent. They are installed via `devtools::install_github` in
   # 0_setup_env.sh Tier 3.
+
+  # ────────── Tier 4: heavy Python science stack (lifted from pyproject pip layer) ──────────
+  # Why: pip 24.2+ aborts the [full,singlecell-upstream] resolve with
+  # `resolution-too-deep`. Lifting the heavy hubs (torch, scvi-tools, scanpy
+  # family, jinja2/nbconvert chain) to mamba shrinks the pip graph by ~70%,
+  # which lets the residual thin pip layer resolve reliably.
+  # See docs/superpowers/specs/2026-05-02-mamba-first-env-design.md.
+  # Channel pins: prefer conda-forge for python-only libs, bioconda for
+  # genomics-domain libs. Strict channel priority is enforced by 0_setup_env.sh.
+  #
+  # Coverage notes:
+  #   * High-confidence packages (well-known on conda-forge or bioconda) are
+  #     listed without per-package channel pins; strict channel priority +
+  #     bioconda/conda-forge order in this file is enough.
+  #   * pytorch lives on conda-forge AND on the dedicated `pytorch` channel.
+  #     We use conda-forge to stay inside the file's channel order. CUDA users
+  #     follow README's CUDA override (mamba install -c pytorch -c nvidia ...).
+  #   * Four packages from Task 0 audit are `unknown` (cell2location,
+  #     cellphonedb, infercnvpy, spatialde) — they remain in pyproject as
+  #     thin pip residue until verified on a network-connected machine. See
+  #     docs/superpowers/specs/2026-05-02-mamba-first-env-design.md "Open
+  #     questions" for follow-up.
+  #
+  # Single-cell / spatial core
+  - scanpy>=1.9.0,<2.0
+  - anndata>=0.11.0
+  - squidpy>=1.2.0
+  # Numeric stack
+  - numpy>=1.24,<2.1            # cap at 2.1 until scvi-tools/numba clear 2.x
+  - pandas>=2.0,<3.0
+  - scipy>=1.7.0
+  - scikit-learn>=1.3
+  - matplotlib>=3.7
+  - seaborn>=0.11.0
+  - pillow>=8.0.0
+  - scikit-misc>=0.5.0
+  # Graph / clustering / embedding
+  - python-igraph>=0.11.0
+  - leidenalg>=0.10.0
+  - louvain>=0.8.0
+  - umap-learn>=0.5.0
+  # Server / notebook runtime
+  - pydantic>=2.0,<3.0
+  - nbformat>=5.9
+  - jupyter_client>=8.0
+  - ipykernel>=6.0
+  - rich>=13.0.0
+  - greenlet>=3.0.0
+  - prompt-toolkit>=3.0
+  - questionary>=2.0
+  - pyyaml>=6.0
+  # Web / API stack (used by bot, app-server, memory)
+  - aiosqlite>=0.19.0
+  - sqlalchemy>=1.4.0
+  - fastapi>=0.100.0
+  - uvicorn>=0.23.0
+  - cryptography>=41.0.0
+  - requests>=2.31.0
+  - openai>=1.0.0
+  - python-dotenv>=1.0.0
+  - httpx>=0.27
+  # Nbconvert / Jinja2 chain — pulled by kb-python; pinning here breaks the
+  # pygpcca/jinja2/fastapi backtracking storm in the pip layer.
+  - jinja2>=3.1.5
+  - nbconvert>=7.0
+  - beautifulsoup4>=4.12
+  # Deep learning (CPU build by default; CUDA users override per README)
+  - pytorch>=2.0,<3.0
+  - pytorch-cpu                 # explicit CPU variant; CUDA users follow
+                                # README's CUDA override snippet.
+  # scvi family + downstream
+  - scvi-tools>=1.4.0,<2.0
+  - scvelo>=0.3.0
+  - cellrank>=2.0.7,<2.1
+  # Batch correction / integration
+  - harmonypy>=0.0.9
+  - bbknn>=1.5.0
+  - scanorama>=1.7.0
+  # Cell typing / communication
+  - celltypist>=1.6.0
+  # Enrichment / differential expression
+  - gseapy>=1.0.0
+  - pydeseq2>=0.4.0
+  # Doublet detection
+  - scrublet>=0.2.3
+  - doubletdetection>=4.3.0
+  # GRN / trajectory
+  - arboreto>=0.1.6
+  - palantir>=1.0.0
+  # Single-cell upstream tooling
+  - multiqc>=1.33,<2.0
+  - kb-python>=0.29.0
+  # Spatial statistics
+  - esda>=2.4.0
+  - libpysal>=4.6.0
+  - pysal>=2.6.0
+  - pot>=0.9.0                  # PyPI name `POT`, conda name `pot`
+  # Resolver-leaf narrowing kept here for parity with prior pyproject pins
+  - coloredlogs>=15.0.1,<16.0
+  - humanfriendly>=10.0,<11.0
