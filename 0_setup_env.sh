@@ -276,9 +276,20 @@ echo "[setup_env] ✔ Tier 2 complete"
 # Idempotent: requireNamespace() skips already-installed packages.
 # Compiles run inside the activated env so they pick up Tier 1's gxx +
 # sysroot + R headers automatically. r-devtools is in environment.yml.
+# wrMisc is installed from CRAN here instead of conda because conda-forge's
+# current r-wrmisc builds require R 4.4/4.5, while the main env stays on R 4.3.
 
 echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
 env_run Rscript - <<'RSCRIPT'
+options(repos = c(CRAN = Sys.getenv("CRAN_MIRROR", "https://cloud.r-project.org")))
+if (!requireNamespace("wrMisc", quietly = TRUE)) {
+  cat("[r-extras] installing wrMisc from CRAN\n")
+  install.packages("wrMisc", quiet = TRUE)
+  if (!requireNamespace("wrMisc", quietly = TRUE)) {
+    stop("[r-extras] FAILED to install wrMisc")
+  }
+}
+
 gh_pkgs <- list(
   c("spacexr",       "dmcable/spacexr"),
   c("CARD",          "YMa-lab/CARD"),

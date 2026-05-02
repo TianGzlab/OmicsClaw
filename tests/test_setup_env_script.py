@@ -5,6 +5,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -114,10 +115,60 @@ def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
         "r-tidygraph",
         "r-tidyr",
         "r-vcfr",
-        "r-wrmisc",
         "r-zoo",
     }
     assert expected <= dependencies
+    assert "r-wrmisc" not in dependencies
+
+
+def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+
+    cran_install = 'install.packages("wrMisc"'
+    github_install = "devtools::install_github(p[2]"
+
+    assert cran_install in setup_script
+    assert github_install in setup_script
+    assert setup_script.index(cran_install) < setup_script.index(github_install)
+
+
+def test_conda_forge_wrmisc_builds_do_not_target_r43():
+    try:
+        result = subprocess.run(
+            [
+                "conda",
+                "search",
+                "-c",
+                "conda-forge",
+                "--override-channels",
+                "r-wrmisc",
+                "--info",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"conda search unavailable: {exc}")
+
+    if result.returncode != 0:
+        pytest.skip(f"conda search failed: {result.stderr}")
+
+    assert "r-wrmisc" in result.stdout
+    assert "r-base >=4.4,<4.5.0a0" in result.stdout
+    assert "r-base >=4.5,<4.6.0a0" in result.stdout
+    assert "r-base >=4.3" not in result.stdout
+
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    dependencies = {
+        dep.split("=")[0].lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+    assert "r-wrmisc" not in dependencies
 
 
 def test_setup_env_falls_back_when_mamba_env_listing_is_broken(tmp_path):

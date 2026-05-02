@@ -114,7 +114,9 @@ dependencies:
   - r-rcpp
   - r-rcpparmadillo
   - r-mcmcpack
-  - r-wrmisc
+  # wrMisc is a CARD import, but conda-forge currently publishes only
+  # R 4.4/4.5 r-wrmisc builds. 0_setup_env.sh installs CRAN wrMisc in Tier 3
+  # before GitHub R packages so the main R 4.3 solve remains satisfiable.
   - r-sp
   - r-rann
   - r-rcolorbrewer
