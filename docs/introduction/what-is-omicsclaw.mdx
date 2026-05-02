@@ -1,0 +1,60 @@
+---
+title: "什么是 OmicsClaw - 多组学 AI Agent"
+description: "OmicsClaw 是一个本地运行的多组学 AI 代理，覆盖空间转录组、单细胞、基因组、蛋白组、代谢组、Bulk RNA-seq 6 大组学领域，通过 88 个可路由的 skill 提供端到端分析能力。"
+keywords: ["OmicsClaw", "多组学", "AI Agent", "spatial transcriptomics", "single-cell", "scRNA-seq", "bioinformatics"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 一句话定义
+
+**OmicsClaw 是一个运行在本地的多组学 AI 代理**——它不是给建议的聊天机器人，而是把 88 个生物信息学技能（skill）组织成一套可路由的分析能力，覆盖 6 大组学领域，由编排器（orchestrator）根据用户的自然语言问题自动选择并调用合适的 skill。
+
+## 与同类工具的差异
+
+| 工具 | 定位 | 运行位置 | 数据流向 |
+|---|---|---|---|
+| **OmicsClaw** | 多组学 AI Agent + 88 skill 路由 | 本地进程 | 数据永不离开本机 |
+| Galaxy | 图形化工作流平台 | 云端或本地服务器 | 上传至服务器处理 |
+| nf-core | Nextflow 流程库（批量执行） | HPC / 云端集群 | 数据发送至计算节点 |
+| ChatGPT 类工具 | 通用对话 LLM | 云端 API | 输入文本上传云端，无执行能力 |
+
+## 端到端示例：从一句话问题到分析结果
+
+```
+用户输入
+  │
+  │  "帮我对空间转录组数据做预处理和质控"
+  ▼
+┌─────────────────────────────────────────┐
+│           orchestrator（编排器）         │
+│  匹配领域：spatial → spatial-preprocess │
+└─────────────────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────────────────┐
+│              CLI 执行层                  │
+│                                         │
+│  python skills/spatial-preprocess/      │
+│    spatial_preprocess.py                │
+│    --demo --output /tmp/preprocess_demo │
+└─────────────────────────────────────────┘
+  │
+  ▼
+输出目录 /tmp/preprocess_demo/
+  ├── report.html        ← QC 汇总报告
+  ├── preprocessed.h5ad  ← 可供下游 skill 使用的数据文件
+  └── figures/           ← QC 图、UMAP、空间图
+```
+
+## 它不是什么
+
+- **不是医疗器械**：OmicsClaw 是研究与教育工具，不提供临床诊断，结论须由领域专家审核。
+- **不是云服务**：所有计算在本地完成，原始数据不会上传至任何外部服务器。
+- **不是一站式 GUI 平台**：CLI 与 Bot 是核心交互入口；OmicsClaw-App 仅用于对话和结果浏览，不是主要使用路径。
+- **不是黑盒**：每个 skill 均附有公开的 `SKILL.md` 方法论文档，中间产物可追溯，分析血缘完整记录。
+
+## 下一步阅读
+
+- [为什么需要 OmicsClaw](/docs/introduction/why-omicsclaw)
+- [五分钟上手](/docs/introduction/quickstart)
+- [整体架构](/docs/architecture/overview)
