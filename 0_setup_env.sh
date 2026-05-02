@@ -216,19 +216,37 @@ echo "[setup_env] env prefix: $ENV_PREFIX"
 
 echo "[setup_env] ✔ Tier 1 complete"
 
-# ----- Tier 2: OmicsClaw editable + Python optional extras ----------
-# pyproject.toml owns all Python deps. Running pip inside the env
-# attaches them to the Tier 1 Python interpreter.
+# ----- Tier 2: thin pip residue -------------------------------------
+# After Tier 1 mamba env creation, the bulk of Python deps are already
+# installed (see environment.yml Tier 4). Tier 2 here only installs:
+#   1. omicsclaw itself in editable mode
+#   2. PyPI-only packages with no conda recipe (SpaGCN/GraphST/cellcharter/
+#      paste-bio/flashdeconv/fastccc/pyVIA/tangram-sc/...)
+#   3. velocyto (no Py3.11 bioconda build)
+# Prefer `uv pip install` if available — its PubGrub resolver is dramatically
+# faster than pip on the residual graph and never hits resolution-too-deep.
+# Fall back to pip with --resolver-max-rounds bump for older toolchains.
 
-echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
+echo "[setup_env] Tier 2.0: install editable omicsclaw + thin pip residue"
+
 if [ -z "${SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL:-}" ]; then
     export SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True
     echo "[setup_env] allowing deprecated sklearn placeholder for upstream SpaGCN metadata"
 fi
-env_run pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 
-# Tier 2.1: tools that have no bioconda Python 3.11 build (surfaced by T2
-# validation):
+# uv lives in environment.yml Tier 0 so it should be present in the env's
+# bin dir. If not (e.g. older env created before this change), fall back
+# to pip with bumped --resolver-max-rounds.
+if env_run sh -c 'command -v uv >/dev/null 2>&1'; then
+    echo "[setup_env] using uv (PubGrub resolver) for thin pip residue"
+    env_run uv pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
+else
+    echo "[setup_env] uv not found in env; falling back to pip with --resolver-max-rounds=200000"
+    env_run pip install --resolver-max-rounds=200000 \
+        -e "$PROJECT_ROOT[full,singlecell-upstream]"
+fi
+
+# Tier 2.1: tools that have no bioconda Python 3.11 build:
 #   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
 #                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
 echo "[setup_env] Tier 2.1: pip install velocyto"
