@@ -1,0 +1,43 @@
+package,status,version_or_reason
+arboreto,mamba_ok,0.1.6 (noarch)
+bbknn,mamba_ok,1.6.0
+ccproxy-api,pip_only,known-no-conda-recipe
+cell2location,unknown,not-in-local-cache; verify on network
+cellcharter,pip_only,known-no-conda-recipe
+cellphonedb,unknown,not-in-local-cache; verify on network
+cellrank,mamba_ok,2.2.0 (noarch)
+celltypist,mamba_ok,1.7.1 (noarch)
+coloredlogs,mamba_ok,15.0.1 (noarch)
+doubletdetection,mamba_ok,4.3.0.post1 (noarch)
+esda,mamba_ok,2.9.0 (noarch)
+fastccc,pip_only,known-no-conda-recipe
+flashdeconv,pip_only,known-no-conda-recipe
+graphst,pip_only,known-no-conda-recipe
+gseapy,mamba_ok,1.2.1
+harmonypy,mamba_ok,0.2.0 (noarch)
+httpx,mamba_ok,0.23.1
+humanfriendly,mamba_ok,10.0
+infercnvpy,unknown,not-in-local-cache; verify on network
+kb-python,mamba_ok,0.30.1 (noarch)
+leidenalg,mamba_ok,0.11.0
+liana,mamba_ok,1.7.1 (noarch)
+libpysal,mamba_ok,4.14.1 (noarch)
+louvain,mamba_ok,0.8.2
+multiqc,mamba_ok,1.34 (noarch)
+palantir,mamba_ok,1.4.4 (noarch)
+paste-bio,pip_only,known-no-conda-recipe
+phate,mamba_ok,2.0.0 (noarch)
+pot,mamba_ok,0.9.6.post1
+pydeseq2,mamba_ok,0.5.4 (noarch)
+pysal,mamba_ok,26.1 (noarch)
+python-igraph,mamba_ok,1.0.0
+pyvia,pip_only,known-no-conda-recipe
+scanorama,mamba_ok,1.7.4 (noarch)
+scrublet,mamba_ok,0.2.3 (noarch)
+scvelo,mamba_ok,0.3.4 (noarch)
+scvi-tools,mamba_ok,1.4.2 (noarch)
+spagcn,pip_only,known-no-conda-recipe
+spatialde,unknown,not-in-local-cache; verify on network
+tangram-sc,pip_only,known-no-conda-recipe
+torch,pip_only,not-in-bioconda-or-conda-forge (pytorch channel only)
+torch_geometric,pip_only,not-in-bioconda-or-conda-forge (pyg channel only)

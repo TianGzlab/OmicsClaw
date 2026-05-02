@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
-# Build vendored tools from upstream source.
+# OmicsClaw vendored tool builder
 #
-# Run AFTER the conda env is created and activated, so the build toolchain
-# (gxx / cmake / autoconf+automake+libtool / make) is on PATH:
+# Add a build_<tool>() function below for each tool that meets the criteria
+# in tools/README.md. Then add a `build_<tool>` call to the dispatch block
+# at the bottom and a `link_if_exists` line to 0_setup_env.sh Tier 4.
 #
-#     conda activate OmicsClaw
-#     bash 0_build_vendored_tools.sh
-#     bash 0_setup_env.sh         # re-run to symlink any new binaries
-#
-# Currently builds NOTHING — this is a stub. To add a tool:
-#   1. add a build block following the commented template at the bottom
-#   2. add a `link_if_exists` line in 0_setup_env.sh Tier 4
-#
-# Idempotent by convention: each tool block must skip itself if its binary
-# already exists. Force a rebuild by deleting tools/<dir>/.
+# Each build function should be idempotent: re-running this script must be
+# a no-op when binaries already exist.
 
 set -euo pipefail
 
@@ -89,28 +82,35 @@ clone_at_tag() {
 
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
-# ────────────────────────────────────────────────────────────────────
-#  Build blocks go below. None are active today.
-# ────────────────────────────────────────────────────────────────────
+# Example template (commented out — uncomment + adapt when needed):
+#
+# build_examplebio() {
+#     local name="examplebio"
+#     local repo="https://github.com/example/examplebio.git"
+#     local rev="v1.2.3"
+#     local dest="$TOOLS_DIR/$name"
+#
+#     if [ -e "$dest/bin/examplebio" ]; then
+#         echo "[vendored] $name already built — skipping"
+#         return 0
+#     fi
+#
+#     mkdir -p "$dest"
+#     if [ ! -d "$dest/upstream" ]; then
+#         git clone --depth 1 --branch "$rev" "$repo" "$dest/upstream"
+#     fi
+#
+#     pushd "$dest/upstream" >/dev/null
+#     mkdir -p "$dest/build"
+#     cmake -B "$dest/build" -S . -DCMAKE_INSTALL_PREFIX="$dest"
+#     cmake --build "$dest/build" -j"$(nproc)"
+#     cmake --install "$dest/build"
+#     popd >/dev/null
+#
+#     echo "[vendored] $name built — binaries in $dest/bin"
+# }
 
-# # ----- TEMPLATE: hifiasm vX.Y.Z (delete this block when adding real tool)
-# if [ -x "$TOOLS_DIR/hifiasm/hifiasm" ]; then
-#     echo "[hifiasm] already built — skipping"
-# else
-#     echo "[hifiasm] cloning & building vX.Y.Z"
-#     clone_at_tag https://github.com/chhylp123/hifiasm "$TOOLS_DIR/hifiasm" X.Y.Z
-#     (cd "$TOOLS_DIR/hifiasm" && make -j "$JOBS" CC="$CC" CXX="$CXX")
-# fi
+# Dispatch — call build_<tool> for each vendored tool.
+# Currently empty.
 
-# ----- done ---------------------------------------------------------
-
-cat <<EOF
-
-[build] ✔ no vendored tools currently configured.
-
-To add a tool:
-  1. uncomment the template above (and rename for the real tool)
-  2. add a matching link_if_exists call in 0_setup_env.sh Tier 4
-  3. re-run:    bash 0_setup_env.sh
-
-EOF
+echo "[vendored] no tools to build (stub)"

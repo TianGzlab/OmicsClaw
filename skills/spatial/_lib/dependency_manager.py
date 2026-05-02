@@ -23,9 +23,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -33,8 +33,18 @@ class DependencyInfo:
     """Metadata for an optional dependency."""
 
     module_name: str      # Python import name (e.g. "scvi" for scvi-tools)
-    install_cmd: str      # pip install command
+    install_cmd: str      # pip install command or sub-env bootstrap hint
     description: str = ""
+    availability_check: Optional[Callable[[], bool]] = field(
+        default=None, compare=False, hash=False,
+    )
+    """Override the default importability check.
+
+    When set, ``is_available(name)`` calls this callable instead of
+    ``importlib.util.find_spec(module_name)``.  Used for Layer-4 sub-env
+    deps (e.g. pybanksy in ``omicsclaw_banksy``) where the package is
+    intentionally not in the main env's site-packages.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +88,14 @@ DEPENDENCY_REGISTRY: dict[str, DependencyInfo] = {
         "Graph self-supervised contrastive learning (GraphST)"
     ),
     "pybanksy": DependencyInfo(
-        "banksy", "pip install pybanksy",
-        "Spatial domain identification (BANKSY)"
+        "banksy",
+        "BANKSY runs in the omicsclaw_banksy sub-env (numpy<2.0). "
+        "Bootstrap once: bash 0_setup_env.sh --with-banksy",
+        "Spatial domain identification (BANKSY, Layer-4 sub-env)",
+        availability_check=lambda: __import__(
+            "omicsclaw.core.external_env",
+            fromlist=["is_env_available"],
+        ).is_env_available("omicsclaw_banksy"),
     ),
     "cellcharter": DependencyInfo(
         "cellcharter", "pip install cellcharter",
@@ -227,8 +243,23 @@ def is_available(name: str) -> bool:
     ----------
     name:
         Registry key (e.g. ``"scvi-tools"``) or Python import name.
+
+    Notes
+    -----
+    When the registry entry carries an ``availability_check`` callback,
+    that callable is invoked instead of ``importlib.util.find_spec``.
+    This supports Layer-4 sub-env packages (e.g. pybanksy) that are
+    intentionally absent from the main env's site-packages.  The callback
+    path is deliberately NOT cached so that sub-env state changes are
+    picked up within the same process.
     """
-    return _check_spec(_get_info(name).module_name)
+    info = _get_info(name)
+    if info.availability_check is not None:
+        try:
+            return bool(info.availability_check())
+        except Exception:
+            return False
+    return _check_spec(info.module_name)
 
 
 def get(name: str, *, warn_if_missing: bool = False) -> Optional[Any]:

@@ -2,9 +2,13 @@
 # OmicsClaw environment setup
 #
 # Strategy (4 tiers):
-#   1. mamba/conda env create from environment.yml (R, CLIs, build toolchain)
-#   2. pip install -e ".[full,singlecell-upstream]" (OmicsClaw + Python deps)
-#      + pip install velocyto (no py3.11 bioconda build)
+#   1. mamba/conda env create from environment.yml — Tier 0 toolchain +
+#      Tier 1-3 R/CLI packages + Tier 4 heavy Python science stack.
+#   2. uv pip install -e ".[full,singlecell-upstream]" for the thin pip
+#      residue (omicsclaw editable + PyPI-only packages with no conda
+#      recipe). Falls back to pip --resolver-max-rounds=200000 if uv
+#      is unavailable. Plus pip install velocyto (no py3.11 bioconda
+#      build).
 #   3. inline Rscript -e 'devtools::install_github(...)' (GitHub R packages)
 #   4. symlink vendored tools/ binaries into $CONDA_PREFIX/bin (stub for now)
 #
@@ -216,19 +220,37 @@ echo "[setup_env] env prefix: $ENV_PREFIX"
 
 echo "[setup_env] ✔ Tier 1 complete"
 
-# ----- Tier 2: OmicsClaw editable + Python optional extras ----------
-# pyproject.toml owns all Python deps. Running pip inside the env
-# attaches them to the Tier 1 Python interpreter.
+# ----- Tier 2: thin pip residue -------------------------------------
+# After Tier 1 mamba env creation, the bulk of Python deps are already
+# installed (see environment.yml Tier 4). Tier 2 here only installs:
+#   1. omicsclaw itself in editable mode
+#   2. PyPI-only packages with no conda recipe (SpaGCN/GraphST/cellcharter/
+#      paste-bio/flashdeconv/fastccc/pyVIA/tangram-sc/...)
+#   3. velocyto (no Py3.11 bioconda build)
+# Prefer `uv pip install` if available — its PubGrub resolver is dramatically
+# faster than pip on the residual graph and never hits resolution-too-deep.
+# Fall back to pip with --resolver-max-rounds bump for older toolchains.
 
-echo "[setup_env] Tier 2.0: pip install -e \".[full,singlecell-upstream]\""
+echo "[setup_env] Tier 2.0: install editable omicsclaw + thin pip residue"
+
 if [ -z "${SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL:-}" ]; then
     export SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True
     echo "[setup_env] allowing deprecated sklearn placeholder for upstream SpaGCN metadata"
 fi
-env_run pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 
-# Tier 2.1: tools that have no bioconda Python 3.11 build (surfaced by T2
-# validation):
+# uv lives in environment.yml Tier 0 so it should be present in the env's
+# bin dir. If not (e.g. older env created before this change), fall back
+# to pip with bumped --resolver-max-rounds.
+if env_run uv --version >/dev/null 2>&1; then
+    echo "[setup_env] using uv (PubGrub resolver) for thin pip residue"
+    env_run uv pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
+else
+    echo "[setup_env] uv not found in env; falling back to pip with --resolver-max-rounds=200000"
+    env_run pip install --resolver-max-rounds=200000 \
+        -e "$PROJECT_ROOT[full,singlecell-upstream]"
+fi
+
+# Tier 2.1: tools that have no bioconda Python 3.11 build:
 #   - velocyto.py: bioconda has only 3.6–3.10 and 3.12 builds, not 3.11.
 #                  PyPI name is `velocyto` (the .py suffix is bioconda-only).
 echo "[setup_env] Tier 2.1: pip install velocyto"
@@ -295,6 +317,46 @@ link_if_exists() {
 echo "[setup_env] Tier 4: linking vendored tools (currently empty stub)"
 # Add link_if_exists calls here when vendoring real tools.
 echo "[setup_env] ✔ Tier 4 complete (no tools vendored)"
+
+# ----- Tier 5: optional sub-environments (Layer 4) -----------------
+# Tools whose dependency pins conflict with the main env live in dedicated
+# sub-envs named `omicsclaw_<tool>`, invoked at runtime via subprocess
+# bridge (see omicsclaw/core/external_env.py).
+#
+# Bootstrap is opt-in: pass `--with-banksy` (or set OMICSCLAW_WITH_BANKSY=1)
+# to install. Default skips to keep base-install fast.
+
+bootstrap_subenv() {
+    local sub_name="$1"
+    local sub_yml="$2"
+    if [ ! -f "$sub_yml" ]; then
+        echo "[setup_env] ⚠ sub-env file missing: $sub_yml" >&2
+        return 1
+    fi
+    if "$INSTALLER" env list | awk '{print $1}' | grep -qx "$sub_name"; then
+        echo "[setup_env] sub-env '$sub_name' exists — updating"
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env update -n "$sub_name" -f "$sub_yml" --prune
+    else
+        echo "[setup_env] creating sub-env '$sub_name'"
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" env create -n "$sub_name" -f "$sub_yml"
+    fi
+}
+
+# Detect --with-banksy in any positional position (after $ENV_NAME = $1).
+WITH_BANKSY=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-banksy) WITH_BANKSY=1 ;;
+    esac
+done
+
+if [ "${OMICSCLAW_WITH_BANKSY:-0}" = "1" ] || [ "$WITH_BANKSY" = "1" ]; then
+    echo "[setup_env] Tier 5: bootstrapping omicsclaw_banksy sub-env"
+    bootstrap_subenv "omicsclaw_banksy" "$PROJECT_ROOT/environments/banksy.yml"
+    echo "[setup_env] ✔ Tier 5 (banksy) complete"
+else
+    echo "[setup_env] Tier 5 skipped (set OMICSCLAW_WITH_BANKSY=1 or pass --with-banksy to enable banksy)"
+fi
 
 # ----- summary ------------------------------------------------------
 

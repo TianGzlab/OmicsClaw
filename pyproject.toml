@@ -42,55 +42,18 @@ requires-python = ">=3.11,<3.14"
 
 # --------------------------------------------------------------------------- #
 # Tier 1: Core — always installed via `pip install -e .`                      #
-# Covers all 16 skills in fallback/built-in mode (no optional deps needed).   #
+# After the mamba-first migration, the core deps shrank from ~25 to a         #
+# handful of pip-only / pip-managed leaves. The bulk (scanpy, anndata,        #
+# squidpy, numpy, pandas, scipy, scikit-learn, igraph, leidenalg, umap-learn, #
+# matplotlib, seaborn, Pillow, scikit-misc, pydantic, nbformat,               #
+# jupyter_client, ipykernel, greenlet, rich, etc.) lives in environment.yml   #
+# Tier 4 and is installed by mamba.                                            #
 # --------------------------------------------------------------------------- #
 dependencies = [
-    # ========== Single-cell / spatial core ==========
-    "scanpy>=1.9.0,<2.0",
-    "anndata>=0.11.0",
-    "squidpy>=1.2.0",
-
-    # ========== Data science ==========
-    "numpy>=1.24",
-    "pandas>=2.0",
-    "scipy>=1.7.0",
-    "scikit-learn>=1.3",
-
-    # ========== Clustering & graph ==========
-    "igraph>=0.9.0",
-    "leidenalg>=0.8.0",
-
-    # ========== Dimensionality reduction ==========
-    "umap-learn>=0.5.0",
-
-    # ========== Visualization ==========
-    "matplotlib>=3.7",
-    "seaborn>=0.11.0",
-    "Pillow>=8.0.0",
-
-    # ========== Data validation ==========
-    "pydantic>=2.0.0,<3.0",
-
-    # ========== HVG seurat_v3 flavor ==========
-    "scikit-misc>=0.5.0",
-
     # ========== pkg_resources fallback for older packages ==========
     "setuptools>=64",
 
-    # ========== Server / notebook runtime ==========
-    # Required by omicsclaw.app.server for notebook support.
-    # Previously in [desktop] extras only, causing ModuleNotFoundError
-    # when users installed with plain `pip install -e .`.
-    "nbformat>=5.9",
-    "jupyter_client>=8.0",
-    "ipykernel>=6.0",
-
-    # ========== Server runtime essentials ==========
-    # greenlet: required by SQLAlchemy async bridge (aiosqlite)
-    # rich: required by MCP module at import time
-    # socksio: required when SOCKS proxy is configured (HTTPS_PROXY)
-    "greenlet>=3.0.0",
-    "rich>=13.0.0",
+    # ========== SOCKS proxy bridge — not on conda-forge under this name ==========
     "socksio>=1.0.0",
 ]
 
@@ -102,80 +65,74 @@ dependencies = [
 # --------------------------------------------------------------------------- #
 spatial-domains = [
     "SpaGCN>=1.2.5,<2.0",
-    "torch>=2.0.0,<3.0",
+    # torch moved to environment.yml Tier 4
     "torch_geometric",                # STAGATE dependency
     "GraphST>=1.1.0",                 # GraphST method
-    "POT>=0.9.0",                     # GraphST requires `ot` (Python Optimal Transport)
+    # POT moved to environment.yml Tier 4
     "cellcharter>=0.2.0",             # CellCharter method
 ]
 
 # --------------------------------------------------------------------------- #
 # Tier 3: Modular Domain Dependencies                                         #
 # Breakdowns for specific domains, preventing installation of unused packages.#
+# Most of the spatial stack (scvi-tools, cellrank, harmonypy, bbknn,          #
+# scanorama, scvelo, gseapy, pydeseq2, palantir, pot, esda, libpysal,         #
+# pysal) is now in environment.yml Tier 4. This extra retains only            #
+# the conda-residue packages — those without a bioconda/conda-forge           #
+# recipe at the time of the Task 0 audit.                                     #
 # --------------------------------------------------------------------------- #
 spatial = [
-    "torch>=2.0.0,<3.0",
-    "scvi-tools>=1.4.0,<2.0",        # Cell2Location, scANVI, VeloVI, scVI
+    # torch, scvi-tools moved to environment.yml Tier 4
     "GraphST>=1.1.0",                 # spatial-domains: GraphST method
     "torch_geometric",                # spatial-domains: STAGATE dependency
     "cellcharter>=0.2.0",             # spatial-domains: CellCharter method
     "tangram-sc>=1.0.0",              # spatial-annotate: Tangram method
-    "cell2location>=0.1.5,<0.2",      # spatial-deconv: Cell2Location method
+    "cell2location>=0.1.5,<0.2",      # spatial-deconv: Cell2Location method — `unknown`, re-audit
     "flashdeconv>=0.1.0",             # spatial-deconv: FlashDeconv method
-    "scvelo>=0.2.5",                  # spatial-velocity: scVelo
-    "liana",                          # spatial-communication: LIANA+ method
-    "cellphonedb>=5.0.0,<6.0",        # spatial-communication: CellPhoneDB
+    # scvelo moved to environment.yml Tier 4
+    "liana>=1.4.0",                   # spatial-communication: LIANA+ method
+    "cellphonedb>=5.0.0,<6.0",        # spatial-communication: CellPhoneDB — `unknown`, re-audit
     "fastccc>=0.1.0",                 # spatial-communication: FastCCC (requires Python >=3.11)
-    "cellrank>=2.0.7,<2.1",           # spatial-trajectory: CellRank
-    "palantir>=1.0.0",                # spatial-trajectory: Palantir
-    "gseapy>=1.0.0",                  # spatial-enrichment: GSEA/Enrichr/ssGSEA
-    "SpatialDE>=1.1.3",               # spatial-genes: SpatialDE method
-    "esda>=2.4.0",                    # spatial-statistics: local Moran, Geary
-    "libpysal>=4.6.0",                # spatial-statistics: spatial weights
-    "pysal>=2.6.0",                   # spatial-statistics: extended analysis
-    "infercnvpy>=0.4.0",              # spatial-cnv: inferCNVpy
-    "harmonypy>=0.0.9",               # spatial-integrate: Harmony
-    "bbknn>=1.5.0",                   # spatial-integrate: BBKNN
-    "scanorama>=1.7.0",               # spatial-integrate: Scanorama
-    "POT>=0.9.0",                     # spatial-register: optimal transport
+    # cellrank, palantir, gseapy moved to environment.yml Tier 4
+    "SpatialDE>=1.1.3",               # spatial-genes: SpatialDE method — `unknown`, re-audit
+    # esda, libpysal, pysal moved to environment.yml Tier 4
+    "infercnvpy>=0.4.0",              # spatial-cnv: inferCNVpy — `unknown`, re-audit
+    # harmonypy, bbknn, scanorama moved to environment.yml Tier 4
+    # POT moved to environment.yml Tier 4
     "paste-bio>=1.0.0",               # spatial-register: PASTE
-    "pydeseq2>=0.4.0",                # spatial-condition: PyDESeq2
+    # pydeseq2 moved to environment.yml Tier 4
 ]
 
 singlecell = [
-    "scrublet>=0.2.3",                # sc-doublet-detection: Scrublet
-    "doubletdetection>=4.3.0",        # sc-doublet-detection: DoubletDetection
-    "harmonypy>=0.0.9",               # sc-batch-integration: Harmony
-    "bbknn>=1.5.0",                   # sc-batch-integration: BBKNN
-    "scanorama>=1.7.0",               # sc-batch-integration: Scanorama
-    "celltypist>=1.6.0",              # sc-cell-annotation: CellTypist
-    "arboreto>=0.1.6",                # sc-grn: GRNBoost2
-    "cellrank>=2.0.7,<2.1",           # sc-pseudotime / sc-velocity downstream
-    "palantir>=1.0.0",                # sc-pseudotime: Palantir
+    # scrublet, doubletdetection moved to environment.yml Tier 4
+    # harmonypy, bbknn, scanorama moved to environment.yml Tier 4
+    # celltypist moved to environment.yml Tier 4
+    # arboreto moved to environment.yml Tier 4
+    # cellrank, palantir moved to environment.yml Tier 4
     "pyVIA>=0.2.4",                   # sc-pseudotime: VIA
-    "pydeseq2>=0.4.0",                # sc-de pseudobulk Python path
-    "louvain>=0.8.0",                 # sc-clustering: Louvain backend
+    # pydeseq2 moved to environment.yml Tier 4
+    # louvain moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
 # singlecell-upstream — Python-side helpers for scRNA upstream wrappers.      #
-# External CLIs such as FastQC, STAR, Cell Ranger, simpleaf, and velocyto are #
-# NOT installed here and must be installed manually into the active env/PATH. #
+# All 4 packages (multiqc, coloredlogs, humanfriendly, kb-python) moved       #
+# to environment.yml Tier 4. This extra is preserved as a stable name         #
+# for backward compat — `pip install -e ".[singlecell-upstream]"` is a        #
+# no-op now, but doesn't break.                                                #
 # --------------------------------------------------------------------------- #
 singlecell-upstream = [
-    "multiqc>=1.33,<2.0",             # sc-fastq-qc: MultiQC report aggregation
-    "coloredlogs>=15.0.1,<16.0",      # MultiQC transitive dep; narrow resolver leaf
-    "humanfriendly>=10.0,<11.0",      # coloredlogs transitive dep; avoids py2-era backtracking
-    "kb-python>=0.29.0",              # sc-count: kb-python pseudoalignment backend
+    # multiqc, coloredlogs, humanfriendly, kb-python all moved to
+    # environment.yml Tier 4. Extra preserved for backward compatibility.
 ]
 
 # --------------------------------------------------------------------------- #
 # singlecell-clustering — optional clustering/embedding backends.             #
 # --------------------------------------------------------------------------- #
 singlecell-clustering = [
-    "python-igraph>=0.11.0",          # Leiden graph backend
-    "leidenalg>=0.10.0",              # Leiden clustering
-    "louvain>=0.8.0",                 # Louvain clustering
+    # python-igraph moved to environment.yml Tier 4
+    # leidenalg moved to environment.yml Tier 4
+    # louvain moved to environment.yml Tier 4
     "phate>=1.0.11",                  # PHATE embedding
 ]
 
@@ -183,8 +140,7 @@ singlecell-clustering = [
 # singlecell-pseudotime — optional trajectory / fate backends.                #
 # --------------------------------------------------------------------------- #
 singlecell-pseudotime = [
-    "cellrank>=2.0.7,<2.1",           # CellRank trajectory inference
-    "palantir>=1.0.0",                # Palantir pseudotime
+    # cellrank, palantir moved to environment.yml Tier 4
     "pyVIA>=0.2.4",                   # VIA pseudotime
 ]
 
@@ -192,11 +148,8 @@ singlecell-pseudotime = [
 # singlecell-batch — optional batch integration stacks.                       #
 # --------------------------------------------------------------------------- #
 singlecell-batch = [
-    "harmonypy>=0.0.9",               # Harmony batch correction
-    "bbknn>=1.5.0",                   # BBKNN batch correction
-    "scanorama>=1.7.0",               # Scanorama batch correction
-    "scvi-tools>=1.4.0,<2.0",         # scVI / scANVI integration
-    "torch>=2.0.0,<3.0",              # PyTorch for scvi-tools
+    # harmonypy, bbknn, scanorama moved to environment.yml Tier 4
+    # scvi-tools, torch moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
@@ -204,8 +157,7 @@ singlecell-batch = [
 # R-backed doublet methods are checked at runtime instead.                    #
 # --------------------------------------------------------------------------- #
 singlecell-doublet = [
-    "scrublet>=0.2.3",                # Scrublet
-    "doubletdetection>=4.3.0",        # DoubletDetection
+    # scrublet, doubletdetection moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
@@ -213,7 +165,7 @@ singlecell-doublet = [
 # R-backed atlas methods are checked at runtime instead.                      #
 # --------------------------------------------------------------------------- #
 singlecell-annotation = [
-    "celltypist>=1.6.0",              # CellTypist
+    # celltypist moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
@@ -222,7 +174,7 @@ singlecell-annotation = [
 # --------------------------------------------------------------------------- #
 singlecell-communication = [
     "liana>=1.4.0",                   # LIANA+ ligand-receptor inference
-    "cellphonedb>=5.0.0,<6.0",        # CellPhoneDB statistical backend
+    "cellphonedb>=5.0.0,<6.0",        # CellPhoneDB statistical backend — `unknown`, re-audit
 ]
 
 # --------------------------------------------------------------------------- #
@@ -230,11 +182,11 @@ singlecell-communication = [
 # External CLIs such as STAR and velocyto remain manual installs.             #
 # --------------------------------------------------------------------------- #
 singlecell-velocity = [
-    "scvelo>=0.3.0",                  # sc-velocity: scVelo modeling
+    # scvelo moved to environment.yml Tier 4
 ]
 
 singlecell-enrichment = [
-    "gseapy>=1.0.0",                  # sc-enrichment / sc-pathway-scoring: gene-set libraries and enrichment helpers
+    # gseapy moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
@@ -268,9 +220,12 @@ singlecell-r-bridge = []
 # --------------------------------------------------------------------------- #
 oauth = [
     "ccproxy-api>=0.2.7,<0.3",
-    "httpx>=0.27",
+    # httpx moved to environment.yml Tier 4
 ]
 
+# These three extras are placeholders for future domain-specific Python
+# packages. Currently empty — domain skills run via the core stack
+# (scanpy/anndata/scipy/etc., installed by environment.yml Tier 4).
 genomics = []
 
 proteomics = []
@@ -278,8 +233,7 @@ proteomics = []
 metabolomics = []
 
 bulkrna = [
-    "pydeseq2>=0.4.0",                # bulkrna-de: PyDESeq2 differential expression
-    "gseapy>=1.0.0",                   # bulkrna-enrichment: GSEA/ORA enrichment
+    # pydeseq2, gseapy moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
@@ -294,66 +248,59 @@ full = [
 # Each layer is isolated to avoid pulling in the entire `spatial` tier.        #
 # --------------------------------------------------------------------------- #
 spatial-velocity = [
-    "scvelo>=0.2.5",                  # RNA velocity (scVelo)
-    "scvi-tools>=1.4.0,<2.0",        # VeloVI method
+    # scvelo, scvi-tools moved to environment.yml Tier 4
 ]
 
 spatial-cnv = [
-    "infercnvpy>=0.4.0",             # Copy number variation inference (inferCNVpy)
+    "infercnvpy>=0.4.0",             # Copy number variation inference (inferCNVpy) — `unknown`, re-audit
 ]
 
 spatial-enrichment = [
-    "gseapy>=1.0.0",                 # Gene set enrichment analysis (GSEApy)
+    # gseapy moved to environment.yml Tier 4
 ]
 
 spatial-communication = [
-    "liana",                          # Ligand-receptor analysis (LIANA+)
-    "cellphonedb>=5.0.0,<6.0",        # CellPhoneDB
+    "liana>=1.4.0",                   # Ligand-receptor analysis (LIANA+)
+    "cellphonedb>=5.0.0,<6.0",        # CellPhoneDB — `unknown`, re-audit
     "fastccc>=0.1.0",                 # FastCCC (requires Python >=3.11)
 ]
 
 spatial-integration = [
-    "harmonypy>=0.0.9",              # Harmony batch correction
-    "bbknn>=1.5.0",                  # BBKNN batch correction
-    "scanorama>=1.7.0",              # Scanorama batch correction
+    # harmonypy, bbknn, scanorama moved to environment.yml Tier 4
 ]
 
 spatial-registration = [
-    "POT>=0.9.0",                     # Optimal transport
+    # POT moved to environment.yml Tier 4
     "paste-bio>=1.0.0",               # PASTE spatial registration
 ]
 
 spatial-annotate = [
     "tangram-sc>=1.0.0",              # Tangram cell type annotation
-    "scvi-tools>=1.4.0,<2.0",        # scANVI, CellAssign methods
-    "torch>=2.0.0,<3.0",             # PyTorch (required by scvi-tools)
+    # scvi-tools, torch moved to environment.yml Tier 4
 ]
 
 spatial-deconv = [
     "flashdeconv>=0.1.0",            # FlashDeconv: fast CPU deconvolution
-    "cell2location>=0.1.5,<0.2",     # Cell2Location: Bayesian spatial deconvolution
-    "scvi-tools>=1.4.0,<2.0",        # DestVI (CondSCVI+DestVI) and Stereoscope
+    "cell2location>=0.1.5,<0.2",     # Cell2Location: Bayesian spatial deconvolution — `unknown`, re-audit
+    # scvi-tools moved to environment.yml Tier 4
     "tangram-sc>=1.0.0",             # Tangram: deep learning cell-to-spot mapping
-    "torch>=2.0.0,<3.0",             # PyTorch backend for scvi-tools and Tangram
+    # torch moved to environment.yml Tier 4
 ]
 
 spatial-trajectory = [
-    "cellrank>=2.0.7,<2.1",          # CellRank trajectory inference
-    "palantir>=1.0.0",                # Palantir trajectory inference
+    # cellrank, palantir moved to environment.yml Tier 4
 ]
 
 spatial-genes = [
-    "SpatialDE>=1.1.3",              # SpatialDE spatially variable genes
+    "SpatialDE>=1.1.3",              # SpatialDE spatially variable genes — `unknown`, re-audit
 ]
 
 spatial-statistics = [
-    "esda>=2.4.0",                    # Local Moran's I, Geary's C
-    "libpysal>=4.6.0",                # Spatial weights
-    "pysal>=2.6.0",                   # Extended spatial analysis
+    # esda, libpysal, pysal moved to environment.yml Tier 4
 ]
 
 spatial-condition = [
-    "pydeseq2>=0.4.0",                # Pseudobulk differential expression
+    # pydeseq2 moved to environment.yml Tier 4
 ]
 
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
@@ -372,26 +319,22 @@ banksy = [
 
 # --------------------------------------------------------------------------- #
 # Tier 4: memory — persistent bot conversation context (optional)             #
+# aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests, openai,    #
+# python-dotenv moved to environment.yml Tier 4.                              #
 # --------------------------------------------------------------------------- #
 memory = [
-    "aiosqlite>=0.19.0",
-    "sqlalchemy>=1.4.0",
-    "fastapi>=0.100.0",
-    "uvicorn>=0.23.0",
-    "cryptography>=41.0.0",
-    "requests>=2.31.0",
-    "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
+    # All 8 packages (aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography,
+    # requests, openai, python-dotenv) moved to environment.yml Tier 4.
+    # Extra preserved for backward compatibility — no-op on pip install.
 ]
 
 # --------------------------------------------------------------------------- #
 # desktop — OmicsClaw-App / web frontend backend dependencies                 #
+# aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests, openai,    #
+# python-dotenv, pyyaml, nbformat, jupyter_client, ipykernel moved to         #
+# environment.yml Tier 4.                                                      #
 # --------------------------------------------------------------------------- #
 desktop = [
-    "aiosqlite>=0.19.0",
-    "sqlalchemy>=1.4.0",
-    "fastapi>=0.100.0",
-    "uvicorn>=0.23.0",
     # python-multipart is required by FastAPI's File / Form parsing.
     # The /notebook/files/upload endpoint in omicsclaw.app.notebook.router
     # uses `File(...)`, so without this import omicsclaw.app.server
@@ -402,14 +345,9 @@ desktop = [
     # multipart is installed. See OmicsClaw-App/scripts/build-backend-
     # runtime.py for the smoke test that caught this.
     "python-multipart>=0.0.9",
-    "cryptography>=41.0.0",
-    "requests>=2.31.0",
-    "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
-    "pyyaml>=6.0",
-    "nbformat>=5.9",
-    "jupyter_client>=8.0",
-    "ipykernel>=6.0",
+    # aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests,
+    # openai, python-dotenv, pyyaml, nbformat, jupyter_client, ipykernel
+    # all moved to environment.yml Tier 4.
 ]
 
 # --------------------------------------------------------------------------- #
@@ -417,15 +355,12 @@ desktop = [
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
 # interactive — CLI/TUI interactive mode dependencies                         #
+# prompt-toolkit, rich, questionary, pyyaml, aiosqlite, requests, openai      #
+# moved to environment.yml Tier 4.                                            #
 # --------------------------------------------------------------------------- #
 interactive = [
-    "prompt-toolkit>=3.0",
-    "rich>=13.0",
-    "questionary>=2.0",
-    "pyyaml>=6.0",
-    "aiosqlite>=0.19.0",
-    "requests>=2.31.0",
-    "openai>=1.0.0",
+    # prompt-toolkit, rich, questionary, pyyaml, aiosqlite, requests, openai
+    # all moved to environment.yml Tier 4.
 ]
 
 # --------------------------------------------------------------------------- #
@@ -438,18 +373,18 @@ tui = [
 
 # --------------------------------------------------------------------------- #
 # autonomous — controlled web-guided notebook fallback for main chat          #
+# nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4.        #
 # --------------------------------------------------------------------------- #
 autonomous = [
     "tavily-python>=0.7",
-    "httpx>=0.27",
+    # httpx moved to environment.yml Tier 4
     "markdownify>=0.14",
-    "nbformat>=5.9",
-    "jupyter_client>=8.0",
-    "ipykernel>=6.0",
+    # nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4
 ]
 
 # --------------------------------------------------------------------------- #
 # research — Multi-agent research pipeline (deepagents + LangGraph)           #
+# nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4.        #
 # --------------------------------------------------------------------------- #
 research = [
     "deepagents>=0.4.11",
@@ -458,14 +393,12 @@ research = [
     "langchain-anthropic>=1.4.0",
     "langgraph-checkpoint-sqlite>=3.0.0",
     "tavily-python>=0.7",
-    "httpx>=0.27",
+    # httpx moved to environment.yml Tier 4
     "markdownify>=0.14",
     "pypdf>=3.0",
     "opendataloader-pdf>=0.5",             # High-quality PDF→Markdown (requires Java 11+)
     # Notebook execution engine (CellVoyager-inspired)
-    "nbformat>=5.9",
-    "jupyter_client>=8.0",
-    "ipykernel>=6.0",
+    # nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4
 ]
 
 dev = [
