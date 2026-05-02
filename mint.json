@@ -1,0 +1,94 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "OmicsClaw 多组学 AI Agent",
+  "logo": {
+    "dark": "/docs/logo/dark.svg",
+    "light": "/docs/logo/light.svg"
+  },
+  "favicon": "/docs/favicon.svg",
+  "colors": {
+    "primary": "#0EA5E9",
+    "light": "#38BDF8",
+    "dark": "#0284C7",
+    "background": {
+      "dark": "#0F172A",
+      "light": "#FFFFFF"
+    }
+  },
+  "metadata": {
+    "og:image": "/docs/images/og-cover.png",
+    "twitter:card": "summary_large_image"
+  },
+  "topbarCtaButton": {
+    "type": "github",
+    "url": "https://github.com/zhou-1314/OmicsClaw"
+  },
+  "search": {
+    "prompt": "搜索 OmicsClaw 文档..."
+  },
+  "redirects": [
+    {
+      "source": "/docs",
+      "destination": "/docs/introduction/what-is-omicsclaw"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "开始",
+      "pages": [
+        "docs/introduction/what-is-omicsclaw",
+        "docs/introduction/why-omicsclaw",
+        "docs/introduction/quickstart"
+      ]
+    },
+    {
+      "group": "架构",
+      "pages": [
+        "docs/architecture/overview",
+        "docs/architecture/skill-system",
+        "docs/architecture/orchestrator"
+      ]
+    },
+    {
+      "group": "七大组学",
+      "pages": [
+        "docs/domains/spatial",
+        "docs/domains/singlecell",
+        "docs/domains/genomics",
+        "docs/domains/proteomics",
+        "docs/domains/metabolomics",
+        "docs/domains/bulkrna",
+        "docs/domains/orchestrator"
+      ]
+    },
+    {
+      "group": "工程能力",
+      "pages": [
+        "docs/engineering/replot",
+        "docs/engineering/memory",
+        "docs/engineering/remote-execution"
+      ]
+    },
+    {
+      "group": "Bot 与生态",
+      "pages": [
+        "docs/ecosystem/chat-bot",
+        "docs/ecosystem/omicsclaw-app"
+      ]
+    },
+    {
+      "group": "安全",
+      "pages": [
+        "docs/safety/rules-and-disclaimer",
+        "docs/safety/data-privacy"
+      ]
+    }
+  ],
+  "excludes": [
+    "docs/_legacy/**",
+    "docs/superpowers/**"
+  ],
+  "footerSocials": {
+    "github": "https://github.com/zhou-1314/OmicsClaw"
+  }
+}
