@@ -56,38 +56,38 @@ sc-clustering         ← 邻居图 + UMAP + Leiden 聚类
 
 | Skill | 用途 | CLI 一行示例 | 文档 |
 |---|---|---|---|
-| sc-fastq-qc | FASTQ 质控 | `python omicsclaw.py run sc-fastq-qc --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-fastq-qc/SKILL.md) |
-| sc-count | FASTQ→计数矩阵 | `python omicsclaw.py run sc-count --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-count/SKILL.md) |
-| sc-multi-count | 多样本合并计数 | `python omicsclaw.py run sc-multi-count --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-multi-count/SKILL.md) |
-| sc-standardize-input | 规范化外部 h5ad | `python omicsclaw.py run sc-standardize-input --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-standardize-input/SKILL.md) |
-| sc-qc | QC 指标计算 | `python omicsclaw.py run sc-qc --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-qc/SKILL.md) |
-| sc-ambient-removal | 去除环境 RNA | `python omicsclaw.py run sc-ambient-removal --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-ambient-removal/SKILL.md) |
-| sc-doublet-detection | 双细胞检测 | `python omicsclaw.py run sc-doublet-detection --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-doublet-detection/SKILL.md) |
-| sc-filter | 细胞 / 基因过滤 | `python omicsclaw.py run sc-filter --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-filter/SKILL.md) |
-| sc-preprocessing | 归一化 + HVG + PCA | `python omicsclaw.py run sc-preprocessing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-preprocessing/SKILL.md) |
-| sc-clustering | 邻居图 + UMAP + 聚类 | `python omicsclaw.py run sc-clustering --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-clustering/SKILL.md) |
-| sc-cell-annotation | 细胞类型注释 | `python omicsclaw.py run sc-cell-annotation --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cell-annotation/SKILL.md) |
-| sc-markers | 聚类 marker 排名 | `python omicsclaw.py run sc-markers --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-markers/SKILL.md) |
-| sc-de | 差异表达分析 | `python omicsclaw.py run sc-de --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-de/SKILL.md) |
-| sc-batch-integration | 批次整合 | `python omicsclaw.py run sc-batch-integration --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-batch-integration/SKILL.md) |
-| sc-differential-abundance | 细胞组成变化 | `python omicsclaw.py run sc-differential-abundance --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-differential-abundance/SKILL.md) |
-| sc-enrichment | 通路富集 ORA/GSEA | `python omicsclaw.py run sc-enrichment --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-enrichment/SKILL.md) |
-| sc-pathway-scoring | 通路活性评分 | `python omicsclaw.py run sc-pathway-scoring --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-pathway-scoring/SKILL.md) |
-| sc-pseudotime | 拟时序轨迹 | `python omicsclaw.py run sc-pseudotime --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-pseudotime/SKILL.md) |
-| sc-velocity-prep | velocity 数据准备 | `python omicsclaw.py run sc-velocity-prep --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-velocity-prep/SKILL.md) |
-| sc-velocity | RNA velocity 分析 | `python omicsclaw.py run sc-velocity --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-velocity/SKILL.md) |
-| sc-cytotrace | 分化潜能预测 | `python omicsclaw.py run sc-cytotrace --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cytotrace/SKILL.md) |
-| sc-grn | 基因调控网络 | `python omicsclaw.py run sc-grn --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-grn/SKILL.md) |
-| sc-cell-communication | 细胞通讯分析 | `python omicsclaw.py run sc-cell-communication --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cell-communication/SKILL.md) |
-| sc-gene-programs | 基因程序发现 | `python omicsclaw.py run sc-gene-programs --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-gene-programs/SKILL.md) |
-| sc-metacell | 元细胞压缩 | `python omicsclaw.py run sc-metacell --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-metacell/SKILL.md) |
-| sc-perturb-prep | 扰动实验数据准备 | `python omicsclaw.py run sc-perturb-prep --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-perturb-prep/SKILL.md) |
-| sc-perturb | 扰动筛选分析 | `python omicsclaw.py run sc-perturb --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-perturb/SKILL.md) |
-| sc-in-silico-perturbation | 计算机模拟敲除 | `python omicsclaw.py run sc-in-silico-perturbation --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-in-silico-perturbation/SKILL.md) |
-| sc-drug-response | 药物响应预测 | `python omicsclaw.py run sc-drug-response --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scrna/sc-drug-response/SKILL.md) |
-| scatac-preprocessing | scATAC-seq 预处理 | `python omicsclaw.py run scatac-preprocessing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/scatac/scatac-preprocessing/SKILL.md) |
+| sc-fastq-qc | FASTQ 质控 | `python omicsclaw.py run sc-fastq-qc --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-fastq-qc/SKILL.md) |
+| sc-count | FASTQ→计数矩阵 | `python omicsclaw.py run sc-count --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-count/SKILL.md) |
+| sc-multi-count | 多样本合并计数 | `python omicsclaw.py run sc-multi-count --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-multi-count/SKILL.md) |
+| sc-standardize-input | 规范化外部 h5ad | `python omicsclaw.py run sc-standardize-input --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-standardize-input/SKILL.md) |
+| sc-qc | QC 指标计算 | `python omicsclaw.py run sc-qc --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-qc/SKILL.md) |
+| sc-ambient-removal | 去除环境 RNA | `python omicsclaw.py run sc-ambient-removal --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-ambient-removal/SKILL.md) |
+| sc-doublet-detection | 双细胞检测 | `python omicsclaw.py run sc-doublet-detection --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-doublet-detection/SKILL.md) |
+| sc-filter | 细胞 / 基因过滤 | `python omicsclaw.py run sc-filter --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-filter/SKILL.md) |
+| sc-preprocessing | 归一化 + HVG + PCA | `python omicsclaw.py run sc-preprocessing --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-preprocessing/SKILL.md) |
+| sc-clustering | 邻居图 + UMAP + 聚类 | `python omicsclaw.py run sc-clustering --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-clustering/SKILL.md) |
+| sc-cell-annotation | 细胞类型注释 | `python omicsclaw.py run sc-cell-annotation --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cell-annotation/SKILL.md) |
+| sc-markers | 聚类 marker 排名 | `python omicsclaw.py run sc-markers --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-markers/SKILL.md) |
+| sc-de | 差异表达分析 | `python omicsclaw.py run sc-de --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-de/SKILL.md) |
+| sc-batch-integration | 批次整合 | `python omicsclaw.py run sc-batch-integration --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-batch-integration/SKILL.md) |
+| sc-differential-abundance | 细胞组成变化 | `python omicsclaw.py run sc-differential-abundance --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-differential-abundance/SKILL.md) |
+| sc-enrichment | 通路富集 ORA/GSEA | `python omicsclaw.py run sc-enrichment --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-enrichment/SKILL.md) |
+| sc-pathway-scoring | 通路活性评分 | `python omicsclaw.py run sc-pathway-scoring --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-pathway-scoring/SKILL.md) |
+| sc-pseudotime | 拟时序轨迹 | `python omicsclaw.py run sc-pseudotime --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-pseudotime/SKILL.md) |
+| sc-velocity-prep | velocity 数据准备 | `python omicsclaw.py run sc-velocity-prep --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-velocity-prep/SKILL.md) |
+| sc-velocity | RNA velocity 分析 | `python omicsclaw.py run sc-velocity --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-velocity/SKILL.md) |
+| sc-cytotrace | 分化潜能预测 | `python omicsclaw.py run sc-cytotrace --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cytotrace/SKILL.md) |
+| sc-grn | 基因调控网络 | `python omicsclaw.py run sc-grn --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-grn/SKILL.md) |
+| sc-cell-communication | 细胞通讯分析 | `python omicsclaw.py run sc-cell-communication --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-cell-communication/SKILL.md) |
+| sc-gene-programs | 基因程序发现 | `python omicsclaw.py run sc-gene-programs --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-gene-programs/SKILL.md) |
+| sc-metacell | 元细胞压缩 | `python omicsclaw.py run sc-metacell --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-metacell/SKILL.md) |
+| sc-perturb-prep | 扰动实验数据准备 | `python omicsclaw.py run sc-perturb-prep --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-perturb-prep/SKILL.md) |
+| sc-perturb | 扰动筛选分析 | `python omicsclaw.py run sc-perturb --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-perturb/SKILL.md) |
+| sc-in-silico-perturbation | 计算机模拟敲除 | `python omicsclaw.py run sc-in-silico-perturbation --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-in-silico-perturbation/SKILL.md) |
+| sc-drug-response | 药物响应预测 | `python omicsclaw.py run sc-drug-response --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scrna/sc-drug-response/SKILL.md) |
+| scatac-preprocessing | scATAC-seq 预处理 | `python omicsclaw.py run scatac-preprocessing --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/scatac/scatac-preprocessing/SKILL.md) |
 
-完整 30 个 skill 列表见 [`skills/singlecell/INDEX.md`](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/singlecell/INDEX.md)。
+完整 30 个 skill 列表见 [`skills/singlecell/INDEX.md`](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/singlecell/INDEX.md)。
 
 ## 何时不适用本领域
 

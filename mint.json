@@ -21,7 +21,7 @@
   },
   "topbarCtaButton": {
     "type": "github",
-    "url": "https://github.com/zhou-1314/OmicsClaw"
+    "url": "https://github.com/TianGzlab/OmicsClaw"
   },
   "search": {
     "prompt": "搜索 OmicsClaw 文档..."
@@ -89,6 +89,6 @@
     "docs/superpowers/**"
   ],
   "footerSocials": {
-    "github": "https://github.com/zhou-1314/OmicsClaw"
+    "github": "https://github.com/TianGzlab/OmicsClaw"
   }
 }
