@@ -21,7 +21,6 @@ dependencies:
   - python-igraph
   - leidenalg
   - umap-learn
-  - matplotlib
   - h5py
   - pip:
       - pybanksy>=1.3.0

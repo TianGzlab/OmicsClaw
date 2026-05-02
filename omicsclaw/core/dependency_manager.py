@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+from omicsclaw.core.external_env import is_env_available
+
 # Mappings of packages to their respective domain tiers.
 DOMAIN_TIERS = {
     # Core dependencies (always installed via pip install -e .)
@@ -137,7 +139,7 @@ def get_installed_tiers() -> dict[str, bool]:
         "spatial-integration": importlib.util.find_spec("harmonypy") is not None or importlib.util.find_spec("bbknn") is not None,
         "spatial-registration": importlib.util.find_spec("paste") is not None,
         "r-bridge": _check_r_available(),
-        "banksy": importlib.util.find_spec("pybanksy") is not None,
+        "banksy": is_env_available("omicsclaw_banksy"),  # Layer-4 sub-env check
     }
     return tiers_status
 
