@@ -50,7 +50,7 @@
       ]
     },
     {
-      "group": "七大组学",
+      "group": "组学领域",
       "pages": [
         "docs/domains/spatial",
         "docs/domains/singlecell",
