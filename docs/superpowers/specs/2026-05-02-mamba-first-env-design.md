@@ -106,6 +106,11 @@ mamba env remove -n OmicsClaw -y
 bash 0_setup_env.sh
 ```
 
+Running `bash 0_setup_env.sh` against an existing OmicsClaw env updates it in
+place via `mamba env update --prune`. If the prune step fails (rare, usually due
+to a locked prefix or a partially-installed package), remove and rebuild:
+`mamba env remove -n OmicsClaw -y && bash 0_setup_env.sh`.
+
 ## Open questions
 
 - liana / liana-py — bioconda has it (1.7.1, noarch). Move to mamba in Task 1.
@@ -131,3 +136,19 @@ The audit was run on 2026-05-02. The `mamba search` approach used in `scripts/au
 These cache files were loaded directly in Python to perform the audit offline. Classification logic: `mamba_ok` if the package has a `py311` compiled build OR a `noarch` pure-Python build (build strings like `pyhd8ed1ab_0`, `pyhdfd78af_0` are compatible with any Python version). 42 packages classified: 27 mamba_ok, 11 pip_only, 4 unknown (64% mamba_ok — meets the expected 60%+ threshold; the 4 unknown packages may push mamba_ok higher once verified on a network-connected machine).
 
 The `scripts/audit_conda_availability.py` script has been updated to correctly handle noarch packages in the `mamba search` JSON output path; the offline cache analysis confirmed the logic is sound.
+
+## Implementation summary (as of branch feature/mamba-first-env)
+
+Tasks 0–8 (12 commits) are done. The branch ships:
+
+- `environment.yml` with new Tier 4 (~50 packages) and `uv` in Tier 0.
+- `pyproject.toml` slimmed: core deps 22→2, optional-dependencies 158→58.
+- `0_setup_env.sh` Tier 2 uses `uv pip install` (with pip --resolver-max-rounds=200000 fallback). New Tier 5 bootstraps `omicsclaw_<tool>` sub-envs on opt-in.
+- `omicsclaw/core/external_env.py` provides `run_python_in_env` / `run_script_in_env` / `run_anndata_op_in_env`.
+- First Layer-4 sub-env: `environments/banksy.yml` (numpy<2.0 + pybanksy). The skill `spatial-domains --method banksy` now dispatches to the sub-env via `.h5ad` round-trip.
+- `scripts/smoke_test_setup.sh` end-to-end validates the build on a clean machine.
+
+Known follow-ups (out of scope for this branch):
+- The four `unknown` packages from Task 0 (cell2location, cellphonedb, infercnvpy, SpatialDE) need re-audit on a network-connected machine; if any have a usable bioconda build, lift them to Tier 4.
+- `liana` is `mamba_ok` per the audit but conda recipe may lag PyPI — leave for follow-up audit.
+- The smoke test must be run end-to-end on a working network before tagging a release; this branch only exercises code paths that don't require live conda channels.

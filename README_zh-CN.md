@@ -200,6 +200,42 @@ pip install -r bot/requirements.txt
 
 *随时通过 `omicsclaw env` 或 `python omicsclaw.py env` 查看安装状态。*
 
+## 环境管理
+
+OmicsClaw 采用 4 层依赖策略，统一入口 `bash 0_setup_env.sh`：
+
+| 层 | 谁管 | 落地位置 | 装什么 |
+|---|---|---|---|
+| 0 — 基底 | mamba | `environment.yml` Tier 0 | python、R、gxx、cmake、构建工具链 |
+| 1 — 重型 Python | mamba | `environment.yml` Tier 4 | scanpy/anndata/squidpy、torch、scvi-tools、scvelo、cellrank、harmonypy/bbknn/scanorama、celltypist、gseapy、pydeseq2、multiqc、kb-python … |
+| 2 — Thin pip 残留 | pip（uv 加速） | `pyproject.toml` extras | `omicsclaw` editable + 仅 PyPI 的包（SpaGCN、GraphST、cellcharter、paste-bio、flashdeconv、fastccc、pyVIA、tangram-sc …） |
+| 3 — 源码 vendored | 源码构建 | `tools/<name>/`、`0_build_vendored_tools.sh` | bioconda 无 Py3.11 build 的生信 CLI（当前空 stub） |
+| 4 — 隔离子环境 | mamba | `environments/<tool>.yml` | 硬冲突依赖（banksy: numpy<2.0；未来 cnvkit/cellranger 同槽位） |
+
+决策树（top-down，命中即停）：能放主 env 就放主 env，子 env 只留给真正硬冲突的依赖。
+对子 env 的调用通过 `omicsclaw.core.external_env.run_anndata_op_in_env` 桥接，
+经临时 `.h5ad` 文件传输 AnnData，主 env 与子 env 不需要共享 Python ABI。
+
+### 常用安装
+
+```bash
+# 默认：Layers 0–2（覆盖除 banksy 外的所有 skill）
+bash 0_setup_env.sh
+
+# 启用 banksy 子环境（Layer 4，opt-in）：
+OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
+# 或：
+bash 0_setup_env.sh --with-banksy
+
+# CUDA 用户：默认装好后再覆盖 CPU 版 pytorch
+mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+```
+
+新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。
+
+设计文档详见 [`docs/superpowers/specs/2026-05-02-mamba-first-env-design.md`](docs/superpowers/specs/2026-05-02-mamba-first-env-design.md)，
+含 pip 24.2 `resolution-too-deep` 复盘和 4 层模型决策依据。
+
 ## 🔑 配置
 
 **最简单的方式：使用交互式向导**

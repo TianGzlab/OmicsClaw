@@ -185,6 +185,46 @@ make venv && make setup
 
 *Check your installation status anytime with `omicsclaw env` or `python omicsclaw.py env`.*
 
+## Environment Management
+
+OmicsClaw uses a 4-layer dependency strategy, all routed through a single
+`bash 0_setup_env.sh` entrypoint:
+
+| Layer | Owner | Where it lives | What goes here |
+|---|---|---|---|
+| 0 — Foundation | mamba | `environment.yml` Tier 0 | python, R, gxx, cmake, build toolchain |
+| 1 — Heavy Python | mamba | `environment.yml` Tier 4 | scanpy/anndata/squidpy, torch, scvi-tools, scvelo, cellrank, harmonypy/bbknn/scanorama, celltypist, gseapy, pydeseq2, multiqc, kb-python, ... |
+| 2 — Thin pip residue | pip (uv-accelerated) | `pyproject.toml` extras | `omicsclaw` editable + PyPI-only packages (SpaGCN, GraphST, cellcharter, paste-bio, flashdeconv, fastccc, pyVIA, tangram-sc, ...) |
+| 3 — Vendored sources | source build | `tools/<name>/`, `0_build_vendored_tools.sh` | bioinformatics CLIs without bioconda Py3.11 builds (currently empty stub) |
+| 4 — Isolated sub-envs | mamba | `environments/<tool>.yml` | hard-conflict deps (banksy: numpy<2.0; future: cnvkit/cellranger) |
+
+Decision rule (top-down, first match wins): if a package can live in the
+main env, it does. Sub-envs are reserved for hard conflicts (incompatible
+major-version pins on numpy/pandas/etc.). Calls into a sub-env go through
+`omicsclaw.core.external_env.run_anndata_op_in_env`, which bridges via
+temporary `.h5ad` files.
+
+### Common installs
+
+```bash
+# Default: Layers 0–2 (covers all skills except banksy).
+bash 0_setup_env.sh
+
+# With banksy sub-env (Layer 4) — opt-in:
+OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
+# or:
+bash 0_setup_env.sh --with-banksy
+
+# CUDA users: after the default install, override the CPU pytorch build:
+mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+```
+
+End-to-end smoke test on a fresh machine: `bash scripts/smoke_test_setup.sh`.
+
+See [`docs/superpowers/specs/2026-05-02-mamba-first-env-design.md`](docs/superpowers/specs/2026-05-02-mamba-first-env-design.md)
+for the design rationale (including why pip 24.2's `resolution-too-deep`
+made the old all-pip strategy untenable).
+
 ## 🔑 Configuration
 
 **The Easiest Way (Interactive Setup):**
