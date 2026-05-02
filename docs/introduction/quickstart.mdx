@@ -1,0 +1,83 @@
+---
+title: "五分钟上手 OmicsClaw"
+description: "从克隆仓库到跑通第一个 demo 分析，五分钟完成 OmicsClaw 安装与首次调用。"
+keywords: ["OmicsClaw 安装", "quickstart", "demo", "conda 环境"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 这一页能让你做什么
+
+跑通 OmicsClaw 的第一个 demo 分析（无需准备数据）。读完后你会拥有：
+
+- 一个可用的 conda 环境
+- 一份 spatial-preprocess demo 的输出报告
+- 对 `omicsclaw.py run` CLI 的基本认知
+
+## 安装：四步
+
+### 1. 克隆仓库
+
+```bash
+git clone https://github.com/zhou-1314/OmicsClaw.git
+cd OmicsClaw
+```
+
+### 2. 创建 conda 环境（mamba-first）
+
+```bash
+bash 0_setup_env.sh
+```
+
+脚本优先使用 `mamba`，无 `mamba` 时回退到 `conda`。它会从 `environment.yml` 创建名为 **OmicsClaw** 的 conda 环境，并依次完成 R 包、生信命令行工具和全部 Python 可选扩展的安装。预计耗时 10–30 分钟（取决于网络和镜像速度）。
+
+### 3. 构建 vendor 工具（如适用）
+
+```bash
+conda activate OmicsClaw
+bash 0_build_vendored_tools.sh
+```
+
+当前该脚本为存根（stub），尚未编译任何工具，执行后立即返回。待后续在 `tools/` 下添加上游工具时，重新运行此步骤以完成编译和链接。
+
+### 4. 激活并验证
+
+```bash
+conda activate OmicsClaw
+python omicsclaw.py list
+```
+
+命令执行后应看到按领域分组的技能列表（空间转录组、单细胞、基因组等 7 个领域），确认环境已就绪。
+
+## 第一次调用：跑 demo
+
+`--demo` 模式使用内置的合成数据集（无需提供任何输入文件），适合快速验证安装是否正常。下面的命令会依次执行 spatial-preprocess → spatial-domains → spatial-de → spatial-genes → spatial-statistics 完整链路：
+
+```bash
+python omicsclaw.py run spatial-pipeline --demo
+```
+
+终端输出示例：
+
+```
+[OmicsClaw] routing → spatial-pipeline
+[spatial-preprocess] running on demo data …
+[spatial-domains]    leiden clustering …
+[spatial-de]         marker gene detection …
+[spatial-genes]      spatially variable genes …
+[spatial-statistics] spatial statistics …
+[OmicsClaw] report written to: /tmp/omicsclaw_demo/spatial-pipeline/
+```
+
+输出目录下包含各步骤的 HTML 报告和图像文件。
+
+## 它不是什么
+
+- **不是 GUI 安装包**：本页假设你使用命令行；OmicsClaw-App 桌面客户端是独立的安装流程，参见 ecosystem/omicsclaw-app
+- **不是云部署指南**：所有命令面向本地 Linux/macOS；远端执行请参考 engineering/remote-execution 页
+- **不覆盖 R 依赖问题排查**：R 包安装常见问题请查阅 [docs/_legacy/R-DEPENDENCIES.md](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md)
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview) — 理解 skill 与 orchestrator
+- [空间转录组域](/docs/domains/spatial) — 第一个完整领域示例
+- [Memory 系统](/docs/engineering/memory) — 让 OmicsClaw 记住你的偏好
