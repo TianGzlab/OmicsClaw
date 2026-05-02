@@ -1,12 +1,18 @@
 # OmicsClaw analysis environment
 #
-# Owns everything that pip cannot install reliably:
+# Owns everything that mamba can install reliably:
 #   - bioinformatics CLIs (samtools, STAR, fastqc, bwa, ...)
 #   - R 4.3 + CRAN + Bioconductor packages
 #   - C/C++ build toolchain (for pip's compiled deps + future tools/ vendoring)
+#   - The heavy Python science stack (scanpy/anndata/squidpy, torch,
+#     scvi-tools/scvelo/cellrank, harmonypy/bbknn/scanorama, multiqc,
+#     kb-python, ...) — see Tier 4 below.
 #
-# Owns NOTHING from pyproject.toml — Python deps are pip's responsibility,
-# installed by 0_setup_env.sh Tier 2 via `pip install -e ".[full]"`.
+# pyproject.toml owns the THIN pip residue: omicsclaw editable + PyPI-only
+# packages with no conda recipe (SpaGCN, GraphST, cellcharter, paste-bio,
+# flashdeconv, fastccc, pyVIA, tangram-sc, ...). 0_setup_env.sh Tier 2
+# installs that residue with `uv pip install` after this file's mamba env
+# create completes.
 #
 # Channel order: conda-forge first (broad scientific), bioconda second
 # (genomics specific). This file is designed for strict channel priority —
@@ -60,8 +66,7 @@ dependencies:
   - simpleaf
   # NOTE: velocyto has no Python 3.11 build on bioconda (only 3.6–3.10,
   # 3.12) — installed via pip ("velocyto>=0.17.17") in Tier 2.1.
-  # NOTE: multiqc and kb-python are pure-Python and live in pyproject.toml
-  # (singlecell-upstream extra) — they are pip-installed in Tier 2 instead.
+  # multiqc and kb-python now live in Tier 4 below (mamba-managed).
 
   # ────────── Tier 2: R 4.3 + CRAN packages (replaces install_r_dependencies.R, CRAN section) ──────────
   - r-base=4.3
@@ -129,6 +134,10 @@ dependencies:
   #     thin pip residue until verified on a network-connected machine. See
   #     docs/superpowers/specs/2026-05-02-mamba-first-env-design.md "Open
   #     questions" for follow-up.
+  #   * cellphonedb was in the plan's initial high-confidence table but
+  #     downgraded to `unknown` by the Task 0 audit (offline-cache miss,
+  #     not a conda absence). It stays in pyproject [singlecell-communication]
+  #     until re-audited on a network-connected machine.
   #
   # Single-cell / spatial core
   - scanpy>=1.9.0,<2.0
