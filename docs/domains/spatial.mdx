@@ -1,0 +1,58 @@
+---
+title: "空间转录组 - spatial · 17 skills"
+description: "Visium / Xenium / MERFISH / Slide-seq 等空间转录组数据的端到端分析：QC、域识别、空间可变基因、解卷积、细胞通讯、轨迹与 CNV。"
+keywords: ["空间转录组", "spatial transcriptomics", "Visium", "Xenium", "MERFISH"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+空间转录组域支持 Visium、Xenium、MERFISH、Slide-seq 等主流空间测序平台，覆盖从原始数据加载到高级下游分析的完整流程。分析维度包括：QC 与标准化、空间域（niche）识别、空间可变基因（SVG）挖掘、细胞类型解卷积、配体-受体细胞通讯、轨迹与拟时序推断，以及拷贝数变异（CNV）推断。与单细胞域的核心区别在于：空间转录组保留每个 spot 或细胞的二维坐标，分析的核心问题是"基因表达在哪里"——不仅描述细胞类型，还揭示其空间分布、邻域关系与组织微环境结构。
+
+## 典型分析流程 ASCII 图
+
+```
+原始数据 (h5ad / 10x output)
+   │
+   ▼
+spatial-preprocess     ← QC + 标准化 + HVG + PCA + UMAP
+   │
+   ▼
+spatial-domains        ← 空间域识别 (leiden / SpaGCN / ...)
+   │
+   ├─→ spatial-de              ← 各域 marker 基因
+   ├─→ spatial-genes           ← 空间可变基因 (SVG)
+   ├─→ spatial-deconv          ← 细胞类型解卷积
+   ├─→ spatial-communication   ← 配体-受体通讯
+   ├─→ spatial-trajectory      ← 拟时序
+   └─→ spatial-cnv             ← 拷贝数
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| spatial-preprocess | QC + 预处理 | `python omicsclaw.py run spatial-preprocessing --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-preprocess/SKILL.md) |
+| spatial-domains | 空间域识别 | `python omicsclaw.py run spatial-domain-identification --demo` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-domains/SKILL.md) |
+| spatial-de | 差异表达 | `python omicsclaw.py run spatial-de --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-de/SKILL.md) |
+| spatial-genes | 空间可变基因 | `python omicsclaw.py run spatial-genes --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-genes/SKILL.md) |
+| spatial-deconv | 细胞类型解卷积 | `python omicsclaw.py run spatial-deconv --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-deconv/SKILL.md) |
+| spatial-communication | 细胞通讯 | `python omicsclaw.py run spatial-communication --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-communication/SKILL.md) |
+| spatial-trajectory | 拟时序轨迹 | `python omicsclaw.py run spatial-trajectory --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-trajectory/SKILL.md) |
+| spatial-cnv | 拷贝数推断 | `python omicsclaw.py run spatial-cnv --input <data.h5ad> --output <dir>` | [SKILL.md](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/spatial-cnv/SKILL.md) |
+
+完整 17 个 skill 列表见 [`skills/spatial/INDEX.md`](https://github.com/zhou-1314/OmicsClaw/blob/main/skills/spatial/INDEX.md)。
+
+## 何时不适用本领域
+
+- **数据没有空间坐标**（如普通 scRNA-seq）：建议使用 [singlecell 域](/docs/domains/singlecell)
+- **bulk RNA-seq 数据**：建议使用 [bulkrna 域](/docs/domains/bulkrna)
+- **想做组织切片图像分析（H&E 细胞分割）**：当前 skill 不覆盖图像深度学习，需借助外部工具（如 StarDist、Cellpose）
+- **DNA 层面的空间分析（spatial DNA-seq）**：不在本域范围内
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)
+- [单细胞组学](/docs/domains/singlecell)
+- [Bulk RNA-seq](/docs/domains/bulkrna)
