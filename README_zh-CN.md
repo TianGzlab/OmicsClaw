@@ -27,6 +27,8 @@
 >
 > OmicsClaw v0.1.0 已正式发布。当前版本完成了核心交互与执行框架，提供原生记忆管理面板 Memory Explorer，并内置覆盖 8 个领域的 72 个分析技能。欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交问题和建议。
 
+> 📖 **完整中文文档**：见 [`docs/`](docs/)（在仓库根目录跑 `npx mintlify dev` 本地预览）
+
 <h3>⚡ 一套内核，多种交互界面</h3>
 
 <table>

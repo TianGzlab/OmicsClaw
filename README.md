@@ -30,6 +30,8 @@
 > OmicsClaw v0.1.0 is officially released! This milestone version completes the core architecture, elevating the interactive natural language analysis experience, introducing a native Memory Explorer dashboard, and providing robust execution of 72 built-in skills across 6 omics domains. Try it now and share your feedback via [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues).
 
 
+> 📖 **Full Chinese documentation**: see [`docs/`](docs/) (preview locally with `npx mintlify dev` from the repo root)
+
 <h3>⚡ Unified Control, Different Surfaces</h3>
 
 <table>
