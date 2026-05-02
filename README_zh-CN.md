@@ -156,12 +156,13 @@ CARD 的轻量 `wrMisc` import 和 CellChat 的 `NMF>=0.23.0` 要求会在 Tier 
 要求的 0.23.0。
 Tier 3 其他 GitHub R 根包（`spacexr`、`CellChat`、`numbat`、`SPARK`、
 `DoubletFinder`）的 conda 可解析直接 `Depends` / `Imports` / `LinkingTo`
-依赖也已前置到 `environment.yml`。GitHub 安装不再重新执行 R 依赖解析，并跳过
+依赖也已前置到 `environment.yml`。对于 `numbat`，Tier 3 会先从 CRAN 显式安装
+`hahmmr` 和 `scistreer>=1.1.0`，再安装 `kharchenkolab/numbat`；
+`scistreer` 的编译型依赖 `phangorn` 和 R 4.3 兼容的 `RcppParallel` 构建
+保持由 conda 层提供。
+GitHub 安装不再重新执行 R 依赖解析，并跳过
 vignettes / manuals，因此 setup 不会受当前 CRAN 传递依赖漂移影响，例如 R 4.3
 基线上的 `CellChat -> ggpubr -> doBy -> forecast` 链。
-R 4.3 主环境下目前唯一已知残余源码构建风险是
-`numbat` 的 `hahmmr` / `scistreer` 依赖：conda-forge / bioconda 当前缓存可见
-构建为 R 4.4+，而 OmicsClaw 暂时保持主环境在 R 4.3。
 
 如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
 但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，包括只显示

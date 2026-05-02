@@ -80,6 +80,7 @@ def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
         "r-patchwork",
         "r-pbapply",
         "r-pbmcapply",
+        "r-phangorn",
         "r-plotly",
         "r-plyr",
         "r-pracma",
@@ -91,6 +92,7 @@ def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
         "r-rcpp",
         "r-rcpparmadillo",
         "r-rcppeigen",
+        "r-rcppparallel",
         "r-rcppml",
         "r-readr",
         "r-reshape2",
@@ -121,16 +123,32 @@ def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
     assert "r-wrmisc" not in dependencies
 
 
+def test_setup_env_installs_numbat_cran_dependencies_before_numbat():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+
+    hahmmr_install = 'ensure_cran_package("hahmmr")'
+    scistreer_install = 'ensure_cran_package("scistreer", "1.1.0")'
+    numbat_install = 'ensure_github_package("numbat", "kharchenkolab/numbat")'
+
+    assert hahmmr_install in setup_script
+    assert scistreer_install in setup_script
+    assert numbat_install in setup_script
+    assert 'ensure_github_package("hahmmr"' not in setup_script
+    assert 'ensure_github_package("scistreer"' not in setup_script
+    assert setup_script.index(hahmmr_install) < setup_script.index(numbat_install)
+    assert setup_script.index(scistreer_install) < setup_script.index(numbat_install)
+
+
 def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
     repo_root = Path(__file__).resolve().parents[1]
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
 
     cran_install = 'ensure_cran_package("wrMisc")'
-    github_install = "    devtools::install_github("
+    github_install = 'ensure_github_package("spacexr", "dmcable/spacexr")'
 
     assert cran_install in setup_script
     assert github_install in setup_script
-    assert "p[2]," in setup_script
     assert setup_script.index(cran_install) < setup_script.index(github_install)
 
 
@@ -141,7 +159,7 @@ def test_setup_env_upgrades_nmf_before_github_r_packages():
     nmf_check = 'ensure_cran_package("NMF", "0.23.0")'
     package_version_check = "current_version < minimum_version"
     nmf_install = "install.packages(pkg"
-    github_install = "    devtools::install_github("
+    github_install = 'ensure_github_package("spacexr", "dmcable/spacexr")'
 
     assert nmf_check in setup_script
     assert package_version_check in setup_script
@@ -152,10 +170,10 @@ def test_setup_env_upgrades_nmf_before_github_r_packages():
 def test_setup_env_installs_github_r_packages_without_dependency_resolution_or_vignettes():
     repo_root = Path(__file__).resolve().parents[1]
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
-    install_call = "    devtools::install_github("
+    install_call = "devtools::install_github("
 
     assert install_call in setup_script
-    assert "p[2]," in setup_script
+    assert "repo," in setup_script
     assert "dependencies = FALSE" in setup_script
     assert "build_vignettes = FALSE" in setup_script
     assert "build_manual = FALSE" in setup_script

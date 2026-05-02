@@ -163,12 +163,13 @@ R 4.3 `r-nmf` build is still 0.21.0 and CellChat requires at least 0.23.0.
 Tier 3's other GitHub R package roots (`spacexr`, `CellChat`, `numbat`,
 `SPARK`, and `DoubletFinder`) also have their conda-resolvable direct
 `Depends`/`Imports`/`LinkingTo` dependencies preinstalled in `environment.yml`.
+For `numbat`, Tier 3 explicitly installs the upstream GitHub dependencies
+`hahmmr` and `scistreer>=1.1.0` from CRAN before installing
+`kharchenkolab/numbat`; `scistreer`'s compiled dependencies `phangorn` and
+the R 4.3-compatible `RcppParallel` build are kept in the conda layer.
 Their GitHub installs do not re-run R dependency resolution and skip
 vignettes/manuals, so setup is not affected by current CRAN transitive drift
 such as `CellChat -> ggpubr -> doBy -> forecast` on the R 4.3 baseline.
-The only known residual source-build risk on the R 4.3 line is `numbat`'s
-`hahmmr`/`scistreer` dependency pair: conda-forge/bioconda currently expose
-cached builds for R 4.4+, while OmicsClaw keeps the main env on R 4.3 for now.
 
 If a previous interrupted run left a complete prefix at
 `<conda-root>/envs/OmicsClaw` but `conda info --envs` does not list it by name,

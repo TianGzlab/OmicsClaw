@@ -280,11 +280,12 @@ echo "[setup_env] ✔ Tier 2 complete"
 # conda-forge's current r-wrmisc builds require R 4.4/4.5, while the main env
 # stays on R 4.3; conda-forge's R 4.3 r-nmf build is still 0.21.0, while
 # CellChat requires NMF >= 0.23.0.
-# GitHub package installs intentionally skip dependency resolution and
-# vignettes/manuals. Hard runtime/build deps are owned by environment.yml and
-# the wrMisc CRAN preflight above; letting devtools resolve dependencies here
-# can pull current CRAN transitive chains such as CellChat -> ggpubr -> doBy ->
-# forecast, which drifts outside the supported R 4.3 conda baseline.
+# GitHub package installs intentionally skip CRAN/Bioconductor dependency
+# resolution and vignettes/manuals. Hard runtime/build deps are owned by
+# environment.yml and the CRAN preflight below. Letting devtools resolve
+# dependencies here can pull current CRAN transitive chains such as CellChat ->
+# ggpubr -> doBy -> forecast, which drifts outside the supported R 4.3 conda
+# baseline.
 
 echo "[setup_env] Tier 3: GitHub R packages (devtools::install_github)"
 env_run Rscript - <<'RSCRIPT'
@@ -334,34 +335,64 @@ ensure_cran_package <- function(pkg, min_version = NULL) {
 
 ensure_cran_package("wrMisc")
 ensure_cran_package("NMF", "0.23.0")
+# numbat 1.5.2 imports hahmmr and scistreer >= 1.1.0. They are available from
+# CRAN; install them before the GitHub numbat root because dependency
+# resolution is disabled for devtools::install_github below.
+ensure_cran_package("hahmmr")
+ensure_cran_package("scistreer", "1.1.0")
 
-gh_pkgs <- list(
-  c("spacexr",       "dmcable/spacexr"),
-  c("CARD",          "YMa-lab/CARD"),
-  c("CellChat",      "jinworks/CellChat"),
-  c("numbat",        "kharchenkolab/numbat"),
-  c("SPARK",         "xzhoulab/SPARK"),
-  c("DoubletFinder", "chris-mcginnis-ucsf/DoubletFinder")
-)
-for (p in gh_pkgs) {
-  if (requireNamespace(p[1], quietly = TRUE)) {
-    cat(sprintf("[r-extras] %s already installed — skipping\n", p[1]))
-  } else {
-    cat(sprintf("[r-extras] installing %s from GitHub:%s\n", p[1], p[2]))
-    devtools::install_github(
-      p[2],
-      dependencies = FALSE,
-      upgrade = "never",
-      build_vignettes = FALSE,
-      build_manual = FALSE,
-      quiet = FALSE
-    )
-    if (!requireNamespace(p[1], quietly = TRUE)) {
-      stop(sprintf("[r-extras] FAILED to install %s", p[1]))
-    }
+ensure_github_package <- function(pkg, repo, min_version = NULL) {
+  current_version <- installed_package_version(pkg)
+  minimum_version <- if (is.null(min_version)) NULL else package_version(min_version)
+  needs_install <- is.null(current_version)
+  if (!needs_install && !is.null(minimum_version)) {
+    needs_install <- current_version < minimum_version
   }
+  if (!needs_install) {
+    cat(sprintf("[r-extras] %s OK", pkg))
+    if (!is.null(minimum_version)) {
+      cat(sprintf(" (version %s >= %s)", as.character(current_version), min_version))
+    }
+    cat("\n")
+    return(invisible(TRUE))
+  }
+
+  if (is.null(min_version)) {
+    cat(sprintf("[r-extras] installing %s from GitHub:%s\n", pkg, repo))
+  } else {
+    current <- if (is.null(current_version)) "missing" else as.character(current_version)
+    cat(sprintf("[r-extras] installing %s >= %s from GitHub:%s (current: %s)\n", pkg, min_version, repo, current))
+  }
+  devtools::install_github(
+    repo,
+    dependencies = FALSE,
+    upgrade = "never",
+    build_vignettes = FALSE,
+    build_manual = FALSE,
+    quiet = FALSE
+  )
+  current_version <- installed_package_version(pkg)
+  if (is.null(current_version)) {
+    stop(sprintf("[r-extras] FAILED to install %s", pkg))
+  }
+  if (!is.null(minimum_version) && current_version < minimum_version) {
+    stop(sprintf(
+      "[r-extras] FAILED to install %s >= %s (installed: %s)",
+      pkg,
+      min_version,
+      as.character(current_version)
+    ))
+  }
+  invisible(TRUE)
 }
-cat("[r-extras] all 6 GitHub R packages OK\n")
+
+ensure_github_package("spacexr", "dmcable/spacexr")
+ensure_github_package("CARD", "YMa-lab/CARD")
+ensure_github_package("CellChat", "jinworks/CellChat")
+ensure_github_package("numbat", "kharchenkolab/numbat")
+ensure_github_package("SPARK", "xzhoulab/SPARK")
+ensure_github_package("DoubletFinder", "chris-mcginnis-ucsf/DoubletFinder")
+cat("[r-extras] all GitHub R packages OK\n")
 RSCRIPT
 echo "[setup_env] ✔ Tier 3 complete"
 

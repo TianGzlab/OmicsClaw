@@ -163,6 +163,9 @@ dependencies:
   - r-logger
   - r-optparse
   - r-paralleldist
+  # scistreer (numbat import) imports phangorn and links RcppParallel; keep
+  # those compiled CRAN deps in the conda layer.
+  - r-phangorn
   - r-purrr
   - r-rhpcblasctl
   - r-r.utils
@@ -174,6 +177,9 @@ dependencies:
   - r-pracma
   - r-kernsmooth
   - r-rocr
+  # Newer conda-forge r-rcppparallel builds target R 4.4/4.5; 5.1.9 still
+  # provides R 4.3 builds and is sufficient for scistreer.
+  - r-rcppparallel=5.1.9
   - r-seuratobject
   - r-zoo
 
