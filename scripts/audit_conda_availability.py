@@ -11,13 +11,20 @@ Classification logic:
                  noarch/pure-Python build (compatible with any Python version,
                  build strings like pyhd8ed1ab_0, pyhdfd78af_0).
     pip_only   — no conda recipe, or only builds for other Python versions
-                 with no noarch fallback.
+                 with no noarch fallback, or lives on a non-default channel
+                 (e.g. pytorch / pyg).
+    unknown    — mamba search failed (network/proxy unavailable) so
+                 classification could not be confirmed; re-run on a
+                 network-connected machine before treating as pip_only.
 
 Note on network failures: if the conda proxy returns HTTP 502 or similar,
-``mamba search`` exits non-zero and all packages are classified pip_only.
-In that case, use the offline local-cache variant of this script that reads
-/opt/conda/pkgs/cache/*.json directly (see audit run notes in the design
-spec for the approach used when the proxy was unavailable).
+``mamba search`` exits non-zero and the package is recorded as ``pip_only``
+with reason ``"not-found"``.  If ``mamba search`` fails (proxy down, channel
+offline, etc.), the script records ``pip_only`` with reason ``"not-found"``.
+To audit accurately, re-run on a machine with a working conda proxy, or
+pre-populate the local cache by running
+``mamba search -c conda-forge -c bioconda <pkg>`` for each package while
+the network is available.
 """
 from __future__ import annotations
 

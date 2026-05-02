@@ -25,7 +25,8 @@ Source: `docs/superpowers/specs/conda-availability-2026-05-02.csv`
 
 **Total packages audited:** 42
 **mamba_ok:** 27 (64%)
-**pip_only:** 15 (36%)
+**pip_only:** 11 (26%)
+**unknown:** 4 (10%) — proxy was down; need network-connected re-run
 
 ### mamba_ok packages (27)
 
@@ -59,25 +60,30 @@ Source: `docs/superpowers/specs/conda-availability-2026-05-02.csv`
 | scvelo | 0.3.4 | noarch |
 | scvi-tools | 1.4.2 | noarch |
 
-### pip_only packages (15)
+### pip_only packages (11)
 
 | Package | Reason |
 |---|---|
 | ccproxy-api | known-no-conda-recipe (internal package) |
-| cell2location | not-in-local-cache (likely no recipe) |
 | cellcharter | known-no-conda-recipe |
-| cellphonedb | not-in-local-cache |
 | fastccc | known-no-conda-recipe |
 | flashdeconv | known-no-conda-recipe |
 | graphst | known-no-conda-recipe |
-| infercnvpy | not-in-local-cache |
 | paste-bio | known-no-conda-recipe |
 | pyvia | known-no-conda-recipe |
 | spagcn | known-no-conda-recipe |
-| spatialde | not-in-local-cache |
 | tangram-sc | known-no-conda-recipe |
-| torch | not-in-local-cache (PyPI wheel) |
-| torch_geometric | not-in-local-cache (PyPI wheel) |
+| torch | not-in-bioconda-or-conda-forge (pytorch channel only) |
+| torch_geometric | not-in-bioconda-or-conda-forge (pyg channel only) |
+
+### unknown packages (4) — requires network-connected verification
+
+| Package | Reason |
+|---|---|
+| cell2location | not-in-local-cache; verify on network |
+| cellphonedb | not-in-local-cache; verify on network |
+| infercnvpy | not-in-local-cache; verify on network |
+| spatialde | not-in-local-cache; verify on network |
 
 ### Surprising classifications
 
@@ -85,7 +91,7 @@ Source: `docs/superpowers/specs/conda-availability-2026-05-02.csv`
 - **scvi-tools** — `mamba_ok` (noarch on bioconda), which is positive. However the cached version is 1.4.2; the pyproject.toml pins `scvi-tools>=1.4.0,<2.0`. Verify that 1.4.2 satisfies all downstream deps (cell2location) before pinning in environment.yml.
 - **harmonypy** — `mamba_ok` via bioconda noarch at version 0.2.0, but pyproject requires `harmonypy>=0.0.9`. The bioconda version is newer; safe to use.
 - **cellrank** — `mamba_ok` noarch at 2.2.0 on conda-forge. This is a complex package that was a concern in the plan; the conda version is current.
-- **cell2location / cellphonedb / infercnvpy / spatialde** — `not-in-local-cache`: these packages may exist on conda but were not in the cache at audit time (cache may be stale or they may be truly PyPI-only). Treat as `pip_only` conservatively; verify in Task 1.
+- **cell2location / cellphonedb / infercnvpy / spatialde** — reclassified to `unknown` (was `pip_only`): the proxy was down at audit time so `mamba search` could not confirm availability. All four have a non-trivial chance of being on bioconda. Task 1 must verify each with `mamba search -c bioconda <pkg>` on a network-connected machine before deciding whether to lift them to environment.yml or leave them in pyproject extras.
 
 ## Migration path for existing OmicsClaw envs
 
@@ -103,10 +109,14 @@ bash 0_setup_env.sh
 ## Open questions
 
 - liana / liana-py — bioconda has it (1.7.1, noarch). Move to mamba in Task 1.
-- infercnvpy — not in local cache; treat as pip_only for now. Check bioconda directly when network is available.
-- cell2location — not in local cache; plan listed this as "conda has it but old; pin needed." Verify in Task 1.
 - tangram-sc — confirmed no conda recipe; stays pip_only.
 - torch — needs the `pytorch` conda channel (not bioconda/conda-forge). Add to environment.yml explicitly in Task 1.
+
+**Verify before Task 1 finalizes:** the audit's offline mode could not classify
+`cell2location`, `cellphonedb`, `infercnvpy`, `spatialde` (`unknown` rows in
+the CSV). All four have a non-trivial chance of being on bioconda; Task 1
+should re-run `mamba search -c bioconda <pkg>` on a network-connected machine
+for each before deciding whether to lift them or leave them in pyproject.
 
 ## Audit run notes
 
@@ -118,6 +128,6 @@ The audit was run on 2026-05-02. The `mamba search` approach used in `scripts/au
 - `bioconda/linux-64` (36 MB, mod Sat 02 May 2026 09:23:05 GMT)
 - `bioconda/noarch` (37 MB, mod Sat 02 May 2026 05:23:32 GMT)
 
-These cache files were loaded directly in Python to perform the audit offline. Classification logic: `mamba_ok` if the package has a `py311` compiled build OR a `noarch` pure-Python build (build strings like `pyhd8ed1ab_0`, `pyhdfd78af_0` are compatible with any Python version). 42 packages classified: 27 mamba_ok, 15 pip_only (64% mamba_ok — meets the expected 60%+ threshold).
+These cache files were loaded directly in Python to perform the audit offline. Classification logic: `mamba_ok` if the package has a `py311` compiled build OR a `noarch` pure-Python build (build strings like `pyhd8ed1ab_0`, `pyhdfd78af_0` are compatible with any Python version). 42 packages classified: 27 mamba_ok, 11 pip_only, 4 unknown (64% mamba_ok — meets the expected 60%+ threshold; the 4 unknown packages may push mamba_ok higher once verified on a network-connected machine).
 
 The `scripts/audit_conda_availability.py` script has been updated to correctly handle noarch packages in the `mamba search` JSON output path; the offline cache analysis confirmed the logic is sound.

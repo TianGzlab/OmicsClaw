@@ -2,9 +2,9 @@ package,status,version_or_reason
 arboreto,mamba_ok,0.1.6 (noarch)
 bbknn,mamba_ok,1.6.0
 ccproxy-api,pip_only,known-no-conda-recipe
-cell2location,pip_only,not-in-local-cache
+cell2location,unknown,not-in-local-cache; verify on network
 cellcharter,pip_only,known-no-conda-recipe
-cellphonedb,pip_only,not-in-local-cache
+cellphonedb,unknown,not-in-local-cache; verify on network
 cellrank,mamba_ok,2.2.0 (noarch)
 celltypist,mamba_ok,1.7.1 (noarch)
 coloredlogs,mamba_ok,15.0.1 (noarch)
@@ -17,7 +17,7 @@ gseapy,mamba_ok,1.2.1
 harmonypy,mamba_ok,0.2.0 (noarch)
 httpx,mamba_ok,0.23.1
 humanfriendly,mamba_ok,10.0
-infercnvpy,pip_only,not-in-local-cache
+infercnvpy,unknown,not-in-local-cache; verify on network
 kb-python,mamba_ok,0.30.1 (noarch)
 leidenalg,mamba_ok,0.11.0
 liana,mamba_ok,1.7.1 (noarch)
@@ -37,7 +37,7 @@ scrublet,mamba_ok,0.2.3 (noarch)
 scvelo,mamba_ok,0.3.4 (noarch)
 scvi-tools,mamba_ok,1.4.2 (noarch)
 spagcn,pip_only,known-no-conda-recipe
-spatialde,pip_only,not-in-local-cache
+spatialde,unknown,not-in-local-cache; verify on network
 tangram-sc,pip_only,known-no-conda-recipe
-torch,pip_only,not-in-local-cache
-torch_geometric,pip_only,not-in-local-cache
+torch,pip_only,not-in-bioconda-or-conda-forge (pytorch channel only)
+torch_geometric,pip_only,not-in-bioconda-or-conda-forge (pyg channel only)
