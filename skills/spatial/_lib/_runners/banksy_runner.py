@@ -145,6 +145,7 @@ def run_banksy(
     sc.pp.pca(banksy_matrix, n_comps=pca_dims)
 
     # Smart Routing: Exact cluster count vs Graph-based discovery
+    n_domains_requested = n_domains  # preserve user input across smart routing
     if n_domains is not None and n_domains > 0:
         logger.info(
             "BANKSY: n_domains=%d specified, forcing extraction via tied-GMM fallback",
@@ -186,7 +187,7 @@ def run_banksy(
     return {
         "method": "banksy",
         "n_domains": actual_n,
-        "n_domains_requested": n_domains,
+        "n_domains_requested": n_domains_requested,
         "lambda": lambda_param,
         "clustering": cluster_name,
         "resolution": resolution,

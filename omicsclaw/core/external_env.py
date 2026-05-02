@@ -21,6 +21,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
+DEFAULT_TIMEOUT_SECONDS: float = 1800.0  # 30 min — banksy on a large slide
+                                          # can take many minutes; longer than
+                                          # this almost always means a hang.
+
 __all__ = [
     "EnvNotFoundError",
     "is_env_available",
@@ -62,17 +66,37 @@ def is_env_available(env: str) -> bool:
 def run_python_in_env(env: str, code: str, *, timeout: float | None = None) -> str:
     """Run a Python one-liner in another conda env, return stdout.
 
+    Args:
+        env: conda environment name.
+        code: Python source to evaluate.
+        timeout: seconds before the subprocess is killed.  If None, defaults
+            to DEFAULT_TIMEOUT_SECONDS (30 min).
+
     Raises:
         EnvNotFoundError: if `env` does not exist.
         subprocess.CalledProcessError: if the subprocess exits non-zero.
+            The exception's ``stderr`` attribute contains the captured output.
     """
     if not is_env_available(env):
         raise EnvNotFoundError(f"conda env not found: {env!r}")
     runner = _runner()
     cmd = [runner, "run", "-n", env, "--no-capture-output", "python", "-c", code]
-    res = subprocess.run(
-        cmd, capture_output=True, text=True, check=True, timeout=timeout
-    )
+    effective_timeout = DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout
+    try:
+        res = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=effective_timeout
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr_tail = (exc.stderr or "").rstrip()
+        raise subprocess.CalledProcessError(
+            exc.returncode,
+            exc.cmd,
+            output=exc.stdout,
+            stderr=(
+                f"sub-env subprocess failed (env={env}, exit={exc.returncode}):\n"
+                f"--- stderr ---\n{stderr_tail}"
+            ),
+        ) from exc
     return res.stdout
 
 
@@ -83,14 +107,40 @@ def run_script_in_env(
     *,
     timeout: float | None = None,
 ) -> str:
-    """Run a Python script in another env. `script` must be readable from both envs."""
+    """Run a Python script in another env. `script` must be readable from both envs.
+
+    Args:
+        env: conda environment name.
+        script: path to the Python script.
+        args: extra CLI arguments forwarded to the script.
+        timeout: seconds before the subprocess is killed.  If None, defaults
+            to DEFAULT_TIMEOUT_SECONDS (30 min).
+
+    Raises:
+        EnvNotFoundError: if `env` does not exist.
+        subprocess.CalledProcessError: if the subprocess exits non-zero.
+            The exception's ``stderr`` attribute contains the captured output.
+    """
     if not is_env_available(env):
         raise EnvNotFoundError(f"conda env not found: {env!r}")
     runner = _runner()
     cmd = [runner, "run", "-n", env, "--no-capture-output", "python", str(script), *args]
-    res = subprocess.run(
-        cmd, capture_output=True, text=True, check=True, timeout=timeout
-    )
+    effective_timeout = DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout
+    try:
+        res = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=effective_timeout
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr_tail = (exc.stderr or "").rstrip()
+        raise subprocess.CalledProcessError(
+            exc.returncode,
+            exc.cmd,
+            output=exc.stdout,
+            stderr=(
+                f"sub-env subprocess failed (env={env}, exit={exc.returncode}):\n"
+                f"--- stderr ---\n{stderr_tail}"
+            ),
+        ) from exc
     return res.stdout
 
 
@@ -108,6 +158,14 @@ def run_anndata_op_in_env(
         --input <tmp_in.h5ad>  --output <tmp_out.h5ad>
     plus `--params <json>` if `params` is non-empty. The script is responsible
     for loading the input, doing its work, and writing the output.
+
+    Args:
+        env: conda environment name.
+        runner_script: path to a script that accepts --input/--output/--params.
+        adata: AnnData object to pass through the bridge.
+        params: JSON-serialisable dict forwarded as ``--params``.
+        timeout: seconds before the subprocess is killed.  If None, defaults
+            to DEFAULT_TIMEOUT_SECONDS (30 min).
     """
     import anndata  # local import — main env has anndata, sub-env may not yet
 
