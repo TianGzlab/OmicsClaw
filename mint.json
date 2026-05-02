@@ -86,7 +86,31 @@
   ],
   "excludes": [
     "docs/_legacy/**",
-    "docs/superpowers/**"
+    "docs/superpowers/**",
+    ".venv/**",
+    "venv/**",
+    "node_modules/**",
+    "frontend/**",
+    "website/**",
+    "knowledge_base/**",
+    "skills/**",
+    "bot/**",
+    "build/**",
+    "data/**",
+    "examples/**",
+    "omicsclaw/**",
+    "scripts/**",
+    "templates/**",
+    "tests/**",
+    "tools/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "README_zh-CN.md",
+    "SOUL.md",
+    "SPEC.md",
+    "llms.txt"
   ],
   "footerSocials": {
     "github": "https://github.com/TianGzlab/OmicsClaw"
