@@ -21,14 +21,15 @@ def _optional_requirements_by_name(package_name: str) -> list[tuple[str, Require
     return matches
 
 
-def test_scvi_tools_constraints_avoid_legacy_jax_resolver_backtracking():
-    requirements = _optional_requirements_by_name("scvi-tools")
-
-    assert requirements
-    for extra_name, requirement in requirements:
-        assert requirement.specifier.contains(Version("1.4.0")), extra_name
-        assert not requirement.specifier.contains(Version("1.3.3")), extra_name
-        assert not requirement.specifier.contains(Version("2.0.0")), extra_name
+def test_scvi_tools_no_longer_in_pyproject_pip_layer():
+    """scvi-tools is now mamba-owned (environment.yml Tier 4)."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    for extra, deps in pyproject["project"]["optional-dependencies"].items():
+        for dep in deps:
+            req = Requirement(dep)
+            assert req.name != "scvi-tools", (
+                f"scvi-tools must live in environment.yml only, found in [{extra}]"
+            )
 
 
 def test_cell2location_constraint_avoids_old_scvi_tools_floor():
@@ -41,24 +42,23 @@ def test_cell2location_constraint_avoids_old_scvi_tools_floor():
         assert not requirement.specifier.contains(Version("0.2.0")), extra_name
 
 
-def test_singlecell_upstream_constraints_avoid_multiqc_leaf_backtracking():
+def test_singlecell_upstream_resolver_leaves_no_longer_in_pyproject():
+    """multiqc, coloredlogs, humanfriendly, kb-python are all in env.yml now."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    upstream = {
-        Requirement(dependency).name: Requirement(dependency)
-        for dependency in pyproject["project"]["optional-dependencies"]["singlecell-upstream"]
-    }
+    moved = {"multiqc", "coloredlogs", "humanfriendly", "kb-python"}
+    for extra, deps in pyproject["project"]["optional-dependencies"].items():
+        for dep in deps:
+            req = Requirement(dep)
+            assert req.name not in moved, (
+                f"{req.name} moved to environment.yml; remove from [{extra}]"
+            )
 
-    multiqc = upstream["multiqc"]
-    assert multiqc.specifier.contains(Version("1.33"))
-    assert not multiqc.specifier.contains(Version("1.32"))
-    assert not multiqc.specifier.contains(Version("2.0"))
 
-    coloredlogs = upstream["coloredlogs"]
-    assert coloredlogs.specifier.contains(Version("15.0.1"))
-    assert not coloredlogs.specifier.contains(Version("14.0"))
-    assert not coloredlogs.specifier.contains(Version("16.0"))
-
-    humanfriendly = upstream["humanfriendly"]
-    assert humanfriendly.specifier.contains(Version("10.0"))
-    assert not humanfriendly.specifier.contains(Version("9.2"))
-    assert not humanfriendly.specifier.contains(Version("11.0"))
+def test_cellrank_no_longer_in_pyproject_pip_layer():
+    """cellrank is now mamba-owned (environment.yml Tier 4)."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    for extra, deps in pyproject["project"]["optional-dependencies"].items():
+        for dep in deps:
+            assert Requirement(dep).name != "cellrank", (
+                f"cellrank must live in environment.yml only, found in [{extra}]"
+            )
