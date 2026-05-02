@@ -2,9 +2,13 @@
 # OmicsClaw environment setup
 #
 # Strategy (4 tiers):
-#   1. mamba/conda env create from environment.yml (R, CLIs, build toolchain)
-#   2. pip install -e ".[full,singlecell-upstream]" (OmicsClaw + Python deps)
-#      + pip install velocyto (no py3.11 bioconda build)
+#   1. mamba/conda env create from environment.yml — Tier 0 toolchain +
+#      Tier 1-3 R/CLI packages + Tier 4 heavy Python science stack.
+#   2. uv pip install -e ".[full,singlecell-upstream]" for the thin pip
+#      residue (omicsclaw editable + PyPI-only packages with no conda
+#      recipe). Falls back to pip --resolver-max-rounds=200000 if uv
+#      is unavailable. Plus pip install velocyto (no py3.11 bioconda
+#      build).
 #   3. inline Rscript -e 'devtools::install_github(...)' (GitHub R packages)
 #   4. symlink vendored tools/ binaries into $CONDA_PREFIX/bin (stub for now)
 #
@@ -237,7 +241,7 @@ fi
 # uv lives in environment.yml Tier 0 so it should be present in the env's
 # bin dir. If not (e.g. older env created before this change), fall back
 # to pip with bumped --resolver-max-rounds.
-if env_run sh -c 'command -v uv >/dev/null 2>&1'; then
+if env_run uv --version >/dev/null 2>&1; then
     echo "[setup_env] using uv (PubGrub resolver) for thin pip residue"
     env_run uv pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 else
