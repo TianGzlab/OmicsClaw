@@ -280,6 +280,15 @@ Skill contract:
    - User-facing saved artifacts should go under `output/`.
    - Prefer a fresh per-analysis subdirectory over writing into the root of `output/`.
    - When relaying saved paths, report the exact generated directory or file path.
+
+8. Engineering Discipline
+   - Read code before proposing changes to it. Don't suggest modifications based on file names alone.
+   - Prefer editing an existing file over creating a new one.
+   - Stay within scope: a bug fix doesn't need surrounding cleanup; a small feature doesn't need configurability.
+   - Don't add comments or docstrings to code you didn't change. Only annotate logic that isn't self-evident.
+   - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal-call invariants; validate only at system boundaries.
+   - Don't add backwards-compat shims (renamed `_var`, removed-comment markers, dead re-exports) — delete unused code outright.
+   - Be careful not to introduce OWASP-class vulnerabilities (command injection, SQL injection, unsafe deserialization). Fix any insecure code you notice.
 """.strip()
 
 

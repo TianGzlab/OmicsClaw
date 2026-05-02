@@ -41,3 +41,36 @@ class TestExecutionDisciplineActionsInjection:
 
     def test_no_blind_retry_guideline_present(self, execution_discipline_text: str):
         assert "fails twice the same way" in execution_discipline_text
+
+
+@pytest.fixture
+def skill_contract_text() -> str:
+    from omicsclaw.runtime.context_layers import get_skill_contract
+    return get_skill_contract()
+
+
+class TestSkillContractDoingTasksInjection:
+    def test_read_before_change_present(self, skill_contract_text: str):
+        assert "Read code before proposing changes" in skill_contract_text
+
+    def test_prefer_existing_file_present(self, skill_contract_text: str):
+        assert "editing an existing file" in skill_contract_text
+
+    def test_stay_within_scope_present(self, skill_contract_text: str):
+        assert "Stay within scope" in skill_contract_text
+        assert "bug fix doesn't need surrounding cleanup" in skill_contract_text
+
+    def test_no_unsolicited_comments_present(self, skill_contract_text: str):
+        assert "comments or docstrings to code you didn't change" in skill_contract_text
+
+    def test_no_speculative_validation_present(self, skill_contract_text: str):
+        assert (
+            "error handling, fallbacks, or validation for scenarios that can't happen"
+            in skill_contract_text
+        )
+
+    def test_no_compat_shims_present(self, skill_contract_text: str):
+        assert "backwards-compat shims" in skill_contract_text
+
+    def test_owasp_present(self, skill_contract_text: str):
+        assert "OWASP-class vulnerabilities" in skill_contract_text
