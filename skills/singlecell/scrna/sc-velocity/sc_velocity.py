@@ -776,18 +776,18 @@ def main():
             print()
             print("  *** WARNING: Velocity output appears degenerate. ***")
             if all_zero:
-                print("  All velocity vectors are zero — scVelo could not estimate meaningful velocity.")
+                print("  All velocity vectors are zero - scVelo could not estimate meaningful velocity.")
             if nan_frac > 0.5:
-                print(f"  {nan_frac*100:.0f}% of velocity values are NaN — fitting may have failed.")
+                print(f"  {nan_frac*100:.0f}% of velocity values are NaN - fitting may have failed.")
             if n_velocity_genes == 0:
-                print("  No genes have non-zero velocity — the spliced/unspliced signal may be too weak.")
+                print("  No genes have non-zero velocity - the spliced/unspliced signal may be too weak.")
             print()
             print("  How to fix:")
-            print("    Option 1 — Use real spliced/unspliced data from velocyto or STARsolo:")
+            print("    Option 1 - Use real spliced/unspliced data from velocyto or STARsolo:")
             print("      oc run sc-velocity-prep --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
-            print("    Option 2 — Try the dynamical model which may recover more signal:")
+            print("    Option 2 - Try the dynamical model which may recover more signal:")
             print("      oc run sc-velocity --input <data.h5ad> --method scvelo_dynamical --output <dir>")
-            print("    Option 3 — Check upstream preprocessing (normalize, HVG, PCA, neighbors):")
+            print("    Option 3 - Check upstream preprocessing (normalize, HVG, PCA, neighbors):")
             print("      oc run sc-preprocessing --input <data.h5ad> --output <dir>")
             print()
         else:
@@ -918,9 +918,9 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete. Further exploration:")
-    print(f"  • sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-cytotrace:  python omicsclaw.py run sc-cytotrace --input {output_dir}/processed.h5ad --output <dir>")
+    print(">> Analysis complete. Further exploration:")
+    print(f"  - sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-cytotrace:  python omicsclaw.py run sc-cytotrace --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

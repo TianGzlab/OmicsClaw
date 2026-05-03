@@ -36,8 +36,9 @@ metadata:
       - "--r-enhanced"
     param_hints:
       ora:
-        priority: "gene_sets/gene_set_db/gene_set_from_markers -> engine -> upstream ranking source -> groupby/ranking_method -> ora thresholds"
-        params: ["gene_sets", "gene_set_db", "gene_set_from_markers", "marker_group", "marker_top_n", "engine", "groupby", "ranking_method", "ora_padj_cutoff", "ora_log2fc_cutoff", "ora_max_genes", "species", "top_terms"]
+        priority: "gene_sets/gene_set_db/gene_set_from_markers -> engine -> groupby/ranking_method"
+        params: ["gene_sets", "gene_set_db", "gene_set_from_markers", "marker_group", "marker_top_n", "engine", "groupby", "ranking_method"]
+        advanced_params: ["ora_padj_cutoff", "ora_log2fc_cutoff", "ora_max_genes", "species", "top_terms"]
         defaults: {engine: "auto", ranking_method: "wilcoxon", ora_padj_cutoff: 0.05, ora_log2fc_cutoff: 0.25, ora_max_genes: 200, species: "human", top_terms: 18}
         requires: ["gene_set_source", "normalized_expression_or_upstream_ranking"]
         tips:
@@ -45,8 +46,9 @@ metadata:
           - "If you only provide a processed h5ad, the wrapper can auto-rank cluster markers first using `ranking_method`."
           - "If you already ran `sc-markers` or `sc-de`, passing that output directory lets the wrapper reuse exported rankings."
       gsea:
-        priority: "gene_sets/gene_set_db/gene_set_from_markers -> engine -> upstream ranking source -> groupby/ranking_method -> gsea ranking controls"
-        params: ["gene_sets", "gene_set_db", "gene_set_from_markers", "marker_group", "marker_top_n", "engine", "groupby", "ranking_method", "gsea_ranking_metric", "gsea_min_size", "gsea_max_size", "gsea_permutation_num", "gsea_weight", "gsea_seed", "species", "top_terms"]
+        priority: "gene_sets/gene_set_db/gene_set_from_markers -> engine -> groupby/ranking_method"
+        params: ["gene_sets", "gene_set_db", "gene_set_from_markers", "marker_group", "marker_top_n", "engine", "groupby", "ranking_method"]
+        advanced_params: ["gsea_ranking_metric", "gsea_min_size", "gsea_max_size", "gsea_permutation_num", "gsea_weight", "gsea_seed", "species", "top_terms"]
         defaults: {engine: "auto", ranking_method: "wilcoxon", gsea_ranking_metric: "auto", gsea_min_size: 5, gsea_max_size: 500, gsea_permutation_num: 100, gsea_weight: 1.0, gsea_seed: 123, species: "human", top_terms: 18}
         requires: ["gene_set_source", "full_ranked_gene_list"]
         tips:

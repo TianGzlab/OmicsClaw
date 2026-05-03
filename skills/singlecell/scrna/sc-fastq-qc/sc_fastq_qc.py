@@ -474,7 +474,7 @@ def main() -> None:
     print(f"  FastQC used: {summary['fastqc_used']}")
     print(f"  MultiQC used: {summary['multiqc_used']}")
     print()
-    print("▶ Next step: Run sc-count to generate a count matrix")
+    print(">> Next step: Run sc-count to generate a count matrix")
     print(f"  python omicsclaw.py run sc-count --input <fastq_dir> --output <dir>")
 
 

@@ -1020,10 +1020,10 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next steps:")
-    print(f"  • sc-cell-annotation: python omicsclaw.py run sc-cell-annotation --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-markers:         python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-pseudotime:      python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
+    print(">> Next steps:")
+    print(f"  - sc-cell-annotation: python omicsclaw.py run sc-cell-annotation --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-markers:         python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-pseudotime:      python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

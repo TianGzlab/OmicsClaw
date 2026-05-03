@@ -321,7 +321,7 @@ def main() -> int:
     diagnostics = _detect_degenerate_output(global_counts, class_counts)
     if diagnostics.get("all_non_perturbed"):
         print()
-        print("  *** ALL cells were classified as non-perturbed (NP) — Mixscape found no perturbation signal. ***")
+        print("  *** ALL cells were classified as non-perturbed (NP) - Mixscape found no perturbation signal. ***")
         print("  This usually means the perturbation effect is too weak for the current threshold,")
         print("  or the perturbation labels do not match real perturbation conditions.")
         print()
@@ -452,9 +452,9 @@ def main() -> int:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next steps:")
-    print(f"  • sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(">> Next steps:")
+    print(f"  - sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

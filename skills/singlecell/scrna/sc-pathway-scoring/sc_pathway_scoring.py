@@ -1085,7 +1085,7 @@ def main() -> None:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete. Consider sc-de to compare scores between groups:")
+    print(">> Analysis complete. Consider sc-de to compare scores between groups:")
     print(f"  python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
 
 

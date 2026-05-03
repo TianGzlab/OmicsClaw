@@ -160,7 +160,7 @@ RENDERER_PARAMS: dict[str, dict[str, dict]] = {
 }
 
 # ── Per-skill renderer lookup ──────────────────────────────────────────────────
-# Maps skill alias → list of renderer names (matches R_ENHANCED_PLOTS keys).
+# Maps skill alias -> list of renderer names (matches R_ENHANCED_PLOTS keys).
 SKILL_RENDERERS: dict[str, list[str]] = {
     "sc-ambient-removal": [
         "plot_feature_violin",

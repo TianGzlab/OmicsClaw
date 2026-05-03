@@ -93,6 +93,9 @@ def test_dashscope_preset_exposes_latest_qwen_models():
     assert "qwen3.6-plus" in dashscope["models"]
     assert "qwen3-coder-plus" in dashscope["models"]
     assert "qwen3-235b-a22b" in dashscope["models"]
+    assert "qwen3-max" in dashscope["models"]
+    assert "qwen3.5-flash" in dashscope["models"]
+    assert "qwen-turbo-latest" in dashscope["models"]
 
 
 def test_resolve_provider_uses_provider_specific_defaults(monkeypatch):

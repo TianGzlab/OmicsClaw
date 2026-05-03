@@ -884,7 +884,7 @@ def main() -> int:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete. Consider sc-de for gene-level differences:")
+    print(">> Analysis complete. Consider sc-de for gene-level differences:")
     print(f"  python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
 
     logger.info("Done: %s", output_dir)

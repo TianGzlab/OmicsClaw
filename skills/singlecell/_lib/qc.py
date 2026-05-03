@@ -476,8 +476,16 @@ def apply_threshold_filtering(
     max_mt_percent: Optional[float] = None,
     min_cells: int = 3,
     tissue: str | None = None,
+    filter_doublets: bool = True,
+    doublet_score_threshold: float = 0.25,
 ) -> tuple[AnnData, dict[str, Any], dict[str, Any]]:
-    """Apply cell and gene filtering with a reusable summary payload."""
+    """Apply cell and gene filtering with a reusable summary payload.
+
+    Doublet removal (``filter_doublets=True``) is applied automatically when
+    ``predicted_doublet`` or ``doublet_score`` columns are present in
+    ``adata.obs`` (written by sc-doublet-detection).  If neither column exists
+    the step is silently skipped — no error, no change in behaviour.
+    """
     effective_params = {
         "min_genes": min_genes,
         "max_genes": max_genes,
@@ -486,6 +494,8 @@ def apply_threshold_filtering(
         "max_mt_percent": max_mt_percent,
         "min_cells": min_cells,
         "tissue": tissue,
+        "filter_doublets": filter_doublets,
+        "doublet_score_threshold": doublet_score_threshold,
     }
     if tissue:
         thresholds = get_tissue_qc_thresholds(tissue)
@@ -516,6 +526,27 @@ def apply_threshold_filtering(
         filter_stats["mt_removed"] = int((adata.obs["pct_counts_mt"] > effective_params["max_mt_percent"]).sum())
     if "outlier" in adata.obs.columns:
         filter_stats["outliers_removed"] = int(adata.obs["outlier"].sum())
+
+    # --- Doublet removal (auto-detect upstream sc-doublet-detection output) ---
+    if filter_doublets:
+        has_predicted = "predicted_doublet" in filtered.obs.columns
+        has_score = "doublet_score" in filtered.obs.columns
+        if has_predicted:
+            dbl_mask = filtered.obs["predicted_doublet"].astype(bool)
+            n_doublets = int(dbl_mask.sum())
+            if n_doublets > 0:
+                filter_stats["doublets_removed"] = n_doublets
+                filtered = filtered[~dbl_mask, :].copy()
+                logger.info("Removed %d doublets (predicted_doublet column)", n_doublets)
+        elif has_score:
+            dbl_mask = filtered.obs["doublet_score"] >= doublet_score_threshold
+            n_doublets = int(dbl_mask.sum())
+            if n_doublets > 0:
+                filter_stats["doublets_removed"] = n_doublets
+                filtered = filtered[~dbl_mask, :].copy()
+                logger.info(
+                    "Removed %d doublets (doublet_score >= %.2f)", n_doublets, doublet_score_threshold
+                )
 
     filtered = filter_genes(filtered, min_cells=effective_params["min_cells"], inplace=True)
     summary = summarize_filter_statistics(adata, filtered, filter_stats=filter_stats)

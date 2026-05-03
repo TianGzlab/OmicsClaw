@@ -36,6 +36,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+
+def _configure_stdio_error_handling(*streams: Any) -> None:
+    """Avoid hard failures when a terminal cannot encode Unicode output."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(errors="backslashreplace")
+        except (OSError, ValueError):
+            continue
+
+
+_configure_stdio_error_handling()
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -143,7 +158,7 @@ def _handle_auth_command(args) -> None:
     """Dispatch ``omicsclaw auth {login,logout,status} [claude|openai]``.
 
     Thin wrapper over the ``ccproxy`` CLI: we only handle provider-name
-    aliasing (``claude`` → ``claude_api``, ``openai`` → ``codex``) and a
+    aliasing (``claude`` -> ``claude_api``, ``openai`` -> ``codex``) and a
     multi-provider status view. All OAuth flow logic lives in ccproxy.
     """
     try:
@@ -505,9 +520,9 @@ def list_skills(domain_filter: str | None = None) -> dict:
         types_str = ", ".join(f".{t}" if t != "*" else "*" for t in data_types)
 
         # 领域标题
-        print(f"{BOLD}{YELLOW}📂 {domain_name}{RESET}  "
+        print(f"{BOLD}{YELLOW}[{domain_name}]{RESET}  "
               f"{CYAN}[{types_str}]{RESET}")
-        print(f"   {'─' * 54}")
+        print(f"   {'-' * 54}")
 
         for alias, info in skills_in_domain:
             script = info["script"]
@@ -521,8 +536,8 @@ def list_skills(domain_filter: str | None = None) -> dict:
     known_domains = set(DOMAINS.keys())
     extra = [(a, i) for a, i in SKILLS.items() if i.get("domain", "other") not in known_domains]
     if extra:
-        print(f"{BOLD}{YELLOW}📂 Other (Dynamically Discovered){RESET}")
-        print(f"   {'─' * 54}")
+        print(f"{BOLD}{YELLOW}[Other (Dynamically Discovered)]{RESET}")
+        print(f"   {'-' * 54}")
         for alias, info in extra:
             script = info["script"]
             status = f"{GREEN}ready{RESET}" if script.exists() else f"{YELLOW}planned{RESET}"
@@ -1011,20 +1026,20 @@ class OmicsClawParser(argparse.ArgumentParser):
             file = sys.stdout
 
         print(
-            f"\n{BOLD}{CYAN}⬡ OmicsClaw{RESET} v{__version__} — "
+            f"\n{BOLD}{CYAN}OmicsClaw{RESET} v{__version__} -- "
             "AI-powered Multi-Omics Analysis Platform\n",
             file=file,
         )
         print(f"{BOLD}Usage:{RESET} oc <command> [options]\n", file=file)
 
-        print(f"{BOLD}{YELLOW}🌟 Core Commands{RESET}", file=file)
+        print(f"{BOLD}{YELLOW}Core Commands{RESET}", file=file)
         print(f"  {GREEN}interactive{RESET}  AI interactive terminal (CLI mode) | Alias: {GREEN}chat{RESET}", file=file)
         print(f"  {GREEN}tui        {RESET}  Advanced full-screen Textual interface", file=file)
         print(f"  {GREEN}list       {RESET}  List all 50+ available analysis skills", file=file)
         print(f"  {GREEN}run        {RESET}  Execute a specific skill (e.g., 'oc run preprocess')", file=file)
         print(f"  {GREEN}version    {RESET}  Show the current OmicsClaw version", file=file)
 
-        print(f"\n{BOLD}{BLUE}🔧 Utility Commands{RESET}", file=file)
+        print(f"\n{BOLD}{BLUE}Utility Commands{RESET}", file=file)
         print(f"  {GREEN}mcp           {RESET}  Manage external Model Context Protocol (MCP) servers", file=file)
         print(f"  {GREEN}doctor        {RESET}  Run environment and runtime diagnostics", file=file)
         print(f"  {GREEN}app-server    {RESET}  Start the desktop/web FastAPI backend for OmicsClaw-App", file=file)
@@ -1033,7 +1048,7 @@ class OmicsClawParser(argparse.ArgumentParser):
         print(f"  {GREEN}onboard       {RESET}  Interactive setup wizard for LLM, runtime, memory, and channels", file=file)
         print(f"  {GREEN}upload        {RESET}  Upload/initialize session from existing .h5ad data", file=file)
 
-        print(f"\n{BOLD}{MAGENTA}⚙  Global Options{RESET}", file=file)
+        print(f"\n{BOLD}{MAGENTA}Global Options{RESET}", file=file)
         print(f"  {GREEN}-m, --mode {RESET}  Workspace mode: {CYAN}daemon{RESET} (persistent) | {CYAN}run{RESET} (isolated per-session)", file=file)
         print(f"  {GREEN}-n, --name {RESET}  Name for run session directory (requires --mode run)", file=file)
         print(f"  {GREEN}--workspace{RESET}  Override workspace directory for this session", file=file)
@@ -1051,7 +1066,7 @@ def main():
     load_project_dotenv(OMICSCLAW_DIR, override=False)
 
     parser = OmicsClawParser(
-        description="OmicsClaw — Multi-Omics Skills Runner",
+        description="OmicsClaw -- Multi-Omics Skills Runner",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -1436,7 +1451,7 @@ def main():
                         pass  # fall back to default filename
 
             out_path = r_figures_dir / filename
-            print(f"  {DIM}{renderer}{RESET} → {out_path.name} ...", end=" ", flush=True)
+            print(f"  {DIM}{renderer}{RESET} -> {out_path.name} ...", end=" ", flush=True)
             import warnings as _warnings
             with _warnings.catch_warnings(record=True) as caught:
                 _warnings.simplefilter("always")
@@ -1448,6 +1463,8 @@ def main():
             else:
                 warn_msg = str(caught[-1].message) if caught else "unknown error"
                 print(f"{YELLOW}skipped{RESET}  ({warn_msg[:80]})")
+                # Write full error to stderr so bot subprocess can classify it
+                print(warn_msg, file=sys.stderr)
                 failed.append(renderer)
 
         print()
@@ -1458,6 +1475,9 @@ def main():
             print()
         if succeeded:
             print(f"  Figures: {r_figures_dir}")
+        # Exit 2 when all renderers failed — signals R env issue to bot
+        if failed and not succeeded:
+            sys.exit(2)
         sys.exit(0)
 
     if args.command == "optimize":
@@ -1674,16 +1694,16 @@ def main():
         print(f"\n{BOLD}OmicsClaw Environment Status{RESET}")
         print(f"{BOLD}{'=' * 40}{RESET}")
         
-        core_status = f"{GREEN}✅ Installed{RESET}" if tiers.get("core") else f"{RED}❌ Missing{RESET}"
+        core_status = f"{GREEN}[ok] Installed{RESET}" if tiers.get("core") else f"{RED}[X] Missing{RESET}"
         print(f"Core System:      {core_status}")
         
         print(f"\n{BOLD}Domain Tiers:{RESET}")
         for tier in ["spatial", "singlecell", "genomics", "proteomics", "metabolomics", "bulkrna"]:
             is_installed = tiers.get(tier, False)
             if is_installed:
-                status = f"{GREEN}✅ Installed{RESET}"
+                status = f"{GREEN}[ok] Installed{RESET}"
             else:
-                status = f"{RED}❌ Missing{RESET} (Run: pip install -e \".[{tier}]\")"
+                status = f"{RED}[X] Missing{RESET} (Run: pip install -e \".[{tier}]\")"
             print(f"- {tier.capitalize():<15} {status}")
             
         print(f"\n{BOLD}Standalone Layer:{RESET}")
@@ -1705,7 +1725,7 @@ def main():
         ]
         for label, tier_key, desc in standalone_layers:
             sl_installed = tiers.get(tier_key, False)
-            sl_status = f"{GREEN}✅ Installed{RESET}" if sl_installed else f"{RED}❌ Missing{RESET} (Run: pip install -e \".[{tier_key}]\")"
+            sl_status = f"{GREEN}[ok] Installed{RESET}" if sl_installed else f"{RED}[X] Missing{RESET} (Run: pip install -e \".[{tier_key}]\")"
             print(f"- {label:<18} {sl_status} ({desc})")
         
         print(f"\nTo install all complete functionalities:\n  pip install -e \".[full]\"\n")

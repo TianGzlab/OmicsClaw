@@ -1424,7 +1424,7 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
     if unk_count and unk_count == total_types:
         body_lines.extend([
             "",
-            "## ⚠ Troubleshooting: All Cells Labeled Unknown\n",
+            "## [!] Troubleshooting: All Cells Labeled Unknown\n",
             "All clusters were annotated as **Unknown**. This means the marker genes used do not match",
             "the genes in your dataset. Common causes and solutions:\n",
             "### Cause 1: Wrong tissue type",
@@ -1732,26 +1732,26 @@ def main():
     print(f"  Cell types identified: {n_types}")
     if summary.get("used_fallback"):
         print(f"  NOTE: Requested '{summary.get('requested_method')}' but fell back to "
-              f"'{summary.get('actual_method')}' — {summary.get('fallback_reason', 'see log')}")
+              f"'{summary.get('actual_method')}' - {summary.get('fallback_reason', 'see log')}")
     if unk_count and unk_count == total_types:
         print()
-        print("  *** ALL cells were labeled 'Unknown' — annotation did not work for this dataset. ***")
+        print("  *** ALL cells were labeled 'Unknown' - annotation did not work for this dataset. ***")
         print("  This usually means the built-in marker genes don't match your tissue or organism.")
         print()
         print("  How to fix:")
-        print("    Option 1 — Provide your own markers (easiest):")
+        print("    Option 1 - Provide your own markers (easiest):")
         print('      Create a JSON file, e.g. my_markers.json:')
         print('        {"T cell": ["CD3D","CD3E"], "Epithelial": ["EPCAM","KRT18"]}')
         print("      Then rerun:")
         print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method markers --marker-file my_markers.json")
         print()
-        print("    Option 2 — Use CellTypist (100+ pretrained models, no reference needed):")
+        print("    Option 2 - Use CellTypist (100+ pretrained models, no reference needed):")
         print("      List available models:")
         print('        python -c "import celltypist; celltypist.models.models_description()"')
         print("      Pick a model for your tissue, then:")
         print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method celltypist --model Immune_All_Low.pkl")
         print()
-        print("    Option 3 — Use a labeled reference dataset:")
+        print("    Option 3 - Use a labeled reference dataset:")
         print("      Download a reference H5AD from https://cellxgene.cziscience.com/")
         print("      Then:")
         print(f"        python {SCRIPT_REL_PATH} --input <your.h5ad> --output {output_dir} --method knnpredict --reference ref.h5ad")
@@ -1761,9 +1761,9 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next steps:")
-    print(f"  • sc-markers: python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  • sc-de:      python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
+    print(">> Next steps:")
+    print(f"  - sc-markers: python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:      python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

@@ -389,10 +389,58 @@ def smart_load(
         adata = import_loom_data(path, **kwargs)
     elif suffix in (".csv", ".tsv"):
         adata = import_count_matrix(path, **filtered_kwargs)
+    elif suffix in (".rds", ".robj", ".rdata"):
+        raise ValueError(
+            f"Seurat/R object detected ({suffix}), OmicsClaw requires AnnData format.\n"
+            "\n"
+            "Convert in R first:\n"
+            "  library(Seurat)\n"
+            "  library(SeuratDisk)\n"
+            f'  obj <- readRDS("{path.name}")\n'
+            '  SaveH5Seurat(obj, filename = "converted.h5seurat")\n'
+            '  Convert("converted.h5seurat", dest = "h5ad")\n'
+            "\n"
+            "Then run:\n"
+            "  python omicsclaw.py run sc-standardize-input --input converted.h5ad --output <dir>\n"
+            "\n"
+            "Alternative (sceasy, one line):\n"
+            f'  sceasy::convertFormat("{path.name}", from = "seurat", to = "anndata",\n'
+            '                        outFile = "converted.h5ad")'
+        )
+    elif suffix in (".xlsx", ".xls"):
+        raise ValueError(
+            f"Excel file detected ({suffix}), OmicsClaw requires a plain text matrix or AnnData.\n"
+            "\n"
+            "Convert in Python:\n"
+            "  import pandas as pd\n"
+            f'  df = pd.read_excel("{path.name}", index_col=0)\n'
+            '  df.to_csv("counts.csv")\n'
+            "\n"
+            "Then run:\n"
+            "  python omicsclaw.py run sc-standardize-input --input counts.csv --output <dir>\n"
+            "\n"
+            f"Supported formats: .h5ad, .h5, .loom, .csv, .tsv, 10X mtx directory"
+        )
     else:
-        # Try as h5ad
+        # Unknown extension — try as h5ad, but wrap with a clear message on failure
         logger.info("Unknown extension %s, trying as h5ad ...", suffix)
-        adata = sc.read_h5ad(path)
+        try:
+            adata = sc.read_h5ad(path)
+        except Exception:
+            raise ValueError(
+                f"Cannot read '{path.name}' (extension: {suffix}).\n"
+                "\n"
+                "Supported input formats:\n"
+                "  .h5ad   — AnnData (recommended)\n"
+                "  .h5     — 10X Genomics HDF5\n"
+                "  .loom   — Loom\n"
+                "  .csv    — count matrix (cells x genes)\n"
+                "  .tsv    — count matrix (cells x genes)\n"
+                "  dir/    — 10X CellRanger output (matrix.mtx + barcodes + features)\n"
+                "\n"
+                "If your data is in Seurat (.rds) or Excel (.xlsx), convert it first.\n"
+                "See: python omicsclaw.py run sc-standardize-input --help"
+            ) from None
 
     ensure_input_contract(adata, source_path=str(path))
     return adata

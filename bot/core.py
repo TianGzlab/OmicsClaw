@@ -203,13 +203,15 @@ def format_skills_table(plain: bool = False) -> str:
     """
     skill_registry = _skill_registry()
 
-    # Group skills by domain
+    # Group canonical skills by domain (exclude legacy alias duplicates)
     domain_skills: dict[str, list[tuple[str, dict]]] = {}
     for alias, info in skill_registry.skills.items():
+        if alias != info.get("alias", alias):
+            continue  # skip legacy alias pointers
         d = info.get("domain", "other")
         domain_skills.setdefault(d, []).append((alias, info))
 
-    total = len(skill_registry.skills)
+    total = sum(len(v) for v in domain_skills.values())
     if plain:
         lines = [f"OmicsClaw Skills ({total} total)", "=" * 40, ""]
     else:
@@ -788,6 +790,105 @@ async def _auto_capture_analysis(session_id: str, skill: str, args: dict, output
         logger.debug(f"Auto-captured analysis: {skill} ({method})")
     except Exception as e:
         logger.warning(f"Auto-capture analysis failed: {e}")
+
+
+_ENV_ERROR_PATTERNS: list[tuple[str, str]] = [
+    # Specific patterns first — prevent generic ImportError from shadowing them
+    (r"compiled using NumPy 1\.x",                    "NumPy 版本冲突"),
+    (r"cannot be run in\s+NumPy\s+\d",               "NumPy 版本冲突"),
+    (r"downgrade to ['\"]?numpy[<>=]",                "NumPy 版本冲突"),
+    (r"CUDA.*out of memory|out of memory.*CUDA",      "GPU 显存不足"),
+    (r"Rscript[:\s]+command not found",               "R 未安装或不在 PATH 中"),
+    (r"Rscript.*not found",                           "R 未安装或不在 PATH 中"),
+    (r"cannot find R",                                "R 未安装或不在 PATH 中"),
+    (r"there is no package called",                   "缺少 R 包"),
+    (r"No space left on device",                      "服务器磁盘空间不足"),
+    (r"(?<!\w)Killed(?!\w)",                          "进程被 OOM Killer 终止（内存不足）"),
+    (r"cannot allocate.*memory|MemoryError",          "内存不足"),
+    # Generic package errors last
+    (r"ModuleNotFoundError",                          "缺少 Python 包"),
+    (r"ImportError",                                  "缺少 Python 包（版本冲突或未安装）"),
+]
+
+
+def _extract_env_snippet(full_err: str) -> str:
+    """Show the beginning (package/file name) and end (error message) of stderr.
+
+    The beginning often contains the offending package import, while the end
+    contains the actual error type. Showing both gives admins actionable context.
+    """
+    lines = [l for l in full_err.strip().splitlines() if l.strip()]
+    if len(lines) <= 15:
+        return full_err.strip()
+    head = "\n".join(lines[:6])
+    tail = "\n".join(lines[-8:])
+    return f"{head}\n...\n{tail}"
+
+
+def _extract_fix_hint(label: str, err: str) -> str:
+    """Return a specific, actionable fix command based on the error type and content."""
+    if "NumPy" in label:
+        return "pip install 'numpy<2'  # 或: conda install 'numpy<2'"
+    if "R 未安装" in label:
+        return "conda install -c conda-forge r-base  # 或: sudo apt install r-base"
+    if "磁盘" in label:
+        return "df -h  # 检查磁盘空间，清理 output/ 或 /tmp 下的大文件"
+    if "OOM" in label:
+        return "增加服务器内存，或减小输入数据规模后重试"
+    if "GPU" in label:
+        return "减少 batch_size，或在 extra_args 中加 --device cpu 使用 CPU 模式"
+    if "内存不足" in label:
+        return "增加服务器内存，或减小输入数据规模后重试"
+    # For missing R packages
+    if "R 包" in label:
+        r_pkgs = re.findall(r"there is no package called '([^']+)'", err)
+        if r_pkgs:
+            install_cmd = ", ".join(f'"{p}"' for p in r_pkgs)
+            return f"Rscript -e 'install.packages(c({install_cmd}))'"
+        return "Rscript -e 'install.packages(\"<包名>\")' # 检查上方报错确认具体包名"
+    # For missing Python packages: try to extract the module name
+    m = re.search(r"No module named ['\"]?([a-zA-Z0-9_\-\.]+)['\"]?", err)
+    if m:
+        pkg = m.group(1).split(".")[0]
+        return f"pip install {pkg}  # 或: conda install {pkg}"
+    return "pip install <缺少的包名>  # 检查上方报错确认具体包名"
+
+
+def _classify_env_error(err: str) -> str | None:
+    """Return a user-friendly message if the error is environment-related, else None."""
+    for pattern, label in _ENV_ERROR_PATTERNS:
+        if re.search(pattern, err, re.IGNORECASE):
+            snippet = _extract_env_snippet(err)
+            fix = _extract_fix_hint(label, err)
+            return (
+                f"**环境错误（不是你的数据问题）: {label}**\n\n"
+                "分析环境有配置问题，你的数据文件完全没问题。\n\n"
+                f"**修复方法（在终端运行）:**\n```\n{fix}\n```\n\n"
+                f"**技术详情:**\n```\n{snippet}\n```"
+            )
+    return None
+
+
+async def _resolve_last_output_dir(session_id: str, skill: str) -> Path | None:
+    """Find the most recent completed output directory for a skill from session memory."""
+    if not memory_store or not session_id:
+        return None
+    try:
+        from omicsclaw.memory.compat import AnalysisMemory
+        analyses = await memory_store.get_memories(session_id, "analysis", limit=20)
+        for mem in analyses:
+            if (
+                isinstance(mem, AnalysisMemory)
+                and mem.skill == skill
+                and mem.output_path
+                and getattr(mem, "status", None) == "completed"
+            ):
+                p = Path(mem.output_path)
+                if p.exists():
+                    return p
+    except Exception as e:
+        logger.debug(f"_resolve_last_output_dir failed: {e}")
+    return None
 
 
 def _read_result_json(out_dir: Path) -> dict | None:
@@ -2111,11 +2212,17 @@ def _build_method_preview(
 
 
 def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
-    """Build a parameter summary block from SKILL.md-declared param_hints.
+    """Build a two-tier parameter card from SKILL.md-declared param_hints.
 
     Reads ``param_hints`` from the registry (loaded from each skill's SKILL.md
     YAML frontmatter). Returns a markdown-formatted string to prepend to the
     tool result. Returns empty string if the skill has no hints for *method*.
+
+    Two-tier layout (when SKILL.md declares ``advanced_params``):
+    - 核心参数: everyday knobs the user should know about
+    - 高级参数: filter/threshold/algorithm-tuning params, shown but not
+      highlighted, so power users can discover them without overwhelming
+      first-time users
 
     Adding hints for a new skill or method requires only editing its SKILL.md —
     no changes to bot/core.py are needed.
@@ -2132,19 +2239,37 @@ def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
         if arg.startswith("--") and i + 1 < len(cmd) and not cmd[i + 1].startswith("--"):
             params_found[arg.lstrip("-").replace("-", "_")] = cmd[i + 1]
 
-    # Build the hint block
-    lines = [
-        f"📋 **Running {skill_key} with method={method_lower}**",
-        "",
-        "**Current Parameters:**",
-    ]
-    for key in tip_info.get("params", []):
-        lines.append(f"  - `{key}`: {params_found.get(key, 'default')}")
+    defaults_map: dict = tip_info.get("defaults", {})
+
+    def _fmt_param(key: str) -> str:
+        """Return key=value — actual cmd value if present, else declared default."""
+        if key in params_found:
+            return f"{key}={params_found[key]}"
+        dval = defaults_map.get(key)
+        return f"{key}={dval}" if dval is not None else f"{key}=default"
+
+    core_keys: list[str] = tip_info.get("params", [])
+    adv_keys: list[str] = tip_info.get("advanced_params", [])
+
+    lines = [f"📋 **{skill_key} · {method_lower}**", ""]
+
+    if core_keys:
+        lines.append("核心参数: " + " | ".join(_fmt_param(k) for k in core_keys))
+    if adv_keys:
+        lines.append("高级参数: " + " | ".join(_fmt_param(k) for k in adv_keys))
+
+    priority = tip_info.get("priority", "")
+    if priority:
+        lines.append(f"调参优先级: {priority.replace(' -> ', ' → ')}")
+
+    for t in tip_info.get("tips", []):
+        lines.append(f"  · {t}")
 
     lines.append("")
-    lines.append(f"**Tuning Priority:** {tip_info.get('priority', 'N/A')}")
-    for t in tip_info.get("tips", []):
-        lines.append(f"  - {t}")
+    lines.append(
+        "[PARAM CARD: show the parameter lines above verbatim to the user — "
+        "do not paraphrase, abbreviate, or omit the 高级参数 line]"
+    )
     lines.append("")
     return "\n".join(lines)
 
@@ -2424,6 +2549,10 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         # Capture failed analysis to memory (so we remember what was tried)
         if session_id:
             await _auto_capture_analysis(session_id, skill_key, args, None, False)
+        # Environment errors take priority — user needs to know it's not their data
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
         if guidance_block and "preflight check failed" in err.lower():
             return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + guidance_block
         if guidance_block:
@@ -2629,6 +2758,187 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 
 
 # ---------------------------------------------------------------------------
+# execute_replot_skill
+# ---------------------------------------------------------------------------
+
+
+async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
+    """Re-render R Enhanced plots from an existing skill output directory."""
+    skill_key = args.get("skill", "")
+    output_path_arg = args.get("output_path", "").strip()
+    renderer = args.get("renderer", "")
+    return_media = str(args.get("return_media", "all")).strip().lower()
+
+    if not skill_key:
+        return "Error: 'skill' is required (e.g. 'sc-qc', 'sc-de')."
+
+    # Resolve output directory — explicit path > session history fallback
+    out_dir: Path | None = None
+    if output_path_arg:
+        out_dir = Path(output_path_arg).resolve()
+        if not out_dir.exists():
+            candidate = OUTPUT_DIR / output_path_arg
+            if candidate.exists():
+                out_dir = candidate.resolve()
+            else:
+                out_dir = None
+    if out_dir is None and session_id:
+        out_dir = await _resolve_last_output_dir(session_id, skill_key)
+    if out_dir is None or not out_dir.exists():
+        return (
+            f"Cannot find output directory for `{skill_key}`.\n\n"
+            "Please provide the `output_path` from a previous skill run, "
+            f"or run the skill first: `omicsclaw(skill='{skill_key}', mode='...')`"
+        )
+
+    figure_data_dir = out_dir / "figure_data"
+    if not figure_data_dir.exists():
+        return (
+            f"figure_data/ not found in {out_dir}\n\n"
+            f"Re-run {skill_key} first to generate the figure data needed for R Enhanced plots."
+        )
+
+    # Build command
+    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "replot", skill_key, "--output", str(out_dir)]
+    if renderer:
+        cmd.extend(["--renderer", renderer])
+
+    # Pass optional plot params
+    plot_param_map = {
+        "top_n": "--top-n",
+        "font_size": "--font-size",
+        "width": "--width",
+        "height": "--height",
+        "palette": "--palette",
+        "dpi": "--dpi",
+        "title": "--title",
+    }
+    for key, flag in plot_param_map.items():
+        val = args.get(key)
+        if val is not None:
+            cmd.extend([flag, str(val)])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        stdout_str = stdout_bytes.decode(errors="replace")
+        stderr_str = stderr_bytes.decode(errors="replace")
+    except Exception:
+        import traceback as _tb
+        return f"replot crashed:\n{_tb.format_exc()[-1500:]}"
+
+    if proc.returncode != 0:
+        err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
+        return f"replot {skill_key} failed (exit {proc.returncode}):\n{err}"
+
+    # Collect generated R Enhanced figures
+    r_enhanced_dir = out_dir / "figures" / "r_enhanced"
+    figure_names = []
+    media_items = []
+    if r_enhanced_dir.exists():
+        for f in sorted(r_enhanced_dir.rglob("*.png")):
+            media_items.append({"type": "photo", "path": str(f)})
+            figure_names.append(f.name)
+
+    if not figure_names:
+        # R renderer may have silently failed (exit 0 but no PNG produced).
+        # Check both stderr AND stdout — R errors from call_r_plot() are
+        # wrapped in Python warnings and may appear in either stream.
+        combined_output = f"{stderr_str}\n{stdout_str}"
+        env_msg = _classify_env_error(combined_output) if combined_output.strip() else None
+        if env_msg:
+            return env_msg
+
+        # Check for common R-side warnings/errors that _classify_env_error missed
+        r_hints: list[str] = []
+        if "there is no package called" in combined_output:
+            import re as _re
+            pkgs = _re.findall(r"there is no package called '([^']+)'", combined_output)
+            if pkgs:
+                install_cmd = ", ".join(f'"{p}"' for p in pkgs)
+                r_hints.append(
+                    f"**R 缺少依赖包:** {', '.join(pkgs)}\n\n"
+                    f"**修复方法（在终端运行）:**\n"
+                    f"```\nRscript -e 'install.packages(c({install_cmd}))'\n```"
+                )
+        if "Rscript" in combined_output and ("not found" in combined_output or "No such file" in combined_output):
+            r_hints.append(
+                "**Rscript 未安装或不在 PATH 中。**\n\n"
+                "**修复方法:**\n"
+                "```\nsudo apt install r-base  # Ubuntu/Debian\n# 或 conda install -c conda-forge r-base\n```"
+            )
+
+        if r_hints:
+            return (
+                f"**R Enhanced 渲染失败（不是你的数据问题）**\n\n"
+                + "\n\n".join(r_hints)
+                + f"\n\n修复后重试: 再次要求 replot {skill_key} 即可。"
+            )
+
+        # Distinguish "no renderers registered" vs "renderers exist but all failed"
+        no_renderers = "No R Enhanced renderers registered" in stdout_str
+        stderr_snippet = stderr_str[-500:].strip() if stderr_str else ""
+        detail = f"\n\n**技术详情:**\n```\n{stderr_snippet}\n```" if stderr_snippet else ""
+
+        if no_renderers:
+            return (
+                f"{skill_key} 目前没有注册 R Enhanced 渲染器。\n\n"
+                "当前支持 R Enhanced replot 的 scRNA 技能包括: "
+                "sc-qc, sc-de, sc-markers, sc-clustering, sc-preprocessing, "
+                "sc-cell-annotation, sc-enrichment, sc-velocity, sc-pseudotime 等 22 个。\n\n"
+                "如需其他绘图方式，请明确告诉我（如 'use matplotlib'）。"
+            )
+
+        return (
+            f"replot {skill_key} 的 R Enhanced 渲染器全部失败，没有生成图片。\n\n"
+            f"**最可能的原因：R 环境未正确配置。**\n\n"
+            f"**修复方法（在终端运行）:**\n"
+            f"```\nconda install -c conda-forge r-base r-ggplot2 r-dplyr r-tidyr\n```\n\n"
+            f"修复后重试: 再次要求 replot {skill_key} 即可。"
+            f"{detail}\n\n"
+            f"请将修复方法告诉用户，不要自行尝试其他绘图工具替代。"
+        )
+
+    # Queue figures for delivery
+    if return_media and media_items and session_id:
+        if return_media == "all":
+            filtered = media_items
+        else:
+            keywords = [k.strip() for k in return_media.split(",") if k.strip()]
+            filtered = [
+                item for item in media_items
+                if any(kw in Path(item["path"]).stem.lower() for kw in keywords)
+            ]
+        if filtered:
+            pending_media[session_id] = pending_media.get(session_id, []) + filtered
+            sent_names = [Path(item["path"]).name for item in filtered]
+            result = (
+                f"R Enhanced re-render complete for **{skill_key}**.\n\n"
+                f"{len(sent_names)} figure(s) generated: {', '.join(sent_names)}\n"
+                f"Figures saved to: {r_enhanced_dir}"
+            )
+            result += (
+                f"\n\n---\n[MEDIA DELIVERY: {len(sent_names)} R Enhanced figure(s) queued: "
+                f"{', '.join(sent_names)}. They will be delivered automatically.]"
+            )
+            return result
+
+    # No session — return paths for inline rendering
+    hints = "\n".join(f"- `{r_enhanced_dir / n}`" for n in figure_names)
+    return (
+        f"R Enhanced re-render complete for **{skill_key}**.\n\n"
+        f"{len(figure_names)} figure(s) generated:\n{hints}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # execute_save_file
 # ---------------------------------------------------------------------------
 
@@ -2825,6 +3135,9 @@ async def execute_parse_literature(args: dict) -> str:
 
     if proc.returncode != 0:
         err = stderr_str[-1500:] if stderr_str else stdout_str[-1500:] if stdout_str else "unknown error"
+        env_msg = _classify_env_error(err)
+        if env_msg:
+            return env_msg
         return f"Literature parsing failed (exit {proc.returncode}):\n{err}"
 
     # Read report
@@ -3832,6 +4145,7 @@ async def execute_custom_analysis_execute(args: dict, **kwargs) -> str:
 def _available_tool_executors() -> dict[str, object]:
     executors = {
         "omicsclaw": execute_omicsclaw,
+        "replot_skill": execute_replot_skill,
         "save_file": execute_save_file,
         "write_file": execute_write_file,
         "generate_audio": execute_generate_audio,

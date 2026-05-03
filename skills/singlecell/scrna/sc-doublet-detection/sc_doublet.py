@@ -957,7 +957,7 @@ def main():
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-filter to remove flagged doublets")
+    print(">> Next step: Run sc-filter to remove flagged doublets")
     print(f"  python omicsclaw.py run sc-filter --input {output_dir}/processed.h5ad --output <dir>")
 
 

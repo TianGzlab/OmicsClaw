@@ -189,6 +189,74 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("analysis", "workflow"),
         ),
         ToolSpec(
+            name="replot_skill",
+            description=(
+                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory "
+                "WITHOUT re-running the analysis. "
+                "Use this when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
+                "'make it prettier', or 'replot'. "
+                "The skill must have been run first (via the omicsclaw tool). "
+                "22 scRNA skills support R Enhanced, including: sc-qc, sc-de, sc-markers, "
+                "sc-preprocessing, sc-clustering, sc-filter, sc-cell-annotation, sc-enrichment, "
+                "sc-velocity, sc-pseudotime, sc-doublet-detection, sc-batch-integration, "
+                "sc-cell-communication, sc-grn, sc-cytotrace, sc-differential-abundance, "
+                "sc-metacell, sc-ambient-removal, sc-pathway-scoring, sc-perturb, "
+                "sc-gene-programs, sc-in-silico-perturbation. "
+                "ALWAYS call this tool when the user asks for R Enhanced — do NOT assume "
+                "a skill lacks R support without calling. If R is not installed, this tool "
+                "returns specific install instructions to relay to the user. "
+                "output_path is the output directory from a previous omicsclaw call. "
+                "If output_path is unknown, omit it — OmicsClaw will auto-resolve from session history. "
+                "By default returns all generated R Enhanced figures. "
+                "IMPORTANT: If this tool returns an error or reports that no figures were generated, "
+                "relay the error message and fix instructions directly to the user. "
+                "Do NOT fall back to custom_analysis_execute, Python plotting, or any other tool "
+                "to substitute for R Enhanced. Only use alternative plotting tools if the user "
+                "explicitly requests it (e.g. 'use Python instead', 'draw it with matplotlib')."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill": {
+                        "type": "string",
+                        "description": "Skill alias to replot (e.g. 'sc-qc', 'sc-de', 'sc-markers').",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": (
+                            "Full path to the output directory from the previous skill run. "
+                            "Omit to auto-resolve from session history."
+                        ),
+                    },
+                    "renderer": {
+                        "type": "string",
+                        "description": "Optional: run only a specific renderer (e.g. 'plot_feature_violin'). Omit to run all renderers.",
+                    },
+                    "return_media": {
+                        "type": "string",
+                        "description": "Filter for which R Enhanced figures to send. Default: 'all'. Use a keyword to filter (e.g. 'violin').",
+                    },
+                    "top_n": {"type": "integer", "description": "Number of top items to label/show."},
+                    "font_size": {"type": "integer", "description": "Base font size in points."},
+                    "width": {"type": "integer", "description": "Figure width in inches."},
+                    "height": {"type": "integer", "description": "Figure height in inches."},
+                    "dpi": {"type": "integer", "description": "Output resolution (default 300)."},
+                    "palette": {"type": "string", "description": "Color palette name."},
+                    "title": {"type": "string", "description": "Custom plot title."},
+                },
+                "required": ["skill"],
+            },
+            surfaces=("bot",),
+            context_params=("session_id", "chat_id"),
+            read_only=False,
+            concurrency_safe=False,
+            result_policy=RESULT_POLICY_SUMMARY_OR_MEDIA,
+            progress_policy=PROGRESS_POLICY_ANALYSIS,
+            risk_level=RISK_LEVEL_MEDIUM,
+            writes_workspace=True,
+            policy_tags=("analysis", "workflow"),
+        ),
+        ToolSpec(
             name="list_skills_in_domain",
             description=(
                 "Lazy-load the full skill list for one OmicsClaw domain. "

@@ -800,16 +800,16 @@ def main() -> None:
     degenerate = drug_scores.empty or drug_scores["Score"].isna().all()
     if degenerate:
         print()
-        print("  *** NO DRUGS WERE SCORED — drug response prediction did not produce results. ***")
+        print("  *** NO DRUGS WERE SCORED - drug response prediction did not produce results. ***")
         print("  This usually means none of the drug target genes were found in your expression data.")
         print()
         print("  How to fix:")
-        print("    Option 1 — Check gene names (Ensembl vs symbols):")
+        print("    Option 1 - Check gene names (Ensembl vs symbols):")
         print("      python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --output mapped/")
-        print("    Option 2 — Use CaDRReS model-based prediction:")
+        print("    Option 2 - Use CaDRReS model-based prediction:")
         print(f"      python omicsclaw.py run sc-drug-response --input <data.h5ad> --output <dir> \\")
         print(f"        --method cadrres --model-dir ~/.cache/omicsclaw/drug_response/")
-        print("    Option 3 — Provide custom drug-target gene mapping (future feature)")
+        print("    Option 3 - Provide custom drug-target gene mapping (future feature)")
         print()
 
     # ── Store drug scores in adata.obs ──
@@ -918,7 +918,7 @@ def main() -> None:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Analysis complete.")
+    print(">> Analysis complete.")
 
 
 def _generate_demo_cadrres_scores(

@@ -178,6 +178,8 @@ PROVIDER_DISPLAY_METADATA: dict[str, ProviderDisplayMetadata] = {
             "qwen3-coder-plus",
             "qwen3-235b-a22b",
             "qwq-plus",
+            "qwen3.5-flash",
+            "qwen-turbo-latest",
         ),
     },
     "moonshot": {

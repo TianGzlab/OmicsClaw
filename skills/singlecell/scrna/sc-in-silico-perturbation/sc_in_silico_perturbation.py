@@ -717,7 +717,7 @@ def main() -> int:
 
     # --- Next-step guidance ---
     print()
-    print("▶ Next step: Run sc-enrichment to enrich perturbed genes")
+    print(">> Next step: Run sc-enrichment to enrich perturbed genes")
     print(f"  python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
