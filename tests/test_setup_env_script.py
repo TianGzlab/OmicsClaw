@@ -1116,9 +1116,6 @@ def _write_torch_backend_setup_fakes(
             fi
 
             if [ "${1:-}" = "install" ]; then
-                if printf '%s\\n' "$*" | grep -q 'pytorch-gpu'; then
-                    exit "${OMICSCLAW_FAKE_INSTALL_CUDA_EXIT:-0}"
-                fi
                 exit 0
             fi
 
@@ -1129,6 +1126,14 @@ def _write_torch_backend_setup_fakes(
             if [ "${1:-}" = "run" ]; then
                 if printf '%s\\n' "$*" | grep -q ' uv pip install '; then
                     printf 'uv-link-mode=%s\\n' "${UV_LINK_MODE:-}" >> "$OMICSCLAW_FAKE_LOG"
+                    if printf '%s\\n' "$*" | grep -q 'download.pytorch.org/whl'; then
+                        exit "${OMICSCLAW_FAKE_INSTALL_CUDA_EXIT:-0}"
+                    fi
+                fi
+                if printf '%s\\n' "$*" | grep -q ' pip install '; then
+                    if printf '%s\\n' "$*" | grep -q 'download.pytorch.org/whl'; then
+                        exit "${OMICSCLAW_FAKE_INSTALL_CUDA_EXIT:-0}"
+                    fi
                 fi
                 if printf '%s\\n' "$*" | grep -q ' python -c '; then
                     if printf '%s\\n' "$*" | grep -q 'sys.prefix'; then
@@ -1242,14 +1247,17 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     cuda_install = (
-        "mamba install -n OmicsClaw --override-channels "
-        "-c conda-forge -c bioconda "
-        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
+        "mamba run -n OmicsClaw --no-capture-output uv pip install "
+        "--index-url https://download.pytorch.org/whl/cu121 "
+        "--upgrade torch==2.5.1+cu121"
     )
     assert "nvidia-smi -L" in calls
     assert cuda_install in calls
+    assert f"{cuda_install}\nuv-link-mode=copy" in calls
     assert "-c nodefaults" not in calls
     assert "pytorch-cuda" not in calls
+    assert "pytorch-gpu" not in calls
+    assert "cuda-version=" not in calls
     assert "conda.anaconda.org/pytorch" not in calls
     assert "torch.cuda.is_available" in calls
     assert calls.index(cuda_install) < calls.index("uv pip install -e")
@@ -1275,9 +1283,9 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     assert (
-        f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} --override-channels "
-        "-c conda-forge -c bioconda "
-        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
+        f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output "
+        "uv pip install --index-url https://download.pytorch.org/whl/cu121 "
+        "--upgrade torch==2.5.1+cu121"
     ) in calls
     assert "-c nodefaults" not in calls
     assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
@@ -1304,19 +1312,19 @@ def test_setup_env_cuda_torch_backend_removes_cpu_variant_markers_before_cuda_in
     calls = log_path.read_text(encoding="utf-8")
     remove_cpu_marker = "mamba remove -n OmicsClaw pytorch-cpu cpuonly -y"
     cuda_install = (
-        "mamba install -n OmicsClaw --override-channels "
-        "-c conda-forge -c bioconda "
-        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
+        "mamba run -n OmicsClaw --no-capture-output uv pip install "
+        "--index-url https://download.pytorch.org/whl/cu121 "
+        "--upgrade torch==2.5.1+cu121"
     )
     assert remove_cpu_marker in calls
     assert cuda_install in calls
     assert calls.index(remove_cpu_marker) < calls.index(cuda_install)
 
 
-def test_setup_env_cuda_torch_channels_can_be_overridden_as_a_list(tmp_path):
+def test_setup_env_cuda_torch_wheel_index_can_be_overridden(tmp_path):
     env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
     env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
-    env["OMICSCLAW_TORCH_CHANNELS"] = "https://mirror.example/conda-forge https://mirror.example/bioconda nodefaults"
+    env["OMICSCLAW_TORCH_WHEEL_INDEX"] = "https://mirror.example/pytorch/cu121"
 
     result = subprocess.run(
         ["bash", "0_setup_env.sh", "OmicsClaw"],
@@ -1330,12 +1338,35 @@ def test_setup_env_cuda_torch_channels_can_be_overridden_as_a_list(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     assert (
-        "mamba install -n OmicsClaw --override-channels "
-        "-c https://mirror.example/conda-forge "
-        "-c https://mirror.example/bioconda "
-        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
+        "mamba run -n OmicsClaw --no-capture-output uv pip install "
+        "--index-url https://mirror.example/pytorch/cu121 "
+        "--upgrade torch==2.5.1+cu121"
     ) in calls
-    assert "-c nodefaults" not in calls
+    assert "pytorch-gpu" not in calls
+    assert "cuda-version=" not in calls
+
+
+def test_setup_env_cuda_torch_version_can_be_overridden(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
+    env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
+    env["OMICSCLAW_TORCH_VERSION"] = "2.4.1"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert (
+        "mamba run -n OmicsClaw --no-capture-output uv pip install "
+        "--index-url https://download.pytorch.org/whl/cu121 "
+        "--upgrade torch==2.4.1+cu121"
+    ) in calls
 
 
 def test_setup_env_uv_pip_install_defaults_to_copy_link_mode(tmp_path):

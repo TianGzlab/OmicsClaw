@@ -255,19 +255,17 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 # Expected: True <cuda_version>
 ```
 
-`OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`. Pick a CUDA version
-supported by your NVIDIA driver and conda-forge's `cuda-version` package, such
-as `12.1` or `12.6`. CUDA PyTorch installs stay in the same conda-forge /
-bioconda channel stack as the main env (`pytorch`, `pytorch-gpu`,
-`cuda-version=<version>`), avoiding BLAS/MKL solver conflicts from mixing the
-official PyTorch channel into a strict conda-forge environment. Advanced mirror
-users can override the channel list with `OMICSCLAW_TORCH_CHANNELS`, for
-example `OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda"`.
-The `nodefaults` marker is valid inside `environment.yml`, but the setup
-script filters it out for `mamba install` because it is not a real downloadable
-channel.
+`OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`, which maps to the PyTorch
+wheel tag `cu121`. CUDA PyTorch is installed with the official PyTorch wheel
+index, for example `https://download.pytorch.org/whl/cu121`, instead of asking
+conda to re-solve `pytorch-gpu` / `cuda-version` inside the already-large
+scientific environment. This avoids solver conflicts across `libtorch`,
+`libarrow`, `libprotobuf`, `libabseil`, and BLAS/MKL packages. Advanced mirror
+users can override the wheel index with `OMICSCLAW_TORCH_WHEEL_INDEX`; advanced
+version overrides are available through `OMICSCLAW_TORCH_VERSION`,
+`OMICSCLAW_PYTORCH_CUDA_TAG`, or `OMICSCLAW_TORCH_WHEEL_SPEC`.
 When CUDA is selected, the script removes CPU-only PyTorch marker packages
-(`pytorch-cpu` / `cpuonly`) before installing the conda-forge GPU stack.
+(`pytorch-cpu` / `cpuonly`) before installing the CUDA wheel.
 Tier 2 defaults `UV_LINK_MODE=copy` when invoking `uv pip install`, which
 avoids noisy hardlink fallback warnings when the uv cache and conda env live
 on different filesystems. Set `UV_LINK_MODE` yourself before running the

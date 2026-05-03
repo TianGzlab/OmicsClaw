@@ -6,8 +6,8 @@ development work.
 ## Tracked Entries
 
 - [2026-05-03-conda-forge-torch-gpu-setup.md](2026-05-03-conda-forge-torch-gpu-setup.md)
-  — fix CUDA PyTorch setup by using conda-forge `pytorch-gpu` /
-  `cuda-version` instead of mixing official PyTorch channels into the main
+  — fix CUDA PyTorch setup by installing official PyTorch CUDA wheels after
+  env creation, avoiding conda GPU torch re-solves inside the main
   conda-forge/bioconda environment.
 - [2026-05-03-auto-torch-backend-setup.md](2026-05-03-auto-torch-backend-setup.md)
   — make the conda setup script auto-select CUDA PyTorch on GPU-capable

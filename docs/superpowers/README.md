@@ -24,9 +24,9 @@ preserve the reference skills' core design:
 
 Recent additions:
 
-- `plans/2026-05-03-conda-forge-torch-gpu-setup.md` — avoid BLAS/MKL solver
-  conflicts by installing CUDA PyTorch from conda-forge's `pytorch-gpu`
-  stack
+- `plans/2026-05-03-conda-forge-torch-gpu-setup.md` — avoid conda GPU torch
+  solver conflicts by installing CUDA PyTorch from official PyTorch wheels
+  after env creation
 - `plans/2026-05-03-auto-torch-backend-setup.md` — make setup choose CUDA
   PyTorch automatically on GPU-capable servers while keeping CPU installs safe
 - `plans/2026-04-15-remote-contract-hardening.md` — harden the new remote

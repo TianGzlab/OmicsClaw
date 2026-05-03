@@ -265,17 +265,16 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 # 预期：True <cuda_version>
 ```
 
-`OMICSCLAW_PYTORCH_CUDA_VERSION` 默认是 `12.1`。请选择 NVIDIA 驱动和
-conda-forge `cuda-version` 包都支持的版本，例如 `12.1` 或 `12.6`。CUDA PyTorch
-默认沿用主环境的 conda-forge / bioconda channel 栈（`pytorch`、`pytorch-gpu`、
-`cuda-version=<version>`），避免在严格 conda-forge 环境里混入官方 PyTorch
-channel 后触发 BLAS/MKL solver 冲突。高级镜像用户可用
-`OMICSCLAW_TORCH_CHANNELS` 覆盖 channel 列表，例如
-`OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda"`。
-`nodefaults` 只适合写在 `environment.yml` 里；setup 脚本在执行 `mamba install`
-时会过滤它，因为它不是一个真实可下载的 channel。
+`OMICSCLAW_PYTORCH_CUDA_VERSION` 默认是 `12.1`，会映射为 PyTorch wheel tag
+`cu121`。CUDA PyTorch 使用官方 PyTorch wheel index 安装，例如
+`https://download.pytorch.org/whl/cu121`，不再让 conda 在已经很大的科学环境里
+重新求解 `pytorch-gpu` / `cuda-version`。这样可以避开 `libtorch`、`libarrow`、
+`libprotobuf`、`libabseil` 和 BLAS/MKL 包之间的 solver 冲突。高级镜像用户可用
+`OMICSCLAW_TORCH_WHEEL_INDEX` 覆盖 wheel index；需要精细控制时也可以设置
+`OMICSCLAW_TORCH_VERSION`、`OMICSCLAW_PYTORCH_CUDA_TAG` 或
+`OMICSCLAW_TORCH_WHEEL_SPEC`。
 选择 CUDA 时，脚本会先移除 CPU-only PyTorch marker 包（`pytorch-cpu` / `cpuonly`），
-再安装 conda-forge GPU 栈。Tier 2 调用
+再安装 CUDA wheel。Tier 2 调用
 `uv pip install` 时默认使用 `UV_LINK_MODE=copy`，避免 uv cache 和 conda env
 位于不同文件系统时出现 hardlink fallback 警告；如果你希望使用其他 uv 链接策略，
 可在运行脚本前自行设置 `UV_LINK_MODE`。远程运行时要在

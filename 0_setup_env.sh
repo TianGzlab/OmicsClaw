@@ -26,7 +26,10 @@ TOOLS_DIR="$PROJECT_ROOT/tools"
 TORCH_BACKEND_RAW="${OMICSCLAW_TORCH_BACKEND:-auto}"
 TORCH_BACKEND="$(printf '%s' "$TORCH_BACKEND_RAW" | tr '[:upper:]' '[:lower:]')"
 PYTORCH_CUDA_VERSION="${OMICSCLAW_PYTORCH_CUDA_VERSION:-12.1}"
-TORCH_CHANNELS_RAW="${OMICSCLAW_TORCH_CHANNELS:-conda-forge bioconda nodefaults}"
+PYTORCH_CUDA_TAG="${OMICSCLAW_PYTORCH_CUDA_TAG:-cu$(printf '%s' "$PYTORCH_CUDA_VERSION" | tr -d '.')}"
+TORCH_VERSION="${OMICSCLAW_TORCH_VERSION:-2.5.1}"
+TORCH_WHEEL_INDEX="${OMICSCLAW_TORCH_WHEEL_INDEX:-https://download.pytorch.org/whl/$PYTORCH_CUDA_TAG}"
+TORCH_WHEEL_SPEC="${OMICSCLAW_TORCH_WHEEL_SPEC:-torch==${TORCH_VERSION}+${PYTORCH_CUDA_TAG}}"
 
 case "$TORCH_BACKEND" in
     auto|cuda|cpu) ;;
@@ -39,6 +42,11 @@ esac
 
 if [ -z "$PYTORCH_CUDA_VERSION" ]; then
     echo "[setup_env] ✖ OMICSCLAW_PYTORCH_CUDA_VERSION must not be empty." >&2
+    exit 1
+fi
+if [ -z "$PYTORCH_CUDA_TAG" ] || [ -z "$TORCH_VERSION" ] || [ -z "$TORCH_WHEEL_INDEX" ] || [ -z "$TORCH_WHEEL_SPEC" ]; then
+    echo "[setup_env] ✖ CUDA PyTorch wheel settings must not be empty." >&2
+    echo "  Check OMICSCLAW_PYTORCH_CUDA_TAG, OMICSCLAW_TORCH_VERSION, OMICSCLAW_TORCH_WHEEL_INDEX, and OMICSCLAW_TORCH_WHEEL_SPEC." >&2
     exit 1
 fi
 
@@ -193,28 +201,20 @@ env_run() {
     fi
 }
 
-env_install() {
-    if [ "$ENV_TARGET_MODE" = "prefix" ]; then
-        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" install -p "$ENV_TARGET_VALUE" "$@"
-    else
-        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" install -n "$ENV_TARGET_VALUE" "$@"
-    fi
-}
-
-torch_channel_args() {
-    for channel in $TORCH_CHANNELS_RAW; do
-        [ -n "$channel" ] || continue
-        [ "$channel" = "nodefaults" ] && continue
-        printf '%s\n' "-c"
-        printf '%s\n' "$channel"
-    done
-}
-
 env_remove() {
     if [ "$ENV_TARGET_MODE" = "prefix" ]; then
         CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" remove -p "$ENV_TARGET_VALUE" "$@"
     else
         CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" remove -n "$ENV_TARGET_VALUE" "$@"
+    fi
+}
+
+ensure_uv_link_mode() {
+    if [ -z "${UV_LINK_MODE:-}" ]; then
+        export UV_LINK_MODE=copy
+        echo "[setup_env] using UV_LINK_MODE=copy for cross-filesystem-safe wheel installs"
+    else
+        echo "[setup_env] using configured UV_LINK_MODE=$UV_LINK_MODE"
     fi
 }
 
@@ -238,10 +238,21 @@ remove_cpu_pytorch_markers() {
 }
 
 install_cuda_pytorch() {
-    echo "[setup_env] installing CUDA PyTorch runtime from conda-forge stack (cuda-version=$PYTORCH_CUDA_VERSION)"
+    echo "[setup_env] installing CUDA PyTorch wheel: $TORCH_WHEEL_SPEC"
+    echo "[setup_env] using PyTorch wheel index: $TORCH_WHEEL_INDEX"
     remove_cpu_pytorch_markers
-    mapfile -t channel_args < <(torch_channel_args)
-    env_install --override-channels "${channel_args[@]}" "pytorch>=2.0,<3.0" "pytorch-gpu>=2.0,<3.0" "cuda-version=$PYTORCH_CUDA_VERSION" -y
+    if env_run uv --version >/dev/null 2>&1; then
+        ensure_uv_link_mode
+        env_run uv pip install \
+            --index-url "$TORCH_WHEEL_INDEX" \
+            --upgrade \
+            "$TORCH_WHEEL_SPEC"
+    else
+        env_run pip install \
+            --index-url "$TORCH_WHEEL_INDEX" \
+            --upgrade \
+            "$TORCH_WHEEL_SPEC"
+    fi
 }
 
 verify_cuda_pytorch() {
@@ -357,12 +368,7 @@ fi
 # to pip with bumped --resolver-max-rounds.
 if env_run uv --version >/dev/null 2>&1; then
     echo "[setup_env] using uv (PubGrub resolver) for thin pip residue"
-    if [ -z "${UV_LINK_MODE:-}" ]; then
-        export UV_LINK_MODE=copy
-        echo "[setup_env] using UV_LINK_MODE=copy for cross-filesystem-safe wheel installs"
-    else
-        echo "[setup_env] using configured UV_LINK_MODE=$UV_LINK_MODE"
-    fi
+    ensure_uv_link_mode
     env_run uv pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 else
     echo "[setup_env] uv not found in env; falling back to pip with --resolver-max-rounds=200000"
