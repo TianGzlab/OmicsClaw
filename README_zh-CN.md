@@ -23,9 +23,9 @@
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 
 > [!NOTE]
-> **🚀 v0.1.0 正式发布**
+> **🚀 v0.1.1 正式发布**
 >
-> OmicsClaw v0.1.0 已正式发布。当前版本完成了核心交互与执行框架，提供原生记忆管理面板 Memory Explorer，并内置覆盖 8 个领域的 72 个分析技能。欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交问题和建议。
+> OmicsClaw v0.1.1 已正式发布。当前版本完成了核心交互与执行框架，提供原生记忆管理面板 Memory Explorer，并内置覆盖多组学领域的 89 个分析技能。欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交问题和建议。
 
 > 📖 **完整中文文档**：见 [`docs/`](docs/)（在仓库根目录跑 `npx mintlify dev` 本地预览）
 

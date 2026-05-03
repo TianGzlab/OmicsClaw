@@ -24,6 +24,7 @@ from omicsclaw.runtime.verification import (
     update_workspace_manifest,
     write_completion_report,
 )
+from omicsclaw.version import __version__
 
 
 def _resolve_omicsclaw_dir() -> Path:
@@ -38,7 +39,7 @@ SKILLS_DIR = OMICSCLAW_DIR / "skills"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
 SKILL_TEMPLATE_PATH = OMICSCLAW_DIR / "templates" / "SKILL-TEMPLATE.md"
 STAGING_ROOT = OMICSCLAW_DIR / ".omicsclaw-staging" / "skill-scaffolds"
-SKILL_SCAFFOLDER_VERSION = "0.1.0"
+SKILL_SCAFFOLDER_VERSION = __version__
 
 VALID_DOMAINS = (
     "spatial",

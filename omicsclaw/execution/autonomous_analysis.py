@@ -22,6 +22,7 @@ from omicsclaw.runtime.verification import (
     update_workspace_manifest,
     write_completion_report,
 )
+from omicsclaw.version import __version__
 
 _OMICSCLAW_ROOT = Path(__file__).resolve().parents[2]
 
@@ -71,7 +72,7 @@ _BLOCKED_TEXT_SNIPPETS = (
     "socket.",
 )
 
-AUTONOMOUS_ANALYSIS_VERSION = "0.1.0"
+AUTONOMOUS_ANALYSIS_VERSION = __version__
 
 
 def validate_custom_analysis_code(source: str) -> list[str]:

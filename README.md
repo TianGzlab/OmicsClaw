@@ -27,7 +27,7 @@
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 
 > [!NOTE]
-> 🚀 **v0.1.0** ships the unified `oc` CLI, graph memory, app backend, remote execution, bot frontends, and **89 generated skills**.
+> 🚀 **v0.1.1** ships the unified `oc` CLI, graph memory, app backend, remote execution, bot frontends, and **89 generated skills**.
 
 OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans and operates; Python/R/CLI tools process data in your local or remote runtime.
 
