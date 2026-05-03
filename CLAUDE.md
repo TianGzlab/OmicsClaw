@@ -12,10 +12,8 @@ developer-facing tasks rather than end-user omics analysis:
 1. Read `README.md` first for project context and prior decisions.
 2. Then read root `SPEC.md` and `AGENTS.md`.
 3. Reply in the user's language and stay concise and execution-focused.
-4. Use `docs/superpowers/playbooks/` as the workflow guidance source for
-   planning, debugging, TDD, verification, code review, and branch completion.
-   Treat them as binding guardrails with explicit gates and evidence
-   requirements.
+4. Use a concise plan, root-cause debugging, focused tests, and verification
+   evidence for non-trivial repository changes.
 5. When you make an important repository decision or complete a milestone,
    update `README.md` while preserving its existing structure.
 

@@ -158,7 +158,7 @@ make test
 python scripts/generate_catalog.py
 ```
 
-Workflow playbooks live in [docs/superpowers/playbooks/](docs/superpowers/playbooks/) and are indexed from [docs/superpowers/README.md](docs/superpowers/README.md). New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md).
+Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md).
 
 </details>
 

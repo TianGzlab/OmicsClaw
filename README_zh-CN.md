@@ -282,8 +282,8 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 
 新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。
 
-设计文档详见 [`docs/superpowers/specs/2026-05-02-mamba-first-env-design.md`](docs/superpowers/specs/2026-05-02-mamba-first-env-design.md)，
-含 pip 24.2 `resolution-too-deep` 复盘和 4 层模型决策依据。
+依赖边界以 [`0_setup_env.sh`](0_setup_env.sh)、[`environment.yml`](environment.yml)
+和 [`pyproject.toml`](pyproject.toml) 为准。
 
 ## 🔑 配置
 

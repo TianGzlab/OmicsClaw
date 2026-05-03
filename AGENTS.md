@@ -12,11 +12,9 @@ Core rules:
 
 - Reply in the user's language, usually Chinese or English.
 - Stay concise, practical, and execution-focused.
-- Use `docs/superpowers/playbooks/` as the repository's on-demand workflow
-  guidance for debugging, TDD, planning, parallelization, verification,
-  code review, and branch completion.
-- Treat those playbooks as binding workflow guardrails with iron laws, red
-  flags, and required evidence, not as optional summaries.
+- For non-trivial changes, work from a concise plan, keep edits scoped, and
+  verify claims with concrete commands or file inspections before reporting
+  completion.
 - When you make an important decision or complete a meaningful milestone,
   update `README.md` while preserving its existing structure.
 
@@ -145,8 +143,7 @@ OmicsClaw/
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
-├── docs/                       # Project docs, including AI workflow support
-│   └── superpowers/            # Playbooks plus dated plans/specs for agents
+├── docs/                       # Project docs and Mintlify site content
 ├── SOUL.md                     # Bot/CLI persona (OmicsBot)
 ├── SPEC.md                     # Repository maintenance + AI development contract
 ├── templates/SKILL-TEMPLATE.md # Template for new skills
@@ -180,17 +177,11 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 7. Add test path to `pytest.ini`
 8. Regenerate catalog: `python scripts/generate_catalog.py`
 
-## Development Workflow Playbooks
+## Development Workflow
 
-For repository development work, consult these playbooks on demand:
-
-- `docs/superpowers/playbooks/skill_systematic_debugging.md`
-- `docs/superpowers/playbooks/skill_test_driven_development.md`
-- `docs/superpowers/playbooks/skill_verification_before_completion.md`
-- `docs/superpowers/playbooks/skill_writing_plans.md`
-- `docs/superpowers/playbooks/skill_dispatching_parallel_agents.md`
-- `docs/superpowers/playbooks/skill_requesting_code_review.md`
-- `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
+For repository development work, start with a short plan when the task spans
+multiple files, debug from root cause before editing, and verify the affected
+behavior before committing, pushing, or opening a PR.
 
 ## Graph Memory System
 

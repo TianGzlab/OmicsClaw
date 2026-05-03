@@ -38,26 +38,9 @@ token.json
 output/
 sessions/
 
-# Superpowers (internal skills)
+# Superpowers (local/internal agent workflow notes)
 superpowers/
-docs/superpowers/**
-!docs/superpowers/
-!docs/superpowers/README.md
-!docs/superpowers/playbooks/
-!docs/superpowers/playbooks/*.md
-!docs/superpowers/plans/
-!docs/superpowers/plans/README.md
-!docs/superpowers/specs/
-!docs/superpowers/specs/README.md
-!docs/superpowers/specs/2026-04-10-repository-spec-migration.md
-!docs/superpowers/specs/2026-04-30-conda-env-management-design.md
-!docs/superpowers/specs/2026-04-30-llm-catalog-modernization-design.md
-!docs/superpowers/plans/2026-04-30-conda-env-management-plan.md
-!docs/superpowers/plans/2026-04-30-llm-catalog-modernization-plan.md
-!docs/superpowers/plans/2026-05-02-mamba-first-env-management.md
-!docs/superpowers/plans/2026-05-02-github-r-package-preflight.md
-!docs/superpowers/specs/2026-05-02-mamba-first-env-design.md
-!docs/superpowers/specs/conda-availability-2026-05-02.csv
+docs/superpowers/
 
 # User data (large, not committed)
 data/*
