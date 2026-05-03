@@ -10,7 +10,10 @@
   <p>
     <a href="README.md"><b>English</b></a> ·
     <a href="README_zh-CN.md"><b>简体中文</b></a> ·
-    <a href="docs/introduction/quickstart.mdx"><b>Quick Start</b></a> ·
+    <a href="#-why-omicsclaw"><b>Why</b></a> ·
+    <a href="#-quick-start"><b>Quick Start</b></a> ·
+    <a href="#-core-capabilities"><b>Capabilities</b></a> ·
+    <a href="#-domain-coverage"><b>Domains</b></a> ·
     <a href="https://TianGzlab.github.io/OmicsClaw/"><b>Docs Site</b></a>
   </p>
 </div>
@@ -24,28 +27,37 @@
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 
 > [!NOTE]
-> 🚀 **v0.1.0** ships the unified `oc` CLI, interactive CLI/TUI, graph memory, app backend, remote execution, bot frontends, and a generated catalog of **89 skills**.
+> 🚀 **v0.1.0** ships the unified `oc` CLI, graph memory, app backend, remote execution, bot frontends, and **89 generated skills**.
 
-OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM helps plan and operate; Python/R/CLI tools still process data in your local or remote runtime.
+OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans and operates; Python/R/CLI tools process data in your local or remote runtime.
 
-## 🖥️ App-Centered Analysis
+## 🖥️ App-First Multi-Omics Workspace
 
 <p align="center">
   <img src="docs/images/omicsclaw-app-overview.png" alt="OmicsClaw App showing connected backend, AutoAgent, datasets, skills, memory, remote bridge, and multi-omics analysis cards" width="94%"/>
 </p>
 
 <p align="center">
-  <b>App workspace</b> → datasets → skills → AutoAgent → remote/local execution → memory → artifacts
+  <b>One workspace for chat, datasets, skills, execution, memory, and analysis outputs.</b>
 </p>
 
-## ✨ At A Glance
+## 💡 Why OmicsClaw?
+
+| Common pain | OmicsClaw answer |
+|---|---|
+| Analyses restart from zero | Persistent workspace, sessions, and graph memory |
+| Python, R, and CLI tools are scattered | Unified skill runner plus natural-language routing |
+| Large data lives on servers | Local UI with remote Linux execution over SSH |
+| Reports, artifacts, and parameters drift | Standard skill output contracts and reproducible demos |
+
+## ✨ Core Capabilities
 
 | | | | |
 |---|---|---|---|
 | 🧠 **Memory**<br/>Sessions, preferences, lineage | 🔒 **Local-first**<br/>Raw data stays in your runtime | 🧰 **89 skills**<br/>Generated catalog + demos | 🧭 **Smart routing**<br/>Natural language to tools |
 | 🖥️ **CLI / TUI**<br/>`oc interactive`, `oc tui` | 🌐 **App backend**<br/>FastAPI for desktop/web | 🔌 **MCP-ready**<br/>Attach external tools | 📡 **Remote mode**<br/>SSH tunnel to Linux servers |
 
-## ⚡ 3-Minute Start
+## ⚡ Quick Start
 
 ```bash
 git clone https://github.com/TianGzlab/OmicsClaw.git
@@ -63,11 +75,25 @@ oc onboard
 oc interactive
 ```
 
-Use `python omicsclaw.py <command>` if the `oc` console script is not on `PATH`.
+If `oc` is not on `PATH`, use `python omicsclaw.py <command>`.
 
 <p align="center">
   <img src="docs/images/OmicsClaw_configure_fast.png" alt="OmicsClaw setup wizard" width="82%"/>
 </p>
+
+## 🧭 Ways To Work
+
+| Surface | Entry point | Use it for |
+|---|---|---|
+| 🧪 Skill runner | `oc run <skill> --demo` | Reproducible analysis |
+| 💬 Interactive CLI | `oc interactive` | Natural-language workflows |
+| 🖥️ Full-screen TUI | `oc tui` | Terminal workspace sessions |
+| 🌐 App backend | `oc app-server` | Desktop/web frontends |
+| 📡 Remote server | `oc app-server` over SSH | Server-side data and jobs |
+| 🤖 Bots | `python -m bot.run --channels ...` | Telegram, Feishu, and more |
+| 🔌 MCP | `oc mcp add ...` | External tool integration |
+
+Remote mode uses `127.0.0.1`, SSH tunneling, and `OMICSCLAW_REMOTE_AUTH_TOKEN`. See [remote execution](docs/engineering/remote-execution.mdx) and the [legacy remote guide](docs/_legacy/remote-connection-guide.md).
 
 ## 📦 Install Paths
 
@@ -80,21 +106,7 @@ Use `python omicsclaw.py <command>` if the `oc` console script is not on `PATH`.
 
 📖 Details: [installation guide](docs/_legacy/INSTALLATION.md), [quickstart](docs/introduction/quickstart.mdx).
 
-**Dependency sources:** Python in [pyproject.toml](pyproject.toml), conda/R/CLIs in [environment.yml](environment.yml), GitHub-only R packages in [0_setup_env.sh](0_setup_env.sh). The root `requirements.txt` is not the primary install entrypoint.
-
-## 🧭 Use It From Anywhere
-
-| Surface | Entry point | Use it for |
-|---|---|---|
-| 🧪 Skill runner | `oc run <skill> --demo` | Reproducible analysis |
-| 💬 Interactive CLI | `oc interactive` | Natural-language workflows |
-| 🖥️ Full-screen TUI | `oc tui` | Terminal workspace sessions |
-| 🌐 App backend | `oc app-server` | Desktop/web frontends |
-| 📡 Remote server | `oc app-server` over SSH | Server-side data and jobs |
-| 🤖 Bots | `python -m bot.run --channels ...` | Telegram, Feishu, and more |
-| 🔌 MCP | `oc mcp add ...` | External tool integration |
-
-Remote execution should bind to `127.0.0.1`, use SSH tunneling, and set `OMICSCLAW_REMOTE_AUTH_TOKEN` for remote control routes. See [remote execution](docs/engineering/remote-execution.mdx) and the [legacy remote guide](docs/_legacy/remote-connection-guide.md).
+**Dependency sources:** Python in [pyproject.toml](pyproject.toml), conda/R/CLIs in [environment.yml](environment.yml), GitHub-only R packages in [0_setup_env.sh](0_setup_env.sh). No root `requirements.txt` is used as the primary entrypoint.
 
 ## 🧬 Domain Coverage
 
@@ -133,6 +145,29 @@ Run `oc list` for the current CLI catalog.
 | 📡 [Remote execution](docs/engineering/remote-execution.mdx) | 🛡️ [Safety rules](docs/safety/rules-and-disclaimer.mdx) |
 
 Preview locally with `npx mintlify dev`.
+
+## ❓ FAQ
+
+<details>
+<summary><b>Does OmicsClaw upload my raw data?</b></summary>
+
+No. Skills run in the configured local or remote runtime; LLM calls should receive context and tool results, not raw omics matrices.
+
+</details>
+
+<details>
+<summary><b>Which installation path should I use?</b></summary>
+
+Use `bash 0_setup_env.sh` for real analysis. Use the lightweight venv only for chat, routing, development, or Python-only skills.
+
+</details>
+
+<details>
+<summary><b>Can the desktop App run jobs on a server?</b></summary>
+
+Yes. Run `oc app-server` on the remote Linux host, keep it bound to `127.0.0.1`, and connect through the App's SSH tunnel runtime.
+
+</details>
 
 <details>
 <summary><b>🛠️ Developer Notes</b></summary>
