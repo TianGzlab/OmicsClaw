@@ -1,189 +1,211 @@
 # Installation Guide
 
-## Quick Start
+> This is the archived Markdown installation guide. The current docs site uses
+> `docs/introduction/quickstart.mdx`, but this file remains useful for
+> repository-local setup and troubleshooting notes.
+
+## Recommended Path
+
+Use `0_setup_env.sh` for a full OmicsClaw analysis environment. It provisions
+the conda environment, R stack, bioinformatics command-line tools, editable
+OmicsClaw package, Python optional method residue, and GitHub-only R packages.
 
 ```bash
-# Clone the repository
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
 
-# Create and activate a Python 3.11+ virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate
+bash 0_setup_env.sh
+conda activate OmicsClaw
 
-# Install the base package
-pip install -e .
-
-# Verify the CLI
+oc env
 oc list
 oc run spatial-preprocess --demo
 ```
 
-After editable install, both of these entrypoints are available:
+After setup, both console entrypoints are available:
 
 - `omicsclaw`
 - `oc`
 
-Both resolve to the same package CLI.
+They resolve to the same package CLI. You can also use the repository launcher
+directly:
 
-## Supported Python Versions
+```bash
+python omicsclaw.py list
+```
 
-OmicsClaw currently targets:
+## Prerequisites
 
-- Python 3.11
-- Python 3.12
+The setup script requires either `mamba` or `conda` on `PATH`. Miniforge is the
+recommended installer because it uses `conda-forge` by default and includes
+`mamba`.
 
-The package metadata currently requires:
+The full `environment.yml` path is currently designed for Linux, WSL2, and
+remote Linux analysis servers. It includes Linux toolchain packages such as
+`gxx_linux-64` and `sysroot_linux-64`. On macOS, use the lightweight Python-only
+path locally, or run the full setup on a Linux/WSL/remote execution host.
+
+### Install Miniforge
+
+Linux and WSL:
+
+```bash
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash "Miniforge3-$(uname)-$(uname -m).sh"
+exec "$SHELL"
+conda --version
+mamba --version
+```
+
+Windows users should run the full setup inside WSL2. Native Windows Miniforge
+can be used for the lightweight Python-only path, but the full conda analysis
+environment contains Linux-specific toolchain packages.
+
+## What `0_setup_env.sh` Manages
+
+The current dependency model has one full-install entrypoint:
+
+```bash
+bash 0_setup_env.sh [env_name]
+```
+
+Default environment name: `OmicsClaw`.
+
+Custom environment name:
+
+```bash
+bash 0_setup_env.sh OmicsClaw_dev
+conda activate OmicsClaw_dev
+```
+
+The script is idempotent. Re-running it updates the existing environment in
+place using `environment.yml`, then re-applies the pip and R source-install
+layers.
+
+| Layer | Owner | Source | Contents |
+| --- | --- | --- | --- |
+| Conda base | `mamba` or `conda` | `environment.yml` | Python 3.11, R 4.3, build toolchain, bioinformatics CLIs, heavy Python science stack |
+| Thin pip residue | `uv pip` or `pip` | `pyproject.toml` extras | editable `omicsclaw`, PyPI-only method packages, console scripts |
+| R source packages | `Rscript` + `devtools` | inline Tier 3 in `0_setup_env.sh` | GitHub-only R packages such as spacexr, CARD, CellChat, numbat, SPARK, DoubletFinder |
+| Vendored tools | symlink stub | `tools/`, `0_build_vendored_tools.sh` | currently no bundled vendored binaries |
+| Isolated sub-envs | `mamba` or `conda` | `environments/*.yml` | hard-conflict tools such as optional banksy |
+
+Dependency source of truth:
+
+- Python package metadata and console scripts: `pyproject.toml`
+- R packages, bioinformatics CLIs, build tooling, and heavy scientific Python
+  packages: `environment.yml`
+- GitHub-only R roots: Tier 3 inside `0_setup_env.sh`
+- The repository does not use a root `requirements.txt` as a primary install
+  entrypoint.
+
+## Full Install Options
+
+### Standard CPU-safe setup
+
+```bash
+bash 0_setup_env.sh
+conda activate OmicsClaw
+```
+
+The conda layer installs a CPU-safe PyTorch baseline. This is the safest default
+for laptops, shared servers, CI, and machines without NVIDIA GPUs.
+
+### GPU-aware PyTorch setup
+
+The script can replace the CPU baseline with the official CUDA PyTorch wheel
+after the main conda solve completes.
+
+```bash
+# Default behavior: try CUDA only if nvidia-smi reports a GPU; continue if not verified.
+OMICSCLAW_TORCH_BACKEND=auto bash 0_setup_env.sh
+
+# Require CUDA PyTorch and fail setup if install or verification fails.
+OMICSCLAW_TORCH_BACKEND=cuda OMICSCLAW_PYTORCH_CUDA_VERSION=12.1 bash 0_setup_env.sh
+
+# Force CPU PyTorch even on GPU-capable machines.
+OMICSCLAW_TORCH_BACKEND=cpu bash 0_setup_env.sh
+```
+
+Verify CUDA after setup:
+
+```bash
+mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+```
+
+Expected on a correctly wired CUDA environment:
 
 ```text
->=3.11,<3.14
+True 12.1
 ```
 
-## System Requirements
+Advanced mirrors can override:
 
-| Component | Minimum | Recommended |
-| --- | --- | --- |
-| Python | 3.11 | 3.11 or 3.12 |
-| RAM | 8 GB | 32 GB+ for larger analyses |
-| Disk | 2 GB for core install | 10 GB+ for full method stack |
-| GPU | optional | recommended for deep-learning-heavy methods |
-| R | optional | recommended for R-backed workflows |
+- `OMICSCLAW_TORCH_WHEEL_INDEX`
+- `OMICSCLAW_TORCH_VERSION`
+- `OMICSCLAW_PYTORCH_CUDA_TAG`
+- `OMICSCLAW_TORCH_WHEEL_SPEC`
 
-## Installation Profiles
+Remote installs must run setup on the actual analysis server. A desktop
+client's GPU state is not relevant for a remote execution host.
 
-OmicsClaw uses optional dependency groups instead of requiring one monolithic environment.
+### Optional banksy sub-environment
 
-`pyproject.toml` is the only root dependency source of truth. The repository no longer maintains a root `requirements.txt` as a primary installation entrypoint.
+`pybanksy` requires dependency pins that conflict with the main full analysis
+environment, so it is installed only into a dedicated `omicsclaw_banksy`
+sub-environment when explicitly requested.
 
-### 1. Core install
+Recommended safe form:
 
 ```bash
+OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
+```
+
+With a custom main env name:
+
+```bash
+bash 0_setup_env.sh OmicsClaw_dev --with-banksy
+```
+
+## Lightweight Python-only Path
+
+Use a venv only when you need chat/routing/development surfaces and do not need
+R-backed methods or external bioinformatics CLIs such as `samtools`, `STAR`,
+`fastqc`, `bwa`, `bcftools`, or `gatk4`.
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
 pip install -e .
+oc list
 ```
 
-This installs the base platform and the core dependencies needed for:
-
-- the main CLI
-- skill discovery
-- prompt/runtime infrastructure
-- core AnnData and scientific Python tooling
-
-### 2. Domain-focused installs
-
-Install only the domains you need:
-
-```bash
-pip install -e ".[spatial]"
-pip install -e ".[singlecell]"
-pip install -e ".[genomics]"
-pip install -e ".[proteomics]"
-pip install -e ".[metabolomics]"
-pip install -e ".[bulkrna]"
-```
-
-### 3. Optional spatial sub-layers
-
-Some heavier spatial capabilities are intentionally split out:
-
-```bash
-pip install -e ".[spatial-domains]"
-pip install -e ".[spatial-annotate]"
-pip install -e ".[spatial-deconv]"
-pip install -e ".[spatial-trajectory]"
-pip install -e ".[spatial-velocity]"
-pip install -e ".[spatial-cnv]"
-pip install -e ".[spatial-enrichment]"
-pip install -e ".[spatial-communication]"
-pip install -e ".[spatial-integration]"
-pip install -e ".[spatial-registration]"
-pip install -e ".[spatial-condition]"
-```
-
-This lets you avoid pulling in every GPU- or R-heavy dependency up front.
-
-### 4. Full install
-
-```bash
-pip install -e ".[full]"
-```
-
-Use this when you want the broadest method coverage in one environment.
-
-### 5. Interactive CLI / TUI
-
-Interactive mode has its own lightweight extras. `.[interactive]` now includes:
-
-- prompt-toolkit / Rich / Questionary for the terminal UI
-- aiosqlite for session persistence
-- OpenAI-compatible client + HTTP dependencies used by the interactive LLM bridge
+Common lightweight extras:
 
 ```bash
 pip install -e ".[interactive]"
-```
-
-OmicsClaw automatically reads the project-root `.env` file for interactive startup. If `python-dotenv` is not installed, a built-in fallback parser is used, so standard `.env` key/value files still work.
-
-For the full-screen Textual TUI:
-
-```bash
 pip install -e ".[tui]"
-```
-
-### 6. Memory server
-
-To use the graph-memory REST API and dashboard backend:
-
-```bash
 pip install -e ".[memory]"
-```
-
-### 7. Desktop / web frontend backend
-
-To drive OmicsClaw-App or any compatible local web frontend:
-
-```bash
 pip install -e ".[desktop]"
-oc app-server --host 127.0.0.1 --port 8765
-```
-
-The `desktop` extra includes the notebook runtime dependencies, so this same
-server process also serves the native `/notebook/*` routes used by the
-embedded notebook UI. No separate notebook bridge is required.
-
-### 8. Research and autonomous extras
-
-For research-pipeline or notebook-style auxiliary workflows:
-
-```bash
-pip install -e ".[research]"
-pip install -e ".[autonomous]"
-```
-
-### 9. Development tools
-
-```bash
 pip install -e ".[dev]"
 ```
 
-This adds test and lint tooling such as `pytest`, `ruff`, `black`, and `mypy`.
+The `[full]` extra is preserved for compatibility, but it is no longer the
+recommended way to build a complete analysis workstation. Use
+`bash 0_setup_env.sh` for full local analysis coverage because the heavy
+scientific stack has moved into the conda layer.
 
-## Common Installation Patterns
+## Configuration
 
-### Minimal interactive workstation
-
-```bash
-pip install -e ".[interactive]"
-```
-
-After installation, the fastest way to configure the runtime is:
+The fastest way to configure LLM providers, shared runtime settings, memory,
+and messaging channels is:
 
 ```bash
 oc onboard
 ```
 
-This writes the project `.env` and can configure LLM credentials, shared runtime settings, memory options, and messaging channels.
-
-Example custom endpoint configuration:
+The wizard writes the project-root `.env` file. Manual configuration is also
+supported:
 
 ```env
 LLM_PROVIDER=custom
@@ -192,97 +214,73 @@ OMICSCLAW_MODEL=your-model-name
 LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
-Provider-specific keys also work without setting `LLM_API_KEY`, for example:
+Provider-specific keys can also be used:
 
 ```env
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### Interactive + TUI + memory
+OAuth support is not part of the analysis-focused full extra. Install it only
+when you need ccproxy-backed OAuth:
 
 ```bash
-pip install -e ".[tui,memory]"
+pip install -e ".[oauth]"
+# or
+pip install -e ".[full,oauth]"
 ```
 
-### Spatial workstation
+## Runtime Services
 
-```bash
-pip install -e ".[spatial,interactive]"
-```
-
-### Broad analysis workstation
-
-```bash
-pip install -e ".[full,interactive,memory]"
-```
-
-### Development environment
-
-```bash
-pip install -e ".[full,interactive,memory,dev]"
-```
-
-## Verifying the Installation
-
-Useful smoke tests:
-
-```bash
-oc list
-python omicsclaw.py env
-oc run spatial-preprocess --demo
-oc interactive -p "介绍一下你能做什么"
-```
-
-If you installed TUI support:
-
-```bash
-oc tui
-```
-
-If you installed memory support:
-
-```bash
-oc memory-server
-```
-
-By default this binds to `127.0.0.1:8766`. If you bind the memory API to a non-local interface, you must also set `OMICSCLAW_MEMORY_API_TOKEN`.
-
-If you installed desktop frontend support:
-
-```bash
-oc app-server
-```
-
-By default this binds to `127.0.0.1:8765` and includes the notebook routes
-consumed by OmicsClaw-App.
-
-If `omicsclaw_kg` is importable, or you set
-`OMICSCLAW_KG_SOURCE_DIR=/path/to/OmicsClaw-KG`, the same `oc app-server`
-process also exposes the embedded `/kg/*` routes used by the KG Explorer.
-
-## Interactive and Workspace Features
-
-After installing `.[interactive]`, you can use:
+### Interactive CLI and TUI
 
 ```bash
 oc interactive
 oc interactive --ui tui
+oc tui
 oc interactive -p "run spatial-preprocess demo"
 oc interactive --session <session-id>
+```
+
+The full-screen TUI needs `textual>=0.80`. If `oc tui` reports that `textual`
+is missing, install the TUI extra inside the active environment:
+
+```bash
+pip install -e ".[tui]"
+```
+
+Workspace options:
+
+```bash
 oc interactive --workspace /path/to/workdir
 oc interactive --mode daemon
 oc interactive --mode run --name my-analysis
 ```
 
-Workspace behavior:
+### Memory API
 
-- `--mode daemon` keeps using a persistent workspace
-- `--mode run` creates an isolated per-session workspace
-- `--workspace` explicitly selects the workspace directory
+```bash
+oc memory-server
+```
 
-## MCP Support
+Default bind address: `127.0.0.1:8766`.
 
-MCP server configuration commands are available from the main CLI:
+If you expose the memory API beyond localhost, set
+`OMICSCLAW_MEMORY_API_TOKEN`.
+
+### Desktop / web app backend
+
+```bash
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+The app backend serves chat streaming, skills, providers, MCP, outputs, bridge
+control, memory proxy routes, and native notebook routes. If `omicsclaw_kg` is
+installed or `OMICSCLAW_KG_SOURCE_DIR=/path/to/OmicsClaw-KG` is set, the same
+process also mounts the embedded `/kg/*` routes.
+
+### MCP management
 
 ```bash
 oc mcp list
@@ -291,84 +289,156 @@ oc mcp remove sequential-thinking
 oc mcp config
 ```
 
-To actually load and execute MCP tools inside interactive sessions, install the adapter package separately:
+To execute MCP tools inside interactive sessions, install the adapter package:
 
 ```bash
 pip install langchain-mcp-adapters
 ```
 
-Notes:
+## Verification
 
-- OmicsClaw stores MCP configuration in the user config directory
-- prompt injection only includes active prompt-worthy MCP servers
-- configured but unavailable servers do not consume prompt budget
-
-## R Dependencies
-
-For R Enhanced plotting dependencies (ggplot2, ComplexHeatmap, monocle3, GSVA, etc.), see [docs/R-DEPENDENCIES.md](R-DEPENDENCIES.md).
-
-Some skills rely on R packages invoked through subprocess-based R workflows.
-
-Install R first:
+Fast smoke checks after full setup:
 
 ```bash
-# Ubuntu / Debian
-sudo apt install r-base r-base-dev
-
-# macOS
-brew install r
+oc env
+oc list
+oc run spatial-preprocess --demo
 ```
 
-Then install any required system libraries for compiled R packages as needed.
-
-Typical Ubuntu packages:
+After configuring an LLM provider with `oc onboard`, verify the interactive
+surface:
 
 ```bash
-sudo apt install libcurl4-openssl-dev libssl-dev libxml2-dev \
-                 libharfbuzz-dev libfribidi-dev libfreetype6-dev \
-                 libpng-dev libtiff5-dev libjpeg-dev
+oc interactive -p "介绍一下你能做什么"
 ```
 
-If your selected methods require Python-side R bridges or helpers, install those explicitly in your environment.
-
-## Fast Installation with uv
-
-If you use `uv`, environment creation and dependency resolution are usually much faster:
+Script and dependency-management checks:
 
 ```bash
-pip install uv
-uv venv .venv --python 3.11
-source .venv/bin/activate
-uv pip install -e ".[interactive]"
+bash -n 0_setup_env.sh
 ```
 
-## Testing the Runtime
-
-For a broader runtime verification:
+Install the development extra before running pytest if your active environment
+does not already include it:
 
 ```bash
+pip install -e ".[dev]"
 python -m pytest -q tests/test_context_assembler.py
-python -m pytest -q tests/test_query_engine.py
-python -m pytest -q tests/test_interactive_loop.py
 ```
 
-For a full test run:
+Full test suite:
 
 ```bash
 python -m pytest -v
 ```
 
+End-to-end fresh-machine smoke test:
+
+```bash
+bash scripts/smoke_test_setup.sh
+```
+
+Run the full smoke test only when you can afford a complete environment create
+and update cycle.
+
 ## Troubleshooting
+
+### Neither `mamba` nor `conda` is found
+
+Install Miniforge, restart the shell, and verify:
+
+```bash
+conda --version
+mamba --version
+```
+
+### Shared conda cache permission errors
+
+On shared conda installations, `0_setup_env.sh` defaults `CONDA_PKGS_DIRS` to a
+private writable cache:
+
+```bash
+~/.conda/pkgs
+```
+
+To use another cache:
+
+```bash
+export CONDA_PKGS_DIRS=/path/to/writable/pkgs
+bash 0_setup_env.sh
+```
+
+### Existing prefix is incomplete
+
+If a previous interrupted setup left a directory without `conda-meta`, remove
+or repair that prefix before rerunning:
+
+```bash
+mamba env remove -p /path/to/incomplete/env -y
+bash 0_setup_env.sh
+```
+
+### pip reports `resolution-too-deep`
+
+Use `bash 0_setup_env.sh` instead of a direct all-pip `[full]` install. The
+current setup intentionally moves heavy resolver hubs such as scanpy, anndata,
+squidpy, torch, scvi-tools, scvelo, cellrank, multiqc, and kb-python into the
+conda layer, leaving pip with only the thin PyPI-only residue.
+
+### CUDA setup is not verified
+
+For optional acceleration, let setup continue:
+
+```bash
+OMICSCLAW_TORCH_BACKEND=auto bash 0_setup_env.sh
+```
+
+For mandatory acceleration, make CUDA verification fatal:
+
+```bash
+OMICSCLAW_TORCH_BACKEND=cuda bash 0_setup_env.sh
+```
+
+Then check:
+
+```bash
+mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+```
+
+### SpaGCN pulls the deprecated `sklearn` placeholder
+
+Tier 2 sets:
+
+```bash
+SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True
+```
+
+This only allows SpaGCN's legacy metadata to resolve. OmicsClaw itself depends
+on `scikit-learn`.
+
+### R package guidance
+
+For the recommended full setup, do not manually install the project R stack
+first. `0_setup_env.sh` installs R 4.3 packages through `environment.yml` and
+GitHub-only R packages through its Tier 3 Rscript block.
+
+For historical R notes, see [R-DEPENDENCIES.md](R-DEPENDENCIES.md).
+
+### `cnvkit` is missing
+
+`cnvkit` is intentionally not bundled because current compatible versions
+conflict with the main environment's `macs3` dependency chain. Install it in a
+separate dedicated environment if you need `genomics-cnv-calling`.
 
 ### `oc` cannot find `omicsclaw.py`
 
-The package entrypoint searches for the repository-root launcher. Run `oc` from inside the OmicsClaw repository, or set:
+Run from inside the OmicsClaw repository or set:
 
 ```bash
 export OMICSCLAW_CLI_PATH=/absolute/path/to/omicsclaw.py
 ```
 
-### TUI falls back or fails to start
+### TUI fails to start in a lightweight venv
 
 Install the TUI extra:
 
@@ -376,38 +446,24 @@ Install the TUI extra:
 pip install -e ".[tui]"
 ```
 
-### MCP servers are configured but no MCP tools appear
+In the full `0_setup_env.sh` environment, the core interactive stack is
+installed by the conda layer, but `textual` remains an optional TUI extra.
 
-Check all three conditions:
+### MCP servers are configured but no tools appear
 
-1. `langchain-mcp-adapters` is installed
-2. the configured server command or URL is reachable
-3. you restarted the interactive session after changing MCP config
+Check:
 
-### Memory server command fails
-
-Install the memory extra:
-
-```bash
-pip install -e ".[memory]"
-```
-
-### Heavy optional packages fail to build
-
-Use smaller installation profiles first, then add only the domain extras you need. This is especially helpful for:
-
-- GPU and PyTorch-heavy spatial methods
-- R-backed workflows
-- packages with compiled scientific dependencies
+1. `langchain-mcp-adapters` is installed.
+2. The configured MCP command or URL is reachable.
+3. You restarted the interactive session after changing MCP config.
 
 ## Summary
 
-The recommended installation strategy is:
+Recommended install strategy:
 
-- start with `pip install -e .`
-- add only the domain extras you need
-- add `.[interactive]` or `.[tui]` for interactive use
-- add `.[memory]` if you want the memory API and dashboard
-- add `.[dev]` for testing and development work
-
-This matches OmicsClaw's current modular runtime design much better than trying to install every optional method on day one.
+1. Use `bash 0_setup_env.sh` for the complete local analysis environment.
+2. Use `oc onboard` to configure LLM and runtime settings.
+3. Use the venv path only for lightweight Python-only chat, routing, or
+   development work.
+4. Keep hard-conflict tools in isolated sub-environments instead of forcing
+   them into the main analysis env.

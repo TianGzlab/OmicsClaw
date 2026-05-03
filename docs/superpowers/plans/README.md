@@ -5,6 +5,17 @@ development work.
 
 ## Tracked Entries
 
+- [2026-05-03-root-readme-slimdown.md](2026-05-03-root-readme-slimdown.md)
+  — shorten the root `README.md` into a concise project entrypoint while
+  preserving install, quick-start, domain coverage, safety, and docs links.
+- [2026-05-03-legacy-remote-guide-refresh.md](2026-05-03-legacy-remote-guide-refresh.md)
+  — refresh `docs/_legacy/remote-connection-guide.md` so remote execution
+  setup uses the current `0_setup_env.sh` full conda environment and current
+  `oc app-server` remote control-plane contract.
+- [2026-05-03-legacy-installation-refresh.md](2026-05-03-legacy-installation-refresh.md)
+  — refresh `docs/_legacy/INSTALLATION.md` so it reflects the current
+  `0_setup_env.sh`-managed full dependency setup and keeps venv as a
+  lightweight Python-only fallback.
 - [2026-05-03-conda-forge-torch-gpu-setup.md](2026-05-03-conda-forge-torch-gpu-setup.md)
   — fix CUDA PyTorch setup by installing official PyTorch CUDA wheels after
   env creation, avoiding conda GPU torch re-solves inside the main
