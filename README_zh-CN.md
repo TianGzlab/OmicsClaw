@@ -270,7 +270,10 @@ PyTorch conda channel 都支持的版本，例如 `12.1` 或 `11.8`。CUDA PyTor
 默认使用绝对官方 channel `https://conda.anaconda.org/pytorch` 和
 `https://conda.anaconda.org/nvidia`，避免本地 channel alias 把 `nvidia` 改写到
 缺少 repodata 的镜像路径。如果你的镜像明确托管这些 channel，可用
-`OMICSCLAW_PYTORCH_CHANNEL` 和 `OMICSCLAW_NVIDIA_CHANNEL` 覆盖。Tier 2 调用
+`OMICSCLAW_PYTORCH_CHANNEL` 和 `OMICSCLAW_NVIDIA_CHANNEL` 覆盖。选择 CUDA 时，
+脚本会移除 CPU-only PyTorch marker 包（`pytorch-cpu` / `cpuonly`），并显式请求
+CUDA PyTorch build（`pytorch=*=*cuda*`），避免只安装 `pytorch-cuda` runtime 但
+实际导入的 `torch` 仍是 CPU build（`torch.version.cuda == None`）。Tier 2 调用
 `uv pip install` 时默认使用 `UV_LINK_MODE=copy`，避免 uv cache 和 conda env
 位于不同文件系统时出现 hardlink fallback 警告；如果你希望使用其他 uv 链接策略，
 可在运行脚本前自行设置 `UV_LINK_MODE`。远程运行时要在

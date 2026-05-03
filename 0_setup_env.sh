@@ -202,18 +202,45 @@ env_install() {
     fi
 }
 
+env_remove() {
+    if [ "$ENV_TARGET_MODE" = "prefix" ]; then
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" remove -p "$ENV_TARGET_VALUE" "$@"
+    else
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" remove -n "$ENV_TARGET_VALUE" "$@"
+    fi
+}
+
 detect_nvidia_gpu() {
     command -v nvidia-smi >/dev/null 2>&1 || return 1
     nvidia-smi -L >/dev/null 2>&1
 }
 
+remove_cpu_pytorch_markers() {
+    cpu_markers=()
+    if compgen -G "$ENV_PREFIX/conda-meta/pytorch-cpu-*.json" >/dev/null; then
+        cpu_markers+=(pytorch-cpu)
+    fi
+    if compgen -G "$ENV_PREFIX/conda-meta/cpuonly-*.json" >/dev/null; then
+        cpu_markers+=(cpuonly)
+    fi
+    if [ "${#cpu_markers[@]}" -gt 0 ]; then
+        echo "[setup_env] removing CPU-only PyTorch marker packages: ${cpu_markers[*]}"
+        env_remove "${cpu_markers[@]}" -y
+    fi
+}
+
 install_cuda_pytorch() {
     echo "[setup_env] installing CUDA PyTorch runtime (pytorch-cuda=$PYTORCH_CUDA_VERSION)"
-    env_install -c "$PYTORCH_CHANNEL" -c "$NVIDIA_CHANNEL" pytorch "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
+    remove_cpu_pytorch_markers
+    env_install -c "$PYTORCH_CHANNEL" -c "$NVIDIA_CHANNEL" "pytorch=*=*cuda*" "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
 }
 
 verify_cuda_pytorch() {
-    env_run python -c 'import torch; ok = torch.cuda.is_available(); print(f"cuda_available={ok} cuda_version={getattr(torch.version, '\''cuda'\'', None)}"); raise SystemExit(0 if ok else 1)'
+    verify_output="$(
+        env_run python -c 'import torch; ok = bool(torch.cuda.is_available()); print(f"cuda_available={ok} cuda_version={getattr(torch.version, '\''cuda'\'', None)}"); print(f"OMICSCLAW_CUDA_OK={1 if ok else 0}")'
+    )"
+    printf '%s\n' "$verify_output"
+    printf '%s\n' "$verify_output" | grep -qx "OMICSCLAW_CUDA_OK=1"
 }
 
 configure_torch_backend() {

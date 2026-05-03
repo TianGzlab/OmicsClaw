@@ -262,6 +262,10 @@ CUDA PyTorch installs use absolute official channels
 by default so local channel aliases do not rewrite `nvidia` to a mirror path
 that lacks repodata. If your mirror explicitly hosts those channels, override
 them with `OMICSCLAW_PYTORCH_CHANNEL` and `OMICSCLAW_NVIDIA_CHANNEL`.
+When CUDA is selected, the script removes CPU-only PyTorch marker packages
+(`pytorch-cpu` / `cpuonly`) and explicitly requests a CUDA PyTorch build
+(`pytorch=*=*cuda*`), so installing `pytorch-cuda` cannot leave the imported
+`torch` module on the CPU build (`torch.version.cuda == None`).
 Tier 2 defaults `UV_LINK_MODE=copy` when invoking `uv pip install`, which
 avoids noisy hardlink fallback warnings when the uv cache and conda env live
 on different filesystems. Set `UV_LINK_MODE` yourself before running the

@@ -1069,6 +1069,7 @@ def _write_torch_backend_setup_fakes(
     *,
     existing_env: bool = True,
     nvidia_gpu: bool = False,
+    cpu_torch_markers: bool = False,
 ) -> tuple[dict[str, str], Path, Path]:
     repo_root = Path(__file__).resolve().parents[1]
     fake_bin = tmp_path / "bin"
@@ -1079,6 +1080,15 @@ def _write_torch_backend_setup_fakes(
     fake_bin.mkdir()
     (fake_prefix / "conda-meta").mkdir(parents=True)
     (fake_prefix / "bin").mkdir(parents=True)
+    if cpu_torch_markers:
+        (fake_prefix / "conda-meta" / "pytorch-cpu-2.5.1-0.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
+        (fake_prefix / "conda-meta" / "cpuonly-2.0-0.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
 
     (fake_bin / "mamba").write_text(
         textwrap.dedent(
@@ -1112,6 +1122,10 @@ def _write_torch_backend_setup_fakes(
                 exit 0
             fi
 
+            if [ "${1:-}" = "remove" ]; then
+                exit 0
+            fi
+
             if [ "${1:-}" = "run" ]; then
                 if printf '%s\\n' "$*" | grep -q ' uv pip install '; then
                     printf 'uv-link-mode=%s\\n' "${UV_LINK_MODE:-}" >> "$OMICSCLAW_FAKE_LOG"
@@ -1124,10 +1138,12 @@ def _write_torch_backend_setup_fakes(
                     if printf '%s\\n' "$*" | grep -q 'torch.cuda.is_available'; then
                         if [ "${OMICSCLAW_FAKE_VERIFY_CUDA_EXIT:-0}" = "0" ]; then
                             echo "cuda_available=True cuda_version=12.1"
+                            echo "OMICSCLAW_CUDA_OK=1"
                         else
-                            echo "cuda_available=False cuda_version=None" >&2
+                            echo "cuda_available=False cuda_version=None"
+                            echo "OMICSCLAW_CUDA_OK=0"
                         fi
-                        exit "${OMICSCLAW_FAKE_VERIFY_CUDA_EXIT:-0}"
+                        exit 0
                     fi
                 fi
                 if printf '%s\\n' "$*" | grep -q ' Rscript '; then
@@ -1229,7 +1245,7 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected
         "mamba install -n OmicsClaw "
         "-c https://conda.anaconda.org/pytorch "
         "-c https://conda.anaconda.org/nvidia "
-        "pytorch pytorch-cuda=12.1 -y"
+        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
     )
     assert "nvidia-smi -L" in calls
     assert cuda_install in calls
@@ -1260,9 +1276,40 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
         f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} "
         "-c https://conda.anaconda.org/pytorch "
         "-c https://conda.anaconda.org/nvidia "
-        "pytorch pytorch-cuda=12.1 -y"
+        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
     ) in calls
     assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
+
+
+def test_setup_env_cuda_torch_backend_removes_cpu_variant_markers_before_cuda_install(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(
+        tmp_path,
+        nvidia_gpu=True,
+        cpu_torch_markers=True,
+    )
+    env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    remove_cpu_marker = "mamba remove -n OmicsClaw pytorch-cpu cpuonly -y"
+    cuda_install = (
+        "mamba install -n OmicsClaw "
+        "-c https://conda.anaconda.org/pytorch "
+        "-c https://conda.anaconda.org/nvidia "
+        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
+    )
+    assert remove_cpu_marker in calls
+    assert cuda_install in calls
+    assert calls.index(remove_cpu_marker) < calls.index(cuda_install)
 
 
 def test_setup_env_cuda_torch_channels_can_be_overridden(tmp_path):
@@ -1286,7 +1333,7 @@ def test_setup_env_cuda_torch_channels_can_be_overridden(tmp_path):
         "mamba install -n OmicsClaw "
         "-c https://mirror.example/pytorch "
         "-c https://mirror.example/nvidia "
-        "pytorch pytorch-cuda=12.1 -y"
+        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
     ) in calls
 
 
