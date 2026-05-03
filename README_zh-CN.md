@@ -271,7 +271,9 @@ conda-forge `cuda-version` 包都支持的版本，例如 `12.1` 或 `12.6`。CU
 `cuda-version=<version>`），避免在严格 conda-forge 环境里混入官方 PyTorch
 channel 后触发 BLAS/MKL solver 冲突。高级镜像用户可用
 `OMICSCLAW_TORCH_CHANNELS` 覆盖 channel 列表，例如
-`OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda nodefaults"`。
+`OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda"`。
+`nodefaults` 只适合写在 `environment.yml` 里；setup 脚本在执行 `mamba install`
+时会过滤它，因为它不是一个真实可下载的 channel。
 选择 CUDA 时，脚本会先移除 CPU-only PyTorch marker 包（`pytorch-cpu` / `cpuonly`），
 再安装 conda-forge GPU 栈。Tier 2 调用
 `uv pip install` 时默认使用 `UV_LINK_MODE=copy`，避免 uv cache 和 conda env

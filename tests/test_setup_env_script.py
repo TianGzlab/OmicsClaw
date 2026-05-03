@@ -1243,11 +1243,12 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected
     calls = log_path.read_text(encoding="utf-8")
     cuda_install = (
         "mamba install -n OmicsClaw --override-channels "
-        "-c conda-forge -c bioconda -c nodefaults "
+        "-c conda-forge -c bioconda "
         "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     )
     assert "nvidia-smi -L" in calls
     assert cuda_install in calls
+    assert "-c nodefaults" not in calls
     assert "pytorch-cuda" not in calls
     assert "conda.anaconda.org/pytorch" not in calls
     assert "torch.cuda.is_available" in calls
@@ -1275,9 +1276,10 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
     calls = log_path.read_text(encoding="utf-8")
     assert (
         f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} --override-channels "
-        "-c conda-forge -c bioconda -c nodefaults "
+        "-c conda-forge -c bioconda "
         "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     ) in calls
+    assert "-c nodefaults" not in calls
     assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
 
 
@@ -1303,7 +1305,7 @@ def test_setup_env_cuda_torch_backend_removes_cpu_variant_markers_before_cuda_in
     remove_cpu_marker = "mamba remove -n OmicsClaw pytorch-cpu cpuonly -y"
     cuda_install = (
         "mamba install -n OmicsClaw --override-channels "
-        "-c conda-forge -c bioconda -c nodefaults "
+        "-c conda-forge -c bioconda "
         "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     )
     assert remove_cpu_marker in calls
@@ -1331,9 +1333,9 @@ def test_setup_env_cuda_torch_channels_can_be_overridden_as_a_list(tmp_path):
         "mamba install -n OmicsClaw --override-channels "
         "-c https://mirror.example/conda-forge "
         "-c https://mirror.example/bioconda "
-        "-c nodefaults "
         "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     ) in calls
+    assert "-c nodefaults" not in calls
 
 
 def test_setup_env_uv_pip_install_defaults_to_copy_link_mode(tmp_path):

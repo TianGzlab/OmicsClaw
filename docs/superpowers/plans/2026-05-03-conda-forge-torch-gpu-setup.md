@@ -16,7 +16,8 @@
 **Implementation tasks:**
 
 1. Update tests first.
-   - Expected CUDA install command should use `-c conda-forge -c bioconda -c nodefaults pytorch pytorch-gpu cuda-version=<version> -y`.
+   - Expected CUDA install command should use `-c conda-forge -c bioconda pytorch pytorch-gpu cuda-version=<version> -y`.
+   - Tests should reject `-c nodefaults`; `nodefaults` is a YAML marker, not a downloadable CLI channel.
    - Tests should fail if `pytorch-cuda` or official `https://conda.anaconda.org/pytorch` is present in the default command.
    - Preserve existing CPU opt-out, forced CUDA failure, prefix install, and marker removal coverage.
 
@@ -25,6 +26,7 @@
 
 3. Implement the script change.
    - Replace official channel defaults with `OMICSCLAW_TORCH_CHANNELS`, defaulting to `conda-forge bioconda nodefaults`.
+   - Filter `nodefaults` out when converting `OMICSCLAW_TORCH_CHANNELS` into `mamba install -c ...` arguments.
    - Install `pytorch`, `pytorch-gpu`, and `cuda-version=$OMICSCLAW_PYTORCH_CUDA_VERSION`.
    - Keep CPU marker removal and CUDA verification.
 

@@ -262,7 +262,10 @@ bioconda channel stack as the main env (`pytorch`, `pytorch-gpu`,
 `cuda-version=<version>`), avoiding BLAS/MKL solver conflicts from mixing the
 official PyTorch channel into a strict conda-forge environment. Advanced mirror
 users can override the channel list with `OMICSCLAW_TORCH_CHANNELS`, for
-example `OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda nodefaults"`.
+example `OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda"`.
+The `nodefaults` marker is valid inside `environment.yml`, but the setup
+script filters it out for `mamba install` because it is not a real downloadable
+channel.
 When CUDA is selected, the script removes CPU-only PyTorch marker packages
 (`pytorch-cpu` / `cpuonly`) before installing the conda-forge GPU stack.
 Tier 2 defaults `UV_LINK_MODE=copy` when invoking `uv pip install`, which

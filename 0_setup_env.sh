@@ -203,6 +203,8 @@ env_install() {
 
 torch_channel_args() {
     for channel in $TORCH_CHANNELS_RAW; do
+        [ -n "$channel" ] || continue
+        [ "$channel" = "nodefaults" ] && continue
         printf '%s\n' "-c"
         printf '%s\n' "$channel"
     done
