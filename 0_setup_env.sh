@@ -26,8 +26,7 @@ TOOLS_DIR="$PROJECT_ROOT/tools"
 TORCH_BACKEND_RAW="${OMICSCLAW_TORCH_BACKEND:-auto}"
 TORCH_BACKEND="$(printf '%s' "$TORCH_BACKEND_RAW" | tr '[:upper:]' '[:lower:]')"
 PYTORCH_CUDA_VERSION="${OMICSCLAW_PYTORCH_CUDA_VERSION:-12.1}"
-PYTORCH_CHANNEL="${OMICSCLAW_PYTORCH_CHANNEL:-https://conda.anaconda.org/pytorch}"
-NVIDIA_CHANNEL="${OMICSCLAW_NVIDIA_CHANNEL:-https://conda.anaconda.org/nvidia}"
+TORCH_CHANNELS_RAW="${OMICSCLAW_TORCH_CHANNELS:-conda-forge bioconda nodefaults}"
 
 case "$TORCH_BACKEND" in
     auto|cuda|cpu) ;;
@@ -202,6 +201,13 @@ env_install() {
     fi
 }
 
+torch_channel_args() {
+    for channel in $TORCH_CHANNELS_RAW; do
+        printf '%s\n' "-c"
+        printf '%s\n' "$channel"
+    done
+}
+
 env_remove() {
     if [ "$ENV_TARGET_MODE" = "prefix" ]; then
         CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" remove -p "$ENV_TARGET_VALUE" "$@"
@@ -230,9 +236,10 @@ remove_cpu_pytorch_markers() {
 }
 
 install_cuda_pytorch() {
-    echo "[setup_env] installing CUDA PyTorch runtime (pytorch-cuda=$PYTORCH_CUDA_VERSION)"
+    echo "[setup_env] installing CUDA PyTorch runtime from conda-forge stack (cuda-version=$PYTORCH_CUDA_VERSION)"
     remove_cpu_pytorch_markers
-    env_install -c "$PYTORCH_CHANNEL" -c "$NVIDIA_CHANNEL" "pytorch=*=*cuda*" "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
+    mapfile -t channel_args < <(torch_channel_args)
+    env_install --override-channels "${channel_args[@]}" "pytorch>=2.0,<3.0" "pytorch-gpu>=2.0,<3.0" "cuda-version=$PYTORCH_CUDA_VERSION" -y
 }
 
 verify_cuda_pytorch() {

@@ -255,17 +255,16 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 # Expected: True <cuda_version>
 ```
 
-`OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`. Pick a value supported
-by your NVIDIA driver and the PyTorch conda channel, such as `12.1` or `11.8`.
-CUDA PyTorch installs use absolute official channels
-`https://conda.anaconda.org/pytorch` and `https://conda.anaconda.org/nvidia`
-by default so local channel aliases do not rewrite `nvidia` to a mirror path
-that lacks repodata. If your mirror explicitly hosts those channels, override
-them with `OMICSCLAW_PYTORCH_CHANNEL` and `OMICSCLAW_NVIDIA_CHANNEL`.
+`OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`. Pick a CUDA version
+supported by your NVIDIA driver and conda-forge's `cuda-version` package, such
+as `12.1` or `12.6`. CUDA PyTorch installs stay in the same conda-forge /
+bioconda channel stack as the main env (`pytorch`, `pytorch-gpu`,
+`cuda-version=<version>`), avoiding BLAS/MKL solver conflicts from mixing the
+official PyTorch channel into a strict conda-forge environment. Advanced mirror
+users can override the channel list with `OMICSCLAW_TORCH_CHANNELS`, for
+example `OMICSCLAW_TORCH_CHANNELS="https://mirror/conda-forge https://mirror/bioconda nodefaults"`.
 When CUDA is selected, the script removes CPU-only PyTorch marker packages
-(`pytorch-cpu` / `cpuonly`) and explicitly requests a CUDA PyTorch build
-(`pytorch=*=*cuda*`), so installing `pytorch-cuda` cannot leave the imported
-`torch` module on the CPU build (`torch.version.cuda == None`).
+(`pytorch-cpu` / `cpuonly`) before installing the conda-forge GPU stack.
 Tier 2 defaults `UV_LINK_MODE=copy` when invoking `uv pip install`, which
 avoids noisy hardlink fallback warnings when the uv cache and conda env live
 on different filesystems. Set `UV_LINK_MODE` yourself before running the

@@ -1116,7 +1116,7 @@ def _write_torch_backend_setup_fakes(
             fi
 
             if [ "${1:-}" = "install" ]; then
-                if printf '%s\\n' "$*" | grep -q 'pytorch-cuda'; then
+                if printf '%s\\n' "$*" | grep -q 'pytorch-gpu'; then
                     exit "${OMICSCLAW_FAKE_INSTALL_CUDA_EXIT:-0}"
                 fi
                 exit 0
@@ -1242,13 +1242,14 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     cuda_install = (
-        "mamba install -n OmicsClaw "
-        "-c https://conda.anaconda.org/pytorch "
-        "-c https://conda.anaconda.org/nvidia "
-        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
+        "mamba install -n OmicsClaw --override-channels "
+        "-c conda-forge -c bioconda -c nodefaults "
+        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     )
     assert "nvidia-smi -L" in calls
     assert cuda_install in calls
+    assert "pytorch-cuda" not in calls
+    assert "conda.anaconda.org/pytorch" not in calls
     assert "torch.cuda.is_available" in calls
     assert calls.index(cuda_install) < calls.index("uv pip install -e")
 
@@ -1273,10 +1274,9 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     assert (
-        f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} "
-        "-c https://conda.anaconda.org/pytorch "
-        "-c https://conda.anaconda.org/nvidia "
-        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
+        f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} --override-channels "
+        "-c conda-forge -c bioconda -c nodefaults "
+        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     ) in calls
     assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
 
@@ -1302,21 +1302,19 @@ def test_setup_env_cuda_torch_backend_removes_cpu_variant_markers_before_cuda_in
     calls = log_path.read_text(encoding="utf-8")
     remove_cpu_marker = "mamba remove -n OmicsClaw pytorch-cpu cpuonly -y"
     cuda_install = (
-        "mamba install -n OmicsClaw "
-        "-c https://conda.anaconda.org/pytorch "
-        "-c https://conda.anaconda.org/nvidia "
-        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
+        "mamba install -n OmicsClaw --override-channels "
+        "-c conda-forge -c bioconda -c nodefaults "
+        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     )
     assert remove_cpu_marker in calls
     assert cuda_install in calls
     assert calls.index(remove_cpu_marker) < calls.index(cuda_install)
 
 
-def test_setup_env_cuda_torch_channels_can_be_overridden(tmp_path):
+def test_setup_env_cuda_torch_channels_can_be_overridden_as_a_list(tmp_path):
     env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
     env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
-    env["OMICSCLAW_PYTORCH_CHANNEL"] = "https://mirror.example/pytorch"
-    env["OMICSCLAW_NVIDIA_CHANNEL"] = "https://mirror.example/nvidia"
+    env["OMICSCLAW_TORCH_CHANNELS"] = "https://mirror.example/conda-forge https://mirror.example/bioconda nodefaults"
 
     result = subprocess.run(
         ["bash", "0_setup_env.sh", "OmicsClaw"],
@@ -1330,10 +1328,11 @@ def test_setup_env_cuda_torch_channels_can_be_overridden(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
     assert (
-        "mamba install -n OmicsClaw "
-        "-c https://mirror.example/pytorch "
-        "-c https://mirror.example/nvidia "
-        "pytorch=*=*cuda* pytorch-cuda=12.1 -y"
+        "mamba install -n OmicsClaw --override-channels "
+        "-c https://mirror.example/conda-forge "
+        "-c https://mirror.example/bioconda "
+        "-c nodefaults "
+        "pytorch>=2.0,<3.0 pytorch-gpu>=2.0,<3.0 cuda-version=12.1 -y"
     ) in calls
 
 
