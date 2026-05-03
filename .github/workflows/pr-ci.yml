@@ -65,6 +65,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[memory,dev]"
+          # These runtime packages are mamba-owned in environment.yml for
+          # real installs. The PR job is intentionally pip-only, so install
+          # the narrow memory/interactive import surface needed by these tests.
+          pip install \
+            rich \
+            prompt-toolkit \
+            questionary \
+            PyYAML \
+            aiosqlite \
+            sqlalchemy \
+            fastapi \
+            uvicorn \
+            cryptography \
+            pydantic \
+            requests \
+            openai \
+            python-dotenv \
+            httpx
 
       - name: Run memory tests
         run: |
@@ -118,6 +136,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          # Full analysis installs get these from 0_setup_env.sh/environment.yml.
+          # Keep pyproject.toml as the thin pip residue and hydrate only this
+          # pip-only PR job with the spatial-preprocess demo test surface.
+          pip install \
+            "numpy>=1.24,<2.1" \
+            "pandas>=2.0,<3.0" \
+            scipy \
+            scikit-learn \
+            matplotlib \
+            seaborn \
+            pillow \
+            h5py \
+            anndata \
+            scanpy \
+            scikit-misc \
+            python-igraph \
+            leidenalg \
+            umap-learn
 
       - name: Run spatial preprocessing tests
         run: python -m pytest skills/spatial/spatial-preprocess/tests/ -v
