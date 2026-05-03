@@ -252,14 +252,22 @@ OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
 # 或：
 bash 0_setup_env.sh --with-banksy
 
-# CUDA 用户：默认装好后再覆盖 CPU 版 pytorch
-# pytorch-cuda 版本需匹配本机驱动（12.1 / 11.8 等）：
-mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+# PyTorch 后端选择：
+#   auto（默认）：如果 nvidia-smi -L 能看到 GPU，就尝试安装 CUDA PyTorch。
+#                 CUDA 设置失败时会警告并保留 CPU baseline。
+#   cuda：强制要求 CUDA PyTorch，安装或验证失败则中断 setup。
+#   cpu：即使机器有 GPU，也保留 CPU PyTorch baseline。
+OMICSCLAW_TORCH_BACKEND=cuda OMICSCLAW_PYTORCH_CUDA_VERSION=12.1 bash 0_setup_env.sh
+OMICSCLAW_TORCH_BACKEND=cpu bash 0_setup_env.sh
 
-# 装好后验证一下 CUDA 是否真的接上：
+# 在 GPU 机器上使用 auto/cuda 后，验证 CUDA 是否真的接上：
 mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 # 预期：True <cuda_version>
 ```
+
+`OMICSCLAW_PYTORCH_CUDA_VERSION` 默认是 `12.1`。请选择 NVIDIA 驱动和
+PyTorch conda channel 都支持的版本，例如 `12.1` 或 `11.8`。远程运行时要在
+真正执行分析的服务器上运行 setup；本地 desktop 机器是否有 GPU 不影响远端环境。
 
 新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。
 

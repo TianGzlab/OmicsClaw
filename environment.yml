@@ -230,8 +230,8 @@ dependencies:
   #     listed without per-package channel pins; strict channel priority +
   #     bioconda/conda-forge order in this file is enough.
   #   * pytorch lives on conda-forge AND on the dedicated `pytorch` channel.
-  #     We use conda-forge to stay inside the file's channel order. CUDA users
-  #     follow README's CUDA override (mamba install -c pytorch -c nvidia ...).
+  #     The file keeps a CPU-safe baseline; 0_setup_env.sh can replace it with
+  #     a CUDA build when OMICSCLAW_TORCH_BACKEND=auto/cuda.
   #   * Four packages from Task 0 audit are `unknown` (cell2location,
   #     cellphonedb, infercnvpy, spatialde) — they remain in pyproject as
   #     thin pip residue until verified on a network-connected machine. See
@@ -292,10 +292,9 @@ dependencies:
   - jinja2>=3.1.5
   - nbconvert>=7.0
   - beautifulsoup4>=4.12
-  # Deep learning (CPU build by default; CUDA users override per README)
+  # Deep learning (CPU-safe baseline; setup script may replace with CUDA)
   - pytorch>=2.0,<3.0
-  - pytorch-cpu                 # explicit CPU variant; CUDA users follow
-                                # README's CUDA override snippet.
+  - pytorch-cpu                 # explicit CPU variant for CPU-only machines.
   # scvi family + downstream
   - scvi-tools>=1.4.0,<2.0
   - scvelo>=0.3.0

@@ -5,6 +5,9 @@ development work.
 
 ## Tracked Entries
 
+- [2026-05-03-auto-torch-backend-setup.md](2026-05-03-auto-torch-backend-setup.md)
+  — make the conda setup script auto-select CUDA PyTorch on GPU-capable
+  servers while preserving CPU-safe defaults and strict forced-CUDA mode.
 - [2026-05-02-github-r-package-preflight.md](2026-05-02-github-r-package-preflight.md)
   — audit Tier 3 GitHub-only R package dependency closures and preinstall
   conda-resolvable install-time dependencies to avoid avoidable CRAN/Bioc

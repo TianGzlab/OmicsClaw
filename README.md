@@ -242,14 +242,23 @@ OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
 # or:
 bash 0_setup_env.sh --with-banksy
 
-# CUDA users: after the default install, override the CPU pytorch build.
-# Pick the pytorch-cuda version that matches your driver (12.1 / 11.8 / etc.):
-mamba install -n OmicsClaw -c pytorch -c nvidia pytorch-cuda=12.1
+# Torch backend selection:
+#   auto (default): if nvidia-smi -L reports a GPU, try CUDA PyTorch.
+#                   If CUDA setup fails, warn and keep the CPU baseline.
+#   cuda: require CUDA PyTorch and fail setup if install/verification fails.
+#   cpu: keep the CPU PyTorch baseline even on GPU-capable machines.
+OMICSCLAW_TORCH_BACKEND=cuda OMICSCLAW_PYTORCH_CUDA_VERSION=12.1 bash 0_setup_env.sh
+OMICSCLAW_TORCH_BACKEND=cpu bash 0_setup_env.sh
 
-# Verify CUDA is wired up:
+# Verify CUDA is wired up when using auto/cuda on a GPU machine:
 mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 # Expected: True <cuda_version>
 ```
+
+`OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`. Pick a value supported
+by your NVIDIA driver and the PyTorch conda channel, such as `12.1` or `11.8`.
+Remote installs must run this setup on the actual analysis server; the desktop
+machine's GPU state is irrelevant.
 
 End-to-end smoke test on a fresh machine: `bash scripts/smoke_test_setup.sh`.
 

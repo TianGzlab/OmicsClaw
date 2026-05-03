@@ -24,6 +24,8 @@ preserve the reference skills' core design:
 
 Recent additions:
 
+- `plans/2026-05-03-auto-torch-backend-setup.md` — make setup choose CUDA
+  PyTorch automatically on GPU-capable servers while keeping CPU installs safe
 - `plans/2026-04-15-remote-contract-hardening.md` — harden the new remote
   control-plane contract so session ownership, job state transitions, and
   persisted metadata stay truthful before the real Executor lands

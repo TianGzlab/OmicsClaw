@@ -23,6 +23,24 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$PROJECT_ROOT/environment.yml"
 TOOLS_DIR="$PROJECT_ROOT/tools"
 
+TORCH_BACKEND_RAW="${OMICSCLAW_TORCH_BACKEND:-auto}"
+TORCH_BACKEND="$(printf '%s' "$TORCH_BACKEND_RAW" | tr '[:upper:]' '[:lower:]')"
+PYTORCH_CUDA_VERSION="${OMICSCLAW_PYTORCH_CUDA_VERSION:-12.1}"
+
+case "$TORCH_BACKEND" in
+    auto|cuda|cpu) ;;
+    *)
+        echo "[setup_env] ✖ invalid OMICSCLAW_TORCH_BACKEND='$TORCH_BACKEND_RAW'." >&2
+        echo "  Expected one of: auto, cuda, cpu." >&2
+        exit 1
+        ;;
+esac
+
+if [ -z "$PYTORCH_CUDA_VERSION" ]; then
+    echo "[setup_env] ✖ OMICSCLAW_PYTORCH_CUDA_VERSION must not be empty." >&2
+    exit 1
+fi
+
 # ----- prerequisites: mamba preferred, conda fallback ---------------
 
 if command -v mamba >/dev/null 2>&1; then
@@ -174,6 +192,62 @@ env_run() {
     fi
 }
 
+env_install() {
+    if [ "$ENV_TARGET_MODE" = "prefix" ]; then
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" install -p "$ENV_TARGET_VALUE" "$@"
+    else
+        CONDA_CHANNEL_PRIORITY=strict "$INSTALLER" install -n "$ENV_TARGET_VALUE" "$@"
+    fi
+}
+
+detect_nvidia_gpu() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
+    nvidia-smi -L >/dev/null 2>&1
+}
+
+install_cuda_pytorch() {
+    echo "[setup_env] installing CUDA PyTorch runtime (pytorch-cuda=$PYTORCH_CUDA_VERSION)"
+    env_install -c pytorch -c nvidia pytorch "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
+}
+
+verify_cuda_pytorch() {
+    env_run python -c 'import torch; ok = torch.cuda.is_available(); print(f"cuda_available={ok} cuda_version={getattr(torch.version, '\''cuda'\'', None)}"); raise SystemExit(0 if ok else 1)'
+}
+
+configure_torch_backend() {
+    echo "[setup_env] torch backend: $TORCH_BACKEND"
+    case "$TORCH_BACKEND" in
+        cpu)
+            echo "[setup_env] keeping CPU PyTorch baseline from environment.yml"
+            ;;
+        auto)
+            if detect_nvidia_gpu; then
+                echo "[setup_env] NVIDIA GPU detected via nvidia-smi; attempting CUDA PyTorch override"
+                if install_cuda_pytorch && verify_cuda_pytorch; then
+                    echo "[setup_env] ✔ CUDA PyTorch verified"
+                else
+                    echo "[setup_env] ⚠ CUDA PyTorch setup was not verified; continuing without verified CUDA acceleration." >&2
+                    echo "  Set OMICSCLAW_TORCH_BACKEND=cuda to make this failure fatal." >&2
+                fi
+            else
+                echo "[setup_env] no NVIDIA GPU detected via nvidia-smi; keeping CPU PyTorch baseline"
+            fi
+            ;;
+        cuda)
+            echo "[setup_env] forced CUDA PyTorch requested"
+            if ! install_cuda_pytorch; then
+                echo "[setup_env] ✖ CUDA PyTorch install failed." >&2
+                exit 1
+            fi
+            if ! verify_cuda_pytorch; then
+                echo "[setup_env] ✖ CUDA PyTorch verification failed." >&2
+                exit 1
+            fi
+            echo "[setup_env] ✔ CUDA PyTorch verified"
+            ;;
+    esac
+}
+
 ENV_LIST_OUTPUT="$(list_conda_envs)" || {
     echo "[setup_env] ✖ failed to list conda environments." >&2
     echo "  Try: conda info --envs" >&2
@@ -217,6 +291,8 @@ if [ -z "$ENV_PREFIX" ] || [ ! -d "$ENV_PREFIX" ]; then
 fi
 ENV_BIN="$ENV_PREFIX/bin"
 echo "[setup_env] env prefix: $ENV_PREFIX"
+
+configure_torch_backend
 
 echo "[setup_env] ✔ Tier 1 complete"
 

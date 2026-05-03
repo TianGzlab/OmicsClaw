@@ -141,6 +141,11 @@ TIER3_CRAN_PREFLIGHT_PACKAGES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _default_subprocess_setup_tests_to_cpu_backend(monkeypatch):
+    monkeypatch.setenv("OMICSCLAW_TORCH_BACKEND", "cpu")
+
+
 def _parse_description_fields(description: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     current_field: str | None = None
@@ -1057,3 +1062,248 @@ def test_setup_env_updates_anonymous_env_list_prefix(tmp_path):
     assert f"mamba env update -p {fake_prefix}" in calls
     assert "mamba env create -n OmicsClaw" not in calls
     assert f"mamba run -p {fake_prefix}" in calls
+
+
+def _write_torch_backend_setup_fakes(
+    tmp_path: Path,
+    *,
+    existing_env: bool = True,
+    nvidia_gpu: bool = False,
+) -> tuple[dict[str, str], Path, Path]:
+    repo_root = Path(__file__).resolve().parents[1]
+    fake_bin = tmp_path / "bin"
+    fake_home = tmp_path / "home"
+    fake_prefix = fake_home / ".conda" / "envs" / "OmicsClaw"
+    fake_envs_dir = fake_prefix.parent
+    log_path = tmp_path / "calls.log"
+    fake_bin.mkdir()
+    (fake_prefix / "conda-meta").mkdir(parents=True)
+    (fake_prefix / "bin").mkdir(parents=True)
+
+    (fake_bin / "mamba").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'mamba %s\\n' "$*" >> "$OMICSCLAW_FAKE_LOG"
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--envs" ]; then
+                cat <<EOF
+            # conda environments:
+            #
+            base                     /fake/base
+            EOF
+                exit 0
+            fi
+
+            if [ "${1:-}" = "env" ] && [ "${2:-}" = "update" ]; then
+                exit 0
+            fi
+
+            if [ "${1:-}" = "env" ] && [ "${2:-}" = "create" ]; then
+                mkdir -p "$OMICSCLAW_FAKE_PREFIX/conda-meta" "$OMICSCLAW_FAKE_PREFIX/bin"
+                exit 0
+            fi
+
+            if [ "${1:-}" = "install" ]; then
+                if printf '%s\\n' "$*" | grep -q 'pytorch-cuda'; then
+                    exit "${OMICSCLAW_FAKE_INSTALL_CUDA_EXIT:-0}"
+                fi
+                exit 0
+            fi
+
+            if [ "${1:-}" = "run" ]; then
+                if printf '%s\\n' "$*" | grep -q ' python -c '; then
+                    if printf '%s\\n' "$*" | grep -q 'sys.prefix'; then
+                        echo "$OMICSCLAW_FAKE_PREFIX"
+                        exit 0
+                    fi
+                    if printf '%s\\n' "$*" | grep -q 'torch.cuda.is_available'; then
+                        if [ "${OMICSCLAW_FAKE_VERIFY_CUDA_EXIT:-0}" = "0" ]; then
+                            echo "cuda_available=True cuda_version=12.1"
+                        else
+                            echo "cuda_available=False cuda_version=None" >&2
+                        fi
+                        exit "${OMICSCLAW_FAKE_VERIFY_CUDA_EXIT:-0}"
+                    fi
+                fi
+                if printf '%s\\n' "$*" | grep -q ' Rscript '; then
+                    cat >/dev/null
+                    exit 0
+                fi
+                exit 0
+            fi
+
+            echo "unexpected mamba command: $*" >&2
+            exit 99
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "conda").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'conda %s\\n' "$*" >> "$OMICSCLAW_FAKE_LOG"
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--envs" ]; then
+                cat <<EOF
+            # conda environments:
+            #
+            base                     /fake/base
+            EOF
+                if [ "${OMICSCLAW_FAKE_EXISTING_ENV:-1}" = "1" ]; then
+                    echo "OmicsClaw                $OMICSCLAW_FAKE_PREFIX"
+                fi
+                exit 0
+            fi
+
+            if [ "${1:-}" = "info" ] && [ "${2:-}" = "--json" ]; then
+                cat <<EOF
+            {"envs_dirs": ["$OMICSCLAW_FAKE_ENVS_DIR"]}
+            EOF
+                exit 0
+            fi
+
+            echo "unexpected conda command: $*" >&2
+            exit 99
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "nvidia-smi").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf 'nvidia-smi %s\\n' "$*" >> "$OMICSCLAW_FAKE_LOG"
+
+            if [ "${1:-}" = "-L" ] && [ "${OMICSCLAW_FAKE_NVIDIA_GPU:-0}" = "1" ]; then
+                echo "GPU 0: NVIDIA A100-SXM4-40GB"
+                exit 0
+            fi
+            exit 1
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "mamba").chmod(0o755)
+    (fake_bin / "conda").chmod(0o755)
+    (fake_bin / "nvidia-smi").chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(fake_home),
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "OMICSCLAW_FAKE_EXISTING_ENV": "1" if existing_env else "0",
+            "OMICSCLAW_FAKE_ENVS_DIR": str(fake_envs_dir),
+            "OMICSCLAW_FAKE_LOG": str(log_path),
+            "OMICSCLAW_FAKE_NVIDIA_GPU": "1" if nvidia_gpu else "0",
+            "OMICSCLAW_FAKE_PREFIX": str(fake_prefix),
+        }
+    )
+    return env, log_path, repo_root
+
+
+def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
+    env.pop("OMICSCLAW_TORCH_BACKEND", None)
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    cuda_install = "mamba install -n OmicsClaw -c pytorch -c nvidia pytorch pytorch-cuda=12.1 -y"
+    assert "nvidia-smi -L" in calls
+    assert cuda_install in calls
+    assert "torch.cuda.is_available" in calls
+    assert calls.index(cuda_install) < calls.index("uv pip install -e")
+
+
+def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(
+        tmp_path,
+        existing_env=False,
+        nvidia_gpu=True,
+    )
+    env.pop("OMICSCLAW_TORCH_BACKEND", None)
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} -c pytorch -c nvidia pytorch pytorch-cuda=12.1 -y" in calls
+    assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
+
+
+def test_setup_env_cpu_torch_backend_skips_cuda_probe_and_install(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
+    env["OMICSCLAW_TORCH_BACKEND"] = "cpu"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert "torch backend: cpu" in result.stdout
+    assert "nvidia-smi -L" not in calls
+    assert "pytorch-cuda" not in calls
+
+
+def test_setup_env_forced_cuda_torch_backend_fails_when_cuda_verification_fails(tmp_path):
+    env, _log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=False)
+    env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
+    env["OMICSCLAW_FAKE_VERIFY_CUDA_EXIT"] = "33"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "CUDA PyTorch verification failed" in result.stderr
+
+
+def test_setup_env_rejects_invalid_torch_backend_before_conda_changes(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
+    env["OMICSCLAW_TORCH_BACKEND"] = "rocm"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "invalid OMICSCLAW_TORCH_BACKEND" in result.stderr
+    calls = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert "env update" not in calls
