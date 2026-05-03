@@ -1,0 +1,44 @@
+---
+title: "为什么需要 OmicsClaw - 解决多组学分析的碎片化问题"
+description: "多组学分析工具碎片化、学习曲线陡、本地隐私要求高。OmicsClaw 用 AI Agent + skill 路由把 88 个分析工具统一成一句话调用，且全部本地运行。"
+keywords: ["多组学分析", "本地 AI", "生物信息学工具", "OmicsClaw 动机"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 多组学研究者今天的真实痛点
+
+**工具碎片化**：空间转录组用 Squidpy，单细胞用 Scanpy / Seurat，差异分析用 DESeq2，变异检测用 GATK，蛋白组用 MaxQuant，代谢组用 XCMS。每个工具各有一套不兼容的 CLI 和数据格式，跨领域分析需要反复转换。
+
+**学习曲线陡**：每个工具的参数语法不同，研究者往往花更多时间查文档、调参数，而非真正分析数据。换一套工具就要重新积累肌肉记忆。
+
+**数据隐私**：临床样本和人类基因组数据在法律和伦理层面均不允许上传至云端 SaaS 平台进行分析。本地计算是唯一合规选项，但本地搭建完整工具链的成本极高。
+
+**报告化弱**：从原始脚本输出到可发表图表，中间还有大量手工拼接——复制 Excel 数值、截图、粘贴到 Word。分析血缘难以追溯，结果可重复性差。
+
+## 启用前 / 启用后对比
+
+| 维度 | 启用前 | 启用 OmicsClaw 后 |
+|---|---|---|
+| 工具切换次数 | 5+（Squidpy / Scanpy / R / Seurat / Excel） | 1（自然语言提问） |
+| 命令记忆负担 | 每个工具一套参数语法，反复查文档 | orchestrator 自动路由，无需记忆命令 |
+| 数据外发风险 | 云端 SaaS 要求上传原始数据 | 全部本地运行，数据不出本机 |
+| 报告生成 | 手工截图、Excel 拼接、人工整理 | skill 自动输出 HTML 报告与可复现图表 |
+
+## 三个真实场景
+
+**单细胞研究生初次分析**：一名研究生第一次处理 scRNA-seq 数据，不熟悉 Scanpy 的过滤参数和归一化顺序。用 OmicsClaw 提问后，orchestrator 自动路由到 `sc-preprocessing` skill，完成 QC、归一化、HVG 选取、PCA/UMAP 和聚类，并输出带注释的 HTML 报告，全程无需手写脚本。
+
+**空间转录组 PI 批量比对样本**：一位 PI 需要比较多个癌症样本的空间 domain 结构差异。OmicsClaw 先调用 `spatial-domains` 对每个样本做 Leiden 聚类域识别，再用 `spatial-condition` 跨样本比较 domain 分布，最终生成统一格式的对比报告，无需手动对齐不同 Seurat 对象。
+
+**Bulk RNA-seq 实验室一站式流程**：一个 Bulk RNA-seq 实验室需要完成差异分析、富集分析和生存分析。OmicsClaw 依次调用 `bulkrna-de`（PyDESeq2 差异分析）、`bulkrna-enrichment`（ORA 通路富集）和 `bulkrna-survival`（基因表达与生存关联），三步结果输出到同一目录，血缘关系完整记录。
+
+## 它不解决什么
+
+- **不解决湿实验环节**：文库制备、测序上机、BCL → FASTQ 转换仍需要实体仪器，OmicsClaw 从 FASTQ 或计数矩阵开始接手
+- **不解决统计新方法的发表**：OmicsClaw 是集成层，不是算法创新平台，发明新分析方法仍需独立研究
+- **不解决团队协作**：当前版本为单机 Agent，不支持多用户共享工作区或协同会话
+
+## 下一步阅读
+
+- [什么是 OmicsClaw](/docs/introduction/what-is-omicsclaw)
+- [五分钟上手](/docs/introduction/quickstart)

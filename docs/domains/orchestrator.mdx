@@ -1,0 +1,48 @@
+---
+title: "编排域 - orchestrator · 2 skills"
+description: "Orchestrator 作为元领域，包含 2 个 meta skill：orchestrator（多组学查询路由）和 omics-skill-builder（skill 脚手架）。"
+keywords: ["orchestrator", "skill builder", "meta skills"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+Orchestrator 是元领域（meta-domain），不执行分析，提供两项支撑：orchestrator 将自然语言路由到正确的分析 skill；omics-skill-builder 生成新 skill 脚手架。列为独立 domain 是为保持注册表对称性，让两个入口在 `omicsclaw.py list` 可见。路由原理见 [架构 · 编排器](/docs/architecture/orchestrator)。
+
+## 典型使用流程 ASCII 图
+
+```text
+开发者新增 skill：
+   omics-skill-builder
+        │
+        ▼
+   生成 skills/<domain>/<new-skill>/{SKILL.md, <slug>.py}
+        │
+        ▼
+   写入实现 + commit
+
+用户跑分析：
+   自然语言提问
+        │
+        ▼
+   orchestrator → 路由到具体 skill
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| orchestrator | 多组学查询路由 | `python skills/orchestrator/omics_orchestrator.py --query "find spatially variable genes" --output output/` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/orchestrator/SKILL.md) |
+| omics-skill-builder | Skill 脚手架生成器 | `python omicsclaw.py run omics-skill-builder --skill-name <new-skill> --domain <domain> --request "<描述>"` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/orchestrator/omics-skill-builder/SKILL.md) |
+
+## 何时不适用本领域
+
+- **直接想跑分析** → 用 6 个分析领域之一，本域是元工具
+- **想改 orchestrator 路由逻辑** → 看代码 `omicsclaw/routing/router.py`，本 skill 文档不覆盖内部修改
+- **想改 LLM provider** → 调整 `.env`，不在本域 skill 范围内
+
+## 下一步阅读
+
+- [架构 · 编排器原理](/docs/architecture/orchestrator)
+- [架构 · 技能系统](/docs/architecture/skill-system)
+- [七大组学概览](/docs/domains/spatial)

@@ -1,0 +1,111 @@
+---
+title: "技能系统 - Skill 是怎么组织和发现的"
+description: "OmicsClaw 的 88 个 skill 按 7 个领域分目录，每个 skill 由 SKILL.md（方法论 + 元数据）+ 入口脚本组成。Registry 启动时扫描全量 skill，orchestrator 据此路由。"
+keywords: ["skill system", "SKILL.md", "registry", "OmicsClaw 技能"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么用 skill 这种组织方式
+
+**可发现性**：skill 即文件夹加 SKILL.md，`omicsclaw.py list` 一键全量列出所有已注册 skill，无需手工维护清单。新增一个目录并写好 SKILL.md，即可完成注册。
+
+**可替换性**：每个 skill 自带 SKILL.md 描述输入/输出契约（`requires`、`saves_h5ad` 等字段），替换内部实现不影响调用方——orchestrator 和 bot 只依赖契约，不依赖实现细节。
+
+**可教性**：SKILL.md 同时是文档和路由元数据，单一来源，LLM 编排器与人类用户共享同一份事实。前者从 frontmatter 读取 `trigger_keywords` 做路由打分，后者阅读 markdown body 获得方法论说明。
+
+## Skill 的物理布局
+
+```text
+skills/
+├── spatial/
+│   ├── INDEX.md                     ← 本领域所有 skill 一行简介列表
+│   ├── spatial-preprocess/
+│   │   ├── SKILL.md                 ← 方法论 + CLI 接口契约 + 元数据
+│   │   └── spatial_preprocess.py    ← 入口脚本
+│   ├── spatial-domains/
+│   │   ├── SKILL.md
+│   │   └── spatial_domains.py
+│   └── ...（共 17 个）
+├── singlecell/    （30 个）
+├── genomics/      （10 个）
+├── proteomics/    （8 个）
+├── metabolomics/  （8 个）
+├── bulkrna/       （13 个）
+└── orchestrator/  （2 个）
+```
+
+## SKILL.md 的契约
+
+每个 SKILL.md 以 YAML frontmatter 开头，registry 和 bot 均从中读取字段。以下字段来自 `skills/spatial/spatial-preprocess/SKILL.md`：
+
+| 字段 | 用途 | 示例（来自 spatial-preprocess） |
+|---|---|---|
+| `name` | skill 唯一标识（路由 slug） | `spatial-preprocess` |
+| `description` | 一句话摘要，供 LLM 路由打分 | `"Load matrix-level spatial transcriptomics data ... downstream-ready AnnData"` |
+| `version` | 版本追踪 | `0.5.0` |
+| `tags` | 关键词列表，辅助搜索 | `[spatial, preprocessing, QC, normalization, HVG, leiden, umap]` |
+| `metadata.omicsclaw.domain` | 所属领域键（7 选 1） | `spatial` |
+| `metadata.omicsclaw.allowed_extra_flags` | bot 可传入的 CLI flags | `["--leiden-resolution", "--min-genes", "--n-top-hvg", ...]` |
+| `metadata.omicsclaw.param_hints` | autoagent 调参搜索空间 + bot 参数预览 | `scanpy_standard: {priority: "tissue → min_genes/max_mt_pct/..."}` |
+| `metadata.omicsclaw.legacy_aliases` | 旧名称，路由仍可命中 | `[preprocess]` |
+| `metadata.omicsclaw.saves_h5ad` | 告知 LLM 该 skill 输出 h5ad | `true` |
+| `metadata.omicsclaw.requires_preprocessed` | 告知 LLM 该 skill 需要预处理输入 | `false` |
+
+## Registry 加载流程
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  OmicsRegistry.load_all() 被调用                         │
+└──────────────────────────────────────────────────────────┘
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│  _iter_skill_dirs() 遍历 skills/ 目录树                  │
+│  · 平铺布局：skills/<domain>/<slug>/                     │
+│  · 嵌套布局：skills/singlecell/scrna/<slug>/             │
+│  · 含 SKILL.md 或单一 .py 文件的目录即为 skill           │
+└──────────────────────────────────────────────────────────┘
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│  对每个 skill 目录：                                     │
+│  · LazySkillMetadata 懒解析 SKILL.md frontmatter         │
+│  · _resolve_script_path() 定位入口 .py 脚本              │
+│  · 提取 domain / alias / legacy_aliases / demo_args      │
+└──────────────────────────────────────────────────────────┘
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│  _register_skill_entry() 写入 registry.skills 字典       │
+│  · canonical alias → info dict                           │
+│  · legacy alias → 同一 info dict（多键同值）             │
+└──────────────────────────────────────────────────────────┘
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│  _refresh_domain_skill_counts() 按实际数量更新域元数据   │
+└──────────────────────────────────────────────────────────┘
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│  orchestrator + run_skill 通过 registry.skills 查表分发  │
+└──────────────────────────────────────────────────────────┘
+```
+
+## 启用前 / 启用后
+
+| 维度 | 普通脚本集合 | OmicsClaw skill 体系 |
+|---|---|---|
+| 可发现性 | 翻 README 手找 | `omicsclaw.py list` 一行全出 |
+| 可路由性 | 用户记住 CLI 名称 | orchestrator 自动打分选 |
+| 可替换性 | 改名要全局搜替 | 只改自己目录内实现 |
+| 可教性 | 文档与代码两边维护 | SKILL.md 单一来源 |
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| `list` 报某 skill 不存在 | 该 skill 目录缺 SKILL.md | 补写 SKILL.md 后重新 list |
+| SKILL.md frontmatter 解析报错 | YAML 语法错（缩进/引号） | 用 `python -c "import yaml; yaml.safe_load(open('skills/.../SKILL.md').read().split('---')[1])"` 调试 |
+| skill 名冲突或路由跳错 | 两个 SKILL.md 的 name 字段相同 | 修改其中一个 name 字段使其唯一 |
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)
+- [七大组学：空间转录组](/docs/domains/spatial)

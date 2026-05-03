@@ -27,11 +27,46 @@ def test_build_provider_registry_entries_exposes_display_metadata():
     deepseek = next(entry for entry in entries if entry["name"] == "deepseek")
     assert deepseek["display_name"] == "DeepSeek"
     assert deepseek["tier"] == "primary"
-    assert "deepseek-chat" in deepseek["models"]
+    assert deepseek["models"] == ["deepseek-v4-flash", "deepseek-v4-pro"]
+    assert deepseek["model_metadata"] == [
+        {"id": "deepseek-v4-flash", "context_window": 1_000_000},
+        {"id": "deepseek-v4-pro", "context_window": 1_000_000},
+    ]
+
+    openai = next(entry for entry in entries if entry["name"] == "openai")
+    assert openai["model_metadata"][0] == {
+        "id": "gpt-5.5-pro",
+        "context_window": 1_050_000,
+    }
+    assert {
+        item["id"]: item["context_window"]
+        for item in openai["model_metadata"]
+    }["gpt-5.4-mini"] == 400_000
+
+    gemini = next(entry for entry in entries if entry["name"] == "gemini")
+    assert {
+        item["id"]: item["context_window"]
+        for item in gemini["model_metadata"]
+    }["gemini-3-flash-preview"] == 1_048_576
+
+    nvidia = next(entry for entry in entries if entry["name"] == "nvidia")
+    assert {
+        item["id"]: item["context_window"]
+        for item in nvidia["model_metadata"]
+    }["nvidia/nemotron-3-super-120b-a12b"] == 1_000_000
+
+    moonshot = next(entry for entry in entries if entry["name"] == "moonshot")
+    moonshot_windows = {
+        item["id"]: item["context_window"]
+        for item in moonshot["model_metadata"]
+    }
+    assert moonshot_windows["kimi-k2.6"] == 262_144
+    assert "moonshot-v1-auto" not in moonshot_windows
 
     custom = next(entry for entry in entries if entry["name"] == "custom")
     assert custom["display_name"] == "Custom Endpoint"
     assert custom["models"] == []
+    assert custom["model_metadata"] == []
 
 
 def test_detect_provider_from_env_prefers_explicit_provider(monkeypatch):
@@ -53,11 +88,14 @@ def test_dashscope_preset_exposes_latest_qwen_models():
     entries = build_provider_registry_entries()
     dashscope = next(entry for entry in entries if entry["name"] == "dashscope")
 
-    assert dashscope["default_model"] == "qwen3-max"
-    assert dashscope["models"][0] == "qwen3-max"
+    assert dashscope["default_model"] == "qwen3.6-plus"
+    assert dashscope["models"][0] == "qwen3.6-plus"
     assert "qwen3.6-plus" in dashscope["models"]
     assert "qwen3-coder-plus" in dashscope["models"]
-    assert "qwen3-235b-a22b" not in dashscope["models"]
+    assert "qwen3-235b-a22b" in dashscope["models"]
+    assert "qwen3-max" in dashscope["models"]
+    assert "qwen3.5-flash" in dashscope["models"]
+    assert "qwen-turbo-latest" in dashscope["models"]
 
 
 def test_resolve_provider_uses_provider_specific_defaults(monkeypatch):
@@ -67,8 +105,21 @@ def test_resolve_provider_uses_provider_specific_defaults(monkeypatch):
     resolved_url, resolved_model, resolved_key = resolve_provider(provider="deepseek")
 
     assert resolved_url == "https://internal.deepseek.example/v1"
-    assert resolved_model == "deepseek-chat"
+    assert resolved_model == "deepseek-v4-flash"
     assert resolved_key == "deepseek-key"
+
+
+def test_resolve_provider_replaces_legacy_deepseek_models_with_current_default(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+
+    for legacy_model in ("deepseek-chat", "deepseek-reasoner"):
+        _resolved_url, resolved_model, resolved_key = resolve_provider(
+            provider="deepseek",
+            model=legacy_model,
+        )
+
+        assert resolved_model == "deepseek-v4-flash"
+        assert resolved_key == "deepseek-key"
 
 
 def test_resolve_provider_auto_detects_specific_key(monkeypatch):
@@ -79,7 +130,7 @@ def test_resolve_provider_auto_detects_specific_key(monkeypatch):
     resolved_url, resolved_model, resolved_key = resolve_provider()
 
     assert resolved_url is None
-    assert resolved_model == "gpt-5.4"
+    assert resolved_model == "gpt-5.5"
     assert resolved_key == "openai-key"
 
 
@@ -100,7 +151,7 @@ def test_resolve_provider_custom_preserves_explicit_endpoint(monkeypatch):
 def test_normalize_model_for_provider_rewrites_foreign_default_model():
     normalized, foreign_provider = normalize_model_for_provider(
         provider="anthropic",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
     )
 
     assert normalized == PROVIDER_PRESETS["anthropic"][1]
@@ -133,7 +184,7 @@ def test_resolve_provider_normalizes_stale_foreign_default_model(monkeypatch):
 
     resolved_url, resolved_model, resolved_key = resolve_provider(
         provider="anthropic",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
     )
 
     assert resolved_url == PROVIDER_PRESETS["anthropic"][0]

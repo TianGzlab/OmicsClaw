@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 
@@ -5,6 +6,28 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
 from omicsclaw.core.registry import registry
+
+
+def test_registry_import_does_not_require_package_file():
+    """App-server startup must not crash if omicsclaw is a namespace package."""
+    code = """
+import importlib
+import omicsclaw
+
+omicsclaw.__file__ = None
+registry = importlib.import_module("omicsclaw.core.registry")
+assert registry.OMICSCLAW_DIR.name == "OmicsClaw"
+assert registry.SKILLS_DIR.name == "skills"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 def test_registry_loaded():
     registry.load_all()

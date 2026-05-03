@@ -19,44 +19,18 @@ and human contributors doing maintenance or development work in OmicsClaw.
 
 - Treat the root `README.md` as the repository's living memory for goals,
   milestones, architecture changes, and contributor-facing workflow rules.
-- Store dated design notes, completion summaries, and architecture records in
-  `docs/superpowers/specs/YYYY-MM-DD-topic.md`.
-- Store dated multi-step implementation plans in
-  `docs/superpowers/plans/YYYY-MM-DD-topic.md`.
-- Keep index `README.md` files current in `docs/superpowers/` and its
-  subdirectories when adding or removing durable docs.
+- Store durable design notes, completion summaries, and architecture records
+  under the relevant `docs/` topic area.
+- Keep local agent workflow notes outside the repository or under ignored
+  paths.
 - Use date prefixes on long-lived documents so they sort chronologically.
 - Prefer extending existing docs and code paths over introducing new top-level
   files, helper scripts, or fallback branches without a concrete need.
 
 ## Development Workflow
 
-OmicsClaw does not currently ship these as runtime-loaded tool skills. In this
-repository, they are implemented as workflow playbooks under
-`docs/superpowers/playbooks/`.
-
-These playbooks are not lightweight reminders. They are repository-level
-workflow contracts adapted from the reference `feishu_agent` skills. Each one
-should define:
-
-- a core principle
-- an iron law or non-negotiable gate
-- when to use and when not to use it
-- red flags and anti-rationalization checks
-- required outputs or evidence
-
-For any non-trivial code task, load the matching playbook before touching code:
-
-- Debugging → `docs/superpowers/playbooks/skill_systematic_debugging.md`
-- TDD → `docs/superpowers/playbooks/skill_test_driven_development.md`
-- Completion verification →
-  `docs/superpowers/playbooks/skill_verification_before_completion.md`
-- Task planning → `docs/superpowers/playbooks/skill_writing_plans.md`
-- Parallel task dispatch →
-  `docs/superpowers/playbooks/skill_dispatching_parallel_agents.md`
-- Code review → `docs/superpowers/playbooks/skill_requesting_code_review.md`
-- Branch completion →
-  `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
+OmicsClaw does not ship local agent workflow playbooks as tracked project
+documentation. Keep such notes outside the repository or under ignored paths.
 
 Typical workflow chaining:
 
@@ -74,13 +48,12 @@ Additional rules:
   public API, or repository contract requires them.
 - Prefer the smallest clear change that solves the current problem.
 - Verify the affected behavior before declaring work complete.
-- Violating the letter of a workflow playbook is usually violating its spirit;
-  treat these playbooks as binding process guardrails, not optional advice.
+- Treat planning, debugging discipline, and completion verification as
+  required process guardrails for non-trivial changes.
 
 ## Repository Maintenance
 
-- If you create a durable plan, spec, or completion summary under
-  `docs/superpowers/`, update the corresponding index `README.md`.
+- Do not commit local agent workflow notes; keep them under ignored paths.
 - If the work changes contributor expectations, agent entrypoints, or project
   structure, reflect that in `README.md`, `AGENTS.md`, and `CONTRIBUTING.md`
   together rather than leaving instructions split-brain.

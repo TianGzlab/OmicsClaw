@@ -18,6 +18,41 @@ STAGE_CONTEXT_COLLAPSE = "context_collapse"
 STAGE_AUTO_COMPACT = "auto_compact"
 STAGE_REACTIVE_COMPACT = "reactive_compact"
 
+# Marker that wraps the body of a manual /compact summary message stored in
+# the transcript. The next /compact invocation uses this to skip
+# re-summarising the previous summary (CodePilot bug #7 — boundary tracking).
+COMPACTION_SUMMARY_OPEN = "<compaction-summary>"
+COMPACTION_SUMMARY_CLOSE = "</compaction-summary>"
+
+
+def wrap_compaction_summary(body: str) -> str:
+    """Wrap a summary body so subsequent compactions can detect and skip it."""
+    return f"{COMPACTION_SUMMARY_OPEN}\n{body.strip()}\n{COMPACTION_SUMMARY_CLOSE}"
+
+
+def unwrap_compaction_summary(content: str) -> str:
+    """Return the inner body of a wrapped summary, or pass through unchanged."""
+    text = (content or "").strip()
+    if not text.startswith(COMPACTION_SUMMARY_OPEN):
+        return content
+    inner = text[len(COMPACTION_SUMMARY_OPEN):]
+    end = inner.rfind(COMPACTION_SUMMARY_CLOSE)
+    if end == -1:
+        return content
+    return inner[:end].strip()
+
+
+def is_compaction_summary_message(message: dict[str, Any]) -> bool:
+    """True if ``message`` is a manual-/compact summary header."""
+    if not isinstance(message, dict):
+        return False
+    if message.get("role") != "system":
+        return False
+    content = message.get("content")
+    if not isinstance(content, str):
+        return False
+    return content.lstrip().startswith(COMPACTION_SUMMARY_OPEN)
+
 
 @dataclass(frozen=True, slots=True)
 class ContextCompactionConfig:
@@ -236,11 +271,17 @@ def _message_preview(message: dict[str, Any], *, max_chars: int = 180) -> str:
             if isinstance(function_block, dict) and function_block.get("name"):
                 tool_names.append(str(function_block.get("name")))
         if tool_names:
-            return _truncate_text(
-                ", ".join(tool_names),
-                max_chars=max_chars,
+            # XML self-closing tag — Claude/DeepSeek treat structural tags
+            # as metadata and don't reproduce them as text. Bare prose form
+            # ("Read, Edit") triggers few-shot mimicry: the model writes
+            # plain-text tool descriptions on the next turn instead of
+            # invoking real tool_calls.
+            joined_names = _truncate_text(
+                ",".join(tool_names),
+                max_chars=max(16, max_chars - 32),
                 label="tool-call summary",
             ).replace("\n", " ").strip()
+            return f'<prior-tool-calls names="{joined_names}"/>'
 
     content = _flatten_message_content(message.get("content", ""))
     if not content:
@@ -328,6 +369,35 @@ def _build_collapse_summary(
         lines.extend(("", replay_block))
 
     return "\n".join(lines).strip()
+
+
+def compact_history(
+    messages: list[dict[str, Any]],
+    *,
+    preserve_messages: int,
+    preserve_chars: int | None,
+    config: ContextCompactionConfig,
+    metadata: dict[str, Any] | None = None,
+    workspace: str | None = None,
+) -> "_CollapseResult":
+    """Public entry point for on-demand transcript compaction.
+
+    Returns a result with:
+      * ``messages`` — the trimmed tail (preserved messages, sanitized).
+      * ``summary`` — a deterministic, template-built summary of what was
+        omitted (empty when nothing was compacted).
+      * ``omitted_count`` — number of messages dropped from the head.
+
+    No LLM call. Intended for slash-command surfaces (e.g. ``/compact``).
+    """
+    return _collapse_history(
+        messages,
+        preserve_messages=preserve_messages,
+        preserve_chars=preserve_chars,
+        metadata=metadata,
+        workspace=workspace,
+        config=config,
+    )
 
 
 def _collapse_history(
@@ -475,3 +545,38 @@ def prepare_model_messages(
         estimated_chars=estimate_prompt_chars(prompt, messages),
         applied_stages=tuple(applied_stages),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionEvent:
+    """One compaction occurrence — emitted to the chat surface as a toast."""
+    messages_compressed: int
+    tokens_saved_estimate: int
+    applied_stages: tuple[str, ...]
+
+
+def build_compaction_status_payload(event: CompactionEvent) -> dict[str, Any]:
+    """Build the CodePilot-shape SSE 'status' payload for a compaction event.
+
+    Returned dict is the JSON object that goes inside the SSE
+    ``data`` field; the caller json.dumps it.
+    """
+    if event.tokens_saved_estimate > 0:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            f"messages summarized, ~{event.tokens_saved_estimate:,} tokens saved"
+        )
+    else:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            "messages summarized"
+        )
+    return {
+        "notification": True,
+        "subtype": "context_compressed",
+        "message": msg,
+        "stats": {
+            "messagesCompressed": event.messages_compressed,
+            "tokensSaved": event.tokens_saved_estimate,
+        },
+    }

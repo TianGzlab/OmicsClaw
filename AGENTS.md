@@ -12,11 +12,9 @@ Core rules:
 
 - Reply in the user's language, usually Chinese or English.
 - Stay concise, practical, and execution-focused.
-- Use `docs/superpowers/playbooks/` as the repository's on-demand workflow
-  guidance for debugging, TDD, planning, parallelization, verification,
-  code review, and branch completion.
-- Treat those playbooks as binding workflow guardrails with iron laws, red
-  flags, and required evidence, not as optional summaries.
+- For non-trivial changes, work from a concise plan, keep edits scoped, and
+  verify claims with concrete commands or file inspections before reporting
+  completion.
 - When you make an important decision or complete a meaningful milestone,
   update `README.md` while preserving its existing structure.
 
@@ -29,27 +27,34 @@ OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial trans
 ## Setup
 
 ```bash
-cd /data1/TianLab/zhouwg/project/OmicsClaw
-pip install -e .
+cd /path/to/OmicsClaw
 
-# Add optional extras only when needed
-# pip install -e ".[interactive]"
-# pip install -e ".[tui]"
-# pip install -e ".[memory]"
-# pip install -e ".[full]"
+# Recommended: full conda-primary install (R + CLIs + Python in one shot)
+bash 0_setup_env.sh
+conda activate OmicsClaw
+
+# Lightweight alternative (Python-only skills, no R or external CLIs):
+# pip install -e .
+# pip install -e ".[interactive]" / ".[tui]" / ".[memory]" / ".[full]"
 
 python omicsclaw.py list   # or: oc list
 python omicsclaw.py run spatial-preprocess --demo
 ```
 
-> **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
-> are available system-wide. `oc` is registered via `[project.scripts]` in
-> `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
-> `omicsclaw`. No PATH tricks needed.
+> **`oc` short alias**: After installing OmicsClaw (either path), both
+> `omicsclaw` and `oc` commands are available system-wide via the
+> `[project.scripts]` entry in `pyproject.toml`.
 >
-> **Dependency source of truth**: Root dependency management lives in
-> `pyproject.toml`. The repository does not use a root `requirements.txt` as a
-> primary install entrypoint.
+> **Dependency source of truth**:
+> - **Python deps** live in `pyproject.toml` (used by both install paths).
+> - **R packages, bioinformatics CLIs, build toolchain** live in
+>   `environment.yml` (conda path only).
+> - **GitHub-only R packages** are installed inline by `0_setup_env.sh`
+>   Tier 3 (`devtools::install_github` for spacexr, CARD, CellChat, numbat,
+>   SPARK, DoubletFinder).
+>
+> The repository does not use a root `requirements.txt` as a primary
+> install entrypoint.
 
 ## Commands
 
@@ -138,8 +143,7 @@ OmicsClaw/
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
-├── docs/                       # Project docs, including AI workflow support
-│   └── superpowers/            # Playbooks plus dated plans/specs for agents
+├── docs/                       # Project docs and Mintlify site content
 ├── SOUL.md                     # Bot/CLI persona (OmicsBot)
 ├── SPEC.md                     # Repository maintenance + AI development contract
 ├── templates/SKILL-TEMPLATE.md # Template for new skills
@@ -173,17 +177,11 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 7. Add test path to `pytest.ini`
 8. Regenerate catalog: `python scripts/generate_catalog.py`
 
-## Development Workflow Playbooks
+## Development Workflow
 
-For repository development work, consult these playbooks on demand:
-
-- `docs/superpowers/playbooks/skill_systematic_debugging.md`
-- `docs/superpowers/playbooks/skill_test_driven_development.md`
-- `docs/superpowers/playbooks/skill_verification_before_completion.md`
-- `docs/superpowers/playbooks/skill_writing_plans.md`
-- `docs/superpowers/playbooks/skill_dispatching_parallel_agents.md`
-- `docs/superpowers/playbooks/skill_requesting_code_review.md`
-- `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
+For repository development work, start with a short plan when the task spans
+multiple files, debug from root cause before editing, and verify the affected
+behavior before committing, pushing, or opening a PR.
 
 ## Graph Memory System
 

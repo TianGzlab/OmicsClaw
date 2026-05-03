@@ -23,9 +23,11 @@
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 
 > [!NOTE]
-> **🚀 v0.1.0 正式发布**
+> **🚀 v0.1.1 正式发布**
 >
-> OmicsClaw v0.1.0 已正式发布。当前版本完成了核心交互与执行框架，提供原生记忆管理面板 Memory Explorer，并内置覆盖 8 个领域的 72 个分析技能。欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交问题和建议。
+> OmicsClaw v0.1.1 已正式发布。当前版本完成了核心交互与执行框架，提供原生记忆管理面板 Memory Explorer，并内置覆盖多组学领域的 89 个分析技能。欢迎通过 [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) 提交问题和建议。
+
+> 📖 **完整中文文档**：见 [`docs/`](docs/)（在仓库根目录跑 `npx mintlify dev` 本地预览）
 
 <h3>⚡ 一套内核，多种交互界面</h3>
 
@@ -63,6 +65,11 @@
 - **🎯 智能路由**：自然语言请求可自动映射到合适的分析技能。
 - **🧬 多组学覆盖**：内置 72 个技能，覆盖空间转录组、单细胞、基因组、蛋白组、代谢组、Bulk RNA-seq、文献挖掘和编排调度。
 
+> **桌面后端健康检查：** 当 `oc app-server` 通过
+> `OMICSCLAW_DESKTOP_LAUNCH_ID` 启动时，`/health` 会返回可选的
+> `launch_id`。OmicsClaw Desktop 用它做进程握手，避免把已经占用
+> 8765 端口的旧后端误认为刚启动的新后端。
+
 **与传统工具的差异：**
 
 | 传统工具 | OmicsClaw |
@@ -77,10 +84,103 @@
 
 ## 📦 安装
 
-为减少依赖冲突，建议在虚拟环境中安装。可使用标准 `venv`，也可以使用 `uv`。
+OmicsClaw 提供两种安装路径，按需选择。
 
-<details open>
-<summary>🪛 创建虚拟环境（推荐）</summary>
+### 🥇 Conda（推荐 —— 全功能）
+
+一条命令即可装好 R 4.3 + ~30 个 R 包、~15 个生信命令行工具（samtools、STAR、fastqc、bwa、bowtie2、minimap2、bcftools、gatk4、picard、simpleaf、fastp、trim-galore、macs3、multiqc、kb-python、velocyto……）、OmicsClaw 本体（editable 模式），以及全部 Python 可选扩展。
+
+**先决条件** —— PATH 上需要有 `conda`。如果当前还没有，建议安装 [Miniforge](https://github.com/conda-forge/miniforge)：默认走 `conda-forge` 源、Apache-2.0 协议（商用友好）、内置 `mamba` 加速求解。（`0_setup_env.sh` 会优先用 `mamba` 创建/更新环境，无 `mamba` 时回退到 `conda`。环境发现优先使用 `conda info --envs`，以避开旧 Python 版 `mamba env list` 的解析器崩溃。）
+
+<details>
+<summary><b>🆕 安装 Miniforge —— 一次性</b></summary>
+
+**Linux 与 macOS**（自动识别 `x86_64`、`aarch64`、Apple Silicon）：
+
+```bash
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash "Miniforge3-$(uname)-$(uname -m).sh"   # 同意 license；conda init 处选 "yes"
+exec "$SHELL"                                # 重启 shell 使 `conda` 进入 PATH
+conda --version && mamba --version           # 验证
+```
+
+**Windows**：从 [Miniforge releases 页](https://github.com/conda-forge/miniforge/releases/latest) 下载 `.exe` 安装器，按 GUI 提示安装，后续命令在「Miniforge Prompt」里执行。
+
+</details>
+
+```bash
+# 1. 克隆并执行 bootstrap
+git clone https://github.com/TianGzlab/OmicsClaw.git
+cd OmicsClaw
+bash 0_setup_env.sh           # 创建名为 "OmicsClaw" 的 conda 环境
+conda activate OmicsClaw
+
+# 2. 验证
+omicsclaw env                 # 或：python omicsclaw.py env
+```
+
+脚本**幂等** —— 重复执行会就地更新现有环境。如需自定义环境名：`bash 0_setup_env.sh my_env_name`。
+
+在共享 conda 安装上，`0_setup_env.sh` 默认把 `CONDA_PKGS_DIRS` 设为
+`~/.conda/pkgs`，避免 libmamba 去清理或重新解压系统级 base 缓存
+（例如 `/share/.../miniconda3/pkgs`）里的包。如果你想用其它可写缓存，
+可在运行脚本前设置 `CONDA_PKGS_DIRS=/path/to/pkgs`。如果安装失败信息是
+镜像 SSL timeout，请重试或切换 conda channel / 镜像；这属于网络问题，
+不是包缓存权限问题。
+
+Tier 2 的 pip 安装还会设置
+`SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True`，因为上游 `SpaGCN`
+包元数据仍引用已废弃的 `sklearn` PyPI 占位包。OmicsClaw 自身依赖的是正确的
+`scikit-learn` 包；该变量只用于允许 SpaGCN 的旧传递依赖元数据完成解析。
+
+完整 Python 依赖会把 `scvi-tools` 限定在 Python 3.11+ 兼容线
+（`>=1.4.0,<2.0`），并使用 `cell2location>=0.1.5,<0.2`。旧的
+`scvi-tools` 1.3.x 元数据会拉入很宽的 `jax<0.7.0` / `jaxlib<0.7.0`
+约束，在部分 PyPI 镜像上会导致 pip 回溯大量 `jax` 版本并报
+`resolution-too-deep`。
+`singlecell-upstream` 辅助栈也会显式限定 MultiQC 日志链路依赖
+（`multiqc>=1.33,<2.0`、`coloredlogs>=15.0.1,<16.0`、
+`humanfriendly>=10.0,<11.0`），避免 pip 在解析 `multiqc` 时回溯到旧的
+`humanfriendly` wheel。
+轨迹分析依赖会把 CellRank 限定在最新的 Python 3.11 兼容线
+（`>=2.0.7,<2.1`），跳过要求 Python 3.12+ 的 CellRank 2.1+ 版本。
+`full` extra 只覆盖分析依赖，默认不包含 `oauth` / `ccproxy-api`；如需
+OAuth，请单独运行 `pip install -e ".[oauth]"`，或在明确需要时使用
+`pip install -e ".[full,oauth]"`。
+CARD 的 CRAN 空间依赖链（`units`、`sf`、`concaveman`）也通过 conda
+预装为 `r-units`、`r-sf`、`r-concaveman`，这样 Tier 3 安装
+`YMa-lab/CARD` 时不会再临时从源码编译这些重型地理空间包。
+CARD 的轻量 `wrMisc` import 和 CellChat 的 `NMF>=0.23.0` 要求会在 Tier 3
+从 CRAN 安装 / 更新，而不是只依赖 conda 包：conda-forge 当前 `r-wrmisc`
+构建面向 R 4.4/4.5，而 R 4.3 的 `r-nmf` 构建仍是 0.21.0，低于 CellChat
+要求的 0.23.0。
+Tier 3 其他 GitHub R 根包（`spacexr`、`CellChat`、`numbat`、`SPARK`、
+`DoubletFinder`）的 conda 可解析直接 `Depends` / `Imports` / `LinkingTo`
+依赖也已前置到 `environment.yml`。对于 `numbat`，Tier 3 会先从 CRAN 显式安装
+`hahmmr` 和 `scistreer>=1.1.0`，再安装 `kharchenkolab/numbat`；
+`scistreer` 的编译型依赖 `phangorn` 和 R 4.3 兼容的 `RcppParallel` 构建
+保持由 conda 层提供。
+这 6 个 GitHub 根包以及 `numbat -> hahmmr/scistreer` 预检链都有安装脚本回归
+测试覆盖：测试会解析它们的必需 `Depends` / `Imports` / `LinkingTo` 元数据，
+如果某个必需依赖既不归 `environment.yml` 管理，也不在 Tier 3 CRAN 预检里，
+就会失败。
+GitHub 安装不再重新执行 R 依赖解析，并跳过
+vignettes / manuals，因此 setup 不会受当前 CRAN 传递依赖漂移影响，例如 R 4.3
+基线上的 `CellChat -> ggpubr -> doBy -> forecast` 链。
+
+如果上一次安装中断后留下了完整的 `<conda-root>/envs/OmicsClaw` prefix，
+但 `conda info --envs` 没有按名称列出它，脚本会识别该 prefix，包括只显示
+路径、不显示名称的匿名 env-list 行，并使用 `env update -p <prefix>` 继续更新。
+如果 prefix 目录存在但没有 `conda-meta`，脚本会把它视为不完整环境；删除或修复该目录后再重新运行脚本。
+
+> **提示**：`cnvkit`（用于 `genomics-cnv-calling`）**未预装**，因为其新版本依赖与 `macs3` 冲突。如需使用，请在单独的环境里安装。
+
+### 🪶 venv（轻量 —— 仅 Python 技能）
+
+适用于只需要 **LLM / 路由 / 对话** 等接口、不跑分析的用户。该路径**不会安装 R、samtools、STAR、fastqc 等**，依赖这些工具的技能在运行时会报「tool not on PATH」。
+
+<details>
+<summary>使用 venv 安装</summary>
 
 **方案 A：使用 `venv`**
 ```bash
@@ -101,8 +201,7 @@ uv venv
 source .venv/bin/activate
 ```
 
-</details>
-
+**安装 OmicsClaw**：
 ```bash
 # 克隆仓库
 git clone https://github.com/TianGzlab/OmicsClaw.git
@@ -122,7 +221,69 @@ pip install -r bot/requirements.txt
 - `pip install -e ".[spatial-domains]"`：安装 SpaGCN / STAGATE 相关深度学习依赖
 - `pip install -e ".[full]"`：安装所有领域依赖和可选方法后端
 
-可随时运行 `python omicsclaw.py env` 检查安装状态。
+</details>
+
+*随时通过 `omicsclaw env` 或 `python omicsclaw.py env` 查看安装状态。*
+
+## 环境管理
+
+OmicsClaw 采用 4 层依赖策略，统一入口 `bash 0_setup_env.sh`：
+
+| 层 | 谁管 | 落地位置 | 装什么 |
+|---|---|---|---|
+| 0 — 基底 | mamba | `environment.yml` Tier 0 | python、R、gxx、cmake、构建工具链 |
+| 1 — 重型 Python | mamba | `environment.yml` Tier 4 | scanpy/anndata/squidpy、torch、scvi-tools、scvelo、cellrank、harmonypy/bbknn/scanorama、celltypist、gseapy、pydeseq2、multiqc、kb-python … |
+| 2 — Thin pip 残留 | pip（uv 加速） | `pyproject.toml` extras | `omicsclaw` editable + 仅 PyPI 的包（SpaGCN、GraphST、cellcharter、paste-bio、flashdeconv、fastccc、pyVIA、tangram-sc …） |
+| 3 — 源码 vendored | 源码构建 | `tools/<name>/`、`0_build_vendored_tools.sh` | bioconda 无 Py3.11 build 的生信 CLI（当前空 stub） |
+| 4 — 隔离子环境 | mamba | `environments/<tool>.yml` | 硬冲突依赖（banksy: numpy<2.0；未来 cnvkit/cellranger 同槽位） |
+
+决策树（top-down，命中即停）：能放主 env 就放主 env，子 env 只留给真正硬冲突的依赖。
+对子 env 的调用通过 `omicsclaw.core.external_env.run_anndata_op_in_env` 桥接，
+经临时 `.h5ad` 文件传输 AnnData，主 env 与子 env 不需要共享 Python ABI。
+
+### 常用安装
+
+```bash
+# 默认：Layers 0–2（覆盖除 banksy 外的所有 skill）
+bash 0_setup_env.sh
+
+# 启用 banksy 子环境（Layer 4，opt-in）：
+OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh
+# 或：
+bash 0_setup_env.sh --with-banksy
+
+# PyTorch 后端选择：
+#   auto（默认）：如果 nvidia-smi -L 能看到 GPU，就尝试安装 CUDA PyTorch。
+#                 CUDA 设置失败时会警告并保留 CPU baseline。
+#   cuda：强制要求 CUDA PyTorch，安装或验证失败则中断 setup。
+#   cpu：即使机器有 GPU，也保留 CPU PyTorch baseline。
+OMICSCLAW_TORCH_BACKEND=cuda OMICSCLAW_PYTORCH_CUDA_VERSION=12.1 bash 0_setup_env.sh
+OMICSCLAW_TORCH_BACKEND=cpu bash 0_setup_env.sh
+
+# 在 GPU 机器上使用 auto/cuda 后，验证 CUDA 是否真的接上：
+mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+# 预期：True <cuda_version>
+```
+
+`OMICSCLAW_PYTORCH_CUDA_VERSION` 默认是 `12.1`，会映射为 PyTorch wheel tag
+`cu121`。CUDA PyTorch 使用官方 PyTorch wheel index 安装，例如
+`https://download.pytorch.org/whl/cu121`，不再让 conda 在已经很大的科学环境里
+重新求解 `pytorch-gpu` / `cuda-version`。这样可以避开 `libtorch`、`libarrow`、
+`libprotobuf`、`libabseil` 和 BLAS/MKL 包之间的 solver 冲突。高级镜像用户可用
+`OMICSCLAW_TORCH_WHEEL_INDEX` 覆盖 wheel index；需要精细控制时也可以设置
+`OMICSCLAW_TORCH_VERSION`、`OMICSCLAW_PYTORCH_CUDA_TAG` 或
+`OMICSCLAW_TORCH_WHEEL_SPEC`。
+选择 CUDA 时，脚本会先移除 CPU-only PyTorch marker 包（`pytorch-cpu` / `cpuonly`），
+再安装 CUDA wheel。Tier 2 调用
+`uv pip install` 时默认使用 `UV_LINK_MODE=copy`，避免 uv cache 和 conda env
+位于不同文件系统时出现 hardlink fallback 警告；如果你希望使用其他 uv 链接策略，
+可在运行脚本前自行设置 `UV_LINK_MODE`。远程运行时要在
+真正执行分析的服务器上运行 setup；本地 desktop 机器是否有 GPU 不影响远端环境。
+
+新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。
+
+依赖边界以 [`0_setup_env.sh`](0_setup_env.sh)、[`environment.yml`](environment.yml)
+和 [`pyproject.toml`](pyproject.toml) 为准。
 
 ## 🔑 配置
 
@@ -184,6 +345,13 @@ LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
 > 📖 **完整服务商列表：** 参见 [`.env.example`](.env.example)。
 >
 > 📖 **Bot / 通道配置：** 参见 [bot/README.md](bot/README.md) 和 [bot/CHANNELS_SETUP.md](bot/CHANNELS_SETUP.md)。
+
+> **服务商 / 模型归一化：** 如果重启时发现过期的跨服务商组合，例如
+> `LLM_PROVIDER=anthropic` 搭配 `OMICSCLAW_MODEL=deepseek-chat`，OmicsClaw
+> 会以所选服务商为准，并把模型重置为该服务商默认值，除非你显式配置了
+> 自定义 `*_BASE_URL` / `LLM_BASE_URL`。已废弃的 DeepSeek 默认模型
+>（`deepseek-chat` / `deepseek-reasoner`）也会迁移到当前 DeepSeek 默认值
+> `deepseek-v4-flash`。
 
 </details>
 
@@ -557,7 +725,7 @@ OmicsClaw/
 ├── tests/                    # 集成与回归测试
 ├── sessions/                 # 会话状态存储
 ├── Makefile                  # 构建与快捷命令
-└── install_r_dependencies.R  # R 依赖安装脚本
+└── 0_setup_env.sh            # 一键环境安装（mamba + pip + R + 外部工具）
 ```
 
 **每个技能都是自包含的：**

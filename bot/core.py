@@ -332,7 +332,7 @@ def audit(event: str, **kwargs):
 # ---------------------------------------------------------------------------
 
 llm: AsyncOpenAI | None = None
-OMICSCLAW_MODEL: str = "deepseek-chat"
+OMICSCLAW_MODEL: str = PROVIDER_PRESETS["deepseek"][1]
 LLM_PROVIDER_NAME: str = ""
 
 MAX_HISTORY = int(os.getenv("OMICSCLAW_MAX_HISTORY", "50"))
@@ -4332,6 +4332,7 @@ def _build_bot_query_engine_callbacks(
     audit_fn,
     deep_learning_methods: set[str],
     usage_accumulator,
+    on_context_compacted=None,
 ):
     notified_methods: set[str] = set()
 
@@ -4466,6 +4467,7 @@ def _build_bot_query_engine_callbacks(
         after_tool=after_tool,
         request_tool_approval=request_tool_approval,
         on_llm_error=on_llm_error,
+        on_context_compacted=on_context_compacted,
     )
 
 
@@ -4526,6 +4528,7 @@ async def llm_tool_loop(
     on_tool_result=None,
     on_stream_content=None,
     on_stream_reasoning=None,
+    on_context_compacted=None,
     # Per-request runtime overrides (desktop app frontend)
     model_override: str = "",
     extra_api_params: dict | None = None,
@@ -4575,6 +4578,97 @@ async def llm_tool_loop(
                 await memory_store.delete_session(session_id)
 
             return "✓ Memory and conversation cleared. (Fresh start)"
+
+        elif cmd == "/plan":
+            from pathlib import Path as _PlanPath
+
+            candidate_dirs: list[_PlanPath] = []
+            for raw in (pipeline_workspace, workspace):
+                if raw:
+                    candidate_dirs.append(_PlanPath(str(raw)))
+
+            for directory in candidate_dirs:
+                plan_path = directory / "plan.md"
+                if plan_path.is_file():
+                    try:
+                        text = plan_path.read_text(encoding="utf-8")
+                    except OSError as exc:
+                        return f"✗ Failed to read {plan_path}: {exc}"
+                    max_chars = 8000
+                    if len(text) > max_chars:
+                        text = (
+                            text[:max_chars]
+                            + f"\n\n... (truncated; full plan at {plan_path})"
+                        )
+                    return f"📋 Plan from `{plan_path}`:\n\n{text}"
+            return (
+                "No plan saved yet. Set a workspace and ask me to create a "
+                "plan, or invoke a pipeline that writes plan.md."
+            )
+
+        elif cmd == "/compact":
+            from omicsclaw.runtime.context_compaction import (
+                ContextCompactionConfig,
+                compact_history,
+                is_compaction_summary_message,
+                unwrap_compaction_summary,
+                wrap_compaction_summary,
+            )
+
+            history = transcript_store.get_history(chat_id)
+            # Boundary tracking: locate the LAST manual-/compact summary so
+            # we don't feed it back into the summariser. Messages before and
+            # including that marker are already-compacted; only what comes
+            # after needs new compaction.
+            boundary_index = -1
+            for idx in range(len(history) - 1, -1, -1):
+                if is_compaction_summary_message(history[idx]):
+                    boundary_index = idx
+                    break
+
+            previous_body = (
+                unwrap_compaction_summary(history[boundary_index]["content"])
+                if boundary_index >= 0
+                else ""
+            )
+            tail_to_compact = (
+                history[boundary_index + 1:] if boundary_index >= 0 else list(history)
+            )
+
+            compaction_config = ContextCompactionConfig()
+            result = compact_history(
+                tail_to_compact,
+                preserve_messages=compaction_config.reactive_preserve_messages,
+                preserve_chars=compaction_config.reactive_preserve_chars,
+                config=compaction_config,
+                workspace=workspace or pipeline_workspace or None,
+            )
+            if result.omitted_count == 0:
+                if boundary_index >= 0:
+                    return (
+                        "✓ Already compacted; no new messages to compact "
+                        "since last /compact."
+                    )
+                return "✓ Nothing to compact — current history is already short."
+
+            if previous_body:
+                combined_body = (
+                    f"{previous_body}\n\n---\n\n{result.summary}".strip()
+                )
+            else:
+                combined_body = result.summary
+            new_history: list[dict] = [
+                {
+                    "role": "system",
+                    "content": wrap_compaction_summary(combined_body),
+                }
+            ] + list(result.messages)
+            transcript_store.replace_history(chat_id, new_history)
+            return (
+                f"✓ Compacted {result.omitted_count} earlier message(s); "
+                f"kept the most recent {len(result.messages)}. "
+                "Summary preserved as a system note."
+            )
 
         elif cmd == "/files":
             try:
@@ -4692,6 +4786,8 @@ For updates and documentation, visit the GitHub repository."""
 - `/new` - Start new conversation (memory preserved)
 - `/clear` - Clear conversation history (memory preserved)
 - `/forget` - Clear conversation + memory (complete reset)
+- `/compact` - Shrink long history to recent tail with a summary
+- `/plan` - Show plan.md from the active workspace
 - `/help` - Show this help message
 - `/files` - List data files
 - `/outputs` - Show recent analysis results
@@ -4769,6 +4865,21 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     session_id = chat_context.session_id
     system_prompt = chat_context.system_prompt
 
+    # Identity anchor: many open-source / distilled models will claim to be
+    # Claude or GPT when asked about their base model because of training-data
+    # contamination. Tell them the truth about what is actually serving them,
+    # using the per-request model override when the frontend provided one.
+    effective_model = (model_override or OMICSCLAW_MODEL or "").strip()
+    effective_provider = (LLM_PROVIDER_NAME or "").strip()
+    if effective_model and effective_provider:
+        system_prompt = system_prompt.rstrip() + (
+            "\n\n## Underlying model identity\n"
+            f"You are powered by the LLM `{effective_model}` served via the `{effective_provider}` provider. "
+            "If the user asks which model or provider backs you, answer truthfully with these exact names. "
+            "Do NOT claim to be Claude, GPT, Gemini, DeepSeek, or any other assistant unless it matches the names above. "
+            "Do NOT claim to be built by Anthropic, OpenAI, or Google unless the provider above matches."
+        )
+
     # Apply per-request system prompt additions
     if system_prompt_append:
         system_prompt = system_prompt.rstrip() + "\n\n" + system_prompt_append.strip()
@@ -4796,6 +4907,7 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         audit_fn=audit,
         deep_learning_methods=DEEP_LEARNING_METHODS,
         usage_accumulator=usage_accumulator or _accumulate_usage,
+        on_context_compacted=on_context_compacted,
     )
     resolved_policy_state = ToolPolicyState.from_mapping(
         policy_state,
@@ -4826,6 +4938,9 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             max_tokens=max_tokens_override if max_tokens_override > 0 else 8192,
             llm_error_types=(APIError,),
             extra_api_params=extra_api_params or {},
+            deepseek_reasoning_passback=(
+                (LLM_PROVIDER_NAME or "").strip().lower() == "deepseek"
+            ),
         ),
         callbacks=callbacks,
     )

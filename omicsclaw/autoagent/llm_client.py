@@ -17,6 +17,13 @@ from omicsclaw.autoagent.constants import (
     LLM_MAX_RETRIES,
     LLM_RETRY_BASE_SECONDS,
 )
+from omicsclaw.core.llm_models import get_default_features
+from omicsclaw.core.llm_patches import apply_deepseek_reasoning_passback
+
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover
+    OpenAI = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +100,11 @@ def call_llm(
             "matching environment variable."
         )
 
-    from openai import OpenAI
+    if OpenAI is None:
+        raise ImportError(
+            "The 'openai' SDK is required for autoagent LLM calls. "
+            "Install it with: pip install openai"
+        )
 
     client = OpenAI(
         api_key=runtime.api_key,
@@ -101,20 +112,32 @@ def call_llm(
         timeout=LLM_CALL_TIMEOUT_SECONDS,
     )
 
-    messages = [
+    messages: list[dict] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": directive},
     ]
+    if runtime.provider == "deepseek":
+        messages = apply_deepseek_reasoning_passback(messages)
+
+    extra_body = (
+        get_default_features(
+            runtime.provider, runtime.model, base_url=runtime.base_url or "",
+        ).get("extra_body")
+        or None
+    )
 
     last_exc: Exception | None = None
     for attempt in range(1, LLM_MAX_RETRIES + 1):
         try:
-            response = client.chat.completions.create(
-                model=runtime.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            create_kwargs: dict[str, object] = {
+                "model": runtime.model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if extra_body:
+                create_kwargs["extra_body"] = extra_body
+            response = client.chat.completions.create(**create_kwargs)
             return response.choices[0].message.content or ""
         except Exception as exc:
             last_exc = exc

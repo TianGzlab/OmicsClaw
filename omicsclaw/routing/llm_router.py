@@ -26,7 +26,7 @@ def _resolve_llm_config() -> Tuple[str, str, str]:
         model=os.getenv("OMICSCLAW_MODEL") or os.getenv("LLM_MODEL", ""),
         api_key=os.getenv("LLM_API_KEY", ""),
     )
-    return api_key, (base_url or "https://api.openai.com/v1"), (model or "gpt-4o-mini")
+    return api_key, (base_url or "https://api.openai.com/v1"), (model or "gpt-5-mini")
 
 
 def route_with_llm(query: str, skills: Dict[str, str], domain: str) -> Tuple[Optional[str], float]:

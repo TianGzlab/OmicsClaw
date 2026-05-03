@@ -38,18 +38,9 @@ token.json
 output/
 sessions/
 
-# Superpowers (internal skills)
+# Superpowers (local/internal agent workflow notes)
 superpowers/
-docs/superpowers/**
-!docs/superpowers/
-!docs/superpowers/README.md
-!docs/superpowers/playbooks/
-!docs/superpowers/playbooks/*.md
-!docs/superpowers/plans/
-!docs/superpowers/plans/README.md
-!docs/superpowers/specs/
-!docs/superpowers/specs/README.md
-!docs/superpowers/specs/2026-04-10-repository-spec-migration.md
+docs/superpowers/
 
 # User data (large, not committed)
 data/*
