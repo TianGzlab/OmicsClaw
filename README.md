@@ -1,11 +1,11 @@
 <a id="top"></a>
 
 <div align="center">
-  <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="360"/>
+  <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="380"/>
 
-  <h3>OmicsClaw</h3>
+  <h2>🧬 OmicsClaw</h2>
   <p><strong>Local-first AI research partner for multi-omics analysis</strong></p>
-  <p>Conversational execution · persistent memory · reproducible skills · desktop and server workflows</p>
+  <p>Chat with your workflows · run reproducible skills · keep data local · resume with memory</p>
 
   <p>
     <a href="README.md"><b>English</b></a> ·
@@ -24,186 +24,131 @@
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 
 > [!NOTE]
-> **v0.1.0 release:** OmicsClaw now provides a stable unified `oc` CLI, interactive CLI/TUI, graph memory, desktop/web app backend, remote execution support, messaging bot frontends, and a generated catalog of 89 analysis skills. Please report issues or feature requests through [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues).
+> 🚀 **v0.1.0** ships the unified `oc` CLI, interactive CLI/TUI, graph memory, app backend, remote execution, bot frontends, and a generated catalog of **89 skills**.
 
-OmicsClaw is a multi-omics analysis platform that turns local analysis tools into reusable AI-callable skills. It supports natural-language workflows while keeping raw data and computation on your own machine or remote Linux server.
+OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM helps plan and operate; Python/R/CLI tools still process data in your local or remote runtime.
 
-## Why OmicsClaw?
+## 🎬 Demo
 
-Most analysis sessions lose context: file paths, parameters, intermediate outputs, and method preferences have to be repeated. OmicsClaw keeps those workflows inspectable and resumable.
+<table>
+  <tr>
+    <th width="65%">🖥️ CLI / TUI</th>
+    <th width="35%">📱 Mobile / Feishu</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <video src="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a" autoplay loop muted playsinline width="100%">
+        <a href="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a">View CLI demo</a>
+      </video>
+    </td>
+    <td align="center">
+      <video src="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e" autoplay loop muted playsinline width="100%">
+        <a href="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e">View mobile demo</a>
+      </video>
+    </td>
+  </tr>
+</table>
 
-| Need | OmicsClaw approach |
-|---|---|
-| Run established bioinformatics workflows | Skills expose CLI/Python analysis modules with standard input, output, demo, and report contracts |
-| Chat without uploading raw data | LLMs receive task context and tool results; local skills process the files |
-| Resume interrupted work | Sessions, memory, workspaces, and outputs remain on disk |
-| Switch interfaces | Use the same runtime from CLI, TUI, app backend, remote server, or bot channel |
-| Extend analysis coverage | Add a skill under `skills/<domain>/<skill-name>/` and regenerate the catalog |
+## ✨ At A Glance
 
-## Quick Start
+| | | | |
+|---|---|---|---|
+| 🧠 **Memory**<br/>Sessions, preferences, lineage | 🔒 **Local-first**<br/>Raw data stays in your runtime | 🧰 **89 skills**<br/>Generated catalog + demos | 🧭 **Smart routing**<br/>Natural language to tools |
+| 🖥️ **CLI / TUI**<br/>`oc interactive`, `oc tui` | 🌐 **App backend**<br/>FastAPI for desktop/web | 🔌 **MCP-ready**<br/>Attach external tools | 📡 **Remote mode**<br/>SSH tunnel to Linux servers |
 
-The recommended setup is the repository bootstrap script. It creates the `OmicsClaw` conda environment and installs Python dependencies, R packages, bioinformatics command-line tools, and GitHub-only R packages managed by the project.
+## ⚡ 3-Minute Start
 
 ```bash
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
-
 bash 0_setup_env.sh
 conda activate OmicsClaw
-
-oc env
 oc list
 oc run spatial-preprocess --demo --output /tmp/omicsclaw_demo
 ```
 
-After installation, both `omicsclaw` and `oc` are available through `[project.scripts]`. If the console script is not on `PATH`, use `python omicsclaw.py <command>`.
-
-Configure LLM credentials and runtime preferences with:
+Configure chat and runtime settings:
 
 ```bash
 oc onboard
-```
-
-Or create `.env` manually from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-Then set at least one provider block in `.env`:
-
-```dotenv
-LLM_PROVIDER=deepseek
-LLM_API_KEY=sk-...
-```
-
-Start the conversational interface:
-
-```bash
 oc interactive
-oc tui
-oc interactive -p "run spatial-preprocess demo"
 ```
 
-For the detailed installation guide, see [docs/_legacy/INSTALLATION.md](docs/_legacy/INSTALLATION.md). For the five-minute tutorial, see [docs/introduction/quickstart.mdx](docs/introduction/quickstart.mdx).
+Use `python omicsclaw.py <command>` if the `oc` console script is not on `PATH`.
 
-## Install Options
+<p align="center">
+  <img src="docs/images/OmicsClaw_configure_fast.png" alt="OmicsClaw setup wizard" width="82%"/>
+</p>
 
-| Path | Use when | Command |
+## 📦 Install Paths
+
+| Path | Best for | Command |
 |---|---|---|
-| Full conda environment | Real analysis work that needs Python, R, and external CLIs | `bash 0_setup_env.sh` |
-| Lightweight venv | Chat, routing, development, or Python-only skills | `pip install -e ".[interactive]"` |
-| Desktop/app backend | OmicsClaw-App, browser frontends, or remote execution | full conda path, then `oc app-server` |
-| Memory API only | Inspect graph memory over HTTP | `pip install -e ".[memory]"`, then `oc memory-server` |
+| 🥇 **Full conda** | Real analysis with Python + R + bioinformatics CLIs | `bash 0_setup_env.sh` |
+| 🪶 **Lightweight venv** | Chat, routing, dev, Python-only skills | `pip install -e ".[interactive]"` |
+| 🖥️ **Desktop/web backend** | OmicsClaw-App or browser frontends | `oc app-server --host 127.0.0.1 --port 8765` |
+| 🧠 **Memory API** | Inspect graph memory over HTTP | `pip install -e ".[memory]"` then `oc memory-server` |
 
-Dependency ownership is intentionally split:
+📖 Details: [installation guide](docs/_legacy/INSTALLATION.md), [quickstart](docs/introduction/quickstart.mdx).
 
-| Dependency type | Source of truth |
-|---|---|
-| Python package metadata and extras | [pyproject.toml](pyproject.toml) |
-| Conda R packages, bioinformatics CLIs, build toolchain | [environment.yml](environment.yml) |
-| GitHub-only R packages | Tier 3 in [0_setup_env.sh](0_setup_env.sh) |
-| Bot-only runtime details | [bot/README.md](bot/README.md) |
+**Dependency sources:** Python in [pyproject.toml](pyproject.toml), conda/R/CLIs in [environment.yml](environment.yml), GitHub-only R packages in [0_setup_env.sh](0_setup_env.sh). The root `requirements.txt` is not the primary install entrypoint.
 
-The repository does not use a root `requirements.txt` as the primary install entrypoint.
+## 🧭 Use It From Anywhere
 
-## Main Commands
-
-| Command | Purpose |
-|---|---|
-| `oc env` | Inspect installed dependency tiers |
-| `oc list` | List available skills |
-| `oc run <skill> --demo` | Run a skill with built-in demo data |
-| `oc run <skill> --input <file> --output <dir>` | Run a skill on user data |
-| `oc interactive` | Start the prompt-toolkit chat interface |
-| `oc tui` | Start the full-screen Textual interface |
-| `oc app-server --host 127.0.0.1 --port 8765` | Start the backend used by desktop/web frontends |
-| `oc memory-server` | Start the graph memory REST API |
-| `oc onboard` | Configure LLM, runtime, memory, and channel settings |
-| `oc mcp list` / `oc mcp add ...` | Manage Model Context Protocol servers |
-| `python -m bot.run --channels telegram,feishu` | Start messaging bot frontends |
-
-Makefile shortcuts such as `make test`, `make demo`, `make bot-telegram`, and `make bot-feishu` remain available for common developer tasks.
-
-## Core Surfaces
-
-| Surface | Entry point | Notes |
+| Surface | Entry point | Use it for |
 |---|---|---|
-| CLI runner | `oc list`, `oc run ...` | Direct, reproducible skill execution |
-| Interactive CLI/TUI | `oc interactive`, `oc tui` | Natural-language analysis with sessions and memory |
-| Desktop/web backend | `oc app-server` | FastAPI backend for OmicsClaw-App and browser frontends |
-| Remote execution | `oc app-server` on a remote Linux host | UI stays local; data and jobs stay on the server through SSH tunneling |
-| Memory API | `oc memory-server` | Optional HTTP API for memory inspection and management |
-| Bot channels | `python -m bot.run --channels ...` | Telegram, Feishu, and other channel adapters share the same tool loop |
+| 🧪 Skill runner | `oc run <skill> --demo` | Reproducible analysis |
+| 💬 Interactive CLI | `oc interactive` | Natural-language workflows |
+| 🖥️ Full-screen TUI | `oc tui` | Terminal workspace sessions |
+| 🌐 App backend | `oc app-server` | Desktop/web frontends |
+| 📡 Remote server | `oc app-server` over SSH | Server-side data and jobs |
+| 🤖 Bots | `python -m bot.run --channels ...` | Telegram, Feishu, and more |
+| 🔌 MCP | `oc mcp add ...` | External tool integration |
 
-Remote execution should bind the backend to `127.0.0.1`, use SSH tunneling, and set `OMICSCLAW_REMOTE_AUTH_TOKEN` when exposing remote control routes. See [docs/engineering/remote-execution.mdx](docs/engineering/remote-execution.mdx) and [docs/_legacy/remote-connection-guide.md](docs/_legacy/remote-connection-guide.md).
+Remote execution should bind to `127.0.0.1`, use SSH tunneling, and set `OMICSCLAW_REMOTE_AUTH_TOKEN` for remote control routes. See [remote execution](docs/engineering/remote-execution.mdx) and the [legacy remote guide](docs/_legacy/remote-connection-guide.md).
 
-## Domain Coverage
+## 🧬 Domain Coverage
 
-`skills/catalog.json` is generated by `scripts/generate_catalog.py` and is the authoritative machine-readable catalog. The current catalog lists 89 skills.
+`skills/catalog.json` is generated by `scripts/generate_catalog.py` and currently lists **89 skills**.
 
-| Domain | Typical workflows | Docs |
+| Domain | Examples | Docs |
 |---|---|---|
-| Spatial transcriptomics | QC, preprocessing, domains, annotation, deconvolution, communication, CNV, trajectory, registration | [docs/domains/spatial.mdx](docs/domains/spatial.mdx) |
-| Single-cell omics | QC, preprocessing, clustering, annotation, doublets, trajectory, velocity, communication, GRN | [docs/domains/singlecell.mdx](docs/domains/singlecell.mdx) |
-| Genomics | QC, alignment, variant calling, CNV, assembly, epigenomics, annotation | [docs/domains/genomics.mdx](docs/domains/genomics.mdx) |
-| Proteomics | QC, DIA/DDA analysis, PTM, interaction networks, biomarker workflows | [docs/domains/proteomics.mdx](docs/domains/proteomics.mdx) |
-| Metabolomics | Peak picking, normalization, annotation, pathway analysis, biomarker workflows | [docs/domains/metabolomics.mdx](docs/domains/metabolomics.mdx) |
-| Bulk RNA-seq | QC, alignment, differential expression, enrichment, co-expression, deconvolution, survival | [docs/domains/bulkrna.mdx](docs/domains/bulkrna.mdx) |
-| Orchestration and literature | Multi-domain routing, method selection, workflow planning, literature support | [docs/domains/orchestrator.mdx](docs/domains/orchestrator.mdx) |
+| 🧫 Spatial transcriptomics | QC, domains, annotation, deconvolution, CNV, trajectory | [spatial](docs/domains/spatial.mdx) |
+| 🔬 Single-cell omics | QC, clustering, annotation, doublets, velocity, GRN | [singlecell](docs/domains/singlecell.mdx) |
+| 🧬 Genomics | QC, alignment, variants, CNV, assembly, epigenomics | [genomics](docs/domains/genomics.mdx) |
+| 🧪 Proteomics | DIA/DDA, PTM, networks, biomarkers | [proteomics](docs/domains/proteomics.mdx) |
+| ⚗️ Metabolomics | Peaks, normalization, annotation, pathways | [metabolomics](docs/domains/metabolomics.mdx) |
+| 📈 Bulk RNA-seq | DE, enrichment, co-expression, deconvolution, survival | [bulkrna](docs/domains/bulkrna.mdx) |
+| 🧠 Orchestration | Routing, planning, literature support | [orchestrator](docs/domains/orchestrator.mdx) |
 
-Run `oc list` for the current CLI view, or inspect [skills/catalog.json](skills/catalog.json) for generated metadata.
+Run `oc list` for the current CLI catalog.
 
-## Architecture Snapshot
+## 🧱 Project Map
 
-OmicsClaw keeps domain-specific science in skills and keeps the shared runtime domain-agnostic.
-
-| Path | Responsibility |
+| Path | Role |
 |---|---|
-| [omicsclaw.py](omicsclaw.py) | Backward-compatible unified CLI runner |
-| [omicsclaw/](omicsclaw/) | Core runtime, registry, loaders, memory, routing, app backend, interactive surfaces |
-| [skills/](skills/) | Domain-organized analysis skills plus internal `_lib` utility packages |
-| [bot/](bot/) | Messaging frontends that reuse the shared LLM tool loop |
-| [docs/](docs/) | Mintlify documentation, engineering notes, legacy guides, workflow playbooks |
-| [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md) | Starting point for new skills |
-| [tests/](tests/) | Pytest coverage for runtime and skills |
+| [omicsclaw.py](omicsclaw.py) | Unified CLI runner |
+| [omicsclaw/](omicsclaw/) | Runtime, registry, memory, routing, app backend, interactive UI |
+| [skills/](skills/) | Domain skills and shared `_lib` utilities |
+| [bot/](bot/) | Messaging frontends |
+| [docs/](docs/) | Docs site, engineering notes, legacy guides |
+| [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md) | New skill template |
 
-For deeper design notes, read [docs/architecture/overview.mdx](docs/architecture/overview.mdx) and [docs/architecture/skill-system.mdx](docs/architecture/skill-system.mdx).
+## 📚 Docs
 
-## Memory, MCP, and Extensibility
-
-- **Memory:** interactive sessions and agents can persist context through the graph memory system. See [docs/engineering/memory.mdx](docs/engineering/memory.mdx).
-- **MCP:** external tools can be registered with `oc mcp add <name> <command-or-url>` and inspected with `oc mcp list`.
-- **New skills:** follow [CONTRIBUTING.md](CONTRIBUTING.md), use [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md), and regenerate the catalog with `python scripts/generate_catalog.py`.
-- **Apps and bots:** desktop/web integration is documented in [docs/ecosystem/omicsclaw-app.mdx](docs/ecosystem/omicsclaw-app.mdx); messaging channels are documented in [docs/ecosystem/chat-bot.mdx](docs/ecosystem/chat-bot.mdx) and [bot/README.md](bot/README.md).
-
-## Documentation Map
-
-| Topic | Link |
+| Start here | Build with it |
 |---|---|
-| Quick start | [docs/introduction/quickstart.mdx](docs/introduction/quickstart.mdx) |
-| What OmicsClaw is | [docs/introduction/what-is-omicsclaw.mdx](docs/introduction/what-is-omicsclaw.mdx) |
-| Architecture | [docs/architecture/overview.mdx](docs/architecture/overview.mdx) |
-| Skill system | [docs/architecture/skill-system.mdx](docs/architecture/skill-system.mdx) |
-| Memory | [docs/engineering/memory.mdx](docs/engineering/memory.mdx) |
-| Remote execution | [docs/engineering/remote-execution.mdx](docs/engineering/remote-execution.mdx) |
-| App backend | [docs/ecosystem/omicsclaw-app.mdx](docs/ecosystem/omicsclaw-app.mdx) |
-| Bot channels | [docs/ecosystem/chat-bot.mdx](docs/ecosystem/chat-bot.mdx) |
-| Safety rules | [docs/safety/rules-and-disclaimer.mdx](docs/safety/rules-and-disclaimer.mdx) |
-| Data privacy | [docs/safety/data-privacy.mdx](docs/safety/data-privacy.mdx) |
-| Legacy installation details | [docs/_legacy/INSTALLATION.md](docs/_legacy/INSTALLATION.md) |
+| 🚀 [Quickstart](docs/introduction/quickstart.mdx) | 🧩 [Skill system](docs/architecture/skill-system.mdx) |
+| 🏗️ [Architecture](docs/architecture/overview.mdx) | 🧠 [Memory](docs/engineering/memory.mdx) |
+| 🖥️ [OmicsClaw-App](docs/ecosystem/omicsclaw-app.mdx) | 🤖 [Bot channels](docs/ecosystem/chat-bot.mdx) |
+| 📡 [Remote execution](docs/engineering/remote-execution.mdx) | 🛡️ [Safety rules](docs/safety/rules-and-disclaimer.mdx) |
 
-Preview the docs site locally with:
+Preview locally with `npx mintlify dev`.
 
-```bash
-npx mintlify dev
-```
+<details>
+<summary><b>🛠️ Developer Notes</b></summary>
 
-## For Developers and AI Agents
-
-Before complex repository maintenance, read [README.md](README.md), [AGENTS.md](AGENTS.md), [SPEC.md](SPEC.md), and the directly relevant code or docs. Repository workflow playbooks live under [docs/superpowers/playbooks/](docs/superpowers/playbooks/) and are indexed from [docs/superpowers/README.md](docs/superpowers/README.md).
-
-Common development commands:
+Before complex repository work, read [README.md](README.md), [AGENTS.md](AGENTS.md), [SPEC.md](SPEC.md), and the relevant code/docs.
 
 ```bash
 python -m pytest -v
@@ -211,32 +156,36 @@ make test
 python scripts/generate_catalog.py
 ```
 
-If a change creates a durable decision, plan, or workflow update, record it under `docs/superpowers/` and update the matching index.
+Workflow playbooks live in [docs/superpowers/playbooks/](docs/superpowers/playbooks/) and are indexed from [docs/superpowers/README.md](docs/superpowers/README.md). New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md).
 
-## Safety and Scope
+</details>
 
-- OmicsClaw is local-first: raw data processing happens in your configured local or remote runtime.
-- OmicsClaw is for research use only. It is not a medical device and does not provide clinical diagnosis.
-- Every scientific result should be reviewed by qualified domain experts before downstream decisions.
-- When exposing APIs beyond localhost, use explicit host binding, SSH tunnels, and tokens as documented.
+## ⚠️ Safety
 
-See [docs/safety/rules-and-disclaimer.mdx](docs/safety/rules-and-disclaimer.mdx) and [docs/safety/data-privacy.mdx](docs/safety/data-privacy.mdx).
+| Rule | Meaning |
+|---|---|
+| 🔒 Local-first | Raw data processing happens in your local or remote runtime |
+| 🧪 Research use only | Not a medical device; no clinical diagnosis |
+| 👩‍🔬 Expert review | Validate scientific outputs before decisions |
+| 🔐 Remote caution | Use localhost binding, SSH tunnels, and tokens |
 
-## Team and Community
+See [data privacy](docs/safety/data-privacy.mdx) and [rules/disclaimer](docs/safety/rules-and-disclaimer.mdx).
+
+## 👥 Community
 
 Maintainers: Luyi Tian, Weige Zhou, Liying Chen, and Pengfei Yin.
 
-Use [GitHub Issues](https://github.com/TianGzlab/OmicsClaw/issues) for bug reports and feature requests. Use [GitHub Discussions](https://github.com/TianGzlab/OmicsClaw/discussions) for questions and workflow discussions.
+🐛 [Issues](https://github.com/TianGzlab/OmicsClaw/issues) · 💬 [Discussions](https://github.com/TianGzlab/OmicsClaw/discussions) · 📖 [Docs](https://TianGzlab.github.io/OmicsClaw/)
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
-OmicsClaw is inspired by [ClawBio](https://github.com/ClawBio/ClawBio)'s bioinformatics-native agent skill library and [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory)'s graph-structured memory ideas.
+Inspired by [ClawBio](https://github.com/ClawBio/ClawBio) and [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory).
 
-## License
+## 📜 License
 
-Apache-2.0 License. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
 
-## Citation
+## 📝 Citation
 
 ```bibtex
 @software{omicsclaw2026,
@@ -247,4 +196,4 @@ Apache-2.0 License. See [LICENSE](LICENSE).
 }
 ```
 
-[Back to top](#top)
+[⬆ Back to top](#top)
