@@ -28,26 +28,15 @@
 
 OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM helps plan and operate; Python/R/CLI tools still process data in your local or remote runtime.
 
-## 🎬 Demo
+## 🖥️ App-Centered Analysis
 
-<table>
-  <tr>
-    <th width="65%">🖥️ CLI / TUI</th>
-    <th width="35%">📱 Mobile / Feishu</th>
-  </tr>
-  <tr>
-    <td align="center">
-      <video src="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a" autoplay loop muted playsinline width="100%">
-        <a href="https://github.com/user-attachments/assets/a24b16b8-dc72-439a-8fcd-d0c0623a4c8a">View CLI demo</a>
-      </video>
-    </td>
-    <td align="center">
-      <video src="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e" autoplay loop muted playsinline width="100%">
-        <a href="https://github.com/user-attachments/assets/0ccb21f8-6aa9-45ec-b50d-44146566e64e">View mobile demo</a>
-      </video>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/images/omicsclaw-app-overview.png" alt="OmicsClaw App showing connected backend, AutoAgent, datasets, skills, memory, remote bridge, and multi-omics analysis cards" width="94%"/>
+</p>
+
+<p align="center">
+  <b>App workspace</b> → datasets → skills → AutoAgent → remote/local execution → memory → artifacts
+</p>
 
 ## ✨ At A Glance
 
