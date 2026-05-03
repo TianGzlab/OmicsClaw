@@ -160,6 +160,10 @@ Tier 3 其他 GitHub R 根包（`spacexr`、`CellChat`、`numbat`、`SPARK`、
 `hahmmr` 和 `scistreer>=1.1.0`，再安装 `kharchenkolab/numbat`；
 `scistreer` 的编译型依赖 `phangorn` 和 R 4.3 兼容的 `RcppParallel` 构建
 保持由 conda 层提供。
+这 6 个 GitHub 根包以及 `numbat -> hahmmr/scistreer` 预检链都有安装脚本回归
+测试覆盖：测试会解析它们的必需 `Depends` / `Imports` / `LinkingTo` 元数据，
+如果某个必需依赖既不归 `environment.yml` 管理，也不在 Tier 3 CRAN 预检里，
+就会失败。
 GitHub 安装不再重新执行 R 依赖解析，并跳过
 vignettes / manuals，因此 setup 不会受当前 CRAN 传递依赖漂移影响，例如 R 4.3
 基线上的 `CellChat -> ggpubr -> doBy -> forecast` 链。

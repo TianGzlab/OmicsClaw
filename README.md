@@ -167,6 +167,10 @@ For `numbat`, Tier 3 explicitly installs the upstream GitHub dependencies
 `hahmmr` and `scistreer>=1.1.0` from CRAN before installing
 `kharchenkolab/numbat`; `scistreer`'s compiled dependencies `phangorn` and
 the R 4.3-compatible `RcppParallel` build are kept in the conda layer.
+The six GitHub roots plus the `numbat -> hahmmr/scistreer` preflight chain are
+covered by setup-script regression tests that parse their required
+`Depends`/`Imports`/`LinkingTo` metadata and fail if a required dependency is
+not owned by either `environment.yml` or the Tier 3 CRAN preflight.
 Their GitHub installs do not re-run R dependency resolution and skip
 vignettes/manuals, so setup is not affected by current CRAN transitive drift
 such as `CellChat -> ggpubr -> doBy -> forecast` on the R 4.3 baseline.

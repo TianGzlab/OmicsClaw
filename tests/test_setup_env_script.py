@@ -1,12 +1,182 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
+
+
+UPSTREAM_GITHUB_R_PACKAGE_DESCRIPTIONS = {
+    "spacexr": """
+Package: spacexr
+Version: 2.2.1
+Depends: R (>= 3.5.0)
+Imports:
+    readr, ggplot2, pals, Matrix, parallel, doParallel, foreach, quadprog,
+    tibble, dplyr, reshape2, knitr, rmarkdown, fields, mgcv, CompQuadForm,
+    Rfast, locfdr, metafor, data.table
+""",
+    "CARD": """
+Package: CARD
+Version: 1.1
+Imports: Rcpp (>= 1.0.7), RcppArmadillo, SingleCellExperiment,
+    SummarizedExperiment, methods, MCMCpack, fields, wrMisc, concaveman, sp,
+    dplyr, sf, Matrix, RANN, ggplot2, reshape2, RColorBrewer, scatterpie,
+    grDevices, ggcorrplot, stats, nnls, pbmcapply, RcppML, NMF,
+    spatstat.random, gtools
+LinkingTo: Rcpp, RcppArmadillo
+""",
+    "CellChat": """
+Package: CellChat
+Version: 2.2.0.9001
+Depends: R (>= 3.6.0), dplyr, igraph, ggplot2
+Imports:
+    future, future.apply, pbapply, irlba, NMF (>= 0.23.0), ggalluvial,
+    stringr, svglite, Matrix, ggrepel, circlize (>= 0.4.12), RColorBrewer,
+    cowplot, methods, ComplexHeatmap, RSpectra, Rcpp, reticulate, scales, sna,
+    reshape2, FNN, shape, BiocGenerics, magrittr, patchwork, colorspace, plyr,
+    ggpubr, ggnetwork, BiocNeighbors, plotly, shiny, bslib, collapse
+LinkingTo: Rcpp, RcppEigen
+""",
+    "numbat": """
+Package: numbat
+Version: 1.5.2
+Depends: R (>= 4.1.0), Matrix
+Imports:
+    ape, caTools, data.table, dendextend, dplyr (>= 1.1.1), GenomicRanges,
+    ggplot2, ggraph, ggtree, glue, hahmmr, igraph, IRanges, logger, magrittr,
+    methods, optparse, parallel, parallelDist, patchwork, purrr, Rcpp,
+    RhpcBLASctl, R.utils, scales, scistreer (>= 1.1.0), stats4, stringr,
+    tibble, tidygraph, tidyr (>= 1.3.0), vcfR, zoo
+LinkingTo: Rcpp, RcppArmadillo, roptim
+""",
+    "SPARK": """
+Package: SPARK
+Version: 1.1.1
+Depends: R (>= 3.4.0), methods
+Imports: Rcpp (>= 1.0.5), foreach, doParallel, parallel, Matrix, CompQuadForm,
+    matlab, pracma
+LinkingTo: Rcpp, RcppArmadillo
+""",
+    "DoubletFinder": """
+Package: DoubletFinder
+Version: 2.0.6
+Depends: R (>= 4.0.0)
+Imports: fields, KernSmooth, parallel, ROCR, Seurat, SeuratObject
+""",
+}
+
+
+TIER3_CRAN_PREFLIGHT_R_PACKAGE_DESCRIPTIONS = {
+    "hahmmr": """
+Package: hahmmr
+Version: 1.0.0
+Depends: R (>= 4.1.0)
+Imports: data.table, dplyr, GenomicRanges, ggplot2, glue, IRanges, methods,
+    patchwork, Rcpp, stringr, tibble, zoo
+LinkingTo: Rcpp, RcppArmadillo, roptim
+""",
+    "scistreer": """
+Package: scistreer
+Version: 1.2.1
+Depends: R (>= 4.1.0)
+Imports: ape, dplyr, ggplot2, ggtree, igraph, parallelDist, patchwork,
+    phangorn, Rcpp, reshape2, RcppParallel, RhpcBLASctl, stringr, tidygraph
+LinkingTo: Rcpp, RcppArmadillo, RcppParallel
+""",
+}
+
+
+BASE_R_PACKAGES = {
+    "grDevices",
+    "Matrix",
+    "methods",
+    "parallel",
+    "R",
+    "stats",
+    "stats4",
+}
+
+
+BIOCONDUCTOR_CONDA_PACKAGES = {
+    "BiocGenerics": "bioconductor-biocgenerics",
+    "BiocNeighbors": "bioconductor-biocneighbors",
+    "ComplexHeatmap": "bioconductor-complexheatmap",
+    "GenomicRanges": "bioconductor-genomicranges",
+    "ggtree": "bioconductor-ggtree",
+    "IRanges": "bioconductor-iranges",
+    "SingleCellExperiment": "bioconductor-singlecellexperiment",
+    "SummarizedExperiment": "bioconductor-summarizedexperiment",
+}
+
+
+CRAN_CONDA_PACKAGE_OVERRIDES = {
+    "CompQuadForm": "r-compquadform",
+    "KernSmooth": "r-kernsmooth",
+    "NMF": "r-nmf",
+    "RANN": "r-rann",
+    "RColorBrewer": "r-rcolorbrewer",
+    "Rcpp": "r-rcpp",
+    "RcppArmadillo": "r-rcpparmadillo",
+    "RcppEigen": "r-rcppeigen",
+    "RcppML": "r-rcppml",
+    "RcppParallel": "r-rcppparallel",
+    "Rfast": "r-rfast",
+    "RhpcBLASctl": "r-rhpcblasctl",
+    "ROCR": "r-rocr",
+    "RSpectra": "r-rspectra",
+    "R.utils": "r-r.utils",
+}
+
+
+TIER3_CRAN_PREFLIGHT_PACKAGES = {
+    "hahmmr",
+    "NMF",
+    "scistreer",
+    "wrMisc",
+}
+
+
+def _parse_description_fields(description: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    current_field: str | None = None
+    for line in description.splitlines():
+        if re.match(r"^[A-Za-z][A-Za-z0-9.]*:", line):
+            current_field, value = line.split(":", 1)
+            fields[current_field] = value.strip()
+        elif current_field:
+            fields[current_field] += " " + line.strip()
+    return fields
+
+
+def _parse_r_package_list(spec: str) -> set[str]:
+    packages: set[str] = set()
+    for raw_part in spec.split(","):
+        name = re.sub(r"\s*\([^)]*\)", "", raw_part).strip()
+        if name:
+            packages.add(name)
+    return packages
+
+
+def _required_r_packages(description: str) -> set[str]:
+    fields = _parse_description_fields(description)
+    packages: set[str] = set()
+    for field in ("Depends", "Imports", "LinkingTo"):
+        packages.update(_parse_r_package_list(fields.get(field, "")))
+    package_name = fields.get("Package")
+    return {pkg for pkg in packages if pkg not in BASE_R_PACKAGES and pkg != package_name}
+
+
+def _conda_package_name(r_package: str) -> str:
+    return (
+        BIOCONDUCTOR_CONDA_PACKAGES.get(r_package)
+        or CRAN_CONDA_PACKAGE_OVERRIDES.get(r_package)
+        or f"r-{r_package.lower()}"
+    )
 
 
 def test_environment_yml_preinstalls_card_cran_spatial_dependencies():
@@ -123,21 +293,113 @@ def test_environment_yml_preinstalls_tier3_github_r_direct_dependencies():
     assert "r-wrmisc" not in dependencies
 
 
+def test_tier3_github_r_package_required_dependencies_are_preflighted():
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    conda_dependencies = {
+        dep.split("=")[0].lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+    cran_preflight_calls = {
+        package
+        for package in TIER3_CRAN_PREFLIGHT_PACKAGES
+        if f'ensure_cran_package("{package}' in setup_script
+    }
+
+    missing: dict[str, list[str]] = {}
+    for package_name, description in UPSTREAM_GITHUB_R_PACKAGE_DESCRIPTIONS.items():
+        package_missing = []
+        for required_package in sorted(_required_r_packages(description), key=str.lower):
+            if required_package in cran_preflight_calls:
+                continue
+            if _conda_package_name(required_package).lower() not in conda_dependencies:
+                package_missing.append(required_package)
+        if package_missing:
+            missing[package_name] = package_missing
+
+    assert missing == {}
+
+
+def test_setup_env_github_roots_match_audited_package_set():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+
+    assert "github_roots <- list(" in setup_script
+    for package_name in UPSTREAM_GITHUB_R_PACKAGE_DESCRIPTIONS:
+        assert f'c("{package_name}",' in setup_script
+    assert "for (pkg in github_roots)" in setup_script
+    assert "ensure_github_package(pkg[1], pkg[2])" in setup_script
+
+
+def test_tier3_cran_preflight_r_package_dependencies_are_conda_resolvable():
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    conda_dependencies = {
+        dep.split("=")[0].lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+
+    missing: dict[str, list[str]] = {}
+    for package_name, description in TIER3_CRAN_PREFLIGHT_R_PACKAGE_DESCRIPTIONS.items():
+        package_missing = []
+        for required_package in sorted(_required_r_packages(description), key=str.lower):
+            if _conda_package_name(required_package).lower() not in conda_dependencies:
+                package_missing.append(required_package)
+        if package_missing:
+            missing[package_name] = package_missing
+
+    assert missing == {}
+
+
+def test_setup_env_cran_preflight_covers_version_sensitive_github_r_dependencies():
+    repo_root = Path(__file__).resolve().parents[1]
+    setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
+    github_first_install = "for (pkg in github_roots)"
+
+    preflight_calls = [
+        'ensure_cran_package("wrMisc")',
+        'ensure_cran_package("NMF", "0.23.0")',
+        'ensure_cran_package("hahmmr")',
+        'ensure_cran_package("scistreer", "1.1.0")',
+    ]
+
+    for preflight_call in preflight_calls:
+        assert preflight_call in setup_script
+        assert setup_script.index(preflight_call) < setup_script.index(github_first_install)
+
+
+def test_environment_yml_pins_rcppparallel_to_r43_compatible_build_for_scistreer():
+    repo_root = Path(__file__).resolve().parents[1]
+    env_yml = yaml.safe_load((repo_root / "environment.yml").read_text(encoding="utf-8"))
+    dependencies = {
+        dep.lower()
+        for dep in env_yml["dependencies"]
+        if isinstance(dep, str)
+    }
+
+    assert "r-phangorn" in dependencies
+    assert "r-rcppparallel=5.1.9" in dependencies
+
+
 def test_setup_env_installs_numbat_cran_dependencies_before_numbat():
     repo_root = Path(__file__).resolve().parents[1]
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
 
     hahmmr_install = 'ensure_cran_package("hahmmr")'
     scistreer_install = 'ensure_cran_package("scistreer", "1.1.0")'
-    numbat_install = 'ensure_github_package("numbat", "kharchenkolab/numbat")'
+    numbat_install = 'c("numbat", "kharchenkolab/numbat")'
+    github_loop = "for (pkg in github_roots)"
 
     assert hahmmr_install in setup_script
     assert scistreer_install in setup_script
     assert numbat_install in setup_script
     assert 'ensure_github_package("hahmmr"' not in setup_script
     assert 'ensure_github_package("scistreer"' not in setup_script
-    assert setup_script.index(hahmmr_install) < setup_script.index(numbat_install)
-    assert setup_script.index(scistreer_install) < setup_script.index(numbat_install)
+    assert setup_script.index(hahmmr_install) < setup_script.index(github_loop)
+    assert setup_script.index(scistreer_install) < setup_script.index(github_loop)
 
 
 def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
@@ -145,7 +407,7 @@ def test_setup_env_installs_wrmisc_from_cran_before_github_r_packages():
     setup_script = (repo_root / "0_setup_env.sh").read_text(encoding="utf-8")
 
     cran_install = 'ensure_cran_package("wrMisc")'
-    github_install = 'ensure_github_package("spacexr", "dmcable/spacexr")'
+    github_install = "for (pkg in github_roots)"
 
     assert cran_install in setup_script
     assert github_install in setup_script
@@ -159,7 +421,7 @@ def test_setup_env_upgrades_nmf_before_github_r_packages():
     nmf_check = 'ensure_cran_package("NMF", "0.23.0")'
     package_version_check = "current_version < minimum_version"
     nmf_install = "install.packages(pkg"
-    github_install = 'ensure_github_package("spacexr", "dmcable/spacexr")'
+    github_install = "for (pkg in github_roots)"
 
     assert nmf_check in setup_script
     assert package_version_check in setup_script

@@ -386,12 +386,17 @@ ensure_github_package <- function(pkg, repo, min_version = NULL) {
   invisible(TRUE)
 }
 
-ensure_github_package("spacexr", "dmcable/spacexr")
-ensure_github_package("CARD", "YMa-lab/CARD")
-ensure_github_package("CellChat", "jinworks/CellChat")
-ensure_github_package("numbat", "kharchenkolab/numbat")
-ensure_github_package("SPARK", "xzhoulab/SPARK")
-ensure_github_package("DoubletFinder", "chris-mcginnis-ucsf/DoubletFinder")
+github_roots <- list(
+  c("spacexr", "dmcable/spacexr"),
+  c("CARD", "YMa-lab/CARD"),
+  c("CellChat", "jinworks/CellChat"),
+  c("numbat", "kharchenkolab/numbat"),
+  c("SPARK", "xzhoulab/SPARK"),
+  c("DoubletFinder", "chris-mcginnis-ucsf/DoubletFinder")
+)
+for (pkg in github_roots) {
+  ensure_github_package(pkg[1], pkg[2])
+}
 cat("[r-extras] all GitHub R packages OK\n")
 RSCRIPT
 echo "[setup_env] ✔ Tier 3 complete"
