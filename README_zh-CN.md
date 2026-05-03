@@ -266,7 +266,14 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 ```
 
 `OMICSCLAW_PYTORCH_CUDA_VERSION` 默认是 `12.1`。请选择 NVIDIA 驱动和
-PyTorch conda channel 都支持的版本，例如 `12.1` 或 `11.8`。远程运行时要在
+PyTorch conda channel 都支持的版本，例如 `12.1` 或 `11.8`。CUDA PyTorch
+默认使用绝对官方 channel `https://conda.anaconda.org/pytorch` 和
+`https://conda.anaconda.org/nvidia`，避免本地 channel alias 把 `nvidia` 改写到
+缺少 repodata 的镜像路径。如果你的镜像明确托管这些 channel，可用
+`OMICSCLAW_PYTORCH_CHANNEL` 和 `OMICSCLAW_NVIDIA_CHANNEL` 覆盖。Tier 2 调用
+`uv pip install` 时默认使用 `UV_LINK_MODE=copy`，避免 uv cache 和 conda env
+位于不同文件系统时出现 hardlink fallback 警告；如果你希望使用其他 uv 链接策略，
+可在运行脚本前自行设置 `UV_LINK_MODE`。远程运行时要在
 真正执行分析的服务器上运行 setup；本地 desktop 机器是否有 GPU 不影响远端环境。
 
 新机器端到端冒烟：`bash scripts/smoke_test_setup.sh`。

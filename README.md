@@ -257,6 +257,15 @@ mamba run -n OmicsClaw python -c "import torch; print(torch.cuda.is_available(),
 
 `OMICSCLAW_PYTORCH_CUDA_VERSION` defaults to `12.1`. Pick a value supported
 by your NVIDIA driver and the PyTorch conda channel, such as `12.1` or `11.8`.
+CUDA PyTorch installs use absolute official channels
+`https://conda.anaconda.org/pytorch` and `https://conda.anaconda.org/nvidia`
+by default so local channel aliases do not rewrite `nvidia` to a mirror path
+that lacks repodata. If your mirror explicitly hosts those channels, override
+them with `OMICSCLAW_PYTORCH_CHANNEL` and `OMICSCLAW_NVIDIA_CHANNEL`.
+Tier 2 defaults `UV_LINK_MODE=copy` when invoking `uv pip install`, which
+avoids noisy hardlink fallback warnings when the uv cache and conda env live
+on different filesystems. Set `UV_LINK_MODE` yourself before running the
+script if you prefer another uv link strategy.
 Remote installs must run this setup on the actual analysis server; the desktop
 machine's GPU state is irrelevant.
 

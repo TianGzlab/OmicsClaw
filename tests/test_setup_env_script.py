@@ -1113,6 +1113,9 @@ def _write_torch_backend_setup_fakes(
             fi
 
             if [ "${1:-}" = "run" ]; then
+                if printf '%s\\n' "$*" | grep -q ' uv pip install '; then
+                    printf 'uv-link-mode=%s\\n' "${UV_LINK_MODE:-}" >> "$OMICSCLAW_FAKE_LOG"
+                fi
                 if printf '%s\\n' "$*" | grep -q ' python -c '; then
                     if printf '%s\\n' "$*" | grep -q 'sys.prefix'; then
                         echo "$OMICSCLAW_FAKE_PREFIX"
@@ -1209,7 +1212,7 @@ def _write_torch_backend_setup_fakes(
 
 def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected(tmp_path):
     env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
-    env.pop("OMICSCLAW_TORCH_BACKEND", None)
+    env["OMICSCLAW_TORCH_BACKEND"] = "auto"
 
     result = subprocess.run(
         ["bash", "0_setup_env.sh", "OmicsClaw"],
@@ -1222,7 +1225,12 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_when_gpu_is_detected
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
-    cuda_install = "mamba install -n OmicsClaw -c pytorch -c nvidia pytorch pytorch-cuda=12.1 -y"
+    cuda_install = (
+        "mamba install -n OmicsClaw "
+        "-c https://conda.anaconda.org/pytorch "
+        "-c https://conda.anaconda.org/nvidia "
+        "pytorch pytorch-cuda=12.1 -y"
+    )
     assert "nvidia-smi -L" in calls
     assert cuda_install in calls
     assert "torch.cuda.is_available" in calls
@@ -1235,7 +1243,7 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
         existing_env=False,
         nvidia_gpu=True,
     )
-    env.pop("OMICSCLAW_TORCH_BACKEND", None)
+    env["OMICSCLAW_TORCH_BACKEND"] = "auto"
 
     result = subprocess.run(
         ["bash", "0_setup_env.sh", "OmicsClaw"],
@@ -1248,8 +1256,76 @@ def test_setup_env_auto_torch_backend_installs_cuda_pytorch_by_prefix(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = log_path.read_text(encoding="utf-8")
-    assert f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} -c pytorch -c nvidia pytorch pytorch-cuda=12.1 -y" in calls
+    assert (
+        f"mamba install -p {env['OMICSCLAW_FAKE_PREFIX']} "
+        "-c https://conda.anaconda.org/pytorch "
+        "-c https://conda.anaconda.org/nvidia "
+        "pytorch pytorch-cuda=12.1 -y"
+    ) in calls
     assert f"mamba run -p {env['OMICSCLAW_FAKE_PREFIX']} --no-capture-output python -c" in calls
+
+
+def test_setup_env_cuda_torch_channels_can_be_overridden(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=True)
+    env["OMICSCLAW_TORCH_BACKEND"] = "cuda"
+    env["OMICSCLAW_PYTORCH_CHANNEL"] = "https://mirror.example/pytorch"
+    env["OMICSCLAW_NVIDIA_CHANNEL"] = "https://mirror.example/nvidia"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert (
+        "mamba install -n OmicsClaw "
+        "-c https://mirror.example/pytorch "
+        "-c https://mirror.example/nvidia "
+        "pytorch pytorch-cuda=12.1 -y"
+    ) in calls
+
+
+def test_setup_env_uv_pip_install_defaults_to_copy_link_mode(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=False)
+    env["OMICSCLAW_TORCH_BACKEND"] = "auto"
+    env.pop("UV_LINK_MODE", None)
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert "uv-link-mode=copy" in calls
+
+
+def test_setup_env_uv_pip_install_preserves_configured_link_mode(tmp_path):
+    env, log_path, repo_root = _write_torch_backend_setup_fakes(tmp_path, nvidia_gpu=False)
+    env["OMICSCLAW_TORCH_BACKEND"] = "auto"
+    env["UV_LINK_MODE"] = "hardlink"
+
+    result = subprocess.run(
+        ["bash", "0_setup_env.sh", "OmicsClaw"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log_path.read_text(encoding="utf-8")
+    assert "uv-link-mode=hardlink" in calls
 
 
 def test_setup_env_cpu_torch_backend_skips_cuda_probe_and_install(tmp_path):

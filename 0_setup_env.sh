@@ -26,6 +26,8 @@ TOOLS_DIR="$PROJECT_ROOT/tools"
 TORCH_BACKEND_RAW="${OMICSCLAW_TORCH_BACKEND:-auto}"
 TORCH_BACKEND="$(printf '%s' "$TORCH_BACKEND_RAW" | tr '[:upper:]' '[:lower:]')"
 PYTORCH_CUDA_VERSION="${OMICSCLAW_PYTORCH_CUDA_VERSION:-12.1}"
+PYTORCH_CHANNEL="${OMICSCLAW_PYTORCH_CHANNEL:-https://conda.anaconda.org/pytorch}"
+NVIDIA_CHANNEL="${OMICSCLAW_NVIDIA_CHANNEL:-https://conda.anaconda.org/nvidia}"
 
 case "$TORCH_BACKEND" in
     auto|cuda|cpu) ;;
@@ -207,7 +209,7 @@ detect_nvidia_gpu() {
 
 install_cuda_pytorch() {
     echo "[setup_env] installing CUDA PyTorch runtime (pytorch-cuda=$PYTORCH_CUDA_VERSION)"
-    env_install -c pytorch -c nvidia pytorch "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
+    env_install -c "$PYTORCH_CHANNEL" -c "$NVIDIA_CHANNEL" pytorch "pytorch-cuda=$PYTORCH_CUDA_VERSION" -y
 }
 
 verify_cuda_pytorch() {
@@ -319,6 +321,12 @@ fi
 # to pip with bumped --resolver-max-rounds.
 if env_run uv --version >/dev/null 2>&1; then
     echo "[setup_env] using uv (PubGrub resolver) for thin pip residue"
+    if [ -z "${UV_LINK_MODE:-}" ]; then
+        export UV_LINK_MODE=copy
+        echo "[setup_env] using UV_LINK_MODE=copy for cross-filesystem-safe wheel installs"
+    else
+        echo "[setup_env] using configured UV_LINK_MODE=$UV_LINK_MODE"
+    fi
     env_run uv pip install -e "$PROJECT_ROOT[full,singlecell-upstream]"
 else
     echo "[setup_env] uv not found in env; falling back to pip with --resolver-max-rounds=200000"
