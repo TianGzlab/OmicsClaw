@@ -899,6 +899,56 @@ async def test_chat_stream_request_workspace_updates_output_dir_before_tool_loop
     assert expected_output_dir.is_dir()
 
 
+@pytest.mark.asyncio
+async def test_outputs_latest_marks_stale_incomplete_run_failed(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    output_dir = tmp_path / "output"
+    stale_run = output_dir / "spatial-domains__graphst__20260504_010203__stale001"
+    stale_run.mkdir(parents=True)
+    stdout_log = stale_run / "stdout.log"
+    stdout_log.write_text("started\n", encoding="utf-8")
+    old_timestamp = 1_700_000_000
+    os.utime(stdout_log, (old_timestamp, old_timestamp))
+    os.utime(stale_run, (old_timestamp, old_timestamp))
+
+    fake_core = SimpleNamespace(OUTPUT_DIR=output_dir)
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+
+    result = await server.outputs_latest(limit=10)
+
+    assert result["total"] == 1
+    assert result["runs"][0]["id"] == stale_run.name
+    assert result["runs"][0]["status"] == "failed"
+    assert "stale" in result["runs"][0]["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_files_tree_returns_remote_files_and_directories(tmp_path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    root = tmp_path / "workspace"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    (root / "notes.md").write_text("# notes\n", encoding="utf-8")
+    (nested / "table.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = await server.files_tree(path=str(root), depth=2)
+
+    assert result["root"] == str(root.resolve())
+    by_name = {entry["name"]: entry for entry in result["tree"]}
+    assert by_name["nested"]["type"] == "directory"
+    assert by_name["nested"]["children"][0]["name"] == "table.csv"
+    assert by_name["nested"]["children"][0]["type"] == "file"
+    assert by_name["notes.md"]["type"] == "file"
+    assert by_name["notes.md"]["extension"] == ".md"
+    assert by_name["notes.md"]["size"] > 0
+
+
 def test_resolve_scoped_memory_workspace_prefers_explicit_then_env_then_data_dir(monkeypatch):
     pytest.importorskip("fastapi")
 

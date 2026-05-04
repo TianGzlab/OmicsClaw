@@ -80,6 +80,19 @@ _DEFAULT_APP_CORS_ORIGINS: tuple[str, ...] = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+_OUTPUT_RUNNING_STALE_SECONDS = 30 * 60
+_FILE_TREE_IGNORED_DIRS: frozenset[str] = frozenset({
+    "node_modules",
+    ".git",
+    "dist",
+    ".next",
+    "__pycache__",
+    ".cache",
+    ".turbo",
+    "coverage",
+    ".output",
+    "build",
+})
 
 # ---------------------------------------------------------------------------
 # Lazy references to bot.core — resolved once at startup via lifespan
@@ -2005,6 +2018,93 @@ async def browse_directories(path: Optional[str] = None):
     }
 
 
+def _classify_tree_file(path: Path) -> dict[str, Any]:
+    return {
+        "name": path.name,
+        "path": str(path),
+        "type": "file",
+        "size": path.stat().st_size,
+        "extension": path.suffix,
+    }
+
+
+def _scan_file_tree(base: Path, depth: int, visited: set[Path] | None = None) -> list[dict[str, Any]]:
+    if depth <= 0:
+        return []
+
+    seen = visited if visited is not None else set()
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+    except OSError as exc:
+        raise HTTPException(400, detail=f"cannot read directory: {exc}") from exc
+
+    resolved_entries: list[tuple[str, Path, bool, bool]] = []
+    for entry in entries:
+        if entry.name.startswith(".") and not entry.name.startswith(".env"):
+            continue
+        try:
+            is_dir = entry.is_dir()
+            is_file = entry.is_file()
+        except OSError:
+            continue
+        if is_dir or is_file:
+            resolved_entries.append((entry.name, entry, is_dir, is_file))
+
+    resolved_entries.sort(key=lambda item: (not item[2], item[0].lower()))
+
+    nodes: list[dict[str, Any]] = []
+    for name, entry, is_dir, is_file in resolved_entries:
+        if is_dir:
+            if name in _FILE_TREE_IGNORED_DIRS:
+                continue
+            try:
+                real = entry.resolve(strict=True)
+            except OSError:
+                continue
+            if real in seen:
+                continue
+            next_seen = set(seen)
+            next_seen.add(real)
+            nodes.append({
+                "name": name,
+                "path": str(entry),
+                "type": "directory",
+                "children": _scan_file_tree(entry, depth - 1, next_seen),
+            })
+        elif is_file:
+            try:
+                nodes.append(_classify_tree_file(entry))
+            except OSError:
+                continue
+    return nodes
+
+
+@app.get("/files/tree")
+async def files_tree(
+    path: str = Query(..., description="Directory path on the backend host"),
+    depth: int = Query(3, ge=1, le=10),
+):
+    """Return files and directories under a backend-host directory."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        base = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    return {
+        "root": str(base),
+        "tree": _scan_file_tree(base, depth),
+    }
+
+
 # ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
@@ -3743,6 +3843,19 @@ def _collect_key_files(run_dir: Path) -> list[dict]:
     return results
 
 
+def _latest_file_mtime(run_dir: Path) -> float:
+    latest = 0.0
+    try:
+        for entry in run_dir.rglob("*"):
+            try:
+                latest = max(latest, entry.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return latest
+
+
 def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     Read ``result.json`` and extract status + summary.
@@ -3751,10 +3864,17 @@ def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     result_file = run_dir / "result.json"
     if not result_file.is_file():
-        # No result.json — infer status from presence of output files
-        figures_dir = run_dir / "figures"
-        if figures_dir.is_dir() and any(figures_dir.iterdir()):
-            return ("completed", None)
+        # result.json is the completion contract. Without it, a run is either
+        # still active or was interrupted before finalization.
+        latest_mtime = max(
+            run_dir.stat().st_mtime,
+            _latest_file_mtime(run_dir),
+        )
+        if time.time() - latest_mtime > _OUTPUT_RUNNING_STALE_SECONDS:
+            return (
+                "failed",
+                f"stale incomplete run: no result.json and no output update for more than {_OUTPUT_RUNNING_STALE_SECONDS // 60} minutes",
+            )
         return ("running", None)
 
     try:

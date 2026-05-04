@@ -77,6 +77,14 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > `<workspace>/output` as `OMICSCLAW_OUTPUT_DIR`. Analysis runs, `/outputs/latest`,
 > and dashboard figures therefore follow the selected Desktop project instead
 > of the backend source checkout's `output/` directory.
+>
+> **Desktop remote file tree + stale runs:** remote runtimes now expose
+> `/files/tree` for the App's right-panel file tree, returning files and
+> directories instead of the folder-picker-only `/files/browse` directory list.
+> `/outputs/latest` treats output directories without `result.json` as live only
+> while files are still changing; if an incomplete directory has no updates for
+> 30 minutes, it is reported as `failed` so interrupted analyses leave the live
+> task count automatically.
 
 ## ⚡ Quick Start
 
