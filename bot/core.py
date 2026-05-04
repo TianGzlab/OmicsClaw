@@ -2500,10 +2500,16 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     if batch_key:
         cmd.extend(["--batch-key", batch_key])
 
+    skill_info = _lookup_skill_info(skill_key)
+    canonical_skill = skill_info.get("alias", skill_key)
+
     # Pass n_epochs if user specified
     n_epochs = args.get("n_epochs")
     if n_epochs is not None:
-        cmd.extend(["--n-epochs", str(int(n_epochs))])
+        if canonical_skill == "spatial-domain-identification":
+            cmd.extend(["--epochs", str(int(n_epochs))])
+        else:
+            cmd.extend(["--n-epochs", str(int(n_epochs))])
 
     cmd.extend(_normalize_extra_args(args.get("extra_args")))
 
@@ -2522,10 +2528,25 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         if is_dl:
             logger.info(f"Starting {skill_key} with {method} (no timeout, may take 10-60 minutes)")
 
-        # Wait until completion — no timeout
-        stdout_bytes, stderr_bytes = await proc.communicate()
-        stdout_str = stdout_bytes.decode(errors="replace")
-        stderr_str = stderr_bytes.decode(errors="replace")
+        async def _read_stream(stream, *, label: str) -> str:
+            if stream is None:
+                return ""
+            chunks: list[str] = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace")
+                chunks.append(text)
+                stripped = text.rstrip()
+                if stripped:
+                    logger.info("[%s] %s", label, stripped)
+            return "".join(chunks)
+
+        stdout_task = asyncio.create_task(_read_stream(proc.stdout, label=f"{skill_key}:stdout"))
+        stderr_task = asyncio.create_task(_read_stream(proc.stderr, label=f"{skill_key}:stderr"))
+        await proc.wait()
+        stdout_str, stderr_str = await asyncio.gather(stdout_task, stderr_task)
     except Exception as e:
         import traceback as _tb
         # Clean up empty output directory on crash

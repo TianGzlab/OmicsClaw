@@ -869,6 +869,11 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="leiden")
+    parser.add_argument(
+        "--data-type",
+        default=None,
+        help="Input platform hint for method-specific routing (e.g. visium, slide_seq, xenium).",
+    )
     parser.add_argument("--n-domains", type=int, default=None, help="Target number of domains (defaults to 7 for GNNs and CellCharter fixed-K mode)")
     parser.add_argument("--epochs", type=int, default=100, help="Max training epochs (for GraphST/SpaGCN/STAGATE)")
     parser.add_argument("--resolution", type=float, default=1.0)
@@ -933,6 +938,8 @@ def main():
     
     # Collect current parameters specific to the method
     current_params = {"method": args.method}
+    if args.data_type:
+        current_params["data_type"] = args.data_type
     if args.method in ["leiden", "louvain", "banksy"]:
         current_params["resolution"] = args.resolution
     if args.method in ["leiden", "louvain"]:
@@ -984,6 +991,7 @@ def main():
         spatial_weight=args.spatial_weight,
         n_domains=args.n_domains,  # Safe variable
         epochs=args.epochs,
+        data_type=args.data_type,
         rad_cutoff=args.rad_cutoff,
         k_nn=args.k_nn,
         stagate_alpha=args.stagate_alpha,
@@ -1013,6 +1021,8 @@ def main():
         params["n_domains"] = args.n_domains
     if args.epochs is not None:
         params["epochs"] = args.epochs
+    if args.data_type:
+        params["data_type"] = args.data_type
     if args.method == "stagate":
         params["rad_cutoff"] = args.rad_cutoff
         params["k_nn"] = args.k_nn

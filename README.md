@@ -57,6 +57,21 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 | 🧠 **Memory**<br/>Sessions, preferences, lineage | 🔒 **Local-first**<br/>Raw data stays in your runtime | 🧰 **89 skills**<br/>Generated catalog + demos | 🧭 **Smart routing**<br/>Natural language to tools |
 | 🖥️ **CLI / TUI**<br/>`oc interactive`, `oc tui` | 🌐 **App backend**<br/>FastAPI for desktop/web | 🔌 **MCP-ready**<br/>Attach external tools | 📡 **Remote mode**<br/>SSH tunnel to Linux servers |
 
+> **Desktop backend health:** `oc app-server` includes an optional
+> `launch_id` in `/health` when started with `OMICSCLAW_DESKTOP_LAUNCH_ID`.
+> OmicsClaw Desktop uses this process handshake to avoid mistaking a stale
+> backend already listening on port 8765 for the newly launched backend.
+>
+> **GraphST + App timeout note:** for `spatial-domain-identification`, the
+> backend now forwards chat/app epoch overrides to the actual `--epochs`
+> skill flag, and GraphST resolves Slide-seq-style inputs to the upstream
+> `datatype='Slide'` path instead of falling back to the default `10X`
+> branch. This fixes a previous App-side footgun where users could request
+> `epochs=1` yet the parameter never reached the skill. It does **not** make
+> large GraphST runs inherently cheap: on very large Slide-seq-style datasets,
+> GraphST still spends substantial CPU/RAM time in preprocessing and graph
+> construction before GPU training begins.
+
 ## ⚡ Quick Start
 
 ```bash

@@ -211,6 +211,57 @@ def test_dispatch_supported_methods():
     }
 
 
+def test_dispatch_graphst_maps_data_type_to_datatype(monkeypatch):
+    """GraphST dispatch should forward data_type into the wrapper's datatype arg."""
+    from skills.spatial._lib import domains as domains_mod
+
+    adata = _make_synthetic_adata()
+    captured: dict[str, object] = {}
+
+    def fake_graphst(input_adata, *, n_domains=7, epochs=None, datatype=None, **kwargs):
+        captured["adata"] = input_adata
+        captured["n_domains"] = n_domains
+        captured["epochs"] = epochs
+        captured["datatype"] = datatype
+        captured.update(kwargs)
+        return {"method": "graphst", "n_domains": 2, "domain_counts": {}}
+
+    monkeypatch.setattr(domains_mod, "identify_domains_graphst", fake_graphst)
+
+    result = domains_mod.dispatch_method(
+        "graphst",
+        adata,
+        n_domains=7,
+        epochs=1,
+        data_type="slide_seq",
+    )
+
+    assert result["method"] == "graphst"
+    assert captured["adata"] is adata
+    assert captured["n_domains"] == 7
+    assert captured["epochs"] == 1
+    assert captured["datatype"] == "slide_seq"
+
+
+def test_cli_accepts_epochs_and_data_type_flags(tmp_output):
+    """CLI surface should expose the GraphST-relevant routing flags."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SKILL_SCRIPT),
+            "--help",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(SKILL_SCRIPT.parent),
+    )
+
+    assert result.returncode == 0
+    assert "--epochs" in result.stdout
+    assert "--data-type" in result.stdout
+
+
 def test_refine_spatial_domains():
     """Spatial refinement should produce labels for all cells."""
     from skills.spatial._lib.domains import identify_domains_leiden, refine_spatial_domains

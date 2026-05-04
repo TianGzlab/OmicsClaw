@@ -492,7 +492,29 @@ def identify_domains_graphst(
 
     import torch
     import gc
-    from GraphST import GraphST as GraphSTModule
+
+    def _resolve_graphst_datatype(
+        graph_adata,
+        explicit_datatype: str | None,
+    ) -> str:
+        if explicit_datatype:
+            token = str(explicit_datatype).strip().lower()
+        else:
+            token_parts = [
+                str(graph_adata.uns.get("platform", "") or ""),
+                str(graph_adata.uns.get("data_type", "") or ""),
+                str(graph_adata.uns.get("spatial_name", "") or ""),
+                str(graph_adata.uns.get("dataset_name", "") or ""),
+            ]
+            token = " ".join(token_parts).strip().lower()
+
+        if any(key in token for key in ("slide", "slide_seq", "slideseq")):
+            return "Slide"
+        if any(key in token for key in ("stereo", "stereoseq", "stereo-seq")):
+            return "Stereo"
+        if any(key in token for key in ("visium", "10x", "10 x")):
+            return "10X"
+        return "10X"
 
     logger.info("Running GraphST (n_domains=%s, epochs=%s, dim_output=%d) ...",
                 n_domains, epochs, dim_output)
@@ -522,6 +544,9 @@ def identify_domains_graphst(
     if spatial_key and spatial_key != "spatial":
         adata_work.obsm["spatial"] = adata_work.obsm[spatial_key]
 
+    detected_datatype = _resolve_graphst_datatype(adata_work, datatype)
+    logger.info("GraphST datatype resolved to %s", detected_datatype)
+
     # ------------------------------------------------------------------
     # 2. GPU setup
     # ------------------------------------------------------------------
@@ -542,6 +567,7 @@ def identify_domains_graphst(
         model_kwargs: dict = {
             "device": device,
             "random_seed": random_seed,
+            "datatype": detected_datatype,
         }
         if dim_output != 64:
             model_kwargs["dim_output"] = dim_output
@@ -1101,4 +1127,9 @@ def dispatch_method(method: str, adata, **kwargs) -> dict:
     import inspect
     sig = inspect.signature(func)
     valid_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+
+    if method == "graphst" and "datatype" in sig.parameters and "datatype" not in valid_kwargs:
+        data_type = kwargs.get("data_type")
+        if data_type is not None:
+            valid_kwargs["datatype"] = data_type
     return func(adata, **valid_kwargs)

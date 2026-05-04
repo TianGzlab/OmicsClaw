@@ -529,6 +529,7 @@ _HARDCODED_SKILLS: dict[str, dict[str, Any]] = {
         "allowed_extra_flags": {
             "--method", "--n-domains", "--resolution",
             "--spatial-weight", "--rad-cutoff", "--lambda-param", "--refine",
+            "--epochs", "--dim-output", "--data-type",
         },
         "saves_h5ad": True,
     },
