@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 try:
     from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
@@ -2028,6 +2028,59 @@ def _classify_tree_file(path: Path) -> dict[str, Any]:
     }
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _trusted_file_roots() -> list[Path]:
+    core = _get_core()
+    roots: list[Path] = []
+    for raw in getattr(core, "TRUSTED_DATA_DIRS", []) or []:
+        try:
+            roots.append(Path(raw).expanduser().resolve(strict=True))
+        except OSError:
+            continue
+    output_dir = getattr(core, "OUTPUT_DIR", None)
+    if output_dir:
+        try:
+            roots.append(Path(output_dir).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    workspace = str(os.getenv("OMICSCLAW_WORKSPACE", "") or "").strip()
+    if workspace:
+        try:
+            roots.append(Path(workspace).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    unique: list[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _resolve_trusted_file_path(raw_path: str) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        target = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="file does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not target.is_file():
+        raise HTTPException(400, detail="path is not a file")
+    trusted_roots = _trusted_file_roots()
+    if not any(_is_relative_to(target, root) for root in trusted_roots):
+        raise HTTPException(403, detail="access denied")
+    return target
+
+
 def _scan_file_tree(base: Path, depth: int, visited: set[Path] | None = None) -> list[dict[str, Any]]:
     if depth <= 0:
         return []
@@ -2103,6 +2156,19 @@ async def files_tree(
         "root": str(base),
         "tree": _scan_file_tree(base, depth),
     }
+
+
+@app.get("/files/serve")
+async def files_serve(path: str = Query(..., description="Trusted file path on the backend host")):
+    """Serve a file from the backend host under trusted workspace/output roots."""
+    target = _resolve_trusted_file_path(path)
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(
+        str(target),
+        media_type=media_type or "application/octet-stream",
+        filename=target.name,
+        headers={"Cache-Control": "private, max-age=60"},
+    )
 
 
 # ---------------------------------------------------------------------------

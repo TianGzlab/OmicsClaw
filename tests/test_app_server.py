@@ -949,6 +949,47 @@ async def test_files_tree_returns_remote_files_and_directories(tmp_path):
     assert by_name["notes.md"]["size"] > 0
 
 
+@pytest.mark.asyncio
+async def test_files_serve_returns_trusted_workspace_file(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    workspace = tmp_path / "workspace"
+    figure = workspace / "output" / "run-1" / "figures" / "spatial.png"
+    figure.parent.mkdir(parents=True)
+    figure.write_bytes(b"PNGDATA")
+
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[workspace], OUTPUT_DIR=workspace / "output")
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+
+    response = await server.files_serve(path=str(figure))
+
+    assert response.status_code == 200
+    assert response.media_type == "image/png"
+    assert response.path == str(figure.resolve())
+
+
+@pytest.mark.asyncio
+async def test_files_serve_rejects_untrusted_path(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"PNGDATA")
+
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[workspace], OUTPUT_DIR=workspace / "output")
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+
+    with pytest.raises(server.HTTPException) as exc:
+        await server.files_serve(path=str(outside))
+
+    assert exc.value.status_code == 403
+
+
 def test_resolve_scoped_memory_workspace_prefers_explicit_then_env_then_data_dir(monkeypatch):
     pytest.importorskip("fastapi")
 

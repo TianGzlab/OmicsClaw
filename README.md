@@ -85,6 +85,9 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > while files are still changing; if an incomplete directory has no updates for
 > 30 minutes, it is reported as `failed` so interrupted analyses leave the live
 > task count automatically.
+> Remote Desktop clients can also fetch trusted backend-host file bytes through
+> `/files/serve`, which is constrained to the active workspace, trusted data
+> directories, and output directory.
 
 ## ⚡ Quick Start
 
