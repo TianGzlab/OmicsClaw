@@ -70,6 +70,15 @@
 > `launch_id`。OmicsClaw Desktop 用它做进程握手，避免把已经占用
 > 8765 端口的旧后端误认为刚启动的新后端。
 
+> **GraphST + App 超时说明：** `spatial-domain-identification` 现在会把
+> 桌面端/对话端传入的 epoch 覆盖值转发到实际的 `--epochs` 技能参数。
+> 对 Slide-seq/Slide-seqV2 风格输入，GraphST 会解析到上游
+> `datatype='Slide'` 路径，不再误退回默认 `10X` 分支。Slide/Stereo
+> 图构建会保留稀疏空间邻接矩阵和 readout mask，避免高分辨率数据上
+> 旧实现的 dense `n_obs x n_obs` 内存分配。大数据 GraphST 仍会在
+> epoch 之外执行预处理、聚类和写盘，`epochs=1` 应理解为流程冒烟测试，
+> 不是瞬时完成的正式分析。
+
 **与传统工具的差异：**
 
 | 传统工具 | OmicsClaw |

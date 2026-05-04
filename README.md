@@ -66,11 +66,11 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > backend now forwards chat/app epoch overrides to the actual `--epochs`
 > skill flag, and GraphST resolves Slide-seq-style inputs to the upstream
 > `datatype='Slide'` path instead of falling back to the default `10X`
-> branch. This fixes a previous App-side footgun where users could request
-> `epochs=1` yet the parameter never reached the skill. It does **not** make
-> large GraphST runs inherently cheap: on very large Slide-seq-style datasets,
-> GraphST still spends substantial CPU/RAM time in preprocessing and graph
-> construction before GPU training begins.
+> branch. Slide/Stereo graph setup now keeps GraphST's spatial adjacency and
+> readout mask sparse, avoiding previous dense `n_obs x n_obs` allocations
+> on high-resolution Slide-seqV2 files. Very large GraphST runs still spend
+> time in preprocessing and clustering outside the requested GPU epoch loop,
+> so `epochs=1` is a pipeline smoke test rather than an instant analysis.
 
 ## ⚡ Quick Start
 

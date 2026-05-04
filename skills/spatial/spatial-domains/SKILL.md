@@ -14,6 +14,7 @@ metadata:
       - "--auto-k"
       - "--auto-k-min"
       - "--auto-k-max"
+      - "--data-type"
       - "--dim-output"
       - "--epochs"
       - "--k-nn"
@@ -66,11 +67,12 @@ metadata:
           - "--stagate-alpha: Cell type-aware module weight (0=disabled)."
           - "--epochs: Training epochs (default 100 in the OmicsClaw CLI wrapper)."
       graphst:
-        priority: "epochs → dim_output → n_domains"
-        params: ["n_domains", "epochs", "dim_output"]
-        defaults: {n_domains: 7, epochs: 100, dim_output: 64}
+        priority: "data_type → epochs → dim_output → n_domains"
+        params: ["n_domains", "epochs", "dim_output", "data_type"]
+        defaults: {n_domains: 7, epochs: 100, dim_output: 64, data_type: auto}
         requires: ["obsm.spatial", "raw_or_counts"]
         tips:
+          - "--data-type: Platform hint for GraphST routing (visium, slide_seq, stereo). Auto-inferred from metadata/path when omitted."
           - "--epochs: Default ~600 in official code. Lower to 50-100 for large datasets (>30k spots)."
           - "--dim-output: Embedding dimension (default 64). Increase for complex tissues."
           - "--n-domains: Target cluster count."
@@ -179,7 +181,7 @@ automatically selects the correct data layer for each method:
 | **Louvain** | `obsp["connectivities"]` (neighbor graph) | Pre-built k-NN graph from log-normalized + PCA | Spatial coords optional |
 | **SpaGCN** | `X` (log-normalized expression) | Full gene matrix; internal PCA by SpaGCN | Spatial coords required; current wrapper uses coordinates only (`histology=False`) |
 | **STAGATE** | `X` (log-normalized, HVG subset) | Auto-filters to `var["highly_variable"]` before training | Spatial coords for radius-based adjacency |
-| **GraphST** | `raw.X` or `layers["counts"]` (raw counts) | Internal `log1p -> normalize -> scale -> HVG(3000)` | Spatial coords required |
+| **GraphST** | `raw.X` or `layers["counts"]` (raw counts) | Internal `log1p -> normalize -> scale -> HVG(3000)` plus platform-aware spatial graph | Spatial coords required; `--data-type` optional |
 | **BANKSY** | `layers["counts"]` or `raw.X` -> `normalize_total` | Non-negative library-size normalized expression | Spatial coords required |
 | **CellCharter** | `obsm["X_pca"]` or `X` (log-normalized) | Fast neighbor aggregation over embeddings | Spatial coords for Delaunay graph |
 
@@ -333,16 +335,17 @@ and a top-level `README.md` to make the output directory easier to inspect.
 
 1. **Input**: AnnData with spatial coordinates (**raw counts** natively sourced from `adata.layers["counts"]` or `adata.raw`)
 2. **Raw count restoration**: Automatically restores safe raw counts to avoid double log-transform. (GraphST internally assumes pure counts and runs its own `log1p -> scale -> HVG`).
-3. **Preprocessing**: `GraphST.preprocess()` + `GraphST.construct_interaction()`
+3. **Preprocessing**: `GraphST.preprocess()` + platform-aware spatial graph construction. Slide/Stereo runs keep the KNN adjacency and readout mask sparse to avoid dense `n_obs x n_obs` allocations.
 4. **Contrastive learning**: Self-supervised GNN (with explicit `torch.cuda.empty_cache()` sweeping to prevent VRAM memory locking).
 5. **Embedding**: PCA on learned representations.
-6. **Clustering**: GMM (with heavily conditioned `reg_covar=1e-3` to prevent ill-conditioned singular matrices) with graceful KMeans fallback.
+6. **Clustering**: Official GraphST clustering on small/medium inputs; MiniBatchKMeans on large embeddings to avoid repeated Leiden resolution scans.
 7. **Labels**: Stored in `adata.obs["spatial_domain"]`
 
 **Key parameters**:
 - `n_domains`: Target number of domains
 - `epochs`: Training epochs (default 100 in OmicsClaw CLI wrapper)
 - `dim_output`: Embedding dimension (default 64)
+- `data_type`: Optional platform hint (`visium`, `slide_seq`, `stereo`); auto-inferred from AnnData metadata or input path when omitted
 - `refine`: Optional GraphST / KNN-style post hoc smoothing
 - Source: Long et al., *Nature Communications* 2023
 

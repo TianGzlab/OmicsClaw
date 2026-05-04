@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "spatial_domains.py"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -241,6 +243,113 @@ def test_dispatch_graphst_maps_data_type_to_datatype(monkeypatch):
     assert captured["n_domains"] == 7
     assert captured["epochs"] == 1
     assert captured["datatype"] == "slide_seq"
+
+
+def test_graphst_datatype_infers_slide_from_input_filename():
+    """Slide-seqV2 filenames should route GraphST away from dense 10X graph construction."""
+    spec = importlib.util.spec_from_file_location("spatial_domains_script", SKILL_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    spatial_domains_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(spatial_domains_script)
+
+    adata = _make_synthetic_adata()
+
+    assert (
+        spatial_domains_script._infer_graphst_data_type(
+            adata,
+            "/data/slideseqv2_mouse_hippocampus.h5ad",
+            explicit_data_type=None,
+        )
+        == "slide_seq"
+    )
+
+
+def test_graphst_large_slide_graph_preparation_uses_sparse_adjacency(monkeypatch):
+    """GraphST Slide/Stereo preparation must avoid dense n_spot x n_spot arrays."""
+    from skills.spatial._lib import domains as domains_mod
+
+    adata = _make_synthetic_adata(n_obs=20, n_vars=30)
+    adata_work = adata.copy()
+
+    domains_mod._prepare_graphst_sparse_slide_graph(adata_work, n_neighbors=3)
+
+    assert sp.issparse(adata_work.obsm["adj"])
+    assert sp.issparse(adata_work.obsm["graph_neigh"])
+    assert adata_work.obsm["adj"].shape == (adata_work.n_obs, adata_work.n_obs)
+    assert adata_work.obsm["graph_neigh"].nnz <= adata_work.n_obs * 3
+
+
+def test_graphst_sparse_init_patch_keeps_readout_mask_sparse():
+    """GraphST's constructor must not densify Slide/Stereo readout masks."""
+    import importlib
+    import torch
+
+    pytest.importorskip("GraphST")
+    from skills.spatial._lib import domains as domains_mod
+
+    graphst_module = importlib.import_module("GraphST.GraphST")
+    adata = _make_synthetic_adata(n_obs=20, n_vars=30)
+    adata_work = adata.copy()
+
+    domains_mod._prepare_graphst_sparse_slide_graph(adata_work, n_neighbors=3)
+    domains_mod._patch_graphst_sparse_readout()
+    domains_mod._patch_graphst_sparse_init()
+
+    model = graphst_module.GraphST(
+        adata_work,
+        device=torch.device("cpu"),
+        datatype="Slide",
+        epochs=1,
+    )
+
+    assert model.adj.is_sparse
+    assert model.graph_neigh.is_sparse
+
+
+def test_graphst_large_embedding_clustering_uses_minibatch_kmeans():
+    """Large GraphST runs should avoid slow repeated Leiden resolution searches."""
+    import anndata
+    from skills.spatial._lib import domains as domains_mod
+
+    rng = np.random.default_rng(42)
+    clusters = [
+        np.full((8, 6), fill_value=i, dtype=np.float32)
+        + rng.normal(0, 0.01, size=(8, 6)).astype(np.float32)
+        for i in range(4)
+    ]
+    adata = anndata.AnnData(X=np.ones((32, 10), dtype=np.float32))
+    adata.obsm["emb"] = np.vstack(clusters)
+
+    labels, clustering_name = domains_mod._cluster_graphst_embedding(
+        adata,
+        n_domains=4,
+        random_seed=42,
+        large_threshold=10,
+    )
+
+    assert clustering_name == "minibatch_kmeans"
+    assert len(labels) == adata.n_obs
+    assert len(set(np.asarray(labels).astype(str))) == 4
+
+
+def test_large_gallery_does_not_compute_missing_umap(monkeypatch):
+    """Large outputs should not spend extra time computing UMAP for the gallery."""
+    spec = importlib.util.spec_from_file_location("spatial_domains_script", SKILL_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    spatial_domains_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(spatial_domains_script)
+
+    adata = _make_synthetic_adata(n_obs=30, n_vars=30)
+    adata.obsm.pop("X_umap", None)
+
+    def fail_umap(*_args, **_kwargs):
+        raise AssertionError("UMAP should not be computed for large gallery outputs")
+
+    monkeypatch.setattr(spatial_domains_script.sc.tl, "umap", fail_umap)
+
+    spatial_domains_script._ensure_umap_for_gallery(adata, max_auto_obs=10)
+
+    assert "X_umap" not in adata.obsm
 
 
 def test_cli_accepts_epochs_and_data_type_flags(tmp_output):
