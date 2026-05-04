@@ -71,6 +71,12 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > on high-resolution Slide-seqV2 files. Very large GraphST runs still spend
 > time in preprocessing and clustering outside the requested GPU epoch loop,
 > so `epochs=1` is a pipeline smoke test rather than an instant analysis.
+>
+> **Desktop workspace outputs:** when OmicsClaw-App syncs a workspace or sends
+> a chat request with `workspace`, the app backend now uses
+> `<workspace>/output` as `OMICSCLAW_OUTPUT_DIR`. Analysis runs, `/outputs/latest`,
+> and dashboard figures therefore follow the selected Desktop project instead
+> of the backend source checkout's `output/` directory.
 
 ## ⚡ Quick Start
 

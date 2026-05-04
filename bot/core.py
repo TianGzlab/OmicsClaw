@@ -89,7 +89,7 @@ def _resolve_omicsclaw_dir() -> Path:
 OMICSCLAW_DIR = _resolve_omicsclaw_dir()
 load_project_dotenv(OMICSCLAW_DIR, override=False)
 OMICSCLAW_PY = OMICSCLAW_DIR / "omicsclaw.py"
-OUTPUT_DIR = OMICSCLAW_DIR / "output"
+OUTPUT_DIR = Path(os.getenv("OMICSCLAW_OUTPUT_DIR", "") or (OMICSCLAW_DIR / "output")).expanduser().resolve()
 DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
 

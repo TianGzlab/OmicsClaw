@@ -805,7 +805,7 @@ async def test_set_workspace_updates_workspace_env_and_persistence(monkeypatch, 
 
     from omicsclaw.app import server
 
-    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[])
+    fake_core = SimpleNamespace(TRUSTED_DATA_DIRS=[], OUTPUT_DIR=tmp_path / "old-output")
     captured_updates: dict[str, str] = {}
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
@@ -820,19 +820,83 @@ async def test_set_workspace_updates_workspace_env_and_persistence(monkeypatch, 
     )
     monkeypatch.delenv("OMICSCLAW_DATA_DIRS", raising=False)
     monkeypatch.delenv("OMICSCLAW_WORKSPACE", raising=False)
+    monkeypatch.delenv("OMICSCLAW_OUTPUT_DIR", raising=False)
 
     result = await server.set_workspace(server.WorkspaceRequest(workspace=str(workspace_dir)))
+
+    expected_output_dir = workspace_dir / "output"
 
     assert result["ok"] is True
     assert result["workspace"] == str(workspace_dir)
     assert result["workspace_env"] == str(workspace_dir)
+    assert result["output_dir"] == str(expected_output_dir)
     assert os.environ["OMICSCLAW_WORKSPACE"] == str(workspace_dir)
     assert os.environ["OMICSCLAW_DATA_DIRS"] == str(workspace_dir)
+    assert os.environ["OMICSCLAW_OUTPUT_DIR"] == str(expected_output_dir)
     assert captured_updates == {
         "OMICSCLAW_DATA_DIRS": str(workspace_dir),
         "OMICSCLAW_WORKSPACE": str(workspace_dir),
+        "OMICSCLAW_OUTPUT_DIR": str(expected_output_dir),
     }
     assert fake_core.TRUSTED_DATA_DIRS == [workspace_dir]
+    assert fake_core.OUTPUT_DIR == expected_output_dir
+    assert expected_output_dir.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_request_workspace_updates_output_dir_before_tool_loop(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    expected_output_dir = workspace_dir / "output"
+    captured: dict[str, object] = {}
+
+    class FakeCore:
+        TRUSTED_DATA_DIRS: list[Path] = []
+        OUTPUT_DIR = tmp_path / "old-output"
+        LLM_PROVIDER_NAME = "test"
+        OMICSCLAW_MODEL = "test-model"
+        received_files: list[object] = []
+
+        @staticmethod
+        def _skill_registry():
+            return SimpleNamespace(skills={})
+
+        @staticmethod
+        def get_tool_executors():
+            return {}
+
+        @staticmethod
+        async def llm_tool_loop(**kwargs):
+            captured["workspace"] = kwargs["workspace"]
+            captured["output_dir"] = FakeCore.OUTPUT_DIR
+            return "done"
+
+    monkeypatch.setattr(server, "_core", FakeCore, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+    monkeypatch.delenv("OMICSCLAW_DATA_DIRS", raising=False)
+    monkeypatch.delenv("OMICSCLAW_WORKSPACE", raising=False)
+    monkeypatch.delenv("OMICSCLAW_OUTPUT_DIR", raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-output-dir",
+            content="run analysis",
+            workspace=str(workspace_dir),
+        )
+    )
+    payload = await _read_streaming_response(response)
+
+    assert '"done"' in payload
+    assert captured["workspace"] == str(workspace_dir)
+    assert captured["output_dir"] == expected_output_dir
+    assert os.environ["OMICSCLAW_WORKSPACE"] == str(workspace_dir)
+    assert os.environ["OMICSCLAW_OUTPUT_DIR"] == str(expected_output_dir)
+    assert FakeCore.TRUSTED_DATA_DIRS == [workspace_dir]
+    assert expected_output_dir.is_dir()
 
 
 def test_resolve_scoped_memory_workspace_prefers_explicit_then_env_then_data_dir(monkeypatch):

@@ -634,6 +634,43 @@ def _resolve_scoped_memory_workspace(explicit_workspace: str = "") -> str:
         return ""
 
 
+def _apply_runtime_workspace(core: Any, workspace: str) -> tuple[Path, Path, list[str]]:
+    """Apply the active Desktop workspace to runtime trust and outputs."""
+    ws = str(workspace or "").strip()
+    if not ws:
+        raise HTTPException(400, detail="workspace is required")
+    ws_path = Path(ws)
+    if not ws_path.is_absolute():
+        raise HTTPException(400, detail="workspace must be an absolute path")
+    if not ws_path.is_dir():
+        raise HTTPException(400, detail=f"directory does not exist: {ws}")
+
+    output_dir = ws_path / "output"
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(500, detail=f"cannot create output directory: {exc}") from exc
+
+    trusted_dirs = getattr(core, "TRUSTED_DATA_DIRS", None)
+    if trusted_dirs is None:
+        trusted_dirs = []
+        setattr(core, "TRUSTED_DATA_DIRS", trusted_dirs)
+    if ws_path not in trusted_dirs:
+        trusted_dirs.append(ws_path)
+        logger.info("Added workspace to trusted dirs: %s", ws)
+
+    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
+    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
+    if ws not in dirs:
+        dirs.append(ws)
+    os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
+    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    os.environ["OMICSCLAW_OUTPUT_DIR"] = str(output_dir)
+    setattr(core, "OUTPUT_DIR", output_dir)
+
+    return ws_path, output_dir, dirs
+
+
 def _permission_profile_to_policy_state(
     session_id: str,
     permission_profile: str,
@@ -990,6 +1027,8 @@ async def chat_stream(req: ChatRequest):
       - {"type": "error",              "data": "..."}   — error
     """
     core = _get_core()
+    if req.workspace.strip():
+        _apply_runtime_workspace(core, req.workspace)
     session_id = req.session_id
     bound_remote_job_id = str(req.job_id or "").strip()
     bound_remote_workspace: Path | None = None
@@ -1863,22 +1902,7 @@ async def set_workspace(req: WorkspaceRequest):
     if not ws_path.is_dir():
         raise HTTPException(400, detail=f"directory does not exist: {ws}")
     core = _get_core()
-
-    # Add to TRUSTED_DATA_DIRS at runtime so tools can access files there
-    if ws_path not in core.TRUSTED_DATA_DIRS:
-        core.TRUSTED_DATA_DIRS.append(ws_path)
-        logger.info("Added workspace to trusted dirs: %s", ws)
-
-    # Update env var so _build_trusted_dirs() picks it up on next rebuild
-    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
-    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
-    if ws not in dirs:
-        dirs.append(ws)
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-    else:
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-
-    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    ws_path, output_dir, dirs = _apply_runtime_workspace(core, ws)
 
     # Persist to .env for next restart
     env_path = _get_omicsclaw_env_path()
@@ -1888,6 +1912,7 @@ async def set_workspace(req: WorkspaceRequest):
             {
                 "OMICSCLAW_DATA_DIRS": ",".join(dirs),
                 "OMICSCLAW_WORKSPACE": ws,
+                "OMICSCLAW_OUTPUT_DIR": str(output_dir),
             },
         )
 
@@ -1896,6 +1921,7 @@ async def set_workspace(req: WorkspaceRequest):
         "workspace": ws,
         "trusted_dirs": [str(d) for d in core.TRUSTED_DATA_DIRS],
         "workspace_env": os.environ.get("OMICSCLAW_WORKSPACE", ""),
+        "output_dir": str(output_dir),
     }
 
 
