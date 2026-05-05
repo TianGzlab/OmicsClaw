@@ -668,6 +668,8 @@ _usage: dict[str, int] = {
 # as "no estimate available" and omits from the cost line.
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     # DeepSeek
+    "deepseek-v4-flash":     (0.27,  1.10),
+    "deepseek-v4-pro":       (0.55,  2.19),
     "deepseek-reasoner":    (0.55,  2.19),
     "deepseek-chat":        (0.27,  1.10),
     "deepseek-v3":          (0.27,  1.10),

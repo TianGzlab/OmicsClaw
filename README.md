@@ -66,7 +66,14 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > rebuild the persisted transcript with a wrapped summary plus the retained
 > tail, matching `/compact` semantics. The Desktop `context_compressed`
 > notification therefore reflects durable backend state instead of a
-> one-request prompt trim.
+> one-request prompt trim. If a compaction stage only trims prompt context and
+> summarizes no older messages, the status payload uses trimmed-context wording
+> instead of reporting `0` summarized messages.
+>
+> **Desktop chat usage cost:** app-server token usage events price the actual
+> requested chat model, including per-request model overrides, before emitting
+> `cost_usd`. Current DeepSeek v4 model aliases are covered so Desktop message
+> footers and usage statistics can show per-turn cost when pricing is known.
 >
 > **GraphST + App timeout note:** for `spatial-domain-identification`, the
 > backend now forwards chat/app epoch overrides to the actual `--epochs`

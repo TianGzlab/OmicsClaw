@@ -607,7 +607,15 @@ def build_compaction_status_payload(event: CompactionEvent) -> dict[str, Any]:
     Returned dict is the JSON object that goes inside the SSE
     ``data`` field; the caller json.dumps it.
     """
-    if event.tokens_saved_estimate > 0:
+    if event.messages_compressed <= 0:
+        if event.tokens_saved_estimate > 0:
+            msg = (
+                "Context compressed: prompt context trimmed, "
+                f"~{event.tokens_saved_estimate:,} tokens saved"
+            )
+        else:
+            msg = "Context compressed: prompt context trimmed"
+    elif event.tokens_saved_estimate > 0:
         msg = (
             f"Context compressed: {event.messages_compressed} older "
             f"messages summarized, ~{event.tokens_saved_estimate:,} tokens saved"

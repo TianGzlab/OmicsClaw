@@ -757,7 +757,12 @@ def _tool_names_from_permission_suggestions(
     return tool_names
 
 
-def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> dict[str, Any]:
+def _build_token_usage(
+    response_usage: Any,
+    usage_totals: dict[str, float],
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
     prompt_tokens = int(getattr(response_usage, "prompt_tokens", 0) or 0)
     completion_tokens = int(getattr(response_usage, "completion_tokens", 0) or 0)
 
@@ -794,7 +799,7 @@ def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> d
     cost_usd = 0.0
     get_prices = getattr(core, "_get_token_price", None)
     if callable(get_prices):
-        input_price, output_price = get_prices(core.OMICSCLAW_MODEL)
+        input_price, output_price = get_prices(model or core.OMICSCLAW_MODEL)
         cost_usd = (
             usage_totals["input_tokens"] / 1_000_000 * float(input_price or 0.0)
             + usage_totals["output_tokens"] / 1_000_000 * float(output_price or 0.0)
@@ -1518,7 +1523,11 @@ async def chat_stream(req: ChatRequest):
                 ),
                 "total_tokens": int(getattr(response_usage, "total_tokens", 0) or 0),
             }
-        usage_payload = _build_token_usage(response_usage, usage_totals)
+        usage_payload = _build_token_usage(
+            response_usage,
+            usage_totals,
+            model=effective_model,
+        )
         return delta
 
     async def request_tool_approval(request: Any, execution_result: Any) -> dict[str, Any]:

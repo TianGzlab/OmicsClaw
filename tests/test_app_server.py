@@ -1227,6 +1227,61 @@ async def test_chat_stream_updates_bound_remote_chat_job_lifecycle(monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_cost_uses_requested_model_override(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    async def fake_llm_tool_loop(**kwargs):
+        kwargs["usage_accumulator"](
+            SimpleNamespace(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+        )
+        await kwargs["on_stream_content"]("priced response")
+        return "priced response"
+
+    def fake_get_token_price(model: str):
+        if model == "priced-model":
+            return (10.0, 20.0)
+        return (0.0, 0.0)
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="unpriced-default",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {},
+        _accumulate_usage=lambda response_usage: {
+            "prompt_tokens": int(getattr(response_usage, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(response_usage, "completion_tokens", 0) or 0),
+            "total_tokens": int(getattr(response_usage, "total_tokens", 0) or 0),
+        },
+        _get_token_price=fake_get_token_price,
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-priced-model",
+            content="hello",
+            model="priced-model",
+        )
+    )
+    payload = await _read_streaming_response(response)
+    events = _parse_sse_events(payload)
+    result_event = next(event for event in events if event["type"] == "result")
+
+    assert result_event["data"]["usage"] == {
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "cost_usd": 0.02,
+    }
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_rejects_bind_when_job_already_canceled(monkeypatch, tmp_path: Path):
     """Regression: ``bind_chat_stream_job`` intentionally passes canceled jobs
     through so the cancel handler can finalize them without clobbering state.

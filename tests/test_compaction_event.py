@@ -47,6 +47,20 @@ def test_payload_without_tokens_saved_omits_token_clause():
     assert payload["stats"]["tokensSaved"] == 0
 
 
+def test_payload_for_zero_message_compaction_uses_generic_wording():
+    event = CompactionEvent(
+        messages_compressed=0,
+        tokens_saved_estimate=8500,
+        applied_stages=("snip_compact",),
+    )
+    payload = build_compaction_status_payload(event)
+    assert payload["message"] == (
+        "Context compressed: prompt context trimmed, ~8,500 tokens saved"
+    )
+    assert "0 older messages" not in payload["message"]
+    assert payload["stats"] == {"messagesCompressed": 0, "tokensSaved": 8500}
+
+
 def test_payload_subtype_is_stable_constant():
     """Frontend dispatch keys on this exact string — must not drift."""
     event = CompactionEvent(messages_compressed=1, tokens_saved_estimate=1, applied_stages=())

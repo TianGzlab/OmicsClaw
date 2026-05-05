@@ -51,6 +51,8 @@ def test_price_table_covers_current_generation_models(model):
 
 def test_deepseek_pricing_unchanged():
     # Baseline: DeepSeek has always been covered — fix must not regress this.
+    assert _get_token_price("deepseek-v4-flash") == pytest.approx((0.27, 1.10))
+    assert _get_token_price("deepseek-v4-pro") == pytest.approx((0.55, 2.19))
     assert _get_token_price("deepseek-chat") == pytest.approx((0.27, 1.10))
     assert _get_token_price("deepseek-reasoner") == pytest.approx((0.55, 2.19))
 
