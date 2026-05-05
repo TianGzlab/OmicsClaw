@@ -1015,6 +1015,12 @@ def main():
     parser.add_argument("--doublet-score-threshold", type=float, default=None,
                         help="Score cutoff for doublet removal when only doublet_score is available (default: 0.25)")
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
+    parser.add_argument(
+        "--confirmed-preflight",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
     # -- Parameter validation --
@@ -1055,6 +1061,7 @@ def main():
             source_path=input_file,
         ),
         logger,
+        confirmed=args.confirmed_preflight,
     )
     public_params = build_public_params(effective_params)
     adata, filter_summary, filter_params, input_contract = prepare_preprocessing_input(

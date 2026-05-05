@@ -62,6 +62,12 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > OmicsClaw Desktop uses this process handshake to avoid mistaking a stale
 > backend already listening on port 8765 for the newly launched backend.
 >
+> **Desktop context compaction:** automatic and reactive chat compaction now
+> rebuild the persisted transcript with a wrapped summary plus the retained
+> tail, matching `/compact` semantics. The Desktop `context_compressed`
+> notification therefore reflects durable backend state instead of a
+> one-request prompt trim.
+>
 > **GraphST + App timeout note:** for `spatial-domain-identification`, the
 > backend now forwards chat/app epoch overrides to the actual `--epochs`
 > skill flag, and GraphST resolves Slide-seq-style inputs to the upstream
@@ -78,6 +84,12 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > and dashboard figures therefore follow the selected Desktop project instead
 > of the backend source checkout's `output/` directory.
 >
+> **Single-cell preflight confirmations:** when a Desktop-triggered single-cell
+> skill stops for confirmation-only preflight guidance, the app backend now keeps
+> that pending state for the chat session. An affirmative user reply replays the
+> original skill call with an explicit confirmation flag, while a new request
+> such as running QC first clears the pending action and is handled normally.
+>
 > **Desktop remote file tree + stale runs:** remote runtimes now expose
 > `/files/tree` for the App's right-panel file tree, returning files and
 > directories instead of the folder-picker-only `/files/browse` directory list.
@@ -87,7 +99,9 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > task count automatically.
 > Remote Desktop clients can also fetch trusted backend-host file bytes through
 > `/files/serve`, which is constrained to the active workspace, trusted data
-> directories, and output directory.
+> directories, and output directory. Chat output hints preserve the actual
+> nested artifact paths, such as `figures/*.png`, so desktop inline previews
+> request files that exist under the generated run directory.
 
 ## ⚡ Quick Start
 

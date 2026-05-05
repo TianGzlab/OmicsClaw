@@ -1,4 +1,5 @@
 """Tests for run_query_engine's on_context_compacted callback wiring."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from omicsclaw.runtime.context_compaction import (
     CompactionEvent,
     ContextCompactionConfig,
+    is_compaction_summary_message,
 )
 from omicsclaw.runtime.query_engine import (
     QueryEngineCallbacks,
@@ -28,14 +30,32 @@ class _FakeLLM:
         return SimpleNamespace(
             usage=None,
             choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="ok", tool_calls=None)
-                )
+                SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))
             ],
         )
 
 
-def _seed_long_history(store: TranscriptStore, chat_id: str, *, turns: int = 30) -> None:
+class _PromptTooLongThenOkLLM:
+    def __init__(self):
+        self.chat = self
+        self.completions = self
+        self.calls = 0
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("maximum context length exceeded")
+        return SimpleNamespace(
+            usage=None,
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))
+            ],
+        )
+
+
+def _seed_long_history(
+    store: TranscriptStore, chat_id: str, *, turns: int = 30
+) -> None:
     for i in range(turns):
         store.append_user_message(chat_id, f"user {i} " + "x" * 800)
         store.append_assistant_message(chat_id, content=f"assistant {i} " + "y" * 800)
@@ -78,6 +98,79 @@ def test_callback_fires_when_compaction_applied(tmp_path):
     assert event.applied_stages
     assert event.messages_compressed >= 0
     assert event.tokens_saved_estimate >= 0
+
+
+def test_auto_compaction_persists_summary_and_trimmed_history(tmp_path):
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    _seed_long_history(transcript_store, "chat-persist")
+    starting_history = list(transcript_store.get_history("chat-persist"))
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+    runtime = ToolRegistry([]).build_runtime({})
+
+    asyncio.run(
+        run_query_engine(
+            llm=_FakeLLM(),
+            context=QueryEngineContext(
+                chat_id="chat-persist",
+                session_id=None,
+                system_prompt="SYS",
+                user_message_content="hi",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(
+                model="fake",
+                context_compaction=ContextCompactionConfig(max_prompt_chars=8000),
+            ),
+        )
+    )
+
+    history = transcript_store.get_history("chat-persist")
+    assert len(history) < len(starting_history)
+    assert is_compaction_summary_message(history[0])
+    assert "earlier message" in history[0]["content"].lower()
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == "ok"
+
+
+def test_reactive_compaction_persists_summary_after_prompt_error(tmp_path):
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    _seed_long_history(transcript_store, "chat-reactive", turns=12)
+    starting_history = list(transcript_store.get_history("chat-reactive"))
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+    runtime = ToolRegistry([]).build_runtime({})
+    llm = _PromptTooLongThenOkLLM()
+
+    asyncio.run(
+        run_query_engine(
+            llm=llm,
+            context=QueryEngineContext(
+                chat_id="chat-reactive",
+                session_id=None,
+                system_prompt="SYS",
+                user_message_content="hi",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(
+                model="fake",
+                context_compaction=ContextCompactionConfig(
+                    max_prompt_chars=1_000_000,
+                    reactive_preserve_messages=4,
+                    reactive_preserve_chars=2_000,
+                ),
+            ),
+        )
+    )
+
+    history = transcript_store.get_history("chat-reactive")
+    assert llm.calls == 2
+    assert len(history) < len(starting_history)
+    assert is_compaction_summary_message(history[0])
+    assert "reactive compact context" in history[0]["content"].lower()
+    assert history[-1]["role"] == "assistant"
 
 
 def test_callback_not_fired_when_no_compaction(tmp_path):

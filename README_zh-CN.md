@@ -70,6 +70,16 @@
 > `launch_id`。OmicsClaw Desktop 用它做进程握手，避免把已经占用
 > 8765 端口的旧后端误认为刚启动的新后端。
 
+> **桌面对话上下文压缩：** 自动压缩和响应式压缩现在会把包裹后的摘要
+> 与保留的最新消息写回持久 transcript，语义与 `/compact` 保持一致。
+> 因此 Desktop 收到的 `context_compressed` 通知代表后端持久状态已经变短，
+> 不再只是单次请求的临时 prompt 裁剪。
+
+> **单细胞预检确认：** 当 Desktop 触发的单细胞技能只因确认型预检提示
+> 暂停时，App 后端会为当前聊天会话保留该 pending 状态。用户给出明确
+> 肯定回复后，会用显式确认标记重放原始技能调用；如果用户改为先跑 QC
+> 等新请求，则清除 pending 动作并正常处理新意图。
+
 > **GraphST + App 超时说明：** `spatial-domain-identification` 现在会把
 > 桌面端/对话端传入的 epoch 覆盖值转发到实际的 `--epochs` 技能参数。
 > 对 Slide-seq/Slide-seqV2 风格输入，GraphST 会解析到上游
@@ -78,6 +88,10 @@
 > 旧实现的 dense `n_obs x n_obs` 内存分配。大数据 GraphST 仍会在
 > epoch 之外执行预处理、聚类和写盘，`epochs=1` 应理解为流程冒烟测试，
 > 不是瞬时完成的正式分析。
+
+> **桌面输出路径提示：** 聊天结果中的输出提示会保留真实的嵌套 artifact
+> 路径，例如 `figures/*.png`，因此 Desktop 内联预览请求的是分析目录下
+> 确实存在的文件。
 
 **与传统工具的差异：**
 
