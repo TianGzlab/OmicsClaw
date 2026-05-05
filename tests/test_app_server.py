@@ -10,6 +10,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+import bot.core as bot_core
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -122,6 +124,50 @@ def test_app_server_main_reports_missing_uvicorn(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "uvicorn is not installed" in captured.err
     assert 'pip install -e ".[desktop]"' in captured.err
+
+
+@pytest.mark.asyncio
+async def test_app_server_lifespan_allows_startup_without_llm_credentials(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured: dict[str, object] = {}
+
+    def fake_init(**kwargs):
+        captured.update(kwargs)
+        if kwargs.get("allow_missing_credentials") is not True:
+            raise AssertionError("app-server startup must not require an LLM API key")
+
+    for key in (
+        "LLM_PROVIDER",
+        "OMICSCLAW_PROVIDER",
+        "LLM_API_KEY",
+        "OMICSCLAW_API_KEY",
+        "LLM_BASE_URL",
+        "OMICSCLAW_BASE_URL",
+        "OMICSCLAW_MODEL",
+        "LLM_AUTH_MODE",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(bot_core, "init", fake_init)
+    monkeypatch.setattr(bot_core, "LLM_PROVIDER_NAME", "openai")
+    monkeypatch.setattr(bot_core, "OMICSCLAW_MODEL", "gpt-5.5")
+    monkeypatch.setattr(server, "_core", None)
+    monkeypatch.setattr(server, "_NOTEBOOK_AVAILABLE", False)
+    monkeypatch.setattr(server, "_memory_client", None)
+
+    async with server.lifespan(server.app):
+        pass
+
+    assert captured["allow_missing_credentials"] is True
+    assert captured["strict_oauth"] is False
+    assert captured["provider"] == ""
+    assert captured["api_key"] == ""
 
 
 def test_app_server_mounts_native_notebook_routes():

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openai import AsyncOpenAI, APIError
+from openai import AsyncOpenAI, APIError, OpenAIError
 
 from omicsclaw.common.runtime_env import load_project_dotenv
 from omicsclaw.core.llm_timeout import (
@@ -40,7 +40,10 @@ from omicsclaw.core.provider_registry import (
     normalize_model_for_provider,
     resolve_provider,
 )
-from omicsclaw.core.provider_runtime import set_active_provider_runtime
+from omicsclaw.core.provider_runtime import (
+    provider_requires_api_key,
+    set_active_provider_runtime,
+)
 
 _PROVIDER_DETECT_ORDER = PROVIDER_DETECT_ORDER
 
@@ -1183,6 +1186,7 @@ def init(
     auth_mode: str = "api_key",
     ccproxy_port: int = 11435,
     strict_oauth: bool = True,
+    allow_missing_credentials: bool = False,
 ):
     """Initialise the shared LLM client. Call once at startup.
 
@@ -1207,6 +1211,10 @@ def init(
           ``api_key`` mode with a loud warning if OAuth can't be set up.
           This prevents a stale ``LLM_AUTH_MODE=oauth`` in ``.env`` from
           blocking the app-server from starting at all.
+
+    ``allow_missing_credentials`` keeps app-server bootstrap reachable before
+    first-time setup has saved an LLM provider key. Explicit provider changes
+    should leave this ``False`` so credential mistakes fail immediately.
     """
     global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
 
@@ -1323,23 +1331,49 @@ def init(
     if effective_base_url:
         kw["base_url"] = effective_base_url
     kw["timeout"] = _build_llm_timeout()
-    try:
-        llm = AsyncOpenAI(**kw)
-    except ImportError as exc:
-        if "socksio" in str(exc) or "socks" in str(exc).lower():
-            raise ImportError(
-                "A SOCKS proxy is configured (HTTPS_PROXY / ALL_PROXY) but "
-                "the 'socksio' package is not installed. Run:\n\n"
-                '  pip install "httpx[socks]"\n\n'
-                "then restart the backend."
-            ) from exc
-        raise
-
-    logger.info(
-        f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
-        f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
-        f"auth_mode={auth_mode_normalized}"
+    missing_required_key = (
+        not effective_api_key and provider_requires_api_key(LLM_PROVIDER_NAME)
     )
+    if allow_missing_credentials and missing_required_key:
+        llm = None
+        logger.warning(
+            "LLM client not initialised because no credentials are "
+            "configured yet: provider=%s model=%s. The app-server remains "
+            "available so the frontend can finish provider setup.",
+            LLM_PROVIDER_NAME,
+            OMICSCLAW_MODEL,
+        )
+    else:
+        try:
+            llm = AsyncOpenAI(**kw)
+        except OpenAIError as exc:
+            if allow_missing_credentials and "missing credentials" in str(exc).lower():
+                llm = None
+                logger.warning(
+                    "LLM client not initialised because no credentials are "
+                    "configured yet: provider=%s model=%s. The app-server remains "
+                    "available so the frontend can finish provider setup.",
+                    LLM_PROVIDER_NAME,
+                    OMICSCLAW_MODEL,
+                )
+            else:
+                raise
+        except ImportError as exc:
+            if "socksio" in str(exc) or "socks" in str(exc).lower():
+                raise ImportError(
+                    "A SOCKS proxy is configured (HTTPS_PROXY / ALL_PROXY) but "
+                    "the 'socksio' package is not installed. Run:\n\n"
+                    '  pip install "httpx[socks]"\n\n'
+                    "then restart the backend."
+                ) from exc
+            raise
+
+    if llm is not None:
+        logger.info(
+            f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
+            f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
+            f"auth_mode={auth_mode_normalized}"
+        )
 
     # Memory initialization — uses the new graph-based memory system
     # Enabled by default; disable with OMICSCLAW_MEMORY_ENABLED=false

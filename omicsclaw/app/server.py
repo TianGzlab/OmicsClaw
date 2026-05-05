@@ -388,6 +388,7 @@ async def lifespan(app: FastAPI):
         auth_mode=auth_mode,
         ccproxy_port=ccproxy_port,
         strict_oauth=False,
+        allow_missing_credentials=True,
     )
     logger.info(
         "OmicsClaw core initialised: provider=%s model=%s",

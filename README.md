@@ -61,6 +61,9 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > `launch_id` in `/health` when started with `OMICSCLAW_DESKTOP_LAUNCH_ID`.
 > OmicsClaw Desktop uses this process handshake to avoid mistaking a stale
 > backend already listening on port 8765 for the newly launched backend.
+> The app backend also starts without a configured LLM credential, keeping
+> `/health` and `/providers` reachable for Desktop first-run setup. Explicit
+> provider changes still validate credentials and report setup errors.
 >
 > **Desktop context compaction:** automatic and reactive chat compaction now
 > rebuild the persisted transcript with a wrapped summary plus the retained
