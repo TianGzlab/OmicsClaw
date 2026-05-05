@@ -109,6 +109,11 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 > directories, and output directory. Chat output hints preserve the actual
 > nested artifact paths, such as `figures/*.png`, so desktop inline previews
 > request files that exist under the generated run directory.
+> Desktop chat streams also consume the same per-session `pending_media` queue
+> used by messaging channels, translating queued analysis figures into
+> `tool_result.media` blocks. Requests such as "show the spatial domain plot"
+> therefore render images inline instead of only reporting that files are being
+> delivered automatically.
 
 ## ⚡ Quick Start
 

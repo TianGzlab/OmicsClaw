@@ -1282,6 +1282,179 @@ async def test_chat_stream_cost_uses_requested_model_override(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_delivers_pending_media_as_tool_result_media(monkeypatch, tmp_path: Path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    image_path = tmp_path / "spatial_domains.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    pending_media: dict[str, list[dict[str, str]]] = {}
+
+    async def fake_llm_tool_loop(**kwargs):
+        pending_media["session-media"] = [
+            {"type": "photo", "path": str(image_path)},
+        ]
+        await kwargs["on_tool_call"]("omicsclaw", {"skill": "spatial-domains"})
+        await kwargs["on_tool_result"](
+            "omicsclaw",
+            (
+                "spatial domain 图 以及其他可视化文件（域纯度直方图、PCA、"
+                "邻近混合图等）正在自动传送中。"
+            ),
+        )
+        return "analysis complete"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        pending_media=pending_media,
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {"omicsclaw": object()},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(session_id="session-media", content="show the plot")
+    )
+    payload = await _read_streaming_response(response)
+    events = _parse_sse_events(payload)
+    tool_result = next(event for event in events if event["type"] == "tool_result")
+
+    assert tool_result["data"]["media"] == [
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "localPath": str(image_path),
+        }
+    ]
+    assert fake_core.pending_media == {}
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_merges_pending_media_without_duplicates(monkeypatch, tmp_path: Path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    image_path = tmp_path / "spatial_domains.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    extra_path = tmp_path / "domain_sizes.png"
+    extra_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    pending_media: dict[str, list[dict[str, str]]] = {}
+
+    async def fake_llm_tool_loop(**kwargs):
+        pending_media["session-media-merge"] = [
+            {"type": "photo", "path": str(image_path)},
+            {"type": "photo", "path": str(extra_path)},
+        ]
+        await kwargs["on_tool_call"]("omicsclaw", {"skill": "spatial-domains"})
+        await kwargs["on_tool_result"](
+            "omicsclaw",
+            json.dumps({"plot_path": str(image_path)}),
+        )
+        return "analysis complete"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        pending_media=pending_media,
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {"omicsclaw": object()},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(session_id="session-media-merge", content="show plots")
+    )
+    payload = await _read_streaming_response(response)
+    events = _parse_sse_events(payload)
+    tool_result = next(event for event in events if event["type"] == "tool_result")
+
+    assert tool_result["data"]["media"] == [
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "localPath": str(image_path),
+        },
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "localPath": str(extra_path),
+        },
+    ]
+    assert fake_core.pending_media == {}
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_delivers_pending_documents_as_file_media(monkeypatch, tmp_path: Path):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    table_path = tmp_path / "domain_purity.csv"
+    table_path.write_text("domain,purity\n1,0.92\n", encoding="utf-8")
+    pending_media: dict[str, list[dict[str, str]]] = {}
+
+    async def fake_llm_tool_loop(**kwargs):
+        pending_media["session-document-media"] = [
+            {"type": "document", "path": str(table_path)},
+        ]
+        await kwargs["on_tool_call"]("omicsclaw", {"skill": "spatial-domains"})
+        await kwargs["on_tool_result"](
+            "omicsclaw",
+            "analysis files are being delivered automatically.",
+        )
+        return "analysis complete"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        pending_media=pending_media,
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {"omicsclaw": object()},
+        _accumulate_usage=lambda response_usage: {},
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(session_id="session-document-media", content="show files")
+    )
+    payload = await _read_streaming_response(response)
+    events = _parse_sse_events(payload)
+    tool_result = next(event for event in events if event["type"] == "tool_result")
+
+    assert tool_result["data"]["media"] == [
+        {
+            "type": "file",
+            "mimeType": "text/csv",
+            "localPath": str(table_path),
+        }
+    ]
+    assert fake_core.pending_media == {}
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_rejects_bind_when_job_already_canceled(monkeypatch, tmp_path: Path):
     """Regression: ``bind_chat_stream_job`` intentionally passes canceled jobs
     through so the cancel handler can finalize them without clobbering state.

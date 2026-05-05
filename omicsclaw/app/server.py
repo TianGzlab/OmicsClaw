@@ -1419,6 +1419,48 @@ async def chat_stream(req: ChatRequest):
             return media
         return media
 
+    def _pending_media_item_to_block(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+        path = str(item.get("path") or item.get("localPath") or "").strip()
+        if not path or not os.path.isfile(path):
+            return None
+        item_type = str(item.get("type") or "").strip().lower()
+        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        if item_type in {"photo", "image"} or mime_type.startswith("image/"):
+            media_type = "image"
+        elif item_type == "video" or mime_type.startswith("video/"):
+            media_type = "video"
+        elif item_type == "audio" or mime_type.startswith("audio/"):
+            media_type = "audio"
+        elif item_type in {"document", "file"}:
+            media_type = "file"
+        else:
+            return None
+        return {
+            "type": media_type,
+            "mimeType": mime_type,
+            "localPath": path,
+        }
+
+    def _consume_pending_media_for_session() -> list[dict[str, Any]]:
+        pending = getattr(core, "pending_media", None)
+        if not isinstance(pending, dict):
+            return []
+        items = pending.pop(session_id, []) or []
+        media: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            block = _pending_media_item_to_block(item)
+            if not block:
+                continue
+            local_path = str(block["localPath"])
+            if local_path in seen:
+                continue
+            seen.add(local_path)
+            media.append(block)
+        return media
+
     async def on_stream_content(chunk: str):
         nonlocal streamed_text, streamed_text_chunks
         streamed_text += chunk
@@ -1473,6 +1515,13 @@ async def chat_stream(req: ChatRequest):
             await _queue_event("tool_output", f"Completed {tool_name}")
 
         media = _extract_media_from_display_output(tool_name, display_output)
+        pending_media = _consume_pending_media_for_session()
+        if pending_media:
+            existing = {str(item.get("localPath", "")) for item in media}
+            media.extend(
+                item for item in pending_media
+                if str(item.get("localPath", "")) not in existing
+            )
 
         result_data: dict[str, Any] = {
             "tool_use_id": tool_use_id,
