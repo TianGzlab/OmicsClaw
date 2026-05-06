@@ -1087,11 +1087,22 @@ async def chat_stream(req: ChatRequest):
     try:
         if req.provider_config and req.provider_config.provider:
             pc = req.provider_config
+            provider = str(pc.provider or "").strip()
+            model = str(pc.model or "").strip()
+            base_url = str(pc.base_url or "").strip()
+            if provider.lower() == "custom" and not base_url:
+                base_url = _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+            _validate_custom_provider_input(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                allow_env_base_url=True,
+            )
             core.init(
                 api_key=pc.api_key,
-                base_url=pc.base_url or None,
-                model=pc.model,
-                provider=pc.provider,
+                base_url=base_url or None,
+                model=model,
+                provider=provider,
             )
         elif _chat_request_requires_provider_reinit(core, req.provider_id, req.model or ""):
             _apply_chat_provider_switch(core, req.provider_id, req.model or "")
@@ -3486,11 +3497,11 @@ async def switch_provider(req: ProviderSwitchRequest):
         remove_keys: set[str] = set()
         if auth_mode == "oauth":
             updates["CCPROXY_PORT"] = str(requested_port)
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         else:
             remove_keys.add("CCPROXY_PORT")
             if req.provider != "custom" and not req.base_url:
-                remove_keys.add("LLM_BASE_URL")
+                remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(
@@ -4473,7 +4484,7 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
             updates["OMICSCLAW_MODEL"] = core.OMICSCLAW_MODEL
         remove_keys: set[str] = {"CCPROXY_PORT"}
         if provider_id != "custom":
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(

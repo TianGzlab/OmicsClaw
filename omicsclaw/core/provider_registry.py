@@ -469,7 +469,12 @@ def resolve_provider(
             if generic_env_applies
             else ""
         )
-        resolved_key = str(generic_key or source.get("OPENAI_API_KEY", "") or "")
+        openai_fallback = (
+            str(source.get("OPENAI_API_KEY", "") or "")
+            if provider_key in {"", "openai"}
+            else ""
+        )
+        resolved_key = str(generic_key or openai_fallback or "")
 
     return resolved_url, resolved_model, resolved_key
 

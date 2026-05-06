@@ -186,7 +186,9 @@ _OMICSCLAW_DIR = Path(__file__).resolve().parent.parent.parent
 def _configure_cli_loggers() -> None:
     """Keep chat output focused on user-visible response text."""
     cli_log_level = os.environ.get("OMICSCLAW_LOG_LEVEL", "ERROR").upper()
-    level = getattr(logging, cli_log_level, logging.WARNING)
+    level = getattr(logging, cli_log_level, None)
+    if not isinstance(level, int):
+        level = logging.ERROR
     for noisy in (
         "omicsclaw.bot",
         "omicsclaw.knowledge",
@@ -2257,7 +2259,7 @@ async def _single_shot(
     if provider:
         init_config["provider"] = provider
     _configure_cli_loggers()
-    resolved_model, resolved_provider = _init_llm(init_config)
+    resolved_model, _ = _init_llm(init_config)
 
     session_id = generate_session_id()
     messages: list[dict] = [{"role": "user", "content": prompt}]

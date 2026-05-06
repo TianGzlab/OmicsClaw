@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import logging
 import os
 import subprocess
 import sys
@@ -196,6 +197,14 @@ def test_init_llm_prefers_explicit_config_over_environment(monkeypatch):
     }
     assert model == "config-model"
     assert provider == "custom"
+
+
+def test_configure_cli_loggers_falls_back_to_error_for_invalid_env(monkeypatch):
+    monkeypatch.setenv("OMICSCLAW_LOG_LEVEL", "INF0")
+
+    interactive._configure_cli_loggers()
+
+    assert logging.getLogger("openai").level == logging.ERROR
 
 
 @pytest.mark.asyncio

@@ -4385,17 +4385,18 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 def _format_llm_api_error_message(exc: Exception) -> str:
     detail = str(exc).strip() or type(exc).__name__
     provider = (LLM_PROVIDER_NAME or "").strip().lower()
-    base_url = str(
-        os.getenv("LLM_BASE_URL", "") or os.getenv("OMICSCLAW_BASE_URL", "") or ""
-    ).strip()
-    if not base_url:
-        try:
-            from omicsclaw.core.provider_runtime import get_active_provider_runtime
+    base_url = ""
+    try:
+        from omicsclaw.core.provider_runtime import get_active_provider_runtime
 
-            runtime = get_active_provider_runtime()
-            base_url = str(getattr(runtime, "base_url", "") or "").strip()
-        except Exception:
-            base_url = ""
+        runtime = get_active_provider_runtime()
+        base_url = str(getattr(runtime, "base_url", "") or "").strip()
+    except Exception:
+        base_url = ""
+    if not base_url:
+        base_url = str(
+            os.getenv("LLM_BASE_URL", "") or os.getenv("OMICSCLAW_BASE_URL", "") or ""
+        ).strip()
 
     if provider == "custom":
         endpoint_hint = (

@@ -174,6 +174,21 @@ def test_resolve_provider_ignores_stale_generic_env_for_explicit_provider(monkey
     assert resolved_key == "openai-key"
 
 
+def test_resolve_provider_does_not_leak_openai_key_to_custom(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved_url, resolved_model, resolved_key = resolve_provider(
+        provider="custom",
+        base_url="https://custom.example.com/v1",
+        model="custom-model",
+    )
+
+    assert resolved_url == "https://custom.example.com/v1"
+    assert resolved_model == "custom-model"
+    assert resolved_key == ""
+
+
 def test_normalize_model_for_provider_rewrites_foreign_default_model():
     normalized, foreign_provider = normalize_model_for_provider(
         provider="anthropic",

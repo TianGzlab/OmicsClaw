@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import builtins
+import sys
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -105,6 +107,9 @@ def test_init_disables_memory_when_graph_dependencies_missing(monkeypatch):
     captured: dict[str, object] = {}
     original_import = builtins.__import__
 
+    memory_module = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "omicsclaw.memory.database", memory_module)
+
     class _FakeAsyncOpenAI:
         def __init__(self, **kwargs):
             captured.update(kwargs)
@@ -115,6 +120,9 @@ def test_init_disables_memory_when_graph_dependencies_missing(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     _clear_llm_env(monkeypatch)
+    for name in list(sys.modules):
+        if name == "omicsclaw.memory" or name.startswith("omicsclaw.memory."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setattr(core, "AsyncOpenAI", _FakeAsyncOpenAI)
     monkeypatch.setattr(core, "memory_store", object())
     monkeypatch.setattr(core, "session_manager", object())
@@ -131,9 +139,13 @@ def test_init_disables_memory_when_graph_dependencies_missing(monkeypatch):
     assert captured["api_key"] == "test-key"
     assert core.memory_store is None
     assert core.session_manager is None
+    assert "omicsclaw.memory.database" not in sys.modules
 
 
 def test_format_llm_api_error_mentions_custom_endpoint_base_url(monkeypatch):
+    from omicsclaw.core import provider_runtime
+
+    provider_runtime.clear_active_provider_runtime()
     monkeypatch.setattr(core, "LLM_PROVIDER_NAME", "custom")
     monkeypatch.setattr(core, "OMICSCLAW_MODEL", "gpt-5.4")
     monkeypatch.setenv("LLM_BASE_URL", "https://api.biom.autos")
@@ -143,6 +155,27 @@ def test_format_llm_api_error_mentions_custom_endpoint_base_url(monkeypatch):
     assert "https://api.biom.autos" in message
     assert "/v1" in message
     assert "Connection error" in message
+
+
+def test_format_llm_api_error_prefers_active_runtime_base_url(monkeypatch):
+    from omicsclaw.core import provider_runtime
+
+    monkeypatch.setattr(core, "LLM_PROVIDER_NAME", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://stale.example.com/v1")
+    provider_runtime.set_active_provider_runtime(
+        provider="custom",
+        base_url="https://active.example.com/v1",
+        model="custom-model",
+        api_key="runtime-key",
+    )
+
+    try:
+        message = core._format_llm_api_error_message(Exception("Connection error."))
+    finally:
+        provider_runtime.clear_active_provider_runtime()
+
+    assert "https://active.example.com/v1" in message
+    assert "https://stale.example.com/v1" not in message
 
 
 def test_init_allows_missing_credentials_when_requested(monkeypatch):
