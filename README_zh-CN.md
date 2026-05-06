@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="400"/>
+  <img src="docs/images/OmicsClaw_logo.svg" alt="OmicsClaw Logo" width="400"/>
 
   <h3>🧬 OmicsClaw</h3>
   <p><strong>面向多组学分析的持久化 AI 研究助手</strong></p>
