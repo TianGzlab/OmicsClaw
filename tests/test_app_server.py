@@ -1621,6 +1621,118 @@ async def test_chat_stream_surfaces_provider_switch_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_reapplies_provider_when_model_changes(monkeypatch):
+    """Custom Endpoint keeps the same provider id while users edit model names.
+
+    The chat request must still reinitialise the runtime when the model differs;
+    otherwise the status event claims the requested model while the underlying
+    AsyncOpenAI client still points at the previous model/provider runtime.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured: dict[str, object] = {}
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "custom"
+        OMICSCLAW_MODEL = "old-model"
+        received_files: list[object] = []
+
+        def init(self, **kwargs):
+            captured["init"] = kwargs
+            self.LLM_PROVIDER_NAME = kwargs.get("provider") or self.LLM_PROVIDER_NAME
+            self.OMICSCLAW_MODEL = kwargs.get("model") or self.OMICSCLAW_MODEL
+
+        _skill_registry = staticmethod(lambda: SimpleNamespace(skills={}))
+        get_tool_executors = staticmethod(lambda: {})
+        _accumulate_usage = staticmethod(lambda response_usage: {})
+
+        async def llm_tool_loop(self, **kwargs):
+            captured["model_override"] = kwargs.get("model_override")
+            return "ok"
+
+    monkeypatch.setattr(server, "_core", FakeCore(), raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+    monkeypatch.setattr(server, "_get_omicsclaw_env_path", lambda: None, raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-custom-model-change",
+            content="hello",
+            provider_id="custom",
+            model="new-model",
+        )
+    )
+    payload = await _read_streaming_response(response)
+
+    assert '"ok"' in payload
+    assert captured["init"] == {
+        "provider": "custom",
+        "model": "new-model",
+        "base_url": "https://api.example.com/v1",
+    }
+    assert captured["model_override"] == "new-model"
+
+
+@pytest.mark.asyncio
+async def test_switch_provider_rejects_incomplete_custom_endpoint(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from fastapi import HTTPException
+
+    from omicsclaw.app import server
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "deepseek"
+        OMICSCLAW_MODEL = "deepseek-v4-flash"
+
+        def init(self, **kwargs):
+            raise AssertionError("incomplete custom provider should fail before core.init")
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server.switch_provider(
+            server.ProviderSwitchRequest(
+                provider="custom",
+                api_key="sk-test",
+                base_url="https://api.example.com/v1",
+                model="",
+            )
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "model" in str(excinfo.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_list_providers_reflects_active_custom_endpoint(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "custom"
+        OMICSCLAW_MODEL = "qwen-plus"
+
+    monkeypatch.setattr(server, "_core", FakeCore, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
+
+    payload = await server.list_providers()
+    custom = next(item for item in payload["providers"] if item["name"] == "custom")
+
+    assert custom["active"] is True
+    assert custom["configured"] is True
+    assert custom["base_url"] == "https://api.example.com/v1"
+    assert custom["default_model"] == "qwen-plus"
+    assert payload["current_model"] == "qwen-plus"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_omits_adaptive_thinking_for_siliconflow(monkeypatch):
     """SiliconFlow gateway rejects non-standard thinking types — adaptive must omit."""
     pytest.importorskip("fastapi")
