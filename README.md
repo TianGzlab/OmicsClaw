@@ -162,6 +162,8 @@ Use a brief plan, targeted tests, and verification evidence for non-trivial repo
 
 Desktop provider changes should preserve the OmicsClaw-App backend contract: `/providers` reports the active provider/model/endpoint, `/providers/test` performs a short live LLM connectivity probe, and `/chat/stream` must reinitialize the provider runtime when a request changes model even if the provider id is unchanged.
 
+Interactive CLI provider changes should share the same runtime resolution path: `LLM_PROVIDER=custom` must honor `LLM_BASE_URL`, `OMICSCLAW_MODEL`, and `LLM_API_KEY`; explicit CLI `--provider` / `--model` overrides must win over environment defaults; malformed custom endpoints should return actionable diagnostics instead of `(no response)`.
+
 TUI helpers under `omicsclaw/interactive/_tui_support.py` stay dependency-light so support tests can run without optional memory or Textual installs. When adding Textual containers, mount the parent widget into the live tree before mounting child widgets.
 
 </details>

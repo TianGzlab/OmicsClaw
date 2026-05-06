@@ -148,6 +148,32 @@ def test_resolve_provider_custom_preserves_explicit_endpoint(monkeypatch):
     assert resolved_key == "generic-key"
 
 
+def test_resolve_provider_uses_generic_custom_env_when_detected(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://custom.example.com/v1")
+    monkeypatch.setenv("OMICSCLAW_MODEL", "custom-env-model")
+    monkeypatch.setenv("LLM_API_KEY", "generic-key")
+
+    resolved_url, resolved_model, resolved_key = resolve_provider()
+
+    assert resolved_url == "https://custom.example.com/v1"
+    assert resolved_model == "custom-env-model"
+    assert resolved_key == "generic-key"
+
+
+def test_resolve_provider_ignores_stale_generic_env_for_explicit_provider(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://custom.example.com/v1")
+    monkeypatch.setenv("OMICSCLAW_MODEL", "custom-env-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved_url, resolved_model, resolved_key = resolve_provider(provider="openai")
+
+    assert resolved_url is None
+    assert resolved_model == "gpt-5.5"
+    assert resolved_key == "openai-key"
+
+
 def test_normalize_model_for_provider_rewrites_foreign_default_model():
     normalized, foreign_provider = normalize_model_for_provider(
         provider="anthropic",

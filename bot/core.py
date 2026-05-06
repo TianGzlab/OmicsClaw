@@ -1377,9 +1377,20 @@ def init(
 
     # Memory initialization — uses the new graph-based memory system
     # Enabled by default; disable with OMICSCLAW_MEMORY_ENABLED=false
+    memory_store = None
+    session_manager = None
     if os.getenv("OMICSCLAW_MEMORY_ENABLED", "true").lower() not in ("false", "0", "no"):
         try:
             from omicsclaw.memory.compat import CompatMemoryStore
+            from omicsclaw.memory.database import DatabaseManager as _DatabaseManager
+            from omicsclaw.memory.search import SearchIndexer as _SearchIndexer
+            from omicsclaw.memory.glossary import GlossaryService as _GlossaryService
+            from omicsclaw.memory.graph import GraphService as _GraphService
+
+            # Import graph-memory dependencies eagerly during core init so a
+            # lightweight chat install can disable memory once, instead of
+            # surfacing repeated non-fatal warnings during every chat turn.
+            del _DatabaseManager, _SearchIndexer, _GlossaryService, _GraphService
 
             db_url = os.getenv("OMICSCLAW_MEMORY_DB_URL")  # None = use default (~/.config/omicsclaw/memory.db)
 
@@ -4371,6 +4382,37 @@ MAX_TOOL_ITERATIONS = int(os.getenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "20"))  # I
 # ---------------------------------------------------------------------------
 
 
+def _format_llm_api_error_message(exc: Exception) -> str:
+    detail = str(exc).strip() or type(exc).__name__
+    provider = (LLM_PROVIDER_NAME or "").strip().lower()
+    base_url = str(
+        os.getenv("LLM_BASE_URL", "") or os.getenv("OMICSCLAW_BASE_URL", "") or ""
+    ).strip()
+    if not base_url:
+        try:
+            from omicsclaw.core.provider_runtime import get_active_provider_runtime
+
+            runtime = get_active_provider_runtime()
+            base_url = str(getattr(runtime, "base_url", "") or "").strip()
+        except Exception:
+            base_url = ""
+
+    if provider == "custom":
+        endpoint_hint = (
+            f" Custom endpoint base_url is `{base_url}`."
+            if base_url
+            else " Custom endpoint base_url is empty."
+        )
+        return (
+            "LLM provider request failed for the custom endpoint:"
+            f" {detail}.{endpoint_hint} Ensure the base URL is the "
+            "OpenAI-compatible API root, commonly ending in `/v1`, not the "
+            "provider dashboard or homepage."
+        )
+
+    return f"Sorry, I'm having trouble thinking right now -- API error: {detail}"
+
+
 def _sanitize_tool_history(history: list[dict], warn: bool = True) -> list[dict]:
     return _runtime_sanitize_tool_history(history, warn=warn)
 
@@ -4610,8 +4652,8 @@ def _build_bot_query_engine_callbacks(
             )
 
     def on_llm_error(exc: Exception) -> str:
-        logger_obj.error(f"LLM API error: {exc}")
-        return f"Sorry, I'm having trouble thinking right now -- API error: {exc}"
+        logger_obj.debug("LLM API error: %s", exc)
+        return _format_llm_api_error_message(exc)
 
     return QueryEngineCallbacks(
         accumulate_usage=usage_accumulator,

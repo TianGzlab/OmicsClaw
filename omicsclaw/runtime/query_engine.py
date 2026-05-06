@@ -178,6 +178,13 @@ def _is_prompt_too_long_error(exc: BaseException) -> bool:
     return any(pattern in message for pattern in patterns)
 
 
+_EMPTY_COMPLETION_MESSAGE = (
+    "LLM provider returned an empty completion. Check that the configured "
+    "provider endpoint is OpenAI-compatible, the model name is valid, and for "
+    "custom endpoints include the API base path such as /v1 when required."
+)
+
+
 def _merge_response_segments(segments: list[str], current: str) -> str:
     merged = [
         segment.strip()
@@ -185,7 +192,7 @@ def _merge_response_segments(segments: list[str], current: str) -> str:
         if segment and segment.strip()
     ]
     if not merged:
-        return "(no response)"
+        return _EMPTY_COMPLETION_MESSAGE
     return "\n\n".join(merged)
 
 

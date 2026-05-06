@@ -22,10 +22,11 @@ Usage (lazy init):
     result = await graph.create_memory("", "Hello", priority=0, title="greeting", domain="core")
 """
 
+from __future__ import annotations
+
 import os
 from typing import Optional, TYPE_CHECKING
 
-from .database import DatabaseManager
 from .scoped_memory import (
     DEFAULT_SCOPED_MEMORY_SCOPE,
     SCOPED_MEMORY_DIRNAME,
@@ -49,17 +50,14 @@ from .scoped_memory_index import (
 )
 from .scoped_memory_select import ScopedMemoryRecall, load_scoped_memory_context
 from .snapshot import ChangesetStore, get_changeset_store
-from .models import (
-    Base, ROOT_NODE_UUID, Node, Memory, Edge, Path,
-    GlossaryKeyword, SearchDocument, ChangeCollector,
-)
 
 if TYPE_CHECKING:
+    from .database import DatabaseManager
     from .graph import GraphService
     from .search import SearchIndexer
     from .glossary import GlossaryService
 
-_db_manager: Optional[DatabaseManager] = None
+_db_manager: Optional["DatabaseManager"] = None
 _graph_service: Optional["GraphService"] = None
 _search_indexer: Optional["SearchIndexer"] = None
 _glossary_service: Optional["GlossaryService"] = None
@@ -70,6 +68,7 @@ def _ensure_initialized():
     if _db_manager is not None:
         return
 
+    from .database import DatabaseManager
     from .search import SearchIndexer
     from .glossary import GlossaryService
     from .graph import GraphService
@@ -101,6 +100,31 @@ def get_search_indexer() -> "SearchIndexer":
 def get_glossary_service() -> "GlossaryService":
     _ensure_initialized()
     return _glossary_service  # type: ignore[return-value]
+
+
+def __getattr__(name: str):
+    if name == "DatabaseManager":
+        from .database import DatabaseManager
+
+        return DatabaseManager
+
+    model_exports = {
+        "Base",
+        "ROOT_NODE_UUID",
+        "Node",
+        "Memory",
+        "Edge",
+        "Path",
+        "GlossaryKeyword",
+        "SearchDocument",
+        "ChangeCollector",
+    }
+    if name in model_exports:
+        from . import models
+
+        return getattr(models, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def close_db():

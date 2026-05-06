@@ -183,6 +183,27 @@ logger = logging.getLogger(__name__)
 _OMICSCLAW_DIR = Path(__file__).resolve().parent.parent.parent
 
 
+def _configure_cli_loggers() -> None:
+    """Keep chat output focused on user-visible response text."""
+    cli_log_level = os.environ.get("OMICSCLAW_LOG_LEVEL", "ERROR").upper()
+    level = getattr(logging, cli_log_level, logging.WARNING)
+    for noisy in (
+        "omicsclaw.bot",
+        "omicsclaw.knowledge",
+        "omicsclaw.knowledge.knowhow",
+        "omicsclaw.core",
+        "omicsclaw.memory",
+        "omicsclaw.memory.snapshot",
+        "omicsclaw.runtime",
+        "omicsclaw.runtime.context",
+        "omicsclaw.runtime.context_layers",
+        "httpx",
+        "httpcore",
+        "openai",
+    ):
+        logging.getLogger(noisy).setLevel(level)
+
+
 # ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
@@ -1346,18 +1367,12 @@ def _init_llm(config: dict) -> tuple[str, str]:
         import bot.core as core
         load_project_dotenv(_OMICSCLAW_DIR, override=False)
 
-        provider = os.environ.get("LLM_PROVIDER", config.get("provider", ""))
-        api_key = os.environ.get("LLM_API_KEY", config.get("api_key", ""))
-        model = os.environ.get("OMICSCLAW_MODEL", config.get("model", ""))
-        base_url = os.environ.get("LLM_BASE_URL", config.get("base_url", ""))
+        provider = str(config.get("provider", "") or os.environ.get("LLM_PROVIDER", "") or "")
+        api_key = str(config.get("api_key", "") or os.environ.get("LLM_API_KEY", "") or "")
+        model = str(config.get("model", "") or os.environ.get("OMICSCLAW_MODEL", "") or "")
+        base_url = str(config.get("base_url", "") or os.environ.get("LLM_BASE_URL", "") or "")
 
-        import logging
-        logging.getLogger("omicsclaw.bot").setLevel(logging.WARNING)
-        # Suppress verbose loggers in CLI mode to make output cleaner
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("omicsclaw.memory").setLevel(logging.WARNING)
-        logging.getLogger("omicsclaw.memory.snapshot").setLevel(logging.WARNING)
+        _configure_cli_loggers()
 
         core.init(
             api_key=api_key,
@@ -1746,22 +1761,18 @@ async def _async_interactive_loop(
         )
         return
 
-    # Init LLM
-    resolved_model, resolved_provider = _init_llm(config)
-    if model:
-        resolved_model = model
-    if provider:
-        resolved_provider = provider
-
     # Quiet noisy loggers in interactive mode to prevent analysis logs from
     # flooding the terminal.  Override with OMICSCLAW_LOG_LEVEL=INFO.
-    _cli_log_level = os.environ.get("OMICSCLAW_LOG_LEVEL", "WARNING").upper()
-    for noisy in (
-        "omicsclaw.bot", "omicsclaw.knowledge", "omicsclaw.core",
-        "omicsclaw.memory", "omicsclaw.runtime", "omicsclaw.runtime.context_layers",
-        "httpx", "httpcore", "openai",
-    ):
-        logging.getLogger(noisy).setLevel(getattr(logging, _cli_log_level, logging.WARNING))
+    _configure_cli_loggers()
+
+    init_config = {**config}
+    if model:
+        init_config["model"] = model
+    if provider:
+        init_config["provider"] = provider
+
+    # Init LLM
+    resolved_model, resolved_provider = _init_llm(init_config)
 
     # Initialise session
     effective_session_id = session_id or generate_session_id()
@@ -2240,8 +2251,13 @@ async def _single_shot(
     config: dict | None = None,
 ) -> None:
     """Run a single prompt without entering interactive loop."""
-    config = config or {}
-    resolved_model, resolved_provider = _init_llm(config)
+    init_config = dict(config or {})
+    if model:
+        init_config["model"] = model
+    if provider:
+        init_config["provider"] = provider
+    _configure_cli_loggers()
+    resolved_model, resolved_provider = _init_llm(init_config)
 
     session_id = generate_session_id()
     messages: list[dict] = [{"role": "user", "content": prompt}]
