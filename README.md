@@ -1,7 +1,7 @@
 <a id="top"></a>
 
 <div align="center">
-  <img src="docs/images/OmicsClaw_logo.jpeg" alt="OmicsClaw Logo" width="380"/>
+  <img src="docs/images/OmicsClaw_logo.svg" alt="OmicsClaw Logo" width="380"/>
 
   <h2>🧬 OmicsClaw</h2>
   <p><strong>Local-first AI research partner for multi-omics analysis</strong></p>
