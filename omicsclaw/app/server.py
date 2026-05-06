@@ -28,7 +28,7 @@ import sys
 import time
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -3567,6 +3567,9 @@ async def test_provider(req: ProviderTestRequest):
             "message": f"Live provider test failed: {exc}",
             "duration_ms": duration_ms,
         }
+    finally:
+        with suppress(Exception):
+            await client.close()
 
     duration_ms = int((time.monotonic() - start) * 1000)
     if not content:

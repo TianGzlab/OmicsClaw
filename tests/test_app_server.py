@@ -1733,6 +1733,74 @@ async def test_list_providers_reflects_active_custom_endpoint(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_provider_test_closes_async_openai_client(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    clients: list[object] = []
+    fail_request = False
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.closed = False
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._create)
+            )
+            clients.append(self)
+
+        async def _create(self, **kwargs):
+            if fail_request:
+                raise RuntimeError("provider unreachable")
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="OK"),
+                    )
+                ]
+            )
+
+        async def close(self):
+            self.closed = True
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = ""
+        OMICSCLAW_MODEL = ""
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+    monkeypatch.setattr(server, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="qwen-plus",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is True
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+    fail_request = True
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="qwen-plus",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is False
+    assert "provider unreachable" in result["message"]
+    assert len(clients) == 2
+    assert clients[1].closed is True
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_omits_adaptive_thinking_for_siliconflow(monkeypatch):
     """SiliconFlow gateway rejects non-standard thinking types — adaptive must omit."""
     pytest.importorskip("fastapi")
