@@ -435,3 +435,89 @@ def test_resume_pending_preflight_request_keeps_remaining_questions(monkeypatch)
     assert "## Accepted answers" in result
     assert "What is group1?" in result
     assert core.pending_preflight_requests["chat-preflight"]["answers"]["groupby"] == "condition"
+
+
+def test_resume_pending_preflight_request_replays_confirmation_only_prompt(monkeypatch):
+    core.pending_preflight_requests.clear()
+    core.pending_preflight_requests["chat-preflight"] = {
+        "tool_name": "omicsclaw",
+        "original_args": {
+            "skill": "sc-preprocessing",
+            "mode": "path",
+            "file_path": "/tmp/pbmc3k_raw.h5ad",
+            "extra_args": ["--method", "scanpy"],
+        },
+        "payload": {
+            "kind": "preflight",
+            "skill_name": "sc-preprocessing",
+            "status": "needs_user_input",
+            "guidance": [],
+            "confirmations": [
+                "Confirm that the default first-pass filtering thresholds are acceptable."
+            ],
+            "missing_requirements": [],
+            "pending_fields": [],
+        },
+        "pending_fields": [],
+        "answers": {},
+    }
+
+    async def _fake_execute(args, session_id=None, chat_id=0):
+        assert args["skill"] == "sc-preprocessing"
+        assert args["confirmed_preflight"] is True
+        return "preprocessing done"
+
+    monkeypatch.setattr(core, "execute_omicsclaw", _fake_execute)
+
+    result = asyncio.run(
+        core._maybe_resume_pending_preflight_request(
+            chat_id="chat-preflight",
+            user_content="确认，可以继续使用默认阈值",
+            session_id=None,
+        )
+    )
+
+    assert result == "preprocessing done"
+    assert "chat-preflight" not in core.pending_preflight_requests
+
+
+def test_resume_pending_preflight_request_does_not_treat_new_request_as_confirmation(monkeypatch):
+    core.pending_preflight_requests.clear()
+    core.pending_preflight_requests["chat-preflight"] = {
+        "tool_name": "omicsclaw",
+        "original_args": {
+            "skill": "sc-preprocessing",
+            "mode": "path",
+            "file_path": "/tmp/pbmc3k_raw.h5ad",
+            "extra_args": ["--method", "scanpy"],
+        },
+        "payload": {
+            "kind": "preflight",
+            "skill_name": "sc-preprocessing",
+            "status": "needs_user_input",
+            "guidance": [],
+            "confirmations": [
+                "Confirm that the default first-pass filtering thresholds are acceptable."
+            ],
+            "missing_requirements": [],
+            "pending_fields": [],
+        },
+        "pending_fields": [],
+        "answers": {},
+    }
+
+    async def _fake_execute(args, session_id=None, chat_id=0):
+        raise AssertionError("should not execute without an affirmative confirmation")
+
+    monkeypatch.setattr(core, "execute_omicsclaw", _fake_execute)
+
+    result = asyncio.run(
+        core._maybe_resume_pending_preflight_request(
+            chat_id="chat-preflight",
+            user_content="先跑 sc-qc 看一下质控",
+            session_id=None,
+        )
+    )
+
+    assert result is None
+    assert "chat-preflight" not in core.pending_preflight_requests

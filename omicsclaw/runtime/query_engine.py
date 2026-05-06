@@ -15,7 +15,9 @@ from .context_budget import estimate_message_size
 from .context_compaction import (
     CompactionEvent,
     ContextCompactionConfig,
+    PreparedModelMessages,
     prepare_model_messages,
+    wrap_compaction_summary,
 )
 from .events import (
     EVENT_SESSION_RESUME,
@@ -101,8 +103,12 @@ class QueryEngineCallbacks:
     on_stream_content: Callable[[str], Any] | None = None
     on_stream_reasoning: Callable[[str], Any] | None = None
     before_tool: Callable[[ToolExecutionRequest], Any] | None = None
-    after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = None
-    request_tool_approval: Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None = None
+    after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = (
+        None
+    )
+    request_tool_approval: (
+        Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None
+    ) = None
     on_llm_error: Callable[[Exception], Any] | None = None
     on_context_compacted: Callable[["CompactionEvent"], Any] | None = None
 
@@ -173,7 +179,11 @@ def _is_prompt_too_long_error(exc: BaseException) -> bool:
 
 
 def _merge_response_segments(segments: list[str], current: str) -> str:
-    merged = [segment.strip() for segment in [*segments, current] if segment and segment.strip()]
+    merged = [
+        segment.strip()
+        for segment in [*segments, current]
+        if segment and segment.strip()
+    ]
     if not merged:
         return "(no response)"
     return "\n\n".join(merged)
@@ -215,7 +225,11 @@ def _normalize_permission_resolution(
         ToolPolicyState.from_mapping(
             policy_state_raw,
             surface=str(
-                ((request.runtime_context or {}).get("surface") or fallback_surface or "")
+                (
+                    (request.runtime_context or {}).get("surface")
+                    or fallback_surface
+                    or ""
+                )
             ).strip(),
         )
         if policy_state_raw is not None
@@ -362,7 +376,8 @@ async def _materialize_message_from_stream(
                     tool_calls_dict[tc_index] = MaterializedToolCall(
                         id=existing.id or tc_chunk.id or "",
                         name=existing.name + (tc_chunk.function.name or ""),
-                        arguments=existing.arguments + (tc_chunk.function.arguments or ""),
+                        arguments=existing.arguments
+                        + (tc_chunk.function.arguments or ""),
                     )
 
     if last_usage is not None:
@@ -424,10 +439,29 @@ async def _emit_compaction_event(
         await _maybe_await(callbacks.on_context_compacted(event))
     except Exception:
         import logging
+
         logging.getLogger(__name__).warning(
             "on_context_compacted callback raised; ignoring.",
             exc_info=True,
         )
+
+
+def _persist_prepared_compaction(
+    *,
+    transcript_store: TranscriptStore,
+    chat_id: int | str,
+    prepared_messages: PreparedModelMessages,
+) -> None:
+    if not prepared_messages.persisted_summary.strip():
+        return
+    compacted_history = [
+        {
+            "role": "system",
+            "content": wrap_compaction_summary(prepared_messages.persisted_summary),
+        },
+        *prepared_messages.messages,
+    ]
+    transcript_store.replace_history(chat_id, compacted_history)
 
 
 async def run_query_engine(
@@ -472,7 +506,9 @@ async def run_query_engine(
         if context_fragments:
             system_prompt = (
                 f"{system_prompt.rstrip()}\n\n## Active Session Hooks\n\n"
-                + "\n\n".join(fragment for fragment in context_fragments if fragment.strip())
+                + "\n\n".join(
+                    fragment for fragment in context_fragments if fragment.strip()
+                )
             ).strip()
 
     transcript_store.touch(context.chat_id)
@@ -489,9 +525,7 @@ async def run_query_engine(
     ).strip()
     workspace = str((tool_runtime_context or {}).get("workspace", "") or "").strip()
     compaction_metadata = (
-        {"pipeline_workspace": pipeline_workspace}
-        if pipeline_workspace
-        else None
+        {"pipeline_workspace": pipeline_workspace} if pipeline_workspace else None
     )
     compaction_workspace = pipeline_workspace or workspace or None
 
@@ -517,6 +551,11 @@ async def run_query_engine(
         request_messages = prepared_messages.messages
         if config.deepseek_reasoning_passback:
             request_messages = apply_deepseek_reasoning_passback(request_messages)
+        _persist_prepared_compaction(
+            transcript_store=transcript_store,
+            chat_id=context.chat_id,
+            prepared_messages=prepared_messages,
+        )
         if prepared_messages.applied_stages and callbacks.on_context_compacted:
             await _emit_compaction_event(
                 callbacks=callbacks,
@@ -569,12 +608,9 @@ async def run_query_engine(
                         force_reactive_compact=True,
                     )
                     has_attempted_reactive_compact = True
-                    if (
-                        reactive_messages.applied_stages
-                        and (
-                            reactive_messages.system_prompt != request_system_prompt
-                            or reactive_messages.messages != request_messages
-                        )
+                    if reactive_messages.applied_stages and (
+                        reactive_messages.system_prompt != request_system_prompt
+                        or reactive_messages.messages != request_messages
                     ):
                         request_system_prompt = reactive_messages.system_prompt
                         request_messages = reactive_messages.messages
@@ -582,6 +618,11 @@ async def run_query_engine(
                             request_messages = apply_deepseek_reasoning_passback(
                                 request_messages
                             )
+                        _persist_prepared_compaction(
+                            transcript_store=transcript_store,
+                            chat_id=context.chat_id,
+                            prepared_messages=reactive_messages,
+                        )
                         if callbacks.on_context_compacted:
                             await _emit_compaction_event(
                                 callbacks=callbacks,
@@ -629,7 +670,9 @@ async def run_query_engine(
                     budget_decision.nudge_message,
                 )
                 continue
-            return _merge_response_segments(accumulated_response_segments, current_response)
+            return _merge_response_segments(
+                accumulated_response_segments, current_response
+            )
 
         execution_requests: list[ToolExecutionRequest] = []
         tool_states: dict[str, Any] = {}
@@ -728,7 +771,9 @@ async def run_query_engine(
                                 ),
                             )
                         approved_runtime_context = dict(request.runtime_context or {})
-                        approved_runtime_context["policy_state"] = effective_policy_state
+                        approved_runtime_context["policy_state"] = (
+                            effective_policy_state
+                        )
                         approved_request = ToolExecutionRequest(
                             call_id=request.call_id,
                             name=request.name,
@@ -801,13 +846,15 @@ async def run_query_engine(
                 )
                 notices = hook_runtime.consume_pending_messages(
                     mode=HOOK_MODE_NOTICE,
-                    event_names=(EVENT_TOOL_BEFORE, EVENT_TOOL_AFTER, EVENT_TOOL_FAILURE),
+                    event_names=(
+                        EVENT_TOOL_BEFORE,
+                        EVENT_TOOL_AFTER,
+                        EVENT_TOOL_FAILURE,
+                    ),
                     call_id=request.call_id,
                 )
                 if notices:
-                    record_output = "\n".join(
-                        [*notices, str(record_output)]
-                    ).strip()
+                    record_output = "\n".join([*notices, str(record_output)]).strip()
             result_record = tool_result_store.record(
                 chat_id=context.chat_id,
                 tool_call_id=request.call_id,
@@ -852,5 +899,7 @@ async def run_query_engine(
             return interruption_message
 
     if last_message and last_message.content:
-        return _merge_response_segments(accumulated_response_segments, last_message.content)
+        return _merge_response_segments(
+            accumulated_response_segments, last_message.content
+        )
     return "(max tool iterations reached)"

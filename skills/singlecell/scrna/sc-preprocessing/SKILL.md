@@ -26,6 +26,7 @@ metadata:
       - "--seurat-hvg-method"
       - "--sctransform-regress-mt"
       - "--no-sctransform-regress-mt"
+      - "--confirmed-preflight"
       - "--r-enhanced"
     param_hints:
       scanpy:

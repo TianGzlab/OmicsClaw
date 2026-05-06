@@ -22,10 +22,11 @@ import shutil
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openai import AsyncOpenAI, APIError
+from openai import AsyncOpenAI, APIError, OpenAIError
 
 from omicsclaw.common.runtime_env import load_project_dotenv
 from omicsclaw.core.llm_timeout import (
@@ -39,7 +40,10 @@ from omicsclaw.core.provider_registry import (
     normalize_model_for_provider,
     resolve_provider,
 )
-from omicsclaw.core.provider_runtime import set_active_provider_runtime
+from omicsclaw.core.provider_runtime import (
+    provider_requires_api_key,
+    set_active_provider_runtime,
+)
 
 _PROVIDER_DETECT_ORDER = PROVIDER_DETECT_ORDER
 
@@ -89,9 +93,48 @@ def _resolve_omicsclaw_dir() -> Path:
 OMICSCLAW_DIR = _resolve_omicsclaw_dir()
 load_project_dotenv(OMICSCLAW_DIR, override=False)
 OMICSCLAW_PY = OMICSCLAW_DIR / "omicsclaw.py"
-OUTPUT_DIR = OMICSCLAW_DIR / "output"
+OUTPUT_DIR = Path(os.getenv("OMICSCLAW_OUTPUT_DIR", "") or (OMICSCLAW_DIR / "output")).expanduser().resolve()
 DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
+
+
+@dataclass(frozen=True)
+class OutputMediaPaths:
+    figure_paths: list[Path]
+    table_paths: list[Path]
+    notebook_paths: list[Path]
+    media_items: list[dict]
+
+
+def _collect_output_media_paths(out_dir: Path) -> OutputMediaPaths:
+    figure_paths: list[Path] = []
+    table_paths: list[Path] = []
+    notebook_paths: list[Path] = []
+    media_items: list[dict] = []
+
+    if not out_dir.exists():
+        return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
+
+    for f in sorted(out_dir.rglob("*")):
+        if not f.is_file():
+            continue
+        if f.suffix in (".md", ".html"):
+            media_items.append({"type": "document", "path": str(f)})
+        elif f.suffix == ".ipynb":
+            media_items.append({"type": "document", "path": str(f)})
+            notebook_paths.append(f)
+        elif f.suffix == ".png":
+            media_items.append({"type": "photo", "path": str(f)})
+            figure_paths.append(f)
+        elif f.suffix == ".csv":
+            media_items.append({"type": "document", "path": str(f)})
+            table_paths.append(f)
+
+    return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
+
+
+def _path_names(paths: list[Path]) -> list[str]:
+    return [path.name for path in paths]
 
 
 def get_skill_runner_python() -> str:
@@ -539,6 +582,74 @@ def _extract_pending_preflight_payload(result_text: str) -> dict | None:
     ]
     return relevant[-1] if relevant else None
 
+
+def _preflight_payload_needs_reply(payload: dict | None) -> bool:
+    if not payload or payload.get("status") != "needs_user_input":
+        return False
+    return bool(payload.get("pending_fields") or payload.get("confirmations"))
+
+
+def _remember_pending_preflight_request(
+    chat_id: int | str,
+    *,
+    args: dict,
+    payload: dict,
+) -> None:
+    pending_preflight_requests[chat_id] = {
+        "tool_name": "omicsclaw",
+        "original_args": copy.deepcopy(args),
+        "payload": payload,
+        "pending_fields": list(payload.get("pending_fields", []) or []),
+        "answers": {},
+    }
+
+
+def _is_affirmative_preflight_confirmation(user_text: str) -> bool:
+    text = _strip_answer_prefix(user_text).strip().lower()
+    if not text:
+        return False
+    negative_markers = (
+        "no",
+        "not",
+        "don't",
+        "dont",
+        "do not",
+        "cancel",
+        "stop",
+        "reject",
+        "先",
+        "不要",
+        "别",
+        "不继续",
+        "取消",
+        "停止",
+        "先跑",
+    )
+    if any(marker in text for marker in negative_markers):
+        return False
+    affirmative_markers = (
+        "yes",
+        "y",
+        "ok",
+        "okay",
+        "confirm",
+        "confirmed",
+        "accept",
+        "continue",
+        "proceed",
+        "go ahead",
+        "use default",
+        "default threshold",
+        "默认",
+        "确认",
+        "可以",
+        "继续",
+        "接受",
+        "同意",
+        "用默认",
+    )
+    return any(marker in text for marker in affirmative_markers)
+
 # Memory system (optional)
 memory_store = None
 session_manager = None
@@ -560,6 +671,8 @@ _usage: dict[str, int] = {
 # as "no estimate available" and omits from the cost line.
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     # DeepSeek
+    "deepseek-v4-flash":     (0.27,  1.10),
+    "deepseek-v4-pro":       (0.55,  2.19),
     "deepseek-reasoner":    (0.55,  2.19),
     "deepseek-chat":        (0.27,  1.10),
     "deepseek-v3":          (0.27,  1.10),
@@ -1073,6 +1186,7 @@ def init(
     auth_mode: str = "api_key",
     ccproxy_port: int = 11435,
     strict_oauth: bool = True,
+    allow_missing_credentials: bool = False,
 ):
     """Initialise the shared LLM client. Call once at startup.
 
@@ -1097,6 +1211,10 @@ def init(
           ``api_key`` mode with a loud warning if OAuth can't be set up.
           This prevents a stale ``LLM_AUTH_MODE=oauth`` in ``.env`` from
           blocking the app-server from starting at all.
+
+    ``allow_missing_credentials`` keeps app-server bootstrap reachable before
+    first-time setup has saved an LLM provider key. Explicit provider changes
+    should leave this ``False`` so credential mistakes fail immediately.
     """
     global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
 
@@ -1213,23 +1331,49 @@ def init(
     if effective_base_url:
         kw["base_url"] = effective_base_url
     kw["timeout"] = _build_llm_timeout()
-    try:
-        llm = AsyncOpenAI(**kw)
-    except ImportError as exc:
-        if "socksio" in str(exc) or "socks" in str(exc).lower():
-            raise ImportError(
-                "A SOCKS proxy is configured (HTTPS_PROXY / ALL_PROXY) but "
-                "the 'socksio' package is not installed. Run:\n\n"
-                '  pip install "httpx[socks]"\n\n'
-                "then restart the backend."
-            ) from exc
-        raise
-
-    logger.info(
-        f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
-        f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
-        f"auth_mode={auth_mode_normalized}"
+    missing_required_key = (
+        not effective_api_key and provider_requires_api_key(LLM_PROVIDER_NAME)
     )
+    if allow_missing_credentials and missing_required_key:
+        llm = None
+        logger.warning(
+            "LLM client not initialised because no credentials are "
+            "configured yet: provider=%s model=%s. The app-server remains "
+            "available so the frontend can finish provider setup.",
+            LLM_PROVIDER_NAME,
+            OMICSCLAW_MODEL,
+        )
+    else:
+        try:
+            llm = AsyncOpenAI(**kw)
+        except OpenAIError as exc:
+            if allow_missing_credentials and "missing credentials" in str(exc).lower():
+                llm = None
+                logger.warning(
+                    "LLM client not initialised because no credentials are "
+                    "configured yet: provider=%s model=%s. The app-server remains "
+                    "available so the frontend can finish provider setup.",
+                    LLM_PROVIDER_NAME,
+                    OMICSCLAW_MODEL,
+                )
+            else:
+                raise
+        except ImportError as exc:
+            if "socksio" in str(exc) or "socks" in str(exc).lower():
+                raise ImportError(
+                    "A SOCKS proxy is configured (HTTPS_PROXY / ALL_PROXY) but "
+                    "the 'socksio' package is not installed. Run:\n\n"
+                    '  pip install "httpx[socks]"\n\n'
+                    "then restart the backend."
+                ) from exc
+            raise
+
+    if llm is not None:
+        logger.info(
+            f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
+            f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
+            f"auth_mode={auth_mode_normalized}"
+        )
 
     # Memory initialization — uses the new graph-based memory system
     # Enabled by default; disable with OMICSCLAW_MEMORY_ENABLED=false
@@ -2500,12 +2644,20 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     if batch_key:
         cmd.extend(["--batch-key", batch_key])
 
+    skill_info = _lookup_skill_info(skill_key)
+    canonical_skill = skill_info.get("alias", skill_key)
+
     # Pass n_epochs if user specified
     n_epochs = args.get("n_epochs")
     if n_epochs is not None:
-        cmd.extend(["--n-epochs", str(int(n_epochs))])
+        if canonical_skill == "spatial-domain-identification":
+            cmd.extend(["--epochs", str(int(n_epochs))])
+        else:
+            cmd.extend(["--n-epochs", str(int(n_epochs))])
 
     cmd.extend(_normalize_extra_args(args.get("extra_args")))
+    if args.get("confirmed_preflight"):
+        cmd.append("--confirmed-preflight")
 
     # Build a parameter hint block so the LLM can relay it to the user
     param_hint = _build_param_hint(skill_key, method, cmd)
@@ -2522,10 +2674,25 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         if is_dl:
             logger.info(f"Starting {skill_key} with {method} (no timeout, may take 10-60 minutes)")
 
-        # Wait until completion — no timeout
-        stdout_bytes, stderr_bytes = await proc.communicate()
-        stdout_str = stdout_bytes.decode(errors="replace")
-        stderr_str = stderr_bytes.decode(errors="replace")
+        async def _read_stream(stream, *, label: str) -> str:
+            if stream is None:
+                return ""
+            chunks: list[str] = []
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace")
+                chunks.append(text)
+                stripped = text.rstrip()
+                if stripped:
+                    logger.info("[%s] %s", label, stripped)
+            return "".join(chunks)
+
+        stdout_task = asyncio.create_task(_read_stream(proc.stdout, label=f"{skill_key}:stdout"))
+        stderr_task = asyncio.create_task(_read_stream(proc.stderr, label=f"{skill_key}:stderr"))
+        await proc.wait()
+        stdout_str, stderr_str = await asyncio.gather(stdout_task, stderr_task)
     except Exception as e:
         import traceback as _tb
         # Clean up empty output directory on crash
@@ -2563,27 +2730,16 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
 
     # Collect report + figures from output directory
     return_media = str(args.get("return_media", "")).strip().lower()
-    figure_names = []
-    table_names = []
-    notebook_names = []
+    collected = _collect_output_media_paths(out_dir)
+    figure_paths = collected.figure_paths
+    table_paths = collected.table_paths
+    notebook_paths = collected.notebook_paths
+    figure_names = _path_names(figure_paths)
+    table_names = _path_names(table_paths)
+    notebook_names = _path_names(notebook_paths)
     sent_names = []
+    media_items = collected.media_items
     if out_dir.exists():
-        media_items = []
-        for f in sorted(out_dir.rglob("*")):
-            if not f.is_file():
-                continue
-            if f.suffix in (".md", ".html"):
-                media_items.append({"type": "document", "path": str(f)})
-            elif f.suffix == ".ipynb":
-                media_items.append({"type": "document", "path": str(f)})
-                notebook_names.append(f.name)
-            elif f.suffix == ".png":
-                media_items.append({"type": "photo", "path": str(f)})
-                figure_names.append(f.name)
-            elif f.suffix == ".csv":
-                media_items.append({"type": "document", "path": str(f)})
-                table_names.append(f.name)
-
         if return_media and media_items:
             if return_media == "all":
                 filtered = media_items
@@ -2695,14 +2851,14 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         # `injectInlineImages` regex can render them as inline <img>
         # elements when the LLM quotes them verbatim in later replies.
         hints = []
-        if figure_names:
-            paths = "\n  ".join(f"- `{out_dir / n}`" for n in figure_names)
+        if figure_paths:
+            paths = "\n  ".join(f"- `{path}`" for path in figure_paths)
             hints.append("Figures:\n  " + paths)
-        if table_names:
-            paths = "\n  ".join(f"- `{out_dir / n}`" for n in table_names)
+        if table_paths:
+            paths = "\n  ".join(f"- `{path}`" for path in table_paths)
             hints.append("Tables:\n  " + paths)
-        if notebook_names:
-            paths = "\n  ".join(f"- `{out_dir / n}`" for n in notebook_names)
+        if notebook_paths:
+            paths = "\n  ".join(f"- `{path}`" for path in notebook_paths)
             hints.append("Notebooks:\n  " + paths)
         result_text += (
             "\n\n---\n"
@@ -4429,14 +4585,12 @@ def _build_bot_query_engine_callbacks(
             display_output = result_record.content
             if func_name == "omicsclaw":
                 pending_payload = _extract_pending_preflight_payload(display_output)
-                if pending_payload and pending_payload.get("pending_fields"):
-                    pending_preflight_requests[chat_id] = {
-                        "tool_name": func_name,
-                        "original_args": copy.deepcopy(func_args),
-                        "payload": pending_payload,
-                        "pending_fields": list(pending_payload.get("pending_fields", []) or []),
-                        "answers": {},
-                    }
+                if _preflight_payload_needs_reply(pending_payload):
+                    _remember_pending_preflight_request(
+                        chat_id,
+                        args=func_args,
+                        payload=pending_payload,
+                    )
                 else:
                     pending_preflight_requests.pop(chat_id, None)
             if func_name == "consult_knowledge":
@@ -4485,6 +4639,14 @@ async def _maybe_resume_pending_preflight_request(
     if not user_text or user_text.startswith("/"):
         return None
 
+    if (
+        state.get("payload", {}).get("confirmations")
+        and not state.get("pending_fields")
+        and not _is_affirmative_preflight_confirmation(user_text)
+    ):
+        pending_preflight_requests.pop(chat_id, None)
+        return None
+
     resolved, remaining = _parse_preflight_reply(state, user_text)
     state["answers"] = resolved
     if remaining:
@@ -4496,18 +4658,18 @@ async def _maybe_resume_pending_preflight_request(
         state.get("pending_fields", []),
         resolved,
     )
+    if state.get("payload", {}).get("confirmations"):
+        updated_args["confirmed_preflight"] = True
     pending_preflight_requests.pop(chat_id, None)
     result = await execute_omicsclaw(updated_args, session_id=session_id, chat_id=chat_id)
 
     pending_payload = _extract_pending_preflight_payload(result)
-    if pending_payload and pending_payload.get("pending_fields"):
-        pending_preflight_requests[chat_id] = {
-            "tool_name": "omicsclaw",
-            "original_args": copy.deepcopy(updated_args),
-            "payload": pending_payload,
-            "pending_fields": list(pending_payload.get("pending_fields", []) or []),
-            "answers": {},
-        }
+    if _preflight_payload_needs_reply(pending_payload):
+        _remember_pending_preflight_request(
+            chat_id,
+            args=updated_args,
+            payload=pending_payload,
+        )
     return strip_user_guidance_lines(result) or result
 
 

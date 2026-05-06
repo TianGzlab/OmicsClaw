@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from skills.singlecell._lib.preflight import (
+    apply_preflight,
     preflight_sc_ambient_removal,
     preflight_sc_batch_integration,
     preflight_sc_cell_annotation,
@@ -316,6 +317,30 @@ def test_preflight_sc_preprocessing_blocks_non_count_like_input():
 
     assert decision.status == "blocked"
     assert any("raw count-like input" in line for line in decision.missing_requirements)
+
+
+def test_apply_preflight_accepts_confirmed_sc_preprocessing_prompt():
+    adata = _adata(x=np.array([[10, 1], [8, 2]], dtype=float))
+    decision = preflight_sc_preprocessing(
+        adata,
+        method="scanpy",
+        min_genes=200,
+        max_mt_pct=20.0,
+        min_cells=3,
+        source_path="/tmp/pbmc3k_raw.h5ad",
+    )
+
+    assert decision.status == "needs_user_input"
+
+    class _Logger:
+        def warning(self, *_args, **_kwargs):
+            return None
+
+    apply_preflight(decision, _Logger(), confirmed=True)
+
+    assert decision.status == "proceed_with_guidance"
+    assert not decision.confirmations
+    assert any("user confirmed" in line for line in decision.guidance)
 
 
 def test_preflight_sc_qc_blocks_non_count_like_input():

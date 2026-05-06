@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import sys
 import types
 from unittest.mock import MagicMock
@@ -21,7 +22,7 @@ def _stub_optional_modules() -> None:
         httpx_stub.get = lambda *_, **__: None  # type: ignore[attr-defined]
         sys.modules["httpx"] = httpx_stub
     for stub_name in ("openai", "tiktoken", "fastapi"):
-        if stub_name not in sys.modules:
+        if stub_name not in sys.modules and importlib.util.find_spec(stub_name) is None:
             sys.modules[stub_name] = types.ModuleType(stub_name)
 
 

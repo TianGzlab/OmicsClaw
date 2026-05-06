@@ -84,9 +84,15 @@ def _prepare_domain_plot_state(adata) -> str | None:
     return get_spatial_key(adata)
 
 
-def _ensure_umap_for_gallery(adata) -> None:
+def _ensure_umap_for_gallery(adata, *, max_auto_obs: int = 30000) -> None:
     """Compute UMAP if needed for the standard gallery."""
     if "X_umap" in adata.obsm:
+        return
+    if adata.n_obs > max_auto_obs:
+        logger.info(
+            "Skipping automatic UMAP for gallery on large dataset (n_obs=%d)",
+            adata.n_obs,
+        )
         return
     try:
         if "connectivities" not in adata.obsp:
@@ -861,6 +867,42 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+
+def _infer_graphst_data_type(
+    adata,
+    input_file: str | None,
+    *,
+    explicit_data_type: str | None = None,
+) -> str | None:
+    """Infer GraphST platform routing from explicit input, AnnData metadata, and path."""
+    if explicit_data_type:
+        return explicit_data_type
+
+    token_parts: list[str] = []
+    for key in ("platform", "data_type", "spatial_name", "dataset_name", "technology"):
+        value = adata.uns.get(key)
+        if value:
+            token_parts.append(str(value))
+
+    spatial_uns = adata.uns.get("spatial")
+    if isinstance(spatial_uns, dict):
+        token_parts.extend(str(key) for key in spatial_uns.keys())
+
+    if input_file:
+        input_path = Path(input_file)
+        token_parts.extend([input_path.name, input_path.stem, str(input_path)])
+
+    token = " ".join(token_parts).strip().lower().replace("-", "_")
+
+    if any(key in token for key in ("slide_seq", "slideseq", "slide seq")):
+        return "slide_seq"
+    if any(key in token for key in ("stereo_seq", "stereoseq", "stereo seq", "stereo")):
+        return "stereo"
+    if any(key in token for key in ("visium", "10x", "10 x")):
+        return "visium"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Spatial Domains — multi-method tissue region identification",
@@ -869,6 +911,11 @@ def main():
     parser.add_argument("--output", dest="output_dir", required=True)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--method", choices=list(SUPPORTED_METHODS), default="leiden")
+    parser.add_argument(
+        "--data-type",
+        default=None,
+        help="Input platform hint for method-specific routing (e.g. visium, slide_seq, xenium).",
+    )
     parser.add_argument("--n-domains", type=int, default=None, help="Target number of domains (defaults to 7 for GNNs and CellCharter fixed-K mode)")
     parser.add_argument("--epochs", type=int, default=100, help="Max training epochs (for GraphST/SpaGCN/STAGATE)")
     parser.add_argument("--resolution", type=float, default=1.0)
@@ -920,6 +967,19 @@ def main():
         logger.info("Method '%s' defaults to 'n_domains=7' when auto-k is disabled.", args.method)
         args.n_domains = 7
 
+    effective_data_type = args.data_type
+    if args.method == "graphst":
+        effective_data_type = _infer_graphst_data_type(
+            adata,
+            input_file,
+            explicit_data_type=args.data_type,
+        )
+        if effective_data_type and effective_data_type != args.data_type:
+            logger.info(
+                "GraphST data_type inferred as '%s' from input metadata/path",
+                effective_data_type,
+            )
+
     # Helpful parameter reminders and current status
     param_tips = {
         "leiden": "1. --resolution (granularity, default 1.0)  2. --spatial-weight (spatial influence, default 0.3)",
@@ -933,6 +993,8 @@ def main():
     
     # Collect current parameters specific to the method
     current_params = {"method": args.method}
+    if effective_data_type:
+        current_params["data_type"] = effective_data_type
     if args.method in ["leiden", "louvain", "banksy"]:
         current_params["resolution"] = args.resolution
     if args.method in ["leiden", "louvain"]:
@@ -984,6 +1046,7 @@ def main():
         spatial_weight=args.spatial_weight,
         n_domains=args.n_domains,  # Safe variable
         epochs=args.epochs,
+        data_type=effective_data_type,
         rad_cutoff=args.rad_cutoff,
         k_nn=args.k_nn,
         stagate_alpha=args.stagate_alpha,
@@ -1013,6 +1076,8 @@ def main():
         params["n_domains"] = args.n_domains
     if args.epochs is not None:
         params["epochs"] = args.epochs
+    if effective_data_type:
+        params["data_type"] = effective_data_type
     if args.method == "stagate":
         params["rad_cutoff"] = args.rad_cutoff
         params["k_nn"] = args.k_nn

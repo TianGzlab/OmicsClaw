@@ -2,10 +2,27 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from openai import OpenAIError
 
 import bot.core as core
 from omicsclaw.agents.pipeline import ResearchPipeline
 from omicsclaw.core.provider_registry import PROVIDER_PRESETS
+
+
+def _clear_llm_env(monkeypatch):
+    for key in (
+        "LLM_PROVIDER",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "OMICSCLAW_API_KEY",
+        "OMICSCLAW_PROVIDER",
+        "OMICSCLAW_BASE_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_build_llm_timeout_uses_defaults(monkeypatch):
@@ -57,6 +74,61 @@ def test_init_passes_timeout_to_async_openai(monkeypatch):
     assert isinstance(captured["timeout"], httpx.Timeout)
     assert captured["timeout"].connect == 5.0
     assert captured["timeout"].read == 30.0
+
+
+def test_init_allows_missing_credentials_when_requested(monkeypatch):
+    class _UnexpectedAsyncOpenAI:
+        def __init__(self, **kwargs):
+            raise AssertionError("missing-key startup must not construct AsyncOpenAI")
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setattr(core, "AsyncOpenAI", _UnexpectedAsyncOpenAI)
+    monkeypatch.setattr(core, "llm", object())
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "false")
+
+    core.init(
+        provider="openai",
+        api_key="",
+        model="gpt-5.5",
+        allow_missing_credentials=True,
+    )
+
+    assert core.llm is None
+    assert core.LLM_PROVIDER_NAME == "openai"
+    assert core.OMICSCLAW_MODEL == "gpt-5.5"
+
+
+def test_init_allows_missing_credentials_error_when_requested(monkeypatch):
+    class _MissingCredentialAsyncOpenAI:
+        def __init__(self, **kwargs):
+            raise OpenAIError("Missing credentials. Please pass an `api_key`.")
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setattr(core, "AsyncOpenAI", _MissingCredentialAsyncOpenAI)
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "false")
+
+    core.init(
+        provider="ollama",
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5:7b",
+        allow_missing_credentials=True,
+    )
+
+    assert core.llm is None
+    assert core.LLM_PROVIDER_NAME == "ollama"
+
+
+def test_init_requires_credentials_by_default(monkeypatch):
+    class _MissingCredentialAsyncOpenAI:
+        def __init__(self, **kwargs):
+            raise OpenAIError("Missing credentials. Please pass an `api_key`.")
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setattr(core, "AsyncOpenAI", _MissingCredentialAsyncOpenAI)
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "false")
+
+    with pytest.raises(OpenAIError, match="Missing credentials"):
+        core.init(provider="openai", api_key="", model="gpt-5.5")
 
 
 def test_pipeline_openai_path_receives_shared_timeout(monkeypatch):

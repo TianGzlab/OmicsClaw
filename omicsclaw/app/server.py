@@ -35,7 +35,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 try:
     from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
@@ -80,6 +80,19 @@ _DEFAULT_APP_CORS_ORIGINS: tuple[str, ...] = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+_OUTPUT_RUNNING_STALE_SECONDS = 30 * 60
+_FILE_TREE_IGNORED_DIRS: frozenset[str] = frozenset({
+    "node_modules",
+    ".git",
+    "dist",
+    ".next",
+    "__pycache__",
+    ".cache",
+    ".turbo",
+    "coverage",
+    ".output",
+    "build",
+})
 
 # ---------------------------------------------------------------------------
 # Lazy references to bot.core — resolved once at startup via lifespan
@@ -375,6 +388,7 @@ async def lifespan(app: FastAPI):
         auth_mode=auth_mode,
         ccproxy_port=ccproxy_port,
         strict_oauth=False,
+        allow_missing_credentials=True,
     )
     logger.info(
         "OmicsClaw core initialised: provider=%s model=%s",
@@ -634,6 +648,43 @@ def _resolve_scoped_memory_workspace(explicit_workspace: str = "") -> str:
         return ""
 
 
+def _apply_runtime_workspace(core: Any, workspace: str) -> tuple[Path, Path, list[str]]:
+    """Apply the active Desktop workspace to runtime trust and outputs."""
+    ws = str(workspace or "").strip()
+    if not ws:
+        raise HTTPException(400, detail="workspace is required")
+    ws_path = Path(ws)
+    if not ws_path.is_absolute():
+        raise HTTPException(400, detail="workspace must be an absolute path")
+    if not ws_path.is_dir():
+        raise HTTPException(400, detail=f"directory does not exist: {ws}")
+
+    output_dir = ws_path / "output"
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(500, detail=f"cannot create output directory: {exc}") from exc
+
+    trusted_dirs = getattr(core, "TRUSTED_DATA_DIRS", None)
+    if trusted_dirs is None:
+        trusted_dirs = []
+        setattr(core, "TRUSTED_DATA_DIRS", trusted_dirs)
+    if ws_path not in trusted_dirs:
+        trusted_dirs.append(ws_path)
+        logger.info("Added workspace to trusted dirs: %s", ws)
+
+    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
+    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
+    if ws not in dirs:
+        dirs.append(ws)
+    os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
+    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    os.environ["OMICSCLAW_OUTPUT_DIR"] = str(output_dir)
+    setattr(core, "OUTPUT_DIR", output_dir)
+
+    return ws_path, output_dir, dirs
+
+
 def _permission_profile_to_policy_state(
     session_id: str,
     permission_profile: str,
@@ -707,7 +758,12 @@ def _tool_names_from_permission_suggestions(
     return tool_names
 
 
-def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> dict[str, Any]:
+def _build_token_usage(
+    response_usage: Any,
+    usage_totals: dict[str, float],
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
     prompt_tokens = int(getattr(response_usage, "prompt_tokens", 0) or 0)
     completion_tokens = int(getattr(response_usage, "completion_tokens", 0) or 0)
 
@@ -744,7 +800,7 @@ def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> d
     cost_usd = 0.0
     get_prices = getattr(core, "_get_token_price", None)
     if callable(get_prices):
-        input_price, output_price = get_prices(core.OMICSCLAW_MODEL)
+        input_price, output_price = get_prices(model or core.OMICSCLAW_MODEL)
         cost_usd = (
             usage_totals["input_tokens"] / 1_000_000 * float(input_price or 0.0)
             + usage_totals["output_tokens"] / 1_000_000 * float(output_price or 0.0)
@@ -990,6 +1046,8 @@ async def chat_stream(req: ChatRequest):
       - {"type": "error",              "data": "..."}   — error
     """
     core = _get_core()
+    if req.workspace.strip():
+        _apply_runtime_workspace(core, req.workspace)
     session_id = req.session_id
     bound_remote_job_id = str(req.job_id or "").strip()
     bound_remote_workspace: Path | None = None
@@ -1362,6 +1420,48 @@ async def chat_stream(req: ChatRequest):
             return media
         return media
 
+    def _pending_media_item_to_block(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+        path = str(item.get("path") or item.get("localPath") or "").strip()
+        if not path or not os.path.isfile(path):
+            return None
+        item_type = str(item.get("type") or "").strip().lower()
+        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        if item_type in {"photo", "image"} or mime_type.startswith("image/"):
+            media_type = "image"
+        elif item_type == "video" or mime_type.startswith("video/"):
+            media_type = "video"
+        elif item_type == "audio" or mime_type.startswith("audio/"):
+            media_type = "audio"
+        elif item_type in {"document", "file"}:
+            media_type = "file"
+        else:
+            return None
+        return {
+            "type": media_type,
+            "mimeType": mime_type,
+            "localPath": path,
+        }
+
+    def _consume_pending_media_for_session() -> list[dict[str, Any]]:
+        pending = getattr(core, "pending_media", None)
+        if not isinstance(pending, dict):
+            return []
+        items = pending.pop(session_id, []) or []
+        media: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            block = _pending_media_item_to_block(item)
+            if not block:
+                continue
+            local_path = str(block["localPath"])
+            if local_path in seen:
+                continue
+            seen.add(local_path)
+            media.append(block)
+        return media
+
     async def on_stream_content(chunk: str):
         nonlocal streamed_text, streamed_text_chunks
         streamed_text += chunk
@@ -1416,6 +1516,13 @@ async def chat_stream(req: ChatRequest):
             await _queue_event("tool_output", f"Completed {tool_name}")
 
         media = _extract_media_from_display_output(tool_name, display_output)
+        pending_media = _consume_pending_media_for_session()
+        if pending_media:
+            existing = {str(item.get("localPath", "")) for item in media}
+            media.extend(
+                item for item in pending_media
+                if str(item.get("localPath", "")) not in existing
+            )
 
         result_data: dict[str, Any] = {
             "tool_use_id": tool_use_id,
@@ -1466,7 +1573,11 @@ async def chat_stream(req: ChatRequest):
                 ),
                 "total_tokens": int(getattr(response_usage, "total_tokens", 0) or 0),
             }
-        usage_payload = _build_token_usage(response_usage, usage_totals)
+        usage_payload = _build_token_usage(
+            response_usage,
+            usage_totals,
+            model=effective_model,
+        )
         return delta
 
     async def request_tool_approval(request: Any, execution_result: Any) -> dict[str, Any]:
@@ -1863,22 +1974,7 @@ async def set_workspace(req: WorkspaceRequest):
     if not ws_path.is_dir():
         raise HTTPException(400, detail=f"directory does not exist: {ws}")
     core = _get_core()
-
-    # Add to TRUSTED_DATA_DIRS at runtime so tools can access files there
-    if ws_path not in core.TRUSTED_DATA_DIRS:
-        core.TRUSTED_DATA_DIRS.append(ws_path)
-        logger.info("Added workspace to trusted dirs: %s", ws)
-
-    # Update env var so _build_trusted_dirs() picks it up on next rebuild
-    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
-    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
-    if ws not in dirs:
-        dirs.append(ws)
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-    else:
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-
-    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    ws_path, output_dir, dirs = _apply_runtime_workspace(core, ws)
 
     # Persist to .env for next restart
     env_path = _get_omicsclaw_env_path()
@@ -1888,6 +1984,7 @@ async def set_workspace(req: WorkspaceRequest):
             {
                 "OMICSCLAW_DATA_DIRS": ",".join(dirs),
                 "OMICSCLAW_WORKSPACE": ws,
+                "OMICSCLAW_OUTPUT_DIR": str(output_dir),
             },
         )
 
@@ -1896,6 +1993,7 @@ async def set_workspace(req: WorkspaceRequest):
         "workspace": ws,
         "trusted_dirs": [str(d) for d in core.TRUSTED_DATA_DIRS],
         "workspace_env": os.environ.get("OMICSCLAW_WORKSPACE", ""),
+        "output_dir": str(output_dir),
     }
 
 
@@ -1977,6 +2075,159 @@ async def browse_directories(path: Optional[str] = None):
         "parent": parent_path,
         "directories": directories,
     }
+
+
+def _classify_tree_file(path: Path) -> dict[str, Any]:
+    return {
+        "name": path.name,
+        "path": str(path),
+        "type": "file",
+        "size": path.stat().st_size,
+        "extension": path.suffix,
+    }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _trusted_file_roots() -> list[Path]:
+    core = _get_core()
+    roots: list[Path] = []
+    for raw in getattr(core, "TRUSTED_DATA_DIRS", []) or []:
+        try:
+            roots.append(Path(raw).expanduser().resolve(strict=True))
+        except OSError:
+            continue
+    output_dir = getattr(core, "OUTPUT_DIR", None)
+    if output_dir:
+        try:
+            roots.append(Path(output_dir).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    workspace = str(os.getenv("OMICSCLAW_WORKSPACE", "") or "").strip()
+    if workspace:
+        try:
+            roots.append(Path(workspace).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    unique: list[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _resolve_trusted_file_path(raw_path: str) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        target = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="file does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not target.is_file():
+        raise HTTPException(400, detail="path is not a file")
+    trusted_roots = _trusted_file_roots()
+    if not any(_is_relative_to(target, root) for root in trusted_roots):
+        raise HTTPException(403, detail="access denied")
+    return target
+
+
+def _scan_file_tree(base: Path, depth: int, visited: set[Path] | None = None) -> list[dict[str, Any]]:
+    if depth <= 0:
+        return []
+
+    seen = visited if visited is not None else set()
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+    except OSError as exc:
+        raise HTTPException(400, detail=f"cannot read directory: {exc}") from exc
+
+    resolved_entries: list[tuple[str, Path, bool, bool]] = []
+    for entry in entries:
+        if entry.name.startswith(".") and not entry.name.startswith(".env"):
+            continue
+        try:
+            is_dir = entry.is_dir()
+            is_file = entry.is_file()
+        except OSError:
+            continue
+        if is_dir or is_file:
+            resolved_entries.append((entry.name, entry, is_dir, is_file))
+
+    resolved_entries.sort(key=lambda item: (not item[2], item[0].lower()))
+
+    nodes: list[dict[str, Any]] = []
+    for name, entry, is_dir, is_file in resolved_entries:
+        if is_dir:
+            if name in _FILE_TREE_IGNORED_DIRS:
+                continue
+            try:
+                real = entry.resolve(strict=True)
+            except OSError:
+                continue
+            if real in seen:
+                continue
+            next_seen = set(seen)
+            next_seen.add(real)
+            nodes.append({
+                "name": name,
+                "path": str(entry),
+                "type": "directory",
+                "children": _scan_file_tree(entry, depth - 1, next_seen),
+            })
+        elif is_file:
+            try:
+                nodes.append(_classify_tree_file(entry))
+            except OSError:
+                continue
+    return nodes
+
+
+@app.get("/files/tree")
+async def files_tree(
+    path: str = Query(..., description="Directory path on the backend host"),
+    depth: int = Query(3, ge=1, le=10),
+):
+    """Return files and directories under a backend-host directory."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        base = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    return {
+        "root": str(base),
+        "tree": _scan_file_tree(base, depth),
+    }
+
+
+@app.get("/files/serve")
+async def files_serve(path: str = Query(..., description="Trusted file path on the backend host")):
+    """Serve a file from the backend host under trusted workspace/output roots."""
+    target = _resolve_trusted_file_path(path)
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(
+        str(target),
+        media_type=media_type or "application/octet-stream",
+        filename=target.name,
+        headers={"Cache-Control": "private, max-age=60"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3717,6 +3968,19 @@ def _collect_key_files(run_dir: Path) -> list[dict]:
     return results
 
 
+def _latest_file_mtime(run_dir: Path) -> float:
+    latest = 0.0
+    try:
+        for entry in run_dir.rglob("*"):
+            try:
+                latest = max(latest, entry.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return latest
+
+
 def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     Read ``result.json`` and extract status + summary.
@@ -3725,10 +3989,17 @@ def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     result_file = run_dir / "result.json"
     if not result_file.is_file():
-        # No result.json — infer status from presence of output files
-        figures_dir = run_dir / "figures"
-        if figures_dir.is_dir() and any(figures_dir.iterdir()):
-            return ("completed", None)
+        # result.json is the completion contract. Without it, a run is either
+        # still active or was interrupted before finalization.
+        latest_mtime = max(
+            run_dir.stat().st_mtime,
+            _latest_file_mtime(run_dir),
+        )
+        if time.time() - latest_mtime > _OUTPUT_RUNNING_STALE_SECONDS:
+            return (
+                "failed",
+                f"stale incomplete run: no result.json and no output update for more than {_OUTPUT_RUNNING_STALE_SECONDS // 60} minutes",
+            )
         return ("running", None)
 
     try:
