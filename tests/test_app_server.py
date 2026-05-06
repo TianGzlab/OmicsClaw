@@ -1752,6 +1752,11 @@ def test_build_thinking_extra_body_adaptive_per_provider():
     assert result == {"type": "enabled", "budget_tokens": 10000}
 
     result = server._build_thinking_extra_body(
+        adaptive, provider="openrouter", model="deepseek/deepseek-v4-pro",
+    )
+    assert result == {"type": "enabled", "budget_tokens": 10000}
+
+    result = server._build_thinking_extra_body(
         adaptive, provider="nvidia", model="deepseek-ai/deepseek-r1",
     )
     assert result == {"type": "enabled", "budget_tokens": 10000}

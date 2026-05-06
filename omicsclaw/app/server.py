@@ -240,6 +240,7 @@ _THINKING_INCOMPATIBLE_PROVIDERS: frozenset[str] = frozenset({
 # gateway providers (openrouter, nvidia, volcengine, …) whose capability
 # depends on which upstream model is selected rather than the gateway itself.
 _THINKING_CAPABLE_MODEL_PATTERNS: tuple[str, ...] = (
+    "deepseek-v4",
     "deepseek-r1",
     "deepseek-reasoner",
     "deepseek-chat",

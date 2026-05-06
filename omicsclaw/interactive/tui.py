@@ -130,7 +130,7 @@ from ._session_command_support import (
     resolve_active_pipeline_workspace,
 )
 from ._style_support import build_style_command_view
-from ._tui_support import build_tui_header_label
+from ._tui_support import attach_reasoning_container, build_tui_header_label
 
 
 # ---------------------------------------------------------------------------
@@ -1018,11 +1018,12 @@ if _HAS_TEXTUAL:
                     chat = self.query_one("#chat-area", ScrollableContainer)
                     
                     if not getattr(self, "_current_reasoning", None):
-                        c = Collapsible(title="🧠 Agent Reasoning & Tool Execution")
-                        v = Vertical()
-                        c.mount(v)
-                        chat.mount(c)
-                        self._current_reasoning = v
+                        self._current_reasoning = attach_reasoning_container(
+                            chat,
+                            collapsible_cls=Collapsible,
+                            vertical_cls=Vertical,
+                            title="🧠 Agent Reasoning & Tool Execution",
+                        )
                     
                     from rich.text import Text
                     msg = Text.from_markup(f"[dim]↳ 🛠️  Calling [cyan]{tool_name}[/cyan]({args_preview})[/dim]")
