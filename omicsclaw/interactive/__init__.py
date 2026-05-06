@@ -6,7 +6,14 @@ Entry points:
     omicsclaw --ui tui      — Same, via flag
 """
 
-from .interactive import run_interactive  # noqa: F401
+from __future__ import annotations
+
+
+def run_interactive(*args, **kwargs):
+    """Start interactive mode without importing optional deps at package import."""
+    from .interactive import run_interactive as _run_interactive
+
+    return _run_interactive(*args, **kwargs)
 
 
 def main() -> None:
