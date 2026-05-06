@@ -57,67 +57,6 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 | 🧠 **Memory**<br/>Sessions, preferences, lineage | 🔒 **Local-first**<br/>Raw data stays in your runtime | 🧰 **89 skills**<br/>Generated catalog + demos | 🧭 **Smart routing**<br/>Natural language to tools |
 | 🖥️ **CLI / TUI**<br/>`oc interactive`, `oc tui` | 🌐 **App backend**<br/>FastAPI for desktop/web | 🔌 **MCP-ready**<br/>Attach external tools | 📡 **Remote mode**<br/>SSH tunnel to Linux servers |
 
-> **Desktop backend health:** `oc app-server` includes an optional
-> `launch_id` in `/health` when started with `OMICSCLAW_DESKTOP_LAUNCH_ID`.
-> OmicsClaw Desktop uses this process handshake to avoid mistaking a stale
-> backend already listening on port 8765 for the newly launched backend.
-> The app backend also starts without a configured LLM credential, keeping
-> `/health` and `/providers` reachable for Desktop first-run setup. Explicit
-> provider changes still validate credentials and report setup errors.
->
-> **Desktop context compaction:** automatic and reactive chat compaction now
-> rebuild the persisted transcript with a wrapped summary plus the retained
-> tail, matching `/compact` semantics. The Desktop `context_compressed`
-> notification therefore reflects durable backend state instead of a
-> one-request prompt trim. If a compaction stage only trims prompt context and
-> summarizes no older messages, the status payload uses trimmed-context wording
-> instead of reporting `0` summarized messages.
->
-> **Desktop chat usage cost:** app-server token usage events price the actual
-> requested chat model, including per-request model overrides, before emitting
-> `cost_usd`. Current DeepSeek v4 model aliases are covered so Desktop message
-> footers and usage statistics can show per-turn cost when pricing is known.
->
-> **GraphST + App timeout note:** for `spatial-domain-identification`, the
-> backend now forwards chat/app epoch overrides to the actual `--epochs`
-> skill flag, and GraphST resolves Slide-seq-style inputs to the upstream
-> `datatype='Slide'` path instead of falling back to the default `10X`
-> branch. Slide/Stereo graph setup now keeps GraphST's spatial adjacency and
-> readout mask sparse, avoiding previous dense `n_obs x n_obs` allocations
-> on high-resolution Slide-seqV2 files. Very large GraphST runs still spend
-> time in preprocessing and clustering outside the requested GPU epoch loop,
-> so `epochs=1` is a pipeline smoke test rather than an instant analysis.
->
-> **Desktop workspace outputs:** when OmicsClaw-App syncs a workspace or sends
-> a chat request with `workspace`, the app backend now uses
-> `<workspace>/output` as `OMICSCLAW_OUTPUT_DIR`. Analysis runs, `/outputs/latest`,
-> and dashboard figures therefore follow the selected Desktop project instead
-> of the backend source checkout's `output/` directory.
->
-> **Single-cell preflight confirmations:** when a Desktop-triggered single-cell
-> skill stops for confirmation-only preflight guidance, the app backend now keeps
-> that pending state for the chat session. An affirmative user reply replays the
-> original skill call with an explicit confirmation flag, while a new request
-> such as running QC first clears the pending action and is handled normally.
->
-> **Desktop remote file tree + stale runs:** remote runtimes now expose
-> `/files/tree` for the App's right-panel file tree, returning files and
-> directories instead of the folder-picker-only `/files/browse` directory list.
-> `/outputs/latest` treats output directories without `result.json` as live only
-> while files are still changing; if an incomplete directory has no updates for
-> 30 minutes, it is reported as `failed` so interrupted analyses leave the live
-> task count automatically.
-> Remote Desktop clients can also fetch trusted backend-host file bytes through
-> `/files/serve`, which is constrained to the active workspace, trusted data
-> directories, and output directory. Chat output hints preserve the actual
-> nested artifact paths, such as `figures/*.png`, so desktop inline previews
-> request files that exist under the generated run directory.
-> Desktop chat streams also consume the same per-session `pending_media` queue
-> used by messaging channels, translating queued analysis figures into
-> `tool_result.media` blocks. Requests such as "show the spatial domain plot"
-> therefore render images inline instead of only reporting that files are being
-> delivered automatically.
-
 ## ⚡ Quick Start
 
 ```bash
