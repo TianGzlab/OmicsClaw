@@ -236,6 +236,33 @@ def test_run_query_engine_uses_llm_error_callback(tmp_path):
     assert result == "handled: boom"
 
 
+def test_run_query_engine_reports_empty_llm_completion(tmp_path):
+    llm = _FakeLLM(responses=[_FakeResponse(_FakeMessage(content="", tool_calls=None))])
+    transcript_store = TranscriptStore(sanitizer=sanitize_tool_history)
+    result_store = ToolResultStore(storage_dir=tmp_path / "tool_results")
+    runtime = ToolRegistry([]).build_runtime({})
+
+    result = asyncio.run(
+        run_query_engine(
+            llm=llm,
+            context=QueryEngineContext(
+                chat_id="chat-empty",
+                session_id="session-empty",
+                system_prompt="SYSTEM",
+                user_message_content="say something",
+            ),
+            tool_runtime=runtime,
+            transcript_store=transcript_store,
+            tool_result_store=result_store,
+            config=QueryEngineConfig(model="fake-model"),
+        )
+    )
+
+    assert result != "(no response)"
+    assert "empty completion" in result.lower()
+    assert "provider" in result.lower()
+
+
 def test_run_query_engine_streams_reasoning_and_text(tmp_path):
     llm = _FakeLLM(
         events=[

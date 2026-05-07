@@ -397,6 +397,10 @@ def resolve_provider(
     """
     source = os.environ if env is None else env
     provider_key = str(provider or "").strip().lower()
+    requested_provider_key = provider_key
+    env_provider_key = str(
+        source.get("LLM_PROVIDER", "") or source.get("OMICSCLAW_PROVIDER", "") or ""
+    ).strip().lower()
     resolved_key = str(api_key or "")
 
     if not provider_key and not resolved_key:
@@ -414,13 +418,38 @@ def resolve_provider(
         provider_key,
         ("", "", ""),
     )
-    env_base_url = (
+    provider_env_base_url = (
         str(source.get(f"{provider_key.upper()}_BASE_URL", "") or "")
         if provider_key
         else ""
     )
+    generic_env_applies = (
+        bool(env_provider_key and env_provider_key == provider_key)
+        or (not provider_key and not requested_provider_key)
+        or (requested_provider_key == "custom" and not env_provider_key)
+    )
+    generic_env_base_url = (
+        str(
+            source.get("LLM_BASE_URL", "")
+            or source.get("OMICSCLAW_BASE_URL", "")
+            or ""
+        )
+        if generic_env_applies
+        else ""
+    )
+    env_model = (
+        str(
+            source.get("OMICSCLAW_MODEL", "")
+            or source.get("LLM_MODEL", "")
+            or source.get("SPATIALCLAW_MODEL", "")
+            or ""
+        )
+        if generic_env_applies
+        else ""
+    )
+    env_base_url = provider_env_base_url or generic_env_base_url
     resolved_url = str(base_url or env_base_url or preset_url or "") or None
-    resolved_model = str(model or preset_model or "deepseek-v4-flash")
+    resolved_model = str(model or env_model or preset_model or "deepseek-v4-flash")
     resolved_model, _normalized_from = normalize_model_for_provider(
         provider_key,
         resolved_model,
@@ -431,11 +460,21 @@ def resolve_provider(
     if not resolved_key and preset_key_env:
         resolved_key = str(source.get(preset_key_env, "") or "")
     if not resolved_key:
-        resolved_key = str(
-            source.get("LLM_API_KEY", "")
-            or source.get("OPENAI_API_KEY", "")
-            or ""
+        generic_key = (
+            str(
+                source.get("LLM_API_KEY", "")
+                or source.get("OMICSCLAW_API_KEY", "")
+                or ""
+            )
+            if generic_env_applies
+            else ""
         )
+        openai_fallback = (
+            str(source.get("OPENAI_API_KEY", "") or "")
+            if provider_key in {"", "openai"}
+            else ""
+        )
+        resolved_key = str(generic_key or openai_fallback or "")
 
     return resolved_url, resolved_model, resolved_key
 

@@ -28,7 +28,7 @@ import sys
 import time
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -36,6 +36,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 try:
     from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
@@ -1086,13 +1087,24 @@ async def chat_stream(req: ChatRequest):
     try:
         if req.provider_config and req.provider_config.provider:
             pc = req.provider_config
+            provider = str(pc.provider or "").strip()
+            model = str(pc.model or "").strip()
+            base_url = str(pc.base_url or "").strip()
+            if provider.lower() == "custom" and not base_url:
+                base_url = _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+            _validate_custom_provider_input(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                allow_env_base_url=True,
+            )
             core.init(
                 api_key=pc.api_key,
-                base_url=pc.base_url or None,
-                model=pc.model,
-                provider=pc.provider,
+                base_url=base_url or None,
+                model=model,
+                provider=provider,
             )
-        elif req.provider_id and req.provider_id.lower() != core.LLM_PROVIDER_NAME.lower():
+        elif _chat_request_requires_provider_reinit(core, req.provider_id, req.model or ""):
             _apply_chat_provider_switch(core, req.provider_id, req.model or "")
     except HTTPException:
         raise
@@ -3280,13 +3292,24 @@ async def list_providers():
     for entry in provider_entries:
         name = str(entry.get("name", "") or "")
         env_key = str(entry.get("env_key", "") or "")
+        active = name == core.LLM_PROVIDER_NAME
+        entry_payload = dict(entry)
+        base_url_source = _provider_base_url_source(name, core.LLM_PROVIDER_NAME)
+        if base_url_source:
+            entry_payload["base_url"] = (
+                _read_first_env(f"{name.upper()}_BASE_URL")
+                or _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+                or str(entry_payload.get("base_url", "") or "")
+            )
+        if active and core.OMICSCLAW_MODEL and not str(entry_payload.get("default_model", "") or "").strip():
+            entry_payload["default_model"] = core.OMICSCLAW_MODEL
         credential_source = _provider_configuration_source(name, env_key, core.LLM_PROVIDER_NAME)
         oauth_supported = provider_supports_oauth(name)
         providers.append({
-            **entry,
+            **entry_payload,
             "configured": bool(credential_source),
             "configured_via": credential_source or None,
-            "active": name == core.LLM_PROVIDER_NAME,
+            "active": active,
             "oauth_supported": oauth_supported,
             "oauth_authenticated": (
                 oauth_statuses.get(name, {}).get("authenticated", False)
@@ -3354,6 +3377,37 @@ class ProviderSwitchRequest(BaseModel):
     ccproxy_port: int = 11435
 
 
+class ProviderTestRequest(BaseModel):
+    provider: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+def _validate_custom_provider_input(
+    *,
+    provider: str,
+    model: str = "",
+    base_url: str = "",
+    allow_env_base_url: bool = False,
+) -> None:
+    if str(provider or "").strip().lower() != "custom":
+        return
+    if not str(model or "").strip():
+        raise HTTPException(
+            400,
+            detail="Custom Endpoint requires an explicit model name.",
+        )
+    if str(base_url or "").strip():
+        return
+    if allow_env_base_url and _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL"):
+        return
+    raise HTTPException(
+        400,
+        detail="Custom Endpoint requires an explicit Base URL.",
+    )
+
+
 @app.put("/providers")
 async def switch_provider(req: ProviderSwitchRequest):
     """Switch the active LLM provider. Re-initializes the core LLM client.
@@ -3388,6 +3442,11 @@ async def switch_provider(req: ProviderSwitchRequest):
                 "Supported: anthropic, openai"
             ),
         )
+    _validate_custom_provider_input(
+        provider=req.provider,
+        model=req.model,
+        base_url=req.base_url,
+    )
 
     # Reject ccproxy_port == app-server's own port: ccproxy serve would
     # fail to bind (the app-server already owns the port), leaving the
@@ -3438,11 +3497,11 @@ async def switch_provider(req: ProviderSwitchRequest):
         remove_keys: set[str] = set()
         if auth_mode == "oauth":
             updates["CCPROXY_PORT"] = str(requested_port)
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         else:
             remove_keys.add("CCPROXY_PORT")
             if req.provider != "custom" and not req.base_url:
-                remove_keys.add("LLM_BASE_URL")
+                remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(
@@ -3457,6 +3516,92 @@ async def switch_provider(req: ProviderSwitchRequest):
         "provider": core.LLM_PROVIDER_NAME,
         "model": core.OMICSCLAW_MODEL,
         "auth_mode": auth_mode,
+    }
+
+
+@app.post("/providers/test")
+async def test_provider(req: ProviderTestRequest):
+    """Run a minimal live test against an OpenAI-compatible provider config."""
+    core = _get_core()
+    provider = str(req.provider or getattr(core, "LLM_PROVIDER_NAME", "") or "").strip()
+    model = str(req.model or getattr(core, "OMICSCLAW_MODEL", "") or "").strip()
+    base_url = str(req.base_url or "").strip()
+    api_key = str(req.api_key or "").strip()
+
+    _validate_custom_provider_input(
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        allow_env_base_url=True,
+    )
+
+    try:
+        from omicsclaw.core.provider_runtime import (
+            provider_requires_api_key,
+            resolve_provider_runtime,
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"Provider runtime unavailable: {exc}") from exc
+
+    runtime = resolve_provider_runtime(
+        provider=provider,
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+    )
+    if not runtime.model:
+        raise HTTPException(400, detail="No model resolved for provider test.")
+    if provider_requires_api_key(runtime.provider) and not runtime.api_key:
+        raise HTTPException(400, detail="No API key resolved for provider test.")
+
+    start = time.monotonic()
+    client = AsyncOpenAI(
+        api_key=runtime.api_key,
+        base_url=runtime.base_url or None,
+        timeout=15.0,
+    )
+    try:
+        response = await client.chat.completions.create(
+            model=runtime.model,
+            messages=[{"role": "user", "content": "Say OK"}],
+            max_tokens=8,
+        )
+        content = str(response.choices[0].message.content or "").strip()
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "ok": False,
+            "status": "failed",
+            "provider": runtime.provider,
+            "model": runtime.model,
+            "base_url": runtime.base_url,
+            "message": f"Live provider test failed: {exc}",
+            "duration_ms": duration_ms,
+        }
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    if not content:
+        return {
+            "ok": False,
+            "status": "failed",
+            "provider": runtime.provider,
+            "model": runtime.model,
+            "base_url": runtime.base_url,
+            "message": "Live provider test returned an empty response.",
+            "duration_ms": duration_ms,
+        }
+
+    return {
+        "ok": True,
+        "status": "passed",
+        "provider": runtime.provider,
+        "model": runtime.model,
+        "base_url": runtime.base_url,
+        "message": "Live provider test passed.",
+        "duration_ms": duration_ms,
     }
 
 
@@ -4316,7 +4461,18 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
     would let the chat run against the old model while the UI reports the
     requested one.
     """
-    core.init(provider=provider_id, model=model)
+    _validate_custom_provider_input(
+        provider=provider_id,
+        model=model,
+        base_url="",
+        allow_env_base_url=True,
+    )
+    base_url = (
+        _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+        if str(provider_id or "").strip().lower() == "custom"
+        else ""
+    )
+    core.init(provider=provider_id, model=model, base_url=base_url or None)
 
     env_path = _get_omicsclaw_env_path()
     if env_path:
@@ -4328,7 +4484,7 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
             updates["OMICSCLAW_MODEL"] = core.OMICSCLAW_MODEL
         remove_keys: set[str] = {"CCPROXY_PORT"}
         if provider_id != "custom":
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(
@@ -4336,6 +4492,23 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
         getattr(core, "LLM_PROVIDER_NAME", provider_id),
         getattr(core, "OMICSCLAW_MODEL", ""),
     )
+
+
+def _chat_request_requires_provider_reinit(core: Any, provider_id: str, model: str) -> bool:
+    requested_provider = str(provider_id or "").strip()
+    if not requested_provider:
+        return False
+
+    current_provider = str(getattr(core, "LLM_PROVIDER_NAME", "") or "").strip()
+    if requested_provider.lower() != current_provider.lower():
+        return True
+
+    requested_model = str(model or "").strip()
+    if not requested_model:
+        return False
+
+    current_model = str(getattr(core, "OMICSCLAW_MODEL", "") or "").strip()
+    return requested_model != current_model
 
 
 # ---- Pydantic models for bridge endpoints --------------------------------

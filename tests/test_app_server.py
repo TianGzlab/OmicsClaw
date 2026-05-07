@@ -1621,6 +1621,331 @@ async def test_chat_stream_surfaces_provider_switch_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_reapplies_provider_when_model_changes(monkeypatch):
+    """Custom Endpoint keeps the same provider id while users edit model names.
+
+    The chat request must still reinitialise the runtime when the model differs;
+    otherwise the status event claims the requested model while the underlying
+    AsyncOpenAI client still points at the previous model/provider runtime.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured: dict[str, object] = {}
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "custom"
+        OMICSCLAW_MODEL = "old-model"
+        received_files: list[object] = []
+
+        def init(self, **kwargs):
+            captured["init"] = kwargs
+            self.LLM_PROVIDER_NAME = kwargs.get("provider") or self.LLM_PROVIDER_NAME
+            self.OMICSCLAW_MODEL = kwargs.get("model") or self.OMICSCLAW_MODEL
+
+        _skill_registry = staticmethod(lambda: SimpleNamespace(skills={}))
+        get_tool_executors = staticmethod(lambda: {})
+        _accumulate_usage = staticmethod(lambda response_usage: {})
+
+        async def llm_tool_loop(self, **kwargs):
+            captured["model_override"] = kwargs.get("model_override")
+            return "ok"
+
+    monkeypatch.setattr(server, "_core", FakeCore(), raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+    monkeypatch.setattr(server, "_get_omicsclaw_env_path", lambda: None, raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-custom-model-change",
+            content="hello",
+            provider_id="custom",
+            model="new-model",
+        )
+    )
+    payload = await _read_streaming_response(response)
+
+    assert '"ok"' in payload
+    assert captured["init"] == {
+        "provider": "custom",
+        "model": "new-model",
+        "base_url": "https://api.example.com/v1",
+    }
+    assert captured["model_override"] == "new-model"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_provider_config_preserves_custom_env_base_url(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured: dict[str, object] = {}
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "deepseek"
+        OMICSCLAW_MODEL = "deepseek-v4-flash"
+        received_files: list[object] = []
+
+        def init(self, **kwargs):
+            captured["init"] = kwargs
+            self.LLM_PROVIDER_NAME = kwargs.get("provider") or self.LLM_PROVIDER_NAME
+            self.OMICSCLAW_MODEL = kwargs.get("model") or self.OMICSCLAW_MODEL
+
+        _skill_registry = staticmethod(lambda: SimpleNamespace(skills={}))
+        get_tool_executors = staticmethod(lambda: {})
+        _accumulate_usage = staticmethod(lambda response_usage: {})
+
+        async def llm_tool_loop(self, **kwargs):
+            return "ok"
+
+    monkeypatch.setattr(server, "_core", FakeCore(), raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+    monkeypatch.setattr(server, "_get_omicsclaw_env_path", lambda: None, raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-custom-provider-config",
+            content="hello",
+            provider_config=server.ProviderConfig(
+                provider="custom",
+                model="custom-model",
+            ),
+        )
+    )
+    payload = await _read_streaming_response(response)
+
+    assert '"ok"' in payload
+    assert captured["init"] == {
+        "api_key": "",
+        "base_url": "https://api.example.com/v1",
+        "model": "custom-model",
+        "provider": "custom",
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_provider_config_rejects_incomplete_custom_endpoint(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from fastapi import HTTPException
+
+    from omicsclaw.app import server
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "deepseek"
+        OMICSCLAW_MODEL = "deepseek-v4-flash"
+
+        def init(self, **kwargs):
+            raise AssertionError("incomplete custom provider should fail before core.init")
+
+    monkeypatch.setattr(server, "_core", FakeCore(), raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server.chat_stream(
+            server.ChatRequest(
+                session_id="session-custom-provider-config-invalid",
+                content="hello",
+                provider_config=server.ProviderConfig(provider="custom"),
+            )
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "model" in str(excinfo.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_switch_provider_clears_legacy_base_url_alias(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured_remove_keys: set[str] = set()
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "openai"
+        OMICSCLAW_MODEL = "gpt-5.5"
+
+        def init(self, **kwargs):
+            self.LLM_PROVIDER_NAME = kwargs.get("provider") or self.LLM_PROVIDER_NAME
+            self.OMICSCLAW_MODEL = kwargs.get("model") or self.OMICSCLAW_MODEL
+
+    def fake_update_env_file(env_path, updates, *, remove_keys=None):
+        captured_remove_keys.update(remove_keys or set())
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+    monkeypatch.setattr(server, "_get_omicsclaw_env_path", lambda: Path("/tmp/.env"))
+    monkeypatch.setattr(server, "_update_env_file", fake_update_env_file)
+
+    await server.switch_provider(
+        server.ProviderSwitchRequest(
+            provider="openai",
+            api_key="sk-test",
+            model="gpt-5.5",
+        )
+    )
+
+    assert "LLM_BASE_URL" in captured_remove_keys
+    assert "OMICSCLAW_BASE_URL" in captured_remove_keys
+
+
+def test_apply_chat_provider_switch_clears_legacy_base_url_alias(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    captured_remove_keys: set[str] = set()
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "custom"
+        OMICSCLAW_MODEL = "custom-model"
+
+        def init(self, **kwargs):
+            self.LLM_PROVIDER_NAME = kwargs.get("provider") or self.LLM_PROVIDER_NAME
+            self.OMICSCLAW_MODEL = kwargs.get("model") or self.OMICSCLAW_MODEL
+
+    def fake_update_env_file(env_path, updates, *, remove_keys=None):
+        captured_remove_keys.update(remove_keys or set())
+
+    monkeypatch.setattr(server, "_get_omicsclaw_env_path", lambda: Path("/tmp/.env"))
+    monkeypatch.setattr(server, "_update_env_file", fake_update_env_file)
+
+    server._apply_chat_provider_switch(FakeCore(), "openai", "gpt-5.5")
+
+    assert "LLM_BASE_URL" in captured_remove_keys
+    assert "OMICSCLAW_BASE_URL" in captured_remove_keys
+
+
+@pytest.mark.asyncio
+async def test_switch_provider_rejects_incomplete_custom_endpoint(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from fastapi import HTTPException
+
+    from omicsclaw.app import server
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "deepseek"
+        OMICSCLAW_MODEL = "deepseek-v4-flash"
+
+        def init(self, **kwargs):
+            raise AssertionError("incomplete custom provider should fail before core.init")
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server.switch_provider(
+            server.ProviderSwitchRequest(
+                provider="custom",
+                api_key="sk-test",
+                base_url="https://api.example.com/v1",
+                model="",
+            )
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "model" in str(excinfo.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_list_providers_reflects_active_custom_endpoint(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = "custom"
+        OMICSCLAW_MODEL = "qwen-plus"
+
+    monkeypatch.setattr(server, "_core", FakeCore, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
+
+    payload = await server.list_providers()
+    custom = next(item for item in payload["providers"] if item["name"] == "custom")
+
+    assert custom["active"] is True
+    assert custom["configured"] is True
+    assert custom["base_url"] == "https://api.example.com/v1"
+    assert custom["default_model"] == "qwen-plus"
+    assert payload["current_model"] == "qwen-plus"
+
+
+@pytest.mark.asyncio
+async def test_provider_test_closes_async_openai_client(monkeypatch):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    clients: list[object] = []
+    fail_request = False
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.closed = False
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._create)
+            )
+            clients.append(self)
+
+        async def _create(self, **kwargs):
+            if fail_request:
+                raise RuntimeError("provider unreachable")
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="OK"),
+                    )
+                ]
+            )
+
+        async def close(self):
+            self.closed = True
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = ""
+        OMICSCLAW_MODEL = ""
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+    monkeypatch.setattr(server, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="qwen-plus",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is True
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+    fail_request = True
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="qwen-plus",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is False
+    assert "provider unreachable" in result["message"]
+    assert len(clients) == 2
+    assert clients[1].closed is True
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_omits_adaptive_thinking_for_siliconflow(monkeypatch):
     """SiliconFlow gateway rejects non-standard thinking types — adaptive must omit."""
     pytest.importorskip("fastapi")

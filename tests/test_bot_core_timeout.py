@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import builtins
+import sys
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from openai import OpenAIError
@@ -74,6 +78,104 @@ def test_init_passes_timeout_to_async_openai(monkeypatch):
     assert isinstance(captured["timeout"], httpx.Timeout)
     assert captured["timeout"].connect == 5.0
     assert captured["timeout"].read == 30.0
+
+
+def test_init_uses_generic_custom_env_without_explicit_args(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setattr(core, "AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "false")
+    monkeypatch.setenv("LLM_PROVIDER", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://custom.example.com/v1")
+    monkeypatch.setenv("OMICSCLAW_MODEL", "custom-env-model")
+    monkeypatch.setenv("LLM_API_KEY", "generic-key")
+
+    core.init()
+
+    assert core.LLM_PROVIDER_NAME == "custom"
+    assert core.OMICSCLAW_MODEL == "custom-env-model"
+    assert captured["api_key"] == "generic-key"
+    assert captured["base_url"] == "https://custom.example.com/v1"
+
+
+def test_init_disables_memory_when_graph_dependencies_missing(monkeypatch):
+    captured: dict[str, object] = {}
+    original_import = builtins.__import__
+
+    memory_module = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "omicsclaw.memory.database", memory_module)
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    def _guarded_import(name, *args, **kwargs):
+        if name == "sqlalchemy" or name.startswith("sqlalchemy."):
+            raise ModuleNotFoundError("No module named 'sqlalchemy'")
+        return original_import(name, *args, **kwargs)
+
+    _clear_llm_env(monkeypatch)
+    for name in list(sys.modules):
+        if name == "omicsclaw.memory" or name.startswith("omicsclaw.memory."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(core, "AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr(core, "memory_store", object())
+    monkeypatch.setattr(core, "session_manager", object())
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "true")
+
+    core.init(
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        model="test-model",
+        provider="custom",
+    )
+
+    assert captured["api_key"] == "test-key"
+    assert core.memory_store is None
+    assert core.session_manager is None
+    assert "omicsclaw.memory.database" not in sys.modules
+
+
+def test_format_llm_api_error_mentions_custom_endpoint_base_url(monkeypatch):
+    from omicsclaw.core import provider_runtime
+
+    provider_runtime.clear_active_provider_runtime()
+    monkeypatch.setattr(core, "LLM_PROVIDER_NAME", "custom")
+    monkeypatch.setattr(core, "OMICSCLAW_MODEL", "gpt-5.4")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.biom.autos")
+
+    message = core._format_llm_api_error_message(Exception("Connection error."))
+
+    assert "https://api.biom.autos" in message
+    assert "/v1" in message
+    assert "Connection error" in message
+
+
+def test_format_llm_api_error_prefers_active_runtime_base_url(monkeypatch):
+    from omicsclaw.core import provider_runtime
+
+    monkeypatch.setattr(core, "LLM_PROVIDER_NAME", "custom")
+    monkeypatch.setenv("LLM_BASE_URL", "https://stale.example.com/v1")
+    provider_runtime.set_active_provider_runtime(
+        provider="custom",
+        base_url="https://active.example.com/v1",
+        model="custom-model",
+        api_key="runtime-key",
+    )
+
+    try:
+        message = core._format_llm_api_error_message(Exception("Connection error."))
+    finally:
+        provider_runtime.clear_active_provider_runtime()
+
+    assert "https://active.example.com/v1" in message
+    assert "https://stale.example.com/v1" not in message
 
 
 def test_init_allows_missing_credentials_when_requested(monkeypatch):
