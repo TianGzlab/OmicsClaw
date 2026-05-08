@@ -5,6 +5,7 @@ Centralises skill definition, discovery, and loading across all omics domains.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -144,8 +145,13 @@ class OmicsRegistry:
         *,
         skill_dir_name: str,
     ) -> None:
-        """Register a primary skill entry plus all supported lookup aliases."""
-        self.skills[canonical_alias] = info
+        """Register a primary skill entry plus all supported lookup aliases.
+
+        Each alias key gets its own deep-copied snapshot of ``info`` so that a
+        future caller mutating one alias view (e.g. ``info["allowed_extra_flags"]
+        .add(...)``) does not silently corrupt the canonical or sibling views.
+        """
+        self.skills[canonical_alias] = copy.deepcopy(info)
 
         lookup_keys: list[str] = list(info.get("legacy_aliases", []))
         if skill_dir_name == canonical_alias or skill_dir_name not in _HARDCODED_SKILLS:
@@ -155,7 +161,7 @@ class OmicsRegistry:
             if key == canonical_alias:
                 continue
             if key not in self.skills:
-                self.skills[key] = info
+                self.skills[key] = copy.deepcopy(info)
 
     def load_all(self, skills_dir: Path | None = None) -> None:
         """Dynamically load and merge skills from the filesystem.
@@ -284,17 +290,17 @@ class OmicsRegistry:
                     and hardcoded_alias != canonical_alias
                     and hardcoded_alias not in self.skills
                 ):
-                    self.skills[hardcoded_alias] = md_info
+                    self.skills[hardcoded_alias] = copy.deepcopy(md_info)
 
 
         # Fallback: register any hardcoded skills not discovered on filesystem
         for alias, info in _HARDCODED_SKILLS.items():
             if alias not in self.skills:
-                self.skills[alias] = info
+                self.skills[alias] = copy.deepcopy(info)
                 # Also register legacy aliases from hardcoded
                 for la in info.get("legacy_aliases", []):
                     if la not in self.skills:
-                        self.skills[la] = info
+                        self.skills[la] = copy.deepcopy(info)
 
         self._refresh_domain_skill_counts()
         self._loaded = True

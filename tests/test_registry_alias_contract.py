@@ -84,6 +84,29 @@ _LOCKED_LEGACY_ALIASES: tuple[tuple[str, str], ...] = (
 )
 
 
+def test_alias_views_do_not_share_mutable_dict_with_canonical():
+    """Mutating a skill info dict reached through one alias must not propagate
+    to the same skill viewed through its canonical or legacy alias.
+
+    Pre-fix the registry stored the same dict object under every alias key,
+    so a future caller editing one view would silently corrupt every other.
+    """
+    registry = OmicsRegistry()
+    registry.load_all()
+
+    canonical_view = registry.skills["spatial-preprocess"]
+    legacy_view = registry.skills["preprocess"]
+
+    # Top-level replacement.
+    canonical_view["description"] = "MUTATED"
+    assert legacy_view.get("description") != "MUTATED"
+
+    # In-place mutation of a nested mutable container (set).
+    canonical_flags = canonical_view.setdefault("allowed_extra_flags", set())
+    canonical_flags.add("--injected-by-test")
+    assert "--injected-by-test" not in (legacy_view.get("allowed_extra_flags") or set())
+
+
 def test_locked_legacy_aliases_resolve_to_canonical_names():
     """Snapshot test: removing any of these aliases breaks existing user invocations.
 
