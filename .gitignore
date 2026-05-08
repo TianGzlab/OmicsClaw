@@ -42,6 +42,10 @@ sessions/
 superpowers/
 docs/superpowers/
 
+# Local framework optimization notes
+docs/engineering/2026-05-07-*.md
+docs/engineering/domain-input-contracts.md
+
 # User data (large, not committed)
 data/*
 !data/.gitkeep
@@ -137,12 +141,8 @@ nature_new_insight2/
 # Knowledge base and workspace (local only)
 workspace/
 
-# Graphify cache and large generated graph data. Keep human-readable reports
-# trackable, but leave local AST caches, absolute-path manifests, and heavy
-# visualization/data files out of review.
-graphify-out/**
-!graphify-out/
-!graphify-out/GRAPH_REPORT.md
+# Graphify knowledge graph (local development artifact)
+graphify-out/
 
 # Local references / external tools (user-downloaded, large)
 resources/

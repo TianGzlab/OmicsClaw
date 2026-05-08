@@ -164,32 +164,20 @@ python scripts/generate_catalog.py
 python omicsclaw.py doctor --workspace .
 ```
 
-Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md). `oc doctor` reports environment readiness plus registry/catalog and graphify map consistency, which helps catch architecture drift before refactors.
+Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md). `oc doctor` reports environment readiness plus registry/catalog consistency and local graphify artifact health when present.
 
-Framework optimization work is tracked by [docs/engineering/2026-05-07-framework-optimization-spec.md](docs/engineering/2026-05-07-framework-optimization-spec.md) and [docs/superpowers/plans/2026-05-07-framework-optimization-roadmap-plan.md](docs/superpowers/plans/2026-05-07-framework-optimization-roadmap-plan.md). Keep public facts synchronized with the runtime registry and protect them with `tests/test_documentation_facts.py`.
+Framework optimization guardrails are enforced by targeted contract tests:
+`tests/test_documentation_facts.py`, `tests/test_skill_runner_contract.py`,
+`tests/test_skill_metadata_contract.py`, `tests/test_skill_help_contract.py`,
+`tests/test_registry_alias_contract.py`, `tests/test_output_ownership_contract.py`,
+and `tests/test_bot_runner_contract.py`.
 
-Domain input assumptions are captured in [docs/engineering/domain-input-contracts.md](docs/engineering/domain-input-contracts.md) and guarded by `tests/test_domain_input_contracts.py`.
-
-All primary skill scripts must expose a lightweight direct `--help` path. The
-contract is documented in [docs/engineering/2026-05-07-skill-help-contract.md](docs/engineering/2026-05-07-skill-help-contract.md)
-and guarded by `tests/test_skill_help_contract.py`.
-
-Skill alias ownership is documented in [docs/engineering/2026-05-07-alias-ownership-contract.md](docs/engineering/2026-05-07-alias-ownership-contract.md)
-and guarded by `tests/test_registry_alias_contract.py`: discovered skills keep
-canonical names and legacy aliases in `SKILL.md`, while hardcoded registry
-entries remain compatibility fallbacks.
-
-Output ownership is documented in [docs/engineering/2026-05-07-output-ownership-contract.md](docs/engineering/2026-05-07-output-ownership-contract.md)
-and guarded by `tests/test_output_ownership_contract.py`: skill scripts write
+All primary skill scripts must expose a lightweight direct `--help` path.
+Discovered skills keep canonical names and legacy aliases in `SKILL.md`, while
+hardcoded registry entries remain compatibility fallbacks. Skill scripts write
 native artifacts, while the shared runner writes top-level `README.md` and
-`reproducibility/analysis_notebook.ipynb`.
-
-Bot skill execution now uses the same shared runner contract as CLI,
-interactive, agent tools, app, and remote jobs. The bot-specific contract is
-documented in [docs/engineering/2026-05-07-bot-runner-contract.md](docs/engineering/2026-05-07-bot-runner-contract.md)
-and guarded by `tests/test_bot_runner_contract.py`.
-
-The repository architecture graph is summarized in [graphify-out/GRAPH_REPORT.md](graphify-out/GRAPH_REPORT.md). Large graphify caches and slice visualizations are generated locally and intentionally ignored.
+`reproducibility/analysis_notebook.ipynb`. Bot skill execution uses the same
+shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
 
 Desktop provider changes should preserve the OmicsClaw-App backend contract: `/providers` reports the active provider/model/endpoint, `/providers/test` performs a short live LLM connectivity probe, and `/chat/stream` must reinitialize the provider runtime when a request changes model even if the provider id is unchanged.
 
