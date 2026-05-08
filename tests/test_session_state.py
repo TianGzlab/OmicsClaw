@@ -2,7 +2,7 @@
 ``state: dict[str, Any]`` pattern in ``omicsclaw/interactive/interactive.py``.
 
 These tests exercise the dataclass shape, defaults, invariants, and the
-to_dict/from_dict adapter used during the staged migration.
+documented transition methods (``stop``, ``set_tips``, ``set_pipeline_workspace``).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def test_session_state_optional_fields_have_documented_defaults():
     assert s.messages == []
     assert s.running is True
     assert s.tips_enabled is True
-    assert s.tips_level == "verbose"
+    assert s.tips_level == "basic"
 
 
 def test_session_state_default_collections_are_independent_per_instance():
@@ -61,14 +61,16 @@ def test_set_tips_enabled_toggles_the_flag():
 
 
 def test_set_tips_level_validates_input():
-    """Only ``verbose`` / ``short`` / ``off`` are valid levels (matching the
-    /tips slash command's accepted values). Other inputs must raise so a
-    typo never silently leaves the session in a malformed state."""
+    """Only ``basic`` / ``expert`` are valid levels (matching the
+    /tips level slash-command's accepted values). Other inputs must raise so
+    a typo never silently leaves the session in a malformed state."""
     s = SessionState(session_id="x", workspace_dir="/w", ui_backend="cli")
-    s.set_tips(level="short")
-    assert s.tips_level == "short"
-    s.set_tips(level="off")
-    assert s.tips_level == "off"
+    s.set_tips(level="expert")
+    assert s.tips_level == "expert"
+    s.set_tips(level="basic")
+    assert s.tips_level == "basic"
+    with pytest.raises(ValueError):
+        s.set_tips(level="verbose")  # was the wrong default before fix
     with pytest.raises(ValueError):
         s.set_tips(level="not-a-level")
 
@@ -78,14 +80,14 @@ def test_set_tips_with_none_arguments_is_idempotent():
     that forward optional CLI args don't accidentally clear the level."""
     s = SessionState(
         session_id="x", workspace_dir="/w", ui_backend="cli",
-        tips_enabled=False, tips_level="off",
+        tips_enabled=False, tips_level="expert",
     )
     s.set_tips()
     assert s.tips_enabled is False
-    assert s.tips_level == "off"
+    assert s.tips_level == "expert"
     s.set_tips(enabled=None, level=None)
     assert s.tips_enabled is False
-    assert s.tips_level == "off"
+    assert s.tips_level == "expert"
 
 
 def test_set_pipeline_workspace_normalizes_none_to_empty_string():

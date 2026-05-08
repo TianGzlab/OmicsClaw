@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-_VALID_TIPS_LEVELS: frozenset[str] = frozenset({"verbose", "short", "off"})
+_VALID_TIPS_LEVELS: frozenset[str] = frozenset({"basic", "expert"})
 
 
 @dataclass
@@ -41,7 +41,8 @@ class SessionState:
       - ``messages`` (``[]``) — LLM message log, append-mostly.
       - ``running`` (``True``) — chat-loop sentinel; flipped by ``stop()``.
       - ``tips_enabled`` (``True``) — `/tips on|off` flag.
-      - ``tips_level`` (``"verbose"``) — one of ``verbose|short|off``.
+      - ``tips_level`` (``"basic"``) — one of ``basic|expert``, matching the
+        ``/tips level`` slash-command's accepted values.
     """
 
     session_id: str
@@ -52,7 +53,7 @@ class SessionState:
     messages: list[dict[str, Any]] = field(default_factory=list)
     running: bool = True
     tips_enabled: bool = True
-    tips_level: str = "verbose"
+    tips_level: str = "basic"
 
     # ---- transitions -------------------------------------------------------
 
@@ -69,7 +70,7 @@ class SessionState:
         """Update tips flag/level. ``None`` for either argument is a no-op so
         callers that forward optional CLI flags don't accidentally clear state.
 
-        Raises ``ValueError`` if ``level`` is not in ``verbose|short|off``.
+        Raises ``ValueError`` if ``level`` is not one of ``basic|expert``.
         """
         if enabled is not None:
             self.tips_enabled = bool(enabled)

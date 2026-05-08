@@ -572,11 +572,10 @@ def _active_scoped_memory_scope(state: SessionState) -> str:
 
 
 def _set_active_pipeline_workspace(state: SessionState, workspace: str | None) -> None:
-    value = str(workspace or "").strip()
-    state.pipeline_workspace = value
+    state.set_pipeline_workspace(str(workspace or "").strip() or None)
     state.session_metadata = build_session_metadata(
         state.session_metadata,
-        pipeline_workspace=value,
+        pipeline_workspace=state.pipeline_workspace,
     )
 
 
@@ -1846,7 +1845,7 @@ async def _async_interactive_loop(
 
             if command is not None and command.name == "/exit":
                 console.print("[dim]Goodbye! See you next time.[/dim]")
-                state.running = False
+                state.stop()
                 break
 
             elif command is not None and command.name == "/help":
@@ -2044,7 +2043,7 @@ async def _async_interactive_loop(
             elif command is not None and command.name == "/tips":
                 arg = command.arg.lower()
                 if arg in ("on", ""):
-                    state.tips_enabled = True
+                    state.set_tips(enabled=True)
                     console.print("[green]💡 Inline knowledge tips: ON[/green]")
                     try:
                         from omicsclaw.knowledge.telemetry import get_telemetry
@@ -2052,7 +2051,7 @@ async def _async_interactive_loop(
                     except Exception:
                         pass
                 elif arg == "off":
-                    state.tips_enabled = False
+                    state.set_tips(enabled=False)
                     console.print("[dim]💡 Inline knowledge tips: OFF[/dim]")
                     try:
                         from omicsclaw.knowledge.telemetry import get_telemetry
@@ -2061,10 +2060,10 @@ async def _async_interactive_loop(
                         pass
                 elif arg.startswith("level"):
                     level = arg[len("level"):].strip()
-                    if level in ("basic", "expert"):
-                        state.tips_level = level
+                    try:
+                        state.set_tips(level=level)
                         console.print(f"[cyan]💡 Tips level set to: {level}[/cyan]")
-                    else:
+                    except ValueError:
                         console.print("[yellow]Usage: /tips level [basic|expert][/yellow]")
                 else:
                     status = "ON" if state.tips_enabled else "OFF"
