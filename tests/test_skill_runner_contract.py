@@ -198,3 +198,77 @@ def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypa
     assert elapsed < 10, f"cancel did not interrupt; ran for {elapsed:.1f}s"
     assert result["success"] is False
     assert result["exit_code"] != 0
+
+
+def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_success(
+    tmp_path, monkeypatch
+):
+    """A skill that wrote ``result.json`` early then was SIGKILL'd via
+    ``cancel_event`` must NOT be silently reclassified as success.
+
+    Pre-fix, the runner mapped any ``returncode == -9`` to ``0`` whenever
+    ``result.json`` existed (originally a workaround for the orphan reaper's
+    SIGKILL race). After we wired ``cancel_event`` through SIGTERM/SIGKILL,
+    ``-9`` also became the *normal* outcome of cancellation — so cancelled
+    runs that happened to leave a partial ``result.json`` were silently
+    reported as ``success=True``.
+    """
+    skill_runner = importlib.import_module("omicsclaw.core.skill_runner")
+
+    fake_script = tmp_path / "fake_partial_then_sleep.py"
+    fake_script.write_text(textwrap.dedent("""\
+        import argparse, json, signal, time
+        from pathlib import Path
+        # Ignore SIGTERM so the runner has to escalate to SIGKILL (-9), which is
+        # exactly the path that used to trip the "-9 + result.json → success"
+        # heuristic.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--demo", action="store_true")
+        ap.add_argument("--output", required=True)
+        args = ap.parse_args()
+        out = Path(args.output)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "result.json").write_text(
+            json.dumps({"summary": {"method": "fake", "partial": True}}),
+            encoding="utf-8",
+        )
+        print("partial-result-written", flush=True)
+        for _ in range(60):
+            time.sleep(0.5)
+    """), encoding="utf-8")
+
+    monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(skill_runner, "SKILLS", {
+        "fake-partial": {
+            "script": fake_script,
+            "domain": "demo",
+            "demo_args": ["--demo"],
+            "allowed_extra_flags": set(),
+            "description": "Partial-then-sleep test skill",
+        }
+    })
+    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
+
+    cancel_event = threading.Event()
+
+    def _trigger_cancel_after_partial_write() -> None:
+        # Give the child time to write result.json before cancelling.
+        time.sleep(1.0)
+        cancel_event.set()
+
+    threading.Thread(target=_trigger_cancel_after_partial_write, daemon=True).start()
+
+    result = skill_runner.run_skill(
+        "fake-partial",
+        demo=True,
+        output_dir=str(tmp_path / "partial_out"),
+        cancel_event=cancel_event,
+    )
+
+    # The partial result.json was on disk when SIGKILL fired, which used to
+    # trip the -9 → 0 heuristic. Cancellation must override the heuristic.
+    assert result["success"] is False, (
+        "cancelled run with partial result.json must NOT be reported as success"
+    )
+    assert result["exit_code"] != 0

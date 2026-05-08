@@ -26,6 +26,7 @@ from omicsclaw.common.report import (
     write_output_readme,
 )
 from omicsclaw.core.registry import registry
+from omicsclaw.core.skill_result import build_skill_run_result
 
 
 OMICSCLAW_DIR = Path(__file__).resolve().parents[2]
@@ -455,7 +456,19 @@ def run_skill(
         stdout = "".join(stdout_lines)
         stderr = "".join(stderr_lines)
         return_code = popen.returncode or 0
-        if return_code == -9 and (Path(out_dir) / "result.json").exists():
+        # The ``-9 → 0`` heuristic was a workaround for the orphan reaper's
+        # SIGKILL race when the main process had already produced its
+        # ``result.json``. Once ``cancel_event`` was wired to escalate to
+        # SIGKILL, ``-9`` also became the *normal* outcome of cancellation.
+        # Skip the heuristic when the run was actually cancelled, otherwise a
+        # cancelled run that happened to leave a partial ``result.json``
+        # would be silently reported as success.
+        was_cancelled = cancel_event is not None and cancel_event.is_set()
+        if (
+            not was_cancelled
+            and return_code == -9
+            and (Path(out_dir) / "result.json").exists()
+        ):
             return_code = 0
         proc = subprocess.CompletedProcess(cmd, return_code, stdout, stderr)
     except Exception as exc:
@@ -490,19 +503,19 @@ def run_skill(
         [path.name for path in final_out_dir.rglob("*") if path.is_file()]
     ) if final_out_dir.exists() else []
 
-    result = {
-        "skill": skill_name,
-        "success": proc.returncode == 0,
-        "exit_code": proc.returncode,
-        "output_dir": str(final_out_dir),
-        "files": output_files,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "duration_seconds": round(duration, 2),
-        "method": actual_method,
-        "readme_path": readme_path,
-        "notebook_path": notebook_path,
-    }
+    result = build_skill_run_result(
+        skill=skill_name,
+        success=proc.returncode == 0,
+        exit_code=proc.returncode,
+        output_dir=final_out_dir,
+        files=output_files,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        duration_seconds=duration,
+        method=actual_method,
+        readme_path=readme_path,
+        notebook_path=notebook_path,
+    ).to_legacy_dict()
 
     if session_path and result["success"]:
         _store_result_in_session(session_path, skill_name, final_out_dir)
@@ -574,18 +587,18 @@ def _run_spatial_pipeline(
     )
 
     succeeded = sum(1 for result in all_results.values() if result["success"])
-    return {
-        "skill": "spatial-pipeline",
-        "success": succeeded == len(SPATIAL_PIPELINE),
-        "exit_code": 0 if succeeded == len(SPATIAL_PIPELINE) else 1,
-        "output_dir": str(out_dir),
-        "files": [path.name for path in out_dir.rglob("*") if path.is_file()],
-        "stdout": f"Pipeline: {succeeded}/{len(SPATIAL_PIPELINE)} skills succeeded.",
-        "stderr": "",
-        "duration_seconds": sum(result["duration"] for result in all_results.values()),
-        "readme_path": str(pipeline_readme),
-        "notebook_path": "",
-    }
+    return build_skill_run_result(
+        skill="spatial-pipeline",
+        success=succeeded == len(SPATIAL_PIPELINE),
+        exit_code=0 if succeeded == len(SPATIAL_PIPELINE) else 1,
+        output_dir=out_dir,
+        files=[path.name for path in out_dir.rglob("*") if path.is_file()],
+        stdout=f"Pipeline: {succeeded}/{len(SPATIAL_PIPELINE)} skills succeeded.",
+        stderr="",
+        duration_seconds=sum(result["duration"] for result in all_results.values()),
+        readme_path=pipeline_readme,
+        notebook_path="",
+    ).to_legacy_dict()
 
 
 def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) -> None:
@@ -611,16 +624,11 @@ def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) 
 
 
 def _err(skill: str, msg: str, duration: float = 0) -> dict:
-    return {
-        "skill": skill,
-        "success": False,
-        "exit_code": -1,
-        "output_dir": None,
-        "files": [],
-        "stdout": "",
-        "stderr": msg,
-        "duration_seconds": round(duration, 2),
-        "method": None,
-        "readme_path": "",
-        "notebook_path": "",
-    }
+    return build_skill_run_result(
+        skill=skill,
+        success=False,
+        exit_code=-1,
+        output_dir=None,
+        stderr=msg,
+        duration_seconds=duration,
+    ).to_legacy_dict()
