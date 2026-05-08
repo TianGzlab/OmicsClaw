@@ -693,8 +693,9 @@ they turn green automatically when fixed:
 
 - **SKILL.md frontmatter format is uneven.** Some skills (mostly
   spatial) have full `param_hints` with `tips` and `requires`; others
-  are minimal. Low-effort cleanup: extend
-  `scripts/migrate_skill_metadata.py` to backfill the skeleton.
+  are minimal. Low-effort cleanup: backfill `param_hints` skeletons in
+  the lean SKILL.md files directly — SKILL.md is the single source of
+  truth for skill metadata.
 - **`param_hints.defaults` duplicates argparse defaults.** Changing a
   default in the entrypoint without updating `SKILL.md` desyncs the
   autoagent search space. Planned: introspection-based diff in a new
