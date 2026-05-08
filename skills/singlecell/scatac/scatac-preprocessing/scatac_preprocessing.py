@@ -662,7 +662,6 @@ def write_report(
             "- The final AnnData stores the retained peak space used for TF-IDF + LSI.",
             "",
             "## Output Files\n",
-            "- `README.md` — user-first output navigation file.",
             "- `processed.h5ad` — downstream-ready AnnData object in the retained peak space.",
             "- `figures/` — standard OmicsClaw scATAC preprocessing gallery.",
             "- `figure_data/` — CSV exports for optional custom visualization layers.",
@@ -672,7 +671,6 @@ def write_report(
             "- `tables/lsi_variance_ratio.csv` — LSI variance explained.",
             "- `tables/qc_metrics_per_cell.csv` — retained per-cell QC metrics.",
             "- `reproducibility/commands.sh` — reproducible CLI entrypoint.",
-            "- `reproducibility/analysis_notebook.ipynb` — code-first rerun notebook.",
         ]
     )
 

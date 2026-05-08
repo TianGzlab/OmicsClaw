@@ -799,7 +799,6 @@ def write_report(
         [
             "",
             "## Output Files\n",
-            "- `README.md` — user-first output navigation file.",
             "- `processed.h5ad` — downstream-ready AnnData object.",
             "- `figures/` — standard OmicsClaw base preprocessing gallery.",
             "- `figure_data/` — CSV exports for optional R or custom visualization layers.",
@@ -809,7 +808,6 @@ def write_report(
             "- `tables/qc_metrics_per_cell.csv` — QC metrics retained after filtering.",
             "- `tables/pca_embedding.csv` — first PCs per cell for downstream clustering/integration.",
             "- `reproducibility/commands.sh` — reproducible CLI entrypoint.",
-            "- `reproducibility/analysis_notebook.ipynb` — code-first rerun notebook.",
         ]
     )
 
