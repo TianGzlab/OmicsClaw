@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -254,6 +255,7 @@ def run_skill(
     extra_args: list[str] | None = None,
     stdout_callback: Callable[[str], None] | None = None,
     stderr_callback: Callable[[str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     """Run a single skill via subprocess and return a stable result dict.
 
@@ -261,6 +263,11 @@ def run_skill(
     invokes them once per line as the skill emits output (newline stripped),
     so long-running skills produce visible logs in real time. Aggregated
     ``stdout`` / ``stderr`` strings are still returned in the result dict.
+
+    When ``cancel_event`` is supplied the runner watches it; if the event is
+    set while the skill is running the child process group receives SIGTERM,
+    waits a short grace period, then SIGKILL, ensuring cancelled jobs do not
+    leak children consuming CPU/GPU until natural completion.
     """
     skill_name = resolve_skill_alias(skill_name)
 
@@ -393,8 +400,32 @@ def run_skill(
             except (ProcessLookupError, PermissionError, OSError):
                 pass
 
+        def _cancel_watcher():
+            """Send SIGTERM (then SIGKILL after grace) when cancel_event is set."""
+            if cancel_event is None:
+                return
+            while popen.poll() is None:
+                if cancel_event.wait(timeout=0.2):
+                    try:
+                        os.killpg(os.getpgid(popen.pid), signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        return
+                    grace_deadline = time.time() + 5.0
+                    while popen.poll() is None and time.time() < grace_deadline:
+                        time.sleep(0.1)
+                    if popen.poll() is None:
+                        try:
+                            os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError, OSError):
+                            pass
+                    return
+
         reap_thread = threading.Thread(target=_reaper, daemon=True)
         reap_thread.start()
+        cancel_thread: threading.Thread | None = None
+        if cancel_event is not None:
+            cancel_thread = threading.Thread(target=_cancel_watcher, daemon=True)
+            cancel_thread.start()
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -418,6 +449,8 @@ def run_skill(
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
         reap_thread.join(timeout=5)
+        if cancel_thread is not None:
+            cancel_thread.join(timeout=5)
 
         stdout = "".join(stdout_lines)
         stderr = "".join(stderr_lines)

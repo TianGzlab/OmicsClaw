@@ -5,6 +5,8 @@ import inspect
 import json
 import sys
 import textwrap
+import threading
+import time
 from pathlib import Path
 
 
@@ -23,6 +25,7 @@ def test_skill_runner_module_exposes_run_skill_contract():
         "extra_args",
         "stdout_callback",
         "stderr_callback",
+        "cancel_event",
     ]
 
 
@@ -135,3 +138,63 @@ def test_run_skill_callback_exception_does_not_break_run(tmp_path, monkeypatch):
     )
     assert result["success"] is True
     assert "hello" in result["stdout"]
+
+
+def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypatch):
+    """Setting ``cancel_event`` while a skill is running must terminate the
+    child subprocess (and its process group) and return promptly.
+
+    Pre-fix the runner's ``popen.wait()`` would not wake up for asyncio
+    cancellation, so jobs cancelled by the FastAPI router would leak
+    children that kept consuming CPU/GPU until they finished naturally.
+    """
+    skill_runner = importlib.import_module("omicsclaw.core.skill_runner")
+
+    fake_script = tmp_path / "fake_long.py"
+    fake_script.write_text(textwrap.dedent("""\
+        import argparse, time
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--demo", action="store_true")
+        ap.add_argument("--output", required=True)
+        args = ap.parse_args()
+        for i in range(60):
+            print(f"working {i}", flush=True)
+            time.sleep(0.5)
+    """), encoding="utf-8")
+
+    monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(skill_runner, "SKILLS", {
+        "fake-long": {
+            "script": fake_script,
+            "domain": "demo",
+            "demo_args": ["--demo"],
+            "allowed_extra_flags": set(),
+            "description": "Long-running test skill",
+        }
+    })
+    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
+
+    cancel_event = threading.Event()
+
+    def _trigger_cancel_after_startup() -> None:
+        # Wait for the child to actually start producing output before cancelling
+        # so we exercise the real "kill while busy" path, not "kill before start".
+        time.sleep(1.0)
+        cancel_event.set()
+
+    threading.Thread(target=_trigger_cancel_after_startup, daemon=True).start()
+
+    started_at = time.time()
+    result = skill_runner.run_skill(
+        "fake-long",
+        demo=True,
+        output_dir=str(tmp_path / "long_out"),
+        cancel_event=cancel_event,
+    )
+    elapsed = time.time() - started_at
+
+    # Without cancellation the fake script would run for ~30s. Cancellation
+    # must interrupt within a few seconds (1s pre-cancel + grace + cleanup).
+    assert elapsed < 10, f"cancel did not interrupt; ran for {elapsed:.1f}s"
+    assert result["success"] is False
+    assert result["exit_code"] != 0
