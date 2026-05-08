@@ -81,7 +81,7 @@ metadata:
           reports log2FC relative to the reference."
         - "--min-samples-per-condition: keep this at >=2; Wilcoxon is a fallback,
           not a replacement for proper replicate-rich GLM analyses."
-    legacy_aliases: [condition, spatial-condition]
+    legacy_aliases: [condition, spatial-condition, spatial-condition-comparison]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

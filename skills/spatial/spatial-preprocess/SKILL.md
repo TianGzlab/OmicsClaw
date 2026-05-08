@@ -47,7 +47,7 @@ metadata:
           reports requested, computed, used, and suggested PCs separately."
         - "--leiden-resolution / --resolutions: public Leiden clustering resolution
           controls for the primary clustering and optional sweep."
-    legacy_aliases: [preprocess]
+    legacy_aliases: [preprocess, spatial-preprocessing]
     saves_h5ad: true
     requires_preprocessed: false
     requires:

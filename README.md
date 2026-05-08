@@ -173,9 +173,10 @@ Framework optimization guardrails are enforced by targeted contract tests:
 and `tests/test_bot_runner_contract.py`.
 
 All primary skill scripts must expose a lightweight direct `--help` path.
-Discovered skills keep canonical names and legacy aliases in `SKILL.md`, while
-hardcoded registry entries remain compatibility fallbacks. Skill scripts write
-native artifacts, while the shared runner writes top-level `README.md` and
+SKILL.md frontmatter (`metadata.omicsclaw`) is the single source of truth
+for skill metadata — canonical name, legacy aliases, allowed flags,
+saves_h5ad, and so on. Skill scripts write native artifacts, while the
+shared runner writes top-level `README.md` and
 `reproducibility/analysis_notebook.ipynb`. Bot skill execution uses the same
 shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
 Shared result construction and adapter coercion live in

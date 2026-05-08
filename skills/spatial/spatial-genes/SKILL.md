@@ -77,7 +77,7 @@ metadata:
           is estimated from coordinate spread."
         - "--flashs-n-rand-features: Wrapper-level sketch size controlling FlashS
           approximation fidelity vs runtime."
-    legacy_aliases: [genes]
+    legacy_aliases: [genes, spatial-svg-detection]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

@@ -90,7 +90,7 @@ metadata:
         - "--layer / --batch-key: Passed to `CellAssign.setup_anndata(..., layer=...,
           batch_key=...)`."
         - "--cellassign-max-epochs: Passed to `model.train(max_epochs=...)`."
-    legacy_aliases: [annotate]
+    legacy_aliases: [annotate, spatial-cell-annotation]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

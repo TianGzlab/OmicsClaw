@@ -54,7 +54,7 @@ metadata:
           parameter."
         - "--use-expression: current wrapper-level switch that uses PC1 of shared
           genes as image intensity instead of uniform weights."
-    legacy_aliases: [register]
+    legacy_aliases: [register, spatial-registration]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

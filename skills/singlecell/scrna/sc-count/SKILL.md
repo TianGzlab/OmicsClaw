@@ -30,6 +30,7 @@ metadata:
     - raw single-cell counting
     - generate count matrix
     allowed_extra_flags:
+    - "--backend"
     - "--chemistry"
     - "--method"
     - "--read2"

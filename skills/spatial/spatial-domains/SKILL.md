@@ -102,7 +102,7 @@ metadata:
         - "--auto-k: Enable automatic discovery of the most stable cluster count.
           If disabled, fixed-K mode defaults to 7 unless --n-domains is provided."
         - "--use-rep: Feature representation to use (defaults to X_pca or X)."
-    legacy_aliases: [domains]
+    legacy_aliases: [domains, spatial-domain-identification]
     saves_h5ad: true
     requires:
       bins:
