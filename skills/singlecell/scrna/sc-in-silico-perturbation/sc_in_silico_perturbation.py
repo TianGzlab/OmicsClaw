@@ -704,8 +704,6 @@ def main() -> int:
     # -- report.md --
     _write_report(output_dir, summary, params, input_path, diagnostics, preflight_warnings)
 
-    # -- README.md --
-
     logger.info("Done: %s", output_dir)
 
     # --- Next-step guidance ---
