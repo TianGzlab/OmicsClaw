@@ -14,7 +14,7 @@ metadata:
     - --n-drugs
     - --r-enhanced
     param_hints: {}
-    saves_h5ad: false
+    saves_h5ad: true
     requires_preprocessed: true
 ---
 

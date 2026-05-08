@@ -22,6 +22,10 @@ metadata:
     - "--celltypist-majority-voting"
     - "--no-celltypist-majority-voting"
     - "--r-enhanced"
+    - "--scsa-foldchange"
+    - "--scsa-pvalue"
+    - "--species"
+    - "--tissue"
     param_hints:
       manual:
         priority: "cluster_key -> manual_map/manual_map_file"

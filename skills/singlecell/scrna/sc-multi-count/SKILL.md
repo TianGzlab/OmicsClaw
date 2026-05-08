@@ -30,6 +30,7 @@ metadata:
     - cellranger aggr alternative
     allowed_extra_flags:
     - "--sample-id"
+    - "--sample-key"
     - "--r-enhanced"
     legacy_aliases: [scrna-multi-count]
     saves_h5ad: true
