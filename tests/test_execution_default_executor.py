@@ -228,3 +228,27 @@ def test_skill_runner_executor_sets_cancel_event_on_asyncio_cancel(monkeypatch, 
         "cancel_event was not set when the executor's asyncio task was cancelled — "
         "the underlying worker thread / subprocess would leak"
     )
+
+
+def test_skill_runner_executor_normalizes_failed_zero_exit(monkeypatch, tmp_path: Path) -> None:
+    import asyncio
+
+    from omicsclaw.execution.executors.default import SkillRunnerExecutor
+
+    def fake_run_skill(_skill, **_kwargs):
+        return {
+            "success": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "missing dependency",
+            "output_dir": str(tmp_path / "artifacts"),
+        }
+
+    monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
+
+    ctx = _make_ctx(tmp_path=tmp_path, skill="literature", inputs={"demo": True})
+    outcome = asyncio.run(SkillRunnerExecutor().run(ctx))
+
+    assert outcome.exit_code == 1
+    assert outcome.error == "missing dependency"
+    assert ctx.stdout_log.read_text(encoding="utf-8") == "missing dependency"

@@ -23,13 +23,13 @@ reuse the same argv shape.
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import threading
 from pathlib import Path
 from typing import Any
 
 from omicsclaw.autoagent.constants import param_to_cli_flag
+from omicsclaw.core.skill_result import coerce_skill_run_result, result_json_fallback
 
 from .base import JobContext, JobOutcome
 
@@ -123,19 +123,16 @@ class SkillRunnerExecutor:
             ctx.stdout_log.write_text(text, encoding="utf-8")
             return JobOutcome(exit_code=1, error=text, stdout_text=text)
 
-        stdout = str(result.get("stdout") or "")
-        stderr = str(result.get("stderr") or "")
-        stdout_text = stdout + (stderr if not stdout or not stderr else "\n" + stderr)
+        run_result = coerce_skill_run_result(result)
+        stdout_text = run_result.combined_output
         if not stdout_text:
-            stdout_text = json.dumps(result, ensure_ascii=False, default=str)
+            stdout_text = result_json_fallback(run_result)
 
         ctx.stdout_log.parent.mkdir(parents=True, exist_ok=True)
         ctx.stdout_log.write_text(stdout_text, encoding="utf-8")
 
-        exit_code = int(result.get("exit_code") or 0)
-        if not result.get("success", False) and exit_code == 0:
-            exit_code = 1
-        error = None if exit_code == 0 else stderr or stdout_text or "skill_runner_failed"
+        exit_code = run_result.adapter_exit_code
+        error = None if exit_code == 0 else run_result.stderr or stdout_text or "skill_runner_failed"
         return JobOutcome(exit_code=exit_code, error=error, stdout_text=stdout_text)
 
 

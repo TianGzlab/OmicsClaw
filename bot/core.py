@@ -2071,6 +2071,7 @@ async def _run_skill_via_shared_runner(
     out_dir: Path,
 ) -> dict:
     from omicsclaw.core import skill_runner
+    from omicsclaw.core.skill_result import coerce_skill_run_result
 
     runner_skill = "spatial-pipeline" if skill_key == "pipeline" else skill_key
     skill_info = _lookup_skill_info(runner_skill)
@@ -2109,18 +2110,17 @@ async def _run_skill_via_shared_runner(
         )
 
     result = await asyncio.to_thread(_run)
-    stdout_str = str(result.get("stdout") or "")
-    stderr_str = str(result.get("stderr") or "")
+    run_result = coerce_skill_run_result(result)
+    stdout_str = run_result.stdout
+    stderr_str = run_result.stderr
     guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))
     clean_stderr = strip_user_guidance_lines(stderr_str)
     clean_stdout = strip_user_guidance_lines(stdout_str)
     error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
-    returncode = int(result.get("exit_code") or 0)
-    if not result.get("success", False) and returncode == 0:
-        returncode = 1
-    output_dir = Path(result.get("output_dir") or out_dir)
+    returncode = run_result.adapter_exit_code
+    output_dir = run_result.output_path or out_dir
     return {
-        "success": bool(result.get("success", False)),
+        "success": run_result.success,
         "returncode": returncode,
         "out_dir": output_dir,
         "output_dir": str(output_dir),
