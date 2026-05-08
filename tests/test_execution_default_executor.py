@@ -131,6 +131,7 @@ def test_jobs_router_default_executor_is_skill_runner_executor() -> None:
 
 def test_skill_runner_executor_maps_job_context_to_run_skill(monkeypatch, tmp_path: Path) -> None:
     import asyncio
+    import threading
 
     from omicsclaw.execution.executors import JobOutcome
     from omicsclaw.execution.executors.default import SkillRunnerExecutor
@@ -163,6 +164,10 @@ def test_skill_runner_executor_maps_job_context_to_run_skill(monkeypatch, tmp_pa
     assert outcome.error is None
     assert "runner-ok" in outcome.stdout_text
     assert ctx.stdout_log.read_text(encoding="utf-8") == "runner-ok"
+
+    cancel_event = captured.pop("cancel_event")
+    assert isinstance(cancel_event, threading.Event)
+    assert not cancel_event.is_set()
     assert captured == {
         "skill": "literature",
         "input_path": None,
@@ -172,3 +177,54 @@ def test_skill_runner_executor_maps_job_context_to_run_skill(monkeypatch, tmp_pa
         "session_path": None,
         "extra_args": ["--method", "metadata-extraction"],
     }
+
+
+def test_skill_runner_executor_sets_cancel_event_on_asyncio_cancel(monkeypatch, tmp_path: Path) -> None:
+    """If the asyncio task running the executor is cancelled, the executor must
+    forward that cancellation to the runner by setting the ``cancel_event`` it
+    passed in. Otherwise the ``run_skill`` worker thread (and its subprocess)
+    would keep running after the user disconnected."""
+    import asyncio
+    import threading
+
+    from omicsclaw.execution.executors.default import SkillRunnerExecutor
+
+    captured_events: list[threading.Event] = []
+
+    def fake_run_skill(skill, **kwargs):
+        cancel_event = kwargs["cancel_event"]
+        captured_events.append(cancel_event)
+        # Block until the executor signals cancellation, with a safety timeout.
+        signaled = cancel_event.wait(timeout=10.0)
+        return {
+            "success": not signaled,
+            "exit_code": 137 if signaled else 0,
+            "stdout": "",
+            "stderr": "cancelled" if signaled else "",
+            "output_dir": str(tmp_path / "artifacts"),
+        }
+
+    monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
+
+    ctx = _make_ctx(tmp_path=tmp_path, skill="literature", inputs={"demo": True})
+
+    async def driver() -> None:
+        task = asyncio.create_task(SkillRunnerExecutor().run(ctx))
+        # Give the worker thread time to enter run_skill and capture the event.
+        for _ in range(50):
+            if captured_events:
+                break
+            await asyncio.sleep(0.02)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(driver())
+
+    assert captured_events, "fake_run_skill was never invoked"
+    assert captured_events[0].is_set(), (
+        "cancel_event was not set when the executor's asyncio task was cancelled — "
+        "the underlying worker thread / subprocess would leak"
+    )

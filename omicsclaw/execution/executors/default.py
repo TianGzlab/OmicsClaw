@@ -22,14 +22,14 @@ reuse the same argv shape.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 from omicsclaw.autoagent.constants import param_to_cli_flag
-
-import asyncio
 
 from .base import JobContext, JobOutcome
 
@@ -96,6 +96,7 @@ class SkillRunnerExecutor:
         input_paths = ctx.inputs.get("inputs")
         demo = bool(ctx.inputs.get("demo"))
         extra_args = _params_to_extra_args(ctx.params)
+        cancel_event = threading.Event()
 
         def _run() -> dict[str, Any]:
             return skill_runner.run_skill(
@@ -106,10 +107,16 @@ class SkillRunnerExecutor:
                 demo=demo,
                 session_path=str(ctx.inputs["session_path"]) if ctx.inputs.get("session_path") else None,
                 extra_args=extra_args or None,
+                cancel_event=cancel_event,
             )
 
         try:
             result = await asyncio.to_thread(_run)
+        except asyncio.CancelledError:
+            # Forward asyncio cancellation to the worker thread / subprocess so
+            # the SIGTERM/SIGKILL path runs instead of leaking the child.
+            cancel_event.set()
+            raise
         except Exception as exc:
             text = f"skill_runner_failed: {exc}"
             ctx.stdout_log.parent.mkdir(parents=True, exist_ok=True)
