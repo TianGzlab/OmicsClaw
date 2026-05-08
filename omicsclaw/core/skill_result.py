@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,14 +79,16 @@ def _float_or_default(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _normalize_files(files: Any) -> tuple[str, ...]:
+    if not files:
+        return ()
+    if isinstance(files, (str, bytes, Path)):
+        return (str(files),)
+    return tuple(str(item) for item in files)
+
+
 def coerce_skill_run_result(result: Mapping[str, Any]) -> SkillRunResult:
     """Coerce a runner result mapping into a normalized result model."""
-    files = result.get("files") or ()
-    if isinstance(files, (str, bytes)):
-        file_items: tuple[str, ...] = (str(files),)
-    else:
-        file_items = tuple(str(item) for item in files)
-
     skill = str(result.get("skill") or "")
     success = bool(result.get("success", False))
     exit_code = _int_or_default(result.get("exit_code"), 0)
@@ -97,7 +99,7 @@ def coerce_skill_run_result(result: Mapping[str, Any]) -> SkillRunResult:
         success=success,
         exit_code=exit_code,
         output_dir=str(output_dir_value) if output_dir_value else None,
-        files=file_items,
+        files=_normalize_files(result.get("files")),
         stdout=str(result.get("stdout") or ""),
         stderr=str(result.get("stderr") or ""),
         duration_seconds=_float_or_default(result.get("duration_seconds"), 0.0),
@@ -108,9 +110,44 @@ def coerce_skill_run_result(result: Mapping[str, Any]) -> SkillRunResult:
     )
 
 
+def build_skill_run_result(
+    *,
+    skill: str,
+    success: bool,
+    exit_code: int,
+    output_dir: str | Path | None,
+    files: Iterable[str | Path] = (),
+    stdout: str = "",
+    stderr: str = "",
+    duration_seconds: float = 0.0,
+    method: str | None = None,
+    readme_path: str | Path | None = "",
+    notebook_path: str | Path | None = "",
+) -> SkillRunResult:
+    """Build a normalized result from runner-native values."""
+    return SkillRunResult(
+        skill=str(skill),
+        success=bool(success),
+        exit_code=int(exit_code),
+        output_dir=str(output_dir) if output_dir else None,
+        files=_normalize_files(files),
+        stdout=str(stdout or ""),
+        stderr=str(stderr or ""),
+        duration_seconds=round(float(duration_seconds or 0.0), 2),
+        method=str(method) if method else None,
+        readme_path=str(readme_path or ""),
+        notebook_path=str(notebook_path or ""),
+    )
+
+
 def result_json_fallback(result: SkillRunResult) -> str:
     """Serialize the original runner mapping for log fallback text."""
     return json.dumps(result.raw, ensure_ascii=False, default=str)
 
 
-__all__ = ["SkillRunResult", "coerce_skill_run_result", "result_json_fallback"]
+__all__ = [
+    "SkillRunResult",
+    "build_skill_run_result",
+    "coerce_skill_run_result",
+    "result_json_fallback",
+]
