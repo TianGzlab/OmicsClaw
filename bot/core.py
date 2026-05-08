@@ -2107,7 +2107,7 @@ async def _run_skill_via_shared_runner(
     clean_stderr = strip_user_guidance_lines(stderr_str)
     clean_stdout = strip_user_guidance_lines(stdout_str)
     error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
-    returncode = int(result.get("exit_code") if result.get("exit_code") is not None else result.get("returncode") or 0)
+    returncode = int(result.get("exit_code") or 0)
     if not result.get("success", False) and returncode == 0:
         returncode = 1
     output_dir = Path(result.get("output_dir") or out_dir)
