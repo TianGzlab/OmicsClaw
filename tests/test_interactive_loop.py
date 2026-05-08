@@ -14,6 +14,7 @@ from rich.console import Console
 
 from omicsclaw.core.registry import OmicsRegistry
 from omicsclaw.interactive import interactive
+from omicsclaw.interactive._session_state import SessionState
 from omicsclaw.interactive._session_command_support import (
     SessionCommandView,
     SessionListEntry,
@@ -368,7 +369,10 @@ async def test_handle_resume_falls_back_to_session_search_for_unique_match(monke
     )
     monkeypatch.setattr(interactive, "console", Console(file=output, force_terminal=False))
 
-    await interactive._handle_resume("brain", {"session_id": "current"})
+    await interactive._handle_resume(
+        "brain",
+        SessionState(session_id="current", workspace_dir="/tmp", ui_backend="cli"),
+    )
 
     assert calls == ["brain", "abc12345"]
     assert [view.session_id for view in applied] == ["abc12345"]
@@ -641,12 +645,11 @@ async def test_stream_llm_response_marks_followup_tool_batches_as_updates(monkey
 
 def test_handle_doctor_applies_shared_diagnostics_view(monkeypatch):
     captured: dict[str, object] = {}
-    state = {
-        "workspace_dir": "/tmp/workspace",
-        "pipeline_workspace": "",
-        "session_metadata": {},
-        "messages": [],
-    }
+    state = SessionState(
+        session_id="doctor",
+        workspace_dir="/tmp/workspace",
+        ui_backend="cli",
+    )
 
     monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
 
@@ -670,12 +673,13 @@ def test_handle_doctor_applies_shared_diagnostics_view(monkeypatch):
 
 def test_handle_context_passes_session_state_to_shared_builder(monkeypatch):
     captured: dict[str, object] = {}
-    state = {
-        "workspace_dir": "/tmp/workspace",
-        "pipeline_workspace": "",
-        "session_metadata": {"active_style": "teaching"},
-        "messages": [{"role": "user", "content": "inspect sample.h5ad"}],
-    }
+    state = SessionState(
+        session_id="ctx",
+        workspace_dir="/tmp/workspace",
+        ui_backend="cli",
+        session_metadata={"active_style": "teaching"},
+        messages=[{"role": "user", "content": "inspect sample.h5ad"}],
+    )
 
     monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
     monkeypatch.setattr(interactive, "_active_output_style", lambda state: "teaching")
@@ -704,7 +708,7 @@ def test_handle_context_passes_session_state_to_shared_builder(monkeypatch):
 
 def test_handle_usage_applies_shared_usage_view(monkeypatch):
     captured: dict[str, object] = {}
-    state = {"session_id": "demo"}
+    state = SessionState(session_id="demo", workspace_dir="/tmp", ui_backend="cli")
 
     monkeypatch.setattr(
         interactive,
