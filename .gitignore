@@ -42,9 +42,15 @@ sessions/
 superpowers/
 docs/superpowers/
 
-# Local framework optimization notes
+# Local implementation notes (non-contract scratch notes)
 docs/engineering/2026-05-07-*.md
-docs/engineering/domain-input-contracts.md
+!docs/engineering/2026-05-07-framework-optimization-spec.md
+!docs/engineering/2026-05-07-alias-ownership-contract.md
+!docs/engineering/2026-05-07-bot-runner-contract.md
+!docs/engineering/2026-05-07-output-ownership-contract.md
+!docs/engineering/2026-05-07-skill-help-contract.md
+!docs/engineering/2026-05-07-skill-runner-contract.md
+!docs/engineering/domain-input-contracts.md
 
 # User data (large, not committed)
 data/*
