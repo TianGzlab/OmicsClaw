@@ -178,6 +178,9 @@ hardcoded registry entries remain compatibility fallbacks. Skill scripts write
 native artifacts, while the shared runner writes top-level `README.md` and
 `reproducibility/analysis_notebook.ipynb`. Bot skill execution uses the same
 shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
+Shared result construction and adapter coercion live in
+`omicsclaw/core/skill_result.py`; new execution surfaces should reuse that
+model instead of rebuilding legacy result dictionaries.
 
 Desktop provider changes should preserve the OmicsClaw-App backend contract: `/providers` reports the active provider/model/endpoint, `/providers/test` performs a short live LLM connectivity probe, and `/chat/stream` must reinitialize the provider runtime when a request changes model even if the provider id is unchanged.
 
