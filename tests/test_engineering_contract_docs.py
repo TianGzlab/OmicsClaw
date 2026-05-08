@@ -31,7 +31,10 @@ def _is_tracked(relative_path: str) -> bool:
 def test_architecture_contract_docs_are_tracked():
     missing = [path for path in ARCHITECTURE_CONTRACT_DOCS if not _is_tracked(path)]
 
-    assert not missing, "\n".join(missing)
+    assert not missing, (
+        "Architecture contract docs must be tracked, not just present in a "
+        "local ignored workspace:\n" + "\n".join(missing)
+    )
 
 
 def test_readme_links_architecture_contract_docs():

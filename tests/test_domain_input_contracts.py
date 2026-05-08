@@ -20,7 +20,10 @@ def test_domain_input_contract_document_is_tracked():
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, (
+        "Domain input contracts must be tracked, not just present in a local "
+        f"ignored workspace: {relative_path}\n{result.stderr}"
+    )
 
 
 def test_domain_input_contract_document_exists_for_all_registered_domains():
