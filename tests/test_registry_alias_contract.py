@@ -47,3 +47,53 @@ def test_declared_legacy_aliases_still_resolve_to_canonical_skill_names():
     assert resolve_skill_alias("preprocess") == "spatial-preprocess"
     assert resolve_skill_alias("domains") == "spatial-domains"
     assert resolve_skill_alias("sc-preprocess") == "sc-preprocessing"
+
+
+# Snapshot of user-facing legacy aliases that must keep resolving.
+# Adding to this set is fine; removing requires a deliberate review because it
+# breaks existing user invocations like `oc run preprocess` or chat history
+# that referenced the short name.
+_LOCKED_LEGACY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("preprocess", "spatial-preprocess"),
+    ("domains", "spatial-domains"),
+    ("de", "spatial-de"),
+    ("genes", "spatial-genes"),
+    ("statistics", "spatial-statistics"),
+    ("annotate", "spatial-annotate"),
+    ("deconv", "spatial-deconv"),
+    ("communication", "spatial-communication"),
+    ("velocity", "spatial-velocity"),
+    ("trajectory", "spatial-trajectory"),
+    ("cnv", "spatial-cnv"),
+    ("enrichment", "spatial-enrichment"),
+    ("integrate", "spatial-integrate"),
+    ("register", "spatial-register"),
+    ("condition", "spatial-condition"),
+    ("sc-preprocess", "sc-preprocessing"),
+    ("sc-annotate", "sc-cell-annotation"),
+    ("sc-doublet", "sc-doublet-detection"),
+    ("sc-integrate", "sc-batch-integration"),
+    ("scatac-preprocess", "scatac-preprocessing"),
+    ("bulk-de", "bulkrna-de"),
+    ("bulk-wgcna", "bulkrna-coexpression"),
+    ("met-diff", "metabolomics-de"),
+    ("peak-detect", "metabolomics-peak-detection"),
+    ("variant-call", "genomics-variant-calling"),
+    ("align", "genomics-alignment"),
+    ("differential-abundance", "proteomics-de"),
+)
+
+
+def test_locked_legacy_aliases_resolve_to_canonical_names():
+    """Snapshot test: removing any of these aliases breaks existing user invocations.
+
+    If this test fails, a SKILL.md `legacy_aliases:` entry was likely removed.
+    Either restore it, or - if the rename is intentional - update this snapshot
+    in the same PR so the breakage is reviewed explicitly.
+    """
+    failed: list[str] = []
+    for legacy, canonical in _LOCKED_LEGACY_ALIASES:
+        resolved = resolve_skill_alias(legacy)
+        if resolved != canonical:
+            failed.append(f"{legacy!r} -> {resolved!r} (expected {canonical!r})")
+    assert not failed, "Locked legacy aliases changed:\n  " + "\n  ".join(failed)
