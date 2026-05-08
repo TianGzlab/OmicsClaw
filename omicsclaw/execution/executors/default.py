@@ -32,7 +32,6 @@ from omicsclaw.autoagent.constants import param_to_cli_flag
 import asyncio
 
 from .base import JobContext, JobOutcome
-from .subprocess import SubprocessExecutor
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
