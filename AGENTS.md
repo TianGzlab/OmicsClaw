@@ -194,6 +194,12 @@ For repository development work, start with a short plan when the task spans
 multiple files, debug from root cause before editing, and verify the affected
 behavior before committing, pushing, or opening a PR.
 
+After creating or materially updating any PR, always run
+`cursor-team-kit:make-pr-easy-to-review` before handing it off. The PR should
+have a reviewer-oriented description with a TL;DR, recommended review order,
+diff buckets, generated/mechanical file notes, risk notes, and verification
+evidence.
+
 ## Graph Memory System
 
 OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`.
