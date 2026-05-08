@@ -88,3 +88,56 @@ def test_execute_omicsclaw_uses_shared_runner_adapter(tmp_path, monkeypatch):
     assert calls[0]["skill_key"] == "literature"
     assert calls[0]["mode"] == "demo"
     assert "Bot Runner" in result
+
+
+def test_bot_run_skill_via_shared_runner_streams_lines_to_bot_logger(
+    tmp_path, monkeypatch, caplog
+):
+    """The bot must subscribe to runner stdout/stderr callbacks so long
+    skills produce visible operator-console logs in real time instead of
+    going silent until completion."""
+    import omicsclaw.core.skill_runner as runner_module
+
+    out_dir = tmp_path / "bot_streaming_out"
+    out_dir.mkdir()
+
+    def fake_run_skill(skill_name=None, *, stdout_callback=None, stderr_callback=None, **kwargs):
+        if stdout_callback is not None:
+            stdout_callback("epoch 1/3")
+            stdout_callback("epoch 2/3")
+            stdout_callback("epoch 3/3")
+        if stderr_callback is not None:
+            stderr_callback("warning: synthetic")
+        return {
+            "skill": skill_name,
+            "success": True,
+            "exit_code": 0,
+            "output_dir": str(out_dir),
+            "files": [],
+            "stdout": "epoch 1/3\nepoch 2/3\nepoch 3/3\n",
+            "stderr": "warning: synthetic\n",
+            "duration_seconds": 0.1,
+            "method": None,
+            "readme_path": "",
+            "notebook_path": "",
+        }
+
+    monkeypatch.setattr(runner_module, "run_skill", fake_run_skill)
+
+    with caplog.at_level("INFO", logger="omicsclaw.bot"):
+        result = asyncio.run(
+            core._run_skill_via_shared_runner(
+                skill_key="literature",
+                input_path=None,
+                session_path=None,
+                mode="demo",
+                out_dir=out_dir,
+            )
+        )
+
+    bot_messages = [r.getMessage() for r in caplog.records if r.name == "omicsclaw.bot"]
+    assert any("epoch 1/3" in m for m in bot_messages), bot_messages
+    assert any("epoch 2/3" in m for m in bot_messages), bot_messages
+    assert any("epoch 3/3" in m for m in bot_messages), bot_messages
+    assert any("warning: synthetic" in m for m in bot_messages), bot_messages
+    assert result["success"] is True

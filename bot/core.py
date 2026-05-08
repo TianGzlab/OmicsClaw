@@ -2090,6 +2090,12 @@ async def _run_skill_via_shared_runner(
             forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
     forwarded_args.extend(_normalize_extra_args(extra_args))
 
+    def _emit_stdout(line: str) -> None:
+        logger.info("[%s:stdout] %s", canonical_skill, line)
+
+    def _emit_stderr(line: str) -> None:
+        logger.info("[%s:stderr] %s", canonical_skill, line)
+
     def _run() -> dict:
         return skill_runner.run_skill(
             runner_skill,
@@ -2098,6 +2104,8 @@ async def _run_skill_via_shared_runner(
             demo=mode == "demo",
             session_path=session_path,
             extra_args=forwarded_args or None,
+            stdout_callback=_emit_stdout,
+            stderr_callback=_emit_stderr,
         )
 
     result = await asyncio.to_thread(_run)
