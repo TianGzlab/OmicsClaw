@@ -63,7 +63,7 @@
 - **🔄 工作流连续性**：可以恢复中断任务、追踪分析血缘，减少重复计算。
 - **🔒 本地优先**：计算在本地完成，记忆系统仅保存元数据，不上传原始数据。
 - **🎯 智能路由**：自然语言请求可自动映射到合适的分析技能。
-- **🧬 多组学覆盖**：内置 72 个技能，覆盖空间转录组、单细胞、基因组、蛋白组、代谢组、Bulk RNA-seq、文献挖掘和编排调度。
+- **🧬 多组学覆盖**：内置 89 个分析技能，覆盖空间转录组、单细胞、基因组、蛋白组、代谢组、Bulk RNA-seq、文献挖掘和编排调度。
 
 **与传统工具的差异：**
 
@@ -780,7 +780,7 @@ make bot-multi CHANNELS=telegram,discord
 - 📜 [`llms.txt`](llms.txt)：项目结构和提示边界的高层说明
 - 🧠 [`AGENTS.md`](AGENTS.md)：`oc` CLI 用法和记忆系统说明
 - 🤖 [`CLAUDE.md`](CLAUDE.md)：定制化 Agent 指令和内部编排约束
-- 🧩 [`skills/catalog.json`](skills/catalog.json)：全部 72 个技能的机器可读注册表
+- 🧩 [`skills/catalog.json`](skills/catalog.json)：全部 89 个技能的机器可读注册表
 
 建议主动告知用户：
 

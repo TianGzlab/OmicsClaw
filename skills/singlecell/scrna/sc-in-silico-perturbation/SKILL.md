@@ -11,21 +11,26 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--ko-gene"
-      - "--n-top-genes"
-      - "--corr-threshold"
-      - "--qc"
-      - "--qc-min-lib-size"
-      - "--qc-min-cells"
-      - "--n-net"
-      - "--n-cells"
-      - "--n-comp"
-      - "--q"
-      - "--td-k"
-      - "--ma-dim"
-      - "--n-cores"
-      - "--r-enhanced"
+    - "--method"
+    - "--ko-gene"
+    - "--n-top-genes"
+    - "--corr-threshold"
+    - "--qc"
+    - "--qc-min-lib-size"
+    - "--qc-min-cells"
+    - "--n-net"
+    - "--n-cells"
+    - "--n-comp"
+    - "--q"
+    - "--td-k"
+    - "--ma-dim"
+    - "--n-cores"
+    - "--r-enhanced"
+    script: sc_in_silico_perturbation.py
+    legacy_aliases: [sc-tenifold-knockout]
+    param_hints: {}
+    saves_h5ad: false
+    requires_preprocessed: false
 ---
 
 # In-Silico Perturbation

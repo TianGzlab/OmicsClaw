@@ -1,7 +1,8 @@
 ---
 name: metabolomics-peak-detection
 description: >-
-  Peak picking, feature detection, alignment and grouping using XCMS, MZmine 3, or MS-DIAL.
+  Peak picking, feature detection, alignment and grouping using XCMS, MZmine 3, or
+  MS-DIAL.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -10,10 +11,14 @@ metadata:
   omicsclaw:
     domain: metabolomics
     emoji: "⛰️"
-    trigger_keywords: [peak detection, feature detection, XCMS, MZmine, MS-DIAL, peak picking]
+    trigger_keywords: [peak detection, feature detection, XCMS, MZmine, MS-DIAL, peak
+        picking]
     allowed_extra_flags: []
     legacy_aliases: [peak-detect]
     saves_h5ad: false
+    script: peak_detect.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # ⛰️ Metabolomics Peak Detection

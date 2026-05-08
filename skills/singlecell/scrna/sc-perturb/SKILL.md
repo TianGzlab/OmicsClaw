@@ -11,16 +11,19 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--pert-key"
-      - "--control"
-      - "--split-by"
-      - "--n-neighbors"
-      - "--logfc-threshold"
-      - "--pval-cutoff"
-      - "--perturbation-type"
-      - "--r-enhanced"
+    - "--method"
+    - "--pert-key"
+    - "--control"
+    - "--split-by"
+    - "--n-neighbors"
+    - "--logfc-threshold"
+    - "--pval-cutoff"
+    - "--perturbation-type"
+    - "--r-enhanced"
     saves_h5ad: true
+    script: sc_perturb.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Single-Cell Perturbation

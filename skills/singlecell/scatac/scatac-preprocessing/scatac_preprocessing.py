@@ -38,7 +38,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
@@ -722,42 +721,13 @@ def write_reproducibility(output_dir: Path, public_params: dict, input_file: str
     (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + ("\n" if env_lines else ""), encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell ATAC preprocessing with Signac-style TF-IDF + LSI plus Scanpy graph construction.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell ATAC preprocessing with TF-IDF, LSI, UMAP, and Leiden clustering.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
-
-
 def get_demo_data():
     rng = np.random.default_rng(7)
     cluster_sizes = [60, 60, 60]
     n_cells = sum(cluster_sizes)
     n_peaks = 2000
     matrix = rng.binomial(1, 0.006, size=(n_cells, n_peaks)).astype(np.float32)
+
 
     cluster_blocks = [
         slice(0, 500),
@@ -893,7 +863,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

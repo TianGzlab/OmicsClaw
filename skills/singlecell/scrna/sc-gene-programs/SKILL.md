@@ -11,15 +11,18 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--n-programs"
-      - "--n-iter"
-      - "--seed"
-      - "--layer"
-      - "--top-genes"
-      - "--r-enhanced"
+    - "--method"
+    - "--n-programs"
+    - "--n-iter"
+    - "--seed"
+    - "--layer"
+    - "--top-genes"
+    - "--r-enhanced"
     saves_h5ad: true
     requires_preprocessed: true
+    script: sc_gene_programs.py
+    legacy_aliases: [sc-programs]
+    param_hints: {}
 ---
 
 # Single-Cell Gene Programs

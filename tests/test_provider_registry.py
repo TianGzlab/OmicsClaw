@@ -199,6 +199,16 @@ def test_normalize_model_for_provider_rewrites_foreign_default_model():
     assert foreign_provider == "deepseek"
 
 
+def test_normalize_model_for_provider_rewrites_foreign_deprecated_default_model():
+    normalized, foreign_provider = normalize_model_for_provider(
+        provider="anthropic",
+        model="deepseek-chat",
+    )
+
+    assert normalized == PROVIDER_PRESETS["anthropic"][1]
+    assert foreign_provider == "deepseek"
+
+
 def test_normalize_model_for_provider_skips_gateway_and_local_providers():
     for provider in MODEL_NORMALIZATION_EXEMPT_PROVIDERS:
         normalized, foreign_provider = normalize_model_for_provider(

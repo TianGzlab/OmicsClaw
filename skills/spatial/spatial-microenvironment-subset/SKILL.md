@@ -9,44 +9,45 @@ version: 0.1.0
 author: OmicsClaw Team
 license: MIT
 tags:
-  - spatial
-  - microenvironment
-  - neighborhood
-  - radius
-  - subset
-  - communication
-  - xenium
-  - visium
+- spatial
+- microenvironment
+- neighborhood
+- radius
+- subset
+- communication
+- xenium
+- visium
 metadata:
   omicsclaw:
     domain: spatial
     script: spatial_microenvironment_subset.py
     allowed_extra_flags:
-      - "--center-key"
-      - "--center-values"
-      - "--target-key"
-      - "--target-values"
-      - "--exclude-centers"
-      - "--radius-microns"
-      - "--radius-native"
-      - "--microns-per-coordinate-unit"
+    - "--center-key"
+    - "--center-values"
+    - "--target-key"
+    - "--target-values"
+    - "--exclude-centers"
+    - "--radius-microns"
+    - "--radius-native"
+    - "--microns-per-coordinate-unit"
     legacy_aliases:
-      - spatial-neighborhood-subset
-      - spatial-proximity-subset
-      - microenvironment
-      - microenvironment subset
-      - tumor microenvironment
-      - neighborhood subset
+    - spatial-neighborhood-subset
+    - spatial-proximity-subset
+    - microenvironment
+    - microenvironment subset
+    - tumor microenvironment
+    - neighborhood subset
     saves_h5ad: true
     requires_preprocessed: false
     trigger_keywords:
-      - microenvironment
-      - neighborhood subset
-      - spatial radius
-      - neighboring cells
-      - nearby cells
-      - tumor microenvironment
-      - extract cells within 50 microns
+    - microenvironment
+    - neighborhood subset
+    - spatial radius
+    - neighboring cells
+    - nearby cells
+    - tumor microenvironment
+    - extract cells within 50 microns
+    param_hints: {}
 ---
 
 # Spatial Microenvironment Subset

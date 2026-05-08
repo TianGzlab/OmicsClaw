@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import importlib.util
 import sys
 from pathlib import Path
@@ -18,12 +19,100 @@ from omicsclaw.diagnostics import (
 ROOT = Path(__file__).resolve().parent.parent
 
 
+class _FakeRegistry:
+    def __init__(self, names: list[str]):
+        self._names = names
+
+    def iter_primary_skills(self, domain=None):
+        return [(name, {"alias": name, "domain": domain or "test"}) for name in self._names]
+
+
 def _load_omicsclaw_script():
     spec = importlib.util.spec_from_file_location("omicsclaw_main_doctor_test", ROOT / "omicsclaw.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_collect_skill_catalog_check_warns_on_registry_catalog_drift(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "catalog.json").write_text(
+        json.dumps(
+            {
+                "skill_count": 3,
+                "skills": [
+                    {"name": "alpha"},
+                    {"name": "beta"},
+                    {"name": "literature"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    check = diagnostics._collect_skill_catalog_check(
+        str(tmp_path),
+        registry_obj=_FakeRegistry(["alpha", "beta"]),
+    )
+
+    assert check.name == "Skill Catalog"
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "registry=2" in check.summary
+    assert "catalog=3" in check.summary
+    assert any("extra_in_catalog: literature" in detail for detail in check.details)
+
+
+def test_collect_skill_catalog_check_ok_when_registry_and_catalog_match(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "catalog.json").write_text(
+        json.dumps(
+            {
+                "skill_count": 2,
+                "skills": [
+                    {"name": "alpha"},
+                    {"name": "beta"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    check = diagnostics._collect_skill_catalog_check(
+        str(tmp_path),
+        registry_obj=_FakeRegistry(["alpha", "beta"]),
+    )
+
+    assert check.status == DIAGNOSTIC_STATUS_OK
+    assert "2 skills" in check.summary
+
+
+def test_collect_graphify_check_warns_when_slice_index_lacks_root_entrypoint(tmp_path):
+    slice_dir = tmp_path / "graphify-out" / "omicsclaw-slices"
+    slice_dir.mkdir(parents=True)
+    (slice_dir / "INDEX.md").write_text("# Slice Index\n", encoding="utf-8")
+
+    check = diagnostics._collect_graphify_check(str(tmp_path))
+
+    assert check.name == "Graphify Map"
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "slice" in check.summary.lower()
+    assert any("omicsclaw-slices/INDEX.md" in detail for detail in check.details)
+    assert any("GRAPH_REPORT.md" in detail for detail in check.details)
+
+
+def test_collect_graphify_check_warns_when_cache_has_no_navigable_report(tmp_path):
+    ast_dir = tmp_path / "graphify-out" / "cache" / "ast"
+    ast_dir.mkdir(parents=True)
+    (ast_dir / "example.json").write_text("{}", encoding="utf-8")
+
+    check = diagnostics._collect_graphify_check(str(tmp_path))
+
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "no navigable" in check.summary.lower()
+    assert any("ast_cache_files=1" in detail for detail in check.details)
 
 
 def test_build_doctor_report_flags_invalid_installed_extensions(tmp_path, monkeypatch):

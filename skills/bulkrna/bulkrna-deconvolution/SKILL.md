@@ -1,7 +1,8 @@
 ---
 name: bulkrna-deconvolution
 description: >-
-  Bulk RNA-seq cell type deconvolution using NNLS (built-in), with optional CIBERSORTx and MuSiC bridges.
+  Bulk RNA-seq cell type deconvolution using NNLS (built-in), with optional CIBERSORTx
+  and MuSiC bridges.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -10,11 +11,15 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🧩"
-    trigger_keywords: [bulk deconvolution, cell type proportion, NNLS, CIBERSORTx, bulk deconv, cell fraction]
+    trigger_keywords: [bulk deconvolution, cell type proportion, NNLS, CIBERSORTx,
+      bulk deconv, cell fraction]
     allowed_extra_flags:
-      - "--reference"
+    - "--reference"
     legacy_aliases: [bulk-deconv]
     saves_h5ad: false
+    script: bulkrna_deconvolution.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Cell Type Deconvolution

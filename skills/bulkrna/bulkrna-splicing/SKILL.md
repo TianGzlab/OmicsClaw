@@ -1,7 +1,8 @@
 ---
 name: bulkrna-splicing
 description: >-
-  Alternative splicing analysis — PSI quantification, differential splicing event detection from rMATS/SUPPA2 output.
+  Alternative splicing analysis — PSI quantification, differential splicing event
+  detection from rMATS/SUPPA2 output.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -10,12 +11,16 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🧬"
-    trigger_keywords: [alternative splicing, splicing analysis, PSI, rMATS, SUPPA2, exon skipping, differential splicing]
+    trigger_keywords: [alternative splicing, splicing analysis, PSI, rMATS, SUPPA2,
+      exon skipping, differential splicing]
     allowed_extra_flags:
-      - "--dpsi-cutoff"
-      - "--padj-cutoff"
+    - "--dpsi-cutoff"
+    - "--padj-cutoff"
     legacy_aliases: [bulk-splicing]
     saves_h5ad: false
+    script: bulkrna_splicing.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Alternative Splicing Analysis

@@ -13,9 +13,12 @@ metadata:
     emoji: "📊"
     trigger_keywords: [CNV, copy number, amplification, deletion, CNVkit]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [cnv-calling]
     saves_h5ad: false
+    script: genomics_cnv_calling.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📊 Copy Number Variant Calling

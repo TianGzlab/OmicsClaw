@@ -1,7 +1,8 @@
 ---
 name: metabolomics-statistics
 description: >-
-  Statistical analysis for metabolomics — PCA, PLS-DA, clustering, and univariate tests.
+  Statistical analysis for metabolomics — PCA, PLS-DA, clustering, and univariate
+  tests.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -14,6 +15,9 @@ metadata:
     allowed_extra_flags: []
     legacy_aliases: [met-stat]
     saves_h5ad: false
+    script: metabolomics_statistics.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📈 Metabolomics Statistical Analysis

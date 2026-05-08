@@ -25,7 +25,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -441,13 +440,6 @@ def main() -> int:
     }
     _write_report(output_dir, summary, params, input_path, diagnostics)
     _write_reproducibility(output_dir, args, input_path)
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Single-cell perturbation analysis with Mixscape.",
-        result_payload=result_payload,
-        preferred_method=args.method,
-    )
     logger.info("Done: %s", output_dir)
 
     # --- Next-step guidance ---

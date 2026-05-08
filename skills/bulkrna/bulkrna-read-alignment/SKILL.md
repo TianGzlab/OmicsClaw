@@ -1,7 +1,8 @@
 ---
 name: bulkrna-read-alignment
 description: >-
-  RNA-seq read alignment and quantification statistics — STAR/HISAT2/Salmon log parsing, mapping rate, unique/multi-mapped reads, library strandedness, gene body coverage.
+  RNA-seq read alignment and quantification statistics — STAR/HISAT2/Salmon log parsing,
+  mapping rate, unique/multi-mapped reads, library strandedness, gene body coverage.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,12 +12,16 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🧬"
-    trigger_keywords: [RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC]
+    trigger_keywords: [RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read
+        alignment, alignment QC]
     allowed_extra_flags:
-      - "--method"
-      - "--species"
+    - "--method"
+    - "--species"
     legacy_aliases: [bulk-align-reads]
     saves_h5ad: false
+    script: bulkrna_read_alignment.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Read Alignment & Quantification Statistics

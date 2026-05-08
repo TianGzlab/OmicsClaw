@@ -12,82 +12,99 @@ metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
-      - "--cell-type-key"
-      - "--method"
-      - "--species"
-      - "--liana-expr-prop"
-      - "--liana-min-cells"
-      - "--liana-n-perms"
-      - "--liana-resource"
-      - "--cellphonedb-iterations"
-      - "--cellphonedb-threshold"
-      - "--fastccc-single-unit-summary"
-      - "--fastccc-complex-aggregation"
-      - "--fastccc-lr-combination"
-      - "--fastccc-min-percentile"
-      - "--cellchat-prob-type"
-      - "--cellchat-min-cells"
+    - "--cell-type-key"
+    - "--method"
+    - "--species"
+    - "--liana-expr-prop"
+    - "--liana-min-cells"
+    - "--liana-n-perms"
+    - "--liana-resource"
+    - "--cellphonedb-iterations"
+    - "--cellphonedb-threshold"
+    - "--fastccc-single-unit-summary"
+    - "--fastccc-complex-aggregation"
+    - "--fastccc-lr-combination"
+    - "--fastccc-min-percentile"
+    - "--cellchat-prob-type"
+    - "--cellchat-min-cells"
     param_hints:
       liana:
         priority: "liana_resource → liana_expr_prop → liana_min_cells → liana_n_perms"
-        params: ["cell_type_key", "species", "liana_resource", "liana_expr_prop", "liana_min_cells", "liana_n_perms"]
-        defaults: {cell_type_key: "leiden", species: "human", liana_resource: "auto", liana_expr_prop: 0.1, liana_min_cells: 5, liana_n_perms: 1000}
+        params: ["cell_type_key", "species", "liana_resource", "liana_expr_prop",
+          "liana_min_cells", "liana_n_perms"]
+        defaults: {cell_type_key: "leiden", species: "human", liana_resource: "auto",
+          liana_expr_prop: 0.1, liana_min_cells: 5, liana_n_perms: 1000}
         requires: ["X_log_normalized", "obs.cell_type"]
         tips:
-          - "--liana-resource: `auto` maps to `consensus` for human and `mouseconsensus` for mouse."
-          - "--liana-expr-prop: minimum expressing-cell fraction forwarded to `liana.mt.rank_aggregate`."
-          - "--liana-min-cells: minimum cells per cell type before LIANA tests interactions."
-          - "--liana-n-perms: permutation depth used in LIANA consensus ranking."
+        - "--liana-resource: `auto` maps to `consensus` for human and `mouseconsensus`
+          for mouse."
+        - "--liana-expr-prop: minimum expressing-cell fraction forwarded to `liana.mt.rank_aggregate`."
+        - "--liana-min-cells: minimum cells per cell type before LIANA tests interactions."
+        - "--liana-n-perms: permutation depth used in LIANA consensus ranking."
       cellphonedb:
         priority: "cellphonedb_threshold → cellphonedb_iterations"
         params: ["cell_type_key", "species", "cellphonedb_threshold", "cellphonedb_iterations"]
-        defaults: {cell_type_key: "leiden", species: "human", cellphonedb_threshold: 0.1, cellphonedb_iterations: 1000}
+        defaults: {cell_type_key: "leiden", species: "human", cellphonedb_threshold: 0.1,
+          cellphonedb_iterations: 1000}
         requires: ["X_log_normalized", "obs.cell_type", "human_species", "cellphonedb_database"]
         tips:
-          - "--cellphonedb-threshold: minimum fraction of cells expressing each ligand or receptor."
-          - "--cellphonedb-iterations: label-shuffling iterations in the official statistical method."
+        - "--cellphonedb-threshold: minimum fraction of cells expressing each ligand
+          or receptor."
+        - "--cellphonedb-iterations: label-shuffling iterations in the official statistical
+          method."
       fastccc:
-        priority: "fastccc_single_unit_summary → fastccc_complex_aggregation → fastccc_lr_combination → fastccc_min_percentile"
-        params: ["cell_type_key", "species", "fastccc_single_unit_summary", "fastccc_complex_aggregation", "fastccc_lr_combination", "fastccc_min_percentile"]
-        defaults: {cell_type_key: "leiden", species: "human", fastccc_single_unit_summary: "Mean", fastccc_complex_aggregation: "Minimum", fastccc_lr_combination: "Arithmetic", fastccc_min_percentile: 0.1}
+        priority: "fastccc_single_unit_summary → fastccc_complex_aggregation → fastccc_lr_combination
+          → fastccc_min_percentile"
+        params: ["cell_type_key", "species", "fastccc_single_unit_summary", "fastccc_complex_aggregation",
+          "fastccc_lr_combination", "fastccc_min_percentile"]
+        defaults: {cell_type_key: "leiden", species: "human", fastccc_single_unit_summary: "Mean",
+          fastccc_complex_aggregation: "Minimum", fastccc_lr_combination: "Arithmetic",
+          fastccc_min_percentile: 0.1}
         requires: ["X_log_normalized", "obs.cell_type", "human_species", "cellphonedb_database"]
         tips:
-          - "--fastccc-single-unit-summary: public FastCCC summary statistic, for example `Mean`, `Median`, `Q3`, or `Quantile_0.9`."
-          - "--fastccc-complex-aggregation: how multi-subunit complexes are summarized (`Minimum` or `Average`)."
-          - "--fastccc-lr-combination: how ligand and receptor activity are combined (`Arithmetic` or `Geometric`)."
-          - "--fastccc-min-percentile: minimum expressing-cell fraction used in FastCCC filtering."
+        - "--fastccc-single-unit-summary: public FastCCC summary statistic, for example
+          `Mean`, `Median`, `Q3`, or `Quantile_0.9`."
+        - "--fastccc-complex-aggregation: how multi-subunit complexes are summarized
+          (`Minimum` or `Average`)."
+        - "--fastccc-lr-combination: how ligand and receptor activity are combined
+          (`Arithmetic` or `Geometric`)."
+        - "--fastccc-min-percentile: minimum expressing-cell fraction used in FastCCC
+          filtering."
       cellchat_r:
         priority: "cellchat_prob_type → cellchat_min_cells"
         params: ["cell_type_key", "species", "cellchat_prob_type", "cellchat_min_cells"]
-        defaults: {cell_type_key: "leiden", species: "human", cellchat_prob_type: "triMean", cellchat_min_cells: 10}
+        defaults: {cell_type_key: "leiden", species: "human", cellchat_prob_type: "triMean",
+          cellchat_min_cells: 10}
         requires: ["X_log_normalized", "obs.cell_type", "Rscript"]
         tips:
-          - "--cellchat-prob-type: forwarded to `computeCommunProb(type=...)`; `triMean` is the current OmicsClaw default."
-          - "--cellchat-min-cells: forwarded to `filterCommunication(min.cells=...)`."
+        - "--cellchat-prob-type: forwarded to `computeCommunProb(type=...)`; `triMean`
+          is the current OmicsClaw default."
+        - "--cellchat-min-cells: forwarded to `filterCommunication(min.cells=...)`."
     legacy_aliases: [communication]
     saves_h5ad: true
     requires_preprocessed: true
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "📡"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - cell communication
-      - cell-cell communication
-      - ligand receptor
-      - ligand-receptor
-      - LIANA
-      - CellPhoneDB
-      - FastCCC
-      - CellChat
+    - cell communication
+    - cell-cell communication
+    - ligand receptor
+    - ligand-receptor
+    - LIANA
+    - CellPhoneDB
+    - FastCCC
+    - CellChat
+    script: spatial_communication.py
 ---
 
 # 📡 Spatial Communication

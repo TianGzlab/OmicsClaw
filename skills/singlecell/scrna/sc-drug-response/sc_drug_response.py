@@ -34,7 +34,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
@@ -686,35 +685,6 @@ def write_reproducibility(output_dir: Path, params: dict, input_file: str | None
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    """Write notebook and README."""
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell drug response prediction.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", "simple_correlation"),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell drug response prediction.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", "simple_correlation"),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
@@ -905,7 +875,6 @@ def main() -> None:
     result_data["next_steps"] = []
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
-    write_standard_run_artifacts(output_dir, result_payload, summary)
     write_reproducibility(output_dir, params, input_file, demo_mode=demo_mode)
 
     print(f"Success: {SKILL_NAME}")

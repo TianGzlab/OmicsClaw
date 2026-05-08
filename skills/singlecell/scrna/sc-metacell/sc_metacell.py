@@ -20,7 +20,12 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import generate_report_footer, generate_report_header, write_output_readme, write_result_json, write_replot_hint
+from omicsclaw.common.report import (
+    generate_report_footer,
+    generate_report_header,
+    write_result_json,
+    write_replot_hint,
+)
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -517,12 +522,6 @@ def main() -> int:
     _write_report(output_dir, summary, params, input_path, diagnostics, preflight_warnings)
 
     # -- README --
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Metacell construction and compression for scRNA-seq.",
-        preferred_method=args.method,
-    )
 
     if diagnostics.get("degenerate"):
         logger.warning("Metacell result is DEGENERATE (%s). See report.md for troubleshooting.", diagnostics.get("reason"))

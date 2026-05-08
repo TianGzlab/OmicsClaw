@@ -46,6 +46,7 @@ DOMAIN_DISPLAY = [
     ("metabolomics", "Metabolomics", "`.mzml`, `.cdf`, `.csv`"),
     ("bulkrna", "Bulk RNA-seq", "`.csv`, `.tsv`, `.fastq`"),
     ("orchestrator", "Orchestrator", "`*` (all types)"),
+    ("literature", "Literature", "`PDF`, `DOI`, `PubMed`, `URL`, text"),
 ]
 
 

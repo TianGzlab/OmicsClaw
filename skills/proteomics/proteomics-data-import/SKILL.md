@@ -1,7 +1,8 @@
 ---
 name: proteomics-data-import
 description: >-
-  Import and convert proteomics data formats between MaxQuant, DIA-NN, Spectronaut, and standard CSV.
+  Import and convert proteomics data formats between MaxQuant, DIA-NN, Spectronaut,
+  and standard CSV.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -14,6 +15,9 @@ metadata:
     allowed_extra_flags: []
     legacy_aliases: [data-import]
     saves_h5ad: false
+    script: proteomics_data_import.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📥 Proteomics Data Import

@@ -1,7 +1,8 @@
 ---
 name: bulkrna-ppi-network
 description: >-
-  Protein-protein interaction network analysis from DEG lists — STRING API query, graph construction, hub gene identification.
+  Protein-protein interaction network analysis from DEG lists — STRING API query,
+  graph construction, hub gene identification.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -13,11 +14,14 @@ metadata:
     emoji: "🕸️"
     trigger_keywords: [PPI, protein interaction, STRING, network, hub gene, interactome]
     allowed_extra_flags:
-      - "--score-threshold"
-      - "--species"
-      - "--top-n"
+    - "--score-threshold"
+    - "--species"
+    - "--top-n"
     legacy_aliases: [bulk-ppi]
     saves_h5ad: false
+    script: bulkrna_ppi_network.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq PPI Network Analysis

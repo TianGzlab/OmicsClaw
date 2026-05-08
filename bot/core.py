@@ -2043,39 +2043,79 @@ async def _run_omics_skill_step(
         unique_suffix=uuid.uuid4().hex[:8],
     )
 
-    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "run", skill_key]
-    if mode == "demo":
-        cmd.append("--demo")
-    elif input_path:
-        cmd.extend(["--input", str(input_path)])
-    cmd.extend(["--output", str(out_dir)])
-    if method:
-        cmd.extend(["--method", method])
-    if data_type:
-        cmd.extend(["--data-type", data_type])
-    if batch_key:
-        cmd.extend(["--batch-key", batch_key])
-    if n_epochs is not None:
-        cmd.extend(["--n-epochs", str(int(n_epochs))])
-    cmd.extend(_normalize_extra_args(extra_args))
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    return await _run_skill_via_shared_runner(
+        skill_key=skill_key,
+        input_path=input_path,
+        session_path=None,
+        mode=mode,
+        method=method,
+        data_type=data_type,
+        batch_key=batch_key,
+        n_epochs=n_epochs,
+        extra_args=extra_args,
+        out_dir=out_dir,
     )
-    stdout_bytes, stderr_bytes = await proc.communicate()
-    stdout_str = stdout_bytes.decode(errors="replace")
-    stderr_str = stderr_bytes.decode(errors="replace")
+
+
+async def _run_skill_via_shared_runner(
+    *,
+    skill_key: str,
+    input_path: str | None,
+    session_path: str | None,
+    mode: str,
+    method: str = "",
+    data_type: str = "",
+    batch_key: str = "",
+    n_epochs: int | None = None,
+    extra_args: list[str] | None = None,
+    out_dir: Path,
+) -> dict:
+    from omicsclaw.core import skill_runner
+
+    runner_skill = "spatial-pipeline" if skill_key == "pipeline" else skill_key
+    skill_info = _lookup_skill_info(runner_skill)
+    canonical_skill = skill_info.get("alias") or runner_skill
+
+    forwarded_args: list[str] = []
+    if method:
+        forwarded_args.extend(["--method", method])
+    if data_type:
+        forwarded_args.extend(["--data-type", data_type])
+    if batch_key:
+        forwarded_args.extend(["--batch-key", batch_key])
+    if n_epochs is not None:
+        if canonical_skill == "spatial-domain-identification":
+            forwarded_args.extend(["--epochs", str(int(n_epochs))])
+        else:
+            forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
+    forwarded_args.extend(_normalize_extra_args(extra_args))
+
+    def _run() -> dict:
+        return skill_runner.run_skill(
+            runner_skill,
+            input_path=str(input_path) if input_path else None,
+            output_dir=str(out_dir),
+            demo=mode == "demo",
+            session_path=session_path,
+            extra_args=forwarded_args or None,
+        )
+
+    result = await asyncio.to_thread(_run)
+    stdout_str = str(result.get("stdout") or "")
+    stderr_str = str(result.get("stderr") or "")
     guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))
     clean_stderr = strip_user_guidance_lines(stderr_str)
     clean_stdout = strip_user_guidance_lines(stdout_str)
     error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
+    returncode = int(result.get("exit_code") if result.get("exit_code") is not None else result.get("returncode") or 0)
+    if not result.get("success", False) and returncode == 0:
+        returncode = 1
+    output_dir = Path(result.get("output_dir") or out_dir)
     return {
-        "success": proc.returncode == 0,
-        "returncode": proc.returncode,
-        "cmd": cmd,
-        "out_dir": out_dir,
+        "success": bool(result.get("success", False)),
+        "returncode": returncode,
+        "out_dir": output_dir,
+        "output_dir": str(output_dir),
         "stdout": stdout_str,
         "stderr": stderr_str,
         "guidance_block": guidance_block,
@@ -2482,7 +2522,7 @@ def _format_auto_route_banner(decision) -> str:
 
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
-    """Execute an OmicsClaw skill via subprocess (waits until completion)."""
+    """Execute an OmicsClaw skill via the shared runner contract."""
     skill_key = args.get("skill", "auto")
     mode = args.get("mode", "demo")
     query = args.get("query", "")
@@ -2633,77 +2673,57 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         unique_suffix=uuid.uuid4().hex[:8],
     )
 
-    # Build command
-    cmd = [get_skill_runner_python(), str(OMICSCLAW_PY), "run"]
-    if skill_key == "pipeline":
-        cmd.append("spatial-pipeline")
-    else:
-        cmd.append(skill_key)
-
-    if mode == "demo":
-        cmd.append("--demo")
-    elif input_path:
-        cmd.extend(["--input", str(input_path)])
-
-    cmd.extend(["--output", str(out_dir)])
-
-    if method:
-        cmd.extend(["--method", method])
-    if data_type:
-        cmd.extend(["--data-type", data_type])
     batch_key = _resolve_requested_batch_key(args)
-    if batch_key:
-        cmd.extend(["--batch-key", batch_key])
 
     skill_info = _lookup_skill_info(skill_key)
-    canonical_skill = skill_info.get("alias", skill_key)
-
-    # Pass n_epochs if user specified
+    canonical_skill = skill_info.get("alias") or skill_key
     n_epochs = args.get("n_epochs")
-    if n_epochs is not None:
-        if canonical_skill == "spatial-domain-identification":
-            cmd.extend(["--epochs", str(int(n_epochs))])
-        else:
-            cmd.extend(["--n-epochs", str(int(n_epochs))])
-
-    cmd.extend(_normalize_extra_args(args.get("extra_args")))
+    extra_args = list(args.get("extra_args") or [])
     if args.get("confirmed_preflight"):
-        cmd.append("--confirmed-preflight")
+        extra_args.append("--confirmed-preflight")
 
     # Build a parameter hint block so the LLM can relay it to the user
-    param_hint = _build_param_hint(skill_key, method, cmd)
+    hint_cmd = ["oc", "run", "spatial-pipeline" if skill_key == "pipeline" else skill_key]
+    if mode == "demo":
+        hint_cmd.append("--demo")
+    elif input_path:
+        hint_cmd.extend(["--input", str(input_path)])
+    hint_cmd.extend(["--output", str(out_dir)])
+    if method:
+        hint_cmd.extend(["--method", method])
+    if data_type:
+        hint_cmd.extend(["--data-type", data_type])
+    if batch_key:
+        hint_cmd.extend(["--batch-key", batch_key])
+    if n_epochs is not None:
+        if canonical_skill == "spatial-domain-identification":
+            hint_cmd.extend(["--epochs", str(int(n_epochs))])
+        else:
+            hint_cmd.extend(["--n-epochs", str(int(n_epochs))])
+    hint_cmd.extend(_normalize_extra_args(extra_args))
+    param_hint = _build_param_hint(skill_key, method, hint_cmd)
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        # Log start for deep learning methods
         is_dl = method.lower() in DEEP_LEARNING_METHODS
         if is_dl:
             logger.info(f"Starting {skill_key} with {method} (no timeout, may take 10-60 minutes)")
 
-        async def _read_stream(stream, *, label: str) -> str:
-            if stream is None:
-                return ""
-            chunks: list[str] = []
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                text = line.decode(errors="replace")
-                chunks.append(text)
-                stripped = text.rstrip()
-                if stripped:
-                    logger.info("[%s] %s", label, stripped)
-            return "".join(chunks)
-
-        stdout_task = asyncio.create_task(_read_stream(proc.stdout, label=f"{skill_key}:stdout"))
-        stderr_task = asyncio.create_task(_read_stream(proc.stderr, label=f"{skill_key}:stderr"))
-        await proc.wait()
-        stdout_str, stderr_str = await asyncio.gather(stdout_task, stderr_task)
+        runner_result = await _run_skill_via_shared_runner(
+            skill_key=skill_key,
+            input_path=input_path,
+            session_path=session_path,
+            mode=mode,
+            method=method,
+            data_type=data_type,
+            batch_key=batch_key,
+            n_epochs=n_epochs,
+            extra_args=extra_args,
+            out_dir=out_dir,
+        )
+        out_dir = Path(runner_result.get("out_dir") or out_dir)
+        stdout_str = str(runner_result.get("stdout") or "")
+        stderr_str = str(runner_result.get("stderr") or "")
+        returncode = int(runner_result.get("returncode") or 0)
     except Exception as e:
         import traceback as _tb
         # Clean up empty output directory on crash
@@ -2711,7 +2731,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             shutil.rmtree(out_dir, ignore_errors=True)
         return f"{skill_key} crashed:\n{_tb.format_exc()[-1500:]}"
 
-    if proc.returncode != 0:
+    if returncode != 0:
         payloads = extract_user_guidance_payloads(stderr_str)
         payload_prefix = "\n".join(format_user_guidance_payload(payload) for payload in payloads if isinstance(payload, dict))
         guidance_block = render_guidance_block(
@@ -2734,9 +2754,9 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
         if guidance_block and "preflight check failed" in err.lower():
             return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + guidance_block
         if guidance_block:
-            rendered = guidance_block + f"\n\n---\n{skill_key} failed (exit {proc.returncode}):\n{err}"
+            rendered = guidance_block + f"\n\n---\n{skill_key} failed (exit {returncode}):\n{err}"
             return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + rendered
-        plain = f"{skill_key} failed (exit {proc.returncode}):\n{err}"
+        plain = f"{skill_key} failed (exit {returncode}):\n{err}"
         return auto_route_banner + (payload_prefix + "\n" if payload_prefix else "") + plain
 
     # Collect report + figures from output directory

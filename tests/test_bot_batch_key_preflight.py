@@ -10,7 +10,11 @@ import pytest
 from anndata import AnnData
 
 if "openai" not in sys.modules:
-    sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object, APIError=Exception)
+    sys.modules["openai"] = types.SimpleNamespace(
+        AsyncOpenAI=object,
+        APIError=Exception,
+        OpenAIError=Exception,
+    )
 
 import bot.core as core
 

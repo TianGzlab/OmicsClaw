@@ -13,28 +13,28 @@ metadata:
     domain: singlecell
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🧪"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: pandas
-        bins: []
+    - kind: pip
+      package: pandas
+      bins: []
     trigger_keywords:
-      - scRNA FASTQ QC
-      - FastQC single-cell
-      - MultiQC single-cell
-      - raw read quality
-      - read-level QC
+    - scRNA FASTQ QC
+    - FastQC single-cell
+    - MultiQC single-cell
+    - raw read quality
+    - read-level QC
     allowed_extra_flags:
-      - "--max-reads"
-      - "--read2"
-      - "--sample"
-      - "--threads"
-      - "--r-enhanced"
+    - "--max-reads"
+    - "--read2"
+    - "--sample"
+    - "--threads"
+    - "--r-enhanced"
     legacy_aliases: [scrna-fastq-qc]
     saves_h5ad: false
     requires_preprocessed: false
@@ -45,9 +45,13 @@ metadata:
         defaults: {threads: 4, max_reads: 20000}
         requires: ["fastq_or_fastq_dir"]
         tips:
-          - "--threads: forwarded to FastQC when installed, and used for external tool runs."
-          - "--sample: choose one sample when the input directory contains multiple FASTQ groups."
-          - "--max-reads: Python fallback only samples this many reads per FASTQ for lightweight local summaries."
+        - "--threads: forwarded to FastQC when installed, and used for external tool
+          runs."
+        - "--sample: choose one sample when the input directory contains multiple
+          FASTQ groups."
+        - "--max-reads: Python fallback only samples this many reads per FASTQ for
+          lightweight local summaries."
+    script: sc_fastq_qc.py
 ---
 
 # 🧪 Single-Cell FASTQ QC
@@ -75,7 +79,7 @@ RNA-seq raw-read quality assessment before alignment and counting.
    when external tools are unavailable.
 4. **Standard output layer**: writes canonical figures, summary tables, and
    figure-ready exports under `figure_data/`.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
+5. **Reproducibility layer**: writes native `report.md`, `result.json`,
    and rerun commands.
 
 ## Input Formats
@@ -100,7 +104,7 @@ RNA-seq raw-read quality assessment before alignment and counting.
 3. **Run method**: execute FastQC and MultiQC when available, and always build a lightweight sampled summary.
 4. **Persist results**: write summary tables and figure-ready CSVs.
 5. **Visualize / summarize**: generate per-base quality and sample-level overview plots.
-6. **Report**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle.
+6. **Report**: write native `report.md`, `result.json`, and the reproducibility bundle; the shared runner adds `README.md`.
 
 ## CLI Reference
 

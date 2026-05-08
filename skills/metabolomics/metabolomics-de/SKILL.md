@@ -12,12 +12,16 @@ metadata:
   omicsclaw:
     domain: metabolomics
     emoji: "📈"
-    trigger_keywords: [metabolomics differential, PLS-DA, volcano plot, biomarker, OPLS-DA]
+    trigger_keywords: [metabolomics differential, PLS-DA, volcano plot, biomarker,
+      OPLS-DA]
     allowed_extra_flags:
-      - "--group-a-prefix"
-      - "--group-b-prefix"
+    - "--group-a-prefix"
+    - "--group-b-prefix"
     legacy_aliases: [met-diff]
     saves_h5ad: false
+    script: met_diff.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📈 Metabolomics Differential Analysis

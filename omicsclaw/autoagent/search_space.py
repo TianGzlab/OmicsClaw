@@ -206,7 +206,10 @@ def build_method_surface(
     - which parameters must be supplied as fixed runtime inputs
     - which methods are genuinely launchable from the optimize UI
     """
-    params: list[str] = param_hints.get("params", [])
+    params: list[str] = [
+        *param_hints.get("params", []),
+        *param_hints.get("advanced_params", []),
+    ]
     defaults: dict[str, Any] = param_hints.get("defaults", {})
     tips_list: list[str] = param_hints.get("tips", [])
     tip_map = _parse_tips(tips_list)

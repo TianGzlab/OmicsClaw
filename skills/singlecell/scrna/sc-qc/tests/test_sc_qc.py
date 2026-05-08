@@ -29,7 +29,7 @@ def test_demo_mode(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert (tmp_output / "README.md").exists()
+    assert not (tmp_output / "README.md").exists()
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
     assert (tmp_output / "figures" / "manifest.json").exists()
@@ -40,7 +40,7 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "tables" / "qc_metrics_per_cell.csv").exists()
     assert (tmp_output / "tables" / "barcode_rank_curve.csv").exists()
     assert (tmp_output / "tables" / "qc_metric_correlations.csv").exists()
-    assert (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
+    assert not (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
     assert (tmp_output / "reproducibility" / "requirements.txt").exists()
     assert not (tmp_output / "reproducibility" / "environment.txt").exists()
     assert "sc-standardize-input" not in result.stderr
@@ -117,7 +117,7 @@ def test_prefers_counts_layer_and_gene_symbol_column(tmp_output, tmp_path):
     np.testing.assert_allclose(np.asarray(qc_h5ad.layers["counts"]), counts)
     assert qc_h5ad.raw is not None
     np.testing.assert_allclose(np.asarray(qc_h5ad.raw.X), counts)
-    assert qc_h5ad.uns["omicsclaw_input_contract"]["standardized"] is True
+    assert bool(qc_h5ad.uns["omicsclaw_input_contract"]["standardized"]) is True
     assert qc_h5ad.uns["omicsclaw_matrix_contract"]["X"] == "raw_counts"
     assert qc_h5ad.uns["omicsclaw_matrix_contract"]["raw"] == "raw_counts_snapshot"
 

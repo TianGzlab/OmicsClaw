@@ -1,7 +1,8 @@
 ---
 name: bulkrna-enrichment
 description: >-
-  Pathway enrichment analysis for bulk RNA-seq — ORA and GSEA via GSEApy, with built-in hypergeometric fallback.
+  Pathway enrichment analysis for bulk RNA-seq — ORA and GSEA via GSEApy, with built-in
+  hypergeometric fallback.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -10,14 +11,18 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🛤️"
-    trigger_keywords: [bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment, KEGG, bulk pathway]
+    trigger_keywords: [bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment,
+      KEGG, bulk pathway]
     allowed_extra_flags:
-      - "--gene-set-file"
-      - "--lfc-cutoff"
-      - "--method"
-      - "--padj-cutoff"
+    - "--gene-set-file"
+    - "--lfc-cutoff"
+    - "--method"
+    - "--padj-cutoff"
     legacy_aliases: [bulk-enrichment]
     saves_h5ad: false
+    script: bulkrna_enrichment.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Pathway Enrichment

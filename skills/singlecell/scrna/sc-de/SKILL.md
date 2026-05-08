@@ -12,19 +12,19 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--celltype-key"
-      - "--group1"
-      - "--group2"
-      - "--groupby"
-      - "--log2fc-threshold"
-      - "--logreg-solver"
-      - "--method"
-      - "--n-top-genes"
-      - "--padj-threshold"
-      - "--pseudobulk-min-cells"
-      - "--pseudobulk-min-counts"
-      - "--sample-key"
-      - "--r-enhanced"
+    - "--celltype-key"
+    - "--group1"
+    - "--group2"
+    - "--groupby"
+    - "--log2fc-threshold"
+    - "--logreg-solver"
+    - "--method"
+    - "--n-top-genes"
+    - "--padj-threshold"
+    - "--pseudobulk-min-cells"
+    - "--pseudobulk-min-counts"
+    - "--sample-key"
+    - "--r-enhanced"
     param_hints:
       wilcoxon:
         priority: "groupby -> n_top_genes -> group1/group2"
@@ -33,7 +33,7 @@ metadata:
         defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
-          - "--method wilcoxon: Default exploratory marker-ranking path."
+        - "--method wilcoxon: Default exploratory marker-ranking path."
       t-test:
         priority: "groupby -> n_top_genes -> group1/group2"
         params: ["groupby", "n_top_genes", "group1", "group2"]
@@ -41,15 +41,17 @@ metadata:
         defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
-          - "--method t-test: Parametric alternative to Wilcoxon."
+        - "--method t-test: Parametric alternative to Wilcoxon."
       logreg:
         priority: "groupby -> logreg_solver -> n_top_genes"
         params: ["groupby", "logreg_solver", "n_top_genes"]
         advanced_params: ["padj_threshold", "log2fc_threshold"]
-        defaults: {groupby: "leiden", logreg_solver: "lbfgs", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
+        defaults: {groupby: "leiden", logreg_solver: "lbfgs", n_top_genes: 10, padj_threshold: 0.05,
+          log2fc_threshold: 1.0}
         requires: ["preprocessed_anndata", "scanpy"]
         tips:
-          - "--method logreg: Logistic-regression ranking, useful when you want genes that best separate one group from the others."
+        - "--method logreg: Logistic-regression ranking, useful when you want genes
+          that best separate one group from the others."
       mast:
         priority: "groupby -> group1/group2 -> n_top_genes"
         params: ["groupby", "group1", "group2", "n_top_genes"]
@@ -57,16 +59,18 @@ metadata:
         defaults: {groupby: "leiden", n_top_genes: 10, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["R_MAST_stack", "log_normalized_expression_matrix"]
         tips:
-          - "--method mast: R-backed MAST hurdle-model path on log-normalized expression."
+        - "--method mast: R-backed MAST hurdle-model path on log-normalized expression."
       deseq2_r:
         priority: "groupby -> group1/group2 -> sample_key -> celltype_key"
         params: ["groupby", "group1", "group2", "sample_key", "celltype_key"]
-        advanced_params: ["pseudobulk_min_cells", "pseudobulk_min_counts", "padj_threshold", "log2fc_threshold"]
-        defaults: {sample_key: "sample_id", celltype_key: "cell_type", pseudobulk_min_cells: 10, pseudobulk_min_counts: 1000, padj_threshold: 0.05, log2fc_threshold: 1.0}
+        advanced_params: ["pseudobulk_min_cells", "pseudobulk_min_counts", "padj_threshold",
+          "log2fc_threshold"]
+        defaults: {sample_key: "sample_id", celltype_key: "cell_type", pseudobulk_min_cells: 10,
+          pseudobulk_min_counts: 1000, padj_threshold: 0.05, log2fc_threshold: 1.0}
         requires: ["raw_counts_or_raw_layer", "biological_replicates", "R_DESeq2_stack"]
         tips:
-          - "--method deseq2_r: Sample-aware pseudobulk path."
-          - "--group1 and --group2 are required for the DESeq2 path."
+        - "--method deseq2_r: Sample-aware pseudobulk path."
+        - "--group1 and --group2 are required for the DESeq2 path."
     saves_h5ad: true
     requires_preprocessed: true
     requires:
@@ -77,15 +81,16 @@ metadata:
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - differential expression
-      - marker genes
-      - de analysis
-      - wilcoxon
-      - pseudo-bulk
+    - differential expression
+    - marker genes
+    - de analysis
+    - wilcoxon
+    - pseudo-bulk
+    script: sc_de.py
 ---
 
 # Single-Cell Differential Expression
@@ -238,7 +243,7 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 - `mast` requires an R environment with `MAST`, `SingleCellExperiment`, and `zellkonverter`.
 - `deseq2_r` requires an R environment with `DESeq2`, `SingleCellExperiment`, and `zellkonverter`.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 
 ## Safety And Guardrails
 

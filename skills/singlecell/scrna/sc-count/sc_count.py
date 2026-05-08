@@ -34,7 +34,6 @@ from omicsclaw.common.report import (
     load_result_json,
     write_repro_requirements,
     write_result_json,
-    write_standard_run_artifacts,
 )
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
@@ -629,15 +628,6 @@ def main() -> None:
     ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
-    write_standard_run_artifacts(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Generate single-cell count matrices with Cell Ranger, STARsolo, SimpleAF / Alevin-fry, or kb-python and export a downstream-ready standardized AnnData.",
-        result_payload=result_payload,
-        preferred_method=summary["method"],
-        script_path=Path(__file__).resolve(),
-        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-    )
 
     # --- stdout guidance ---
     if diagnostics["degenerate"]:

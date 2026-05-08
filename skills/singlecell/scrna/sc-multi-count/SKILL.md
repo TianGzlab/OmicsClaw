@@ -12,25 +12,25 @@ metadata:
     domain: singlecell
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🧬"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - merge count matrices
-      - multi-sample count
-      - aggregate samples
-      - combine count outputs
-      - cellranger aggr alternative
+    - merge count matrices
+    - multi-sample count
+    - aggregate samples
+    - combine count outputs
+    - cellranger aggr alternative
     allowed_extra_flags:
-      - "--sample-id"
-      - "--r-enhanced"
+    - "--sample-id"
+    - "--r-enhanced"
     legacy_aliases: [scrna-multi-count]
     saves_h5ad: true
     requires_preprocessed: false
@@ -41,8 +41,11 @@ metadata:
         defaults: {}
         requires: ["two_or_more_processed_h5ad"]
         tips:
-          - "--input: repeat for each sample, e.g. --input s1/processed.h5ad --input s2/processed.h5ad"
-          - "--sample-id: optional labels; if omitted, derived from directory or file names."
+        - "--input: repeat for each sample, e.g. --input s1/processed.h5ad --input
+          s2/processed.h5ad"
+        - "--sample-id: optional labels; if omitted, derived from directory or file
+          names."
+    script: sc_multi_count.py
 ---
 
 # Multi-Sample Count Merge
@@ -68,7 +71,7 @@ single-sample scRNA-seq count matrices into one downstream-ready AnnData.
    `layers['counts']` and OmicsClaw input-contract metadata.
 4. **Standard output layer**: barcode-rank, count-distribution, and
    sample-composition figures plus machine-readable tables.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
+5. **Reproducibility layer**: writes native `report.md`, `result.json`,
    and rerun commands.
 
 ## Input Formats

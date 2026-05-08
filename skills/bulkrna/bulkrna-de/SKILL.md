@@ -1,7 +1,8 @@
 ---
 name: bulkrna-de
 description: >-
-  Differential expression analysis via PyDESeq2 with Welch's t-test fallback — volcano plots, MA plots, p-value diagnostics.
+  Differential expression analysis via PyDESeq2 with Welch's t-test fallback — volcano
+  plots, MA plots, p-value diagnostics.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,15 +12,19 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🔬"
-    trigger_keywords: [differential expression, DE analysis, DESeq2, volcano plot, fold change, DEGs, bulk DE]
+    trigger_keywords: [differential expression, DE analysis, DESeq2, volcano plot,
+      fold change, DEGs, bulk DE]
     allowed_extra_flags:
-      - "--control-prefix"
-      - "--lfc-cutoff"
-      - "--method"
-      - "--padj-cutoff"
-      - "--treat-prefix"
+    - "--control-prefix"
+    - "--lfc-cutoff"
+    - "--method"
+    - "--padj-cutoff"
+    - "--treat-prefix"
     legacy_aliases: [bulk-de]
     saves_h5ad: false
+    script: bulkrna_de.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Differential Expression

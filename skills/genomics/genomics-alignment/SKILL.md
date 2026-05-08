@@ -13,9 +13,12 @@ metadata:
     emoji: "🎯"
     trigger_keywords: [alignment, BWA, Bowtie2, Minimap2, map reads]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [align]
     saves_h5ad: false
+    script: genomics_alignment.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🎯 Genomics Read Alignment

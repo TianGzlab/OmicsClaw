@@ -11,12 +11,16 @@ metadata:
   omicsclaw:
     domain: genomics
     emoji: "🧬"
-    trigger_keywords: [epigenomics, ATAC-seq, ChIP-seq, peak calling, MACS, motif, chromatin]
+    trigger_keywords: [epigenomics, ATAC-seq, ChIP-seq, peak calling, MACS, motif,
+      chromatin]
     allowed_extra_flags:
-      - "--assay"
-      - "--method"
+    - "--assay"
+    - "--method"
     legacy_aliases: [epigenomics]
     saves_h5ad: false
+    script: genomics_epigenomics.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🧬 Epigenomics Analysis

@@ -1,7 +1,8 @@
 ---
 name: bulkrna-read-qc
 description: >-
-  FASTQ quality assessment for bulk RNA-seq — Phred scores, GC content, adapter detection, read length distribution, Q20/Q30 rates.
+  FASTQ quality assessment for bulk RNA-seq — Phred scores, GC content, adapter detection,
+  read length distribution, Q20/Q30 rates.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,10 +12,14 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🔍"
-    trigger_keywords: [FASTQ QC, read quality, Phred, FastQC, adapter, GC content, Q20, Q30]
+    trigger_keywords: [FASTQ QC, read quality, Phred, FastQC, adapter, GC content,
+      Q20, Q30]
     allowed_extra_flags: []
     legacy_aliases: [bulk-fastqc]
     saves_h5ad: false
+    script: bulkrna_read_qc.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq FASTQ Quality Assessment

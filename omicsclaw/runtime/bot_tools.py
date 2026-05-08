@@ -41,7 +41,7 @@ def _resolve_domain_briefing(context: BotToolContext) -> str:
         from omicsclaw.core.domain_briefing import build_domain_briefing
         return build_domain_briefing(
             lead_in=(
-                "OmicsClaw dispatches multi-omics analysis across 7 domains. "
+                "OmicsClaw dispatches multi-omics analysis across 8 domains. "
                 "Each line below summarizes a domain and lists a few representative skills."
             ),
             trailing_hint=(
@@ -260,7 +260,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             name="list_skills_in_domain",
             description=(
                 "Lazy-load the full skill list for one OmicsClaw domain. "
-                "Call this ONLY when the 7-domain briefing in the `omicsclaw` tool "
+                "Call this ONLY when the 8-domain briefing in the `omicsclaw` tool "
                 "description isn't enough to pick a skill, or when the user asks "
                 "'what tools do you have for <domain>?'. The result is a markdown "
                 "block with each skill's alias, one-line description, and trigger "
@@ -275,7 +275,7 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                         "enum": [
                             "spatial", "singlecell", "genomics",
                             "proteomics", "metabolomics", "bulkrna",
-                            "orchestrator",
+                            "orchestrator", "literature",
                         ],
                         "description": "Which domain's skills to list.",
                     },

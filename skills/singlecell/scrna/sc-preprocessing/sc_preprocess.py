@@ -26,7 +26,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -860,35 +859,6 @@ def write_reproducibility(output_dir: Path, public_params: dict, input_file: str
     (repro_dir / "requirements.txt").write_text("\n".join(env_lines) + ("\n" if env_lines else ""), encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    """Emit wrapper-level README and notebook exports when dependencies allow."""
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell preprocessing with Scanpy, Seurat LogNormalize, or Seurat SCTransform workflows.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Single-cell preprocessing with Scanpy, Seurat LogNormalize, or Seurat SCTransform workflows.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", DEFAULT_METHOD),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
 
 
 def get_demo_data():
@@ -1154,7 +1124,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

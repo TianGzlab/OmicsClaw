@@ -1,7 +1,8 @@
 ---
 name: metabolomics-quantification
 description: >-
-  Feature quantification, missing value imputation, and normalization for metabolomics data.
+  Feature quantification, missing value imputation, and normalization for metabolomics
+  data.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -10,12 +11,16 @@ metadata:
   omicsclaw:
     domain: metabolomics
     emoji: "📏"
-    trigger_keywords: [metabolomics quantification, imputation, feature quantification, missing values]
+    trigger_keywords: [metabolomics quantification, imputation, feature quantification,
+      missing values]
     allowed_extra_flags:
-      - "--impute"
-      - "--normalize"
+    - "--impute"
+    - "--normalize"
     legacy_aliases: [met-quantify]
     saves_h5ad: false
+    script: met_quantify.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📏 Metabolomics Quantification

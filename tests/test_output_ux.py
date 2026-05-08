@@ -85,13 +85,14 @@ def test_build_output_dir_name_includes_method_when_available():
 
 def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path):
     oc = _load_omicsclaw_script()
+    from omicsclaw.core import skill_runner
 
     fake_script = tmp_path / "fake_skill.py"
     fake_script.write_text("print('fake')\n", encoding="utf-8")
 
-    monkeypatch.setattr(oc, "DEFAULT_OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
     monkeypatch.setattr(
-        oc,
+        skill_runner,
         "SKILLS",
         {
             "fake-skill": {
@@ -103,22 +104,33 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
             }
         },
     )
-    monkeypatch.setattr(oc, "DOMAINS", {"demo": {"name": "Demo"}})
+    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
-    def fake_run(cmd, capture_output, text, cwd, env):
-        out_dir = Path(cmd[cmd.index("--output") + 1])
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "report.md").write_text("# Fake report\n", encoding="utf-8")
-        payload = {
-            "skill": "fake-skill-internal",
-            "completed_at": "2026-03-29T06:26:34+00:00",
-            "summary": {"method": "cellcharter", "score": 0.98},
-            "data": {"params": {"method": "cellcharter", "resolution": 1.0}},
-        }
-        (out_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+    class FakePopen:
+        pid = 999999
+        returncode = 0
 
-    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+        def __init__(self, cmd, stdout, stderr, text, cwd, env, start_new_session):
+            self.cmd = cmd
+            out_dir = Path(cmd[cmd.index("--output") + 1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "report.md").write_text("# Fake report\n", encoding="utf-8")
+            payload = {
+                "skill": "fake-skill-internal",
+                "completed_at": "2026-03-29T06:26:34+00:00",
+                "summary": {"method": "cellcharter", "score": 0.98},
+                "data": {"params": {"method": "cellcharter", "resolution": 1.0}},
+            }
+            (out_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        def wait(self):
+            return self.returncode
+
+        def communicate(self):
+            return "ok\n", ""
+
+    monkeypatch.setattr(skill_runner.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(skill_runner.time, "sleep", lambda _seconds: None)
 
     result = oc.run_skill("fake-skill", demo=True, extra_args=["--method", "cellcharter"])
 

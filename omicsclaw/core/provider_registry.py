@@ -368,6 +368,12 @@ def normalize_model_for_provider(
     if candidate_model in DEPRECATED_PROVIDER_DEFAULT_MODELS.get(provider_key, frozenset()):
         return current_default_model, provider_key
 
+    for other_name, deprecated_models in DEPRECATED_PROVIDER_DEFAULT_MODELS.items():
+        if other_name == provider_key:
+            continue
+        if candidate_model in deprecated_models:
+            return current_default_model, other_name
+
     for other_name, (_, other_default_model, _) in provider_presets.items():
         if other_name == provider_key:
             continue

@@ -13,37 +13,38 @@ metadata:
     script: omics_skill_builder.py
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🛠"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: pyyaml
-        bins: []
+    - kind: pip
+      package: pyyaml
+      bins: []
     trigger_keywords:
-      - create omicsclaw skill
-      - add new skill
-      - scaffold skill
-      - create reusable workflow
-      - 新增 skill
-      - 创建 skill
-      - 封装成 skill
+    - create omicsclaw skill
+    - add new skill
+    - scaffold skill
+    - create reusable workflow
+    - 新增 skill
+    - 创建 skill
+    - 封装成 skill
     allowed_extra_flags:
-      - "--request"
-      - "--skill-name"
-      - "--domain"
-      - "--summary"
-      - "--trigger-keyword"
-      - "--method"
-      - "--input-format"
-      - "--output-item"
-      - "--no-tests"
+    - "--request"
+    - "--skill-name"
+    - "--domain"
+    - "--summary"
+    - "--trigger-keyword"
+    - "--method"
+    - "--input-format"
+    - "--output-item"
+    - "--no-tests"
     legacy_aliases: []
     saves_h5ad: false
     requires_preprocessed: false
+    param_hints: {}
 ---
 
 # 🛠 Omics Skill Builder

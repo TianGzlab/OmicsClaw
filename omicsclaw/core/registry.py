@@ -182,8 +182,13 @@ class OmicsRegistry:
 
             domain_name = domain_path.name
 
+            candidate_skill_dirs = []
+            if self._looks_like_skill_dir(domain_path):
+                candidate_skill_dirs.append(domain_path)
+            candidate_skill_dirs.extend(self._iter_skill_dirs(domain_path))
+
             # Scan skill directories (handles subdomain nesting)
-            for skill_path in self._iter_skill_dirs(domain_path):
+            for skill_path in candidate_skill_dirs:
                 skill_dir_name = skill_path.name
                 lazy = self.lazy_skills.get(skill_dir_name)
 
@@ -208,10 +213,9 @@ class OmicsRegistry:
                 )
 
                 # Build skill_info from SKILL.md metadata (primary source)
-                if lazy and lazy.description:
+                has_skill_metadata = bool(lazy and lazy.description)
+                if has_skill_metadata:
                     legacy_aliases = list(lazy.legacy_aliases or [])
-                    if hardcoded_alias and hardcoded_alias != canonical_alias:
-                        legacy_aliases.append(hardcoded_alias)
                     md_info: dict[str, Any] = {
                         "domain": lazy.domain or domain_name,
                         "alias": canonical_alias,
@@ -251,6 +255,8 @@ class OmicsRegistry:
                         if key == "alias":
                             continue
                         if key == "legacy_aliases":
+                            if has_skill_metadata:
+                                continue
                             merged_aliases = list(md_info.get("legacy_aliases", []))
                             merged_aliases.extend(value or [])
                             if hardcoded_alias and hardcoded_alias != canonical_alias:
@@ -272,6 +278,13 @@ class OmicsRegistry:
                     md_info,
                     skill_dir_name=skill_dir_name,
                 )
+                if (
+                    has_skill_metadata
+                    and hardcoded_alias
+                    and hardcoded_alias != canonical_alias
+                    and hardcoded_alias not in self.skills
+                ):
+                    self.skills[hardcoded_alias] = md_info
 
 
         # Fallback: register any hardcoded skills not discovered on filesystem
@@ -296,7 +309,12 @@ class OmicsRegistry:
             if not domain_path.is_dir() or domain_path.name.startswith(('.', '__')):
                 continue
 
-            for skill_path in self._iter_skill_dirs(domain_path):
+            candidate_skill_dirs = []
+            if self._looks_like_skill_dir(domain_path):
+                candidate_skill_dirs.append(domain_path)
+            candidate_skill_dirs.extend(self._iter_skill_dirs(domain_path))
+
+            for skill_path in candidate_skill_dirs:
                 skill_md = skill_path / "SKILL.md"
                 if not skill_md.exists():
                     continue
@@ -500,6 +518,16 @@ _HARDCODED_DOMAINS = {
             "Not an analysis — dispatches to the right domain skill."
         ),
         "representative_skills": ["orchestrator", "omics-skill-builder"],
+    },
+    "literature": {
+        "name": "Literature",
+        "primary_data_types": ["pdf", "txt", "doi", "url"],
+        "skill_count": 1,
+        "summary": (
+            "Scientific literature parsing for PDFs, URLs, DOIs, PubMed IDs, "
+            "GEO accession extraction, and dataset metadata handoff."
+        ),
+        "representative_skills": ["literature"],
     },
 }
 

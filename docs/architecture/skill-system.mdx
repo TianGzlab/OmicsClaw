@@ -1,6 +1,6 @@
 ---
 title: "技能系统 - Skill 是怎么组织和发现的"
-description: "OmicsClaw 的 88 个 skill 按 7 个领域分目录，每个 skill 由 SKILL.md（方法论 + 元数据）+ 入口脚本组成。Registry 启动时扫描全量 skill，orchestrator 据此路由。"
+description: "OmicsClaw 的 89 个 skill 按 8 个领域分目录，每个 skill 由 SKILL.md（方法论 + 元数据）+ 入口脚本组成。Registry 启动时扫描全量 skill，orchestrator 据此路由。"
 keywords: ["skill system", "SKILL.md", "registry", "OmicsClaw 技能"]
 og:image: "/docs/images/og-cover.png"
 ---
@@ -31,7 +31,8 @@ skills/
 ├── proteomics/    （8 个）
 ├── metabolomics/  （8 个）
 ├── bulkrna/       （13 个）
-└── orchestrator/  （2 个）
+├── orchestrator/  （2 个）
+└── literature/    （1 个）
 ```
 
 ## SKILL.md 的契约
@@ -44,7 +45,7 @@ skills/
 | `description` | 一句话摘要，供 LLM 路由打分 | `"Load matrix-level spatial transcriptomics data ... downstream-ready AnnData"` |
 | `version` | 版本追踪 | `0.5.0` |
 | `tags` | 关键词列表，辅助搜索 | `[spatial, preprocessing, QC, normalization, HVG, leiden, umap]` |
-| `metadata.omicsclaw.domain` | 所属领域键（7 选 1） | `spatial` |
+| `metadata.omicsclaw.domain` | 所属领域键（当前 8 个 domain） | `spatial` |
 | `metadata.omicsclaw.allowed_extra_flags` | bot 可传入的 CLI flags | `["--leiden-resolution", "--min-genes", "--n-top-hvg", ...]` |
 | `metadata.omicsclaw.param_hints` | autoagent 调参搜索空间 + bot 参数预览 | `scanpy_standard: {priority: "tissue → min_genes/max_mt_pct/..."}` |
 | `metadata.omicsclaw.legacy_aliases` | 旧名称，路由仍可命中 | `[preprocess]` |
@@ -108,4 +109,4 @@ skills/
 
 - [整体架构](/docs/architecture/overview)
 - [编排器](/docs/architecture/orchestrator)
-- [七大组学：空间转录组](/docs/domains/spatial)
+- [多组学领域：空间转录组](/docs/domains/spatial)

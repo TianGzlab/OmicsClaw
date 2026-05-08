@@ -44,7 +44,6 @@ from omicsclaw.common.report import (
     write_repro_requirements,
     write_result_json,
     write_replot_hint,
-    write_standard_run_artifacts,
 )
 from omicsclaw.common.checksums import sha256_file
 from skills.singlecell._lib.adata_utils import (
@@ -887,15 +886,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="RNA velocity analysis for single-cell RNA-seq with scVelo.",
-        result_payload=result_payload,
-        preferred_method=summary.get("mode", "stochastic"),
-        script_path=Path(__file__).resolve(),
-        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-    )
 
     # R Enhanced figures (only when --r-enhanced flag is set)
     # NOTE: Must run BEFORE the os.killpg self-termination at module level.

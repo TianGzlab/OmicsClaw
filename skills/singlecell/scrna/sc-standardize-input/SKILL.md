@@ -11,17 +11,19 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--species"
-      - "--r-enhanced"
+    - "--species"
+    - "--r-enhanced"
     saves_h5ad: true
     requires_preprocessed: false
     emoji: "🧱"
     trigger_keywords:
-      - standardize AnnData
-      - fix scRNA input
-      - canonicalize single-cell input
-      - prepare AnnData
-      - input contract
+    - standardize AnnData
+    - fix scRNA input
+    - canonicalize single-cell input
+    - prepare AnnData
+    - input contract
+    script: sc_standardize_input.py
+    param_hints: {}
 ---
 
 # Single-Cell Input Standardization

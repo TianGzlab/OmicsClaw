@@ -1,7 +1,8 @@
 ---
 name: bulkrna-survival
 description: >-
-  Survival analysis for bulk RNA-seq — Kaplan-Meier curves, Cox proportional hazards, expression-based patient stratification.
+  Survival analysis for bulk RNA-seq — Kaplan-Meier curves, Cox proportional hazards,
+  expression-based patient stratification.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,13 +12,17 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "📈"
-    trigger_keywords: [survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome]
+    trigger_keywords: [survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall
+        survival, clinical outcome]
     allowed_extra_flags:
-      - "--clinical"
-      - "--cutoff-method"
-      - "--genes"
+    - "--clinical"
+    - "--cutoff-method"
+    - "--genes"
     legacy_aliases: [bulk-survival]
     saves_h5ad: false
+    script: bulkrna_survival.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Survival Analysis

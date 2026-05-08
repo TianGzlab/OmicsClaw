@@ -2,7 +2,8 @@
 name: genomics-assembly
 description: >-
   Genome assembly quality assessment: N50/N90/L50/L90 (QUAST-compatible),
-  GC content, contig length distribution, completeness estimation. Wraps SPAdes, Megahit, Flye, Canu.
+  GC content, contig length distribution, completeness estimation. Wraps SPAdes, Megahit,
+  Flye, Canu.
 version: 0.2.0
 author: OmicsClaw
 license: MIT
@@ -13,9 +14,12 @@ metadata:
     emoji: "🧬"
     trigger_keywords: [genome assembly, de novo, SPAdes, Megahit, Flye, Canu]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [assemble]
     saves_h5ad: false
+    script: genome_assembly.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🧬 Genome Assembly

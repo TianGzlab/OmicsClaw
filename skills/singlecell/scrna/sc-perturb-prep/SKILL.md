@@ -12,23 +12,25 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--mapping-file"
-      - "--barcode-column"
-      - "--sgrna-column"
-      - "--target-column"
-      - "--sep"
-      - "--delimiter"
-      - "--gene-position"
-      - "--pert-key"
-      - "--sgrna-key"
-      - "--target-key"
-      - "--control-patterns"
-      - "--control-label"
-      - "--keep-multi-guide"
-      - "--species"
-      - "--r-enhanced"
+    - "--mapping-file"
+    - "--barcode-column"
+    - "--sgrna-column"
+    - "--target-column"
+    - "--sep"
+    - "--delimiter"
+    - "--gene-position"
+    - "--pert-key"
+    - "--sgrna-key"
+    - "--target-key"
+    - "--control-patterns"
+    - "--control-label"
+    - "--keep-multi-guide"
+    - "--species"
+    - "--r-enhanced"
     saves_h5ad: true
     requires_preprocessed: false
+    script: sc_perturb_prep.py
+    param_hints: {}
 ---
 
 # Single-Cell Perturbation Preparation

@@ -11,53 +11,66 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--gene-sets"
-      - "--gene-set-db"
-      - "--species"
-      - "--groupby"
-      - "--top-pathways"
-      - "--aucell-auc-max-rank"
-      - "--score-genes-ctrl-size"
-      - "--score-genes-n-bins"
-      - "--aucell-py-auc-threshold"
-      - "--r-enhanced"
+    - "--method"
+    - "--gene-sets"
+    - "--gene-set-db"
+    - "--species"
+    - "--groupby"
+    - "--top-pathways"
+    - "--aucell-auc-max-rank"
+    - "--score-genes-ctrl-size"
+    - "--score-genes-n-bins"
+    - "--aucell-py-auc-threshold"
+    - "--r-enhanced"
     param_hints:
       aucell_r:
         priority: "gene_sets/gene_set_db -> groupby -> aucell_auc_max_rank -> top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_auc_max_rank", "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20, aucell_auc_max_rank: "5% of detected features when omitted", species: "human"}
+        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_auc_max_rank",
+          "top_pathways"]
+        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
+          aucell_auc_max_rank: "5% of detected features when omitted", species: "human"}
         requires: ["AUCell", "GSEABase", "local_gmt_or_gene_set_db"]
         tips:
-          - "--method aucell_r: Official AUCell Bioconductor scoring path."
-          - "--aucell-auc-max-rank: AUCell ranking depth override; leave unset to use the wrapper's 5% feature default."
+        - "--method aucell_r: Official AUCell Bioconductor scoring path."
+        - "--aucell-auc-max-rank: AUCell ranking depth override; leave unset to use
+          the wrapper's 5% feature default."
       score_genes_py:
-        priority: "gene_sets/gene_set_db -> groupby -> score_genes_ctrl_size -> score_genes_n_bins -> top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "score_genes_ctrl_size", "score_genes_n_bins", "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20, score_genes_ctrl_size: 50, score_genes_n_bins: 25, species: "human"}
+        priority: "gene_sets/gene_set_db -> groupby -> score_genes_ctrl_size -> score_genes_n_bins
+          -> top_pathways"
+        params: ["gene_sets", "gene_set_db", "species", "groupby", "score_genes_ctrl_size",
+          "score_genes_n_bins", "top_pathways"]
+        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
+          score_genes_ctrl_size: 50, score_genes_n_bins: 25, species: "human"}
         requires: ["normalized_expression", "local_gmt_or_gene_set_db"]
         tips:
-          - "--method score_genes_py: lightweight Python module-score path for normalized adata.X."
-          - "--score-genes-ctrl-size: number of control genes used for background subtraction."
-          - "--score-genes-n-bins: expression binning granularity for control-gene matching."
+        - "--method score_genes_py: lightweight Python module-score path for normalized
+          adata.X."
+        - "--score-genes-ctrl-size: number of control genes used for background subtraction."
+        - "--score-genes-n-bins: expression binning granularity for control-gene matching."
       aucell_py:
-        priority: "gene_sets/gene_set_db -> groupby -> aucell_py_auc_threshold -> top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_py_auc_threshold", "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20, aucell_py_auc_threshold: 0.05, species: "human"}
+        priority: "gene_sets/gene_set_db -> groupby -> aucell_py_auc_threshold ->
+          top_pathways"
+        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_py_auc_threshold",
+          "top_pathways"]
+        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
+          aucell_py_auc_threshold: 0.05, species: "human"}
         requires: ["local_gmt_or_gene_set_db"]
         tips:
-          - "--method aucell_py: pure Python AUCell implementation -- no R required."
-          - "--aucell-py-auc-threshold: fraction of ranked genome for AUC calculation (default 0.05)."
-          - "AUCell ranks genes per cell by expression, then measures gene-set recovery curve AUC."
+        - "--method aucell_py: pure Python AUCell implementation -- no R required."
+        - "--aucell-py-auc-threshold: fraction of ranked genome for AUC calculation
+          (default 0.05)."
+        - "AUCell ranks genes per cell by expression, then measures gene-set recovery
+          curve AUC."
     saves_h5ad: true
     requires_preprocessed: false
     trigger_keywords:
-      - pathway score
-      - pathway scoring
-      - gene set score
-      - module score
-      - pathway activity
-      - signature score
+    - pathway score
+    - pathway scoring
+    - gene set score
+    - module score
+    - pathway activity
+    - signature score
+    script: sc_pathway_scoring.py
 ---
 
 # Single-Cell Pathway Scoring

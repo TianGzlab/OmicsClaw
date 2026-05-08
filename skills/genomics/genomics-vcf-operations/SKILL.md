@@ -15,6 +15,9 @@ metadata:
     allowed_extra_flags: []
     legacy_aliases: [vcf-ops]
     saves_h5ad: false
+    script: genomics_vcf_operations.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📋 VCF Operations

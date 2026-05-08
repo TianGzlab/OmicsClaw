@@ -14,45 +14,51 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--leiden-resolution"
-      - "--method"
-      - "--min-cells"
-      - "--min-peaks"
-      - "--n-lsi"
-      - "--n-neighbors"
-      - "--n-top-peaks"
-      - "--tfidf-scale-factor"
+    - "--leiden-resolution"
+    - "--method"
+    - "--min-cells"
+    - "--min-peaks"
+    - "--n-lsi"
+    - "--n-neighbors"
+    - "--n-top-peaks"
+    - "--tfidf-scale-factor"
     param_hints:
       tfidf_lsi:
         priority: "min_peaks/min_cells -> n_top_peaks -> n_lsi/n_neighbors -> leiden_resolution"
-        params: ["min_peaks", "min_cells", "n_top_peaks", "tfidf_scale_factor", "n_lsi", "n_neighbors", "leiden_resolution"]
-        defaults: {min_peaks: 200, min_cells: 5, n_top_peaks: 10000, tfidf_scale_factor: 10000.0, n_lsi: 30, n_neighbors: 15, leiden_resolution: 0.8}
+        params: ["min_peaks", "min_cells", "n_top_peaks", "tfidf_scale_factor", "n_lsi",
+          "n_neighbors", "leiden_resolution"]
+        defaults: {min_peaks: 200, min_cells: 5, n_top_peaks: 10000, tfidf_scale_factor: 10000.0,
+          n_lsi: 30, n_neighbors: 15, leiden_resolution: 0.8}
         requires: ["count_like_peak_matrix_in_X", "scanpy", "sklearn"]
         tips:
-          - "--min-peaks / --min-cells: Wrapper-level sparsity filters for low-information cells and rarely observed peaks."
-          - "--n-top-peaks: Wrapper-level feature-budget control using globally most accessible peaks after filtering."
-          - "--n-lsi / --n-neighbors / --leiden-resolution: Main structure-learning controls for latent space, graph locality, and clustering granularity."
+        - "--min-peaks / --min-cells: Wrapper-level sparsity filters for low-information
+          cells and rarely observed peaks."
+        - "--n-top-peaks: Wrapper-level feature-budget control using globally most
+          accessible peaks after filtering."
+        - "--n-lsi / --n-neighbors / --leiden-resolution: Main structure-learning
+          controls for latent space, graph locality, and clustering granularity."
     legacy_aliases: [scatac-preprocess]
     saves_h5ad: true
     requires_preprocessed: false
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🧬"
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - scATAC preprocessing
-      - single-cell ATAC preprocessing
-      - ATAC TF-IDF LSI
-      - chromatin accessibility clustering
-      - scATAC UMAP Leiden
+    - scATAC preprocessing
+    - single-cell ATAC preprocessing
+    - ATAC TF-IDF LSI
+    - chromatin accessibility clustering
+    - scATAC UMAP Leiden
+    script: scatac_preprocessing.py
 ---
 
 # 🧬 scATAC Preprocessing
@@ -304,7 +310,7 @@ output_directory/
 
 - Normal `oc run` execution and direct script execution should produce the same
   core reproducibility bundle whenever the wrapper succeeds.
-- `analysis_notebook.ipynb` should be written on normal successful runs when
+- `analysis_notebook.ipynb` is runner-owned and should be generated when
   the shared notebook export helper is available.
 - Figures should be rendered from persisted `adata` / table state, not only from
   transient local variables created during preprocessing.

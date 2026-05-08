@@ -12,8 +12,8 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--species"
-      - "--r-enhanced"
+    - "--species"
+    - "--r-enhanced"
     param_hints:
       qc_metrics:
         priority: "species"
@@ -21,32 +21,35 @@ metadata:
         defaults: {species: "human"}
         requires: ["count_like_matrix_in_layers.raw_or_X", "gene_symbols_with_species_prefix_convention"]
         tips:
-          - "--species: Wrapper-level control for mitochondrial / ribosomal gene-prefix detection; use `human` for `MT-` / `RP[SL]`, `mouse` for `mt-` / `Rp[sl]`."
-          - "Current OmicsClaw implementation exposes one public QC path, `qc_metrics`; it always computes ribosomal percentage in addition to mitochondrial percentage."
-          - "This skill is diagnostic-only and does not remove cells or genes."
+        - "--species: Wrapper-level control for mitochondrial / ribosomal gene-prefix
+          detection; use `human` for `MT-` / `RP[SL]`, `mouse` for `mt-` / `Rp[sl]`."
+        - "Current OmicsClaw implementation exposes one public QC path, `qc_metrics`;
+          it always computes ribosomal percentage in addition to mitochondrial percentage."
+        - "This skill is diagnostic-only and does not remove cells or genes."
     saves_h5ad: true
     requires_preprocessed: false
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "📊"
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - scRNA QC
-      - single-cell QC
-      - quality control
-      - mitochondrial percentage
-      - ribosomal percentage
-      - QC violin
-      - QC scatter
-      - n genes per cell
+    - scRNA QC
+    - single-cell QC
+    - quality control
+    - mitochondrial percentage
+    - ribosomal percentage
+    - QC violin
+    - QC scatter
+    - n genes per cell
+    script: sc_qc.py
 ---
 
 # 📊 Single-Cell QC

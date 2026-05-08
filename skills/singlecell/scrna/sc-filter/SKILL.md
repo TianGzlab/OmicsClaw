@@ -12,24 +12,26 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--max-counts"
-      - "--max-genes"
-      - "--max-mt-percent"
-      - "--min-cells"
-      - "--min-counts"
-      - "--min-genes"
-      - "--tissue"
-      - "--r-enhanced"
+    - "--max-counts"
+    - "--max-genes"
+    - "--max-mt-percent"
+    - "--min-cells"
+    - "--min-counts"
+    - "--min-genes"
+    - "--tissue"
+    - "--r-enhanced"
     param_hints:
       threshold_filtering:
         priority: "tissue -> min_genes/max_mt_percent -> min_cells -> count caps"
-        params: ["tissue", "min_genes", "max_genes", "min_counts", "max_counts", "max_mt_percent", "min_cells"]
+        params: ["tissue", "min_genes", "max_genes", "min_counts", "max_counts", "max_mt_percent",
+          "min_cells"]
         defaults: {min_genes: 200, max_mt_percent: 20.0, min_cells: 3}
         requires: ["qc_metrics_in_obs_or_count_like_matrix_in_X", "scanpy"]
         tips:
-          - "--tissue: Wrapper-level preset that overrides the default QC thresholds with OmicsClaw tissue heuristics."
-          - "--min-genes / --max-mt-percent: Main cell-retention controls."
-          - "--min-cells: Gene-level retention threshold applied after cell filtering."
+        - "--tissue: Wrapper-level preset that overrides the default QC thresholds
+          with OmicsClaw tissue heuristics."
+        - "--min-genes / --max-mt-percent: Main cell-retention controls."
+        - "--min-cells: Gene-level retention threshold applied after cell filtering."
     saves_h5ad: true
     requires_preprocessed: false
     requires:
@@ -41,12 +43,13 @@ metadata:
     os: [macos, linux]
     install: []
     trigger_keywords:
-      - filter cells
-      - cell filtering
-      - gene filtering
-      - remove low quality
-      - qc filtering
-      - tissue-specific thresholds
+    - filter cells
+    - cell filtering
+    - gene filtering
+    - remove low quality
+    - qc filtering
+    - tissue-specific thresholds
+    script: sc_filter.py
 ---
 
 # Single-Cell Filter
@@ -178,7 +181,7 @@ The current wrapper writes a standard recipe-driven gallery:
 
 ## Current Limitations
 
-- This wrapper now writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - Threshold presets are OmicsClaw wrapper defaults, not upstream standard recommendations for every tissue.
 
 ## Safety And Guardrails

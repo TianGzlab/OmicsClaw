@@ -1,4 +1,4 @@
-"""Contract tests for the default ``SubprocessExecutor`` wiring used by /jobs."""
+"""Contract tests for the default ``SkillRunnerExecutor`` wiring used by /jobs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from omicsclaw.execution.executors import (
     JobContext,
-    SubprocessExecutor,
+    SkillRunnerExecutor,
     build_default_executor,
     default_command_factory,
 )
@@ -118,12 +118,57 @@ def test_default_command_factory_ignores_none_param_values(tmp_path: Path) -> No
     assert argv[argv.index("--threshold") + 1] == "0.5"
 
 
-def test_build_default_executor_returns_subprocess_executor() -> None:
+def test_build_default_executor_returns_skill_runner_executor() -> None:
     executor = build_default_executor()
-    assert isinstance(executor, SubprocessExecutor)
+    assert isinstance(executor, SkillRunnerExecutor)
 
 
-def test_jobs_router_default_executor_is_subprocess_executor() -> None:
+def test_jobs_router_default_executor_is_skill_runner_executor() -> None:
     from omicsclaw.remote.routers import jobs as jobs_module
 
-    assert isinstance(jobs_module._DEFAULT_EXECUTOR, SubprocessExecutor)
+    assert isinstance(jobs_module._DEFAULT_EXECUTOR, SkillRunnerExecutor)
+
+
+def test_skill_runner_executor_maps_job_context_to_run_skill(monkeypatch, tmp_path: Path) -> None:
+    import asyncio
+
+    from omicsclaw.execution.executors import JobOutcome
+    from omicsclaw.execution.executors.default import SkillRunnerExecutor
+
+    captured: dict[str, object] = {}
+
+    def fake_run_skill(skill, **kwargs):
+        captured["skill"] = skill
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "exit_code": 0,
+            "stdout": "runner-ok",
+            "stderr": "",
+            "output_dir": str(tmp_path / "artifacts"),
+        }
+
+    monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
+
+    ctx = _make_ctx(
+        tmp_path=tmp_path,
+        skill="literature",
+        inputs={"demo": True},
+        params={"method": "metadata-extraction", "unused": None},
+    )
+    outcome = asyncio.run(SkillRunnerExecutor().run(ctx))
+
+    assert isinstance(outcome, JobOutcome)
+    assert outcome.exit_code == 0
+    assert outcome.error is None
+    assert "runner-ok" in outcome.stdout_text
+    assert ctx.stdout_log.read_text(encoding="utf-8") == "runner-ok"
+    assert captured == {
+        "skill": "literature",
+        "input_path": None,
+        "input_paths": None,
+        "output_dir": str(ctx.artifact_root),
+        "demo": True,
+        "session_path": None,
+        "extra_args": ["--method", "metadata-extraction"],
+    }

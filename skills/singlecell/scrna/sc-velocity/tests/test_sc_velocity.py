@@ -47,7 +47,7 @@ def test_demo_mode(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert (tmp_output / "README.md").exists()
+    assert not (tmp_output / "README.md").exists()
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
     assert (tmp_output / "processed.h5ad").exists()

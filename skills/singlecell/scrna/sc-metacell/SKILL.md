@@ -11,15 +11,17 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--use-rep"
-      - "--n-metacells"
-      - "--celltype-key"
-      - "--min-iter"
-      - "--max-iter"
-      - "--r-enhanced"
+    - "--method"
+    - "--use-rep"
+    - "--n-metacells"
+    - "--celltype-key"
+    - "--min-iter"
+    - "--max-iter"
+    - "--r-enhanced"
     saves_h5ad: true
     requires_preprocessed: true
+    script: sc_metacell.py
+    param_hints: {}
 ---
 
 # Single-Cell Metacell

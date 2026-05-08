@@ -198,8 +198,9 @@ def list_registered_skill_names() -> list[str]:
 
 
 def run_skill_command(command: SkillRunCommandArgs) -> dict[str, Any]:
-    omicsclaw_script = load_omicsclaw_script()
-    return omicsclaw_script.run_skill(
+    from omicsclaw.core.skill_runner import run_skill
+
+    return run_skill(
         command.skill,
         input_path=command.input_path,
         output_dir=command.output_dir,

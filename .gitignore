@@ -137,6 +137,13 @@ nature_new_insight2/
 # Knowledge base and workspace (local only)
 workspace/
 
+# Graphify cache and large generated graph data. Keep human-readable reports
+# trackable, but leave local AST caches, absolute-path manifests, and heavy
+# visualization/data files out of review.
+graphify-out/**
+!graphify-out/
+!graphify-out/GRAPH_REPORT.md
+
 # Local references / external tools (user-downloaded, large)
 resources/
 

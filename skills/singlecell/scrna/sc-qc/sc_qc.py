@@ -34,7 +34,6 @@ from omicsclaw.common.report import (
     generate_report_header,
     generate_report_footer,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -540,35 +539,6 @@ def write_reproducibility(output_dir: Path, public_params: dict, input_file: str
     (repro_dir / "requirements.txt").write_text(requirements_text, encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    """Emit wrapper-level README and notebook exports when dependencies allow."""
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Quality control metric calculation and diagnostic visualization for scRNA-seq data.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", QC_METHOD),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Quality control metric calculation and diagnostic visualization for scRNA-seq data.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", QC_METHOD),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
 
 
 def generate_demo_data(species: str = "human"):
@@ -784,7 +754,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # Final summary
     print(f"\n{'='*60}")
