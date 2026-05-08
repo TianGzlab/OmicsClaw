@@ -1,66 +1,74 @@
 ---
 name: sc-clustering
 description: >-
-  Build the neighbor graph, run a low-dimensional embedding, and cluster single-cell data from a
+  Build the neighbor graph, run a low-dimensional embedding, and cluster single-cell
+  data from a
   normalized scRNA AnnData object.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, clustering, embedding, umap, tsne, diffmap, phate, leiden, louvain]
+tags: [singlecell, scrna, clustering, embedding, umap, tsne, diffmap, phate, leiden,
+  louvain]
 metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--embedding-method"
-      - "--cluster-method"
-      - "--use-rep"
-      - "--n-neighbors"
-      - "--n-pcs"
-      - "--resolution"
-      - "--umap-min-dist"
-      - "--umap-spread"
-      - "--tsne-perplexity"
-      - "--tsne-metric"
-      - "--diffmap-n-comps"
-      - "--phate-knn"
-      - "--phate-decay"
-      - "--r-enhanced"
+    - "--embedding-method"
+    - "--cluster-method"
+    - "--use-rep"
+    - "--n-neighbors"
+    - "--n-pcs"
+    - "--resolution"
+    - "--umap-min-dist"
+    - "--umap-spread"
+    - "--tsne-perplexity"
+    - "--tsne-metric"
+    - "--diffmap-n-comps"
+    - "--phate-knn"
+    - "--phate-decay"
+    - "--r-enhanced"
     param_hints:
       umap:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
         params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
         advanced_params: ["n_pcs", "umap_min_dist", "umap_spread"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, umap_min_dist: 0.5, umap_spread: 1.0}
+        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0,
+          umap_min_dist: 0.5, umap_spread: 1.0}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
-          - "`use_rep` is the most important selector if multiple embeddings are available."
+        - "`use_rep` is the most important selector if multiple embeddings are available."
       tsne:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
         params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
         advanced_params: ["n_pcs", "tsne_perplexity", "tsne_metric"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, tsne_perplexity: 30.0, tsne_metric: euclidean}
+        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0,
+          tsne_perplexity: 30.0, tsne_metric: euclidean}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
-          - "`tsne` is mainly for visualization; the clustering still comes from the neighbor graph."
+        - "`tsne` is mainly for visualization; the clustering still comes from the
+          neighbor graph."
       diffmap:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
         params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
         advanced_params: ["n_pcs", "diffmap_n_comps"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, diffmap_n_comps: 15}
+        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0,
+          diffmap_n_comps: 15}
         requires: ["normalized_expression", "embedding_or_pca"]
         tips:
-          - "`diffmap` often emphasizes continuous trajectories more than compact clusters."
+        - "`diffmap` often emphasizes continuous trajectories more than compact clusters."
       phate:
         priority: "use_rep -> cluster_method -> n_neighbors/resolution"
         params: ["use_rep", "cluster_method", "n_neighbors", "resolution"]
         advanced_params: ["n_pcs", "phate_knn", "phate_decay"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, phate_knn: 15, phate_decay: 40}
+        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0,
+          phate_knn: 15, phate_decay: 40}
         requires: ["normalized_expression", "embedding_or_pca", "phate"]
         tips:
-          - "`phate` is optional and may need extra installation before use."
+        - "`phate` is optional and may need extra installation before use."
     saves_h5ad: true
     requires_preprocessed: true
     legacy_aliases: [sc-dimred-cluster]
+    script: sc_cluster.py
 ---
 
 # Single-Cell Clustering

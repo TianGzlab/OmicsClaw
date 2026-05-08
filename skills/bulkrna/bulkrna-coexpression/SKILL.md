@@ -1,7 +1,8 @@
 ---
 name: bulkrna-coexpression
 description: >-
-  WGCNA-style weighted gene co-expression network analysis — module detection, soft thresholding, hub genes.
+  WGCNA-style weighted gene co-expression network analysis — module detection, soft
+  thresholding, hub genes.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -10,12 +11,16 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🕸️"
-    trigger_keywords: [coexpression, WGCNA, gene network, co-expression modules, hub genes, gene modules]
+    trigger_keywords: [coexpression, WGCNA, gene network, co-expression modules, hub
+        genes, gene modules]
     allowed_extra_flags:
-      - "--min-module-size"
-      - "--power"
+    - "--min-module-size"
+    - "--power"
     legacy_aliases: [bulk-wgcna]
     saves_h5ad: false
+    script: bulkrna_coexpression.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Co-expression Network Analysis

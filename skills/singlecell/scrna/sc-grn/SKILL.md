@@ -12,24 +12,27 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--allow-simplified-grn"
-      - "--cluster-key"
-      - "--db"
-      - "--motif"
-      - "--n-jobs"
-      - "--n-top-targets"
-      - "--seed"
-      - "--tf-list"
-      - "--r-enhanced"
+    - "--allow-simplified-grn"
+    - "--cluster-key"
+    - "--db"
+    - "--motif"
+    - "--n-jobs"
+    - "--n-top-targets"
+    - "--seed"
+    - "--tf-list"
+    - "--r-enhanced"
     param_hints:
       pyscenic_workflow:
         priority: "tf_list -> db -> motif -> n_top_targets -> n_jobs"
         params: ["tf_list", "db", "motif", "n_top_targets", "n_jobs", "seed"]
         defaults: {n_top_targets: 50, n_jobs: 4, seed: 42}
-        requires: ["preprocessed_anndata", "pyscenic", "arboreto", "TF_list", "cisTarget_database", "motif_annotations"]
+        requires: ["preprocessed_anndata", "pyscenic", "arboreto", "TF_list", "cisTarget_database",
+          "motif_annotations"]
         tips:
-          - "--tf-list, --db, and --motif are the core external resources for a full pySCENIC run."
-          - "--n-top-targets: Wrapper-level export cap for the top targets retained per regulon."
+        - "--tf-list, --db, and --motif are the core external resources for a full
+          pySCENIC run."
+        - "--n-top-targets: Wrapper-level export cap for the top targets retained
+          per regulon."
     saves_h5ad: true
     requires_preprocessed: true
     requires:
@@ -40,17 +43,18 @@ metadata:
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: pyscenic
-        bins: []
+    - kind: pip
+      package: pyscenic
+      bins: []
     trigger_keywords:
-      - grn
-      - gene regulatory
-      - scenic
-      - pyscenic
-      - regulon
-      - transcription factor
-      - grnboost
+    - grn
+    - gene regulatory
+    - scenic
+    - pyscenic
+    - regulon
+    - transcription factor
+    - grnboost
+    script: sc_grn.py
 ---
 
 # Single-Cell GRN
@@ -169,7 +173,7 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 ## Current Limitations
 
 - This skill depends on external pySCENIC resources and does not download them automatically.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 
 ## Safety And Guardrails
 

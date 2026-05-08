@@ -14,6 +14,9 @@ metadata:
     trigger_keywords: [sequencing QC, FastQC, read quality, adapter trimming, fastp]
     allowed_extra_flags: []
     saves_h5ad: false
+    script: genomics_qc.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📊 Genomics QC

@@ -13,9 +13,12 @@ metadata:
     emoji: "🧱"
     trigger_keywords: [structural variant, SV, Manta, Delly, Lumpy, Sniffles]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [sv-detect]
     saves_h5ad: false
+    script: sv_detection.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🧱 Structural Variant Detection

@@ -1,7 +1,9 @@
 ---
 name: bulkrna-trajblend
 description: >-
-  Bulk-to-single-cell trajectory interpolation — uses VAE and GNN to bridge bulk RNA-seq with single-cell reference data, generating synthetic single-cell profiles and embedding bulk samples into developmental trajectories.
+  Bulk-to-single-cell trajectory interpolation — uses VAE and GNN to bridge bulk RNA-seq
+  with single-cell reference data, generating synthetic single-cell profiles and embedding
+  bulk samples into developmental trajectories.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -12,12 +14,16 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🔀"
-    trigger_keywords: [trajblend, trajectory, bulk to single cell, interpolation, bulk2single, VAE, deconvolution trajectory]
+    trigger_keywords: [trajblend, trajectory, bulk to single cell, interpolation,
+      bulk2single, VAE, deconvolution trajectory]
     allowed_extra_flags:
-      - "--n-epochs"
-      - "--reference"
+    - "--n-epochs"
+    - "--reference"
     legacy_aliases: [bulk-trajblend]
     saves_h5ad: false
+    script: bulkrna_trajblend.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Trajectory Interpolation (BulkTrajBlend-style)

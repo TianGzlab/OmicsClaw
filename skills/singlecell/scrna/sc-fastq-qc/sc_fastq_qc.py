@@ -25,7 +25,6 @@ from omicsclaw.common.report import (
     load_result_json,
     write_repro_requirements,
     write_result_json,
-    write_standard_run_artifacts,
 )
 from skills.singlecell._lib.upstream import (
     choose_fastq_sample,
@@ -446,15 +445,6 @@ def main() -> None:
     ]
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, "")
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
-    write_standard_run_artifacts(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Quality control for raw single-cell FASTQ files using FastQC and MultiQC when available.",
-        result_payload=result_payload,
-        preferred_method="fastqc",
-        script_path=Path(__file__).resolve(),
-        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-    )
 
     # --- stdout guidance ---
     if diagnostics["degenerate"]:

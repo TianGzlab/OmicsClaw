@@ -71,3 +71,16 @@ def test_registry_loaded():
     )
     assert len(registry.skills) > 0
     assert len(registry.domains) > 0
+
+
+def test_registry_loads_top_level_literature_skill():
+    registry.load_all()
+
+    assert "literature" in registry.skills
+    assert "omics-skill-builder" in registry.skills
+    assert registry.skills["literature"]["alias"] == "literature"
+    assert registry.skills["literature"]["domain"] == "literature"
+    assert Path(registry.skills["literature"]["script"]).name == "literature_parse.py"
+    assert ("literature", registry.skills["literature"]) in registry.iter_primary_skills()
+    assert registry.domains["literature"]["skill_count"] == 1
+    assert len(registry.iter_primary_skills()) == 89

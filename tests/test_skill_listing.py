@@ -72,11 +72,11 @@ def test_tool_spec_is_registered_for_bot():
     assert "list_skills_in_domain" in names
 
     spec = next(s for s in specs if s.name == "list_skills_in_domain")
-    # Domain enum must match the briefing's 7 known domains.
+    # Domain enum must match the briefing's known domains.
     enum = spec.parameters["properties"]["domain"]["enum"]
     assert set(enum) == {
         "spatial", "singlecell", "genomics",
-        "proteomics", "metabolomics", "bulkrna", "orchestrator",
+        "proteomics", "metabolomics", "bulkrna", "orchestrator", "literature",
     }
     assert spec.parameters["required"] == ["domain"]
     # Lazy read-only lookup: safe to call in parallel, doesn't mutate workspace.
@@ -91,6 +91,15 @@ def test_omicsclaw_tool_description_mentions_list_skills_tool():
     )
     omics = next(s for s in specs if s.name == "omicsclaw")
     assert "list_skills_in_domain" in omics.description
+    assert "across 8 domains" in omics.description
+    assert "**literature**" in omics.description
+
+
+def test_list_skills_in_domain_literature_returns_registered_skill():
+    out = list_skills_in_domain("literature")
+    assert "literature" in out
+    assert "1/1 skills" in out
+    assert "`literature`" in out
 
 
 # ---------------------------------------------------------------------------

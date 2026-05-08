@@ -12,68 +12,82 @@ metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
-      - "--read1"
-      - "--read2"
-      - "--ids"
-      - "--ref-map"
-      - "--ref-annotation"
-      - "--exp-name"
-      - "--platform"
-      - "--threads"
-      - "--contaminant-index"
-      - "--min-length-qual-trimming"
-      - "--min-quality-trimming"
-      - "--demultiplexing-mismatches"
-      - "--demultiplexing-kmer"
-      - "--umi-allowed-mismatches"
-      - "--umi-start-position"
-      - "--umi-end-position"
-      - "--disable-clipping"
-      - "--compute-saturation"
-      - "--htseq-no-ambiguous"
-      - "--transcriptome"
-      - "--star-two-pass-mode"
-      - "--stpipeline-repo"
-      - "--bin-path"
+    - "--read1"
+    - "--read2"
+    - "--ids"
+    - "--ref-map"
+    - "--ref-annotation"
+    - "--exp-name"
+    - "--platform"
+    - "--threads"
+    - "--contaminant-index"
+    - "--min-length-qual-trimming"
+    - "--min-quality-trimming"
+    - "--demultiplexing-mismatches"
+    - "--demultiplexing-kmer"
+    - "--umi-allowed-mismatches"
+    - "--umi-start-position"
+    - "--umi-end-position"
+    - "--disable-clipping"
+    - "--compute-saturation"
+    - "--htseq-no-ambiguous"
+    - "--transcriptome"
+    - "--star-two-pass-mode"
+    - "--stpipeline-repo"
+    - "--bin-path"
     param_hints:
       st_pipeline:
-        priority: "ids/ref_map/ref_annotation -> threads -> compute_saturation -> demultiplexing -> umi"
-        params: ["read1", "read2", "ids", "ref_map", "ref_annotation", "exp_name", "platform", "threads", "compute_saturation", "demultiplexing_mismatches", "demultiplexing_kmer", "umi_allowed_mismatches", "umi_start_position", "umi_end_position"]
-        defaults: {platform: "visium", threads: 4, min_length_qual_trimming: 20, min_quality_trimming: 20, demultiplexing_mismatches: 2, demultiplexing_kmer: 6, umi_allowed_mismatches: 1, umi_start_position: 18, umi_end_position: 27}
-        requires: ["FASTQ_R1", "FASTQ_R2", "ids_barcode_coordinate_file", "STAR_index_directory", "GTF_annotation_or_transcriptome"]
+        priority: "ids/ref_map/ref_annotation -> threads -> compute_saturation ->
+          demultiplexing -> umi"
+        params: ["read1", "read2", "ids", "ref_map", "ref_annotation", "exp_name",
+          "platform", "threads", "compute_saturation", "demultiplexing_mismatches",
+          "demultiplexing_kmer", "umi_allowed_mismatches", "umi_start_position", "umi_end_position"]
+        defaults: {platform: "visium", threads: 4, min_length_qual_trimming: 20, min_quality_trimming: 20,
+          demultiplexing_mismatches: 2, demultiplexing_kmer: 6, umi_allowed_mismatches: 1,
+          umi_start_position: 18, umi_end_position: 27}
+        requires: ["FASTQ_R1", "FASTQ_R2", "ids_barcode_coordinate_file", "STAR_index_directory",
+          "GTF_annotation_or_transcriptome"]
         tips:
-          - "--ids / --ref-map / --ref-annotation: these are the core run contract; matrix-level inputs should go to spatial-preprocess instead."
-          - "--platform: a reporting label only; it does not switch upstream algorithms, but it keeps the output contract explicit for Visium, Slide-seq, or custom barcode-coordinate assays."
-          - "--compute-saturation: enables the upstream saturation curve so the OmicsClaw report can summarize sequencing depth sufficiency."
-          - "--demultiplexing-mismatches / --demultiplexing-kmer: first tuning knobs when barcode recovery is unexpectedly low."
-          - "--umi-allowed-mismatches / --umi-start-position / --umi-end-position: only adjust if the kit layout differs from the standard assumptions or the upstream protocol documents it."
+        - "--ids / --ref-map / --ref-annotation: these are the core run contract;
+          matrix-level inputs should go to spatial-preprocess instead."
+        - "--platform: a reporting label only; it does not switch upstream algorithms,
+          but it keeps the output contract explicit for Visium, Slide-seq, or custom
+          barcode-coordinate assays."
+        - "--compute-saturation: enables the upstream saturation curve so the OmicsClaw
+          report can summarize sequencing depth sufficiency."
+        - "--demultiplexing-mismatches / --demultiplexing-kmer: first tuning knobs
+          when barcode recovery is unexpectedly low."
+        - "--umi-allowed-mismatches / --umi-start-position / --umi-end-position: only
+          adjust if the kit layout differs from the standard assumptions or the upstream
+          protocol documents it."
     legacy_aliases: [spatial-raw-fastq-processing, spatial-st-pipeline]
     saves_h5ad: true
     requires_preprocessed: false
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🧬"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: anndata
-        bins: []
+    - kind: pip
+      package: anndata
+      bins: []
     trigger_keywords:
-      - spatial raw processing
-      - raw spatial fastq
-      - spatial fastq
-      - st_pipeline
-      - st pipeline
-      - barcode coordinates
-      - ids file
-      - visium raw fastq
-      - slide-seq fastq
-      - slideseq fastq
-      - upstream spatial processing
+    - spatial raw processing
+    - raw spatial fastq
+    - spatial fastq
+    - st_pipeline
+    - st pipeline
+    - barcode coordinates
+    - ids file
+    - visium raw fastq
+    - slide-seq fastq
+    - slideseq fastq
+    - upstream spatial processing
+    script: spatial_raw_processing.py
 ---
 
 # 🧬 Spatial Raw Processing
@@ -133,7 +147,7 @@ Important boundary:
 4. **Persist upstream artifacts**: keep the counts TSV, BED, logs, stdout/stderr, and run metadata under `upstream/st_pipeline/`.
 5. **Convert to AnnData**: write `raw_counts.h5ad` with raw counts in `X`, `layers["counts"]`, `raw`, and `obsm["spatial"]`.
 6. **Visualize / summarize**: generate the canonical gallery, export tables, and write `figure_data/`.
-7. **Report / handoff**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle, then point the user to `spatial-preprocess`.
+7. **Report / handoff**: write native `report.md`, `result.json`, and the reproducibility bundle, then point the user to `spatial-preprocess`; the shared runner adds `README.md`.
 
 ## CLI Reference
 

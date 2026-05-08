@@ -12,10 +12,14 @@ metadata:
   omicsclaw:
     domain: metabolomics
     emoji: "🧪"
-    trigger_keywords: [xcms, metabolomics preprocessing, LC-MS, peak detection, RT alignment]
+    trigger_keywords: [xcms, metabolomics preprocessing, LC-MS, peak detection, RT
+        alignment]
     allowed_extra_flags: []
     legacy_aliases: [xcms-preprocess]
     saves_h5ad: false
+    script: metabolomics_xcms_preprocessing.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🧪 XCMS Metabolomics Preprocessing

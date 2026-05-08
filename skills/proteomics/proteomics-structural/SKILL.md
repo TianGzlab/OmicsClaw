@@ -10,11 +10,15 @@ metadata:
   omicsclaw:
     domain: proteomics
     emoji: "🏗️"
-    trigger_keywords: [structural proteomics, cross-linking MS, XL-MS, XlinkX, pLink, xiSEARCH]
+    trigger_keywords: [structural proteomics, cross-linking MS, XL-MS, XlinkX, pLink,
+      xiSEARCH]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [struct-proteomics]
     saves_h5ad: false
+    script: struct_proteomics.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🏗️ Structural Proteomics

@@ -12,147 +12,187 @@ metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
-      - "--analysis-type"
-      - "--centrality-score"
-      - "--cluster-key"
-      - "--coocc-interval"
-      - "--coocc-n-splits"
-      - "--genes"
-      - "--getis-star"
-      - "--local-moran-geoda-quads"
-      - "--n-top-genes"
-      - "--no-getis-star"
-      - "--no-local-moran-geoda-quads"
-      - "--no-stats-two-tailed"
-      - "--ripley-max-dist"
-      - "--ripley-metric"
-      - "--ripley-mode"
-      - "--ripley-n-neigh"
-      - "--ripley-n-observations"
-      - "--ripley-n-simulations"
-      - "--ripley-n-steps"
-      - "--stats-corr-method"
-      - "--stats-n-neighs"
-      - "--stats-n-perms"
-      - "--stats-n-rings"
-      - "--stats-seed"
-      - "--stats-two-tailed"
+    - "--analysis-type"
+    - "--centrality-score"
+    - "--cluster-key"
+    - "--coocc-interval"
+    - "--coocc-n-splits"
+    - "--genes"
+    - "--getis-star"
+    - "--local-moran-geoda-quads"
+    - "--n-top-genes"
+    - "--no-getis-star"
+    - "--no-local-moran-geoda-quads"
+    - "--no-stats-two-tailed"
+    - "--ripley-max-dist"
+    - "--ripley-metric"
+    - "--ripley-mode"
+    - "--ripley-n-neigh"
+    - "--ripley-n-observations"
+    - "--ripley-n-simulations"
+    - "--ripley-n-steps"
+    - "--stats-corr-method"
+    - "--stats-n-neighs"
+    - "--stats-n-perms"
+    - "--stats-n-rings"
+    - "--stats-seed"
+    - "--stats-two-tailed"
     param_hints:
       neighborhood_enrichment:
         priority: "cluster_key → stats_n_neighs/stats_n_rings → stats_n_perms"
-        params: ["cluster_key", "stats_n_neighs", "stats_n_rings", "stats_n_perms", "stats_seed"]
-        defaults: {cluster_key: "leiden", stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199, stats_seed: 123}
+        params: ["cluster_key", "stats_n_neighs", "stats_n_rings", "stats_n_perms",
+          "stats_seed"]
+        defaults: {cluster_key: "leiden", stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199,
+          stats_seed: 123}
         requires: ["obs.cluster_key", "obsm.spatial"]
         tips:
-          - "`neighborhood_enrichment` permutes cluster labels on the Squidpy spatial graph; it does not read the expression matrix."
-          - "--stats-n-neighs / --stats-n-rings: core `squidpy.gr.spatial_neighbors()` graph controls exposed directly by the wrapper."
-          - "--stats-n-perms / --stats-seed: official `squidpy.gr.nhood_enrichment()` permutation controls."
+        - "`neighborhood_enrichment` permutes cluster labels on the Squidpy spatial
+          graph; it does not read the expression matrix."
+        - "--stats-n-neighs / --stats-n-rings: core `squidpy.gr.spatial_neighbors()`
+          graph controls exposed directly by the wrapper."
+        - "--stats-n-perms / --stats-seed: official `squidpy.gr.nhood_enrichment()`
+          permutation controls."
       ripley:
-        priority: "cluster_key → ripley_mode → ripley_n_simulations/n_observations → ripley_n_steps/max_dist"
-        params: ["cluster_key", "ripley_mode", "ripley_metric", "ripley_n_neigh", "ripley_n_simulations", "ripley_n_observations", "ripley_max_dist", "ripley_n_steps", "stats_seed"]
-        defaults: {cluster_key: "leiden", ripley_mode: "L", ripley_metric: "euclidean", ripley_n_neigh: 2, ripley_n_simulations: 100, ripley_n_observations: 1000, ripley_max_dist: null, ripley_n_steps: 50, stats_seed: 123}
+        priority: "cluster_key → ripley_mode → ripley_n_simulations/n_observations
+          → ripley_n_steps/max_dist"
+        params: ["cluster_key", "ripley_mode", "ripley_metric", "ripley_n_neigh",
+          "ripley_n_simulations", "ripley_n_observations", "ripley_max_dist", "ripley_n_steps",
+          "stats_seed"]
+        defaults: {cluster_key: "leiden", ripley_mode: "L", ripley_metric: "euclidean",
+          ripley_n_neigh: 2, ripley_n_simulations: 100, ripley_n_observations: 1000,
+          ripley_max_dist: null, ripley_n_steps: 50, stats_seed: 123}
         requires: ["obs.cluster_key", "obsm.spatial"]
         tips:
-          - "OmicsClaw defaults to Ripley's `L` because it is usually the most interpretable first pass for clustered vs dispersed spatial patterns."
-          - "--ripley-mode / --ripley-metric / --ripley-n-neigh / --ripley-n-simulations / --ripley-n-observations / --ripley-max-dist / --ripley-n-steps / --stats-seed: official `squidpy.gr.ripley()` controls."
+        - "OmicsClaw defaults to Ripley's `L` because it is usually the most interpretable
+          first pass for clustered vs dispersed spatial patterns."
+        - "--ripley-mode / --ripley-metric / --ripley-n-neigh / --ripley-n-simulations
+          / --ripley-n-observations / --ripley-max-dist / --ripley-n-steps / --stats-seed:
+          official `squidpy.gr.ripley()` controls."
       co_occurrence:
         priority: "cluster_key → coocc_interval → coocc_n_splits"
         params: ["cluster_key", "coocc_interval", "coocc_n_splits"]
         defaults: {cluster_key: "leiden", coocc_interval: 50, coocc_n_splits: null}
         requires: ["obs.cluster_key", "obsm.spatial"]
         tips:
-          - "`co_occurrence` is a distance-binned descriptive proximity summary for cluster pairs; it is not a gene-level association test."
-          - "--coocc-interval / --coocc-n-splits: official `squidpy.gr.co_occurrence()` controls exposed by the wrapper."
+        - "`co_occurrence` is a distance-binned descriptive proximity summary for
+          cluster pairs; it is not a gene-level association test."
+        - "--coocc-interval / --coocc-n-splits: official `squidpy.gr.co_occurrence()`
+          controls exposed by the wrapper."
       moran:
         priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms/stats_corr_method"
-        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms", "stats_corr_method", "stats_two_tailed", "stats_seed"]
-        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199, stats_corr_method: "fdr_bh", stats_two_tailed: false, stats_seed: 123}
+        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms",
+          "stats_corr_method", "stats_two_tailed", "stats_seed"]
+        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199,
+          stats_corr_method: "fdr_bh", stats_two_tailed: false, stats_seed: 123}
         requires: ["X_log_normalized", "obsm.spatial"]
         tips:
-          - "`moran` runs `squidpy.gr.spatial_autocorr(mode='moran')` on the selected genes from `adata.X`."
-          - "--stats-corr-method / --stats-two-tailed / --stats-n-perms / --stats-seed: official `squidpy.gr.spatial_autocorr()` controls."
-          - "If `--genes` is omitted, OmicsClaw uses HVGs first and falls back to high-variance genes."
+        - "`moran` runs `squidpy.gr.spatial_autocorr(mode='moran')` on the selected
+          genes from `adata.X`."
+        - "--stats-corr-method / --stats-two-tailed / --stats-n-perms / --stats-seed:
+          official `squidpy.gr.spatial_autocorr()` controls."
+        - "If `--genes` is omitted, OmicsClaw uses HVGs first and falls back to high-variance
+          genes."
       geary:
         priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms/stats_corr_method"
-        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms", "stats_corr_method", "stats_two_tailed", "stats_seed"]
-        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199, stats_corr_method: "fdr_bh", stats_two_tailed: false, stats_seed: 123}
+        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms",
+          "stats_corr_method", "stats_two_tailed", "stats_seed"]
+        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199,
+          stats_corr_method: "fdr_bh", stats_two_tailed: false, stats_seed: 123}
         requires: ["X_log_normalized", "obsm.spatial"]
         tips:
-          - "`geary` runs the same Squidpy global-autocorrelation engine as Moran but with `mode='geary'`."
-          - "Geary's C is most useful when the user wants an alternative geometry for local dissimilarity emphasis rather than a second independent test family."
+        - "`geary` runs the same Squidpy global-autocorrelation engine as Moran but
+          with `mode='geary'`."
+        - "Geary's C is most useful when the user wants an alternative geometry for
+          local dissimilarity emphasis rather than a second independent test family."
       local_moran:
-        priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms → local_moran_geoda_quads"
-        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms", "local_moran_geoda_quads", "stats_seed"]
-        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199, local_moran_geoda_quads: false, stats_seed: 123}
+        priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms
+          → local_moran_geoda_quads"
+        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms",
+          "local_moran_geoda_quads", "stats_seed"]
+        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199,
+          local_moran_geoda_quads: false, stats_seed: 123}
         requires: ["X_log_normalized", "obsm.spatial"]
         tips:
-          - "`local_moran` uses official `esda.Moran_Local` on the Squidpy-derived spatial graph."
-          - "--local-moran-geoda-quads: official `Moran_Local(..., geoda_quads=...)` switch for quadrant labeling convention."
+        - "`local_moran` uses official `esda.Moran_Local` on the Squidpy-derived spatial
+          graph."
+        - "--local-moran-geoda-quads: official `Moran_Local(..., geoda_quads=...)`
+          switch for quadrant labeling convention."
       getis_ord:
-        priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms → getis_star"
-        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms", "getis_star", "stats_seed"]
-        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199, getis_star: true, stats_seed: 123}
+        priority: "genes/n_top_genes → stats_n_neighs/stats_n_rings → stats_n_perms
+          → getis_star"
+        params: ["genes", "n_top_genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms",
+          "getis_star", "stats_seed"]
+        defaults: {n_top_genes: 20, stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199,
+          getis_star: true, stats_seed: 123}
         requires: ["X_log_normalized", "obsm.spatial"]
         tips:
-          - "`getis_ord` uses official `esda.G_Local` for local hotspot / coldspot scoring."
-          - "--getis-star: official `G_Local(..., star=...)` switch controlling Gi* vs Gi-style neighborhood treatment."
+        - "`getis_ord` uses official `esda.G_Local` for local hotspot / coldspot scoring."
+        - "--getis-star: official `G_Local(..., star=...)` switch controlling Gi*
+          vs Gi-style neighborhood treatment."
       bivariate_moran:
         priority: "genes(exactly two) → stats_n_neighs/stats_n_rings → stats_n_perms"
         params: ["genes", "stats_n_neighs", "stats_n_rings", "stats_n_perms"]
         defaults: {stats_n_neighs: 6, stats_n_rings: 1, stats_n_perms: 199}
         requires: ["X_log_normalized", "obsm.spatial"]
         tips:
-          - "`bivariate_moran` requires exactly two genes and uses official `esda.Moran_BV`."
-          - "Interpret the result as spatial cross-correlation between neighboring expression patterns, not as a ligand-receptor or coexpression model."
+        - "`bivariate_moran` requires exactly two genes and uses official `esda.Moran_BV`."
+        - "Interpret the result as spatial cross-correlation between neighboring expression
+          patterns, not as a ligand-receptor or coexpression model."
       network_properties:
         priority: "stats_n_neighs/stats_n_rings → cluster_key(optional)"
         params: ["cluster_key", "stats_n_neighs", "stats_n_rings"]
         defaults: {cluster_key: "leiden", stats_n_neighs: 6, stats_n_rings: 1}
         requires: ["obsm.spatial"]
         tips:
-          - "`network_properties` summarizes the Squidpy spatial graph with NetworkX; `cluster_key` only affects optional per-cluster aggregation."
-          - "Graph-density differences across runs are only meaningful if the graph-construction parameters are reported alongside them."
+        - "`network_properties` summarizes the Squidpy spatial graph with NetworkX;
+          `cluster_key` only affects optional per-cluster aggregation."
+        - "Graph-density differences across runs are only meaningful if the graph-construction
+          parameters are reported alongside them."
       spatial_centrality:
         priority: "cluster_key → centrality_score → stats_n_neighs/stats_n_rings"
         params: ["cluster_key", "centrality_score", "stats_n_neighs", "stats_n_rings"]
-        defaults: {cluster_key: "leiden", centrality_score: "all", stats_n_neighs: 6, stats_n_rings: 1}
+        defaults: {cluster_key: "leiden", centrality_score: "all", stats_n_neighs: 6,
+          stats_n_rings: 1}
         requires: ["obs.cluster_key", "obsm.spatial"]
         tips:
-          - "`spatial_centrality` wraps official `squidpy.gr.centrality_scores()`."
-          - "Current Squidpy output columns are `degree_centrality`, `average_clustering`, and `closeness_centrality`; OmicsClaw keeps that contract instead of inventing extra score names."
+        - "`spatial_centrality` wraps official `squidpy.gr.centrality_scores()`."
+        - "Current Squidpy output columns are `degree_centrality`, `average_clustering`,
+          and `closeness_centrality`; OmicsClaw keeps that contract instead of inventing
+          extra score names."
     legacy_aliases: [statistics]
     saves_h5ad: true
     requires_preprocessed: true
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "📊"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: squidpy
-        bins: []
-      - kind: pip
-        package: esda
-        bins: []
-      - kind: pip
-        package: libpysal
-        bins: []
-      - kind: pip
-        package: networkx
-        bins: []
+    - kind: pip
+      package: squidpy
+      bins: []
+    - kind: pip
+      package: esda
+      bins: []
+    - kind: pip
+      package: libpysal
+      bins: []
+    - kind: pip
+      package: networkx
+      bins: []
     trigger_keywords:
-      - spatial statistics
-      - Moran
-      - Geary
-      - Ripley
-      - co-occurrence
-      - Getis-Ord
-      - local Moran
-      - centrality
+    - spatial statistics
+    - Moran
+    - Geary
+    - Ripley
+    - co-occurrence
+    - Getis-Ord
+    - local Moran
+    - centrality
+    script: spatial_statistics.py
 ---
 
 # 📊 Spatial Statistics

@@ -12,10 +12,10 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--mode"
-      - "--n-jobs"
-      - "--r-enhanced"
+    - "--method"
+    - "--mode"
+    - "--n-jobs"
+    - "--r-enhanced"
     param_hints:
       scvelo_stochastic:
         priority: "n_jobs"
@@ -23,21 +23,23 @@ metadata:
         defaults: {n_jobs: 4}
         requires: ["scvelo", "layers.spliced", "layers.unspliced"]
         tips:
-          - "--method scvelo_stochastic or --mode stochastic: default velocity path."
+        - "--method scvelo_stochastic or --mode stochastic: default velocity path."
       scvelo_dynamical:
         priority: "n_jobs"
         params: ["n_jobs"]
         defaults: {n_jobs: 4}
         requires: ["scvelo", "layers.spliced", "layers.unspliced"]
         tips:
-          - "--method scvelo_dynamical or --mode dynamical: computes latent time when the fit succeeds."
+        - "--method scvelo_dynamical or --mode dynamical: computes latent time when
+          the fit succeeds."
       scvelo_steady_state:
         priority: "n_jobs"
         params: ["n_jobs"]
         defaults: {n_jobs: 4}
         requires: ["scvelo", "layers.spliced", "layers.unspliced"]
         tips:
-          - "--method scvelo_steady_state or --mode steady_state: steady-state approximation path."
+        - "--method scvelo_steady_state or --mode steady_state: steady-state approximation
+          path."
     saves_h5ad: true
     requires_preprocessed: true
     requires:
@@ -48,17 +50,18 @@ metadata:
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scvelo
-        bins: []
+    - kind: pip
+      package: scvelo
+      bins: []
     trigger_keywords:
-      - rna velocity
-      - velocity
-      - scvelo
-      - spliced unspliced
-      - cellular dynamics
-      - velovi
-      - velocity pseudotime
+    - rna velocity
+    - velocity
+    - scvelo
+    - spliced unspliced
+    - cellular dynamics
+    - velovi
+    - velocity pseudotime
+    script: sc_velocity.py
 ---
 
 # Single-Cell Velocity
@@ -212,7 +215,7 @@ The current wrapper writes a standard Python gallery plus plot-ready tables:
 
 - This wrapper depends on spliced/unspliced layers already being present.
 - The standard OmicsClaw upstream path is now `sc-velocity-prep` -> `sc-velocity`.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 
 ## Safety And Guardrails
 

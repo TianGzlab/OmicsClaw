@@ -12,10 +12,14 @@ metadata:
   omicsclaw:
     domain: proteomics
     emoji: "🔬"
-    trigger_keywords: [PTM, phosphorylation, acetylation, ubiquitination, modification, motif]
+    trigger_keywords: [PTM, phosphorylation, acetylation, ubiquitination, modification,
+      motif]
     allowed_extra_flags: []
     legacy_aliases: [ptm]
     saves_h5ad: false
+    script: proteomics_ptm.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🔬 Post-Translational Modification Analysis

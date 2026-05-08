@@ -1,7 +1,8 @@
 ---
 name: proteomics-identification
 description: >-
-  Database search for peptide/protein identification using MaxQuant, MS-GF+, Comet, or Mascot.
+  Database search for peptide/protein identification using MaxQuant, MS-GF+, Comet,
+  or Mascot.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -10,10 +11,14 @@ metadata:
   omicsclaw:
     domain: proteomics
     emoji: "🔬"
-    trigger_keywords: [peptide identification, database search, MaxQuant, MS-GF+, Comet, Mascot]
+    trigger_keywords: [peptide identification, database search, MaxQuant, MS-GF+,
+      Comet, Mascot]
     allowed_extra_flags: []
     legacy_aliases: [peptide-id]
     saves_h5ad: false
+    script: proteomics_identification.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🔬 Peptide Identification

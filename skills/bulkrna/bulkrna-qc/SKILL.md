@@ -1,20 +1,26 @@
 ---
 name: bulkrna-qc
 description: >-
-  Bulk RNA-seq count matrix quality control — library sizes, gene detection, sample correlation, outlier detection, CPM normalization.
+  Bulk RNA-seq count matrix quality control — library sizes, gene detection, sample
+  correlation, outlier detection, CPM normalization.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, QC, count-matrix, library-size, gene-detection, sample-correlation, CPM]
+tags: [bulkrna, QC, count-matrix, library-size, gene-detection, sample-correlation,
+  CPM]
 requires: [numpy, pandas, matplotlib, scipy]
 metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "📊"
-    trigger_keywords: [bulk QC, library size, count matrix, sample quality, gene detection, RNA-seq quality, count QC]
+    trigger_keywords: [bulk QC, library size, count matrix, sample quality, gene detection,
+      RNA-seq quality, count QC]
     allowed_extra_flags: []
     legacy_aliases: [bulk-align]
     saves_h5ad: false
+    script: bulkrna_qc.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Count Matrix QC

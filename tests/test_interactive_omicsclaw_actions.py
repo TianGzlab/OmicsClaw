@@ -130,10 +130,7 @@ def test_run_skill_command_forwards_skill_run_args(monkeypatch):
         calls.append((skill, input_path, output_dir, demo, extra_args))
         return {"success": True, "output_dir": output_dir}
 
-    monkeypatch.setattr(
-        "omicsclaw.interactive._omicsclaw_actions.load_omicsclaw_script",
-        lambda: SimpleNamespace(run_skill=_run_skill),
-    )
+    monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", _run_skill)
 
     result = run_skill_command(
         SkillRunCommandArgs(

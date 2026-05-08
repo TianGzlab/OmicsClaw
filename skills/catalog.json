@@ -463,7 +463,7 @@
     },
     {
       "name": "literature",
-      "cli_alias": null,
+      "cli_alias": "literature",
       "description": "Parse scientific literature (PDFs, URLs, DOIs) to extract GEO accessions, metadata, and datasets. Use when users provide a paper and want to automatically extract data sources for downstream omics analysis.",
       "version": "0.1.0",
       "status": "mvp",

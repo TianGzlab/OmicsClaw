@@ -2,7 +2,7 @@
 
 Purpose
 -------
-The bot's ``omicsclaw`` tool description carries a compact 7-domain briefing
+The bot's ``omicsclaw`` tool description carries a compact 8-domain briefing
 (``omicsclaw.core.domain_briefing``) — intentionally small so every turn pays
 ~500 tokens instead of ~4,000. When the briefing isn't enough for the LLM to
 pick a skill, it calls ``list_skills_in_domain(domain=...)`` to page in the
@@ -62,7 +62,8 @@ def list_skills_in_domain(
     ----------
     domain:
         Domain key — one of ``spatial``, ``singlecell``, ``genomics``,
-        ``proteomics``, ``metabolomics``, ``bulkrna``, ``orchestrator``.
+        ``proteomics``, ``metabolomics``, ``bulkrna``, ``orchestrator``,
+        ``literature``.
         Unknown domains return a short error-style message (NOT an exception)
         so the LLM can recover without a crash path.
     filter:

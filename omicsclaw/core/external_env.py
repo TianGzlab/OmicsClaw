@@ -46,15 +46,32 @@ def _runner() -> str:
     raise RuntimeError("neither mamba nor conda is on PATH")
 
 
+def _available_runners() -> list[str]:
+    """Return conda-compatible runners in preferred order."""
+    runners: list[str] = []
+    if shutil.which("mamba"):
+        runners.append("mamba")
+    if shutil.which("conda"):
+        runners.append("conda")
+    if not runners:
+        raise RuntimeError("neither mamba nor conda is on PATH")
+    return runners
+
+
+def _env_list_lines() -> list[str]:
+    """Return lines from the first working env-list command."""
+    for runner in _available_runners():
+        res = subprocess.run(
+            [runner, "env", "list"], capture_output=True, text=True, check=False
+        )
+        if res.returncode == 0:
+            return res.stdout.splitlines()
+    return []
+
+
 def is_env_available(env: str) -> bool:
     """Return True if a conda env named `env` exists."""
-    runner = _runner()
-    res = subprocess.run(
-        [runner, "env", "list"], capture_output=True, text=True, check=False
-    )
-    if res.returncode != 0:
-        return False
-    for line in res.stdout.splitlines():
+    for line in _env_list_lines():
         if line.strip().startswith("#") or not line.strip():
             continue
         first = line.split()[0]

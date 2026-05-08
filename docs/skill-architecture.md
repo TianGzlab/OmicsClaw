@@ -246,7 +246,7 @@ only when it needs detail. The tiers operate within a **single LLM turn**
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  L0  capability_resolver (programmatic, 0 LLM tokens)         │
-│      scores all 88 skills by trigger_keywords + description    │
+│      scores all 89 skills by trigger_keywords + description    │
 │      token overlap + file extension + method mentions          │
 │      → returns chosen_skill OR skill_candidates[:5]            │
 └──────────────────────────────────────────────────────────────┘
@@ -305,7 +305,7 @@ The 7-domain briefing is rendered by
 `omicsclaw/core/domain_briefing.py:build_domain_briefing()`. Format:
 
 ```markdown
-OmicsClaw dispatches multi-omics analysis across 7 domains.
+OmicsClaw dispatches multi-omics analysis across 8 domains.
 
 - **spatial** (17 skills — Spatial Transcriptomics)
   Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, ...

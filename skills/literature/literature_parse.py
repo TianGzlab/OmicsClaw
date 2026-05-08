@@ -4,7 +4,7 @@
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add parent directory to path
@@ -15,18 +15,27 @@ from skills.literature.core.extractor import extract_metadata
 from skills.literature.core.downloader import download_geo_dataset
 
 
+DEMO_TEXT = (
+    "We profiled human brain spatial transcriptomics with Visium and deposited "
+    "the processed data in GEO under accession GSE123456."
+)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Parse literature and extract GEO datasets')
-    parser.add_argument('--input', required=True, help='URL, DOI, PubMed ID, PDF path, or text')
+    parser.add_argument('--input', help='URL, DOI, PubMed ID, PDF path, or text')
     parser.add_argument('--input-type', default='auto',
                        choices=['auto', 'url', 'doi', 'pubmed', 'file', 'text'],
                        help='Input type (default: auto-detect)')
     parser.add_argument('--output', required=True, help='Output directory')
+    parser.add_argument('--demo', action='store_true', help='Run with built-in local demo text')
     parser.add_argument('--no-download', action='store_true',
                        help='Extract metadata only, skip download')
     parser.add_argument('--data-dir', help='Data directory for downloads (default: data/)')
 
     args = parser.parse_args()
+    if not args.demo and not args.input:
+        parser.error('the following arguments are required: --input (unless --demo is used)')
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -40,10 +49,14 @@ def main():
         data_dir = project_root / 'data'
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Parsing input: {args.input}")
+    input_value = DEMO_TEXT if args.demo else args.input
+    input_type = 'text' if args.demo else args.input_type
+    no_download = bool(args.no_download or args.demo)
+
+    print(f"Parsing input: {input_value}")
 
     # Parse input
-    text, detected_type = parse_input(args.input, args.input_type)
+    text, detected_type = parse_input(input_value, input_type)
     print(f"Detected input type: {detected_type}")
 
     if not text or text.startswith('Error'):
@@ -68,7 +81,7 @@ def main():
 
     # Download datasets
     download_results = []
-    if not args.no_download and gse_ids:
+    if not no_download and gse_ids:
         print(f"\nDownloading datasets to {data_dir}...")
         for gse_id in gse_ids:
             print(f"\nProcessing {gse_id}...")
@@ -83,7 +96,15 @@ def main():
                 print(f"✗ {gse_id}: Failed - {', '.join(result['errors'])}")
 
     # Generate report
-    generate_report(output_dir, metadata, download_results, args.no_download)
+    generate_report(output_dir, metadata, download_results, no_download)
+    write_result_json(
+        output_dir=output_dir,
+        metadata=metadata,
+        download_results=download_results,
+        no_download=no_download,
+        detected_type=detected_type,
+        demo=args.demo,
+    )
 
     print(f"\n✓ Results saved to {output_dir}")
     print(f"  - Report: {output_dir / 'report.md'}")
@@ -91,6 +112,39 @@ def main():
 
     if download_results:
         print(f"  - Downloaded data: {data_dir}")
+
+
+def write_result_json(
+    output_dir: Path,
+    *,
+    metadata: dict,
+    download_results: list,
+    no_download: bool,
+    detected_type: str,
+    demo: bool,
+):
+    """Write a minimal OmicsClaw result envelope for downstream output tooling."""
+    payload = {
+        "skill": "literature",
+        "success": True,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "method": "metadata-extraction",
+            "gse_count": len(metadata["geo_accessions"].get("gse", [])),
+            "organism": metadata.get("organism", "unknown"),
+            "technology": metadata.get("technology", "unknown"),
+        },
+        "data": {
+            "metadata": metadata,
+            "download_results": download_results,
+            "params": {
+                "input_type": detected_type,
+                "no_download": no_download,
+                "demo": demo,
+            },
+        },
+    }
+    (output_dir / "result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def generate_report(output_dir: Path, metadata: dict, download_results: list, no_download: bool):

@@ -32,7 +32,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -672,13 +671,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Cell potency prediction using gene expression complexity.",
-        result_payload=result_payload,
-        preferred_method=args.method,
-    )
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

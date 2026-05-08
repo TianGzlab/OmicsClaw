@@ -11,9 +11,9 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--n-neighbors"
-      - "--r-enhanced"
+    - "--method"
+    - "--n-neighbors"
+    - "--r-enhanced"
     param_hints:
       cytotrace_simple:
         priority: "n_neighbors"
@@ -21,10 +21,12 @@ metadata:
         defaults: {n_neighbors: 30}
         requires: ["normalized_expression_or_counts"]
         tips:
-          - "`cytotrace_simple` uses gene detection count as a potency proxy. No external models needed."
+        - "`cytotrace_simple` uses gene detection count as a potency proxy. No external
+          models needed."
     saves_h5ad: true
     requires_preprocessed: true
     legacy_aliases: []
+    script: sc_cytotrace.py
 ---
 
 # Single-Cell CytoTRACE Potency Prediction

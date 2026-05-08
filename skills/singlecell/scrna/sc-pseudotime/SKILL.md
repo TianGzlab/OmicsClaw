@@ -11,60 +11,68 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--cluster-key"
-      - "--use-rep"
-      - "--root-cluster"
-      - "--root-cell"
-      - "--end-clusters"
-      - "--n-neighbors"
-      - "--n-pcs"
-      - "--n-dcs"
-      - "--n-genes"
-      - "--corr-method"
-      - "--palantir-knn"
-      - "--palantir-n-components"
-      - "--palantir-num-waypoints"
-      - "--palantir-max-iterations"
-      - "--palantir-seed"
-      - "--via-knn"
-      - "--via-seed"
-      - "--cellrank-n-states"
-      - "--cellrank-schur-components"
-      - "--cellrank-frac-to-keep"
-      - "--cellrank-use-velocity"
-      - "--r-enhanced"
+    - "--method"
+    - "--cluster-key"
+    - "--use-rep"
+    - "--root-cluster"
+    - "--root-cell"
+    - "--end-clusters"
+    - "--n-neighbors"
+    - "--n-pcs"
+    - "--n-dcs"
+    - "--n-genes"
+    - "--corr-method"
+    - "--palantir-knn"
+    - "--palantir-n-components"
+    - "--palantir-num-waypoints"
+    - "--palantir-max-iterations"
+    - "--palantir-seed"
+    - "--via-knn"
+    - "--via-seed"
+    - "--cellrank-n-states"
+    - "--cellrank-schur-components"
+    - "--cellrank-frac-to-keep"
+    - "--cellrank-use-velocity"
+    - "--r-enhanced"
     param_hints:
       dpt:
         priority: "cluster_key -> use_rep -> root_cluster/root_cell"
         params: ["cluster_key", "use_rep", "root_cluster", "root_cell"]
         advanced_params: ["n_neighbors", "n_pcs", "n_dcs", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", n_neighbors: 15, n_pcs: 50, n_dcs: 10, n_genes: 50, corr_method: "pearson"}
+        defaults: {cluster_key: "leiden", n_neighbors: 15, n_pcs: 50, n_dcs: 10, n_genes: 50,
+          corr_method: "pearson"}
         requires: ["normalized_expression", "cluster_labels_in_obs", "trajectory_representation"]
       palantir:
         priority: "cluster_key -> use_rep -> root_cluster/root_cell"
         params: ["cluster_key", "use_rep", "root_cluster", "root_cell"]
-        advanced_params: ["palantir_knn", "palantir_n_components", "palantir_num_waypoints", "palantir_max_iterations", "palantir_seed", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", palantir_knn: 30, palantir_n_components: 10, palantir_num_waypoints: 1200, palantir_max_iterations: 25, palantir_seed: 20, n_genes: 50, corr_method: "pearson"}
+        advanced_params: ["palantir_knn", "palantir_n_components", "palantir_num_waypoints",
+          "palantir_max_iterations", "palantir_seed", "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", palantir_knn: 30, palantir_n_components: 10,
+          palantir_num_waypoints: 1200, palantir_max_iterations: 25, palantir_seed: 20,
+          n_genes: 50, corr_method: "pearson"}
         requires: ["normalized_expression", "palantir", "explicit_root_choice"]
       via:
         priority: "cluster_key -> use_rep -> root_cluster/root_cell"
         params: ["cluster_key", "use_rep", "root_cluster", "root_cell"]
         advanced_params: ["via_knn", "via_seed", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", via_knn: 30, via_seed: 20, n_genes: 50, corr_method: "pearson"}
+        defaults: {cluster_key: "leiden", via_knn: 30, via_seed: 20, n_genes: 50,
+          corr_method: "pearson"}
         requires: ["normalized_expression", "pyVIA", "explicit_root_choice"]
       cellrank:
         priority: "cluster_key -> use_rep -> root_cluster/root_cell -> cellrank_n_states"
         params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "cellrank_n_states"]
-        advanced_params: ["cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", cellrank_n_states: 3, cellrank_schur_components: 20, cellrank_frac_to_keep: 0.3, cellrank_use_velocity: false, n_genes: 50, corr_method: "pearson"}
+        advanced_params: ["cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity",
+          "n_genes", "corr_method"]
+        defaults: {cluster_key: "leiden", cellrank_n_states: 3, cellrank_schur_components: 20,
+          cellrank_frac_to_keep: 0.3, cellrank_use_velocity: false, n_genes: 50, corr_method: "pearson"}
         requires: ["normalized_expression", "cellrank", "explicit_root_choice"]
       slingshot_r:
         priority: "cluster_key -> use_rep -> root_cluster -> end_clusters"
         params: ["cluster_key", "use_rep", "root_cluster", "end_clusters"]
         advanced_params: ["n_genes", "corr_method"]
         defaults: {cluster_key: "leiden", end_clusters: null, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "slingshot", "SingleCellExperiment", "zellkonverter", "explicit_root_choice"]
+        requires: ["normalized_expression", "slingshot", "SingleCellExperiment", "zellkonverter",
+          "explicit_root_choice"]
       monocle3_r:
         priority: "cluster_key -> use_rep -> root_cluster"
         params: ["cluster_key", "use_rep", "root_cluster"]
@@ -74,15 +82,16 @@ metadata:
     saves_h5ad: true
     requires_preprocessed: true
     trigger_keywords:
-      - pseudotime
-      - trajectory
-      - lineage
-      - diffusion pseudotime
-      - palantir
-      - via
-      - cellrank
-      - monocle3
-      - slingshot
+    - pseudotime
+    - trajectory
+    - lineage
+    - diffusion pseudotime
+    - palantir
+    - via
+    - cellrank
+    - monocle3
+    - slingshot
+    script: sc_pseudotime.py
 ---
 
 # Single-Cell Pseudotime

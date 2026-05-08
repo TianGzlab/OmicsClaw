@@ -11,11 +11,15 @@ metadata:
   omicsclaw:
     domain: genomics
     emoji: "🔎"
-    trigger_keywords: [variant calling, SNV, indel, GATK, DeepVariant, FreeBayes, Mutect2, VQSR]
+    trigger_keywords: [variant calling, SNV, indel, GATK, DeepVariant, FreeBayes,
+      Mutect2, VQSR]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [variant-call]
     saves_h5ad: false
+    script: genomics_variant_calling.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🔎 Variant Calling

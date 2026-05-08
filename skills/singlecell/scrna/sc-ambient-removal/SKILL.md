@@ -12,13 +12,13 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--contamination"
-      - "--expected-cells"
-      - "--filtered-matrix-dir"
-      - "--method"
-      - "--raw-h5"
-      - "--raw-matrix-dir"
-      - "--r-enhanced"
+    - "--contamination"
+    - "--expected-cells"
+    - "--filtered-matrix-dir"
+    - "--method"
+    - "--raw-h5"
+    - "--raw-matrix-dir"
+    - "--r-enhanced"
     param_hints:
       simple:
         priority: "contamination"
@@ -26,24 +26,27 @@ metadata:
         defaults: {contamination: 0.05}
         requires: ["count_like_expression_in_layers_counts_or_raw_or_X", "scanpy"]
         tips:
-          - "--method simple: Python fallback that subtracts a global ambient profile from the best available raw-count-like matrix."
-          - "--contamination: Wrapper-level contamination fraction used directly in the subtraction formula after scaling by each barcode's library size."
+        - "--method simple: Python fallback that subtracts a global ambient profile
+          from the best available raw-count-like matrix."
+        - "--contamination: Wrapper-level contamination fraction used directly in
+          the subtraction formula after scaling by each barcode's library size."
       cellbender:
         priority: "raw_h5 -> expected_cells"
         params: ["raw_h5", "expected_cells"]
         defaults: {expected_cells: "input_n_obs_or_required_without_input"}
         requires: ["cellbender", "10x_raw_h5"]
         tips:
-          - "--raw-h5: Required for the CellBender path."
-          - "--expected-cells: Main CellBender size prior; strongly recommended and required when no separate --input is provided."
+        - "--raw-h5: Required for the CellBender path."
+        - "--expected-cells: Main CellBender size prior; strongly recommended and
+          required when no separate --input is provided."
       soupx:
         priority: "raw_matrix_dir -> filtered_matrix_dir"
         params: ["raw_matrix_dir", "filtered_matrix_dir"]
         defaults: {}
         requires: ["SoupX_ready_R_environment", "10x_raw_and_filtered_matrix_dirs"]
         tips:
-          - "--method soupx: Requires both raw and filtered 10x matrix directories."
-          - "If the required SoupX inputs are missing, OmicsClaw falls back to `simple`."
+        - "--method soupx: Requires both raw and filtered 10x matrix directories."
+        - "If the required SoupX inputs are missing, OmicsClaw falls back to `simple`."
     saves_h5ad: true
     requires_preprocessed: false
     requires:
@@ -54,15 +57,16 @@ metadata:
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: cellbender
-        bins: []
+    - kind: pip
+      package: cellbender
+      bins: []
     trigger_keywords:
-      - ambient RNA
-      - ambient removal
-      - cellbender
-      - contamination
-      - background RNA
+    - ambient RNA
+    - ambient removal
+    - cellbender
+    - contamination
+    - background RNA
+    script: sc_ambient.py
 ---
 
 # Single-Cell Ambient RNA Removal
@@ -228,7 +232,7 @@ The current wrapper writes direct figure outputs rather than a recipe-driven gal
 
 ## Current Limitations
 
-- The wrapper writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 - `simple` is an OmicsClaw fallback, not an upstream CellBender/SoupX equivalent.
 - `processed.h5ad` is a downstream convenience export, not CellBender's native primary file format.
 - The wrapper will try to load many common single-cell formats through OmicsClaw's smart loader, but sophisticated methods still require their true raw 10x side inputs.

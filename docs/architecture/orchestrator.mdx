@@ -7,7 +7,7 @@ og:image: "/docs/images/og-cover.png"
 
 ## 为什么需要 Orchestrator
 
-**用户不应该记 88 个 skill 名**：OmicsClaw 横跨 7 个组学领域，共有 88 个 skill，每个都有不同的 CLI 参数与前置要求。对非专业工程师来说，自然语言才是正确的入口，不应让用户学习 `spatial-svg-detection` 和 `genomics-variant-calling` 的区别。
+**用户不应该记 89 个 skill 名**：OmicsClaw 横跨 8 个组学/支撑领域，共有 89 个 skill，每个都有不同的 CLI 参数与前置要求。对非专业工程师来说，自然语言才是正确的入口，不应让用户学习 `spatial-svg-detection` 和 `genomics-variant-calling` 的区别。
 
 **跨领域查询需要拆分**：一个问题可能同时涉及多个领域，比如"比较两个样本的 domain 差异"需要先跑 `spatial-domains`（每个样本），再跑 `spatial-condition`（样本间比较）。Orchestrator 把单条问题拆解成有序的 skill 调用序列。
 

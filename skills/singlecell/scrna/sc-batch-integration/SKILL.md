@@ -11,22 +11,22 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--batch-key"
-      - "--method"
-      - "--n-epochs"
-      - "--no-gpu"
-      - "--n-latent"
-      - "--labels-key"
-      - "--harmony-theta"
-      - "--bbknn-neighbors-within-batch"
-      - "--scanorama-knn"
-      - "--integration-features"
-      - "--integration-pcs"
-      - "--simba-n-top-genes"
-      - "--simba-n-components"
-      - "--simba-k"
-      - "--simba-num-workers"
-      - "--r-enhanced"
+    - "--batch-key"
+    - "--method"
+    - "--n-epochs"
+    - "--no-gpu"
+    - "--n-latent"
+    - "--labels-key"
+    - "--harmony-theta"
+    - "--bbknn-neighbors-within-batch"
+    - "--scanorama-knn"
+    - "--integration-features"
+    - "--integration-pcs"
+    - "--simba-n-top-genes"
+    - "--simba-n-components"
+    - "--simba-k"
+    - "--simba-num-workers"
+    - "--r-enhanced"
     param_hints:
       harmony:
         priority: "batch_key"
@@ -35,7 +35,7 @@ metadata:
         defaults: {batch_key: "batch", harmony_theta: 2.0, integration_pcs: 50}
         requires: ["existing_PCA_or_computeable_PCA", "harmonypy"]
         tips:
-          - "--method harmony: Default integration path in the current wrapper."
+        - "--method harmony: Default integration path in the current wrapper."
       scvi:
         priority: "batch_key -> n_epochs -> no_gpu"
         params: ["batch_key", "n_epochs"]
@@ -43,15 +43,16 @@ metadata:
         defaults: {batch_key: "batch", n_epochs: 400, n_latent: 30, no_gpu: false}
         requires: ["scvi", "torch"]
         tips:
-          - "--n-epochs: Main runtime/optimization knob for scVI."
+        - "--n-epochs: Main runtime/optimization knob for scVI."
       scanvi:
         priority: "batch_key -> n_epochs -> no_gpu"
         params: ["batch_key", "labels_key", "n_epochs"]
         advanced_params: ["n_latent", "no_gpu"]
-        defaults: {batch_key: "batch", labels_key: null, n_epochs: 200, n_latent: 30, no_gpu: false}
+        defaults: {batch_key: "batch", labels_key: null, n_epochs: 200, n_latent: 30,
+          no_gpu: false}
         requires: ["scvi", "torch", "labels_in_obs"]
         tips:
-          - "If no labels are available, the current wrapper falls back to `scvi`."
+        - "If no labels are available, the current wrapper falls back to `scvi`."
       bbknn:
         priority: "batch_key"
         params: ["batch_key"]
@@ -59,7 +60,7 @@ metadata:
         defaults: {batch_key: "batch", bbknn_neighbors_within_batch: 3}
         requires: ["bbknn", "existing_PCA_or_computeable_PCA"]
         tips:
-          - "--method bbknn: Lightweight graph correction path."
+        - "--method bbknn: Lightweight graph correction path."
       scanorama:
         priority: "batch_key"
         params: ["batch_key"]
@@ -67,7 +68,7 @@ metadata:
         defaults: {batch_key: "batch", scanorama_knn: 20}
         requires: ["scanorama"]
         tips:
-          - "--method scanorama: Panorama-stitching integration path."
+        - "--method scanorama: Panorama-stitching integration path."
       fastmnn:
         priority: "batch_key"
         params: ["batch_key"]
@@ -75,7 +76,7 @@ metadata:
         defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_batchelor_stack"]
         tips:
-          - "--method fastmnn: R-backed batchelor fastMNN path via the shared H5AD bridge."
+        - "--method fastmnn: R-backed batchelor fastMNN path via the shared H5AD bridge."
       seurat_cca:
         priority: "batch_key"
         params: ["batch_key"]
@@ -83,7 +84,8 @@ metadata:
         defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_Seurat_stack"]
         tips:
-          - "--method seurat_cca: R-backed Seurat CCA integration path via the shared H5AD bridge."
+        - "--method seurat_cca: R-backed Seurat CCA integration path via the shared
+          H5AD bridge."
       seurat_rpca:
         priority: "batch_key"
         params: ["batch_key"]
@@ -91,7 +93,8 @@ metadata:
         defaults: {batch_key: "batch", integration_features: 2000, integration_pcs: 30}
         requires: ["R_Seurat_stack"]
         tips:
-          - "--method seurat_rpca: R-backed Seurat RPCA integration path via the shared H5AD bridge."
+        - "--method seurat_rpca: R-backed Seurat RPCA integration path via the shared
+          H5AD bridge."
     legacy_aliases: [sc-integrate]
     saves_h5ad: true
     requires_preprocessed: true
@@ -103,16 +106,17 @@ metadata:
     homepage: https://github.com/OmicsClaw/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - batch integration
-      - batch effect
-      - harmony
-      - scvi
-      - bbknn
-      - merge samples
+    - batch integration
+    - batch effect
+    - harmony
+    - scvi
+    - bbknn
+    - merge samples
+    script: sc_integrate.py
 ---
 
 # Single-Cell Batch Integration
@@ -273,7 +277,7 @@ The current standard Python gallery is recipe-based and uses:
 ## Current Limitations
 
 - `fastmnn`, `seurat_cca`, and `seurat_rpca` require a working R environment with batchelor or Seurat plus the H5AD bridge packages.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
+- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
 
 ## Workflow Position
 

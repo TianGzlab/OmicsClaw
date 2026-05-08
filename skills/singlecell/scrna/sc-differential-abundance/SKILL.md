@@ -11,19 +11,22 @@ metadata:
   omicsclaw:
     domain: singlecell
     allowed_extra_flags:
-      - "--method"
-      - "--condition-key"
-      - "--sample-key"
-      - "--cell-type-key"
-      - "--contrast"
-      - "--reference-cell-type"
-      - "--fdr"
-      - "--prop"
-      - "--n-neighbors"
-      - "--min-count"
-      - "--r-enhanced"
+    - "--method"
+    - "--condition-key"
+    - "--sample-key"
+    - "--cell-type-key"
+    - "--contrast"
+    - "--reference-cell-type"
+    - "--fdr"
+    - "--prop"
+    - "--n-neighbors"
+    - "--min-count"
+    - "--r-enhanced"
     saves_h5ad: true
     requires_preprocessed: true
+    script: sc_differential_abundance.py
+    legacy_aliases: [sc-da, sc-compositional]
+    param_hints: {}
 ---
 
 # Single-Cell Differential Abundance

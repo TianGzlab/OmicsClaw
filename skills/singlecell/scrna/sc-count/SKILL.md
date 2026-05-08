@@ -13,32 +13,32 @@ metadata:
     domain: singlecell
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🧬"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - Cell Ranger count
-      - STARsolo count
-      - fastq to adata
-      - raw single-cell counting
-      - generate count matrix
+    - Cell Ranger count
+    - STARsolo count
+    - fastq to adata
+    - raw single-cell counting
+    - generate count matrix
     allowed_extra_flags:
-      - "--chemistry"
-      - "--method"
-      - "--read2"
-      - "--reference"
-      - "--sample"
-      - "--t2g"
-      - "--threads"
-      - "--whitelist"
-      - "--r-enhanced"
+    - "--chemistry"
+    - "--method"
+    - "--read2"
+    - "--reference"
+    - "--sample"
+    - "--t2g"
+    - "--threads"
+    - "--whitelist"
+    - "--r-enhanced"
     legacy_aliases: [scrna-count, sc-pseudoalign-count, scrna-pseudoalign-count]
     saves_h5ad: true
     requires_preprocessed: false
@@ -49,35 +49,42 @@ metadata:
         defaults: {threads: 8, chemistry: "auto"}
         requires: ["cellranger", "fastq_dir_or_existing_cellranger_output"]
         tips:
-          - "--reference: required Cell Ranger transcriptome reference directory."
-          - "--sample: choose one sample when the FASTQ directory contains multiple groups."
-          - "--chemistry auto: current wrapper leaves chemistry auto-detection to Cell Ranger by default."
+        - "--reference: required Cell Ranger transcriptome reference directory."
+        - "--sample: choose one sample when the FASTQ directory contains multiple
+          groups."
+        - "--chemistry auto: current wrapper leaves chemistry auto-detection to Cell
+          Ranger by default."
       starsolo:
         priority: "reference -> chemistry -> whitelist -> sample -> threads"
         params: ["reference", "chemistry", "whitelist", "sample", "threads"]
         defaults: {threads: 8}
         requires: ["STAR", "10x_paired_fastq_or_existing_starsolo_output"]
         tips:
-          - "--chemistry: current STARsolo wrapper supports `10xv2`, `10xv3`, and `10xv4` geometry."
-          - "--whitelist: strongly recommended; OmicsClaw only auto-detects common local v2/v3 whitelist files."
-          - "--reference: must be a STAR genome directory, not a raw FASTA/GTF pair."
+        - "--chemistry: current STARsolo wrapper supports `10xv2`, `10xv3`, and `10xv4`
+          geometry."
+        - "--whitelist: strongly recommended; OmicsClaw only auto-detects common local
+          v2/v3 whitelist files."
+        - "--reference: must be a STAR genome directory, not a raw FASTA/GTF pair."
       simpleaf:
         priority: "reference -> chemistry -> sample -> threads"
         params: ["reference", "chemistry", "sample", "threads"]
         defaults: {threads: 8, chemistry: "10xv3"}
         requires: ["simpleaf_output_or_fastq"]
         tips:
-          - "--reference: current wrapper expects a simpleaf index path."
-          - "--chemistry: current wrapper is optimized for mainstream 10x-style droplet presets."
+        - "--reference: current wrapper expects a simpleaf index path."
+        - "--chemistry: current wrapper is optimized for mainstream 10x-style droplet
+          presets."
       kb_python:
         priority: "reference -> t2g -> chemistry -> sample -> threads"
         params: ["reference", "t2g", "chemistry", "sample", "threads"]
         defaults: {threads: 8, chemistry: "10xv3"}
         requires: ["kb_output_or_fastq"]
         tips:
-          - "--reference: current wrapper expects a kallisto index path."
-          - "--t2g: required transcript-to-gene map for kb-python runs."
-          - "--chemistry: forwarded as kb technology string such as `10xv2`, `10xv3`, or `10xv4`."
+        - "--reference: current wrapper expects a kallisto index path."
+        - "--t2g: required transcript-to-gene map for kb-python runs."
+        - "--chemistry: forwarded as kb technology string such as `10xv2`, `10xv3`,
+          or `10xv4`."
+    script: sc_count.py
 ---
 
 # 🧬 Single-Cell Counting
@@ -103,7 +110,7 @@ FASTQ input into standardized count matrices and a downstream-ready AnnData.
    `layers['counts']` and OmicsClaw input-contract metadata.
 4. **Standard output layer**: barcode-rank and count-distribution figures plus
    machine-readable tables.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
+5. **Reproducibility layer**: writes native `report.md`, `result.json`,
    and rerun commands.
 
 ## Input Formats
@@ -151,7 +158,7 @@ Download guidance:
 3. **Run method**: launch the selected backend when needed, or import existing outputs directly.
 4. **Persist results**: load the filtered matrix, standardize it into the OmicsClaw AnnData contract, and preserve backend artifact paths.
 5. **Visualize / summarize**: generate barcode-rank and count-distribution plots plus summary tables.
-6. **Report**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle.
+6. **Report**: write native `report.md`, `result.json`, and the reproducibility bundle; the shared runner adds `README.md`.
 
 ## CLI Reference
 

@@ -1,7 +1,8 @@
 ---
 name: metabolomics-annotation
 description: >-
-  Metabolite annotation and structural identification using SIRIUS, CSI:FingerID, GNPS, or MetFrag.
+  Metabolite annotation and structural identification using SIRIUS, CSI:FingerID,
+  GNPS, or MetFrag.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -10,11 +11,15 @@ metadata:
   omicsclaw:
     domain: metabolomics
     emoji: "🏷️"
-    trigger_keywords: [metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching, metabolite ID]
+    trigger_keywords: [metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching,
+      metabolite ID]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [met-annotate]
     saves_h5ad: false
+    script: metabolomics_annotation.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🏷️ Metabolite Annotation

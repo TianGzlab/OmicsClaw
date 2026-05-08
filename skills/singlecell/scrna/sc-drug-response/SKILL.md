@@ -1,3 +1,23 @@
+---
+name: sc-drug-response
+description: Drug response prediction from scRNA-seq (CaDRReS-Sc, simple correlation)
+version: 0.1.0
+metadata:
+  omicsclaw:
+    domain: singlecell
+    script: sc_drug_response.py
+    allowed_extra_flags:
+    - --cluster-key
+    - --drug-db
+    - --method
+    - --model-dir
+    - --n-drugs
+    - --r-enhanced
+    param_hints: {}
+    saves_h5ad: false
+    requires_preprocessed: true
+---
+
 # sc-drug-response
 
 **Single-cell drug response prediction** — predict drug sensitivity from single-cell transcriptomes using pharmacogenomic models or gene expression correlation with known drug targets.

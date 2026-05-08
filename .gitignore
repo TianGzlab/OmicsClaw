@@ -42,6 +42,10 @@ sessions/
 superpowers/
 docs/superpowers/
 
+# Local framework optimization notes
+docs/engineering/2026-05-07-*.md
+docs/engineering/domain-input-contracts.md
+
 # User data (large, not committed)
 data/*
 !data/.gitkeep
@@ -136,6 +140,9 @@ nature_new_insight2/
 
 # Knowledge base and workspace (local only)
 workspace/
+
+# Graphify knowledge graph (local development artifact)
+graphify-out/
 
 # Local references / external tools (user-downloaded, large)
 resources/

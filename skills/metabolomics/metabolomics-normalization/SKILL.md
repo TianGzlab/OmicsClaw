@@ -14,6 +14,9 @@ metadata:
     allowed_extra_flags: []
     legacy_aliases: [met-normalize]
     saves_h5ad: false
+    script: metabolomics_normalization.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 📐 Metabolomics Normalization

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
 import platform
 import shutil
@@ -545,6 +546,194 @@ def _collect_knowledge_check() -> DiagnosticCheck:
     )
 
 
+def _resolve_project_root(omicsclaw_dir: str) -> Path:
+    text = str(omicsclaw_dir or "").strip()
+    if text:
+        return Path(text).expanduser().resolve()
+    return Path(__file__).resolve().parents[1]
+
+
+def _collect_skill_catalog_check(
+    omicsclaw_dir: str,
+    *,
+    registry_obj: Any | None = None,
+) -> DiagnosticCheck:
+    root = _resolve_project_root(omicsclaw_dir)
+    catalog_path = root / "skills" / "catalog.json"
+    details: list[str] = [f"path={catalog_path}"]
+
+    if registry_obj is None:
+        try:
+            from omicsclaw.core.registry import OmicsRegistry
+
+            registry_obj = OmicsRegistry()
+            registry_obj.load_all(root / "skills")
+        except Exception as exc:
+            return DiagnosticCheck(
+                name="Skill Catalog",
+                status=DIAGNOSTIC_STATUS_WARN,
+                summary=f"Registry load failed: {exc}",
+                details=tuple(details),
+            )
+
+    try:
+        registry_names = {
+            str(alias)
+            for alias, _info in registry_obj.iter_primary_skills()
+            if str(alias).strip()
+        }
+    except Exception as exc:
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary=f"Registry inventory failed: {exc}",
+            details=tuple(details),
+        )
+
+    if not catalog_path.exists():
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="skills/catalog.json is missing.",
+            details=tuple(details),
+        )
+
+    try:
+        catalog_data = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary=f"skills/catalog.json could not be parsed: {exc}",
+            details=tuple(details),
+        )
+
+    if not isinstance(catalog_data, dict):
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="skills/catalog.json should contain a JSON object.",
+            details=tuple(details),
+        )
+
+    raw_skills = catalog_data.get("skills", [])
+    if not isinstance(raw_skills, list):
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="skills/catalog.json field `skills` should be a list.",
+            details=tuple(details),
+        )
+
+    catalog_names = {
+        str(item.get("name", "")).strip()
+        for item in raw_skills
+        if isinstance(item, dict) and str(item.get("name", "")).strip()
+    }
+    declared_count = catalog_data.get("skill_count", len(raw_skills))
+    try:
+        catalog_count = int(declared_count)
+    except (TypeError, ValueError):
+        catalog_count = len(catalog_names)
+        details.append(f"invalid_skill_count={declared_count!r}")
+
+    registry_count = len(registry_names)
+    count_matches = registry_count == catalog_count == len(catalog_names)
+    names_match = registry_names == catalog_names
+    if count_matches and names_match:
+        return DiagnosticCheck(
+            name="Skill Catalog",
+            status=DIAGNOSTIC_STATUS_OK,
+            summary=f"Registry and generated catalog agree on {registry_count} skills.",
+            details=tuple(details),
+        )
+
+    extra_in_catalog = sorted(catalog_names - registry_names)
+    missing_from_catalog = sorted(registry_names - catalog_names)
+    if extra_in_catalog:
+        details.append("extra_in_catalog: " + ", ".join(extra_in_catalog[:12]))
+    if missing_from_catalog:
+        details.append("missing_from_catalog: " + ", ".join(missing_from_catalog[:12]))
+    if catalog_count != len(catalog_names):
+        details.append(f"catalog_skill_count={catalog_count}, named_entries={len(catalog_names)}")
+
+    return DiagnosticCheck(
+        name="Skill Catalog",
+        status=DIAGNOSTIC_STATUS_WARN,
+        summary=f"Registry/catalog drift detected: registry={registry_count}, catalog={catalog_count}.",
+        details=tuple(details),
+    )
+
+
+def _collect_graphify_check(omicsclaw_dir: str) -> DiagnosticCheck:
+    root = _resolve_project_root(omicsclaw_dir)
+    graphify_dir = root / "graphify-out"
+    details: list[str] = [f"path={graphify_dir}"]
+
+    if not graphify_dir.exists():
+        return DiagnosticCheck(
+            name="Graphify Map",
+            status=DIAGNOSTIC_STATUS_INFO,
+            summary="graphify-out is not present.",
+            details=tuple(details),
+        )
+
+    root_report = graphify_dir / "GRAPH_REPORT.md"
+    wiki_index = graphify_dir / "wiki" / "index.md"
+    slice_index = graphify_dir / "omicsclaw-slices" / "INDEX.md"
+    ast_cache = graphify_dir / "cache" / "ast"
+    ast_cache_count = 0
+    if ast_cache.is_dir():
+        try:
+            ast_cache_count = sum(1 for path in ast_cache.iterdir() if path.is_file())
+        except OSError:
+            ast_cache_count = 0
+    details.append(f"ast_cache_files={ast_cache_count}")
+
+    if root_report.exists():
+        details.append(f"root_report={root_report.relative_to(root)}")
+        if wiki_index.exists():
+            details.append(f"wiki_index={wiki_index.relative_to(root)}")
+        if slice_index.exists():
+            details.append(f"slice_index={slice_index.relative_to(root)}")
+        return DiagnosticCheck(
+            name="Graphify Map",
+            status=DIAGNOSTIC_STATUS_OK,
+            summary="Root graphify report is available.",
+            details=tuple(details),
+        )
+
+    if wiki_index.exists():
+        details.append(f"wiki_index={wiki_index.relative_to(root)}")
+        if slice_index.exists():
+            details.append(f"slice_index={slice_index.relative_to(root)}")
+        return DiagnosticCheck(
+            name="Graphify Map",
+            status=DIAGNOSTIC_STATUS_OK,
+            summary="Graphify wiki index is available.",
+            details=tuple(details),
+        )
+
+    missing = "missing root GRAPH_REPORT.md and wiki/index.md"
+    if slice_index.exists():
+        details.append(f"slice_index={slice_index.relative_to(root)}")
+        details.append(missing)
+        return DiagnosticCheck(
+            name="Graphify Map",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="Graphify slice index exists, but root entrypoints are missing.",
+            details=tuple(details),
+        )
+
+    details.append(missing)
+    return DiagnosticCheck(
+        name="Graphify Map",
+        status=DIAGNOSTIC_STATUS_WARN,
+        summary="graphify-out exists but no navigable graph report was found.",
+        details=tuple(details),
+    )
+
+
 def _collect_extensions_check(omicsclaw_dir: str) -> DiagnosticCheck:
     if not omicsclaw_dir:
         return DiagnosticCheck(
@@ -706,6 +895,8 @@ def build_doctor_report(
     checks.append(_collect_provider_check())
     checks.append(_collect_session_db_check())
     checks.append(_collect_knowledge_check())
+    checks.append(_collect_skill_catalog_check(str(omicsclaw_dir or "").strip()))
+    checks.append(_collect_graphify_check(str(omicsclaw_dir or "").strip()))
     checks.append(_collect_extensions_check(str(omicsclaw_dir or "").strip()))
     checks.append(_collect_mcp_check())
     checks.append(_collect_directory_check("Workspace", resolved_workspace))

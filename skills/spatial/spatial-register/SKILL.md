@@ -13,58 +13,70 @@ metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
-      - "--method"
-      - "--paste-alpha"
-      - "--paste-dissimilarity"
-      - "--paste-use-gpu"
-      - "--reference-slice"
-      - "--slice-key"
-      - "--stalign-a"
-      - "--stalign-image-size"
-      - "--stalign-niter"
-      - "--use-expression"
+    - "--method"
+    - "--paste-alpha"
+    - "--paste-dissimilarity"
+    - "--paste-use-gpu"
+    - "--reference-slice"
+    - "--slice-key"
+    - "--stalign-a"
+    - "--stalign-image-size"
+    - "--stalign-niter"
+    - "--use-expression"
     param_hints:
       paste:
         priority: "slice_key/reference_slice → paste_alpha → paste_dissimilarity"
-        params: ["slice_key", "reference_slice", "paste_alpha", "paste_dissimilarity", "paste_use_gpu"]
+        params: ["slice_key", "reference_slice", "paste_alpha", "paste_dissimilarity",
+          "paste_use_gpu"]
         defaults: {paste_alpha: 0.1, paste_dissimilarity: "kl", paste_use_gpu: false}
         requires: ["obsm.spatial", "obs.slice", "shared_genes", "X_expression"]
         tips:
-          - "--slice-key: practical wrapper control; OmicsClaw requires a real slice label column instead of fabricating one."
-          - "--paste-alpha: public PASTE weight between expression dissimilarity and spatial distance in `pairwise_align`."
-          - "--paste-dissimilarity: public PASTE expression dissimilarity choice; the wrapper exposes the documented `kl` / `euclidean` options."
-          - "--paste-use-gpu: public PASTE backend switch; only matters when a compatible Torch backend is available."
+        - "--slice-key: practical wrapper control; OmicsClaw requires a real slice
+          label column instead of fabricating one."
+        - "--paste-alpha: public PASTE weight between expression dissimilarity and
+          spatial distance in `pairwise_align`."
+        - "--paste-dissimilarity: public PASTE expression dissimilarity choice; the
+          wrapper exposes the documented `kl` / `euclidean` options."
+        - "--paste-use-gpu: public PASTE backend switch; only matters when a compatible
+          Torch backend is available."
       stalign:
         priority: "slice_key/reference_slice → stalign_a → stalign_niter"
-        params: ["slice_key", "reference_slice", "stalign_niter", "stalign_a", "stalign_image_size", "use_expression"]
-        defaults: {stalign_niter: 2000, stalign_a: 500.0, stalign_image_size: 400, use_expression: false}
+        params: ["slice_key", "reference_slice", "stalign_niter", "stalign_a", "stalign_image_size",
+          "use_expression"]
+        defaults: {stalign_niter: 2000, stalign_a: 500.0, stalign_image_size: 400,
+          use_expression: false}
         requires: ["obsm.spatial", "obs.slice", "pairwise_two_slices", "X_expression_optional"]
         tips:
-          - "--stalign-a / --stalign-niter: public STalign LDDMM controls that directly affect deformation smoothness and optimization depth."
-          - "--stalign-image-size: current OmicsClaw wrapper rasterization resolution before calling LDDMM; this is wrapper-level, not the core scientific STalign parameter."
-          - "--use-expression: current wrapper-level switch that uses PC1 of shared genes as image intensity instead of uniform weights."
+        - "--stalign-a / --stalign-niter: public STalign LDDMM controls that directly
+          affect deformation smoothness and optimization depth."
+        - "--stalign-image-size: current OmicsClaw wrapper rasterization resolution
+          before calling LDDMM; this is wrapper-level, not the core scientific STalign
+          parameter."
+        - "--use-expression: current wrapper-level switch that uses PC1 of shared
+          genes as image intensity instead of uniform weights."
     legacy_aliases: [register]
     saves_h5ad: true
     requires_preprocessed: true
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "📐"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - spatial registration
-      - slice alignment
-      - coordinate alignment
-      - PASTE
-      - STalign
-      - multi-slice
+    - spatial registration
+    - slice alignment
+    - coordinate alignment
+    - PASTE
+    - STalign
+    - multi-slice
+    script: spatial_register.py
 ---
 
 # 📐 Spatial Register

@@ -1,7 +1,8 @@
 ---
 name: genomics-phasing
 description: >-
-  Haplotype phasing analysis: phase block N50, phased fraction, PS (Phase Set) field parsing,
+  Haplotype phasing analysis: phase block N50, phased fraction, PS (Phase Set) field
+  parsing,
   pipe-delimited genotype detection. Wraps WhatsHap, SHAPEIT5, Eagle2.
 version: 0.2.0
 author: OmicsClaw
@@ -13,9 +14,12 @@ metadata:
     emoji: "🔀"
     trigger_keywords: [haplotype phasing, WhatsHap, SHAPEIT, Eagle, phasing]
     allowed_extra_flags:
-      - "--method"
+    - "--method"
     legacy_aliases: [phase]
     saves_h5ad: false
+    script: genomics_phasing.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🔀 Haplotype Phasing

@@ -1,7 +1,8 @@
 ---
 name: bulkrna-batch-correction
 description: >-
-  Batch effect correction for multi-cohort bulk RNA-seq data using ComBat, with PCA-based visualization before and after correction.
+  Batch effect correction for multi-cohort bulk RNA-seq data using ComBat, with PCA-based
+  visualization before and after correction.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,12 +12,16 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🔧"
-    trigger_keywords: [batch correction, ComBat, batch effect, harmonize, multi-cohort, batch removal]
+    trigger_keywords: [batch correction, ComBat, batch effect, harmonize, multi-cohort,
+      batch removal]
     allowed_extra_flags:
-      - "--batch-info"
-      - "--mode"
+    - "--batch-info"
+    - "--mode"
     legacy_aliases: [bulk-combat]
     saves_h5ad: false
+    script: bulkrna_batch_correction.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Batch Effect Correction

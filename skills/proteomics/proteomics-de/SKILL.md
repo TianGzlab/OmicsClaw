@@ -11,10 +11,14 @@ metadata:
   omicsclaw:
     domain: proteomics
     emoji: "⚖️"
-    trigger_keywords: [differential abundance, protein expression, MSstats, limma, volcano]
+    trigger_keywords: [differential abundance, protein expression, MSstats, limma,
+      volcano]
     allowed_extra_flags: []
     legacy_aliases: [differential-abundance]
     saves_h5ad: false
+    script: proteomics_de.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # ⚖️ Differential Protein Abundance

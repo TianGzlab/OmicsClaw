@@ -1,7 +1,8 @@
 ---
 name: proteomics-enrichment
 description: >-
-  Pathway, network, and functional enrichment for proteomics using STRING, DAVID, or g:Profiler.
+  Pathway, network, and functional enrichment for proteomics using STRING, DAVID,
+  or g:Profiler.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -10,12 +11,16 @@ metadata:
   omicsclaw:
     domain: proteomics
     emoji: "🗺️"
-    trigger_keywords: [proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler, GO enrichment]
+    trigger_keywords: [proteomics enrichment, pathway analysis, STRING, DAVID, g:Profiler,
+      GO enrichment]
     allowed_extra_flags:
-      - "--method"
-      - "--species"
+    - "--method"
+    - "--species"
     legacy_aliases: [prot-enrichment]
     saves_h5ad: false
+    script: prot_enrichment.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # 🗺️ Proteomics Enrichment

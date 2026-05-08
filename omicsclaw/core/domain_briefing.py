@@ -27,6 +27,7 @@ _DOMAIN_DISPLAY_ORDER = (
     "metabolomics",
     "bulkrna",
     "orchestrator",
+    "literature",
 )
 
 

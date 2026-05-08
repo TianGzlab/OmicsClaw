@@ -23,7 +23,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
@@ -409,13 +408,6 @@ def main() -> int:
     }
     _write_report(output_dir, summary, params, input_file, prep_diagnostics)
     _write_reproducibility(output_dir, args, input_file)
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Prepare a perturbation-ready AnnData from expression data plus sgRNA assignments.",
-        result_payload=result_payload,
-        preferred_method=METHOD_NAME,
-    )
     logger.info("Done: %s", output_dir)
 
     # --- Next-step guidance ---

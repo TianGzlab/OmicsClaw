@@ -20,7 +20,12 @@ Core rules:
 
 ## Project Overview
 
-OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial transcriptomics, single-cell omics, genomics, proteomics, and metabolomics. Each skill is a self-contained module that performs a specific analysis task via CLI or Python API. All processing is local-first. Design is inspired by [ClawBio](https://github.com/ClawBio/ClawBio).
+OmicsClaw is a multi-omics analysis platform supporting 89 registered skills
+across 8 domains: spatial transcriptomics, single-cell omics, genomics,
+proteomics, metabolomics, Bulk RNA-seq, orchestration, and literature. Each
+skill is a self-contained module that performs a specific analysis task via CLI
+or Python API. All processing is local-first. Design is inspired by
+[ClawBio](https://github.com/ClawBio/ClawBio).
 
 **Note**: OmicsClaw evolved from SpatialClaw and now uses a unified `omicsclaw.py` entrypoint.
 
@@ -55,6 +60,11 @@ python omicsclaw.py run spatial-preprocess --demo
 >
 > The repository does not use a root `requirements.txt` as a primary
 > install entrypoint.
+>
+> **Known `pip check` warning**: the full conda environment keeps
+> `jinja2>=3.1.5` for FastAPI/nbconvert even though upstream
+> `pygpcca==1.0.4` still pins `jinja2==3.0.3`. Treat that single warning as
+> metadata noise when `oc doctor` and targeted import checks pass.
 
 ## Commands
 
@@ -63,7 +73,7 @@ python omicsclaw.py run spatial-preprocess --demo
 
 | Command | Purpose |
 |---------|---------|
-| `oc list` | List all 50+ skills across 5 domains |
+| `oc list` | List all 89 skills across 8 domains |
 | `oc run <skill> --demo` | Run a skill with demo data |
 | `oc run <skill> --input <file> --output <dir>` | Run with user data |
 | `oc interactive` | **Start interactive terminal chat (CLI mode)** |
@@ -105,7 +115,7 @@ OmicsClaw/
 │       ├── interactive.py      # prompt_toolkit REPL loop (CLI mode)
 │       └── tui.py              # Textual full-screen TUI (TUI mode)
 ├── skills/                     # Domain-organized skills + shared utilities
-│   ├── spatial/                # 15 spatial transcriptomics skills
+│   ├── spatial/                # 17 spatial transcriptomics skills
 │   │   ├── _lib/               # ★ Shared spatial utilities (adata_utils, viz, loader, etc.)
 │   │   │   ├── viz/            # Unified visualization package (13 modules)
 │   │   │   ├── adata_utils.py  # AnnData helper functions
@@ -117,7 +127,7 @@ OmicsClaw/
 │   │   ├── spatial-domains/    # Tissue region identification
 │   │   ├── spatial-annotate/   # Cell type annotation
 │   │   └── ...
-│   ├── singlecell/             # 14 single-cell omics skills
+│   ├── singlecell/             # 30 single-cell omics skills
 │   │   ├── _lib/               # ★ Shared single-cell utilities (19 modules)
 │   │   │   ├── io.py, qc.py, preprocessing.py, markers.py, ...
 │   │   │   ├── r_bridge.py     # R/Seurat integration bridge
@@ -132,9 +142,10 @@ OmicsClaw/
 │   │   └── _lib/               # Shared proteomics utilities
 │   ├── metabolomics/           # 8 metabolomics skills
 │   │   └── _lib/               # Shared metabolomics utilities
-│   ├── bulkrna/                # Bulk RNA skills
+│   ├── bulkrna/                # 13 bulk RNA skills
 │   │   └── _lib/               # Shared bulk RNA utilities
-│   └── orchestrator/           # Multi-domain routing
+│   ├── orchestrator/           # 2 orchestration skills
+│   └── literature/             # 1 literature skill
 ├── bot/                        # Messaging bot frontends
 │   ├── core.py                 # Shared LLM engine + tool loop (reused by interactive)
 │   ├── run.py                  # Unified bot runner
@@ -182,6 +193,12 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 For repository development work, start with a short plan when the task spans
 multiple files, debug from root cause before editing, and verify the affected
 behavior before committing, pushing, or opening a PR.
+
+After creating or materially updating any PR, always run
+`cursor-team-kit:make-pr-easy-to-review` before handing it off. The PR should
+have a reviewer-oriented description with a TL;DR, recommended review order,
+diff buckets, generated/mechanical file notes, risk notes, and verification
+evidence.
 
 ## Graph Memory System
 
@@ -259,7 +276,7 @@ bot/
 All channels share `bot/core.py` which contains:
 - LLM tool-use loop (OpenAI function calling)
 - TOOLS definition (omicsclaw, save_file, write_file, generate_audio)
-- `execute_omicsclaw()` — runs `omicsclaw.py run <skill>` as subprocess
+- `execute_omicsclaw()` — executes normal skills via the shared runner contract
 - Security helpers (path sanitization, file size limits)
 - Audit logging (JSONL)
 

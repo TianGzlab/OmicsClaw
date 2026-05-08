@@ -2,7 +2,8 @@
 name: spatial-preprocess
 description: >-
   Load matrix-level spatial transcriptomics data (including raw_counts.h5ad
-  from spatial-raw-processing), run the current OmicsClaw scanpy-standard preprocessing workflow,
+  from spatial-raw-processing), run the current OmicsClaw scanpy-standard preprocessing
+  workflow,
   and export a downstream-ready AnnData with explicit effective QC parameters
   plus a standardized preprocessing visualization contract.
 version: 0.5.0
@@ -13,60 +14,70 @@ metadata:
   omicsclaw:
     domain: spatial
     allowed_extra_flags:
-      - "--data-type"
-      - "--leiden-resolution"
-      - "--max-genes"
-      - "--max-mt-pct"
-      - "--min-cells"
-      - "--min-genes"
-      - "--n-neighbors"
-      - "--n-pcs"
-      - "--n-top-hvg"
-      - "--resolutions"
-      - "--species"
-      - "--tissue"
+    - "--data-type"
+    - "--leiden-resolution"
+    - "--max-genes"
+    - "--max-mt-pct"
+    - "--min-cells"
+    - "--min-genes"
+    - "--n-neighbors"
+    - "--n-pcs"
+    - "--n-top-hvg"
+    - "--resolutions"
+    - "--species"
+    - "--tissue"
     param_hints:
       scanpy_standard:
-        priority: "tissue → min_genes/max_mt_pct/max_genes → n_top_hvg → n_pcs/n_neighbors → leiden_resolution"
-        params: ["data_type", "species", "tissue", "min_genes", "min_cells", "max_mt_pct", "max_genes", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution", "resolutions"]
-        defaults: {data_type: "generic", species: "human", min_genes: 0, min_cells: 0, max_mt_pct: 20.0, max_genes: 0, n_top_hvg: 2000, n_pcs: 30, n_neighbors: 15, leiden_resolution: 0.5}
+        priority: "tissue → min_genes/max_mt_pct/max_genes → n_top_hvg → n_pcs/n_neighbors
+          → leiden_resolution"
+        params: ["data_type", "species", "tissue", "min_genes", "min_cells", "max_mt_pct",
+          "max_genes", "n_top_hvg", "n_pcs", "n_neighbors", "leiden_resolution", "resolutions"]
+        defaults: {data_type: "generic", species: "human", min_genes: 0, min_cells: 0,
+          max_mt_pct: 20.0, max_genes: 0, n_top_hvg: 2000, n_pcs: 30, n_neighbors: 15,
+          leiden_resolution: 0.5}
         requires: ["raw_counts_in_X", "obsm.spatial_optional", "scanpy_pipeline"]
         tips:
-          - "--tissue: OmicsClaw wrapper-level preset that fills QC defaults; reports also record the effective thresholds after preset resolution."
-          - "--min-genes / --max-mt-pct / --max-genes: main QC thresholds controlling how aggressively low-quality spots are removed."
-          - "--n-top-hvg: public Scanpy HVG selection budget passed to `pp.highly_variable_genes(..., flavor='seurat_v3', layer='counts')`."
-          - "--n-pcs / --n-neighbors: public Scanpy graph-construction controls; OmicsClaw reports requested, computed, used, and suggested PCs separately."
-          - "--leiden-resolution / --resolutions: public Leiden clustering resolution controls for the primary clustering and optional sweep."
+        - "--tissue: OmicsClaw wrapper-level preset that fills QC defaults; reports
+          also record the effective thresholds after preset resolution."
+        - "--min-genes / --max-mt-pct / --max-genes: main QC thresholds controlling
+          how aggressively low-quality spots are removed."
+        - "--n-top-hvg: public Scanpy HVG selection budget passed to `pp.highly_variable_genes(...,
+          flavor='seurat_v3', layer='counts')`."
+        - "--n-pcs / --n-neighbors: public Scanpy graph-construction controls; OmicsClaw
+          reports requested, computed, used, and suggested PCs separately."
+        - "--leiden-resolution / --resolutions: public Leiden clustering resolution
+          controls for the primary clustering and optional sweep."
     legacy_aliases: [preprocess]
     saves_h5ad: true
     requires_preprocessed: false
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🔬"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
-      - kind: pip
-        package: squidpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
+    - kind: pip
+      package: squidpy
+      bins: []
     trigger_keywords:
-      - preprocess
-      - spatial preprocessing
-      - spatial QC
-      - normalize
-      - visium
-      - xenium
-      - merfish
-      - slide-seq
-      - load spatial data
-      - leiden
-      - umap
+    - preprocess
+    - spatial preprocessing
+    - spatial QC
+    - normalize
+    - visium
+    - xenium
+    - merfish
+    - slide-seq
+    - load spatial data
+    - leiden
+    - umap
+    script: spatial_preprocess.py
 ---
 
 # 🔬 Spatial Preprocess

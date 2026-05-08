@@ -1,9 +1,8 @@
 """``LocalExecutor`` — in-process baseline.
 
-MVP-1 keeps the ``executor_not_implemented`` behavior of the previous
-inline stub: return a failed outcome with a diagnostic stdout tail. The
-abstraction makes this a 10-line swap once the real subprocess runner
-(spawning ``python omicsclaw.py run <skill> …``) is ready.
+Legacy placeholder executor that preserves the old
+``executor_not_implemented`` behavior for tests or explicit fallback wiring.
+The default app/remote path now uses ``SkillRunnerExecutor``.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 ---
 name: bulkrna-geneid-mapping
 description: >-
-  Gene identifier conversion between Ensembl, Entrez, HGNC symbols, and UniProt for bulk RNA-seq count matrices.
+  Gene identifier conversion between Ensembl, Entrez, HGNC symbols, and UniProt for
+  bulk RNA-seq count matrices.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -11,15 +12,19 @@ metadata:
   omicsclaw:
     domain: bulkrna
     emoji: "🏷️"
-    trigger_keywords: [gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs]
+    trigger_keywords: [gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation,
+      convert IDs]
     allowed_extra_flags:
-      - "--from"
-      - "--mapping-file"
-      - "--on-duplicate"
-      - "--species"
-      - "--to"
+    - "--from"
+    - "--mapping-file"
+    - "--on-duplicate"
+    - "--species"
+    - "--to"
     legacy_aliases: [bulk-geneid]
     saves_h5ad: false
+    script: bulkrna_geneid_mapping.py
+    param_hints: {}
+    requires_preprocessed: false
 ---
 
 # Bulk RNA-seq Gene ID Mapping

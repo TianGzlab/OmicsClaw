@@ -12,33 +12,33 @@ metadata:
     domain: singlecell
     requires:
       bins:
-        - python3
+      - python3
       env: []
       config: []
     emoji: "🌀"
     homepage: https://github.com/TianGzlab/OmicsClaw
     os: [macos, linux]
     install:
-      - kind: pip
-        package: scanpy
-        bins: []
+    - kind: pip
+      package: scanpy
+      bins: []
     trigger_keywords:
-      - RNA velocity prep
-      - prepare spliced unspliced layers
-      - velocyto
-      - starsolo velocyto
-      - velocity-ready AnnData
+    - RNA velocity prep
+    - prepare spliced unspliced layers
+    - velocyto
+    - starsolo velocyto
+    - velocity-ready AnnData
     allowed_extra_flags:
-      - "--base-h5ad"
-      - "--chemistry"
-      - "--gtf"
-      - "--method"
-      - "--read2"
-      - "--reference"
-      - "--sample"
-      - "--threads"
-      - "--whitelist"
-      - "--r-enhanced"
+    - "--base-h5ad"
+    - "--chemistry"
+    - "--gtf"
+    - "--method"
+    - "--read2"
+    - "--reference"
+    - "--sample"
+    - "--threads"
+    - "--whitelist"
+    - "--r-enhanced"
     legacy_aliases: [scrna-velocity-prep]
     saves_h5ad: true
     requires_preprocessed: false
@@ -49,17 +49,22 @@ metadata:
         defaults: {threads: 4}
         requires: ["cellranger_output_or_loom"]
         tips:
-          - "--gtf: required when the wrapper needs to run velocyto from a Cell Ranger BAM."
-          - "--base-h5ad: merge spliced/unspliced layers back into an existing OmicsClaw object."
+        - "--gtf: required when the wrapper needs to run velocyto from a Cell Ranger
+          BAM."
+        - "--base-h5ad: merge spliced/unspliced layers back into an existing OmicsClaw
+          object."
       starsolo:
         priority: "reference -> chemistry -> whitelist -> base_h5ad -> sample -> threads"
         params: ["reference", "chemistry", "whitelist", "base_h5ad", "sample", "threads"]
         defaults: {threads: 8}
         requires: ["starsolo_velocyto_output_or_fastq"]
         tips:
-          - "--chemistry: current STARsolo velocity wrapper supports `10xv2`, `10xv3`, and `10xv4` geometry."
-          - "--whitelist: strongly recommended for real FASTQ-backed STARsolo runs."
-          - "--base-h5ad: merge velocity layers into an existing preprocessed AnnData for direct scVelo use."
+        - "--chemistry: current STARsolo velocity wrapper supports `10xv2`, `10xv3`,
+          and `10xv4` geometry."
+        - "--whitelist: strongly recommended for real FASTQ-backed STARsolo runs."
+        - "--base-h5ad: merge velocity layers into an existing preprocessed AnnData
+          for direct scVelo use."
+    script: sc_velocity_prep.py
 ---
 
 # 🌀 Single-Cell Velocity Prep
@@ -86,7 +91,7 @@ velocity-ready `spliced` and `unspliced` layers before running `sc-velocity`.
 4. **Standard output layer**: writes `processed.h5ad`, a compatibility alias
    `velocity_input.h5ad`, summary figures, and
    figure-ready exports.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
+5. **Reproducibility layer**: writes native `report.md`, `result.json`,
    and rerun commands.
 
 ## Input Formats
@@ -128,7 +133,7 @@ Beginner rule of thumb:
 3. **Run method**: execute velocyto or STARsolo when needed, or import existing velocity artifacts directly.
 4. **Persist results**: build `spliced`, `unspliced`, `ambiguous`, and `counts` layers and optionally merge them into a base `h5ad`.
 5. **Visualize / summarize**: export velocity-layer summaries and top-gene balance tables.
-6. **Report**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle.
+6. **Report**: write native `report.md`, `result.json`, and the reproducibility bundle; the shared runner adds `README.md`.
 
 ## CLI Reference
 

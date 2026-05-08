@@ -27,7 +27,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -584,12 +583,6 @@ def main() -> int:
 
     # ---- Report ----
     _write_report(output_dir, summary, params, input_path, top_df, diagnostics)
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Gene program discovery and usage scoring for scRNA-seq.",
-        preferred_method=args.method,
-    )
 
     # ---- Success banner ----
     print(f"\n{'=' * 60}")
