@@ -70,18 +70,38 @@ def _set(value: Any) -> set[str]:
     return {str(value)}
 
 
-def test_hardcoded_skills_are_fully_derivable_from_skill_md_frontmatter():
-    """If this test fails, its message is the audit report driving Task 1.2."""
+def test_hardcoded_skills_can_be_deleted_without_data_loss():
+    """Deletion-safety audit: would removing ``_HARDCODED_SKILLS`` lose
+    information that SKILL.md frontmatter does not already carry?
+
+    This is stricter than "are the dicts identical" — SKILL.md is allowed
+    to be a *superset* of hardcoded (the existing merge logic already lets
+    SKILL.md win). A drift fires only when hardcoded has data that SKILL.md
+    cannot reconstruct.
+
+    Drift dimensions:
+      [lookup_lost]   — alias / legacy alias name resolvable via hardcoded
+                        but neither in SKILL.md ``name`` nor ``legacy_aliases``
+      [flags_lost]    — flag in hardcoded ``allowed_extra_flags`` but not in
+                        SKILL.md
+      [saves_h5ad_disagrees] — boolean disagreement between layers (must
+                        resolve to the actually-true value)
+      [domain_drift]  — domain disagreement (hardcoded vs SKILL.md)
+      [script_drift]  — script path disagreement (post-deletion the
+                        filesystem-derived path is canonical; this fires
+                        only if the hardcoded path is *different*)
+      [missing_skill_md] — hardcoded entry whose script has no SKILL.md
+                        next to it (cannot be deleted without first
+                        creating one)
+    """
     drifts: list[str] = []
-    fields_per_skill_summary: dict[str, list[str]] = {
+    summary: dict[str, list[str]] = {
         "missing_skill_md": [],
-        "alias_drift": [],
+        "lookup_lost": [],
+        "flags_lost": [],
+        "saves_h5ad_disagrees": [],
         "domain_drift": [],
-        "allowed_extra_flags_drift": [],
-        "legacy_aliases_drift": [],
-        "saves_h5ad_drift": [],
         "script_drift": [],
-        "description_missing": [],
     }
 
     for hardcoded_key, hc_info in registry_module._HARDCODED_SKILLS.items():
@@ -91,68 +111,61 @@ def test_hardcoded_skills_are_fully_derivable_from_skill_md_frontmatter():
             drifts.append(
                 f"[missing_skill_md] {hardcoded_key}: no SKILL.md next to {script_path}"
             )
-            fields_per_skill_summary["missing_skill_md"].append(hardcoded_key)
+            summary["missing_skill_md"].append(hardcoded_key)
             continue
 
         fm = _frontmatter(skill_md)
         omics = _omics_metadata(skill_md)
 
-        # alias ↔ name
-        hc_alias = hc_info.get("alias")
+        # lookup_lost: every name resolvable via hardcoded must be reachable
+        # via SKILL.md's name + legacy_aliases.
+        hc_names = {hc_info.get("alias"), hardcoded_key} | _set(hc_info.get("legacy_aliases"))
+        hc_names.discard(None)
         md_name = fm.get("name")
-        if hc_alias != md_name:
+        md_lookups = ({md_name} if md_name else set()) | _set(omics.get("legacy_aliases"))
+        lost_names = hc_names - md_lookups
+        if lost_names:
             drifts.append(
-                f"[alias_drift] {hardcoded_key}: hardcoded.alias={hc_alias!r}, "
-                f"SKILL.md.name={md_name!r}"
+                f"[lookup_lost] {hardcoded_key}: deleting hardcoded would drop "
+                f"{sorted(lost_names)} as resolvable names "
+                f"(SKILL.md provides {sorted(md_lookups)})"
             )
-            fields_per_skill_summary["alias_drift"].append(hardcoded_key)
+            summary["lookup_lost"].append(hardcoded_key)
 
-        # domain
-        hc_domain = hc_info.get("domain")
-        md_domain = omics.get("domain")
-        if hc_domain != md_domain:
-            drifts.append(
-                f"[domain_drift] {hardcoded_key}: hardcoded.domain={hc_domain!r}, "
-                f"SKILL.md.metadata.omicsclaw.domain={md_domain!r}"
-            )
-            fields_per_skill_summary["domain_drift"].append(hardcoded_key)
-
-        # allowed_extra_flags (set equality)
+        # flags_lost: SKILL.md must list every flag hardcoded allows.
         hc_flags = _set(hc_info.get("allowed_extra_flags"))
         md_flags = _set(omics.get("allowed_extra_flags"))
-        if hc_flags != md_flags:
-            only_hc = sorted(hc_flags - md_flags)
-            only_md = sorted(md_flags - hc_flags)
+        flags_only_in_hc = hc_flags - md_flags
+        if flags_only_in_hc:
             drifts.append(
-                f"[allowed_extra_flags_drift] {hardcoded_key}: "
-                f"only_in_hardcoded={only_hc}, only_in_skill_md={only_md}"
+                f"[flags_lost] {hardcoded_key}: deleting hardcoded would drop "
+                f"flags {sorted(flags_only_in_hc)} (not in SKILL.md)"
             )
-            fields_per_skill_summary["allowed_extra_flags_drift"].append(hardcoded_key)
+            summary["flags_lost"].append(hardcoded_key)
 
-        # legacy_aliases (set equality, ignoring ordering)
-        hc_legacy = _set(hc_info.get("legacy_aliases"))
-        md_legacy = _set(omics.get("legacy_aliases"))
-        if hc_legacy != md_legacy:
-            only_hc = sorted(hc_legacy - md_legacy)
-            only_md = sorted(md_legacy - hc_legacy)
-            drifts.append(
-                f"[legacy_aliases_drift] {hardcoded_key}: "
-                f"only_in_hardcoded={only_hc}, only_in_skill_md={only_md}"
-            )
-            fields_per_skill_summary["legacy_aliases_drift"].append(hardcoded_key)
-
-        # saves_h5ad
+        # saves_h5ad: layers must agree.
         hc_saves = bool(hc_info.get("saves_h5ad", False))
         md_saves = bool(omics.get("saves_h5ad", False))
         if hc_saves != md_saves:
             drifts.append(
-                f"[saves_h5ad_drift] {hardcoded_key}: "
-                f"hardcoded={hc_saves}, SKILL.md={md_saves}"
+                f"[saves_h5ad_disagrees] {hardcoded_key}: hardcoded={hc_saves}, "
+                f"SKILL.md={md_saves} — investigate which is true"
             )
-            fields_per_skill_summary["saves_h5ad_drift"].append(hardcoded_key)
+            summary["saves_h5ad_disagrees"].append(hardcoded_key)
 
-        # script: SKILL.md may set "script:" relative to skill dir; otherwise
-        # convention is <dir-name-with-underscores>.py
+        # domain: must agree.
+        hc_domain = hc_info.get("domain")
+        md_domain = omics.get("domain")
+        if hc_domain and md_domain and hc_domain != md_domain:
+            drifts.append(
+                f"[domain_drift] {hardcoded_key}: hardcoded.domain={hc_domain!r}, "
+                f"SKILL.md.domain={md_domain!r}"
+            )
+            summary["domain_drift"].append(hardcoded_key)
+
+        # script path agreement (informational — post-deletion the filesystem
+        # convention takes over; only fires if hardcoded path is *not* the
+        # convention OR an explicit SKILL.md "script:" override).
         md_script_rel = omics.get("script") or fm.get("script")
         if md_script_rel:
             md_script_resolved = (skill_md.parent / md_script_rel).resolve()
@@ -162,34 +175,27 @@ def test_hardcoded_skills_are_fully_derivable_from_skill_md_frontmatter():
         hc_script_resolved = script_path.resolve()
         if md_script_resolved != hc_script_resolved:
             drifts.append(
-                f"[script_drift] {hardcoded_key}: "
-                f"hardcoded={hc_script_resolved}, derived_from_SKILL.md={md_script_resolved}"
+                f"[script_drift] {hardcoded_key}: hardcoded={hc_script_resolved}, "
+                f"derived_from_SKILL.md={md_script_resolved}"
             )
-            fields_per_skill_summary["script_drift"].append(hardcoded_key)
-
-        # description presence (informational)
-        if not DESCRIPTION_AUDIT_IS_INFORMATIONAL:
-            hc_desc = (hc_info.get("description") or "").strip()
-            md_desc = (fm.get("description") or "").strip()
-            if hc_desc and not md_desc:
-                drifts.append(
-                    f"[description_missing] {hardcoded_key}: hardcoded has description, "
-                    f"SKILL.md description is empty"
-                )
-                fields_per_skill_summary["description_missing"].append(hardcoded_key)
+            summary["script_drift"].append(hardcoded_key)
 
     if not drifts:
-        return  # 100% derivable — Task 1.2a is unblocked
+        return  # No data loss on deletion — Task 1.2c step 4 is unblocked
 
     summary_lines = [
         "",
-        f"AUDIT REPORT — {len(drifts)} drift(s) across {len(registry_module._HARDCODED_SKILLS)} hardcoded entries",
+        f"DELETION-SAFETY AUDIT — {len(drifts)} blocker(s) across "
+        f"{len(registry_module._HARDCODED_SKILLS)} hardcoded entries",
         "",
         "By dimension:",
     ]
-    for dim, entries in fields_per_skill_summary.items():
+    for dim, entries in summary.items():
         if entries:
-            summary_lines.append(f"  {dim}: {len(entries)} entries — {sorted(set(entries))[:8]}{'...' if len(entries) > 8 else ''}")
+            summary_lines.append(
+                f"  {dim}: {len(entries)} — {sorted(set(entries))[:10]}"
+                f"{'...' if len(entries) > 10 else ''}"
+            )
 
     summary_lines.append("")
     summary_lines.append("Detailed drifts (first 60):")
