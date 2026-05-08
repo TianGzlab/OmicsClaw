@@ -104,7 +104,7 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    readme = f"""# Omics Skill Builder
+    scaffold_summary = f"""# Omics Skill Builder Scaffold
 
 Created a new scaffolded OmicsClaw skill.
 
@@ -124,7 +124,9 @@ Next steps:
 3. Refine trigger keywords and parameter hints in the generated SKILL.md.
 """
 
-    _write_text(output_dir / "README.md", readme)
+    # The shared runner owns `output_dir/README.md`; this skill writes its
+    # scaffold-specific summary under a non-clashing name.
+    _write_text(output_dir / "SCAFFOLD_SUMMARY.md", scaffold_summary)
     _write_text(output_dir / "report.md", report)
     _write_text(
         output_dir / "reproducibility" / "commands.sh",
