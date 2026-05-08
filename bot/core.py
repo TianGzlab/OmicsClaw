@@ -17,11 +17,13 @@ import json
 import logging
 import os
 import re
-import requests
 import shutil
 import sys
 import tempfile
+import threading
 import time
+
+import requests
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2097,6 +2099,8 @@ async def _run_skill_via_shared_runner(
     def _emit_stderr(line: str) -> None:
         logger.info("[%s:stderr] %s", canonical_skill, line)
 
+    cancel_event = threading.Event()
+
     def _run() -> dict:
         return skill_runner.run_skill(
             runner_skill,
@@ -2107,9 +2111,17 @@ async def _run_skill_via_shared_runner(
             extra_args=forwarded_args or None,
             stdout_callback=_emit_stdout,
             stderr_callback=_emit_stderr,
+            cancel_event=cancel_event,
         )
 
-    result = await asyncio.to_thread(_run)
+    try:
+        result = await asyncio.to_thread(_run)
+    except asyncio.CancelledError:
+        # Forward bot-task cancellation to the runner so the worker thread
+        # and its subprocess actually shut down (SIGTERM/SIGKILL path) instead
+        # of leaking after the user disconnects.
+        cancel_event.set()
+        raise
     run_result = coerce_skill_run_result(result)
     stdout_str = run_result.stdout
     stderr_str = run_result.stderr
