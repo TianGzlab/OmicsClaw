@@ -245,6 +245,8 @@ class OmicsRegistry:
                         "allowed_extra_flags": set(),
                         "legacy_aliases": [],
                         "saves_h5ad": False,
+                        "requires_preprocessed": False,
+                        "param_hints": {},
                     }
 
                 self._register_skill_entry(

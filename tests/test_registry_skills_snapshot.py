@@ -1,17 +1,18 @@
-"""Snapshot of ``registry.skills`` shape, used as a refactor safety net.
+"""Snapshot of ``registry.skills`` shape — the public registry contract.
 
-When ``_HARDCODED_SKILLS`` / ``_HARDCODED_DOMAINS`` are removed in favor of
-SKILL.md as the single source of truth, this test verifies that the
-observable registry contract (set of resolvable names + per-name field
-shape) does not change.
+After the ``_HARDCODED_SKILLS`` deletion (PR registry-data-logic-split),
+SKILL.md frontmatter is the single source of truth. This test pins the
+*observable* contract so a future refactor that drops a name, drops a
+field, or changes a field type fails loudly.
 
-The snapshot is intentionally focused on the *shape* of each entry, not
-its full byte-for-byte content — frontmatter strings (descriptions,
-trigger keywords) may evolve without breaking the contract. What matters
-is:
-  - the set of canonical skill aliases stays the same
-  - every previously-resolvable legacy alias still resolves
-  - each entry still exposes the same set of typed fields
+Pinned dimensions:
+  - the canonical skill set (≥80 entries) is stable
+  - every pre-rename canonical (e.g. ``spatial-preprocessing``) still
+    resolves to the new canonical
+  - every short legacy alias shipped in CLAUDE.md examples still
+    resolves
+  - each canonical entry exposes the documented field-and-type set
+  - each domain entry exposes its required fields
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ REQUIRED_FIELDS_AND_TYPES: dict[str, type | tuple[type, ...]] = {
     "allowed_extra_flags": (set, frozenset, list),
     "legacy_aliases": list,
     "saves_h5ad": bool,
+    "requires_preprocessed": bool,
+    "param_hints": dict,
 }
 
 
