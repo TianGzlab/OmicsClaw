@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from omicsclaw.common.report import (
     build_output_dir_name,
@@ -25,6 +26,7 @@ from omicsclaw.common.report import (
     write_output_readme,
 )
 from omicsclaw.core.registry import registry
+from omicsclaw.core.skill_result import build_skill_run_result
 
 
 OMICSCLAW_DIR = Path(__file__).resolve().parents[2]
@@ -215,6 +217,34 @@ def _write_pipeline_readme(
     return readme_path
 
 
+def _stream_to_sink(
+    stream,
+    sink: list[str],
+    callback: Callable[[str], None] | None,
+) -> None:
+    """Drain ``stream`` line-by-line into ``sink`` and forward to ``callback``.
+
+    ``callback`` receives each line stripped of its trailing newline. Callback
+    exceptions are swallowed so a buggy log handler cannot abort the run.
+    """
+    try:
+        for line in iter(stream.readline, ""):
+            if not line:
+                break
+            sink.append(line)
+            if callback is not None:
+                try:
+                    callback(line.rstrip("\n"))
+                except Exception:
+                    # The skill must complete even if the consumer's logger blows up.
+                    pass
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
 def run_skill(
     skill_name: str,
     *,
@@ -224,8 +254,22 @@ def run_skill(
     demo: bool = False,
     session_path: str | None = None,
     extra_args: list[str] | None = None,
+    stdout_callback: Callable[[str], None] | None = None,
+    stderr_callback: Callable[[str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
-    """Run a single skill via subprocess and return a stable result dict."""
+    """Run a single skill via subprocess and return a stable result dict.
+
+    When ``stdout_callback`` / ``stderr_callback`` are supplied the runner
+    invokes them once per line as the skill emits output (newline stripped),
+    so long-running skills produce visible logs in real time. Aggregated
+    ``stdout`` / ``stderr`` strings are still returned in the result dict.
+
+    When ``cancel_event`` is supplied the runner watches it; if the event is
+    set while the skill is running the child process group receives SIGTERM,
+    waits a short grace period, then SIGKILL, ensuring cancelled jobs do not
+    leak children consuming CPU/GPU until natural completion.
+    """
     skill_name = resolve_skill_alias(skill_name)
 
     if skill_name == "spatial-pipeline":
@@ -342,6 +386,7 @@ def run_skill(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,  # line-buffered so callbacks fire as the skill prints
             cwd=str(script_path.parent),
             env=env,
             start_new_session=True,
@@ -356,17 +401,76 @@ def run_skill(
             except (ProcessLookupError, PermissionError, OSError):
                 pass
 
+        def _cancel_watcher():
+            """Send SIGTERM (then SIGKILL after grace) when cancel_event is set."""
+            if cancel_event is None:
+                return
+            while popen.poll() is None:
+                if cancel_event.wait(timeout=0.2):
+                    try:
+                        os.killpg(os.getpgid(popen.pid), signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        return
+                    grace_deadline = time.time() + 5.0
+                    while popen.poll() is None and time.time() < grace_deadline:
+                        time.sleep(0.1)
+                    if popen.poll() is None:
+                        try:
+                            os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError, OSError):
+                            pass
+                    return
+
         reap_thread = threading.Thread(target=_reaper, daemon=True)
         reap_thread.start()
+        cancel_thread: threading.Thread | None = None
+        if cancel_event is not None:
+            cancel_thread = threading.Thread(target=_cancel_watcher, daemon=True)
+            cancel_thread.start()
+
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        stdout_thread = threading.Thread(
+            target=_stream_to_sink,
+            args=(popen.stdout, stdout_lines, stdout_callback),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=_stream_to_sink,
+            args=(popen.stderr, stderr_lines, stderr_callback),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
         try:
-            stdout, stderr = popen.communicate()
+            popen.wait()
         except Exception:
-            stdout, stderr = "", ""
+            pass
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
         reap_thread.join(timeout=5)
+        if cancel_thread is not None:
+            cancel_thread.join(timeout=5)
+
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
         return_code = popen.returncode or 0
-        if return_code == -9 and (Path(out_dir) / "result.json").exists():
+        # The ``-9 → 0`` heuristic was a workaround for the orphan reaper's
+        # SIGKILL race when the main process had already produced its
+        # ``result.json``. Once ``cancel_event`` was wired to escalate to
+        # SIGKILL, ``-9`` also became the *normal* outcome of cancellation.
+        # Skip the heuristic when the run was actually cancelled, otherwise a
+        # cancelled run that happened to leave a partial ``result.json``
+        # would be silently reported as success.
+        was_cancelled = cancel_event is not None and cancel_event.is_set()
+        if (
+            not was_cancelled
+            and return_code == -9
+            and (Path(out_dir) / "result.json").exists()
+        ):
             return_code = 0
-        proc = subprocess.CompletedProcess(cmd, return_code, stdout or "", stderr or "")
+        proc = subprocess.CompletedProcess(cmd, return_code, stdout, stderr)
     except Exception as exc:
         duration = time.time() - t0
         return _err(skill_name, str(exc), duration=duration)
@@ -399,19 +503,19 @@ def run_skill(
         [path.name for path in final_out_dir.rglob("*") if path.is_file()]
     ) if final_out_dir.exists() else []
 
-    result = {
-        "skill": skill_name,
-        "success": proc.returncode == 0,
-        "exit_code": proc.returncode,
-        "output_dir": str(final_out_dir),
-        "files": output_files,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "duration_seconds": round(duration, 2),
-        "method": actual_method,
-        "readme_path": readme_path,
-        "notebook_path": notebook_path,
-    }
+    result = build_skill_run_result(
+        skill=skill_name,
+        success=proc.returncode == 0,
+        exit_code=proc.returncode,
+        output_dir=final_out_dir,
+        files=output_files,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        duration_seconds=duration,
+        method=actual_method,
+        readme_path=readme_path,
+        notebook_path=notebook_path,
+    ).to_legacy_dict()
 
     if session_path and result["success"]:
         _store_result_in_session(session_path, skill_name, final_out_dir)
@@ -483,18 +587,18 @@ def _run_spatial_pipeline(
     )
 
     succeeded = sum(1 for result in all_results.values() if result["success"])
-    return {
-        "skill": "spatial-pipeline",
-        "success": succeeded == len(SPATIAL_PIPELINE),
-        "exit_code": 0 if succeeded == len(SPATIAL_PIPELINE) else 1,
-        "output_dir": str(out_dir),
-        "files": [path.name for path in out_dir.rglob("*") if path.is_file()],
-        "stdout": f"Pipeline: {succeeded}/{len(SPATIAL_PIPELINE)} skills succeeded.",
-        "stderr": "",
-        "duration_seconds": sum(result["duration"] for result in all_results.values()),
-        "readme_path": str(pipeline_readme),
-        "notebook_path": "",
-    }
+    return build_skill_run_result(
+        skill="spatial-pipeline",
+        success=succeeded == len(SPATIAL_PIPELINE),
+        exit_code=0 if succeeded == len(SPATIAL_PIPELINE) else 1,
+        output_dir=out_dir,
+        files=[path.name for path in out_dir.rglob("*") if path.is_file()],
+        stdout=f"Pipeline: {succeeded}/{len(SPATIAL_PIPELINE)} skills succeeded.",
+        stderr="",
+        duration_seconds=sum(result["duration"] for result in all_results.values()),
+        readme_path=pipeline_readme,
+        notebook_path="",
+    ).to_legacy_dict()
 
 
 def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) -> None:
@@ -520,16 +624,11 @@ def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) 
 
 
 def _err(skill: str, msg: str, duration: float = 0) -> dict:
-    return {
-        "skill": skill,
-        "success": False,
-        "exit_code": -1,
-        "output_dir": None,
-        "files": [],
-        "stdout": "",
-        "stderr": msg,
-        "duration_seconds": round(duration, 2),
-        "method": None,
-        "readme_path": "",
-        "notebook_path": "",
-    }
+    return build_skill_run_result(
+        skill=skill,
+        success=False,
+        exit_code=-1,
+        output_dir=None,
+        stderr=msg,
+        duration_seconds=duration,
+    ).to_legacy_dict()

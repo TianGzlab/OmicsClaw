@@ -22,14 +22,14 @@ reuse the same argv shape.
 
 from __future__ import annotations
 
-import json
+import asyncio
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 from omicsclaw.autoagent.constants import param_to_cli_flag
-
-import asyncio
+from omicsclaw.core.skill_result import coerce_skill_run_result, result_json_fallback
 
 from .base import JobContext, JobOutcome
 
@@ -96,6 +96,7 @@ class SkillRunnerExecutor:
         input_paths = ctx.inputs.get("inputs")
         demo = bool(ctx.inputs.get("demo"))
         extra_args = _params_to_extra_args(ctx.params)
+        cancel_event = threading.Event()
 
         def _run() -> dict[str, Any]:
             return skill_runner.run_skill(
@@ -106,29 +107,32 @@ class SkillRunnerExecutor:
                 demo=demo,
                 session_path=str(ctx.inputs["session_path"]) if ctx.inputs.get("session_path") else None,
                 extra_args=extra_args or None,
+                cancel_event=cancel_event,
             )
 
         try:
             result = await asyncio.to_thread(_run)
+        except asyncio.CancelledError:
+            # Forward asyncio cancellation to the worker thread / subprocess so
+            # the SIGTERM/SIGKILL path runs instead of leaking the child.
+            cancel_event.set()
+            raise
         except Exception as exc:
             text = f"skill_runner_failed: {exc}"
             ctx.stdout_log.parent.mkdir(parents=True, exist_ok=True)
             ctx.stdout_log.write_text(text, encoding="utf-8")
             return JobOutcome(exit_code=1, error=text, stdout_text=text)
 
-        stdout = str(result.get("stdout") or "")
-        stderr = str(result.get("stderr") or "")
-        stdout_text = stdout + (stderr if not stdout or not stderr else "\n" + stderr)
+        run_result = coerce_skill_run_result(result)
+        stdout_text = run_result.combined_output
         if not stdout_text:
-            stdout_text = json.dumps(result, ensure_ascii=False, default=str)
+            stdout_text = result_json_fallback(run_result)
 
         ctx.stdout_log.parent.mkdir(parents=True, exist_ok=True)
         ctx.stdout_log.write_text(stdout_text, encoding="utf-8")
 
-        exit_code = int(result.get("exit_code") or 0)
-        if not result.get("success", False) and exit_code == 0:
-            exit_code = 1
-        error = None if exit_code == 0 else stderr or stdout_text or "skill_runner_failed"
+        exit_code = run_result.adapter_exit_code
+        error = None if exit_code == 0 else run_result.stderr or stdout_text or "skill_runner_failed"
         return JobOutcome(exit_code=exit_code, error=error, stdout_text=stdout_text)
 
 

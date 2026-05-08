@@ -17,11 +17,13 @@ import json
 import logging
 import os
 import re
-import requests
 import shutil
 import sys
 import tempfile
+import threading
 import time
+
+import requests
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2071,6 +2073,7 @@ async def _run_skill_via_shared_runner(
     out_dir: Path,
 ) -> dict:
     from omicsclaw.core import skill_runner
+    from omicsclaw.core.skill_result import coerce_skill_run_result
 
     runner_skill = "spatial-pipeline" if skill_key == "pipeline" else skill_key
     skill_info = _lookup_skill_info(runner_skill)
@@ -2090,6 +2093,14 @@ async def _run_skill_via_shared_runner(
             forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
     forwarded_args.extend(_normalize_extra_args(extra_args))
 
+    def _emit_stdout(line: str) -> None:
+        logger.info("[%s:stdout] %s", canonical_skill, line)
+
+    def _emit_stderr(line: str) -> None:
+        logger.info("[%s:stderr] %s", canonical_skill, line)
+
+    cancel_event = threading.Event()
+
     def _run() -> dict:
         return skill_runner.run_skill(
             runner_skill,
@@ -2098,21 +2109,30 @@ async def _run_skill_via_shared_runner(
             demo=mode == "demo",
             session_path=session_path,
             extra_args=forwarded_args or None,
+            stdout_callback=_emit_stdout,
+            stderr_callback=_emit_stderr,
+            cancel_event=cancel_event,
         )
 
-    result = await asyncio.to_thread(_run)
-    stdout_str = str(result.get("stdout") or "")
-    stderr_str = str(result.get("stderr") or "")
+    try:
+        result = await asyncio.to_thread(_run)
+    except asyncio.CancelledError:
+        # Forward bot-task cancellation to the runner so the worker thread
+        # and its subprocess actually shut down (SIGTERM/SIGKILL path) instead
+        # of leaking after the user disconnects.
+        cancel_event.set()
+        raise
+    run_result = coerce_skill_run_result(result)
+    stdout_str = run_result.stdout
+    stderr_str = run_result.stderr
     guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))
     clean_stderr = strip_user_guidance_lines(stderr_str)
     clean_stdout = strip_user_guidance_lines(stdout_str)
     error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
-    returncode = int(result.get("exit_code") or 0)
-    if not result.get("success", False) and returncode == 0:
-        returncode = 1
-    output_dir = Path(result.get("output_dir") or out_dir)
+    returncode = run_result.adapter_exit_code
+    output_dir = run_result.output_path or out_dir
     return {
-        "success": bool(result.get("success", False)),
+        "success": run_result.success,
         "returncode": returncode,
         "out_dir": output_dir,
         "output_dir": str(output_dir),
