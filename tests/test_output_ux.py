@@ -106,12 +106,16 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
     )
     monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
+    import io
+
     class FakePopen:
         pid = 999999
         returncode = 0
 
-        def __init__(self, cmd, stdout, stderr, text, cwd, env, start_new_session):
+        def __init__(self, cmd, **kwargs):
             self.cmd = cmd
+            self.stdout = io.StringIO("ok\n")
+            self.stderr = io.StringIO("")
             out_dir = Path(cmd[cmd.index("--output") + 1])
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / "report.md").write_text("# Fake report\n", encoding="utf-8")
@@ -125,9 +129,6 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
 
         def wait(self):
             return self.returncode
-
-        def communicate(self):
-            return "ok\n", ""
 
     monkeypatch.setattr(skill_runner.subprocess, "Popen", FakePopen)
     monkeypatch.setattr(skill_runner.time, "sleep", lambda _seconds: None)

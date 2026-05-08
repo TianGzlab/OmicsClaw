@@ -16,7 +16,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from omicsclaw.common.report import (
     build_output_dir_name,
@@ -215,6 +215,34 @@ def _write_pipeline_readme(
     return readme_path
 
 
+def _stream_to_sink(
+    stream,
+    sink: list[str],
+    callback: Callable[[str], None] | None,
+) -> None:
+    """Drain ``stream`` line-by-line into ``sink`` and forward to ``callback``.
+
+    ``callback`` receives each line stripped of its trailing newline. Callback
+    exceptions are swallowed so a buggy log handler cannot abort the run.
+    """
+    try:
+        for line in iter(stream.readline, ""):
+            if not line:
+                break
+            sink.append(line)
+            if callback is not None:
+                try:
+                    callback(line.rstrip("\n"))
+                except Exception:
+                    # The skill must complete even if the consumer's logger blows up.
+                    pass
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
 def run_skill(
     skill_name: str,
     *,
@@ -224,8 +252,16 @@ def run_skill(
     demo: bool = False,
     session_path: str | None = None,
     extra_args: list[str] | None = None,
+    stdout_callback: Callable[[str], None] | None = None,
+    stderr_callback: Callable[[str], None] | None = None,
 ) -> dict:
-    """Run a single skill via subprocess and return a stable result dict."""
+    """Run a single skill via subprocess and return a stable result dict.
+
+    When ``stdout_callback`` / ``stderr_callback`` are supplied the runner
+    invokes them once per line as the skill emits output (newline stripped),
+    so long-running skills produce visible logs in real time. Aggregated
+    ``stdout`` / ``stderr`` strings are still returned in the result dict.
+    """
     skill_name = resolve_skill_alias(skill_name)
 
     if skill_name == "spatial-pipeline":
@@ -342,6 +378,7 @@ def run_skill(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,  # line-buffered so callbacks fire as the skill prints
             cwd=str(script_path.parent),
             env=env,
             start_new_session=True,
@@ -358,15 +395,36 @@ def run_skill(
 
         reap_thread = threading.Thread(target=_reaper, daemon=True)
         reap_thread.start()
+
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        stdout_thread = threading.Thread(
+            target=_stream_to_sink,
+            args=(popen.stdout, stdout_lines, stdout_callback),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=_stream_to_sink,
+            args=(popen.stderr, stderr_lines, stderr_callback),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
         try:
-            stdout, stderr = popen.communicate()
+            popen.wait()
         except Exception:
-            stdout, stderr = "", ""
+            pass
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
         reap_thread.join(timeout=5)
+
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
         return_code = popen.returncode or 0
         if return_code == -9 and (Path(out_dir) / "result.json").exists():
             return_code = 0
-        proc = subprocess.CompletedProcess(cmd, return_code, stdout or "", stderr or "")
+        proc = subprocess.CompletedProcess(cmd, return_code, stdout, stderr)
     except Exception as exc:
         duration = time.time() - t0
         return _err(skill_name, str(exc), duration=duration)
