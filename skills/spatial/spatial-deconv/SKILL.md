@@ -161,7 +161,7 @@ metadata:
         - "--card-imputation / --card-num-grids / --card-ineibor: public `CARD.imputation`
           controls; current wrapper exports refined proportions when imputation is
           enabled."
-    legacy_aliases: [deconv]
+    legacy_aliases: [deconv, spatial-deconvolution]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

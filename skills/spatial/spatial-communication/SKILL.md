@@ -80,7 +80,7 @@ metadata:
         - "--cellchat-prob-type: forwarded to `computeCommunProb(type=...)`; `triMean`
           is the current OmicsClaw default."
         - "--cellchat-min-cells: forwarded to `filterCommunication(min.cells=...)`."
-    legacy_aliases: [communication]
+    legacy_aliases: [communication, spatial-cell-communication]
     saves_h5ad: true
     requires_preprocessed: true
     requires:

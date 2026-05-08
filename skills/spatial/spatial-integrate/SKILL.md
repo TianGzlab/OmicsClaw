@@ -62,7 +62,7 @@ metadata:
         - "--scanorama-alpha: Alignment-score cutoff controlling which batch matches
           are accepted."
         - "--scanorama-batch-size: Incremental alignment batch size for large datasets."
-    legacy_aliases: [integrate]
+    legacy_aliases: [integrate, spatial-integration]
     saves_h5ad: true
     requires_preprocessed: true
     requires:
