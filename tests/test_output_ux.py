@@ -155,9 +155,9 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
 
 
 def test_pipeline_readme_lists_step_methods(tmp_path):
-    oc = _load_omicsclaw_script()
+    from omicsclaw.core.skill_runner import _write_pipeline_readme
 
-    readme_path = oc._write_pipeline_readme(
+    readme_path = _write_pipeline_readme(
         tmp_path,
         pipeline_name="spatial-pipeline",
         completed_at="2026-03-29T06:30:00+00:00",

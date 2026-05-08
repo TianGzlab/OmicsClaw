@@ -92,7 +92,6 @@ from omicsclaw.common.report import (
     build_output_dir_name,
 )
 from omicsclaw.core.skill_runner import (
-    _write_pipeline_readme,
     resolve_skill_alias,
     run_skill,
 )
