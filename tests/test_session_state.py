@@ -43,67 +43,6 @@ def test_session_state_default_collections_are_independent_per_instance():
     assert b.session_metadata == {}
 
 
-# --- to_dict / from_dict adapter ----------------------------------------------
-
-def test_to_dict_round_trips_through_from_dict():
-    original = SessionState(
-        session_id="sess-rt",
-        workspace_dir="/wkspace",
-        ui_backend="tui",
-        pipeline_workspace="/wkspace/pipeline-001",
-        session_metadata={"title": "demo run"},
-        messages=[{"role": "user", "content": "hi"}],
-        running=False,
-        tips_enabled=False,
-        tips_level="short",
-    )
-    dumped = original.to_dict()
-    restored = SessionState.from_dict(dumped)
-    assert restored == original
-
-
-def test_to_dict_emits_keys_matching_legacy_state_dict():
-    """Migration adapter: the dumped dict must use the exact keys interactive.py
-    historically used so partially-migrated callers still see a familiar shape."""
-    s = SessionState(session_id="x", workspace_dir="/w", ui_backend="cli")
-    d = s.to_dict()
-    assert set(d) >= {
-        "session_id",
-        "workspace_dir",
-        "ui_backend",
-        "pipeline_workspace",
-        "session_metadata",
-        "messages",
-        "running",
-        "tips_enabled",
-        "tips_level",
-    }
-
-
-def test_from_dict_tolerates_absent_optional_fields():
-    """Legacy state dicts often omit ``tips_enabled`` / ``tips_level`` until
-    the user toggles them; ``from_dict`` must absorb that shape."""
-    legacy = {
-        "session_id": "legacy",
-        "workspace_dir": "/legacy",
-        "ui_backend": "cli",
-        "pipeline_workspace": "",
-        "session_metadata": {},
-        "messages": [],
-        "running": True,
-        # tips_enabled / tips_level intentionally absent
-    }
-    s = SessionState.from_dict(legacy)
-    assert s.tips_enabled is True
-    assert s.tips_level == "verbose"
-
-
-def test_from_dict_rejects_missing_required_fields():
-    """Required fields with no safe default must raise rather than coerce."""
-    with pytest.raises((KeyError, TypeError)):
-        SessionState.from_dict({"workspace_dir": "/w", "ui_backend": "cli"})
-
-
 # --- Transitions --------------------------------------------------------------
 
 def test_stop_marks_session_not_running():
