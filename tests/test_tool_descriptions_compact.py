@@ -65,11 +65,15 @@ def test_omicsclaw_description_pins_auto_prepare_for_batch_integration() -> None
 # --- replot_skill ------------------------------------------------------------
 
 
-def test_replot_skill_description_under_500_chars() -> None:
+def test_replot_skill_description_under_550_chars() -> None:
+    """Budget bumped from 500 to 550 to keep both the
+    ``custom_analysis_execute`` AND Python-plotting prohibition (the
+    review-flagged "do not fall back" path) without risking model
+    behavior."""
     spec = _spec_by_name("replot_skill")
-    assert len(spec.description) <= 500, (
+    assert len(spec.description) <= 550, (
         f"replot_skill description grew to {len(spec.description)} chars; "
-        f"budget is 500."
+        f"budget is 550."
     )
 
 
@@ -81,3 +85,13 @@ def test_replot_skill_description_pins_top_n_renderer_flags() -> None:
     lower = spec.description.lower()
     assert "top-n" in lower or "top_n" in lower
     assert "renderer" in lower
+
+
+def test_replot_skill_description_pins_no_python_fallback() -> None:
+    """The original instruction explicitly forbade falling back to
+    ``custom_analysis_execute``. Code review caught the loss; pin both
+    names so future rewrites can't drop them again."""
+    spec = _spec_by_name("replot_skill")
+    lower = spec.description.lower()
+    assert "custom_analysis_execute" in lower
+    assert "python" in lower

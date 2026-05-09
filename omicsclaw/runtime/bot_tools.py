@@ -66,13 +66,14 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             description=(
                 "Run an OmicsClaw multi-omics analysis skill.\n\n"
                 f"{briefing}\n\n"
-                "Defaults: `skill='auto'` + `query=<user request>` "
+                "PREFER `skill='auto'` + `query=<user request>` "
                 "(auto-routes deterministically). Pick a specific skill only "
                 "if the user named it. `mode='demo'` ONLY when explicitly "
                 "asked. `return_media` empty = text summary; pass a keyword "
                 "('umap','qc','cluster',comma-sep) or 'all' for figures. "
                 "For sc-batch-integration upstream-prep pause, rerun with "
-                "`auto_prepare=true`. Preserve exact numbers / paths / errors."
+                "`auto_prepare=true`. Preserve exact numbers, warnings, "
+                "errors, and file paths when relaying results."
             ),
             parameters={
                 "type": "object",
@@ -185,7 +186,8 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                 "to pick one sub-plot; tune via `top-n`/`font-size`/"
                 "`width`/`height`/`dpi`/`palette`/`title`. Omit "
                 "`output_path` to auto-resolve. If R missing, relay "
-                "returned install instructions; do NOT fall back to Python."
+                "returned install instructions; do NOT fall back to "
+                "`custom_analysis_execute` or Python plotting."
             ),
             parameters={
                 "type": "object",
