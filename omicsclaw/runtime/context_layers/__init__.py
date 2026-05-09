@@ -684,6 +684,50 @@ class ContextAssemblyRequest:
         object.__setattr__(self, "output_style", str(self.output_style or "").strip())
 
 
+_PredicateEventSink = Callable[["events.LifecycleEvent"], None]
+_predicate_event_sinks: dict[int, _PredicateEventSink] = {}
+_next_predicate_event_sink_id: int = 1
+
+
+def register_predicate_event_sink(sink: _PredicateEventSink) -> int:
+    """Register a callback that receives ``EVENT_PREDICATE_HIT`` /
+    ``EVENT_PREDICATE_MISS`` events when ``ContextLayerInjector`` evaluates
+    a predicate-gated layer. Returns an ID for ``unregister_predicate_event_sink``.
+
+    Used by the runtime telemetry pipeline (and by tests) to observe which
+    conditional rules are actually firing per request.
+    """
+    global _next_predicate_event_sink_id
+    sink_id = _next_predicate_event_sink_id
+    _next_predicate_event_sink_id += 1
+    _predicate_event_sinks[sink_id] = sink
+    return sink_id
+
+
+def unregister_predicate_event_sink(sink_id: int) -> None:
+    _predicate_event_sinks.pop(sink_id, None)
+
+
+def _emit_predicate_event(event_name: str, *, predicate: str, surface: str) -> None:
+    if not _predicate_event_sinks:
+        return
+    from .. import events as _events_mod  # local import to avoid cycles at module load
+
+    evt = _events_mod.LifecycleEvent(
+        name=event_name,
+        payload={"predicate": predicate, "surface": surface},
+        surface=surface,
+        source="context_layers.predicate",
+    )
+    for sink in tuple(_predicate_event_sinks.values()):
+        try:
+            sink(evt)
+        except Exception as exc:  # pragma: no cover - sink errors must not break assembly
+            LOGGER.warning(
+                "Predicate event sink raised %s; ignoring", exc.__class__.__name__
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ContextLayerInjector:
     name: str
@@ -691,9 +735,31 @@ class ContextLayerInjector:
     placement: str
     surfaces: tuple[str, ...]
     builder: LayerBuilder
+    predicate: Callable[["ContextAssemblyRequest"], bool] | None = None
 
     def applies(self, request: ContextAssemblyRequest) -> bool:
-        return request.surface in self.surfaces
+        if request.surface not in self.surfaces:
+            return False
+        if self.predicate is None:
+            return True
+        try:
+            decision = bool(self.predicate(request))
+        except Exception as exc:  # fail-closed: misbehaving predicate must not inject
+            LOGGER.warning(
+                "Predicate for layer %r raised %s: %s; suppressing layer",
+                self.name,
+                exc.__class__.__name__,
+                exc,
+            )
+            return False
+        from .. import events as _events_mod
+
+        _emit_predicate_event(
+            _events_mod.EVENT_PREDICATE_HIT if decision else _events_mod.EVENT_PREDICATE_MISS,
+            predicate=self.name,
+            surface=str(request.surface or ""),
+        )
+        return decision
 
     def render(self, request: ContextAssemblyRequest) -> ContextLayer | None:
         result = self.builder(request)
