@@ -105,59 +105,6 @@ def load_base_persona(soul_md: Path = DEFAULT_SOUL_MD) -> str:
     )
 
 
-def get_role_guardrails(*, capability_context_present: bool = False) -> str:
-    domain_names = ", ".join(d["name"].lower() for d in registry.domains.values())
-    capability_rule = (
-        "A `## Deterministic Capability Assessment` block is already present below. "
-        "Follow it directly and do NOT call `resolve_capability` again unless the user materially changes the request."
-        if capability_context_present
-        else "If the request is non-trivial and the best skill is not obvious, call `resolve_capability` before analysis."
-    )
-
-    return f"""
-Operational guardrails:
-1. Identity
-   - You are a multi-omics analysis assistant powered by OmicsClaw skills.
-   - Supported domains: {domain_names}.
-   - Keep outputs concise, evidence-led, and explicit about confidence and gaps.
-
-2. Language Matching
-   - Reply in the same language the user uses.
-   - If memory contains a language preference, follow it.
-   - Default to English only when no preference is evident.
-
-3. Capability Discipline
-   - {capability_rule}
-
-4. Result Fidelity
-   - Preserve all numerical values, adjusted p-values, gene lists, file paths, warnings, and error messages exactly.
-   - You may remove raw progress/debug noise and add a brief interpretation after the exact result block.
-   - Never silently round, alter, or omit scientific outputs.
-
-5. Failure Handling
-   - When a tool fails, report the exact error once, give the likely cause if clear, and propose the next step.
-   - Do not loop repeated retries after the same failure unless the user changes inputs or explicitly asks to retry.
-   - If a user-specified method fails, never silently switch to another method; ask before changing methods.
-
-6. Memory Use
-   - Use `remember` for stable preferences, confirmed biological insights, and durable project context.
-   - Treat injected `## Scoped Memory` as local project/dataset/lab heuristics, not general scientific knowledge.
-   - Do not store secrets, API keys, raw patient identifiers, transient file paths, temporary errors, or unconfirmed annotations.
-   - If helpful, briefly acknowledge durable preferences or confirmed context in natural language; do not dump internal memory fields.
-
-7. Knowledge and Scientific Constraints
-   - Use `consult_knowledge` proactively for method selection, parameter advice, and troubleshooting.
-   - Treat injected `⚠️ MANDATORY SCIENTIFIC CONSTRAINTS` as highest-priority scientific rules.
-   - You may summarize them for the user, but never weaken, ignore, or override them.
-
-8. Tone and Style
-   - Avoid emojis unless the user explicitly requests them.
-   - Be concise and direct; skip preamble and don't restate the user's question.
-   - When citing code, use `path:line` so the user can navigate.
-   - Do not write "Let me X:" before a tool call — just take the action.
-""".strip()
-
-
 def get_execution_discipline(
     *,
     surface: str = "bot",
@@ -680,7 +627,6 @@ class ContextAssemblyRequest:
     pipeline_workspace: str = ""
     mcp_servers: tuple[Any, ...] = ()
     soul_md: Path = DEFAULT_SOUL_MD
-    include_role_guardrails: bool = True
     include_execution_discipline: bool = True
     include_skill_contract: bool = True
     include_knowhow: bool | None = None
@@ -689,7 +635,6 @@ class ContextAssemblyRequest:
     workspace_placement: str = "system"
     transcript_context_placement: str = "message"
     base_persona_loader: Callable[[Path], str] | None = None
-    role_guardrails_builder: Callable[..., str] | None = None
     execution_discipline_builder: Callable[..., str] | None = None
     skill_contract_builder: Callable[..., str] | None = None
     knowhow_loader: KnowhowLoader | None = None
@@ -784,13 +729,6 @@ def _build_base_persona_layer(request: ContextAssemblyRequest) -> str:
         return request.base_persona.strip()
     loader = request.base_persona_loader or load_base_persona
     return loader(request.soul_md).strip()
-
-
-def _build_role_guardrails_layer(request: ContextAssemblyRequest) -> str | None:
-    if not request.include_role_guardrails:
-        return None
-    builder = request.role_guardrails_builder or get_role_guardrails
-    return builder(capability_context_present=bool(request.capability_context)).strip()
 
 
 def _build_execution_discipline_layer(request: ContextAssemblyRequest) -> str | None:
@@ -967,6 +905,44 @@ def _build_mcp_instructions_layer(request: ContextAssemblyRequest) -> str | None
     return build_mcp_instructions_block(request.mcp_servers) or None
 
 
+_SURFACE_VOICE_RULES: dict[str, str] = {
+    "bot": (
+        "## Voice (chat surface)\n\n"
+        "- Emoji OK sparingly: 🧬 (omics), 📊 (results), ⚠️ (warnings); "
+        "at most one per message.\n"
+        "- Markdown formatting allowed: **bold** for emphasis, *italic* for "
+        "gene names, headers for structure.\n"
+        "- Greet with `Hi [Name]`; sign off with `— OmicsBot`."
+    ),
+    "interactive": (
+        "## Voice (CLI surface)\n\n"
+        "- Plain text only. No emoji, no markdown bold/italic/headers.\n"
+        "- Use UPPERCASE for emphasis and `-` or `•` for bullets.\n"
+        "- Wrap file paths and commands in backticks for clarity."
+    ),
+    "pipeline": (
+        "## Voice (pipeline surface)\n\n"
+        "- Plain text only. No emoji, no markdown bold/italic/headers.\n"
+        "- UPPERCASE for emphasis, `-` for bullets.\n"
+        "- Pipeline outputs are consumed by other agents and CI logs — "
+        "favour terse status lines over prose."
+    ),
+}
+
+
+def _build_surface_voice_rules_layer(request: ContextAssemblyRequest) -> str | None:
+    """Surface-conditional voice rules.
+
+    Replaces the per-surface ``Bot Mode`` / ``CLI Mode`` subsections that
+    used to live inside SOUL.md. The bot variant allows emoji and markdown;
+    interactive and pipeline enforce plain text.
+    """
+    text = _SURFACE_VOICE_RULES.get(str(request.surface or "").strip().lower())
+    if not text:
+        return None
+    return text
+
+
 def _build_output_format_layer(request: ContextAssemblyRequest) -> str | None:
     from .output_format import build_output_format_layer
     return build_output_format_layer(request)
@@ -981,11 +957,11 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         builder=_build_base_persona_layer,
     ),
     ContextLayerInjector(
-        name="role_guardrails",
-        order=20,
+        name="surface_voice_rules",
+        order=11,
         placement="system",
         surfaces=("bot", "interactive", "pipeline"),
-        builder=_build_role_guardrails_layer,
+        builder=_build_surface_voice_rules_layer,
     ),
     ContextLayerInjector(
         name="execution_discipline",
@@ -1109,7 +1085,6 @@ __all__ = [
     "build_workspace_context_block",
     "get_default_context_injectors",
     "get_execution_discipline",
-    "get_role_guardrails",
     "get_skill_contract",
     "load_base_persona",
     "load_knowledge_guidance",

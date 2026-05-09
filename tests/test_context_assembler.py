@@ -75,8 +75,8 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
 
     assert assembly.layer_names == (
         "base_persona",
+        "surface_voice_rules",
         "output_format",
-        "role_guardrails",
         "execution_discipline",
         "skill_contract",
         "memory_context",
@@ -106,7 +106,6 @@ def test_assemble_prompt_context_can_route_workspace_to_message_context():
             surface="bot",
             base_persona="BASE PERSONA",
             workspace="/tmp/session",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
             workspace_placement="message",
@@ -144,7 +143,6 @@ def test_assemble_prompt_context_can_disable_execution_discipline():
             surface="interactive",
             base_persona="BASE PERSONA",
             include_execution_discipline=False,
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
         )
@@ -317,7 +315,6 @@ def test_assemble_prompt_context_prefetches_knowledge_guidance_for_method_questi
             base_persona="BASE PERSONA",
             query="Which method should I use for batch correction?",
             domain="singlecell",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
             knowledge_loader=fake_knowledge_loader,
@@ -380,7 +377,6 @@ def test_assemble_prompt_context_skips_knowledge_guidance_for_generic_requests()
             base_persona="BASE PERSONA",
             query="Analyze sample.h5ad",
             domain="singlecell",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
             knowledge_loader=fake_knowledge_loader,
@@ -400,7 +396,6 @@ def test_assemble_prompt_context_includes_skill_context_only_when_relevant():
             skill="spatial-preprocess",
             query="Analyze sample.h5ad with spatial-preprocess",
             domain="spatial",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
         )
@@ -529,7 +524,6 @@ def test_assemble_prompt_context_includes_plan_context_layer():
             surface="interactive",
             base_persona="BASE PERSONA",
             plan_context="## Active Plan Mode\n\n- Status: approved",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
         )
@@ -545,7 +539,6 @@ def test_assemble_prompt_context_routes_transcript_context_to_message_layer():
             surface="interactive",
             base_persona="BASE PERSONA",
             transcript_context="## Selective Transcript Replay\n\n- omitted older refs",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
         )
@@ -590,7 +583,6 @@ def test_assemble_prompt_context_includes_active_prompt_pack_layer(tmp_path):
             surface="interactive",
             omicsclaw_dir=str(tmp_path),
             base_persona="BASE PERSONA",
-            include_role_guardrails=False,
             include_skill_contract=False,
             include_knowhow=False,
         )

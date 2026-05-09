@@ -107,7 +107,7 @@ from .output_styles import (
     render_output_style_layer,
     resolve_output_style_profile,
 )
-from .system_prompt import build_system_prompt, get_role_guardrails
+from .system_prompt import build_system_prompt
 from .task_store import (
     DONE_TASK_STATUSES,
     TASK_STATUS_BLOCKED,
@@ -352,7 +352,6 @@ __all__ = [
     "get_default_context_injectors",
     "get_execution_discipline",
     "get_output_style_profiles",
-    "get_role_guardrails",
     "get_skill_contract",
     "isolated_workspace",
     "load_base_persona",
