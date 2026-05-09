@@ -63,6 +63,8 @@ def select_tool_specs(
                 else _events_mod.EVENT_PREDICATE_MISS,
                 predicate=spec.name,
                 surface=surface,
+                source="tool_registry.predicate",
+                kind="tool",
             )
         except Exception:  # pragma: no cover - never break selection on telemetry failure
             pass

@@ -145,3 +145,32 @@ def test_predicate_emits_predicate_hit_event_via_existing_sink() -> None:
     )
     # Payload should at least name the tool whose predicate fired.
     assert any(evt.payload.get("predicate") == "probe" for evt in captured)
+
+
+def test_predicate_event_distinguishes_tool_from_layer_source() -> None:
+    """Tool-selection events must be tagged ``source='tool_registry.predicate'``
+    + ``kind='tool'`` so consumers can disambiguate from context-layer
+    predicate events that share the sink (avoids ambiguous events when a
+    layer and a tool happen to share a predicate name)."""
+    from omicsclaw.runtime.context_layers import (
+        register_predicate_event_sink,
+        unregister_predicate_event_sink,
+    )
+
+    captured = []
+    sink_id = register_predicate_event_sink(captured.append)
+    try:
+        spec = _spec("probe", predicate=lambda req: True)
+        select_tool_specs((spec,), request=_req(surface="bot"))
+    finally:
+        unregister_predicate_event_sink(sink_id)
+
+    assert captured, "no events captured"
+    evt = captured[0]
+    assert evt.source == "tool_registry.predicate", (
+        f"tool-selection events must distinguish source; got {evt.source!r}"
+    )
+    assert evt.payload.get("kind") == "tool", (
+        f"tool-selection events must carry kind='tool'; got "
+        f"{evt.payload.get('kind')!r}"
+    )

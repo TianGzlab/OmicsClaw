@@ -43,20 +43,31 @@ _MEMORY_KEYWORDS_RE = re.compile(
 )
 
 _PLOT_KEYWORDS_RE = re.compile(
-    # Note: ``umap`` / ``tsne`` deliberately excluded — they're algorithm
-    # names that often appear without plot intent ("explain UMAP").
-    # Concrete plot-type words (violin/heatmap/scatter) and explicit
-    # plot/figure/visualize verbs are unambiguous.
-    r"\b(plot|figure|violin|heatmap|visualize|visualise|chart|"
-    r"scatter|barplot|boxplot|enhance the (?:plot|figure))\b|"
+    # Plot-type words that are unambiguous (violin/heatmap/barplot/boxplot).
+    # ``umap`` / ``tsne`` excluded — algorithm names without plot intent.
+    # ``figure`` / ``scatter`` are common enough as non-plot tokens
+    # ("figure of merit", "scatter the cells", "figure out") that we
+    # require them to co-occur with a verb (``draw|make|generate|show|
+    # render|enhance``) to fire.
+    r"\b(plot|violin|heatmap|visualize|visualise|barplot|boxplot|"
+    r"chart|enhance the (?:plot|figure))\b|"
+    r"\b(?:draw|make|generate|show|render|enhance)\s+(?:a\s+|an\s+|the\s+)?"
+    r"(?:figure|scatter)\b|"
     r"图(?!像|片)|可视化|绘图|画图",
     re.IGNORECASE,
 )
 
+# ``web`` / ``website`` / ``webpage`` / explicit URL / search-the-web phrases
+# are unambiguous. Bare ``online`` is too common in scientific phrases
+# ("online statistical test", "online learning", "online resource") so we
+# require it to either follow a search/find/lookup verb (e.g. "find X
+# online") OR precede a fetch-noun (e.g. "online tool", "online lookup").
 _WEB_OR_URL_RE = re.compile(
     r"https?://|"
-    r"\b(web|website|webpage|online|scrape|crawl|search the web|"
+    r"\b(web|website|webpage|scrape|crawl|search the web|"
     r"look up online|search online|web search)\b|"
+    r"\b(?:look\s+up|search|find|access|fetch|grab|browse)\b[^.\n]*\bonline\b|"
+    r"\bonline\s+(?:search|lookup|database|tool|service)\b|"
     r"网页|网站|搜.{0,3}网|在线搜",
     re.IGNORECASE,
 )
