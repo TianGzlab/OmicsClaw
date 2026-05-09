@@ -862,6 +862,24 @@ async def run_query_engine(
                 )
                 if notices:
                     record_output = "\n".join([*notices, str(record_output)]).strip()
+            # Phase 4 (system-prompt-compression refactor): prepend the
+            # matched pre-call rule preamble (engineering / skill-execution
+            # discipline) to the tool result so the model sees the rule
+            # right before it reasons about the result. This is the
+            # runtime wiring of ``PreCallRuleInjector`` —
+            # ``build_pre_call_rule_text`` is otherwise dead abstraction.
+            from .tool_execution_hooks import (
+                DEFAULT_PRE_CALL_RULE_INJECTORS,
+                build_pre_call_rule_text,
+            )
+
+            preamble_text = build_pre_call_rule_text(
+                tool_name=request.name,
+                tool_args=request.arguments or {},
+                injectors=DEFAULT_PRE_CALL_RULE_INJECTORS,
+            )
+            if preamble_text:
+                record_output = f"{preamble_text}\n\n{record_output}".strip()
             result_record = tool_result_store.record(
                 chat_id=context.chat_id,
                 tool_call_id=request.call_id,

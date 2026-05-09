@@ -963,8 +963,9 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         builder=_build_surface_voice_rules_layer,
     ),
     # --- Predicate-gated rule layers (Phase 4) ---
-    # Order 12-18: lightweight, conditional rules that replace fragments
-    # of the deleted ``execution_discipline`` and ``skill_contract`` layers.
+    # Order 12-19 (skipping 15, taken by ``output_format``): lightweight,
+    # conditional rules that replace fragments of the deleted
+    # ``execution_discipline`` and ``skill_contract`` layers.
     ContextLayerInjector(
         name="scope_and_minimal_change_rule",
         order=12,

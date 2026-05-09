@@ -109,3 +109,26 @@ def test_engineering_and_skill_preamble_do_not_collide() -> None:
     skill_only = _preamble("omicsclaw", {"skill": "sc-de"})
     assert "lowercase" not in eng_only.lower()
     assert "owasp" not in skill_only.lower()
+
+
+# --- query_engine integration ------------------------------------------------
+
+
+def test_query_engine_module_actually_imports_pre_call_rule_text() -> None:
+    """Phase 4 critical regression guard: ``PreCallRuleInjector`` is dead
+    weight unless the runtime tool-execution path actually invokes
+    ``build_pre_call_rule_text``. Verify the symbol is referenced from
+    ``query_engine`` source so a future refactor that drops the wiring
+    fails this test loudly.
+    """
+    import inspect
+
+    from omicsclaw.runtime import query_engine as qe_mod
+
+    source = inspect.getsource(qe_mod)
+    assert "build_pre_call_rule_text" in source, (
+        "query_engine no longer calls build_pre_call_rule_text — the "
+        "engineering / skill_execution preambles never reach the model. "
+        "Re-wire the call site or delete the abstraction."
+    )
+    assert "DEFAULT_PRE_CALL_RULE_INJECTORS" in source
