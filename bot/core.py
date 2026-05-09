@@ -3678,107 +3678,6 @@ async def execute_inspect_data(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# execute_download_file
-# ---------------------------------------------------------------------------
-
-
-async def execute_download_file(args: dict) -> str:
-    """Download file from URL."""
-    url = args.get("url", "")
-    dest_arg = args.get("destination", "")
-
-    if not url:
-        return "Error: url is required."
-
-    try:
-        filename = url.split("/")[-1] or "downloaded_file"
-        filename = sanitize_filename(filename)
-
-        dest_dir = resolve_dest(dest_arg) if dest_arg else DATA_DIR
-        dest_path = dest_dir / filename
-
-        response = requests.get(url, timeout=120, stream=True)
-        response.raise_for_status()
-
-        with open(dest_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
-        return f"Downloaded: {dest_path} ({size_mb:.2f} MB)"
-    except Exception as e:
-        return f"Download failed: {e}"
-
-
-# ---------------------------------------------------------------------------
-# execute_create_json_file
-# ---------------------------------------------------------------------------
-
-
-async def execute_create_json_file(args: dict) -> str:
-    """Create JSON file from data."""
-    data = args.get("data", {})
-    filename = args.get("filename", "")
-    dest_arg = args.get("destination", "")
-
-    if not filename:
-        return "Error: filename is required."
-
-    filename = sanitize_filename(filename)
-    if not filename.endswith(".json"):
-        filename += ".json"
-
-    dest_dir = resolve_dest(dest_arg, default=OUTPUT_DIR) if dest_arg else OUTPUT_DIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    filepath = dest_dir / filename
-
-    try:
-        filepath.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return f"JSON file created: {filepath}"
-    except Exception as e:
-        return f"Error creating JSON file: {e}"
-
-
-# ---------------------------------------------------------------------------
-# execute_create_csv_file
-# ---------------------------------------------------------------------------
-
-
-async def execute_create_csv_file(args: dict) -> str:
-    """Create CSV file from tabular data."""
-    data = args.get("data", [])
-    filename = args.get("filename", "")
-    dest_arg = args.get("destination", "")
-
-    if not filename:
-        return "Error: filename is required."
-    if not data:
-        return "Error: data is required."
-
-    filename = sanitize_filename(filename)
-    if not filename.endswith(".csv"):
-        filename += ".csv"
-
-    dest_dir = resolve_dest(dest_arg, default=OUTPUT_DIR) if dest_arg else OUTPUT_DIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    filepath = dest_dir / filename
-
-    try:
-        import csv
-        with open(filepath, "w", newline="", encoding="utf-8") as f:
-            if isinstance(data[0], dict):
-                writer = csv.DictWriter(f, fieldnames=data[0].keys())
-                writer.writeheader()
-                writer.writerows(data)
-            else:
-                writer = csv.writer(f)
-                writer.writerows(data)
-        return f"CSV file created: {filepath}"
-    except Exception as e:
-        return f"Error creating CSV file: {e}"
-
-
-# ---------------------------------------------------------------------------
 # execute_make_directory
 # ---------------------------------------------------------------------------
 
@@ -4387,9 +4286,6 @@ def _available_tool_executors() -> dict[str, object]:
         "fetch_geo_metadata": execute_fetch_geo_metadata,
         "list_directory": execute_list_directory,
         "inspect_file": execute_inspect_file,
-        "download_file": execute_download_file,
-        "create_json_file": execute_create_json_file,
-        "create_csv_file": execute_create_csv_file,
         "make_directory": execute_make_directory,
         "move_file": execute_move_file,
         "remove_file": execute_remove_file,

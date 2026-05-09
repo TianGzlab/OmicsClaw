@@ -163,7 +163,7 @@ def web_or_url_intent(req: ContextAssemblyRequest) -> bool:
     """Fires when the user mentions a URL or web/online search intent.
 
     Triggers exposure of ``web_fetch`` / ``web_search`` /
-    ``web_method_search`` / ``download_file`` etc.
+    ``web_method_search``.
     """
     return bool(_WEB_OR_URL_RE.search(req.query or ""))
 

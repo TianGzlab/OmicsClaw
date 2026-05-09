@@ -41,7 +41,9 @@ def test_build_bot_tool_specs_includes_curated_engineering_tools():
     assert "todo_write" in names
     assert "web_fetch" in names
     assert "web_search" in names
-    assert "mcp_list" in names
+    # ``mcp_list`` was removed in the tool-list-compression refactor as
+    # confirmed dead code (0 audit-log calls, no production refs).
+    # ``mcp_list_servers`` HTTP endpoint in app/server.py is unaffected.
 
 
 def test_omicsclaw_tool_description_mentions_sc_batch_auto_prepare():
@@ -54,9 +56,18 @@ def test_omicsclaw_tool_description_mentions_sc_batch_auto_prepare():
 
     omics_spec = next(spec for spec in specs if spec.name == "omicsclaw")
 
+    # ``auto_prepare=true`` reference lives in the top-level description
+    # so the LLM sees the recovery path on every turn.
     assert "auto_prepare=true" in omics_spec.description
-    assert "sc-standardize-input" in omics_spec.description
-    assert "sc-preprocessing" in omics_spec.description
+    # ``sc-standardize-input`` / ``sc-preprocessing`` are the concrete
+    # upstream steps that ``auto_prepare=true`` runs; they live in the
+    # ``auto_prepare`` parameter description (model sees both during
+    # tool-use). Pin them there.
+    auto_prepare_desc = (
+        omics_spec.parameters["properties"]["auto_prepare"]["description"]
+    )
+    assert "sc-standardize-input" in auto_prepare_desc
+    assert "sc-preprocessing" in auto_prepare_desc
 
 
 def test_tool_search_reports_engineering_and_existing_tools(tmp_path: Path):
@@ -215,30 +226,8 @@ def test_web_fetch_uses_shared_fetcher_and_truncates(monkeypatch, tmp_path: Path
     assert "... [truncated]" in result
 
 
-def test_mcp_list_sanitizes_environment_values(monkeypatch, tmp_path: Path):
-    executors = _build_executors(tmp_path)
-    config_root = tmp_path / "config"
-    (config_root / "omicsclaw").mkdir(parents=True, exist_ok=True)
-    (config_root / "omicsclaw" / "mcp.yaml").write_text(
-        "demo:\n"
-        "  transport: stdio\n"
-        "  command: npx\n"
-        "  args:\n"
-        "    - -y\n"
-        "    - demo-server\n"
-        "  env:\n"
-        "    API_KEY: secret-value\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root))
-
-    payload = json.loads(asyncio.run(executors["mcp_list"]({})))
-    assert payload["servers"] == [
-        {
-            "name": "demo",
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "demo-server"],
-            "env_keys": ["API_KEY"],
-        }
-    ]
+# ``test_mcp_list_sanitizes_environment_values`` removed: the
+# ``mcp_list`` bot ToolSpec + executor were deleted in the tool-list-
+# compression refactor (0 audit-log calls, no production callers).
+# The ``mcp_list_servers`` HTTP endpoint in ``omicsclaw/app/server.py``
+# is a separate function and remains tested via the app-server suite.

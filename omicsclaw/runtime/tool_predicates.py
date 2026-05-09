@@ -29,15 +29,8 @@ _AUDIO_KEYWORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
-_MCP_KEYWORD_RE = re.compile(r"\bmcp\b", re.IGNORECASE)
-
-
 def _audio_intent(req: ContextAssemblyRequest) -> bool:
     return bool(_AUDIO_KEYWORDS_RE.search(req.query or ""))
-
-
-def _mcp_intent(req: ContextAssemblyRequest) -> bool:
-    return bool(_MCP_KEYWORD_RE.search(req.query or ""))
 
 
 # --- The mapping -------------------------------------------------------------
@@ -55,8 +48,6 @@ TOOL_PREDICATE_MAP: dict[str, Callable[[ContextAssemblyRequest], bool]] = {
     "file_edit": _pred.anndata_or_file_path_in_query,
     "grep_files": _pred.anndata_or_file_path_in_query,
     "tool_search": _pred.anndata_or_file_path_in_query,
-    "create_json_file": _pred.anndata_or_file_path_in_query,
-    "create_csv_file": _pred.anndata_or_file_path_in_query,
     # PDF / paper → pdf_or_paper_intent
     "parse_literature": _pred.pdf_or_paper_intent,
     "fetch_geo_metadata": _pred.pdf_or_paper_intent,
@@ -80,12 +71,10 @@ TOOL_PREDICATE_MAP: dict[str, Callable[[ContextAssemblyRequest], bool]] = {
     "web_method_search": _pred.web_or_url_intent,
     "web_fetch": _pred.web_or_url_intent,
     "web_search": _pred.web_or_url_intent,
-    "download_file": _pred.web_or_url_intent,
     # Skill creation → create_omics_skill
     "create_omics_skill": _pred.skill_creation_intent,
     # Niche tools — narrow custom predicates
     "generate_audio": _audio_intent,
-    "mcp_list": _mcp_intent,
 }
 
 

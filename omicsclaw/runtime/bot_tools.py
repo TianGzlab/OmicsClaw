@@ -66,27 +66,14 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             description=(
                 "Run an OmicsClaw multi-omics analysis skill.\n\n"
                 f"{briefing}\n\n"
-                "### Routing policy (read before picking `skill`)\n"
-                "PREFER `skill='auto'` together with `query=<user's request verbatim>`. "
-                "The capability resolver scores all skills by trigger keywords, description "
-                "overlap, file extension, and method mentions, then picks the best match "
-                "deterministically (no extra LLM call). Pass a specific `skill` name ONLY when: "
-                "(a) the user explicitly named that skill, or "
-                "(b) a prior auto-routing result asked you to disambiguate by re-invoking "
-                "with a chosen candidate. "
-                "If auto-routing detects close candidates, the tool will return a short list "
-                "of alternatives instead of executing — re-invoke with the right `skill`.\n\n"
-                "Use mode='demo' to run with built-in synthetic data. "
-                "Use mode='file' when the user has sent an omics data file. "
-                "If `sc-batch-integration` recommends upstream preparation and the user explicitly agrees, "
-                "rerun this tool with `auto_prepare=true` so OmicsClaw performs the recommended "
-                "`sc-standardize-input` / `sc-preprocessing` steps before the final integration call. "
-                "IMPORTANT: Preserve exact numerical values, warnings, errors, and file paths when relaying results. "
-                "By default only a text summary is returned (return_media omitted or empty). "
-                "Set return_media ONLY when the user explicitly asks for figures/plots/tables. "
-                "Use 'all' to send everything, or a keyword to filter "
-                "(e.g. 'umap' for UMAP plots, 'qc' for QC violin, 'cluster' for cluster tables). "
-                "Multiple keywords can be comma-separated (e.g. 'umap,qc')."
+                "PREFER `skill='auto'` + `query=<user request>` "
+                "(auto-routes deterministically). Pick a specific skill only "
+                "if the user named it. `mode='demo'` ONLY when explicitly "
+                "asked. `return_media` empty = text summary; pass a keyword "
+                "('umap','qc','cluster',comma-sep) or 'all' for figures. "
+                "For sc-batch-integration upstream-prep pause, rerun with "
+                "`auto_prepare=true`. Preserve exact numbers, warnings, "
+                "errors, and file paths when relaying results."
             ),
             parameters={
                 "type": "object",
@@ -191,28 +178,16 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ToolSpec(
             name="replot_skill",
             description=(
-                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory "
-                "WITHOUT re-running the analysis. "
-                "Use this when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
-                "'make it prettier', or 'replot'. "
-                "The skill must have been run first (via the omicsclaw tool). "
-                "22 scRNA skills support R Enhanced, including: sc-qc, sc-de, sc-markers, "
-                "sc-preprocessing, sc-clustering, sc-filter, sc-cell-annotation, sc-enrichment, "
-                "sc-velocity, sc-pseudotime, sc-doublet-detection, sc-batch-integration, "
-                "sc-cell-communication, sc-grn, sc-cytotrace, sc-differential-abundance, "
-                "sc-metacell, sc-ambient-removal, sc-pathway-scoring, sc-perturb, "
-                "sc-gene-programs, sc-in-silico-perturbation. "
-                "ALWAYS call this tool when the user asks for R Enhanced — do NOT assume "
-                "a skill lacks R support without calling. If R is not installed, this tool "
-                "returns specific install instructions to relay to the user. "
-                "output_path is the output directory from a previous omicsclaw call. "
-                "If output_path is unknown, omit it — OmicsClaw will auto-resolve from session history. "
-                "By default returns all generated R Enhanced figures. "
-                "IMPORTANT: If this tool returns an error or reports that no figures were generated, "
-                "relay the error message and fix instructions directly to the user. "
-                "Do NOT fall back to custom_analysis_execute, Python plotting, or any other tool "
-                "to substitute for R Enhanced. Only use alternative plotting tools if the user "
-                "explicitly requests it (e.g. 'use Python instead', 'draw it with matplotlib')."
+                "Re-render R Enhanced (ggplot2) plots from a prior skill "
+                "output WITHOUT re-running. Use for 're-draw with R', "
+                "'make it prettier', 'replot', or to tune params. Skill "
+                "must have run first via `omicsclaw`. ALWAYS call for R "
+                "Enhanced — never assume lack of R support. Use `renderer` "
+                "to pick one sub-plot; tune via `top-n`/`font-size`/"
+                "`width`/`height`/`dpi`/`palette`/`title`. Omit "
+                "`output_path` to auto-resolve. If R missing, relay "
+                "returned install instructions; do NOT fall back to "
+                "`custom_analysis_execute` or Python plotting."
             ),
             parameters={
                 "type": "object",
@@ -437,72 +412,6 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=True,
             concurrency_safe=True,
             policy_tags=("workspace", "inspection"),
-        ),
-        ToolSpec(
-            name="download_file",
-            description="Download a file from a URL. Use when user provides a direct file URL.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "File URL"},
-                    "destination": {"type": "string", "description": "Destination path (optional)"},
-                },
-                "required": ["url"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_HIGH,
-            approval_mode=APPROVAL_MODE_ASK,
-            writes_workspace=True,
-            touches_network=True,
-            allowed_in_background=False,
-            policy_tags=("network", "workspace", "artifact"),
-        ),
-        ToolSpec(
-            name="create_json_file",
-            description="Create a JSON file from structured data. Saved to output/ by default. ONLY use when user explicitly asks to save data as JSON.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "data": {"type": "object", "description": "Data to save as JSON"},
-                    "filename": {"type": "string", "description": "Filename (without extension)"},
-                    "destination": {"type": "string", "description": "Destination folder (optional)"},
-                },
-                "required": ["data", "filename"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_MEDIUM,
-            writes_workspace=True,
-            policy_tags=("workspace", "artifact"),
-        ),
-        ToolSpec(
-            name="create_csv_file",
-            description="Create a CSV file from tabular data. Saved to output/ by default. ONLY use when user explicitly asks to save data as CSV.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": {},
-                        },
-                        "description": "Array of row objects",
-                    },
-                    "filename": {"type": "string", "description": "Filename (without extension)"},
-                    "destination": {"type": "string", "description": "Destination folder (optional)"},
-                },
-                "required": ["data", "filename"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_MEDIUM,
-            writes_workspace=True,
-            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="make_directory",
