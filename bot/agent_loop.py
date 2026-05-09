@@ -41,23 +41,48 @@ import bot.core as _core
 
 # Stable bot.core symbols.
 from bot.core import (
+    BOT_START_TIME,
     DATA_DIR,
+    DEEP_LEARNING_METHODS,
     EXAMPLES_DIR,
     MAX_CONVERSATIONS,
     MAX_HISTORY,
     MAX_HISTORY_CHARS,
     OMICSCLAW_DIR,
     OUTPUT_DIR,
+    _primary_skill_count,
+    _skill_registry,
     audit,
+    format_skills_table,
     pending_preflight_requests,
     tool_result_store,
     transcript_store,
 )
+from bot.billing import accumulate_usage as _accumulate_usage
+from bot.preflight import (
+    _apply_preflight_answers,
+    _build_pending_preflight_message,
+    _extract_pending_preflight_payload,
+    _is_affirmative_preflight_confirmation,
+    _parse_preflight_reply,
+    _preflight_payload_needs_reply,
+    _remember_pending_preflight_request,
+)
+from bot.tool_executors import (
+    _build_tool_runtime,
+    execute_omicsclaw,
+    get_tool_executors,
+    get_tool_runtime,
+)
 
+from omicsclaw.common.user_guidance import strip_user_guidance_lines
 from omicsclaw.core.llm_timeout import build_llm_timeout_policy
 from omicsclaw.runtime.bot_tools import (
     BotToolContext,
     build_bot_tool_registry,
+)
+from omicsclaw.runtime.context_assembler import (
+    assemble_chat_context as _assemble_chat_context,
 )
 from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.policy import TOOL_POLICY_ALLOW
@@ -73,7 +98,9 @@ from omicsclaw.runtime.tool_orchestration import (
     EXECUTION_STATUS_POLICY_BLOCKED,
     ToolExecutionRequest,
 )
+from omicsclaw.runtime.tool_spec import PROGRESS_POLICY_ANALYSIS
 from omicsclaw.runtime.transcript_store import (
+    build_selective_replay_context,
     sanitize_tool_history as _runtime_sanitize_tool_history,
 )
 
