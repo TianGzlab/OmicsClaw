@@ -100,39 +100,8 @@ DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
 
 
-@dataclass(frozen=True)
-class OutputMediaPaths:
-    figure_paths: list[Path]
-    table_paths: list[Path]
-    notebook_paths: list[Path]
-    media_items: list[dict]
-
-
-def _collect_output_media_paths(out_dir: Path) -> OutputMediaPaths:
-    figure_paths: list[Path] = []
-    table_paths: list[Path] = []
-    notebook_paths: list[Path] = []
-    media_items: list[dict] = []
-
-    if not out_dir.exists():
-        return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
-
-    for f in sorted(out_dir.rglob("*")):
-        if not f.is_file():
-            continue
-        if f.suffix in (".md", ".html"):
-            media_items.append({"type": "document", "path": str(f)})
-        elif f.suffix == ".ipynb":
-            media_items.append({"type": "document", "path": str(f)})
-            notebook_paths.append(f)
-        elif f.suffix == ".png":
-            media_items.append({"type": "photo", "path": str(f)})
-            figure_paths.append(f)
-        elif f.suffix == ".csv":
-            media_items.append({"type": "document", "path": str(f)})
-            table_paths.append(f)
-
-    return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
+# OutputMediaPaths + collector — extracted to bot.skill_orchestration per ADR 0001.
+from bot.skill_orchestration import OutputMediaPaths, _collect_output_media_paths
 
 
 def _path_names(paths: list[Path]) -> list[str]:
@@ -1194,51 +1163,13 @@ def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
 # LLM re-invokes with a specific skill. Calibrated against
 # ``capability_resolver._candidate_score`` output magnitudes (single keyword
 # match is worth ~0.85 points; an alias hit is worth ~10).
-_AUTO_DISAMBIGUATE_GAP = 2.0
-
-
-def _format_auto_disambiguation(decision, query_text: str) -> str:
-    """Return a human-readable disambiguation block for close-tie auto routing."""
-    candidates = list(decision.skill_candidates or [])[:3]
-    if not candidates:
-        return ""
-    reg = _skill_registry()
-    lines = [
-        "🤔 **Auto-routing found multiple close candidates** — I won't execute yet.",
-        f"Query: `{query_text.strip()[:200]}`",
-        "",
-        "**Top candidates (score — higher is better):**",
-    ]
-    for i, c in enumerate(candidates, 1):
-        info = reg.skills.get(c.skill, {}) or {}
-        desc = (info.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > 140:
-            desc = desc[:137] + "…"
-        reason = c.reasons[0] if c.reasons else ""
-        lines.append(f"{i}. `{c.skill}` (score {c.score:.2f}) — {desc}")
-        if reason:
-            lines.append(f"   matched: {reason}")
-    lines.extend([
-        "",
-        "**Next step:** re-invoke `omicsclaw` with `skill='<chosen alias above>'` "
-        "and the same `mode`/`query`. Pick based on the user's data modality "
-        "(H&E+coordinates → spatial; h5ad single-cell counts → singlecell; "
-        "bulk counts csv → bulkrna; raw MS/LC-MS → proteomics/metabolomics).",
-    ])
-    return "\n".join(lines)
-
-
-def _format_auto_route_banner(decision) -> str:
-    """Return a short banner prepended to tool output when auto routing chose a skill."""
-    chosen = decision.chosen_skill
-    conf = float(getattr(decision, "confidence", 0.0) or 0.0)
-    candidates = list(decision.skill_candidates or [])
-    alts = [c.skill for c in candidates[1:3] if c.skill != chosen]
-    alt_str = f" Close alternatives: {', '.join(alts)}." if alts else ""
-    return (
-        f"📍 Auto-routed to `{chosen}` (confidence {conf:.2f}).{alt_str} "
-        "If this doesn't match the user's intent, re-invoke with an explicit `skill`.\n---\n"
-    )
+# _AUTO_DISAMBIGUATE_GAP + auto-routing banner / disambiguation —
+# extracted to bot.skill_orchestration per ADR 0001.
+from bot.skill_orchestration import (
+    _AUTO_DISAMBIGUATE_GAP,
+    _format_auto_disambiguation,
+    _format_auto_route_banner,
+)
 
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
