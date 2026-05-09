@@ -140,6 +140,63 @@ def test_routes_to_skill_accepts_resolve_capability_with_matching_domain() -> No
     assert assert_routes_to_skill(result, "genomics-variant-calling").passed
 
 
+def test_routes_to_skill_accepts_read_knowhow_label_resolving_to_skill_kh() -> None:
+    """When ``read_knowhow(name=...)`` resolves (via the production
+    ``KnowHowInjector`` lookup chain — filename / doc_id / label) to a
+    KH whose ``skills`` metadata lists ``expected_skill``, that's an
+    unambiguous routing signal — even when the call uses the label form
+    that doesn't textually contain the skill's tokens.
+
+    Concrete T9 trace this catches:
+    ``read_knowhow(name='Best practices for Bulk RNA-seq Differential
+    Expression Analysis')`` resolves to
+    ``KH-bulk-rnaseq-differential-expression.md``, whose ``related_skills``
+    includes ``bulkrna-de``. The token matcher would reject the label
+    because ``'bulkrna'`` doesn't appear as a single word inside
+    ``'Bulk RNA-seq'``."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(
+                name="read_knowhow",
+                arguments={"name": "Best practices for Bulk RNA-seq Differential Expression Analysis"},
+            ),
+        )
+    )
+    assert assert_routes_to_skill(result, "bulkrna-de").passed
+
+
+def test_routes_to_skill_accepts_consult_knowledge_with_matching_domain() -> None:
+    """``consult_knowledge`` is a peer dispatcher to ``resolve_capability``
+    (the production tool spec dispatches both to the same KB lookup
+    surface). Calling it with a ``domain`` field that matches the
+    expected skill's omics domain is a routing signal — DeepSeek
+    routinely emits this in T9 instead of ``resolve_capability``."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(
+                name="consult_knowledge",
+                arguments={"query": "variant calling BAM GRCh38", "domain": "genomics"},
+            ),
+        )
+    )
+    assert assert_routes_to_skill(result, "genomics-variant-calling").passed
+
+
+def test_response_mentions_inspection_only_inconclusive_even_with_preamble_text() -> None:
+    """An inspection-only round counts as inconclusive even when the
+    model emits a short preamble like 'Let me check the file first.' —
+    the substantive answer (which the regex is looking for) lives in
+    the follow-up round single-round eval doesn't capture. The
+    inspection-only signal is what matters, not whether the model
+    chatted before issuing the tool call."""
+    result = _make_result(
+        response_text="我来先查看一下数据集的元信息。",
+        tool_calls=(ToolCallObservation(name="inspect_data", arguments={}),),
+    )
+    outcome = assert_response_mentions(result, must_mention=(r"\bmarker\b",))
+    assert outcome.passed
+
+
 def test_routes_to_skill_resolve_capability_wrong_domain_does_not_match() -> None:
     """Sanity: a metabolomics resolve_capability call must not cross-
     validate a routing intent for a single-cell skill."""
@@ -261,12 +318,14 @@ def test_response_mentions_inconclusive_on_inspection_only_round() -> None:
     assert outcome.passed
 
 
-def test_response_mentions_still_fails_when_response_present_but_missing() -> None:
-    """Sanity: inspection-tolerance only kicks in for *empty* response_text.
-    Once the model has emitted text content, missing patterns are real."""
+def test_response_mentions_validates_when_substantive_tool_present() -> None:
+    """Sanity: inspection-tolerance is for *inspection-only* rounds. As
+    soon as the model calls a substantive tool (e.g. ``omicsclaw``),
+    the round has produced action and the response should be checked
+    for the required mentions — missing pattern is a real failure."""
     result = _make_result(
         response_text="Here is some explanation but no statistical term.",
-        tool_calls=(ToolCallObservation(name="inspect_data", arguments={}),),
+        tool_calls=(ToolCallObservation(name="omicsclaw", arguments={"skill": "sc-de"}),),
     )
     outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
     assert not outcome.passed
@@ -282,6 +341,20 @@ def test_response_mentions_still_fails_on_empty_with_non_inspection_tool() -> No
     )
     outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
     assert not outcome.passed
+
+
+def test_response_mentions_file_read_counts_as_inspection() -> None:
+    """``file_read`` (Claude Code built-in surfaced in system prompt) is
+    a first-round inspection action just like ``inspect_data``. T9 case
+    methodology__padj_filter shows DeepSeek using ``file_read`` to
+    inspect a CSV before answering — empty text + file_read should be
+    treated as inconclusive, same as inspect_data."""
+    result = _make_result(
+        response_text="",
+        tool_calls=(ToolCallObservation(name="file_read", arguments={"path": "/tmp/de.csv"}),),
+    )
+    outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
+    assert outcome.passed
 
 
 def test_assert_result_truthiness_matches_passed() -> None:

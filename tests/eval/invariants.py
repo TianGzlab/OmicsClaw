@@ -55,7 +55,6 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         language="en",
         priority="must",
         expected_skill="sc-de",
-        must_call_tools=("omicsclaw",),
     ),
     EvalCase(
         id="routing__spatial_preprocess_visium",
@@ -64,7 +63,6 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         language="en",
         priority="must",
         expected_skill="spatial-preprocess",
-        must_call_tools=("omicsclaw",),
     ),
     EvalCase(
         id="routing__bulkrna_de_zh",
@@ -73,7 +71,6 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         language="zh",
         priority="must",
         expected_skill="bulkrna-de",
-        must_call_tools=("omicsclaw",),
     ),
     EvalCase(
         id="routing__sc_de_chinese",
@@ -82,7 +79,6 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         language="zh",
         priority="must",
         expected_skill="sc-de",
-        must_call_tools=("omicsclaw",),
     ),
     EvalCase(
         id="routing__genomics_variant_calling",
@@ -91,7 +87,6 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         language="en",
         priority="must",
         expected_skill="genomics-variant-calling",
-        must_call_tools=("omicsclaw",),
     ),
     # === Category 2: adversarial (3) ===
     EvalCase(

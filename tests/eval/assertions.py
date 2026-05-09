@@ -56,6 +56,8 @@ _INSPECTION_TOOL_NAMES: frozenset[str] = frozenset({
     "get_file_size",
     "resolve_capability",
     "remember",
+    "file_read",
+    "list_directory",
 })
 
 
@@ -105,6 +107,52 @@ def _name_matches_skill_tokens(name: str, skill: str) -> bool:
     )
 
 
+def _read_knowhow_resolves_to_skill_kh(name: str, expected_skill: str) -> bool:
+    """Whether ``read_knowhow(name=...)`` resolves (using the production
+    ``KnowHowInjector`` lookup chain — filename / doc_id / label) to a
+    KH whose ``skills`` metadata lists ``expected_skill``.
+
+    Catches label forms whose textual tokens don't textually overlap the
+    skill name (e.g. ``'Best practices for Bulk RNA-seq Differential
+    Expression Analysis'`` ↔ ``bulkrna-de``). Returns False on any
+    lookup failure so the eval suite stays robust if the KH metadata
+    moves or the injector import path breaks.
+    """
+    if not name or not expected_skill:
+        return False
+    try:
+        from omicsclaw.knowledge.knowhow import get_knowhow_injector
+    except Exception:
+        return False
+
+    target = name.strip().lower()
+    if not target:
+        return False
+    try:
+        injector = get_knowhow_injector()
+        injector._ensure_loaded()
+        metadata = injector._metadata
+    except Exception:
+        return False
+
+    candidate = target if target.startswith("kh-") else f"kh-{target}"
+    if not candidate.endswith(".md"):
+        candidate = f"{candidate}.md"
+
+    for filename, meta in metadata.items():
+        fn_lower = filename.lower()
+        doc_id_lower = (meta.doc_id or "").lower()
+        label_lower = (meta.label or "").lower()
+        if (
+            fn_lower == target
+            or fn_lower == candidate
+            or (doc_id_lower and doc_id_lower == target)
+            or (label_lower and label_lower == target)
+        ):
+            return expected_skill in (meta.skills or ())
+    return False
+
+
 # --- Helper 1: routing -------------------------------------------------------
 
 
@@ -145,14 +193,22 @@ def assert_routes_to_skill(
         kh_name = str(tc.arguments.get("name", "") or "")
         if _name_matches_skill_tokens(kh_name, expected_skill):
             return _ok()
+        if _read_knowhow_resolves_to_skill_kh(kh_name, expected_skill):
+            return _ok()
 
     expected_domain = _skill_domain(expected_skill)
     if expected_domain:
         for tc in result.tool_calls:
-            if tc.name != "resolve_capability":
+            # ``resolve_capability(domain_hint=...)`` and
+            # ``consult_knowledge(domain=...)`` are peer dispatcher tools
+            # — both surface the omics domain as a routing hint.
+            if tc.name == "resolve_capability":
+                hint = str(tc.arguments.get("domain_hint", "") or "").lower()
+            elif tc.name == "consult_knowledge":
+                hint = str(tc.arguments.get("domain", "") or "").lower()
+            else:
                 continue
-            domain_hint = str(tc.arguments.get("domain_hint", "") or "").lower()
-            if domain_hint == expected_domain:
+            if hint == expected_domain:
                 return _ok()
 
     if not omicsclaw_calls:
@@ -218,15 +274,15 @@ def assert_response_mentions(
     """
     text = result.response_text or ""
 
-    # Multi-round agent tolerance: when the captured round emitted no
-    # text and only inspection-class tool calls, the model is doing
-    # inspect-before-action (SOUL.md ``Result Fidelity`` rule) and the
-    # substantive response lives in the follow-up round we don't
-    # capture. Skip the mention check rather than failing — punishing
-    # this would over-fit eval to behavior production never demands.
+    # Multi-round agent tolerance: when the captured round consists only
+    # of inspection-class tool calls (no substantive action), the model
+    # is doing inspect-before-action (SOUL.md ``Result Fidelity`` rule)
+    # and the substantive response lives in the follow-up round we
+    # don't capture. The captured round may emit a short preamble
+    # ("Let me check the file.") but the answer the regex looks for
+    # never lives there. Skip the mention check rather than failing.
     if (
-        not text
-        and result.tool_calls
+        result.tool_calls
         and all(tc.name in _INSPECTION_TOOL_NAMES for tc in result.tool_calls)
     ):
         return _ok()

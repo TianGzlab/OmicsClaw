@@ -157,3 +157,7 @@ resources/
 .codex
 .planning/
 e2e_test
+
+# Eval suite per-run artifacts (every UTC-timestamped run dir)
+tests/eval/results/*/
+!tests/eval/results/.gitkeep
