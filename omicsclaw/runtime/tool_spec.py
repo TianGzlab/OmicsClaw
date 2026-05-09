@@ -47,6 +47,13 @@ class ToolSpec:
     policy_tags: tuple[str, ...] = ()
     input_validator: Callable[[dict[str, Any], Mapping[str, Any] | None], Any] | None = None
     speculative_classifier: Callable[[dict[str, Any], Mapping[str, Any] | None], Any] | None = None
+    # Optional gating predicate: ``None`` (default) means "always-on" — the
+    # tool appears in every per-request payload that matches its surface.
+    # Otherwise the predicate receives a ``ContextAssemblyRequest`` and the
+    # tool is included only when it returns True. A misbehaving predicate
+    # fails-closed (tool suppressed + WARNING). Mirrors
+    # ``ContextLayerInjector.predicate``.
+    predicate: Callable[[Any], bool] | None = None
 
     @property
     def resolved_executor_name(self) -> str:
