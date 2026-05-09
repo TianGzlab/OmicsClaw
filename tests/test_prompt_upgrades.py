@@ -80,55 +80,50 @@ class TestSurfaceConditionalVoiceRules:
         assert "no emoji" in lower or "plain text" in lower
 
 
-@pytest.fixture
-def execution_discipline_text() -> str:
-    from omicsclaw.runtime.context_layers import get_execution_discipline
-    return get_execution_discipline()
+class TestExecutionRulesNowGated:
+    """Phase 4 retired the always-on ``execution_discipline`` and
+    ``skill_contract`` text blocks. Their content split into two homes:
+    predicate-gated layers (covered in ``test_predicate_gated_injectors.py``)
+    and pre-call tool preambles (covered in ``test_tool_preambles.py``).
 
+    The most-load-bearing rules are pinned here as a backstop so a future
+    regression that drops one of these pre-call mechanisms surfaces in
+    this file's history."""
 
-class TestExecutionDisciplineActionsInjection:
-    def test_reversibility_guideline_present(self, execution_discipline_text: str):
-        assert "reversibility and blast radius" in execution_discipline_text
+    def test_action_risk_rule_lives_in_soul_md(self, soul_md_text: str):
+        # SOUL.md rule 5 ("destructive or shared-state actions") is the
+        # always-on home for what used to be Action Risk Discipline.
+        lower = soul_md_text.lower()
+        assert "destructive" in lower
+        assert "confirm" in lower
 
-    def test_no_destructive_shortcut_guideline_present(self, execution_discipline_text: str):
-        assert "destructive shortcut" in execution_discipline_text
-        assert "force-push" in execution_discipline_text or "force push" in execution_discipline_text
-
-    def test_no_blind_retry_guideline_present(self, execution_discipline_text: str):
-        assert "fails twice the same way" in execution_discipline_text
-
-
-@pytest.fixture
-def skill_contract_text() -> str:
-    from omicsclaw.runtime.context_layers import get_skill_contract
-    return get_skill_contract()
-
-
-class TestSkillContractDoingTasksInjection:
-    def test_read_before_change_present(self, skill_contract_text: str):
-        assert "Read code before proposing changes" in skill_contract_text
-
-    def test_prefer_existing_file_present(self, skill_contract_text: str):
-        assert "editing an existing file" in skill_contract_text
-
-    def test_stay_within_scope_present(self, skill_contract_text: str):
-        assert "Stay within scope" in skill_contract_text
-        assert "bug fix doesn't need surrounding cleanup" in skill_contract_text
-
-    def test_no_unsolicited_comments_present(self, skill_contract_text: str):
-        assert "comments or docstrings to code you didn't change" in skill_contract_text
-
-    def test_no_speculative_validation_present(self, skill_contract_text: str):
-        assert (
-            "error handling, fallbacks, or validation for scenarios that can't happen"
-            in skill_contract_text
+    def test_engineering_preamble_carries_owasp_and_no_shell_rules(self):
+        from omicsclaw.runtime.tool_execution_hooks import (
+            DEFAULT_PRE_CALL_RULE_INJECTORS,
+            build_pre_call_rule_text,
         )
 
-    def test_no_compat_shims_present(self, skill_contract_text: str):
-        assert "backwards-compat shims" in skill_contract_text
+        text = build_pre_call_rule_text(
+            tool_name="file_edit",
+            tool_args={"path": "src/foo.py"},
+            injectors=DEFAULT_PRE_CALL_RULE_INJECTORS,
+        ).lower()
+        assert "owasp" in text or "injection" in text
+        assert ".sh" in text or "shell" in text
 
-    def test_owasp_present(self, skill_contract_text: str):
-        assert "OWASP-class vulnerabilities" in skill_contract_text
+    def test_skill_execution_preamble_carries_method_and_output_rules(self):
+        from omicsclaw.runtime.tool_execution_hooks import (
+            DEFAULT_PRE_CALL_RULE_INJECTORS,
+            build_pre_call_rule_text,
+        )
+
+        text = build_pre_call_rule_text(
+            tool_name="omicsclaw",
+            tool_args={"skill": "sc-de"},
+            injectors=DEFAULT_PRE_CALL_RULE_INJECTORS,
+        ).lower()
+        assert "lowercase" in text
+        assert "output/" in text
 
 
 @pytest.fixture

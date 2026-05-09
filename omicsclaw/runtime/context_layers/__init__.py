@@ -105,144 +105,6 @@ def load_base_persona(soul_md: Path = DEFAULT_SOUL_MD) -> str:
     )
 
 
-def get_execution_discipline(
-    *,
-    surface: str = "bot",
-    workspace: str = "",
-    pipeline_workspace: str = "",
-    plan_context_present: bool = False,
-) -> str:
-    normalized_surface = str(surface or "bot").strip().lower() or "bot"
-    workspace_present = bool(
-        _normalize_path_text(workspace) or _normalize_path_text(pipeline_workspace)
-    )
-
-    sections = [
-        """
-Execution discipline:
-1. Scope Control
-   - Fulfil the user's stated request first.
-   - Do not add extra analyses, exports, files, refactors, or follow-on steps unless the user asks.
-   - For exploratory questions, inspect or explain first; do not trigger expensive runs by default.
-
-2. Existing-First Work
-   - Read relevant files, plans, current outputs, and exact errors before changing code or rerunning analysis.
-   - Prefer existing OmicsClaw skills, workspace artifacts, and built-in utilities over ad hoc scripts or new abstractions.
-   - In workspace-oriented tasks, use `tool_search`, `file_read`, `glob_files`, and `grep_files` to inspect before `file_edit` or `file_write`.
-
-3. Minimal Changes
-   - Choose the smallest clear change that solves the present task.
-   - Do not introduce speculative abstractions, future-proof frameworks, or broad cleanups without a concrete need.
-   - Avoid new files, notebooks, helper scripts, and fallback branches unless they are required for the requested outcome.
-
-4. Failure Diagnosis
-   - If a step fails, inspect the exact error, inputs, and surrounding context before retrying.
-   - Do not loop the same failing action with unchanged inputs.
-   - Do not silently switch methods, references, parameters, or datasets after a failure.
-   - If a tool result begins with "**环境错误" or contains "分析环境有配置问题", the failure is
-     an environment issue (missing package, version conflict, OOM, disk full). Tell the user:
-     this is NOT their data; the fix command is already shown — relay it clearly.
-     Do NOT suggest re-uploading data or changing analysis parameters.
-
-5. Reporting Integrity
-   - Report exactly what you inspected, executed, changed, and verified.
-   - Never claim a test, command, file, figure, or output exists unless you directly observed it.
-   - Do not give time estimates; when relevant, describe relative cost or note that a step may be long-running.
-
-6. Action Risk Discipline
-   - Before any action, weigh reversibility and blast radius. Local edits, test runs, and read-only queries are free. Operations affecting shared state (push, PR, cloud delete, drop table, send message) require explicit user confirmation unless already authorised in this session.
-   - When you hit an obstacle, do not use a destructive shortcut (force-push, --no-verify, rm -rf, hard reset) to make it go away. Investigate the root cause first.
-   - If the same action fails twice the same way, stop and re-examine the assumption — do not retry blindly.
-""".strip()
-    ]
-
-    if normalized_surface == "bot":
-        sections.append(
-            """
-7. Chat Mode Discipline
-   - If the user only needs explanation, interpretation, or translation, answer directly instead of calling tools.
-   - Do not create saved artifacts unless the user explicitly asks for a file, export, or workspace change.
-""".strip()
-        )
-
-    if normalized_surface in {"interactive", "pipeline"} or workspace_present or plan_context_present:
-        sections.append(
-            """
-8. Workspace Continuity
-   - Treat the active workspace or pipeline workspace as the source of truth for `plan.md`, `todos.md`, reports, and run artifacts.
-   - Before rerunning a stage or editing outputs, check whether the relevant artifact already exists and whether the user asked to refresh it.
-   - Use `todo_write` and task tools only when the work is genuinely multi-step; do not create busywork task lists.
-   - Keep writes inside the active workspace or the declared `output/` contract; do not scatter temporary files across the repo.
-""".strip()
-        )
-
-    return "\n\n".join(section for section in sections if section).strip()
-
-
-def get_skill_contract(*, capability_context_present: bool = False) -> str:
-    capability_rule = (
-        "- A `## Deterministic Capability Assessment` block is already present below. "
-        "Follow it directly and do NOT call `resolve_capability` again unless the user materially changes the request."
-        if capability_context_present
-        else "- If the request is non-trivial and the best skill is not obvious, call `resolve_capability` before analysis."
-    )
-
-    return f"""
-Skill contract:
-1. Skill Routing and Capability
-   {capability_rule}
-   - If the user names an exact skill or gives an obvious exact skill invocation, call `omicsclaw` directly.
-   - Prefer canonical skill aliases when possible; legacy aliases may exist but should not be your default.
-   - Use `mode='demo'` only when the user explicitly asks for a demo.
-   - If an exact skill exists, do NOT jump to custom code.
-   - If coverage='partial_skill', explain which step is covered by the skill and which step requires custom analysis before proceeding.
-   - If coverage='no_skill', you may use `web_method_search` and then `custom_analysis_execute`.
-   - Use `create_omics_skill` only when the user explicitly asks to add, scaffold, package, or persist a reusable skill.
-
-2. Method and Parameter Handling
-   - When the user specifies a method, pass it in lowercase via the `method` parameter.
-   - Prefer canonical backend names from the chosen skill, capability assessment, SKILL.md metadata, or knowledge guidance; do not rely on stale hardcoded method lists.
-   - For method suitability or default-parameter questions, use `inspect_data` only for `.h5ad` / AnnData preflight and use `consult_knowledge` for cross-domain method advice.
-   - Warn the user before long deep-learning analyses; they often take 10-60 minutes.
-   - If `sc-batch-integration` pauses because upstream preparation is recommended and the user explicitly agrees to continue with those prep steps, call `omicsclaw` again with `auto_prepare=true` instead of manually chaining separate tool calls yourself.
-   - If the user explicitly insists on direct integration despite the workflow warning, only then use `confirm_workflow_skip=true`.
-
-3. File Path Discipline
-   - When the user provides a file path, use exactly that file.
-   - Do not browse for "better" substitutes, auto-preprocess, or auto-fix missing prerequisites.
-   - If the requested method cannot run on that file, explain why and ask before changing course.
-
-4. Data Exploration and Preflight
-   - Use `inspect_data` first only when the user is exploring or previewing an `.h5ad` / AnnData file without requesting a concrete pipeline.
-   - Do not use `inspect_data` as a generic preflight for mzML, VCF, BAM, or other non-AnnData inputs.
-   - After inspection, suggest a small set of appropriate analyses and wait for the user's choice before running expensive jobs.
-
-5. Literature and PDF Handling
-   - Use `parse_literature` when the user wants dataset extraction, GEO accession discovery, or structured paper metadata from a scientific paper or uploaded PDF.
-   - Not every PDF requires `parse_literature` first; if the user only wants summary, translation, or explanation, answer directly unless structured extraction would materially help.
-
-6. Controlled Execution and File Writing
-   - Run analysis code via `omicsclaw` or `custom_analysis_execute`, not via generated shell scripts.
-   - Never use `write_file` to create executable shell scripts such as `.sh` or `.bash`.
-   - Only write `.py` or `.R` scripts when the user explicitly asks to save or export them, and save them under `output/`.
-   - Use `custom_analysis_execute` for execution; use saved scripts only as exported artifacts.
-
-7. Output Location
-   - User-facing saved artifacts should go under `output/`.
-   - Prefer a fresh per-analysis subdirectory over writing into the root of `output/`.
-   - When relaying saved paths, report the exact generated directory or file path.
-
-8. Engineering Discipline
-   - Read code before proposing changes to it. Don't suggest modifications based on file names alone.
-   - Prefer editing an existing file over creating a new one.
-   - Stay within scope: a bug fix doesn't need surrounding cleanup; a small feature doesn't need configurability.
-   - Don't add comments or docstrings to code you didn't change. Only annotate logic that isn't self-evident.
-   - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal-call invariants; validate only at system boundaries.
-   - Don't add backwards-compat shims (renamed `_var`, removed-comment markers, dead re-exports) — delete unused code outright.
-   - Be careful not to introduce OWASP-class vulnerabilities (command injection, SQL injection, unsafe deserialization). Fix any insecure code you notice.
-""".strip()
-
-
 def build_memory_context_block(memory_context: str) -> str:
     value = str(memory_context or "").strip()
     if not value:
@@ -627,16 +489,12 @@ class ContextAssemblyRequest:
     pipeline_workspace: str = ""
     mcp_servers: tuple[Any, ...] = ()
     soul_md: Path = DEFAULT_SOUL_MD
-    include_execution_discipline: bool = True
-    include_skill_contract: bool = True
     include_knowhow: bool | None = None
     include_knowledge_guidance: bool | None = None
     include_extension_prompt_packs: bool = True
     workspace_placement: str = "system"
     transcript_context_placement: str = "message"
     base_persona_loader: Callable[[Path], str] | None = None
-    execution_discipline_builder: Callable[..., str] | None = None
-    skill_contract_builder: Callable[..., str] | None = None
     knowhow_loader: KnowhowLoader | None = None
     knowledge_loader: Callable[..., str] | None = None
     extension_prompt_pack_loader: Callable[..., Any] | None = None
@@ -684,6 +542,50 @@ class ContextAssemblyRequest:
         object.__setattr__(self, "output_style", str(self.output_style or "").strip())
 
 
+_PredicateEventSink = Callable[["events.LifecycleEvent"], None]
+_predicate_event_sinks: dict[int, _PredicateEventSink] = {}
+_next_predicate_event_sink_id: int = 1
+
+
+def register_predicate_event_sink(sink: _PredicateEventSink) -> int:
+    """Register a callback that receives ``EVENT_PREDICATE_HIT`` /
+    ``EVENT_PREDICATE_MISS`` events when ``ContextLayerInjector`` evaluates
+    a predicate-gated layer. Returns an ID for ``unregister_predicate_event_sink``.
+
+    Used by the runtime telemetry pipeline (and by tests) to observe which
+    conditional rules are actually firing per request.
+    """
+    global _next_predicate_event_sink_id
+    sink_id = _next_predicate_event_sink_id
+    _next_predicate_event_sink_id += 1
+    _predicate_event_sinks[sink_id] = sink
+    return sink_id
+
+
+def unregister_predicate_event_sink(sink_id: int) -> None:
+    _predicate_event_sinks.pop(sink_id, None)
+
+
+def _emit_predicate_event(event_name: str, *, predicate: str, surface: str) -> None:
+    if not _predicate_event_sinks:
+        return
+    from .. import events as _events_mod  # local import to avoid cycles at module load
+
+    evt = _events_mod.LifecycleEvent(
+        name=event_name,
+        payload={"predicate": predicate, "surface": surface},
+        surface=surface,
+        source="context_layers.predicate",
+    )
+    for sink in tuple(_predicate_event_sinks.values()):
+        try:
+            sink(evt)
+        except Exception as exc:  # pragma: no cover - sink errors must not break assembly
+            LOGGER.warning(
+                "Predicate event sink raised %s; ignoring", exc.__class__.__name__
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ContextLayerInjector:
     name: str
@@ -691,9 +593,31 @@ class ContextLayerInjector:
     placement: str
     surfaces: tuple[str, ...]
     builder: LayerBuilder
+    predicate: Callable[["ContextAssemblyRequest"], bool] | None = None
 
     def applies(self, request: ContextAssemblyRequest) -> bool:
-        return request.surface in self.surfaces
+        if request.surface not in self.surfaces:
+            return False
+        if self.predicate is None:
+            return True
+        try:
+            decision = bool(self.predicate(request))
+        except Exception as exc:  # fail-closed: misbehaving predicate must not inject
+            LOGGER.warning(
+                "Predicate for layer %r raised %s: %s; suppressing layer",
+                self.name,
+                exc.__class__.__name__,
+                exc,
+            )
+            return False
+        from .. import events as _events_mod
+
+        _emit_predicate_event(
+            _events_mod.EVENT_PREDICATE_HIT if decision else _events_mod.EVENT_PREDICATE_MISS,
+            predicate=self.name,
+            surface=str(request.surface or ""),
+        )
+        return decision
 
     def render(self, request: ContextAssemblyRequest) -> ContextLayer | None:
         result = self.builder(request)
@@ -729,25 +653,6 @@ def _build_base_persona_layer(request: ContextAssemblyRequest) -> str:
         return request.base_persona.strip()
     loader = request.base_persona_loader or load_base_persona
     return loader(request.soul_md).strip()
-
-
-def _build_execution_discipline_layer(request: ContextAssemblyRequest) -> str | None:
-    if not request.include_execution_discipline:
-        return None
-    builder = request.execution_discipline_builder or get_execution_discipline
-    return builder(
-        surface=request.surface,
-        workspace=request.workspace,
-        pipeline_workspace=request.pipeline_workspace,
-        plan_context_present=bool(request.plan_context),
-    ).strip()
-
-
-def _build_skill_contract_layer(request: ContextAssemblyRequest) -> str | None:
-    if not request.include_skill_contract:
-        return None
-    builder = request.skill_contract_builder or get_skill_contract
-    return builder(capability_context_present=bool(request.capability_context)).strip()
 
 
 def _build_memory_context_layer(request: ContextAssemblyRequest) -> str | None:
@@ -948,6 +853,100 @@ def _build_output_format_layer(request: ContextAssemblyRequest) -> str | None:
     return build_output_format_layer(request)
 
 
+# --- Predicate-gated rule layers (Phase 4) ----------------------------------
+#
+# Each rule below replaces a section that used to live in the always-on
+# ``execution_discipline`` or ``skill_contract`` layers. The text body is
+# kept under ~400 chars per layer so the worst-case injection (all 7
+# triggering simultaneously) stays well below the deleted layers' combined
+# 7,800 chars. The actual fan-out is much smaller — typical sc-de turns
+# trigger 2-3 of these.
+
+_PREDICATE_GATED_RULES: dict[str, str] = {
+    "scope_and_minimal_change_rule": (
+        "## Scope and Minimal Change\n"
+        "- Fulfil the user's stated request first. Don't add extra analyses, "
+        "exports, refactors, or follow-on steps unless asked.\n"
+        "- Choose the smallest clear change. No speculative abstractions, "
+        "future-proof frameworks, or broad cleanups without a concrete need.\n"
+        "- Read existing files, plans, and current outputs before changing code."
+    ),
+    "file_path_and_inspect_rule": (
+        "## File Path Discipline\n"
+        "- Use exactly the file the user provided. Don't browse for "
+        "substitutes, auto-preprocess, or auto-fix missing prerequisites.\n"
+        "- For `.h5ad` / AnnData previews, use `inspect_data` first; do NOT "
+        "use `inspect_data` as a generic preflight for mzML/VCF/BAM.\n"
+        "- After inspection, suggest a small set of analyses and wait for "
+        "user choice before running expensive jobs."
+    ),
+    "parse_literature_rule": (
+        "## Literature & PDF Handling\n"
+        "- Use `parse_literature` for dataset extraction, GEO accession "
+        "discovery, or structured paper metadata.\n"
+        "- Not every PDF needs `parse_literature` — for summary, translation, "
+        "or explanation, answer directly unless structured extraction "
+        "would materially help."
+    ),
+    "workspace_continuity_rule": (
+        "## Workspace Continuity\n"
+        "- Treat the active workspace / pipeline workspace as the source of "
+        "truth for `plan.md`, `todos.md`, reports, and run artifacts.\n"
+        "- Before rerun, check whether the relevant artifact already exists "
+        "and whether the user asked to refresh it.\n"
+        "- Keep writes inside the active workspace; don't scatter temp "
+        "files across the repo."
+    ),
+    "chat_mode_rule": (
+        "## Chat-Mode Discipline\n"
+        "- If the user only needs explanation, interpretation, or translation, "
+        "answer directly without tool calls.\n"
+        "- Don't create saved artifacts unless the user explicitly asks for "
+        "a file, export, or workspace change."
+    ),
+    "memory_hygiene_rule": (
+        "## Memory Hygiene\n"
+        "- Use `remember` for stable preferences, confirmed biological insights, "
+        "and durable project context. Never store secrets, API keys, PII, "
+        "transient file paths, temporary errors, or unconfirmed annotations.\n"
+        "- Treat injected `## Scoped Memory` as local project/dataset/lab "
+        "heuristics, not general scientific knowledge."
+    ),
+    "capability_routing_hint_rule": (
+        "## Capability Routing\n"
+        "- For non-trivial analysis, call `resolve_capability(query='…', "
+        "domain_hint='…')` to map the request to a skill before acting.\n"
+        "- Prefer canonical skill aliases. Use `mode='demo'` only when the "
+        "user explicitly asks for a demo."
+    ),
+}
+
+
+def _make_predicate_rule_builder(rule_name: str) -> LayerBuilder:
+    """Bind a static rule_text to a builder so the layer renders a
+    constant string when its predicate fires."""
+    def _builder(_request: ContextAssemblyRequest) -> str | None:
+        return _PREDICATE_GATED_RULES.get(rule_name)
+
+    return _builder
+
+
+def _predicate(name: str) -> Callable[[ContextAssemblyRequest], bool]:
+    """Lazy-import a predicate function from ``omicsclaw.runtime.predicates``
+    so the import only triggers when ``ContextLayerInjector.applies`` is
+    called — avoids the circular import between ``predicates`` (which
+    imports ``ContextAssemblyRequest`` from this module) and the
+    injector definitions below.
+    """
+    def _call(req: ContextAssemblyRequest) -> bool:
+        from .. import predicates as _pred_mod
+
+        fn = getattr(_pred_mod, name)
+        return bool(fn(req))
+
+    return _call
+
+
 DEFAULT_CONTEXT_LAYER_INJECTORS = (
     ContextLayerInjector(
         name="base_persona",
@@ -963,19 +962,65 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         surfaces=("bot", "interactive", "pipeline"),
         builder=_build_surface_voice_rules_layer,
     ),
+    # --- Predicate-gated rule layers (Phase 4) ---
+    # Order 12-19 (skipping 15, taken by ``output_format``): lightweight,
+    # conditional rules that replace fragments of the deleted
+    # ``execution_discipline`` and ``skill_contract`` layers.
     ContextLayerInjector(
-        name="execution_discipline",
-        order=25,
+        name="scope_and_minimal_change_rule",
+        order=12,
         placement="system",
         surfaces=("bot", "interactive", "pipeline"),
-        builder=_build_execution_discipline_layer,
+        builder=_make_predicate_rule_builder("scope_and_minimal_change_rule"),
+        predicate=_predicate("implementation_intent"),
     ),
     ContextLayerInjector(
-        name="skill_contract",
-        order=30,
+        name="file_path_and_inspect_rule",
+        order=13,
         placement="system",
         surfaces=("bot", "interactive", "pipeline"),
-        builder=_build_skill_contract_layer,
+        builder=_make_predicate_rule_builder("file_path_and_inspect_rule"),
+        predicate=_predicate("anndata_or_file_path_in_query"),
+    ),
+    ContextLayerInjector(
+        name="parse_literature_rule",
+        order=14,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("parse_literature_rule"),
+        predicate=_predicate("pdf_or_paper_intent"),
+    ),
+    ContextLayerInjector(
+        name="workspace_continuity_rule",
+        order=16,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("workspace_continuity_rule"),
+        predicate=_predicate("workspace_active"),
+    ),
+    ContextLayerInjector(
+        name="chat_mode_rule",
+        order=17,
+        placement="system",
+        surfaces=("bot",),
+        builder=_make_predicate_rule_builder("chat_mode_rule"),
+        predicate=_predicate("chat_surface"),
+    ),
+    ContextLayerInjector(
+        name="memory_hygiene_rule",
+        order=18,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("memory_hygiene_rule"),
+        predicate=_predicate("memory_in_use"),
+    ),
+    ContextLayerInjector(
+        name="capability_routing_hint_rule",
+        order=19,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("capability_routing_hint_rule"),
+        predicate=_predicate("non_trivial_no_capability"),
     ),
     ContextLayerInjector(
         name="memory_context",
@@ -1084,8 +1129,6 @@ __all__ = [
     "build_transcript_context_block",
     "build_workspace_context_block",
     "get_default_context_injectors",
-    "get_execution_discipline",
-    "get_skill_contract",
     "load_base_persona",
     "load_knowledge_guidance",
     "load_skill_context",
