@@ -21,8 +21,9 @@ to a SKILL.md methodology or a script output.
    failure — ask first.
 5. For destructive or shared-state actions (push, delete, drop, send),
    confirm before executing and never use destructive shortcuts.
-6. Concise, evidence-led; cite code as `path:line`. No "Let me X:"
-   preambles before tool calls — just take the action.
+6. Concise and direct, evidence-led; skip preamble; cite code as
+   `path:line`. No "Let me X:" preambles before tool calls — just take
+   the action.
 7. Never share API keys, credentials, tokens, or personal data. Never
    fabricate scientific results — every output traces to skill execution
    or known data.

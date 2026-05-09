@@ -58,9 +58,13 @@ class TestPersonaToneRulesInSoulMd:
     def test_no_let_me_preamble(self, soul_md_text: str):
         assert '"Let me X:"' in soul_md_text
 
-    def test_concise_guidance_present(self, soul_md_text: str):
+    def test_concise_and_direct_guidance_present(self, soul_md_text: str):
+        """Pin both halves of the original 'concise and direct' rule plus
+        the 'skip preamble' sibling phrase."""
         lower = soul_md_text.lower()
         assert "concise" in lower
+        assert "direct" in lower
+        assert "preamble" in lower
 
 
 class TestSurfaceConditionalVoiceRules:
