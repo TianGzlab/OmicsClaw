@@ -239,4 +239,4 @@ produce scientifically invalid results.
   → Single-Cell Differential Expression Guardrails: MUST distinguish exploratory marker ranking from replicate-aware pseudobulk inference before running sc-de
   → Single-Cell Input Contract Guardrails: MUST decide whether the input can be standardized safely, whether key scientific parameters need user confirmation, or whether required metadata/content is missing and analysis must pause
 
-If a guard's full content is needed, call `read_knowhow(name="<filename>")` for the canonical markdown.
+If a guard's full content is needed, call `read_knowhow(name="<filename>")` (bot surface) or read `knowledge_base/knowhows/<filename>` directly.

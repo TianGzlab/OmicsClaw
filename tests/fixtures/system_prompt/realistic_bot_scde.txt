@@ -254,7 +254,7 @@ produce scientifically invalid results.
   → Single-Cell Input Contract Guardrails: MUST decide whether the input can be standardized safely, whether key scientific parameters need user confirmation, or whether required metadata/content is missing and analysis must pause
   → Best practices for RNA-seq Differential Expression Analysis: MUST use adjusted p-values (padj/FDR) for DEG filtering and MUST NOT interpret raw p-values as significance thresholds
 
-If a guard's full content is needed, call `read_knowhow(name="<filename>")` for the canonical markdown.
+If a guard's full content is needed, call `read_knowhow(name="<filename>")` (bot surface) or read `knowledge_base/knowhows/<filename>` directly.
 
 ## Workspace Context
 

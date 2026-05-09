@@ -418,9 +418,14 @@ class KnowHowInjector:
 
         if headline_only:
             parts.append("")
+            # Hint covers both surfaces: bot has the ``read_knowhow`` tool
+            # registered; interactive / pipeline surfaces use Claude Code's
+            # built-in file_read against the canonical markdown path. Pointing
+            # at both keeps the headline payload surface-agnostic.
             parts.append(
                 "If a guard's full content is needed, call "
-                "`read_knowhow(name=\"<filename>\")` for the canonical markdown."
+                "`read_knowhow(name=\"<filename>\")` (bot surface) or read "
+                "`knowledge_base/knowhows/<filename>` directly."
             )
             return "\n".join(parts)
 

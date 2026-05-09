@@ -118,3 +118,23 @@ def test_headline_only_output_mentions_read_knowhow_tool() -> None:
         "headline-only constraints must reference the read_knowhow tool "
         "so the model knows the fetch path"
     )
+
+
+def test_headline_only_hint_covers_non_bot_surfaces_with_file_path_fallback() -> None:
+    """The headline hint is injected on bot/interactive/pipeline surfaces but
+    ``read_knowhow`` is only registered for the bot surface. The hint must
+    therefore also point at a surface-agnostic fallback (the on-disk markdown
+    path) so interactive / pipeline agents can still resolve the guard
+    without inventing a non-existent tool call.
+    """
+    text = _injector().get_constraints(
+        skill="sc-de",
+        query="run sc-de differential expression",
+        domain="singlecell",
+        headline_only=True,
+    )
+    assert "knowledge_base/knowhows" in text, (
+        "headline hint must include the markdown file-path fallback so "
+        "interactive / pipeline surfaces (where read_knowhow is not a "
+        "registered tool) have a working escape hatch."
+    )

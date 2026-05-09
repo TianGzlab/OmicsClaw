@@ -223,4 +223,4 @@ produce scientifically invalid results.
 **Active guards for this task:**
   → Best practices for data analyses: MUST validate data before analysis and MUST handle duplicates, missing values, and ID mismatches explicitly
 
-If a guard's full content is needed, call `read_knowhow(name="<filename>")` for the canonical markdown.
+If a guard's full content is needed, call `read_knowhow(name="<filename>")` (bot surface) or read `knowledge_base/knowhows/<filename>` directly.

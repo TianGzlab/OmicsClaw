@@ -236,4 +236,4 @@ produce scientifically invalid results.
   → Best practices for data analyses: MUST validate data before analysis and MUST handle duplicates, missing values, and ID mismatches explicitly
   → Best practices for RNA-seq Differential Expression Analysis: MUST use adjusted p-values (padj/FDR) for DEG filtering and MUST NOT interpret raw p-values as significance thresholds
 
-If a guard's full content is needed, call `read_knowhow(name="<filename>")` for the canonical markdown.
+If a guard's full content is needed, call `read_knowhow(name="<filename>")` (bot surface) or read `knowledge_base/knowhows/<filename>` directly.
