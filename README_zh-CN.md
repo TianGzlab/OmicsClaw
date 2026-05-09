@@ -842,7 +842,7 @@ make bot-multi CHANNELS=telegram,discord
 
 OmicsClaw 的设计和实现受到了以下开源项目的重要启发：
 
-- **[ClawBio](https://github.com/ClawBio/ClawBio)**：生物信息学场景下较早的原生 AI agent 技能库之一。OmicsClaw 的技能架构、本地优先理念、可复现性设计和 Bot 集成模式都受到了它的启发。
+- **[ClawBio](https://github.com/ClawBio/ClawBio)**：生物信息学场景下较早的原生 AI agent 技能库之一。OmicsClaw 的技能架构、本地优先理念、可复现性设计和 Bot 集成模式都受到了它的启发。早期 ClawBio 项目中还有以 **Professor Teresa K. Attwood** 为原型的 AI 形象 **RoboTerri**——Attwood 教授是生物信息学教育的先驱，PRINTS 数据库的创建者、InterPro 的共同开发者、GOBLET 的共同创立者。我们衷心感谢 ClawBio 团队和 Attwood 教授对生物信息学社区的长期贡献。
 - **[Nocturne Memory](https://github.com/Dataojitori/nocturne_memory)**：一个轻量、支持回溯的长时记忆服务。OmicsClaw 的持久记忆系统借鉴了其图结构记忆和 MCP 集成思路。
 
 ## 📖 文档

@@ -219,7 +219,9 @@ Maintainers: Luyi Tian (Principal Investigator), Weige Zhou (Lead Developer), Li
 
 ## 🙏 Acknowledgments
 
-Inspired by [ClawBio](https://github.com/ClawBio/ClawBio) and [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory).
+OmicsClaw's architecture, skill design, local-first philosophy, and bot integration patterns are deeply inspired by **[ClawBio](https://github.com/ClawBio/ClawBio)**, the first bioinformatics-native AI agent skill library. The original ClawBio project featured **RoboTerri**, an AI persona modelled on Professor Teresa K. Attwood — a pioneer in bioinformatics education, creator of the PRINTS database, co-developer of InterPro, and co-founder of GOBLET. We gratefully acknowledge the ClawBio team and Professor Attwood's enduring contributions to the bioinformatics community.
+
+Memory and session-continuity patterns are inspired by [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory).
 
 ## 📜 License
 

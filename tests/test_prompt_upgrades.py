@@ -1,28 +1,83 @@
-"""Substring-pin tests for the system-prompt discipline injections."""
+"""Substring-pin tests for the system-prompt discipline injections.
+
+Phase 3 retired the ``role_guardrails`` injector. The tone rules that
+used to live there now split between two homes:
+- The persistent always-on rules (concise, ``path:line``, ``Let me X``
+  ban) live in SOUL.md.
+- The surface-conditional emoji / markdown / plain-text rules live in
+  the ``surface_voice_rules`` layer.
+
+This file pins the contract at both new locations so a future regression
+that drops one of these rules from the prompt is caught immediately.
+"""
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parent.parent
+SOUL_PATH = ROOT / "SOUL.md"
+
 
 @pytest.fixture
-def role_guardrails_text() -> str:
-    from omicsclaw.runtime.context_layers import get_role_guardrails
-    return get_role_guardrails()
+def soul_md_text() -> str:
+    return SOUL_PATH.read_text(encoding="utf-8")
 
 
-class TestRoleGuardrailsToneInjection:
-    def test_emoji_guideline_present(self, role_guardrails_text: str):
-        assert "emojis unless the user explicitly requests them" in role_guardrails_text
+@pytest.fixture
+def bot_voice_rules_text() -> str:
+    from omicsclaw.runtime.context_assembler import assemble_prompt_context
+    from omicsclaw.runtime.context_layers import ContextAssemblyRequest
 
-    def test_concise_guideline_present(self, role_guardrails_text: str):
-        assert "concise and direct" in role_guardrails_text
-        assert "skip preamble" in role_guardrails_text
+    asm = assemble_prompt_context(request=ContextAssemblyRequest(surface="bot"))
+    for layer in asm.layers:
+        if layer.name == "surface_voice_rules":
+            return layer.content
+    raise AssertionError("surface_voice_rules layer missing for bot surface")
 
-    def test_path_line_citation_present(self, role_guardrails_text: str):
-        assert "`path:line`" in role_guardrails_text
 
-    def test_no_let_me_preamble(self, role_guardrails_text: str):
-        assert '"Let me X:" before a tool call' in role_guardrails_text
+@pytest.fixture
+def cli_voice_rules_text() -> str:
+    from omicsclaw.runtime.context_assembler import assemble_prompt_context
+    from omicsclaw.runtime.context_layers import ContextAssemblyRequest
+
+    asm = assemble_prompt_context(request=ContextAssemblyRequest(surface="interactive"))
+    for layer in asm.layers:
+        if layer.name == "surface_voice_rules":
+            return layer.content
+    raise AssertionError("surface_voice_rules layer missing for interactive surface")
+
+
+class TestPersonaToneRulesInSoulMd:
+    """Always-on tone rules that survive Phase 3 in SOUL.md."""
+
+    def test_path_line_citation_present(self, soul_md_text: str):
+        assert "`path:line`" in soul_md_text
+
+    def test_no_let_me_preamble(self, soul_md_text: str):
+        assert '"Let me X:"' in soul_md_text
+
+    def test_concise_and_direct_guidance_present(self, soul_md_text: str):
+        """Pin both halves of the original 'concise and direct' rule plus
+        the 'skip preamble' sibling phrase."""
+        lower = soul_md_text.lower()
+        assert "concise" in lower
+        assert "direct" in lower
+        assert "preamble" in lower
+
+
+class TestSurfaceConditionalVoiceRules:
+    """Per-surface emoji / markdown rules moved here from role_guardrails."""
+
+    def test_bot_allows_emoji_sparingly(self, bot_voice_rules_text: str):
+        lower = bot_voice_rules_text.lower()
+        assert "emoji" in lower
+        assert "no emoji" not in lower
+
+    def test_cli_forbids_emoji(self, cli_voice_rules_text: str):
+        lower = cli_voice_rules_text.lower()
+        assert "no emoji" in lower or "plain text" in lower
 
 
 @pytest.fixture

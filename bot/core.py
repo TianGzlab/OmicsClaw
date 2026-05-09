@@ -202,7 +202,7 @@ from omicsclaw.runtime.query_engine import (
 from omicsclaw.runtime.hooks import build_default_lifecycle_hook_runtime
 from omicsclaw.runtime.policy import TOOL_POLICY_ALLOW
 from omicsclaw.runtime.policy_state import ToolPolicyState
-from omicsclaw.runtime.system_prompt import build_system_prompt, get_role_guardrails
+from omicsclaw.runtime.system_prompt import build_system_prompt
 from omicsclaw.runtime.tool_orchestration import (
     EXECUTION_STATUS_POLICY_BLOCKED,
     ToolExecutionRequest,
