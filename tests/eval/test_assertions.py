@@ -71,6 +71,31 @@ def test_routes_to_skill_no_op_on_empty_expected() -> None:
     assert assert_routes_to_skill(result, "").passed
 
 
+def test_routes_to_skill_accepts_read_knowhow_kh_signal() -> None:
+    """``read_knowhow(name='KH-<skill>-*')`` is a strong routing signal in
+    multi-round agent traces — the model loading the skill's KH means it
+    has already decided to route there, even when the subsequent
+    ``omicsclaw`` call lands in the next round the eval doesn't capture."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(name="inspect_data", arguments={"file_path": "/tmp/x.h5ad"}),
+            ToolCallObservation(name="read_knowhow", arguments={"name": "KH-sc-de-guardrails.md"}),
+        )
+    )
+    assert assert_routes_to_skill(result, "sc-de").passed
+
+
+def test_routes_to_skill_unrelated_kh_does_not_count() -> None:
+    """A KH from a different skill must not cross-validate routing."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(name="read_knowhow", arguments={"name": "KH-spatial-preprocess.md"}),
+        )
+    )
+    outcome = assert_routes_to_skill(result, "sc-de")
+    assert not outcome.passed
+
+
 # --- assert_calls_tools ---
 
 
@@ -157,6 +182,47 @@ def test_response_mentions_handles_multiline_text() -> None:
 
 def test_response_mentions_passes_on_empty_constraints() -> None:
     assert assert_response_mentions(_make_result()).passed
+
+
+def test_response_mentions_inconclusive_on_inspection_only_round() -> None:
+    """First-round agent traces may have empty response_text because the
+    model used the round entirely for inspection tools. Skip the mention
+    check in that case — the substantive response lives in the follow-up
+    round the single-round eval doesn't capture. SOUL.md explicitly
+    encourages inspect-before-action; punishing it would over-fit eval
+    to behavior production never demands."""
+    result = _make_result(
+        response_text="",
+        tool_calls=(
+            ToolCallObservation(name="inspect_data", arguments={"file_path": "/tmp/x.h5ad"}),
+            ToolCallObservation(name="read_knowhow", arguments={"name": "KH-sc-de.md"}),
+        ),
+    )
+    outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
+    assert outcome.passed
+
+
+def test_response_mentions_still_fails_when_response_present_but_missing() -> None:
+    """Sanity: inspection-tolerance only kicks in for *empty* response_text.
+    Once the model has emitted text content, missing patterns are real."""
+    result = _make_result(
+        response_text="Here is some explanation but no statistical term.",
+        tool_calls=(ToolCallObservation(name="inspect_data", arguments={}),),
+    )
+    outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
+    assert not outcome.passed
+
+
+def test_response_mentions_still_fails_on_empty_with_non_inspection_tool() -> None:
+    """If the empty response is paired with a non-inspection tool
+    (e.g. ``omicsclaw`` itself), the model has already taken substantive
+    action — empty text plus missing pattern is a real signal failure."""
+    result = _make_result(
+        response_text="",
+        tool_calls=(ToolCallObservation(name="omicsclaw", arguments={"skill": "sc-de"}),),
+    )
+    outcome = assert_response_mentions(result, must_mention=(r"\bpadj\b",))
+    assert not outcome.passed
 
 
 def test_assert_result_truthiness_matches_passed() -> None:
