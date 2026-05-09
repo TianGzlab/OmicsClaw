@@ -474,8 +474,8 @@ async def _auto_prepare_sc_batch_integration(
     if not plan:
         return ""
 
-    from bot.core import execute_omicsclaw  # still in bot.core until #120
     from bot.skill_orchestration import _run_omics_skill_step
+    from bot.tool_executors import execute_omicsclaw
 
     step_records: list[dict] = []
     current_input = str(plan["file_path"])
