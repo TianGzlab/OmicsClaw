@@ -342,34 +342,10 @@ def _primary_skill_count() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Audit log (JSONL)
+# Audit log (JSONL) — extracted to bot.audit per ADR 0001.
 # ---------------------------------------------------------------------------
 
-_AUDIT_LOG_DIR = OMICSCLAW_DIR / "bot" / "logs"
-try:
-    _AUDIT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-except OSError as _exc:
-    # mkdir can fail when OMICSCLAW_DIR resolves to a read-only location
-    # (e.g. a signed .app bundle's Resources/ dir on macOS, or an NFS
-    # mount without write perms). The audit() helper below already tolerates
-    # missing directories via its own OSError handler, so we log and
-    # continue — a missing audit log is strictly better than crashing the
-    # whole process at module load time.
-    logger.warning(
-        "Could not create audit log dir %s (%s) — audit events will be dropped",
-        _AUDIT_LOG_DIR,
-        _exc,
-    )
-_AUDIT_LOG_PATH = _AUDIT_LOG_DIR / "audit.jsonl"
-
-
-def audit(event: str, **kwargs):
-    entry = {"ts": datetime.now(timezone.utc).isoformat(), "event": event, **kwargs}
-    try:
-        with open(_AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
-    except OSError as e:
-        logger.warning(f"Audit log write failed: {e}")
+from bot.audit import audit  # re-export
 
 
 # ---------------------------------------------------------------------------
@@ -681,34 +657,15 @@ def get_usage_snapshot() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Shared rate limiter used across messaging channels
+# Shared rate limiter — extracted to bot.rate_limit per ADR 0001.
 # ---------------------------------------------------------------------------
 
-RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "10"))
-_rate_buckets: dict[str, list[float]] = {}
-
-
-def check_rate_limit(user_id: str, admin_id: str = "") -> bool:
-    """Check per-user rate limit. Returns True if allowed."""
-    if RATE_LIMIT_PER_HOUR <= 0 or (admin_id and user_id == admin_id):
-        return True
-    now = time.time()
-    bucket = _rate_buckets.setdefault(user_id, [])
-    bucket[:] = [t for t in bucket if now - t < 3600]
-    if len(bucket) >= RATE_LIMIT_PER_HOUR:
-        return False
-    bucket.append(now)
-    return True
-
-
-def _evict_lru_conversations():
-    """Evict least-recently-used conversations when limit exceeded."""
-    transcript_store.max_conversations = MAX_CONVERSATIONS
-    evicted = transcript_store.evict_lru_conversations()
-    for chat_id in evicted:
-        tool_result_store.clear(chat_id)
-    if evicted:
-        logger.debug(f"Evicted {len(evicted)} stale conversation(s)")
+from bot.rate_limit import (
+    RATE_LIMIT_PER_HOUR,
+    _evict_lru_conversations,
+    _rate_buckets,
+    check_rate_limit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1334,147 +1291,19 @@ def _build_llm_timeout():
     return build_llm_timeout_policy(log=logger).as_httpx_timeout()
 
 # ---------------------------------------------------------------------------
-# Security helpers
+# Path validation + file discovery — extracted to bot.path_validation per ADR 0001.
 # ---------------------------------------------------------------------------
 
-
-def sanitize_filename(filename: str) -> str:
-    filename = Path(filename).name
-    filename = re.sub(r"[\x00-\x1f]", "", filename)
-    filename = filename.replace("..", "").replace("/", "").replace("\\", "")
-    return filename or "unnamed_file"
-
-
-def resolve_dest(folder: str | None, default: Path | None = None) -> Path:
-    fallback = default if default is not None else DATA_DIR
-    dest = Path(folder) if folder else fallback
-    if not dest.is_absolute():
-        dest = OMICSCLAW_DIR / dest
-    try:
-        dest.resolve().relative_to(OMICSCLAW_DIR.resolve())
-    except ValueError:
-        logger.warning(f"Path escape blocked: {dest}")
-        audit("security", severity="HIGH", detail="path_escape_blocked", attempted_path=str(dest))
-        dest = fallback
-    dest.mkdir(parents=True, exist_ok=True)
-    return dest
-
-
-def validate_path(filepath: Path, allowed_root: Path) -> bool:
-    try:
-        filepath.resolve().relative_to(allowed_root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-# ---------------------------------------------------------------------------
-# Trusted data directories + file discovery
-# ---------------------------------------------------------------------------
-
-def _build_trusted_dirs() -> list[Path]:
-    """Build the list of directories where data files may be read from."""
-    dirs = [DATA_DIR, EXAMPLES_DIR, OUTPUT_DIR]
-    extra = os.environ.get("OMICSCLAW_DATA_DIRS", os.environ.get("SPATIALCLAW_DATA_DIRS", ""))
-    if extra:
-        for d in extra.split(","):
-            d = d.strip()
-            if d:
-                p = Path(d)
-                if p.is_absolute() and p.is_dir():
-                    dirs.append(p)
-                else:
-                    logger.warning(f"OMICSCLAW_DATA_DIRS: ignoring '{d}' (not an absolute directory)")
-    return dirs
-
-
-TRUSTED_DATA_DIRS: list[Path] = []
-
-
-def _ensure_trusted_dirs():
-    global TRUSTED_DATA_DIRS
-    if not TRUSTED_DATA_DIRS:
-        TRUSTED_DATA_DIRS = _build_trusted_dirs()
-        logger.info(f"Trusted data dirs: {[str(d) for d in TRUSTED_DATA_DIRS]}")
-
-
-def validate_input_path(filepath: str, *, allow_dir: bool = False) -> Path | None:
-    """Validate that a user-supplied path points to a real file/dir in a trusted directory.
-
-    Returns resolved Path if valid, None otherwise.
-    """
-    _ensure_trusted_dirs()
-    p = Path(filepath).expanduser()
-    if not p.is_absolute():
-        # 1. Try relative to project root first (most common case)
-        candidate = OMICSCLAW_DIR / p
-        if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
-            p = candidate
-        else:
-            # 2. Try each trusted data directory
-            for d in TRUSTED_DATA_DIRS:
-                candidate = d / p
-                if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
-                    p = candidate
-                    break
-            else:
-                # 3. Fall back to DATA_DIR
-                p = DATA_DIR / p
-
-    resolved = p.resolve()
-    if not resolved.exists():
-        return None
-    if not resolved.is_file() and not (allow_dir and resolved.is_dir()):
-        return None
-
-    for trusted in TRUSTED_DATA_DIRS:
-        try:
-            resolved.relative_to(trusted.resolve())
-            return resolved
-        except ValueError:
-            continue
-
-    # Also allow files anywhere under project root
-    try:
-        resolved.relative_to(OMICSCLAW_DIR.resolve())
-        return resolved
-    except ValueError:
-        pass
-
-    logger.warning(f"Path not in trusted dirs: {resolved}")
-    audit("security", severity="MEDIUM", detail="untrusted_path_rejected", path=str(resolved))
-    return None
-
-
-def discover_file(filename_or_pattern: str) -> list[Path]:
-    """Search trusted data directories for files matching the given name or glob pattern.
-
-    Returns a list of matching paths, sorted by modification time (newest first).
-    """
-    _ensure_trusted_dirs()
-
-    # Handle absolute paths directly
-    if filename_or_pattern.startswith('/'):
-        p = Path(filename_or_pattern)
-        if p.is_file():
-            return [p]
-        return []
-
-    matches: list[Path] = []
-    for d in TRUSTED_DATA_DIRS:
-        if not d.exists():
-            continue
-        if "*" in filename_or_pattern or "?" in filename_or_pattern:
-            matches.extend(f for f in d.rglob(filename_or_pattern) if f.is_file())
-        else:
-            exact = d / filename_or_pattern
-            if exact.is_file():
-                matches.append(exact)
-            for f in d.rglob(filename_or_pattern):
-                if f.is_file() and f not in matches:
-                    matches.append(f)
-    matches.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-    return matches
+from bot.path_validation import (
+    TRUSTED_DATA_DIRS,
+    _build_trusted_dirs,
+    _ensure_trusted_dirs,
+    discover_file,
+    resolve_dest,
+    sanitize_filename,
+    validate_input_path,
+    validate_path,
+)
 
 
 # ---------------------------------------------------------------------------
