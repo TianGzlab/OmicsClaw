@@ -40,16 +40,19 @@ def _injector() -> KnowHowInjector:
 # --- Headline-only mode -------------------------------------------------------
 
 
-def test_get_constraints_emits_only_headlines_by_default() -> None:
-    """The default output must contain headline rows but no body sections.
+def test_get_constraints_emits_only_headlines_when_opted_in() -> None:
+    """``headline_only=True`` (the production-path opt-in) suppresses the
+    full KH bodies and emits only ``→ {label}: {critical_rule}`` headlines.
 
-    The current code emits ``### 📋 {label}`` body markers; after the change
-    those should be gone unless the caller explicitly asks for full bodies.
+    The default remains ``headline_only=False`` for backward-compat with
+    callers / tests that assert on body content; the production
+    ``load_knowhow_constraints`` helper opts into ``True``.
     """
     text = _injector().get_constraints(
         skill="sc-de",
         query="run sc-de differential expression",
         domain="singlecell",
+        headline_only=True,
     )
     assert text, "expected non-empty constraints for sc-de query"
     assert "**Active guards for this task:**" in text
@@ -61,16 +64,21 @@ def test_get_constraints_emits_only_headlines_by_default() -> None:
     assert len(text) < 2000, f"expected headline-only payload <2KB, got {len(text)} chars"
 
 
-def test_get_constraints_full_mode_still_available_for_legacy_callers() -> None:
-    """Callers that still need the full markdown body can opt-in via headline_only=False."""
+def test_get_constraints_default_is_full_body_for_test_compat() -> None:
+    """The bare default keeps the legacy full-body output so existing tests
+    asserting on body content continue to pass without modification.
+
+    Phase 2 production callers explicitly opt into ``headline_only=True``;
+    this test pins the contract that the default is *not* the compressed
+    mode so the same default never breaks unmigrated callers silently.
+    """
     text = _injector().get_constraints(
         skill="sc-de",
         query="run sc-de differential expression",
         domain="singlecell",
-        headline_only=False,
     )
-    assert text, "expected non-empty constraints"
-    assert "### 📋" in text, "body section heading missing in legacy full-body mode"
+    assert text
+    assert "### 📋" in text, "body section heading missing in legacy default"
 
 
 # --- K=4 cap ------------------------------------------------------------------

@@ -723,6 +723,39 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("memory", "knowledge"),
         ),
         ToolSpec(
+            name="read_knowhow",
+            description=(
+                "Fetch the full markdown body of a Mandatory Scientific Constraint "
+                "(KnowHow guard) by name. Call this when the headline-only "
+                "Active Guards block in the system prompt does not give enough "
+                "detail — for example, when the user asks WHY a guard requires a "
+                "specific threshold, when a method name is ambiguous, or when "
+                "the headline mentions parameters the user is uncertain about. "
+                "Accepts the filename (e.g. KH-sc-de-guardrails.md), the doc_id "
+                "(sc-de-guardrails), or the human-readable label. Returns the "
+                "full markdown text, or an empty string if no guard matches."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "KH identifier. Accepts filename "
+                            "(KH-sc-de-guardrails.md), doc_id (sc-de-guardrails), "
+                            "or label (Single-Cell Differential Expression Guardrails)."
+                        ),
+                    },
+                },
+                "required": ["name"],
+            },
+            surfaces=("bot",),
+            read_only=True,
+            concurrency_safe=True,
+            result_policy=RESULT_POLICY_KNOWLEDGE_REFERENCE,
+            policy_tags=("knowledge", "knowhow", "reference"),
+        ),
+        ToolSpec(
             name="consult_knowledge",
             description=(
                 "Query the OmicsClaw knowledge base for analysis guidance. "
