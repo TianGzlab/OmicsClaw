@@ -1014,6 +1014,100 @@ def _build_output_format_layer(request: ContextAssemblyRequest) -> str | None:
     return build_output_format_layer(request)
 
 
+# --- Predicate-gated rule layers (Phase 4) ----------------------------------
+#
+# Each rule below replaces a section that used to live in the always-on
+# ``execution_discipline`` or ``skill_contract`` layers. The text body is
+# kept under ~400 chars per layer so the worst-case injection (all 7
+# triggering simultaneously) stays well below the deleted layers' combined
+# 7,800 chars. The actual fan-out is much smaller — typical sc-de turns
+# trigger 2-3 of these.
+
+_PREDICATE_GATED_RULES: dict[str, str] = {
+    "scope_and_minimal_change_rule": (
+        "## Scope and Minimal Change\n"
+        "- Fulfil the user's stated request first. Don't add extra analyses, "
+        "exports, refactors, or follow-on steps unless asked.\n"
+        "- Choose the smallest clear change. No speculative abstractions, "
+        "future-proof frameworks, or broad cleanups without a concrete need.\n"
+        "- Read existing files, plans, and current outputs before changing code."
+    ),
+    "file_path_and_inspect_rule": (
+        "## File Path Discipline\n"
+        "- Use exactly the file the user provided. Don't browse for "
+        "substitutes, auto-preprocess, or auto-fix missing prerequisites.\n"
+        "- For `.h5ad` / AnnData previews, use `inspect_data` first; do NOT "
+        "use `inspect_data` as a generic preflight for mzML/VCF/BAM.\n"
+        "- After inspection, suggest a small set of analyses and wait for "
+        "user choice before running expensive jobs."
+    ),
+    "parse_literature_rule": (
+        "## Literature & PDF Handling\n"
+        "- Use `parse_literature` for dataset extraction, GEO accession "
+        "discovery, or structured paper metadata.\n"
+        "- Not every PDF needs `parse_literature` — for summary, translation, "
+        "or explanation, answer directly unless structured extraction "
+        "would materially help."
+    ),
+    "workspace_continuity_rule": (
+        "## Workspace Continuity\n"
+        "- Treat the active workspace / pipeline workspace as the source of "
+        "truth for `plan.md`, `todos.md`, reports, and run artifacts.\n"
+        "- Before rerun, check whether the relevant artifact already exists "
+        "and whether the user asked to refresh it.\n"
+        "- Keep writes inside the active workspace; don't scatter temp "
+        "files across the repo."
+    ),
+    "chat_mode_rule": (
+        "## Chat-Mode Discipline\n"
+        "- If the user only needs explanation, interpretation, or translation, "
+        "answer directly without tool calls.\n"
+        "- Don't create saved artifacts unless the user explicitly asks for "
+        "a file, export, or workspace change."
+    ),
+    "memory_hygiene_rule": (
+        "## Memory Hygiene\n"
+        "- Use `remember` for stable preferences, confirmed biological insights, "
+        "and durable project context. Never store secrets, API keys, PII, "
+        "transient file paths, temporary errors, or unconfirmed annotations.\n"
+        "- Treat injected `## Scoped Memory` as local project/dataset/lab "
+        "heuristics, not general scientific knowledge."
+    ),
+    "capability_routing_hint_rule": (
+        "## Capability Routing\n"
+        "- For non-trivial analysis, call `resolve_capability(query='…', "
+        "domain_hint='…')` to map the request to a skill before acting.\n"
+        "- Prefer canonical skill aliases. Use `mode='demo'` only when the "
+        "user explicitly asks for a demo."
+    ),
+}
+
+
+def _make_predicate_rule_builder(rule_name: str) -> LayerBuilder:
+    """Bind a static rule_text to a builder so the layer renders a
+    constant string when its predicate fires."""
+    def _builder(_request: ContextAssemblyRequest) -> str | None:
+        return _PREDICATE_GATED_RULES.get(rule_name)
+
+    return _builder
+
+
+def _predicate(name: str) -> Callable[[ContextAssemblyRequest], bool]:
+    """Lazy-import a predicate function from ``omicsclaw.runtime.predicates``
+    so the import only triggers when ``ContextLayerInjector.applies`` is
+    called — avoids the circular import between ``predicates`` (which
+    imports ``ContextAssemblyRequest`` from this module) and the
+    injector definitions below.
+    """
+    def _call(req: ContextAssemblyRequest) -> bool:
+        from .. import predicates as _pred_mod
+
+        fn = getattr(_pred_mod, name)
+        return bool(fn(req))
+
+    return _call
+
+
 DEFAULT_CONTEXT_LAYER_INJECTORS = (
     ContextLayerInjector(
         name="base_persona",
@@ -1028,6 +1122,65 @@ DEFAULT_CONTEXT_LAYER_INJECTORS = (
         placement="system",
         surfaces=("bot", "interactive", "pipeline"),
         builder=_build_surface_voice_rules_layer,
+    ),
+    # --- Predicate-gated rule layers (Phase 4) ---
+    # Order 12-18: lightweight, conditional rules that replace fragments
+    # of the deleted ``execution_discipline`` and ``skill_contract`` layers.
+    ContextLayerInjector(
+        name="scope_and_minimal_change_rule",
+        order=12,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("scope_and_minimal_change_rule"),
+        predicate=_predicate("implementation_intent"),
+    ),
+    ContextLayerInjector(
+        name="file_path_and_inspect_rule",
+        order=13,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("file_path_and_inspect_rule"),
+        predicate=_predicate("anndata_or_file_path_in_query"),
+    ),
+    ContextLayerInjector(
+        name="parse_literature_rule",
+        order=14,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("parse_literature_rule"),
+        predicate=_predicate("pdf_or_paper_intent"),
+    ),
+    ContextLayerInjector(
+        name="workspace_continuity_rule",
+        order=16,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("workspace_continuity_rule"),
+        predicate=_predicate("workspace_active"),
+    ),
+    ContextLayerInjector(
+        name="chat_mode_rule",
+        order=17,
+        placement="system",
+        surfaces=("bot",),
+        builder=_make_predicate_rule_builder("chat_mode_rule"),
+        predicate=_predicate("chat_surface"),
+    ),
+    ContextLayerInjector(
+        name="memory_hygiene_rule",
+        order=18,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("memory_hygiene_rule"),
+        predicate=_predicate("memory_in_use"),
+    ),
+    ContextLayerInjector(
+        name="capability_routing_hint_rule",
+        order=19,
+        placement="system",
+        surfaces=("bot", "interactive", "pipeline"),
+        builder=_make_predicate_rule_builder("capability_routing_hint_rule"),
+        predicate=_predicate("non_trivial_no_capability"),
     ),
     ContextLayerInjector(
         name="execution_discipline",

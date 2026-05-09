@@ -73,10 +73,17 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
         )
     )
 
+    # Test request triggers anndata_or_file_path_in_query (h5ad in query)
+    # and workspace_active (workspace + pipeline_workspace set), so the
+    # corresponding predicate-gated rule layers appear. Other predicate
+    # layers stay quiet (no implementation/memory/pdf keywords; capability
+    # context already present; surface=interactive so chat_mode_rule off).
     assert assembly.layer_names == (
         "base_persona",
         "surface_voice_rules",
+        "file_path_and_inspect_rule",
         "output_format",
+        "workspace_continuity_rule",
         "execution_discipline",
         "skill_contract",
         "memory_context",
