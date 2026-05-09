@@ -427,7 +427,7 @@ minversion = "7.0"
 pythonpath = ["."]
 python_files = "test_*.py"
 python_functions = "test_*"
-addopts = "-v --import-mode=importlib -m 'not slow'"
+addopts = "-v --import-mode=importlib -m 'not slow and not eval'"
 testpaths = [
     "tests",
     "skills/spatial/spatial-preprocess/tests",
@@ -462,6 +462,7 @@ markers = [
     "requires_torch: tests requiring PyTorch (SpaGCN, Cell2Location, scVI)",
     "requires_r: tests requiring R (Rscript on PATH)",
     "demo: demo-mode integration tests",
+    "eval: real-LLM behavioral parity tests; run manually or via nightly cron (excluded by default)",
 ]
 filterwarnings = [
     "ignore::FutureWarning",

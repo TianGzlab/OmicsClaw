@@ -1427,33 +1427,13 @@ def get_tools() -> list[dict]:
 
 
 def _build_bot_tool_context() -> BotToolContext:
-    skill_names = tuple(list(_skill_registry().skills.keys()) + ["auto"])
-    # Pre-render the compact domain briefing once per tool-registry build so
-    # we don't pay repeated registry scans inside build_bot_tool_specs. The
-    # old flat skill_desc_text (88 "alias (description)" entries) is no
-    # longer embedded in the LLM-facing tool description — it ballooned to
-    # ~4k tokens. The briefing is ~500 tokens and stable across turns.
-    from omicsclaw.core.domain_briefing import build_domain_briefing
-    briefing = build_domain_briefing(
-        lead_in=(
-            "OmicsClaw dispatches multi-omics analysis across 7 domains. "
-            "Each line below summarizes a domain and lists a few representative skills."
-        ),
-        trailing_hint=(
-            "The `skill` parameter accepts any canonical skill alias or legacy alias "
-            "(resolved automatically). For the complete skill list of one domain, "
-            "call the `list_skills_in_domain` tool (preferred, paginated) or read "
-            "`skills/<domain>/INDEX.md` on disk. "
-            "Prefer skill='auto' with a natural-language `query` to let the capability "
-            "resolver pick the best match programmatically."
-        ),
-        ensure_loaded=False,  # _skill_registry() above already loaded
-    )
-    return BotToolContext(
-        skill_names=skill_names,
-        skill_desc_text="",  # retained for backward-compat; no longer used
-        domain_briefing=briefing,
-    )
+    """Thin alias around the canonical ``build_default_bot_tool_context``
+    in ``omicsclaw/runtime/bot_tools.py``. Kept as a module-private hook
+    so other bot/core.py callers can monkeypatch in tests if needed —
+    do not inline this call site away."""
+    from omicsclaw.runtime.bot_tools import build_default_bot_tool_context
+
+    return build_default_bot_tool_context()
 
 
 def get_tool_registry():

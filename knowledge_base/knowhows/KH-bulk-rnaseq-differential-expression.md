@@ -1,10 +1,10 @@
 ---
 doc_id: bulk-rnaseq-differential-expression
-title: Best practices for RNA-seq Differential Expression Analysis
+title: Best practices for Bulk RNA-seq Differential Expression Analysis
 doc_type: knowhow
 critical_rule: MUST use adjusted p-values (padj/FDR) for DEG filtering and MUST NOT interpret raw p-values as significance thresholds
-domains: [bulkrna, singlecell]
-related_skills: [bulk-rnaseq-counts-to-de-deseq2, bulkrna-de, bulkrna-deseq2, de]
+domains: [bulkrna]
+related_skills: [bulk-rnaseq-counts-to-de-deseq2, bulkrna-de, bulkrna-deseq2]
 phases: [before_run]
 search_terms: [RNA-seq, differential expression, DESeq2, padj, FDR, fold change, 差异表达, 差异基因, 差异分析]
 priority: 0.9

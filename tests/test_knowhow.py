@@ -417,3 +417,112 @@ def test_spatial_raw_processing_constraints_use_guardrail_doc():
 
     assert "Spatial Raw Processing Guardrails" in constraints
     assert "knowledge_base/skill-guides/spatial/spatial-raw-processing.md" in constraints
+
+
+def test_bulk_rnaseq_de_kh_does_not_surface_for_sc_de_query() -> None:
+    """The bulk-RNA-seq DE guard must not appear in the headline-only
+    block surfaced for an sc-de query.
+
+    Why: the prior frontmatter on
+    ``KH-bulk-rnaseq-differential-expression.md`` listed both
+    ``bulkrna`` and ``singlecell`` domains, which made the bulk-DE
+    guard load alongside the sc-de guards on every single-cell DE
+    request. T9 (PR #112) showed DeepSeek-v4-flash following that
+    extra guard's label into ``read_knowhow``, splitting attention
+    between sc-de and bulk-DE and biasing the routing trace away
+    from a clean ``omicsclaw(skill='sc-de')`` call. Tightening the
+    domain scope keeps the bulk guard for bulk queries; sc-de's own
+    KH plus the cross-domain best-practice guard already cover the
+    padj/FDR rule for single-cell pseudobulk paths.
+    """
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="sc-de",
+        query="do differential expression on /tmp/sample.h5ad",
+        domain="singlecell",
+        headline_only=True,
+    )
+
+    assert (
+        "Best practices for RNA-seq Differential Expression Analysis" not in constraints
+    ), (
+        "bulk RNA-seq DE guard leaked into the sc-de headline block — "
+        "narrow KH-bulk-rnaseq-differential-expression.md frontmatter to "
+        "domains: [bulkrna] only."
+    )
+    # sc-de's own guard must still surface
+    assert "Single-Cell Differential Expression Guardrails" in constraints
+
+
+def test_bulk_rnaseq_de_kh_still_surfaces_for_bulkrna_query() -> None:
+    """Sanity: tightening the sc-de scope must not break the bulk
+    pathway. ``bulkrna-de`` queries still need the padj/FDR guard."""
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="bulkrna-de",
+        query="run DESeq2 on /tmp/counts.csv",
+        domain="bulkrna",
+        headline_only=True,
+    )
+
+    # The bulk DE guard MUST be present for bulk queries — under either
+    # the old title or the new "Bulk RNA-seq" title.
+    assert (
+        "Bulk RNA-seq Differential Expression" in constraints
+        or "RNA-seq Differential Expression" in constraints
+    )
+
+
+def test_padj_fdr_rule_surfaces_for_sc_de_pseudobulk() -> None:
+    """The padj/FDR rule applies equally to bulk RNA-seq DE and sc-de
+    pseudobulk paths (DESeq2_R on aggregated raw counts). Narrowing
+    the bulk-RNA-seq KH to ``domains: [bulkrna]`` must NOT silently
+    drop padj coverage from sc-de prompts.
+
+    This regression test was added in response to PR #112 review:
+    after the bulk KH was narrowed to bulkrna-only, no surfaced KH
+    on sc-de queries carried the padj/FDR rule. A cross-domain
+    ``KH-de-padj-guardrails.md`` must surface for sc-de queries
+    too — the rule is domain-agnostic for any DE workflow.
+    """
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="sc-de",
+        query="do differential expression on /tmp/sample.h5ad",
+        domain="singlecell",
+        headline_only=True,
+    )
+
+    import re
+    assert re.search(
+        r"\b(padj|FDR|adjusted\s+p[-_\s]*value|Benjamini)\b",
+        constraints,
+        re.IGNORECASE,
+    ), (
+        "padj/FDR guidance missing from sc-de headline block — "
+        "sc-de pseudobulk needs the same padj rule as bulkrna-de. "
+        "Create KH-de-padj-guardrails.md with domains: [bulkrna, singlecell]."
+    )
+
+
+def test_padj_fdr_rule_still_surfaces_for_bulkrna_query() -> None:
+    """Sanity: the cross-domain padj guard must also surface for bulk
+    queries (or else the bulk path also loses coverage)."""
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="bulkrna-de",
+        query="filter DEGs from /tmp/de_results.csv",
+        domain="bulkrna",
+        headline_only=True,
+    )
+
+    import re
+    assert re.search(
+        r"\b(padj|FDR|adjusted\s+p[-_\s]*value|Benjamini)\b",
+        constraints,
+        re.IGNORECASE,
+    )
