@@ -29,6 +29,44 @@ class BotToolContext:
     domain_briefing: str = ""
 
 
+def build_default_bot_tool_context() -> BotToolContext:
+    """Production-shape ``BotToolContext`` with the full skill registry.
+
+    Mirrors ``bot/core.py:_build_bot_tool_context`` so external callers
+    (e.g. the behavioral-parity eval suite) can build the *same* tool
+    list the production bot path sends to the LLM. Without this, eval
+    callers tend to stub ``skill_names=("sc-de", "spatial-preprocess")``
+    and end up testing a fictional tool surface where the ``omicsclaw``
+    tool's ``skill`` parameter is restricted to two enums and the
+    ``"auto"`` routing path is missing — fatal for routing parity.
+    """
+    from omicsclaw.core.domain_briefing import build_domain_briefing
+    from omicsclaw.core.registry import ensure_registry_loaded
+
+    registry = ensure_registry_loaded()
+    skill_names = tuple(list(registry.skills.keys()) + ["auto"])
+    briefing = build_domain_briefing(
+        lead_in=(
+            "OmicsClaw dispatches multi-omics analysis across 7 domains. "
+            "Each line below summarizes a domain and lists a few representative skills."
+        ),
+        trailing_hint=(
+            "The `skill` parameter accepts any canonical skill alias or legacy alias "
+            "(resolved automatically). For the complete skill list of one domain, "
+            "call the `list_skills_in_domain` tool (preferred, paginated) or read "
+            "`skills/<domain>/INDEX.md` on disk. "
+            "Prefer skill='auto' with a natural-language `query` to let the capability "
+            "resolver pick the best match programmatically."
+        ),
+        ensure_loaded=False,
+    )
+    return BotToolContext(
+        skill_names=skill_names,
+        skill_desc_text="",
+        domain_briefing=briefing,
+    )
+
+
 def _resolve_domain_briefing(context: BotToolContext) -> str:
     """Return the briefing text, computing it lazily if not preset.
 

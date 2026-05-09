@@ -179,8 +179,16 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         category="regression",
         language="en",
         priority="should",
+        # PR #107 fixed sc-enrichment KH from over-firing on plain sc-de
+        # queries. The bug surface is "sc-de output recites the
+        # sc-enrichment guardrail" — the actual KH headline reads
+        # "MUST distinguish ... before running sc-enrichment" so an
+        # over-firing run would mention sc-enrichment in *any* of those
+        # adjacent contexts (before/after, MUST, guardrail). Match all
+        # of them.
         must_not_mention=(
-            r"sc-enrichment\s+(?:guard|MUST|required|must\s+also|next\s+step)",
+            r"sc-enrichment\s+(?:guard|guardrail|MUST|required|must\s+also|next\s+step)",
+            r"(?:guard|guardrail|MUST|required|before\s+running|after\s+running|next\s+step)\s+[^.]*sc-enrichment",
         ),
     ),
     EvalCase(

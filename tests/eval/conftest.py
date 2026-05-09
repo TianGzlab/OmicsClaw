@@ -88,7 +88,14 @@ def real_llm_runner(eval_model_name: str):
             "and rerun with ``pytest -m eval``."
         )
 
+    # Detect Anthropic-API-key + missing base_url combination — without
+    # an explicit override the runner would point AsyncOpenAI at the
+    # OpenAI default endpoint and 401 on the first call. Default the
+    # base_url to Anthropic's OpenAI-compat endpoint instead so eval
+    # works out-of-the-box with Anthropic credentials.
     base_url = os.getenv("LLM_BASE_URL", "")
+    if not base_url and (os.getenv("ANTHROPIC_API_KEY") or api_key.startswith("sk-ant-")):
+        base_url = "https://api.anthropic.com/v1"
 
     async def _run(
         query: str,
@@ -101,8 +108,8 @@ def real_llm_runner(eval_model_name: str):
         from openai import AsyncOpenAI
 
         from omicsclaw.runtime.bot_tools import (
-            BotToolContext,
             build_bot_tool_specs,
+            build_default_bot_tool_context,
         )
         from omicsclaw.runtime.context_layers import ContextAssemblyRequest
         from omicsclaw.runtime.system_prompt import build_system_prompt
@@ -118,9 +125,15 @@ def real_llm_runner(eval_model_name: str):
             workspace=workspace,
         )
 
-        # Build the production-shape tool list (predicate-gated).
-        skill_names = (skill,) if skill else ("sc-de", "spatial-preprocess")
-        ctx = BotToolContext(skill_names=skill_names, domain_briefing="(eval)")
+        # Build the production-shape tool list. Reuses the same
+        # ``BotToolContext`` builder ``bot/core.py`` uses, so the
+        # ``omicsclaw`` tool's ``skill`` enum exposes the full skill
+        # registry + ``"auto"`` and the model sees the real domain
+        # briefing — not a 2-skill stub. Without this the eval would
+        # measure a fictional surface that can't route to skills like
+        # ``bulkrna-de`` / ``genomics-variant-calling`` even when the
+        # production prompt would.
+        ctx = build_default_bot_tool_context()
         all_specs = build_bot_tool_specs(ctx)
         request = ContextAssemblyRequest(
             surface="bot",
