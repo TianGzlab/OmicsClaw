@@ -7,7 +7,6 @@ from omicsclaw.interactive import _mcp
 from omicsclaw.extensions import write_extension_state, write_install_record
 from omicsclaw.runtime.context_layers import (
     build_mcp_instructions_block,
-    get_execution_discipline,
     should_prefetch_knowledge_guidance,
     should_prefetch_skill_context,
 )
@@ -84,8 +83,6 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
         "file_path_and_inspect_rule",
         "output_format",
         "workspace_continuity_rule",
-        "execution_discipline",
-        "skill_contract",
         "memory_context",
         "skill_context",
         "capability_assessment",
@@ -103,7 +100,8 @@ def test_assemble_prompt_context_layers_are_ordered_and_accounted():
     assert "## Prefetched Skill Context" in assembly.system_prompt
     assert "Selected skill: `spatial-preprocess`" in assembly.system_prompt
     assert "seq-think" in assembly.system_prompt
-    assert "Execution discipline:" in assembly.system_prompt
+    # workspace_continuity_rule fires (workspace + pipeline_workspace are set)
+    assert "Workspace Continuity" in assembly.system_prompt
     assert assembly.message_context == ""
 
 
@@ -113,7 +111,6 @@ def test_assemble_prompt_context_can_route_workspace_to_message_context():
             surface="bot",
             base_persona="BASE PERSONA",
             workspace="/tmp/session",
-            include_skill_contract=False,
             include_knowhow=False,
             workspace_placement="message",
         )
@@ -128,35 +125,11 @@ def test_assemble_prompt_context_can_route_workspace_to_message_context():
     assert assembly.layer_stats["workspace_context"]["placement"] == "message"
 
 
-def test_get_execution_discipline_adapts_to_surface_and_workspace():
-    bot_rules = get_execution_discipline(surface="bot")
-    interactive_rules = get_execution_discipline(
-        surface="interactive",
-        workspace="/tmp/session",
-        pipeline_workspace="/tmp/pipeline",
-        plan_context_present=True,
-    )
-
-    assert "Chat Mode Discipline" in bot_rules
-    assert "Workspace Continuity" not in bot_rules
-    assert "Workspace Continuity" in interactive_rules
-    assert "`plan.md`" in interactive_rules
-    assert "`tool_search`" in interactive_rules
-
-
-def test_assemble_prompt_context_can_disable_execution_discipline():
-    assembly = assemble_prompt_context(
-        request=ContextAssemblyRequest(
-            surface="interactive",
-            base_persona="BASE PERSONA",
-            include_execution_discipline=False,
-            include_skill_contract=False,
-            include_knowhow=False,
-        )
-    )
-
-    assert "execution_discipline" not in assembly.layer_stats
-    assert "Execution discipline:" not in assembly.system_prompt
+# Phase 4 retired ``get_execution_discipline`` and the
+# ``include_execution_discipline`` / ``include_skill_contract`` toggles.
+# The chat-mode and workspace-continuity rules they used to ship now live
+# in dedicated predicate-gated layers; their content/trigger logic is
+# covered in ``tests/test_predicate_gated_injectors.py``.
 
 
 def test_assemble_chat_context_loads_memory_and_builds_prompt():
@@ -322,7 +295,6 @@ def test_assemble_prompt_context_prefetches_knowledge_guidance_for_method_questi
             base_persona="BASE PERSONA",
             query="Which method should I use for batch correction?",
             domain="singlecell",
-            include_skill_contract=False,
             include_knowhow=False,
             knowledge_loader=fake_knowledge_loader,
         )
@@ -384,7 +356,6 @@ def test_assemble_prompt_context_skips_knowledge_guidance_for_generic_requests()
             base_persona="BASE PERSONA",
             query="Analyze sample.h5ad",
             domain="singlecell",
-            include_skill_contract=False,
             include_knowhow=False,
             knowledge_loader=fake_knowledge_loader,
         )
@@ -403,7 +374,6 @@ def test_assemble_prompt_context_includes_skill_context_only_when_relevant():
             skill="spatial-preprocess",
             query="Analyze sample.h5ad with spatial-preprocess",
             domain="spatial",
-            include_skill_contract=False,
             include_knowhow=False,
         )
     )
@@ -531,7 +501,6 @@ def test_assemble_prompt_context_includes_plan_context_layer():
             surface="interactive",
             base_persona="BASE PERSONA",
             plan_context="## Active Plan Mode\n\n- Status: approved",
-            include_skill_contract=False,
             include_knowhow=False,
         )
     )
@@ -546,7 +515,6 @@ def test_assemble_prompt_context_routes_transcript_context_to_message_layer():
             surface="interactive",
             base_persona="BASE PERSONA",
             transcript_context="## Selective Transcript Replay\n\n- omitted older refs",
-            include_skill_contract=False,
             include_knowhow=False,
         )
     )
@@ -590,7 +558,6 @@ def test_assemble_prompt_context_includes_active_prompt_pack_layer(tmp_path):
             surface="interactive",
             omicsclaw_dir=str(tmp_path),
             base_persona="BASE PERSONA",
-            include_skill_contract=False,
             include_knowhow=False,
         )
     )
