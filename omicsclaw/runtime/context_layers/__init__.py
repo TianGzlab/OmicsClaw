@@ -420,11 +420,17 @@ def load_knowhow_constraints(
         from omicsclaw.knowledge.knowhow import get_knowhow_injector
 
         injector = get_knowhow_injector()
+        # Phase 2 (KH lazy-load): the runtime context-assembly path emits
+        # only the one-line headlines. Models fetch the full guard body on
+        # demand via the ``read_knowhow(name)`` tool when the headline alone
+        # is insufficient. Tests still call ``get_constraints`` directly with
+        # the legacy full-body default for body-content assertions.
         constraints = injector.get_constraints(
             skill=skill or None,
             query=query or None,
             domain=domain or None,
             phase=phase,
+            headline_only=True,
         )
         elapsed_ms = (time.monotonic() - started_at) * 1000
         if constraints:

@@ -4076,6 +4076,33 @@ async def execute_forget(args: dict, session_id: str = None) -> str:
         return f"Error forgetting memory: {e}"
 
 
+async def execute_read_knowhow(args: dict, **kwargs) -> str:
+    """Fetch the full markdown body of a KH guard by name.
+
+    Pairs with the headline-only ``MANDATORY SCIENTIFIC CONSTRAINTS`` block
+    in the system prompt: the model sees ``→ {label}: {critical_rule}``
+    summaries up front and calls ``read_knowhow(name=...)`` only when more
+    detail (thresholds, code examples, edge cases) is actually needed.
+    """
+    try:
+        from omicsclaw.knowledge.knowhow import get_knowhow_injector
+
+        name = (args or {}).get("name", "")
+        if not name:
+            return "Error: 'name' parameter is required."
+        body = get_knowhow_injector().read_knowhow(str(name))
+        if not body:
+            return (
+                f"No KnowHow guard matched '{name}'. The Active Guards block "
+                "in the system prompt lists the available labels; pass one of "
+                "them, the doc_id, or the KH-*.md filename."
+            )
+        return body
+    except Exception as e:
+        logger.error(f"read_knowhow failed: {e}", exc_info=True)
+        return f"Error reading KH: {e}"
+
+
 async def execute_consult_knowledge(args: dict, **kwargs) -> str:
     """Query the OmicsClaw knowledge base for analysis guidance."""
     try:
@@ -4371,6 +4398,7 @@ def _available_tool_executors() -> dict[str, object]:
         "recall": execute_recall,
         "forget": execute_forget,
         "consult_knowledge": execute_consult_knowledge,
+        "read_knowhow": execute_read_knowhow,
         "resolve_capability": execute_resolve_capability,
         "list_skills_in_domain": execute_list_skills_in_domain,
         "create_omics_skill": execute_create_omics_skill,
