@@ -42,6 +42,37 @@ _MEMORY_KEYWORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PLOT_KEYWORDS_RE = re.compile(
+    # Note: ``umap`` / ``tsne`` deliberately excluded — they're algorithm
+    # names that often appear without plot intent ("explain UMAP").
+    # Concrete plot-type words (violin/heatmap/scatter) and explicit
+    # plot/figure/visualize verbs are unambiguous.
+    r"\b(plot|figure|violin|heatmap|visualize|visualise|chart|"
+    r"scatter|barplot|boxplot|enhance the (?:plot|figure))\b|"
+    r"图(?!像|片)|可视化|绘图|画图",
+    re.IGNORECASE,
+)
+
+_WEB_OR_URL_RE = re.compile(
+    r"https?://|"
+    r"\b(web|website|webpage|online|scrape|crawl|search the web|"
+    r"look up online|search online|web search)\b|"
+    r"网页|网站|搜.{0,3}网|在线搜",
+    re.IGNORECASE,
+)
+
+# Skill-creation specifically — must not match plain skill invocations
+# ("run sc-de", "execute spatial-preprocess"). A creation verb must
+# co-occur with the literal word "skill" (or a Chinese equivalent).
+_SKILL_CREATION_RE = re.compile(
+    r"\b(create|creating|add|adding|scaffold|scaffolding|build|building|"
+    r"package|packaging|wrap|wrapping)\b[^.\n]*\bskill\b|"
+    r"封装(?:成|为)?(?:一个|个)?\s*skill|"
+    r"新建(?:一个|个)?\s*skill|"
+    r"创建\s*skill",
+    re.IGNORECASE,
+)
+
 # Trivial-query length cutoff: very short queries don't trigger non-trivial
 # routing reminders. Picked to skip greetings ("hi", "hello") and one-word
 # follow-ups while letting "do DE" through.
@@ -108,6 +139,35 @@ def memory_in_use(req: ContextAssemblyRequest) -> bool:
     return bool(_MEMORY_KEYWORDS_RE.search(req.query or ""))
 
 
+def plot_intent(req: ContextAssemblyRequest) -> bool:
+    """Fires when the user wants a plot / figure / visualization tweaked.
+
+    Triggers exposure of ``replot_skill`` — the only tool whose entire
+    purpose is post-hoc visual tuning.
+    """
+    return bool(_PLOT_KEYWORDS_RE.search(req.query or ""))
+
+
+def web_or_url_intent(req: ContextAssemblyRequest) -> bool:
+    """Fires when the user mentions a URL or web/online search intent.
+
+    Triggers exposure of ``web_fetch`` / ``web_search`` /
+    ``web_method_search`` / ``download_file`` etc.
+    """
+    return bool(_WEB_OR_URL_RE.search(req.query or ""))
+
+
+def skill_creation_intent(req: ContextAssemblyRequest) -> bool:
+    """Fires when the user wants to *create* / *scaffold* / *package* a
+    new OmicsClaw skill — not just run an existing one.
+
+    Triggers exposure of ``create_omics_skill``. The regex deliberately
+    requires a creation verb co-occurring with the word ``skill`` (or a
+    Chinese equivalent) so plain invocations (``run sc-de``) don't match.
+    """
+    return bool(_SKILL_CREATION_RE.search(req.query or ""))
+
+
 def non_trivial_no_capability(req: ContextAssemblyRequest) -> bool:
     """Fires for substantive queries that lack a deterministic capability
     block.
@@ -129,5 +189,8 @@ __all__ = [
     "memory_in_use",
     "non_trivial_no_capability",
     "pdf_or_paper_intent",
+    "plot_intent",
+    "skill_creation_intent",
+    "web_or_url_intent",
     "workspace_active",
 ]
