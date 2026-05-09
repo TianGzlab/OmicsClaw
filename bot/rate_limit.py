@@ -30,18 +30,5 @@ def check_rate_limit(user_id: str, admin_id: str = "") -> bool:
     return True
 
 
-def _evict_lru_conversations():
-    """Evict least-recently-used conversations when limit exceeded.
-
-    Late-imports ``transcript_store`` / ``tool_result_store`` /
-    ``MAX_CONVERSATIONS`` from ``bot.core`` so the module loads without a
-    circular dependency at import time.
-    """
-    from bot.core import MAX_CONVERSATIONS, tool_result_store, transcript_store
-
-    transcript_store.max_conversations = MAX_CONVERSATIONS
-    evicted = transcript_store.evict_lru_conversations()
-    for chat_id in evicted:
-        tool_result_store.clear(chat_id)
-    if evicted:
-        logger.debug(f"Evicted {len(evicted)} stale conversation(s)")
+# ``_evict_lru_conversations`` was relocated to ``bot.session`` in slice #116
+# (it manages session-storage limits, not rate-limit buckets).
