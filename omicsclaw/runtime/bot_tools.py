@@ -1039,7 +1039,16 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ),
     ]
     specs.extend(build_engineering_tool_specs())
-    return specs
+    # Phase 1 (tool-list-compression): attach the predicate field to each
+    # lazy-load tool from the centralized TOOL_PREDICATE_MAP. The 8
+    # always-on tools (omicsclaw, resolve_capability, consult_knowledge,
+    # inspect_data, list_directory, glob_files, file_read, read_knowhow)
+    # are absent from the map and keep predicate=None. The runtime
+    # ``select_tool_specs`` filter then drops the lazy tools whose
+    # predicate doesn't fire for the current request.
+    from .tool_predicates import attach_predicates as _attach_predicates
+
+    return list(_attach_predicates(tuple(specs)))
 
 
 def build_bot_tool_registry(context: BotToolContext) -> ToolRegistry:
