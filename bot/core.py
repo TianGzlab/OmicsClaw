@@ -100,39 +100,8 @@ DATA_DIR = OMICSCLAW_DIR / "data"
 EXAMPLES_DIR = OMICSCLAW_DIR / "examples"
 
 
-@dataclass(frozen=True)
-class OutputMediaPaths:
-    figure_paths: list[Path]
-    table_paths: list[Path]
-    notebook_paths: list[Path]
-    media_items: list[dict]
-
-
-def _collect_output_media_paths(out_dir: Path) -> OutputMediaPaths:
-    figure_paths: list[Path] = []
-    table_paths: list[Path] = []
-    notebook_paths: list[Path] = []
-    media_items: list[dict] = []
-
-    if not out_dir.exists():
-        return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
-
-    for f in sorted(out_dir.rglob("*")):
-        if not f.is_file():
-            continue
-        if f.suffix in (".md", ".html"):
-            media_items.append({"type": "document", "path": str(f)})
-        elif f.suffix == ".ipynb":
-            media_items.append({"type": "document", "path": str(f)})
-            notebook_paths.append(f)
-        elif f.suffix == ".png":
-            media_items.append({"type": "photo", "path": str(f)})
-            figure_paths.append(f)
-        elif f.suffix == ".csv":
-            media_items.append({"type": "document", "path": str(f)})
-            table_paths.append(f)
-
-    return OutputMediaPaths(figure_paths, table_paths, notebook_paths, media_items)
+# OutputMediaPaths + collector — extracted to bot.skill_orchestration per ADR 0001.
+from bot.skill_orchestration import OutputMediaPaths, _collect_output_media_paths
 
 
 def _path_names(paths: list[Path]) -> list[str]:
@@ -342,34 +311,10 @@ def _primary_skill_count() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Audit log (JSONL)
+# Audit log (JSONL) — extracted to bot.audit per ADR 0001.
 # ---------------------------------------------------------------------------
 
-_AUDIT_LOG_DIR = OMICSCLAW_DIR / "bot" / "logs"
-try:
-    _AUDIT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-except OSError as _exc:
-    # mkdir can fail when OMICSCLAW_DIR resolves to a read-only location
-    # (e.g. a signed .app bundle's Resources/ dir on macOS, or an NFS
-    # mount without write perms). The audit() helper below already tolerates
-    # missing directories via its own OSError handler, so we log and
-    # continue — a missing audit log is strictly better than crashing the
-    # whole process at module load time.
-    logger.warning(
-        "Could not create audit log dir %s (%s) — audit events will be dropped",
-        _AUDIT_LOG_DIR,
-        _exc,
-    )
-_AUDIT_LOG_PATH = _AUDIT_LOG_DIR / "audit.jsonl"
-
-
-def audit(event: str, **kwargs):
-    entry = {"ts": datetime.now(timezone.utc).isoformat(), "event": event, **kwargs}
-    try:
-        with open(_AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
-    except OSError as e:
-        logger.warning(f"Audit log write failed: {e}")
+from bot.audit import audit  # re-export
 
 
 # ---------------------------------------------------------------------------
@@ -400,426 +345,67 @@ tool_result_store = ToolResultStore(
 conversations = transcript_store.messages_by_chat
 _conversation_access = transcript_store.access_by_chat  # LRU tracking
 
-received_files: dict[int | str, dict] = {}
+# received_files moved to bot.session (re-exported via the SessionManager import below).
 pending_media: dict[int | str, list[dict]] = {}
 pending_text: list[str] = []
 pending_preflight_requests: dict[int | str, dict] = {}
 
 BOT_START_TIME = time.time()
 
-_PREFLIGHT_TOP_LEVEL_ARGS = {
-    "skill",
-    "mode",
-    "method",
-    "file_path",
-    "data_type",
-    "n_epochs",
-    "return_media",
-}
+# Preflight state machine — extracted to bot.preflight per ADR 0001.
+from bot.preflight import (
+    _PREFLIGHT_TOP_LEVEL_ARGS,
+    _apply_preflight_answers,
+    _build_pending_preflight_message,
+    _coerce_preflight_value,
+    _extract_pending_preflight_payload,
+    _is_affirmative_preflight_confirmation,
+    _parse_preflight_reply,
+    _preflight_payload_needs_reply,
+    _remember_pending_preflight_request,
+    _set_or_replace_extra_arg,
+    _strip_answer_prefix,
+)
 
 
-def _strip_answer_prefix(text: str) -> str:
-    cleaned = str(text or "").strip()
-    cleaned = re.sub(r"^\s*(?:[-*]\s+|\d+\.\s+)", "", cleaned)
-    return cleaned.strip()
-
-
-def _coerce_preflight_value(value: str, value_type: str) -> object:
-    text = _strip_answer_prefix(value)
-    if value_type == "integer":
-        return int(text)
-    if value_type == "number":
-        return float(text)
-    if value_type == "boolean":
-        lowered = text.lower()
-        if lowered in {"yes", "y", "true", "1", "ok", "okay", "accept"}:
-            return True
-        if lowered in {"no", "n", "false", "0", "reject"}:
-            return False
-    return text
-
-
-def _set_or_replace_extra_arg(extra_args: list[str], flag: str, value: object) -> list[str]:
-    updated: list[str] = []
-    i = 0
-    while i < len(extra_args):
-        token = str(extra_args[i])
-        if token == flag:
-            i += 2
-            continue
-        if token.startswith(flag + "="):
-            i += 1
-            continue
-        updated.append(token)
-        i += 1
-    if isinstance(value, bool):
-        if value:
-            updated.append(flag)
-    else:
-        updated.extend([flag, str(value)])
-    return updated
-
-
-def _parse_preflight_reply(state: dict, user_text: str) -> tuple[dict[str, object], list[dict]]:
-    pending_fields = list(state.get("pending_fields", []) or [])
-    existing_answers = dict(state.get("answers", {}) or {})
-    text = str(user_text or "").strip()
-    resolved = dict(existing_answers)
-    lowered = text.lower()
-
-    segments: list[str] = []
-    for chunk in re.split(r"[\n;]+", text):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        if "=" in chunk or ":" in chunk:
-            segments.extend([piece.strip() for piece in chunk.split(",") if piece.strip()])
-        else:
-            segments.append(chunk)
-
-    for field in pending_fields:
-        key = str(field.get("key", "") or "")
-        if not key or key in resolved:
-            continue
-        aliases = [str(item).lower() for item in field.get("aliases", []) if str(item).strip()]
-        value_type = str(field.get("value_type", "string") or "string")
-        for segment in segments:
-            if "=" in segment:
-                left, right = segment.split("=", 1)
-            elif ":" in segment:
-                left, right = segment.split(":", 1)
-            else:
-                continue
-            left_norm = left.strip().lstrip("-").replace("-", "_").lower()
-            if left_norm in aliases:
-                resolved[key] = _coerce_preflight_value(right, value_type)
-                break
-            if any(left_norm == alias.replace("-", "_") for alias in aliases):
-                resolved[key] = _coerce_preflight_value(right, value_type)
-                break
-
-    for field in pending_fields:
-        key = str(field.get("key", "") or "")
-        if not key or key in resolved:
-            continue
-        choices = [str(choice) for choice in field.get("choices", []) if str(choice).strip()]
-        if choices:
-            for choice in choices:
-                pattern = rf"(?<![a-z0-9_]){re.escape(choice.lower())}(?![a-z0-9_])"
-                if re.search(pattern, lowered):
-                    resolved[key] = _coerce_preflight_value(choice, str(field.get("value_type", "string") or "string"))
-                    break
-
-    unresolved = [field for field in pending_fields if str(field.get("key", "") or "") not in resolved]
-
-    if unresolved:
-        ordered_lines = [_strip_answer_prefix(line) for line in re.split(r"[\n;]+", text) if _strip_answer_prefix(line)]
-        if len(unresolved) == 1 and ordered_lines and not any(("=" in line or ":" in line) for line in ordered_lines):
-            field = unresolved[0]
-            resolved[str(field.get("key", "") or "")] = _coerce_preflight_value(
-                ordered_lines[-1],
-                str(field.get("value_type", "string") or "string"),
-            )
-        elif len(ordered_lines) >= len(unresolved) and not any(("=" in line or ":" in line) for line in ordered_lines):
-            for field, line in zip(unresolved, ordered_lines, strict=False):
-                resolved[str(field.get("key", "") or "")] = _coerce_preflight_value(
-                    line,
-                    str(field.get("value_type", "string") or "string"),
-                )
-
-    remaining = [field for field in pending_fields if str(field.get("key", "") or "") not in resolved]
-    return resolved, remaining
-
-
-def _apply_preflight_answers(original_args: dict, pending_fields: list[dict], answers: dict[str, object]) -> dict:
-    updated_args = copy.deepcopy(original_args)
-    extra_args = list(updated_args.get("extra_args", []) or [])
-    field_map = {
-        str(field.get("key", "") or ""): field
-        for field in pending_fields
-        if str(field.get("key", "") or "")
-    }
-    for key, value in answers.items():
-        field = field_map.get(key, {})
-        flag = str(field.get("flag", "") or "").strip()
-        if key in _PREFLIGHT_TOP_LEVEL_ARGS:
-            updated_args[key] = value
-            continue
-        if key.startswith("allow_"):
-            continue
-        if flag:
-            extra_args = _set_or_replace_extra_arg(extra_args, flag, value)
-    if extra_args:
-        updated_args["extra_args"] = extra_args
-    return updated_args
-
-
-def _build_pending_preflight_message(state: dict, *, answered: dict[str, object] | None = None, remaining_fields: list[dict] | None = None) -> str:
-    payload = dict(state.get("payload", {}) or {})
-    if remaining_fields is not None:
-        remaining_keys = {str(field.get("key", "") or "") for field in remaining_fields}
-        payload["pending_fields"] = remaining_fields
-        payload["confirmations"] = [
-            str(field.get("prompt", "") or "").strip()
-            for field in remaining_fields
-            if str(field.get("prompt", "") or "").strip()
-        ]
-        payload["status"] = "needs_user_input" if payload["confirmations"] else payload.get("status", "needs_user_input")
-        if payload.get("missing_requirements") and not remaining_keys:
-            payload["missing_requirements"] = list(payload.get("missing_requirements", []))
-    block = render_guidance_block([], payloads=[payload]) or ""
-    if answered:
-        accepted = "\n".join(f"- `{key}` = {value}" for key, value in answered.items())
-        if accepted:
-            return f"## Accepted answers\n\n{accepted}\n\n---\n{block}".strip()
-    return block
-
-
-def _extract_pending_preflight_payload(result_text: str) -> dict | None:
-    payloads = extract_user_guidance_payloads(result_text)
-    relevant = [
-        payload
-        for payload in payloads
-        if payload.get("kind") == "preflight" and payload.get("status") in {"needs_user_input", "blocked"}
-    ]
-    return relevant[-1] if relevant else None
-
-
-def _preflight_payload_needs_reply(payload: dict | None) -> bool:
-    if not payload or payload.get("status") != "needs_user_input":
-        return False
-    return bool(payload.get("pending_fields") or payload.get("confirmations"))
-
-
-def _remember_pending_preflight_request(
-    chat_id: int | str,
-    *,
-    args: dict,
-    payload: dict,
-) -> None:
-    pending_preflight_requests[chat_id] = {
-        "tool_name": "omicsclaw",
-        "original_args": copy.deepcopy(args),
-        "payload": payload,
-        "pending_fields": list(payload.get("pending_fields", []) or []),
-        "answers": {},
-    }
-
-
-def _is_affirmative_preflight_confirmation(user_text: str) -> bool:
-    text = _strip_answer_prefix(user_text).strip().lower()
-    if not text:
-        return False
-    negative_markers = (
-        "no",
-        "not",
-        "don't",
-        "dont",
-        "do not",
-        "cancel",
-        "stop",
-        "reject",
-        "先",
-        "不要",
-        "别",
-        "不继续",
-        "取消",
-        "停止",
-        "先跑",
-    )
-    if any(marker in text for marker in negative_markers):
-        return False
-    affirmative_markers = (
-        "yes",
-        "y",
-        "ok",
-        "okay",
-        "confirm",
-        "confirmed",
-        "accept",
-        "continue",
-        "proceed",
-        "go ahead",
-        "use default",
-        "default threshold",
-        "默认",
-        "确认",
-        "可以",
-        "继续",
-        "接受",
-        "同意",
-        "用默认",
-    )
-    return any(marker in text for marker in affirmative_markers)
 
 # Memory system (optional)
 memory_store = None
 session_manager = None
 
 # ---------------------------------------------------------------------------
-# Usage statistics (token counters)
+# Usage statistics (token counters) — extracted to bot.billing per ADR 0001.
+# Names below are re-exported so legacy callers (tests, app integration)
+# resolve through bot.core unchanged.
 # ---------------------------------------------------------------------------
 
-_usage: dict[str, int] = {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0,
-    "api_calls": 0,
-}
-
-# Approximate pricing per 1M tokens (USD, input/output) — keyed by a substring
-# of the (lower-cased) model id. Override via LLM_INPUT_PRICE / LLM_OUTPUT_PRICE
-# env vars. Missing models fall through to (0.0, 0.0), which the chat UI treats
-# as "no estimate available" and omits from the cost line.
-_TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    # DeepSeek
-    "deepseek-v4-flash":     (0.27,  1.10),
-    "deepseek-v4-pro":       (0.55,  2.19),
-    "deepseek-reasoner":    (0.55,  2.19),
-    "deepseek-chat":        (0.27,  1.10),
-    "deepseek-v3":          (0.27,  1.10),
-    # Anthropic Claude
-    "claude-opus-4":        (15.00, 75.00),
-    "claude-sonnet-4":      (3.00, 15.00),
-    "claude-haiku-4":       (1.00,  5.00),
-    "claude-3-5-sonnet":    (3.00, 15.00),
-    "claude-3-5-haiku":     (0.80,  4.00),
-    "claude-3-opus":        (15.00, 75.00),
-    "claude-3-sonnet":      (3.00, 15.00),
-    "claude-3-haiku":       (0.25,  1.25),
-    # OpenAI
-    "gpt-5.4-mini":         (0.25,  2.00),
-    "gpt-5.4":              (2.50, 10.00),
-    "gpt-5.3-codex":        (2.50, 10.00),
-    "gpt-5-mini":           (0.25,  2.00),
-    "gpt-5":                (2.50, 10.00),
-    "gpt-4.1-mini":         (0.40,  1.60),
-    "gpt-4.1":              (2.00,  8.00),
-    "o4-mini":              (1.10,  4.40),
-    "o3-mini":              (1.10,  4.40),
-    "gpt-4o-mini":          (0.15,  0.60),
-    "gpt-4o":               (2.50, 10.00),
-    "gpt-4-turbo":          (10.00, 30.00),
-    "gpt-3.5-turbo":        (0.50,  1.50),
-    # Google Gemini
-    "gemini-3.1-pro":       (1.25, 10.00),
-    "gemini-3-flash":       (0.15,  0.60),
-    "gemini-2.5-pro":       (1.25, 10.00),
-    "gemini-2.5-flash":     (0.15,  0.60),
-    "gemini-2.0-flash":     (0.10,  0.40),
-    "gemini-1.5-pro":       (1.25,  5.00),
-    "gemini-1.5-flash":     (0.075, 0.30),
-    # Moonshot / Kimi
-    "kimi-k2-thinking":     (0.60,  2.50),
-    "kimi-k2":              (0.60,  2.50),
-    "moonshot-v1":          (0.30,  1.00),
-    # Zhipu GLM
-    "glm-5":                (0.60,  2.20),
-    "glm-4.7":              (0.50,  1.80),
-    "glm-4":                (0.50,  1.50),
-    # Doubao (Volcengine)
-    "doubao-seed-2":        (0.40,  1.00),
-    "doubao-1.5-pro":       (0.50,  1.20),
-    # Qwen / DashScope
-    "qwen3-coder-plus":     (0.30,  1.20),
-    "qwq-plus":             (0.35,  1.40),
-    "qwen-max":             (1.60,  6.40),
-    "qwen-plus":            (0.40,  1.20),
-    "qwen-long":            (0.05,  0.20),
-}
-
-# Longest-first so sub-version ids (e.g. "gpt-5.4-mini") match their specific
-# entry before falling back to a shorter family prefix (e.g. "gpt-5").
-_TOKEN_PRICE_KEYS_BY_LENGTH: tuple[str, ...] = tuple(
-    sorted(_TOKEN_PRICES, key=len, reverse=True)
+from bot.billing import (
+    _TOKEN_PRICES,
+    _TOKEN_PRICE_KEYS_BY_LENGTH,
+    _get_token_price,
+    _usage,
+    accumulate_usage,
+    get_token_price,
+    reset_usage,
 )
-
-
-def _get_token_price(model: str) -> tuple[float, float]:
-    """Return (input_price, output_price) per 1M tokens for the current model."""
-    try:
-        return (
-            float(os.environ["LLM_INPUT_PRICE"]),
-            float(os.environ["LLM_OUTPUT_PRICE"]),
-        )
-    except (KeyError, ValueError, TypeError):
-        pass
-    model_lower = model.lower()
-    for key in _TOKEN_PRICE_KEYS_BY_LENGTH:
-        if key in model_lower:
-            return _TOKEN_PRICES[key]
-    return (0.0, 0.0)
-
-
-def _accumulate_usage(response_usage) -> dict[str, int]:
-    """Add API response usage to global counters. Returns per-call delta."""
-    if response_usage is None:
-        return {}
-    delta = {
-        "prompt_tokens":     getattr(response_usage, "prompt_tokens",     0) or 0,
-        "completion_tokens": getattr(response_usage, "completion_tokens", 0) or 0,
-        "total_tokens":      getattr(response_usage, "total_tokens",      0) or 0,
-    }
-    _usage["prompt_tokens"]     += delta["prompt_tokens"]
-    _usage["completion_tokens"] += delta["completion_tokens"]
-    _usage["total_tokens"]      += delta["total_tokens"]
-    _usage["api_calls"]         += 1
-    return delta
+from bot.billing import accumulate_usage as _accumulate_usage  # legacy alias
+from bot.billing import get_usage_snapshot as _billing_snapshot
 
 
 def get_usage_snapshot() -> dict:
-    """Return a copy of the current cumulative usage statistics plus cost estimate."""
-    inp_price, out_price = _get_token_price(OMICSCLAW_MODEL)
-    cost = (
-        _usage["prompt_tokens"]     / 1_000_000 * inp_price +
-        _usage["completion_tokens"] / 1_000_000 * out_price
-    )
-    return {
-        **_usage,
-        "model": OMICSCLAW_MODEL,
-        "provider": LLM_PROVIDER_NAME,
-        "input_price_per_1m":  inp_price,
-        "output_price_per_1m": out_price,
-        "estimated_cost_usd":  round(cost, 6),
-    }
-
-
-def reset_usage() -> None:
-    """Reset session-level usage counters to zero."""
-    for k in _usage:
-        _usage[k] = 0
-
+    """Zero-arg snapshot using the active bot model + provider."""
+    return _billing_snapshot(model=OMICSCLAW_MODEL, provider=LLM_PROVIDER_NAME)
 
 
 # ---------------------------------------------------------------------------
-# Shared rate limiter used across messaging channels
+# Shared rate limiter — extracted to bot.rate_limit per ADR 0001.
 # ---------------------------------------------------------------------------
 
-RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "10"))
-_rate_buckets: dict[str, list[float]] = {}
-
-
-def check_rate_limit(user_id: str, admin_id: str = "") -> bool:
-    """Check per-user rate limit. Returns True if allowed."""
-    if RATE_LIMIT_PER_HOUR <= 0 or (admin_id and user_id == admin_id):
-        return True
-    now = time.time()
-    bucket = _rate_buckets.setdefault(user_id, [])
-    bucket[:] = [t for t in bucket if now - t < 3600]
-    if len(bucket) >= RATE_LIMIT_PER_HOUR:
-        return False
-    bucket.append(now)
-    return True
-
-
-def _evict_lru_conversations():
-    """Evict least-recently-used conversations when limit exceeded."""
-    transcript_store.max_conversations = MAX_CONVERSATIONS
-    evicted = transcript_store.evict_lru_conversations()
-    for chat_id in evicted:
-        tool_result_store.clear(chat_id)
-    if evicted:
-        logger.debug(f"Evicted {len(evicted)} stale conversation(s)")
+from bot.rate_limit import (
+    RATE_LIMIT_PER_HOUR,
+    _rate_buckets,
+    check_rate_limit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1078,337 +664,11 @@ def _format_next_steps(result_data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Session Manager
+# Session Manager + init() — extracted to bot.session per ADR 0001.
 # ---------------------------------------------------------------------------
 
-class SessionManager:
-    """Manages user sessions with memory persistence."""
+from bot.session import SessionManager, _evict_lru_conversations, init, received_files  # re-export
 
-    def __init__(self, store):
-        self.store = store
-
-    async def get_or_create(self, user_id: str, platform: str, chat_id: str):
-        """Get existing session or create new one."""
-        session_id = f"{platform}:{user_id}:{chat_id}"
-        session = await self.store.get_session(session_id)
-        if not session:
-            session = await self.store.create_session(user_id, platform, chat_id, session_id=session_id)
-        else:
-            await self.store.update_session(session_id, {"last_activity": datetime.now(timezone.utc)})
-        return session
-
-    async def load_context(self, session_id: str) -> str:
-        """Load recent memories and format for LLM context."""
-        try:
-            # Get recent memories (limit to keep context small)
-            # Wrap each get_memories call in try-except to handle decryption errors
-            datasets = []
-            analyses = []
-            prefs = []
-            insights = []
-            project_ctx = []
-
-            try:
-                datasets = await self.store.get_memories(session_id, "dataset", limit=2)
-            except Exception as e:
-                logger.warning(f"Failed to load dataset memories: {e}")
-
-            try:
-                analyses = await self.store.get_memories(session_id, "analysis", limit=3)
-            except Exception as e:
-                logger.warning(f"Failed to load analysis memories: {e}")
-
-            try:
-                prefs = await self.store.get_memories(session_id, "preference", limit=5)
-            except Exception as e:
-                logger.warning(f"Failed to load preference memories: {e}")
-
-            try:
-                insights = await self.store.get_memories(session_id, "insight", limit=3)
-            except Exception as e:
-                logger.warning(f"Failed to load insight memories: {e}")
-
-            try:
-                project_ctx = await self.store.get_memories(session_id, "project_context", limit=1)
-            except Exception as e:
-                logger.warning(f"Failed to load project context memories: {e}")
-
-            parts = []
-
-            # Project context (top-level)
-            if project_ctx:
-                pc = project_ctx[0]
-                ctx_parts = []
-                if pc.project_goal:
-                    ctx_parts.append(f"Goal: {pc.project_goal}")
-                if pc.species:
-                    ctx_parts.append(f"Species: {pc.species}")
-                if pc.tissue_type:
-                    ctx_parts.append(f"Tissue: {pc.tissue_type}")
-                if pc.disease_model:
-                    ctx_parts.append(f"Disease: {pc.disease_model}")
-                if ctx_parts:
-                    parts.append("**Project Context**: " + " | ".join(ctx_parts))
-
-            # Dataset context
-            if datasets:
-                ds = datasets[0]
-                parts.append(f"**Current Dataset**: {ds.file_path} ({ds.platform or 'unknown'}, {ds.n_obs or '?'} obs, preprocessed={ds.preprocessing_state})")
-
-            # Recent analyses
-            if analyses:
-                parts.append("**Recent Analyses**:")
-                for i, a in enumerate(analyses[:3], 1):
-                    parts.append(f"{i}. {a.skill} ({a.method}) - {a.status}")
-
-            # User preferences
-            if prefs:
-                parts.append("**User Preferences**:")
-                for p in prefs:
-                    parts.append(f"- {p.key}: {p.value}")
-
-            # Biological insights
-            if insights:
-                parts.append("**Known Insights**:")
-                for ins in insights:
-                    confidence = "confirmed" if ins.confidence == "user_confirmed" else "predicted"
-                    parts.append(f"- {ins.entity_type} {ins.entity_id}: {ins.biological_label} ({confidence})")
-
-            return "\n".join(parts) if parts else ""
-        except Exception as e:
-            logger.error(f"Failed to load memory context: {e}", exc_info=True)
-            return ""
-
-
-def init(
-    api_key: str = "",
-    base_url: str | None = None,
-    model: str = "",
-    provider: str = "",
-    auth_mode: str = "api_key",
-    ccproxy_port: int = 11435,
-    strict_oauth: bool = True,
-    allow_missing_credentials: bool = False,
-):
-    """Initialise the shared LLM client. Call once at startup.
-
-    ``provider`` selects a preset (deepseek, gemini, openai, anthropic,
-    nvidia, siliconflow, openrouter, volcengine, dashscope, zhipu, ollama,
-    custom).  Explicit ``base_url`` / ``model`` override the preset.
-
-    When ``api_key`` is empty, the key is auto-resolved from provider-
-    specific environment variables (e.g. DEEPSEEK_API_KEY for deepseek).
-
-    When ``auth_mode="oauth"`` (only valid for ``anthropic`` / ``openai``),
-    requests are routed through a local ``ccproxy`` server instead of
-    using an API key — requires ``pip install 'omicsclaw[oauth]'`` and a
-    prior ``omicsclaw auth login`` step.
-
-    ``strict_oauth``:
-        - ``True`` (default, for explicit caller action such as ``PUT
-          /providers`` or CLI ``auth login``): any OAuth setup failure
-          (missing ccproxy, unauthenticated, unsupported provider) raises
-          ``RuntimeError`` so the user sees the problem immediately.
-        - ``False`` (for server lifespan / bot bootstrap): degrade to
-          ``api_key`` mode with a loud warning if OAuth can't be set up.
-          This prevents a stale ``LLM_AUTH_MODE=oauth`` in ``.env`` from
-          blocking the app-server from starting at all.
-
-    ``allow_missing_credentials`` keeps app-server bootstrap reachable before
-    first-time setup has saved an LLM provider key. Explicit provider changes
-    should leave this ``False`` so credential mistakes fail immediately.
-    """
-    global llm, OMICSCLAW_MODEL, LLM_PROVIDER_NAME, memory_store, session_manager
-
-    auth_mode_normalized = str(auth_mode or "api_key").strip().lower() or "api_key"
-
-    # Clear any stale ccproxy-injected env vars BEFORE resolve_provider()
-    # reads them — otherwise a prior OAuth session's ANTHROPIC_BASE_URL /
-    # sentinel key would silently pin the next API-key mode request to the
-    # local ccproxy endpoint (Bug 3: OAuth pollutes API-key mode).
-    try:
-        from omicsclaw.core.ccproxy_manager import clear_ccproxy_env
-        clear_ccproxy_env()
-    except Exception:
-        # ccproxy_manager is optional; missing module just means no cleanup needed.
-        pass
-
-    resolved_url, resolved_model, resolved_key = resolve_provider(
-        provider=provider,
-        base_url=base_url or "",
-        model=model,
-        api_key=api_key,
-    )
-    if model and str(resolved_model).strip() != str(model).strip():
-        _normalized_model, normalized_from_provider = normalize_model_for_provider(
-            provider,
-            model,
-            base_url=base_url or "",
-        )
-        logger.warning(
-            "Normalized stale model '%s' for provider '%s' to '%s' "
-            "(matched default model of '%s')",
-            model,
-            provider,
-            resolved_model,
-            normalized_from_provider or "another provider",
-        )
-    OMICSCLAW_MODEL = resolved_model
-
-    # Determine display name for the provider
-    if provider:
-        LLM_PROVIDER_NAME = provider
-    elif resolved_url:
-        # Try to match resolved_url back to a known provider
-        for pname, (purl, _, _) in PROVIDER_PRESETS.items():
-            if purl and resolved_url and purl.rstrip("/") in resolved_url.rstrip("/"):
-                LLM_PROVIDER_NAME = pname
-                break
-        else:
-            LLM_PROVIDER_NAME = "custom"
-    else:
-        LLM_PROVIDER_NAME = "openai"
-
-    effective_api_key = str(resolved_key or api_key or "")
-    effective_base_url = str(resolved_url or "")
-
-    # Validate / set up OAuth if requested. Under strict_oauth=True any
-    # failure raises; under strict_oauth=False we log and degrade to
-    # api_key mode so a stale LLM_AUTH_MODE=oauth doesn't break startup.
-    if auth_mode_normalized == "oauth":
-        from omicsclaw.core.ccproxy_manager import (
-            OAUTH_PROVIDERS,
-            maybe_start_ccproxy,
-            provider_supports_oauth,
-        )
-
-        def _oauth_failed(reason: str) -> None:
-            """Either raise (strict) or warn-and-fall-back to api_key."""
-            nonlocal auth_mode_normalized
-            if strict_oauth:
-                raise RuntimeError(reason)
-            logger.warning(
-                "Falling back to auth_mode='api_key' — %s. "
-                "Set LLM_AUTH_MODE=api_key in your .env to silence this "
-                "warning, or install / authenticate ccproxy.",
-                reason,
-            )
-            auth_mode_normalized = "api_key"
-
-        if not provider_supports_oauth(LLM_PROVIDER_NAME):
-            _oauth_failed(
-                f"auth_mode='oauth' is not supported for provider "
-                f"'{LLM_PROVIDER_NAME}' (supported: "
-                f"{sorted(OAUTH_PROVIDERS.keys())})"
-            )
-        else:
-
-            try:
-                maybe_start_ccproxy(
-                    anthropic_oauth=(LLM_PROVIDER_NAME == "anthropic"),
-                    openai_oauth=(LLM_PROVIDER_NAME == "openai"),
-                    port=int(ccproxy_port),
-                )
-            except RuntimeError as exc:
-                _oauth_failed(str(exc))
-
-    runtime = set_active_provider_runtime(
-        provider=LLM_PROVIDER_NAME,
-        base_url=effective_base_url,
-        model=OMICSCLAW_MODEL,
-        api_key=effective_api_key,
-        # Use the normalized mode — which may have been downgraded to
-        # api_key above if strict_oauth=False and OAuth setup failed.
-        auth_mode=auth_mode_normalized,
-        ccproxy_port=int(ccproxy_port),
-    )
-
-    # Use the runtime's resolved base_url / api_key — for OAuth these are
-    # the local ccproxy endpoint + sentinel, for API key mode they are the
-    # resolved cloud values (unchanged from pre-OAuth behavior).
-    effective_api_key = runtime.api_key or effective_api_key
-    effective_base_url = runtime.base_url or effective_base_url
-
-    kw: dict = {"api_key": effective_api_key}
-    if effective_base_url:
-        kw["base_url"] = effective_base_url
-    kw["timeout"] = _build_llm_timeout()
-    missing_required_key = (
-        not effective_api_key and provider_requires_api_key(LLM_PROVIDER_NAME)
-    )
-    if allow_missing_credentials and missing_required_key:
-        llm = None
-        logger.warning(
-            "LLM client not initialised because no credentials are "
-            "configured yet: provider=%s model=%s. The app-server remains "
-            "available so the frontend can finish provider setup.",
-            LLM_PROVIDER_NAME,
-            OMICSCLAW_MODEL,
-        )
-    else:
-        try:
-            llm = AsyncOpenAI(**kw)
-        except OpenAIError as exc:
-            if allow_missing_credentials and "missing credentials" in str(exc).lower():
-                llm = None
-                logger.warning(
-                    "LLM client not initialised because no credentials are "
-                    "configured yet: provider=%s model=%s. The app-server remains "
-                    "available so the frontend can finish provider setup.",
-                    LLM_PROVIDER_NAME,
-                    OMICSCLAW_MODEL,
-                )
-            else:
-                raise
-        except ImportError as exc:
-            if "socksio" in str(exc) or "socks" in str(exc).lower():
-                raise ImportError(
-                    "A SOCKS proxy is configured (HTTPS_PROXY / ALL_PROXY) but "
-                    "the 'socksio' package is not installed. Run:\n\n"
-                    '  pip install "httpx[socks]"\n\n'
-                    "then restart the backend."
-                ) from exc
-            raise
-
-    if llm is not None:
-        logger.info(
-            f"LLM initialised: provider={LLM_PROVIDER_NAME}, "
-            f"model={OMICSCLAW_MODEL}, base_url={effective_base_url or '(default)'}, "
-            f"auth_mode={auth_mode_normalized}"
-        )
-
-    # Memory initialization — uses the new graph-based memory system
-    # Enabled by default; disable with OMICSCLAW_MEMORY_ENABLED=false
-    memory_store = None
-    session_manager = None
-    if os.getenv("OMICSCLAW_MEMORY_ENABLED", "true").lower() not in ("false", "0", "no"):
-        try:
-            from omicsclaw.memory.compat import CompatMemoryStore
-            from omicsclaw.memory.database import DatabaseManager as _DatabaseManager
-            from omicsclaw.memory.search import SearchIndexer as _SearchIndexer
-            from omicsclaw.memory.glossary import GlossaryService as _GlossaryService
-            from omicsclaw.memory.graph import GraphService as _GraphService
-
-            # Import graph-memory dependencies eagerly during core init so a
-            # lightweight chat install can disable memory once, instead of
-            # surfacing repeated non-fatal warnings during every chat turn.
-            del _DatabaseManager, _SearchIndexer, _GlossaryService, _GraphService
-
-            db_url = os.getenv("OMICSCLAW_MEMORY_DB_URL")  # None = use default (~/.config/omicsclaw/memory.db)
-
-            store = CompatMemoryStore(
-                database_url=db_url,
-            )
-            # NOTE: initialize() is called lazily on first async operation
-            # from MemoryClient._ensure_init(), since init() runs in sync context.
-
-            memory_store = store
-            session_manager = SessionManager(store)
-            logger.info("Graph memory system initialized (omicsclaw.memory)")
-        except ImportError:
-            logger.warning("Memory dependencies not installed, skipping memory init")
-        except Exception as e:
-            logger.error(f"Memory init failed: {e}")
 
 
 SYSTEM_PROMPT: str = ""
@@ -1445,147 +705,19 @@ def _build_llm_timeout():
     return build_llm_timeout_policy(log=logger).as_httpx_timeout()
 
 # ---------------------------------------------------------------------------
-# Security helpers
+# Path validation + file discovery — extracted to bot.path_validation per ADR 0001.
 # ---------------------------------------------------------------------------
 
-
-def sanitize_filename(filename: str) -> str:
-    filename = Path(filename).name
-    filename = re.sub(r"[\x00-\x1f]", "", filename)
-    filename = filename.replace("..", "").replace("/", "").replace("\\", "")
-    return filename or "unnamed_file"
-
-
-def resolve_dest(folder: str | None, default: Path | None = None) -> Path:
-    fallback = default if default is not None else DATA_DIR
-    dest = Path(folder) if folder else fallback
-    if not dest.is_absolute():
-        dest = OMICSCLAW_DIR / dest
-    try:
-        dest.resolve().relative_to(OMICSCLAW_DIR.resolve())
-    except ValueError:
-        logger.warning(f"Path escape blocked: {dest}")
-        audit("security", severity="HIGH", detail="path_escape_blocked", attempted_path=str(dest))
-        dest = fallback
-    dest.mkdir(parents=True, exist_ok=True)
-    return dest
-
-
-def validate_path(filepath: Path, allowed_root: Path) -> bool:
-    try:
-        filepath.resolve().relative_to(allowed_root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-# ---------------------------------------------------------------------------
-# Trusted data directories + file discovery
-# ---------------------------------------------------------------------------
-
-def _build_trusted_dirs() -> list[Path]:
-    """Build the list of directories where data files may be read from."""
-    dirs = [DATA_DIR, EXAMPLES_DIR, OUTPUT_DIR]
-    extra = os.environ.get("OMICSCLAW_DATA_DIRS", os.environ.get("SPATIALCLAW_DATA_DIRS", ""))
-    if extra:
-        for d in extra.split(","):
-            d = d.strip()
-            if d:
-                p = Path(d)
-                if p.is_absolute() and p.is_dir():
-                    dirs.append(p)
-                else:
-                    logger.warning(f"OMICSCLAW_DATA_DIRS: ignoring '{d}' (not an absolute directory)")
-    return dirs
-
-
-TRUSTED_DATA_DIRS: list[Path] = []
-
-
-def _ensure_trusted_dirs():
-    global TRUSTED_DATA_DIRS
-    if not TRUSTED_DATA_DIRS:
-        TRUSTED_DATA_DIRS = _build_trusted_dirs()
-        logger.info(f"Trusted data dirs: {[str(d) for d in TRUSTED_DATA_DIRS]}")
-
-
-def validate_input_path(filepath: str, *, allow_dir: bool = False) -> Path | None:
-    """Validate that a user-supplied path points to a real file/dir in a trusted directory.
-
-    Returns resolved Path if valid, None otherwise.
-    """
-    _ensure_trusted_dirs()
-    p = Path(filepath).expanduser()
-    if not p.is_absolute():
-        # 1. Try relative to project root first (most common case)
-        candidate = OMICSCLAW_DIR / p
-        if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
-            p = candidate
-        else:
-            # 2. Try each trusted data directory
-            for d in TRUSTED_DATA_DIRS:
-                candidate = d / p
-                if candidate.exists() and (candidate.is_file() or (allow_dir and candidate.is_dir())):
-                    p = candidate
-                    break
-            else:
-                # 3. Fall back to DATA_DIR
-                p = DATA_DIR / p
-
-    resolved = p.resolve()
-    if not resolved.exists():
-        return None
-    if not resolved.is_file() and not (allow_dir and resolved.is_dir()):
-        return None
-
-    for trusted in TRUSTED_DATA_DIRS:
-        try:
-            resolved.relative_to(trusted.resolve())
-            return resolved
-        except ValueError:
-            continue
-
-    # Also allow files anywhere under project root
-    try:
-        resolved.relative_to(OMICSCLAW_DIR.resolve())
-        return resolved
-    except ValueError:
-        pass
-
-    logger.warning(f"Path not in trusted dirs: {resolved}")
-    audit("security", severity="MEDIUM", detail="untrusted_path_rejected", path=str(resolved))
-    return None
-
-
-def discover_file(filename_or_pattern: str) -> list[Path]:
-    """Search trusted data directories for files matching the given name or glob pattern.
-
-    Returns a list of matching paths, sorted by modification time (newest first).
-    """
-    _ensure_trusted_dirs()
-
-    # Handle absolute paths directly
-    if filename_or_pattern.startswith('/'):
-        p = Path(filename_or_pattern)
-        if p.is_file():
-            return [p]
-        return []
-
-    matches: list[Path] = []
-    for d in TRUSTED_DATA_DIRS:
-        if not d.exists():
-            continue
-        if "*" in filename_or_pattern or "?" in filename_or_pattern:
-            matches.extend(f for f in d.rglob(filename_or_pattern) if f.is_file())
-        else:
-            exact = d / filename_or_pattern
-            if exact.is_file():
-                matches.append(exact)
-            for f in d.rglob(filename_or_pattern):
-                if f.is_file() and f not in matches:
-                    matches.append(f)
-    matches.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-    return matches
+from bot.path_validation import (
+    TRUSTED_DATA_DIRS,
+    _build_trusted_dirs,
+    _ensure_trusted_dirs,
+    discover_file,
+    resolve_dest,
+    sanitize_filename,
+    validate_input_path,
+    validate_path,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1600,383 +732,28 @@ DEEP_LEARNING_METHODS = {
     "scanvi", "cellassign",
 }
 
-_BATCH_KEY_EXACT_PREFERENCES = (
-    "batch",
-    "sample",
-    "sample_id",
-    "batch_id",
-    "orig.ident",
-    "orig_ident",
-    "library",
-    "library_id",
-    "donor",
-    "donor_id",
-    "patient",
-    "patient_id",
+# sc-batch-integration preflight — extracted to omicsclaw.runtime.preflight.sc_batch per ADR 0001.
+from omicsclaw.runtime.preflight.sc_batch import (
+    _BATCH_KEY_EXACT_PREFERENCES,
+    _BATCH_KEY_EXCLUDED_COLUMNS,
+    _BATCH_KEY_HINT_TERMS,
+    _auto_prepare_sc_batch_integration,
+    _extract_flag_value,
+    _find_batch_key_candidates,
+    _format_auto_prepare_summary,
+    _format_batch_key_clarification,
+    _format_sc_batch_workflow_guidance,
+    _get_sc_batch_integration_workflow_plan,
+    _inspect_h5ad_integration_readiness,
+    _load_h5ad_obs_dataframe,
+    _maybe_require_batch_integration_workflow,
+    _maybe_require_batch_key_selection,
+    _normalize_obs_key,
+    _resolve_requested_batch_key,
+    _score_batch_key_candidate,
 )
-_BATCH_KEY_HINT_TERMS = (
-    "batch",
-    "sample",
-    "donor",
-    "patient",
-    "subject",
-    "individual",
-    "library",
-    "dataset",
-    "origin",
-    "source",
-    "condition",
-    "treatment",
-    "group",
-    "replicate",
-    "lane",
-    "chemistry",
-    "center",
-    "site",
-)
-_BATCH_KEY_EXCLUDED_COLUMNS = {
-    "_index",
-    "barcode",
-    "cell",
-    "cell_id",
-    "cell_type",
-    "celltype",
-    "annotation",
-    "predicted_label",
-    "predicted_labels",
-    "leiden",
-    "louvain",
-    "seurat_clusters",
-    "cluster",
-    "clusters",
-    "phase",
-    "doublet",
-    "doublet_score",
-    "n_genes_by_counts",
-    "total_counts",
-    "pct_counts_mt",
-    "pct_counts_ribo",
-}
 
 
-def _normalize_obs_key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(name).strip().lower()).strip()
-
-
-def _extract_flag_value(args_list: list[str], flag: str) -> str | None:
-    for idx, arg in enumerate(args_list):
-        if arg == flag and idx + 1 < len(args_list):
-            value = str(args_list[idx + 1]).strip()
-            return value or None
-        if arg.startswith(flag + "="):
-            value = arg.split("=", 1)[1].strip()
-            return value or None
-    return None
-
-
-def _resolve_requested_batch_key(args: dict) -> str | None:
-    direct = str(args.get("batch_key", "")).strip()
-    if direct:
-        return direct
-    extra_args = args.get("extra_args")
-    if isinstance(extra_args, list):
-        return _extract_flag_value(extra_args, "--batch-key")
-    return None
-
-
-def _load_h5ad_obs_dataframe(file_path: Path):
-    import anndata as ad
-
-    adata = ad.read_h5ad(file_path, backed="r")
-    try:
-        return adata.obs.copy(), int(adata.n_obs)
-    finally:
-        file_handle = getattr(adata, "file", None)
-        if file_handle is not None:
-            try:
-                file_handle.close()
-            except Exception:
-                pass
-
-
-def _score_batch_key_candidate(column_name: str, series, n_obs: int) -> dict | None:
-    normalized = _normalize_obs_key(column_name)
-    normalized_compact = normalized.replace(" ", "")
-    if normalized_compact in _BATCH_KEY_EXCLUDED_COLUMNS:
-        return None
-
-    non_null = series.dropna()
-    nunique = int(non_null.nunique())
-    if nunique <= 1:
-        return None
-    if n_obs > 0 and nunique >= n_obs:
-        return None
-
-    score = 0
-    reasons: list[str] = []
-    preferred_names = {name.replace(".", "").replace("_", "") for name in _BATCH_KEY_EXACT_PREFERENCES}
-    if normalized_compact in preferred_names:
-        score += 120
-        reasons.append("name matches a common batch/sample column")
-    else:
-        matched_terms = [term for term in _BATCH_KEY_HINT_TERMS if term in normalized]
-        if matched_terms:
-            score += 35 + 10 * min(len(matched_terms), 3)
-            reasons.append("name looks batch-like")
-
-    if 2 <= nunique <= 24:
-        score += 35
-        reasons.append(f"{nunique} groups")
-    elif 25 <= nunique <= 96:
-        score += 20
-        reasons.append(f"{nunique} groups")
-    elif 97 <= nunique <= min(256, max(100, n_obs // 2)):
-        score += 5
-        reasons.append(f"{nunique} groups")
-    else:
-        return None
-
-    preview = [str(v) for v in non_null.astype(str).unique()[:5]]
-    if not preview or score < 40:
-        return None
-
-    return {
-        "column": str(column_name),
-        "score": score,
-        "nunique": nunique,
-        "preview": preview,
-        "reasons": reasons,
-    }
-
-
-def _find_batch_key_candidates(file_path: Path) -> dict:
-    obs_df, n_obs = _load_h5ad_obs_dataframe(file_path)
-    candidates = []
-    for column in obs_df.columns:
-        candidate = _score_batch_key_candidate(column, obs_df[column], n_obs)
-        if candidate:
-            candidates.append(candidate)
-    candidates.sort(key=lambda item: (-int(item["score"]), int(item["nunique"]), str(item["column"])))
-    return {
-        "n_obs": n_obs,
-        "obs_columns": [str(col) for col in obs_df.columns],
-        "candidates": candidates[:8],
-    }
-
-
-def _format_batch_key_clarification(
-    *,
-    file_path: Path,
-    requested_batch_key: str | None,
-    preflight: dict,
-) -> str:
-    obs_columns = preflight.get("obs_columns", [])
-    candidates = preflight.get("candidates", [])
-    lines = [
-        "Batch-key clarification needed before running `sc-batch-integration`.",
-        f"- File: `{file_path.name}`",
-    ]
-
-    if requested_batch_key:
-        lines.extend(
-            [
-                f"- Requested `batch_key`: `{requested_batch_key}`",
-                "- Status: that column was not found in `adata.obs`.",
-            ]
-        )
-    else:
-        lines.append("- Status: no `batch_key` was provided, so I paused before guessing.")
-
-    if candidates:
-        lines.append("- Possible batch-like columns found in `adata.obs`:")
-        for candidate in candidates:
-            preview = ", ".join(candidate["preview"])
-            lines.append(
-                f"  - `{candidate['column']}`: {candidate['nunique']} groups "
-                f"(examples: {preview})"
-            )
-    else:
-        lines.append("- I did not find a confident batch-like column automatically.")
-
-    visible_columns = ", ".join(f"`{col}`" for col in obs_columns[:20]) if obs_columns else "(none found)"
-    lines.extend(
-        [
-            f"- Available `obs` columns: {visible_columns}",
-            "- Please tell me which column should be used as `batch_key`.",
-            "- I have not started the integration yet because `sample`, `patient`, `condition`, and related columns imply different correction targets.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _maybe_require_batch_key_selection(skill_key: str, input_path: str | None, args: dict) -> str:
-    if not input_path:
-        return ""
-
-    skill_info = _lookup_skill_info(skill_key)
-    canonical_skill = skill_info.get("alias", skill_key)
-    if canonical_skill != "sc-batch-integration":
-        return ""
-
-    file_path = Path(input_path)
-    if file_path.suffix.lower() != ".h5ad":
-        return ""
-
-    requested_batch_key = _resolve_requested_batch_key(args)
-    try:
-        preflight = _find_batch_key_candidates(file_path)
-    except Exception as exc:
-        logger.warning("Failed to inspect AnnData batch candidates for %s: %s", file_path, exc)
-        return ""
-
-    obs_columns = set(preflight.get("obs_columns", []))
-    if requested_batch_key:
-        if requested_batch_key in obs_columns:
-            return ""
-        return _format_batch_key_clarification(
-            file_path=file_path,
-            requested_batch_key=requested_batch_key,
-            preflight=preflight,
-        )
-
-    return _format_batch_key_clarification(
-        file_path=file_path,
-        requested_batch_key=None,
-        preflight=preflight,
-    )
-
-
-def _inspect_h5ad_integration_readiness(file_path: Path) -> dict:
-    import anndata as ad
-
-    adata = ad.read_h5ad(file_path, backed="r")
-    try:
-        contract = adata.uns.get("omicsclaw_input_contract", {})
-        if not isinstance(contract, dict):
-            contract = {}
-        obs_columns = [str(col) for col in adata.obs.columns]
-        obsm_keys = [str(key) for key in adata.obsm.keys()]
-        obsp_keys = [str(key) for key in adata.obsp.keys()]
-        uns_keys = [str(key) for key in adata.uns.keys()]
-        obs_keys_lower = {key.lower() for key in obs_columns}
-        obsm_keys_lower = {key.lower() for key in obsm_keys}
-        obsp_keys_lower = {key.lower() for key in obsp_keys}
-        uns_keys_lower = {key.lower() for key in uns_keys}
-        looks_preprocessed = bool(
-            {"x_pca", "x_umap"} & obsm_keys_lower
-            or {"neighbors", "pca"} & uns_keys_lower
-            or {"connectivities", "distances"} & obsp_keys_lower
-            or {"leiden", "louvain", "cluster", "clusters"} & obs_keys_lower
-        )
-        return {
-            "obs_columns": obs_columns,
-            "obsm_keys": obsm_keys,
-            "obsp_keys": obsp_keys,
-            "uns_keys": uns_keys,
-            "layers": [str(key) for key in adata.layers.keys()],
-            "has_raw": adata.raw is not None,
-            "standardized": bool(contract.get("standardized")),
-            "standardized_by": str(contract.get("standardized_by", "")).strip(),
-            "looks_preprocessed": looks_preprocessed,
-        }
-    finally:
-        file_handle = getattr(adata, "file", None)
-        if file_handle is not None:
-            try:
-                file_handle.close()
-            except Exception:
-                pass
-
-
-def _format_sc_batch_workflow_guidance(file_path: Path, reasons: list[str], *, start_step: int = 1) -> str:
-    steps = [
-        "`sc-standardize-input` to canonicalize the input contract",
-        "`sc-preprocessing` to build normalized expression, PCA, neighbors, UMAP, and clusters",
-        "`sc-batch-integration` after the batch column is confirmed",
-    ]
-    lines = [
-        "Workflow check paused before running `sc-batch-integration`.",
-        f"- File: `{file_path.name}`",
-        "- Why I paused:",
-    ]
-    lines.extend(f"  - {reason}" for reason in reasons)
-    lines.append("- Recommended workflow:")
-    for idx, step in enumerate(steps[start_step - 1 :], start=start_step):
-        lines.append(f"  {idx}. {step}")
-    lines.extend(
-        [
-            "- Tell me if you want me to start from the recommended first step.",
-            "- If you really want direct integration anyway, say that explicitly and I can skip this workflow check.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _get_sc_batch_integration_workflow_plan(skill_key: str, input_path: str | None, args: dict) -> dict | None:
-    if not input_path:
-        return None
-    skill_info = _lookup_skill_info(skill_key)
-    canonical_skill = skill_info.get("alias", skill_key)
-    if canonical_skill != "sc-batch-integration":
-        return None
-
-    file_path = Path(input_path)
-    if file_path.is_dir():
-        return {
-            "file_path": file_path,
-            "reasons": [
-                "directory-style single-cell input should be standardized before integration so counts, feature names, and provenance are normalized",
-                "the standard path is to load/standardize first, then preprocess, then integrate",
-            ],
-            "start_step": 1,
-        }
-
-    suffix = file_path.suffix.lower()
-    if suffix != ".h5ad":
-        return {
-            "file_path": file_path,
-            "reasons": [
-                f"`{suffix or 'unknown'}` is not a ready AnnData integration input for the current workflow",
-                "non-h5ad single-cell inputs are better handled by `sc-standardize-input` before integration",
-            ],
-            "start_step": 1,
-        }
-
-    try:
-        readiness = _inspect_h5ad_integration_readiness(file_path)
-    except Exception as exc:
-        logger.warning("Failed to inspect integration readiness for %s: %s", file_path, exc)
-        return None
-
-    reasons: list[str] = []
-    start_step = 2
-    if not readiness.get("standardized"):
-        reasons.append("this `.h5ad` was not marked as standardized by `sc-standardize-input`")
-        start_step = 1
-    if not readiness.get("looks_preprocessed"):
-        reasons.append("this object does not show the usual preprocessing markers such as PCA, neighbors, or cluster labels")
-        start_step = 1 if start_step == 1 else 2
-
-    if not reasons:
-        return None
-    return {
-        "file_path": file_path,
-        "reasons": reasons,
-        "start_step": start_step,
-    }
-
-
-def _maybe_require_batch_integration_workflow(skill_key: str, input_path: str | None, args: dict) -> str:
-    if not input_path or bool(args.get("confirm_workflow_skip")) or bool(args.get("auto_prepare")):
-        return ""
-    plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
-    if not plan:
-        return ""
-    return _format_sc_batch_workflow_guidance(
-        plan["file_path"],
-        plan["reasons"],
-        start_step=int(plan.get("start_step", 1)),
-    )
 
 
 def _normalize_extra_args(extra_args) -> list[str]:
@@ -2123,94 +900,6 @@ async def _run_skill_via_shared_runner(
     }
 
 
-def _format_auto_prepare_summary(step_records: list[dict], *, final_input_path: str | None = None) -> str:
-    lines = [
-        "Automatic preparation workflow completed for `sc-batch-integration`.",
-        "- Completed steps:",
-    ]
-    for idx, step in enumerate(step_records, start=1):
-        lines.append(
-            f"  {idx}. `{step['skill']}` -> `{step['output_path']}`"
-        )
-    if final_input_path:
-        lines.append(f"- Integration input prepared at: `{final_input_path}`")
-    return "\n".join(lines)
-
-
-async def _auto_prepare_sc_batch_integration(
-    *,
-    args: dict,
-    skill_key: str,
-    input_path: str,
-    session_id: str | None,
-    chat_id: int | str,
-) -> str:
-    plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
-    if not plan:
-        return ""
-
-    step_records: list[dict] = []
-    current_input = str(plan["file_path"])
-
-    if int(plan.get("start_step", 1)) <= 1:
-        standardize_result = await _run_omics_skill_step(
-            skill_key="sc-standardize-input",
-            input_path=current_input,
-            mode="path",
-        )
-        if not standardize_result["success"]:
-            guidance = standardize_result["guidance_block"]
-            failure = (
-                f"`sc-standardize-input` failed during automatic preparation "
-                f"(exit {standardize_result['returncode']}):\n{standardize_result['error_text']}"
-            )
-            return guidance + f"\n\n---\n{failure}" if guidance else failure
-        standardized_path = standardize_result["out_dir"] / "processed.h5ad"
-        if not standardized_path.exists():
-            return (
-                "Automatic preparation stopped because `sc-standardize-input` did not produce "
-                f"`processed.h5ad` in `{standardize_result['out_dir']}`."
-            )
-        current_input = str(standardized_path)
-        step_records.append({"skill": "sc-standardize-input", "output_path": current_input})
-
-    if int(plan.get("start_step", 1)) <= 2:
-        preprocess_result = await _run_omics_skill_step(
-            skill_key="sc-preprocessing",
-            input_path=current_input,
-            mode="path",
-        )
-        if not preprocess_result["success"]:
-            guidance = preprocess_result["guidance_block"]
-            failure = (
-                f"`sc-preprocessing` failed during automatic preparation "
-                f"(exit {preprocess_result['returncode']}):\n{preprocess_result['error_text']}"
-            )
-            prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
-            message = prefix + "\n\n---\n" + failure
-            return guidance + "\n\n---\n" + message if guidance else message
-        processed_path = preprocess_result["out_dir"] / "processed.h5ad"
-        if not processed_path.exists():
-            return (
-                "Automatic preparation stopped because `sc-preprocessing` did not produce "
-                f"`processed.h5ad` in `{preprocess_result['out_dir']}`."
-            )
-        current_input = str(processed_path)
-        step_records.append({"skill": "sc-preprocessing", "output_path": current_input})
-
-    chained_args = dict(args)
-    chained_args["file_path"] = current_input
-    chained_args["mode"] = "path"
-    chained_args["confirm_workflow_skip"] = True
-    chained_args["auto_prepare"] = False
-
-    batch_clarification = _maybe_require_batch_key_selection(skill_key, current_input, chained_args)
-    prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
-    if batch_clarification:
-        return prefix + "\n\n---\n" + batch_clarification
-
-    final_result = await execute_omicsclaw(chained_args, session_id=session_id, chat_id=chat_id)
-    return prefix + "\n\n---\n" + final_result
 
 
 def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
@@ -2474,51 +1163,13 @@ def _build_param_hint(skill_key: str, method: str, cmd: list[str]) -> str:
 # LLM re-invokes with a specific skill. Calibrated against
 # ``capability_resolver._candidate_score`` output magnitudes (single keyword
 # match is worth ~0.85 points; an alias hit is worth ~10).
-_AUTO_DISAMBIGUATE_GAP = 2.0
-
-
-def _format_auto_disambiguation(decision, query_text: str) -> str:
-    """Return a human-readable disambiguation block for close-tie auto routing."""
-    candidates = list(decision.skill_candidates or [])[:3]
-    if not candidates:
-        return ""
-    reg = _skill_registry()
-    lines = [
-        "🤔 **Auto-routing found multiple close candidates** — I won't execute yet.",
-        f"Query: `{query_text.strip()[:200]}`",
-        "",
-        "**Top candidates (score — higher is better):**",
-    ]
-    for i, c in enumerate(candidates, 1):
-        info = reg.skills.get(c.skill, {}) or {}
-        desc = (info.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > 140:
-            desc = desc[:137] + "…"
-        reason = c.reasons[0] if c.reasons else ""
-        lines.append(f"{i}. `{c.skill}` (score {c.score:.2f}) — {desc}")
-        if reason:
-            lines.append(f"   matched: {reason}")
-    lines.extend([
-        "",
-        "**Next step:** re-invoke `omicsclaw` with `skill='<chosen alias above>'` "
-        "and the same `mode`/`query`. Pick based on the user's data modality "
-        "(H&E+coordinates → spatial; h5ad single-cell counts → singlecell; "
-        "bulk counts csv → bulkrna; raw MS/LC-MS → proteomics/metabolomics).",
-    ])
-    return "\n".join(lines)
-
-
-def _format_auto_route_banner(decision) -> str:
-    """Return a short banner prepended to tool output when auto routing chose a skill."""
-    chosen = decision.chosen_skill
-    conf = float(getattr(decision, "confidence", 0.0) or 0.0)
-    candidates = list(decision.skill_candidates or [])
-    alts = [c.skill for c in candidates[1:3] if c.skill != chosen]
-    alt_str = f" Close alternatives: {', '.join(alts)}." if alts else ""
-    return (
-        f"📍 Auto-routed to `{chosen}` (confidence {conf:.2f}).{alt_str} "
-        "If this doesn't match the user's intent, re-invoke with an explicit `skill`.\n---\n"
-    )
+# _AUTO_DISAMBIGUATE_GAP + auto-routing banner / disambiguation —
+# extracted to bot.skill_orchestration per ADR 0001.
+from bot.skill_orchestration import (
+    _AUTO_DISAMBIGUATE_GAP,
+    _format_auto_disambiguation,
+    _format_auto_route_banner,
+)
 
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
