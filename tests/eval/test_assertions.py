@@ -360,3 +360,45 @@ def test_response_mentions_file_read_counts_as_inspection() -> None:
 def test_assert_result_truthiness_matches_passed() -> None:
     assert bool(AssertResult(passed=True))
     assert not bool(AssertResult(passed=False, reasons=("x",)))
+
+
+# --- skill→domain heuristic completeness -------------------------------------
+
+
+def test_skill_domain_covers_every_omics_domain_in_claude_md() -> None:
+    """Sanity guard for ``_skill_domain``: every domain enumerated in
+    CLAUDE.md must round-trip via the prefix heuristic. Catches the
+    case where a future skill is added under a new prefix and the
+    eval suite silently degrades to fallback-1-3-only routing."""
+    from tests.eval.assertions import _skill_domain
+
+    samples = [
+        ("sc-de", "singlecell"),
+        ("sc-clustering", "singlecell"),
+        ("sc-batch-integration", "singlecell"),
+        ("scatac-preprocessing", "singlecell"),
+        ("spatial-preprocess", "spatial"),
+        ("spatial-de", "spatial"),
+        ("bulkrna-de", "bulkrna"),
+        ("bulk-rnaseq-counts-to-de-deseq2", "bulkrna"),
+        ("genomics-variant-calling", "genomics"),
+        ("genomics-alignment", "genomics"),
+        ("proteomics-identification", "proteomics"),
+        ("metabolomics-peak-detection", "metabolomics"),
+    ]
+    for skill, expected in samples:
+        assert _skill_domain(skill) == expected, (
+            f"_skill_domain({skill!r}) should be {expected!r}; "
+            f"if you added a new skill prefix, extend "
+            f"_DOMAIN_SKILL_PREFIXES in tests/eval/assertions.py."
+        )
+
+
+def test_skill_domain_returns_empty_for_unknown_skill() -> None:
+    """Unknown / empty skills return '' so the resolve_capability
+    fallback short-circuits cleanly. Documenting the contract."""
+    from tests.eval.assertions import _skill_domain
+
+    assert _skill_domain("") == ""
+    assert _skill_domain("foo-bar") == ""
+    assert _skill_domain("multiomics-something-future") == ""
