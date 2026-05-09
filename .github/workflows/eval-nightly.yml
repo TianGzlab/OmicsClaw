@@ -1,9 +1,12 @@
 name: Behavioral Parity Eval (weekly)
 
 # Runs the @pytest.mark.eval suite against the production prompt + tool list
-# every Monday at midnight UTC. Skipped automatically when
-# secrets.ANTHROPIC_API_KEY is not configured (e.g. on forks), so PRs
-# from contributors don't fail when they lack credentials.
+# every Monday at midnight UTC. Endpoint + model are resolved from the
+# same env semantics as bot/run.py — set `LLM_PROVIDER` (e.g. `deepseek`,
+# `anthropic`) as a repo variable and the matching API key as a repo
+# secret. Skipped automatically when no provider key secret is
+# configured (e.g. on forks), so PRs from contributors don't fail when
+# they lack credentials.
 
 on:
   schedule:
@@ -36,9 +39,12 @@ jobs:
       - name: Detect missing API key (graceful skip)
         id: detect_key
         run: |
-          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ] && [ -z "${{ secrets.LLM_API_KEY }}" ]; then
+          if [ -z "${{ secrets.LLM_API_KEY }}" ] \
+             && [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ] \
+             && [ -z "${{ secrets.DEEPSEEK_API_KEY }}" ] \
+             && [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
             echo "no_credentials=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Eval workflow has no API key secret configured; nothing to run."
+            echo "::warning::Eval workflow has no provider API key secret configured; nothing to run."
           else
             echo "no_credentials=false" >> "$GITHUB_OUTPUT"
           fi
@@ -46,10 +52,18 @@ jobs:
       - name: Run eval suite
         if: steps.detect_key.outputs.no_credentials != 'true'
         env:
-          # Prefer ANTHROPIC_API_KEY (Anthropic native); fall back to LLM_API_KEY.
-          LLM_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.LLM_API_KEY }}
-          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.anthropic.com/v1' }}
-          EVAL_MODEL: ${{ vars.EVAL_MODEL || 'claude-sonnet-4-6' }}
+          # Provider + endpoint + model resolve via omicsclaw.core.provider_registry,
+          # matching bot/run.py. Set LLM_PROVIDER as a repo variable and the
+          # matching API key as a repo secret; LLM_BASE_URL / EVAL_MODEL are
+          # optional overrides that take precedence over the provider preset.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          OMICSCLAW_MODEL: ${{ vars.OMICSCLAW_MODEL }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
         run: |
           python scripts/run_eval.py
 

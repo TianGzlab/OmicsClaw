@@ -30,20 +30,28 @@ LLM_API_KEY=... python scripts/run_eval.py
 
 ## Environment contract
 
+The eval suite resolves its endpoint + model from the **same env semantics
+that drive `bot/run.py`** (via
+`omicsclaw.core.provider_registry.resolve_provider`). When production
+runs DeepSeek v4-flash, eval measures DeepSeek v4-flash — no foreign
+default that masks regressions on the model users actually hit.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_API_KEY` | (none — required) | Anthropic / OpenAI-compatible API key |
-| `LLM_BASE_URL` | (provider default) | Override endpoint (Anthropic OAI-compat: `https://api.anthropic.com/v1`) |
-| `EVAL_MODEL` | `claude-sonnet-4-6` | Pin model for reproducibility across runs |
+| `LLM_PROVIDER` | (auto-detect) | Selects provider preset (`deepseek`, `anthropic`, `openai`, ...) |
+| `LLM_API_KEY` | (provider-specific fallback) | OpenAI-compatible API key — also accepts `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` |
+| `LLM_BASE_URL` | (provider preset) | Override endpoint when not using the preset's default |
+| `OMICSCLAW_MODEL` | (provider preset) | Production model name; eval inherits this |
+| `EVAL_MODEL` | (inherits `OMICSCLAW_MODEL`) | Eval-only override — lets nightly cron sweep alternate models without touching `.env` |
 
-When `LLM_API_KEY` is unset, all `@pytest.mark.eval` tests skip
+When no provider key is found in env, all `@pytest.mark.eval` tests skip
 gracefully — `pytest -m eval` exits 0 with skipped lines, no errors.
 
 ## Cost guard
 
 | | per run | per week (nightly cron) |
 |---|---|---|
-| 18 cases × `claude-sonnet-4-6` × temp=0 × N=1 | ~$0.50 | ~$0.50 (1 run) |
+| 18 cases × production model × temp=0 × N=1 | ~$0.05 (DeepSeek) — ~$0.50 (Anthropic) | one nightly run |
 
 The marker exclusion (`addopts = '-m "not slow and not eval"'`) keeps
 PR CI cost-free; only the explicit nightly workflow plus manual

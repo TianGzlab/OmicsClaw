@@ -13,8 +13,11 @@ alternate models without touching the production-facing ``.env``.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from omicsclaw.core.provider_registry import resolve_provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +38,21 @@ def resolve_eval_config(
 ) -> EvalRuntimeConfig:
     """Resolve the effective eval runtime configuration from env.
 
-    Not yet implemented — RED phase placeholder for TDD.
+    Delegates endpoint + model + key resolution to the same
+    ``resolve_provider`` helper used by ``bot/run.py``, so eval inherits
+    whatever provider production is configured for. ``EVAL_MODEL`` is the
+    only eval-only knob — it overrides the production model when set,
+    enabling the nightly cron to sweep alternates without touching .env.
     """
-    raise NotImplementedError("resolve_eval_config is not implemented (RED)")
+    source = os.environ if env is None else env
+
+    resolved_url, resolved_model, resolved_key = resolve_provider(env=source)
+
+    eval_model_override = str(source.get("EVAL_MODEL", "") or "").strip()
+    effective_model = eval_model_override or resolved_model
+
+    return EvalRuntimeConfig(
+        api_key=resolved_key or None,
+        base_url=resolved_url,
+        model=effective_model,
+    )

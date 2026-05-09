@@ -18,11 +18,12 @@ secrets without alarm.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+
+from tests.eval.runtime_config import EvalRuntimeConfig, resolve_eval_config
 
 
 # --- Result shape -----------------------------------------------------------
@@ -60,19 +61,27 @@ class LLMRoundResult:
 # --- Skip-without-credentials helper ----------------------------------------
 
 
-def _api_key_present() -> str | None:
-    """Return the active API key (LLM_API_KEY or ANTHROPIC_API_KEY) or None."""
-    return os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or None
+@pytest.fixture(scope="session")
+def eval_runtime_config() -> EvalRuntimeConfig:
+    """Effective eval runtime config (model + base_url + key) for this run.
+
+    Delegates to ``resolve_eval_config`` so eval and production both
+    consume ``omicsclaw.core.provider_registry.resolve_provider``.
+    """
+    return resolve_eval_config()
 
 
 @pytest.fixture(scope="session")
-def eval_model_name() -> str:
-    """Pinned eval model. Override via ``EVAL_MODEL`` env var."""
-    return os.getenv("EVAL_MODEL", "claude-sonnet-4-6")
+def eval_model_name(eval_runtime_config: EvalRuntimeConfig) -> str:
+    """Effective eval model name. Override via ``EVAL_MODEL`` env var."""
+    return eval_runtime_config.model
 
 
 @pytest.fixture
-def real_llm_runner(eval_model_name: str):
+def real_llm_runner(
+    eval_model_name: str,
+    eval_runtime_config: EvalRuntimeConfig,
+):
     """Async runner: ``await runner(query, **context) -> LLMRoundResult``.
 
     Skips the test gracefully when no API key is configured. The runner
@@ -80,22 +89,16 @@ def real_llm_runner(eval_model_name: str):
     matches what the production bot path produces — no mock, no
     alternate prompt, no alternate tool list.
     """
-    api_key = _api_key_present()
+    api_key = eval_runtime_config.api_key
     if not api_key:
         pytest.skip(
-            "LLM_API_KEY (or ANTHROPIC_API_KEY) not set; "
-            "behavioral-parity eval requires LLM access. Set the env var "
-            "and rerun with ``pytest -m eval``."
+            "No provider API key configured (checked LLM_API_KEY / "
+            "ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / etc.); behavioral-"
+            "parity eval requires LLM access. Set the env var and rerun "
+            "with ``pytest -m eval``."
         )
 
-    # Detect Anthropic-API-key + missing base_url combination — without
-    # an explicit override the runner would point AsyncOpenAI at the
-    # OpenAI default endpoint and 401 on the first call. Default the
-    # base_url to Anthropic's OpenAI-compat endpoint instead so eval
-    # works out-of-the-box with Anthropic credentials.
-    base_url = os.getenv("LLM_BASE_URL", "")
-    if not base_url and (os.getenv("ANTHROPIC_API_KEY") or api_key.startswith("sk-ant-")):
-        base_url = "https://api.anthropic.com/v1"
+    base_url = eval_runtime_config.base_url
 
     async def _run(
         query: str,
