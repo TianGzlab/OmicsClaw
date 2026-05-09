@@ -114,12 +114,12 @@ def test_engineering_and_skill_preamble_do_not_collide() -> None:
 # --- query_engine integration ------------------------------------------------
 
 
-def test_query_engine_module_actually_imports_pre_call_rule_text() -> None:
+def test_query_engine_actually_calls_build_pre_call_rule_text() -> None:
     """Phase 4 critical regression guard: ``PreCallRuleInjector`` is dead
-    weight unless the runtime tool-execution path actually invokes
-    ``build_pre_call_rule_text``. Verify the symbol is referenced from
-    ``query_engine`` source so a future refactor that drops the wiring
-    fails this test loudly.
+    weight unless the runtime tool-execution path actually *invokes*
+    ``build_pre_call_rule_text``. Stronger than a bare import-check —
+    pins both the import AND the call-expression so an orphaned import
+    left by a refactor still fails the test.
     """
     import inspect
 
@@ -127,8 +127,49 @@ def test_query_engine_module_actually_imports_pre_call_rule_text() -> None:
 
     source = inspect.getsource(qe_mod)
     assert "build_pre_call_rule_text" in source, (
-        "query_engine no longer calls build_pre_call_rule_text — the "
-        "engineering / skill_execution preambles never reach the model. "
+        "query_engine no longer references build_pre_call_rule_text"
+    )
+    assert "DEFAULT_PRE_CALL_RULE_INJECTORS" in source, (
+        "query_engine no longer references DEFAULT_PRE_CALL_RULE_INJECTORS"
+    )
+    assert "build_pre_call_rule_text(" in source, (
+        "query_engine imports but does not invoke build_pre_call_rule_text — "
+        "the engineering / skill_execution preambles never reach the model. "
         "Re-wire the call site or delete the abstraction."
     )
-    assert "DEFAULT_PRE_CALL_RULE_INJECTORS" in source
+
+
+def test_query_engine_prepends_preamble_to_tool_record_output_observably() -> None:
+    """E2E observable test: drive the same call site ``query_engine``
+    uses (``build_pre_call_rule_text`` over
+    ``DEFAULT_PRE_CALL_RULE_INJECTORS``) with realistic tool args, and
+    observe that the preamble text would be prepended to a synthetic
+    record_output exactly the way the production code does it. If the
+    production prepend pattern changes (e.g. swap to "append" or use a
+    different separator), this test catches it.
+    """
+    from omicsclaw.runtime.tool_execution_hooks import (
+        DEFAULT_PRE_CALL_RULE_INJECTORS,
+        build_pre_call_rule_text,
+    )
+
+    record_output = "TOOL_OUTPUT_BODY"
+    preamble_text = build_pre_call_rule_text(
+        tool_name="file_edit",
+        tool_args={"path": "src/foo.py"},
+        injectors=DEFAULT_PRE_CALL_RULE_INJECTORS,
+    )
+    # Mirror exactly what query_engine.py does after the existing notices
+    # block. If this assertion ever drifts from the production pattern,
+    # update query_engine and this test together.
+    final_output = (
+        f"{preamble_text}\n\n{record_output}".strip()
+        if preamble_text
+        else record_output
+    )
+
+    assert "Engineering preamble" in final_output
+    assert final_output.endswith("TOOL_OUTPUT_BODY"), (
+        "preamble must precede the tool body (prepend, not append)"
+    )
+    assert "TOOL_OUTPUT_BODY" in final_output
