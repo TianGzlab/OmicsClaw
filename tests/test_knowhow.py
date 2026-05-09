@@ -473,3 +473,56 @@ def test_bulk_rnaseq_de_kh_still_surfaces_for_bulkrna_query() -> None:
         "Bulk RNA-seq Differential Expression" in constraints
         or "RNA-seq Differential Expression" in constraints
     )
+
+
+def test_padj_fdr_rule_surfaces_for_sc_de_pseudobulk() -> None:
+    """The padj/FDR rule applies equally to bulk RNA-seq DE and sc-de
+    pseudobulk paths (DESeq2_R on aggregated raw counts). Narrowing
+    the bulk-RNA-seq KH to ``domains: [bulkrna]`` must NOT silently
+    drop padj coverage from sc-de prompts.
+
+    This regression test was added in response to PR #112 review:
+    after the bulk KH was narrowed to bulkrna-only, no surfaced KH
+    on sc-de queries carried the padj/FDR rule. A cross-domain
+    ``KH-de-padj-guardrails.md`` must surface for sc-de queries
+    too — the rule is domain-agnostic for any DE workflow.
+    """
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="sc-de",
+        query="do differential expression on /tmp/sample.h5ad",
+        domain="singlecell",
+        headline_only=True,
+    )
+
+    import re
+    assert re.search(
+        r"\b(padj|FDR|adjusted\s+p[-_\s]*value|Benjamini)\b",
+        constraints,
+        re.IGNORECASE,
+    ), (
+        "padj/FDR guidance missing from sc-de headline block — "
+        "sc-de pseudobulk needs the same padj rule as bulkrna-de. "
+        "Create KH-de-padj-guardrails.md with domains: [bulkrna, singlecell]."
+    )
+
+
+def test_padj_fdr_rule_still_surfaces_for_bulkrna_query() -> None:
+    """Sanity: the cross-domain padj guard must also surface for bulk
+    queries (or else the bulk path also loses coverage)."""
+    injector = KnowHowInjector(knowhows_dir=KNOWHOW_DIR)
+
+    constraints = injector.get_constraints(
+        skill="bulkrna-de",
+        query="filter DEGs from /tmp/de_results.csv",
+        domain="bulkrna",
+        headline_only=True,
+    )
+
+    import re
+    assert re.search(
+        r"\b(padj|FDR|adjusted\s+p[-_\s]*value|Benjamini)\b",
+        constraints,
+        re.IGNORECASE,
+    )
