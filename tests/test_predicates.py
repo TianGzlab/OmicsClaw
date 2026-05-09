@@ -219,3 +219,111 @@ def test_non_trivial_no_capability_quiet_on_empty_query() -> None:
     from omicsclaw.runtime.predicates import non_trivial_no_capability
 
     assert non_trivial_no_capability(_req(query="", capability_context="")) is False
+
+
+# --- plot_intent (added in tool-list-compression Phase 1) --------------------
+
+
+def test_plot_intent_fires_on_plot_keywords() -> None:
+    from omicsclaw.runtime.predicates import plot_intent
+
+    for query in (
+        "enhance the umap plot",
+        "show me a violin plot",
+        "make the heatmap nicer",
+        "visualize cluster boundaries",
+        "make the figure prettier",
+    ):
+        assert plot_intent(_req(query=query)) is True, query
+
+
+def test_plot_intent_fires_on_chinese_keywords() -> None:
+    from omicsclaw.runtime.predicates import plot_intent
+
+    assert plot_intent(_req(query="把图调整得更清楚")) is True
+    assert plot_intent(_req(query="可视化聚类结果")) is True
+
+
+def test_plot_intent_quiet_on_unrelated_query() -> None:
+    from omicsclaw.runtime.predicates import plot_intent
+
+    assert plot_intent(_req(query="run sc-de differential expression")) is False
+    assert plot_intent(_req(query="explain UMAP to me")) is False
+
+
+def test_plot_intent_quiet_on_empty_query() -> None:
+    from omicsclaw.runtime.predicates import plot_intent
+
+    assert plot_intent(_req(query="")) is False
+
+
+# --- web_or_url_intent --------------------------------------------------------
+
+
+def test_web_or_url_intent_fires_on_https_url() -> None:
+    from omicsclaw.runtime.predicates import web_or_url_intent
+
+    assert web_or_url_intent(_req(query="fetch https://example.com/page")) is True
+    assert web_or_url_intent(_req(query="grab http://api.x.io/data")) is True
+
+
+def test_web_or_url_intent_fires_on_web_keywords() -> None:
+    from omicsclaw.runtime.predicates import web_or_url_intent
+
+    for query in (
+        "search the web for spatial deconvolution methods",
+        "look up the website for scanpy",
+        "scrape that page",
+        "find the latest scvi tutorial online",
+    ):
+        assert web_or_url_intent(_req(query=query)) is True, query
+
+
+def test_web_or_url_intent_fires_on_chinese_keywords() -> None:
+    from omicsclaw.runtime.predicates import web_or_url_intent
+
+    assert web_or_url_intent(_req(query="搜一下这个方法的论文网页")) is True
+
+
+def test_web_or_url_intent_quiet_on_unrelated_query() -> None:
+    from omicsclaw.runtime.predicates import web_or_url_intent
+
+    assert web_or_url_intent(_req(query="run sc-de on /tmp/x.h5ad")) is False
+    assert web_or_url_intent(_req(query="explain UMAP")) is False
+
+
+# --- skill_creation_intent ----------------------------------------------------
+
+
+def test_skill_creation_intent_fires_on_create_skill_keywords() -> None:
+    from omicsclaw.runtime.predicates import skill_creation_intent
+
+    for query in (
+        "create a new skill for batch correction",
+        "scaffold a skill that wraps deeptools",
+        "I want to add a new skill for ATAC-seq",
+        "package this analysis into a reusable skill",
+    ):
+        assert skill_creation_intent(_req(query=query)) is True, query
+
+
+def test_skill_creation_intent_fires_on_chinese_keywords() -> None:
+    from omicsclaw.runtime.predicates import skill_creation_intent
+
+    assert skill_creation_intent(_req(query="封装成一个 skill")) is True
+    assert skill_creation_intent(_req(query="新建 skill 模板")) is True
+
+
+def test_skill_creation_intent_quiet_on_run_skill_query() -> None:
+    """Running a skill is NOT creating one — the predicate must not
+    over-fire on plain skill invocations."""
+    from omicsclaw.runtime.predicates import skill_creation_intent
+
+    assert skill_creation_intent(_req(query="run sc-de")) is False
+    assert skill_creation_intent(_req(query="execute the spatial-preprocess skill")) is False
+
+
+def test_skill_creation_intent_quiet_on_empty_query() -> None:
+    from omicsclaw.runtime.predicates import skill_creation_intent
+
+    assert skill_creation_intent(_req(query="")) is False

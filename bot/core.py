@@ -5166,6 +5166,15 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
             system_prompt = system_prompt.rstrip() + "\n\n## Mode\n" + hint
 
     tool_runtime = _build_tool_runtime()
+    # Phase 1 (tool-list-compression): build the per-request filtered
+    # tool payload. ``chat_context.prompt_context.request`` carries the
+    # ContextAssemblyRequest that drove system-prompt assembly; reusing
+    # it here means tool selection sees the same query / surface /
+    # workspace / capability context the system prompt did.
+    _tool_selection_request = chat_context.prompt_context.request
+    request_tools = tuple(
+        get_tool_registry().to_openai_tools_for_request(_tool_selection_request)
+    )
     hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
     callbacks = _build_bot_query_engine_callbacks(
         chat_id=chat_id,
@@ -5201,6 +5210,7 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
                 "workspace": workspace,
                 "pipeline_workspace": pipeline_workspace,
             },
+            request_tools=request_tools,
         ),
         tool_runtime=tool_runtime,
         transcript_store=transcript_store,

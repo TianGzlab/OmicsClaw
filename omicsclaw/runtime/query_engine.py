@@ -95,6 +95,12 @@ class QueryEngineContext:
     hook_runtime: LifecycleHookRuntime | None = None
     tool_runtime_context: dict[str, Any] | None = None
     token_budget: int | str | None = None
+    # Phase 1 (tool-list-compression): when set, this tuple replaces the
+    # full ``tool_runtime.openai_tools`` payload sent to the LLM, so
+    # callers can exercise ``ToolRegistry.to_openai_tools_for_request``
+    # to filter tools per request. ``None`` (default) preserves legacy
+    # behavior — the full registered tool list is sent.
+    request_tools: tuple[dict[str, Any], ...] | None = None
 
 
 @dataclass(slots=True)
@@ -581,12 +587,21 @@ async def run_query_engine(
                     kwargs.update(config.extra_api_params)
 
                 try:
+                    # Phase 1 (tool-list-compression): use per-request tool
+                    # list when caller provided one (via
+                    # ``QueryEngineContext.request_tools``). Falls back to
+                    # the full registry payload for backward compatibility.
+                    request_tools = (
+                        list(context.request_tools)
+                        if context.request_tools is not None
+                        else list(tool_runtime.openai_tools)
+                    )
                     response = await llm.chat.completions.create(
                         model=config.model,
                         max_tokens=config.max_tokens,
                         messages=[{"role": "system", "content": request_system_prompt}]
                         + request_messages,
-                        tools=list(tool_runtime.openai_tools),
+                        tools=request_tools,
                         **kwargs,
                     )
                     last_message = await _materialize_message(

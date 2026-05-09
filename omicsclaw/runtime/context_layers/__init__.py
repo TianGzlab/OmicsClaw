@@ -566,16 +566,32 @@ def unregister_predicate_event_sink(sink_id: int) -> None:
     _predicate_event_sinks.pop(sink_id, None)
 
 
-def _emit_predicate_event(event_name: str, *, predicate: str, surface: str) -> None:
+def _emit_predicate_event(
+    event_name: str,
+    *,
+    predicate: str,
+    surface: str,
+    source: str = "context_layers.predicate",
+    kind: str = "layer",
+) -> None:
+    """Emit a predicate-evaluation event to all registered sinks.
+
+    ``source`` distinguishes which subsystem fired the predicate
+    (e.g. ``context_layers.predicate`` for layer gating vs
+    ``tool_registry.predicate`` for tool-list selection). ``kind``
+    is mirrored into the payload so consumers can filter without
+    parsing the source string. This avoids the ambiguity that would
+    occur if a layer and a tool happened to share a predicate name.
+    """
     if not _predicate_event_sinks:
         return
     from .. import events as _events_mod  # local import to avoid cycles at module load
 
     evt = _events_mod.LifecycleEvent(
         name=event_name,
-        payload={"predicate": predicate, "surface": surface},
+        payload={"predicate": predicate, "surface": surface, "kind": kind},
         surface=surface,
-        source="context_layers.predicate",
+        source=source,
     )
     for sink in tuple(_predicate_event_sinks.values()):
         try:
