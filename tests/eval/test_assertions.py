@@ -96,6 +96,65 @@ def test_routes_to_skill_unrelated_kh_does_not_count() -> None:
     assert not outcome.passed
 
 
+def test_routes_to_skill_accepts_label_form_read_knowhow() -> None:
+    """``read_knowhow`` accepts label form too (e.g.
+    ``'Spatial Preprocess Guardrails'``). Treat it as a routing signal
+    when the label contains every dash-separated token of expected_skill
+    on word boundaries — covers the production happy path where the
+    headline-only block surfaces labels (not basenames) and the model
+    copies them verbatim."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(name="read_knowhow", arguments={"name": "Spatial Preprocess Guardrails"}),
+        )
+    )
+    assert assert_routes_to_skill(result, "spatial-preprocess").passed
+
+
+def test_routes_to_skill_label_form_does_not_match_unrelated_skill() -> None:
+    """Sanity: word-boundary token check rejects partial overlaps."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(name="read_knowhow", arguments={"name": "Best practices for Bulk RNA-seq Differential Expression Analysis"}),
+        )
+    )
+    # 'sc' is NOT contained at a word boundary inside 'rna-seq' or
+    # 'differential expression' — so this must NOT cross-validate sc-de.
+    outcome = assert_routes_to_skill(result, "sc-de")
+    assert not outcome.passed
+
+
+def test_routes_to_skill_accepts_resolve_capability_with_matching_domain() -> None:
+    """``resolve_capability(query=, domain_hint=<domain>)`` is a strong
+    routing signal when domain_hint matches the expected_skill's domain
+    prefix. DeepSeek-v4-flash uses this in T9 to route bulkrna / genomics
+    queries before issuing the omicsclaw call."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(
+                name="resolve_capability",
+                arguments={"query": "call variants on a BAM file", "domain_hint": "genomics"},
+            ),
+        )
+    )
+    assert assert_routes_to_skill(result, "genomics-variant-calling").passed
+
+
+def test_routes_to_skill_resolve_capability_wrong_domain_does_not_match() -> None:
+    """Sanity: a metabolomics resolve_capability call must not cross-
+    validate a routing intent for a single-cell skill."""
+    result = _make_result(
+        tool_calls=(
+            ToolCallObservation(
+                name="resolve_capability",
+                arguments={"query": "process mzML", "domain_hint": "metabolomics"},
+            ),
+        )
+    )
+    outcome = assert_routes_to_skill(result, "sc-de")
+    assert not outcome.passed
+
+
 # --- assert_calls_tools ---
 
 

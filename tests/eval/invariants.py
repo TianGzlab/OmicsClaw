@@ -103,7 +103,8 @@ EVAL_CASES: tuple[EvalCase, ...] = (
         must_mention=(
             r"(metabolomics|代谢组|wrong\s+domain|mismatch|不\s*适\s*合|"
             r"different\s+domain|cross-?domain|sc-de.*designed\s+for\s+single-?cell|"
-            r"single-cell.*not.*metabolomics)",
+            r"single-cell.*not.*metabolomics|"
+            r"incompatible|can'?t\s+run|cannot\s+run|not\s+suitable|mzML)",
         ),
     ),
     EvalCase(

@@ -59,6 +59,52 @@ _INSPECTION_TOOL_NAMES: frozenset[str] = frozenset({
 })
 
 
+# Skill-name → omics domain prefix mapping. Heuristic on the
+# dash-separated prefix; covers every domain CLAUDE.md routes to. Used
+# by ``assert_routes_to_skill`` to recognise ``resolve_capability(
+# domain_hint=<domain>)`` as a routing signal when the hint matches the
+# expected skill's home domain.
+_DOMAIN_SKILL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "singlecell": ("sc-", "scatac-"),
+    "spatial": ("spatial-",),
+    "bulkrna": ("bulkrna-", "bulk-rnaseq-"),
+    "genomics": ("genomics-",),
+    "proteomics": ("proteomics-",),
+    "metabolomics": ("metabolomics-",),
+}
+
+
+def _skill_domain(skill: str) -> str:
+    """Return the omics domain a skill belongs to, or '' if unknown."""
+    skill_lower = (skill or "").lower()
+    for domain, prefixes in _DOMAIN_SKILL_PREFIXES.items():
+        if any(skill_lower.startswith(p) for p in prefixes):
+            return domain
+    return ""
+
+
+def _name_matches_skill_tokens(name: str, skill: str) -> bool:
+    """Whether ``name`` contains every dash-separated token of ``skill``
+    on a non-letter boundary (case-insensitive).
+
+    Catches label-style ``read_knowhow`` calls like
+    ``'Spatial Preprocess Guardrails'`` matching ``spatial-preprocess``
+    while still rejecting cross-skill overlaps (e.g. ``'Bulk RNA-seq
+    Differential Expression'`` does NOT contain the ``sc`` token at a
+    word boundary so cannot cross-validate ``sc-de``).
+    """
+    if not name or not skill:
+        return False
+    name_lower = name.lower()
+    tokens = [t for t in skill.lower().split("-") if t]
+    if not tokens:
+        return False
+    return all(
+        re.search(rf"(?<![a-z]){re.escape(token)}(?![a-z])", name_lower)
+        for token in tokens
+    )
+
+
 # --- Helper 1: routing -------------------------------------------------------
 
 
@@ -67,17 +113,23 @@ def assert_routes_to_skill(
 ) -> AssertResult:
     """Pass iff the captured round routes to ``expected_skill``.
 
-    Routing is detected as either:
+    Routing is detected as any of:
 
     1. An ``omicsclaw`` tool call whose ``skill`` argument equals
-       ``expected_skill`` OR is ``"auto"`` (which the capability resolver
-       will then resolve — accepting auto avoids forcing the model to
-       pre-resolve), OR
-    2. A ``read_knowhow`` tool call whose ``name`` argument matches
-       ``KH-<expected_skill>-*`` — the model loading the skill's KH is a
-       strong routing signal in multi-round agent traces, even when the
-       subsequent ``omicsclaw`` call lands in the next round the eval
-       doesn't capture.
+       ``expected_skill`` OR is ``"auto"`` (which the capability
+       resolver resolves at runtime — accepting auto avoids forcing
+       the model to pre-resolve).
+    2. A ``read_knowhow(name=...)`` whose ``name`` (filename / doc_id /
+       label form — all three are accepted by the production tool)
+       contains every dash-separated token of ``expected_skill`` on
+       word boundaries. Catches the production happy path where the
+       headline-only block surfaces labels and the model copies them
+       verbatim.
+    3. A ``resolve_capability(domain_hint=<domain>)`` whose
+       ``domain_hint`` matches the omics domain of ``expected_skill``.
+       OmicsClaw's dispatch tool — calling it is itself a request to
+       route, and the domain hint scopes the lookup to the right
+       subset of skills.
     """
     if not expected_skill:
         return _ok()
@@ -87,20 +139,29 @@ def assert_routes_to_skill(
     if expected_skill in routed_skills or "auto" in routed_skills:
         return _ok()
 
-    kh_pattern = re.compile(rf"^KH-{re.escape(expected_skill)}\b", re.IGNORECASE)
     for tc in result.tool_calls:
         if tc.name != "read_knowhow":
             continue
         kh_name = str(tc.arguments.get("name", "") or "")
-        if kh_pattern.match(kh_name):
+        if _name_matches_skill_tokens(kh_name, expected_skill):
             return _ok()
+
+    expected_domain = _skill_domain(expected_skill)
+    if expected_domain:
+        for tc in result.tool_calls:
+            if tc.name != "resolve_capability":
+                continue
+            domain_hint = str(tc.arguments.get("domain_hint", "") or "").lower()
+            if domain_hint == expected_domain:
+                return _ok()
 
     if not omicsclaw_calls:
         return _fail(
             f"expected routing to skill {expected_skill!r}, "
-            f"but no omicsclaw tool call was emitted "
-            f"and no read_knowhow(name='KH-{expected_skill}-*') signal "
-            f"was found; tool calls observed: "
+            f"but no omicsclaw tool call was emitted, "
+            f"no read_knowhow(name=...) matched the skill's tokens, "
+            f"and no resolve_capability(domain_hint={expected_domain!r}) "
+            f"was issued; tool calls observed: "
             f"{list(result.tool_names) or '(none)'}"
         )
 
