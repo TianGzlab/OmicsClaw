@@ -61,17 +61,21 @@ class LLMRoundResult:
 # --- Skip-without-credentials helper ----------------------------------------
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def eval_runtime_config() -> EvalRuntimeConfig:
     """Effective eval runtime config (model + base_url + key) for this run.
 
     Delegates to ``resolve_eval_config`` so eval and production both
     consume ``omicsclaw.core.provider_registry.resolve_provider``.
+
+    Function-scoped so ``monkeypatch.setenv`` in any future test sees a
+    freshly-resolved config — caching is cheap (dict lookups), so there
+    is no perf reason to widen the scope.
     """
     return resolve_eval_config()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def eval_model_name(eval_runtime_config: EvalRuntimeConfig) -> str:
     """Effective eval model name. Override via ``EVAL_MODEL`` env var."""
     return eval_runtime_config.model
@@ -93,9 +97,9 @@ def real_llm_runner(
     if not api_key:
         pytest.skip(
             "No provider API key configured (checked LLM_API_KEY / "
-            "ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / etc.); behavioral-"
-            "parity eval requires LLM access. Set the env var and rerun "
-            "with ``pytest -m eval``."
+            "ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY / "
+            "etc.); behavioral-parity eval requires LLM access. Set "
+            "the env var and rerun with ``pytest -m eval``."
         )
 
     base_url = eval_runtime_config.base_url

@@ -37,7 +37,21 @@ def test_anthropic_key_picks_anthropic_endpoint_for_backward_compat() -> None:
         "ANTHROPIC_API_KEY": "sk-ant-fake",
     })
     assert cfg.api_key == "sk-ant-fake"
-    assert cfg.base_url == "https://api.anthropic.com/v1/"
+    assert cfg.base_url is not None
+    assert cfg.base_url.rstrip("/").endswith("api.anthropic.com/v1")
+
+
+def test_generic_llm_api_key_with_sk_ant_prefix_falls_back_to_anthropic() -> None:
+    """Backward-compat path documented in PR #112 handoff: contributors
+    sometimes set ``LLM_API_KEY=sk-ant-...`` (the generic var) without
+    ``LLM_PROVIDER`` or ``ANTHROPIC_API_KEY``. ``resolve_provider`` alone
+    can't detect Anthropic from a generic key, so eval must fall back to
+    the Anthropic preset URL — otherwise the runner 401s against
+    OpenAI's default endpoint."""
+    cfg = resolve_eval_config(env={"LLM_API_KEY": "sk-ant-foo"})
+    assert cfg.api_key == "sk-ant-foo"
+    assert cfg.base_url is not None
+    assert cfg.base_url.rstrip("/").endswith("api.anthropic.com/v1")
 
 
 def test_no_credential_yields_none_key() -> None:

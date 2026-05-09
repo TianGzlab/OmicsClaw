@@ -39,10 +39,10 @@ default that masks regressions on the model users actually hit.
 | Variable | Default | Purpose |
 |---|---|---|
 | `LLM_PROVIDER` | (auto-detect) | Selects provider preset (`deepseek`, `anthropic`, `openai`, ...) |
-| `LLM_API_KEY` | (provider-specific fallback) | OpenAI-compatible API key — also accepts `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` |
+| `LLM_API_KEY` | (none) | Generic API key. Alternatively set the provider-specific key (`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / ...) and the provider auto-detects |
 | `LLM_BASE_URL` | (provider preset) | Override endpoint when not using the preset's default |
 | `OMICSCLAW_MODEL` | (provider preset) | Production model name; eval inherits this |
-| `EVAL_MODEL` | (inherits `OMICSCLAW_MODEL`) | Eval-only override — lets nightly cron sweep alternate models without touching `.env` |
+| `EVAL_MODEL` | (inherits `OMICSCLAW_MODEL`) | Eval-only override. Lets nightly cron sweep alternate models without touching `.env` — must pair with a compatible provider/base_url, otherwise the runner returns a 4xx |
 
 When no provider key is found in env, all `@pytest.mark.eval` tests skip
 gracefully — `pytest -m eval` exits 0 with skipped lines, no errors.

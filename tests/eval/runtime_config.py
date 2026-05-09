@@ -17,7 +17,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from omicsclaw.core.provider_registry import resolve_provider
+from omicsclaw.core.provider_registry import PROVIDER_PRESETS, resolve_provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +47,15 @@ def resolve_eval_config(
     source = os.environ if env is None else env
 
     resolved_url, resolved_model, resolved_key = resolve_provider(env=source)
+
+    # Backward-compat fallback: ``LLM_API_KEY=sk-ant-...`` (generic var,
+    # not the provider-specific ``ANTHROPIC_API_KEY``) can't be detected
+    # by ``resolve_provider`` because the generic LLM_API_KEY isn't bound
+    # to any provider. Without this nudge, eval runs against OpenAI's
+    # default endpoint with an Anthropic key and 401s. Documented in the
+    # PR #112 handoff.
+    if resolved_url is None and (resolved_key or "").startswith("sk-ant-"):
+        resolved_url = PROVIDER_PRESETS["anthropic"][0]
 
     eval_model_override = str(source.get("EVAL_MODEL", "") or "").strip()
     effective_model = eval_model_override or resolved_model
