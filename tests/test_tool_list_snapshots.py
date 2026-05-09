@@ -192,32 +192,28 @@ def _baseline_payload() -> dict[str, Any]:
     return _serialize(Scenario(name="baseline_bot"))
 
 
-def test_always_on_tool_list_under_phase1_budget() -> None:
-    """Phase 1 budget: the always-on tool list (empty query, no
-    workspace, no capability) must stay <=9,500 chars.
+def test_always_on_tool_list_under_phase2_budget() -> None:
+    """Phase 2 budget: <=8,000 chars. Note ``replot_skill`` is
+    predicate-gated (lazy-load), so its compression doesn't affect the
+    baseline; only ``omicsclaw`` description shrinkage counts here.
 
-    Started at 29,262 chars before predicate gating; landed at ~8,745c
-    on Phase 1 (-70%). PR2 will tighten the budget to ~6,000c via
-    omicsclaw + replot_skill description compression.
+    History: 29,262 unfiltered → 8,745 on Phase 1 lazy-load (-70%)
+    → 7,708 on Phase 2 omicsclaw description compression (-74%).
     """
     payload = _baseline_payload()
-    assert payload["total_chars"] <= 9500, (
+    assert payload["total_chars"] <= 8000, (
         f"always-on tool list grew to {payload['total_chars']} chars; "
-        f"Phase 1 budget is 9,500. Either compress an always-on tool "
+        f"Phase 2 budget is 8,000. Either compress an always-on tool "
         f"description or move it to lazy-load."
     )
 
 
-def test_realistic_scde_tool_list_under_phase1_budget() -> None:
-    """Phase 1 budget: a realistic sc-de turn (query + h5ad path)
-    must stay <=15,500 chars (vs 29,262 unfiltered baseline).
-
-    Landed at ~14,363c on Phase 1 (-51%). PR2 will tighten to ~10,000c.
-    """
+def test_realistic_scde_tool_list_under_phase2_budget() -> None:
+    """Phase 2 budget: realistic sc-de <=12,500 chars (vs 29,262 unfiltered)."""
     scde = next(s for s in SCENARIOS if s.name == "realistic_bot_scde")
     payload = _serialize(scde)
-    assert payload["total_chars"] <= 15500, (
-        f"sc-de tool list at {payload['total_chars']} chars; budget 15,500"
+    assert payload["total_chars"] <= 12500, (
+        f"sc-de tool list at {payload['total_chars']} chars; Phase 2 budget 12,500"
     )
 
 

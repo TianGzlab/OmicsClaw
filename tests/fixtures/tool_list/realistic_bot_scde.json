@@ -7,12 +7,10 @@
     "pipeline_workspace": "",
     "capability_context": ""
   },
-  "total_chars": 14363,
-  "tool_count": 22,
+  "total_chars": 12416,
+  "tool_count": 20,
   "tool_names": [
     "consult_knowledge",
-    "create_csv_file",
-    "create_json_file",
     "file_edit",
     "file_read",
     "file_write",
@@ -38,7 +36,7 @@
       "type": "function",
       "function": {
         "name": "omicsclaw",
-        "description": "Run an OmicsClaw multi-omics analysis skill.\n\n(test)\n\n### Routing policy (read before picking `skill`)\nPREFER `skill='auto'` together with `query=<user's request verbatim>`. The capability resolver scores all skills by trigger keywords, description overlap, file extension, and method mentions, then picks the best match deterministically (no extra LLM call). Pass a specific `skill` name ONLY when: (a) the user explicitly named that skill, or (b) a prior auto-routing result asked you to disambiguate by re-invoking with a chosen candidate. If auto-routing detects close candidates, the tool will return a short list of alternatives instead of executing — re-invoke with the right `skill`.\n\nUse mode='demo' to run with built-in synthetic data. Use mode='file' when the user has sent an omics data file. If `sc-batch-integration` recommends upstream preparation and the user explicitly agrees, rerun this tool with `auto_prepare=true` so OmicsClaw performs the recommended `sc-standardize-input` / `sc-preprocessing` steps before the final integration call. IMPORTANT: Preserve exact numerical values, warnings, errors, and file paths when relaying results. By default only a text summary is returned (return_media omitted or empty). Set return_media ONLY when the user explicitly asks for figures/plots/tables. Use 'all' to send everything, or a keyword to filter (e.g. 'umap' for UMAP plots, 'qc' for QC violin, 'cluster' for cluster tables). Multiple keywords can be comma-separated (e.g. 'umap,qc').",
+        "description": "Run an OmicsClaw multi-omics analysis skill.\n\n(test)\n\nDefaults: `skill='auto'` + `query=<user request>` (auto-routes deterministically). Pick a specific skill only if the user named it. `mode='demo'` ONLY when explicitly asked. `return_media` empty = text summary; pass a keyword ('umap','qc','cluster',comma-sep) or 'all' for figures. For sc-batch-integration upstream-prep pause, rerun with `auto_prepare=true`. Preserve exact numbers / paths / errors.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -228,66 +226,6 @@
           },
           "required": [
             "file_path"
-          ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "create_json_file",
-        "description": "Create a JSON file from structured data. Saved to output/ by default. ONLY use when user explicitly asks to save data as JSON.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "data": {
-              "type": "object",
-              "description": "Data to save as JSON"
-            },
-            "filename": {
-              "type": "string",
-              "description": "Filename (without extension)"
-            },
-            "destination": {
-              "type": "string",
-              "description": "Destination folder (optional)"
-            }
-          },
-          "required": [
-            "data",
-            "filename"
-          ]
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "create_csv_file",
-        "description": "Create a CSV file from tabular data. Saved to output/ by default. ONLY use when user explicitly asks to save data as CSV.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "data": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              "description": "Array of row objects"
-            },
-            "filename": {
-              "type": "string",
-              "description": "Filename (without extension)"
-            },
-            "destination": {
-              "type": "string",
-              "description": "Destination folder (optional)"
-            }
-          },
-          "required": [
-            "data",
-            "filename"
           ]
         }
       }

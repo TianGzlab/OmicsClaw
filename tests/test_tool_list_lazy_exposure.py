@@ -90,8 +90,6 @@ FILE_PATH_TOOLS = (
     "file_edit",
     "grep_files",
     "tool_search",
-    "create_json_file",
-    "create_csv_file",
 )
 
 
@@ -191,7 +189,7 @@ def test_replot_skill_hidden_on_non_plot_query() -> None:
 # --- Lazy-load mapping: web_or_url_intent ------------------------------------
 
 
-WEB_TOOLS = ("web_method_search", "web_fetch", "web_search", "download_file")
+WEB_TOOLS = ("web_method_search", "web_fetch", "web_search")
 
 
 @pytest.mark.parametrize("tool", WEB_TOOLS)
@@ -231,12 +229,10 @@ def test_generate_audio_appears_on_audio_query() -> None:
     assert "generate_audio" in _selected_names(query="generate audio for this report")
 
 
-def test_mcp_list_hidden_by_default() -> None:
-    assert "mcp_list" not in _selected_names(query="run sc-de")
-
-
-def test_mcp_list_appears_on_mcp_query() -> None:
-    assert "mcp_list" in _selected_names(query="what mcp servers are available")
+# Phase 2: ``mcp_list``, ``download_file``, ``create_json_file``,
+# ``create_csv_file`` were deleted as confirmed dead code (0 audit-log
+# calls, no production callers, functional overlap with ``web_fetch`` /
+# ``write_file``).
 
 
 # --- Aggregate count assertions ---------------------------------------------
