@@ -268,7 +268,7 @@ def _maybe_require_batch_key_selection(skill_key: str, input_path: str | None, a
     if not input_path:
         return ""
 
-    from bot.core import _lookup_skill_info
+    from bot.skill_orchestration import _lookup_skill_info
 
     skill_info = _lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
@@ -375,7 +375,7 @@ def _get_sc_batch_integration_workflow_plan(skill_key: str, input_path: str | No
     if not input_path:
         return None
 
-    from bot.core import _lookup_skill_info
+    from bot.skill_orchestration import _lookup_skill_info
 
     skill_info = _lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
@@ -474,7 +474,8 @@ async def _auto_prepare_sc_batch_integration(
     if not plan:
         return ""
 
-    from bot.core import _run_omics_skill_step, execute_omicsclaw
+    from bot.skill_orchestration import _run_omics_skill_step
+    from bot.tool_executors import execute_omicsclaw
 
     step_records: list[dict] = []
     current_input = str(plan["file_path"])
