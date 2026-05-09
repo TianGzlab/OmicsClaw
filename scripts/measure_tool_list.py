@@ -20,13 +20,25 @@ import sys
 
 def _build_specs(args: argparse.Namespace):
     from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_specs
+    from omicsclaw.runtime.context_layers import ContextAssemblyRequest
+    from omicsclaw.runtime.tool_registry import select_tool_specs
 
     skills = tuple(s for s in (args.skill, "spatial-preprocess") if s)
     ctx = BotToolContext(
         skill_names=skills or ("sc-de",),
         domain_briefing=args.domain_briefing or "(test)",
     )
-    return build_bot_tool_specs(ctx)
+    all_specs = build_bot_tool_specs(ctx)
+    if args.no_filter:
+        return all_specs
+    request = ContextAssemblyRequest(
+        surface=args.surface,
+        skill=args.skill,
+        query=args.query,
+        workspace=args.workspace,
+        capability_context=args.capability_context,
+    )
+    return list(select_tool_specs(all_specs, request=request))
 
 
 def _print_table(specs, top_n: int) -> None:
@@ -61,8 +73,15 @@ def main() -> int:
     parser.add_argument("--surface", choices=("bot", "interactive", "pipeline"), default="bot")
     parser.add_argument("--skill", default="")
     parser.add_argument("--query", default="")
+    parser.add_argument("--workspace", default="")
+    parser.add_argument("--capability-context", default="")
     parser.add_argument("--domain-briefing", default="")
     parser.add_argument("--top", type=int, default=10, help="Show top N tools by size")
+    parser.add_argument(
+        "--no-filter",
+        action="store_true",
+        help="Show ALL registered tools (skip predicate-gated selection). Default: filter.",
+    )
     args = parser.parse_args()
 
     try:

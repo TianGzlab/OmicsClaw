@@ -100,9 +100,24 @@ SCENARIOS: tuple[Scenario, ...] = (
 
 
 def _build_specs(scenario: Scenario):
+    """Return the per-request *selected* specs (the payload the LLM
+    actually sees), mirroring what ``ToolRegistry.to_openai_tools_for_request``
+    produces in production."""
+    from omicsclaw.runtime.context_layers import ContextAssemblyRequest
+    from omicsclaw.runtime.tool_registry import select_tool_specs
+
     skills = (scenario.skill,) if scenario.skill else ("sc-de",)
     ctx = BotToolContext(skill_names=skills, domain_briefing="(test)")
-    return build_bot_tool_specs(ctx)
+    all_specs = build_bot_tool_specs(ctx)
+    request = ContextAssemblyRequest(
+        surface=scenario.surface,
+        skill=scenario.skill,
+        query=scenario.query,
+        workspace=scenario.workspace,
+        pipeline_workspace=scenario.pipeline_workspace,
+        capability_context=scenario.capability_context,
+    )
+    return select_tool_specs(all_specs, request=request)
 
 
 def _serialize(scenario: Scenario) -> dict[str, Any]:
@@ -168,3 +183,60 @@ def test_at_least_ten_scenarios_cover_intent_categories() -> None:
     surfaces = {s.surface for s in SCENARIOS}
     assert "bot" in surfaces
     assert "interactive" in surfaces
+
+
+# --- Phase 1 budget asserts --------------------------------------------------
+
+
+def _baseline_payload() -> dict[str, Any]:
+    return _serialize(Scenario(name="baseline_bot"))
+
+
+def test_always_on_tool_list_under_phase1_budget() -> None:
+    """Phase 1 budget: the always-on tool list (empty query, no
+    workspace, no capability) must stay <=9,500 chars.
+
+    Started at 29,262 chars before predicate gating; landed at ~8,745c
+    on Phase 1 (-70%). PR2 will tighten the budget to ~6,000c via
+    omicsclaw + replot_skill description compression.
+    """
+    payload = _baseline_payload()
+    assert payload["total_chars"] <= 9500, (
+        f"always-on tool list grew to {payload['total_chars']} chars; "
+        f"Phase 1 budget is 9,500. Either compress an always-on tool "
+        f"description or move it to lazy-load."
+    )
+
+
+def test_realistic_scde_tool_list_under_phase1_budget() -> None:
+    """Phase 1 budget: a realistic sc-de turn (query + h5ad path)
+    must stay <=15,500 chars (vs 29,262 unfiltered baseline).
+
+    Landed at ~14,363c on Phase 1 (-51%). PR2 will tighten to ~10,000c.
+    """
+    scde = next(s for s in SCENARIOS if s.name == "realistic_bot_scde")
+    payload = _serialize(scde)
+    assert payload["total_chars"] <= 15500, (
+        f"sc-de tool list at {payload['total_chars']} chars; budget 15,500"
+    )
+
+
+def test_baseline_tool_count_matches_always_on_set() -> None:
+    """Baseline must show exactly the 8 always-on tools."""
+    payload = _baseline_payload()
+    expected = {
+        "omicsclaw",
+        "resolve_capability",
+        "consult_knowledge",
+        "inspect_data",
+        "list_directory",
+        "glob_files",
+        "file_read",
+        "read_knowhow",
+    }
+    actual = set(payload["tool_names"])
+    assert actual == expected, (
+        f"baseline visible tools differ from always-on contract\n"
+        f"  unexpected extras: {actual - expected}\n"
+        f"  missing required: {expected - actual}"
+    )
