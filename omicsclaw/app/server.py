@@ -2561,6 +2561,22 @@ class ScopedPruneRequest(BaseModel):
 
 # -- Helper: get graph / glossary / changeset services ----------------------
 
+def _get_review_log():
+    """Return the singleton ReviewLog (cold-path operations).
+
+    Used by /memory/review/* endpoints. Falls back with a 503 if the
+    memory module isn't installed or is mid-initialization.
+    """
+    try:
+        from omicsclaw.memory import get_review_log
+    except Exception as exc:
+        raise HTTPException(503, detail=f"Memory system unavailable: {exc}")
+    try:
+        return get_review_log()
+    except Exception as exc:
+        raise HTTPException(503, detail=f"Memory system unavailable: {exc}")
+
+
 def _get_graph_service():
     """Return GraphService, raising 503 if the memory module is not available."""
     try:
@@ -2977,20 +2993,125 @@ async def memory_review_approve():
 
 @app.post("/memory/review/rollback")
 async def memory_review_rollback(req: MemoryRollbackRequest):
-    """Rollback a specific memory to a previous version."""
+    """Rollback a specific memory to a previous version.
+
+    PR #5: routed through ReviewLog instead of GraphService. Namespace
+    is the desktop's launch-derived namespace so the rollback is
+    confined to whatever partition the desktop user is editing.
+    """
     if _memory_client is None:
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
-        result = await graph.rollback_to_memory(target_memory_id=req.target_memory_id)
-        return {"ok": True, "result": result}
+        from omicsclaw.memory import desktop_namespace
+
+        review = _get_review_log()
+        result = await review.rollback_to(
+            req.target_memory_id, namespace=desktop_namespace()
+        )
+        return {
+            "ok": True,
+            "result": {
+                "restored_memory_id": result.restored_memory_id,
+                "node_uuid": result.node_uuid,
+                "was_already_active": result.was_already_active,
+            },
+        }
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc))
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Memory review rollback error")
+        raise HTTPException(500, detail=str(exc))
+
+
+# -- GET /memory/review/orphans ----------------------------------------------
+
+@app.get("/memory/review/orphans")
+async def memory_review_orphans(
+    namespace: Optional[str] = Query(
+        None,
+        description=(
+            "Restrict to one namespace. Omit for the desktop's own "
+            "namespace; pass an empty string for the global view."
+        ),
+    ),
+):
+    """List deprecated memories whose successor was deleted (orphan chains).
+
+    Default namespace is the desktop's own; an explicit empty string
+    means "across all partitions" (admin view).
+    """
+    if _memory_client is None:
+        raise HTTPException(503, detail="Memory system not available")
+
+    try:
+        from dataclasses import asdict
+
+        from omicsclaw.memory import desktop_namespace
+
+        review = _get_review_log()
+
+        if namespace is None:
+            ns_filter: Optional[str] = desktop_namespace()
+        elif namespace == "":
+            ns_filter = None
+        else:
+            ns_filter = namespace
+
+        orphans = await review.list_orphans(namespace=ns_filter)
+        return {
+            "namespace": ns_filter,
+            "count": len(orphans),
+            "orphans": [asdict(o) for o in orphans],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Memory review orphans error")
+        raise HTTPException(500, detail=str(exc))
+
+
+# -- GET /memory/review/version-chain ----------------------------------------
+
+@app.get("/memory/review/version-chain")
+async def memory_review_version_chain(
+    uri: str = Query(..., description="Memory URI (e.g. 'core://agent')"),
+    namespace: Optional[str] = Query(
+        None,
+        description="Override the desktop default namespace.",
+    ),
+):
+    """List the version chain for a versioned URI in age order.
+
+    Returns 400 if the URI is overwrite-only (``dataset://``,
+    ``analysis://``) — those structurally cannot have a chain.
+    """
+    if _memory_client is None:
+        raise HTTPException(503, detail="Memory system not available")
+
+    try:
+        from dataclasses import asdict
+
+        from omicsclaw.memory import desktop_namespace
+        from omicsclaw.memory.review_log import NoVersionHistoryError
+
+        review = _get_review_log()
+        ns = namespace or desktop_namespace()
+        chain = await review.list_version_chain(uri, namespace=ns)
+        return {
+            "uri": uri,
+            "namespace": ns,
+            "count": len(chain),
+            "entries": [asdict(e) for e in chain],
+        }
+    except NoVersionHistoryError as exc:
+        raise HTTPException(400, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Memory review version-chain error")
         raise HTTPException(500, detail=str(exc))
 
 

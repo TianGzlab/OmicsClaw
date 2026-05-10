@@ -2522,3 +2522,120 @@ async def test_memory_review_integrate_reports_missing_keys(monkeypatch, tmp_pat
         assert result["remaining"] == len(keys) - 1
     finally:
         await memory_pkg.close_db()
+
+
+# ----------------------------------------------------------------------
+# PR #5 — review routes wired to ReviewLog
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_review_rollback_uses_reviewlog(monkeypatch, tmp_path):
+    """POST /memory/review/rollback now routes through ReviewLog with the
+    desktop's launch-derived namespace. Older active versions roll back
+    cleanly; idempotent when already active."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.app.server import MemoryRollbackRequest
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(
+        monkeypatch, tmp_path
+    )
+
+    try:
+        # GraphService.create_memory + update_memory go to __shared__,
+        # so ensure the desktop namespace is __shared__ for this test.
+        monkeypatch.delenv("OMICSCLAW_DESKTOP_LAUNCH_ID", raising=False)
+        monkeypatch.setattr(
+            "omicsclaw.memory.desktop_namespace", lambda: "__shared__"
+        )
+        monkeypatch.setattr(server, "_memory_client", object())
+
+        await graph.create_memory(
+            parent_path="",
+            content="v1",
+            priority=0,
+            title="rollback-target",
+            domain="core",
+        )
+        update_result = await graph.update_memory(
+            path="rollback-target",
+            content="v2",
+            domain="core",
+        )
+
+        old_id = update_result["old_memory_id"]
+        new_id = update_result["new_memory_id"]
+        assert old_id != new_id
+
+        result = await server.memory_review_rollback(
+            MemoryRollbackRequest(target_memory_id=old_id)
+        )
+
+        assert result["ok"] is True
+        assert result["result"]["restored_memory_id"] == old_id
+        assert result["result"]["was_already_active"] is False
+
+        # Re-rolling should be a no-op.
+        again = await server.memory_review_rollback(
+            MemoryRollbackRequest(target_memory_id=old_id)
+        )
+        assert again["result"]["was_already_active"] is True
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_review_orphans_endpoint_returns_dataclass_dicts(
+    monkeypatch, tmp_path
+):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(
+        monkeypatch, tmp_path
+    )
+
+    try:
+        monkeypatch.setattr(server, "_memory_client", object())
+
+        # No orphans yet — endpoint should return an empty list cleanly.
+        result = await server.memory_review_orphans(namespace="")
+        assert result["count"] == 0
+        assert result["orphans"] == []
+        assert result["namespace"] is None
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_review_version_chain_endpoint_rejects_overwrite_uri(
+    monkeypatch, tmp_path
+):
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(
+        monkeypatch, tmp_path
+    )
+
+    try:
+        monkeypatch.setattr(server, "_memory_client", object())
+        monkeypatch.setattr(
+            "omicsclaw.memory.desktop_namespace", lambda: "__shared__"
+        )
+
+        # ``dataset://`` is overwrite-only — endpoint should 400.
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as ei:
+            await server.memory_review_version_chain(
+                uri="dataset://x.h5ad",
+                namespace=None,
+            )
+        assert ei.value.status_code == 400
+    finally:
+        await memory_pkg.close_db()
