@@ -1,0 +1,16 @@
+domain: metabolomics
+emoji: 🗺️
+trigger_keywords:
+- metabolomics pathway
+- KEGG
+- MetaboAnalyst
+- enrichment
+- mummichog
+allowed_extra_flags:
+- --method
+legacy_aliases:
+- met-pathway
+saves_h5ad: false
+script: met_pathway.py
+param_hints: {}
+requires_preprocessed: false

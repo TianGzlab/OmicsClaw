@@ -1,0 +1,16 @@
+domain: metabolomics
+emoji: 📏
+trigger_keywords:
+- metabolomics quantification
+- imputation
+- feature quantification
+- missing values
+allowed_extra_flags:
+- --impute
+- --normalize
+legacy_aliases:
+- met-quantify
+saves_h5ad: false
+script: met_quantify.py
+param_hints: {}
+requires_preprocessed: false

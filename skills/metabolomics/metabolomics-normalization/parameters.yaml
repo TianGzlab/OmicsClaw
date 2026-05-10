@@ -1,0 +1,15 @@
+domain: metabolomics
+emoji: 📐
+trigger_keywords:
+- metabolomics normalization
+- scaling
+- NOREVA
+- TIC normalization
+allowed_extra_flags:
+- --method
+legacy_aliases:
+- met-normalize
+saves_h5ad: false
+script: metabolomics_normalization.py
+param_hints: {}
+requires_preprocessed: false
