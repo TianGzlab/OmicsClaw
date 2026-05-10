@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import uuid as uuidlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +39,31 @@ if TYPE_CHECKING:
     from .database import DatabaseManager
     from .search import SearchIndexer
 
-_UNSET: Any = object()
+
+class _UnsetType:
+    """Sentinel class for "argument was not supplied".
+
+    Lets ``priority: int | None | _UnsetType`` distinguish
+    "preserve the current value" (sentinel) from
+    "set the value to None" (explicit None). A regular ``None`` default
+    can't tell those apart.
+    """
+
+    _instance: Optional["_UnsetType"] = None
+
+    def __new__(cls) -> "_UnsetType":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "_UNSET"
+
+
+_UNSET: _UnsetType = _UnsetType()
+
+PriorityArg = Union[int, _UnsetType]
+DisclosureArg = Union[Optional[str], _UnsetType]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,8 +111,8 @@ class MemoryEngine:
         content: str,
         *,
         namespace: str,
-        priority: Any = _UNSET,
-        disclosure: Any = _UNSET,
+        priority: PriorityArg = _UNSET,
+        disclosure: DisclosureArg = _UNSET,
     ) -> MemoryRef:
         """Overwrite-mode upsert: create-or-replace the active memory at (namespace, uri).
 
@@ -150,8 +174,8 @@ class MemoryEngine:
         s: AsyncSession,
         path_row: Path,
         content: str,
-        priority: Any,
-        disclosure: Any,
+        priority: PriorityArg,
+        disclosure: DisclosureArg,
     ) -> tuple[int, str]:
         edge = await s.get(Edge, path_row.edge_id)
         if edge is None:
@@ -173,14 +197,20 @@ class MemoryEngine:
         ).scalar_one_or_none()
 
         if memory is None:
-            # Edge exists but has no active memory — create one and attach.
-            memory = Memory(
-                node_uuid=edge.child_uuid, content=content, deprecated=False
+            # Edge exists but no active memory: a deprecated chain might
+            # exist with no successor (a crash window in upsert_versioned,
+            # or a direct DB poke). We deliberately do NOT silently
+            # fabricate a fresh active memory — that would disconnect a
+            # deprecated tail from any successor and lose audit lineage.
+            # Surface the corruption so callers can route to ReviewLog.
+            raise RuntimeError(
+                f"Path {path_row.namespace}/{path_row.domain}/{path_row.path} "
+                f"has no active memory but the edge persists; refusing to "
+                f"silently rebuild. Inspect the deprecated chain for node "
+                f"{edge.child_uuid} and resolve via ReviewLog before retrying."
             )
-            s.add(memory)
-            await s.flush()
-        else:
-            memory.content = content
+
+        memory.content = content
 
         if priority is not _UNSET:
             edge.priority = priority
@@ -195,8 +225,8 @@ class MemoryEngine:
         parsed: MemoryURI,
         namespace: str,
         content: str,
-        priority: Any,
-        disclosure: Any,
+        priority: PriorityArg,
+        disclosure: DisclosureArg,
     ) -> tuple[int, str]:
         parent_uuid = await self._resolve_parent_node_uuid(s, parsed, namespace)
 
@@ -273,8 +303,8 @@ class MemoryEngine:
         content: str,
         *,
         namespace: str,
-        priority: Any = _UNSET,
-        disclosure: Any = _UNSET,
+        priority: PriorityArg = _UNSET,
+        disclosure: DisclosureArg = _UNSET,
     ) -> VersionedMemoryRef:
         """Versioned upsert: deprecate the old Memory, insert a new one.
 
@@ -320,8 +350,8 @@ class MemoryEngine:
         s: AsyncSession,
         path_row: Path,
         content: str,
-        priority: Any,
-        disclosure: Any,
+        priority: PriorityArg,
+        disclosure: DisclosureArg,
     ) -> tuple[Optional[int], int, str]:
         """Insert a new active Memory and deprecate the previous active one.
 
@@ -371,8 +401,8 @@ class MemoryEngine:
         uri: str | MemoryURI,
         *,
         namespace: str,
-        priority: Any = _UNSET,
-        disclosure: Any = _UNSET,
+        priority: PriorityArg = _UNSET,
+        disclosure: DisclosureArg = _UNSET,
     ) -> None:
         """Update Edge metadata (priority, disclosure) without touching Memory.
 

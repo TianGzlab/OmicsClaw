@@ -466,11 +466,17 @@ class SearchIndexer:
                     sd.priority,
                     sd.content,
                     sd.disclosure,
-                    bm25(search_documents_fts, 0.0, 2.5, 0.0, 2.0, 1.0, 1.0, 0.75) AS score
+                    -- 8 bm25 weights, one per FTS column in declaration order:
+                    -- namespace, domain, path, node_uuid, uri, content,
+                    -- disclosure, search_terms. namespace gets 0.0 because
+                    -- the JOIN already filters it; domain/node_uuid stay 0.0
+                    -- so they don't influence ranking.
+                    bm25(search_documents_fts, 0.0, 0.0, 2.5, 0.0, 2.0, 1.0, 1.0, 0.75) AS score
                 FROM search_documents AS sd
                 JOIN search_documents_fts
-                  ON search_documents_fts.domain = sd.domain
-                 AND search_documents_fts.path = sd.path
+                  ON search_documents_fts.namespace = sd.namespace
+                 AND search_documents_fts.domain    = sd.domain
+                 AND search_documents_fts.path      = sd.path
                 WHERE search_documents_fts MATCH :match_query
                   {domain_clause}
                 ORDER BY score ASC, sd.priority ASC, length(sd.path) ASC

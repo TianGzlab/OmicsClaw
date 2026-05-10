@@ -331,6 +331,22 @@ async def test_upsert_versioned_chain_can_have_3_links(engine):
 
 
 @pytest.mark.asyncio
+async def test_upsert_refuses_to_silently_rebuild_orphan_path(engine):
+    """If the active memory has been deactivated leaving a deprecated tail
+    behind, upsert (overwrite) must raise rather than silently fabricate
+    a new active memory — that would break the chain's audit lineage."""
+    eng, db = engine
+    ref = await eng.upsert("core://agent", "v1", namespace="tg/userA")
+
+    async with db.session() as s:
+        memory = await s.get(Memory, ref.memory_id)
+        memory.deprecated = True  # simulated corruption: active row lost
+
+    with pytest.raises(RuntimeError, match="no active memory"):
+        await eng.upsert("core://agent", "v2", namespace="tg/userA")
+
+
+@pytest.mark.asyncio
 async def test_upsert_versioned_returns_namespace_isolated(engine):
     eng, db = engine
 
