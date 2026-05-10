@@ -273,16 +273,98 @@ class MemoryEngine:
         content: str,
         *,
         namespace: str,
-        priority: int = 0,
-        disclosure: Optional[str] = None,
+        priority: Any = _UNSET,
+        disclosure: Any = _UNSET,
     ) -> VersionedMemoryRef:
         """Versioned upsert: deprecate the old Memory, insert a new one.
 
         For ``core://*`` and ``preference://*`` URIs where the version
         chain is the audit trail. The old Memory keeps ``deprecated=True``
         and ``migrated_to=new_memory_id``; only the newest is active.
+        First write returns ``old_memory_id=None``.
         """
-        raise NotImplementedError("Task 3a.3")
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        canonical = str(parsed)
+
+        async with self._db.session() as s:
+            existing_path = await self._fetch_path(s, namespace, parsed)
+
+            if existing_path is None:
+                # No existing path: this is a first write — same shape as upsert
+                # but routed through the versioned helper for return-type symmetry.
+                new_memory_id, node_uuid = await self._upsert_create(
+                    s, parsed, namespace, content, priority, disclosure
+                )
+                old_memory_id: Optional[int] = None
+            else:
+                old_memory_id, new_memory_id, node_uuid = (
+                    await self._upsert_versioned_chain(
+                        s, existing_path, content, priority, disclosure
+                    )
+                )
+
+            await self._search.refresh_search_documents_for_node(
+                node_uuid, session=s
+            )
+
+        return VersionedMemoryRef(
+            old_memory_id=old_memory_id,
+            new_memory_id=new_memory_id,
+            node_uuid=node_uuid,
+            namespace=namespace,
+            uri=canonical,
+        )
+
+    async def _upsert_versioned_chain(
+        self,
+        s: AsyncSession,
+        path_row: Path,
+        content: str,
+        priority: Any,
+        disclosure: Any,
+    ) -> tuple[Optional[int], int, str]:
+        """Insert a new active Memory and deprecate the previous active one.
+
+        Returns ``(old_memory_id, new_memory_id, node_uuid)``. ``old_memory_id``
+        is ``None`` only when no active Memory existed (orphan path), which
+        we recover from by treating the new write as the chain's first link.
+        """
+        edge = await s.get(Edge, path_row.edge_id)
+        if edge is None:
+            raise RuntimeError(
+                f"Path {path_row.namespace}/{path_row.domain}/{path_row.path} "
+                f"references a missing edge — graph corruption."
+            )
+        node_uuid = edge.child_uuid
+
+        old = (
+            await s.execute(
+                select(Memory)
+                .where(
+                    Memory.node_uuid == node_uuid,
+                    Memory.deprecated == False,  # noqa: E712
+                )
+                .order_by(Memory.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        new_memory = Memory(node_uuid=node_uuid, content=content, deprecated=False)
+        s.add(new_memory)
+        await s.flush()
+
+        old_id: Optional[int] = None
+        if old is not None:
+            old.deprecated = True
+            old.migrated_to = new_memory.id
+            old_id = old.id
+
+        if priority is not _UNSET:
+            edge.priority = priority
+        if disclosure is not _UNSET:
+            edge.disclosure = disclosure
+
+        return old_id, new_memory.id, node_uuid
 
     async def patch_edge_metadata(
         self,

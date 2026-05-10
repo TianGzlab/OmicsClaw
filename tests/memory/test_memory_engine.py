@@ -233,3 +233,111 @@ async def test_upsert_accepts_memory_uri_object(engine):
         namespace="tg/userA",
     )
     assert ref.uri == "core://agent"
+
+
+# ----------------------------------------------------------------------
+# upsert_versioned (deprecation chain mode)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upsert_versioned_first_write_no_chain(engine):
+    eng, db = engine
+
+    ref = await eng.upsert_versioned(
+        "core://agent", "v1", namespace="tg/userA"
+    )
+
+    assert isinstance(ref, VersionedMemoryRef)
+    assert ref.old_memory_id is None
+    assert ref.new_memory_id > 0
+    assert ref.namespace == "tg/userA"
+    assert ref.uri == "core://agent"
+
+    async with db.session() as s:
+        memory = await s.get(Memory, ref.new_memory_id)
+        assert memory.deprecated is False
+        assert memory.migrated_to is None
+        assert memory.content == "v1"
+
+
+@pytest.mark.asyncio
+async def test_upsert_versioned_creates_chain_on_second_write(engine):
+    eng, db = engine
+
+    first = await eng.upsert_versioned("core://agent", "v1", namespace="tg/userA")
+    second = await eng.upsert_versioned("core://agent", "v2", namespace="tg/userA")
+
+    assert second.old_memory_id == first.new_memory_id
+    assert second.new_memory_id != first.new_memory_id
+    assert second.node_uuid == first.node_uuid
+
+    async with db.session() as s:
+        old = await s.get(Memory, first.new_memory_id)
+        new = await s.get(Memory, second.new_memory_id)
+
+        assert old.deprecated is True
+        assert old.migrated_to == second.new_memory_id
+
+        assert new.deprecated is False
+        assert new.migrated_to is None
+        assert new.content == "v2"
+
+
+@pytest.mark.asyncio
+async def test_upsert_versioned_old_search_doc_replaced(engine):
+    eng, db = engine
+
+    first = await eng.upsert_versioned("core://agent", "v1", namespace="tg/userA")
+    second = await eng.upsert_versioned("core://agent", "v2", namespace="tg/userA")
+
+    async with db.session() as s:
+        rows = (
+            await s.execute(
+                sa.select(SearchDocument).where(
+                    SearchDocument.namespace == "tg/userA",
+                    SearchDocument.domain == "core",
+                    SearchDocument.path == "agent",
+                )
+            )
+        ).scalars().all()
+        # Exactly one search_documents row at (namespace, domain, path) — the
+        # composite PK guarantees that, but we also assert it points at the
+        # new memory_id, not the deprecated one.
+        assert len(rows) == 1
+        assert rows[0].memory_id == second.new_memory_id
+        assert rows[0].content == "v2"
+
+
+@pytest.mark.asyncio
+async def test_upsert_versioned_chain_can_have_3_links(engine):
+    eng, db = engine
+
+    r1 = await eng.upsert_versioned("core://agent", "v1", namespace="tg/userA")
+    r2 = await eng.upsert_versioned("core://agent", "v2", namespace="tg/userA")
+    r3 = await eng.upsert_versioned("core://agent", "v3", namespace="tg/userA")
+
+    async with db.session() as s:
+        m1 = await s.get(Memory, r1.new_memory_id)
+        m2 = await s.get(Memory, r2.new_memory_id)
+        m3 = await s.get(Memory, r3.new_memory_id)
+
+        assert m1.deprecated is True and m1.migrated_to == r2.new_memory_id
+        assert m2.deprecated is True and m2.migrated_to == r3.new_memory_id
+        assert m3.deprecated is False and m3.migrated_to is None
+
+        # All three memories share the same node_uuid (the conceptual entity).
+        assert m1.node_uuid == m2.node_uuid == m3.node_uuid
+
+
+@pytest.mark.asyncio
+async def test_upsert_versioned_returns_namespace_isolated(engine):
+    eng, db = engine
+
+    a = await eng.upsert_versioned("core://agent", "for A", namespace="tg/userA")
+    b = await eng.upsert_versioned("core://agent", "for B", namespace="tg/userB")
+
+    # Different namespaces → independent chains, independent nodes.
+    assert a.node_uuid != b.node_uuid
+    assert a.old_memory_id is None
+    assert b.old_memory_id is None  # B's first write also has no chain
