@@ -1,209 +1,93 @@
 ---
 name: proteomics-de
-description: >-
-  Differential protein abundance testing using MSstats, limma, proDA,
-  and scipy/statsmodels for Python. Multiple testing correction with BH FDR.
-version: 0.1.0
+description: Load when computing two-group differential protein abundance (group2 vs group1, log2FC + p-value + BH-adjusted FDR) via Welch t-test, equal-variance t-test, or Mann-Whitney on a wide protein × sample CSV. Skip when you need multi-condition DE (run pairwise contrasts manually) or label-based TMT linear-mixed models.
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [proteomics, differential, MSstats, limma, volcano]
-metadata:
-  omicsclaw:
-    domain: proteomics
-    emoji: "⚖️"
-    trigger_keywords: [differential abundance, protein expression, MSstats, limma,
-      volcano]
-    allowed_extra_flags: []
-    legacy_aliases: [differential-abundance]
-    saves_h5ad: false
-    script: proteomics_de.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- proteomics
+- differential-expression
+- ttest
+- welch
+- mann-whitney
+- bh-fdr
+requires:
+- pandas
+- numpy
+- scipy
 ---
 
-# ⚖️ Differential Protein Abundance
+# proteomics-de
 
-Statistical testing for differentially abundant proteins between experimental conditions.
+## When to use
 
-## Core Capabilities
+The user has a wide protein × sample CSV (rows = proteins as
+index, columns = samples) and wants two-group differential
+abundance. Three backends:
 
-1. **MSstats**: Feature-level mixed models with group comparison
-2. **limma**: Empirical Bayes moderated t-tests on protein-level data
-3. **proDA**: Probabilistic handling of missing values
-4. **scipy/statsmodels (Python)**: T-test with FDR correction
-5. **Visualization**: Volcano plots, heatmaps
+- `ttest` (default) — Student's two-sample t-test (equal variance).
+- `welch` — Welch's t-test (unequal variance).
+- `mann_whitney` — non-parametric Mann-Whitney U.
 
-## CLI Reference
+All return per-protein `log2fc` (group2 vs group1), `pvalue`, and
+BH-adjusted `padj`. `--alpha` controls significance threshold for
+the `tables/significant.csv` shortlist; `--log2fc-threshold`
+optionally adds an absolute log2FC filter.
+
+For multi-condition DE, run pairwise contrasts manually. For
+label-based TMT linear-mixed models, use MSstats / limma in R.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Protein × sample table | `.csv` with protein index in column 0 and equal-count sample columns | yes (unless `--demo`) |
+| Method | `--method {ttest,welch,mann_whitney}` (default `ttest`) | no |
+| Significance | `--alpha <float>` (default 0.05); `--log2fc-threshold <float>` (default 0.0) | no |
+
+| Output | Path | Notes |
+|---|---|---|
+| Full results | `tables/differential_abundance.csv` | per-protein `log2fc`, `pvalue`, `padj`, `group1_mean`, `group2_mean` |
+| Significant subset | `tables/significant.csv` | filtered by `--alpha` (and optional `--log2fc-threshold`) |
+| Report | `report.md` + `result.json` | `summary["method"]`, `summary["n_tested"]`, `summary["n_significant"]` |
+
+## Flow
+
+1. Load CSV with `pd.read_csv(args.input_path, index_col=0)` (`proteomics_de.py:289`); split columns at midpoint — first half = group1, second half = group2 (`:290-292`). NO CLI flag for prefix/suffix.
+2. Dispatch on `--method` (`proteomics_de.py:295`); per-protein test → `log2fc` (mean(log2(g2)) − mean(log2(g1))) + raw `pvalue`.
+3. Apply BH FDR adjustment (`proteomics_de.py:137` / `:178`) → `padj` column.
+4. Filter `padj < args.alpha` (and `|log2fc| ≥ args.log2fc_threshold` if > 0) → `tables/significant.csv`.
+5. Write `tables/differential_abundance.csv` (`proteomics_de.py:299`) + `tables/significant.csv` (`:306`) + `report.md` + `result.json` (`:322`).
+
+## Gotchas
+
+- **Group assignment is by COLUMN POSITION — first half / second half.** `proteomics_de.py:290-292` splits `data.columns[:mid]` vs `data.columns[mid:]`. There is NO CLI flag for control / treatment prefixes; if your CSV columns are interleaved, pre-sort them. Demo uses `control_1..N` then `treatment_1..N` (`:204-205`).
+- **Index column 0 is treated as the protein ID.** `pd.read_csv(args.input_path, index_col=0)` (`proteomics_de.py:289`) is unconditional — make sure your protein-ID column is the FIRST column in the CSV.
+- **Unknown `--method` raises `ValueError`.** `proteomics_de.py:192` rejects values outside `("ttest", "welch", "mann_whitney")` — argparse `choices=` enforces this at parse time too.
+- **`--input` REQUIRED unless `--demo`.** `proteomics_de.py:288` raises `ValueError("--input required")`.
+- **log2FC direction: group2 minus group1.** Positive `log2fc` means group2 > group1. If your "control" is in the second half of columns, you'll get inverted signs — the script does NOT auto-detect direction.
+- **NaN handling differs per backend.** `ttest` / `welch` (`proteomics_de.py:116-118`) drop rows where either group's mean is non-finite (`np.isfinite` filter). `mann_whitney` (`:150-151`) additionally drops `0` values (`g1 > 0`, `g2 > 0`) — small placeholder intensities silently disappear from Mann-Whitney runs but stay in t-test runs. Pre-impute zeros if you need consistent behaviour.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run differential-abundance --demo
-python omicsclaw.py run differential-abundance --input <protein_matrix.csv> --output <dir>
+# Demo
+python omicsclaw.py run proteomics-de --demo --output /tmp/de_demo
+
+# Real CSV (first half = group1, second half = group2)
+python omicsclaw.py run proteomics-de \
+  --input protein_abundance.csv --output results/ \
+  --method welch --alpha 0.05 --log2fc-threshold 1.0
+
+# Mann-Whitney (non-parametric)
+python omicsclaw.py run proteomics-de \
+  --input protein_abundance.csv --output results/ \
+  --method mann_whitney --alpha 0.01
 ```
 
-## Algorithm / Methodology
+## See also
 
-### MSstats Group Comparison (R)
-
-```r
-library(MSstats)
-
-comparison_matrix <- matrix(c(1, -1, 0, 0,
-                               1, 0, -1, 0,
-                               0, 1, -1, 0),
-                             nrow = 3, byrow = TRUE)
-rownames(comparison_matrix) <- c('Treatment1-Control', 'Treatment2-Control', 'Treatment1-Treatment2')
-colnames(comparison_matrix) <- c('Control', 'Treatment1', 'Treatment2', 'Treatment3')
-
-results <- groupComparison(contrast.matrix = comparison_matrix, data = processed)
-
-sig_proteins <- results$ComparisonResult[results$ComparisonResult$adj.pvalue < 0.05 &
-                                          abs(results$ComparisonResult$log2FC) > 1, ]
-```
-
-### limma for Proteomics (R)
-
-```r
-library(limma)
-
-design <- model.matrix(~ 0 + condition, data = sample_info)
-colnames(design) <- levels(sample_info$condition)
-
-fit <- lmFit(protein_matrix, design)
-contrast_matrix <- makeContrasts(Treatment - Control, levels = design)
-fit2 <- contrasts.fit(fit, contrast_matrix)
-fit2 <- eBayes(fit2)
-
-results <- topTable(fit2, number = Inf, adjust.method = 'BH')
-sig_results <- results[results$adj.P.Val < 0.05 & abs(results$logFC) > 1, ]
-```
-
-### proDA (Missing Value-Aware)
-
-```r
-library(QFeatures)
-library(proDA)
-
-fit <- proDA(protein_matrix, design = ~ condition, data = sample_info)
-results <- test_diff(fit, contrast = 'conditionTreatment')
-results$adj_pval <- p.adjust(results$pval, method = 'BH')
-sig_results <- results[results$adj_pval < 0.05 & abs(results$diff) > 1, ]
-```
-
-### Python: scipy/statsmodels
-
-```python
-import pandas as pd
-import numpy as np
-from scipy import stats
-from statsmodels.stats.multitest import multipletests
-
-def differential_test(intensities, group1_cols, group2_cols):
-    results = []
-    for protein in intensities.index:
-        g1 = intensities.loc[protein, group1_cols].dropna()
-        g2 = intensities.loc[protein, group2_cols].dropna()
-
-        if len(g1) >= 2 and len(g2) >= 2:
-            stat, pval = stats.ttest_ind(g1, g2)
-            log2fc = g2.mean() - g1.mean()
-            results.append({'protein': protein, 'log2FC': log2fc, 'pvalue': pval})
-
-    df = pd.DataFrame(results)
-    df['adj_pvalue'] = multipletests(df['pvalue'], method='fdr_bh')[1]
-    return df
-
-sig = results[(results['adj_pvalue'] < 0.05) & (abs(results['log2FC']) > 1)]
-```
-
-### Volcano Plot (R)
-
-```r
-library(ggplot2)
-
-ggplot(results, aes(x = log2FC, y = -log10(adj.P.Val))) +
-    geom_point(aes(color = significant), alpha = 0.6) +
-    geom_hline(yintercept = -log10(0.05), linetype = 'dashed') +
-    geom_vline(xintercept = c(-1, 1), linetype = 'dashed') +
-    scale_color_manual(values = c('grey', 'red')) +
-    theme_minimal()
-```
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--method` | `limma` | limma, msstats, proda, ttest |
-| `--fdr-cutoff` | `0.05` | FDR threshold |
-| `--fc-cutoff` | `1.0` | Log2FC threshold |
-
-## Why This Exists
-
-- **Without it**: T-tests assume independence and fail on complex experimental designs or missing MS values
-- **With it**: Validated mixed-models (MSstats) and empirical Bayes (Limma) correctly handle imputation and variances
-- **Why OmicsClaw**: Standardizes notoriously strict R packages into a simple Python wrapper
-
-## Workflow
-
-1. **Calculate**: Prepare contrast matrix and condition vectors.
-2. **Execute**: Calculate log ratios and moderated t-statistics per protein.
-3. **Assess**: Perform Benjamini-Hochberg FDR correction.
-4. **Generate**: Output structured significant hits.
-5. **Report**: Synthesize Volcano plots and heatmaps.
-
-## Example Queries
-
-- "Run MSstats differential abundance on this data"
-- "Find differentially expressed proteins using limma"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── statistics.csv
-├── figures/
-│   └── volcano_plot.png
-├── tables/
-│   └── differential_results.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `quantification` — Upstream normalized expression
-- `prot-enrichment` — Downstream pathway enrichment
-
-## Version Compatibility
-
-Reference examples tested with: limma 3.58+, MSstats 4.8+, scipy 1.12+, statsmodels 0.14+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, statsmodels
-**Optional**: MSstats (R), limma (R), proDA (R), QFeatures (R)
-
-## Citations
-
-- [MSstats](https://doi.org/10.1074/mcp.M113.034728) — Choi et al., MCP 2014
-- [limma](https://doi.org/10.1093/nar/gkv007) — Ritchie et al., Nucleic Acids Research 2015
-- [proDA](https://doi.org/10.1101/661496) — Ahlmann-Eltze & Anders, bioRxiv 2019
-
-## Related Skills
-
-- `quantification` — Prepare normalized data for testing
-- `prot-enrichment` — Pathway enrichment of significant proteins
-- `ptm` — PTM-level differential analysis
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — t-test / Welch / Mann-Whitney trade-offs, BH FDR
+- `references/output_contract.md` — `tables/differential_abundance.csv` schema
+- Adjacent skills: `proteomics-quantification` (upstream — produces protein abundance), `proteomics-data-import` (upstream — schema normalisation), `proteomics-enrichment` (downstream — pathway enrichment on significant proteins), `proteomics-ptm` (parallel — PTM site analysis)

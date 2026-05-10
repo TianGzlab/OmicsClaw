@@ -1,87 +1,97 @@
 ---
 name: proteomics-quantification
-description: >-
-  Protein/peptide quantification (LFQ, TMT, DIA) using MaxQuant LFQ, DIA-NN, or Skyline.
-version: 0.1.0
+description: Load when computing per-protein abundance from a peptide / PSM table via LFQ (intensity summation), iBAQ (intensity / tryptic peptide count), or spectral counting (PSMs per protein). Skip when the input is already protein-level (use `proteomics-ms-qc` for QC) or for label-based TMT / iTRAQ workflows (search upstream first).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [proteomics, quantification, LFQ, TMT, DIA, DIA-NN]
-metadata:
-  omicsclaw:
-    domain: proteomics
-    emoji: "📏"
-    trigger_keywords: [protein quantification, LFQ, TMT, DIA, DIA-NN, Skyline]
-    allowed_extra_flags: []
-    legacy_aliases: [quantification]
-    saves_h5ad: false
-    script: proteomics_quantification.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- proteomics
+- quantification
+- lfq
+- ibaq
+- spectral-counting
+requires:
+- pandas
+- numpy
 ---
 
-# 📏 Protein Quantification
+# proteomics-quantification
 
-Protein and peptide quantification for label-free (LFQ), isobaric labelling (TMT), and DIA workflows.
+## When to use
 
-## CLI Reference
+The user has a peptide / PSM table and wants protein-level
+abundance via one of:
+
+- `lfq` (default) — Label-Free Quantification by intensity
+  summation. Requires an `intensity` column.
+- `ibaq` — intensity-Based Absolute Quantification
+  (intensity / theoretical tryptic peptide count). Requires an
+  `intensity` column AND ONE OF: a per-protein `sequence` column
+  (in-silico digested by the script) OR a pre-computed
+  `n_theoretical_peptides` integer column. Without either, the
+  script silently estimates `unique_peptides × 1.5`.
+- `spectral_count` — PSM count per protein (no intensity needed).
+
+Pick with `--method {lfq,spectral_count,ibaq}` (default `lfq`).
+For TMT / iTRAQ label-based workflows, perform the search-engine
+quant first; this skill is intensity- / count-only.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Peptide / PSM table | `.csv` with `protein` column. `intensity` required for `lfq` / `ibaq`; for `ibaq` ALSO either `sequence` (per-protein AA sequence, in-silico digested at `proteomics_quantification.py:42-72`) OR `n_theoretical_peptides` (pre-computed integer); PSM rows for `spectral_count` | yes (unless `--demo`) |
+| Method | `--method {lfq,spectral_count,ibaq}` (default `lfq`) | no |
+
+| Output | Path | Notes |
+|---|---|---|
+| Protein abundance | `tables/protein_abundance.csv` | one row per protein with the chosen abundance metric |
+| Report | `report.md` + `result.json` | `summary["method"]`, `summary["n_proteins"]` |
+
+## Flow
+
+1. Load CSV (`--input <peptides.csv>`) or generate a demo (`--demo`).
+2. Dispatch on `--method` (`proteomics_quantification.py:156`); validate required columns per method.
+3. Aggregate per protein:
+   - `lfq`: sum `intensity` per protein.
+   - `ibaq`: sum `intensity` per protein, divide by `n_theoretical_peptides`. Source order at `proteomics_quantification.py:115-130`: `sequence` (compute on the fly) → `n_theoretical_peptides` (use as-is) → `unique_peptides × 1.5` (silent estimate with warning).
+   - `spectral_count`: count PSMs per protein.
+4. Write `tables/protein_abundance.csv` (`proteomics_quantification.py:277`) + `report.md` + `result.json` (`:283`).
+
+## Gotchas
+
+- **`lfq` and `ibaq` require an `intensity` column; method enforces this.** `proteomics_quantification.py:77` raises `ValueError("Input requires an 'intensity' column for LFQ")`; `:109` raises the same for iBAQ. `spectral_count` only needs row counts (no intensity).
+- **`ibaq` requires either `sequence` OR `n_theoretical_peptides`; otherwise it SILENTLY ESTIMATES.** `proteomics_quantification.py:115-130` checks for `sequence` first (in-silico digest at `:42-72`, K/R not before P, length 7-30), then `n_theoretical_peptides`, otherwise falls back to `unique_peptides × 1.5` with only a logger warning. The wrong column name (`theoretical_peptides` instead of `n_theoretical_peptides`) silently triggers the estimate path — always pass one of the two correct columns.
+- **Unknown `--method` raises `ValueError`.** `proteomics_quantification.py:156` rejects values outside `("lfq", "spectral_count", "ibaq")`. The `argparse choices=` already enforces this — the `:156` raise is defence-in-depth for direct library calls.
+- **`--input` REQUIRED unless `--demo`.** `proteomics_quantification.py:269` raises `ValueError("--input required")`.
+- **Missing intensities in `lfq` are summed as 0.** `pd.Series.sum(skipna=True)` is the default — proteins with all-NaN intensities yield 0, indistinguishable from "all detected as zero". Pre-filter or impute upstream if NaN-vs-zero matters.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run proteomics-quantification --demo
-python omicsclaw.py run proteomics-quantification --input <data.csv> --output <dir>
+# Demo (LFQ default)
+python omicsclaw.py run proteomics-quantification --demo --output /tmp/quant_demo
+
+# LFQ on real peptides
+python omicsclaw.py run proteomics-quantification \
+  --input peptides.csv --output results/ --method lfq
+
+# iBAQ via per-protein sequence (in-silico digest)
+python omicsclaw.py run proteomics-quantification \
+  --input peptides_with_sequence.csv --output results/ --method ibaq
+
+# iBAQ via pre-computed n_theoretical_peptides
+python omicsclaw.py run proteomics-quantification \
+  --input peptides_with_n_theo.csv --output results/ --method ibaq
+
+# Spectral counting
+python omicsclaw.py run proteomics-quantification \
+  --input psms.csv --output results/ --method spectral_count
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: Peak heights vary wildly due to ion suppression, ionization efficiency, and LC drift
-- **With it**: Powerful algorithms (MaxLFQ, DIA-NN) normalize intensities across large cohorts
-- **Why OmicsClaw**: Provides a standard programmatic interface to multiple quantification paradigms (LFQ, TMT, DIA)
-
-## Workflow
-
-1. **Calculate**: Map identified sequences to MS1 or MS2 extraction windows.
-2. **Execute**: Integrate peak areas and apply cross-run retention time alignment.
-3. **Assess**: Perform global normalization (median centering, quantile).
-4. **Generate**: Output structural intensity matrices.
-5. **Report**: Tabulate key quantification yield metrics.
-
-## Example Queries
-
-- "Quantify proteins using MaxQuant LFQ"
-- "Run DIA-NN on these wiff files"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── quantified.csv
-├── figures/
-│   └── normalization_boxplot.png
-├── tables/
-│   └── intensity_matrix.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `peptide-id` — Upstream sequence identification
-- `differential-abundance` — Downstream statistical execution
-
-## Citations
-
-- [MaxQuant LFQ](https://doi.org/10.1074/mcp.M113.031591)
-- [DIA-NN](https://doi.org/10.1038/s41592-019-0638-x)
+- `references/parameters.md` — every CLI flag, per-method input requirements
+- `references/methodology.md` — LFQ / iBAQ / spectral-count semantics
+- `references/output_contract.md` — `tables/protein_abundance.csv` schema
+- Adjacent skills: `proteomics-data-import` (upstream — produces normalised peptide / protein tables), `proteomics-identification` (upstream — peptide-level summary), `proteomics-ms-qc` (parallel — protein-table QC), `proteomics-de` (downstream — differential abundance)

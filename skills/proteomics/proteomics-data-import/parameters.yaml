@@ -1,0 +1,13 @@
+domain: proteomics
+emoji: 📥
+trigger_keywords:
+- data import
+- convert proteomics
+- format conversion
+allowed_extra_flags: []
+legacy_aliases:
+- data-import
+saves_h5ad: false
+script: proteomics_data_import.py
+param_hints: {}
+requires_preprocessed: false
