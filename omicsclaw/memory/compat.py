@@ -297,13 +297,21 @@ class CompatMemoryStore:
     async def _client_for_session(self, session_id: str) -> MemoryClient:
         """Resolve a session to its owner-namespace client.
 
-        Falls back to ``__shared__`` when the session can't be resolved
-        (defensive — in production the bot always creates a session before
-        the first save_memory call).
+        Raises ``LookupError`` when the session can't be resolved.
+        Silently falling back to ``__shared__`` (the previous behavior)
+        was a privacy hole — auto-captured datasets arriving before
+        their session was created would land globally where every other
+        user could read them. Callers (``save_memory``,
+        ``_auto_capture_dataset``) already wrap memory ops in
+        try/except, so propagating the error skips the write safely.
         """
         session = await self.get_session(session_id)
         if session is None:
-            return self._client_for_namespace(SHARED_NAMESPACE)
+            raise LookupError(
+                f"Cannot resolve session_id={session_id!r}: no session "
+                "row found. Ensure create_session() was called before "
+                "save_memory()."
+            )
         namespace = f"{session.platform}/{session.user_id}"
         return self._client_for_namespace(namespace)
 

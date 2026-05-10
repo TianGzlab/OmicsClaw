@@ -237,6 +237,9 @@ class GraphService:
         node_uuid: str = ROOT_NODE_UUID,
         context_domain: Optional[str] = None,
         context_path: Optional[str] = None,
+        *,
+        namespace: Optional[str] = None,
+        include_shared: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get direct children of a node via the edges table.
@@ -246,6 +249,19 @@ class GraphService:
           1. Same domain AND path starts with ``context_path/``
           2. Same domain (any path)
           3. Any path at all
+
+        ``namespace`` filtering modes:
+          * ``namespace=None`` — legacy unfiltered admin view.
+          * ``namespace=X``, ``include_shared=False`` (default) — strict,
+            matches ``MemoryEngine.list_children`` semantics. A child
+            whose only path lives outside ``X`` is dropped.
+          * ``namespace=X``, ``include_shared=True`` — UI/desktop mode.
+            Children with paths in ``X`` *or* ``__shared__`` are listed,
+            with namespace-matched paths preferred when picking the
+            display path. The desktop ``/memory/children`` endpoint
+            uses this mode so the user can browse their own writes
+            *and* shared system rows (``core://agent/*``, future
+            ``core://kh/*`` seeds) from one tree.
         """
         async with self.session() as session:
             stmt = (
@@ -284,10 +300,28 @@ class GraphService:
                     continue
                 seen.add(edge.child_uuid)
 
-                path_result = await session.execute(
-                    select(Path).where(Path.edge_id == edge.id)
-                )
+                path_stmt = select(Path).where(Path.edge_id == edge.id)
+                if namespace is not None:
+                    if include_shared:
+                        path_stmt = path_stmt.where(
+                            Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                        )
+                    else:
+                        path_stmt = path_stmt.where(Path.namespace == namespace)
+                path_result = await session.execute(path_stmt)
                 all_paths = path_result.scalars().all()
+
+                # Drop children that have no path in the requested scope.
+                if namespace is not None and not all_paths:
+                    continue
+
+                # Prefer namespace-matched paths over shared when both
+                # exist (mirrors engine.search ordering).
+                if namespace is not None and include_shared and len(all_paths) > 1:
+                    all_paths = sorted(
+                        all_paths,
+                        key=lambda p: 0 if p.namespace == namespace else 1,
+                    )
 
                 if node_uuid == ROOT_NODE_UUID and context_domain:
                     has_domain_path = any(p.domain == context_domain for p in all_paths)
@@ -357,8 +391,27 @@ class GraphService:
         # Tier 3: whatever is available
         return paths[0]
 
-    async def get_all_paths(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get all paths with their node/edge info."""
+    async def get_all_paths(
+        self,
+        domain: Optional[str] = None,
+        *,
+        namespace: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Get all paths with their node/edge info.
+
+        ``namespace`` filtering modes:
+          * ``namespace=None`` — legacy admin view (all rows). The
+            ``namespace`` key is included in the output dict so admin
+            consumers can distinguish same-URI rows across partitions.
+          * ``namespace=X``, ``include_shared=False`` (default) — strict
+            scope to ``X``.
+          * ``namespace=X``, ``include_shared=True`` — UI/desktop mode.
+            Returns rows in ``X`` *or* ``__shared__``, with
+            namespace-matched rows ordered first so dedupe (by
+            ``(domain, path)`` URI within this scoped view) keeps the
+            user's own copy when both partitions hold the same URI.
+        """
         async with self.session() as session:
             stmt = (
                 select(Path, Edge, Memory)
@@ -375,14 +428,43 @@ class GraphService:
 
             if domain is not None:
                 stmt = stmt.where(Path.domain == domain)
+            if namespace is not None:
+                if include_shared:
+                    stmt = stmt.where(
+                        Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                    )
+                else:
+                    stmt = stmt.where(Path.namespace == namespace)
 
             stmt = stmt.order_by(Path.domain, Path.path)
             result = await session.execute(stmt)
 
+            rows = list(result.all())
+
+            # Within a scoped view (namespace given), order namespace-matched
+            # rows before shared so the (domain, path) dedupe below keeps
+            # the caller's own copy when both partitions hold the same URI.
+            scoped_view = namespace is not None
+            if scoped_view and include_shared:
+                rows.sort(
+                    key=lambda triple: 0
+                    if triple[0].namespace == namespace
+                    else 1
+                )
+
             paths = []
             seen = set()
-            for path_obj, edge, memory in result.all():
-                key = (path_obj.domain, path_obj.path)
+            for path_obj, edge, memory in rows:
+                # In admin view, dedupe by (namespace, domain, path) so
+                # two namespaces' same URI both surface; in scoped view
+                # dedupe by (domain, path) so a shared duplicate of a
+                # user-namespace row collapses (user's row wins via the
+                # CASE order above).
+                key = (
+                    (path_obj.domain, path_obj.path)
+                    if scoped_view
+                    else (path_obj.namespace, path_obj.domain, path_obj.path)
+                )
                 if key in seen:
                     continue
                 seen.add(key)
@@ -390,6 +472,7 @@ class GraphService:
                     {
                         "domain": path_obj.domain,
                         "path": path_obj.path,
+                        "namespace": path_obj.namespace,
                         "uri": f"{path_obj.domain}://{path_obj.path}",
                         "name": path_obj.path.rsplit("/", 1)[-1],
                         "priority": edge.priority,
@@ -473,14 +556,27 @@ class GraphService:
         return path_obj
 
     async def _resolve_path(
-        self, session: AsyncSession, path: str, domain: str = "core"
+        self,
+        session: AsyncSession,
+        path: str,
+        domain: str = "core",
+        namespace: Optional[str] = None,
     ) -> Optional[tuple]:
-        """Resolve domain+path to (Path, Edge, node_uuid). Returns None if not found."""
-        result = await session.execute(
+        """Resolve domain+path to (Path, Edge, node_uuid). Returns None if not found.
+
+        When ``namespace`` is given, the lookup is restricted to that
+        namespace — preventing one user's resolve from picking up another
+        user's row with the same ``(domain, path)``. ``namespace=None``
+        preserves the legacy unfiltered behavior for admin tooling.
+        """
+        stmt = (
             select(Path, Edge)
             .join(Edge, Path.edge_id == Edge.id)
             .where(Path.domain == domain, Path.path == path)
         )
+        if namespace is not None:
+            stmt = stmt.where(Path.namespace == namespace)
+        result = await session.execute(stmt)
         row = result.first()
         if not row:
             return None
@@ -714,11 +810,17 @@ class GraphService:
         domain: str,
         path: str,
         *,
+        namespace: Optional[str] = None,
         collector: Optional[ChangeCollector] = None,
     ) -> None:
-        """Delete a path and all its descendant paths in the given domain."""
+        """Delete a path and all its descendant paths in the given domain.
+
+        When ``namespace`` is given, the deletion is scoped to that
+        namespace — so userA's remove_path can never delete userB's
+        same ``(domain, path)`` row.
+        """
         safe = escape_like_literal(path)
-        result = await session.execute(
+        stmt = (
             select(Path)
             .where(Path.domain == domain)
             .where(
@@ -728,6 +830,9 @@ class GraphService:
                 )
             )
         )
+        if namespace is not None:
+            stmt = stmt.where(Path.namespace == namespace)
+        result = await session.execute(stmt)
         paths = result.scalars().all()
 
         for p in paths:
@@ -741,9 +846,21 @@ class GraphService:
         session: AsyncSession,
         edge: Edge,
         *,
+        namespace: Optional[str] = None,
         collector: Optional[ChangeCollector] = None,
     ) -> None:
-        """Delete an edge, all its path references, and descendant paths."""
+        """Delete an edge, all its path references, and descendant paths.
+
+        ``namespace`` propagates the strict scope from a namespaced
+        ``remove_path`` call. The current call graph would be safe
+        without this propagation (``_gc_node_soft`` only fires post-
+        global-orphan-check on a per-namespace ``node_uuid``, so
+        descendants live in the same namespace), but encoding the
+        contract on the helper prevents a future caller from
+        re-introducing a cross-namespace cascade. ``namespace=None``
+        preserves the legacy unfiltered behavior for ``cascade_delete_node``
+        and similar admin paths.
+        """
         paths_result = await session.execute(
             select(Path).where(Path.edge_id == edge.id)
         )
@@ -754,6 +871,7 @@ class GraphService:
                 session,
                 p.domain,
                 p.path,
+                namespace=namespace,
                 collector=collector,
             )
 
@@ -861,10 +979,17 @@ class GraphService:
         session: AsyncSession,
         node_uuid: str,
         *,
+        namespace: Optional[str] = None,
         collector: Optional[ChangeCollector] = None,
     ) -> None:
         """Soft GC: if a node has no incoming paths, deprecate its memories
-        and cascade-delete all edges/paths around it."""
+        and cascade-delete all edges/paths around it.
+
+        ``namespace`` propagates the strict scope from a namespaced
+        ``remove_path`` so the cascade through ``_cascade_delete_edge``
+        cannot stray into another namespace. ``namespace=None`` preserves
+        the legacy admin-cascade behavior.
+        """
         if await self._count_incoming_paths(session, node_uuid) > 0:
             return
 
@@ -881,6 +1006,7 @@ class GraphService:
             await self._cascade_delete_edge(
                 session,
                 edge,
+                namespace=namespace,
                 collector=collector,
             )
 
@@ -1008,6 +1134,8 @@ class GraphService:
         priority: Optional[int] = None,
         disclosure: Optional[str] = None,
         domain: str = "core",
+        *,
+        namespace: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Update a memory.
@@ -1017,12 +1145,18 @@ class GraphService:
 
         PR #3c shim: delegates to ``MemoryEngine.upsert_versioned`` (when
         content changes) or ``MemoryEngine.patch_edge_metadata`` (metadata
-        only) with ``namespace='__shared__'``. Pre-flight resolves the
-        path and snapshots ``rows_before``; post-flight re-fetches to
-        build ``rows_after``. The ``priority``/``disclosure`` defaults of
-        ``None`` mean "preserve" in the legacy contract — we translate
-        that into the engine's ``_UNSET`` sentinel by simply omitting
-        unset kwargs from the engine call.
+        only). Pre-flight resolves the path and snapshots ``rows_before``;
+        post-flight re-fetches to build ``rows_after``. The
+        ``priority``/``disclosure`` defaults of ``None`` mean "preserve"
+        in the legacy contract — we translate that into the engine's
+        ``_UNSET`` sentinel by simply omitting unset kwargs from the
+        engine call.
+
+        ``namespace=None`` preserves the legacy ``__shared__`` lock so
+        existing admin tooling (``oc memory-server`` browse routes) keeps
+        editing shared memories. User-facing surfaces (desktop
+        ``/memory/update``) pass their own namespace so the user's
+        per-namespace memories are addressable.
         """
         if path == "":
             raise ValueError("Cannot update the root node.")
@@ -1032,6 +1166,8 @@ class GraphService:
                 f"No update fields provided for '{domain}://{path}'. "
                 "At least one of content, priority, or disclosure must be set."
             )
+
+        target_ns = namespace if namespace is not None else SHARED_NAMESPACE
 
         # Pre-flight: snapshot the current edge + active memory.
         async with self.session() as session:
@@ -1047,7 +1183,7 @@ class GraphService:
                     ),
                 )
                 .where(
-                    Path.namespace == SHARED_NAMESPACE,
+                    Path.namespace == target_ns,
                     Path.domain == domain,
                     Path.path == path,
                 )
@@ -1079,14 +1215,14 @@ class GraphService:
             ref = await self._engine.upsert_versioned(
                 f"{domain}://{path}",
                 content,
-                namespace=SHARED_NAMESPACE,
+                namespace=target_ns,
                 **engine_kwargs,
             )
             new_memory_id = ref.new_memory_id
         else:
             await self._engine.patch_edge_metadata(
                 f"{domain}://{path}",
-                namespace=SHARED_NAMESPACE,
+                namespace=target_ns,
                 **engine_kwargs,
             )
             new_memory_id = old_id
@@ -1253,14 +1389,25 @@ class GraphService:
             }
 
     async def remove_path(
-        self, path: str, domain: str = "core", session: Optional[AsyncSession] = None
+        self,
+        path: str,
+        domain: str = "core",
+        session: Optional[AsyncSession] = None,
+        *,
+        namespace: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Remove a path and its sub-paths with orphan prevention."""
+        """Remove a path and its sub-paths with orphan prevention.
+
+        When ``namespace`` is given, lookup and deletion are scoped to
+        that namespace — ``MemoryClient(namespace="A").forget(...)`` can
+        never delete a row in namespace ``B``. ``namespace=None``
+        preserves the legacy unfiltered behavior for admin tooling.
+        """
         if path == "":
             raise ValueError("Cannot remove the root path.")
 
         async with self._optional_session(session) as session:
-            target = await self._resolve_path(session, path, domain)
+            target = await self._resolve_path(session, path, domain, namespace=namespace)
             if not target:
                 raise ValueError(f"Path '{domain}://{path}' not found")
             _, target_edge, target_node_uuid = target
@@ -1296,11 +1443,15 @@ class GraphService:
 
             collector = ChangeCollector()
             affected_nodes = await self._search.get_node_uuids_for_prefix(session, domain, path)
-            await self._delete_subtree_paths(session, domain, path, collector=collector)
+            await self._delete_subtree_paths(
+                session, domain, path, namespace=namespace, collector=collector
+            )
             await session.flush()
 
             await self._gc_edge_if_pathless(session, target_edge, collector=collector)
-            await self._gc_node_soft(session, target_node_uuid, collector=collector)
+            await self._gc_node_soft(
+                session, target_node_uuid, namespace=namespace, collector=collector
+            )
 
             for node_uuid in affected_nodes:
                 await self._search.refresh_search_documents_for_node(node_uuid, session=session)
@@ -1382,10 +1533,28 @@ class GraphService:
     # Recent Memories
     # =========================================================================
 
-    async def get_recent_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get the most recently created/updated non-deprecated memories."""
+    async def get_recent_memories(
+        self,
+        limit: int = 10,
+        *,
+        namespace: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Get the most recently created/updated non-deprecated memories.
+
+        ``namespace`` filtering modes:
+          * ``namespace=None`` — legacy admin view (all rows).
+          * ``namespace=X``, ``include_shared=False`` (default) — strict.
+            ``MemoryClient(namespace="A").get_recent()`` uses this so a
+            user does not see other users' or system shared rows in
+            their own recent listing.
+          * ``namespace=X``, ``include_shared=True`` — UI/desktop mode.
+            Returns rows in ``X`` *or* ``__shared__``. The desktop
+            ``/memory/recent`` endpoint uses this so user-customized
+            ``core://agent/*`` rows surface alongside per-user rows.
+        """
         async with self.session() as session:
-            result = await session.execute(
+            stmt = (
                 select(Memory, Edge, Path)
                 .select_from(Path)
                 .join(Edge, Path.edge_id == Edge.id)
@@ -1398,6 +1567,14 @@ class GraphService:
                 )
                 .order_by(Memory.created_at.desc())
             )
+            if namespace is not None:
+                if include_shared:
+                    stmt = stmt.where(
+                        Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                    )
+                else:
+                    stmt = stmt.where(Path.namespace == namespace)
+            result = await session.execute(stmt)
 
             seen = set()
             memories = []

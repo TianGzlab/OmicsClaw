@@ -369,29 +369,48 @@ class MemoryClient:
     # ------------------------------------------------------------------
 
     async def get_recent(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Return recently updated memories (no namespace filter — admin view)."""
+        """Return recently updated memories scoped to the client's namespace.
+
+        Strict — no shared fallback, by the same rule as
+        ``MemoryEngine.list_children`` (recent listings should not bleed
+        ``__shared__`` system rows into a per-user view).
+        """
         await self._ensure_init()
         from .graph import GraphService
 
         assert self._engine is not None
         graph = GraphService(self._engine.db, self._engine.search_indexer)
-        return await graph.get_recent_memories(limit=limit)
+        return await graph.get_recent_memories(
+            limit=limit, namespace=self._namespace
+        )
 
     async def forget(self, uri: str) -> Dict[str, Any]:
-        """Remove a memory by URI.
+        """Remove a memory by URI, mirroring ``remember``'s routing policy.
 
-        Currently delegates to ``GraphService.remove_path`` — the engine
-        does not yet expose a delete verb (that lands in PR #4b
-        ``ReviewLog.cascade_delete``). Path lookup is scoped to the
-        client's namespace.
+        Resolves the target namespace via the same ``namespace_policy``
+        that ``remember`` uses: ``core://agent/*``, ``core://kh/*``,
+        ``core://my_user_default/*`` route to ``__shared__`` regardless of
+        the caller's namespace; everything else stays in the caller's
+        namespace. This keeps ``remember(uri) → forget(uri)`` symmetric
+        — a per-user client can clean up its own shared-prefix writes —
+        while still preventing cross-user deletes for non-shared URIs
+        (``MemoryClient(namespace="A").forget("dataset://x")`` cannot
+        reach namespace ``B``).
+
+        Delegates to ``GraphService.remove_path`` (the engine does not
+        yet expose a delete verb — that lands in PR #4b
+        ``ReviewLog.cascade_delete``).
         """
         await self._ensure_init()
         from .graph import GraphService
 
         parsed = MemoryURI.parse(uri)
+        target_ns = resolve_namespace(parsed, current=self._namespace)
         assert self._engine is not None
         graph = GraphService(self._engine.db, self._engine.search_indexer)
-        result = await graph.remove_path(path=parsed.path, domain=parsed.domain)
+        result = await graph.remove_path(
+            path=parsed.path, domain=parsed.domain, namespace=target_ns
+        )
 
         try:
             from .snapshot import get_changeset_store

@@ -1746,10 +1746,11 @@ async def chat_stream(req: ChatRequest):
 
             on_context_compacted = make_compaction_event_handler(queue)
 
+            from omicsclaw.memory import desktop_chat_user_id
             result = await core.llm_tool_loop(
                 chat_id=session_id,
                 user_content=user_content,
-                user_id="desktop_user",
+                user_id=desktop_chat_user_id(),
                 workspace=req.workspace,
                 pipeline_workspace=req.pipeline_workspace,
                 output_style=req.output_style,
@@ -2850,6 +2851,7 @@ async def memory_update(req: MemoryUpdateRequest):
             content=req.content,
             priority=req.priority,
             domain=req.domain,
+            namespace=_memory_client.namespace,
         )
         return {"ok": True, "path": req.path, "domain": req.domain, "result": result}
     except ValueError as exc:
@@ -2901,6 +2903,8 @@ async def memory_children(
             node_uuid=parent_uuid,
             context_domain=domain,
             context_path=path or None,
+            namespace=_memory_client.namespace,
+            include_shared=True,
         )
         return {"node_uuid": parent_uuid, "domain": domain, "children": children}
     except Exception as exc:
@@ -2918,7 +2922,11 @@ async def memory_domains():
 
     try:
         graph = _get_graph_service()
-        all_paths = await graph.get_all_paths(domain=None)
+        all_paths = await graph.get_all_paths(
+            domain=None,
+            namespace=_memory_client.namespace,
+            include_shared=True,
+        )
 
         # Group by domain and count
         domain_counts: dict[str, int] = {}
@@ -2947,7 +2955,17 @@ async def memory_recent(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        results = await _memory_client.get_recent(limit=limit)
+        # Desktop UI mode: route through GraphService directly with
+        # include_shared=True so user-customized core://agent/* rows
+        # surface alongside per-namespace rows. The strict
+        # MemoryClient.get_recent is reserved for multi-tenant bot
+        # surfaces where shared bleed-through would be wrong.
+        graph = _get_graph_service()
+        results = await graph.get_recent_memories(
+            limit=limit,
+            namespace=_memory_client.namespace,
+            include_shared=True,
+        )
         return {"results": results, "count": len(results)}
     except Exception as exc:
         logger.exception("Memory recent error")
