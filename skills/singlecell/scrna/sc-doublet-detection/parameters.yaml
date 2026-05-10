@@ -1,0 +1,89 @@
+domain: singlecell
+allowed_extra_flags:
+- --method
+- --expected-doublet-rate
+- --threshold
+- --batch-key
+- --doubletdetection-n-iters
+- --doubletdetection-standard-scaling
+- --no-doubletdetection-standard-scaling
+- --scds-mode
+- --r-enhanced
+param_hints:
+  scrublet:
+    priority: expected_doublet_rate -> batch_key
+    params:
+    - expected_doublet_rate
+    - batch_key
+    advanced_params:
+    - threshold
+    defaults:
+      expected_doublet_rate: 0.06
+      threshold: auto
+    requires:
+    - scrublet
+    - raw_count_like_input
+    tips:
+    - '--method scrublet: default Python-native path.'
+    - '--batch-key: useful when captures/samples are mixed and Scrublet should run
+      per batch.'
+    - '--threshold: manual cutoff overriding Scrublet''s automatic call.'
+  doubletdetection:
+    priority: doubletdetection_n_iters
+    params:
+    - doubletdetection_n_iters
+    - doubletdetection_standard_scaling
+    defaults:
+      doubletdetection_n_iters: 10
+      doubletdetection_standard_scaling: false
+    requires:
+    - doubletdetection
+    - raw_count_like_input
+    tips:
+    - '--method doubletdetection: consensus Python path borrowed from SCOP''s method
+      surface.'
+    - The current wrapper records expected_doublet_rate for context, but the native
+      DoubletDetection classifier does not use it directly.
+  doubletfinder:
+    priority: expected_doublet_rate
+    params:
+    - expected_doublet_rate
+    defaults:
+      expected_doublet_rate: 0.06
+    requires:
+    - R_doubletfinder_stack
+    tips:
+    - '--method doubletfinder: R-backed Seurat path.'
+    - If the R runtime fails, the wrapper falls back to scDblFinder and reports both
+      methods.
+  scdblfinder:
+    priority: expected_doublet_rate
+    params:
+    - expected_doublet_rate
+    defaults:
+      expected_doublet_rate: 0.06
+    requires:
+    - R_scdblfinder_stack
+    tips:
+    - '--method scdblfinder: fast Bioconductor path with a compact wrapper surface.'
+  scds:
+    priority: expected_doublet_rate -> scds_mode
+    params:
+    - expected_doublet_rate
+    - scds_mode
+    defaults:
+      expected_doublet_rate: 0.06
+      scds_mode: cxds
+    requires:
+    - R_scds_stack
+    tips:
+    - '--method scds: Bioconductor score family from SCOP.'
+    - --scds-mode chooses which score (`hybrid`, `cxds`, or `bcds`) becomes the public
+      call surface.
+    - In the current environment, `cxds` is the safest first-pass default.
+legacy_aliases:
+- sc-doublet
+saves_h5ad: true
+requires_preprocessed: false
+script: sc_doublet.py
+trigger_keywords: []
