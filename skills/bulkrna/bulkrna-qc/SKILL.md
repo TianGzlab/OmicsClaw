@@ -1,154 +1,74 @@
 ---
 name: bulkrna-qc
-description: >-
-  Bulk RNA-seq count matrix quality control — library sizes, gene detection, sample
-  correlation, outlier detection, CPM normalization.
+description: Load when checking a bulk RNA-seq count matrix for library-size outliers, gene detection rates, and sample-sample correlation before DE. Skip if data is raw FASTQ (use bulkrna-read-qc) or aligner logs (use bulkrna-read-alignment), or for single-cell counts (use sc-qc).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, QC, count-matrix, library-size, gene-detection, sample-correlation,
-  CPM]
-requires: [numpy, pandas, matplotlib, scipy]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "📊"
-    trigger_keywords: [bulk QC, library size, count matrix, sample quality, gene detection,
-      RNA-seq quality, count QC]
-    allowed_extra_flags: []
-    legacy_aliases: [bulk-align]
-    saves_h5ad: false
-    script: bulkrna_qc.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- bulkrna
+- QC
+- count-matrix
+- library-size
+- gene-detection
+- sample-correlation
+- CPM
+requires:
+- numpy
+- pandas
+- matplotlib
+- scipy
 ---
 
-# Bulk RNA-seq Count Matrix QC
+# bulkrna-qc
 
-Quality control assessment of bulk RNA-seq count matrices. Computes library sizes, gene detection rates, sample-to-sample correlations (log-CPM Pearson), outlier detection, and CPM normalization.
+## When to use
 
-## Core Capabilities
+Run as the first step on a bulk RNA-seq count matrix (genes × samples)
+before differential expression.  Surfaces the four failure modes that
+silently bias DE results: a sample with a tiny library, a sample with
+suspiciously few detected genes, a low-correlation outlier vs the rest,
+and CPM-vs-raw comparison artefacts.
 
-- Compute per-sample library sizes and gene detection rates
-- Log-CPM Pearson correlation heatmap with automatic outlier flagging (MAD-based)
-- CPM normalization output for downstream analysis
-- Expression density plots for cross-sample comparison
-- Auto-detect sample group labels from naming conventions
+## Inputs & Outputs
 
-## CLI Reference
+| Input | Format | Required |
+|---|---|---|
+| Count matrix | `.csv` (gene id col + sample count cols) | yes (or `--demo`) |
+
+| Output | Path | Notes |
+|---|---|---|
+| Library sizes | `figures/library_sizes.png` | per-sample total counts |
+| Gene detection | `figures/gene_detection.png` | non-zero gene count per sample |
+| Sample correlation | `figures/sample_correlation_heatmap.png` | Spearman or Pearson |
+| Outlier flag | `result.json["outliers"]` | sample names flagged below correlation threshold |
+| CPM-normalised matrix | `tables/cpm.csv` | per-million normalisation, useful for visualisation |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load the count matrix (raise on missing `--input` or non-existent file per `bulkrna_qc.py:428,431`).
+2. Compute per-sample library sizes and detected-gene counts.
+3. Compute sample × sample correlation matrix; flag samples below the median-of-medians threshold as outliers.
+4. Compute CPM normalisation as a side artifact (write `tables/cpm.csv`).
+5. Render four figures and emit `report.md` + `result.json`.
+
+## Gotchas
+
+- **Hard-fails on missing input.**  `bulkrna_qc.py:428` raises `ValueError("--input is required when not using --demo")`; `:431` raises `FileNotFoundError` if the path doesn't exist.  No silent demo fallback when `--input` is given but invalid — fix the path or use `--demo`.
+- **CPM is for visualisation only.**  `tables/cpm.csv` is emitted as a downstream-friendly artefact, but **DE testing must always use raw counts** (PyDESeq2's negative-binomial GLM expects integer counts; feeding CPM produces meaningless dispersion estimates).  Do not pipe `cpm.csv` into `bulkrna-de`.
+- **Outlier flagging is correlation-based, not biology-aware.**  If two biological conditions differ strongly (e.g. tumour vs normal), the cross-condition correlations are *expected* to be lower — the outlier flag may fire on legitimate biology.  Cross-check `result.json["outliers"]` against the experimental design before excluding samples.
+- **First column is treated as the gene-id column unconditionally.**  If the CSV has a header row but no leading id column (samples-only), the first sample column will be silently parsed as gene names and omitted from QC.  Inspect `report.md`'s "samples seen" count vs your design before trusting the output.
+
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-qc --demo
-python omicsclaw.py run bulkrna-qc --input <counts.csv> --output <dir>
-python bulkrna_qc.py --input counts.csv --output results/
-python bulkrna_qc.py --demo --output /tmp/qc_demo
+python omicsclaw.py run bulkrna-qc --input counts.csv --output results/
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: Researchers manually inspect count matrices, compute library sizes in R/Python, generate correlation heatmaps, and visually scan for outlier samples — each step requiring separate scripts and ad-hoc thresholds.
-- **With it**: A single Python command runs the full QC pipeline — library sizes, gene detection, log-CPM correlation, outlier flagging, CPM export — and produces publication-ready figures and a structured report.
-- **Why OmicsClaw**: Integrates best-practice QC metrics (log-CPM correlation, MAD-based outlier detection) into the OmicsClaw reporting framework with auto-generated demo data for testing.
-
-## Algorithm / Methodology
-
-### Library Size Analysis
-- Raw counts per sample are summed to compute library size
-- Coefficient of variation (CV) across samples quantifies library size imbalance
-
-### Gene Detection
-- Genes detected in each sample (count > 0) are counted
-- Distribution shows data sparsity patterns
-
-### Sample Correlation
-- Pearson correlation is computed on log2(CPM + 1) transformed data
-- Using log-CPM rather than raw counts avoids domination by highly-expressed genes
-
-### Outlier Detection
-- Mean inter-sample correlation per sample is compared against the cohort median
-- Samples below `median − 2 × MAD × 1.4826` are flagged as potential outliers
-
-### CPM Normalization
-- Counts Per Million: `CPM_ij = count_ij / library_size_j × 10^6`
-
-## Input Formats
-
-| Format | Extension | Description |
-|--------|-----------|-------------|
-| Count matrix | `.csv` | Genes as rows, samples as columns; first column is gene identifiers |
-
-## Workflow
-
-1. **Load**: Read a genes-by-samples raw count matrix (CSV).
-2. **Library sizes**: Sum counts per sample, compute mean, median, and CV.
-3. **Gene detection**: Count samples detecting each gene (count >0).
-4. **CPM normalize**: Compute Counts Per Million for downstream use.
-5. **Correlate**: Pearson correlation on log2(CPM+1) values.
-6. **Outlier detection**: Flag samples with low mean correlation via MAD threshold.
-7. **Visualize**: Generate library size bar chart, gene detection histogram, correlation heatmap, and expression density plot.
-8. **Report**: Write markdown report, result.json, tables (sample stats, CPM), and reproducibility script.
-
-## Example Queries
-
-- "Check the quality of my bulk RNA-seq count matrix"
-- "Are there any outlier samples in my data?"
-- "Generate a sample correlation heatmap"
-- "Normalize my counts to CPM"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── library_sizes.png
-│   ├── gene_detection.png
-│   ├── sample_correlation.png
-│   └── expression_density.png
-├── tables/
-│   ├── sample_stats.csv
-│   └── cpm_normalized.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | — | Path to count matrix CSV (genes x samples) |
-| `--output` | — | Output directory (required) |
-| `--demo` | — | Run with bundled/auto-generated demo data |
-
-## Safety
-
-- **Local-first**: All processing runs locally; no data is uploaded to external services.
-- **Disclaimer**: Every report includes the standard OmicsClaw disclaimer.
-- **Audit trail**: Parameters, sample metadata, and input checksums are recorded in result.json.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked when user intent matches count matrix QC, library size, or sample quality keywords.
-
-**Chaining partners**:
-- `bulkrna-de` — Downstream: differential expression on QC-verified data
-- `bulkrna-coexpression` — Downstream: co-expression network analysis
-- `bulkrna-deconvolution` — Downstream: cell type deconvolution
-
-## Version Compatibility
-
-Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotlib 3.7+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, matplotlib
-
-## Related Skills
-
-- `bulkrna-read-qc` — Upstream: FASTQ quality assessment
-- `bulkrna-read-alignment` — Upstream: alignment statistics
-- `bulkrna-de` — Downstream: differential expression analysis
-- `bulkrna-coexpression` — Downstream: co-expression network analysis
-- `bulkrna-deconvolution` — Downstream: cell type deconvolution
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — library-size, gene-detection, correlation-based outlier metrics
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-read-qc` / `bulkrna-read-alignment` (upstream), `bulkrna-de` (downstream — raw counts only), `bulkrna-batch-correction` (downstream if QC reveals batch effects), `sc-qc` (single-cell sibling)
