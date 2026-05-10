@@ -2469,6 +2469,40 @@ async def uninstall_skill(req: SkillUninstallRequest):
 # GET /memory/browse — browse memory graph nodes
 # ---------------------------------------------------------------------------
 
+async def _decorate_analysis_titles(children: list) -> None:
+    """Replace ``name`` with a derived display label for analysis://*
+    children, in-place. See
+    docs/adr/0002-derived-display-label-for-analysis-memory.md.
+
+    The engine's ``list_children_rich`` returns a 100-char
+    ``content_snippet`` that's too short to carry the full
+    ``executed_at``/``parameters.input``, so we fetch the full content
+    via ``recall`` for each analysis child. Cost = N indexed reads where
+    N = number of analysis children rendered in the current tree level
+    (typically ≤ 50 in the desktop UI). Silent fallback to ``edge.name``
+    on parse failure or missing fields means the UI never renders blank.
+    """
+    if _memory_client is None:
+        return
+    from omicsclaw.memory.compat import _analysis_content_to_title
+
+    for child in children:
+        if child.get("domain") != "analysis":
+            continue
+        path = child.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        try:
+            record = await _memory_client.recall(f"analysis://{path}")
+        except Exception:
+            continue
+        if record is None or not getattr(record, "content", None):
+            continue
+        title = _analysis_content_to_title(record.content)
+        if title is not None:
+            child["name"] = title
+
+
 @app.get("/memory/browse")
 async def memory_browse(
     path: str = Query("", description="Node path to browse"),
@@ -2495,6 +2529,7 @@ async def memory_browse(
             context_path=path,
             include_shared=True,
         )
+        await _decorate_analysis_titles(children)
 
         # Also get the node itself if path is provided
         node = None
@@ -2929,6 +2964,7 @@ async def memory_children(
             context_path=path_str or None,
             include_shared=True,
         )
+        await _decorate_analysis_titles(children)
         return {"node_uuid": parent_uuid, "domain": domain_str, "children": children}
     except Exception as exc:
         logger.exception("Memory children error")

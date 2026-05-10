@@ -214,6 +214,73 @@ def _content_to_memory(content: str, memory_type: str) -> Optional[BaseMemory]:
         return None
 
 
+def _analysis_content_to_title(
+    content: str, *, now: Optional[datetime] = None
+) -> Optional[str]:
+    """Render the desktop tree label for an ``analysis://*`` memory.
+
+    The URI's last path segment is a UUID hex (load-bearing for write-
+    collision avoidance), so the segment alone is unintelligible. This
+    helper parses the Pydantic-serialized content and produces a
+    human-readable Display label:
+
+        ``<dataset_basename> · <hh:mm or yyyy-mm-dd hh:mm> · <status>``
+
+    Returns ``None`` on any failure (non-JSON, missing ``executed_at``,
+    unparseable timestamp). Callers fall back to ``edge.name`` so the
+    UI never renders a blank row.
+
+    The ``now`` keyword exists so tests can pin the today/older
+    boundary; production passes ``None`` and the helper uses
+    ``datetime.now(tz=UTC)``. Both ``executed_at`` and ``now`` are
+    converted to the server's local TZ for the date/time format —
+    correct for the desktop deployment (server == user); remote-mode
+    surfaces a known caveat (see
+    docs/adr/0002-derived-display-label-for-analysis-memory.md).
+    """
+    if not content:
+        return None
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    executed_raw = data.get("executed_at")
+    if not isinstance(executed_raw, str):
+        return None
+    try:
+        executed_at = datetime.fromisoformat(executed_raw.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if executed_at.tzinfo is None:
+        executed_at = executed_at.replace(tzinfo=timezone.utc)
+    local_executed = executed_at.astimezone()
+
+    if now is None:
+        now = datetime.now(tz=timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local_now = now.astimezone()
+
+    if local_executed.date() == local_now.date():
+        time_str = local_executed.strftime("%H:%M")
+    else:
+        time_str = local_executed.strftime("%Y-%m-%d %H:%M")
+
+    params = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+    raw_input = params.get("input") if isinstance(params.get("input"), str) else ""
+    if raw_input:
+        basename = os.path.basename(raw_input) or raw_input
+    else:
+        basename = "<unknown dataset>"
+
+    status = data.get("status") if isinstance(data.get("status"), str) else "?"
+
+    return f"{basename} · {time_str} · {status}"
+
+
 # =============================================================================
 # CompatMemoryStore — implements the old MemoryStore interface
 # =============================================================================
