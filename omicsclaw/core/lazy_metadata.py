@@ -77,9 +77,12 @@ class LazySkillMetadata:
         # null-valued collections do not crash callers.
         runtime: dict[str, object] = {}
         for key in _RUNTIME_FIELDS:
-            value = sidecar.get(key) if sidecar.get(key) is not None else None
+            # `dict.get(missing_key)` already returns None, so this two-step
+            # fallthrough handles both "key absent" and "value is None" (bare
+            # YAML key) uniformly.
+            value = sidecar.get(key)
             if value is None:
-                value = legacy.get(key) if legacy.get(key) is not None else None
+                value = legacy.get(key)
             if value is None:
                 value = _RUNTIME_DEFAULTS[key]
             runtime[key] = value
