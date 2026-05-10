@@ -1,278 +1,81 @@
 ---
 name: genomics-variant-calling
-description: >-
-  Germline and somatic variant calling (SNVs, Indels) using GATK HaplotypeCaller,
-  Mutect2, DeepVariant, or FreeBayes. Includes GVCF workflow, VQSR, and hard filtering.
-version: 0.2.0
+description: Load when summarising small variants (SNVs / indels) from a VCF or computing demo-pattern variant statistics (Ti/Tv ratio, per-chromosome distribution, SNP / indel split). Skip when filtering / merging VCFs (use `genomics-vcf-operations`), when calling structural variants (use `genomics-sv-detection`), or when adding functional annotations (use `genomics-variant-annotation`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [genomics, variant-calling, GATK, DeepVariant, FreeBayes, VQSR]
-metadata:
-  omicsclaw:
-    domain: genomics
-    emoji: "🔎"
-    trigger_keywords: [variant calling, SNV, indel, GATK, DeepVariant, FreeBayes,
-      Mutect2, VQSR]
-    allowed_extra_flags:
-    - "--method"
-    legacy_aliases: [variant-call]
-    saves_h5ad: false
-    script: genomics_variant_calling.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- genomics
+- variant-calling
+- snv
+- indel
+- vcf
+- ti-tv
+requires:
+- pandas
+- numpy
 ---
 
-# 🔎 Variant Calling
+# genomics-variant-calling
 
-Germline and somatic small variant calling (SNVs, Indels). Supports GATK HaplotypeCaller, Mutect2, DeepVariant, and FreeBayes.
+## When to use
 
-## Core Capabilities
+The user has a VCF (or a BAM intended for calling) and wants
+small-variant summary statistics: total variant count, SNP / indel
+split, Ti/Tv ratio, per-chromosome distribution. The script does
+**not** invoke an external caller (GATK HaplotypeCaller, Mutect2,
+DeepVariant, FreeBayes, etc.) — it summarises an existing VCF or
+generates a demo VCF for downstream-skill smoke tests.
 
-1. **GATK HaplotypeCaller**: Gold standard for germline variant calling with GVCF cohort workflow
-2. **GATK Mutect2**: Somatic variant calling for tumor-normal pairs
-3. **DeepVariant**: Deep learning-based variant caller (CNN)
-4. **FreeBayes**: Bayesian haplotype-based caller
-5. **VQSR / Hard Filtering**: Machine learning and rule-based variant quality filtering
+For variant filtering / normalisation use `genomics-vcf-operations`;
+for SVs use `genomics-sv-detection`; for functional annotation use
+`genomics-variant-annotation`.
 
-## CLI Reference
+## Inputs & Outputs
 
-```bash
-python omicsclaw.py run genomics-variant-calling --demo
-python omicsclaw.py run genomics-variant-calling --input <data.bam> --output <dir>
-```
+| Input | Format | Required |
+|---|---|---|
+| Variants | `.vcf` or `.bam` (BAM only used as a placeholder; no calling is run) | yes (unless `--demo`) |
 
-## Algorithm / Methodology
+| Output | Path | Notes |
+|---|---|---|
+| Variant table | `tables/variants.csv` | per-variant CHROM/POS/REF/ALT/QUAL |
+| Per-chromosome | `tables/variants_per_chrom.csv` | counts per chromosome |
+| Report | `report.md` + `result.json` | always; `result.json["data"]["variants_per_chrom"]` mirrors the table |
 
-### GATK Single-Sample Calling
+## Flow
 
-```bash
-# Basic HaplotypeCaller
-gatk HaplotypeCaller \
-    -R reference.fa \
-    -I sample.bam \
-    -O sample.vcf.gz
+1. Load VCF (`--input <file.vcf>`) or generate a demo VCF at `output_dir/demo_variants.vcf` with `--n-variants` records (`genomics_variant_calling.py:94`).
+2. Parse records; classify SNP vs indel; compute Ti/Tv on biallelic SNPs.
+3. Aggregate per-chromosome counts.
+4. Write `tables/variants.csv` (`genomics_variant_calling.py:300`) + `tables/variants_per_chrom.csv` (`:308`) + `report.md` + `result.json` envelope (`:314`).
 
-# With standard annotations
-gatk HaplotypeCaller \
-    -R reference.fa \
-    -I sample.bam \
-    -O sample.vcf.gz \
-    -A Coverage -A QualByDepth -A FisherStrand -A StrandOddsRatio \
-    -A MappingQualityRankSumTest -A ReadPosRankSumTest
+## Gotchas
 
-# Target intervals (exome/panel)
-gatk HaplotypeCaller \
-    -R reference.fa \
-    -I sample.bam \
-    -L targets.interval_list \
-    -O sample.vcf.gz
-```
+- **No external caller is invoked.** This skill does NOT run GATK / Mutect2 / DeepVariant / FreeBayes — it ingests a VCF and summarises it. To actually CALL variants, run an external pipeline first; this skill consumes the resulting VCF.
+- **`--input` REQUIRED unless `--demo`.** `genomics_variant_calling.py:289` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError` at `:292`.
+- **`--n-variants` only affects `--demo`** (`genomics_variant_calling.py:278`, default 500). It is silently ignored when `--input` is set.
+- **Multi-allelic VCF rows ARE split per-ALT.** `genomics_variant_calling.py:181-182` iterates `for a in alt.split(","):` and emits one CSV row per ALT allele. Output row counts therefore exceed input VCF line counts on multi-allelic data — no need to pre-normalise unless your downstream consumer requires one row per VCF line.
+- **Demo VCF is a minimal SNV set** (no indels, no structural variants, no genotype fields). Useful for orchestrator smoke tests; do NOT use for biological inference.
 
-### GVCF Workflow (Recommended for Cohorts)
+## Key CLI
 
 ```bash
-# Step 1: Generate GVCFs per sample
-gatk HaplotypeCaller \
-    -R reference.fa \
-    -I sample.bam \
-    -O sample.g.vcf.gz \
-    -ERC GVCF
+# Demo (500 synthetic SNVs)
+python omicsclaw.py run genomics-variant-calling --demo --output /tmp/var_demo
 
-# Step 2: Combine GVCFs (GenomicsDBImport)
-gatk GenomicsDBImport \
-    --genomicsdb-workspace-path genomicsdb \
-    --sample-name-map sample_map.txt \
-    -L intervals.interval_list
+# Custom demo size
+python omicsclaw.py run genomics-variant-calling --demo --n-variants 2000 \
+  --output /tmp/var_demo_large
 
-# Step 3: Joint Genotyping
-gatk GenotypeGVCFs \
-    -R reference.fa \
-    -V gendb://genomicsdb \
-    -O cohort.vcf.gz
+# Real VCF
+python omicsclaw.py run genomics-variant-calling \
+  --input cohort.vcf --output results/
 ```
 
-### VQSR (Variant Quality Score Recalibration)
+## See also
 
-Machine learning-based filtering using known variant sites. Requires many variants (WGS preferred).
-
-```bash
-# Build SNP model
-gatk VariantRecalibrator \
-    -R reference.fa -V cohort.vcf.gz \
-    --resource:hapmap,known=false,training=true,truth=true,prior=15.0 hapmap.vcf.gz \
-    --resource:omni,known=false,training=true,truth=false,prior=12.0 omni.vcf.gz \
-    --resource:1000G,known=false,training=true,truth=false,prior=10.0 1000G.vcf.gz \
-    --resource:dbsnp,known=true,training=false,truth=false,prior=2.0 dbsnp.vcf.gz \
-    -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR \
-    -mode SNP -O snp.recal --tranches-file snp.tranches
-
-# Apply SNP filter
-gatk ApplyVQSR \
-    -R reference.fa -V cohort.vcf.gz -O cohort.snp_recal.vcf.gz \
-    --recal-file snp.recal --tranches-file snp.tranches \
-    --truth-sensitivity-filter-level 99.5 -mode SNP
-```
-
-### Hard Filtering (When VQSR Not Suitable)
-
-For small datasets, exomes, or single samples where VQSR fails.
-
-```bash
-# Filter SNPs
-gatk VariantFiltration -R reference.fa -V snps.vcf.gz -O snps.filtered.vcf.gz \
-    --filter-expression "QD < 2.0" --filter-name "QD2" \
-    --filter-expression "FS > 60.0" --filter-name "FS60" \
-    --filter-expression "MQ < 40.0" --filter-name "MQ40" \
-    --filter-expression "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
-    --filter-expression "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8" \
-    --filter-expression "SOR > 3.0" --filter-name "SOR3"
-
-# Filter Indels
-gatk VariantFiltration -R reference.fa -V indels.vcf.gz -O indels.filtered.vcf.gz \
-    --filter-expression "QD < 2.0" --filter-name "QD2" \
-    --filter-expression "FS > 200.0" --filter-name "FS200" \
-    --filter-expression "ReadPosRankSum < -20.0" --filter-name "ReadPosRankSum-20" \
-    --filter-expression "SOR > 10.0" --filter-name "SOR10"
-```
-
-### BQSR (Base Quality Score Recalibration)
-
-```bash
-# Step 1: BaseRecalibrator
-gatk BaseRecalibrator -R reference.fa -I sample.bam \
-    --known-sites dbsnp.vcf.gz --known-sites known_indels.vcf.gz \
-    -O recal_data.table
-
-# Step 2: ApplyBQSR
-gatk ApplyBQSR -R reference.fa -I sample.bam \
-    --bqsr-recal-file recal_data.table -O sample.recal.bam
-```
-
-### Complete Single-Sample Pipeline
-
-```bash
-#!/bin/bash
-SAMPLE=$1; REF=reference.fa
-DBSNP=dbsnp.vcf.gz; KNOWN_INDELS=known_indels.vcf.gz
-
-# BQSR
-gatk BaseRecalibrator -R $REF -I ${SAMPLE}.bam \
-    --known-sites $DBSNP --known-sites $KNOWN_INDELS -O ${SAMPLE}.recal.table
-gatk ApplyBQSR -R $REF -I ${SAMPLE}.bam \
-    --bqsr-recal-file ${SAMPLE}.recal.table -O ${SAMPLE}.recal.bam
-
-# Call variants
-gatk HaplotypeCaller -R $REF -I ${SAMPLE}.recal.bam -O ${SAMPLE}.g.vcf.gz -ERC GVCF
-
-# Genotype
-gatk GenotypeGVCFs -R $REF -V ${SAMPLE}.g.vcf.gz -O ${SAMPLE}.vcf.gz
-
-# Hard filter
-gatk VariantFiltration -R $REF -V ${SAMPLE}.vcf.gz -O ${SAMPLE}.filtered.vcf.gz \
-    --filter-expression "QD < 2.0" --filter-name "LowQD" \
-    --filter-expression "FS > 60.0" --filter-name "HighFS" \
-    --filter-expression "MQ < 40.0" --filter-name "LowMQ"
-```
-
-## Key Annotations Reference
-
-| Annotation | Description | Good Values |
-|------------|-------------|-------------|
-| QD | Quality by Depth | > 2.0 |
-| FS | Fisher Strand | < 60 (SNP), < 200 (Indel) |
-| SOR | Strand Odds Ratio | < 3 (SNP), < 10 (Indel) |
-| MQ | Mapping Quality | > 40 |
-| MQRankSum | MQ Rank Sum Test | > -12.5 |
-| ReadPosRankSum | Read Position Rank Sum | > -8.0 (SNP), > -20.0 (Indel) |
-
-## Resource Files
-
-| Resource | Use |
-|----------|-----|
-| dbSNP | Known variants (prior=2.0) |
-| HapMap | Training/truth SNPs (prior=15.0) |
-| Omni | Training SNPs (prior=12.0) |
-| 1000G SNPs | Training SNPs (prior=10.0) |
-| Mills Indels | Training/truth indels (prior=12.0) |
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--method` | `gatk` | gatk, deepvariant, freebayes |
-| `--mode` | `germline` | germline or somatic |
-| `--reference` | required | Reference genome FASTA |
-| `--intervals` | none | Target intervals (BED/interval_list) |
-
-## Why This Exists
-
-- **Without it**: Raw alignments contain spurious mismatch artifacts from sequencing chemistry or mapping errors
-- **With it**: Machine learning and Bayesian models distinguish true biology from technical noise
-- **Why OmicsClaw**: Standardizes the notoriously complex GATK/DeepVariant execution graphs
-
-## Workflow
-
-1. **Calculate**: Accumulate pileups and local haplotype graphs.
-2. **Execute**: Calculate likelihood of variant states per locus.
-3. **Assess**: Perform VQSR machine learning or hard filtering.
-4. **Generate**: Output structural VCF catalogs.
-5. **Report**: Tabulate key transition/transversion metrics.
-
-## Example Queries
-
-- "Call germline traits from this bam using GATK"
-- "Use Mutect2 for somatic variants on tumor-normal pairs"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── variants.vcf.gz
-├── figures/
-│   └── vqsr_tranches.png
-├── tables/
-│   └── variant_quality_summary.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `align` — Upstream BAM mapping
-- `annotation` — Downstream consequence indexing
-
-## Version Compatibility
-
-Reference examples tested with: GATK 4.5+, bcftools 1.19+
-
-## Dependencies
-
-**Required**: GATK 4.x, samtools, bcftools
-**Optional**: DeepVariant, FreeBayes
-
-## Citations
-
-- [GATK](https://gatk.broadinstitute.org/) — McKenna et al., Genome Research 2010
-- [DeepVariant](https://doi.org/10.1038/nbt.4235) — Poplin et al., Nature Biotechnology 2018
-- [FreeBayes](https://github.com/freebayes/freebayes) — Garrison & Marth, arXiv 2012
-
-## Related Skills
-
-- `genomics-qc` — QC before variant calling
-- `align` — Read alignment upstream
-- `vcf-ops` — Post-calling VCF manipulation
-- `variant-annotate` — Variant annotation downstream
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — SNP / indel / Ti-Tv definitions
+- `references/output_contract.md` — `tables/variants.csv` schema
+- Adjacent skills: `genomics-alignment` (upstream — produces the BAM that calling consumes), `genomics-vcf-operations` (downstream — VCF filtering / merging), `genomics-variant-annotation` (downstream — functional impact), `genomics-sv-detection` (parallel — SVs instead of small variants)
