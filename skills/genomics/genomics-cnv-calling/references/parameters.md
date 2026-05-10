@@ -6,6 +6,7 @@
 
 ## Allowed extra CLI flags
 
+- `--alpha`
 - `--method`
 
 ## Per-method parameter hints

@@ -6,16 +6,15 @@
 
 ## Allowed extra CLI flags
 
-- `--backend`
 - `--chemistry`
 - `--method`
+- `--r-enhanced`
 - `--read2`
 - `--reference`
 - `--sample`
 - `--t2g`
 - `--threads`
 - `--whitelist`
-- `--r-enhanced`
 
 ## Per-method parameter hints
 

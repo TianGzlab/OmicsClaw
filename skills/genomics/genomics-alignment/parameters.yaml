@@ -6,8 +6,7 @@ trigger_keywords:
 - Bowtie2
 - Minimap2
 - map reads
-allowed_extra_flags:
-- --method
+allowed_extra_flags: []
 legacy_aliases:
 - align
 saves_h5ad: false

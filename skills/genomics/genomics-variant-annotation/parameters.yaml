@@ -7,7 +7,7 @@ trigger_keywords:
 - ANNOVAR
 - functional effect
 allowed_extra_flags:
-- --method
+- --n-variants
 legacy_aliases:
 - variant-annotate
 saves_h5ad: false

@@ -6,15 +6,16 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--pert-key`
 - `--control`
-- `--split-by`
-- `--n-neighbors`
 - `--logfc-threshold`
-- `--pval-cutoff`
+- `--method`
+- `--n-neighbors`
+- `--pert-key`
 - `--perturbation-type`
+- `--pval-cutoff`
 - `--r-enhanced`
+- `--seed`
+- `--split-by`
 
 ## Per-method parameter hints
 

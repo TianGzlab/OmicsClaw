@@ -6,7 +6,7 @@
 
 ## Allowed extra CLI flags
 
-_No extra flags beyond the standard `--input` / `--output` / `--demo` set._
+- `--loc-threshold`
 
 ## Per-method parameter hints
 

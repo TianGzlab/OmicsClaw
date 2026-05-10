@@ -6,9 +6,8 @@
 
 ## Allowed extra CLI flags
 
-- `--sample-id`
-- `--sample-key`
 - `--r-enhanced`
+- `--sample-id`
 
 ## Per-method parameter hints
 

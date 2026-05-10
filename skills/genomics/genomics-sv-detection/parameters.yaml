@@ -8,7 +8,7 @@ trigger_keywords:
 - Lumpy
 - Sniffles
 allowed_extra_flags:
-- --method
+- --n-svs
 legacy_aliases:
 - sv-detect
 saves_h5ad: false

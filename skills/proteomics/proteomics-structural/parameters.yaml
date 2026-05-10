@@ -8,7 +8,8 @@ trigger_keywords:
 - pLink
 - xiSEARCH
 allowed_extra_flags:
-- --method
+- --crosslinker
+- --fdr
 legacy_aliases:
 - struct-proteomics
 saves_h5ad: false

@@ -490,3 +490,238 @@ def test_gotchas_anchor_check_skipped_when_script_missing(tmp_path: Path) -> Non
     skill = _write_v2_skill(tmp_path / "demo", body=body)  # no script_text → no demo.py
     errors = skill_lint.lint_skill(skill)
     assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# Check: allowed_extra_flags ⊇ argparse
+# ---------------------------------------------------------------------------
+
+def _flag_script(*flags: str) -> str:
+    """Render a minimal Python script with the given argparse flags."""
+    lines = [
+        "import argparse",
+        "p = argparse.ArgumentParser()",
+        'p.add_argument("--input")',
+        'p.add_argument("--output")',
+        'p.add_argument("--demo", action="store_true")',
+    ]
+    for flag in flags:
+        lines.append(f'p.add_argument("{flag}")')
+    return "\n".join(lines) + "\n"
+
+
+def test_allowed_extra_flags_matches_argparse(tmp_path: Path) -> None:
+    """yaml.allowed_extra_flags must list exactly the script's argparse flags
+    (minus --input / --output / --demo, which the runner blocks)."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": ["--alpha", "--method"]}
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        sidecar=sidecar,
+        script_text=_flag_script("--method", "--alpha"),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("allowed_extra_flags" in e for e in errors), errors
+
+
+def test_allowed_extra_flags_missing_declared_flag_fails(tmp_path: Path) -> None:
+    """A flag declared in argparse but absent from yaml triggers an error."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": ["--method"]}
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        sidecar=sidecar,
+        script_text=_flag_script("--method", "--alpha"),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any("missing '--alpha'" in e for e in errors), errors
+
+
+def test_allowed_extra_flags_lists_undeclared_flag_fails(tmp_path: Path) -> None:
+    """A yaml entry that argparse does not declare triggers an error."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": ["--method", "--missing"]}
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        sidecar=sidecar,
+        script_text=_flag_script("--method"),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any("'--missing'" in e and "does not declare" in e for e in errors), errors
+
+
+def test_allowed_extra_flags_runner_blocked_trio_excluded(tmp_path: Path) -> None:
+    """--input / --output / --demo are runner-blocked and must NOT need to
+    be listed in allowed_extra_flags."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": ["--method"]}
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        sidecar=sidecar,
+        # Script declares only --input/--output/--demo + --method
+        script_text=_flag_script("--method"),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("--input" in e or "--output" in e or "--demo" in e for e in errors), errors
+
+
+def test_allowed_extra_flags_check_skipped_when_script_missing(tmp_path: Path) -> None:
+    """If the script doesn't resolve, skip the check rather than false-fail."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": ["--method"]}
+    skill = _write_v2_skill(tmp_path / "demo", sidecar=sidecar)  # no script
+    errors = skill_lint.lint_skill(skill)
+    assert not any("allowed_extra_flags missing" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# Check: output_contract.md paths exist in the script
+# ---------------------------------------------------------------------------
+
+def _write_output_contract(skill: Path, body: str) -> None:
+    (skill / "references" / "output_contract.md").write_text(body, encoding="utf-8")
+
+
+def test_output_contract_paths_must_exist_in_script(tmp_path: Path) -> None:
+    """A path in output_contract.md must appear as a substring in the script."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script() + 'open("tables/foo.csv").write(...)\n',
+    )
+    _write_output_contract(skill, "## Output\n- `tables/foo.csv`\n- `tables/missing.csv`\n")
+    errors = skill_lint.lint_skill(skill)
+    assert any("'tables/missing.csv'" in e for e in errors), errors
+    assert not any("'tables/foo.csv'" in e for e in errors), errors
+
+
+def test_output_contract_framework_files_exempt(tmp_path: Path) -> None:
+    """`report.md`, `result.json`, `processed.h5ad`, `commands.sh`, etc. are
+    written by the framework helper, NOT the skill script — exempt them."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script(),  # Script writes nothing custom
+    )
+    _write_output_contract(
+        skill,
+        "## Output\n- `report.md`\n- `result.json`\n- `processed.h5ad`\n"
+        "- `commands.sh`\n- `requirements.txt`\n- `checksums.sha256`\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+def test_output_contract_html_comment_paths_ignored(tmp_path: Path) -> None:
+    """The migrate_skill.py header `<!-- ... output_contract.md -->` must
+    not trigger false positives for `output_contract.md` / `SKILL.md`."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script() + 'open("tables/real.csv").write(...)\n',
+    )
+    _write_output_contract(
+        skill,
+        "<!-- Generated by scripts/migrate_skill.py -->\n"
+        "<!-- Kind: references/output_contract.md | Source: SKILL.md -->\n\n"
+        "## Output\n- `tables/real.csv`\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+def test_output_contract_multi_dot_extensions_match_correctly(tmp_path: Path) -> None:
+    """`checksums.sha256` must NOT be truncated to `checksums.sh` by greedy
+    extension alternation."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script(),
+    )
+    _write_output_contract(
+        skill, "## Output\n- `reproducibility/checksums.sha256`\n"
+    )
+    errors = skill_lint.lint_skill(skill)
+    # checksums.sha256 is in _FRAMEWORK_FILES → exempt; if greedy-matched to
+    # checksums.sh, the framework-files set would not contain it and the
+    # check would emit an error.  No error means the regex is correct.
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+def test_output_contract_check_skipped_when_script_missing(tmp_path: Path) -> None:
+    """If the script doesn't resolve, skip the check rather than false-fail."""
+    skill = _write_v2_skill(tmp_path / "demo")  # no script
+    _write_output_contract(skill, "## Output\n- `tables/imaginary.csv`\n")
+    errors = skill_lint.lint_skill(skill)
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# Check: _lib lookup behaviour
+# ---------------------------------------------------------------------------
+
+def test_output_contract_scans_imported_lib_at_skill_dir(tmp_path: Path) -> None:
+    """A path that lives only in `<skill>/_lib/<X>.py` (which the script
+    explicitly imports) must be accepted by the lint."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script() + "from .._lib.helper import process\n",
+    )
+    lib_dir = skill / "_lib"
+    lib_dir.mkdir()
+    (lib_dir / "helper.py").write_text('open("tables/from_lib.csv").write(...)\n', encoding="utf-8")
+    _write_output_contract(skill, "## Output\n- `tables/from_lib.csv`\n")
+    errors = skill_lint.lint_skill(skill)
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+def test_output_contract_scans_imported_lib_at_grandparent(tmp_path: Path) -> None:
+    """For two-deep skill trees (e.g. singlecell/scrna/X), the lint must
+    walk up to find the `_lib` at the domain root."""
+    domain = tmp_path / "singlecell" / "scrna"
+    skill = _write_v2_skill(
+        domain / "demo",
+        script_text=(
+            _flag_script()
+            + "from skills.singlecell._lib.helper import process\n"
+        ),
+    )
+    # _lib lives at skills/singlecell/_lib/, two levels above the skill dir
+    lib_dir = tmp_path / "singlecell" / "_lib"
+    lib_dir.mkdir()
+    (lib_dir / "helper.py").write_text('open("tables/from_lib.csv").write(...)\n', encoding="utf-8")
+    # The lint stops walking at a `skills/` directory boundary, so anchor
+    # one in tmp so the loop terminates predictably.
+    (tmp_path / "skills").mkdir(exist_ok=True)
+    _write_output_contract(skill, "## Output\n- `tables/from_lib.csv`\n")
+    errors = skill_lint.lint_skill(skill)
+    assert not any("output_contract.md:" in e for e in errors), errors
+
+
+def test_output_contract_does_not_scan_unimported_lib(tmp_path: Path) -> None:
+    """A path that lives in `_lib/<X>.py` which the script does NOT import
+    must NOT silently validate the contract — that was the spatial-domains
+    bug where the contract claimed to write `cellchat_results.csv` because
+    it appeared in a sibling _lib file."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        script_text=_flag_script() + "from .._lib.real import wanted\n",
+    )
+    lib_dir = skill / "_lib"
+    lib_dir.mkdir()
+    (lib_dir / "real.py").write_text('open("tables/wanted.csv").write(...)\n', encoding="utf-8")
+    (lib_dir / "unrelated.py").write_text('open("tables/unrelated.csv").write(...)\n', encoding="utf-8")
+    _write_output_contract(
+        skill,
+        "## Output\n- `tables/wanted.csv`\n- `tables/unrelated.csv`\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    # `wanted.csv` is in an imported _lib → ok.
+    # `unrelated.csv` lives in unimported `_lib/unrelated.py` → must error.
+    assert any("'tables/unrelated.csv'" in e for e in errors), errors
+    assert not any("'tables/wanted.csv'" in e for e in errors), errors
+
+
+def test_argparse_short_flag_does_not_satisfy_long_flag_requirement(tmp_path: Path) -> None:
+    """`add_argument("-m", "--method")` must register `--method` (not `-m`)
+    and require `--method` in `allowed_extra_flags`.  The earlier regex
+    `[\\-\\-]` collapsed to `[-]` and would have matched `-m` instead."""
+    sidecar = {**VALID_SIDECAR, "allowed_extra_flags": []}
+    script = _flag_script() + 'p.add_argument("-m", "--method")\n'
+    skill = _write_v2_skill(tmp_path / "demo", sidecar=sidecar, script_text=script)
+    errors = skill_lint.lint_skill(skill)
+    assert any("missing '--method'" in e for e in errors), errors
+    # Must NOT report `-m` as a missing flag (single-dash short flags are
+    # never listed in allowed_extra_flags).
+    assert not any("missing '-m'" in e for e in errors), errors

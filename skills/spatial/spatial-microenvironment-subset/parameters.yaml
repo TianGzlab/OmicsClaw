@@ -3,12 +3,13 @@ script: spatial_microenvironment_subset.py
 allowed_extra_flags:
 - --center-key
 - --center-values
-- --target-key
-- --target-values
+- --data-type
 - --exclude-centers
+- --microns-per-coordinate-unit
 - --radius-microns
 - --radius-native
-- --microns-per-coordinate-unit
+- --target-key
+- --target-values
 legacy_aliases:
 - spatial-neighborhood-subset
 - spatial-proximity-subset

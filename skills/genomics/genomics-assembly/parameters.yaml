@@ -8,7 +8,7 @@ trigger_keywords:
 - Flye
 - Canu
 allowed_extra_flags:
-- --method
+- --genome-size
 legacy_aliases:
 - assemble
 saves_h5ad: false

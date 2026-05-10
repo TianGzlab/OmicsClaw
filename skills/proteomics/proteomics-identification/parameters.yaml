@@ -7,7 +7,9 @@ trigger_keywords:
 - MS-GF+
 - Comet
 - Mascot
-allowed_extra_flags: []
+allowed_extra_flags:
+- --fdr
+- --n-spectra
 legacy_aliases:
 - peptide-id
 saves_h5ad: false

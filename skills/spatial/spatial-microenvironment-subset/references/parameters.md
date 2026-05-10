@@ -8,12 +8,13 @@
 
 - `--center-key`
 - `--center-values`
-- `--target-key`
-- `--target-values`
+- `--data-type`
 - `--exclude-centers`
+- `--microns-per-coordinate-unit`
 - `--radius-microns`
 - `--radius-native`
-- `--microns-per-coordinate-unit`
+- `--target-key`
+- `--target-values`
 
 ## Per-method parameter hints
 

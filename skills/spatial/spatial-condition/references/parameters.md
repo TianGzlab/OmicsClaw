@@ -13,9 +13,6 @@
 - `--method`
 - `--min-counts-per-gene`
 - `--min-samples-per-condition`
-- `--no-pydeseq2-cooks-filter`
-- `--no-pydeseq2-independent-filter`
-- `--no-pydeseq2-refit-cooks`
 - `--pydeseq2-alpha`
 - `--pydeseq2-cooks-filter`
 - `--pydeseq2-fit-type`

@@ -6,23 +6,24 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--min-genes`
-- `--min-cells`
+- `--confirmed-preflight`
+- `--doublet-score-threshold`
 - `--max-mt-pct`
-- `--n-top-hvg`
+- `--method`
+- `--min-cells`
+- `--min-genes`
 - `--n-pcs`
+- `--n-top-hvg`
+- `--no-remove-doublets`
 - `--normalization-target-sum`
-- `--scanpy-hvg-flavor`
 - `--pearson-hvg-flavor`
 - `--pearson-theta`
+- `--r-enhanced`
+- `--scanpy-hvg-flavor`
+- `--sctransform-regress-mt`
+- `--seurat-hvg-method`
 - `--seurat-normalize-method`
 - `--seurat-scale-factor`
-- `--seurat-hvg-method`
-- `--sctransform-regress-mt`
-- `--no-sctransform-regress-mt`
-- `--confirmed-preflight`
-- `--r-enhanced`
 
 ## Per-method parameter hints
 

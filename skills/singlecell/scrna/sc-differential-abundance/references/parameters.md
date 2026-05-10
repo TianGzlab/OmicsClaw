@@ -6,17 +6,18 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--condition-key`
-- `--sample-key`
 - `--cell-type-key`
+- `--condition-key`
 - `--contrast`
-- `--reference-cell-type`
 - `--fdr`
-- `--prop`
-- `--n-neighbors`
+- `--method`
 - `--min-count`
+- `--n-neighbors`
+- `--n-permutations`
+- `--prop`
 - `--r-enhanced`
+- `--reference-cell-type`
+- `--sample-key`
 
 ## Per-method parameter hints
 

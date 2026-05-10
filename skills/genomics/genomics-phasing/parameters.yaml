@@ -7,7 +7,7 @@ trigger_keywords:
 - Eagle
 - phasing
 allowed_extra_flags:
-- --method
+- --n-variants
 legacy_aliases:
 - phase
 saves_h5ad: false

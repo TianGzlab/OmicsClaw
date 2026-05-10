@@ -8,6 +8,7 @@
 
 - `--assay`
 - `--method`
+- `--n-peaks`
 
 ## Per-method parameter hints
 

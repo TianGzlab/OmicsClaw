@@ -6,7 +6,8 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
+- `--crosslinker`
+- `--fdr`
 
 ## Per-method parameter hints
 

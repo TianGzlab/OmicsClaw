@@ -6,7 +6,7 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
+- `--n-variants`
 
 ## Per-method parameter hints
 

@@ -7,7 +7,6 @@
 ## Allowed extra CLI flags
 
 - `--method`
-- `--species`
 
 ## Per-method parameter hints
 

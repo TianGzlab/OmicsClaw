@@ -6,7 +6,7 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
+- `--n-svs`
 
 ## Per-method parameter hints
 

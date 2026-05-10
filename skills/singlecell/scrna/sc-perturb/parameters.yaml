@@ -1,14 +1,15 @@
 domain: singlecell
 allowed_extra_flags:
-- --method
-- --pert-key
 - --control
-- --split-by
-- --n-neighbors
 - --logfc-threshold
-- --pval-cutoff
+- --method
+- --n-neighbors
+- --pert-key
 - --perturbation-type
+- --pval-cutoff
 - --r-enhanced
+- --seed
+- --split-by
 saves_h5ad: true
 script: sc_perturb.py
 param_hints: {}
