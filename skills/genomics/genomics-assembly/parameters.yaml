@@ -1,0 +1,17 @@
+domain: genomics
+emoji: 🧬
+trigger_keywords:
+- genome assembly
+- de novo
+- SPAdes
+- Megahit
+- Flye
+- Canu
+allowed_extra_flags:
+- --method
+legacy_aliases:
+- assemble
+saves_h5ad: false
+script: genome_assembly.py
+param_hints: {}
+requires_preprocessed: false
