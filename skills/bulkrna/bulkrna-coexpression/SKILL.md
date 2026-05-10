@@ -1,123 +1,72 @@
 ---
 name: bulkrna-coexpression
-description: >-
-  WGCNA-style weighted gene co-expression network analysis — module detection, soft
-  thresholding, hub genes.
+description: Load when discovering gene co-expression modules and hub genes in a bulk RNA-seq cohort via WGCNA-style soft-thresholded networks. Skip for direct DE comparison (use bulkrna-de) or PPI lookup of an existing gene list (use bulkrna-ppi-network); single-cell co-expression uses sc-grn instead.
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, coexpression, WGCNA, network, modules, hub-genes]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "🕸️"
-    trigger_keywords: [coexpression, WGCNA, gene network, co-expression modules, hub
-        genes, gene modules]
-    allowed_extra_flags:
-    - "--min-module-size"
-    - "--power"
-    legacy_aliases: [bulk-wgcna]
-    saves_h5ad: false
-    script: bulkrna_coexpression.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- bulkrna
+- coexpression
+- WGCNA
+- network
+- modules
+- hub-genes
 ---
 
-# Bulk RNA-seq Co-expression Network Analysis
+# bulkrna-coexpression
 
-WGCNA-style weighted gene co-expression network analysis. Detects gene modules via soft thresholding, topological overlap, and hierarchical clustering, then identifies hub genes per module.
+## When to use
 
-## CLI Reference
+Run on a bulk RNA-seq cohort (≥15 samples recommended; works on smaller
+sets but module structure is unstable below that) when you want to find
+groups of co-regulated genes ("modules") and the hub genes within each.
+Soft-thresholded correlation network in the WGCNA style; outputs module
+assignments, hub genes, and module-trait correlations.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Count matrix | `.csv` (gene × sample) | yes (or `--demo`) |
+| Sample traits | `--traits` CSV | optional, for module-trait correlation |
+
+| Output | Path | Notes |
+|---|---|---|
+| Module assignments | `tables/module_assignments.csv` | gene → module colour |
+| Hub genes | `tables/hub_genes.csv` | per-module top-connectivity genes |
+| Soft-threshold diagnostic | `figures/soft_threshold.png` | scale-free fit by power |
+| Module dendrogram | `figures/module_dendrogram.png` | gene clustering tree |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load count matrix; check sample count + non-zero gene fraction (`bulkrna_coexpression.py:54` raises `FileNotFoundError` on missing input; `:721, :724` raise on missing/invalid `--input`).
+2. Choose soft-thresholding power (`:377` raises `ValueError` if no power achieves scale-free topology).
+3. Build adjacency matrix; cluster modules.
+4. Compute hub genes (top intramodular connectivity per module).
+5. If `--traits` provided, correlate eigengenes vs traits.
+6. Render diagnostics; write tables + report.
+
+## Gotchas
+
+- **Soft-thresholding can fail silently with too-few-samples.**  `:382` warns when no candidate power achieves scale-free topology R² > 0.8; the run continues with the highest-R² candidate.  Below ~15 samples, modules become noise — check `result.json["soft_threshold_R2"]` and treat results as exploratory if R² < 0.6.
+- **No biological-replicate filter.**  Unlike PyDESeq2, this skill makes no distinction between technical and biological replicates.  Modules built on a cohort with hidden batch structure will reflect the batch, not biology — run `bulkrna-batch-correction` upstream if PCA shows batch separation.
+- **Gene IDs must match between counts and traits.**  No automatic mapping — feed counts and traits with consistent identifier system, or run `bulkrna-geneid-mapping` first.
+- **Hub genes are connectivity-based, not necessarily biology-load-bearing.**  A hub in WGCNA means "highest intramodular correlation" — useful as a starting hypothesis but not proof of regulatory primacy.  Validate with knockdown / knockout data or eQTL evidence.
+
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-coexpression --demo
-python omicsclaw.py run bulkrna-coexpression --input <counts.csv> --output <dir>
-python bulkrna_coexpression.py --input counts.csv --output results/
-python bulkrna_coexpression.py --demo --output /tmp/coexpression_demo
-python bulkrna_coexpression.py --input counts.csv --output results/ --power 6 --min-module-size 15
+python omicsclaw.py run bulkrna-coexpression \
+  --input counts.csv --output results/
+python omicsclaw.py run bulkrna-coexpression \
+  --input counts.csv --traits clinical.csv --output results/
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: Researchers must install the WGCNA R package, manually tune soft-thresholding power, interpret topological overlap matrices, and write custom scripts to extract hub genes from each module.
-- **With it**: A single Python command runs the full WGCNA-style pipeline — soft threshold selection, TOM-based module detection, hub gene extraction — and produces publication-ready figures and tables.
-- **Why OmicsClaw**: Implements the core WGCNA methodology in pure Python (numpy/scipy) with no R dependency, integrated into the OmicsClaw reporting framework with automatic scale-free topology fitting.
-
-## Workflow
-
-1. **Load**: Read a genes-by-samples raw count matrix (CSV with a `gene` column and sample columns).
-2. **Transform**: Log2-transform counts (log2(x + 1)) and filter low-variance genes (keep top 80% by variance).
-3. **Correlate**: Compute Pearson correlation matrix across all retained genes.
-4. **Soft Threshold**: Test a range of soft-thresholding powers and select the first power achieving scale-free topology fit (R^2 > 0.8).
-5. **Module Detection**: Compute adjacency matrix, topological overlap matrix (TOM), and apply hierarchical clustering with tree cutting to identify co-expression modules.
-6. **Hub Genes**: For each module, rank genes by intra-module connectivity and report the top hub genes.
-7. **Report**: Write markdown report, result.json, module assignment and hub gene tables, and a reproducibility script.
-
-## Example Queries
-
-- "Run WGCNA on my bulk RNA-seq data"
-- "Find co-expression modules and hub genes"
-- "Detect gene co-expression networks from my count matrix"
-- "What soft threshold power should I use for my RNA-seq data?"
-- "Identify hub genes in co-expression modules"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── scale_free_fit.png
-│   ├── module_sizes.png
-│   └── module_dendrogram.png
-├── tables/
-│   ├── module_assignments.csv
-│   ├── hub_genes.csv
-│   └── threshold_fit.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Safety
-
-- **Local-first**: All processing runs locally; no data is uploaded to external services.
-- **Disclaimer**: Every report includes the standard OmicsClaw disclaimer.
-- **Audit trail**: Parameters, method details, and input checksums are recorded in result.json.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked when user intent matches co-expression, WGCNA, gene network, or hub gene keywords.
-
-**Chaining partners**:
-- `bulkrna-de` -- Upstream: differentially expressed genes can be used as input
-- `bulkrna-enrichment` -- Downstream: pathway/GO enrichment of module gene sets
-- `bulkrna-qc` -- Upstream: count matrix QC
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--power` | auto | Soft-thresholding power (auto-selected if omitted) |
-| `--min-module-size` | `10` | Minimum number of genes per module |
-
-## Version Compatibility
-
-Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotlib 3.7+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, matplotlib
-
-## Citations
-
-- [WGCNA](https://doi.org/10.1186/1471-2105-9-559) -- Langfelder & Horvath, BMC Bioinformatics 2008
-- [Scale-free topology](https://doi.org/10.2202/1544-6115.1128) -- Zhang & Horvath, Statistical Applications in Genetics and Molecular Biology 2005
-- [Topological Overlap Matrix](https://doi.org/10.1073/pnas.0502024102) -- Yip & Horvath, BMC Bioinformatics 2007
-
-## Related Skills
-
-- `bulkrna-de` -- Differential expression analysis upstream
-- `bulkrna-enrichment` -- Pathway enrichment of module gene sets downstream
-- `bulkrna-qc` -- Count matrix QC upstream
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — soft-thresholding, module detection, hub-gene definition
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-batch-correction` (run upstream if batches suspected), `bulkrna-de` (parallel: differential expression), `bulkrna-ppi-network` (parallel: STRING PPI on a gene list), `sc-grn` (single-cell sibling using GRNBoost2 / pySCENIC)

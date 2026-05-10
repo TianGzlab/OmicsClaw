@@ -1,137 +1,72 @@
 ---
 name: bulkrna-deconvolution
-description: >-
-  Bulk RNA-seq cell type deconvolution using NNLS (built-in), with optional CIBERSORTx
-  and MuSiC bridges.
+description: Load when estimating cell-type proportions in bulk RNA-seq samples from a single-cell or signature-matrix reference. Skip if the data is already single-cell (no deconvolution needed) or for spatial deconvolution (use spatial-deconv).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, deconvolution, NNLS, CIBERSORTx, MuSiC, cell-type-proportion]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "🧩"
-    trigger_keywords: [bulk deconvolution, cell type proportion, NNLS, CIBERSORTx,
-      bulk deconv, cell fraction]
-    allowed_extra_flags:
-    - "--reference"
-    legacy_aliases: [bulk-deconv]
-    saves_h5ad: false
-    script: bulkrna_deconvolution.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- bulkrna
+- deconvolution
+- NNLS
+- CIBERSORTx
+- MuSiC
+- cell-type-proportion
 ---
 
-# Bulk RNA-seq Cell Type Deconvolution
+# bulkrna-deconvolution
 
-Estimate cell type proportions from bulk RNA-seq expression data using non-negative least squares (NNLS). Given a bulk count matrix and a cell type signature matrix (marker gene expression profiles), the skill solves for the mixture coefficients that best reconstruct each sample's expression profile and normalizes them to proportions summing to 1.
+## When to use
 
-## CLI Reference
+Run on a bulk RNA-seq cohort when you have a single-cell reference (or
+a curated signature matrix) and want to estimate per-sample cell-type
+proportions.  Built-in NNLS path is dependency-free; CIBERSORTx and
+MuSiC bridges are available when the upstream tools are installed.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Bulk count matrix | `.csv` (gene × sample) | yes (or `--demo`) |
+| Reference | `--reference` CSV (signature matrix) or `.h5ad` (sc reference) | yes (or `--demo`) |
+
+| Output | Path | Notes |
+|---|---|---|
+| Proportions | `tables/cell_type_proportions.csv` | sample × cell_type, rows sum to 1 |
+| Stacked-bar plot | `figures/proportions_stacked.png` | per-sample composition |
+| Heatmap | `figures/proportions_heatmap.png` | sample × cell_type intensity |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load bulk matrix (`bulkrna_deconvolution.py:368` raises `ValueError` if `--input` missing without `--demo`).
+2. Load reference (`:370` raises `ValueError` if `--reference` missing without `--demo`; `:76` raises `FileNotFoundError` if path doesn't exist).
+3. Align gene namespaces between bulk and reference (`:131` raises if no overlap).
+4. Resolve `--method`: NNLS (built-in), CIBERSORTx (external binary), MuSiC (R bridge).
+5. Run deconvolution; optionally normalise rows to sum to 1.
+6. Render figures and emit table + report.
+
+## Gotchas
+
+- **`--reference` is REQUIRED for non-demo runs.**  Unlike most bulkrna skills, this one needs two inputs.  `bulkrna_deconvolution.py:370` raises with "--reference is required when not using --demo" if you forget; no silent fallback.
+- **Gene-namespace mismatch is fatal.**  `:131` raises `ValueError` when bulk and reference share zero gene IDs (typical cause: bulk uses Ensembl, reference uses HGNC symbols).  Pre-run `bulkrna-geneid-mapping` to harmonise; the error message names the offending sets so cross-checking is easy.
+- **CIBERSORTx requires an external binary, not a pip install.**  The CIBERSORTx bridge calls a CLI that must be on `$PATH`; if missing, the run errors with a stack trace pointing at `subprocess` rather than a friendly OmicsClaw message.  Use NNLS unless you specifically need CIBERSORTx's noise-handling.
+- **MuSiC requires an R environment.**  Like CIBERSORTx, this is a bridge — no auto-install.  The bridge reads the reference as a `SingleCellExperiment`; the conversion happens via `zellkonverter` and can fail silently if the sc reference has unexpected `obs` columns.  Always verify `result.json["method_used"]` matches `--method`.
+
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-deconvolution --demo
-python omicsclaw.py run bulkrna-deconvolution --input <counts.csv> --output <dir> --reference <signature.csv>
-python bulkrna_deconvolution.py --input counts.csv --output results/ --reference signature.csv
-python bulkrna_deconvolution.py --demo --output /tmp/deconv_demo
+python omicsclaw.py run bulkrna-deconvolution \
+  --input counts.csv --reference signature.csv --output results/ \
+  --method nnls
+python omicsclaw.py run bulkrna-deconvolution \
+  --input counts.csv --reference scref.h5ad --output results/ \
+  --method music
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: Researchers must install and configure external deconvolution tools (CIBERSORTx web portal, MuSiC R package), each with its own data format requirements and authentication hurdles, just to get cell type proportions from bulk RNA-seq.
-- **With it**: A single Python command runs NNLS-based deconvolution locally, produces publication-ready proportion charts, and exports per-sample cell type tables ready for downstream analysis.
-- **Why OmicsClaw**: Wraps the mathematically principled NNLS approach into the OmicsClaw reporting framework with zero external dependencies beyond scipy, while documenting how to bridge to CIBERSORTx or MuSiC when higher accuracy is needed.
-
-## Workflow
-
-1. **Load**: Read the bulk count matrix (genes x samples CSV) and the cell type signature matrix (genes x cell_types CSV).
-2. **Intersect**: Find shared genes between bulk data and signature matrix; subset both to shared features.
-3. **Deconvolve**: For each sample, solve the NNLS problem `min ||Ax - b||` where A is the signature matrix, b is the sample expression vector, and x is the non-negative proportion vector.
-4. **Normalize**: Scale each sample's proportion vector to sum to 1.
-5. **Summarize**: Identify the dominant cell type per sample and compute mean proportions across all samples.
-6. **Visualize**: Generate stacked bar chart, heatmap, and pie chart of cell type proportions.
-7. **Report**: Write markdown report, result.json, proportion tables, and a reproducibility script.
-
-## Example Queries
-
-- "Deconvolve my bulk RNA-seq data to get cell type proportions"
-- "Run NNLS deconvolution with this signature matrix"
-- "Estimate cell type fractions from bulk expression"
-- "What cell types are in my bulk RNA samples?"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── proportions_stacked.png
-│   ├── proportions_heatmap.png
-│   └── mean_proportions_pie.png
-├── tables/
-│   ├── proportions.csv
-│   └── dominant_types.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Safety
-
-- **Local-first**: All computation runs locally via scipy NNLS; no data is uploaded to external services.
-- **Disclaimer**: Every report includes the standard OmicsClaw disclaimer.
-- **Audit trail**: Parameters, gene intersection size, and input checksums are recorded in result.json.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked when user intent matches bulk deconvolution, cell type proportion, or NNLS keywords.
-
-**Chaining partners**:
-- `bulkrna-qc` -- Upstream: count matrix QC
-- `bulkrna-de` -- Upstream/parallel: differential expression identifies condition-specific cell type shifts
-- `bulkrna-enrichment` -- Downstream: pathway enrichment on cell-type-specific gene sets
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | (required) | Path to bulk count matrix CSV (genes x samples) |
-| `--output` | (required) | Output directory |
-| `--reference` | (none) | Path to signature matrix CSV (genes x cell_types) |
-| `--demo` | false | Run with built-in demo data |
-
-## Signature Matrix Format
-
-The reference signature matrix must be a CSV with:
-- **Rows**: genes (first column is gene identifiers)
-- **Columns**: cell types (each column header is a cell type name)
-- **Values**: average expression levels for each gene in each cell type
-
-## Bridging to External Tools
-
-While NNLS provides a solid baseline, more sophisticated methods exist:
-
-- **CIBERSORTx**: Upload signature and mixture matrices to the CIBERSORTx web portal for support-vector-regression-based deconvolution with batch correction. Requires free academic registration.
-- **MuSiC**: R/Bioconductor package that uses multi-subject single-cell reference data with variance weighting. Requires R installation (not bundled).
-
-## Version Compatibility
-
-Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotlib 3.7+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, matplotlib
-**Optional**: none (NNLS is built into scipy)
-
-## Citations
-
-- [NNLS](https://doi.org/10.1137/1.9781611971217) -- Lawson & Hanson, Solving Least Squares Problems, 1995
-- [CIBERSORTx](https://doi.org/10.1038/s41587-019-0114-2) -- Newman et al., Nature Biotechnology 2019
-- [MuSiC](https://doi.org/10.1038/s41467-018-08023-x) -- Wang et al., Nature Communications 2019
-
-## Related Skills
-
-- `bulkrna-qc` -- Count matrix QC upstream
-- `bulkrna-de` -- Differential expression analysis
-- `bulkrna-enrichment` -- Pathway enrichment of gene sets downstream
-- `spatial-deconvolution` -- Spatial transcriptomics deconvolution (CARD, Cell2Location)
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — NNLS vs CIBERSORTx vs MuSiC, signature matrix construction
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-geneid-mapping` (run upstream to harmonise gene IDs), `bulkrna-trajblend` (parallel: bulk-to-sc bridging via VAE+GNN), `spatial-deconv` (spatial-side sibling: spot-level proportions)
