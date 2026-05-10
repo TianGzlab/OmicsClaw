@@ -263,3 +263,125 @@ async def test_search_orders_namespace_before_shared(engine):
     a_idx = uris.index("preference://style")
     shared_idx = uris.index("core://agent")
     assert a_idx < shared_idx
+
+
+# ----------------------------------------------------------------------
+# list_children — strict-namespace
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_children_returns_direct_children_in_namespace(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "parent", namespace="tg/userA")
+    await eng.upsert(
+        "analysis://sc-de/run_42", "child A", namespace="tg/userA"
+    )
+    await eng.upsert(
+        "analysis://sc-de/run_99", "child B", namespace="tg/userA"
+    )
+
+    children = await eng.list_children(
+        "analysis://sc-de", namespace="tg/userA"
+    )
+
+    uris = sorted(c.uri for c in children)
+    assert uris == ["analysis://sc-de/run_42", "analysis://sc-de/run_99"]
+    assert all(c.namespace == "tg/userA" for c in children)
+
+
+@pytest.mark.asyncio
+async def test_list_children_does_not_include_grandchildren(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "parent", namespace="tg/userA")
+    await eng.upsert(
+        "analysis://sc-de/run_42", "child", namespace="tg/userA"
+    )
+    await eng.upsert(
+        "analysis://sc-de/run_42/sub", "grandchild", namespace="tg/userA"
+    )
+
+    children = await eng.list_children(
+        "analysis://sc-de", namespace="tg/userA"
+    )
+    uris = [c.uri for c in children]
+
+    assert "analysis://sc-de/run_42" in uris
+    assert "analysis://sc-de/run_42/sub" not in uris
+
+
+@pytest.mark.asyncio
+async def test_list_children_strict_excludes_shared_children(engine):
+    """When the parent is shared and a child also lives in __shared__, that
+    shared child must NOT appear in a per-user listing — strict semantics."""
+    eng, _ = engine
+    await eng.upsert("core://agent", "shared parent", namespace="__shared__")
+    await eng.upsert(
+        "core://agent/voice", "shared voice", namespace="__shared__"
+    )
+    await eng.upsert(
+        "core://agent/style",
+        "user A's style override",
+        namespace="tg/userA",
+    )
+
+    children = await eng.list_children("core://agent", namespace="tg/userA")
+    uris = sorted(c.uri for c in children)
+
+    assert uris == ["core://agent/style"]
+
+
+@pytest.mark.asyncio
+async def test_list_children_returns_empty_when_no_children(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "parent only", namespace="tg/userA")
+
+    children = await eng.list_children(
+        "analysis://sc-de", namespace="tg/userA"
+    )
+    assert children == []
+
+
+@pytest.mark.asyncio
+async def test_list_children_returns_empty_when_parent_missing(engine):
+    eng, _ = engine
+    children = await eng.list_children(
+        "analysis://nonexistent", namespace="tg/userA"
+    )
+    assert children == []
+
+
+@pytest.mark.asyncio
+async def test_list_children_root_lists_top_level(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "top1", namespace="tg/userA")
+    await eng.upsert("analysis://sc-velocity", "top2", namespace="tg/userA")
+
+    from omicsclaw.memory.uri import MemoryURI
+
+    children = await eng.list_children(
+        MemoryURI(domain="analysis", path=""), namespace="tg/userA"
+    )
+    uris = sorted(c.uri for c in children)
+
+    assert "analysis://sc-de" in uris
+    assert "analysis://sc-velocity" in uris
+
+
+@pytest.mark.asyncio
+async def test_list_children_returns_active_memory_ref(engine):
+    eng, db = engine
+    parent = await eng.upsert("analysis://sc-de", "parent", namespace="tg/userA")
+    child = await eng.upsert(
+        "analysis://sc-de/run_42", "child", namespace="tg/userA"
+    )
+
+    children = await eng.list_children(
+        "analysis://sc-de", namespace="tg/userA"
+    )
+
+    assert len(children) == 1
+    ref = children[0]
+    assert isinstance(ref, MemoryRef)
+    assert ref.memory_id == child.memory_id
+    assert ref.node_uuid == child.node_uuid

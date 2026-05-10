@@ -575,7 +575,109 @@ class MemoryEngine:
     async def list_children(
         self, uri: str | MemoryURI, *, namespace: str
     ) -> list[MemoryRef]:
-        raise NotImplementedError("PR #3b")
+        """List direct children of ``uri`` strictly inside ``namespace``.
+
+        Strict semantics: a child only appears if it has a Path in
+        ``namespace``. Shared children of the same parent are intentionally
+        invisible — use ReviewLog.browse_shared (PR #4b) to see those.
+
+        The parent itself can live in ``namespace`` or in ``__shared__``;
+        we resolve the parent through the same fallback the writer uses,
+        so per-user children of shared parents (e.g., ``core://agent/style``
+        under shared ``core://agent``) list correctly.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+
+        async with self._db.session() as s:
+            parent_uuid = await self._resolve_listing_parent(s, parsed, namespace)
+            if parent_uuid is None:
+                return []
+
+            child_edges = (
+                await s.execute(
+                    select(Edge).where(Edge.parent_uuid == parent_uuid)
+                )
+            ).scalars().all()
+            if not child_edges:
+                return []
+
+            edge_id_to_child_uuid = {e.id: e.child_uuid for e in child_edges}
+            edge_ids = list(edge_id_to_child_uuid)
+
+            path_rows = (
+                await s.execute(
+                    select(Path)
+                    .where(
+                        Path.namespace == namespace,
+                        Path.edge_id.in_(edge_ids),
+                    )
+                    .order_by(Path.path)
+                )
+            ).scalars().all()
+
+            return await self._materialize_listing(
+                s, path_rows, edge_id_to_child_uuid, namespace
+            )
+
+    async def _resolve_listing_parent(
+        self, s: AsyncSession, parsed: MemoryURI, namespace: str
+    ) -> Optional[str]:
+        """Return the parent's child_uuid, or None if the parent doesn't exist.
+
+        For root URIs (path=""), returns ROOT_NODE_UUID directly. For
+        non-root URIs, looks the path up in ``namespace`` first, then
+        ``__shared__``. Listing through a missing parent returns no children.
+        """
+        if parsed.is_root:
+            return ROOT_NODE_UUID
+
+        for ns in (namespace, SHARED_NAMESPACE):
+            parent_path = await self._fetch_path(s, ns, parsed)
+            if parent_path is None:
+                continue
+            parent_edge = await s.get(Edge, parent_path.edge_id)
+            if parent_edge is not None:
+                return parent_edge.child_uuid
+
+        return None
+
+    async def _materialize_listing(
+        self,
+        s: AsyncSession,
+        path_rows: list[Path],
+        edge_id_to_child_uuid: dict[int, str],
+        namespace: str,
+    ) -> list[MemoryRef]:
+        """Turn a list of Path rows into MemoryRef objects.
+
+        Skips rows whose node has no active memory (a deprecated chain
+        with no successor — surfaces nothing rather than a half-result).
+        """
+        results: list[MemoryRef] = []
+        for path_row in path_rows:
+            child_uuid = edge_id_to_child_uuid[path_row.edge_id]
+            memory = (
+                await s.execute(
+                    select(Memory)
+                    .where(
+                        Memory.node_uuid == child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                    .order_by(Memory.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                continue
+            results.append(
+                MemoryRef(
+                    memory_id=memory.id,
+                    node_uuid=child_uuid,
+                    namespace=namespace,
+                    uri=f"{path_row.domain}://{path_row.path}",
+                )
+            )
+        return results
 
     async def get_subtree(
         self,
