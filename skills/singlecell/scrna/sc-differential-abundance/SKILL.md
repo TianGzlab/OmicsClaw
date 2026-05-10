@@ -1,131 +1,105 @@
 ---
 name: sc-differential-abundance
-description: >-
-  Sample-aware differential abundance and compositional analysis for scRNA-seq
-  using Milo, scCODA, or an exploratory proportion-based fallback.
-version: 0.1.0
+description: Load when testing whether cell-type / cluster proportions or neighbourhood densities differ between conditions in a multi-sample scRNA AnnData via Milo, scCODA, simple proportion screen, or R Monte-Carlo permutation. Skip when ranking marker genes (use sc-markers) or for per-cell DE (use sc-de).
+version: 0.2.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, differential-abundance, compositional, milo, sccoda]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--method"
-    - "--condition-key"
-    - "--sample-key"
-    - "--cell-type-key"
-    - "--contrast"
-    - "--reference-cell-type"
-    - "--fdr"
-    - "--prop"
-    - "--n-neighbors"
-    - "--min-count"
-    - "--r-enhanced"
-    saves_h5ad: true
-    requires_preprocessed: true
-    script: sc_differential_abundance.py
-    legacy_aliases: [sc-da, sc-compositional]
-    param_hints: {}
+tags:
+- singlecell
+- scrna
+- differential-abundance
+- compositional
+- milo
+- sccoda
+- proportion-test
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# Single-Cell Differential Abundance
+# sc-differential-abundance
 
-## Why This Exists
+## When to use
 
-- Without it: users often confuse differential expression with differential abundance.
-- With it: sample-aware changes in cell-state or cell-type prevalence are reported explicitly.
+The user has a multi-sample, multi-condition scRNA AnnData and asks
+*"Did the relative abundance of these cell states change between
+conditions?"* — distinct from per-cell DE. Four methods:
 
-## Current Methods
+- `milo` (default) — neighbourhood-level DA, replicate-aware (pertpy).
+- `sccoda` — Bayesian compositional analysis with a reference cell
+  type (pertpy).
+- `simple` — exploratory proportion screen, no pertpy needed.
+- `proportion_test_r` — base-R Monte-Carlo permutation; lollipop plots
+  with bootstrap 95% CI.
 
-| Method | Description | Dependencies |
+For per-cell **expression** changes between conditions, use `sc-de`.
+For ranking *what* defines a cluster, use `sc-markers`.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
 |---|---|---|
-| `milo` | Neighborhood-level DA using Milo (replicate-aware) | pertpy |
-| `sccoda` | Bayesian compositional analysis | pertpy |
-| `simple` | Exploratory proportion screen (no replicates needed) | statsmodels |
-| `proportion_test_r` | Monte Carlo permutation test for cell type proportion changes. Produces obs_log2FD with bootstrap 95% CI per cell type per comparison. | base R only |
+| AnnData with sample + condition + cell-type columns | `.h5ad` | yes (unless `--demo`) |
 
-## Key Inputs
+| Output | Path | Notes |
+|---|---|---|
+| AnnData (preserved) | `processed.h5ad` | unchanged unless milo writes neighbour graph |
+| Counts matrix | `tables/sample_by_celltype_counts.csv` | always |
+| Proportions matrix | `tables/sample_by_celltype_proportions.csv` | always |
+| Mean-by-condition | `tables/condition_mean_proportions.csv` | always |
+| `simple` results | `tables/simple_da_results.csv` | when method == `simple` |
+| `milo` neighbourhood results | `tables/milo_nhood_results.csv` + `figures/milo_logfc_barplot.png` | when method == `milo` |
+| `proportion_test_r` results | `tables/proportion_test_results.csv` + per-comparison lollipops | when method == `proportion_test_r` |
+| `sccoda` effects | `tables/sccoda_effects.csv` | when method == `sccoda` |
+| Composition heatmap | `figures/sample_celltype_proportions.png` | always |
+| Report | `report.md` + `result.json` | always |
 
-- a preprocessed `AnnData`
-- sample-level replication via `--sample-key`
-- biological condition via `--condition-key`
-- a grouping column via `--cell-type-key`
+## Flow
 
-## Public Parameters
+1. Load AnnData; validate `--method`, `--fdr`, `--n-neighbors`, `--prop`, `--n-permutations`.
+2. Run preflight on `--condition-key`, `--sample-key`, `--cell-type-key` — fail fast on missing columns or under-replication.
+3. Build the universal composition summary (counts / proportions / condition means) and save them.
+4. Dispatch to the method-specific runner (`run_milo_da` / `run_sccoda_da` / simple proportion test / R proportion test).
+5. Append method-specific summary fields to `result.json` (`n_nhoods` / `n_effect_rows` / `n_cell_types` / `n_significant`, plus `backend` for milo/sccoda).
+6. Save figures, `report.md`, `result.json`.
 
-| Parameter | Meaning |
-|---|---|
-| `--method` | `milo`, `sccoda`, or exploratory `simple` |
-| `--condition-key` | condition column in `adata.obs` |
-| `--sample-key` | sample / donor column in `adata.obs` |
-| `--cell-type-key` | cell type or state column in `adata.obs` |
-| `--contrast` | explicit comparison like `control vs stim` |
-| `--reference-cell-type` | scCODA reference cell type |
-| `--fdr` | FDR cutoff for reporting |
-| `--prop` | Milo neighborhood sampling fraction |
-| `--n-neighbors` | KNN size if a graph must be rebuilt |
+## Gotchas
 
-## Usage Examples
+- **Preflight failure raises `SystemExit(1)`, not `ValueError`.** `sc_differential_abundance.py:601` prints the missing-column / under-replication problems and exits the process. Common cases: `condition` / `sample` / `cell_type` columns missing, or `<2` samples per condition for `milo` / `sccoda`. Pass the actual obs column names (`--sample-key donor`, `--cell-type-key annotation`).
+- **`--input` missing without `--demo` raises `SystemExit`, not `ValueError`.** `sc_differential_abundance.py:580` does `raise SystemExit("Provide --input or use --demo")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
+- **`milo` / `sccoda` need pertpy installed.** Both methods route through `run_milo_da` / `run_sccoda_da` in `skills/singlecell/_lib/differential_abundance.py`; the pertpy import is lazy and surfaces as `ImportError` at call time when pertpy is absent. `simple` and `proportion_test_r` run without pertpy.
+- **`proportion_test_r` requires a working R install but no pertpy.** `sc_differential_abundance.py:383` raises `FileNotFoundError(f"R script not found: {r_script}")` if the bundled R helper is missing from the install — typically when the package was installed without the R extra.
+- **`result.json` count keys are *additive* per method, not exclusive.** All four methods write `result.json["n_cell_types"]` (set at the universal summary initialiser, `sc_differential_abundance.py:636`); `milo` additionally writes `n_nhoods` (`:695`), `sccoda` additionally writes `n_effect_rows` (`:754`), `proportion_test_r` overwrites `n_cell_types` from its `clusters` column (`:429`). Downstream tools that just need "how many things were tested" can read `n_cell_types` universally.
+- **`--reference-cell-type` is `sccoda`-only.** Other methods ignore the value silently. Default `"automatic"` lets scCODA pick.
+
+## Key CLI
 
 ```bash
-# Proportion test (R, no external deps)
-python omicsclaw.py run sc-differential-abundance --demo --method proportion_test_r --output /tmp/prop_test_demo
+# Demo (built-in synthetic 2-condition × 4-sample data)
+python omicsclaw.py run sc-differential-abundance --demo \
+  --method milo --output /tmp/sc_da_demo
 
-# Milo (replicate-aware)
-python omicsclaw.py run sc-differential-abundance --demo --method milo --output /tmp/milo_demo
+# Milo (replicate-aware neighbourhood DA)
+python omicsclaw.py run sc-differential-abundance \
+  --input integrated.h5ad --output results/ \
+  --method milo --condition-key treatment --sample-key donor
+
+# scCODA Bayesian compositional analysis
+python omicsclaw.py run sc-differential-abundance \
+  --input integrated.h5ad --output results/ \
+  --method sccoda --reference-cell-type "B cell" \
+  --condition-key treatment --sample-key donor --cell-type-key cell_type
+
+# Lightweight proportion screen (no pertpy)
+python omicsclaw.py run sc-differential-abundance \
+  --input integrated.h5ad --output results/ --method simple
 ```
 
-## Notes
+## See also
 
-- `milo` is the preferred neighborhood-level DA path when replicate structure is available.
-- `sccoda` is a compositional Bayesian path and requires a reference cell type concept.
-- `simple` is not a replacement for replicate-aware DA; it is a lightweight fallback.
-- `proportion_test_r` uses base R only (zero installs needed). It runs a Monte Carlo permutation test and produces lollipop plots with bootstrap confidence intervals.
-
-## Outputs
-
-- `tables/sample_by_celltype_counts.csv`
-- `tables/sample_by_celltype_proportions.csv`
-- method-specific result tables
-- `figures/sample_celltype_proportions.png`
-- `result.json` and `report.md`
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled demo data | — |
-| `--method` | str | `milo` | DA method: `milo`, `sccoda`, `simple`, `proportion_test_r` | choices validated |
-| `--condition-key` | str | `condition` | Condition/treatment column in `obs` | — |
-| `--sample-key` | str | `sample` | Biological replicate column in `obs` | — |
-| `--cell-type-key` | str | `cell_type` | Cell type or cluster column in `obs` | — |
-| `--contrast` | str | None | Explicit comparison string, e.g. `control vs stim` | — |
-| `--reference-cell-type` | str | `automatic` | scCODA reference cell type | sccoda only |
-| `--fdr` | float | 0.05 | FDR cutoff for reporting | — |
-| `--prop` | float | 0.1 | Milo neighborhood sampling fraction | milo only |
-| `--n-neighbors` | int | 30 | KNN size if graph must be rebuilt | — |
-| `--min-count` | int | 10 | Minimum cell count per neighborhood | milo only |
-| `--n-permutations` | int | 1000 | Monte Carlo permutations for proportion_test_r | proportion_test_r only |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `embedding_points.csv` | UMAP/embedding colored by condition or DA result | ggplot2 |
-| `plot_cell_barplot` | `r_cell_barplot.png` | `sample_by_celltype_proportions.csv` | Stacked bar of cell type proportions per sample | ggplot2 |
-
-## References Inside OmicsClaw
-
-- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-differential-abundance-guardrails.md`.
-- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-differential-abundance.md`.
-
-## Workflow Position
-
-**Upstream:** sc-clustering or sc-cell-annotation (with condition/sample metadata)
-**Downstream:** Terminal analysis. Consider: sc-de for gene-level differences
+- `references/parameters.md` — every CLI flag, per-method tunables
+- `references/methodology.md` — when each method wins; pertpy install notes
+- `references/output_contract.md` — `result.json` keys per method, table column schemas
+- Adjacent skills: `sc-cell-annotation` / `sc-clustering` (upstream — produce the cell-type column), `sc-de` (parallel — per-cell expression DE between conditions, NOT abundance), `sc-markers` (parallel — within-sample cluster marker ranking, NOT cross-condition)
