@@ -1,0 +1,140 @@
+<!-- AUTO-GENERATED from parameters.yaml — do not edit by hand. -->
+<!-- Regenerate: python scripts/generate_parameters_md.py <skill_dir> -->
+
+
+# Parameters
+
+## Allowed extra CLI flags
+
+- `--de-corr-method`
+- `--de-method`
+- `--enrichr-log2fc-cutoff`
+- `--enrichr-max-genes`
+- `--enrichr-padj-cutoff`
+- `--fdr-threshold`
+- `--gene-set`
+- `--gene-set-file`
+- `--groupby`
+- `--gsea-ascending`
+- `--gsea-max-size`
+- `--gsea-min-size`
+- `--gsea-permutation-num`
+- `--gsea-ranking-metric`
+- `--gsea-seed`
+- `--gsea-threads`
+- `--gsea-weight`
+- `--method`
+- `--n-top-terms`
+- `--no-gsea-ascending`
+- `--no-ssgsea-ascending`
+- `--source`
+- `--species`
+- `--ssgsea-ascending`
+- `--ssgsea-correl-norm-type`
+- `--ssgsea-max-size`
+- `--ssgsea-min-size`
+- `--ssgsea-sample-norm-method`
+- `--ssgsea-seed`
+- `--ssgsea-threads`
+- `--ssgsea-weight`
+
+## Per-method parameter hints
+
+### `enrichr`
+
+**Tuning priority:** source/gene_set_file → de_method/de_corr_method → enrichr_padj_cutoff/log2fc_cutoff → enrichr_max_genes
+
+**Core parameters:**
+
+| name | default |
+|---|---|
+| `groupby` | `leiden` |
+| `source` | `omicsclaw_core` |
+| `species` | `human` |
+| `gene_set` | `—` |
+| `gene_set_file` | `—` |
+| `de_method` | `wilcoxon` |
+| `de_corr_method` | `benjamini-hochberg` |
+| `enrichr_padj_cutoff` | `0.05` |
+| `enrichr_log2fc_cutoff` | `1.0` |
+| `enrichr_max_genes` | `200` |
+| `fdr_threshold` | `0.05` |
+| `n_top_terms` | `20` |
+
+**Requires:**
+- `obs.groupby`
+- `X_log_normalized`
+
+**Tips:**
+- `enrichr` in OmicsClaw is an ORA-style marker enrichment path: it first ranks markers with Scanpy, then enriches positive markers per group.
+- --source: choose `omicsclaw_core` for a stable local-first library, or an external library key such as `GO_Biological_Process` / `MSigDB_Hallmark` when GSEApy can resolve it.
+- --gene-set-file: OmicsClaw wrapper-level override for local `.json` or `.gmt` gene-set libraries.
+- --de-method / --de-corr-method: upstream Scanpy ranking controls that directly affect which markers enter ORA.
+- --enrichr-padj-cutoff / --enrichr-log2fc-cutoff / --enrichr-max-genes: wrapper-level positive-marker selection rules before enrichment.
+
+### `gsea`
+
+**Tuning priority:** source/gene_set_file → de_method/de_corr_method → gsea_ranking_metric → gsea_min_size/max_size → gsea_permutation_num/weight
+
+**Core parameters:**
+
+| name | default |
+|---|---|
+| `groupby` | `leiden` |
+| `source` | `omicsclaw_core` |
+| `species` | `human` |
+| `gene_set` | `—` |
+| `gene_set_file` | `—` |
+| `de_method` | `wilcoxon` |
+| `de_corr_method` | `benjamini-hochberg` |
+| `gsea_ranking_metric` | `auto` |
+| `gsea_min_size` | `15` |
+| `gsea_max_size` | `500` |
+| `gsea_permutation_num` | `100` |
+| `gsea_weight` | `1.0` |
+| `gsea_ascending` | `False` |
+| `gsea_threads` | `1` |
+| `gsea_seed` | `123` |
+| `fdr_threshold` | `0.05` |
+| `n_top_terms` | `20` |
+
+**Requires:**
+- `obs.groupby`
+- `X_log_normalized`
+
+**Tips:**
+- --gsea-ranking-metric: OmicsClaw wrapper-level choice of how Scanpy marker rankings are converted into a preranked list; `auto` prefers `scores`, then `logfoldchanges`.
+- --gsea-min-size / --gsea-max-size / --gsea-permutation-num / --gsea-weight / --gsea-ascending / --gsea-threads / --gsea-seed: official GSEApy `prerank()` controls.
+- `gsea` keeps the full ranked gene list per group, so it is more appropriate than ORA when the user wants subtle coordinated pathway shifts instead of thresholded marker overlap.
+
+### `ssgsea`
+
+**Tuning priority:** source/gene_set_file → ssgsea_sample_norm_method/correl_norm_type → ssgsea_min_size/max_size → ssgsea_weight
+
+**Core parameters:**
+
+| name | default |
+|---|---|
+| `groupby` | `leiden` |
+| `source` | `omicsclaw_core` |
+| `species` | `human` |
+| `gene_set` | `—` |
+| `gene_set_file` | `—` |
+| `ssgsea_sample_norm_method` | `rank` |
+| `ssgsea_correl_norm_type` | `rank` |
+| `ssgsea_min_size` | `15` |
+| `ssgsea_max_size` | `500` |
+| `ssgsea_weight` | `0.25` |
+| `ssgsea_ascending` | `False` |
+| `ssgsea_threads` | `1` |
+| `ssgsea_seed` | `123` |
+| `n_top_terms` | `20` |
+
+**Requires:**
+- `obs.groupby`
+- `X_log_normalized`
+
+**Tips:**
+- `ssgsea` in the current OmicsClaw wrapper runs on group-level mean expression profiles, not on every spot independently.
+- --ssgsea-sample-norm-method / --ssgsea-correl-norm-type / --ssgsea-min-size / --ssgsea-max-size / --ssgsea-weight / --ssgsea-ascending / --ssgsea-threads / --ssgsea-seed: official GSEApy `ssgsea()` controls.
+- OmicsClaw projects selected group-level ssGSEA scores back to `adata.obs` for visualization; this is a display layer rather than extra statistical testing.

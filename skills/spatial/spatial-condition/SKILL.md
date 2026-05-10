@@ -1,411 +1,101 @@
 ---
 name: spatial-condition
-description: >-
-  Compare experimental conditions in spatial transcriptomics data using
-  pseudobulk differential expression with method-aware PyDESeq2 or Wilcoxon
-  testing and explicit replicate handling.
-version: 0.3.0
-author: OmicsClaw Team
+description: Load when comparing two or more experimental conditions (treatment vs control) on a multi-sample preprocessed spatial AnnData via PyDESeq2 pseudobulk or Wilcoxon DE — needs `obs[condition_key]`, `obs[sample_key]`, and cluster labels. Skip when running per-cluster DE on one condition (use `spatial-de`) or comparing two slices without replicates.
+version: 0.5.0
+author: OmicsClaw
 license: MIT
-tags: [spatial, condition, pseudobulk, pydeseq2, DESeq2, differential-expression,
-  wilcoxon]
-metadata:
-  omicsclaw:
-    domain: spatial
-    allowed_extra_flags:
-    - "--cluster-key"
-    - "--condition-key"
-    - "--fdr-threshold"
-    - "--log2fc-threshold"
-    - "--method"
-    - "--min-counts-per-gene"
-    - "--min-samples-per-condition"
-    - "--no-pydeseq2-cooks-filter"
-    - "--no-pydeseq2-independent-filter"
-    - "--no-pydeseq2-refit-cooks"
-    - "--pydeseq2-alpha"
-    - "--pydeseq2-cooks-filter"
-    - "--pydeseq2-fit-type"
-    - "--pydeseq2-independent-filter"
-    - "--pydeseq2-n-cpus"
-    - "--pydeseq2-refit-cooks"
-    - "--pydeseq2-size-factors-fit-type"
-    - "--reference-condition"
-    - "--sample-key"
-    - "--wilcoxon-alternative"
-    param_hints:
-      pydeseq2:
-        priority: "condition_key/sample_key/cluster_key → reference_condition → pydeseq2_fit_type/size_factors_fit_type
-          → pydeseq2_alpha"
-        params: ["condition_key", "sample_key", "cluster_key", "reference_condition",
-          "min_counts_per_gene", "min_samples_per_condition", "fdr_threshold", "log2fc_threshold",
-          "pydeseq2_fit_type", "pydeseq2_size_factors_fit_type", "pydeseq2_alpha",
-          "pydeseq2_refit_cooks", "pydeseq2_cooks_filter", "pydeseq2_independent_filter",
-          "pydeseq2_n_cpus"]
-        defaults: {condition_key: "condition", sample_key: "sample_id", cluster_key: "leiden",
-          min_counts_per_gene: 10, min_samples_per_condition: 2, fdr_threshold: 0.05,
-          log2fc_threshold: 1.0, pydeseq2_fit_type: "parametric", pydeseq2_size_factors_fit_type: "ratio",
-          pydeseq2_alpha: 0.05, pydeseq2_refit_cooks: true, pydeseq2_cooks_filter: true,
-          pydeseq2_independent_filter: true, pydeseq2_n_cpus: 1}
-        requires: ["raw_or_counts", "obs.condition_key", "obs.sample_key"]
-        tips:
-        - "--condition-key / --sample-key / --cluster-key: define the pseudobulk design
-          before any statistical tuning."
-        - "--reference-condition: determines the direction of the contrast and therefore
-          the sign of log2FC."
-        - "--min-counts-per-gene: OmicsClaw pseudobulk gene filter before DE testing."
-        - "--min-samples-per-condition: wrapper-level replicate gate; use 2 as the
-          minimum and prefer >=3."
-        - "--pydeseq2-fit-type: official PyDESeq2 dispersion fit mode (`parametric`
-          or `mean`)."
-        - "--pydeseq2-size-factors-fit-type: official PyDESeq2 size-factor strategy
-          (`ratio`, `poscounts`, `iterative`)."
-        - "--pydeseq2-alpha: official DeseqStats significance target used during result
-          filtering."
-        - "--pydeseq2-refit-cooks / --pydeseq2-cooks-filter / --pydeseq2-independent-filter:
-          official PyDESeq2 result-stabilizing controls."
-        - "--pydeseq2-n-cpus: passed through to DeseqDataSet / DeseqStats."
-      wilcoxon:
-        priority: "condition_key/sample_key/cluster_key → reference_condition → wilcoxon_alternative"
-        params: ["condition_key", "sample_key", "cluster_key", "reference_condition",
-          "min_counts_per_gene", "min_samples_per_condition", "fdr_threshold", "log2fc_threshold",
-          "wilcoxon_alternative"]
-        defaults: {condition_key: "condition", sample_key: "sample_id", cluster_key: "leiden",
-          min_counts_per_gene: 10, min_samples_per_condition: 2, fdr_threshold: 0.05,
-          log2fc_threshold: 1.0, wilcoxon_alternative: "two-sided"}
-        requires: ["raw_or_counts", "obs.condition_key", "obs.sample_key"]
-        tips:
-        - "--wilcoxon-alternative: official SciPy `ranksums` alternative hypothesis
-          (`two-sided`, `less`, `greater`)."
-        - "--reference-condition: controls the comparison direction; OmicsClaw still
-          reports log2FC relative to the reference."
-        - "--min-samples-per-condition: keep this at >=2; Wilcoxon is a fallback,
-          not a replacement for proper replicate-rich GLM analyses."
-    legacy_aliases: [condition, spatial-condition, spatial-condition-comparison]
-    saves_h5ad: true
-    requires_preprocessed: true
-    requires:
-      bins:
-      - python3
-      env: []
-      config: []
-    emoji: "⚖️"
-    homepage: https://github.com/TianGzlab/OmicsClaw
-    os: [macos, linux]
-    install:
-    - kind: pip
-      package: scanpy
-      bins: []
-    - kind: pip
-      package: pydeseq2
-      bins: []
-    trigger_keywords:
-    - condition comparison
-    - pseudobulk
-    - DESeq2
-    - PyDESeq2
-    - treatment vs control
-    - experimental conditions
-    - replicate-aware differential expression
-    script: spatial_condition.py
+tags:
+- spatial
+- condition
+- pseudobulk
+- pydeseq2
+- wilcoxon
+- differential-expression
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# ⚖️ Spatial Condition
+# spatial-condition
 
-You are **Spatial Condition**, the condition-comparison skill for OmicsClaw.
-Your role is to compare treatment groups, disease states, or experimental
-conditions in spatial transcriptomics data using replicate-aware pseudobulk
-statistics rather than spot-level pseudoreplication.
+## When to use
 
-## Why This Exists
+The user has a preprocessed multi-sample spatial AnnData with
+`obs[condition_key]` (e.g. `treatment`/`control`), `obs[sample_key]`
+(biological replicate id), and a cluster column (default `leiden`),
+and wants per-cluster differential expression between conditions.
+Two backends:
 
-- **Without it**: users often compare conditions with cell/spot-level Wilcoxon
-  tests, which inflates significance by treating technical observations as
-  independent biological replicates.
-- **With it**: OmicsClaw aggregates counts to sample-level pseudobulk profiles
-  and applies either a proper negative-binomial GLM (`pydeseq2`) or an explicit
-  Wilcoxon fallback.
-- **Why OmicsClaw**: it standardizes design-column validation, replicate checks,
-  method-specific tuning hints, and reproducible outputs across spatial
-  condition-comparison workflows.
+- `pydeseq2` (default) — pseudobulk per `(sample, cluster)`,
+  PyDESeq2 NB/GLM. Requires raw counts in `layers["counts"]` (or
+  `adata.raw` as fallback). Honours replicate structure correctly.
+- `wilcoxon` — spot-level Wilcoxon rank-sum
+  (`scanpy.tl.rank_genes_groups`). Cheap fallback when no replicate
+  structure exists, but ignores pseudoreplication.
 
-## Core Capabilities
+For per-cluster DE within a single condition use `spatial-de`. For
+spatially variable genes use `spatial-genes`.
 
-1. **Pseudobulk aggregation**: sums raw counts per sample x cluster.
-2. **PyDESeq2** (default): negative-binomial GLM on pseudobulk counts using
-   official PyDESeq2 controls.
-3. **Wilcoxon fallback**: pseudobulk rank-sum testing on log-CPM transformed
-   profiles for lower-replicate or fallback scenarios.
-4. **Per-cluster contrasts**: runs condition comparisons within each cluster to
-   find context-specific responses.
-5. **Replicate-aware filtering**: skips contrasts that do not satisfy the
-   configured sample-count threshold.
-6. **Standard Python gallery**: emits a recipe-driven condition-comparison
-   gallery with overview, diagnostic, supporting, and uncertainty panels backed
-   by the shared `skills/spatial/_lib/viz` layer.
-7. **Figure-ready exports**: writes `figure_data/` CSVs plus a gallery manifest
-   so downstream tools can restyle the same analysis without recomputing DE.
-8. **Structured outputs**: exports global DE table, per-cluster contrast
-   summaries, skipped-contrast reasons, figures, and reproducibility commands.
+## Inputs & Outputs
 
-## Input Formats
+| Input | Format | Required |
+|---|---|---|
+| Preprocessed multi-sample spatial AnnData | `.h5ad` with `obsm["spatial"]`, `obs[condition_key]`, `obs[sample_key]`, `obs[cluster_key]` (default `leiden`) | yes (unless `--demo`) |
+| Raw counts | `adata.layers["counts"]` (preferred) or `adata.raw` (fallback) | yes for `pydeseq2` |
 
-| Format | Extension | Required Fields | Example |
-|--------|-----------|-----------------|---------|
-| AnnData (preprocessed) | `.h5ad` | `layers["counts"]` or `raw`, `obs[condition_key]`, `obs[sample_key]` | `multi_sample.h5ad` |
-| Demo | n/a | `--demo` flag | Runs spatial-preprocess demo then injects synthetic conditions / replicate IDs |
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | `obs[condition_key]` + `obs[cluster_key]` cast to Categorical (`obs[sample_key]` is read but not cast) |
+| Pseudobulk DE | `tables/pseudobulk_de.csv` | gene × cluster × contrast (long-form) |
+| Per-cluster summary | `tables/per_cluster_summary.csv` | up/down counts per cluster |
+| Skipped contrasts | `tables/skipped_contrasts.csv` | clusters that failed replicate-count check |
+| Run summary | `tables/condition_run_summary.csv` | params used per-method |
+| Report | `report.md` + `result.json` | always |
 
-### Input Matrix Convention
+## Flow
 
-This skill has a multi-step pipeline with different statistical assumptions:
+1. Load AnnData (`--input`) or build a 12-sample demo (`--demo`).
+2. Validate `obs[condition_key]` + `obs[sample_key]` exist (`_lib/condition.py:91-95` raises `ValueError` if missing); cast `condition_key` + `cluster_key` to Categorical (`spatial_condition.py:84-86`).
+3. For `pydeseq2`: aggregate raw counts per `(sample, cluster)` pseudobulk; require `layers["counts"]` or fall back to `adata.raw`.
+4. Per cluster: skip the contrast if either condition has < `--min-samples-per-condition` samples; log to `tables/skipped_contrasts.csv`.
+5. Fit DE model per surviving (cluster, contrast); apply `--fdr-threshold` + `--log2fc-threshold`.
+6. Compute UMAP / spatial summaries; render plots; save tables and `processed.h5ad`.
 
-| Component | Input Matrix | Rationale |
-|-----------|-------------|-----------|
-| **Pseudobulk aggregation** | `adata.layers["counts"]` (raw) | Sum aggregation requires raw integer-like counts; summing log values is invalid |
-| **PyDESeq2** | pseudobulk raw integer counts | PyDESeq2 models counts with a negative-binomial GLM |
-| **Wilcoxon** | pseudobulk raw counts internally transformed to CPM/log-space | OmicsClaw computes the transformation inside the wrapper before rank testing |
+## Gotchas
 
-**Core principle**: pseudobulk always starts from raw counts, then the DE method
-operates on the aggregated matrix.
+- **`pydeseq2` falls back silently when raw counts are missing.** `_lib/condition.py:60-86` (`_get_counts_matrix`) prefers `adata.layers["counts"]`, falls back to `adata.raw`, then to `adata.X` — each fallback only logs a warning. If `adata.X` is log-normalised, pseudobulk sums are statistically invalid (`log(a)+log(b) != log(a+b)`). Always preprocess so `layers["counts"]` is populated. `wilcoxon` skips this codepath entirely — it normalises internally.
+- **Single-condition / no-replicate clusters are silently skipped.** `tables/skipped_contrasts.csv` lists clusters with < `--min-samples-per-condition` samples per condition. Always inspect that file — clusters not in `pseudobulk_de.csv` were dropped, not "no DE genes".
+- **`--condition-key` and `--sample-key` must be different columns.** `spatial_condition.py:1024-1025` rejects via `parser.error` when they match. A common mistake is using `condition` for both — pseudobulk needs the sample axis distinct from the condition axis.
+- **`obs[condition_key]` and `obs[cluster_key]` cast to Categorical in place.** `spatial_condition.py:84-86` overwrites both columns with `pd.Categorical(...)`. Order is sorted-unique unless `--reference-condition` pins the reference level — non-alphabetical custom orderings on input are lost. `obs[sample_key]` is NOT cast.
+- **`obsm["X_pca"]` is recomputed inside the script when needed.** `spatial_condition.py:1170` writes `obsm["X_pca"] = adata_hvg.obsm["X_pca"]` for the UMAP / PCA reporting view; this is a diagnostic recompute, not a published embedding.
+- **PyDESeq2 needs ≥ 2 samples per condition.** `--min-samples-per-condition` defaults to 2. If your study has one slice per condition, either pool spots into pseudo-replicates upstream or fall back to `--method wilcoxon`.
 
-**Data layout requirement**:
-
-```python
-adata.layers["counts"] = adata.X.copy()    # before normalize_total + log1p
-adata.X = lognorm_expr                      # after normalize_total + log1p
-adata.obs["condition"] = condition_labels   # e.g. "treated" / "control"
-adata.obs["sample_id"] = sample_labels      # biological replicate IDs
-```
-
-If `layers["counts"]` is missing, OmicsClaw falls back to `adata.raw` or
-`adata.X` with a warning.
-
-## Workflow
-
-1. **Validate**: check condition / sample columns and verify each sample maps to
-   exactly one condition.
-2. **Aggregate**: create pseudobulk matrices per sample x cluster from raw
-   counts.
-3. **Filter**: drop low-count genes and skip contrasts with too few biological
-   replicates.
-4. **Test**:
-   - `pydeseq2`: fit NB GLM per cluster/contrast
-   - `wilcoxon`: run rank-sum test on transformed pseudobulk profiles
-5. **Render the standard gallery**: build the OmicsClaw narrative gallery with
-   design-context, diagnostic burden, supporting summaries, and uncertainty
-   panels.
-6. **Export figure-ready data**: write `figure_data/*.csv` and
-   `figure_data/manifest.json` for downstream customization.
-7. **Report and export**: write `report.md`, `result.json`, `processed.h5ad`,
-   figures, tables, and reproducibility helpers.
-
-## Visualization Contract
-
-OmicsClaw treats `spatial-condition` visualization as a two-layer system:
-
-1. **Python standard gallery**: the canonical result layer. This is the
-   default output users should inspect first.
-2. **R customization layer**: an optional styling and publication layer that
-   reads `figure_data/` and does not recompute pseudobulk DE.
-
-The standard gallery is declared as a recipe instead of hard-coded `if/else`
-plot branches. Current gallery roles include:
-
-- `overview`: condition labels on tissue and a global pseudobulk volcano
-- `diagnostic`: cluster-level DE burden projected onto spatial and UMAP views
-- `supporting`: per-contrast significant-gene counts and per-cluster burden
-- `uncertainty`: adjusted p-value distributions, sample support, and
-  skipped-contrast summaries when applicable
-
-## CLI Reference
+## Key CLI
 
 ```bash
-# PyDESeq2 default run
-oc run spatial-condition \
-  --input <data.h5ad> --output <dir> \
-  --condition-key condition --sample-key sample_id
+# Demo (synthetic 12-sample data)
+python omicsclaw.py run spatial-condition --demo --output /tmp/cond_demo
 
-# PyDESeq2 with explicit cluster labels and tuning
-oc run spatial-condition \
-  --input <data.h5ad> --method pydeseq2 \
-  --condition-key condition --sample-key sample_id --cluster-key leiden \
+# PyDESeq2 pseudobulk (default)
+python omicsclaw.py run spatial-condition \
+  --input preprocessed.h5ad --output results/ \
+  --method pydeseq2 \
+  --condition-key treatment --sample-key sample_id --cluster-key leiden \
   --reference-condition control \
-  --min-counts-per-gene 10 --min-samples-per-condition 2 \
-  --pydeseq2-fit-type parametric \
-  --pydeseq2-size-factors-fit-type ratio \
-  --pydeseq2-alpha 0.05 --pydeseq2-n-cpus 1 \
-  --output <dir>
+  --min-samples-per-condition 3 --fdr-threshold 0.05 --log2fc-threshold 1.0
 
-# Wilcoxon fallback mode
-oc run spatial-condition \
-  --input <data.h5ad> --method wilcoxon \
-  --condition-key condition --sample-key sample_id \
-  --reference-condition control \
-  --wilcoxon-alternative two-sided \
-  --output <dir>
-
-# Demo mode
-oc run spatial-condition --demo --output /tmp/cond_demo
-
-# Direct script entrypoint
-python skills/spatial/spatial-condition/spatial_condition.py \
-  --input <data.h5ad> --method pydeseq2 --output <dir>
+# Wilcoxon spot-level (cheap fallback when no replicates)
+python omicsclaw.py run spatial-condition \
+  --input preprocessed.h5ad --output results/ \
+  --method wilcoxon --condition-key treatment --sample-key sample_id \
+  --wilcoxon-alternative two-sided
 ```
 
-Every successful standard OmicsClaw wrapper run, including `oc run` and
-conversational skill execution, also writes a top-level `README.md` and
-`reproducibility/analysis_notebook.ipynb` to make the output directory easier
-to inspect and rerun.
+## See also
 
-## Example Queries
-
-- "Compare healthy vs disease slices with pseudobulk statistics"
-- "Find treatment-responsive genes per spatial cluster"
-- "Run a Wilcoxon fallback because I only have two replicates per condition"
-
-## Algorithm / Methodology
-
-### PyDESeq2 (default)
-
-1. **Input**: pseudobulk raw integer counts built from sample x cluster
-   aggregation
-2. **Design**: OmicsClaw fits `~ condition` using official `DeseqDataSet(...)`
-   controls
-3. **Testing**: OmicsClaw uses `DeseqStats(...)` with explicit
-   `contrast=["condition", other, reference]`
-4. **Outputs**: reports `base_mean`, `log2fc`, `stat`, `pvalue`, and adjusted
-   `pvalue_adj`
-
-**Core tuning flags**:
-
-- `--reference-condition`: defines the sign direction of the contrast
-- `--cluster-key`: chooses the cluster partition for per-cluster pseudobulk
-- `--min-counts-per-gene`: wrapper-level gene filter before DE testing
-- `--min-samples-per-condition`: wrapper-level replicate gate
-- `--pydeseq2-fit-type`: official PyDESeq2 dispersion fit mode
-- `--pydeseq2-size-factors-fit-type`: official normalization size-factor mode
-- `--pydeseq2-refit-cooks`: whether Cook's outlier refitting is enabled
-- `--pydeseq2-alpha`: official target FDR used by `DeseqStats`
-- `--pydeseq2-cooks-filter`: whether Cook's filtering is applied in result
-  extraction
-- `--pydeseq2-independent-filter`: whether independent filtering is applied in
-  result extraction
-- `--pydeseq2-n-cpus`: CPU count passed to PyDESeq2
-
-### Wilcoxon
-
-1. **Input**: pseudobulk raw counts
-2. **Transformation**: OmicsClaw computes CPM/log-transformed profiles inside
-   the wrapper
-3. **Testing**: `scipy.stats.ranksums()` is used on per-gene transformed values
-4. **Outputs**: reports a pseudobulk-derived `log2fc`, Wilcoxon statistic, raw
-   `pvalue`, and BH-adjusted `pvalue_adj`
-
-**Core tuning flags**:
-
-- `--reference-condition`: defines the sign direction of the contrast
-- `--cluster-key`: chooses the cluster partition for per-cluster pseudobulk
-- `--min-counts-per-gene`: wrapper-level gene filter before DE testing
-- `--min-samples-per-condition`: minimum replicate count before a contrast is
-  attempted
-- `--wilcoxon-alternative`: official SciPy alternative hypothesis
-
-## Output Structure
-
-```text
-output_directory/
-├── README.md
-├── report.md
-├── result.json
-├── processed.h5ad
-├── figures/
-│   ├── condition_spatial_context.png
-│   ├── pseudobulk_volcano.png
-│   ├── condition_effect_burden_spatial.png
-│   ├── condition_effect_burden_umap.png
-│   ├── condition_de_barplot.png
-│   ├── cluster_de_burden.png
-│   ├── condition_pvalue_distribution.png
-│   ├── sample_counts_by_condition.png
-│   └── manifest.json
-├── figure_data/
-│   ├── pseudobulk_de.csv
-│   ├── pseudobulk_volcano_points.csv
-│   ├── per_cluster_summary.csv
-│   ├── skipped_contrasts.csv
-│   ├── cluster_de_metrics.csv
-│   ├── top_de_genes.csv
-│   ├── sample_counts_by_condition.csv
-│   ├── condition_run_summary.csv
-│   ├── condition_spatial_points.csv
-│   ├── condition_umap_points.csv          # when UMAP is available
-│   └── manifest.json
-├── tables/
-│   ├── pseudobulk_de.csv
-│   ├── per_cluster_summary.csv
-│   └── skipped_contrasts.csv
-└── reproducibility/
-    ├── analysis_notebook.ipynb
-    ├── commands.sh
-    ├── requirements.txt
-    └── r_visualization.sh
-```
-
-`README.md` and `reproducibility/analysis_notebook.ipynb` are generated by the
-standard OmicsClaw wrapper. Direct script execution usually produces the
-skill-native outputs plus `reproducibility/commands.sh`.
-
-The bundled optional R templates live under:
-
-```text
-skills/spatial/spatial-condition/r_visualization/
-├── README.md
-└── condition_publication_template.R
-```
-
-## Dependencies
-
-**Required**:
-
-- `scanpy`
-- `scipy`
-
-**Optional**:
-
-- `pydeseq2` for proper negative-binomial GLM inference
-
-**Optional (R)**:
-
-- `ggplot2`
-
-## Safety
-
-- **Local-first**: all processing remains local.
-- **No pseudoreplication**: do not interpret spot-level observations as
-  biological replicates.
-- **Reference transparency**: always state which condition is the reference
-  before interpreting log2 fold changes.
-- **Replicate caution**: fewer than 3 samples per condition is workable but
-  materially less stable.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-
-- condition comparison
-- pseudobulk
-- PyDESeq2 / DESeq2
-- treatment vs control
-
-**Chaining partners**:
-
-- `spatial-preprocess` for counts preservation and baseline clustering
-- `spatial-enrichment` for pathway analysis on DE genes
-- `spatial-genes` for comparing treatment-responsive genes to SVG programs
-
-## Citations
-
-- [PyDESeq2 documentation: `DeseqDataSet`](https://pydeseq2.readthedocs.io/en/stable/api/docstrings/pydeseq2.dds.DeseqDataSet.html)
-- [PyDESeq2 documentation: `DeseqStats`](https://pydeseq2.readthedocs.io/en/stable/api/docstrings/pydeseq2.ds.DeseqStats.html)
-- [SciPy documentation: `scipy.stats.ranksums`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ranksums.html)
-- [Squair et al. 2021](https://doi.org/10.1038/s41467-021-25960-2) — pseudobulk best practices
+- `references/parameters.md` — every CLI flag, per-method tunables
+- `references/methodology.md` — when each backend wins; replicate-count rules
+- `references/output_contract.md` — pseudobulk + skipped-contrast schemas
+- Adjacent skills: `spatial-preprocess` (upstream), `spatial-domains` (upstream — provides `obs["leiden"]`), `spatial-de` (parallel — per-cluster DE within one condition), `spatial-integrate` (upstream — required for cross-batch comparisons), `spatial-statistics` (parallel — per-gene Moran's I)
