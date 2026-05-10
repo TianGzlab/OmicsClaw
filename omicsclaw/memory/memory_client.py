@@ -364,8 +364,11 @@ class MemoryClient:
         return "\n\n".join(parts) if parts else ""
 
     # ------------------------------------------------------------------
-    # Verbs still routed through the legacy GraphService
-    # (PR #4b ReviewLog will replace these.)
+    # forget still routes through the legacy GraphService for the
+    # subtree-cascade + orphan-prevention semantics that the engine
+    # delete verb does not yet replicate. (Next PR in the §6.2
+    # GraphService retirement walks the cascade logic into ReviewLog
+    # so this last call site can come off graph.py too.)
     # ------------------------------------------------------------------
 
     async def get_recent(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -376,12 +379,9 @@ class MemoryClient:
         ``__shared__`` system rows into a per-user view).
         """
         await self._ensure_init()
-        from .graph import GraphService
-
         assert self._engine is not None
-        graph = GraphService(self._engine.db, self._engine.search_indexer)
-        return await graph.get_recent_memories(
-            limit=limit, namespace=self._namespace
+        return await self._engine.get_recent(
+            namespace=self._namespace, limit=limit
         )
 
     async def forget(self, uri: str) -> Dict[str, Any]:

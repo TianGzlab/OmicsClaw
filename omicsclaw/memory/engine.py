@@ -21,6 +21,7 @@ Read verbs (PR #3b):
     - search(query, namespace, ...)           — FTS over (namespace, __shared__)
     - list_children(uri, namespace)           — strict-namespace children
     - get_subtree(uri, namespace, ...)        — flat listing under a prefix
+    - get_recent(namespace, ...)              — recently-updated memory listing
 
 Read-fallback policy (CONTEXT.md): ``recall`` and ``search`` fall back to
 ``__shared__`` so per-user contexts can see globally-shared content;
@@ -34,7 +35,7 @@ import uuid as uuidlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -765,3 +766,71 @@ class MemoryEngine:
             return await self._materialize_listing(
                 s, list(path_rows), edge_id_to_child, namespace
             )
+
+    async def get_recent(
+        self,
+        *,
+        namespace: str,
+        limit: int = 10,
+        include_shared: bool = False,
+    ) -> list[dict]:
+        """Return recently-updated active memories scoped to ``namespace``.
+
+        Strict by default: only rows whose Path is in ``namespace`` show
+        up — same rule as ``list_children`` and ``get_subtree``. Pass
+        ``include_shared=True`` for the desktop UI mode that also surfaces
+        ``__shared__`` rows (so user-customised ``core://agent/*`` shows
+        up in the recent listing alongside per-user writes).
+
+        Output dict shape mirrors the legacy
+        ``GraphService.get_recent_memories`` so the call sites that swap
+        over need no result-shape changes.
+
+        Note: this verb is intentionally namespace-required — engine reads
+        always carry a partition. The legacy ``namespace=None`` admin
+        mode lives in ``GraphService.get_recent_memories`` and remains
+        for ``oc memory-server``-style admin tooling.
+        """
+        async with self._db.session() as s:
+            stmt = (
+                select(Memory, Edge, Path)
+                .select_from(Path)
+                .join(Edge, Path.edge_id == Edge.id)
+                .join(
+                    Memory,
+                    and_(
+                        Memory.node_uuid == Edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    ),
+                )
+                .order_by(Memory.created_at.desc())
+            )
+            if include_shared:
+                stmt = stmt.where(
+                    Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                )
+            else:
+                stmt = stmt.where(Path.namespace == namespace)
+
+            rows = (await s.execute(stmt)).all()
+
+            seen: set[int] = set()
+            results: list[dict] = []
+            for memory, edge, path_obj in rows:
+                if memory.id in seen:
+                    continue
+                seen.add(memory.id)
+                results.append(
+                    {
+                        "memory_id": memory.id,
+                        "uri": f"{path_obj.domain}://{path_obj.path}",
+                        "priority": edge.priority,
+                        "disclosure": edge.disclosure,
+                        "created_at": memory.created_at.isoformat()
+                        if memory.created_at
+                        else None,
+                    }
+                )
+                if len(results) >= limit:
+                    break
+            return results
