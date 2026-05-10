@@ -25,18 +25,21 @@ Verbs reserved for PR #3b:
 
 from __future__ import annotations
 
+import uuid as uuidlib
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Edge, Memory, Node, Path
+from .models import ROOT_NODE_UUID, Edge, Memory, Node, Path
 from .uri import MemoryURI
 
 if TYPE_CHECKING:
     from .database import DatabaseManager
     from .search import SearchIndexer
+
+_UNSET: Any = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,8 +87,8 @@ class MemoryEngine:
         content: str,
         *,
         namespace: str,
-        priority: int = 0,
-        disclosure: Optional[str] = None,
+        priority: Any = _UNSET,
+        disclosure: Any = _UNSET,
     ) -> MemoryRef:
         """Overwrite-mode upsert: create-or-replace the active memory at (namespace, uri).
 
@@ -93,8 +96,176 @@ class MemoryEngine:
         Memory row's content in place — no deprecation chain, no new
         Memory row. Use this for ``dataset://`` and ``analysis://`` URIs
         where history is not interesting.
+
+        ``priority`` and ``disclosure`` use a sentinel so an update call
+        without them preserves the existing edge's metadata; pass an
+        explicit ``None`` (or any value) to overwrite.
         """
-        raise NotImplementedError("Task 3a.2")
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        canonical = str(parsed)
+
+        async with self._db.session() as s:
+            existing_path = await self._fetch_path(s, namespace, parsed)
+
+            if existing_path is not None:
+                memory_id, node_uuid = await self._upsert_existing(
+                    s, existing_path, content, priority, disclosure
+                )
+            else:
+                memory_id, node_uuid = await self._upsert_create(
+                    s, parsed, namespace, content, priority, disclosure
+                )
+
+            await self._search.refresh_search_documents_for_node(
+                node_uuid, session=s
+            )
+
+        return MemoryRef(
+            memory_id=memory_id,
+            node_uuid=node_uuid,
+            namespace=namespace,
+            uri=canonical,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers (kept private — tests should drive only via verbs)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _fetch_path(
+        s: AsyncSession, namespace: str, parsed: MemoryURI
+    ) -> Optional[Path]:
+        return (
+            await s.execute(
+                select(Path).where(
+                    Path.namespace == namespace,
+                    Path.domain == parsed.domain,
+                    Path.path == parsed.path,
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def _upsert_existing(
+        self,
+        s: AsyncSession,
+        path_row: Path,
+        content: str,
+        priority: Any,
+        disclosure: Any,
+    ) -> tuple[int, str]:
+        edge = await s.get(Edge, path_row.edge_id)
+        if edge is None:
+            raise RuntimeError(
+                f"Path {path_row.namespace}/{path_row.domain}/{path_row.path} "
+                f"references a missing edge — graph corruption."
+            )
+
+        memory = (
+            await s.execute(
+                select(Memory)
+                .where(
+                    Memory.node_uuid == edge.child_uuid,
+                    Memory.deprecated == False,  # noqa: E712 — SQLAlchemy column comparison
+                )
+                .order_by(Memory.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if memory is None:
+            # Edge exists but has no active memory — create one and attach.
+            memory = Memory(
+                node_uuid=edge.child_uuid, content=content, deprecated=False
+            )
+            s.add(memory)
+            await s.flush()
+        else:
+            memory.content = content
+
+        if priority is not _UNSET:
+            edge.priority = priority
+        if disclosure is not _UNSET:
+            edge.disclosure = disclosure
+
+        return memory.id, edge.child_uuid
+
+    async def _upsert_create(
+        self,
+        s: AsyncSession,
+        parsed: MemoryURI,
+        namespace: str,
+        content: str,
+        priority: Any,
+        disclosure: Any,
+    ) -> tuple[int, str]:
+        parent_uuid = await self._resolve_parent_node_uuid(s, parsed, namespace)
+
+        node_uuid = str(uuidlib.uuid4())
+        s.add(Node(uuid=node_uuid))
+        await s.flush()
+
+        memory = Memory(node_uuid=node_uuid, content=content, deprecated=False)
+        s.add(memory)
+        await s.flush()
+
+        edge_name = parsed.path.rsplit("/", 1)[-1] if "/" in parsed.path else parsed.path
+        edge = Edge(
+            parent_uuid=parent_uuid,
+            child_uuid=node_uuid,
+            name=edge_name,
+            priority=0 if priority is _UNSET else priority,
+            disclosure=None if disclosure is _UNSET else disclosure,
+        )
+        s.add(edge)
+        await s.flush()
+
+        s.add(
+            Path(
+                namespace=namespace,
+                domain=parsed.domain,
+                path=parsed.path,
+                edge_id=edge.id,
+            )
+        )
+        await s.flush()
+
+        return memory.id, node_uuid
+
+    @staticmethod
+    async def _resolve_parent_node_uuid(
+        s: AsyncSession, parsed: MemoryURI, namespace: str
+    ) -> str:
+        """Resolve the parent node UUID for a new path, with shared fallback.
+
+        Top-level URIs (``core://agent``, ``analysis://sc-de``) attach to
+        ROOT. Nested URIs require the parent path to exist either in the
+        current namespace or in ``__shared__``. Falling back to shared lets
+        a per-user write attach under a globally-known structural parent.
+        """
+        parent_uri = parsed.parent()
+        if parent_uri is None or parent_uri.is_root:
+            return ROOT_NODE_UUID
+
+        for ns in (namespace, "__shared__"):
+            parent_path = (
+                await s.execute(
+                    select(Path).where(
+                        Path.namespace == ns,
+                        Path.domain == parent_uri.domain,
+                        Path.path == parent_uri.path,
+                    )
+                )
+            ).scalar_one_or_none()
+            if parent_path is None:
+                continue
+            parent_edge = await s.get(Edge, parent_path.edge_id)
+            if parent_edge is not None:
+                return parent_edge.child_uuid
+
+        raise ValueError(
+            f"Parent path {parent_uri} does not exist in namespace "
+            f"{namespace!r} or '__shared__' — create the parent first."
+        )
 
     async def upsert_versioned(
         self,
