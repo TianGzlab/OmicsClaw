@@ -197,6 +197,34 @@ def test_gotcha_candidates_mined(tmp_path: Path) -> None:
     assert "falls back" in gotchas.lower() or "no replicates" in gotchas.lower()
 
 
+def test_migration_preserves_unknown_omicsclaw_fields(tmp_path: Path) -> None:
+    """Older skills carry decorative fields like `homepage`, `os`, `install`,
+    `requires.bins/env/config` that no runtime code reads but a maintainer
+    may still want.  The migration must not silently drop them — copy all
+    legacy_omicsclaw keys into the sidecar verbatim, then ensure required
+    defaults are present."""
+    fm = dict(LEGACY_FRONTMATTER)
+    fm = yaml.safe_load(yaml.safe_dump(fm))  # deep copy
+    fm["metadata"]["omicsclaw"]["homepage"] = "https://example.org"
+    fm["metadata"]["omicsclaw"]["os"] = ["macos", "linux"]
+    fm["metadata"]["omicsclaw"]["install"] = [{"kind": "pip", "package": "scanpy"}]
+    fm["metadata"]["omicsclaw"]["requires"] = {"bins": ["python3"], "env": [], "config": []}
+
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(fm, sort_keys=False) + "---\n\n" + LEGACY_BODY,
+        encoding="utf-8",
+    )
+    migrate_skill.migrate(skill)
+
+    sidecar = yaml.safe_load((skill / "parameters.yaml").read_text())
+    assert sidecar["homepage"] == "https://example.org"
+    assert sidecar["os"] == ["macos", "linux"]
+    assert sidecar["install"] == [{"kind": "pip", "package": "scanpy"}]
+    assert sidecar["requires"] == {"bins": ["python3"], "env": [], "config": []}
+
+
 def test_gotcha_mining_handles_blockquote_note_form(tmp_path: Path) -> None:
     """Legacy SKILL.md often uses `> **Note**:` / `> **Important**:` markdown
     blockquotes for warnings.  The miner must strip the leading `>` whitespace

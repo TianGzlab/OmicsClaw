@@ -138,20 +138,18 @@ SIDECAR_DEFAULTS: dict[str, object] = {
     "param_hints": {},
 }
 
-# Optional fields that are copied through when present.
-SIDECAR_OPTIONAL = ("emoji",)
-
 
 def _build_sidecar(legacy_omicsclaw: dict) -> dict:
-    sidecar: dict = {
-        "domain": legacy_omicsclaw.get("domain", ""),
-        "script": legacy_omicsclaw.get("script", ""),
-    }
+    """Copy every key from the legacy `metadata.omicsclaw` block verbatim,
+    then ensure required fields have their defaults filled in.  Decorative
+    fields (`homepage`, `os`, `install`, `requires`) flow through unchanged
+    even though no current runtime code reads them — preserving data is
+    cheaper than re-deriving it later."""
+    sidecar = dict(legacy_omicsclaw)
+    sidecar.setdefault("domain", "")
+    sidecar.setdefault("script", "")
     for key, default in SIDECAR_DEFAULTS.items():
-        sidecar[key] = legacy_omicsclaw.get(key, default)
-    for key in SIDECAR_OPTIONAL:
-        if key in legacy_omicsclaw:
-            sidecar[key] = legacy_omicsclaw[key]
+        sidecar.setdefault(key, default)
     return sidecar
 
 
