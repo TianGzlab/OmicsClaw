@@ -282,7 +282,75 @@ def test_sc_de_real_skill_roundtrips(tmp_path: Path) -> None:
     assert sc.param_hints["deseq2_r"]["defaults"]["pseudobulk_min_cells"] == 10
 
 
-_PROD_SPATIAL_DE = Path(__file__).resolve().parent.parent / "skills" / "spatial" / "spatial-de"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PROD_SPATIAL_DE = _REPO_ROOT / "skills" / "spatial" / "spatial-de"
+
+
+def _discover_v2_skills() -> list[Path]:
+    """Every production skill directory that has migrated to v2 (has a
+    parameters.yaml sidecar).  Excludes the _template scaffold."""
+    return sorted(
+        p.parent for p in (_REPO_ROOT / "skills").rglob("parameters.yaml")
+        if not any(part.startswith("_") for part in p.relative_to(_REPO_ROOT / "skills").parts[:-1])
+        and not p.parent.name.startswith("_")
+    )
+
+
+@pytest.mark.parametrize(
+    "skill_dir",
+    _discover_v2_skills(),
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
+def test_every_v2_skill_roundtrips(tmp_path: Path, skill_dir: Path) -> None:
+    """Every v2 skill in production must round-trip identically between the
+    legacy frontmatter form and the new sidecar form via LazySkillMetadata.
+
+    Auto-discovers every parameters.yaml under skills/ — when PR #N adds a
+    new v2 skill, this test covers it for free.  Per-skill failures are
+    attributable via the pytest parametrisation ID (e.g.
+    `bulkrna/bulkrna-coexpression`).
+    """
+    sidecar_data = yaml.safe_load((skill_dir / "parameters.yaml").read_text(encoding="utf-8"))
+    assert isinstance(sidecar_data, dict), f"{skill_dir}/parameters.yaml must be a dict"
+
+    # Identity fields stay in SKILL.md frontmatter; reuse production values
+    # so the fabricated forms only differ in WHERE the runtime contract lives.
+    prod_skill_md = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    prod_fm = yaml.safe_load(prod_skill_md.split("---", 2)[1]) or {}
+    identity = {
+        "name": prod_fm.get("name", skill_dir.name),
+        "description": prod_fm.get("description", ""),
+    }
+
+    fm_skill = tmp_path / "fm"
+    fm_skill.mkdir()
+    fm_frontmatter = {**identity, "metadata": {"omicsclaw": sidecar_data}}
+    (fm_skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(fm_frontmatter, sort_keys=False) + "---\n",
+        encoding="utf-8",
+    )
+
+    sc_skill = tmp_path / "sc"
+    sc_skill.mkdir()
+    (sc_skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(identity, sort_keys=False) + "---\n",
+        encoding="utf-8",
+    )
+    (sc_skill / "parameters.yaml").write_text(
+        yaml.safe_dump(sidecar_data, sort_keys=False), encoding="utf-8"
+    )
+
+    fm = LazySkillMetadata(fm_skill)
+    sc = LazySkillMetadata(sc_skill)
+
+    assert fm.domain == sc.domain
+    assert fm.script == sc.script
+    assert fm.allowed_extra_flags == sc.allowed_extra_flags
+    assert fm.trigger_keywords == sc.trigger_keywords
+    assert fm.legacy_aliases == sc.legacy_aliases
+    assert fm.saves_h5ad == sc.saves_h5ad
+    assert fm.requires_preprocessed == sc.requires_preprocessed
+    assert fm.param_hints == sc.param_hints
 
 
 def test_spatial_de_real_skill_roundtrips(tmp_path: Path) -> None:
