@@ -67,11 +67,22 @@ def _parse_skill_md(skill_dir: Path) -> tuple[dict, str] | None:
     return frontmatter, body
 
 
+_SKIP_CLAUSES = ("skip when", "skip if", "skip for")
+
+
 def _check_description(description: str) -> list[str]:
     errors: list[str] = []
     desc = (description or "").strip()
-    if not desc.lower().startswith("load when"):
+    # Whitespace-normalise so YAML folded scalars (`>-` / `|`) that wrap
+    # "Skip when" across lines, or that introduce double spaces, still match.
+    normalised = " ".join(desc.lower().split())
+    if not normalised.startswith("load when"):
         errors.append("description: must start with 'Load when'")
+    if not any(clause in normalised for clause in _SKIP_CLAUSES):
+        errors.append(
+            "description: must include a 'Skip when' / 'Skip if' / 'Skip for' "
+            "clause"
+        )
     if len(desc.split()) > MAX_DESCRIPTION_WORDS:
         errors.append(
             f"description: must be <= {MAX_DESCRIPTION_WORDS} words "
