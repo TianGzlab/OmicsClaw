@@ -3,45 +3,95 @@ from __future__ import annotations
 from pathlib import Path
 import yaml
 
+# Fields that lazy_metadata exposes as properties.  When a v2 sidecar
+# (`parameters.yaml`) is present, every field except name/description is read
+# from the sidecar; otherwise we fall back to the legacy
+# `metadata.omicsclaw` block in the SKILL.md frontmatter.
+_RUNTIME_FIELDS = (
+    "domain",
+    "script",
+    "trigger_keywords",
+    "allowed_extra_flags",
+    "legacy_aliases",
+    "saves_h5ad",
+    "requires_preprocessed",
+    "param_hints",
+)
+
+_RUNTIME_DEFAULTS: dict[str, object] = {
+    "domain": "",
+    "script": "",
+    "trigger_keywords": [],
+    "allowed_extra_flags": [],
+    "legacy_aliases": [],
+    "saves_h5ad": False,
+    "requires_preprocessed": False,
+    "param_hints": {},
+}
+
+
 class LazySkillMetadata:
     def __init__(self, skill_path: Path):
         self.path = skill_path
         self._basic = None
         self._full = None
 
-    def _load_basic(self):
+    def _parse_frontmatter(self) -> dict | None:
         skill_md = self.path / "SKILL.md"
         if not skill_md.exists():
-            self._basic = {}
-            return
+            return None
 
         content = skill_md.read_text(encoding="utf-8")
         if not content.startswith("---"):
-            self._basic = {}
-            return
+            return None
 
         parts = content.split("---", 2)
         if len(parts) < 3:
-            self._basic = {}
-            return
+            return None
 
         try:
-            frontmatter = yaml.safe_load(parts[1])
-            omicsclaw_meta = frontmatter.get("metadata", {}).get("omicsclaw", {})
-            self._basic = {
-                "name": frontmatter.get("name", ""),
-                "description": frontmatter.get("description", ""),
-                "domain": omicsclaw_meta.get("domain", ""),
-                "script": omicsclaw_meta.get("script", ""),
-                "trigger_keywords": omicsclaw_meta.get("trigger_keywords", []),
-                "allowed_extra_flags": omicsclaw_meta.get("allowed_extra_flags", []),
-                "legacy_aliases": omicsclaw_meta.get("legacy_aliases", []),
-                "saves_h5ad": omicsclaw_meta.get("saves_h5ad", False),
-                "requires_preprocessed": omicsclaw_meta.get("requires_preprocessed", False),
-                "param_hints": omicsclaw_meta.get("param_hints", {}),
-            }
+            return yaml.safe_load(parts[1]) or {}
         except yaml.YAMLError:
-            self._basic = {}
+            return None
+
+    def _load_sidecar(self) -> dict | None:
+        sidecar = self.path / "parameters.yaml"
+        if not sidecar.exists():
+            return None
+        try:
+            data = yaml.safe_load(sidecar.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _load_basic(self):
+        # Tolerate missing/malformed frontmatter — the sidecar may still hold
+        # the runtime contract.  Identity fields default to safe empties.
+        frontmatter = self._parse_frontmatter() or {}
+        legacy = (frontmatter.get("metadata") or {}).get("omicsclaw") or {}
+        sidecar = self._load_sidecar() or {}
+
+        # Per-field merge: sidecar wins where it speaks, frontmatter fills
+        # gaps, defaults backstop both.  A bare YAML key (`field:`) parses to
+        # None — treat that as "field absent" so partial migration and
+        # null-valued collections do not crash callers.
+        runtime: dict[str, object] = {}
+        for key in _RUNTIME_FIELDS:
+            # `dict.get(missing_key)` already returns None, so this two-step
+            # fallthrough handles both "key absent" and "value is None" (bare
+            # YAML key) uniformly.
+            value = sidecar.get(key)
+            if value is None:
+                value = legacy.get(key)
+            if value is None:
+                value = _RUNTIME_DEFAULTS[key]
+            runtime[key] = value
+
+        self._basic = {
+            "name": frontmatter.get("name", ""),
+            "description": frontmatter.get("description", ""),
+            **runtime,
+        }
 
     def _ensure_basic(self):
         if self._basic is None:

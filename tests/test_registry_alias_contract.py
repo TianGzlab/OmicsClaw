@@ -19,6 +19,18 @@ def _frontmatter(skill_md: Path) -> dict[str, Any]:
     return yaml.safe_load(text.split("---", 2)[1]) or {}
 
 
+def _runtime_legacy_aliases(skill_dir: Path) -> list[str]:
+    """Read legacy_aliases from the v2 sidecar if present, otherwise from the
+    legacy frontmatter block.  Mirrors lazy_metadata's source priority."""
+    sidecar = skill_dir / "parameters.yaml"
+    if sidecar.exists():
+        data = yaml.safe_load(sidecar.read_text(encoding="utf-8")) or {}
+        return list(data.get("legacy_aliases", []) or [])
+    fm = _frontmatter(skill_dir / "SKILL.md")
+    omics = (fm.get("metadata", {}) or {}).get("omicsclaw", {}) or {}
+    return list(omics.get("legacy_aliases", []) or [])
+
+
 def test_discovered_skill_legacy_aliases_are_owned_by_skill_md():
     registry = OmicsRegistry()
     registry.load_all()
@@ -30,14 +42,12 @@ def test_discovered_skill_legacy_aliases_are_owned_by_skill_md():
         if not skill_md.exists():
             continue
 
-        data = _frontmatter(skill_md)
-        omics = data.get("metadata", {}).get("omicsclaw", {}) if isinstance(data, dict) else {}
-        expected_aliases = list(omics.get("legacy_aliases", []) or [])
+        expected_aliases = _runtime_legacy_aliases(skill_md.parent)
         actual_aliases = list(info.get("legacy_aliases", []) or [])
         if actual_aliases != expected_aliases:
             mismatches.append(
                 f"{alias}: registry legacy_aliases={actual_aliases!r}, "
-                f"SKILL.md legacy_aliases={expected_aliases!r}"
+                f"declared legacy_aliases={expected_aliases!r}"
             )
 
     assert not mismatches, "\n".join(mismatches[:80])

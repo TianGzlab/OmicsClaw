@@ -1,0 +1,22 @@
+domain: bulkrna
+script: bulkrna_de.py
+saves_h5ad: false
+requires_preprocessed: false
+trigger_keywords:
+- differential expression
+- DE analysis
+- DESeq2
+- volcano plot
+- fold change
+- DEGs
+- bulk DE
+legacy_aliases:
+- bulk-de
+allowed_extra_flags:
+- --control-prefix
+- --lfc-cutoff
+- --method
+- --padj-cutoff
+- --treat-prefix
+param_hints: {}
+emoji: 🔬
