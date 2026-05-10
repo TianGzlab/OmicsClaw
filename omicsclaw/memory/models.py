@@ -33,6 +33,11 @@ Base = declarative_base()
 # Using a fixed UUID instead of NULL avoids SQLite's NULL != NULL uniqueness quirk.
 ROOT_NODE_UUID = "00000000-0000-0000-0000-000000000000"
 
+# Shared (cross-namespace) partition. Read fallback target for recall/search;
+# also the implicit default for legacy callers that don't pass ``namespace``.
+# Single source of truth — engine.py / search.py / migrations import from here.
+SHARED_NAMESPACE = "__shared__"
+
 
 # =============================================================================
 # Shared Utilities
