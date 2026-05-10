@@ -562,7 +562,15 @@ class MemoryEngine:
         domain: Optional[str] = None,
         limit: int = 10,
     ) -> list[dict]:
-        raise NotImplementedError("PR #3b")
+        """Full-text search restricted to ``namespace`` + ``__shared__``.
+
+        Per-namespace hits are returned ahead of shared hits when scores
+        are otherwise comparable. Each result dict carries a
+        ``namespace`` key indicating which partition the hit came from.
+        """
+        return await self._search.search(
+            query, limit=limit, domain=domain, namespace=namespace
+        )
 
     async def list_children(
         self, uri: str | MemoryURI, *, namespace: str

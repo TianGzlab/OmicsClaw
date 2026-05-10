@@ -150,3 +150,116 @@ async def test_recall_accepts_memory_uri_object(engine):
     )
     assert record is not None
     assert record.uri == "core://agent"
+
+
+# ----------------------------------------------------------------------
+# search — namespace-combined FTS
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_finds_in_namespace(engine):
+    eng, _ = engine
+    await eng.upsert(
+        "analysis://sc-de", "perform differential expression", namespace="tg/userA"
+    )
+
+    hits = await eng.search("differential", namespace="tg/userA")
+
+    assert any(hit["uri"] == "analysis://sc-de" for hit in hits)
+
+
+@pytest.mark.asyncio
+async def test_search_finds_shared_content(engine):
+    eng, _ = engine
+    await eng.upsert(
+        "core://agent",
+        "you are a helpful spatial omics agent",
+        namespace="__shared__",
+    )
+
+    hits = await eng.search("spatial omics", namespace="tg/userA")
+
+    assert any(hit["uri"] == "core://agent" for hit in hits)
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_leak_across_namespaces(engine):
+    """Critical: writes in ns/A must not appear in searches from ns/B."""
+    eng, _ = engine
+    await eng.upsert(
+        "dataset://pbmc.h5ad",
+        "user A's secret dataset",
+        namespace="tg/userA",
+    )
+
+    hits = await eng.search("secret", namespace="tg/userB")
+
+    assert all(hit["uri"] != "dataset://pbmc.h5ad" for hit in hits)
+
+
+@pytest.mark.asyncio
+async def test_search_respects_domain_filter(engine):
+    eng, _ = engine
+    await eng.upsert(
+        "analysis://sc-de", "differential expression", namespace="tg/userA"
+    )
+    await eng.upsert(
+        "dataset://pbmc.h5ad", "differential dataset", namespace="tg/userA"
+    )
+
+    hits = await eng.search(
+        "differential", namespace="tg/userA", domain="analysis"
+    )
+
+    assert all(hit["domain"] == "analysis" for hit in hits)
+
+
+@pytest.mark.asyncio
+async def test_search_respects_limit(engine):
+    eng, _ = engine
+    for i in range(5):
+        await eng.upsert(
+            f"analysis://run_{i}",
+            f"differential expression run {i}",
+            namespace="tg/userA",
+        )
+
+    hits = await eng.search("differential", namespace="tg/userA", limit=2)
+
+    assert len(hits) <= 2
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_for_no_match(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "alpha", namespace="tg/userA")
+
+    hits = await eng.search("zeta-not-present", namespace="tg/userA")
+
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_search_orders_namespace_before_shared(engine):
+    """Per-namespace hits should outrank __shared__ hits with comparable score.
+
+    Both rows match the same query token; the namespace's row should appear
+    in the result list before the shared one.
+    """
+    eng, _ = engine
+    await eng.upsert(
+        "core://agent", "you are a helpful agent", namespace="__shared__"
+    )
+    await eng.upsert(
+        "preference://style",
+        "user A prefers helpful agents",
+        namespace="tg/userA",
+    )
+
+    hits = await eng.search("helpful", namespace="tg/userA", limit=10)
+
+    uris = [h["uri"] for h in hits]
+    a_idx = uris.index("preference://style")
+    shared_idx = uris.index("core://agent")
+    assert a_idx < shared_idx

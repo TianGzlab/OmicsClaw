@@ -373,26 +373,54 @@ class SearchIndexer:
     # -----------------------------------------------------------------
 
     async def search(
-        self, query: str, limit: int = 10, domain: Optional[str] = None
+        self,
+        query: str,
+        limit: int = 10,
+        domain: Optional[str] = None,
+        namespace: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Search memories by path and content using the derived FTS index."""
+        """Search memories by path and content using the derived FTS index.
+
+        When ``namespace`` is provided, results are restricted to that
+        namespace plus the shared partition; per-namespace hits are sorted
+        ahead of shared ones. ``namespace=None`` preserves legacy
+        unfiltered behavior for callers that haven't migrated.
+        """
         async with self._session() as session:
             candidate_limit = max(limit * 5, 50)
             params: Dict[str, Any] = {"candidate_limit": candidate_limit}
+
             domain_clause = ""
             if domain is not None:
                 params["domain"] = domain
                 domain_clause = "AND sd.domain = :domain"
 
+            namespace_clause, namespace_order = "", ""
+            if namespace is not None:
+                params["current_ns"] = namespace
+                params["shared_ns"] = SHARED_NAMESPACE
+                namespace_clause = (
+                    "AND sd.namespace IN (:current_ns, :shared_ns)"
+                )
+                namespace_order = (
+                    "CASE WHEN sd.namespace = :current_ns THEN 0 ELSE 1 END ASC,"
+                )
+
             if self.db_type == "sqlite":
                 # Try FTS5 first, fall back to LIKE search
                 try:
                     return await self._search_sqlite_fts(
-                        session, query, params, domain_clause, limit
+                        session,
+                        query,
+                        params,
+                        domain_clause,
+                        namespace_clause,
+                        namespace_order,
+                        limit,
                     )
                 except Exception:
                     return await self._search_sqlite_like(
-                        session, query, limit, domain
+                        session, query, limit, domain, namespace
                     )
             else:
                 normalized = expand_query_terms(query)
@@ -411,6 +439,7 @@ class SearchIndexer:
                             sd.priority,
                             sd.content,
                             sd.disclosure,
+                            sd.namespace AS namespace,
                             ts_rank_cd(
                                 to_tsvector(
                                     'simple',
@@ -432,7 +461,8 @@ class SearchIndexer:
                                 coalesce(sd.search_terms, '')
                               ) @@ websearch_to_tsquery('simple', :ts_query)
                           {domain_clause}
-                        ORDER BY score DESC, sd.priority ASC, char_length(sd.path) ASC
+                          {namespace_clause}
+                        ORDER BY {namespace_order} score DESC, sd.priority ASC, char_length(sd.path) ASC
                         LIMIT :candidate_limit
                         """
                     ),
@@ -447,6 +477,8 @@ class SearchIndexer:
         query: str,
         params: Dict[str, Any],
         domain_clause: str,
+        namespace_clause: str,
+        namespace_order: str,
         limit: int,
     ) -> List[Dict[str, Any]]:
         """Search using SQLite FTS5."""
@@ -466,6 +498,7 @@ class SearchIndexer:
                     sd.priority,
                     sd.content,
                     sd.disclosure,
+                    sd.namespace AS namespace,
                     -- 8 bm25 weights, one per FTS column in declaration order:
                     -- namespace, domain, path, node_uuid, uri, content,
                     -- disclosure, search_terms. namespace gets 0.0 because
@@ -479,7 +512,8 @@ class SearchIndexer:
                  AND search_documents_fts.path      = sd.path
                 WHERE search_documents_fts MATCH :match_query
                   {domain_clause}
-                ORDER BY score ASC, sd.priority ASC, length(sd.path) ASC
+                  {namespace_clause}
+                ORDER BY {namespace_order} score ASC, sd.priority ASC, length(sd.path) ASC
                 LIMIT :candidate_limit
                 """
             ),
@@ -493,6 +527,7 @@ class SearchIndexer:
         query: str,
         limit: int,
         domain: Optional[str],
+        namespace: Optional[str],
     ) -> List[Dict[str, Any]]:
         """Fallback search using LIKE when FTS5 is unavailable."""
         safe_query = f"%{escape_like_literal(query)}%"
@@ -502,6 +537,17 @@ class SearchIndexer:
         if domain:
             params["domain"] = domain
             domain_clause = "AND sd.domain = :domain"
+
+        namespace_clause, namespace_order = "", ""
+        if namespace is not None:
+            params["current_ns"] = namespace
+            params["shared_ns"] = SHARED_NAMESPACE
+            namespace_clause = (
+                "AND sd.namespace IN (:current_ns, :shared_ns)"
+            )
+            namespace_order = (
+                "CASE WHEN sd.namespace = :current_ns THEN 0 ELSE 1 END ASC,"
+            )
 
         result = await session.execute(
             text(
@@ -514,11 +560,13 @@ class SearchIndexer:
                     sd.priority,
                     sd.content,
                     sd.disclosure,
+                    sd.namespace AS namespace,
                     0 AS score
                 FROM search_documents AS sd
                 WHERE (sd.content LIKE :query ESCAPE '\\' OR sd.path LIKE :query ESCAPE '\\')
                   {domain_clause}
-                ORDER BY sd.priority ASC, length(sd.path) ASC
+                  {namespace_clause}
+                ORDER BY {namespace_order} sd.priority ASC, length(sd.path) ASC
                 LIMIT :limit
                 """
             ),
@@ -537,6 +585,7 @@ class SearchIndexer:
             seen_nodes.add(row["node_uuid"])
             matches.append(
                 {
+                    "namespace": row.get("namespace"),
                     "domain": row["domain"],
                     "path": row["path"],
                     "uri": row["uri"],
