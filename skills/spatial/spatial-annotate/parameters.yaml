@@ -1,0 +1,153 @@
+domain: spatial
+allowed_extra_flags:
+- --batch-key
+- --cell-type-key
+- --cellassign-max-epochs
+- --cluster-key
+- --layer
+- --marker-n-genes
+- --marker-overlap-method
+- --marker-overlap-normalize
+- --marker-padj-cutoff
+- --marker-rank-method
+- --method
+- --model
+- --reference
+- --scanvi-max-epochs
+- --scanvi-n-hidden
+- --scanvi-n-layers
+- --scanvi-n-latent
+- --species
+- --tangram-device
+- --tangram-num-epochs
+- --tangram-train-genes
+param_hints:
+  marker_based:
+    priority: cluster_key → marker_rank_method → marker_n_genes / marker_padj_cutoff
+    params:
+    - cluster_key
+    - species
+    - marker_rank_method
+    - marker_n_genes
+    - marker_overlap_method
+    - marker_overlap_normalize
+    - marker_padj_cutoff
+    defaults:
+      cluster_key: leiden
+      species: human
+      marker_rank_method: wilcoxon
+      marker_n_genes: 50
+      marker_overlap_method: overlap_count
+      marker_overlap_normalize: reference
+    requires:
+    - X_log_normalized
+    - cluster_labels
+    tips:
+    - '--marker-rank-method: Passed to `scanpy.tl.rank_genes_groups`; OmicsClaw defaults
+      to `wilcoxon`.'
+    - '--marker-n-genes: Passed through as `top_n_markers` for `scanpy.tl.marker_gene_overlap`;
+      set `0` to switch to adjusted-p-value marker selection.'
+    - '--marker-overlap-method / --marker-overlap-normalize: Passed to `scanpy.tl.marker_gene_overlap`;
+      `reference` normalization preserves the old overlap / signature-size behavior.'
+    - '--marker-padj-cutoff: Only takes effect when `--marker-n-genes 0`, matching
+      Scanpy''s documented precedence.'
+  tangram:
+    priority: reference → cell_type_key → tangram_num_epochs → tangram_train_genes
+    params:
+    - reference
+    - cell_type_key
+    - tangram_num_epochs
+    - tangram_device
+    - tangram_train_genes
+    defaults:
+      cell_type_key: cell_type
+      tangram_num_epochs: 500
+      tangram_device: auto
+      tangram_train_genes: 2000
+    requires:
+    - reference_h5ad
+    - X_log_normalized
+    tips:
+    - '--tangram-num-epochs: Passed to `tg.map_cells_to_space(..., num_epochs=...)`.'
+    - '--tangram-device: Passed to `tg.map_cells_to_space(..., device=...)`; `auto`
+      resolves to CUDA, MPS, or CPU in that order.'
+    - '--tangram-train-genes: OmicsClaw wrapper control for the gene list passed into
+      `tg.pp_adatas(..., genes=...)`; `0` means all shared genes.'
+  scanvi:
+    priority: reference → cell_type_key → batch_key/layer → scanvi_n_latent
+    params:
+    - reference
+    - cell_type_key
+    - batch_key
+    - layer
+    - scanvi_n_hidden
+    - scanvi_n_latent
+    - scanvi_n_layers
+    - scanvi_max_epochs
+    defaults:
+      cell_type_key: cell_type
+      layer: counts
+      scanvi_n_hidden: 128
+      scanvi_n_latent: 10
+      scanvi_n_layers: 1
+      scanvi_max_epochs: 100
+    requires:
+    - reference_h5ad
+    - counts_or_raw
+    tips:
+    - '--layer / --batch-key: Passed to `SCVI.setup_anndata` / `SCANVI.setup_anndata`;
+      use them when raw counts live outside `layers[''counts'']` or batch structure
+      matters.'
+    - '--scanvi-n-hidden / --scanvi-n-latent / --scanvi-n-layers: Passed to the underlying
+      `scvi.model.SCVI(...)` encoder-decoder.'
+    - '--scanvi-max-epochs: Current OmicsClaw wrapper uses this for SCVI pretraining,
+      SCANVI finetuning, and query adaptation.'
+  cellassign:
+    priority: model/species → layer → batch_key → cellassign_max_epochs
+    params:
+    - model
+    - species
+    - layer
+    - batch_key
+    - cellassign_max_epochs
+    defaults:
+      species: human
+      layer: counts
+      cellassign_max_epochs: 400
+    requires:
+    - counts_or_raw
+    tips:
+    - '--model: OmicsClaw wrapper path to a JSON marker-panel file; if omitted, built-in
+      species signatures are used.'
+    - '--layer / --batch-key: Passed to `CellAssign.setup_anndata(..., layer=...,
+      batch_key=...)`.'
+    - '--cellassign-max-epochs: Passed to `model.train(max_epochs=...)`.'
+legacy_aliases:
+- annotate
+- spatial-cell-annotation
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🏷️
+homepage: https://github.com/TianGzlab/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: scanpy
+  bins: []
+trigger_keywords:
+- cell type annotation
+- annotate cell types
+- Tangram
+- scANVI
+- CellAssign
+- marker genes
+- label transfer
+- spatial annotation
+script: spatial_annotate.py
