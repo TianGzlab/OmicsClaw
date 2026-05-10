@@ -335,22 +335,27 @@ class ReviewLog:
             "memories_removed": removed_memories,
         }
 
-    async def gc_pathless_edges(
-        self, *, namespace: Optional[str] = None
-    ) -> int:
-        """Drop edges that have no Path row referencing them.
+    async def gc_pathless_edges(self) -> int:
+        """Drop edges that have no Path row referencing them, in any namespace.
 
         These accumulate from interrupted writes or manual DB pokes.
         Returns the number of edges removed.
+
+        Note: this operates globally on purpose. Edges aren't namespaced
+        — they describe structural parent→child relationships between
+        nodes, and a single edge can be referenced by Paths from multiple
+        namespaces (the alias mechanism). A per-namespace GC would have
+        to delete edges that A's Paths don't reference, which would
+        silently destroy B's data. Global is the only safe scope.
         """
         async with self._db.session() as s:
-            # Subquery: edge_ids that ARE referenced by at least one Path
-            referenced = sa.select(Path.edge_id).distinct()
-            if namespace is not None:
-                referenced = referenced.where(Path.namespace == namespace)
-            referenced_ids = (
-                await s.execute(referenced)
+            referenced_rows = (
+                await s.execute(sa.select(Path.edge_id).distinct())
             ).scalars().all()
+            # SQL "x NOT IN (..., NULL, ...)" returns UNKNOWN for every row,
+            # which makes the DELETE a no-op. Filter NULLs explicitly so a
+            # Path with edge_id IS NULL doesn't poison the subquery.
+            referenced_ids = [eid for eid in referenced_rows if eid is not None]
 
             stmt = sa.delete(Edge)
             if referenced_ids:
@@ -377,14 +382,13 @@ class ReviewLog:
     # 4b.5 — changesets
     # ------------------------------------------------------------------
 
-    async def list_pending_changes(
-        self, *, namespace: Optional[str] = None
-    ) -> list[dict]:
-        """Return the rows pending review.
+    async def list_pending_changes(self) -> list[dict]:
+        """Return the rows pending review across all namespaces.
 
-        ``namespace`` is reserved for a future per-tenant filter; the
-        current ``ChangesetStore`` doesn't yet record namespace, so the
-        argument is accepted but not yet applied.
+        The current ``ChangesetStore`` doesn't record namespace per row,
+        so a per-namespace filter would silently drop everything. PR #5
+        will add the column once surfaces wire namespace through the
+        record-many call; until then this is global.
         """
         store = self._store()
         return store.get_changed_rows()

@@ -287,6 +287,43 @@ async def test_gc_pathless_edges_removes_edges_with_no_paths(env):
         assert edge_after is None
 
 
+@pytest.mark.asyncio
+async def test_gc_pathless_edges_preserves_edges_referenced_from_other_namespaces(env):
+    """An edge referenced by ANY namespace's Path must survive GC.
+
+    The previous design accepted a `namespace` parameter that silently
+    deleted edges referenced only by other namespaces — the data-loss
+    bug PR #4b's review caught. Test guards against the regression.
+    """
+    engine, review, db, _ = env
+    await engine.upsert("dataset://shared.h5ad", "A", namespace="tg/userA")
+    await engine.upsert("dataset://shared.h5ad", "B", namespace="tg/userB")
+
+    # Snapshot the two edge ids; both must survive GC.
+    async with db.session() as s:
+        edge_ids = [
+            row.edge_id
+            for row in (
+                await s.execute(
+                    sa.select(Path).where(
+                        Path.domain == "dataset",
+                        Path.path == "shared.h5ad",
+                    )
+                )
+            ).scalars().all()
+        ]
+
+    removed = await review.gc_pathless_edges()
+    # Other tests in this module may have left orphan edges around; we
+    # only assert that OUR two edges still exist.
+    async with db.session() as s:
+        for eid in edge_ids:
+            edge_after = await s.get(Edge, eid)
+            assert edge_after is not None, (
+                f"GC removed edge {eid} that was still referenced"
+            )
+
+
 # ----------------------------------------------------------------------
 # 4b.4 — browse_shared
 # ----------------------------------------------------------------------
@@ -358,4 +395,18 @@ async def test_discard_pending_changes_clears_the_store(env):
 
     discarded = await review.discard_pending_changes()
     assert discarded >= 1
+    assert store.get_change_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_approve_changes_clears_all_when_no_ids(env):
+    _, review, _, store = env
+    store.record_many(
+        before_state={},
+        after_state={"nodes": [{"uuid": "approve-uuid"}]},
+    )
+    assert store.get_change_count() >= 1
+
+    approved = await review.approve_changes()
+    assert approved >= 1
     assert store.get_change_count() == 0
