@@ -1,101 +1,75 @@
 ---
 name: bulkrna-trajblend
-description: >-
-  Bulk-to-single-cell trajectory interpolation — uses VAE and GNN to bridge bulk RNA-seq
-  with single-cell reference data, generating synthetic single-cell profiles and embedding
-  bulk samples into developmental trajectories.
+description: Load when bridging bulk RNA-seq samples to a single-cell reference via VAE+GNN trajectory interpolation, generating synthetic single-cell profiles per bulk sample. Skip for cell-type proportion estimation (use bulkrna-deconvolution) or for native single-cell trajectory inference (use sc-pseudotime).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, trajectory, interpolation, VAE, GNN, deconvolution, single-cell]
-requires: [numpy, pandas, matplotlib, scipy, scikit-learn]
-optional_requires: [torch, anndata]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "🔀"
-    trigger_keywords: [trajblend, trajectory, bulk to single cell, interpolation,
-      bulk2single, VAE, deconvolution trajectory]
-    allowed_extra_flags:
-    - "--n-epochs"
-    - "--reference"
-    legacy_aliases: [bulk-trajblend]
-    saves_h5ad: false
-    script: bulkrna_trajblend.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- bulkrna
+- trajectory
+- interpolation
+- VAE
+- GNN
+- deconvolution
+- single-cell
 ---
 
-# Bulk RNA-seq Trajectory Interpolation (BulkTrajBlend-style)
+# bulkrna-trajblend
 
-Bridges bulk RNA-seq data with single-cell reference to interpolate missing cell states and embed bulk samples into developmental trajectories. Implements a simplified BulkTrajBlend-inspired approach using variational autoencoders (VAE) for synthetic cell generation and nearest-neighbor trajectory mapping.
+## When to use
 
-## Core Capabilities
+Run when you have a bulk RNA-seq cohort and a paired single-cell
+reference, and you want richer information than per-sample cell-type
+proportions (which is bulkrna-deconvolution's job).  TrajBlend uses a
+VAE + GNN to embed bulk samples into the single-cell trajectory space —
+each bulk sample becomes a synthetic single-cell distribution that can
+be projected onto the reference's developmental axes.
 
-- Estimate cell type fractions from bulk RNA-seq via deconvolution
-- Generate synthetic single-cell profiles weighted by estimated fractions (VAE-inspired)
-- Map bulk samples onto scRNA-seq trajectory embedding (PCA/UMAP)
-- Pseudotime estimation for bulk samples based on nearest reference cells
-- Visualization: trajectory plots with bulk-injected positions, fraction heatmaps
+## Inputs & Outputs
 
-## Why This Exists
+| Input | Format | Required |
+|---|---|---|
+| Bulk count matrix | `.csv` / `.tsv` (gene × sample) | yes (or `--demo`) |
+| sc reference | `--reference` `.h5ad` or `.csv` | yes (or `--demo`) |
+| `--n-epochs` | int | default `50` (ignored in fallback path) |
 
-- **Without it**: Bulk RNA-seq data cannot be placed on developmental trajectories — users must generate new scRNA-seq data.
-- **With it**: Existing bulk datasets gain trajectory context by leveraging available single-cell references.
-- **Reference**: Inspired by `BulkTrajBlend` (omicverse), `Bulk2Single`, and related deconvolution-trajectory methods.
+| Output | Path | Notes |
+|---|---|---|
+| Synthetic sc profiles | `tables/synthetic_sc.csv` | per bulk sample, blended cell distribution |
+| Trajectory projection | `figures/trajectory_projection.png` | bulk samples on sc reference UMAP |
+| Embedding stats | `result.json["embedding"]` | dimensions, training loss curve |
+| Report | `report.md` + `result.json` | always |
 
-## Algorithm / Methodology
+## Flow
 
-### Cell Fraction Estimation
-- NNLS-based deconvolution against scRNA-seq reference signatures
-- Alternative: pre-computed fractions from external tools (CIBERSORTx, etc.)
+1. Load bulk counts + sc reference.
+2. Find common genes between bulk and reference (`bulkrna_trajblend.py:117` raises `ValueError` if `< 50` genes overlap).
+3. If PyTorch available: train VAE for `--n-epochs` epochs, then GNN for graph-aware refinement.
+4. If PyTorch unavailable: pure-NumPy fallback (no training; uses linear interpolation between sc reference centroids).  `--n-epochs` is silently ignored.
+5. Project bulk samples into the reference's UMAP space.
+6. Render projection + emit synthetic profiles.
 
-### Synthetic Cell Generation
-- Weighted sampling of reference scRNA-seq cells according to estimated fractions
-- Optional Gaussian noise injection to model biological variability
-- Fractions serve as mixing weights for trajectory interpolation
+## Gotchas
 
-### Trajectory Mapping
-- Bulk samples projected onto reference PCA/UMAP embedding
-- K-nearest reference cells used to estimate pseudotime
-- Confidence intervals based on neighbor pseudotime variance
+- **Gene-namespace mismatch hard-fails at 50.**  `bulkrna_trajblend.py:117` raises if fewer than 50 gene IDs overlap between bulk and reference.  Most common cause: bulk uses Ensembl IDs while sc reference uses HGNC symbols.  Pre-run `bulkrna-geneid-mapping` to harmonise — the error message names the offending sets.
+- **Pure-NumPy fallback is qualitatively different from the VAE+GNN path.**  When `torch` is unimportable, the wrapper silently switches to a centroid-interpolation fallback (no training, no graph awareness).  `--n-epochs` becomes a no-op (`:354`'s help text already says "unused in fallback").  Verify `result.json["backend"]` — `"vae_gnn"` for the real path, `"numpy_fallback"` for centroid interpolation; results from the fallback are useful as a sanity check but should not be reported as VAE+GNN output.
+- **The "synthetic single-cell" profiles are interpretation aids, not real cells.**  Each bulk sample maps to a *distribution* over the reference cell types; treating any single row of `synthetic_sc.csv` as if it represents one cell will mislead downstream analyses that expect real single-cell variability.  Use the projection plots, not the synthetic matrix, for biological reasoning.
+- **VAE training is stochastic across runs.**  Each run with PyTorch picks a fresh random seed (no `--seed` flag); two runs on the same input produce slightly different projections.  The resemblance to the reference manifold is robust; the absolute coordinate values are not.
 
-## Input Formats
-
-| Format | Extension | Description |
-|--------|-----------|-------------|
-| Bulk expression | `.csv`, `.tsv` | Genes × samples count matrix |
-| scRNA-seq reference | `.h5ad`, `.csv` | AnnData or matrix with cell type labels |
-
-## CLI Reference
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-trajblend --demo
-python omicsclaw.py run bulkrna-trajblend --input bulk_counts.csv \
-  --reference scref.h5ad --output results/
+python omicsclaw.py run bulkrna-trajblend \
+  --input bulk_counts.csv --reference scref.h5ad --output results/
+python omicsclaw.py run bulkrna-trajblend \
+  --input bulk_counts.csv --reference scref.h5ad --output results/ \
+  --n-epochs 200
 ```
 
-## Output Structure
+## See also
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── trajectory_embedding.png
-│   ├── fraction_heatmap.png
-│   ├── pseudotime_distribution.png
-│   └── bulk_on_trajectory.png
-├── tables/
-│   ├── cell_fractions.csv
-│   ├── pseudotime_estimates.csv
-│   └── synthetic_cells.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Related Skills
-
-- `bulkrna-deconvolution` — Upstream: cell type fraction estimation
-- `bulkrna-qc` — Upstream: count matrix quality control
-- `sc-trajectory` — Complementary: single-cell trajectory analysis
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — VAE+GNN architecture, NumPy fallback, gene-overlap requirement
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-deconvolution` (parallel: simpler cell-type proportion path; use this skill when you also want trajectory placement), `bulkrna-geneid-mapping` (run upstream to harmonise gene IDs), `sc-pseudotime` (the single-cell-native trajectory inference this skill bridges to)
