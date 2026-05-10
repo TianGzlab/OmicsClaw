@@ -8,19 +8,24 @@ only layer that touches those tables directly.
 
 Above it sits ``MemoryClient`` (strategy: which namespace, version vs.
 overwrite); below it sits the ORM. The legacy ``GraphService`` is
-unaffected during PR #3a — see ``docs/2026-05-09-memory-refactor-plan.md``
+unaffected during PR #3a/#3b — see ``docs/2026-05-09-memory-refactor-plan.md``
 for the full migration path.
 
-Verbs landed in this PR (PR #3a):
+Write verbs (PR #3a):
     - upsert(uri, content, namespace, ...)
     - upsert_versioned(uri, content, namespace, ...)
     - patch_edge_metadata(uri, namespace, ...)
 
-Verbs reserved for PR #3b:
-    - recall(uri, namespace, ...)
-    - search(query, namespace, ...)
-    - list_children(uri, namespace)
-    - get_subtree(uri, namespace, ...)
+Read verbs (PR #3b):
+    - recall(uri, namespace, ...)             — single-row fetch with shared fallback
+    - search(query, namespace, ...)           — FTS over (namespace, __shared__)
+    - list_children(uri, namespace)           — strict-namespace children
+    - get_subtree(uri, namespace, ...)        — flat listing under a prefix
+
+Read-fallback policy (CONTEXT.md): ``recall`` and ``search`` fall back to
+``__shared__`` so per-user contexts can see globally-shared content;
+``list_children`` and ``get_subtree`` are strict so a user's listing
+doesn't get polluted by shared structure they didn't ask for.
 """
 
 from __future__ import annotations
@@ -88,6 +93,26 @@ class VersionedMemoryRef:
     node_uuid: str
     namespace: str
     uri: str
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryRecord:
+    """Materialized result of ``recall``.
+
+    ``namespace`` is the namespace the caller asked for; ``loaded_namespace``
+    is the namespace the row actually came from. They differ when the read
+    fell back to ``__shared__`` because the per-user namespace had no match.
+    """
+
+    memory_id: int
+    node_uuid: str
+    namespace: str
+    uri: str
+    content: str
+    loaded_namespace: str
+
+
+SHARED_NAMESPACE = "__shared__"
 
 
 class MemoryEngine:
@@ -451,8 +476,83 @@ class MemoryEngine:
         *,
         namespace: str,
         fallback_to_shared: bool = True,
-    ) -> Optional[Any]:
-        raise NotImplementedError("PR #3b")
+    ) -> Optional[MemoryRecord]:
+        """Fetch the active memory at ``(namespace, uri)``.
+
+        Returns ``None`` if no active memory exists. When the per-namespace
+        lookup misses and ``fallback_to_shared=True`` (the default), falls
+        back to ``__shared__`` — this is how per-user contexts see
+        globally-shared content like ``core://agent``.
+
+        ``MemoryRecord.loaded_namespace`` records which namespace produced
+        the row (the caller-supplied one or ``__shared__``).
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        canonical = str(parsed)
+
+        async with self._db.session() as s:
+            record = await self._recall_in_namespace(s, parsed, canonical, namespace)
+            if record is not None:
+                return record
+
+            if (
+                fallback_to_shared
+                and namespace != SHARED_NAMESPACE
+            ):
+                shared = await self._recall_in_namespace(
+                    s, parsed, canonical, SHARED_NAMESPACE
+                )
+                if shared is not None:
+                    # Echo the caller's requested namespace; tag origin separately.
+                    return MemoryRecord(
+                        memory_id=shared.memory_id,
+                        node_uuid=shared.node_uuid,
+                        namespace=namespace,
+                        uri=canonical,
+                        content=shared.content,
+                        loaded_namespace=SHARED_NAMESPACE,
+                    )
+
+        return None
+
+    async def _recall_in_namespace(
+        self,
+        s: AsyncSession,
+        parsed: MemoryURI,
+        canonical: str,
+        namespace: str,
+    ) -> Optional[MemoryRecord]:
+        """Fetch the active memory for ``(namespace, parsed)`` or ``None``."""
+        path_row = await self._fetch_path(s, namespace, parsed)
+        if path_row is None:
+            return None
+
+        edge = await s.get(Edge, path_row.edge_id)
+        if edge is None:
+            return None
+
+        memory = (
+            await s.execute(
+                select(Memory)
+                .where(
+                    Memory.node_uuid == edge.child_uuid,
+                    Memory.deprecated == False,  # noqa: E712
+                )
+                .order_by(Memory.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if memory is None:
+            return None
+
+        return MemoryRecord(
+            memory_id=memory.id,
+            node_uuid=edge.child_uuid,
+            namespace=namespace,
+            uri=canonical,
+            content=memory.content,
+            loaded_namespace=namespace,
+        )
 
     async def search(
         self,
