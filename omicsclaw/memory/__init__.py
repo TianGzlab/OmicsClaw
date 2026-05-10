@@ -25,7 +25,6 @@ Usage (lazy init):
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from .scoped_memory import (
@@ -157,10 +156,14 @@ def cli_namespace_from_workspace(workspace_dir: Optional[str]) -> str:
     ``None`` means "use cwd" — the natural default for ``oc interactive``
     invoked without ``--workspace``.
     """
+    # Local import — module-level ``from pathlib import Path`` would
+    # shadow the lazy ``omicsclaw.memory.Path`` ORM export below.
+    from pathlib import Path as _PathlibPath
+
     if workspace_dir is None or workspace_dir == "":
-        target = Path.cwd()
+        target = _PathlibPath.cwd()
     else:
-        target = Path(workspace_dir)
+        target = _PathlibPath(workspace_dir)
     return str(target.resolve())
 
 

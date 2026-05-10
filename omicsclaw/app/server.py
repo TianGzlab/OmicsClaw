@@ -405,12 +405,23 @@ async def lifespan(app: FastAPI):
             _NOTEBOOK_IMPORT_ERROR or "(import failed without message)",
         )
 
-    # Optionally expose MemoryClient for browse/search endpoints
+    # Optionally expose MemoryClient for browse/search endpoints. The
+    # desktop client is bound to a launch-id-derived namespace
+    # (``app/<launch_id>`` or ``app/desktop_user`` for single-user runs)
+    # so its writes/reads are partitioned from the bot's per-user
+    # namespaces and from CLI workspace namespaces.
     try:
-        from omicsclaw.memory.memory_client import MemoryClient
-        _memory_client = MemoryClient()
-        await _memory_client.initialize()
-        logger.info("MemoryClient initialised")
+        from omicsclaw.memory import (
+            desktop_namespace,
+            get_engine_db,
+            get_memory_client,
+        )
+
+        await get_engine_db().init_db()
+        _memory_client = get_memory_client(namespace=desktop_namespace())
+        logger.info(
+            "MemoryClient initialised (namespace=%s)", _memory_client.namespace
+        )
     except Exception as exc:
         logger.warning("MemoryClient unavailable (non-fatal): %s", exc)
         _memory_client = None
@@ -2466,19 +2477,23 @@ async def memory_browse(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
+        from dataclasses import asdict
+
         uri = f"{domain}://{path}" if path else f"{domain}://"
         children = await _memory_client.list_children(uri)
 
         # Also get the node itself if path is provided
         node = None
         if path:
-            node = await _memory_client.recall(f"{domain}://{path}")
+            record = await _memory_client.recall(f"{domain}://{path}")
+            if record is not None:
+                node = asdict(record)
 
         return {
             "path": path,
             "domain": domain,
             "node": node,
-            "children": children,
+            "children": [asdict(c) for c in children],
         }
     except Exception as exc:
         logger.exception("Memory browse error")
