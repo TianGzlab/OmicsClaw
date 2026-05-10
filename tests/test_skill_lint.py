@@ -63,6 +63,7 @@ def _write_v2_skill(
     sidecar: dict | None = None,
     skip_references: tuple[str, ...] = (),
     extra_frontmatter: dict | None = None,
+    script_text: str | None = None,
 ) -> Path:
     skill = base
     skill.mkdir(parents=True, exist_ok=True)
@@ -78,9 +79,12 @@ def _write_v2_skill(
         "---\n" + yaml.safe_dump(fm, sort_keys=False) + "---\n\n" + body,
         encoding="utf-8",
     )
+    sc = sidecar or VALID_SIDECAR
     (skill / "parameters.yaml").write_text(
-        yaml.safe_dump(sidecar or VALID_SIDECAR, sort_keys=False), encoding="utf-8"
+        yaml.safe_dump(sc, sort_keys=False), encoding="utf-8"
     )
+    if script_text is not None:
+        (skill / sc["script"]).write_text(script_text, encoding="utf-8")
     refs = skill / "references"
     refs.mkdir(exist_ok=True)
     for name in ("methodology.md", "output_contract.md"):
@@ -90,7 +94,7 @@ def _write_v2_skill(
         from generate_parameters_md import render_parameters_md
 
         (refs / "parameters.md").write_text(
-            render_parameters_md(sidecar or VALID_SIDECAR), encoding="utf-8"
+            render_parameters_md(sc), encoding="utf-8"
         )
     return skill
 
@@ -287,3 +291,202 @@ def test_sidecar_flag_must_start_with_double_dash(tmp_path: Path) -> None:
     skill = _write_v2_skill(tmp_path / "demo", sidecar=bad)
     errors = skill_lint.lint_skill(skill)
     assert any("allowed_extra_flags" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Gotcha-anchor lint — every code surface mentioned in a Gotcha must
+# grep-resolve in the skill's script.  Catches the dominant failure mode
+# from PR #4 review (Gotchas describing "the desired script" rather than
+# what the code actually does).
+# ---------------------------------------------------------------------------
+
+
+def _gotcha_body(gotchas_block: str) -> str:
+    """Minimal v2 body with a custom Gotchas section."""
+    return (
+        "# Demo Skill\n\n"
+        "## When to use\nLoad to demo.\n\n"
+        "## Inputs & Outputs\nIn → out.\n\n"
+        "## Flow\n1. Step.\n\n"
+        f"## Gotchas\n{gotchas_block}\n"
+        "## Key CLI\n```\noc run demo --demo\n```\n\n"
+        "## See also\n- references/methodology.md\n"
+    )
+
+
+def test_gotchas_template_passes(tmp_path: Path) -> None:
+    """The default v2 template's empty-gotchas marker must lint clean."""
+    body = _gotcha_body(
+        "- _No gotchas yet — append entries as they surface in production._\n"
+    )
+    skill = _write_v2_skill(tmp_path / "demo", body=body)
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_pure_prose_passes(tmp_path: Path) -> None:
+    """Bullets without code anchors are allowed (the lint is anchor-only)."""
+    body = _gotcha_body(
+        "- LFCs are unshrunk by design — apply shrinkage downstream.\n"
+        "- Pre-filter removes low-count genes (total < 10).\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo", body=body, script_text="x = 1\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_result_json_unresolved_fails(tmp_path: Path) -> None:
+    """A Gotcha referencing result.json[\"fake_key\"] must fail when the
+    script does not mention that key — the PR #4 hallucination pattern."""
+    body = _gotcha_body(
+        '- Check `result.json["fake_key"]` to verify the run.\n'
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="summary = {'real_key': 1}\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any(
+        "gotchas" in e.lower() and "fake_key" in e for e in errors
+    ), errors
+
+
+def test_gotchas_result_json_resolved_passes(tmp_path: Path) -> None:
+    body = _gotcha_body(
+        '- Check `result.json["method_used"]` to confirm the engine ran.\n'
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text='summary["method_used"] = "wilcoxon"\n',
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_result_json_nested_first_key_checked(tmp_path: Path) -> None:
+    """For nested keys (result.json[\"summary\"][\"X\"]) the lint checks the
+    top-level key — that's the most reliably grep-able."""
+    body = _gotcha_body(
+        '- Inspect `result.json["summary"]["expression_source"]`.\n'
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text='out = {"summary": {"expression_source": "X"}}\n',
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_file_line_in_bounds_passes(tmp_path: Path) -> None:
+    body = _gotcha_body(
+        "- Behaviour anchored at `demo.py:5` (the silent fallback branch).\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="\n".join(f"line_{i}" for i in range(20)),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_file_line_out_of_bounds_fails(tmp_path: Path) -> None:
+    """A file:line pointer past the script's end must fail.  PR #3
+    reviewer caught a similar bug (anchor pointed to a report-rendering
+    line that didn't exist where claimed)."""
+    body = _gotcha_body(
+        "- Wrong anchor at `demo.py:9999` — file is much shorter.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="\n".join(f"line_{i}" for i in range(10)),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any(
+        "gotchas" in e.lower() and "9999" in e for e in errors
+    ), errors
+
+
+def test_gotchas_file_line_range_checks_upper_bound(tmp_path: Path) -> None:
+    """A range like `demo.py:5-9999` must fail because 9999 exceeds file."""
+    body = _gotcha_body(
+        "- Range anchor `demo.py:5-9999` straddles past EOF.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="\n".join(f"line_{i}" for i in range(20)),
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any("gotchas" in e.lower() and "9999" in e for e in errors), errors
+
+
+def test_gotchas_table_filename_unresolved_fails(tmp_path: Path) -> None:
+    """A `tables/<file>.csv` reference that the script never writes — PR #4
+    hallucination pattern (e.g., 'cell_type_proportions.csv' when the
+    actual filename was 'proportions.csv')."""
+    body = _gotcha_body(
+        "- Output ends up in `tables/fake_results.csv` for the run.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text='df.to_csv(out / "tables/real.csv")\n',
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any(
+        "gotchas" in e.lower() and "fake_results.csv" in e for e in errors
+    ), errors
+
+
+def test_gotchas_figure_filename_resolved_passes(tmp_path: Path) -> None:
+    body = _gotcha_body(
+        "- The volcano lives at `figures/volcano_plot.png`.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text='plt.savefig(out / "figures/volcano_plot.png")\n',
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors
+
+
+def test_gotchas_empty_marker_only_matches_when_lead_of_bullet(
+    tmp_path: Path,
+) -> None:
+    """A real Gotcha bullet that happens to mention 'none yet' as prose
+    must NOT bypass the anchor lint.  The empty-template skip applies
+    only when a bullet leads with the marker phrase — Reviewer S1 fix."""
+    body = _gotcha_body(
+        "- A real footgun: with `result.json[\"fake_key\"]` no fix is "
+        "available — none yet documented in the codebase.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="summary = {'real_key': 1}\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    # Anchor lint must still fire for fake_key, despite the prose phrase
+    assert any(
+        "gotchas" in e.lower() and "fake_key" in e for e in errors
+    ), errors
+
+
+def test_gotchas_anchor_check_skipped_when_script_missing(tmp_path: Path) -> None:
+    """If parameters.yaml's `script` doesn't resolve to a real file (e.g.,
+    the script lives in a sibling dir), skip the anchor lint gracefully —
+    do not block the whole skill."""
+    body = _gotcha_body(
+        '- Result key `result.json["anything"]` and table `tables/x.csv`.\n'
+    )
+    skill = _write_v2_skill(tmp_path / "demo", body=body)  # no script_text → no demo.py
+    errors = skill_lint.lint_skill(skill)
+    assert not any("gotchas" in e.lower() for e in errors), errors

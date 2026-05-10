@@ -1,130 +1,74 @@
 ---
 name: sc-standardize-input
-description: >-
-  Start here if you already have an external single-cell h5ad. Fixes the AnnData
-  contract so downstream OmicsClaw scRNA skills can use it safely.
-version: 0.2.0
+description: Load when an external single-cell h5ad/h5/loom/mtx needs to be canonicalised onto the OmicsClaw AnnData contract before downstream scRNA skills run. Skip when data already came from sc-count (already canonical), or for bulk RNA-seq (use bulkrna-qc) or spatial (use spatial-preprocess).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, input, standardization, anndata, preprocessing]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--species"
-    - "--r-enhanced"
-    saves_h5ad: true
-    requires_preprocessed: false
-    emoji: "🧱"
-    trigger_keywords:
-    - standardize AnnData
-    - fix scRNA input
-    - canonicalize single-cell input
-    - prepare AnnData
-    - input contract
-    script: sc_standardize_input.py
-    param_hints: {}
+tags:
+- singlecell
+- scrna
+- input
+- standardization
+- anndata
+requires:
+- anndata
+- numpy
+- scipy
 ---
 
-# Single-Cell Input Standardization
+# sc-standardize-input
 
-You are **SC Standardize Input**, the OmicsClaw skill for explicitly exporting
-the same canonical AnnData contract that downstream scRNA skills should use
-internally when they auto-prepare compatible inputs.
+## When to use
 
-## Data / State Requirements
+The user has a single-cell expression file from outside OmicsClaw (a public
+`.h5ad`, a 10X mtx directory, a `.loom`, etc.) and needs the canonical
+AnnData contract every downstream scRNA skill assumes: raw counts in
+`layers["counts"]` and `adata.raw`, harmonised feature names, and a
+`uns["omicsclaw_matrix_contract"]` provenance record.  Run this once before
+`sc-qc` / `sc-preprocessing` / etc.
 
-- **Input**: Any single-cell data file (.h5ad, .h5, .loom, .csv, .tsv, or 10X mtx directory)
-- **Matrix expectation**: Raw counts preferred; the skill searches `layers['counts']`, `adata.raw`, and `adata.X` for count-like data
-- **No upstream step required**: This is the first step in the pipeline
-- **No clustering or labels required**
+## Inputs & Outputs
 
-## What This Skill Does
+| Input | Format | Required |
+|---|---|---|
+| Single-cell expression | `.h5ad`, `.h5`, `.loom`, `.csv`, `.tsv`, or 10X mtx dir | yes (unless `--demo`) |
 
-1. loads user input through the shared single-cell loader
-2. auto-detects species from gene name conventions (UPPER = human, Title = mouse)
-3. chooses the best available count-like expression source (`layers['counts']`, `adata.raw`, or `adata.X`)
-4. standardizes feature names for downstream QC and analysis
-5. ensures `adata.layers['counts']` exists as the canonical raw-count layer
-6. writes a count-like snapshot to `adata.raw`
-7. records provenance and matrix semantics in `adata.uns['omicsclaw_input_contract']` and `adata.uns['omicsclaw_matrix_contract']`
-8. saves a downstream-ready `processed.h5ad`
+| Output | Path | Notes |
+|---|---|---|
+| Canonicalised AnnData | `processed.h5ad` | `adata.X` = counts; `layers["counts"]` + `adata.raw` populated |
+| Provenance | `result.json` | `summary` includes `warnings`, contract metadata |
+| Report | `report.md` | always written |
 
-## What This Skill Does Not Do
+## Flow
 
-1. it does not filter cells or genes
-2. it does not normalize or cluster the data
-3. it does not run biological analysis; it only stabilizes the input contract
-4. it does not magically make normalized-expression methods ready; those usually still need `sc-preprocessing`
+1. Load via the shared multi-format single-cell loader.
+2. Pre-flight: validate non-empty input; auto-detect species from gene name case (UPPER → human, Title → mouse).
+3. Pick the best count-like matrix among `layers["counts"]`, `adata.raw`, and `adata.X` (orchestrated by `canonicalize_singlecell_adata` in `skills/singlecell/_lib/adata_utils.py:389`, which calls the `matrix_looks_count_like` heuristic at `_lib/adata_utils.py:255`).
+4. Harmonise feature names (Ensembl ↔ symbol, deduplicate).
+5. Persist `uns["omicsclaw_input_contract"]` + `uns["omicsclaw_matrix_contract"]`.
+6. Save `processed.h5ad`; emit `report.md` + `result.json`.
 
-## Recommended Usage
+## Gotchas
 
-Run this skill explicitly when:
-- users provide arbitrary `.h5ad` files from outside OmicsClaw
-- raw counts may live in `adata.raw` or `layers['counts']` instead of `adata.X`
-- gene identifiers may need harmonization before QC or downstream scRNA skills
-- you want to inspect or save the canonicalized object itself before running analysis
+- **`--r-enhanced` is accepted but produces no R plots.** `sc_standardize_input.py:250` declares the flag for CLI consistency; this skill is input canonicalisation, not visualisation.  Pass it freely, but expect no R Enhanced figures.
+- **Count-source selection is heuristic, not declarative.** The skill scans `layers["counts"]` → `adata.raw` → `adata.X` and picks the first that passes a `matrix_looks_count_like` check.  If the input is already log-normalised everywhere, the heuristic can mis-classify and fall through to `adata.X`; verify `result.json["summary"]["warnings"]` after every run.
+- **Species auto-detect is gene-case-based.** UPPER-case symbols → human, Title-case → mouse.  Non-standard gene-name conventions (Ensembl IDs only, lowercase) silently fall through to the `auto` default.  Pass `--species human` or `--species mouse` explicitly when working with non-symbol matrices.
+- **No filtering, no normalisation, no clustering.** Even if `result.json` looks complete, the output is still raw counts in canonical form — run `sc-qc` and `sc-preprocessing` next.
 
-## Workflow
-
-1. **Load**: read input via shared multi-format loader
-2. **Preflight**: validate non-empty input; detect species
-3. **Canonicalize**: select best count-like matrix, standardize gene names
-4. **Persist contracts**: write `omicsclaw_input_contract` and `omicsclaw_matrix_contract`
-5. **Export**: save `processed.h5ad`
-6. **Report**: generate `report.md` and `result.json` with diagnostics
-
-## CLI
+## Key CLI
 
 ```bash
-# Basic usage (species auto-detected)
-python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir>
+# Demo (built-in PBMC3K)
+python omicsclaw.py run sc-standardize-input --demo --output /tmp/sc_std_demo
 
-# Explicit species
-python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir> --species mouse
-
-# Demo mode
-python omicsclaw.py run sc-standardize-input --demo --output /tmp/demo
+# Real run with species hint
+python omicsclaw.py run sc-standardize-input \
+  --input external.h5ad --output results/ --species mouse
 ```
 
-## Parameters
+## See also
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--input` | (required unless `--demo`) | Input file path |
-| `--output` | (required) | Output directory |
-| `--species` | `auto` | Species hint: `auto`, `human`, or `mouse` |
-| `--demo` | false | Run with built-in PBMC3K demo data |
-
-## Output Contract
-
-- `adata.X` = `raw_counts`
-- `adata.layers['counts']` = `raw_counts`
-- `adata.raw` = `raw_counts_snapshot`
-- `adata.uns['omicsclaw_matrix_contract']` records all of the above explicitly
-
-## Workflow Position
-
-- **Upstream step**: Used when input comes from external tools (not from `sc-count`); converts arbitrary formats into the OmicsClaw canonical contract
-- **Usual next step**: `sc-qc` for quality assessment
-
-## Next Step
-
-After standardization, run one of:
-- `sc-qc` to compute and visualize quality control metrics
-- `sc-preprocessing` to normalize, find HVGs, compute PCA/UMAP, and cluster
-- `sc-doublet-detection` if doublet removal is needed before preprocessing
-
-## CLI Parameters
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--input` | path | — | Input file path (`.h5ad`, `.h5`, `.loom`, `.csv`, `.tsv`, or 10X mtx directory); required unless `--demo` |
-| `--output` | path | — | Output directory (required) |
-| `--demo` | flag | `false` | Run with built-in PBMC3K demo data |
-| `--species` | enum | `auto` | Species hint for gene name conventions: `auto`, `human`, `mouse` |
-| `--r-enhanced` | flag | `false` | Accepted for CLI consistency; no R Enhanced plots are generated by this skill |
-
-## R Enhanced Plots
-
-This skill has no R Enhanced plots. `--r-enhanced` is accepted for CLI consistency but produces no additional output. The skill's purpose is input canonicalization, not visualization.
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — count-source heuristic, species detection logic
+- `references/output_contract.md` — exact `processed.h5ad` + `result.json` shape
+- Adjacent skills: `sc-count` (FASTQ → AnnData; skip standardisation when used), `sc-qc` (next step), `sc-preprocessing` (full normalise+cluster pipeline)

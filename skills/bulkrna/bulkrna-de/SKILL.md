@@ -58,7 +58,7 @@ t-test is the fallback for the single-replicate / no-PyDESeq2 case.
 - **LFCs are unshrunk by design.** Suitable for hypothesis testing (padj thresholds), but for ranking / visualisation that emphasises high-confidence effects, apply apeglm or ashr shrinkage *outside* this skill.
 - **VST / rlog transformations are visualisation-only.** Do not feed transformed counts back into this skill — DE testing always wants raw integer counts.
 - **Sample group detection is prefix-based.** Columns must start with `--control-prefix` (default `ctrl`) or `--treat-prefix` (default `treat`); columns matching neither prefix are silently dropped.
-- **Pre-filter removes low-count genes** (total < 10).  This improves dispersion estimation but means the input gene count is not the testing gene count — `result.json["n_genes_tested"]` is authoritative.
+- **Pre-filter removes low-count genes** (total < 10).  This improves dispersion estimation but means the input gene count is not the testing gene count — `result.json["n_tested"]` is authoritative.
 
 ## Key CLI
 

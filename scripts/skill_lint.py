@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -144,6 +145,94 @@ def _check_sidecar(sidecar: dict) -> list[str]:
     return errors
 
 
+_GOTCHA_FILE_LINE_RE = re.compile(r"`?([\w./-]+\.py):(\d+)(?:-(\d+))?`?")
+_GOTCHA_RESULT_JSON_RE = re.compile(r"`?result\.json(?:\[[\"'][^\"']+[\"']\])+`?")
+_GOTCHA_RESULT_KEY_RE = re.compile(r"\[[\"']([^\"']+)[\"']\]")
+_GOTCHA_TABLE_FIG_RE = re.compile(r"`?(?:tables|figures)/([\w._-]+)`?")
+_GOTCHA_BULLET_RE = re.compile(r"^\s*-\s+(.*)$", re.MULTILINE)
+_GOTCHA_EMPTY_BULLET_RE = re.compile(
+    r"^[-*\s_`]*(no gotchas yet|none yet|no gotchas surfaced)\b",
+    re.IGNORECASE,
+)
+
+
+def _check_gotchas_anchors(
+    skill_dir: Path, body: str, sidecar: dict
+) -> list[str]:
+    """Verify every code anchor in the Gotchas section grep-resolves.
+
+    The dominant hallucination pattern from PR #4 review was Gotchas that
+    described "the desired script" rather than what the code actually does —
+    references to `result.json` keys that didn't exist, table filenames that
+    weren't written, file:line anchors past EOF.  This lint catches all
+    three by greping the skill's `script` for each anchor before the PR
+    leaves the contributor's branch.
+    """
+    errors: list[str] = []
+
+    section = re.search(
+        r"^## Gotchas\b\s*\n(.*?)(?=^## |\Z)",
+        body,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section:
+        return []  # missing-section error already raised by _check_body
+    block = section.group(1)
+
+    # Per-bullet processing.  Skip the empty-template marker bullet only
+    # when the bullet's lead matches it (so a real Gotcha that *mentions*
+    # the phrase "none yet" inside its prose does not silently bypass the
+    # anchor lint).
+    real_bullets: list[str] = []
+    for bullet in _GOTCHA_BULLET_RE.findall(block):
+        if _GOTCHA_EMPTY_BULLET_RE.match(bullet):
+            continue
+        real_bullets.append(bullet)
+    if not real_bullets:
+        return []
+
+    script_name = sidecar.get("script") or ""
+    script_path = skill_dir / script_name if script_name else None
+    if not (script_path and script_path.exists()):
+        return []  # script not co-located — skip rather than false-fail
+    script_text = script_path.read_text(encoding="utf-8")
+    script_line_count = script_text.count("\n") + 1
+
+    real_block = "\n".join(real_bullets)
+
+    # TODO(cross-file): when an anchor references a sibling library file
+    # (e.g. `_lib/de.py:485-506`, used in spatial-de Gotchas), the
+    # filename's basename will not match `script_name` so the line-bound
+    # check is skipped.  A project-wide grep would close the gap, but
+    # would require resolving the path relative to the repo root.
+    for fname, l1, l2 in _GOTCHA_FILE_LINE_RE.findall(real_block):
+        if Path(fname).name != Path(script_name).name:
+            continue  # cross-file anchor — see TODO above
+        upper = int(l2) if l2 else int(l1)
+        if upper > script_line_count:
+            anchor = f"{fname}:{l1}" + (f"-{l2}" if l2 else "")
+            errors.append(
+                f"gotchas: anchor {anchor} exceeds {script_name} length "
+                f"({script_line_count} lines)"
+            )
+
+    for full in _GOTCHA_RESULT_JSON_RE.findall(real_block):
+        keys = _GOTCHA_RESULT_KEY_RE.findall(full)
+        if keys and keys[0] not in script_text:
+            errors.append(
+                f'gotchas: result.json["{keys[0]}"] not referenced in '
+                f"{script_name}"
+            )
+
+    for fname in _GOTCHA_TABLE_FIG_RE.findall(real_block):
+        if fname not in script_text:
+            errors.append(
+                f"gotchas: '{fname}' not referenced in {script_name}"
+            )
+
+    return errors
+
+
 def _check_references(skill_dir: Path, sidecar: dict) -> list[str]:
     errors: list[str] = []
     refs = skill_dir / "references"
@@ -186,6 +275,7 @@ def lint_skill(skill_dir: Path) -> list[str]:
     errors.extend(_check_frontmatter_keys(frontmatter))
     errors.extend(_check_sidecar(sidecar))
     errors.extend(_check_references(skill_dir, sidecar))
+    errors.extend(_check_gotchas_anchors(skill_dir, body, sidecar))
     return errors
 
 
