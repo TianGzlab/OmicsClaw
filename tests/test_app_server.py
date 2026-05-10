@@ -2559,6 +2559,210 @@ async def test_memory_browse_children_have_rich_shape(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# /memory/browse + /memory/children — derived display label for analysis://*
+# (see docs/adr/0002-derived-display-label-for-analysis-memory.md)
+# ---------------------------------------------------------------------------
+
+
+def _seed_analysis_payload(*, status: str, dataset_path: str, executed_at: str):
+    """Build a Pydantic-compatible AnalysisMemory JSON for seeding."""
+    import json as _json
+
+    return _json.dumps({
+        "memory_id": "any-uuid-fake",
+        "memory_type": "analysis",
+        "created_at": executed_at,
+        "source_dataset_id": "ds-uuid",
+        "parent_analysis_id": None,
+        "skill": "sc-preprocessing",
+        "method": "default",
+        "parameters": {"input": dataset_path},
+        "output_path": "",
+        "status": status,
+        "executed_at": executed_at,
+        "duration_seconds": 0.0,
+    })
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_decorates_analysis_children_with_derived_title(
+    monkeypatch, tmp_path
+):
+    """For ``analysis://*`` parents, ``/memory/browse`` must surface
+    ``<basename> · <time> · <status>`` in each child's ``name`` field,
+    not the URI's UUID-style last segment. The desktop tree currently
+    renders ``name`` directly so the user sees identifiable rows
+    instead of opaque hex.
+    """
+    import os as _os
+    import time as _time
+
+    # Pin the test process to UTC so the time-of-day rendered by
+    # ``_analysis_content_to_title`` is deterministic regardless of the
+    # CI runner's locale.
+    _os.environ["TZ"] = "UTC"
+    _time.tzset()
+
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Two analysis runs under the same skill, different datasets and
+        # statuses. URI last-segments are intentionally unreadable to
+        # mimic the production UUID-hex pattern this fix exists for.
+        await desktop_client.remember(
+            "analysis://sc-preprocessing/3c7a182ee7ab498ea4454a2f8465063c",
+            _seed_analysis_payload(
+                status="completed",
+                dataset_path="/data/work/pbmc3k_raw.h5ad",
+                executed_at="2026-05-05T12:43:00Z",
+            ),
+        )
+        await desktop_client.remember(
+            "analysis://sc-preprocessing/9c71d3252e4c4fc3ae51468db124d5cc",
+            _seed_analysis_payload(
+                status="failed",
+                dataset_path="/data/work/visium_brain.h5ad",
+                executed_at="2026-05-05T08:15:00Z",
+            ),
+        )
+
+        result = await server.memory_browse(
+            path="sc-preprocessing", domain="analysis"
+        )
+        children = result["children"]
+        assert len(children) == 2, (
+            f"seeded 2 children, got {len(children)}: {children!r}"
+        )
+
+        names = {c["name"] for c in children}
+
+        # Both children should have the derived title in ``name``. We
+        # don't pin exact strings on the time portion (older-than-today
+        # vs today depends on the test's wall clock) — assert the two
+        # invariant pieces: dataset basename and status.
+        for c in children:
+            assert "·" in c["name"], (
+                f"expected derived title with separator in name, got "
+                f"{c['name']!r} — looks like raw UUID, decoration didn't fire"
+            )
+            assert (
+                "pbmc3k_raw.h5ad" in c["name"]
+                or "visium_brain.h5ad" in c["name"]
+            ), f"name {c['name']!r} missing dataset basename"
+            assert (
+                c["name"].endswith(" · completed")
+                or c["name"].endswith(" · failed")
+            ), f"name {c['name']!r} missing status suffix"
+
+        # The original UUID is preserved in ``path`` so the frontend
+        # can still link to / inspect / delete the row.
+        paths = {c["path"] for c in children}
+        assert (
+            "sc-preprocessing/3c7a182ee7ab498ea4454a2f8465063c" in paths
+        ), f"path {paths!r} should keep UUID"
+
+        # Negative: bare UUID hex must NOT appear as a name (that was
+        # the pre-fix behaviour).
+        assert (
+            "3c7a182ee7ab498ea4454a2f8465063c" not in names
+        ), f"name set still contains raw UUID: {names!r}"
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_children_endpoint_decorates_analysis_too(
+    monkeypatch, tmp_path
+):
+    """The ``/memory/children`` endpoint shares the decoration. The
+    desktop graph view loads children through this endpoint after the
+    initial ``/memory/browse`` so both paths must produce the same
+    label or the UI would flicker between hex and title."""
+    import os as _os
+    import time as _time
+
+    _os.environ["TZ"] = "UTC"
+    _time.tzset()
+
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember(
+            "analysis://sc-preprocessing/abc123fakeuuid",
+            _seed_analysis_payload(
+                status="completed",
+                dataset_path="/x/pbmc3k_raw.h5ad",
+                executed_at="2026-05-05T12:43:00Z",
+            ),
+        )
+
+        result = await server.memory_children(
+            node_uuid="", domain="analysis", path="sc-preprocessing"
+        )
+        children = result["children"]
+        assert len(children) == 1, f"got {children!r}"
+        assert "·" in children[0]["name"]
+        assert "pbmc3k_raw.h5ad" in children[0]["name"]
+        assert children[0]["name"].endswith(" · completed")
+        assert children[0]["path"] == "sc-preprocessing/abc123fakeuuid", (
+            "path must preserve the raw URI segment"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_does_not_decorate_non_analysis_domains(
+    monkeypatch, tmp_path
+):
+    """The decoration is scoped to ``analysis://*``. Other domains —
+    here ``core://`` — keep their existing ``edge.name`` (URI's last
+    path segment) so the fix doesn't perturb dataset / preference /
+    session / core listings."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("core://my_user/note", "v1")
+
+        result = await server.memory_browse(path="my_user", domain="core")
+        children = result["children"]
+        assert len(children) == 1
+        assert children[0]["name"] == "note", (
+            f"core domain should keep edge.name; got {children[0]['name']!r}. "
+            f"Decoration must be scoped to analysis://* only."
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
 # T2 S3 — /memory/search namespace-scoped (caller + __shared__ only)
 # ---------------------------------------------------------------------------
 
