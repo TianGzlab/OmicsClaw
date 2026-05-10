@@ -36,7 +36,7 @@ otherwise so the skill always returns something useful.
 | Per-file table | `tables/fastq_per_file_summary.csv` | one row per FASTQ |
 | Per-sample table | `tables/fastq_per_sample_summary.csv` | aggregated by sample |
 | Per-base table | `tables/fastq_per_base_quality.csv` | quality vs read position |
-| Quality figures | `figures/per_base_quality.png`, `figures/fastq_file_quality.png` | always rendered |
+| Quality figures | `figures/fastq_q30_summary.png`, `figures/per_base_quality.png`, `figures/fastq_file_quality.png`, `figures/fastq_read_structure.png` | all four always rendered |
 | Report | `report.md` + `result.json` | always written |
 
 ## Flow
@@ -52,7 +52,7 @@ otherwise so the skill always returns something useful.
 
 - **`--max-reads 20000` (default) caps the Python-fallback path only.** When FastQC is available the full FASTQ is processed; when not, only the first 20K reads per file are sampled.  Sampling depth is recorded per file in `tables/fastq_per_file_summary.csv`; bump `--max-reads` if a FASTQ has high variance across the file.
 - **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only.  Pass freely, expect no R Enhanced output.
-- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`); the absence of a *figure* entry means it was not rendered (e.g. paired-read panel only fires when `--read2` is set).  Don't infer skill-wide success from any single status.
+- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`).  All four panels are emitted unconditionally (`sc_fastq_qc.py:430-433`), so absence of an entry typically means upstream tool failure rather than a configuration choice — inspect `summary.warnings` before assuming a panel was suppressed.
 
 ## Key CLI
 

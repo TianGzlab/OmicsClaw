@@ -1,6 +1,6 @@
 ---
 name: sc-filter
-description: Load when removing low-quality cells and lowly-detected genes from a single-cell AnnData using QC-derived thresholds or tissue presets. Skip when QC has not been computed yet (use sc-qc) or for the full normalize→HVG→PCA→cluster pipeline (use sc-preprocessing).
+description: Load when removing low-quality cells and lowly-detected genes from a single-cell AnnData using QC-derived thresholds or tissue presets. Skip for the full normalize→HVG→PCA→cluster pipeline (use sc-preprocessing) or when reads are still raw FASTQ (use sc-fastq-qc → sc-count first).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -35,8 +35,8 @@ normalise, cluster, or annotate.
 | Output | Path | Notes |
 |---|---|---|
 | Filtered AnnData | `processed.h5ad` | post-filter, contract preserved |
-| Filter stats | `tables/filter_stats.csv` | per-cell decisions |
-| Retention summary | `tables/filter_summary.csv` | per-rule keep/drop counts |
+| Filter stats | `tables/filter_stats.csv` | per-rule keep/drop counts |
+| Retention summary | `tables/filter_summary.csv` | workflow + threshold metadata + cells/genes-retained pct |
 | Diagnostic figures | `figures/filter_comparison.png`, `figures/filter_summary.png` | before/after panels |
 | Provenance | `result.json` | `summary` includes `expression_source`, `warnings` |
 | Report | `report.md` | always written |
@@ -53,7 +53,8 @@ normalise, cluster, or annotate.
 ## Gotchas
 
 - **`--tissue` presets silently override matching CLI flags.** Passing `--tissue pbmc` plus `--max-mt-percent 30` resolves to whatever the PBMC preset declares for `max_mt_percent`, not 30.  When mixing, omit the explicit flag or override the preset by editing it in `references/methodology.md`.  Result tables record the *effective* thresholds, not the user-passed ones.
-- **Input file missing → hard fail.** `sc_filter.py:573` raises `FileNotFoundError` on a non-existent `--input`.  Common in batch pipelines when the upstream `sc-qc` output dir was renamed.
+- **QC metrics are computed on demand if missing.** `sc_filter.py:617-622` calls `ensure_qc_metrics(...)` when the AnnData lacks `n_genes_by_counts` / `pct_counts_mt`, so this skill works *without* a prior `sc-qc` run.  Running `sc-qc` first is still recommended for diagnostic figures, but it's not a hard prerequisite — the routing description used to overstate this.
+- **Input file missing → hard fail.** `sc_filter.py:573` raises `FileNotFoundError` on a non-existent `--input`.  Common in batch pipelines when an upstream output dir was renamed.
 - **`expression_source` is recorded but does not gate the filter.** `result.json["summary"]["expression_source"]` carries which matrix the metrics came from (`layers.counts` / `adata.raw` / `adata.X`).  Filtering still runs even if the source is log-normalised — but `total_counts` / mt% interpretations become meaningless.  Check the source before relying on the thresholds.
 - **`processed.h5ad` is contract-preserving, not contract-canonical.** The skill keeps whatever layers / `raw` / `uns` the input had; if upstream skipped `sc-standardize-input`, downstream skills may still mis-classify the count source.  Run `sc-standardize-input` before `sc-filter` when input came from outside OmicsClaw.
 

@@ -458,6 +458,28 @@ def test_gotchas_figure_filename_resolved_passes(tmp_path: Path) -> None:
     assert not any("gotchas" in e.lower() for e in errors), errors
 
 
+def test_gotchas_empty_marker_only_matches_when_lead_of_bullet(
+    tmp_path: Path,
+) -> None:
+    """A real Gotcha bullet that happens to mention 'none yet' as prose
+    must NOT bypass the anchor lint.  The empty-template skip applies
+    only when a bullet leads with the marker phrase — Reviewer S1 fix."""
+    body = _gotcha_body(
+        "- A real footgun: with `result.json[\"fake_key\"]` no fix is "
+        "available — none yet documented in the codebase.\n"
+    )
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        body=body,
+        script_text="summary = {'real_key': 1}\n",
+    )
+    errors = skill_lint.lint_skill(skill)
+    # Anchor lint must still fire for fake_key, despite the prose phrase
+    assert any(
+        "gotchas" in e.lower() and "fake_key" in e for e in errors
+    ), errors
+
+
 def test_gotchas_anchor_check_skipped_when_script_missing(tmp_path: Path) -> None:
     """If parameters.yaml's `script` doesn't resolve to a real file (e.g.,
     the script lives in a sibling dir), skip the anchor lint gracefully —

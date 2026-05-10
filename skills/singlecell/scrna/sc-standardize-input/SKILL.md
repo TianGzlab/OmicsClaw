@@ -43,7 +43,7 @@ AnnData contract every downstream scRNA skill assumes: raw counts in
 
 1. Load via the shared multi-format single-cell loader.
 2. Pre-flight: validate non-empty input; auto-detect species from gene name case (UPPER → human, Title → mouse).
-3. Pick the best count-like matrix among `layers["counts"]`, `adata.raw`, and `adata.X` using a `matrix_looks_count_like` heuristic.
+3. Pick the best count-like matrix among `layers["counts"]`, `adata.raw`, and `adata.X` (orchestrated by `canonicalize_singlecell_adata` in `skills/singlecell/_lib/adata_utils.py:389`, which calls the `matrix_looks_count_like` heuristic at `_lib/adata_utils.py:255`).
 4. Harmonise feature names (Ensembl ↔ symbol, deduplicate).
 5. Persist `uns["omicsclaw_input_contract"]` + `uns["omicsclaw_matrix_contract"]`.
 6. Save `processed.h5ad`; emit `report.md` + `result.json`.

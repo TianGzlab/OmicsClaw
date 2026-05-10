@@ -55,7 +55,7 @@ remove cells (filter downstream with `obs["is_doublet"]`).
 ## Gotchas
 
 - **R backends silently fall back.** `sc_doublet.py:304` logs `"DoubletFinder runtime failed (...). Falling back to scDblFinder."` and continues; `sc_doublet.py:359` does the same for `scds → cxds`.  After every R-method run, confirm `result.json["summary"]["method_used"]` matches what you asked for — the `--method doubletfinder` flag does not guarantee DoubletFinder ran.
-- **`--method scds --scds-mode hybrid` falls back to `cxds` on failure.** `sc_doublet.py:359` swaps modes silently; the requested mode is not surfaced as an error, only logged.
+- **Explicit `--scds-mode` (e.g. `bcds` or `hybrid`) silently falls back to the `cxds` default on failure.** `sc_doublet.py:359` swaps modes when the requested one raises; the requested mode is not surfaced as an error, only logged.  Inspect the warning log when the report claims `scds` ran with the default.
 - **No cells are removed.** This skill annotates barcodes; downstream filtering on `obs["is_doublet"]` is the user's responsibility.  If `sc-filter` was already run, doublets re-introduce themselves to the cluster graph if not filtered after this step.
 - **Group summary is conditional.** `tables/group_summary.csv` is only written when `--batch-key` is set; absence does not mean failure.
 - **Embedding pre-flight is non-fatal.** `sc_doublet.py:429` logs `"Preview embedding computation failed"` and continues; the score-distribution figure still renders without the embedding overlay.  When the figure looks sparse vs documented examples, check the warning log before assuming a bug.

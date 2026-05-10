@@ -149,7 +149,11 @@ _GOTCHA_FILE_LINE_RE = re.compile(r"`?([\w./-]+\.py):(\d+)(?:-(\d+))?`?")
 _GOTCHA_RESULT_JSON_RE = re.compile(r"`?result\.json(?:\[[\"'][^\"']+[\"']\])+`?")
 _GOTCHA_RESULT_KEY_RE = re.compile(r"\[[\"']([^\"']+)[\"']\]")
 _GOTCHA_TABLE_FIG_RE = re.compile(r"`?(?:tables|figures)/([\w._-]+)`?")
-_GOTCHAS_EMPTY_MARKERS = ("no gotchas yet", "none yet", "no gotchas surfaced")
+_GOTCHA_BULLET_RE = re.compile(r"^\s*-\s+(.*)$", re.MULTILINE)
+_GOTCHA_EMPTY_BULLET_RE = re.compile(
+    r"^[-*\s_`]*(no gotchas yet|none yet|no gotchas surfaced)\b",
+    re.IGNORECASE,
+)
 
 
 def _check_gotchas_anchors(
@@ -175,8 +179,16 @@ def _check_gotchas_anchors(
         return []  # missing-section error already raised by _check_body
     block = section.group(1)
 
-    compact = " ".join(block.lower().split())
-    if any(marker in compact for marker in _GOTCHAS_EMPTY_MARKERS):
+    # Per-bullet processing.  Skip the empty-template marker bullet only
+    # when the bullet's lead matches it (so a real Gotcha that *mentions*
+    # the phrase "none yet" inside its prose does not silently bypass the
+    # anchor lint).
+    real_bullets: list[str] = []
+    for bullet in _GOTCHA_BULLET_RE.findall(block):
+        if _GOTCHA_EMPTY_BULLET_RE.match(bullet):
+            continue
+        real_bullets.append(bullet)
+    if not real_bullets:
         return []
 
     script_name = sidecar.get("script") or ""
@@ -186,9 +198,16 @@ def _check_gotchas_anchors(
     script_text = script_path.read_text(encoding="utf-8")
     script_line_count = script_text.count("\n") + 1
 
-    for fname, l1, l2 in _GOTCHA_FILE_LINE_RE.findall(block):
+    real_block = "\n".join(real_bullets)
+
+    # TODO(cross-file): when an anchor references a sibling library file
+    # (e.g. `_lib/de.py:485-506`, used in spatial-de Gotchas), the
+    # filename's basename will not match `script_name` so the line-bound
+    # check is skipped.  A project-wide grep would close the gap, but
+    # would require resolving the path relative to the repo root.
+    for fname, l1, l2 in _GOTCHA_FILE_LINE_RE.findall(real_block):
         if Path(fname).name != Path(script_name).name:
-            continue  # cross-file anchor — verifying would need a project-wide grep
+            continue  # cross-file anchor — see TODO above
         upper = int(l2) if l2 else int(l1)
         if upper > script_line_count:
             anchor = f"{fname}:{l1}" + (f"-{l2}" if l2 else "")
@@ -197,7 +216,7 @@ def _check_gotchas_anchors(
                 f"({script_line_count} lines)"
             )
 
-    for full in _GOTCHA_RESULT_JSON_RE.findall(block):
+    for full in _GOTCHA_RESULT_JSON_RE.findall(real_block):
         keys = _GOTCHA_RESULT_KEY_RE.findall(full)
         if keys and keys[0] not in script_text:
             errors.append(
@@ -205,7 +224,7 @@ def _check_gotchas_anchors(
                 f"{script_name}"
             )
 
-    for fname in _GOTCHA_TABLE_FIG_RE.findall(block):
+    for fname in _GOTCHA_TABLE_FIG_RE.findall(real_block):
         if fname not in script_text:
             errors.append(
                 f"gotchas: '{fname}' not referenced in {script_name}"
