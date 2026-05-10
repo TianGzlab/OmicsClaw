@@ -1,0 +1,158 @@
+# OmicsClaw Skill v2 — parameters.yaml schema
+#
+# This file is the human-readable specification of the runtime contract held by
+# every v2 skill's `parameters.yaml` sidecar.  It is consumed by:
+#   * scripts/skill_lint.py        (validates real sidecars against this shape)
+#   * scripts/migrate_skill.py     (emits sidecars conforming to this shape)
+#   * scripts/generate_parameters_md.py
+#
+# The schema is *not* a JSON Schema document — it is a YAML reference.  The lint
+# script implements the structural checks in pure Python to avoid pulling in
+# `jsonschema`.
+#
+# Provenance: every field below is migrated 1:1 from the legacy
+# `metadata.omicsclaw` block in SKILL.md frontmatter.  A skill is "v2" when its
+# parameters.yaml exists; lazy_metadata.py prefers the sidecar and ignores the
+# legacy frontmatter block.
+
+# ---------------------------------------------------------------------------
+# Required top-level fields
+# ---------------------------------------------------------------------------
+
+domain:
+  type: string
+  required: true
+  description: |
+    Omics domain bucket. Must match an existing domain directory under skills/.
+    Examples: spatial, singlecell, genomics, proteomics, metabolomics, bulkrna,
+    orchestrator, literature.
+
+script:
+  type: string
+  required: true
+  description: |
+    Filename of the runtime entrypoint, relative to the skill directory
+    (e.g. "bulkrna_de.py").  Resolved by registry._resolve_script_path.
+
+# ---------------------------------------------------------------------------
+# Required behavioural flags (inherit current defaults)
+# ---------------------------------------------------------------------------
+
+saves_h5ad:
+  type: bool
+  required: true
+  default: false
+  description: |
+    True if the skill writes an `.h5ad` AnnData artifact to the output dir.
+    Used by the bot to decide whether to surface a downstream-AnnData hint.
+
+requires_preprocessed:
+  type: bool
+  required: true
+  default: false
+  description: |
+    True if the skill expects a preprocessed AnnData (e.g. with HVG / PCA / UMAP).
+    Used by the orchestrator to gate routing.
+
+# ---------------------------------------------------------------------------
+# Required collection fields (may be empty list/dict)
+# ---------------------------------------------------------------------------
+
+trigger_keywords:
+  type: list[string]
+  required: true
+  default: []
+  description: |
+    Free-text keywords used by the orchestrator's keyword-routing layer
+    (omicsclaw/core/capability_resolver.py).  These complement the SKILL.md
+    description and are NOT a substitute for it.
+
+legacy_aliases:
+  type: list[string]
+  required: true
+  default: []
+  description: |
+    Old skill names this skill answers to.  registry._register_skill_entry
+    registers each alias.  Drop entries here when the legacy name is fully
+    out of circulation.
+
+allowed_extra_flags:
+  type: list[string]
+  required: true
+  default: []
+  description: |
+    CLI flags accepted by the runtime script *in addition* to the standard
+    --input / --output / --demo set.  Used by lazy_metadata.allowed_extra_flags
+    (returned as a set) and by the bot tool_executors to validate user-supplied
+    flags before invoking the script.  Each entry must start with "--".
+
+param_hints:
+  type: dict[method_name -> method_hint]
+  required: true
+  default: {}
+  description: |
+    Per-method parameter tuning hints.  Empty dict {} is valid for skills with
+    no method-specific tuning.  Each key is a lowercase method name (matching
+    a value the user can pass to --method).
+  shape:
+    method_hint:
+      priority:
+        type: string
+        required: false
+        description: |
+          One-line ordering hint for the bot's parameter card UX
+          (e.g. "groupby -> scanpy_corr_method -> filter_markers").
+      params:
+        type: list[string]
+        required: true
+        description: |
+          Parameter names this method understands.  Names use snake_case to
+          match the Python script's argument names (the corresponding CLI flag
+          is the kebab-case form).
+      advanced_params:
+        type: list[string]
+        required: false
+        default: []
+        description: |
+          Secondary parameter names rendered on a separate "高级参数" row in
+          bot's parameter card (bot/skill_orchestration.py::_build_param_hint).
+          Use when there is a clear core / advanced split.
+      defaults:
+        type: dict[string -> any]
+        required: true
+        description: |
+          Default value for each name in `params`.  Type is per-parameter.
+      requires:
+        type: list[string]
+        required: false
+        default: []
+        description: |
+          AnnData layout requirements (e.g. "obs.groupby", "X_log_normalized")
+          that the skill validates before running this method.
+      tips:
+        type: list[string]
+        required: false
+        default: []
+        description: |
+          Free-text tips surfaced to the user when they ask "what params can I
+          tune?" — one short sentence per entry.
+
+# ---------------------------------------------------------------------------
+# Optional fields
+# ---------------------------------------------------------------------------
+
+emoji:
+  type: string
+  required: false
+  description: |
+    Single emoji used in bot-rendered headers (e.g. "🔬").  Decorative only.
+
+# ---------------------------------------------------------------------------
+# Forbidden fields
+# ---------------------------------------------------------------------------
+# The following keys MUST NOT appear in parameters.yaml.  They live in SKILL.md
+# frontmatter (the user-visible / Anthropic-style metadata):
+#   name, description, version, author, license, tags, requires
+#
+# If a migration tool encounters them in parameters.yaml, skill_lint.py reports
+# an error.
