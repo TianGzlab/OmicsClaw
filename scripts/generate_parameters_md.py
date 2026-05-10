@@ -124,7 +124,11 @@ def write_or_check(skill_dir: Path, *, check: bool) -> int:
         return 0
 
     target.write_text(rendered, encoding="utf-8")
-    print(f"wrote {target.relative_to(_ROOT)}")
+    try:
+        display = target.resolve().relative_to(_ROOT)
+    except ValueError:
+        display = target
+    print(f"wrote {display}")
     return 0
 
 
