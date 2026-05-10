@@ -13,6 +13,20 @@ Graph-based memory storage with:
 
 All infrastructure (engine, session, migrations) lives in database.py.
 This module contains only graph-domain business logic.
+
+TODO(post-PR #6): retire this module per refactor plan §6.2. Five
+call sites still depend on its non-engine verbs:
+
+  * ``omicsclaw/app/server.py`` — ``/memory/update``,
+    ``/memory/children``, ``/memory/domains``
+  * ``omicsclaw/memory/memory_client.py`` — ``forget``, ``get_recent``
+
+Migrating these requires breaking-API surface work that was deferred
+out of PR #6's documentation-only scope. Once those callers move to
+``MemoryEngine`` / ``ReviewLog``, this whole file can be deleted.
+The shim's ``create_memory`` and ``update_memory`` already route
+through ``MemoryEngine.upsert_versioned`` (see PR #3c), so the
+remaining surface is small.
 """
 
 import uuid as uuid_lib

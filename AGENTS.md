@@ -202,16 +202,37 @@ evidence.
 
 ## Graph Memory System
 
-OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`.
+OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`. Vocabulary, decisions, and architectural diagrams live in [`docs/CONTEXT.md`](docs/CONTEXT.md).
 
 ### Architecture
 
-The memory system is backed by SQLite/PostgreSQL and is built as a graph database overlay using SQLAlchemy.
+Three layers over a SQLite/PostgreSQL graph database (SQLAlchemy):
 
-- **Nodes & Edges**: Every entity (session, dataset, user preference) is a node connected via edges to a central root node (`ROOT_NODE_UUID`). Nodes are addressed by URIs (e.g., `session://user123/cli`).
-- **MemoryClient**: High-level abstract client (`omicsclaw/memory/memory_client.py`) used by multi-agent pipelines to `remember()`, `recall()`, and `search()`.
-- **Compat Layer**: To maintain backward compatibility with old bot memory, `omicsclaw/memory/compat.py` implements the old interface but routes it through the graph engine.
-- **REST API**: A FastAPI backend provides management capabilities, accessible via `oc memory-server`.
+| Layer | Module | Role |
+|---|---|---|
+| Strategy | `MemoryClient(engine, namespace=...)` | Decides which Namespace a write lands in and whether it's versioned vs. overwrite. |
+| Hot path | `MemoryEngine` (`omicsclaw/memory/engine.py`) | 7 verbs over `(uri, namespace)`: `upsert`, `upsert_versioned`, `patch_edge_metadata`, `recall`, `search`, `list_children`, `get_subtree`. |
+| Cold path | `ReviewLog` (`omicsclaw/memory/review_log.py`) | Version-chain inspection, rollback, orphan/GC, browse_shared, changeset approve/discard — for the desktop Review & Audit pane. |
+
+- **Nodes & Edges**: Every entity (session, dataset, user preference) is a node connected via edges to a central root (`ROOT_NODE_UUID`). Nodes are addressed by URIs (e.g., `core://agent`, `dataset://pbmc.h5ad`).
+- **Namespace partition**: `paths`, `search_documents`, and `glossary_keywords` carry a `namespace` column; surfaces inject the value (CLI = workspace path, Desktop = `app/<launch_id>`, Bot = `<platform>/<user_id>`, system = `__shared__`).
+- **Read fallback is asymmetric**: `recall` and `search` see `__shared__` content automatically; `list_children` and `get_subtree` are strict so private inventories don't get polluted by shared structure.
+- **Compat Layer**: `omicsclaw/memory/compat.py` (`CompatMemoryStore`) is the bot's drop-in replacement for the legacy `bot.memory.MemoryStore`; it derives a per-session namespace from `(platform, user_id)`.
+- **REST API**: A FastAPI backend provides management capabilities (browse, search, review, rollback, orphan inspection), accessible via `oc memory-server`. The desktop's `/memory/review/*` routes go through `ReviewLog`.
+
+#### Surface helpers
+
+```python
+from omicsclaw.memory import (
+    cli_namespace_from_workspace,  # absolute workspace path (cwd if None)
+    desktop_namespace,             # app/<OMICSCLAW_DESKTOP_LAUNCH_ID> or app/desktop_user
+    get_memory_client,             # factory: MemoryClient bound to a namespace
+    get_memory_engine,             # singleton MemoryEngine
+    get_review_log,                # singleton ReviewLog
+)
+```
+
+> **Migration note (PRs #125–#132).** `MemoryEngine` and `ReviewLog` replace the legacy 1584-line `GraphService`. New code MUST use `MemoryEngine`/`ReviewLog`/`MemoryClient`; `GraphService` lingers as a transitional shim while five remaining call sites (`/memory/update`, `/memory/children`, `/memory/domains`, `MemoryClient.forget`, `MemoryClient.get_recent`) are migrated.
 
 ### Running the Dashboard API
 
