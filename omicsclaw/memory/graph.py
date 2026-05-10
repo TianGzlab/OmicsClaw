@@ -28,8 +28,10 @@ from sqlalchemy import (
     not_,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from .engine import MemoryEngine
 from .models import (
     ROOT_NODE_UUID,
+    SHARED_NAMESPACE,
     Node,
     Memory,
     Edge,
@@ -67,6 +69,11 @@ class GraphService:
         self.session = db.session
         self._optional_session = db._optional_session
         self._search = search
+        # Transitional shim (PR #3c): the mutating verbs delegate to
+        # MemoryEngine with namespace='__shared__', preserving the legacy
+        # observable behaviour. PR #6 deletes the shim entirely once
+        # callers have moved to MemoryClient/MemoryEngine directly.
+        self._engine = MemoryEngine(db, search)
 
     @staticmethod
     def _decode_legacy(content: str) -> str:
@@ -900,7 +907,14 @@ class GraphService:
         Create a new memory under a parent path.
 
         Creates: Node -> Memory -> Edge (parent->child) -> Path.
+
+        PR #3c shim: delegates the actual write to ``MemoryEngine.upsert_versioned``
+        with ``namespace='__shared__'``. The path-computation policy
+        (auto-numbering when ``title`` is omitted, the duplicate-path check)
+        stays here because it has no engine equivalent. PR #6 removes the
+        shim once callers move to ``MemoryClient`` / ``MemoryEngine`` directly.
         """
+        # Pre-flight: resolve parent, compute final path, reject duplicates.
         async with self.session() as session:
             if not parent_path:
                 parent_uuid = ROOT_NODE_UUID
@@ -922,43 +936,56 @@ class GraphService:
                 )
 
             existing = await session.execute(
-                select(Path).where(Path.domain == domain, Path.path == final_path)
+                select(Path).where(
+                    Path.namespace == SHARED_NAMESPACE,
+                    Path.domain == domain,
+                    Path.path == final_path,
+                )
             )
             if existing.scalar_one_or_none():
                 raise ValueError(f"Path '{domain}://{final_path}' already exists")
 
-            new_uuid = str(uuid_lib.uuid4())
-            node = await self._ensure_node(session, new_uuid)
-            memory = await self._insert_memory(session, new_uuid, content)
+        # Delegate the row-creating part to MemoryEngine. Engine produces
+        # Node + Memory + Edge + Path inside ``__shared__`` and refreshes
+        # the search index. Returned ref carries memory_id and node_uuid.
+        ref = await self._engine.upsert_versioned(
+            f"{domain}://{final_path}",
+            content,
+            namespace=SHARED_NAMESPACE,
+            priority=priority,
+            disclosure=disclosure,
+        )
 
-            edge_name = title if title else final_path.rsplit("/", 1)[-1]
-            created = await self._create_edge_with_paths(
-                session,
-                parent_uuid,
-                new_uuid,
-                edge_name,
-                domain,
-                final_path,
-                priority,
-                disclosure,
-            )
+        # Re-fetch the four rows we just created so the caller's changeset
+        # bookkeeping (rows_after) gets the canonical serialised shape.
+        async with self.session() as session:
+            path_row = (
+                await session.execute(
+                    select(Path).where(
+                        Path.namespace == SHARED_NAMESPACE,
+                        Path.domain == domain,
+                        Path.path == final_path,
+                    )
+                )
+            ).scalar_one()
+            edge = await session.get(Edge, path_row.edge_id)
+            node = await session.get(Node, ref.node_uuid)
+            memory = await session.get(Memory, ref.new_memory_id)
 
-            await self._search.refresh_search_documents_for_node(new_uuid, session=session)
-
-            return {
-                "id": memory.id,
-                "node_uuid": new_uuid,
-                "domain": domain,
-                "path": final_path,
-                "uri": f"{domain}://{final_path}",
-                "priority": priority,
-                "rows_after": {
-                    "nodes": [serialize_row(node)],
-                    "memories": [serialize_memory_ref(memory)],
-                    "edges": [serialize_row(created["edge"])],
-                    "paths": [serialize_row(created["path"])],
-                },
-            }
+        return {
+            "id": ref.new_memory_id,
+            "node_uuid": ref.node_uuid,
+            "domain": domain,
+            "path": final_path,
+            "uri": f"{domain}://{final_path}",
+            "priority": priority,
+            "rows_after": {
+                "nodes": [serialize_row(node)],
+                "memories": [serialize_memory_ref(memory)],
+                "edges": [serialize_row(edge)],
+                "paths": [serialize_row(path_row)],
+            },
+        }
 
     async def update_memory(
         self,
@@ -971,8 +998,17 @@ class GraphService:
         """
         Update a memory.
 
-        Content change -> new Memory row with the same node_uuid.
+        Content change -> new Memory row with the same node_uuid (deprecation chain).
         Metadata change -> update the Edge directly.
+
+        PR #3c shim: delegates to ``MemoryEngine.upsert_versioned`` (when
+        content changes) or ``MemoryEngine.patch_edge_metadata`` (metadata
+        only) with ``namespace='__shared__'``. Pre-flight resolves the
+        path and snapshots ``rows_before``; post-flight re-fetches to
+        build ``rows_after``. The ``priority``/``disclosure`` defaults of
+        ``None`` mean "preserve" in the legacy contract — we translate
+        that into the engine's ``_UNSET`` sentinel by simply omitting
+        unset kwargs from the engine call.
         """
         if path == "":
             raise ValueError("Cannot update the root node.")
@@ -983,6 +1019,7 @@ class GraphService:
                 "At least one of content, priority, or disclosure must be set."
             )
 
+        # Pre-flight: snapshot the current edge + active memory.
         async with self.session() as session:
             result = await session.execute(
                 select(Memory, Edge, Path)
@@ -995,81 +1032,81 @@ class GraphService:
                         Memory.deprecated == False,
                     ),
                 )
-                .where(Path.domain == domain, Path.path == path)
+                .where(
+                    Path.namespace == SHARED_NAMESPACE,
+                    Path.domain == domain,
+                    Path.path == path,
+                )
                 .order_by(Memory.created_at.desc())
                 .limit(1)
             )
             row = result.first()
-
             if not row:
                 raise ValueError(
                     f"Path '{domain}://{path}' not found or memory is deprecated"
                 )
-
-            old_memory, edge, path_obj = row
+            old_memory, edge, _ = row
             old_id = old_memory.id
+            edge_id = edge.id
             node_uuid = edge.child_uuid
-
-            rows_before: Dict[str, list] = {}
-            rows_after: Dict[str, list] = {}
-
             edge_before = serialize_row(edge)
+            old_memory_ref = serialize_memory_ref(old_memory)
 
-            if priority is not None:
-                edge.priority = priority
-                session.add(edge)
-            if disclosure is not None:
-                edge.disclosure = disclosure
-                session.add(edge)
+        # Translate legacy "None means preserve" into engine's _UNSET via
+        # kwargs omission. Engine helpers preserve current values when an
+        # arg isn't supplied.
+        engine_kwargs: Dict[str, Any] = {}
+        if priority is not None:
+            engine_kwargs["priority"] = priority
+        if disclosure is not None:
+            engine_kwargs["disclosure"] = disclosure
 
-            edge_after = serialize_row(edge)
+        if content is not None:
+            ref = await self._engine.upsert_versioned(
+                f"{domain}://{path}",
+                content,
+                namespace=SHARED_NAMESPACE,
+                **engine_kwargs,
+            )
+            new_memory_id = ref.new_memory_id
+        else:
+            await self._engine.patch_edge_metadata(
+                f"{domain}://{path}",
+                namespace=SHARED_NAMESPACE,
+                **engine_kwargs,
+            )
+            new_memory_id = old_id
+
+        # Post-flight: re-fetch updated rows for changeset bookkeeping.
+        rows_before: Dict[str, list] = {}
+        rows_after: Dict[str, list] = {}
+
+        async with self.session() as session:
+            edge_after_obj = await session.get(Edge, edge_id)
+            edge_after = serialize_row(edge_after_obj)
             if edge_before != edge_after:
                 rows_before["edges"] = [edge_before]
                 rows_after["edges"] = [edge_after]
 
-            new_memory_id = old_id
-
             if content is not None:
-                rows_before["memories"] = [serialize_memory_ref(old_memory)]
-
-                new_memory = await self._insert_memory(
-                    session, node_uuid, content, deprecated=True
-                )
-                new_memory_id = new_memory.id
-                await self._deprecate_node_memories(
-                    session,
-                    node_uuid,
-                    successor_id=new_memory_id,
-                )
-                await session.execute(
-                    update(Memory)
-                    .where(Memory.id == new_memory_id)
-                    .values(deprecated=False, migrated_to=None)
-                )
-
-                await session.flush()
-                updated = await session.execute(
-                    select(Memory).where(Memory.id.in_([old_id, new_memory_id]))
-                )
+                rows_before["memories"] = [old_memory_ref]
+                old_after = await session.get(Memory, old_id)
+                new_after = await session.get(Memory, new_memory_id)
                 rows_after["memories"] = [
-                    serialize_memory_ref(m) for m in updated.scalars().all()
+                    serialize_memory_ref(old_after),
+                    serialize_memory_ref(new_after),
                 ]
 
-            if content is None:
-                session.add(path_obj)
-
-            await self._search.refresh_search_documents_for_node(node_uuid, session=session)
-
-            return {
-                "domain": domain,
-                "path": path,
-                "uri": f"{domain}://{path}",
-                "old_memory_id": old_id,
-                "new_memory_id": new_memory_id,
-                "node_uuid": node_uuid,
-                "rows_before": rows_before,
-                "rows_after": rows_after,
-            }
+        return {
+            "domain": domain,
+            "path": path,
+            "uri": f"{domain}://{path}",
+            "old_memory_id": old_id,
+            "new_memory_id": new_memory_id,
+            "node_uuid": node_uuid,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+        }
 
     async def rollback_to_memory(
         self, target_memory_id: int, session: Optional[AsyncSession] = None
