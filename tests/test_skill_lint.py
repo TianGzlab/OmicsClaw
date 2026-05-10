@@ -58,7 +58,7 @@ VALID_BODY = (
 def _write_v2_skill(
     base: Path,
     *,
-    description: str = "Load when demoing the lint.",
+    description: str = "Load when demoing the lint. Skip when in production.",
     body: str = VALID_BODY,
     sidecar: dict | None = None,
     skip_references: tuple[str, ...] = (),
@@ -147,6 +147,76 @@ def test_description_word_count_capped(tmp_path: Path) -> None:
     skill = _write_v2_skill(tmp_path / "demo", description=long_desc)
     errors = skill_lint.lint_skill(skill)
     assert any("description" in e and "50" in e for e in errors)
+
+
+def test_description_must_include_skip_clause(tmp_path: Path) -> None:
+    """A description that only says when to load is half a routing trigger;
+    it must also tell the agent which neighbour to bounce to.  Accepts
+    'Skip when' / 'Skip if' / 'Skip for' (all three forms appear in
+    production descriptions).
+    """
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        description="Load when demoing the lint without a skip clause.",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any(
+        "description" in e and "Skip" in e for e in errors
+    ), f"expected a Skip-clause error, got {errors}"
+
+
+@pytest.mark.parametrize("clause", ["Skip when", "Skip if", "Skip for"])
+def test_description_skip_clause_variants_accepted(
+    tmp_path: Path, clause: str
+) -> None:
+    """All three Skip variants observed in production descriptions are
+    accepted by the lint."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        description=f"Load when X. {clause} Y.",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert not any(
+        "description" in e and "Skip" in e for e in errors
+    ), f"expected Skip clause to satisfy lint, got {errors}"
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Load when X.\nSkip\nwhen Y.",  # YAML literal block scalar (`|`)
+        "Load when X. Skip  when Y.",   # double-space artefact
+        "Load when X.\tSkip\twhen Y.",  # tab whitespace
+    ],
+    ids=["newline-wrapped", "double-space", "tab-separated"],
+)
+def test_description_skip_clause_normalised_whitespace(
+    tmp_path: Path, description: str
+) -> None:
+    """YAML folded / literal scalars and quoted forms can introduce newlines,
+    double spaces, or tabs between 'Skip' and the connective.  The lint
+    must whitespace-normalise before matching."""
+    skill = _write_v2_skill(tmp_path / "demo", description=description)
+    errors = skill_lint.lint_skill(skill)
+    assert not any(
+        "description" in e and "Skip" in e for e in errors
+    ), f"expected normalised Skip clause to satisfy lint, got {errors}"
+
+
+def test_description_skip_without_connective_rejected(tmp_path: Path) -> None:
+    """A bare 'Skip' (no when/if/for) carries no routing semantics — the
+    connective is what tells the agent which neighbour to bounce to.
+    Locks in that 'Skip otherwise.' / 'Skip in production.' do NOT satisfy
+    the rule, so a future contributor relaxing the substring to plain 'skip '
+    would see this test fail."""
+    skill = _write_v2_skill(
+        tmp_path / "demo",
+        description="Load when X. Skip otherwise.",
+    )
+    errors = skill_lint.lint_skill(skill)
+    assert any(
+        "description" in e and "Skip" in e for e in errors
+    ), f"expected bare Skip to be rejected, got {errors}"
 
 
 def test_missing_required_section_fails(tmp_path: Path) -> None:
