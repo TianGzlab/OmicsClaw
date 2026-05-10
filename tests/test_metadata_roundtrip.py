@@ -282,6 +282,202 @@ def test_sc_de_real_skill_roundtrips(tmp_path: Path) -> None:
     assert sc.param_hints["deseq2_r"]["defaults"]["pseudobulk_min_cells"] == 10
 
 
+_PROD_SPATIAL_DE = Path(__file__).resolve().parent.parent / "skills" / "spatial" / "spatial-de"
+
+
+def test_spatial_de_real_skill_roundtrips(tmp_path: Path) -> None:
+    """Pin the production skills/spatial/spatial-de runtime contract directly.
+
+    Loads the actual parameters.yaml from the migrated skill and asserts both
+    that (a) the legacy frontmatter form would yield the same LazySkillMetadata
+    output as the production sidecar, and (b) the production sidecar still
+    contains the load-bearing keys that bot/skill_orchestration.py and
+    omicsclaw/core/registry.py read.  If a future edit drops a method, flag,
+    or default from the production file, the production-sanity assertions
+    below fail — closing the silent-drift hole that an in-test spec dict
+    alone would leave open.
+    """
+    prod_sidecar = yaml.safe_load((_PROD_SPATIAL_DE / "parameters.yaml").read_text())
+
+    # Production sanity: load-bearing shape every consumer depends on.
+    assert set(prod_sidecar["param_hints"].keys()) == {"wilcoxon", "t-test", "pydeseq2"}
+    assert "--method" in prod_sidecar["allowed_extra_flags"]
+    assert "--sample-key" in prod_sidecar["allowed_extra_flags"]
+    assert prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_n_cpus"] == 1
+    assert prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_alpha"] == 0.05
+    assert prod_sidecar["param_hints"]["wilcoxon"]["defaults"]["scanpy_pts"] is False
+    assert (
+        prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_fit_type"]
+        == "parametric"
+    )
+    assert prod_sidecar["legacy_aliases"] == ["de"]
+    assert prod_sidecar["saves_h5ad"] is True
+
+    # Roundtrip: the same shape, expressed as legacy frontmatter, must give
+    # identical LazySkillMetadata output as the production sidecar form.
+    spec = {
+        "domain": "spatial",
+        "script": "spatial_de.py",
+        "saves_h5ad": True,
+        "requires_preprocessed": True,
+        "trigger_keywords": [
+            "differential expression", "marker gene", "pseudobulk",
+            "Wilcoxon", "t-test", "PyDESeq2", "spatial DE",
+        ],
+        "legacy_aliases": ["de"],
+        "allowed_extra_flags": [
+            "--fdr-threshold", "--filter-compare-abs", "--filter-markers",
+            "--group1", "--group2", "--groupby",
+            "--log2fc-threshold", "--max-out-group-fraction", "--method",
+            "--min-cells-per-sample", "--min-counts-per-gene",
+            "--min-fold-change", "--min-in-group-fraction", "--n-top-genes",
+            "--no-filter-compare-abs", "--no-filter-markers",
+            "--no-pydeseq2-cooks-filter", "--no-pydeseq2-independent-filter",
+            "--no-pydeseq2-refit-cooks", "--no-scanpy-pts",
+            "--no-scanpy-rankby-abs", "--no-scanpy-tie-correct",
+            "--pydeseq2-alpha", "--pydeseq2-cooks-filter",
+            "--pydeseq2-fit-type", "--pydeseq2-independent-filter",
+            "--pydeseq2-n-cpus", "--pydeseq2-refit-cooks",
+            "--pydeseq2-size-factors-fit-type", "--sample-key",
+            "--scanpy-corr-method", "--scanpy-pts", "--scanpy-rankby-abs",
+            "--scanpy-tie-correct",
+        ],
+        "param_hints": {
+            "wilcoxon": {
+                "priority": "groupby → scanpy_corr_method → filter_markers → scanpy_tie_correct",
+                "params": [
+                    "groupby", "group1", "group2", "n_top_genes",
+                    "fdr_threshold", "log2fc_threshold",
+                    "scanpy_corr_method", "scanpy_rankby_abs", "scanpy_pts",
+                    "scanpy_tie_correct", "filter_markers",
+                    "min_in_group_fraction", "min_fold_change",
+                    "max_out_group_fraction", "filter_compare_abs",
+                ],
+                "defaults": {
+                    "groupby": "leiden", "n_top_genes": 10,
+                    "fdr_threshold": 0.05, "log2fc_threshold": 1.0,
+                    "scanpy_corr_method": "benjamini-hochberg",
+                    "scanpy_rankby_abs": False, "scanpy_pts": False,
+                    "scanpy_tie_correct": False, "filter_markers": True,
+                    "min_in_group_fraction": 0.25, "min_fold_change": 1.0,
+                    "max_out_group_fraction": 0.5, "filter_compare_abs": False,
+                },
+                "requires": ["obs.groupby", "X_log_normalized"],
+                "tips": [
+                    "--scanpy-corr-method: official `scanpy.tl.rank_genes_groups` "
+                    "multiple-testing correction (`benjamini-hochberg` or `bonferroni`).",
+                    "--scanpy-tie-correct: official Wilcoxon tie correction toggle "
+                    "in Scanpy; only relevant for `wilcoxon`.",
+                    "--scanpy-rankby-abs: ranks genes by absolute score but does "
+                    "not change the reported log fold-change sign.",
+                    "--scanpy-pts: asks Scanpy to report per-group detection "
+                    "fractions (`pct_nz_group`, `pct_nz_reference`).",
+                    "--filter-markers + min/max fraction controls: official "
+                    "`scanpy.tl.filter_rank_genes_groups` post-filter for "
+                    "cluster-style marker specificity.",
+                ],
+            },
+            "t-test": {
+                "priority": "groupby → scanpy_corr_method → filter_markers",
+                "params": [
+                    "groupby", "group1", "group2", "n_top_genes",
+                    "fdr_threshold", "log2fc_threshold",
+                    "scanpy_corr_method", "scanpy_rankby_abs", "scanpy_pts",
+                    "filter_markers", "min_in_group_fraction",
+                    "min_fold_change", "max_out_group_fraction",
+                    "filter_compare_abs",
+                ],
+                "defaults": {
+                    "groupby": "leiden", "n_top_genes": 10,
+                    "fdr_threshold": 0.05, "log2fc_threshold": 1.0,
+                    "scanpy_corr_method": "benjamini-hochberg",
+                    "scanpy_rankby_abs": False, "scanpy_pts": False,
+                    "filter_markers": True, "min_in_group_fraction": 0.25,
+                    "min_fold_change": 1.0, "max_out_group_fraction": 0.5,
+                    "filter_compare_abs": False,
+                },
+                "requires": ["obs.groupby", "X_log_normalized"],
+                "tips": [
+                    "--scanpy-corr-method / --scanpy-rankby-abs / --scanpy-pts: "
+                    "same official Scanpy controls as the Wilcoxon path.",
+                    "--filter-markers: keep this on for a first pass unless the "
+                    "user explicitly wants raw unfiltered ranking output.",
+                    "`t-test` is faster than Wilcoxon but remains an exploratory "
+                    "log-expression marker workflow rather than replicate-aware "
+                    "sample inference.",
+                ],
+            },
+            "pydeseq2": {
+                "priority": (
+                    "group1/group2 → sample_key → "
+                    "min_cells_per_sample/min_counts_per_gene → "
+                    "pydeseq2_fit_type/size_factors_fit_type → pydeseq2_alpha"
+                ),
+                "params": [
+                    "groupby", "group1", "group2", "sample_key",
+                    "n_top_genes", "fdr_threshold", "log2fc_threshold",
+                    "min_cells_per_sample", "min_counts_per_gene",
+                    "pydeseq2_fit_type", "pydeseq2_size_factors_fit_type",
+                    "pydeseq2_refit_cooks", "pydeseq2_alpha",
+                    "pydeseq2_cooks_filter", "pydeseq2_independent_filter",
+                    "pydeseq2_n_cpus",
+                ],
+                "defaults": {
+                    "groupby": "leiden", "sample_key": "sample_id",
+                    "n_top_genes": 10, "fdr_threshold": 0.05,
+                    "log2fc_threshold": 1.0,
+                    "min_cells_per_sample": 10, "min_counts_per_gene": 10,
+                    "pydeseq2_fit_type": "parametric",
+                    "pydeseq2_size_factors_fit_type": "ratio",
+                    "pydeseq2_refit_cooks": True, "pydeseq2_alpha": 0.05,
+                    "pydeseq2_cooks_filter": True,
+                    "pydeseq2_independent_filter": True,
+                    "pydeseq2_n_cpus": 1,
+                },
+                "requires": ["counts_or_raw", "obs.sample_key", "obs.groupby"],
+                "tips": [
+                    "`pydeseq2` in `spatial-de` is intentionally restricted to "
+                    "explicit two-group contrasts with a real `sample_key`; "
+                    "OmicsClaw will not fabricate replicates.",
+                    "If the same biological samples contribute to both groups, "
+                    "OmicsClaw automatically uses a paired design "
+                    "(`~ sample_id + condition`).",
+                    "--min-cells-per-sample: wrapper-level gate for each sample "
+                    "x group pseudobulk profile before DESeq2 fitting.",
+                    "--min-counts-per-gene: wrapper-level pseudobulk gene filter "
+                    "applied before PyDESeq2.",
+                    "--pydeseq2-fit-type / --pydeseq2-size-factors-fit-type / "
+                    "--pydeseq2-refit-cooks / --pydeseq2-alpha / "
+                    "--pydeseq2-cooks-filter / --pydeseq2-independent-filter / "
+                    "--pydeseq2-n-cpus: official PyDESeq2 controls exposed "
+                    "directly by the wrapper.",
+                ],
+            },
+        },
+    }
+    fm = LazySkillMetadata(_frontmatter_form(tmp_path, "spatial-de", spec))
+    sc = LazySkillMetadata(_sidecar_form(tmp_path, "spatial-de", spec))
+
+    # Identity + scalar fields
+    assert fm.allowed_extra_flags == sc.allowed_extra_flags == set(spec["allowed_extra_flags"])
+    assert fm.trigger_keywords == sc.trigger_keywords == spec["trigger_keywords"]
+    assert fm.legacy_aliases == sc.legacy_aliases == ["de"]
+    assert fm.saves_h5ad is sc.saves_h5ad is True
+    assert fm.requires_preprocessed is sc.requires_preprocessed is True
+
+    # Per-method param_hints — exercises mixed bool/int/float/str defaults
+    # and ensures none of the 3 methods got dropped.
+    assert set(fm.param_hints.keys()) == set(sc.param_hints.keys()) == {"wilcoxon", "t-test", "pydeseq2"}
+    assert fm.param_hints == sc.param_hints == spec["param_hints"]
+
+    # Spot-check a few load-bearing values (cheap regression on framework
+    # type-coercion behaviour for booleans, integers, floats, and strings).
+    assert sc.param_hints["wilcoxon"]["defaults"]["scanpy_pts"] is False
+    assert sc.param_hints["pydeseq2"]["defaults"]["pydeseq2_n_cpus"] == 1
+    assert sc.param_hints["pydeseq2"]["defaults"]["pydeseq2_alpha"] == 0.05
+    assert sc.param_hints["pydeseq2"]["defaults"]["pydeseq2_fit_type"] == "parametric"
+
+
 def test_param_hints_preserve_advanced_params(tmp_path: Path) -> None:
     """bot/skill_orchestration.py reads tip_info['advanced_params'] — make
     sure roundtrip preserves it byte-for-byte (not coerced to a different

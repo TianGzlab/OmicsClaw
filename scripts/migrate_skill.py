@@ -43,7 +43,7 @@ METHODOLOGY_HEADINGS = (
     "input formats", "version compatibility", "dependencies",
 )
 OUTPUT_HEADINGS = ("output structure", "output schema", "output contract",
-                   "outputs", "result")
+                   "outputs", "result", "visualization contract")
 R_VIZ_HEADINGS = ("r enhanced", "r visualization", "r visualisation", "replot")
 SAFETY_HEADINGS = ("safety",)
 DROP_HEADINGS = ("citations", "related skills", "example queries",
