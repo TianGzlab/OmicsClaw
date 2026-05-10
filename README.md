@@ -129,6 +129,29 @@ metadata noise when `oc doctor` and the targeted import checks pass.
 
 Run `oc list` for the current CLI catalog.
 
+## 🧠 Memory Architecture
+
+Graph-backed agent memory at `omicsclaw/memory/`. Sessions, dataset / analysis / preference / insight lineage, and core agent identity persist across runs and replay back into chat context. Three layers:
+
+| Layer | Module | Role |
+|---|---|---|
+| Strategy | `MemoryClient(engine, namespace=...)` | Decides which **Namespace** a write lands in and whether it's versioned vs. overwrite. |
+| Hot path | `MemoryEngine` | 7 verbs over `(uri, namespace)`: `upsert`, `upsert_versioned`, `patch_edge_metadata`, `recall`, `search`, `list_children`, `get_subtree`. |
+| Cold path | `ReviewLog` | Version-chain inspection, rollback, orphan/GC, browse_shared, changeset approve/discard — for the desktop Review & Audit pane. |
+
+**Namespace partition** keeps surfaces isolated:
+
+| Surface | Namespace |
+|---|---|
+| CLI / TUI | absolute workspace path (cwd unless `--workspace` is set) |
+| Desktop | `app/<OMICSCLAW_DESKTOP_LAUNCH_ID>` or `app/desktop_user` |
+| Telegram / Feishu bot | `f"{platform}/{user_id}"` |
+| Globally shared | `__shared__` (read-fallback target for every other namespace) |
+
+Read fallback is asymmetric: `recall` and `search` see `__shared__` content automatically; `list_children` and `get_subtree` are strict so private inventories don't get polluted by shared structure.
+
+Vocabulary, decisions, and architectural diagrams live in [`docs/CONTEXT.md`](docs/CONTEXT.md).
+
 ## ❓ FAQ
 
 <details>
