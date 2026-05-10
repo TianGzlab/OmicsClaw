@@ -346,14 +346,6 @@ class ChangesetStore:
             os.remove(p)
 
 
-def _parse_uri(uri: str):
-    if "://" in uri:
-        domain, path = uri.split("://", 1)
-    else:
-        domain, path = "core", uri
-    return domain, path
-
-
 # Global singleton
 _store: Optional[ChangesetStore] = None
 
