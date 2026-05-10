@@ -1,216 +1,113 @@
 ---
 name: sc-pathway-scoring
-description: >-
-  Single-cell pathway and gene-set activity scoring for preprocessed scRNA-seq
-  data using AUCell or a lightweight normalized-expression module-score path.
-version: 0.2.0
-author: OmicsClaw Team
+description: Load when computing per-cell pathway / gene-set scores on a normalised scRNA AnnData via AUCell (R or Python) or Scanpy score_genes. Skip when running condition-vs-control bulk-style enrichment on top of a DE table (use sc-enrichment) or for de-novo gene-program discovery (use sc-gene-programs).
+version: 0.3.0
+author: OmicsClaw
 license: MIT
-tags: [singlecell, pathway-scoring, pathway, geneset, aucell, module-score]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--method"
-    - "--gene-sets"
-    - "--gene-set-db"
-    - "--species"
-    - "--groupby"
-    - "--top-pathways"
-    - "--aucell-auc-max-rank"
-    - "--score-genes-ctrl-size"
-    - "--score-genes-n-bins"
-    - "--aucell-py-auc-threshold"
-    - "--r-enhanced"
-    param_hints:
-      aucell_r:
-        priority: "gene_sets/gene_set_db -> groupby -> aucell_auc_max_rank -> top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_auc_max_rank",
-          "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
-          aucell_auc_max_rank: "5% of detected features when omitted", species: "human"}
-        requires: ["AUCell", "GSEABase", "local_gmt_or_gene_set_db"]
-        tips:
-        - "--method aucell_r: Official AUCell Bioconductor scoring path."
-        - "--aucell-auc-max-rank: AUCell ranking depth override; leave unset to use
-          the wrapper's 5% feature default."
-      score_genes_py:
-        priority: "gene_sets/gene_set_db -> groupby -> score_genes_ctrl_size -> score_genes_n_bins
-          -> top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "score_genes_ctrl_size",
-          "score_genes_n_bins", "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
-          score_genes_ctrl_size: 50, score_genes_n_bins: 25, species: "human"}
-        requires: ["normalized_expression", "local_gmt_or_gene_set_db"]
-        tips:
-        - "--method score_genes_py: lightweight Python module-score path for normalized
-          adata.X."
-        - "--score-genes-ctrl-size: number of control genes used for background subtraction."
-        - "--score-genes-n-bins: expression binning granularity for control-gene matching."
-      aucell_py:
-        priority: "gene_sets/gene_set_db -> groupby -> aucell_py_auc_threshold ->
-          top_pathways"
-        params: ["gene_sets", "gene_set_db", "species", "groupby", "aucell_py_auc_threshold",
-          "top_pathways"]
-        defaults: {groupby: "auto-detect cluster/cell_type label when omitted", top_pathways: 20,
-          aucell_py_auc_threshold: 0.05, species: "human"}
-        requires: ["local_gmt_or_gene_set_db"]
-        tips:
-        - "--method aucell_py: pure Python AUCell implementation -- no R required."
-        - "--aucell-py-auc-threshold: fraction of ranked genome for AUC calculation
-          (default 0.05)."
-        - "AUCell ranks genes per cell by expression, then measures gene-set recovery
-          curve AUC."
-    saves_h5ad: true
-    requires_preprocessed: false
-    trigger_keywords:
-    - pathway score
-    - pathway scoring
-    - gene set score
-    - module score
-    - pathway activity
-    - signature score
-    script: sc_pathway_scoring.py
+tags:
+- singlecell
+- scrna
+- pathway-scoring
+- aucell
+- scanpy-score-genes
+- gene-sets
+- decoupler
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# Single-Cell Pathway Scoring
+# sc-pathway-scoring
 
-## Why This Exists
+## When to use
 
-- Without it: users often jump from clustering to pathway claims without seeing per-cell score evidence.
-- With it: this wrapper scores pathway or signature activity per cell, then optionally summarizes it across clusters or cell types.
-- Why OmicsClaw: it keeps the AnnData contract stable, exports grouped tables, and renders a reusable pathway-scoring gallery.
+The user has a normalised scRNA AnnData and a gene-set library (GMT
+file or one of the built-in DB aliases: `hallmark`, `kegg`, `reactome`,
+`go_bp`, ...) and wants per-cell scores quantifying how active each
+gene set is. Three methods:
 
-## Core Capabilities
+- `aucell_r` (default) — R-backed AUCell via `decoupler-py`-style
+  bridge. Best statistical foundation; requires R env.
+- `aucell_py` — Python AUCell (`--aucell-py-auc-threshold`). Pure
+  Python.
+- `score_genes_py` — Scanpy `tl.score_genes` per gene set. Lightest
+  and fastest.
 
-1. **Official AUCell execution** via the Bioconductor R package.
-2. **Lightweight Python module scoring** on normalized expression.
-3. **Per-cell score export** back into `processed.h5ad`.
-4. **Grouped pathway summaries** using a user-selected or auto-detected label column.
-5. **Stable tables and gallery figures** for downstream interpretation and reuse.
+Output: `tables/enrichment_scores.csv` (cells × gene_sets), plus
+group-mean / group-high-fraction tables when `--groupby` is provided.
 
-## Scope Boundary
+For *bulk-style* condition-vs-control GSEA / ORA on a DE table use
+`sc-enrichment`. For de-novo gene-program discovery use
+`sc-gene-programs`.
 
-Implemented methods:
+## Inputs & Outputs
 
-1. `aucell_r`
-2. `score_genes_py`
+| Input | Format | Required |
+|---|---|---|
+| Normalised AnnData | `.h5ad` | yes (unless `--demo`) |
+| Gene sets | `.gmt` (`--gene-sets`) **OR** library alias (`--gene-set-db hallmark`/`kegg`/`reactome`/`go_bp`) | yes (unless `--demo`) |
 
-This skill focuses on **per-cell pathway or signature scoring**. It does **not** perform ORA or preranked GSEA significance testing. If you want GO/KEGG enrichment significance on a ranked gene list, that should be a separate enrichment skill.
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | adds per-cell pathway scores in `obs` (one column per gene set) |
+| Per-cell scores | `tables/enrichment_scores.csv` | cells × gene_sets |
+| Gene-set overlap | `tables/gene_set_overlap.csv` | how many input genes survived the feature mapping |
+| Top pathways | `tables/top_pathways.csv` | top-`--top-pathways` ranked gene sets |
+| Group means | `tables/group_mean_scores.csv` | when `--groupby` is provided |
+| Group high-fraction | `tables/group_high_fraction.csv` | when `--groupby` is provided |
+| Figures | `top_gene_sets.png`, `group_mean_heatmap.png`, `group_mean_dotplot.png`, `top_pathway_distributions.png`, `embedding_top_pathways.png` | rendered via `skills/singlecell/_lib/viz/enrichment.py`; group-aware ones require `--groupby` |
+| Report | `report.md` + `result.json` | always |
 
-## Input Expectations
+## Flow
 
-- Input object: preferably a preprocessed `.h5ad`
-- Gene-set source: one of:
-  - `--gene-sets <path/to/file.gmt>`
-  - `--gene-set-db hallmark|kegg|go_bp|go_cc|go_mf|reactome`
-- Optional grouping column: `--groupby`
+1. Load AnnData (`--input`) or build a demo.
+2. Load gene sets: parse `--gene-sets` GMT, OR fetch via `--gene-set-db <alias>` and write a resolved GMT.
+3. Validate: at least one gene-set member overlaps the input features (`feature_label_source` chosen from `var_names` / `var["gene_symbol"]` / etc.).
+4. Run preflight; resolve `--groupby` (auto-pick from `leiden` / `louvain` / `cell_type` if unset).
+5. Dispatch to method:
+   - `aucell_r`: shell out to bundled R script via `RScriptRunner`.
+   - `aucell_py`: AUCell-Python with `--aucell-py-auc-threshold`.
+   - `score_genes_py`: Scanpy `tl.score_genes` per gene set.
+6. Compute group-aware aggregates if `--groupby` is set.
+7. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
 
-Matrix expectations:
-- `score_genes_py` expects `X = normalized_expression`
-- `aucell_r` prefers normalized expression but can still score a count-like source by ranking genes within each cell
+## Gotchas
 
-## CLI Reference
+- **Zero-overlap between gene sets and input features is a hard fail.** `sc_pathway_scoring.py:171` raises `ValueError(f"No valid gene sets were parsed from {gene_sets_path}")` for malformed GMT files; `:435` raises `ValueError("No gene sets had any overlap with the input features, so no enrichment scores could be computed.")` and `:885-887` raises `ValueError("None of the supplied gene-set members matched the input features. ...")` when the merged overlap table sums to 0. Run `sc-standardize-input` upstream if gene names need canonicalisation, or pass `--gene-sets` with matching ID space.
+- **`score_genes_py` requires `.X` to be normalised expression.** `sc_pathway_scoring.py:413` raises `ValueError("`score_genes_py` requires normalized expression in `adata.X`. Run `sc-preprocessing` first.")`. The other two methods (`aucell_r`, `aucell_py`) use rank-based scoring and are tolerant of raw counts.
+- **`--gene-set-db` library lookup can fail in three ways (gseapy / Python side).** `sc_pathway_scoring.py:354` raises `ImportError("--gene-set-db requires gseapy. ...")` when gseapy isn't installed; `:363` raises `RuntimeError("Failed to download or resolve gene-set library ...")` on a network / unknown-library failure; `:368` raises `ValueError("Gene-set library ... returned no gene sets ...")` when gseapy returns an empty dict. All three are pre-AUCell — fix gseapy or supply a local `--gene-sets` GMT.
+- **`aucell_r` R environment is validated separately (R side).** `sc_pathway_scoring.py:381` calls `validate_r_environment(required_r_packages=["AUCell", "GSEABase"])` which raises if the R bridge is missing AUCell / GSEABase. After the R subprocess returns, `:400` raises `ValueError("AUCell output is missing the required 'Cell' column")` when the R-Python data round-trip drops the cell index.
+- **One of `--gene-sets` or `--gene-set-db` is required.** `sc_pathway_scoring.py:858` raises `ValueError("--input required when not using --demo")`; `:860` raises `ValueError("--gene-sets or --gene-set-db is required unless --demo is used")` when both are unset on a real run. Library aliases are: `hallmark`, `kegg`, `reactome`, `go_bp` — others are passed through to the EnrichR library API.
+- **`--gene-sets` file existence is checked, format is not pre-validated.** `sc_pathway_scoring.py:866` raises `FileNotFoundError(f"Gene set file not found: {gene_sets_path}")` for a missing path. Empty / malformed GMT survives this check and triggers `:171` later.
+- **`obs` is mutated: one column per gene set.** When the run completes, `processed.h5ad` has new `obs` columns (one per gene set name). For large libraries (e.g., `MSigDB_Hallmark_2020` has 50 sets, KEGG_2021 has 320) this can dramatically bloat `obs`. Filter or namespace the gene sets if downstream tools struggle.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run sc-pathway-scoring \
-  --input data.h5ad --gene-set-db hallmark --groupby leiden --output out/
+# Demo (built-in gene sets)
+python omicsclaw.py run sc-pathway-scoring --demo --output /tmp/sc_pw_demo
 
+# AUCell-R with MSigDB Hallmark, grouped by cell type
 python omicsclaw.py run sc-pathway-scoring \
-  --input data.h5ad --method aucell_r --gene-sets pathways.gmt \
-  --aucell-auc-max-rank 250 --top-pathways 25 --output out/
+  --input clustered.h5ad --output results/ \
+  --gene-set-db hallmark --groupby cell_type
 
+# AUCell-Python (no R needed) with custom GMT
 python omicsclaw.py run sc-pathway-scoring \
-  --input data.h5ad --method score_genes_py --gene-set-db kegg \
-  --groupby cell_type --score-genes-ctrl-size 50 --score-genes-n-bins 25 --output out/
+  --input clustered.h5ad --output results/ \
+  --method aucell_py --gene-sets pathways.gmt --groupby leiden
+
+# Scanpy score_genes for fast prototyping
+python omicsclaw.py run sc-pathway-scoring \
+  --input clustered.h5ad --output results/ \
+  --method score_genes_py --gene-sets pathways.gmt
 ```
 
-## Public Parameters
+## See also
 
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--method` | scoring backend | `aucell_r` or `score_genes_py` |
-| `--gene-sets` | local GMT gene-set file | optional if `--gene-set-db` is used |
-| `--gene-set-db` | built-in pathway/signature library | `hallmark`, `kegg`, `go_bp`, `go_cc`, `go_mf`, `reactome` |
-| `--species` | library organism mapping | used with `--gene-set-db`, default `human` |
-| `--groupby` | grouping column for summaries | optional; auto-detected when omitted if a plausible label column exists |
-| `--top-pathways` | export/plot size control | wrapper-level output control |
-| `--aucell-auc-max-rank` | official AUCell `aucMaxRank` override | only used by `aucell_r` |
-| `--score-genes-ctrl-size` | module-score control gene count | only used by `score_genes_py` |
-| `--score-genes-n-bins` | module-score expression binning | only used by `score_genes_py` |
-
-## Workflow Position
-
-Typical beginner-friendly flow:
-
-1. `sc-preprocessing`
-2. `sc-clustering` or `sc-cell-annotation`
-3. `sc-pathway-scoring`
-4. follow-up interpretation with `sc-de`, `sc-cell-annotation`, or a future statistical enrichment skill
-
-## What The Figures Mean
-
-- `top_gene_sets.png`: the strongest pathway/signature score shifts after aggregating across all cells
-- `group_mean_heatmap.png`: mean pathway scores for each group (cluster/cell type)
-- `group_mean_dotplot.png`: same grouped pathway scores, with dot size showing the fraction of cells in that group with above-median scores
-- `top_pathway_distributions.png`: score distributions for the top pathways
-- `embedding_top_pathways.png`: pathway scores projected back onto the embedding to show where the signature is active
-
-## Output Contract
-
-Successful runs write:
-
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- `tables/enrichment_scores.csv`
-- `tables/gene_set_overlap.csv`
-- `tables/top_pathways.csv`
-- `tables/group_mean_scores.csv` when grouped summaries are available
-- `tables/group_high_fraction.csv` when grouped summaries are available
-- `figures/top_gene_sets.png`
-- `figures/group_mean_heatmap.png` when grouped summaries are available
-- `figures/group_mean_dotplot.png` when grouped summaries are available
-- `figures/top_pathway_distributions.png`
-- `figures/embedding_top_pathways.png` when an embedding exists
-- `figure_data/`
-
-Stable AnnData outputs:
-
-- `adata.obs["enrich__*"]` score columns
-- `adata.uns["sc_pathway_scoring"]`
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled demo data | — |
-| `--method` | str | `score_genes_py` | Scoring backend: `aucell_r`, `score_genes_py`, `aucell_py` | validated against METHOD_REGISTRY |
-| `--gene-sets` | str | None | Path to local GMT gene-set file | required unless `--gene-set-db` or `--demo` |
-| `--gene-set-db` | str | None | Built-in library key: `hallmark`, `kegg`, `go_bp`, `go_cc`, `go_mf`, `reactome` | — |
-| `--species` | str | `human` | Organism for gene-set library resolution | — |
-| `--groupby` | str | None | Grouping column for summaries; auto-detected when omitted | — |
-| `--top-pathways` | int | 20 | Number of top pathways to export/plot | — |
-| `--aucell-auc-max-rank` | int | None | AUCell `aucMaxRank` override (default: 5% of detected genes) | aucell_r only |
-| `--score-genes-ctrl-size` | int | 50 | Control gene count for background subtraction | score_genes_py only |
-| `--score-genes-n-bins` | int | 25 | Expression binning granularity for control-gene matching | score_genes_py only |
-| `--aucell-py-auc-threshold` | float | 0.05 | Fraction of ranked genome for AUC calculation | aucell_py only |
-| `--seed` | int | 42 | Random seed for AUCell ranking | aucell_py only |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `embedding_points.csv` | UMAP/embedding colored by cluster/cell type labels | ggplot2 |
-| `plot_embedding_feature` | `r_embedding_feature.png` | `embedding_points.csv` | UMAP/embedding colored by top pathway score | ggplot2 |
-
-## Current Limitations
-
-- This skill scores pathway activity; it does not report GO/KEGG enrichment significance.
-- `score_genes_py` is a practical lightweight scoring path, not a full GSVA/ssGSEA implementation.
-- `aucell_r` depends on local R packages (`AUCell`, `GSEABase`).
+- `references/parameters.md` — every CLI flag, library aliases
+- `references/methodology.md` — AUCell vs score_genes; gene-symbol expectations
+- `references/output_contract.md` — `enrichment_scores.csv` schema; per-method differences
+- Adjacent skills: `sc-clustering` / `sc-cell-annotation` (upstream — produce `--groupby` column for group-aware aggregates), `sc-enrichment` (parallel — bulk-style GSEA/ORA on DE tables, NOT per-cell scoring), `sc-gene-programs` (parallel — de-novo factorisation, NOT supervised scoring against curated sets), `sc-grn` (parallel — TF-target regulons; AUCell is shared underlying tech)

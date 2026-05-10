@@ -1,0 +1,63 @@
+domain: singlecell
+allowed_extra_flags:
+- --allow-simplified-grn
+- --cluster-key
+- --db
+- --motif
+- --n-jobs
+- --n-top-targets
+- --seed
+- --tf-list
+- --r-enhanced
+param_hints:
+  pyscenic_workflow:
+    priority: tf_list -> db -> motif -> n_top_targets -> n_jobs
+    params:
+    - tf_list
+    - db
+    - motif
+    - n_top_targets
+    - n_jobs
+    - seed
+    defaults:
+      n_top_targets: 50
+      n_jobs: 4
+      seed: 42
+    requires:
+    - preprocessed_anndata
+    - pyscenic
+    - arboreto
+    - TF_list
+    - cisTarget_database
+    - motif_annotations
+    tips:
+    - --tf-list, --db, and --motif are the core external resources for a full pySCENIC
+      run.
+    - '--n-top-targets: Wrapper-level export cap for the top targets retained per
+      regulon.'
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: S
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: pyscenic
+  bins: []
+trigger_keywords:
+- grn
+- gene regulatory
+- scenic
+- pyscenic
+- regulon
+- transcription factor
+- grnboost
+script: sc_grn.py
+legacy_aliases: []
