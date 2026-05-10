@@ -173,10 +173,10 @@ def test_bulkrna_de_real_skill_roundtrips(tmp_path: Path) -> None:
 
 def test_sc_de_real_skill_roundtrips(tmp_path: Path) -> None:
     """Fixture mirroring the production skills/singlecell/scrna/sc-de runtime
-    contract — the first migrated skill with non-trivial param_hints (5
-    methods, advanced_params, mixed-type defaults).  Permanently guards
-    PR #2's pilot migration and exercises the per-field-merge path on a
-    realistically complex shape."""
+    contract — the first migrated skill with non-trivial param_hints.  All 5
+    methods (wilcoxon, t-test, logreg, mast, deseq2_r) are pinned so a
+    future edit that drops or renames any method is caught.  Exercises the
+    per-field-merge path on a realistically complex shape."""
     spec = {
         "domain": "singlecell",
         "script": "sc_de.py",
@@ -205,6 +205,46 @@ def test_sc_de_real_skill_roundtrips(tmp_path: Path) -> None:
                 },
                 "requires": ["preprocessed_anndata", "scanpy"],
                 "tips": ["--method wilcoxon: Default exploratory marker-ranking path."],
+            },
+            "t-test": {
+                "priority": "groupby -> n_top_genes -> group1/group2",
+                "params": ["groupby", "n_top_genes", "group1", "group2"],
+                "advanced_params": ["padj_threshold", "log2fc_threshold"],
+                "defaults": {
+                    "groupby": "leiden", "n_top_genes": 10,
+                    "padj_threshold": 0.05, "log2fc_threshold": 1.0,
+                },
+                "requires": ["preprocessed_anndata", "scanpy"],
+                "tips": ["--method t-test: Parametric alternative to Wilcoxon."],
+            },
+            "logreg": {
+                "priority": "groupby -> logreg_solver -> n_top_genes",
+                "params": ["groupby", "logreg_solver", "n_top_genes"],
+                "advanced_params": ["padj_threshold", "log2fc_threshold"],
+                "defaults": {
+                    "groupby": "leiden", "logreg_solver": "lbfgs",
+                    "n_top_genes": 10, "padj_threshold": 0.05,
+                    "log2fc_threshold": 1.0,
+                },
+                "requires": ["preprocessed_anndata", "scanpy"],
+                "tips": [
+                    "--method logreg: Logistic-regression ranking, useful when "
+                    "you want genes that best separate one group from the others."
+                ],
+            },
+            "mast": {
+                "priority": "groupby -> group1/group2 -> n_top_genes",
+                "params": ["groupby", "group1", "group2", "n_top_genes"],
+                "advanced_params": ["padj_threshold", "log2fc_threshold"],
+                "defaults": {
+                    "groupby": "leiden", "n_top_genes": 10,
+                    "padj_threshold": 0.05, "log2fc_threshold": 1.0,
+                },
+                "requires": ["R_MAST_stack", "log_normalized_expression_matrix"],
+                "tips": [
+                    "--method mast: R-backed MAST hurdle-model path on "
+                    "log-normalized expression."
+                ],
             },
             "deseq2_r": {
                 "priority": "groupby -> group1/group2 -> sample_key -> celltype_key",
