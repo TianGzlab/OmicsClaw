@@ -2370,6 +2370,70 @@ async def test_mcp_sync_empty_payload_removes_all_existing_servers(monkeypatch):
     assert removed == ["stale-a", "stale-b"]
 
 
+# ---------------------------------------------------------------------------
+# T2 S5 — /memory/update writes to the desktop client's namespace
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_update_endpoint_writes_to_desktop_namespace(monkeypatch, tmp_path):
+    """POST /memory/update must update the row in the desktop's namespace
+    (``_memory_client.namespace``), not the legacy ``__shared__``-only
+    target. PR #137 fixed the GraphService shim that hardcoded
+    ``Path.namespace == SHARED_NAMESPACE``; without that fix a desktop
+    user's per-namespace memory was unreachable through this endpoint.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.app.server import MemoryUpdateRequest
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        # Bind the server's _memory_client to a non-shared namespace so we
+        # can prove updates land there (not in __shared__).
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Seed a row at app/desktop_user — note core://test/* is NOT in
+        # SHARED_PREFIXES, so MemoryClient.remember writes to the caller's
+        # namespace as expected.
+        await desktop_client.remember("core://test/key", "v1")
+
+        # Act: hit the endpoint function (the public HTTP surface).
+        result = await server.memory_update(
+            MemoryUpdateRequest(
+                path="test/key", domain="core", content="v2",
+            )
+        )
+        assert result["ok"] is True
+
+        # Assert: the desktop namespace row updated; nothing in __shared__.
+        record = await engine.recall(
+            "core://test/key",
+            namespace="app/desktop_user",
+            fallback_to_shared=False,
+        )
+        assert record is not None, "Update vaporized the desktop row"
+        assert record.content == "v2", (
+            f"Expected v2 in app/desktop_user, got {record.content!r}"
+        )
+
+        shared_record = await engine.recall(
+            "core://test/key",
+            namespace="__shared__",
+            fallback_to_shared=False,
+        )
+        assert shared_record is None, (
+            f"/memory/update leaked into __shared__: {shared_record!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
 @pytest.mark.asyncio
 async def test_memory_review_clear_discards_pending_memory_create(monkeypatch, tmp_path):
     pytest.importorskip("fastapi")
