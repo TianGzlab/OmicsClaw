@@ -364,11 +364,9 @@ class MemoryClient:
         return "\n\n".join(parts) if parts else ""
 
     # ------------------------------------------------------------------
-    # forget still routes through the legacy GraphService for the
-    # subtree-cascade + orphan-prevention semantics that the engine
-    # delete verb does not yet replicate. (Next PR in the §6.2
-    # GraphService retirement walks the cascade logic into ReviewLog
-    # so this last call site can come off graph.py too.)
+    # forget — engine-routed since slice 2 of §6.2 GraphService
+    # retirement; subtree cascade with orphan prevention and soft-
+    # deprecate of the affected memories lives in MemoryEngine.delete.
     # ------------------------------------------------------------------
 
     async def get_recent(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -397,20 +395,16 @@ class MemoryClient:
         (``MemoryClient(namespace="A").forget("dataset://x")`` cannot
         reach namespace ``B``).
 
-        Delegates to ``GraphService.remove_path`` (the engine does not
-        yet expose a delete verb — that lands in PR #4b
-        ``ReviewLog.cascade_delete``).
+        Delegates to ``MemoryEngine.delete``: subtree cascade with
+        orphan prevention and soft-deprecate of the affected memories
+        (review pane can roll back).
         """
         await self._ensure_init()
-        from .graph import GraphService
 
         parsed = MemoryURI.parse(uri)
         target_ns = resolve_namespace(parsed, current=self._namespace)
         assert self._engine is not None
-        graph = GraphService(self._engine.db, self._engine.search_indexer)
-        result = await graph.remove_path(
-            path=parsed.path, domain=parsed.domain, namespace=target_ns
-        )
+        result = await self._engine.delete(parsed, namespace=target_ns)
 
         try:
             from .snapshot import get_changeset_store

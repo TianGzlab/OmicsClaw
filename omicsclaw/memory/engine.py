@@ -15,6 +15,7 @@ Write verbs (PR #3a):
     - upsert(uri, content, namespace, ...)
     - upsert_versioned(uri, content, namespace, ...)
     - patch_edge_metadata(uri, namespace, ...)
+    - delete(uri, namespace)                  — subtree cascade with orphan prevention
 
 Read verbs (PR #3b):
     - recall(uri, namespace, ...)             — single-row fetch with shared fallback
@@ -35,17 +36,19 @@ import uuid as uuidlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     ROOT_NODE_UUID,
     SHARED_NAMESPACE,
+    ChangeCollector,
     Edge,
     Memory,
     Node,
     Path,
     escape_like_literal,
+    serialize_row,
 )
 from .uri import MemoryURI
 
@@ -457,6 +460,304 @@ class MemoryEngine:
             edge.disclosure = disclosure
 
         return old_id, new_memory.id, node_uuid
+
+    async def delete(
+        self,
+        uri: str | MemoryURI,
+        *,
+        namespace: str,
+    ) -> dict:
+        """Delete a path and its namespace-scoped subtree.
+
+        Soft-delete semantics: Memory rows on the deleted node are
+        marked ``deprecated=True`` rather than physically removed, so
+        the review pane can roll the version chain back. Path / Edge /
+        Node structural rows are physically deleted.
+
+        Pre-flight orphan check: if removing this prefix would leave a
+        child node with no remaining incoming Path in any namespace,
+        the call raises ``ValueError`` instead of creating an
+        unreachable subgraph. The caller can re-route the child first
+        and retry.
+
+        Strict-namespace: only Path rows in ``namespace`` are touched.
+        ``MemoryClient(namespace="A").forget(uri)`` cannot reach
+        namespace ``"B"``.
+
+        Returns ``{"rows_before": <ChangeCollector dict>, "rows_after": {}}``
+        — same audit shape as the legacy ``GraphService.remove_path``
+        so ``snapshot.get_changeset_store().record_many(...)`` keeps
+        working unchanged for the desktop review pane.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        if parsed.is_root or not parsed.path:
+            raise ValueError("Cannot delete the root path.")
+
+        async with self._db.session() as s:
+            target = await self._delete_resolve_target(s, parsed, namespace)
+            if target is None:
+                raise ValueError(f"Path '{parsed}' not found")
+            target_edge, target_node_uuid = target
+
+            await self._delete_check_orphans(s, target_node_uuid, parsed)
+
+            # Pre-collect node UUIDs whose search docs need rebuilding
+            # AFTER the deletes complete. Done before mutation so the
+            # query sees the pre-deletion structure. Cross-namespace by
+            # design — search docs reflect current DB state regardless
+            # of which namespace's Path was just removed.
+            affected_nodes = await self._search.get_node_uuids_for_prefix(
+                s, parsed.domain, parsed.path
+            )
+
+            collector = ChangeCollector()
+            await self._delete_subtree_paths(s, parsed, namespace, collector)
+            await s.flush()
+
+            await self._delete_gc_edge_if_pathless(s, target_edge, collector)
+            await self._delete_gc_node_soft(
+                s, target_node_uuid, namespace, collector
+            )
+
+            for node_uuid in affected_nodes:
+                await self._search.refresh_search_documents_for_node(
+                    node_uuid, session=s
+                )
+
+        return {"rows_before": collector.to_dict(), "rows_after": {}}
+
+    @staticmethod
+    async def _delete_resolve_target(
+        s: AsyncSession, parsed: MemoryURI, namespace: str
+    ) -> Optional[tuple[Edge, str]]:
+        """Find the Edge + child_uuid for ``(namespace, parsed)``."""
+        row = (
+            await s.execute(
+                select(Path, Edge)
+                .join(Edge, Path.edge_id == Edge.id)
+                .where(
+                    Path.namespace == namespace,
+                    Path.domain == parsed.domain,
+                    Path.path == parsed.path,
+                )
+            )
+        ).first()
+        if row is None:
+            return None
+        _, edge = row
+        return edge, edge.child_uuid
+
+    async def _delete_check_orphans(
+        self, s: AsyncSession, target_node_uuid: str, parsed: MemoryURI
+    ) -> None:
+        """Refuse the delete if any direct child would lose its only
+        incoming Path. Raises ``ValueError`` listing the would-orphan
+        children so the caller can re-route them first.
+        """
+        child_edges = (
+            await s.execute(
+                select(Edge).where(Edge.parent_uuid == target_node_uuid)
+            )
+        ).scalars().all()
+
+        would_orphan: list[Edge] = []
+        for child_edge in child_edges:
+            surviving = await self._delete_count_incoming_paths(
+                s,
+                child_edge.child_uuid,
+                exclude_domain=parsed.domain,
+                exclude_path_prefix=parsed.path,
+            )
+            if surviving == 0:
+                would_orphan.append(child_edge)
+
+        if would_orphan:
+            details = ", ".join(
+                f"'{e.name}' (node: {e.child_uuid[:8]}...)"
+                for e in would_orphan
+            )
+            raise ValueError(
+                f"Cannot remove '{parsed}': the following child node(s) "
+                f"would become unreachable: {details}. Create alternative "
+                f"paths for these children first, or remove them explicitly."
+            )
+
+    @staticmethod
+    async def _delete_count_incoming_paths(
+        s: AsyncSession,
+        node_uuid: str,
+        *,
+        exclude_domain: str,
+        exclude_path_prefix: str,
+    ) -> int:
+        """Count Paths whose Edge points TO ``node_uuid``, excluding
+        Paths under the soon-to-be-deleted prefix (so the orphan
+        precheck asks "would this child still have any path AFTER the
+        delete completes")."""
+        safe_prefix = escape_like_literal(exclude_path_prefix)
+        stmt = (
+            select(func.count())
+            .select_from(Path)
+            .join(Edge, Path.edge_id == Edge.id)
+            .where(Edge.child_uuid == node_uuid)
+            .where(
+                not_(
+                    and_(
+                        Path.domain == exclude_domain,
+                        Path.path.like(f"{safe_prefix}/%", escape="\\"),
+                    )
+                )
+            )
+        )
+        return (await s.execute(stmt)).scalar() or 0
+
+    @staticmethod
+    async def _delete_subtree_paths(
+        s: AsyncSession,
+        parsed: MemoryURI,
+        namespace: str,
+        collector: ChangeCollector,
+    ) -> None:
+        """Delete every Path in ``namespace`` whose ``(domain, path)``
+        matches the prefix or sits under it.
+
+        Captures each row into the collector before deleting so the
+        audit/changeset UI can reconstruct what was removed.
+        """
+        safe = escape_like_literal(parsed.path)
+        stmt = (
+            select(Path)
+            .where(Path.namespace == namespace)
+            .where(Path.domain == parsed.domain)
+            .where(
+                or_(
+                    Path.path == parsed.path,
+                    Path.path.like(f"{safe}/%", escape="\\"),
+                )
+            )
+        )
+        for p in (await s.execute(stmt)).scalars().all():
+            collector.record("paths", serialize_row(p))
+            await s.delete(p)
+
+    @staticmethod
+    async def _delete_gc_edge_if_pathless(
+        s: AsyncSession,
+        edge: Edge,
+        collector: ChangeCollector,
+    ) -> None:
+        """Drop ``edge`` if no Path row references it after the subtree
+        delete. Other Paths (aliases) reaching the same edge keep it
+        alive."""
+        remaining = (
+            await s.execute(
+                select(func.count())
+                .select_from(Path)
+                .where(Path.edge_id == edge.id)
+            )
+        ).scalar() or 0
+        if remaining > 0:
+            return
+        collector.record("edges", serialize_row(edge))
+        await s.delete(edge)
+
+    async def _delete_gc_node_soft(
+        self,
+        s: AsyncSession,
+        node_uuid: str,
+        namespace: str,
+        collector: ChangeCollector,
+    ) -> None:
+        """If ``node_uuid`` has no remaining incoming Path (any
+        namespace), deprecate its active memories and cascade-clean
+        edges around it.
+
+        Soft semantics: Memory rows stay (with ``deprecated=True``) so
+        the review pane can roll back. Edges incident to the now-dead
+        node are physically deleted via ``_delete_gc_edge_if_pathless``
+        / ``_delete_cascade_edge``.
+        """
+        still_reachable = (
+            await s.execute(
+                select(func.count())
+                .select_from(Path)
+                .join(Edge, Path.edge_id == Edge.id)
+                .where(Edge.child_uuid == node_uuid)
+            )
+        ).scalar() or 0
+        if still_reachable > 0:
+            return
+
+        # Edges pointing TO this node (parents → us): drop pathless ones.
+        incoming = (
+            await s.execute(
+                select(Edge).where(Edge.child_uuid == node_uuid)
+            )
+        ).scalars().all()
+        for edge in incoming:
+            await self._delete_gc_edge_if_pathless(s, edge, collector)
+
+        # Edges pointing FROM this node (us → children): cascade-clean
+        # the path forest under each. The orphan precheck guarantees
+        # children survive through some other path; this just tidies
+        # the namespace-scoped path rows we own here.
+        outgoing = (
+            await s.execute(
+                select(Edge).where(Edge.parent_uuid == node_uuid)
+            )
+        ).scalars().all()
+        for edge in outgoing:
+            await self._delete_cascade_edge(s, edge, namespace, collector)
+
+        # Snapshot active memories before deprecation so the audit log
+        # can reconstruct what the user "forgot".
+        active = (
+            await s.execute(
+                select(Memory).where(
+                    Memory.node_uuid == node_uuid,
+                    Memory.deprecated == False,  # noqa: E712
+                )
+            )
+        ).scalars().all()
+        for m in active:
+            collector.record("memories", serialize_row(m))
+
+        if active:
+            await s.execute(
+                update(Memory)
+                .where(
+                    Memory.node_uuid == node_uuid,
+                    Memory.deprecated == False,  # noqa: E712
+                )
+                .values(deprecated=True)
+            )
+
+    async def _delete_cascade_edge(
+        self,
+        s: AsyncSession,
+        edge: Edge,
+        namespace: str,
+        collector: ChangeCollector,
+    ) -> None:
+        """Strip ``namespace``-scoped Paths off ``edge`` and drop the
+        edge itself when it falls pathless.
+
+        Only acts inside ``namespace`` so an outgoing-edge cascade from
+        a soft-GCed node cannot stray into another user's partition.
+        """
+        for p in (
+            await s.execute(
+                select(Path).where(
+                    Path.edge_id == edge.id,
+                    Path.namespace == namespace,
+                )
+            )
+        ).scalars().all():
+            collector.record("paths", serialize_row(p))
+            await s.delete(p)
+
+        await s.flush()
+        await self._delete_gc_edge_if_pathless(s, edge, collector)
 
     async def patch_edge_metadata(
         self,
