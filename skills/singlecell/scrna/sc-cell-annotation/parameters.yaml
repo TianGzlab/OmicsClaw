@@ -1,0 +1,118 @@
+domain: singlecell
+allowed_extra_flags:
+- --manual-map
+- --manual-map-file
+- --cluster-key
+- --method
+- --model
+- --reference
+- --marker-file
+- --celltypist-majority-voting
+- --no-celltypist-majority-voting
+- --r-enhanced
+- --scsa-foldchange
+- --scsa-pvalue
+- --species
+- --tissue
+param_hints:
+  manual:
+    priority: cluster_key -> manual_map/manual_map_file
+    params:
+    - cluster_key
+    - manual_map
+    - manual_map_file
+    defaults:
+      cluster_key: auto
+    requires:
+    - cluster_labels_in_obs
+    tips:
+    - '--method manual: explicit relabeling from user-provided cluster mappings.'
+    - '--manual-map example: `0=T cell;1,2=Myeloid`.'
+  markers:
+    priority: cluster_key -> marker_file
+    params:
+    - cluster_key
+    - marker_file
+    defaults:
+      cluster_key: auto
+      marker_file: null
+    requires:
+    - normalized_expression
+    - cluster_labels_in_obs
+    tips:
+    - '--method markers: use when clusters already exist and you want a quick label
+      proposal from known markers.'
+    - Built-in markers cover blood (PBMC), brain, and general tissue cell types (human
+      gene symbols).
+    - For non-human organisms or specialized tissues, provide --marker-file markers.json.
+    - If ALL cells are 'Unknown', it means marker genes were not found — see Reference
+      Data Guide below.
+  celltypist:
+    priority: model -> celltypist_majority_voting
+    params:
+    - model
+    - celltypist_majority_voting
+    defaults:
+      model: Immune_All_Low
+      celltypist_majority_voting: false
+    requires:
+    - celltypist
+    - normalized_expression_matrix
+    tips:
+    - '--model: CellTypist model name or model file stem.'
+    - '--celltypist-majority-voting: optional neighborhood/cluster smoothing for CellTypist
+      labels.'
+  popv:
+    priority: reference -> cluster_key
+    params:
+    - reference
+    - cluster_key
+    defaults:
+      cluster_key: auto
+    requires:
+    - labeled_reference_h5ad
+    - normalized_expression_matrix
+    tips:
+    - '--method popv: official PopV path when possible, else lightweight reference
+      mapping fallback.'
+  knnpredict:
+    priority: reference -> cluster_key
+    params:
+    - reference
+    - cluster_key
+    defaults:
+      cluster_key: auto
+    requires:
+    - labeled_reference_h5ad
+    - normalized_expression_matrix
+    tips:
+    - '--method knnpredict: lightweight AnnData-first projection inspired by SCOP
+      KNNPredict.'
+  singler:
+    priority: reference
+    params:
+    - reference
+    defaults:
+      reference: HPCA
+    requires:
+    - R_SingleR_stack
+    tips:
+    - '--method singler: R SingleR path using celldex / ExperimentHub atlases or a
+      labeled local H5AD reference.'
+  scmap:
+    priority: reference
+    params:
+    - reference
+    defaults:
+      reference: HPCA
+    requires:
+    - R_scmap_stack
+    tips:
+    - '--method scmap: R scmap path using celldex / ExperimentHub atlases or a labeled
+      local H5AD reference.'
+legacy_aliases:
+- sc-annotate
+saves_h5ad: true
+requires_preprocessed: true
+script: sc_annotate.py
+trigger_keywords: []
