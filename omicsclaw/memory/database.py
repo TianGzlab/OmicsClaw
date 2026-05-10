@@ -200,6 +200,7 @@ class DatabaseManager:
                         text("""
                             CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
                             USING fts5(
+                                namespace,
                                 domain,
                                 path,
                                 node_uuid,
