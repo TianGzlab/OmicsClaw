@@ -221,6 +221,33 @@ def test_output_contract_heading_routes_to_output_contract_md(tmp_path: Path) ->
     assert "tables/de_full.csv" not in methodology  # only in output_contract
 
 
+def test_visualization_contract_heading_routes_to_output_contract(tmp_path: Path) -> None:
+    """`## Visualization Contract` describes the standardized output gallery
+    (figures + figure_data layout), which is part of the output contract —
+    not an algorithm detail.  Route it to references/output_contract.md so
+    spatial-de (and other spatial skills that share this heading) don't
+    leave it as a stub."""
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    body = (
+        "# Demo\n\n"
+        "## Visualization Contract\n\n"
+        "OmicsClaw treats visualization as a two-layer system:\n"
+        "1. Python standard gallery\n"
+        "2. R customization layer\n\n"
+        "## Algorithm\n\nSteps.\n"
+    )
+    (skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(LEGACY_FRONTMATTER, sort_keys=False) + "---\n\n" + body,
+        encoding="utf-8",
+    )
+    migrate_skill.migrate(skill)
+    output_md = (skill / "references" / "output_contract.md").read_text()
+    assert "two-layer system" in output_md
+    methodology = (skill / "references" / "methodology.md").read_text()
+    assert "two-layer system" not in methodology  # only in output_contract
+
+
 def test_safety_section_routes_to_methodology(tmp_path: Path) -> None:
     """`## Safety And Guardrails` carries real failure modes that we want
     the maintainer to promote into ## Gotchas — silently dropping it loses
