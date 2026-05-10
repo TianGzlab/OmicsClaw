@@ -105,11 +105,13 @@ class SearchIndexer:
 
         path_rows = (
             await session.execute(
-                select(Path.domain, Path.path, Edge.priority, Edge.disclosure)
+                select(
+                    Path.namespace, Path.domain, Path.path, Edge.priority, Edge.disclosure
+                )
                 .select_from(Path)
                 .join(Edge, Path.edge_id == Edge.id)
                 .where(Edge.child_uuid == node_uuid)
-                .order_by(Path.domain, Path.path)
+                .order_by(Path.namespace, Path.domain, Path.path)
             )
         ).all()
         if not path_rows:
@@ -127,6 +129,7 @@ class SearchIndexer:
             uri = f"{row.domain}://{row.path}"
             documents.append(
                 {
+                    "namespace": row.namespace,
                     "domain": row.domain,
                     "path": row.path,
                     "node_uuid": node_uuid,
@@ -182,9 +185,9 @@ class SearchIndexer:
                     text(
                         """
                         INSERT INTO search_documents_fts (
-                            domain, path, node_uuid, uri, content, disclosure, search_terms
+                            namespace, domain, path, node_uuid, uri, content, disclosure, search_terms
                         ) VALUES (
-                            :domain, :path, :node_uuid, :uri, :content, coalesce(:disclosure, ''), :search_terms
+                            :namespace, :domain, :path, :node_uuid, :uri, :content, coalesce(:disclosure, ''), :search_terms
                         )
                         """
                     ),

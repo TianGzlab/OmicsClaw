@@ -14,9 +14,56 @@ def _load_001():
 
 
 async def _build_legacy_schema(db: DatabaseManager) -> None:
-    """Create the pre-001 schema (current ORM models — no namespace column)."""
+    """Create the pre-001 schema explicitly (no namespace column).
+
+    The current ORM models already include ``namespace``, so we can't simply
+    call ``Base.metadata.create_all`` and expect a legacy result. Instead:
+
+    1. ``create_all`` to set up unrelated tables (nodes, memories, edges).
+    2. Drop the three namespace-bearing tables and recreate them with the
+       pre-001 schema using raw SQL so the migration has real legacy rows
+       to act on.
+    """
     async with db.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    async with db.session() as s:
+        await s.execute(sa.text("DROP TABLE IF EXISTS paths"))
+        await s.execute(sa.text("DROP TABLE IF EXISTS search_documents"))
+        await s.execute(sa.text("DROP TABLE IF EXISTS glossary_keywords"))
+        await s.execute(sa.text("""
+            CREATE TABLE paths (
+                domain     VARCHAR(64)  NOT NULL DEFAULT 'core',
+                path       VARCHAR(512) NOT NULL,
+                edge_id    INTEGER REFERENCES edges(id),
+                created_at DATETIME,
+                PRIMARY KEY (domain, path)
+            )
+        """))
+        await s.execute(sa.text("""
+            CREATE TABLE search_documents (
+                domain       VARCHAR(64)  NOT NULL DEFAULT 'core',
+                path         VARCHAR(512) NOT NULL,
+                node_uuid    VARCHAR(36)  NOT NULL REFERENCES nodes(uuid) ON DELETE CASCADE,
+                memory_id    INTEGER      NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                uri          TEXT         NOT NULL,
+                content      TEXT         NOT NULL,
+                disclosure   TEXT,
+                search_terms TEXT         NOT NULL DEFAULT '',
+                priority     INTEGER      NOT NULL DEFAULT 0,
+                updated_at   DATETIME,
+                PRIMARY KEY (domain, path)
+            )
+        """))
+        await s.execute(sa.text("""
+            CREATE TABLE glossary_keywords (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword    TEXT         NOT NULL,
+                node_uuid  VARCHAR(36)  NOT NULL REFERENCES nodes(uuid) ON DELETE CASCADE,
+                created_at DATETIME,
+                UNIQUE (keyword, node_uuid)
+            )
+        """))
 
 
 async def _pk_columns_in_order(s, table: str) -> list[str]:
