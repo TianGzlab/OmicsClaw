@@ -185,6 +185,119 @@ async def test_search_memories_filters_by_session_namespace(store):
     assert "beta-secret.h5ad" not in a_files
 
 
+# ----------------------------------------------------------------------
+# Lazy-init: bot/session.py constructs the store from a SYNC init()
+# and cannot await initialize(), so public async methods must
+# self-initialise on first use. Production bug surfaced from a CLI
+# memory tool call: AssertionError "CompatMemoryStore must be
+# initialised before use" deep inside execute_remember.
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compat_store_lazy_init_via_get_session(tmp_path):
+    """Production first-touch is `get_session` (called by
+    `_assemble_chat_context → session_manager.get_or_create`), not
+    `create_session`. Pin the actual prod path: a freshly-constructed
+    store, never explicitly initialised, must answer get_session
+    correctly (returning None for an unknown id) by lazy-init'ing."""
+    from omicsclaw.memory.compat import CompatMemoryStore
+
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    try:
+        result = await store.get_session("nonexistent")
+        assert result is None
+        assert store._initialized, (
+            "lazy-init didn't fire on get_session — production "
+            "_assemble_chat_context path will still AssertionError"
+        )
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_compat_store_concurrent_first_init_runs_body_once(
+    tmp_path, monkeypatch
+):
+    """The asyncio.Lock around initialize()'s body must serialise
+    concurrent first-time init so the body executes exactly once,
+    even under N parallel callers.
+
+    Without the lock, two coroutines both pass the
+    ``if self._initialized: return`` fast-path check, both run the
+    body in parallel, and the second clobbers the first's
+    ``_db`` / ``_engine`` / ``_session_client`` while the first
+    coroutine may still be operating against the original engine.
+    Counting ``DatabaseManager.init_db`` invocations is the cleanest
+    detection: under-the-lock = 1, race = N.
+    """
+    import asyncio as _asyncio
+    from omicsclaw.memory import database as database_mod
+    from omicsclaw.memory.compat import CompatMemoryStore
+
+    init_count = 0
+    real_init_db = database_mod.DatabaseManager.init_db
+
+    async def counting_init_db(self):
+        nonlocal init_count
+        init_count += 1
+        # Widen the race window so a missing lock is reliably detectable.
+        await _asyncio.sleep(0.01)
+        return await real_init_db(self)
+
+    monkeypatch.setattr(database_mod.DatabaseManager, "init_db", counting_init_db)
+
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    try:
+        # 8 parallel public-method calls on a freshly-constructed store —
+        # none requires a pre-existing session.
+        await _asyncio.gather(
+            *[store.get_session(f"missing-{i}") for i in range(5)],
+            *[store.create_session(f"u{i}", "telegram") for i in range(3)],
+        )
+        assert init_count == 1, (
+            f"initialize() body ran {init_count} times — the lock failed "
+            "to serialise concurrent first-init (race condition active)"
+        )
+        assert store._initialized
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_compat_store_lazy_initialises_on_first_public_call(tmp_path):
+    """CompatMemoryStore must auto-initialise when a public async method
+    is called before someone has explicitly awaited initialize().
+
+    bot/session.py:311 constructs the store from a synchronous init()
+    function, then assigns it to bot.core.memory_store. The async
+    initialize() coroutine is never awaited along that path. The first
+    LLM tool call (execute_remember -> memory_store.save_memory) must
+    not blow up with 'CompatMemoryStore must be initialised before use'.
+    """
+    from omicsclaw.memory.compat import CompatMemoryStore, PreferenceMemory
+
+    # Mirror production: construct, do NOT await initialize().
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+
+    try:
+        session = await store.create_session("alice", "telegram")
+        assert session.platform == "telegram"
+        assert session.user_id == "alice"
+
+        pref = PreferenceMemory(
+            domain="global", key="language", value="zh", is_strict=False
+        )
+        mem_id = await store.save_memory(session.session_id, pref)
+        assert mem_id, "save_memory after lazy init returned no memory id"
+
+        # Round-trip via search to prove the engine + indexer are alive.
+        hits = await store.search_memories(session.session_id, "language")
+        assert any(h.key == "language" for h in hits if hasattr(h, "key"))
+    finally:
+        await store.close()
+
+
 @pytest.mark.asyncio
 async def test_save_memory_with_unknown_session_raises(store):
     """If the session can't be resolved, the write must NOT fall back to
