@@ -20,7 +20,9 @@ Write verbs (PR #3a):
 Read verbs (PR #3b):
     - recall(uri, namespace, ...)             — single-row fetch with shared fallback
     - search(query, namespace, ...)           — FTS over (namespace, __shared__)
-    - list_children(uri, namespace)           — strict-namespace children
+    - list_children(uri, namespace)           — strict-namespace children (MemoryRef)
+    - list_children_rich(uri, namespace, ...) — desktop-tree listing with content snippets
+    - list_paths(namespace, ...)              — flat path catalog with metadata
     - get_subtree(uri, namespace, ...)        — flat listing under a prefix
     - get_recent(namespace, ...)              — recently-updated memory listing
 
@@ -1134,4 +1136,261 @@ class MemoryEngine:
                 )
                 if len(results) >= limit:
                     break
+            return results
+
+    # ------------------------------------------------------------------
+    # Browse verbs (PR §6.2 slice 3) — rich UI dict shape consumed by
+    # the desktop /memory/{children,domains} endpoints. ``MemoryRef``
+    # is too thin for the React tree view; these return the full
+    # dicts the front-end parses.
+    # ------------------------------------------------------------------
+
+    async def list_children_rich(
+        self,
+        uri: str | MemoryURI,
+        *,
+        namespace: str,
+        context_domain: Optional[str] = None,
+        context_path: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> list[dict]:
+        """Direct children of ``uri`` as desktop-tree dicts.
+
+        Each dict has ``node_uuid``, ``edge_id``, ``name``, ``domain``,
+        ``path``, ``content_snippet`` (first ≤100 chars + ``…``),
+        ``priority``, ``disclosure``, ``approx_children_count``.
+
+        ``context_domain`` / ``context_path`` drive the alias-picking
+        priority: same domain + sub-path > same domain > anything.
+        Mirrors ``GraphService.get_children`` so the desktop
+        ``/memory/children`` endpoint can swap without UI changes.
+
+        Strict by default; ``include_shared=True`` pulls children whose
+        Path lives in ``namespace`` *or* ``__shared__`` and prefers the
+        per-namespace alias when both exist.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        prefix = f"{context_path}/" if context_path else None
+
+        async with self._db.session() as s:
+            parent_uuid = await self._resolve_listing_parent(s, parsed, namespace)
+            if parent_uuid is None:
+                return []
+
+            child_rows = (
+                await s.execute(
+                    select(Edge, Memory)
+                    .join(
+                        Memory,
+                        and_(
+                            Memory.node_uuid == Edge.child_uuid,
+                            Memory.deprecated == False,  # noqa: E712
+                        ),
+                    )
+                    .where(Edge.parent_uuid == parent_uuid)
+                    .order_by(Edge.priority.asc(), Edge.name)
+                )
+            ).all()
+            if not child_rows:
+                return []
+
+            child_uuids = {edge.child_uuid for edge, _ in child_rows}
+            grand_count_map: dict[str, int] = {}
+            if child_uuids:
+                rows = (
+                    await s.execute(
+                        select(Edge.parent_uuid, func.count(Edge.id))
+                        .where(Edge.parent_uuid.in_(child_uuids))
+                        .group_by(Edge.parent_uuid)
+                    )
+                ).all()
+                grand_count_map = {parent: count for parent, count in rows}
+
+            children: list[dict] = []
+            seen: set[str] = set()
+            for edge, memory in child_rows:
+                if edge.child_uuid in seen:
+                    continue
+                seen.add(edge.child_uuid)
+
+                path_stmt = select(Path).where(Path.edge_id == edge.id)
+                if include_shared:
+                    path_stmt = path_stmt.where(
+                        Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                    )
+                else:
+                    path_stmt = path_stmt.where(Path.namespace == namespace)
+                all_paths = (await s.execute(path_stmt)).scalars().all()
+
+                if not all_paths:
+                    continue
+
+                if include_shared and len(all_paths) > 1:
+                    all_paths = sorted(
+                        all_paths,
+                        key=lambda p: 0 if p.namespace == namespace else 1,
+                    )
+
+                # When listing from ROOT with a context_domain, drop
+                # children that have no path under that domain — same
+                # filter graph.get_children applies for the desktop
+                # tree's domain tabs.
+                if parent_uuid == ROOT_NODE_UUID and context_domain:
+                    if not any(p.domain == context_domain for p in all_paths):
+                        continue
+
+                path_obj = self._pick_best_path(
+                    list(all_paths), context_domain, prefix
+                )
+
+                content = memory.content
+                decoded = self._decode_legacy(content)
+                if decoded != content:
+                    await s.execute(
+                        update(Memory)
+                        .where(Memory.id == memory.id)
+                        .values(content=decoded)
+                    )
+                    content = decoded
+
+                children.append(
+                    {
+                        "node_uuid": edge.child_uuid,
+                        "edge_id": edge.id,
+                        "name": edge.name,
+                        "domain": path_obj.domain if path_obj else "core",
+                        "path": path_obj.path if path_obj else edge.name,
+                        "content_snippet": (
+                            content[:100] + "..."
+                            if len(content) > 100
+                            else content
+                        ),
+                        "priority": edge.priority,
+                        "disclosure": edge.disclosure,
+                        "approx_children_count": grand_count_map.get(
+                            edge.child_uuid, 0
+                        ),
+                    }
+                )
+
+            return children
+
+    @staticmethod
+    def _pick_best_path(
+        paths: list[Path],
+        context_domain: Optional[str],
+        prefix: Optional[str],
+    ) -> Optional[Path]:
+        """Select the most contextually relevant Path alias for display.
+
+        Tier 1 — same domain AND under the caller's current prefix.
+        Tier 2 — same domain, any path.
+        Tier 3 — first available.
+
+        Mirrors ``GraphService._pick_best_path``.
+        """
+        if not paths:
+            return None
+        if len(paths) == 1:
+            return paths[0]
+
+        if context_domain and prefix:
+            for p in paths:
+                if p.domain == context_domain and p.path.startswith(prefix):
+                    return p
+        if context_domain:
+            for p in paths:
+                if p.domain == context_domain:
+                    return p
+        return paths[0]
+
+    @staticmethod
+    def _decode_legacy(content: str) -> str:
+        """Decode a base64-encoded legacy memory.content if it round-trips.
+
+        Old rows were occasionally stored base64-encoded; new writes are
+        always plain text. Reading via this verb auto-rewrites the row to
+        plain text on the rare hit, so the migration is incremental.
+        """
+        import base64
+
+        try:
+            decoded = base64.b64decode(content, validate=True).decode("utf-8")
+            if base64.b64encode(decoded.encode("utf-8")).decode("ascii") == content:
+                return decoded
+        except Exception:
+            pass
+        return content
+
+    async def list_paths(
+        self,
+        *,
+        namespace: str,
+        domain: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> list[dict]:
+        """Flat catalog of Paths in ``namespace`` (optionally + shared).
+
+        Each dict has ``domain``, ``path``, ``namespace``, ``uri``,
+        ``name`` (last path segment), ``priority``, ``memory_id``,
+        ``node_uuid``. Used by ``/memory/domains`` to count nodes per
+        domain and by power-user tooling that wants the full path list.
+
+        ``include_shared=True`` returns rows from ``namespace`` *or*
+        ``__shared__``, deduped by ``(domain, path)`` so the same URI
+        never appears twice — the namespace-matched copy wins via
+        ordering, mirroring ``GraphService.get_all_paths`` scoped-view.
+        """
+        async with self._db.session() as s:
+            stmt = (
+                select(Path, Edge, Memory)
+                .select_from(Path)
+                .join(Edge, Path.edge_id == Edge.id)
+                .join(
+                    Memory,
+                    and_(
+                        Memory.node_uuid == Edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    ),
+                )
+            )
+            if domain is not None:
+                stmt = stmt.where(Path.domain == domain)
+            if include_shared:
+                stmt = stmt.where(
+                    Path.namespace.in_([namespace, SHARED_NAMESPACE])
+                )
+            else:
+                stmt = stmt.where(Path.namespace == namespace)
+            stmt = stmt.order_by(Path.domain, Path.path)
+
+            rows = list((await s.execute(stmt)).all())
+
+            # Within scoped+include_shared, order namespace-matched
+            # first so dedupe keeps the user's copy when the same URI
+            # exists in both partitions.
+            if include_shared:
+                rows.sort(
+                    key=lambda triple: 0 if triple[0].namespace == namespace else 1
+                )
+
+            results: list[dict] = []
+            seen: set[tuple] = set()
+            for path_obj, edge, memory in rows:
+                key = (path_obj.domain, path_obj.path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(
+                    {
+                        "domain": path_obj.domain,
+                        "path": path_obj.path,
+                        "namespace": path_obj.namespace,
+                        "uri": f"{path_obj.domain}://{path_obj.path}",
+                        "name": path_obj.path.rsplit("/", 1)[-1],
+                        "priority": edge.priority,
+                        "memory_id": memory.id,
+                        "node_uuid": edge.child_uuid,
+                    }
+                )
             return results

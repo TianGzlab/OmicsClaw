@@ -35,6 +35,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from sqlalchemy import and_, select
+
 from .engine import MemoryEngine, MemoryRecord
 from .models import (
     SHARED_NAMESPACE,
@@ -337,6 +339,179 @@ class MemoryClient:
         return await self._engine.get_subtree(
             uri, namespace=self._namespace, limit=limit
         )
+
+    async def list_children_rich(
+        self,
+        uri: str = "core://",
+        *,
+        context_domain: Optional[str] = None,
+        context_path: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Desktop-tree dicts for the children of ``uri``.
+
+        Returns the rich shape (``content_snippet``, ``priority``,
+        ``approx_children_count`` …) consumed by the desktop
+        ``/memory/children`` endpoint. Strict by default;
+        ``include_shared=True`` surfaces ``__shared__`` children too.
+        """
+        await self._ensure_init()
+        assert self._engine is not None
+        return await self._engine.list_children_rich(
+            uri,
+            namespace=self._namespace,
+            context_domain=context_domain,
+            context_path=context_path,
+            include_shared=include_shared,
+        )
+
+    async def list_paths(
+        self,
+        *,
+        domain: Optional[str] = None,
+        include_shared: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Flat catalog of Paths in the client's namespace.
+
+        Used by ``/memory/domains`` to count nodes per domain.
+        ``include_shared=True`` returns a dedupe'd union with
+        ``__shared__`` (namespace copy wins on URI collision).
+        """
+        await self._ensure_init()
+        assert self._engine is not None
+        return await self._engine.list_paths(
+            namespace=self._namespace,
+            domain=domain,
+            include_shared=include_shared,
+        )
+
+    async def update_existing(
+        self,
+        uri: str,
+        *,
+        content: Optional[str] = None,
+        priority: Optional[int] = None,
+        disclosure: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update an existing memory in this client's namespace.
+
+        Path must already exist. Content change creates a new active
+        ``Memory`` row (the previous one is deprecated, audit chain
+        intact); a metadata-only call patches the ``Edge`` directly.
+
+        Returns the legacy ``GraphService.update_memory`` audit shape
+        (``old_memory_id``, ``new_memory_id``, ``rows_before``,
+        ``rows_after`` …) so the desktop ``/memory/update`` endpoint
+        can swap without UI changes.
+        """
+        await self._ensure_init()
+
+        if content is None and priority is None and disclosure is None:
+            raise ValueError(
+                "update_existing requires at least one of content, "
+                "priority, disclosure"
+            )
+
+        parsed = MemoryURI.parse(uri)
+        if not parsed.path:
+            raise ValueError("Cannot update the root path")
+
+        target_ns = self._namespace
+        assert self._engine is not None
+
+        # Pre-flight: snapshot the active row so the audit dict can
+        # show "what was there before" alongside "what is there now".
+        async with self._engine.db.session() as s:
+            row = (
+                await s.execute(
+                    select(Memory, Edge, Path)
+                    .select_from(Path)
+                    .join(Edge, Path.edge_id == Edge.id)
+                    .join(
+                        Memory,
+                        and_(
+                            Memory.node_uuid == Edge.child_uuid,
+                            Memory.deprecated == False,  # noqa: E712
+                        ),
+                    )
+                    .where(
+                        Path.namespace == target_ns,
+                        Path.domain == parsed.domain,
+                        Path.path == parsed.path,
+                    )
+                    .order_by(Memory.created_at.desc())
+                    .limit(1)
+                )
+            ).first()
+            if not row:
+                raise ValueError(
+                    f"Path '{uri}' not found or memory is deprecated"
+                )
+            old_memory, edge, _ = row
+            old_id = old_memory.id
+            edge_id = edge.id
+            node_uuid = edge.child_uuid
+            edge_before = serialize_row(edge)
+            old_memory_ref = serialize_memory_ref(old_memory)
+
+        # Translate "preserve" semantics: omit kwargs whose value is
+        # None so the engine's ``_UNSET`` sentinel preserves the
+        # current edge metadata.
+        engine_kwargs: Dict[str, Any] = {}
+        if priority is not None:
+            engine_kwargs["priority"] = priority
+        if disclosure is not None:
+            engine_kwargs["disclosure"] = disclosure
+
+        if content is not None:
+            ref = await self._engine.upsert_versioned(
+                parsed, content, namespace=target_ns, **engine_kwargs
+            )
+            new_memory_id = ref.new_memory_id
+        else:
+            await self._engine.patch_edge_metadata(
+                parsed, namespace=target_ns, **engine_kwargs
+            )
+            new_memory_id = old_id
+
+        # Post-flight: rebuild rows_before / rows_after for the audit
+        # changeset bookkeeper. Edge metadata is included only when it
+        # actually changed; memory rows are included only on content
+        # updates.
+        #
+        # rows_after["memories"] intentionally has TWO entries on a
+        # content update — the now-deprecated old row (re-fetched so
+        # it carries deprecated=True, migrated_to=new_id) followed by
+        # the new active row. This mirrors GraphService.update_memory's
+        # legacy shape so the desktop review pane can render both
+        # sides of the chain transition without a separate query.
+        rows_before: Dict[str, list] = {}
+        rows_after: Dict[str, list] = {}
+        async with self._engine.db.session() as s:
+            edge_after = serialize_row(await s.get(Edge, edge_id))
+            if edge_before != edge_after:
+                rows_before["edges"] = [edge_before]
+                rows_after["edges"] = [edge_after]
+
+            if content is not None:
+                rows_before["memories"] = [old_memory_ref]
+                rows_after["memories"] = [
+                    serialize_memory_ref(await s.get(Memory, old_id)),
+                    serialize_memory_ref(
+                        await s.get(Memory, new_memory_id)
+                    ),
+                ]
+
+        return {
+            "domain": parsed.domain,
+            "path": parsed.path,
+            "uri": str(parsed),
+            "old_memory_id": old_id,
+            "new_memory_id": new_memory_id,
+            "node_uuid": node_uuid,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+        }
 
     # ------------------------------------------------------------------
     # Composite verbs

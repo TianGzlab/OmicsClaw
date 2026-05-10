@@ -2845,13 +2845,10 @@ async def memory_update(req: MemoryUpdateRequest):
         raise HTTPException(400, detail="At least one of content or priority must be provided")
 
     try:
-        graph = _get_graph_service()
-        result = await graph.update_memory(
-            path=req.path,
+        result = await _memory_client.update_existing(
+            f"{req.domain}://{req.path}",
             content=req.content,
             priority=req.priority,
-            domain=req.domain,
-            namespace=_memory_client.namespace,
         )
         return {"ok": True, "path": req.path, "domain": req.domain, "result": result}
     except ValueError as exc:
@@ -2896,17 +2893,32 @@ async def memory_children(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
         from omicsclaw.memory.models import ROOT_NODE_UUID
-        parent_uuid = node_uuid if node_uuid else ROOT_NODE_UUID
-        children = await graph.get_children(
-            node_uuid=parent_uuid,
-            context_domain=domain,
-            context_path=path or None,
-            namespace=_memory_client.namespace,
+
+        # Normalise FastAPI ``Query(...)`` defaults so the endpoint
+        # behaves sanely when called directly (tests, in-process
+        # tooling) rather than only over HTTP. Without this, ``path``
+        # is a ``Query`` instance that is truthy and would corrupt the
+        # URI build below.
+        node_uuid_str = node_uuid if isinstance(node_uuid, str) else ""
+        domain_str = domain if isinstance(domain, str) else "core"
+        path_str = path if isinstance(path, str) else ""
+
+        parent_uuid = node_uuid_str if node_uuid_str else ROOT_NODE_UUID
+        # URI-based lookup: ``domain://`` resolves to ROOT, ``domain://path``
+        # to the path's child node. Front-end sends consistent
+        # ``(node_uuid, domain, path)`` triples returned from a previous
+        # list_children_rich call so the URI lookup hits the same parent.
+        parent_uri = (
+            f"{domain_str}://{path_str}" if path_str else f"{domain_str}://"
+        )
+        children = await _memory_client.list_children_rich(
+            parent_uri,
+            context_domain=domain_str,
+            context_path=path_str or None,
             include_shared=True,
         )
-        return {"node_uuid": parent_uuid, "domain": domain, "children": children}
+        return {"node_uuid": parent_uuid, "domain": domain_str, "children": children}
     except Exception as exc:
         logger.exception("Memory children error")
         raise HTTPException(500, detail=str(exc))
@@ -2921,10 +2933,8 @@ async def memory_domains():
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
-        all_paths = await graph.get_all_paths(
+        all_paths = await _memory_client.list_paths(
             domain=None,
-            namespace=_memory_client.namespace,
             include_shared=True,
         )
 
