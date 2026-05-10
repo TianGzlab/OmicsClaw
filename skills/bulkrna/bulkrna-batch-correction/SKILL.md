@@ -31,24 +31,25 @@ when available, falling back to a Python port.
 
 | Output | Path | Notes |
 |---|---|---|
-| Corrected matrix | `tables/counts_corrected.csv` | same shape, batch effect removed |
+| Corrected matrix | `tables/corrected_expression.csv` | same shape, batch effect removed |
 | PCA before/after | `figures/pca_before_after.png` | side-by-side comparison |
-| Per-batch summary | `tables/batch_summary.csv` | sample counts per batch |
-| Report | `report.md` + `result.json` | always |
+| Batch metrics | `tables/batch_metrics.csv` | silhouette score before/after |
+| Report | `report.md` + `result.json` | summary keys: `n_genes`, `n_samples`, `n_batches`, `batch_names`, `mode`, `silhouette_before`, `silhouette_after` |
 
 ## Flow
 
 1. Load expression matrix + batch metadata.
-2. If `--batch-info` describes only one batch, warn at `bulkrna_batch_correction.py:165` ("Only 1 batch detected; returning data unchanged.") and short-circuit — no transformation applied.
-3. Try R `sva::ComBat`.  On import failure, fall back to Python implementation (`:427` warns "R ComBat not available (...); using Python fallback.").
-4. Render before/after PCA; emit corrected table + report.
+2. Try R `sva::ComBat` first; on import failure, fall back to Python ComBat (`bulkrna_batch_correction.py:427` warns "R ComBat not available (...); using Python fallback.").
+3. The Python fallback short-circuits with a warning at `:165` ("Only 1 batch detected; returning data unchanged.") when `--batch-info` describes a single batch.  The R path has no equivalent guard.
+4. Render before/after PCA; emit corrected table, batch-metrics table, and report.
 
 ## Gotchas
 
-- **Single-batch input is a silent no-op.**  `bulkrna_batch_correction.py:165` returns the input unchanged (with a warning).  If your `--batch-info` accidentally has all samples in one batch (typo, header parsing error), the run "succeeds" but does nothing.  Verify `result.json["batches_seen"]` ≥ 2 before trusting downstream results.
-- **R vs Python ComBat give numerically different results.**  `:427`'s silent fallback to the Python port can produce per-gene corrected values that differ at the 3rd decimal from R `sva` — usually inconsequential for downstream DE but visible in direct value comparisons.  Cross-check `result.json["backend"]`.
+- **Single-batch input is a silent no-op (Python fallback only).**  `bulkrna_batch_correction.py:165` returns the input unchanged with a warning when only one batch is detected — but **only when the Python ComBat path runs**.  The R `sva::ComBat` path at `:421` does not have this guard, so a single-batch run on an R-equipped system may proceed with nonsense output.  Verify `result.json["n_batches"]` ≥ 2 before trusting downstream results.
+- **R vs Python ComBat give numerically different results.**  `:427`'s silent fallback to the Python port can produce per-gene corrected values that differ at the 3rd decimal from R `sva` — usually inconsequential for downstream DE but visible in direct value comparisons.  The chosen backend is not recorded in the summary dict; only the warning log distinguishes them.
 - **ComBat assumes the biological design is balanced across batches.**  If condition X is only in batch 1 and condition Y is only in batch 2, ComBat will remove the biology along with the batch effect.  No automatic check — sanity-cross-tabulate `condition × batch` before running, and consider including condition as a covariate in a more sophisticated tool (limma::removeBatchEffect) if confounded.
-- **Negative output values are normal for ComBat-on-counts.**  ComBat operates in log-space and returns gene-by-sample matrices that can contain negative values after back-transform.  Do NOT pipe `counts_corrected.csv` into `bulkrna-de` (which expects non-negative integer counts) — use the corrected matrix only for visualisation, clustering, or co-expression analysis.
+- **Negative output values are normal for ComBat-on-counts.**  ComBat operates in log-space and returns gene-by-sample matrices that can contain negative values after back-transform.  Do NOT pipe `corrected_expression.csv` into `bulkrna-de` (which expects non-negative integer counts) — use the corrected matrix only for visualisation, clustering, or co-expression analysis.
+- **Silhouette score interpretation is direction-of-improvement, not absolute.**  `silhouette_before` / `silhouette_after` (in `result.json` and `batch_metrics.csv`) measure batch clustering tightness.  A drop indicates batch effect has been reduced; absolute values depend on how separable the batches were originally.
 
 ## Key CLI
 

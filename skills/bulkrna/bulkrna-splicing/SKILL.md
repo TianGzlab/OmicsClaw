@@ -33,7 +33,8 @@ MXE / RI).
 
 | Output | Path | Notes |
 |---|---|---|
-| Significant events | `tables/sig_splicing_events.csv` | filtered table |
+| All events | `tables/splicing_events.csv` | full annotated event table |
+| Significant events | `tables/significant_events.csv` | filtered by `--dpsi-cutoff` and `--padj-cutoff` |
 | ΔPSI distribution | `figures/dpsi_distribution.png` | histogram with cutoff lines |
 | Event-type breakdown | `figures/event_type_bar.png` | SE / A3SS / A5SS / MXE / RI counts |
 | Volcano | `figures/splicing_volcano.png` | ΔPSI vs -log10(padj) |

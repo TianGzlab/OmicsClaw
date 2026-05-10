@@ -33,10 +33,10 @@ Cox proportional-hazards hazard ratio.
 
 | Output | Path | Notes |
 |---|---|---|
-| Per-gene survival stats | `tables/survival_summary.csv` | log-rank p, HR, HR 95% CI |
+| Per-gene survival stats | `tables/survival_results.csv` | columns: `gene, cutoff, n_high, n_low, hazard_ratio, log_rank_chi2, log_rank_pval, median_survival_high, median_survival_low` |
 | KM curves | `figures/<gene>_km.png` | one per gene tested |
 | Forest plot | `figures/forest_plot.png` | HR + CI across genes |
-| Report | `report.md` + `result.json` | always |
+| Report | `report.md` + `result.json` | summary contains `n_genes` and per-gene `results` array (`bulkrna_survival.py:153-160`) |
 
 ## Flow
 
@@ -45,16 +45,17 @@ Cox proportional-hazards hazard ratio.
    - Skip with warning at `bulkrna_survival.py:630` if gene not in expression matrix.
    - Stratify samples by `--cutoff-method` (default `median`; alt `optimal` finds the maxstat cut).
    - Run log-rank test on the stratified groups.
-   - Fit Cox model; warn at `:326` if the high or low group has too few events to be meaningful.
-3. Try R `survival` package first; fall back to Python `lifelines` (`:626` warns "R survival not available (...); using Python fallback").
-4. Render KM curves + forest plot; emit summary table.
+   - Compute a simple events/time hazard ratio.  Warn at `:326` ("Heavy censoring (X%). KM tail estimates may be unreliable.") when the censoring rate exceeds 80%.
+3. Try R `survival` package first; fall back to Python `lifelines` (`:626` warns "R survival not available (...); using Python fallback.").
+4. Render KM curves + forest plot; emit `tables/survival_results.csv`.
 
 ## Gotchas
 
-- **Genes not in the expression matrix are silently skipped.**  `bulkrna_survival.py:630` logs a warning per missing gene and continues.  Check `result.json["tested_genes"]` vs `--genes` after the run — a typo'd or wrong-namespace gene list produces empty output without an obvious error.
+- **Genes not in the expression matrix are silently skipped.**  `bulkrna_survival.py:630` logs a warning per missing gene and continues.  After the run, count the rows in `tables/survival_results.csv` (or inspect `result.json["results"]`) and compare against the `--genes` list — a typo'd or wrong-namespace gene produces no obvious error.
 - **`--cutoff-method optimal` p-values are NOT corrected for multiple testing.**  The `optimal` cutoff scans all possible cuts and picks the maximally separating one, which inflates Type I error.  Reported log-rank p-values are raw — apply Bonferroni / BH correction externally if you scan many genes.
-- **R-vs-Python survival backends give slightly different HRs.**  `:626`'s silent fallback to `lifelines` can produce HRs that differ at the 2nd decimal place from R `survival`'s output (different tie-handling defaults: Efron in R, Breslow in lifelines).  Cross-check `result.json["backend"]` — `"r_survival"` vs `"python_lifelines"` — before reporting exact HR values.
-- **Low-event arms produce unstable Cox estimates.**  `:326` warns when an arm has too few events; the run continues with whatever HR / CI the model returns, which can be wildly inflated.  Sanity-check `tables/survival_summary.csv["events_high"]` and `["events_low"]` — any arm with <5 events is statistically uninterpretable.
+- **The hazard ratio is a simple events/person-time ratio, not a Cox MLE.**  The script computes `(events_high / time_high) / (events_low / time_low)` (`bulkrna_survival.py:328-333`), not a Cox proportional-hazards regression coefficient.  This estimator is biased when proportional-hazards holds with unequal exposure — for publication-grade HRs, re-fit a proper Cox model in R or `lifelines` against the same stratification.
+- **R-vs-Python backend silently switches.**  `:626` warns and falls back to a NumPy log-rank implementation when R `survival` isn't importable; the per-gene HR estimator is the same simple events/time ratio in both cases, but the chosen backend isn't recorded in the summary dict — only in the warning log.  Verify R availability before relying on the result for downstream papers.
+- **Heavy censoring distorts KM tail estimates.**  `:326` fires when ≥80% of patients are censored; the printed median survival numbers are dominated by extrapolation past the last event time.  Treat `median_survival_*` as "≥ X" rather than a point estimate when the corresponding gene's censoring rate is high.
 
 ## Key CLI
 

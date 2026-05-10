@@ -52,7 +52,7 @@ count matrix.
 ## Gotchas
 
 - **Aligner detection is filename-based, not content-based.**  `bulkrna_read_alignment.py:305-311` dispatches by `input_path.name.lower()` — anything that is neither `log.final.out` nor `meta_info` (case-insensitive substring) is silently parsed as a HISAT2 log.  A renamed STAR log will produce nonsense.  Pass `--method star` explicitly if your STAR file isn't named conventionally.
-- **The skill consumes the LOG, not the BAM.**  Feeding a `.bam` or `.sam` file as `--input` will not raise — the parser just finds zero matchable lines and reports an empty stats dict.  Sanity-check `result.json["stats"]["total_reads"]` is non-zero before trusting any downstream summary.
+- **The skill consumes the LOG, not the BAM.**  Feeding a `.bam` or `.sam` file as `--input` will not raise — the parser just finds zero matchable lines and reports an empty stats dict.  Sanity-check `result.json["summary"]["total_reads"]` is non-zero before trusting any downstream summary.
 - **Gene body coverage is synthetic in `--demo` mode** (`bulkrna_read_alignment.py:142-150`).  The 5'→3' bias profile in demo runs is a fixed reproducible curve, not derived from real input — useful for layout previews but not for assessing real RNA degradation.
 
 ## Key CLI
