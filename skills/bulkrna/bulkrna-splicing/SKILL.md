@@ -36,24 +36,24 @@ MXE / RI).
 | All events | `tables/splicing_events.csv` | full annotated event table |
 | Significant events | `tables/significant_events.csv` | filtered by `--dpsi-cutoff` and `--padj-cutoff` |
 | ΔPSI distribution | `figures/dpsi_distribution.png` | histogram with cutoff lines |
-| Event-type breakdown | `figures/event_type_bar.png` | SE / A3SS / A5SS / MXE / RI counts |
-| Volcano | `figures/splicing_volcano.png` | ΔPSI vs -log10(padj) |
+| Event-type breakdown | `figures/event_type_distribution.png` | SE / A3SS / A5SS / MXE / RI counts |
+| Volcano | `figures/volcano_splicing.png` | ΔPSI vs -log10(padj) |
 | Report | `report.md` + `result.json` | always |
 
 ## Flow
 
 1. Load splicing event table.  Hard-fail at `bulkrna_splicing.py:365,368` on missing or invalid `--input`.
-2. Detect format (rMATS vs SUPPA2) by column shape.
+2. Validate the fixed input schema: must contain columns `event_type, gene, delta_psi, padj` (`bulkrna_splicing.py:153-155`).  No format detection — caller must pre-flatten rMATS / SUPPA2 output to this schema.
 3. Filter by `--dpsi-cutoff` AND `--padj-cutoff`.
 4. Group by event type; render distribution + volcano + bar plots.
-5. Emit filtered table + report.
+5. Emit `tables/splicing_events.csv` (full) + `tables/significant_events.csv` (filtered) + report.
 
 ## Gotchas
 
 - **This skill consumes the SPLICING TABLE, not BAM or FASTQ.**  Run rMATS or SUPPA2 upstream and feed their output here.  The wrapper does not perform splicing detection itself — feeding it BAM files raises a parser error or silently produces an empty result.
 - **`--dpsi-cutoff` is the ABSOLUTE value of ΔPSI.**  Default `0.1` keeps events with `|ΔPSI| ≥ 0.1`, including both inclusion-up and inclusion-down.  Set to `0` to keep all directionally significant events.
-- **Format detection is column-name-based.**  rMATS uses `IncLevelDifference` / `FDR`; SUPPA2 uses `dPSI` / `pval`.  Mixed-format input (e.g. SUPPA2 dPSI columns merged into an rMATS-style table) is not handled — the parser picks one format and silently drops the other's columns.
-- **Event-type breakdown depends on the upstream tool's classification.**  rMATS reports SE / A3SS / A5SS / MXE / RI as separate files; SUPPA2 uses an EVENT field.  If you concatenate rMATS files manually, ensure each row's event type is preserved or the breakdown bar chart will under-count.
+- **Input schema is fixed: `event_type, gene, delta_psi, padj` (with optional `pvalue` and `event_id`).**  The script does NOT auto-detect rMATS vs SUPPA2 column conventions — if your input uses rMATS's `IncLevelDifference`/`FDR` or SUPPA2's `dPSI`/`pval` natively, rename columns first or the loader will silently drop your data.
+- **Event-type breakdown depends on the upstream tool's classification.**  rMATS reports SE / A3SS / A5SS / MXE / RI as separate files; SUPPA2 uses an EVENT field.  Concatenate / re-label these into a single `event_type` column before feeding the skill, or the breakdown bar chart under-counts.
 
 ## Key CLI
 

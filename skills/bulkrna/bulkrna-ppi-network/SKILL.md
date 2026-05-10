@@ -37,7 +37,7 @@ induced subgraph, and ranks hub proteins by degree centrality.
 | Node centrality | `tables/node_centrality.csv` | per-gene degree / betweenness / closeness / hub_score |
 | Hub genes | `tables/hub_genes.csv` | top-N from `node_centrality` by hub_score |
 | Network figure | `figures/ppi_network.png` | NetworkX layout |
-| Degree distribution | `figures/degree_distribution.png` | scale-free check |
+| Hub-gene barplot | `figures/hub_genes_barplot.png` | top-N by hub_score |
 | Report | `report.md` + `result.json` | summary keys: `n_genes`, `n_edges`, `n_connected`, `n_isolated`, `mean_degree` |
 
 ## Flow

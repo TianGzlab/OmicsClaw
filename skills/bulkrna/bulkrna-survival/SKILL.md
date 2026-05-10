@@ -34,7 +34,7 @@ Cox proportional-hazards hazard ratio.
 | Output | Path | Notes |
 |---|---|---|
 | Per-gene survival stats | `tables/survival_results.csv` | columns: `gene, cutoff, n_high, n_low, hazard_ratio, log_rank_chi2, log_rank_pval, median_survival_high, median_survival_low` |
-| KM curves | `figures/<gene>_km.png` | one per gene tested |
+| KM curves | `figures/km_<gene>.png` | one per gene tested |
 | Forest plot | `figures/forest_plot.png` | HR + CI across genes |
 | Report | `report.md` + `result.json` | summary contains `n_genes` and per-gene `results` array (`bulkrna_survival.py:153-160`) |
 

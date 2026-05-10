@@ -35,8 +35,8 @@ and a built-in hypergeometric implementation as fallbacks.
 | Output | Path | Notes |
 |---|---|---|
 | Enrichment table | `tables/enrichment_results.csv` | per-term padj, NES, leading-edge genes |
-| Top terms barplot | `figures/top_terms_bar.png` | top N by padj |
-| Dotplot | `figures/dotplot.png` | size = gene count, colour = padj |
+| Top terms barplot | `figures/enrichment_barplot.png` | top N by padj |
+| Dotplot | `figures/enrichment_dotplot.png` | size = gene count, colour = padj |
 | Report | `report.md` + `result.json` | always |
 
 ## Flow

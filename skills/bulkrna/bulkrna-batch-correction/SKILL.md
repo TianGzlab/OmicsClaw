@@ -32,7 +32,9 @@ when available, falling back to a Python port.
 | Output | Path | Notes |
 |---|---|---|
 | Corrected matrix | `tables/corrected_expression.csv` | same shape, batch effect removed |
-| PCA before/after | `figures/pca_before_after.png` | side-by-side comparison |
+| PCA before correction | `figures/pca_before_correction.png` | per-sample colour-coded by batch |
+| PCA after correction | `figures/pca_after_correction.png` | same layout, post-ComBat |
+| Batch assessment | `figures/batch_assessment.png` | side-by-side comparison + silhouette delta |
 | Batch metrics | `tables/batch_metrics.csv` | silhouette score before/after |
 | Report | `report.md` + `result.json` | summary keys: `n_genes`, `n_samples`, `n_batches`, `batch_names`, `mode`, `silhouette_before`, `silhouette_after` |
 

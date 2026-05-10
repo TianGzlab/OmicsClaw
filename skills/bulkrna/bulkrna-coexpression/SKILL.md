@@ -34,8 +34,9 @@ assignments, hub genes, and module-trait correlations.
 |---|---|---|
 | Module assignments | `tables/module_assignments.csv` | gene → module colour |
 | Hub genes | `tables/hub_genes.csv` | per-module top-connectivity genes |
-| Soft-threshold diagnostic | `tables/threshold_fit.csv` + `figures/soft_threshold.png` | per-power scale-free fit + connectivity |
-| Module dendrogram | `figures/module_dendrogram.png` | gene clustering tree |
+| Soft-threshold diagnostic | `tables/threshold_fit.csv` + `figures/scale_free_fit.png` | per-power scale-free fit + connectivity |
+| Module sizes | `figures/module_sizes.png` | bar chart of gene count per module |
+| Module assignments | `figures/module_dendrogram.png` | colour-strip of per-gene module label |
 | Report | `report.md` + `result.json` | summary keys: `n_genes_used`, `n_samples`, `soft_power`, `n_modules`, `module_sizes`, `method_used` |
 
 ## Flow
