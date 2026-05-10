@@ -544,17 +544,31 @@ class MemoryClient:
     # deprecate of the affected memories lives in MemoryEngine.delete.
     # ------------------------------------------------------------------
 
-    async def get_recent(self, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_recent(
+        self,
+        limit: int = 10,
+        *,
+        include_shared: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Return recently updated memories scoped to the client's namespace.
 
-        Strict — no shared fallback, by the same rule as
+        Strict by default — no shared fallback, by the same rule as
         ``MemoryEngine.list_children`` (recent listings should not bleed
         ``__shared__`` system rows into a per-user view).
+
+        ``include_shared=True`` is the desktop UI mode: returns rows in
+        the client's namespace *or* ``__shared__`` so user-customised
+        ``core://agent/*`` surfaces alongside per-user rows. Reserved
+        for single-tenant surfaces — multi-tenant bot surfaces should
+        keep the default to avoid leaking shared writes from one user
+        into another's view.
         """
         await self._ensure_init()
         assert self._engine is not None
         return await self._engine.get_recent(
-            namespace=self._namespace, limit=limit
+            namespace=self._namespace,
+            limit=limit,
+            include_shared=include_shared,
         )
 
     async def forget(self, uri: str) -> Dict[str, Any]:
