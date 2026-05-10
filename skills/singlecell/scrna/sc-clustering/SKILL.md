@@ -43,13 +43,13 @@ explicit resolution or auto-resolution search.  Designed to read from
 | Per-cluster summary | `tables/cluster_summary.csv` | cells per cluster |
 | Run-level summary | `tables/clustering_summary.csv` | resolution, n_clusters, modularity |
 | Embedding points | `tables/embedding_points.csv` | per-cell embedding coordinates |
-| Diagnostic figures | `figures/auto_resolution_search.png` (when auto-tuning), embedding gallery | rendered as gallery |
+| Diagnostic figures | embedding gallery (always); `figures/auto_resolution_search.png` only when `--resolution auto` | gallery + conditional sweep figure |
 | Report | `report.md` + `result.json` | always written |
 
 ## Flow
 
 1. Load AnnData; pick embedding source (`--use-rep` or default).
-2. If `--resolution` is `auto` or a sweep range, run the auto-resolution search and write `figures/auto_resolution_search.png`.
+2. If `--resolution` is `auto`, run the auto-resolution search and write `figures/auto_resolution_search.png`; otherwise parse it as a single float.
 3. Build the neighbour graph (`--n-neighbors` × `--n-pcs`).
 4. Compute the chosen `--embedding-method` low-dim embedding.
 5. Cluster with `--cluster-method` at the chosen `--resolution`.
@@ -59,7 +59,7 @@ explicit resolution or auto-resolution search.  Designed to read from
 
 - **No embedding source → hard fail.** `sc_cluster.py:336` raises `ValueError("No embedding available for clustering.")` when neither `obsm["X_pca"]` is present nor `--use-rep` is set to a valid `obsm` key.  Run `sc-preprocessing` (or `sc-batch-integration` for a multi-sample dataset) before this skill, or pass `--use-rep X_pca` explicitly when the input has a non-default embedding name.
 - **`--input` is required without `--demo`.** `sc_cluster.py:851` raises `ValueError("--input required when not using --demo")`.  Common when running in a pipeline where the upstream step didn't write a valid path.
-- **`--resolution` accepts a string for sweep mode.** Numeric values run a single resolution; literal `auto` triggers the auto-resolution search; comma-separated like `0.3,0.6,1.0` runs each and picks via the silhouette criterion logged in `tables/clustering_summary.csv`.
+- **`--resolution` is either a single float or the literal `auto`.** `sc_cluster.py:856-857` parses `args.resolution`: if `lower() == "auto"` it triggers the auto-resolution search; otherwise it calls `float(args.resolution)`.  Comma-separated values (`"0.3,0.6,1.0"`) raise `ValueError` from `float()` — there is no built-in multi-value sweep mode beyond `auto`.
 - **The skill writes the chosen `--cluster-method` column verbatim into `obs`.** `obs["leiden"]` (or `obs["louvain"]`) overwrites any pre-existing column with that name.  Save the input separately if you need to compare the new clustering against a prior one.
 
 ## Key CLI
@@ -73,7 +73,7 @@ python omicsclaw.py run sc-clustering \
   --input integrated.h5ad --output results/ \
   --use-rep X_harmony --resolution 1.0
 
-# Auto-resolution sweep with t-SNE embedding
+# Auto-resolution search with t-SNE embedding
 python omicsclaw.py run sc-clustering \
   --input preprocessed.h5ad --output results/ \
   --embedding-method tsne --resolution auto

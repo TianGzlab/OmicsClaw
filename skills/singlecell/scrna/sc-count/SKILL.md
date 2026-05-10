@@ -40,6 +40,7 @@ samples).
 |---|---|---|
 | AnnData | `processed.h5ad` | canonical contract; sample-label populated when `--sample` is used |
 | Run summary | `tables/count_summary.csv` | compact run-level summary |
+| Backend summary | `tables/backend_summary.csv` | backend-emitted metric/value pairs (always written) |
 | Per-barcode metrics | `tables/barcode_metrics.csv` | per-barcode count summary |
 | Diagnostic figures | `figures/barcode_rank.png`, `figures/count_distributions.png`, `figures/count_complexity_scatter.png` | always rendered |
 | Report | `report.md` + `result.json` | always written |
@@ -58,7 +59,7 @@ samples).
 - **Missing input path → hard fail.** `sc_count.py:356` raises `FileNotFoundError(f"Input path not found: {input_path}")`.  Common when the FASTQ dir is on a network mount that has not been resolved at run time.
 - **STARsolo requires explicit chemistry.** `sc_count.py:420` raises `ValueError("STARsolo runs require an explicit `--chemistry` value such as `10xv3`.")` when chemistry is left at the `auto` default.  STARsolo currently supports `10xv2`, `10xv3`, and `10xv4`; pass one of those.
 - **Backend prerequisites are validated up front.** `sc_count.py:401`, `:423`, `:451` raise `ValueError` for missing `--reference` (CellRanger/STARsolo/simpleaf), missing `--t2g` (kb-python), or unsupported `--chemistry` for STARsolo.  No silent fallback to a different backend — pick a feasible one before invoking.
-- **Re-canonicalising-existing-output is detected by directory shape, not a flag.** If `--input` points at a CellRanger output dir (e.g. one with `outs/raw_feature_bc_matrix/`), the skill skips counting and just imports the matrix.  The summary distinguishes the two paths in `result.json["summary"]["mode"]`; verify if you expected a fresh run.
+- **Re-canonicalising-existing-output is detected by directory shape, not a flag.** If `--input` points at a CellRanger output dir (e.g. one with `outs/raw_feature_bc_matrix/`), the skill skips counting and just imports the matrix.  No flag separates the two paths; verify by inspecting `result.json["data"]["execution"]` (empty list = re-canonicalise; populated = backend invoked) or by reading `tables/backend_summary.csv` (lists the backend metrics only when the backend ran).
 
 ## Key CLI
 

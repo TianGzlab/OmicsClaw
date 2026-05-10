@@ -1,6 +1,6 @@
 ---
 name: sc-multi-count
-description: Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count) into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData (use sc-standardize-input) or for raw FASTQ multiplexing (use sc-count).
+description: Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count) into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData (use sc-standardize-input) or for FASTQ→counts on each sample (use sc-count first).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
@@ -29,7 +29,7 @@ canonical AnnData contract instead of re-counting.
 
 | Input | Format | Required |
 |---|---|---|
-| Per-sample inputs | directory of `.h5ad` (one per sample) or list passed via `--input` | yes (unless `--demo`) |
+| Per-sample inputs | repeated `--input <path>` flag, one per sample (`action="append"`) | yes (unless `--demo`); minimum two paths |
 
 | Output | Path | Notes |
 |---|---|---|
@@ -41,7 +41,7 @@ canonical AnnData contract instead of re-counting.
 
 ## Flow
 
-1. Discover per-sample AnnData files from `--input` (file list or directory).
+1. Collect per-sample AnnData paths from each `--input <path>` flag (`action="append"`); paired `--sample-id <id>` flags assign sample labels.
 2. Load each, normalise the single-cell contract (`layers["counts"]`, `adata.raw`, gene name harmonisation).
 3. Stack with explicit sample-label per cell.
 4. Write merged AnnData; emit per-sample / per-barcode summary tables.
@@ -50,7 +50,9 @@ canonical AnnData contract instead of re-counting.
 
 ## Gotchas
 
-- **Missing input → hard fail.** `sc_multi_count.py:346` raises `FileNotFoundError` when any element of `--input` does not resolve.  In batch pipelines, a single mistyped sample name aborts the whole merge — pre-flight your file list.
+- **`--input` is `action="append"` — repeat the flag, do not comma-split.** `sc_multi_count.py:315` declares `--input` with `action="append"`.  Pass `--input s1.h5ad --input s2.h5ad --input s3.h5ad`; a single comma-separated value (`--input s1.h5ad,s2.h5ad`) is treated as one literal path that does not exist and triggers `FileNotFoundError`.  No directory expansion.
+- **At least two `--input` paths are required.** `sc_multi_count.py:335` calls `parser.error("At least two --input paths required when not using --demo.")` if you pass zero or one.  For a single-sample run you don't need this skill — just use the upstream `sc-count` output directly.
+- **Missing input file → hard fail.** `sc_multi_count.py:346` raises `FileNotFoundError` when any individual `--input` path does not resolve.  In batch pipelines, a single mistyped sample name aborts the whole merge — pre-flight your file list.
 - **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only; the flag exists for CLI consistency.
 - **No within-sample re-counting.** This is a stitching skill — it stacks already-canonical AnnData objects.  If a per-sample input has a non-canonical matrix layout, run `sc-standardize-input` on each before this; otherwise the merged contract may surface incoherent per-cell metrics downstream.
 
@@ -60,13 +62,17 @@ canonical AnnData contract instead of re-counting.
 # Demo (built-in two synthetic samples)
 python omicsclaw.py run sc-multi-count --demo --output /tmp/sc_multi_demo
 
-# Merge by directory
+# Three samples — repeat --input per file
 python omicsclaw.py run sc-multi-count \
-  --input cellranger_aggregated_dir/ --output results/
+  --input s1.h5ad --input s2.h5ad --input s3.h5ad \
+  --output results/
 
-# Explicit list (each --input may be repeated; or a comma-separated list)
+# With explicit per-sample labels (paired with --input order)
 python omicsclaw.py run sc-multi-count \
-  --input s1.h5ad,s2.h5ad,s3.h5ad --output results/
+  --input s1.h5ad --sample-id ctrl_a \
+  --input s2.h5ad --sample-id ctrl_b \
+  --input s3.h5ad --sample-id treat_a \
+  --output results/
 ```
 
 ## See also
