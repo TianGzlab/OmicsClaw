@@ -2480,6 +2480,9 @@ async def memory_browse(
     try:
         from dataclasses import asdict
 
+        from omicsclaw.memory.namespace_policy import should_version
+        from omicsclaw.memory.uri import MemoryURI
+
         uri = f"{domain}://{path}" if path else f"{domain}://"
         children = await _memory_client.list_children(uri)
 
@@ -2490,11 +2493,18 @@ async def memory_browse(
             if record is not None:
                 node = asdict(record)
 
+        # is_versioned tells the desktop UI whether the URI has a
+        # version chain (and therefore whether to surface the
+        # History/rollback button). Mirrors the namespace_policy rule
+        # the engine uses to pick upsert_versioned vs upsert.
+        is_versioned = should_version(MemoryURI.parse(uri))
+
         return {
             "path": path,
             "domain": domain,
             "node": node,
             "children": [asdict(c) for c in children],
+            "is_versioned": is_versioned,
         }
     except Exception as exc:
         logger.exception("Memory browse error")
