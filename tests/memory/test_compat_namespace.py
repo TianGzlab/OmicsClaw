@@ -195,6 +195,76 @@ async def test_search_memories_filters_by_session_namespace(store):
 
 
 @pytest.mark.asyncio
+async def test_compat_store_lazy_init_via_get_session(tmp_path):
+    """Production first-touch is `get_session` (called by
+    `_assemble_chat_context → session_manager.get_or_create`), not
+    `create_session`. Pin the actual prod path: a freshly-constructed
+    store, never explicitly initialised, must answer get_session
+    correctly (returning None for an unknown id) by lazy-init'ing."""
+    from omicsclaw.memory.compat import CompatMemoryStore
+
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    try:
+        result = await store.get_session("nonexistent")
+        assert result is None
+        assert store._initialized, (
+            "lazy-init didn't fire on get_session — production "
+            "_assemble_chat_context path will still AssertionError"
+        )
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_compat_store_concurrent_first_init_runs_body_once(
+    tmp_path, monkeypatch
+):
+    """The asyncio.Lock around initialize()'s body must serialise
+    concurrent first-time init so the body executes exactly once,
+    even under N parallel callers.
+
+    Without the lock, two coroutines both pass the
+    ``if self._initialized: return`` fast-path check, both run the
+    body in parallel, and the second clobbers the first's
+    ``_db`` / ``_engine`` / ``_session_client`` while the first
+    coroutine may still be operating against the original engine.
+    Counting ``DatabaseManager.init_db`` invocations is the cleanest
+    detection: under-the-lock = 1, race = N.
+    """
+    import asyncio as _asyncio
+    from omicsclaw.memory import database as database_mod
+    from omicsclaw.memory.compat import CompatMemoryStore
+
+    init_count = 0
+    real_init_db = database_mod.DatabaseManager.init_db
+
+    async def counting_init_db(self):
+        nonlocal init_count
+        init_count += 1
+        # Widen the race window so a missing lock is reliably detectable.
+        await _asyncio.sleep(0.01)
+        return await real_init_db(self)
+
+    monkeypatch.setattr(database_mod.DatabaseManager, "init_db", counting_init_db)
+
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    try:
+        # 8 parallel public-method calls on a freshly-constructed store —
+        # none requires a pre-existing session.
+        await _asyncio.gather(
+            *[store.get_session(f"missing-{i}") for i in range(5)],
+            *[store.create_session(f"u{i}", "telegram") for i in range(3)],
+        )
+        assert init_count == 1, (
+            f"initialize() body ran {init_count} times — the lock failed "
+            "to serialise concurrent first-init (race condition active)"
+        )
+        assert store._initialized
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_compat_store_lazy_initialises_on_first_public_call(tmp_path):
     """CompatMemoryStore must auto-initialise when a public async method
     is called before someone has explicitly awaited initialize().

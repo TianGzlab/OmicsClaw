@@ -18,6 +18,7 @@ PRESERVED FEATURES:
   - Session context loading (formatted for LLM injection)
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -244,24 +245,43 @@ class CompatMemoryStore:
         # are stateless so all clients share one engine instance.
         self._memory_clients: dict[str, MemoryClient] = {}
         self._initialized = False
+        # Guard concurrent first-time init: bot/session.py constructs
+        # this store from a sync init() and the first awaiting callers
+        # may race (two near-simultaneous Telegram messages each calling
+        # session_manager.get_or_create concurrently). Without the lock
+        # both would pass the `_initialized` check, both would build a
+        # fresh DatabaseManager/MemoryEngine, and the second would
+        # clobber state the first is mid-flight on. Python 3.10+
+        # ``asyncio.Lock()`` no longer binds to a running loop at
+        # construction, so this is safe in __init__.
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
-        """Initialize storage backend."""
+        """Initialize storage backend (idempotent + concurrent-safe).
+
+        Double-checked locking: the outer fast-path bool check avoids
+        lock contention after the first successful init; the inner
+        check inside the lock prevents the body from running twice when
+        two coroutines both saw ``_initialized=False`` and queued.
+        """
         if self._initialized:
             return
+        async with self._init_lock:
+            if self._initialized:
+                return
 
-        from .database import DatabaseManager
-        from .engine import MemoryEngine
-        from .search import SearchIndexer
+            from .database import DatabaseManager
+            from .engine import MemoryEngine
+            from .search import SearchIndexer
 
-        self._db = DatabaseManager(self._database_url)
-        await self._db.init_db()
-        self._search = SearchIndexer(self._db)
-        self._engine = MemoryEngine(self._db, self._search)
-        self._session_client = MemoryClient(
-            engine=self._engine, namespace=SHARED_NAMESPACE
-        )
-        self._initialized = True
+            self._db = DatabaseManager(self._database_url)
+            await self._db.init_db()
+            self._search = SearchIndexer(self._db)
+            self._engine = MemoryEngine(self._db, self._search)
+            self._session_client = MemoryClient(
+                engine=self._engine, namespace=SHARED_NAMESPACE
+            )
+            self._initialized = True
 
     async def close(self) -> None:
         """Close backend resources."""
