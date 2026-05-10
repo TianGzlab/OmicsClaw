@@ -409,3 +409,95 @@ def test_desktop_chat_user_id_matches_desktop_namespace(monkeypatch):
     monkeypatch.setenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "launch-xyz")
     assert desktop_chat_user_id() == "launch-xyz"
     assert f"app/{desktop_chat_user_id()}" == desktop_namespace()
+
+
+# ----------------------------------------------------------------------
+# MemoryEngine.get_recent — hot-path "recent listing" verb that replaces
+# the GraphService.get_recent_memories call site inside MemoryClient.
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_engine_get_recent_strict_namespace(env):
+    """engine.get_recent(namespace=X) returns only rows in X — never
+    rows from other namespaces, never __shared__ rows by default."""
+    engine, _, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    b = MemoryClient(engine=engine, namespace="tg/B")
+
+    await a.remember("dataset://only_a.h5ad", "A")
+    await b.remember("dataset://only_b.h5ad", "B")
+    await a.remember("core://agent/style", "concise")  # → __shared__
+
+    rows = await engine.get_recent(namespace="tg/A", limit=10)
+    uris = {r["uri"] for r in rows}
+    assert "dataset://only_a.h5ad" in uris
+    assert "dataset://only_b.h5ad" not in uris, "leaked B's row into A"
+    assert "core://agent/style" not in uris, "leaked __shared__ row by default"
+
+
+@pytest.mark.asyncio
+async def test_engine_get_recent_include_shared(env):
+    """engine.get_recent(include_shared=True) returns rows from
+    (namespace, __shared__) — desktop UI mode."""
+    engine, _, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+
+    await a.remember("dataset://only_a.h5ad", "A")
+    await a.remember("core://agent/style", "concise")  # → __shared__
+
+    rows = await engine.get_recent(
+        namespace="tg/A", limit=10, include_shared=True
+    )
+    uris = {r["uri"] for r in rows}
+    assert "dataset://only_a.h5ad" in uris
+    assert "core://agent/style" in uris
+
+
+@pytest.mark.asyncio
+async def test_engine_get_recent_return_shape(env):
+    """Each row has memory_id, uri, priority, disclosure, created_at —
+    matching the legacy GraphService.get_recent_memories shape so the
+    MemoryClient swap is shape-preserving."""
+    engine, _, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    await a.remember("dataset://x.h5ad", "X", priority=42)
+
+    rows = await engine.get_recent(namespace="tg/A", limit=5)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["uri"] == "dataset://x.h5ad"
+    assert row["priority"] == 42
+    assert "disclosure" in row
+    assert "memory_id" in row
+    assert "created_at" in row  # ISO-format string or None
+
+
+@pytest.mark.asyncio
+async def test_engine_get_recent_honors_limit(env):
+    """limit parameter caps result count."""
+    engine, _, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    for i in range(5):
+        await a.remember(f"dataset://x{i}.h5ad", f"row {i}")
+
+    rows = await engine.get_recent(namespace="tg/A", limit=3)
+    assert len(rows) == 3
+
+
+@pytest.mark.asyncio
+async def test_engine_get_recent_excludes_deprecated(env):
+    """Versioned writes deprecate the old Memory; get_recent returns
+    only the active head, not deprecated predecessors."""
+    engine, _, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    # core://my_user is versioned per namespace_policy → upsert_versioned
+    await a.remember("core://my_user/note", "v1")
+    await a.remember("core://my_user/note", "v2")
+
+    rows = await engine.get_recent(namespace="tg/A", limit=10)
+    matching = [r for r in rows if r["uri"] == "core://my_user/note"]
+    assert len(matching) == 1, (
+        f"expected exactly one active row for the versioned URI, "
+        f"got {len(matching)} — deprecated predecessor leaked"
+    )
