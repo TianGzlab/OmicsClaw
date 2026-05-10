@@ -317,6 +317,7 @@ class CompatMemoryStore:
 
     async def create_session(self, user_id: str, platform: str, chat_id: str = "", session_id: str = None) -> Session:
         """Create a new session in the graph memory."""
+        await self.initialize()
         session_id = session_id or uuid.uuid4().hex[:16]
         session = Session(
             session_id=session_id,
@@ -334,6 +335,7 @@ class CompatMemoryStore:
 
     async def get_session(self, session_id: str) -> Optional[Session]:
         """Retrieve session by ID. Sessions live in __shared__."""
+        await self.initialize()
         record = await self._client.recall(f"session://{session_id}")
         if record is None or not record.content:
             return None
@@ -376,6 +378,7 @@ class CompatMemoryStore:
         The memory lands in the session's owner namespace
         (``f"{platform}/{user_id}"``); session metadata stays shared.
         """
+        await self.initialize()
         client = await self._client_for_session(session_id)
 
         domain = _TYPE_TO_DOMAIN.get(memory.memory_type, "core")
@@ -409,6 +412,7 @@ class CompatMemoryStore:
         calls — listings are strict, so shared keywords don't bleed
         into a per-user inventory.
         """
+        await self.initialize()
         client = await self._client_for_session(session_id)
 
         if memory_type:
@@ -461,6 +465,7 @@ class CompatMemoryStore:
         astronomically unlikely, but the per-namespace search keeps the
         update strictly within whichever namespace the row lives.
         """
+        await self.initialize()
         # Touch the session client first so the shared partition is
         # always considered (covers the legacy "everything in shared"
         # case before the namespace migration).
@@ -487,6 +492,7 @@ class CompatMemoryStore:
 
     async def delete_session(self, session_id: str) -> None:
         """Delete session."""
+        await self.initialize()
         try:
             await self._client.forget(f"session://{session_id}")
         except ValueError:
@@ -496,6 +502,7 @@ class CompatMemoryStore:
         self, session_id: str, query: str, memory_type: Optional[str] = None
     ) -> list[BaseMemory]:
         """Search memories by content within the session's namespace."""
+        await self.initialize()
         client = await self._client_for_session(session_id)
 
         domain = _TYPE_TO_DOMAIN.get(memory_type) if memory_type else None

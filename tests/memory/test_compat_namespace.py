@@ -185,6 +185,49 @@ async def test_search_memories_filters_by_session_namespace(store):
     assert "beta-secret.h5ad" not in a_files
 
 
+# ----------------------------------------------------------------------
+# Lazy-init: bot/session.py constructs the store from a SYNC init()
+# and cannot await initialize(), so public async methods must
+# self-initialise on first use. Production bug surfaced from a CLI
+# memory tool call: AssertionError "CompatMemoryStore must be
+# initialised before use" deep inside execute_remember.
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compat_store_lazy_initialises_on_first_public_call(tmp_path):
+    """CompatMemoryStore must auto-initialise when a public async method
+    is called before someone has explicitly awaited initialize().
+
+    bot/session.py:311 constructs the store from a synchronous init()
+    function, then assigns it to bot.core.memory_store. The async
+    initialize() coroutine is never awaited along that path. The first
+    LLM tool call (execute_remember -> memory_store.save_memory) must
+    not blow up with 'CompatMemoryStore must be initialised before use'.
+    """
+    from omicsclaw.memory.compat import CompatMemoryStore, PreferenceMemory
+
+    # Mirror production: construct, do NOT await initialize().
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+
+    try:
+        session = await store.create_session("alice", "telegram")
+        assert session.platform == "telegram"
+        assert session.user_id == "alice"
+
+        pref = PreferenceMemory(
+            domain="global", key="language", value="zh", is_strict=False
+        )
+        mem_id = await store.save_memory(session.session_id, pref)
+        assert mem_id, "save_memory after lazy init returned no memory id"
+
+        # Round-trip via search to prove the engine + indexer are alive.
+        hits = await store.search_memories(session.session_id, "language")
+        assert any(h.key == "language" for h in hits if hasattr(h, "key"))
+    finally:
+        await store.close()
+
+
 @pytest.mark.asyncio
 async def test_save_memory_with_unknown_session_raises(store):
     """If the session can't be resolved, the write must NOT fall back to
