@@ -2371,6 +2371,105 @@ async def test_mcp_sync_empty_payload_removes_all_existing_servers(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# T2 S2 — /memory/browse recall falls back to __shared__
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_endpoint_falls_back_to_shared(monkeypatch, tmp_path):
+    """GET /memory/browse for a URI that lives only in __shared__ must
+    surface the shared content to the desktop client via read fallback.
+    Pins the engine.recall(fallback_to_shared=True) contract at the
+    HTTP boundary."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # core://agent/* routes to __shared__ via namespace_policy.
+        await desktop_client.remember("core://agent/style", "concise replies")
+
+        # Sanity: the row really lives only in __shared__.
+        assert (
+            await engine.recall(
+                "core://agent/style",
+                namespace="app/desktop_user",
+                fallback_to_shared=False,
+            )
+        ) is None
+
+        result = await server.memory_browse(path="agent/style", domain="core")
+        assert result["node"] is not None, (
+            "browse returned no node — read fallback to __shared__ broken"
+        )
+        assert result["node"]["content"] == "concise replies"
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
+# T2 S3 — /memory/search namespace-scoped (caller + __shared__ only)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_search_endpoint_excludes_other_namespaces(
+    monkeypatch, tmp_path
+):
+    """GET /memory/search must scope FTS hits to the desktop's namespace
+    plus __shared__. Bystander namespaces' content matching the query
+    must not leak — the production guarantee for multi-tenant DBs."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        bystander_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Three rows, all containing "mito" — one per namespace.
+        await desktop_client.remember(
+            "analysis://desktop/qc-report", "mito 18% in pbmc"
+        )
+        await desktop_client.remember(
+            "core://agent/style", "concise replies about mito"
+        )  # → __shared__
+        await bystander_client.remember(
+            "analysis://bob/qc", "mito 22% (bob's secret)"
+        )
+
+        result = await server.memory_search(q="mito", limit=20, domain=None)
+        namespaces = {r.get("namespace") for r in result["results"]}
+        contents = " ".join(
+            (r.get("content_snippet") or "") for r in result["results"]
+        )
+
+        assert "app/desktop_user" in namespaces, (
+            f"Desktop's own row missing from FTS: {result['results']}"
+        )
+        assert "telegram/bob" not in namespaces, (
+            f"Bystander telegram/bob leaked into desktop FTS: {result['results']}"
+        )
+        assert "bob's secret" not in contents, (
+            f"Bystander content leaked through search snippets: {contents!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
 # T2 S4 — /memory/{children,domains,recent} desktop-UI mode (include_shared)
 # ---------------------------------------------------------------------------
 
