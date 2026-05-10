@@ -1,160 +1,74 @@
 ---
 name: bulkrna-splicing
-description: >-
-  Alternative splicing analysis — PSI quantification, differential splicing event
-  detection from rMATS/SUPPA2 output.
+description: Load when summarising rMATS / SUPPA2 alternative-splicing output and identifying significant differential splicing events. Skip if you only have count-level DE (use bulkrna-de) or for splicing in single-cell or spatial data (currently unsupported).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, splicing, alternative-splicing, PSI, rMATS, SUPPA2]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "🧬"
-    trigger_keywords: [alternative splicing, splicing analysis, PSI, rMATS, SUPPA2,
-      exon skipping, differential splicing]
-    allowed_extra_flags:
-    - "--dpsi-cutoff"
-    - "--padj-cutoff"
-    legacy_aliases: [bulk-splicing]
-    saves_h5ad: false
-    script: bulkrna_splicing.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- bulkrna
+- splicing
+- alternative-splicing
+- PSI
+- rMATS
+- SUPPA2
 ---
 
-# Bulk RNA-seq Alternative Splicing Analysis
+# bulkrna-splicing
 
-Alternative splicing quantification and differential splicing event detection. Accepts pre-computed splicing event tables (e.g. from rMATS or SUPPA2), computes PSI-based statistics, identifies significant differential splicing events, and produces publication-ready visualizations.
+## When to use
 
-## CLI Reference
+Run AFTER rMATS or SUPPA2 has produced its splicing-event table — this
+skill consumes that output (not raw alignments).  Computes per-event
+ΔPSI (delta percent-spliced-in), flags events crossing significance and
+ΔPSI thresholds, and groups results by event type (SE / A3SS / A5SS /
+MXE / RI).
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Splicing event table | `.csv` from rMATS or SUPPA2 (event_id, type, ΔPSI, p-value cols) | yes (or `--demo`) |
+| `--dpsi-cutoff` | float | default `0.1` (events with abs ΔPSI ≥ this) |
+| `--padj-cutoff` | float | default `0.05` (significance threshold) |
+
+| Output | Path | Notes |
+|---|---|---|
+| All events | `tables/splicing_events.csv` | full annotated event table |
+| Significant events | `tables/significant_events.csv` | filtered by `--dpsi-cutoff` and `--padj-cutoff` |
+| ΔPSI distribution | `figures/dpsi_distribution.png` | histogram with cutoff lines |
+| Event-type breakdown | `figures/event_type_distribution.png` | SE / A3SS / A5SS / MXE / RI counts |
+| Volcano | `figures/volcano_splicing.png` | ΔPSI vs -log10(padj) |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load splicing event table.  Hard-fail at `bulkrna_splicing.py:365,368` on missing or invalid `--input`.
+2. Validate the fixed input schema: must contain columns `event_type, gene, delta_psi, padj` (`bulkrna_splicing.py:153-155`).  No format detection — caller must pre-flatten rMATS / SUPPA2 output to this schema.
+3. Filter by `--dpsi-cutoff` AND `--padj-cutoff`.
+4. Group by event type; render distribution + volcano + bar plots.
+5. Emit `tables/splicing_events.csv` (full) + `tables/significant_events.csv` (filtered) + report.
+
+## Gotchas
+
+- **This skill consumes the SPLICING TABLE, not BAM or FASTQ.**  Run rMATS or SUPPA2 upstream and feed their output here.  The wrapper does not perform splicing detection itself — feeding it BAM files raises a parser error or silently produces an empty result.
+- **`--dpsi-cutoff` is the ABSOLUTE value of ΔPSI.**  Default `0.1` keeps events with `|ΔPSI| ≥ 0.1`, including both inclusion-up and inclusion-down.  Set to `0` to keep all directionally significant events.
+- **Input schema is fixed: `event_type, gene, delta_psi, padj` (with optional `pvalue` and `event_id`).**  The script does NOT auto-detect rMATS vs SUPPA2 column conventions — if your input uses rMATS's `IncLevelDifference`/`FDR` or SUPPA2's `dPSI`/`pval` natively, rename columns first or the loader will silently drop your data.
+- **Event-type breakdown depends on the upstream tool's classification.**  rMATS reports SE / A3SS / A5SS / MXE / RI as separate files; SUPPA2 uses an EVENT field.  Concatenate / re-label these into a single `event_type` column before feeding the skill, or the breakdown bar chart under-counts.
+
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-splicing --demo
-python omicsclaw.py run bulkrna-splicing --input <splicing_events.csv> --output <dir>
-python bulkrna_splicing.py --input events.csv --output results/ --dpsi-cutoff 0.1 --padj-cutoff 0.05
-python bulkrna_splicing.py --demo --output /tmp/splicing_demo
+python omicsclaw.py run bulkrna-splicing \
+  --input rmats_se.csv --output results/
+python omicsclaw.py run bulkrna-splicing \
+  --input suppa2_events.csv --output results/ \
+  --dpsi-cutoff 0.2 --padj-cutoff 0.01
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: Researchers must manually parse rMATS/SUPPA2 output files, compute delta-PSI statistics, apply multiple-testing correction, and create splicing-specific visualizations across thousands of events.
-- **With it**: A single Python command summarizes splicing events by type, identifies significant differential splicing, and produces volcano plots and event-type distributions ready for publication.
-- **Why OmicsClaw**: Wraps standard alternative splicing analysis into the OmicsClaw reporting framework with consistent output structure, reproducibility scripts, and automatic demo data generation.
-
-## Algorithm / Methodology
-
-### Splicing Event Types
-
-| Abbreviation | Event Type | Description |
-|---|---|---|
-| SE | Skipped Exon | An exon is included or excluded from the transcript |
-| A5SS | Alternative 5' Splice Site | Two or more 5' splice sites for the same exon |
-| A3SS | Alternative 3' Splice Site | Two or more 3' splice sites for the same exon |
-| MXE | Mutually Exclusive Exons | One of two exons is included, not both |
-| RI | Retained Intron | An intron is retained in the mature transcript |
-
-### PSI Quantification
-
-Percent Spliced In (PSI) measures the fraction of transcripts that include a given exon or splice site:
-
-```
-PSI = inclusion_reads / (inclusion_reads + exclusion_reads)
-```
-
-Delta-PSI (dPSI) between conditions:
-
-```
-dPSI = PSI_treatment - PSI_control
-```
-
-### Statistical Testing
-
-- **Per-event t-test**: Welch's t-test on PSI replicates between conditions
-- **Multiple testing correction**: Benjamini-Hochberg FDR
-- **Significance thresholds**: |dPSI| > cutoff AND padj < cutoff
-
-### Upstream Tools
-
-This skill operates on pre-computed splicing event tables produced by:
-
-- **rMATS** (replicate Multivariate Analysis of Transcript Splicing) — detects differential alternative splicing from replicate RNA-seq data
-- **SUPPA2** — fast quantification of splicing events from transcript-level TPMs
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | — | Path to splicing events CSV |
-| `--output` | — | Output directory (required) |
-| `--demo` | — | Run with synthetic demo data |
-| `--dpsi-cutoff` | `0.1` | Absolute delta-PSI threshold for significance |
-| `--padj-cutoff` | `0.05` | Adjusted p-value threshold for significance |
-
-## Workflow
-
-1. **Load**: Read a splicing events table (CSV with event_id, event_type, gene, psi_ctrl, psi_treat, delta_psi, pvalue, padj columns).
-2. **Summarize**: Count events by type, compute overall statistics.
-3. **Filter**: Identify significant differential splicing events by |dPSI| and adjusted p-value thresholds.
-4. **Visualize**: Generate event type distribution (pie chart), delta-PSI histogram, and splicing volcano plot.
-5. **Report**: Write markdown report, result.json, full and filtered event tables, and a reproducibility script.
-
-## Example Queries
-
-- "Analyze alternative splicing events from my rMATS output"
-- "Find significant differential splicing between conditions"
-- "Show me the distribution of splicing event types"
-- "Run splicing analysis with a delta-PSI cutoff of 0.15"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── event_type_distribution.png
-│   ├── dpsi_distribution.png
-│   └── volcano_splicing.png
-├── tables/
-│   ├── splicing_events.csv
-│   └── significant_events.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Safety
-
-- **Local-first**: All processing runs locally; no data is uploaded to external services.
-- **Disclaimer**: Every report includes the standard OmicsClaw disclaimer.
-- **Audit trail**: Parameters, thresholds, and input metadata are recorded in result.json.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked when user intent matches alternative splicing analysis keywords.
-
-**Chaining partners**:
-- `bulkrna-qc` — Upstream: count matrix QC
-- `bulkrna-de` — Parallel: gene-level differential expression to complement exon-level splicing
-- `bulkrna-enrichment` — Downstream: pathway enrichment of genes with significant splicing changes
-
-## Version Compatibility
-
-Reference examples tested with: scipy 1.11+, pandas 2.0+, numpy 1.24+, matplotlib 3.7+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, matplotlib
-
-## Citations
-
-- [rMATS](https://doi.org/10.1073/pnas.1419161111) — Shen et al., PNAS 2014
-- [SUPPA2](https://doi.org/10.1101/gr.213454.116) — Trincado et al., Genome Research 2018
-- [Benjamini-Hochberg](https://doi.org/10.1111/j.2517-6161.1995.tb02031.x) — Benjamini & Hochberg, JRSSB 1995
-
-## Related Skills
-
-- `bulkrna-qc` — Count matrix QC upstream
-- `bulkrna-de` — Gene-level differential expression
-- `bulkrna-enrichment` — Pathway enrichment of affected genes
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — rMATS vs SUPPA2 format conventions, event-type taxonomy
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-de` (parallel: gene-level DE, complements exon-level splicing), `bulkrna-enrichment` (downstream: pathway view of splicing-affected genes via gene-symbol mapping)

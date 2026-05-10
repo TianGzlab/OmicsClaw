@@ -1,0 +1,17 @@
+domain: bulkrna
+emoji: 🧩
+trigger_keywords:
+- bulk deconvolution
+- cell type proportion
+- NNLS
+- CIBERSORTx
+- bulk deconv
+- cell fraction
+allowed_extra_flags:
+- --reference
+legacy_aliases:
+- bulk-deconv
+saves_h5ad: false
+script: bulkrna_deconvolution.py
+param_hints: {}
+requires_preprocessed: false

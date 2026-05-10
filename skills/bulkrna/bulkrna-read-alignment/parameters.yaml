@@ -1,0 +1,19 @@
+domain: bulkrna
+emoji: 🧬
+trigger_keywords:
+- RNA-seq alignment
+- STAR
+- HISAT2
+- Salmon
+- mapping rate
+- read alignment
+- alignment QC
+allowed_extra_flags:
+- --method
+- --species
+legacy_aliases:
+- bulk-align-reads
+saves_h5ad: false
+script: bulkrna_read_alignment.py
+param_hints: {}
+requires_preprocessed: false
