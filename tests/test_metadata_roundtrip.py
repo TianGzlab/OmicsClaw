@@ -142,6 +142,35 @@ def test_runtime_contract_roundtrips(tmp_path: Path, name: str, spec: dict) -> N
     assert fm.param_hints == sc.param_hints, "param_hints"
 
 
+def test_bulkrna_de_real_skill_roundtrips(tmp_path: Path) -> None:
+    """Fixture mirroring the production skills/bulkrna/bulkrna-de runtime
+    contract.  If a future maintainer changes the bulkrna-de sidecar in a way
+    that diverges from the legacy frontmatter, this test fails — guarding
+    PR #1's pilot migration permanently."""
+    spec = {
+        "domain": "bulkrna",
+        "script": "bulkrna_de.py",
+        "saves_h5ad": False,
+        "requires_preprocessed": False,
+        "trigger_keywords": [
+            "differential expression", "DE analysis", "DESeq2",
+            "volcano plot", "fold change", "DEGs", "bulk DE",
+        ],
+        "legacy_aliases": ["bulk-de"],
+        "allowed_extra_flags": [
+            "--control-prefix", "--lfc-cutoff", "--method",
+            "--padj-cutoff", "--treat-prefix",
+        ],
+        "param_hints": {},
+    }
+    fm = LazySkillMetadata(_frontmatter_form(tmp_path, "bulkrna-de", spec))
+    sc = LazySkillMetadata(_sidecar_form(tmp_path, "bulkrna-de", spec))
+    assert fm.allowed_extra_flags == sc.allowed_extra_flags == set(spec["allowed_extra_flags"])
+    assert fm.trigger_keywords == sc.trigger_keywords == spec["trigger_keywords"]
+    assert fm.legacy_aliases == sc.legacy_aliases == spec["legacy_aliases"]
+    assert fm.param_hints == sc.param_hints == {}
+
+
 def test_param_hints_preserve_advanced_params(tmp_path: Path) -> None:
     """bot/skill_orchestration.py reads tip_info['advanced_params'] — make
     sure roundtrip preserves it byte-for-byte (not coerced to a different
