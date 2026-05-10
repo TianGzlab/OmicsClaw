@@ -2578,15 +2578,6 @@ def _get_review_log():
         raise HTTPException(503, detail=f"Memory system unavailable: {exc}")
 
 
-def _get_graph_service():
-    """Return GraphService, raising 503 if the memory module is not available."""
-    try:
-        from omicsclaw.memory import get_graph_service
-        return get_graph_service()
-    except Exception as exc:
-        raise HTTPException(503, detail=f"Memory graph service unavailable: {exc}")
-
-
 def _get_glossary_service():
     """Return GlossaryService, raising 503 if the memory module is not available."""
     try:
@@ -2965,16 +2956,12 @@ async def memory_recent(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        # Desktop UI mode: route through GraphService directly with
-        # include_shared=True so user-customized core://agent/* rows
-        # surface alongside per-namespace rows. The strict
-        # MemoryClient.get_recent is reserved for multi-tenant bot
-        # surfaces where shared bleed-through would be wrong.
-        graph = _get_graph_service()
-        results = await graph.get_recent_memories(
-            limit=limit,
-            namespace=_memory_client.namespace,
-            include_shared=True,
+        # Desktop UI mode: include_shared=True surfaces user-customised
+        # core://agent/* alongside per-namespace rows. Multi-tenant bot
+        # surfaces use the default (strict) so one user's shared writes
+        # don't bleed into another's view.
+        results = await _memory_client.get_recent(
+            limit=limit, include_shared=True
         )
         return {"results": results, "count": len(results)}
     except Exception as exc:
