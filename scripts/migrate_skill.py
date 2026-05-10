@@ -42,7 +42,8 @@ METHODOLOGY_HEADINGS = (
     "lfc shrinkage", "transformation guidance", "core capabilities",
     "input formats", "version compatibility", "dependencies",
 )
-OUTPUT_HEADINGS = ("output structure", "output schema", "outputs", "result")
+OUTPUT_HEADINGS = ("output structure", "output schema", "output contract",
+                   "outputs", "result")
 R_VIZ_HEADINGS = ("r enhanced", "r visualization", "r visualisation", "replot")
 SAFETY_HEADINGS = ("safety",)
 DROP_HEADINGS = ("citations", "related skills", "example queries",
@@ -215,7 +216,12 @@ def _write_references(skill_dir: Path, legacy_body: str, sidecar: dict) -> None:
         if not heading:
             continue  # preamble — leave it; the new SKILL.md owns the lead-in
         bucket = _classify_heading(heading)
-        if bucket in buckets:
+        if bucket == "safety":
+            # "Safety And Guardrails" content carries real failure-mode info
+            # that the maintainer will likely promote to ## Gotchas.  Route
+            # it into methodology rather than silently drop.
+            buckets["methodology"].append(content)
+        elif bucket in buckets:
             buckets[bucket].append(content)
 
     skill_md = skill_dir / "SKILL.md"

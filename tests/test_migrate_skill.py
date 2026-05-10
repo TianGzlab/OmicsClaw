@@ -197,6 +197,50 @@ def test_gotcha_candidates_mined(tmp_path: Path) -> None:
     assert "falls back" in gotchas.lower() or "no replicates" in gotchas.lower()
 
 
+def test_output_contract_heading_routes_to_output_contract_md(tmp_path: Path) -> None:
+    """Legacy SKILL.md often uses `## Output Contract` as the heading; the
+    bucketing must route it to references/output_contract.md (not silently
+    let it fall through to methodology)."""
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    body = (
+        "# Demo\n\n"
+        "## Output Contract\n\n"
+        "- `tables/de_full.csv`\n"
+        "- `report.md`\n\n"
+        "## Algorithm\n\nSteps.\n"
+    )
+    (skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(LEGACY_FRONTMATTER, sort_keys=False) + "---\n\n" + body,
+        encoding="utf-8",
+    )
+    migrate_skill.migrate(skill)
+    output_md = (skill / "references" / "output_contract.md").read_text()
+    assert "tables/de_full.csv" in output_md
+    methodology = (skill / "references" / "methodology.md").read_text()
+    assert "tables/de_full.csv" not in methodology  # only in output_contract
+
+
+def test_safety_section_routes_to_methodology(tmp_path: Path) -> None:
+    """`## Safety And Guardrails` carries real failure modes that we want
+    the maintainer to promote into ## Gotchas — silently dropping it loses
+    information."""
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    body = (
+        "# Demo\n\n"
+        "## Safety And Guardrails\n\n"
+        "Sample_key is statistical design, not cosmetic metadata.\n"
+    )
+    (skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(LEGACY_FRONTMATTER, sort_keys=False) + "---\n\n" + body,
+        encoding="utf-8",
+    )
+    migrate_skill.migrate(skill)
+    methodology = (skill / "references" / "methodology.md").read_text()
+    assert "statistical design" in methodology
+
+
 def test_migration_preserves_unknown_omicsclaw_fields(tmp_path: Path) -> None:
     """Older skills carry decorative fields like `homepage`, `os`, `install`,
     `requires.bins/env/config` that no runtime code reads but a maintainer
