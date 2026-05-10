@@ -1,0 +1,128 @@
+domain: singlecell
+allowed_extra_flags:
+- --gene-set-db
+- --gene-set-from-markers
+- --gene-sets
+- --engine
+- --groupby
+- --gsea-max-size
+- --gsea-min-size
+- --gsea-permutation-num
+- --gsea-ranking-metric
+- --gsea-seed
+- --gsea-weight
+- --marker-group
+- --marker-top-n
+- --method
+- --ora-log2fc-cutoff
+- --ora-max-genes
+- --ora-padj-cutoff
+- --ranking-method
+- --species
+- --top-terms
+- --r-enhanced
+param_hints:
+  ora:
+    priority: gene_sets/gene_set_db/gene_set_from_markers -> engine -> groupby/ranking_method
+    params:
+    - gene_sets
+    - gene_set_db
+    - gene_set_from_markers
+    - marker_group
+    - marker_top_n
+    - engine
+    - groupby
+    - ranking_method
+    advanced_params:
+    - ora_padj_cutoff
+    - ora_log2fc_cutoff
+    - ora_max_genes
+    - species
+    - top_terms
+    defaults:
+      engine: auto
+      ranking_method: wilcoxon
+      ora_padj_cutoff: 0.05
+      ora_log2fc_cutoff: 0.25
+      ora_max_genes: 200
+      species: human
+      top_terms: 18
+    requires:
+    - gene_set_source
+    - normalized_expression_or_upstream_ranking
+    tips:
+    - '--method ora: best for thresholded marker/DE gene lists when you want the most
+      enriched terms quickly.'
+    - If you only provide a processed h5ad, the wrapper can auto-rank cluster markers
+      first using `ranking_method`.
+    - If you already ran `sc-markers` or `sc-de`, passing that output directory lets
+      the wrapper reuse exported rankings.
+  gsea:
+    priority: gene_sets/gene_set_db/gene_set_from_markers -> engine -> groupby/ranking_method
+    params:
+    - gene_sets
+    - gene_set_db
+    - gene_set_from_markers
+    - marker_group
+    - marker_top_n
+    - engine
+    - groupby
+    - ranking_method
+    advanced_params:
+    - gsea_ranking_metric
+    - gsea_min_size
+    - gsea_max_size
+    - gsea_permutation_num
+    - gsea_weight
+    - gsea_seed
+    - species
+    - top_terms
+    defaults:
+      engine: auto
+      ranking_method: wilcoxon
+      gsea_ranking_metric: auto
+      gsea_min_size: 5
+      gsea_max_size: 500
+      gsea_permutation_num: 100
+      gsea_weight: 1.0
+      gsea_seed: 123
+      species: human
+      top_terms: 18
+    requires:
+    - gene_set_source
+    - full_ranked_gene_list
+    tips:
+    - '--method gsea: keeps the full ranking and is better when subtle coordinated
+      shifts matter more than hard DEG thresholds.'
+    - If the input is a filtered marker table, OmicsClaw may rebuild a fuller ranking
+      from `processed.h5ad`.
+    - '`gsea_ranking_metric=auto` prefers `stat`, then `scores`, then `logfoldchanges`.'
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🧭
+homepage: https://github.com/TianGzlab/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: gseapy
+  bins: []
+- kind: pip
+  package: scanpy
+  bins: []
+trigger_keywords:
+- sc enrichment
+- single-cell enrichment
+- GO enrichment
+- KEGG enrichment
+- GSEA
+- ORA
+- pathway enrichment
+script: sc_enrichment.py
+legacy_aliases: []

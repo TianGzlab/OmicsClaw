@@ -1,246 +1,114 @@
 ---
 name: sc-grn
-description: >-
-  Infer gene regulatory networks from scRNA-seq using the pySCENIC workflow:
-  GRNBoost2 for adjacency inference, cisTarget-style motif pruning, and AUCell
-  regulon scoring.
-version: 0.2.0
+description: Load when inferring TF → target gene regulatory networks on a normalised scRNA AnnData via pySCENIC (GRNBoost2 + cisTarget + AUCell) or correlation-based GRN fallback (when arboreto is unavailable, in --demo, or with --allow-simplified-grn). Skip when computing ligand-receptor cell-cell signalling (use sc-cell-communication) or for predicting genetic-KO effects (use sc-in-silico-perturbation).
+version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, grn, pyscenic, regulon, transcription-factor]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--allow-simplified-grn"
-    - "--cluster-key"
-    - "--db"
-    - "--motif"
-    - "--n-jobs"
-    - "--n-top-targets"
-    - "--seed"
-    - "--tf-list"
-    - "--r-enhanced"
-    param_hints:
-      pyscenic_workflow:
-        priority: "tf_list -> db -> motif -> n_top_targets -> n_jobs"
-        params: ["tf_list", "db", "motif", "n_top_targets", "n_jobs", "seed"]
-        defaults: {n_top_targets: 50, n_jobs: 4, seed: 42}
-        requires: ["preprocessed_anndata", "pyscenic", "arboreto", "TF_list", "cisTarget_database",
-          "motif_annotations"]
-        tips:
-        - "--tf-list, --db, and --motif are the core external resources for a full
-          pySCENIC run."
-        - "--n-top-targets: Wrapper-level export cap for the top targets retained
-          per regulon."
-    saves_h5ad: true
-    requires_preprocessed: true
-    requires:
-      bins: [python3]
-      env: []
-      config: []
-    emoji: "S"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux]
-    install:
-    - kind: pip
-      package: pyscenic
-      bins: []
-    trigger_keywords:
-    - grn
-    - gene regulatory
-    - scenic
-    - pyscenic
-    - regulon
-    - transcription factor
-    - grnboost
-    script: sc_grn.py
+tags:
+- singlecell
+- scrna
+- grn
+- gene-regulatory-network
+- scenic
+- pyscenic
+- grnboost2
+- aucell
+- cistarget
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# Single-Cell GRN
+# sc-grn
 
-## Why This Exists
+## When to use
 
-- Without it: regulon analysis requires several external resources and multi-step orchestration.
-- With it: pySCENIC-style GRN outputs are standardized into one wrapper contract.
-- Why OmicsClaw: tables, figures, and AnnData outputs are bundled together.
+The user has a normalised scRNA AnnData (cluster labels in
+`obs[--cluster-key]`, default `leiden`) and wants gene regulatory
+network inference: TFs → target genes plus per-cell regulon activity
+scores. Two paths:
 
-## Core Capabilities
+- **Full SCENIC pipeline** (when `--tf-list` + `--db` + `--motif` are
+  all provided): GRNBoost2 co-expression → cisTarget motif enrichment
+  + pruning → AUCell scoring per cell. Produces motif-validated
+  regulons; AUCell activity is exposed as **per-TF `obs["regulon_<TF>"]` columns** (one float column per regulon) plus `tables/grn_auc_matrix.csv`.
+- **Correlation fallback** (when external resources are missing AND
+  `--allow-simplified-grn` is set, or in `--demo`): adjacency-only
+  output, no motif validation, no AUCell. Useful for sanity checks
+  but NOT a substitute for the full pipeline.
 
-1. **Implementation-aligned pySCENIC workflow**: adjacency inference, motif pruning, and regulon scoring.
-2. **Explicit external-resource contract**: TF list, cisTarget databases, and motif annotations are surfaced as real prerequisites.
-3. **Regulon-centric outputs**: adjacency, regulon, target, and AUCell tables.
-4. **Direct figure exports**: regulon activity UMAP, regulon heatmap, and network plot.
-5. **Downstream-ready export**: writes `adata_with_grn.h5ad`, report, result JSON, README, and notebook artifacts.
+For ligand-receptor / cell-cell communication use
+`sc-cell-communication`. For in-silico KO predictions use
+`sc-in-silico-perturbation` (which builds a simpler GRN internally).
 
-## Scope Boundary
+## Inputs & Outputs
 
-This skill currently exposes one public workflow: `pyscenic_workflow`.
+| Input | Format | Required |
+|---|---|---|
+| Normalised AnnData | `.h5ad` with `obs[--cluster-key]` | yes (unless `--demo`) |
+| TF list | `.txt` (one TF per line, `--tf-list`) | required for full SCENIC |
+| cisTarget DB | glob pattern (`--db`) | required for full SCENIC |
+| Motif annotations | TSV (`--motif`) | required for full SCENIC |
 
-That workflow covers:
+| Output | Path | Notes |
+|---|---|---|
+| AnnData | `processed.h5ad` | adds per-regulon `obs["regulon_<TF>"]` columns (one per TF when AUCell ran, `sc_grn.py:850`) plus contract metadata. **Note:** AUCell scores live in `obs`, NOT `obsm` — there is no `obsm["X_aucell"]`. |
+| All adjacencies | `tables/grn_adjacencies.csv` | TF → target with importance score (always when GRNBoost2 ran) |
+| Regulon summary | `tables/grn_regulons.csv` | per-TF target count + motif NES |
+| TF → target pairs | `tables/grn_regulon_targets.csv` | flattened list |
+| AUCell activity | `tables/grn_auc_matrix.csv` | when AUCell ran (full SCENIC) |
+| Figures | `figures/regulon_activity_umap.png`, `figures/regulon_heatmap.png`, `figures/regulon_network.png` | best-effort |
+| Report | `report.md` + `result.json` | always |
 
-1. GRNBoost2 adjacency inference
-2. motif-based pruning
-3. AUCell regulon scoring
+## Flow
 
-## Input Formats
+1. Load AnnData (`--input`) or build a synthetic demo (GRNBoost2-only).
+2. Preflight: when running the full pipeline, verify `--tf-list` / `--db` / `--motif` exist; demo / `--allow-simplified-grn` skip the resource check.
+3. Try GRNBoost2 (arboreto) for co-expression adjacencies; if `arboreto` is not installed OR returns empty, **silently fall back to correlation-based adjacencies** and record `result.json["used_fallback"]=True` + `fallback_reason`.
+4. With full resources: run cisTarget motif enrichment + pruning → AUCell scoring per cell.
+5. Detect degenerate output (zero regulons / TFs) → write troubleshooting block; do NOT raise.
+6. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
 
-| Format | Extension / form | Current wrapper support | Notes |
-|--------|------------------|-------------------------|-------|
-| AnnData | `.h5ad` | preferred | most realistic path for preprocessed scRNA-seq |
-| Shared-loader formats | `.h5`, `.loom`, `.csv`, `.tsv`, 10x directory | technically loadable | usually still need preprocessing and external GRN resources |
-| Demo | `--demo` | yes | bundled lightweight fallback |
+## Gotchas
 
-### Input Expectations
+- **Silent fallback to correlation GRN when `arboreto` is missing or fails.** `sc_grn.py:631` catches `ImportError` for arboreto, sets `used_fallback=True`, `fallback_reason="arboreto package not installed"`; `:639-647` catches general exceptions / empty results with `fallback_reason` set accordingly. The fallback adjacency-only mode skips motif validation AND AUCell — `tables/grn_auc_matrix.csv` won't be written. The persisted `result.json["used_fallback"]` is set in the top-level summary at `sc_grn.py:859` (line 696 is inside the `run_grn_demo` return dict that feeds it).
+- **`--input` is `parser.error` (exit code 2), not `ValueError`.** `sc_grn.py:735` calls `parser.error("--input required when not using --demo")`. Once `--input` is given, `:738` raises `FileNotFoundError(f"Input file not found: {input_path}\nProvide a valid preprocessed .h5ad file, or use --demo for a quick test.")` for a missing path.
+- **Full SCENIC needs ALL THREE external resources.** `--tf-list` + `--db` + `--motif` must be provided together; the preflight at `sc_grn.py:749-758` enforces this unless `--demo` or `--allow-simplified-grn` bypasses. Resources must be downloaded separately (cisTarget DBs from `https://resources.aertslab.org/cistarget/`).
+- **Two distinct degenerate-output modes.** *Total failure* (`result is None`): `sc_grn.py:805/:826` writes the degenerate-diag block and **calls `sys.exit(1)`** at `:833` (caller wrappers expecting a 0 exit will see a hard fail). *Partial degeneracy* (`_check_degenerate_output` returns a non-None diagnostic with regulons-but-uninformative): the script proceeds to a soft-warn finish and exits 0. Always check `result.json["n_regulons"]` (line 857) AND the process exit code before chaining downstream.
+- **`processed.h5ad` per-regulon `obs["regulon_<TF>"]` columns only exist when AUCell ran.** In the correlation-fallback or no-motif path, `processed.h5ad` is essentially the input AnnData with contract metadata only — no `regulon_*` `obs` columns and no `tables/grn_auc_matrix.csv`. Downstream skills consuming regulon activity must check for the columns' presence first.
+- **`--cluster-key` defaults to `leiden`.** `sc_grn.py:716` defaults to `leiden`. If the AnnData has labels under a different key (e.g., `cell_type`), pass `--cluster-key cell_type` so the per-cluster regulon-activity heatmap is meaningful.
 
-- The current skill expects a preprocessed scRNA-seq object.
-- Required external resources: TF list, cisTarget database files, and motif annotations.
-- The wrapper does not automatically fetch pySCENIC resources for the user.
-
-## Workflow
-
-1. Load preprocessed expression data.
-2. Run adjacency inference.
-3. Prune candidate targets with motif evidence.
-4. Score regulon activity per cell.
-5. Export `adata_with_grn.h5ad`, tables, figures, `report.md`, and `result.json`.
-
-## CLI Reference
-
-```bash
-python omicsclaw.py run sc-grn \
-  --input <processed.h5ad> \
-  --tf-list <tfs.txt> \
-  --db '<db_glob>' \
-  --motif <motif.tbl> \
-  --output <dir>
-```
-
-## Public Parameters
-
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--tf-list` | transcription-factor list | core prerequisite for adjacency inference |
-| `--db` | cisTarget database selector | usually a glob or database path |
-| `--motif` | motif annotation table | required for pruning |
-| `--n-top-targets` | wrapper-level export cap | limits exported targets per regulon |
-| `--n-jobs` | parallelism control | runtime knob for pySCENIC steps |
-| `--seed` | reproducibility control | affects stochastic components |
-
-## Algorithm / Methodology
-
-Current OmicsClaw `pyscenic_workflow` runs:
-
-1. GRNBoost2 adjacency inference from expression data
-2. motif-based pruning using the supplied cisTarget and motif resources
-3. AUCell regulon scoring per cell
-4. export of regulon activity and target summaries back into the output AnnData
-
-Important implementation notes:
-
-- `n_top_targets` is a wrapper-level export control, not a full pySCENIC science knob.
-- Resource availability matters more than fine parameter tuning for first-pass success.
-
-## Output Contract
-
-Successful runs write:
-
-- `adata_with_grn.h5ad`
-- `report.md`
-- `result.json`
-- `tables/grn_adjacencies.csv`
-- `tables/grn_regulons.csv`
-- `tables/grn_regulon_targets.csv`
-- `tables/grn_auc_matrix.csv`
-- `figures/`
-
-### Visualization Contract
-
-The current wrapper writes direct figure outputs rather than a recipe-driven gallery:
-
-- `figures/regulon_activity_umap.png`
-- `figures/regulon_heatmap.png`
-- `figures/regulon_network.png`
-
-### What Users Should Inspect First
-
-1. `report.md`
-2. `tables/grn_regulons.csv`
-3. `figures/regulon_activity_umap.png`
-4. `tables/grn_auc_matrix.csv`
-5. `adata_with_grn.h5ad`
-
-## Current Limitations
-
-- This skill depends on external pySCENIC resources and does not download them automatically.
-- The shared runner adds top-level README and notebook-style reproducibility artifacts when notebook export dependencies are available.
-
-## Safety And Guardrails
-
-- Verify the TF list, cisTarget databases, and motif annotations before promising a full run.
-- Do not present `n_top_targets` as a full pySCENIC science parameter; it is a wrapper-level export control.
-- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-grn-guardrails.md`.
-- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-grn.md`.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | None | Input AnnData file (`.h5ad`) | Required unless `--demo` |
-| `--output` | str | — | Output directory | Required |
-| `--demo` | flag | off | Run with built-in demo data (GRNBoost2 only) | — |
-| `--tf-list` | str | None | TF list file (one TF gene symbol per line) | Optional; required for full pySCENIC run |
-| `--db` | str | None | cisTarget database glob pattern | Optional; required for motif pruning |
-| `--motif` | str | None | Motif annotations file (`.tbl`) | Optional; required for motif pruning |
-| `--n-top-targets` | int | 50 | Maximum targets exported per regulon | Wrapper-level cap, not a pySCENIC science knob |
-| `--n-jobs` | int | 4 | Number of parallel jobs for pySCENIC steps | — |
-| `--seed` | int | 42 | Random seed for reproducibility | — |
-| `--cluster-key` | str | `leiden` | `adata.obs` column for cell grouping in figures | — |
-| `--allow-simplified-grn` | flag | off | Accept correlation-based GRN fallback when no TF/database/motif files are provided | Enables `demo_mode` logic without `--demo` |
-| `--r-enhanced` | flag | off | Generate R Enhanced plots (requires R + ggplot2) | — |
-
-## R Enhanced Plots
-
-| Renderer | Output file | Description |
-|----------|-------------|-------------|
-| `plot_embedding_discrete` | `figures/r_enhanced/r_embedding_discrete.png` | UMAP colored by discrete cluster labels |
-| `plot_embedding_feature` | `figures/r_enhanced/r_embedding_feature.png` | UMAP colored by a continuous feature (AUC score) |
-
-## Special Requirements
-
-### External pySCENIC Database Files
-
-A full pySCENIC run with motif enrichment requires three external resource files that OmicsClaw does **not** download automatically:
-
-| Resource | Flag | Example download |
-|----------|------|-----------------|
-| TF list (one TF per line) | `--tf-list` | `wget https://raw.githubusercontent.com/aertslab/pySCENIC/master/resources/hs_hgnc_tfs.txt` |
-| cisTarget database (`.feather`) | `--db` | See `https://resources.aertslab.org/cistarget/` |
-| Motif annotations (`.tbl`) | `--motif` | `wget https://resources.aertslab.org/cistarget/motif2tf/motifs-v9-nr.hgnc-m0.001-o0.0.tbl` |
-
-Store downloaded files under `examples/databases/motifs/` or provide explicit paths via the flags above.
-
-### Simplified / Fallback Mode
-
-When `--tf-list`, `--db`, and `--motif` are all absent **and** `--allow-simplified-grn` is passed, the wrapper accepts a correlation-based fallback GRN (no motif pruning). This is useful for quick exploratory analysis or when pySCENIC databases are not yet available.
+## Key CLI
 
 ```bash
-# Full pySCENIC run
-python omicsclaw.py run sc-grn \
-  --input processed.h5ad \
-  --tf-list hs_hgnc_tfs.txt \
-  --db 'databases/*.feather' \
-  --motif motifs-v9-nr.hgnc-m0.001-o0.0.tbl \
-  --output results/
+# Demo (correlation-based, no external resources)
+python omicsclaw.py run sc-grn --demo --output /tmp/sc_grn_demo
 
-# Simplified fallback (no external databases needed)
+# Full SCENIC pipeline with all 3 external resources
 python omicsclaw.py run sc-grn \
-  --input processed.h5ad \
-  --allow-simplified-grn \
-  --output results/
+  --input clustered.h5ad --output results/ \
+  --tf-list /refs/cistarget/hsapiens_TFs.txt \
+  --db '/refs/cistarget/hg38_*.feather' \
+  --motif /refs/cistarget/motifs-v9-nr.hgnc-m0.001-o0.0.tbl \
+  --n-jobs 8
+
+# Correlation-only (when SCENIC resources unavailable, explicit opt-in)
+python omicsclaw.py run sc-grn \
+  --input clustered.h5ad --output results/ \
+  --allow-simplified-grn
+
+# Custom cluster key + tighter target budget
+python omicsclaw.py run sc-grn \
+  --input annotated.h5ad --output results/ \
+  --tf-list tf.txt --db '/refs/*.feather' --motif motifs.tbl \
+  --cluster-key cell_type --n-top-targets 25
 ```
 
-## Workflow Position
+## See also
 
-**Upstream:** sc-clustering or sc-cell-annotation
-**Downstream:** Terminal analysis.
+- `references/parameters.md` — every CLI flag, resource-format conventions
+- `references/methodology.md` — GRNBoost2 → cisTarget → AUCell flow; correlation-fallback semantics
+- `references/output_contract.md` — per-regulon `obs["regulon_<TF>"]` columns; adjacency / regulon CSV columns
+- Adjacent skills: `sc-clustering` (upstream — produces `obs["leiden"]`), `sc-batch-integration` (upstream — integrated embedding for cleaner co-expression), `sc-cell-communication` (parallel — L-R signalling, NOT TF→target), `sc-in-silico-perturbation` (parallel — predicts KO effects with a smaller internal GRN), `sc-pathway-scoring` (parallel — per-cell pathway scores; complementary to AUCell regulon scores)
