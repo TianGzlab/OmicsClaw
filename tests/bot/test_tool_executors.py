@@ -153,6 +153,110 @@ async def test_execute_remember_lands_in_session_namespace(memory_store):
     )
 
 
+@pytest.mark.asyncio
+async def test_execute_remember_preference_update_versions_existing_value(
+    memory_store,
+):
+    """User says 'remember reply in Chinese' then later 'change to English'.
+    Both messages route to ``execute_remember`` with the same
+    ``(memory_type=preference, domain=global, key=language)`` triple but
+    different ``value``. The desktop preference panel must reflect the new
+    value, not the old one.
+
+    Contract:
+      - Exactly one Path row at ``preference/global/language``
+      - Path resolves to a node whose **active** memory carries the new
+        value (``English``)
+      - The old value (``Chinese``) is preserved as a deprecated row in
+        the chain (preference://* lives in VERSIONED_PREFIXES so the
+        rollback UI can restore it)
+
+    Regression: the user reported the desktop preference panel didn't
+    update after the second tool call. If ``execute_remember`` no-ops on
+    the second call (e.g., dedupe on URI without re-reading content) or
+    if the path's edge_id never repoints to the new active memory, the
+    panel keeps showing the stale value.
+    """
+    from bot.tool_executors import execute_remember
+    from omicsclaw.memory.models import Edge, Memory, Path
+
+    session = await memory_store.create_session("alice", "telegram")
+
+    result_v1 = await execute_remember(
+        args={
+            "memory_type": "preference",
+            "domain": "global",
+            "key": "language",
+            "value": "Chinese",
+        },
+        session_id=session.session_id,
+    )
+    assert "✓" in result_v1 or "saved" in result_v1.lower(), (
+        f"v1 save failed: {result_v1!r}"
+    )
+
+    result_v2 = await execute_remember(
+        args={
+            "memory_type": "preference",
+            "domain": "global",
+            "key": "language",
+            "value": "English",
+        },
+        session_id=session.session_id,
+    )
+    assert "✓" in result_v2 or "saved" in result_v2.lower(), (
+        f"v2 save failed: {result_v2!r}"
+    )
+
+    async with memory_store._db.session() as s:
+        path_rows = (
+            await s.execute(
+                sa.select(Path).where(
+                    Path.domain == "preference",
+                    Path.path == "global/language",
+                    Path.namespace == "telegram/alice",
+                )
+            )
+        ).scalars().all()
+        assert len(path_rows) == 1, (
+            f"Expected exactly one preference/global/language path; got "
+            f"{len(path_rows)}. The bot is creating a sibling instead of "
+            f"updating in place."
+        )
+
+        edge = (
+            await s.execute(sa.select(Edge).where(Edge.id == path_rows[0].edge_id))
+        ).scalar_one()
+
+        memories = (
+            await s.execute(
+                sa.select(Memory)
+                .where(Memory.node_uuid == edge.child_uuid)
+                .order_by(Memory.id)
+            )
+        ).scalars().all()
+
+    active = [m for m in memories if not m.deprecated]
+    assert len(active) == 1, (
+        f"Expected exactly one active memory after the second remember; "
+        f"got {len(active)}. Active rows: "
+        f"{[(m.id, m.deprecated, m.content[:60]) for m in active]}"
+    )
+    assert "English" in active[0].content, (
+        f"Active preference still has the old value. Active content: "
+        f"{active[0].content!r} (expected 'English' to appear). This is "
+        f"the user-visible bug: the desktop panel keeps showing Chinese "
+        f"after the user asks the bot to switch to English."
+    )
+
+    deprecated = [m for m in memories if m.deprecated]
+    assert len(deprecated) == 1, (
+        f"Expected exactly one deprecated memory (the prior Chinese row "
+        f"so the rollback UI can restore it); got {len(deprecated)}."
+    )
+    assert "Chinese" in deprecated[0].content
+
+
 def test_tool_executors_dispatch_table_lists_all_24_executors():
     """``_available_tool_executors()`` returns the full dispatch map.
     The lazy ``bot.core.TOOL_EXECUTORS`` attribute also adds the
