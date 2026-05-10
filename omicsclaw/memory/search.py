@@ -21,9 +21,12 @@ from .models import (
     escape_like_literal,
 )
 from .search_terms import build_document_search_terms, expand_query_terms
+from .uri import MemoryURI
 
 if TYPE_CHECKING:
     from .database import DatabaseManager
+
+SHARED_NAMESPACE = "__shared__"
 
 
 class SearchIndexer:
@@ -117,15 +120,29 @@ class SearchIndexer:
         if not path_rows:
             return []
 
-        keyword_rows = await session.execute(
-            select(GlossaryKeyword.keyword)
-            .where(GlossaryKeyword.node_uuid == node_uuid)
-            .order_by(GlossaryKeyword.keyword)
-        )
-        glossary_text = " ".join(row[0] for row in keyword_rows if row[0])
+        # Glossary keywords are partitioned by namespace; for each search
+        # row we include only keywords visible from its namespace, i.e. the
+        # row's own namespace plus the global ``__shared__`` namespace.
+        keyword_rows = (
+            await session.execute(
+                select(GlossaryKeyword.keyword, GlossaryKeyword.namespace)
+                .where(GlossaryKeyword.node_uuid == node_uuid)
+                .order_by(GlossaryKeyword.namespace, GlossaryKeyword.keyword)
+            )
+        ).all()
+        keyword_by_ns: Dict[str, List[str]] = {}
+        for kw, ns in keyword_rows:
+            if not kw:
+                continue
+            keyword_by_ns.setdefault(ns, []).append(kw)
 
         documents = []
+        shared_keywords = keyword_by_ns.get(SHARED_NAMESPACE, [])
         for row in path_rows:
+            visible = list(keyword_by_ns.get(row.namespace, []))
+            if row.namespace != SHARED_NAMESPACE:
+                visible.extend(shared_keywords)
+            glossary_text = " ".join(visible)
             uri = f"{row.domain}://{row.path}"
             documents.append(
                 {
@@ -199,11 +216,114 @@ class SearchIndexer:
     async def refresh_search_documents_for_node(
         self, node_uuid: str, session: Optional[AsyncSession] = None
     ) -> None:
-        """Rebuild derived search rows for one node."""
+        """Rebuild derived search rows for one node (all namespaces).
+
+        Used when a node's content or structural metadata changed and every
+        path pointing at it needs to be reindexed.
+        """
         async with self._optional_session(session) as session:
             documents = await self._build_search_documents_for_node(session, node_uuid)
             await self._delete_search_documents_for_node(session, node_uuid)
             await self._insert_search_documents(session, documents)
+
+    async def refresh_search_documents_for(
+        self,
+        namespace: str,
+        uri: str | MemoryURI,
+        session: Optional[AsyncSession] = None,
+    ) -> None:
+        """Surgically rebuild ONE search row at (namespace, domain, path).
+
+        Useful when a write touches only a single (namespace, uri) and we
+        don't want to disturb sibling rows for the same node in other
+        namespaces. No-op if the path doesn't exist or has no active memory.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+
+        async with self._optional_session(session) as s:
+            path_row = (
+                await s.execute(
+                    select(Path).where(
+                        Path.namespace == namespace,
+                        Path.domain == parsed.domain,
+                        Path.path == parsed.path,
+                    )
+                )
+            ).scalar_one_or_none()
+            if path_row is None:
+                return
+
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is None:
+                return
+
+            memory = (
+                await s.execute(
+                    select(Memory)
+                    .where(
+                        Memory.node_uuid == edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                    .order_by(Memory.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                return
+
+            keyword_rows = (
+                await s.execute(
+                    select(GlossaryKeyword.keyword)
+                    .where(
+                        GlossaryKeyword.node_uuid == edge.child_uuid,
+                        GlossaryKeyword.namespace.in_(
+                            [namespace, SHARED_NAMESPACE]
+                        ),
+                    )
+                    .order_by(GlossaryKeyword.keyword)
+                )
+            ).all()
+            glossary_text = " ".join(row[0] for row in keyword_rows if row[0])
+
+            uri_str = f"{parsed.domain}://{parsed.path}"
+            doc = {
+                "namespace": namespace,
+                "domain": parsed.domain,
+                "path": parsed.path,
+                "node_uuid": edge.child_uuid,
+                "memory_id": memory.id,
+                "uri": uri_str,
+                "content": memory.content,
+                "disclosure": edge.disclosure,
+                "search_terms": build_document_search_terms(
+                    parsed.path,
+                    uri_str,
+                    memory.content,
+                    edge.disclosure,
+                    glossary_text,
+                ),
+                "priority": edge.priority,
+            }
+
+            if self.db_type == "sqlite":
+                try:
+                    await s.execute(
+                        text(
+                            "DELETE FROM search_documents_fts "
+                            "WHERE namespace = :ns AND domain = :d AND path = :p"
+                        ),
+                        {"ns": namespace, "d": parsed.domain, "p": parsed.path},
+                    )
+                except Exception:
+                    pass
+            await s.execute(
+                delete(SearchDocument).where(
+                    SearchDocument.namespace == namespace,
+                    SearchDocument.domain == parsed.domain,
+                    SearchDocument.path == parsed.path,
+                )
+            )
+            await self._insert_search_documents(s, [doc])
 
     async def get_node_uuids_for_prefix(
         self, session: AsyncSession, domain: str, base_path: str
