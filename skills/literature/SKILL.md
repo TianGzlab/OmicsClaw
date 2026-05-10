@@ -1,120 +1,93 @@
 ---
 name: literature
-description: >-
-  Parse scientific literature (PDFs, URLs, DOIs) to extract GEO accessions,
-  metadata, and datasets. Use when users provide a paper and want to
-  automatically extract data sources for downstream omics analysis.
-version: 0.1.0
+description: Load when extracting GEO accessions, dataset metadata, and downloadable references from a scientific paper (PDF / URL / DOI / PubMed ID / raw text) for downstream omics analysis. Skip when the dataset is already in hand or when only routing a query (use `orchestrator`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [literature, pdf-parsing, geo, pubmed, data-download]
-metadata:
-  omicsclaw:
-    domain: literature
-    requires:
-      bins:
-      - python3
-      env: []
-      config: []
-    emoji: "📄"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux, windows]
-    install:
-    - kind: pip
-      package: pypdf
-      bins: []
-    trigger_keywords:
-    - parse paper
-    - literature
-    - GEO accession
-    - download dataset
-    - PDF extract
-    - PubMed
-    - DOI
-    script: literature_parse.py
-    allowed_extra_flags: []
-    param_hints: {}
-    saves_h5ad: false
-    requires_preprocessed: false
+tags:
+- literature
+- pdf
+- doi
+- pubmed
+- geo
+- metadata
+requires:
+- requests
 ---
 
-# Literature Parsing Skill
+# literature
 
-## Purpose
+## When to use
 
-Parse scientific literature (PDFs, URLs, DOIs) to extract GEO accessions and metadata, then download datasets for downstream omics analysis.
+The user provides a scientific paper reference (PDF path, URL,
+DOI, PubMed ID, or raw text excerpt) and wants OmicsClaw to
+extract GEO accessions, dataset metadata, and (optionally)
+download referenced GEO datasets — so a downstream analysis skill
+can be invoked on real data.
 
-## Methodology
+`--input-type` defaults to `auto` (sniffs from input shape).
+`--no-download` skips the GEO download step (metadata only).
 
-### 1. Input Processing
+For dispatching a NL query to an analysis skill use `orchestrator`.
+For scaffolding a new skill from a paper use `omics-skill-builder`.
 
-Accepts multiple input types:
-- **URL**: PubMed, bioRxiv, journal article links
-- **DOI**: Digital Object Identifier (e.g., 10.1038/s41586-021-03569-1)
-- **PubMed ID**: PMID (e.g., 33234567)
-- **PDF**: Uploaded scientific paper
-- **Text**: Raw text containing GEO references
+## Inputs & Outputs
 
-### 2. Metadata Extraction
+| Input | Format | Required |
+|---|---|---|
+| Reference | `--input <URL\|DOI\|PubMed\|PDF path\|text>` | yes (unless `--demo`) |
+| Input type | `--input-type {auto,url,doi,pubmed,file,text}` (default `auto`) | no |
+| Skip download | `--no-download` (extract metadata only) | no |
+| Data dir | `--data-dir <path>` (default `data/`) | no |
 
-Extracts structured information:
-- **GEO Accessions**: GSE (study-level), GSM (sample-level)
-- **Organism**: Species (e.g., Homo sapiens, Mus musculus)
-- **Tissue**: Tissue type or organ
-- **Cell Type**: Cell type if specified
-- **Technology**: Sequencing platform (10x, Visium, etc.)
+| Output | Path | Notes |
+|---|---|---|
+| Extracted metadata | `output_dir/extracted_metadata.json` | written at `literature_parse.py:80` |
+| Report | `output_dir/report.md` | written at `literature_parse.py:193` |
+| Result envelope | `output_dir/result.json` | written at `literature_parse.py:147` |
+| Downloaded GEO data | `<data-dir>/<GSE...>/...` | only when GEO accessions found AND `--no-download` not set |
 
-### 3. Data Download
+## Flow
 
-Downloads datasets from GEO:
-- Resolves GSE to find all associated GSM samples
-- Downloads expression matrices (.h5ad, .mtx, .csv)
-- Organizes files by accession: `data/GSE123456/`
-- Generates metadata.json with extracted information
+1. Parse `--input` (or `--demo`); raise `parser.error('the following arguments are required: --input (unless --demo is used)')` at `literature_parse.py:38` when missing.
+2. Detect input type (URL / DOI / PubMed / PDF / text) via `--input-type auto` or honour the explicit value.
+3. Call `parse_input` (`skills/literature/core/parser.py`); fetch / parse content.
+4. Call `extract_metadata` (`skills/literature/core/extractor.py`) → identify GEO accessions, dataset metadata, study type.
+5. If GEO accessions found AND not `--no-download`: call `download_geo_dataset` (`skills/literature/core/downloader.py`) → save to `--data-dir`.
+6. Write `extracted_metadata.json` (`literature_parse.py:80`) + `report.md` (`:193`) + `result.json` (`:147`).
 
-### 4. Error Handling
+## Gotchas
 
-- **Retry with fallbacks**: PDF parsing → text extraction → manual patterns
-- **Partial results**: Returns successfully extracted data even if some downloads fail
-- **Logging**: Detailed logs for debugging
+- **`--input` REQUIRED unless `--demo` — uses `parser.error` (exit 2).** `literature_parse.py:38` calls `parser.error('the following arguments are required: --input (unless --demo is used)')`. Different from most file-pipeline skills which raise `ValueError`.
+- **`--input-type auto` heuristics are positional, not URL-aware.** `core/parser.py:35-55` checks the bare-DOI regex `^10\.\d{4,}/\S+` first; URLs always hit the `startswith("http")` branch and resolve to `url`, even when they wrap a DOI (`https://doi.org/10.1038/...`). For PDF / file paths use `--input-type file` explicitly — `Path.exists()` has to succeed for auto-detection to pick `file`.
+- **GEO download requires internet access.** `download_geo_dataset` issues HTTP requests to GEO FTP. Air-gapped runs must pass `--no-download` or the run will hang / time out.
+- **PDF parsing requires `pypdf` / similar.** If the PDF parser dependency is missing, the run errors out — verify `skills/literature/requirements.txt` is satisfied.
+- **`extracted_metadata.json` is at `output_dir/` ROOT, not `tables/`.** This skill does NOT follow the `tables/<file>.csv` convention used by analysis skills.
+- **Empty / unparseable input ⇒ exit 1 (not 2).** `literature_parse.py:64` calls `sys.exit(1)` on internal parse failure (distinct from the `parser.error` exit-2 path for missing args).
 
-## Output
-
-- **data/GSE*/**: Downloaded datasets organized by accession
-- **output/literature-parse_*/report.md**: Extraction report
-- **output/literature-parse_*/metadata.json**: Structured metadata
-
-## Usage
+## Key CLI
 
 ```bash
-# Parse from URL
-python skills/literature/literature_parse.py \
-  --input "https://pubmed.ncbi.nlm.nih.gov/12345" \
-  --output output/literature_results
+# Demo (built-in local text)
+python omicsclaw.py run literature --demo --output /tmp/lit_demo
 
-# Parse from DOI
-python skills/literature/literature_parse.py \
-  --input "10.1038/s41586-021-03569-1" \
-  --input-type doi \
-  --output output/literature_results
+# DOI
+python omicsclaw.py run literature \
+  --input "10.1038/s41586-021-03689-7" --output results/
 
-# Parse PDF
-python skills/literature/literature_parse.py \
-  --input paper.pdf \
-  --input-type file \
-  --output output/literature_results
+# PDF (use --input-type file)
+python omicsclaw.py run literature \
+  --input my_paper.pdf --input-type file --output results/
+
+# URL, metadata-only (no GEO download)
+python omicsclaw.py run literature \
+  --input "https://www.nature.com/articles/..." \
+  --output results/ --no-download
 ```
 
-## Integration
+## See also
 
-After extraction, the bot automatically suggests appropriate analysis skills based on:
-- Data type (spatial, single-cell, bulk)
-- Organism and tissue
-- Available files
-
-## Dependencies
-
-- pypdf: PDF text extraction
-- requests: HTTP requests
-- beautifulsoup4: HTML parsing
-- GEOparse: GEO data access (optional, fallback to direct API)
+- `references/parameters.md` — every CLI flag, input-type heuristics
+- `references/methodology.md` — GEO accession rules, parser fallbacks
+- `references/output_contract.md` — `extracted_metadata.json` schema
+- Adjacent skills: `orchestrator` (downstream — routes the resulting dataset to an analysis skill), `omics-skill-builder` (parallel — scaffold a new skill from a paper)

@@ -1,0 +1,31 @@
+domain: orchestrator
+allowed_extra_flags:
+- --query
+- --routing-mode
+saves_h5ad: false
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🎯
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os:
+- macos
+- linux
+- windows
+install:
+- kind: pip
+  package: pyyaml
+  bins: []
+trigger_keywords:
+- which skill
+- route query
+- what should I run
+- orchestrate
+- pipeline
+- which analysis
+script: omics_orchestrator.py
+param_hints: {}
+requires_preprocessed: false
+legacy_aliases: []
