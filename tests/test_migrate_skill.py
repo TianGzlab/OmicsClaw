@@ -197,6 +197,30 @@ def test_gotcha_candidates_mined(tmp_path: Path) -> None:
     assert "falls back" in gotchas.lower() or "no replicates" in gotchas.lower()
 
 
+def test_gotcha_mining_handles_blockquote_note_form(tmp_path: Path) -> None:
+    """Legacy SKILL.md often uses `> **Note**:` / `> **Important**:` markdown
+    blockquotes for warnings.  The miner must strip the leading `>` whitespace
+    before applying its patterns, otherwise it misses the entire dominant form.
+    """
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    fm = dict(LEGACY_FRONTMATTER)
+    body = (
+        "# Demo\n\n"
+        "## Why\nReason.\n\n"
+        "> **Note**: PyDESeq2 must be run on raw integer counts only.\n\n"
+        "> **Important**: Apply LFC shrinkage outside this skill.\n"
+    )
+    (skill / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(fm, sort_keys=False) + "---\n\n" + body,
+        encoding="utf-8",
+    )
+    migrate_skill.migrate(skill)
+    gotchas = (skill / "_migration" / "gotcha-candidates.md").read_text().lower()
+    assert "raw integer counts" in gotchas
+    assert "lfc shrinkage" in gotchas
+
+
 def test_description_suggestions_emitted(tmp_path: Path) -> None:
     skill = _write_legacy(tmp_path / "demo-skill")
     migrate_skill.migrate(skill)

@@ -195,6 +195,22 @@ def test_sidecar_missing_required_field_fails(tmp_path: Path) -> None:
     assert any("domain" in e for e in errors)
 
 
+def test_section_inside_html_comment_does_not_satisfy_check(tmp_path: Path) -> None:
+    """A required section heading inside an HTML comment should NOT count
+    as the section being present (substring-only matching is wrong)."""
+    body_with_commented_sections = (
+        "# Demo Skill\n\n"
+        "<!-- ## When to use ## Inputs & Outputs ## Flow ## Gotchas "
+        "## Key CLI ## See also -->\n"
+        "Real body content but no actual sections.\n"
+    )
+    skill = _write_v2_skill(tmp_path / "demo", body=body_with_commented_sections)
+    errors = skill_lint.lint_skill(skill)
+    # Each missing section should be flagged.
+    assert any("## When to use" in e for e in errors)
+    assert any("## Gotchas" in e for e in errors)
+
+
 def test_sidecar_flag_must_start_with_double_dash(tmp_path: Path) -> None:
     bad = dict(VALID_SIDECAR)
     bad["allowed_extra_flags"] = ["method"]  # missing --

@@ -82,13 +82,17 @@ def _check_description(description: str) -> list[str]:
 
 def _check_body(body: str) -> list[str]:
     errors: list[str] = []
-    line_count = body.count("\n") + 1
+    line_count = len(body.splitlines())
     if line_count > MAX_BODY_LINES:
         errors.append(
             f"body: exceeds {MAX_BODY_LINES} lines (found {line_count})"
         )
+    # Line-anchored match: a heading must start the line (after optional
+    # whitespace).  Avoids false positives from HTML comments or prose that
+    # quotes a section name inline.
+    body_lines = [ln.lstrip() for ln in body.splitlines()]
     for section in REQUIRED_SECTIONS:
-        if section not in body:
+        if not any(line.startswith(section) for line in body_lines):
             errors.append(f"body: missing required section '{section}'")
     return errors
 

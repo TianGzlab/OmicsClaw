@@ -159,6 +159,113 @@ def test_name_and_description_always_from_frontmatter(tmp_path: Path) -> None:
     assert lazy.description == "Load when the user wants a demo."
 
 
+def test_partial_sidecar_falls_back_per_field_to_frontmatter(tmp_path: Path) -> None:
+    """If parameters.yaml exists but omits a field, lazy_metadata must fall
+    back to the legacy `metadata.omicsclaw` block for THAT field, not silently
+    return the empty default.  This is the realistic mid-migration shape."""
+    skill = _write_skill(
+        tmp_path / "demo-skill",
+        frontmatter={
+            "name": "demo-skill",
+            "description": "Load when demo.",
+            "metadata": {
+                "omicsclaw": {
+                    "domain": "from-frontmatter",
+                    "allowed_extra_flags": ["--legacy-flag"],
+                    "trigger_keywords": ["legacy", "kw"],
+                    "param_hints": {"m": {"params": ["x"], "defaults": {"x": 1}}},
+                    "saves_h5ad": True,
+                }
+            },
+        },
+        sidecar={
+            # Sidecar covers ONLY the bookkeeping fields; runtime/lookup fields
+            # absent here must come from the legacy block above.
+            "domain": "from-sidecar",
+            "script": "demo.py",
+            "requires_preprocessed": False,
+            "legacy_aliases": [],
+        },
+    )
+
+    lazy = LazySkillMetadata(skill)
+
+    # Sidecar wins where it speaks.
+    assert lazy.domain == "from-sidecar"
+    assert lazy.script == "demo.py"
+    # Frontmatter fills the gaps the sidecar left.
+    assert lazy.allowed_extra_flags == {"--legacy-flag"}
+    assert lazy.trigger_keywords == ["legacy", "kw"]
+    assert lazy.param_hints == {"m": {"params": ["x"], "defaults": {"x": 1}}}
+    assert lazy.saves_h5ad is True
+
+
+def test_null_sidecar_collection_fields_do_not_crash(tmp_path: Path) -> None:
+    """A bare `field:` key in YAML parses to None.  lazy_metadata must
+    coerce None -> default for collection fields so callers like
+    `set(lazy.allowed_extra_flags)` and `lazy.param_hints.keys()` don't raise.
+    """
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: Load when demo.\n---\n",
+        encoding="utf-8",
+    )
+    # Bare keys — every collection field is None after yaml.safe_load.
+    (skill / "parameters.yaml").write_text(
+        "domain: demo\n"
+        "script: demo.py\n"
+        "saves_h5ad: false\n"
+        "requires_preprocessed: false\n"
+        "trigger_keywords:\n"
+        "legacy_aliases:\n"
+        "allowed_extra_flags:\n"
+        "param_hints:\n",
+        encoding="utf-8",
+    )
+
+    lazy = LazySkillMetadata(skill)
+
+    # Each access must succeed AND return the empty default of the right type.
+    assert lazy.allowed_extra_flags == set()  # would raise TypeError on None
+    assert lazy.trigger_keywords == []
+    assert lazy.legacy_aliases == []
+    assert lazy.param_hints == {}
+    assert isinstance(lazy.param_hints, dict)
+    assert lazy.param_hints.keys() == set()  # would raise AttributeError on None
+
+
+def test_sidecar_used_even_when_frontmatter_is_unparseable(tmp_path: Path) -> None:
+    """If SKILL.md has malformed/missing frontmatter (stray BOM, missing
+    closing ---), the sidecar must still drive the runtime contract.  Identity
+    fields fall back to safe defaults rather than silently zeroing out the
+    sidecar."""
+    skill = tmp_path / "demo-skill"
+    skill.mkdir()
+    # No frontmatter fences at all.
+    (skill / "SKILL.md").write_text("# Demo\nNo frontmatter here.\n", encoding="utf-8")
+    (skill / "parameters.yaml").write_text(
+        "domain: demo\n"
+        "script: demo.py\n"
+        "saves_h5ad: false\n"
+        "requires_preprocessed: false\n"
+        "trigger_keywords: []\n"
+        "legacy_aliases: []\n"
+        "allowed_extra_flags: ['--foo']\n"
+        "param_hints:\n"
+        "  m:\n"
+        "    params: ['x']\n"
+        "    defaults: {x: 1}\n",
+        encoding="utf-8",
+    )
+
+    lazy = LazySkillMetadata(skill)
+
+    assert lazy.domain == "demo"
+    assert lazy.allowed_extra_flags == {"--foo"}
+    assert lazy.param_hints == {"m": {"params": ["x"], "defaults": {"x": 1}}}
+
+
 def test_no_sidecar_falls_back_to_frontmatter(tmp_path: Path) -> None:
     """Skills without a parameters.yaml continue to read the legacy block."""
     skill = _write_skill(

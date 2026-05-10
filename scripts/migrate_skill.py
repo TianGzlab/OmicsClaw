@@ -54,9 +54,11 @@ DROP_HEADINGS = ("citations", "related skills", "example queries",
 # ---------------------------------------------------------------------------
 
 GOTCHA_PATTERNS = (
+    # Lead-boundary only: many patterns end in `:` which is itself a non-word
+    # character, so a trailing `\b` would never match.
     re.compile(r"\b(falls back to|fallback to|fails when|requires (>=|at least|the)|"
                r"do not|must not|note:|warning:|important:|caveat:?|gotcha:?|"
-               r"only relevant for|incompatible with)\b", re.IGNORECASE),
+               r"only relevant for|incompatible with)", re.IGNORECASE),
 )
 
 
@@ -246,14 +248,25 @@ def _write_references(skill_dir: Path, legacy_body: str, sidecar: dict) -> None:
 # _migration/ aids
 # ---------------------------------------------------------------------------
 
+_EMPHASIS_RE = re.compile(r"\*+|_+")
+
+
+def _normalise_for_mining(line: str) -> str:
+    """Strip markdown blockquote/list/emphasis decoration so pattern
+    matching sees the underlying text.  `> **Note**: ...` is the dominant
+    warning shape across OmicsClaw's legacy SKILL.md files."""
+    line = line.lstrip(" >").strip(" -*")
+    return _EMPHASIS_RE.sub("", line)
+
+
 def _mine_gotchas(legacy_body: str, tests_dir: Path) -> list[str]:
     candidates: list[str] = []
     for line in legacy_body.splitlines():
-        stripped = line.strip(" -*")
-        if not stripped:
+        cleaned = _normalise_for_mining(line)
+        if not cleaned:
             continue
-        if any(p.search(stripped) for p in GOTCHA_PATTERNS):
-            candidates.append(stripped)
+        if any(p.search(cleaned) for p in GOTCHA_PATTERNS):
+            candidates.append(cleaned)
 
     if tests_dir.exists():
         for test_file in tests_dir.glob("test_*.py"):

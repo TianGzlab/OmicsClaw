@@ -188,7 +188,7 @@ class OmicsRegistry:
 
         # Scan domain directories
         for domain_path in target_dir.iterdir():
-            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__')):
+            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__', '_')):
                 continue
 
             domain_name = domain_path.name
@@ -265,7 +265,7 @@ class OmicsRegistry:
             return
 
         for domain_path in target_dir.iterdir():
-            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__')):
+            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__', '_')):
                 continue
 
             candidate_skill_dirs = []

@@ -65,23 +65,24 @@ class LazySkillMetadata:
         return data if isinstance(data, dict) else None
 
     def _load_basic(self):
-        frontmatter = self._parse_frontmatter()
-        if frontmatter is None:
-            self._basic = {}
-            return
+        # Tolerate missing/malformed frontmatter — the sidecar may still hold
+        # the runtime contract.  Identity fields default to safe empties.
+        frontmatter = self._parse_frontmatter() or {}
+        legacy = (frontmatter.get("metadata") or {}).get("omicsclaw") or {}
+        sidecar = self._load_sidecar() or {}
 
-        sidecar = self._load_sidecar()
-        if sidecar is not None:
-            runtime = {
-                key: sidecar.get(key, _RUNTIME_DEFAULTS[key])
-                for key in _RUNTIME_FIELDS
-            }
-        else:
-            omicsclaw_meta = frontmatter.get("metadata", {}).get("omicsclaw", {}) or {}
-            runtime = {
-                key: omicsclaw_meta.get(key, _RUNTIME_DEFAULTS[key])
-                for key in _RUNTIME_FIELDS
-            }
+        # Per-field merge: sidecar wins where it speaks, frontmatter fills
+        # gaps, defaults backstop both.  A bare YAML key (`field:`) parses to
+        # None — treat that as "field absent" so partial migration and
+        # null-valued collections do not crash callers.
+        runtime: dict[str, object] = {}
+        for key in _RUNTIME_FIELDS:
+            value = sidecar.get(key) if sidecar.get(key) is not None else None
+            if value is None:
+                value = legacy.get(key) if legacy.get(key) is not None else None
+            if value is None:
+                value = _RUNTIME_DEFAULTS[key]
+            runtime[key] = value
 
         self._basic = {
             "name": frontmatter.get("name", ""),
