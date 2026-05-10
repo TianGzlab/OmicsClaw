@@ -37,7 +37,15 @@ from typing import TYPE_CHECKING, Optional, Union
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ROOT_NODE_UUID, Edge, Memory, Node, Path, escape_like_literal
+from .models import (
+    ROOT_NODE_UUID,
+    SHARED_NAMESPACE,
+    Edge,
+    Memory,
+    Node,
+    Path,
+    escape_like_literal,
+)
 from .uri import MemoryURI
 
 if TYPE_CHECKING:
@@ -110,9 +118,6 @@ class MemoryRecord:
     uri: str
     content: str
     loaded_namespace: str
-
-
-SHARED_NAMESPACE = "__shared__"
 
 
 class MemoryEngine:
@@ -286,41 +291,56 @@ class MemoryEngine:
 
         return memory.id, node_uuid
 
-    @staticmethod
     async def _resolve_parent_node_uuid(
-        s: AsyncSession, parsed: MemoryURI, namespace: str
+        self, s: AsyncSession, parsed: MemoryURI, namespace: str
     ) -> str:
         """Resolve the parent node UUID for a new path, with shared fallback.
 
         Top-level URIs (``core://agent``, ``analysis://sc-de``) attach to
         ROOT. Nested URIs require the parent path to exist either in the
-        current namespace or in ``__shared__``. Falling back to shared lets
-        a per-user write attach under a globally-known structural parent.
+        current namespace or in ``__shared__`` — falling back to shared
+        lets a per-user write attach under a globally-known parent.
         """
         parent_uri = parsed.parent()
         if parent_uri is None or parent_uri.is_root:
             return ROOT_NODE_UUID
 
-        for ns in (namespace, "__shared__"):
-            parent_path = (
+        uuid = await self._resolve_node_for_uri(s, parent_uri, namespace)
+        if uuid is None:
+            raise ValueError(
+                f"Parent path {parent_uri} does not exist in namespace "
+                f"{namespace!r} or '__shared__' — create the parent first."
+            )
+        return uuid
+
+    @staticmethod
+    async def _resolve_node_for_uri(
+        s: AsyncSession, parsed: MemoryURI, namespace: str
+    ) -> Optional[str]:
+        """Look up the node UUID for ``parsed`` in ``(namespace, __shared__)``.
+
+        Returns the first match's ``child_uuid`` (which is the conceptual
+        node id), or ``None`` if neither namespace has the path. Used by
+        both the write-side parent resolver and the read-side listing
+        parent resolver — see CONTEXT.md for why the loop order matters
+        (per-namespace match wins over a shared one).
+        """
+        for ns in (namespace, SHARED_NAMESPACE):
+            path_row = (
                 await s.execute(
                     select(Path).where(
                         Path.namespace == ns,
-                        Path.domain == parent_uri.domain,
-                        Path.path == parent_uri.path,
+                        Path.domain == parsed.domain,
+                        Path.path == parsed.path,
                     )
                 )
             ).scalar_one_or_none()
-            if parent_path is None:
+            if path_row is None:
                 continue
-            parent_edge = await s.get(Edge, parent_path.edge_id)
-            if parent_edge is not None:
-                return parent_edge.child_uuid
-
-        raise ValueError(
-            f"Parent path {parent_uri} does not exist in namespace "
-            f"{namespace!r} or '__shared__' — create the parent first."
-        )
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is not None:
+                return edge.child_uuid
+        return None
 
     async def upsert_versioned(
         self,
@@ -622,24 +642,15 @@ class MemoryEngine:
     async def _resolve_listing_parent(
         self, s: AsyncSession, parsed: MemoryURI, namespace: str
     ) -> Optional[str]:
-        """Return the parent's child_uuid, or None if the parent doesn't exist.
+        """Return the parent's child_uuid, or ``None`` if the path is missing.
 
-        For root URIs (path=""), returns ROOT_NODE_UUID directly. For
-        non-root URIs, looks the path up in ``namespace`` first, then
-        ``__shared__``. Listing through a missing parent returns no children.
+        For root URIs (path=""), returns ``ROOT_NODE_UUID`` directly.
+        Listing through a missing parent returns no children — strict
+        listings don't fail loudly, they just produce nothing.
         """
         if parsed.is_root:
             return ROOT_NODE_UUID
-
-        for ns in (namespace, SHARED_NAMESPACE):
-            parent_path = await self._fetch_path(s, ns, parsed)
-            if parent_path is None:
-                continue
-            parent_edge = await s.get(Edge, parent_path.edge_id)
-            if parent_edge is not None:
-                return parent_edge.child_uuid
-
-        return None
+        return await self._resolve_node_for_uri(s, parsed, namespace)
 
     async def _materialize_listing(
         self,
@@ -650,28 +661,43 @@ class MemoryEngine:
     ) -> list[MemoryRef]:
         """Turn a list of Path rows into MemoryRef objects.
 
-        Skips rows whose node has no active memory (a deprecated chain
-        with no successor — surfaces nothing rather than a half-result).
+        Shared by ``list_children`` and ``get_subtree``. Active-memory
+        lookup is batched to a single query so a 1000-row subtree pays
+        for 2 queries (one for paths, one for memories) instead of 1001.
+        Rows whose node has no active memory (a deprecated chain with no
+        successor) are silently skipped — surface nothing rather than a
+        half-result.
         """
+        if not path_rows:
+            return []
+
+        unique_uuids = {edge_id_to_child_uuid[p.edge_id] for p in path_rows}
+        memory_rows = (
+            await s.execute(
+                select(Memory.node_uuid, Memory.id).where(
+                    Memory.node_uuid.in_(unique_uuids),
+                    Memory.deprecated == False,  # noqa: E712
+                )
+            )
+        ).all()
+
+        # Pick max id per node — newest active wins on the rare path with
+        # multiple non-deprecated rows (shouldn't happen post-3a but the
+        # code is defensive at minimal cost).
+        active_by_node: dict[str, int] = {}
+        for node_uuid, mid in memory_rows:
+            if mid > active_by_node.get(node_uuid, -1):
+                active_by_node[node_uuid] = mid
+
         results: list[MemoryRef] = []
         for path_row in path_rows:
             child_uuid = edge_id_to_child_uuid[path_row.edge_id]
-            memory = (
-                await s.execute(
-                    select(Memory)
-                    .where(
-                        Memory.node_uuid == child_uuid,
-                        Memory.deprecated == False,  # noqa: E712
-                    )
-                    .order_by(Memory.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if memory is None:
+            memory_id = active_by_node.get(child_uuid)
+            if memory_id is None:
                 continue
             results.append(
                 MemoryRef(
-                    memory_id=memory.id,
+                    memory_id=memory_id,
                     node_uuid=child_uuid,
                     namespace=namespace,
                     uri=f"{path_row.domain}://{path_row.path}",

@@ -18,6 +18,7 @@ from .models import (
     Path,
     GlossaryKeyword,
     SearchDocument,
+    SHARED_NAMESPACE,
     escape_like_literal,
 )
 from .search_terms import build_document_search_terms, expand_query_terms
@@ -25,8 +26,6 @@ from .uri import MemoryURI
 
 if TYPE_CHECKING:
     from .database import DatabaseManager
-
-SHARED_NAMESPACE = "__shared__"
 
 
 class SearchIndexer:
