@@ -1,91 +1,78 @@
 ---
 name: metabolomics-annotation
-description: >-
-  Metabolite annotation and structural identification using SIRIUS, CSI:FingerID,
-  GNPS, or MetFrag.
-version: 0.1.0
+description: Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing real HMDB / KEGG / LipidMaps / METLIN look-up (this skill is demo-only) or for raw spectra (use `metabolomics-xcms-preprocessing` first).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [metabolomics, annotation, SIRIUS, GNPS, MetFrag]
-metadata:
-  omicsclaw:
-    domain: metabolomics
-    emoji: "🏷️"
-    trigger_keywords: [metabolite annotation, SIRIUS, GNPS, MetFrag, spectral matching,
-      metabolite ID]
-    allowed_extra_flags:
-    - "--method"
-    legacy_aliases: [met-annotate]
-    saves_h5ad: false
-    script: metabolomics_annotation.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- metabolomics
+- annotation
+- hmdb
+- demo
+- mz-match
+requires:
+- pandas
+- numpy
 ---
 
-# 🏷️ Metabolite Annotation
+# metabolomics-annotation
 
-Metabolite annotation and structural identification against spectral libraries. Supports SIRIUS/CSI:FingerID, GNPS, and MetFrag.
+## When to use
 
-## CLI Reference
+The user has a feature table with `mz` (m/z) values and wants
+each feature annotated by m/z match to a metabolite database.
+**This is demo-only annotation.** The reference is an 15-entry
+HMDB dictionary (`metabolomics_annotation.py:57-74`: Glucose,
+Lactic acid, Alanine, Glycine, Serine, Proline, Valine, Leucine).
+`--database {hmdb,kegg,lipidmaps,metlin}` is recorded as metadata
+but does NOT switch the lookup table.
+
+For real database-scale annotation use SIRIUS / GNPS / MetFrag
+externally and feed the resulting annotation CSV into a downstream
+skill.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Feature table | `.csv` with `mz` column (m/z values) | yes (unless `--demo`) |
+| Database | `--database {hmdb,kegg,lipidmaps,metlin}` (default `hmdb`, RECORDED ONLY — does not switch lookup) | no |
+| Mass tolerance | `--ppm <float>` (default 10.0) | no |
+
+| Output | Path | Notes |
+|---|---|---|
+| Annotations | `tables/annotations.csv` | per-feature match (mz → name + HMDB id + formula) |
+| Report | `report.md` + `result.json` | `n_annotated`, `database` (recorded value) |
+
+## Flow
+
+1. Load CSV (`--input <features.csv>`) or generate a demo (`--demo`).
+2. For each input `mz`, search the 15-entry HMDB dictionary (`metabolomics_annotation.py:57-74`) within `--ppm` tolerance.
+3. Write `tables/annotations.csv` (`metabolomics_annotation.py:279`) + `report.md` + `result.json`.
+
+## Gotchas
+
+- **Database is HARD-CODED 8 metabolites — `--database` is metadata only.** `metabolomics_annotation.py:57-74` defines an 15-entry HMDB tuple. The CLI accepts `hmdb` / `kegg` / `lipidmaps` / `metlin` (`:251` choices=...) but the value is only logged into `result.json` — the lookup always uses the same 15-entry HMDB list. For real annotation, use SIRIUS / GNPS / MetFrag externally.
+- **`--ppm 10.0` default is m/z-tolerance.** Suitable for high-resolution Orbitrap; for low-resolution Q-TOF use `--ppm 30.0`. The mass-error formula is `|mz_obs - mz_ref| < (ppm × mz_ref / 1e6)`.
+- **`--input` REQUIRED unless `--demo`.** `metabolomics_annotation.py:269` raises `ValueError("--input required when not using --demo")`.
+- **Required CSV column is `mz`** (lowercase). XCMS exports `mzmed`, MZmine exports `m/z`; rename to `mz` first.
+- **Multiple matches per feature ⇒ multiple rows.** A feature with 3 candidate matches yields 3 rows in `tables/annotations.csv`; deduplicate downstream by `feature_id` if you need 1:1.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run met-annotate --demo
-python omicsclaw.py run met-annotate --input <features.csv> --output <dir>
+# Demo
+python omicsclaw.py run metabolomics-annotation --demo --output /tmp/anno_demo
+
+# Real feature table (annotates against demo HMDB dictionary regardless of --database)
+python omicsclaw.py run metabolomics-annotation \
+  --input features.csv --output results/ \
+  --database hmdb --ppm 5.0
 ```
 
-## Why This Exists
+## See also
 
-- **Without it**: LC-MS peaks remain anonymous "features" defined only by m/z and retention time
-- **With it**: Converts features into candidate chemical structures via spectral networking and in-silico fragmentation
-- **Why OmicsClaw**: Centralizes access to fragmented knowledgebases (SIRIUS, GNPS, MetFrag)
-
-## Workflow
-
-1. **Calculate**: Extract pure MS2 spectra representations.
-2. **Execute**: Query spectral libraries or generate fragmentation trees.
-3. **Assess**: Score candidate chemical formulas and structures.
-4. **Generate**: Output structural mappings of features to molecules.
-5. **Report**: Tabulate top compound identifications with confidence tiers.
-
-## Example Queries
-
-- "Annotate these metabolomics features using SIRIUS"
-- "Match MS2 spectra against GNPS libraries"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── annotated.csv
-├── figures/
-│   └── chemical_class_distribution.png
-├── tables/
-│   └── compound_identifications.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Local database matching where possible; transparent interactions for external APIs (like GNPS).
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `peak-detection` — Upstream feature extraction
-- `met-diff` — Downstream structural interpretation of significant hits
-
-## Citations
-
-- [SIRIUS](https://doi.org/10.1038/s41592-019-0344-8)
-- [GNPS](https://doi.org/10.1038/nbt.3597)
-- [MetFrag](https://doi.org/10.1186/s13321-016-0115-9)
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — m/z-match formula, demo-DB caveats
+- `references/output_contract.md` — `tables/annotations.csv` schema
+- Adjacent skills: `metabolomics-xcms-preprocessing` (upstream — feature × sample matrix), `metabolomics-peak-detection` (upstream — per-sample peak picking), `metabolomics-quantification` (parallel — impute + normalise), `metabolomics-pathway-enrichment` (downstream — pathway analysis on annotated features)

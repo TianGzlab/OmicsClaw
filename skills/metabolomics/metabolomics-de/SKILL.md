@@ -1,262 +1,88 @@
 ---
 name: metabolomics-de
-description: >-
-  Metabolomics differential analysis using univariate tests (t-test, FDR),
-  multivariate methods (PCA, PLS-DA, OPLS-DA, sPLS-DA), Random Forest,
-  and ROC analysis for biomarker discovery.
-version: 0.1.0
+description: Load when running two-group metabolomics DE (t-test + log2FC + BH-FDR + PCA) on a feature × sample CSV using `--group-a-prefix` / `--group-b-prefix` (default `ctrl` / `treat`). Skip when needing tunable test backends (use `metabolomics-statistics` for Wilcoxon / ANOVA / Kruskal) or for raw spectra.
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [metabolomics, differential, PLS-DA, volcano, biomarker, ROC]
-metadata:
-  omicsclaw:
-    domain: metabolomics
-    emoji: "📈"
-    trigger_keywords: [metabolomics differential, PLS-DA, volcano plot, biomarker,
-      OPLS-DA]
-    allowed_extra_flags:
-    - "--group-a-prefix"
-    - "--group-b-prefix"
-    legacy_aliases: [met-diff]
-    saves_h5ad: false
-    script: met_diff.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- metabolomics
+- de
+- ttest
+- pca
+- bh-fdr
+- biomarker
+requires:
+- pandas
+- numpy
+- scipy
+- scikit-learn
 ---
 
-# 📈 Metabolomics Differential Analysis
+# metabolomics-de
 
-Univariate and multivariate statistical analysis for identifying differentially abundant metabolites and biomarker discovery.
+## When to use
 
-## Core Capabilities
+The user has a feature × sample metabolomics CSV with column-name
+prefixes encoding the two-group design (default `ctrl` for control,
+`treat` for treatment) and wants univariate t-test + log2FC +
+BH-FDR + a PCA scatter as the canonical "two-group differential
+analysis" output.
 
-1. **Univariate testing**: t-test, Wilcoxon, ANOVA with BH FDR correction
-2. **Fold change**: Log2FC calculation with volcano plot visualization
-3. **PCA**: Unsupervised exploration and outlier detection
-4. **PLS-DA / sPLS-DA**: Supervised classification with VIP scores and sparse feature selection
-5. **OPLS-DA**: Orthogonal PLS-DA with S-plot for predictive features
-6. **Random Forest**: Non-linear feature importance ranking
-7. **ROC analysis**: Diagnostic performance evaluation of candidate biomarkers
+`--group-a-prefix` and `--group-b-prefix` are user-tunable
+(defaults `ctrl` and `treat`). For more test backends
+(Wilcoxon / ANOVA / Kruskal) use `metabolomics-statistics`.
 
-## CLI Reference
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Feature × sample table | `.csv` with sample columns starting `ctrl*` and `treat*` (or matching the user-supplied prefixes) | yes (unless `--demo`) |
+| Group prefixes | `--group-a-prefix <str>` (default `ctrl`), `--group-b-prefix <str>` (default `treat`) | no |
+
+| Output | Path | Notes |
+|---|---|---|
+| Full DE results | `tables/differential_features.csv` | per-feature `pvalue`, `fdr` (BH), `log2fc`, group means |
+| Significant subset | `tables/significant_features.csv` | filtered by hard-coded `fdr < 0.05` |
+| PCA scatter (when ≥ 3 samples per group) | `figures/pca_scores.png` | best-effort, may be skipped on tiny inputs |
+| Report | `report.md` + `result.json` | `n_features`, `n_significant` |
+
+## Flow
+
+1. Load CSV (`--input <features.csv>`) or generate a demo at `output_dir/<demo>.csv` (`met_diff.py:279`).
+2. Filter group columns by prefix (`met_diff.py:287-288`); raise `ValueError("Could not find columns starting with '...' / '...'")` at `:291` if either group is empty.
+3. Run univariate t-test → `pvalue` + BH-adjusted `fdr` + log2FC (`met_diff.py:run_univariate`).
+4. Filter `fdr < 0.05` (HARD-CODED, `met_diff.py:303-304`) → `tables/significant_features.csv`.
+5. Best-effort PCA on `group_a_cols + group_b_cols` → `figures/pca_scores.png`; failures are logged not raised.
+6. Write `tables/differential_features.csv` (`met_diff.py:301`) + `tables/significant_features.csv` (`:305`) + report + result.json.
+
+## Gotchas
+
+- **Default prefixes are `ctrl` and `treat`.** `met_diff.py:271-272` defaults `--group-a-prefix=ctrl` and `--group-b-prefix=treat`. Real input column names like `Control_1` / `Treated_1` (capital, different word) need explicit `--group-a-prefix Control_ --group-b-prefix Treated_`.
+- **Empty group ⇒ `ValueError`.** `met_diff.py:291-294` raises `ValueError("Could not find columns starting with '...' / '...'")` when either filter returns no columns. Sanity-check the prefixes.
+- **FDR threshold is HARD-CODED at 0.05.** `met_diff.py:303-304` filters `de_result[de_result["fdr"] < 0.05]` — there is NO `--alpha` flag. Use `metabolomics-statistics` if you need a tunable significance threshold.
+- **`--input` REQUIRED unless `--demo`.** `met_diff.py:282` raises `ValueError("--input required when not using --demo")`.
+- **PCA is best-effort.** `met_diff.py:309-310` wraps `run_pca` in `try / except` — failures (e.g. < 3 samples per group, all-NaN features) only log a warning. The DE table is still written.
+- **Test backend is fixed at t-test (Welch).** No `--method` flag here — for backend choice use sibling `metabolomics-statistics`.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run met-diff --demo
-python omicsclaw.py run met-diff --input <feature_table.csv> --output <dir>
+# Demo
+python omicsclaw.py run metabolomics-de --demo --output /tmp/de_demo
+
+# Real CSV with default ctrl_/treat_ prefixes
+python omicsclaw.py run metabolomics-de \
+  --input quantified_features.csv --output results/
+
+# Custom prefixes
+python omicsclaw.py run metabolomics-de \
+  --input my_features.csv --output results/ \
+  --group-a-prefix Control_ --group-b-prefix Treated_
 ```
 
-## Algorithm / Methodology
+## See also
 
-### Univariate Analysis (R)
-
-```r
-library(tidyverse)
-
-data <- read.csv('normalized_data.csv', row.names = 1)
-groups <- factor(read.csv('sample_info.csv')$group)
-
-# T-test for each feature
-ttest_results <- apply(data, 2, function(x) {
-    test <- t.test(x ~ groups)
-    c(pvalue = test$p.value,
-      fc = mean(x[groups == levels(groups)[2]]) - mean(x[groups == levels(groups)[1]]))
-})
-ttest_results <- as.data.frame(t(ttest_results))
-ttest_results$fdr <- p.adjust(ttest_results$pvalue, method = 'BH')
-
-sig_features <- ttest_results[ttest_results$fdr < 0.05, ]
-```
-
-### Volcano Plot (R)
-
-```r
-library(ggplot2)
-
-results$significant <- results$fdr < 0.05 & abs(results$log2fc) > 1
-
-ggplot(results, aes(x = log2fc, y = -log10(pvalue), color = significant)) +
-    geom_point(alpha = 0.6) +
-    scale_color_manual(values = c('gray', 'red')) +
-    geom_hline(yintercept = -log10(0.05), linetype = 'dashed') +
-    geom_vline(xintercept = c(-1, 1), linetype = 'dashed') +
-    labs(x = 'Log2 Fold Change', y = '-log10(p-value)') +
-    theme_bw()
-```
-
-### PCA (R)
-
-```r
-library(pcaMethods)
-
-pca_result <- pca(data, nPcs = 5, method = 'ppca')
-scores <- as.data.frame(scores(pca_result))
-scores$group <- groups
-
-ggplot(scores, aes(x = PC1, y = PC2, color = group)) +
-    geom_point(size = 3) +
-    stat_ellipse(level = 0.95) +
-    labs(x = paste0('PC1 (', round(pca_result@R2[1] * 100, 1), '%)'),
-         y = paste0('PC2 (', round(pca_result@R2[2] * 100, 1), '%)')) +
-    theme_bw()
-```
-
-### PLS-DA with VIP Scores (mixOmics)
-
-```r
-library(mixOmics)
-
-plsda_result <- plsda(as.matrix(data), groups, ncomp = 3)
-
-# Cross-validation
-perf_plsda <- perf(plsda_result, validation = 'Mfold', folds = 5, nrepeat = 50)
-ncomp_opt <- perf_plsda$choice.ncomp['BER', 'centroids.dist']
-
-# Final model + VIP scores
-final_plsda <- plsda(as.matrix(data), groups, ncomp = ncomp_opt)
-plotIndiv(final_plsda, group = groups, ellipse = TRUE, legend = TRUE)
-
-vip <- vip(final_plsda)
-top_vip <- sort(vip[, ncomp_opt], decreasing = TRUE)[1:20]
-```
-
-### sPLS-DA (Sparse — Feature Selection)
-
-```r
-tune_splsda <- tune.splsda(as.matrix(data), groups, ncomp = 3,
-                            validation = 'Mfold', folds = 5, nrepeat = 50,
-                            test.keepX = c(5, 10, 20, 50, 100))
-optimal_keepX <- tune_splsda$choice.keepX
-
-splsda_result <- splsda(as.matrix(data), groups, ncomp = ncomp_opt, keepX = optimal_keepX)
-selected_features <- selectVar(splsda_result, comp = 1)$name
-```
-
-### OPLS-DA (ropls)
-
-```r
-library(ropls)
-
-oplsda <- opls(data, groups, predI = 1, orthoI = NA)
-plot(oplsda, typeVc = 'x-score')  # Scores plot
-plot(oplsda, typeVc = 'x-loading')  # S-plot
-
-vip_scores <- getVipVn(oplsda)
-top_vip <- sort(vip_scores, decreasing = TRUE)[1:20]
-```
-
-### Random Forest Feature Importance
-
-```r
-library(randomForest)
-
-rf_model <- randomForest(x = data, y = groups, importance = TRUE, ntree = 500)
-importance <- importance(rf_model)
-top_features <- rownames(importance)[order(importance[, 'MeanDecreaseAccuracy'], decreasing = TRUE)[1:20]]
-varImpPlot(rf_model, n.var = 20)
-```
-
-### ROC Analysis (pROC)
-
-```r
-library(pROC)
-
-top_feature <- 'feature_123'
-roc_result <- roc(groups, data[, top_feature])
-plot(roc_result, main = paste('AUC =', round(auc(roc_result), 3)))
-```
-
-### Heatmap
-
-```r
-library(pheatmap)
-
-top_features <- rownames(sig_features)[1:50]
-annotation_row <- data.frame(Group = groups)
-rownames(annotation_row) <- rownames(data)
-
-pheatmap(t(data[, top_features]), annotation_col = annotation_row,
-         scale = 'row', clustering_method = 'ward.D2')
-```
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--method` | `ttest` | Statistical test method |
-| `--fdr-cutoff` | `0.05` | FDR significance threshold |
-| `--fc-cutoff` | `1.0` | Log2FC threshold |
-| `--multivariate` | `pca` | pca, plsda, oplsda, splsda |
-
-## Why This Exists
-
-- **Without it**: Complex metabolomic variance is hard to parse; minor batch effects can mimic true biological signal
-- **With it**: Powerful multivariate (PLS-DA) and univariate testing models separate true biomarkers from noise
-- **Why OmicsClaw**: Automates strict R-based multidimensional workflows with single Python calls
-
-## Workflow
-
-1. **Calculate**: Log transformations and scaling.
-2. **Execute**: Run PCA/OPLS-DA and extract variable importance (VIP) scores.
-3. **Assess**: Execute parallel univariate FDR-corrected models.
-4. **Generate**: Output candidate biomarker lists.
-5. **Report**: Synthesize VIP plots, score plots, and hierarchical heatmaps.
-
-## Example Queries
-
-- "Run PLS-DA and find significant metabolites"
-- "Perform differential analysis on this normalized metabolomics matrix"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── statistics.csv
-├── figures/
-│   ├── plsda_scores.png
-│   ├── vip_plot.png
-│   └── volcano_plot.png
-├── tables/
-│   └── differential_results.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `met-normalize` — Upstream data scaling
-- `met-annotate` — Downstream identification of biomarkers
-
-## Version Compatibility
-
-Reference examples tested with: mixOmics 6.24+, ropls 1.32+
-
-## Dependencies
-
-**Required**: numpy, pandas, scipy, scikit-learn
-**Optional**: mixOmics (R), ropls (R), randomForest (R), pROC (R), pheatmap (R)
-
-## Citations
-
-- [mixOmics](https://doi.org/10.1371/journal.pcbi.1005752) — Rohart et al., PLoS Computational Biology 2017
-- [ropls](https://doi.org/10.1021/acs.jproteome.5b00354) — Thévenot et al., Journal of Proteome Research 2015
-- [MetaboAnalyst](https://doi.org/10.1093/nar/gkab382) — Pang et al., Nucleic Acids Research 2021
-
-## Related Skills
-
-- `met-normalize` — Data normalization before analysis
-- `met-pathway` — Pathway enrichment of significant metabolites
-- `xcms-preprocess` — Feature extraction upstream
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — t-test + log2FC + BH FDR conventions, PCA caveats
+- `references/output_contract.md` — `tables/differential_features.csv` schema
+- Adjacent skills: `metabolomics-statistics` (parallel — tunable backends + `--alpha`), `metabolomics-quantification` (upstream — impute + normalise), `metabolomics-normalization` (upstream — normalise only), `metabolomics-pathway-enrichment` (downstream — pathway analysis on significant features)

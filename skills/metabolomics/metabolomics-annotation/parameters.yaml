@@ -1,0 +1,19 @@
+domain: metabolomics
+emoji: 🏷️
+trigger_keywords:
+- metabolite annotation
+- SIRIUS
+- GNPS
+- MetFrag
+- spectral matching
+- metabolite ID
+allowed_extra_flags:
+- --adducts
+- --database
+- --ppm
+legacy_aliases:
+- met-annotate
+saves_h5ad: false
+script: metabolomics_annotation.py
+param_hints: {}
+requires_preprocessed: false

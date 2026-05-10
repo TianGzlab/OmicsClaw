@@ -1,257 +1,79 @@
 ---
 name: metabolomics-xcms-preprocessing
-description: >-
-  XCMS3 workflow for LC-MS/GC-MS metabolomics preprocessing. Peak detection
-  (CentWave/MatchedFilter), RT alignment (Obiwarp), correspondence, gap filling,
-  and CAMERA adduct/isotope annotation.
-version: 0.1.0
+description: Load when running an XCMS-style preprocessing summary on LC-MS metabolomics raw / vendor-converted files — emits a peak table with m/z, retention time, and per-sample intensities. Skip when working with an already-built peak table (use `metabolomics-peak-detection`) or when only annotation is needed (use `metabolomics-annotation`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [metabolomics, xcms, preprocessing, LC-MS, peak-detection, alignment]
-metadata:
-  omicsclaw:
-    domain: metabolomics
-    emoji: "🧪"
-    trigger_keywords: [xcms, metabolomics preprocessing, LC-MS, peak detection, RT
-        alignment]
-    allowed_extra_flags: []
-    legacy_aliases: [xcms-preprocess]
-    saves_h5ad: false
-    script: metabolomics_xcms_preprocessing.py
-    param_hints: {}
-    requires_preprocessed: false
+tags:
+- metabolomics
+- xcms
+- preprocessing
+- peak-detection
+- lc-ms
+- gc-ms
+- centwave
+requires:
+- pandas
+- numpy
 ---
 
-# 🧪 XCMS Metabolomics Preprocessing
+# metabolomics-xcms-preprocessing
 
-XCMS3 workflow for untargeted LC-MS/GC-MS metabolomics. Requires Bioconductor 3.18+ with xcms 4.0+ and MSnbase 2.28+.
+## When to use
 
-## Core Capabilities
+The user has LC-MS / GC-MS metabolomics files (or a placeholder
+multi-file list) and wants the standard XCMS-style preprocessing
+output: peak table with `mz`, `rt`, and per-sample intensity
+columns. The skill mirrors the canonical CentWave + Obiwarp +
+correspondence + gap-fill workflow conceptually but is pure
+Python — there is no rcpp / xcms R bridge here.
 
-1. **Peak detection**: CentWave (centroided) or MatchedFilter (profile data)
-2. **RT alignment**: Obiwarp dynamic time warping for retention time correction
-3. **Peak correspondence**: Density-based grouping across samples
-4. **Gap filling**: Recover missing values by region integration
-5. **CAMERA annotation**: Isotope pattern and adduct group identification
+For per-sample peak picking from a single intensity matrix use
+`metabolomics-peak-detection`. For metabolite annotation use
+`metabolomics-annotation`.
 
-## CLI Reference
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Raw / converted MS files | `--input <file1> [<file2> ...]` (multi-file via `nargs="+"`) | yes (unless `--demo`) |
+| ppm | `--ppm <float>` (default 25.0) — m/z tolerance | no |
+| Peak width | `--peakwidth-min` / `--peakwidth-max` (default 10.0 / 60.0 sec) | no |
+
+| Output | Path | Notes |
+|---|---|---|
+| Peak table | `tables/peak_table.csv` | features × (mz, rt, intensities…) — long form |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load files (`--input <files>`) or generate a demo peak table (`--demo`).
+2. Apply CentWave-style peak detection at the configured `--ppm` and `--peakwidth-*` parameters.
+3. Write `tables/peak_table.csv` (`metabolomics_xcms_preprocessing.py:211`) + `report.md` + `result.json`.
+
+## Gotchas
+
+- **Pure Python — NO real XCMS / CAMERA invocation.** The script does not call R / `rcpp` / `xcms` / `CAMERA`. Demo and real-input runs both produce a synthetic-shaped peak table; for production XCMS workflows, run XCMS in R upstream and feed the resulting peak table into `metabolomics-peak-detection` or `metabolomics-quantification`.
+- **`--input` accepts MULTIPLE files via `nargs="+"`.** `metabolomics_xcms_preprocessing.py:186` declares `nargs="+"`, so passing several files is the supported single-call shape. Demo ignores `--input`.
+- **`--input` REQUIRED unless `--demo`.** `metabolomics_xcms_preprocessing.py:203` raises `ValueError("--input required when not using --demo")`.
+- **Peak-width units are SECONDS (chromatographic).** `--peakwidth-min 10.0 --peakwidth-max 60.0` defaults assume LC-MS scan timing. For UPLC narrow peaks consider `--peakwidth-min 5 --peakwidth-max 20`.
+- **`--ppm 25.0` default is broad.** Suitable for low-resolution Orbitrap / Q-TOF; for high-resolution FTMS use `--ppm 5.0`. Wrong value silently yields false positive merges.
+
+## Key CLI
 
 ```bash
-python omicsclaw.py run xcms-preprocess --demo
-python omicsclaw.py run xcms-preprocess --input <raw_data/> --output <dir>
+# Demo (synthetic peak table)
+python omicsclaw.py run metabolomics-xcms-preprocessing --demo --output /tmp/xcms_demo
+
+# Real LC-MS files
+python omicsclaw.py run metabolomics-xcms-preprocessing \
+  --input sample1.mzML sample2.mzML sample3.mzML --output results/ \
+  --ppm 5.0 --peakwidth-min 5 --peakwidth-max 30
 ```
 
-## Algorithm / Methodology
+## See also
 
-### Load Raw Data
-
-```r
-library(xcms)
-library(MSnbase)
-
-raw_files <- list.files('raw_data', pattern = '\\.(mzML|mzXML)$', full.names = TRUE)
-raw_data <- readMSData(raw_files, mode = 'onDisk')
-```
-
-### Define Sample Groups
-
-```r
-sample_info <- data.frame(
-    sample_name = basename(raw_files),
-    sample_group = c(rep('Control', 5), rep('Treatment', 5), rep('QC', 3)),
-    injection_order = 1:length(raw_files)
-)
-pData(raw_data) <- sample_info
-```
-
-### Peak Detection (CentWave — Centroided Data)
-
-```r
-cwp <- CentWaveParam(
-    peakwidth = c(5, 30),       # Peak width range in seconds
-    ppm = 15,                    # m/z tolerance
-    snthresh = 10,               # Signal-to-noise threshold
-    prefilter = c(3, 1000),      # Min peaks and intensity
-    mzdiff = 0.01,               # Minimum m/z difference
-    noise = 1000,                # Noise level
-    integrate = 1                # Integration method
-)
-
-xdata <- findChromPeaks(raw_data, param = cwp)
-cat('Peaks found:', nrow(chromPeaks(xdata)), '\n')
-```
-
-### Peak Detection (MatchedFilter — Profile Data)
-
-```r
-mfp <- MatchedFilterParam(
-    binSize = 0.1, fwhm = 30, snthresh = 10, step = 0.1, mzdiff = 0.8
-)
-xdata_profile <- findChromPeaks(raw_data, param = mfp)
-```
-
-### Retention Time Alignment (Obiwarp)
-
-```r
-obp <- ObiwarpParam(
-    binSize = 0.5, response = 1, distFun = 'cor_opt',
-    gapInit = 0.3, gapExtend = 2.4
-)
-xdata <- adjustRtime(xdata, param = obp)
-plotAdjustedRtime(xdata)
-```
-
-### Peak Correspondence (Grouping)
-
-```r
-pdp <- PeakDensityParam(
-    sampleGroups = pData(xdata)$sample_group,
-    bw = 5,                      # RT bandwidth
-    minFraction = 0.5,           # Min fraction of samples
-    minSamples = 1,              # Min samples per group
-    binSize = 0.025              # m/z bin size
-)
-xdata <- groupChromPeaks(xdata, param = pdp)
-cat('Features:', nrow(featureDefinitions(xdata)), '\n')
-```
-
-### Gap Filling
-
-```r
-fpp <- ChromPeakAreaParam()
-xdata <- fillChromPeaks(xdata, param = fpp)
-```
-
-### Extract Feature Table
-
-```r
-feature_values <- featureValues(xdata, method = 'maxint', value = 'into')
-feature_defs <- as.data.frame(featureDefinitions(xdata))
-feature_defs$feature_id <- rownames(feature_defs)
-
-feature_table <- cbind(feature_defs[, c('feature_id', 'mzmed', 'rtmed')], feature_values)
-write.csv(feature_table, 'feature_table.csv', row.names = FALSE)
-```
-
-### CAMERA Annotation (Isotopes/Adducts)
-
-```r
-library(CAMERA)
-
-xsa <- xsAnnotate(as(xdata, 'xcmsSet'))
-xsa <- groupFWHM(xsa, perfwhm = 0.6)
-xsa <- findIsotopes(xsa, mzabs = 0.01, ppm = 10)
-xsa <- findAdducts(xsa, polarity = 'positive')
-camera_results <- getPeaklist(xsa)
-```
-
-### Quality Control
-
-```r
-# TIC for each sample
-tic <- chromatogram(raw_data, aggregationFun = 'sum')
-plot(tic)
-
-# Peak count per sample
-peak_counts <- table(chromPeaks(xdata)[, 'sample'])
-barplot(peak_counts, main = 'Peaks per sample')
-
-# PCA of features
-library(pcaMethods)
-log_values <- log2(feature_values + 1)
-log_values[is.na(log_values)] <- 0
-pca <- pca(t(log_values), nPcs = 3, method = 'ppca')
-plotPcs(pca, col = as.factor(pData(xdata)$sample_group))
-```
-
-### Export for MetaboAnalyst
-
-```r
-export_data <- t(feature_values)
-colnames(export_data) <- paste0('M', round(feature_defs$mzmed, 4), 'T', round(feature_defs$rtmed, 1))
-export_df <- data.frame(Sample = rownames(export_data), Group = pData(xdata)$sample_group, export_data)
-write.csv(export_df, 'metaboanalyst_input.csv', row.names = FALSE)
-```
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--peak-method` | `centwave` | centwave or matchedfilter |
-| `--ppm` | `15` | m/z tolerance (ppm) |
-| `--peakwidth` | `5,30` | Peak width range (seconds) |
-| `--sn-thresh` | `10` | Signal-to-noise threshold |
-| `--align-method` | `obiwarp` | RT alignment method |
-
-## Why This Exists
-
-- **Without it**: Raw mzML/mzXML profiles are just unaligned 3D data clouds of m/z, intensity, and time
-- **With it**: Sophisticated algorithms detect true chemical peaks, correct temporal drift (Obiwarp), and map features across runs
-- **Why OmicsClaw**: Avoids verbose R scripts with a hyper-optimized parameter wrapper for XCMS3
-
-## Workflow
-
-1. **Calculate**: Fit moving mathematical wavelets to detect peaks (CentWave).
-2. **Execute**: Align retention times dynamically across all mass spec runs.
-3. **Assess**: Group congruent features and integrate signal caps for missing zones.
-4. **Generate**: Output structural correspondence matrices (feature tables).
-5. **Report**: Synthesize Total Ion Chromatogram (TIC) and aligned retention deviation plots.
-
-## Example Queries
-
-- "Preprocess these mzML files using XCMS"
-- "Detect peaks and align retention times"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── feature_table.csv
-├── figures/
-│   ├── tic_overlay.png
-│   └── retention_deviation.png
-├── tables/
-│   └── grouped_features.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `met-normalize` — Downstream data scaling
-- `met-annotate` — Downstream explicit matching to spectra
-
-## Version Compatibility
-
-Reference examples tested with: xcms 4.0+, MSnbase 2.28+
-
-## Dependencies
-
-**Required**: xcms, MSnbase (R/Bioconductor)
-**Optional**: CAMERA, pcaMethods
-
-## Citations
-
-- [XCMS](https://doi.org/10.1021/ac051437y) — Smith et al., Analytical Chemistry 2006
-- [CentWave](https://doi.org/10.1186/1471-2105-9-504) — Tautenhahn et al., BMC Bioinformatics 2008
-- [CAMERA](https://doi.org/10.1021/ac202450g) — Kuhl et al., Analytical Chemistry 2012
-
-## Related Skills
-
-- `met-annotate` — Identify metabolites
-- `met-normalize` — Normalize feature table
-- `met-diff` — Differential analysis
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — CentWave / Obiwarp conventions, ppm + peakwidth tuning
+- `references/output_contract.md` — `tables/peak_table.csv` schema
+- Adjacent skills: `metabolomics-peak-detection` (downstream — per-sample peak picking on a feature × intensity matrix), `metabolomics-annotation` (downstream — annotate features against HMDB / KEGG), `metabolomics-quantification` (downstream — impute + normalise), `metabolomics-normalization` (downstream — normalisation methods)
