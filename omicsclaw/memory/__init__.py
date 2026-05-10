@@ -167,7 +167,21 @@ def cli_namespace_from_workspace(workspace_dir: Optional[str]) -> str:
     return str(target.resolve())
 
 
-_DESKTOP_DEFAULT_NAMESPACE = "app/desktop_user"
+_DESKTOP_DEFAULT_USER_ID = "desktop_user"
+
+
+def desktop_chat_user_id() -> str:
+    """User-id portion of the Desktop chat agent loop's CompatMemoryStore session.
+
+    The chat path constructs its namespace as ``f"app/{user_id}"`` (see
+    ``CompatMemoryStore._client_for_session``). Returning the same id
+    component ``desktop_namespace()`` derives keeps the chat-write and
+    endpoint-read namespaces aligned, including under
+    ``OMICSCLAW_DESKTOP_LAUNCH_ID`` multi-launch deployments where
+    they would otherwise diverge.
+    """
+    launch_id = (os.getenv("OMICSCLAW_DESKTOP_LAUNCH_ID") or "").strip()
+    return launch_id or _DESKTOP_DEFAULT_USER_ID
 
 
 def desktop_namespace() -> str:
@@ -178,10 +192,7 @@ def desktop_namespace() -> str:
     is prefixed with ``app/`` so cross-surface collisions with bot
     namespaces (``telegram/...``, ``feishu/...``) are impossible.
     """
-    launch_id = (os.getenv("OMICSCLAW_DESKTOP_LAUNCH_ID") or "").strip()
-    if launch_id:
-        return f"app/{launch_id}"
-    return _DESKTOP_DEFAULT_NAMESPACE
+    return f"app/{desktop_chat_user_id()}"
 
 
 def __getattr__(name: str):
@@ -230,6 +241,7 @@ __all__ = [
     "get_memory_engine", "get_review_log", "get_memory_client",
     "get_engine_db",
     "cli_namespace_from_workspace", "desktop_namespace",
+    "desktop_chat_user_id",
     "close_db",
     "ChangesetStore", "get_changeset_store",
     "Base", "ROOT_NODE_UUID", "Node", "Memory", "Edge", "Path",

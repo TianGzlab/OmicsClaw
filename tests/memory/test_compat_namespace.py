@@ -186,14 +186,22 @@ async def test_search_memories_filters_by_session_namespace(store):
 
 
 @pytest.mark.asyncio
-async def test_save_memory_with_unknown_session_falls_back_to_shared(store):
-    """If the session can't be resolved, write goes to __shared__ — not silently
-    lost. (Defensive default; in practice the bot always creates a session
-    first, so this is the recovery path for log replay or test harnesses.)"""
-    await store.save_memory(
-        "nonexistent-session-id", DatasetMemory(file_path="orphan.h5ad")
-    )
+async def test_save_memory_with_unknown_session_raises(store):
+    """If the session can't be resolved, the write must NOT fall back to
+    ``__shared__`` (every other user could read it). Instead
+    ``_client_for_session`` raises ``LookupError`` and ``save_memory``
+    propagates — the caller decides whether to log-and-skip
+    (``_auto_capture_dataset``) or surface the error.
 
+    This pins the privacy fix: the prior behavior was a silent
+    fall-back to the shared partition, which leaked auto-captured
+    datasets across users when a session was missing or evicted."""
+    with pytest.raises(LookupError):
+        await store.save_memory(
+            "nonexistent-session-id", DatasetMemory(file_path="orphan.h5ad")
+        )
+
+    # Nothing landed anywhere — particularly not in __shared__.
     async with store._db.session() as s:
         rows = (
             await s.execute(
@@ -202,6 +210,4 @@ async def test_save_memory_with_unknown_session_falls_back_to_shared(store):
                 )
             )
         ).scalars().all()
-
-    assert len(rows) == 1
-    assert rows[0].namespace == "__shared__"
+    assert rows == []
