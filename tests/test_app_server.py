@@ -2370,6 +2370,363 @@ async def test_mcp_sync_empty_payload_removes_all_existing_servers(monkeypatch):
     assert removed == ["stale-a", "stale-b"]
 
 
+# ---------------------------------------------------------------------------
+# T2 S2 — /memory/browse recall falls back to __shared__
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_endpoint_falls_back_to_shared(monkeypatch, tmp_path):
+    """GET /memory/browse for a URI that lives only in __shared__ must
+    surface the shared content to the desktop client via read fallback.
+    Pins the engine.recall(fallback_to_shared=True) contract at the
+    HTTP boundary."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # core://agent/* routes to __shared__ via namespace_policy.
+        await desktop_client.remember("core://agent/style", "concise replies")
+
+        # Sanity: the row really lives only in __shared__.
+        assert (
+            await engine.recall(
+                "core://agent/style",
+                namespace="app/desktop_user",
+                fallback_to_shared=False,
+            )
+        ) is None
+
+        result = await server.memory_browse(path="agent/style", domain="core")
+        assert result["node"] is not None, (
+            "browse returned no node — read fallback to __shared__ broken"
+        )
+        assert result["node"]["content"] == "concise replies"
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
+# T2 S3 — /memory/search namespace-scoped (caller + __shared__ only)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_search_endpoint_excludes_other_namespaces(
+    monkeypatch, tmp_path
+):
+    """GET /memory/search must scope FTS hits to the desktop's namespace
+    plus __shared__. Bystander namespaces' content matching the query
+    must not leak — the production guarantee for multi-tenant DBs."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        bystander_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Three rows, all containing "mito" — one per namespace.
+        await desktop_client.remember(
+            "analysis://desktop/qc-report", "mito 18% in pbmc"
+        )
+        await desktop_client.remember(
+            "core://agent/style", "concise replies about mito"
+        )  # → __shared__
+        await bystander_client.remember(
+            "analysis://bob/qc", "mito 22% (bob's secret)"
+        )
+
+        result = await server.memory_search(q="mito", limit=20, domain=None)
+        namespaces = {r.get("namespace") for r in result["results"]}
+        contents = " ".join(
+            (r.get("content_snippet") or "") for r in result["results"]
+        )
+
+        assert "app/desktop_user" in namespaces, (
+            f"Desktop's own row missing from FTS: {result['results']}"
+        )
+        assert "telegram/bob" not in namespaces, (
+            f"Bystander telegram/bob leaked into desktop FTS: {result['results']}"
+        )
+        assert "bob's secret" not in contents, (
+            f"Bystander content leaked through search snippets: {contents!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
+# T2 S4 — /memory/{children,domains,recent} desktop-UI mode (include_shared)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_children_endpoint_surfaces_shared_and_excludes_others(
+    monkeypatch, tmp_path
+):
+    """GET /memory/children for the desktop client returns children in
+    its own namespace AND in __shared__ (PR #137's include_shared=True
+    UI mode), but never children that live only in another bot user's
+    namespace.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        other_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Desktop's own write
+        await desktop_client.remember("dataset://desktop_only.h5ad", "desk")
+        # A shared-prefix write (lands in __shared__ via namespace_policy)
+        await desktop_client.remember("core://agent/style", "concise")
+        # Bystander's own write — must NOT show in desktop tree
+        await other_client.remember("dataset://bob_secret.h5ad", "bob")
+
+        children = await server.memory_children(
+            node_uuid="", domain="dataset"
+        )
+        paths = {c["path"] for c in children["children"]}
+        assert "desktop_only.h5ad" in paths, (
+            f"Desktop's own dataset missing from tree: {paths}"
+        )
+        assert "bob_secret.h5ad" not in paths, (
+            f"Bystander telegram/bob's dataset leaked into desktop tree: {paths}"
+        )
+
+        core_children = await server.memory_children(
+            node_uuid="", domain="core"
+        )
+        core_paths = {c["path"] for c in core_children["children"]}
+        assert any("agent" in p for p in core_paths), (
+            f"Shared core://agent/* missing from desktop tree (include_shared "
+            f"contract broken): {core_paths}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_recent_endpoint_excludes_other_namespaces(
+    monkeypatch, tmp_path
+):
+    """GET /memory/recent for the desktop client must include the
+    desktop's own writes AND __shared__ rows (the desktop-UI mode), but
+    never another user's per-namespace writes."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        other_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("dataset://desktop_only.h5ad", "desk")
+        await desktop_client.remember("core://agent/style", "concise")
+        await other_client.remember("dataset://bob_secret.h5ad", "bob")
+
+        result = await server.memory_recent(limit=20)
+        uris = {r["uri"] for r in result["results"]}
+        assert "dataset://desktop_only.h5ad" in uris
+        assert "core://agent/style" in uris, (
+            "include_shared contract: desktop /memory/recent should surface "
+            f"user's __shared__ writes; got {uris}"
+        )
+        assert "dataset://bob_secret.h5ad" not in uris, (
+            f"Bystander row leaked into desktop's /memory/recent: {uris}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_domains_endpoint_counts_user_plus_shared_only(
+    monkeypatch, tmp_path
+):
+    """GET /memory/domains counts paths the desktop user can address —
+    own namespace + __shared__ — never sibling namespaces. The legacy
+    unscoped count was a privacy/correctness leak."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        other_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("dataset://d1.h5ad", "d1")
+        await desktop_client.remember("analysis://a1/run", "a1")
+        await desktop_client.remember("core://agent/style", "concise")
+        # Three rows for telegram/bob — must not influence desktop's counts
+        await other_client.remember("dataset://b1.h5ad", "b1")
+        await other_client.remember("dataset://b2.h5ad", "b2")
+        await other_client.remember("analysis://b/run", "b3")
+
+        result = await server.memory_domains()
+        domain_counts = {d["domain"]: d["node_count"] for d in result["domains"]}
+
+        assert "dataset" in domain_counts and domain_counts["dataset"] >= 1
+        assert "analysis" in domain_counts and domain_counts["analysis"] >= 1
+        # Desktop has 1 dataset; bystander has 2 — total under unscoped
+        # would be 3. Scoped count must show 1 (just the desktop's).
+        assert domain_counts["dataset"] == 1, (
+            f"Domain count leaked telegram/bob's datasets: "
+            f"got {domain_counts['dataset']}, expected 1 (desktop only). "
+            f"Full counts: {domain_counts}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
+# T2 S6 — /memory/delete is namespace-scoped (no cross-namespace blast)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_delete_endpoint_does_not_cross_namespace(monkeypatch, tmp_path):
+    """DELETE /memory/delete must remove only the desktop client's row.
+    Two namespaces holding the same ``(domain, path)`` URI must not be
+    collapsed by the delete — that would be the PR #131-class data-loss
+    pattern PR #137 closed for the legacy GraphService path.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        bystander_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("dataset://pbmc.h5ad", "desktop's pbmc")
+        await bystander_client.remember("dataset://pbmc.h5ad", "bob's pbmc")
+
+        # Act
+        result = await server.memory_delete(path="pbmc.h5ad", domain="dataset")
+        assert result["ok"] is True
+
+        # Assert: desktop row gone; bystander row intact
+        desktop_after = await engine.recall(
+            "dataset://pbmc.h5ad",
+            namespace="app/desktop_user",
+            fallback_to_shared=False,
+        )
+        bystander_after = await engine.recall(
+            "dataset://pbmc.h5ad",
+            namespace="telegram/bob",
+            fallback_to_shared=False,
+        )
+        assert desktop_after is None, (
+            f"Desktop row survived its own delete: {desktop_after!r}"
+        )
+        assert bystander_after is not None, (
+            "telegram/bob's same-URI row was deleted by desktop's "
+            "/memory/delete — PR #137 cross-namespace safety broken"
+        )
+        assert bystander_after.content == "bob's pbmc"
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
+# T2 S5 — /memory/update writes to the desktop client's namespace
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_update_endpoint_writes_to_desktop_namespace(monkeypatch, tmp_path):
+    """POST /memory/update must update the row in the desktop's namespace
+    (``_memory_client.namespace``), not the legacy ``__shared__``-only
+    target. PR #137 fixed the GraphService shim that hardcoded
+    ``Path.namespace == SHARED_NAMESPACE``; without that fix a desktop
+    user's per-namespace memory was unreachable through this endpoint.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.app.server import MemoryUpdateRequest
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        # Bind the server's _memory_client to a non-shared namespace so we
+        # can prove updates land there (not in __shared__).
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        # Seed a row at app/desktop_user — note core://test/* is NOT in
+        # SHARED_PREFIXES, so MemoryClient.remember writes to the caller's
+        # namespace as expected.
+        await desktop_client.remember("core://test/key", "v1")
+
+        # Act: hit the endpoint function (the public HTTP surface).
+        result = await server.memory_update(
+            MemoryUpdateRequest(
+                path="test/key", domain="core", content="v2",
+            )
+        )
+        assert result["ok"] is True
+
+        # Assert: the desktop namespace row updated; nothing in __shared__.
+        record = await engine.recall(
+            "core://test/key",
+            namespace="app/desktop_user",
+            fallback_to_shared=False,
+        )
+        assert record is not None, "Update vaporized the desktop row"
+        assert record.content == "v2", (
+            f"Expected v2 in app/desktop_user, got {record.content!r}"
+        )
+
+        shared_record = await engine.recall(
+            "core://test/key",
+            namespace="__shared__",
+            fallback_to_shared=False,
+        )
+        assert shared_record is None, (
+            f"/memory/update leaked into __shared__: {shared_record!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
 @pytest.mark.asyncio
 async def test_memory_review_clear_discards_pending_memory_create(monkeypatch, tmp_path):
     pytest.importorskip("fastapi")

@@ -165,3 +165,64 @@ async def test_two_cli_workspaces_isolate_their_writes(shared_engine):
     assert a_record.content == "ws_a's analysis"
     assert b_record.content == "ws_b's analysis"
     assert a_record.namespace != b_record.namespace
+
+
+# ---------------------------------------------------------------------------
+# T2 S8 — memories survive engine close/reopen (server restart simulation)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memories_survive_engine_close_and_reopen(tmp_path, monkeypatch):
+    """The memory system's promise to the user — 'the agent remembers what
+    I told it across sessions' — only holds if writes survive a server
+    restart. Simulate: write → close engine → reopen engine pointing at
+    the same DB file → recall.
+
+    Without this, the namespace machinery could be in-memory and we
+    wouldn't notice. The pin: SQLite file persists, init_db is
+    idempotent, and engine cache reset is clean.
+    """
+    db_path = f"{tmp_path}/persist.db"
+    monkeypatch.setenv("OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}")
+
+    from omicsclaw.memory import (
+        close_db,
+        get_engine_db,
+        get_memory_client,
+    )
+
+    # First "process": write a memory in a per-user namespace and a
+    # shared one, then close the engine cleanly.
+    await close_db()
+    await get_engine_db().init_db()
+    user = get_memory_client(namespace="telegram/alice")
+    await user.remember("preference://qc/threshold", "20% mito")
+    await user.remember("core://agent/style", "concise")  # → __shared__
+    await close_db()
+
+    # Second "process": reopen against the same DB file. The package's
+    # singletons reset on close_db; init_db is a no-op for an already-
+    # migrated schema.
+    await get_engine_db().init_db()
+    user2 = get_memory_client(namespace="telegram/alice")
+
+    pref = await user2.recall("preference://qc/threshold")
+    assert pref is not None, "preference vanished across restart"
+    assert pref.content == "20% mito"
+
+    style = await user2.recall("core://agent/style")
+    assert style is not None, "shared row vanished across restart"
+    assert style.content == "concise"
+
+    # And isolation is still enforced after restart: a different
+    # namespace must not see alice's preference.
+    bob = get_memory_client(namespace="telegram/bob")
+    bob_view = await bob.recall(
+        "preference://qc/threshold", fallback_to_shared=False
+    )
+    assert bob_view is None, (
+        "Namespace isolation lost across restart — bob saw alice's row"
+    )
+
+    await close_db()

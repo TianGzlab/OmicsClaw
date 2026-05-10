@@ -75,6 +75,84 @@ def test_tool_executors_re_exports_share_identity_with_bot_core():
     )
 
 
+# ---------------------------------------------------------------------------
+# T2 S1 — bot's manage_memory tool path lands writes in session namespace
+# ---------------------------------------------------------------------------
+
+
+import pytest
+import pytest_asyncio
+import sqlalchemy as sa
+
+
+@pytest_asyncio.fixture
+async def memory_store(tmp_path, monkeypatch):
+    """A real CompatMemoryStore wired to ``bot.core.memory_store``.
+
+    The bot tool ``execute_remember`` reads ``_core.memory_store`` (late
+    binding from bot.core's module-level global), so the test must mutate
+    that global to inject a temp-DB store. ``monkeypatch`` restores it
+    cleanly.
+    """
+    from omicsclaw.memory.compat import CompatMemoryStore
+    import bot.core
+
+    store = CompatMemoryStore(database_url=f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    await store.initialize()
+    monkeypatch.setattr(bot.core, "memory_store", store)
+    try:
+        yield store
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_execute_remember_lands_in_session_namespace(memory_store):
+    """When the LLM tool ``execute_remember`` saves a preference for an
+    active Telegram session, the resulting row must land in the
+    session-derived namespace ``f"{platform}/{user_id}"`` — the
+    production guarantee that two bot users cannot see each other's
+    preferences. This test exercises the real bot→CompatMemoryStore→
+    MemoryEngine→DB path; the only thing it skips is the LLM emitting
+    the tool call."""
+    from bot.tool_executors import execute_remember
+    from omicsclaw.memory.models import Path
+
+    session = await memory_store.create_session("alice", "telegram")
+
+    result = await execute_remember(
+        args={
+            "memory_type": "preference",
+            "domain": "global",
+            "key": "qc_threshold",
+            "value": "20%",
+        },
+        session_id=session.session_id,
+    )
+
+    assert "✓" in result or "saved" in result.lower(), (
+        f"execute_remember reported failure: {result!r}"
+    )
+
+    async with memory_store._db.session() as s:
+        rows = (
+            await s.execute(
+                sa.select(Path).where(
+                    Path.domain == "preference",
+                    Path.path == "global/qc_threshold",
+                )
+            )
+        ).scalars().all()
+
+    assert len(rows) == 1, (
+        f"Expected exactly 1 path row, got {len(rows)}: "
+        f"{[(r.namespace, r.domain, r.path) for r in rows]}"
+    )
+    assert rows[0].namespace == "telegram/alice", (
+        f"Preference landed in {rows[0].namespace!r}; expected 'telegram/alice'"
+    )
+
+
 def test_tool_executors_dispatch_table_lists_all_24_executors():
     """``_available_tool_executors()`` returns the full dispatch map.
     The lazy ``bot.core.TOOL_EXECUTORS`` attribute also adds the
