@@ -371,14 +371,45 @@ class MemoryEngine:
         uri: str | MemoryURI,
         *,
         namespace: str,
-        priority: Optional[int] = None,
-        disclosure: Optional[str] = None,
+        priority: Any = _UNSET,
+        disclosure: Any = _UNSET,
     ) -> None:
         """Update Edge metadata (priority, disclosure) without touching Memory.
 
-        At least one of ``priority``/``disclosure`` must be provided.
+        At least one of ``priority``/``disclosure`` must be provided. Pass
+        an explicit ``None`` to clear ``disclosure``. Memory rows and the
+        version chain are untouched; the search_documents row is refreshed
+        because priority and disclosure feed into search_terms.
         """
-        raise NotImplementedError("Task 3a.4")
+        if priority is _UNSET and disclosure is _UNSET:
+            raise ValueError(
+                "patch_edge_metadata requires at least one of priority "
+                "or disclosure to be set."
+            )
+
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+
+        async with self._db.session() as s:
+            path_row = await self._fetch_path(s, namespace, parsed)
+            if path_row is None:
+                raise LookupError(
+                    f"Path for {parsed} in namespace {namespace!r} not found."
+                )
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is None:
+                raise RuntimeError(
+                    f"Path {namespace}/{parsed} references a missing edge "
+                    f"— graph corruption."
+                )
+
+            if priority is not _UNSET:
+                edge.priority = priority
+            if disclosure is not _UNSET:
+                edge.disclosure = disclosure
+
+            await self._search.refresh_search_documents_for_node(
+                edge.child_uuid, session=s
+            )
 
     # ------------------------------------------------------------------
     # Read verbs (PR #3b)

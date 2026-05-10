@@ -341,3 +341,146 @@ async def test_upsert_versioned_returns_namespace_isolated(engine):
     assert a.node_uuid != b.node_uuid
     assert a.old_memory_id is None
     assert b.old_memory_id is None  # B's first write also has no chain
+
+
+# ----------------------------------------------------------------------
+# patch_edge_metadata
+# ----------------------------------------------------------------------
+
+
+async def _get_edge_for(eng, uri: str, namespace: str):
+    """Helper: load the edge backing (namespace, uri)."""
+    from omicsclaw.memory.uri import MemoryURI
+
+    parsed = MemoryURI.parse(uri)
+    async with eng._db.session() as s:
+        path_row = (
+            await s.execute(
+                sa.select(Path).where(
+                    Path.namespace == namespace,
+                    Path.domain == parsed.domain,
+                    Path.path == parsed.path,
+                )
+            )
+        ).scalar_one()
+        return await s.get(Edge, path_row.edge_id)
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_updates_priority(engine):
+    eng, db = engine
+    await eng.upsert("core://agent", "content", namespace="tg/userA", priority=0)
+
+    await eng.patch_edge_metadata(
+        "core://agent", namespace="tg/userA", priority=9
+    )
+
+    edge = await _get_edge_for(eng, "core://agent", "tg/userA")
+    assert edge.priority == 9
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_updates_disclosure(engine):
+    eng, db = engine
+    await eng.upsert("core://agent", "content", namespace="tg/userA")
+
+    await eng.patch_edge_metadata(
+        "core://agent", namespace="tg/userA", disclosure="hidden from search"
+    )
+
+    edge = await _get_edge_for(eng, "core://agent", "tg/userA")
+    assert edge.disclosure == "hidden from search"
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_updates_both(engine):
+    eng, db = engine
+    await eng.upsert("core://agent", "content", namespace="tg/userA")
+
+    await eng.patch_edge_metadata(
+        "core://agent",
+        namespace="tg/userA",
+        priority=3,
+        disclosure="why this exists",
+    )
+
+    edge = await _get_edge_for(eng, "core://agent", "tg/userA")
+    assert edge.priority == 3
+    assert edge.disclosure == "why this exists"
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_does_not_touch_memory(engine):
+    eng, db = engine
+    ref = await eng.upsert("core://agent", "content", namespace="tg/userA")
+
+    async with db.session() as s:
+        before = (await s.get(Memory, ref.memory_id)).content
+    await eng.patch_edge_metadata(
+        "core://agent", namespace="tg/userA", priority=1
+    )
+    async with db.session() as s:
+        memory = await s.get(Memory, ref.memory_id)
+        # Same content; same row id (no new memory created).
+        assert memory.content == before
+        all_memories = (
+            await s.execute(
+                sa.select(Memory).where(Memory.node_uuid == ref.node_uuid)
+            )
+        ).scalars().all()
+        assert len(all_memories) == 1
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_refreshes_search_doc(engine):
+    eng, db = engine
+    await eng.upsert("core://agent", "content", namespace="tg/userA", priority=0)
+
+    await eng.patch_edge_metadata(
+        "core://agent", namespace="tg/userA", priority=7
+    )
+
+    async with db.session() as s:
+        sd = (
+            await s.execute(
+                sa.select(SearchDocument).where(
+                    SearchDocument.namespace == "tg/userA",
+                    SearchDocument.domain == "core",
+                    SearchDocument.path == "agent",
+                )
+            )
+        ).scalar_one()
+        assert sd.priority == 7
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_namespace_isolated(engine):
+    eng, db = engine
+    await eng.upsert("core://agent", "A", namespace="tg/userA", priority=1)
+    await eng.upsert("core://agent", "B", namespace="tg/userB", priority=1)
+
+    await eng.patch_edge_metadata(
+        "core://agent", namespace="tg/userA", priority=99
+    )
+
+    edge_a = await _get_edge_for(eng, "core://agent", "tg/userA")
+    edge_b = await _get_edge_for(eng, "core://agent", "tg/userB")
+    assert edge_a.priority == 99
+    assert edge_b.priority == 1  # B unchanged
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_raises_if_path_missing(engine):
+    eng, _ = engine
+    with pytest.raises(LookupError, match="not found"):
+        await eng.patch_edge_metadata(
+            "core://nonexistent", namespace="tg/userA", priority=1
+        )
+
+
+@pytest.mark.asyncio
+async def test_patch_edge_metadata_requires_at_least_one_field(engine):
+    eng, _ = engine
+    await eng.upsert("core://agent", "x", namespace="tg/userA")
+    with pytest.raises(ValueError, match="at least one"):
+        await eng.patch_edge_metadata("core://agent", namespace="tg/userA")
