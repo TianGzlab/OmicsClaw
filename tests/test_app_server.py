@@ -2415,6 +2415,96 @@ async def test_memory_browse_endpoint_falls_back_to_shared(monkeypatch, tmp_path
 
 
 # ---------------------------------------------------------------------------
+# /memory/browse — is_versioned flag drives the desktop "Show history" button
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_marks_versioned_uri(monkeypatch, tmp_path):
+    """A versioned URI (per ``namespace_policy.should_version``) must
+    surface ``is_versioned=True`` in the /memory/browse response so the
+    desktop UI can decide whether to render the History/rollback button.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("core://my_user/note", "v1")
+
+        result = await server.memory_browse(path="my_user/note", domain="core")
+        assert result["is_versioned"] is True, (
+            f"core://my_user/note is in VERSIONED_PREFIXES; expected "
+            f"is_versioned=True, got {result.get('is_versioned')!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_marks_overwrite_uri(monkeypatch, tmp_path):
+    """An overwrite-only URI (``dataset://``, ``analysis://``) must
+    surface ``is_versioned=False`` so the UI hides the History button —
+    these URIs structurally have no version chain."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("dataset://x.h5ad", "data x")
+
+        result = await server.memory_browse(path="x.h5ad", domain="dataset")
+        assert result["is_versioned"] is False, (
+            f"dataset:// is overwrite-only; expected is_versioned=False, "
+            f"got {result.get('is_versioned')!r}"
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_browse_is_versioned_present_on_root_browse(
+    monkeypatch, tmp_path
+):
+    """Root browse (``path=""``, ``domain="core"``) must still include
+    the ``is_versioned`` field. ``core://`` itself is not versioned, so
+    the value is False — but the field's presence is the contract the
+    front-end relies on, not just the value.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        result = await server.memory_browse(path="", domain="core")
+        assert "is_versioned" in result
+        assert result["is_versioned"] is False
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
 # T2 S3 — /memory/search namespace-scoped (caller + __shared__ only)
 # ---------------------------------------------------------------------------
 
