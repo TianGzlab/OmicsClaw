@@ -1,152 +1,94 @@
 ---
 name: sc-cytotrace
-description: >-
-  Predict cell differentiation potency from scRNA-seq data using gene expression
-  complexity as a proxy for stemness.
-version: 0.1.0
+description: Load when computing per-cell differentiation potency / stemness scores from gene-expression complexity on a scRNA AnnData via the CytoTRACE-simple method. Skip when ordering cells along a trajectory (use sc-pseudotime) or for marker-based cell-type labelling (use sc-cell-annotation).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, cytotrace, potency, differentiation, stemness]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--method"
-    - "--n-neighbors"
-    - "--r-enhanced"
-    param_hints:
-      cytotrace_simple:
-        priority: "n_neighbors"
-        params: ["n_neighbors"]
-        defaults: {n_neighbors: 30}
-        requires: ["normalized_expression_or_counts"]
-        tips:
-        - "`cytotrace_simple` uses gene detection count as a potency proxy. No external
-          models needed."
-    saves_h5ad: true
-    requires_preprocessed: true
-    legacy_aliases: []
-    script: sc_cytotrace.py
+tags:
+- singlecell
+- scrna
+- cytotrace
+- potency
+- stemness
+- differentiation
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
+- scipy
 ---
 
-# Single-Cell CytoTRACE Potency Prediction
+# sc-cytotrace
 
-## Why This Exists
+## When to use
 
-- Without it: no quick way to estimate which cells are more stem-like vs differentiated.
-- With it: a potency score and categorical label for every cell, useful for developmental studies,
-  cancer stem cell analysis, and trajectory interpretation.
-- Why OmicsClaw: standardized output contract, gallery, and report following the same conventions
-  as all other scRNA skills.
+The user has a normalised (or raw-count) scRNA AnnData and wants a
+single per-cell **differentiation potency** score (0 = differentiated,
+1 = stem/totipotent), plus a 6-bin categorical label
+(`Differentiated`, `Mostly Differentiated`, ..., `Totipotent`). The
+implementation uses the CytoTRACE-simple proxy: gene-expression
+complexity (number of genes detected per cell), KNN-smoothed and rank-
+normalised. Single backend: `cytotrace_simple`.
 
-## Core Capabilities
+Output goes into `obs["cytotrace_score"]`, `obs["cytotrace_potency"]`,
+`obs["cytotrace_gene_count"]`. For trajectory ordering use
+`sc-pseudotime`; for cell-type labels use `sc-cell-annotation`.
 
-1. **cytotrace_simple**: lightweight potency prediction using gene expression complexity
-   (number of detected genes per cell) as a proxy for stemness, with KNN smoothing.
+## Inputs & Outputs
 
-## Data / State Requirements
+| Input | Format | Required |
+|---|---|---|
+| Normalised or raw scRNA AnnData | `.h5ad` | yes (unless `--demo`) |
 
-- **Input**: normalized expression or raw counts in `X`
-- **Upstream**: `sc-preprocessing` (recommended) or `sc-clustering`
-- **Neighbor graph**: built automatically if missing; reused if present
-- **UMAP**: computed automatically for visualization if missing
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | adds `obs["cytotrace_score"]` (float 0-1), `obs["cytotrace_potency"]` (6-level categorical), `obs["cytotrace_gene_count"]` (int) |
+| Per-cell scores | `tables/cytotrace_scores.csv` | always |
+| Embedding data | `figure_data/cytotrace_embedding.csv` | always |
+| Figures | `figures/potency_umap.png`, `figures/score_distribution.png`, `figures/potency_composition.png` | always |
+| Report | `report.md` + `result.json` | always |
 
-## Method Description
+## Flow
 
-### cytotrace_simple
+1. Load AnnData; preflight requires `.X` to be `normalized_expression` OR `raw_counts` (matrix-contract check).
+2. Compute per-cell gene-count complexity (number of detected genes).
+3. Rank-normalise gene counts; KNN-smooth across `--n-neighbors` neighbours.
+4. Min-max rescale to `[0, 1]` → `cytotrace_score`.
+5. Bin score into 6 potency categories; record counts per category.
+6. Detect degenerate output (≤ 1 unique category) → write `result.json["suggested_actions"]`; do NOT raise.
+7. Render figures, save tables, `processed.h5ad`, `report.md`, `result.json`.
 
-The `cytotrace_simple` method is inspired by CytoTRACE (Gulati et al., Science 2020),
-which showed that gene expression complexity (number of detected genes) correlates with
-developmental potential.
+## Gotchas
 
-Steps:
-1. **Gene count**: count genes detected per cell (expression > 0)
-2. **Rank normalization**: rank-normalize to [0, 1]
-3. **KNN smoothing**: smooth scores using the cell-cell neighbor graph
-4. **Potency binning**: assign cells to 6 potency categories
+- **Single backend only.** `sc_cytotrace.py:549` argparse `choices=["cytotrace_simple"]` — there is no full CytoTRACE 2 / R-backed path here. `:580` raises `ValueError(f"Unknown method: {args.method}")` if the registry diverges.
+- **Score is a *proxy* via gene complexity, not the original CytoTRACE algorithm.** `sc_cytotrace.py:193-199` documents the simplified pipeline (gene_count → rank → smooth → minmax → 6 bins). Don't quote scores as identical to published CytoTRACE — they're correlated but not numerically equivalent.
+- **Degenerate output is a soft fail.** When all cells land in 1 potency bin (e.g., uniformly low complexity), `sc_cytotrace.py:253-271` records `result.json["n_potency_categories"] ≤ 1`, sets `degenerate=True`, and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_potency_categories"]` before interpreting the score.
+- **`--input` mandatory unless `--demo`.** `sc_cytotrace.py:562` raises `ValueError("--input required when not using --demo")`.
+- **The skill OVERWRITES existing `obs["cytotrace_*"]` columns.** `sc_cytotrace.py:245-247` directly assigns into `obs`. Save the input AnnData first if you need to compare two CytoTRACE runs (e.g., before/after filtering).
 
-| Category | Score Range | Biological Meaning |
-|----------|------------|-------------------|
-| Differentiated | 0.00 - 0.17 | Terminally differentiated |
-| Unipotent | 0.17 - 0.33 | Can produce one cell type |
-| Oligopotent | 0.33 - 0.50 | Can produce few cell types |
-| Multipotent | 0.50 - 0.67 | Can produce many cell types |
-| Pluripotent | 0.67 - 0.83 | Can produce most cell types |
-| Totipotent | 0.83 - 1.00 | Can produce all cell types |
-
-## CLI Reference
+## Key CLI
 
 ```bash
-# Basic usage
-python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
-  --input <preprocessed.h5ad> --output <dir>
+# Demo
+python omicsclaw.py run sc-cytotrace --demo --output /tmp/sc_cytotrace_demo
 
-# With custom neighbors
-python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
-  --input <preprocessed.h5ad> --output <dir> --n-neighbors 50
+# Default on a normalised AnnData
+python omicsclaw.py run sc-cytotrace \
+  --input clustered.h5ad --output results/
 
-# Demo mode
-python omicsclaw.py run sc-cytotrace --demo --output /tmp/cytotrace_demo
+# Tighter KNN smoothing for sparse data
+python omicsclaw.py run sc-cytotrace \
+  --input clustered.h5ad --output results/ --n-neighbors 50
+
+# With R-enhanced ggplot figures
+python omicsclaw.py run sc-cytotrace \
+  --input clustered.h5ad --output results/ --r-enhanced
 ```
 
-## Public Parameters
+## See also
 
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--method` | analysis method | `cytotrace_simple` (default, only option currently) |
-| `--n-neighbors` | KNN smoothing neighbors | default 30; higher = smoother scores |
-
-## Output Contract
-
-Successful runs write:
-
-- `processed.h5ad` -- with `obs['cytotrace_score']`, `obs['cytotrace_potency']`, `obs['cytotrace_gene_count']`
-- `figures/potency_umap.png` -- UMAP colored by score and potency category
-- `figures/score_distribution.png` -- score histogram
-- `figures/potency_composition.png` -- potency category bar chart
-- `tables/cytotrace_scores.csv` -- per-cell scores
-- `report.md`
-- `result.json`
-- `reproducibility/commands.sh`
-
-## Downstream Link
-
-- After potency prediction, consider:
-  - `sc-pseudotime` -- for trajectory / lineage analysis
-  - `sc-de --groupby cytotrace_potency` -- for differential expression between potency levels
-  - Overlay potency scores on spatial data if available
-
-## Current Limitations
-
-- `cytotrace_simple` is a heuristic based on gene complexity; it does not use pretrained
-  deep learning models like CytoTRACE 2.
-- The method assumes that gene detection count correlates with developmental potential,
-  which holds for most but not all biological systems.
-- Very small datasets (<50 cells) may produce unreliable scores.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled demo data | — |
-| `--method` | str | `cytotrace_simple` | Potency method (only `cytotrace_simple` currently) | fixed choice |
-| `--n-neighbors` | int | 30 | KNN neighbors for score smoothing | — |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `cytotrace_embedding.csv` | UMAP/embedding colored by cell type labels | ggplot2 |
-| `plot_embedding_feature` | `r_embedding_feature.png` | `cytotrace_embedding.csv` | UMAP/embedding colored by CytoTRACE score | ggplot2 |
-
-Note: The plan listed 1 R renderer (`plot_feature_boxplot`) for sc-cytotrace, but the actual `R_ENHANCED_PLOTS` dict contains `plot_embedding_discrete` and `plot_embedding_feature`. The cytotrace boxplot renderer (`plot_cytotrace_boxplot`) is registered in the R registry but not wired into the skill's `R_ENHANCED_PLOTS` dict.
-
-## Workflow Position
-
-**Upstream:** sc-clustering or sc-cell-annotation
-**Downstream:** Terminal analysis. Consider: sc-pseudotime, sc-velocity
+- `references/parameters.md` — every CLI flag, smoothing notes
+- `references/methodology.md` — gene-count proxy vs original CytoTRACE; bin thresholds
+- `references/output_contract.md` — `obs["cytotrace_score"]` / `cytotrace_potency` schema
+- Adjacent skills: `sc-pseudotime` (parallel — graph-based trajectory ordering, complementary to potency), `sc-clustering` (upstream — provides UMAP for the potency-on-UMAP plot), `sc-cell-annotation` (parallel — predicts discrete cell-type labels rather than continuous potency)

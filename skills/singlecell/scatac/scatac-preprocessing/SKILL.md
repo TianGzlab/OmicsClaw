@@ -1,340 +1,99 @@
 ---
 name: scatac-preprocessing
-description: >-
-  Single-cell ATAC-seq preprocessing with a Signac-style TF-IDF + LSI workflow.
-  Performs cell and peak filtering, top-peak selection, TF-IDF normalization,
-  latent semantic indexing, neighborhood graph construction, UMAP, and Leiden
-  clustering, then exports a downstream-ready AnnData plus a standard OmicsClaw
-  gallery and reproducibility bundle.
-version: 0.1.0
+description: Load when preprocessing a single-cell ATAC peak × cell AnnData via Signac-style TF-IDF + LSI + Leiden, producing a clustered UMAP-ready object. Skip when input is fragments or BAM (peak calling not implemented here) or for scRNA preprocessing (use sc-preprocessing).
+version: 0.2.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scatac, atac, preprocessing, tfidf, lsi, clustering]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-    - "--leiden-resolution"
-    - "--method"
-    - "--min-cells"
-    - "--min-peaks"
-    - "--n-lsi"
-    - "--n-neighbors"
-    - "--n-top-peaks"
-    - "--tfidf-scale-factor"
-    param_hints:
-      tfidf_lsi:
-        priority: "min_peaks/min_cells -> n_top_peaks -> n_lsi/n_neighbors -> leiden_resolution"
-        params: ["min_peaks", "min_cells", "n_top_peaks", "tfidf_scale_factor", "n_lsi",
-          "n_neighbors", "leiden_resolution"]
-        defaults: {min_peaks: 200, min_cells: 5, n_top_peaks: 10000, tfidf_scale_factor: 10000.0,
-          n_lsi: 30, n_neighbors: 15, leiden_resolution: 0.8}
-        requires: ["count_like_peak_matrix_in_X", "scanpy", "sklearn"]
-        tips:
-        - "--min-peaks / --min-cells: Wrapper-level sparsity filters for low-information
-          cells and rarely observed peaks."
-        - "--n-top-peaks: Wrapper-level feature-budget control using globally most
-          accessible peaks after filtering."
-        - "--n-lsi / --n-neighbors / --leiden-resolution: Main structure-learning
-          controls for latent space, graph locality, and clustering granularity."
-    legacy_aliases: [scatac-preprocess]
-    saves_h5ad: true
-    requires_preprocessed: false
-    requires:
-      bins:
-      - python3
-      env: []
-      config: []
-    emoji: "🧬"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux]
-    install:
-    - kind: pip
-      package: scanpy
-      bins: []
-    trigger_keywords:
-    - scATAC preprocessing
-    - single-cell ATAC preprocessing
-    - ATAC TF-IDF LSI
-    - chromatin accessibility clustering
-    - scATAC UMAP Leiden
-    script: scatac_preprocessing.py
+tags:
+- singlecell
+- scatac
+- atac
+- preprocessing
+- tfidf
+- lsi
+- clustering
+- leiden
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
+- scipy
+- scikit-learn
 ---
 
-# 🧬 scATAC Preprocessing
+# scatac-preprocessing
 
-You are **scATAC Preprocessing**, the OmicsClaw skill for turning raw-count-like
-single-cell chromatin accessibility input into a downstream-ready AnnData with
-QC-filtered cells, selected peaks, TF-IDF-transformed feature space, LSI
-embedding, neighborhood graph, UMAP, clustering, and a standard OmicsClaw
-result bundle.
+## When to use
 
-## Why This Exists
+The user has a peak × cell scATAC AnnData (raw-count-like accessibility
+matrix in `.X`) and wants the standard "filter → TF-IDF → LSI → graph →
+UMAP → Leiden" pipeline in one shot. Currently a single backend:
+`tfidf_lsi` (Signac-style). The skill stops at clustered UMAP — no
+fragment QC, no peak calling, no motif / gene-activity scoring, no
+multi-sample integration. For scRNA preprocessing use `sc-preprocessing`.
 
-- **Without it**: users manually piece together sparse peak filtering, TF-IDF,
-  LSI, graph construction, and clustering with inconsistent export behavior
-- **With it**: one command produces a stable scATAC preprocessing object plus a
-  standard OmicsClaw report, gallery, tables, and reproducibility bundle
-- **Why OmicsClaw**: the wrapper keeps a compact, implementation-aligned
-  contract around a Signac-style TF-IDF + LSI workflow while exposing only the
-  highest-value controls
+## Inputs & Outputs
 
-## Scope Boundary
+| Input | Format | Required |
+|---|---|---|
+| Peak × cell AnnData | `.h5ad` (`.X` non-negative count-like) | yes (unless `--demo`) |
+| Alternates | `.h5` (10x), `.loom`, `.csv`/`.tsv`, 10x directory | yes (loaded via `smart_load`) |
 
-Current OmicsClaw `scatac-preprocessing` exposes **one implemented workflow**:
+| Output | Path | Notes |
+|---|---|---|
+| Processed AnnData | `processed.h5ad` | retained peak space; `obsm["X_lsi"]`, `obsm["X_umap"]`, `obs["leiden"]`; raw counts kept in `layers["counts"]` |
+| Run summary | `tables/preprocess_summary.csv` | always |
+| Cluster sizes | `tables/cluster_summary.csv` | always |
+| Top peaks | `tables/peak_summary.csv` | most accessible retained peaks |
+| LSI variance | `tables/lsi_variance_ratio.csv` | per-component |
+| Per-cell QC | `tables/qc_metrics_per_cell.csv` | always |
+| Figures | `figures/umap_leiden.png`, `figures/qc_violin.png`, `figures/top_accessible_peaks.png`, `figures/lsi_variance.png` | always |
+| Report | `report.md` + `result.json` | always |
 
-1. `tfidf_lsi`
+## Flow
 
-This skill does:
+1. Load the peak × cell input via the shared `smart_load` (AnnData / 10x H5 / loom / CSV / 10x dir).
+2. Validate `.X` is present, non-empty, non-negative.
+3. Compute per-cell `n_peaks_by_counts` / `total_counts`; filter cells by `--min-peaks` and peaks by `--min-cells`.
+4. Retain the globally most accessible peaks up to `--n-top-peaks`.
+5. Run Signac-style TF-IDF (`--tfidf-scale-factor`); truncated-SVD LSI to `--n-lsi` components.
+6. Build neighbour graph (`--n-neighbors`), UMAP, Leiden (`--leiden-resolution`).
+7. Save `processed.h5ad`, tables, figures, `report.md`, `result.json`.
 
-1. cell filtering by detected peaks
-2. peak filtering by cell support
-3. wrapper-level top-peak selection
-4. TF-IDF normalization
-5. truncated SVD / LSI embedding
-6. graph construction, UMAP, and Leiden clustering
-7. downstream-ready AnnData export
+## Gotchas
 
-This skill does **not**:
+- **Filtering can wipe everything.** `scatac_preprocessing.py:149` raises `RuntimeError("All cells were removed by `min_peaks`. Lower the threshold.")` and `:154` raises `RuntimeError("All peaks were removed by `min_cells`. Lower the threshold.")` — both are hard fails. Inspect `n_peaks_by_counts` distribution before tightening these thresholds; `--min-peaks 200` (default) assumes a typical 10x scATAC depth.
+- **LSI hard-fails on a degenerate matrix.** `scatac_preprocessing.py:228` raises `RuntimeError("Not enough cells or peaks remain to compute a stable LSI embedding.")` when the matrix is too sparse / small after filtering. Either lower QC thresholds or feed a richer dataset.
+- **Input must be non-negative count-like in `.X`.** `scatac_preprocessing.py:118` raises `ValueError("Input AnnData has no matrix in adata.X.")`; `:122` raises `ValueError("Input matrix is empty.")`; `:124` raises `ValueError("scATAC preprocessing requires a non-negative accessibility matrix.")`. Already-TF-IDF-transformed data will fail the non-negativity check.
+- **`processed.h5ad` keeps only retained peaks.** `scatac_preprocessing.py:176` does `adata = adata[:, keep].copy()` — `var` is filtered to the top `n_top_peaks` accessible. The original peak universe is **not** preserved in `X` (the deleted peaks are gone). Snapshot the input before running if you need the full peak space later.
+- **`--input` mandatory unless `--demo`.** `scatac_preprocessing.py:809` raises `ValueError("--input required when not using --demo")`.
+- **Single backend only.** `scatac_preprocessing.py:272` raises `ValueError(f"Unknown preprocessing method '{method}'")` for anything other than `tfidf_lsi`. The `--method` flag exists for forward compatibility; today it's effectively a no-op.
 
-1. start from fragment files
-2. call peaks from BAM / fragments
-3. compute motif enrichments
-4. compute gene activity scores
-5. perform differential accessibility
-6. perform multi-sample integration
-
-Those belong to later OmicsClaw scATAC skills.
-
-## Core Capabilities
-
-1. **Implementation-aligned scATAC preprocessing**: sparse accessibility matrix
-   to TF-IDF + LSI + graph + clustering in one run
-2. **Compact public controls**: a small parameter set tunes QC sparsity
-   thresholds, feature budget, latent dimensionality, graph locality, and
-   clustering granularity
-3. **Stable gallery contract**: UMAP clusters, QC violin, top accessible peaks,
-   and LSI variance figures under `figures/`
-4. **Structured figure-data layer**: `figure_data/` exports summary, cluster,
-   peak, LSI, UMAP, and QC tables for downstream customization
-5. **Downstream-ready AnnData**: processed peak matrix, raw counts layer, raw
-   snapshot over retained peaks, LSI embeddings, graph, and cluster labels
-6. **Notebook-first reproducibility**: README, report, result JSON, replay
-   command, pinned requirements, and analysis notebook
-
-## Input Formats
-
-The current wrapper uses `skills.singlecell._lib.io.smart_load(...)`.
-
-| Format | Extension / form | Current wrapper support | Notes |
-|--------|------------------|-------------------------|-------|
-| AnnData | `.h5ad` | yes | preferred path |
-| 10x HDF5 | `.h5` | yes | loaded through the shared single-cell loader |
-| Loom | `.loom` | yes | supported when the file already encodes a peak matrix |
-| Delimited matrix | `.csv`, `.tsv` | yes | interpreted as a peak-by-cell or cell-by-peak count matrix via the shared loader |
-| 10x directory | directory | yes | delegated to the shared 10x importer |
-| Demo | `--demo` | yes | local synthetic scATAC example |
-
-## Data / State Requirements
-
-| Requirement | Where it should exist | Why it matters |
-|-------------|------------------------|----------------|
-| Raw-count-like peak matrix | `adata.X` | TF-IDF and LSI assume non-negative accessibility counts or binary peak calls |
-| Cell identifiers | `adata.obs_names` | Needed for graph, exports, and UMAP table generation |
-| Peak identifiers | `adata.var_names` | Needed for retained-peak reporting and top-peak summaries |
-| Sufficient sparsity support | matrix entries > 0 across cells and peaks | Needed so `min_peaks`, `min_cells`, and LSI can operate sensibly |
-
-### Current Wrapper Assumptions
-
-- The most reliable input is a **raw-count-like peak matrix in `adata.X`**.
-- The wrapper does **not** start from fragments or run peak calling.
-- `--n-top-peaks` is a **wrapper-level control** that keeps the globally most
-  accessible peaks after filtering; it is not a direct mirror of every upstream
-  scATAC toolkit's feature-selection API.
-- The final `processed.h5ad` stores the retained peak space used for TF-IDF +
-  LSI. The original full peak universe is not preserved in `X`.
-
-## Workflow
-
-1. **Load**: read input via the shared single-cell loader or synthetic demo data.
-2. **Validate**: confirm the matrix is non-negative and looks compatible with count-like accessibility preprocessing.
-3. **QC and filtering**:
-   - compute `total_counts`, `n_peaks_by_counts`, and `fraction_accessible`
-   - filter cells by `min_peaks`
-   - filter peaks by `min_cells`
-4. **Select feature space**: retain the globally most accessible peaks up to
-   `n_top_peaks` after filtering
-5. **Run latent workflow**:
-   - compute Signac-style TF-IDF transform
-   - run truncated SVD / LSI
-   - build Scanpy neighbors on the LSI representation
-   - compute UMAP and Leiden clustering
-6. **Write standard outputs**: `processed.h5ad`, report, result JSON, gallery,
-   figure-data CSVs, summary tables, README, and notebook
-
-## CLI Reference
+## Key CLI
 
 ```bash
-# Standard usage
-python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
-  --input <raw_atac.h5ad> --output <dir>
+# Demo (built-in synthetic scATAC)
+python omicsclaw.py run scatac-preprocessing --demo --output /tmp/scatac_demo
 
-# Tune sparsity and feature budget
-python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
-  --input <raw_atac.h5ad> \
-  --min-peaks 300 --min-cells 10 --n-top-peaks 20000 \
-  --output <dir>
+# Standard run on a 10x scATAC h5
+python omicsclaw.py run scatac-preprocessing \
+  --input atac_peaks.h5 --output results/
 
-# Tune latent space and graph granularity
-python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
-  --input <raw_atac.h5ad> \
-  --n-lsi 40 --n-neighbors 20 --leiden-resolution 1.0 \
-  --output <dir>
+# Tune QC + feature budget
+python omicsclaw.py run scatac-preprocessing \
+  --input atac_peaks.h5ad --output results/ \
+  --min-peaks 300 --min-cells 10 --n-top-peaks 20000
 
-# Demo
-oc run scatac-preprocessing --demo --output /tmp/scatac_preprocess_demo
+# Tune latent space + clustering
+python omicsclaw.py run scatac-preprocessing \
+  --input atac_peaks.h5ad --output results/ \
+  --n-lsi 40 --n-neighbors 20 --leiden-resolution 1.0
 ```
 
-## Example Queries
+## See also
 
-- "Preprocess my scATAC peak matrix and give me a clustered UMAP"
-- "Run TF-IDF and LSI on this single-cell ATAC dataset"
-- "Filter sparse cells and build Leiden clusters for chromatin accessibility data"
-
-## Public Parameters
-
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--method` | preprocessing backend | currently only `tfidf_lsi` is implemented |
-| `--min-peaks` | cell filtering threshold | removes low-information cells with too few detected peaks |
-| `--min-cells` | peak filtering threshold | removes peaks observed in too few cells |
-| `--n-top-peaks` | retained peak budget | wrapper-level cap on globally most accessible peaks |
-| `--tfidf-scale-factor` | TF-IDF scaling constant | wrapper control for transformed accessibility magnitude |
-| `--n-lsi` | latent dimensionality | requested number of LSI components |
-| `--n-neighbors` | graph locality | Scanpy neighbor-graph granularity |
-| `--leiden-resolution` | clustering granularity | Scanpy Leiden resolution |
-
-## Algorithm / Methodology
-
-### `tfidf_lsi`
-
-1. **Sparse QC**: compute cell accessibility burden and filter cells /
-   peaks using `min_peaks` and `min_cells`.
-2. **Peak retention**: rank peaks by total accessibility after filtering and
-   keep up to `n_top_peaks`.
-3. **TF-IDF transform**: compute a Signac-style TF-IDF representation with
-   `tfidf_scale_factor` as the wrapper-level scaling constant.
-4. **LSI**: run truncated SVD to obtain `X_lsi`, then use the LSI space for
-   graph construction.
-5. **Graph and clustering**: build Scanpy neighbors, UMAP, and Leiden on the
-   latent representation.
-
-**Key parameters**:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `min_peaks` | `200` | Wrapper-level minimum detected peaks per cell |
-| `min_cells` | `5` | Wrapper-level minimum cells per retained peak |
-| `n_top_peaks` | `10000` | Wrapper-level retained-peak budget after filtering |
-| `tfidf_scale_factor` | `10000.0` | Scaling factor applied before `log1p` on TF-IDF values |
-| `n_lsi` | `30` | Requested number of latent semantic indexing components |
-| `n_neighbors` | `15` | Scanpy neighbor graph parameter |
-| `leiden_resolution` | `0.8` | Scanpy Leiden clustering granularity |
-
-> **Current OmicsClaw behavior**: the wrapper currently implements a single
-> Python-native TF-IDF + LSI path. It does not yet expose fragment-aware QC,
-> Signac percentile-style top-feature selection, ArchR workflows, or motif /
-> gene-activity stages.
-
-> **Parameter design note**: `n_top_peaks` and `tfidf_scale_factor` are
-> wrapper-level controls. They are scientifically meaningful, but they should
-> not be described as if OmicsClaw were exposing every upstream scATAC toolkit
-> parameter directly.
-
-## Visualization Contract
-
-`scatac-preprocessing` treats Python output as the standard analysis gallery.
-The current contract is:
-
-1. **Python standard gallery**:
-   - `umap_leiden.png`
-   - `qc_violin.png`
-   - `top_accessible_peaks.png`
-   - `lsi_variance.png`
-2. **Figure-ready exports**:
-   - `figure_data/preprocess_summary.csv`
-   - `figure_data/cluster_summary.csv`
-   - `figure_data/peak_summary.csv`
-   - `figure_data/lsi_variance_ratio.csv`
-   - `figure_data/umap_points.csv`
-   - `figure_data/qc_metrics_per_cell.csv`
-3. **Optional customization layer**:
-   - current wrapper exports figure-ready CSVs first; a dedicated R styling
-     layer can be added later without recomputing the science
-
-## Output Structure
-
-```text
-output_directory/
-├── README.md
-├── report.md
-├── result.json
-├── processed.h5ad
-├── figures/
-│   ├── umap_leiden.png
-│   ├── qc_violin.png
-│   ├── top_accessible_peaks.png
-│   ├── lsi_variance.png
-│   └── manifest.json
-├── tables/
-│   ├── preprocess_summary.csv
-│   ├── cluster_summary.csv
-│   ├── peak_summary.csv
-│   ├── lsi_variance_ratio.csv
-│   └── qc_metrics_per_cell.csv
-├── figure_data/
-│   ├── preprocess_summary.csv
-│   ├── cluster_summary.csv
-│   ├── peak_summary.csv
-│   ├── lsi_variance_ratio.csv
-│   ├── umap_points.csv
-│   ├── qc_metrics_per_cell.csv
-│   └── manifest.json
-└── reproducibility/
-    ├── analysis_notebook.ipynb
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Reproducibility Contract
-
-- Normal `oc run` execution and direct script execution should produce the same
-  core reproducibility bundle whenever the wrapper succeeds.
-- `analysis_notebook.ipynb` is runner-owned and should be generated when
-  the shared notebook export helper is available.
-- Figures should be rendered from persisted `adata` / table state, not only from
-  transient local variables created during preprocessing.
-
-## Knowledge Companions
-
-- Short operational guardrails:
-  `knowledge_base/knowhows/KH-scatac-preprocessing-guardrails.md`.
-- Longer tuning guide:
-  `knowledge_base/skill-guides/singlecell/scatac-preprocessing.md`.
-
-## Dependencies
-
-**Required**:
-
-- `scanpy`
-- `anndata`
-- `numpy`
-- `pandas`
-- `scipy`
-- `scikit-learn`
-- `matplotlib`
-
-## References
-
-- Signac reference docs for TF-IDF, top-feature selection, and SVD / LSI
-- Scanpy docs for `pp.neighbors`, `tl.umap`, and `tl.leiden`
+- `references/parameters.md` — every CLI flag, per-method tunables
+- `references/methodology.md` — TF-IDF + LSI math; Signac alignment
+- `references/output_contract.md` — `obsm`/`var` schema + table layouts
+- Adjacent skills: `sc-preprocessing` (parallel — scRNA, NOT scATAC), `sc-clustering` (downstream — re-cluster on `obsm["X_lsi"]` if you want a different resolution without re-running TF-IDF)

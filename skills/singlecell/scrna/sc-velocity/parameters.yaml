@@ -1,0 +1,71 @@
+domain: singlecell
+allowed_extra_flags:
+- --method
+- --mode
+- --n-jobs
+- --r-enhanced
+param_hints:
+  scvelo_stochastic:
+    priority: n_jobs
+    params:
+    - n_jobs
+    defaults:
+      n_jobs: 4
+    requires:
+    - scvelo
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '--method scvelo_stochastic or --mode stochastic: default velocity path.'
+  scvelo_dynamical:
+    priority: n_jobs
+    params:
+    - n_jobs
+    defaults:
+      n_jobs: 4
+    requires:
+    - scvelo
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '--method scvelo_dynamical or --mode dynamical: computes latent time when the
+      fit succeeds.'
+  scvelo_steady_state:
+    priority: n_jobs
+    params:
+    - n_jobs
+    defaults:
+      n_jobs: 4
+    requires:
+    - scvelo
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '--method scvelo_steady_state or --mode steady_state: steady-state approximation
+      path.'
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: S
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: scvelo
+  bins: []
+trigger_keywords:
+- rna velocity
+- velocity
+- scvelo
+- spliced unspliced
+- cellular dynamics
+- velovi
+- velocity pseudotime
+script: sc_velocity.py
+legacy_aliases: []
