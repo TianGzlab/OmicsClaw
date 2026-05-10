@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .memory_client import MemoryClient
+from .models import SHARED_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -222,18 +223,89 @@ class CompatMemoryStore:
 
     Maps flat memory operations to graph memory URIs.
     Preserves: deduplication, session management, search.
+
+    Namespace policy (PR #4a):
+      - Sessions live in ``__shared__`` so a session_id can be resolved
+        to its owner without a global directory lookup.
+      - User memories (dataset/analysis/preference/insight/project) land
+        in the session-derived namespace ``f"{platform}/{user_id}"``,
+        so two telegram users on the same bot can't see each other's
+        ``dataset://pbmc.h5ad`` row.
     """
 
     def __init__(self, database_url: Optional[str] = None):
-        self._client = MemoryClient(database_url)
+        self._database_url = database_url
+        self._db = None
+        self._search = None
+        self._engine = None
+        # Always-shared client for session metadata.
+        self._session_client: Optional[MemoryClient] = None
+        # Cached lightweight clients keyed by namespace string. Engines
+        # are stateless so all clients share one engine instance.
+        self._memory_clients: dict[str, MemoryClient] = {}
+        self._initialized = False
 
     async def initialize(self) -> None:
         """Initialize storage backend."""
-        await self._client.initialize()
+        if self._initialized:
+            return
+
+        from .database import DatabaseManager
+        from .engine import MemoryEngine
+        from .search import SearchIndexer
+
+        self._db = DatabaseManager(self._database_url)
+        await self._db.init_db()
+        self._search = SearchIndexer(self._db)
+        self._engine = MemoryEngine(self._db, self._search)
+        self._session_client = MemoryClient(
+            engine=self._engine, namespace=SHARED_NAMESPACE
+        )
+        self._initialized = True
 
     async def close(self) -> None:
         """Close backend resources."""
-        await self._client.close()
+        if self._db is not None:
+            await self._db.close()
+        self._db = None
+        self._engine = None
+        self._search = None
+        self._session_client = None
+        self._memory_clients.clear()
+        self._initialized = False
+
+    @property
+    def _client(self) -> MemoryClient:
+        """Backward-compat shim — old call sites that read ``self._client``
+        get the shared session client. New methods route via
+        ``_client_for_session`` so memory ops land in the user's namespace.
+        """
+        assert self._session_client is not None, (
+            "CompatMemoryStore must be initialised before use"
+        )
+        return self._session_client
+
+    def _client_for_namespace(self, namespace: str) -> MemoryClient:
+        """Get-or-create a lightweight MemoryClient for ``namespace``."""
+        assert self._engine is not None
+        client = self._memory_clients.get(namespace)
+        if client is None:
+            client = MemoryClient(engine=self._engine, namespace=namespace)
+            self._memory_clients[namespace] = client
+        return client
+
+    async def _client_for_session(self, session_id: str) -> MemoryClient:
+        """Resolve a session to its owner-namespace client.
+
+        Falls back to ``__shared__`` when the session can't be resolved
+        (defensive — in production the bot always creates a session before
+        the first save_memory call).
+        """
+        session = await self.get_session(session_id)
+        if session is None:
+            return self._client_for_namespace(SHARED_NAMESPACE)
+        namespace = f"{session.platform}/{session.user_id}"
+        return self._client_for_namespace(namespace)
 
     async def create_session(self, user_id: str, platform: str, chat_id: str = "", session_id: str = None) -> Session:
         """Create a new session in the graph memory."""
@@ -253,11 +325,11 @@ class CompatMemoryStore:
         return session
 
     async def get_session(self, session_id: str) -> Optional[Session]:
-        """Retrieve session by ID."""
-        mem = await self._client.recall(f"session://{session_id}")
-        if not mem or not mem.get("content"):
+        """Retrieve session by ID. Sessions live in __shared__."""
+        record = await self._client.recall(f"session://{session_id}")
+        if record is None or not record.content:
             return None
-        content = mem["content"]
+        content = record.content
         # Auto-decode legacy base64 content from old encryption system
         decoded = _decode_legacy_content(content)
         if decoded != content:
@@ -291,12 +363,18 @@ class CompatMemoryStore:
         )
 
     async def save_memory(self, session_id: str, memory: BaseMemory) -> str:
-        """Save a memory, return memory_id."""
+        """Save a memory, return memory_id.
+
+        The memory lands in the session's owner namespace
+        (``f"{platform}/{user_id}"``); session metadata stays shared.
+        """
+        client = await self._client_for_session(session_id)
+
         domain = _TYPE_TO_DOMAIN.get(memory.memory_type, "core")
         path = _memory_to_uri_path(memory)
         content = _memory_to_content(memory)
 
-        await self._client.remember(
+        await client.remember(
             uri=f"{domain}://{path}",
             content=content,
             disclosure=f"Memory from session {session_id}",
@@ -315,7 +393,16 @@ class CompatMemoryStore:
     async def get_memories(
         self, session_id: str, memory_type: Optional[str] = None, limit: int = 100
     ) -> list[BaseMemory]:
-        """Retrieve memories, optionally filtered by type."""
+        """Retrieve memories, optionally filtered by type.
+
+        Reads through the session's owner-namespace client so a user
+        only sees their own memories. The shared partition is consulted
+        via the engine's read-fallback only on individual ``recall``
+        calls — listings are strict, so shared keywords don't bleed
+        into a per-user inventory.
+        """
+        client = await self._client_for_session(session_id)
+
         if memory_type:
             domain = _TYPE_TO_DOMAIN.get(memory_type)
             if not domain:
@@ -329,16 +416,16 @@ class CompatMemoryStore:
             """Recursively collect leaf memories from a domain tree."""
             if len(results) >= limit:
                 return
-            children = await self._client.list_children(uri)
+            children = await client.list_children(uri)
             for child in children:
                 if len(results) >= limit:
                     return
-                child_uri = f"{child['domain']}://{child['path']}"
-                mem = await self._client.recall(child_uri)
-                if mem and mem.get("content"):
-                    content = _decode_legacy_content(mem["content"])
-                    if content != mem["content"]:
-                        await self._client.remember(uri=child_uri, content=content)
+                child_uri = child.uri
+                rec = await client.recall(child_uri)
+                if rec is not None and rec.content:
+                    content = _decode_legacy_content(rec.content)
+                    if content != rec.content:
+                        await client.remember(uri=child_uri, content=content)
                     obj = _content_to_memory(content, mtype)
                     if obj:
                         results.append(obj)
@@ -357,25 +444,38 @@ class CompatMemoryStore:
         return results[:limit]
 
     async def update_memory(self, memory_id: str, updates: dict) -> None:
-        """Update memory fields — search and update in place."""
-        # Search for the memory by ID substring
-        results = await self._client.search(memory_id, limit=5)
-        for r in results:
-            mem = await self._client.recall(r["uri"])
-            if mem and mem.get("content"):
-                content = mem["content"]
+        """Update memory fields — search and update in place.
+
+        Searches every cached per-namespace client; without a session_id
+        the caller hasn't told us which user the memory_id belongs to,
+        and we don't want a global scan that could match the wrong user's
+        memory_id collision. ``memory_id`` is a uuid4 so collisions are
+        astronomically unlikely, but the per-namespace search keeps the
+        update strictly within whichever namespace the row lives.
+        """
+        # Touch the session client first so the shared partition is
+        # always considered (covers the legacy "everything in shared"
+        # case before the namespace migration).
+        candidate_clients = [self._session_client] + list(self._memory_clients.values())
+        seen = set()
+        for client in candidate_clients:
+            if client is None or id(client) in seen:
+                continue
+            seen.add(id(client))
+            results = await client.search(memory_id, limit=5)
+            for r in results:
+                rec = await client.recall(r["uri"])
+                if rec is None or not rec.content:
+                    continue
                 try:
-                    data = json.loads(content)
-                    if data.get("memory_id") == memory_id:
-                        data.update(updates)
-                        new_content = json.dumps(data)
-                        await self._client.remember(
-                            uri=r["uri"],
-                            content=new_content,
-                        )
-                        return
+                    data = json.loads(rec.content)
                 except json.JSONDecodeError:
                     continue
+                if data.get("memory_id") != memory_id:
+                    continue
+                data.update(updates)
+                await client.remember(uri=r["uri"], content=json.dumps(data))
+                return
 
     async def delete_session(self, session_id: str) -> None:
         """Delete session."""
@@ -387,21 +487,23 @@ class CompatMemoryStore:
     async def search_memories(
         self, session_id: str, query: str, memory_type: Optional[str] = None
     ) -> list[BaseMemory]:
-        """Search memories by content."""
+        """Search memories by content within the session's namespace."""
+        client = await self._client_for_session(session_id)
+
         domain = _TYPE_TO_DOMAIN.get(memory_type) if memory_type else None
-        results = await self._client.search(query, limit=20, domain=domain)
+        results = await client.search(query, limit=20, domain=domain)
 
         memories = []
         for r in results:
-            mem = await self._client.recall(r["uri"])
-            if mem and mem.get("content"):
-                content = mem["content"]
-                # Try to detect memory type from the domain
-                rd = r.get("domain", "")
-                mt = _DOMAIN_TO_TYPE.get(rd, memory_type or "")
-                obj = _content_to_memory(content, mt)
-                if obj:
-                    memories.append(obj)
+            rec = await client.recall(r["uri"])
+            if rec is None or not rec.content:
+                continue
+            content = rec.content
+            rd = r.get("domain", "")
+            mt = _DOMAIN_TO_TYPE.get(rd, memory_type or "")
+            obj = _content_to_memory(content, mt)
+            if obj:
+                memories.append(obj)
 
         return memories
 
