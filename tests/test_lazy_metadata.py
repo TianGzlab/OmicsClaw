@@ -6,7 +6,8 @@ def test_lazy_metadata_loads_basic_info():
     lazy = LazySkillMetadata(skill_path)
 
     assert lazy.name == "spatial-preprocess"
-    assert "Load matrix-level spatial transcriptomics data" in lazy.description
+    assert "Load when" in lazy.description
+    assert "spatial transcriptomics" in lazy.description
     assert lazy.domain == "spatial"
 
 def test_lazy_metadata_loads_full_on_demand():
@@ -20,7 +21,7 @@ def test_lazy_metadata_loads_full_on_demand():
     full = lazy.get_full()
     assert "tags" in full
     assert "version" in full
-    assert full["version"] == "0.5.0"
+    assert full["version"] == "0.6.0"
 
 
 def test_lazy_metadata_loads_spatial_preprocess_param_hints():
