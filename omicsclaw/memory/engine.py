@@ -139,8 +139,12 @@ class MemoryEngine:
         return self._db
 
     @property
-    def search(self) -> "SearchIndexer":
-        """The underlying ``SearchIndexer``."""
+    def search_indexer(self) -> "SearchIndexer":
+        """The underlying ``SearchIndexer``.
+
+        Note: not named ``search`` because the engine has a ``search``
+        verb (full-text query) that would shadow it.
+        """
         return self._search
 
     # ------------------------------------------------------------------
