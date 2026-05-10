@@ -282,12 +282,39 @@ def test_sc_de_real_skill_roundtrips(tmp_path: Path) -> None:
     assert sc.param_hints["deseq2_r"]["defaults"]["pseudobulk_min_cells"] == 10
 
 
+_PROD_SPATIAL_DE = Path(__file__).resolve().parent.parent / "skills" / "spatial" / "spatial-de"
+
+
 def test_spatial_de_real_skill_roundtrips(tmp_path: Path) -> None:
-    """Fixture mirroring the production skills/spatial/spatial-de runtime
-    contract — the heaviest legacy skill (476-line SKILL.md, 34 flags,
-    3 methods × up to 16 params per method, mixed bool/float/int/str
-    defaults).  Pins the full contract so a future maintainer can't
-    silently drop a method, flag, or default."""
+    """Pin the production skills/spatial/spatial-de runtime contract directly.
+
+    Loads the actual parameters.yaml from the migrated skill and asserts both
+    that (a) the legacy frontmatter form would yield the same LazySkillMetadata
+    output as the production sidecar, and (b) the production sidecar still
+    contains the load-bearing keys that bot/skill_orchestration.py and
+    omicsclaw/core/registry.py read.  If a future edit drops a method, flag,
+    or default from the production file, the production-sanity assertions
+    below fail — closing the silent-drift hole that an in-test spec dict
+    alone would leave open.
+    """
+    prod_sidecar = yaml.safe_load((_PROD_SPATIAL_DE / "parameters.yaml").read_text())
+
+    # Production sanity: load-bearing shape every consumer depends on.
+    assert set(prod_sidecar["param_hints"].keys()) == {"wilcoxon", "t-test", "pydeseq2"}
+    assert "--method" in prod_sidecar["allowed_extra_flags"]
+    assert "--sample-key" in prod_sidecar["allowed_extra_flags"]
+    assert prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_n_cpus"] == 1
+    assert prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_alpha"] == 0.05
+    assert prod_sidecar["param_hints"]["wilcoxon"]["defaults"]["scanpy_pts"] is False
+    assert (
+        prod_sidecar["param_hints"]["pydeseq2"]["defaults"]["pydeseq2_fit_type"]
+        == "parametric"
+    )
+    assert prod_sidecar["legacy_aliases"] == ["de"]
+    assert prod_sidecar["saves_h5ad"] is True
+
+    # Roundtrip: the same shape, expressed as legacy frontmatter, must give
+    # identical LazySkillMetadata output as the production sidecar form.
     spec = {
         "domain": "spatial",
         "script": "spatial_de.py",
