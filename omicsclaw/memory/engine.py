@@ -34,10 +34,10 @@ import uuid as uuidlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ROOT_NODE_UUID, Edge, Memory, Node, Path
+from .models import ROOT_NODE_UUID, Edge, Memory, Node, Path, escape_like_literal
 from .uri import MemoryURI
 
 if TYPE_CHECKING:
@@ -686,4 +686,40 @@ class MemoryEngine:
         namespace: str,
         limit: int = 100,
     ) -> list[MemoryRef]:
-        raise NotImplementedError("PR #3b")
+        """Flat list of MemoryRef under ``(namespace, uri)`` up to ``limit``.
+
+        Includes the prefix URI itself plus all descendants. Strict
+        namespace — no shared fallback. Sorted lexicographically by path
+        for deterministic output. A root URI (``analysis://``) lists every
+        path in the namespace under that domain.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+
+        async with self._db.session() as s:
+            stmt = select(Path).where(
+                Path.namespace == namespace,
+                Path.domain == parsed.domain,
+            )
+            if not parsed.is_root:
+                base = parsed.path
+                safe = escape_like_literal(base)
+                stmt = stmt.where(
+                    or_(
+                        Path.path == base,
+                        Path.path.like(f"{safe}/%", escape="\\"),
+                    )
+                )
+            stmt = stmt.order_by(Path.path).limit(limit)
+            path_rows = (await s.execute(stmt)).scalars().all()
+            if not path_rows:
+                return []
+
+            edge_ids = [p.edge_id for p in path_rows]
+            edges = (
+                await s.execute(select(Edge).where(Edge.id.in_(edge_ids)))
+            ).scalars().all()
+            edge_id_to_child = {e.id: e.child_uuid for e in edges}
+
+            return await self._materialize_listing(
+                s, list(path_rows), edge_id_to_child, namespace
+            )

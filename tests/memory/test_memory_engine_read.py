@@ -385,3 +385,131 @@ async def test_list_children_returns_active_memory_ref(engine):
     assert isinstance(ref, MemoryRef)
     assert ref.memory_id == child.memory_id
     assert ref.node_uuid == child.node_uuid
+
+
+# ----------------------------------------------------------------------
+# get_subtree — flat listing under a prefix
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_returns_root_and_descendants(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "root", namespace="tg/userA")
+    await eng.upsert(
+        "analysis://sc-de/run_1", "child1", namespace="tg/userA"
+    )
+    await eng.upsert(
+        "analysis://sc-de/run_1/sub", "grand", namespace="tg/userA"
+    )
+    await eng.upsert(
+        "analysis://sc-de/run_2", "child2", namespace="tg/userA"
+    )
+
+    subtree = await eng.get_subtree("analysis://sc-de", namespace="tg/userA")
+    uris = [r.uri for r in subtree]
+
+    assert uris == [
+        "analysis://sc-de",
+        "analysis://sc-de/run_1",
+        "analysis://sc-de/run_1/sub",
+        "analysis://sc-de/run_2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_excludes_other_namespaces(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "user A's", namespace="tg/userA")
+    await eng.upsert(
+        "analysis://sc-de/run_1", "user A's child", namespace="tg/userA"
+    )
+    await eng.upsert("analysis://sc-de", "user B's", namespace="tg/userB")
+    await eng.upsert(
+        "analysis://sc-de/run_99", "user B's child", namespace="tg/userB"
+    )
+    await eng.upsert("analysis://sc-de", "shared", namespace="__shared__")
+
+    subtree = await eng.get_subtree("analysis://sc-de", namespace="tg/userA")
+    uris = sorted(r.uri for r in subtree)
+    namespaces = {r.namespace for r in subtree}
+
+    assert uris == ["analysis://sc-de", "analysis://sc-de/run_1"]
+    assert namespaces == {"tg/userA"}
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_excludes_paths_outside_prefix(engine):
+    """Sibling paths that share a prefix substring (not a directory prefix)
+    must not be included — e.g. ``sc-de-bonus`` is not under ``sc-de``."""
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "x", namespace="tg/userA")
+    await eng.upsert("analysis://sc-de/run_1", "y", namespace="tg/userA")
+    await eng.upsert("analysis://sc-de-bonus", "z", namespace="tg/userA")
+
+    subtree = await eng.get_subtree("analysis://sc-de", namespace="tg/userA")
+    uris = [r.uri for r in subtree]
+
+    assert "analysis://sc-de-bonus" not in uris
+    assert "analysis://sc-de/run_1" in uris
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_respects_limit(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "root", namespace="tg/userA")
+    for i in range(10):
+        await eng.upsert(
+            f"analysis://sc-de/run_{i}", f"r{i}", namespace="tg/userA"
+        )
+
+    subtree = await eng.get_subtree(
+        "analysis://sc-de", namespace="tg/userA", limit=3
+    )
+    assert len(subtree) == 3
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_returns_empty_when_no_match(engine):
+    eng, _ = engine
+    subtree = await eng.get_subtree(
+        "analysis://nope", namespace="tg/userA"
+    )
+    assert subtree == []
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_root_uri_lists_namespace_in_domain(engine):
+    eng, _ = engine
+    await eng.upsert("analysis://sc-de", "x", namespace="tg/userA")
+    await eng.upsert("analysis://sc-velocity", "y", namespace="tg/userA")
+    await eng.upsert("dataset://pbmc.h5ad", "z", namespace="tg/userA")
+
+    from omicsclaw.memory.uri import MemoryURI
+
+    subtree = await eng.get_subtree(
+        MemoryURI(domain="analysis", path=""), namespace="tg/userA"
+    )
+    uris = sorted(r.uri for r in subtree)
+
+    assert uris == ["analysis://sc-de", "analysis://sc-velocity"]
+    assert all(r.uri.startswith("analysis://") for r in subtree)
+
+
+@pytest.mark.asyncio
+async def test_get_subtree_skips_paths_with_no_active_memory(engine):
+    eng, db = engine
+    await eng.upsert("analysis://sc-de", "root", namespace="tg/userA")
+    ref = await eng.upsert(
+        "analysis://sc-de/run_1", "child", namespace="tg/userA"
+    )
+
+    async with db.session() as s:
+        memory = await s.get(Memory, ref.memory_id)
+        memory.deprecated = True
+
+    subtree = await eng.get_subtree("analysis://sc-de", namespace="tg/userA")
+    uris = [r.uri for r in subtree]
+
+    assert "analysis://sc-de" in uris
+    assert "analysis://sc-de/run_1" not in uris
