@@ -2608,7 +2608,10 @@ def _memory_snapshot_row_identity(table: str, row: dict[str, Any]):
     if table in {"memories", "edges"}:
         return row["id"]
     if table == "paths":
-        return (row["domain"], row["path"])
+        # PK is (namespace, domain, path) post-001_namespace migration. Older
+        # snapshots predating the namespace column default to "__shared__".
+        namespace = row.get("namespace") or "__shared__"
+        return (namespace, row["domain"], row["path"])
     if table == "glossary_keywords":
         if "id" in row and row["id"] is not None:
             return row["id"]
