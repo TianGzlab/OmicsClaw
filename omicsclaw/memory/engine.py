@@ -131,6 +131,18 @@ class MemoryEngine:
         self._db = db
         self._search = search
 
+    @property
+    def db(self) -> "DatabaseManager":
+        """The underlying ``DatabaseManager`` — exposed read-only so the
+        client and review layers can run their own short queries without
+        reaching into a private attribute."""
+        return self._db
+
+    @property
+    def search(self) -> "SearchIndexer":
+        """The underlying ``SearchIndexer``."""
+        return self._search
+
     # ------------------------------------------------------------------
     # Write verbs (PR #3a)
     # ------------------------------------------------------------------

@@ -223,7 +223,7 @@ class MemoryClient:
     ) -> Dict[str, Any]:
         """Re-fetch the four written rows for the legacy result shape."""
         assert self._engine is not None
-        db = self._engine._db  # accessing private — engine and client co-evolve
+        db = self._engine.db
         import sqlalchemy as sa
 
         async with db.session() as s:
@@ -374,7 +374,7 @@ class MemoryClient:
         from .graph import GraphService
 
         assert self._engine is not None
-        graph = GraphService(self._engine._db, self._engine._search)
+        graph = GraphService(self._engine.db, self._engine.search)
         return await graph.get_recent_memories(limit=limit)
 
     async def forget(self, uri: str) -> Dict[str, Any]:
@@ -390,7 +390,7 @@ class MemoryClient:
 
         parsed = MemoryURI.parse(uri)
         assert self._engine is not None
-        graph = GraphService(self._engine._db, self._engine._search)
+        graph = GraphService(self._engine.db, self._engine.search)
         result = await graph.remove_path(path=parsed.path, domain=parsed.domain)
 
         try:
