@@ -2371,6 +2371,61 @@ async def test_mcp_sync_empty_payload_removes_all_existing_servers(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# T2 S6 — /memory/delete is namespace-scoped (no cross-namespace blast)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_memory_delete_endpoint_does_not_cross_namespace(monkeypatch, tmp_path):
+    """DELETE /memory/delete must remove only the desktop client's row.
+    Two namespaces holding the same ``(domain, path)`` URI must not be
+    collapsed by the delete — that would be the PR #131-class data-loss
+    pattern PR #137 closed for the legacy GraphService path.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        bystander_client = MemoryClient(engine=engine, namespace="telegram/bob")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("dataset://pbmc.h5ad", "desktop's pbmc")
+        await bystander_client.remember("dataset://pbmc.h5ad", "bob's pbmc")
+
+        # Act
+        result = await server.memory_delete(path="pbmc.h5ad", domain="dataset")
+        assert result["ok"] is True
+
+        # Assert: desktop row gone; bystander row intact
+        desktop_after = await engine.recall(
+            "dataset://pbmc.h5ad",
+            namespace="app/desktop_user",
+            fallback_to_shared=False,
+        )
+        bystander_after = await engine.recall(
+            "dataset://pbmc.h5ad",
+            namespace="telegram/bob",
+            fallback_to_shared=False,
+        )
+        assert desktop_after is None, (
+            f"Desktop row survived its own delete: {desktop_after!r}"
+        )
+        assert bystander_after is not None, (
+            "telegram/bob's same-URI row was deleted by desktop's "
+            "/memory/delete — PR #137 cross-namespace safety broken"
+        )
+        assert bystander_after.content == "bob's pbmc"
+    finally:
+        await memory_pkg.close_db()
+
+
+# ---------------------------------------------------------------------------
 # T2 S5 — /memory/update writes to the desktop client's namespace
 # ---------------------------------------------------------------------------
 
