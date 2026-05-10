@@ -2504,6 +2504,60 @@ async def test_memory_browse_is_versioned_present_on_root_browse(
         await memory_pkg.close_db()
 
 
+@pytest.mark.asyncio
+async def test_memory_browse_children_have_rich_shape(monkeypatch, tmp_path):
+    """Each /memory/browse child must carry the desktop-tree fields
+    (``name``, ``path``, ``domain``, ``approx_children_count``) so
+    MemoryTree.tsx and MemoryContent.tsx can render labels and decide
+    whether the entry is a directory. The sparse ``MemoryRef`` shape
+    (``memory_id``/``node_uuid``/``namespace``/``uri`` only) leaves the
+    UI showing blank rows, which is the regression this guards.
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    _, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop_client = MemoryClient(engine=engine, namespace="app/desktop_user")
+        monkeypatch.setattr(server, "_memory_client", desktop_client)
+
+        await desktop_client.remember("core://parent/child_a", "leaf a")
+        await desktop_client.remember("core://parent/child_b/grandchild", "leaf b")
+
+        result = await server.memory_browse(path="parent", domain="core")
+        children = result["children"]
+        assert len(children) >= 2, (
+            f"expected ≥2 children under core://parent, got {len(children)}"
+        )
+
+        required = {"name", "path", "domain", "approx_children_count"}
+        for child in children:
+            missing = required - set(child)
+            assert not missing, (
+                f"child {child!r} missing rich-shape fields: {missing}. "
+                f"This means /memory/browse is returning the sparse "
+                f"MemoryRef list_children shape instead of "
+                f"list_children_rich, and the desktop UI shows blank rows."
+            )
+
+        by_name = {c["name"]: c for c in children}
+        assert "child_a" in by_name, f"missing 'child_a'; got {list(by_name)}"
+        assert "child_b" in by_name, f"missing 'child_b'; got {list(by_name)}"
+        assert by_name["child_a"]["approx_children_count"] == 0
+        assert by_name["child_b"]["approx_children_count"] >= 1, (
+            "child_b has a grandchild; approx_children_count should be ≥1 "
+            "so the UI marks it as a directory"
+        )
+        assert by_name["child_a"]["domain"] == "core"
+        assert by_name["child_a"]["path"] == "parent/child_a"
+    finally:
+        await memory_pkg.close_db()
+
+
 # ---------------------------------------------------------------------------
 # T2 S3 — /memory/search namespace-scoped (caller + __shared__ only)
 # ---------------------------------------------------------------------------

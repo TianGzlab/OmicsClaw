@@ -2484,7 +2484,17 @@ async def memory_browse(
         from omicsclaw.memory.uri import MemoryURI
 
         uri = f"{domain}://{path}" if path else f"{domain}://"
-        children = await _memory_client.list_children(uri)
+        # list_children_rich returns the desktop-tree dict shape
+        # (name, path, domain, content_snippet, approx_children_count, …)
+        # the UI's MemoryTree/MemoryContent rely on for labels and the
+        # directory-vs-leaf icon. include_shared=True so __shared__
+        # children (e.g., core://agent/*) appear alongside the user's own.
+        children = await _memory_client.list_children_rich(
+            uri,
+            context_domain=domain,
+            context_path=path,
+            include_shared=True,
+        )
 
         # Also get the node itself if path is provided
         node = None
@@ -2503,7 +2513,7 @@ async def memory_browse(
             "path": path,
             "domain": domain,
             "node": node,
-            "children": [asdict(c) for c in children],
+            "children": children,
             "is_versioned": is_versioned,
         }
     except Exception as exc:
