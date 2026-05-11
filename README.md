@@ -129,7 +129,7 @@ Graph-backed memory at `omicsclaw/memory/` carries your sessions, datasets, anal
 | Desktop app | Per launch (or per signed-in user) |
 | Telegram / Feishu bot | Per platform user |
 
-A reserved `__shared__` pool (core agent identity, glossary) is the one thing every surface reads back automatically. Full vocabulary and architecture in [`docs/CONTEXT.md`](docs/CONTEXT.md).
+A reserved `__shared__` pool (core agent identity, knowledge handbook guards, glossary) is the one thing every surface reads back automatically. Full vocabulary and architecture in [`docs/CONTEXT.md`](docs/CONTEXT.md).
 
 ## ❓ FAQ
 
