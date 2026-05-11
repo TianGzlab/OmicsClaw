@@ -1,0 +1,96 @@
+# =============================================================================
+# OmicsClaw Skill v2 — parameters.yaml sidecar
+#
+# This file is BOTH the example sidecar (copy + edit) AND the human-readable
+# spec for the v2 runtime contract held by every skill's parameters.yaml.
+#
+# Consumed by:
+#   * scripts/skill_lint.py        — validates real sidecars against this shape
+#   * scripts/migrate_skill.py     — emits sidecars conforming to this shape
+#   * scripts/generate_parameters_md.py
+#
+# The schema is *not* a JSON Schema document — it is a YAML reference + a
+# concrete example.  The lint script implements the structural checks in pure
+# Python to avoid pulling in `jsonschema`.
+#
+# Provenance: every field below is migrated 1:1 from the legacy
+# `metadata.omicsclaw` block in SKILL.md frontmatter.  A skill is "v2" when its
+# parameters.yaml exists; lazy_metadata.py prefers the sidecar and ignores the
+# legacy frontmatter block.
+#
+# After copying this template, you can either keep these explanatory comments
+# or strip them — the lint validates the YAML data, not the comments.
+#
+# Convention: every field below is REQUIRED unless its comment explicitly
+# marks it optional (e.g. `emoji`).  `param_hints: {}` is valid for skills
+# with no method-specific tuning, but the key itself must be present.
+# =============================================================================
+
+# --- Required: domain bucket -------------------------------------------------
+# Must match an existing dir under skills/ (spatial / singlecell / genomics /
+# proteomics / metabolomics / bulkrna / orchestrator / literature).
+domain: replace-me
+
+# --- Required: runtime entrypoint --------------------------------------------
+# Filename of the Python script, relative to this skill directory.
+# Resolved by registry._resolve_script_path.
+script: replace_me.py
+
+# --- Required: behavioural flags ---------------------------------------------
+# True if the skill writes a `processed.h5ad` AnnData artifact to the output
+# dir.  Used by the bot to decide whether to surface a downstream-AnnData hint.
+saves_h5ad: false
+
+# True if the skill expects a preprocessed AnnData (HVG / PCA / UMAP already
+# computed).  Used by the orchestrator to gate routing.
+requires_preprocessed: false
+
+# --- Required: orchestrator routing keywords ---------------------------------
+# Free-text phrases used by capability_resolver's keyword-routing layer.
+# Complement the SKILL.md description; NOT a substitute for it.
+trigger_keywords:
+- replace-me-keyword
+
+# --- Required: legacy aliases ------------------------------------------------
+# Old skill names this skill answers to.  registry._register_skill_entry
+# registers each alias.  Drop entries here when the legacy name is fully
+# out of circulation.
+legacy_aliases: []
+
+# --- Required: CLI flags exposed to `omicsclaw.py run` -----------------------
+# Flags accepted by the runtime script *in addition* to the standard
+# --input / --output / --demo set.  Each entry must start with "--".
+# `omicsclaw/core/skill_runner.py:354-378` filters out user-supplied flags
+# NOT listed here — empty / partial lists silently drop user flags.
+# `scripts/skill_lint.py::_check_allowed_extra_flags` enforces this list
+# matches the script's argparse declarations exactly (PR-eval-2 #163).
+allowed_extra_flags: []
+
+# --- Required: per-method parameter hints ------------------------------------
+# Per-method parameter tuning hints for the bot's parameter-card UX.
+# Empty dict {} is valid for skills with no method-specific tuning.
+# Each key is a lowercase method name (matching --method values).
+#
+# Per-method shape:
+#   <method>:
+#     priority:        str   — one-line ordering hint shown in the card UX
+#                              (e.g. "groupby -> scanpy_corr_method -> filter_markers")
+#     params:          [str] — parameter names in snake_case (CLI flag is kebab-case)
+#     advanced_params: [str] — secondary params on the "高级参数" row
+#     defaults:        dict  — default value per param (any type)
+#     requires:        [str] — AnnData layout requirements (e.g. "obs.groupby")
+#     tips:            [str] — one short sentence per tip surfaced to user
+param_hints: {}
+
+# --- Optional: emoji ---------------------------------------------------------
+# Single emoji used in bot-rendered headers.  Decorative only.
+# emoji: "🔬"
+
+# =============================================================================
+# Forbidden fields
+# =============================================================================
+# The following keys MUST NOT appear in parameters.yaml.  They live in
+# SKILL.md frontmatter (the user-visible / Anthropic-style metadata):
+#   name, description, version, author, license, tags, requires
+#
+# scripts/skill_lint.py raises an error if any of these surface here.

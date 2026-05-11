@@ -37,7 +37,7 @@ def _resolve_omicsclaw_dir() -> Path:
 OMICSCLAW_DIR = _resolve_omicsclaw_dir()
 SKILLS_DIR = OMICSCLAW_DIR / "skills"
 OUTPUT_DIR = OMICSCLAW_DIR / "output"
-SKILL_TEMPLATE_PATH = OMICSCLAW_DIR / "templates" / "SKILL-TEMPLATE.md"
+SKILL_TEMPLATE_PATH = OMICSCLAW_DIR / "templates" / "skill" / "SKILL.md"
 STAGING_ROOT = OMICSCLAW_DIR / ".omicsclaw-staging" / "skill-scaffolds"
 SKILL_SCAFFOLDER_VERSION = __version__
 
@@ -341,7 +341,7 @@ def render_skill_markdown(
     promotion_note = (
         f"Promoted from successful autonomous analysis at `{source_bundle.source_dir}`."
         if source_bundle
-        else "Generated from `templates/SKILL-TEMPLATE.md` by `omics-skill-builder`."
+        else "Generated from `templates/skill/` by `omics-skill-builder`."
     )
 
     return f"""---

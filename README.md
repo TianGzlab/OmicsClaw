@@ -187,7 +187,7 @@ python scripts/generate_catalog.py
 python omicsclaw.py doctor --workspace .
 ```
 
-Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/SKILL-TEMPLATE.md](templates/SKILL-TEMPLATE.md). `oc doctor` reports environment readiness plus registry/catalog consistency and local graphify artifact health when present.
+Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/skill/](templates/skill/) (the v2 scaffold — copy the whole directory). `oc doctor` reports environment readiness plus registry/catalog consistency and local graphify artifact health when present.
 
 Framework optimization guardrails are enforced by targeted contract tests:
 `tests/test_documentation_facts.py`, `tests/test_skill_runner_contract.py`,
