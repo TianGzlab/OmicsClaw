@@ -46,6 +46,9 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 - **orchestrator** (2 skills — Orchestrator)
   Meta tooling: multi-omics query routing and skill scaffolding. Not an analysis — dispatches to the right domain skill.
   Key skills: orchestrator, omics-skill-builder
+- **literature** (1 skills — Literature)
+  Scientific literature parsing for PDFs, URLs, DOIs, PubMed IDs, GEO accession extraction, and dataset metadata handoff.
+  Key skills: literature
 
 ### Full per-domain skill list
 
