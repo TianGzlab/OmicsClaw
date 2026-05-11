@@ -16,6 +16,8 @@ from omicsclaw.core.skill_scaffolder import (
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from skill_lint import lint_skill  # noqa: E402
 
 
 def test_skill_scaffolder_import_does_not_require_package_file():
@@ -64,8 +66,20 @@ def test_create_skill_scaffold_creates_registry_loadable_skill(tmp_path: Path):
     assert (skill_dir / "scaffold_spec.json").exists()
     assert (skill_dir / "manifest.json").exists()
     assert (skill_dir / "completion_report.json").exists()
+    # v2 layout (PR-eval-3a): every scaffold ships sidecar + 4 references.
+    # These existence checks are the actual regression guard — `lint_skill`
+    # short-circuits to [] for any skill *without* `parameters.yaml`, so if the
+    # scaffolder ever regressed to legacy v1 emission, the lint assert alone
+    # would silently pass.  The pair below — exists() + lint == [] — only
+    # passes when both v2 shape AND v2 content are correct.
+    assert (skill_dir / "parameters.yaml").exists()
+    assert (skill_dir / "references" / "methodology.md").exists()
+    assert (skill_dir / "references" / "output_contract.md").exists()
+    assert (skill_dir / "references" / "parameters.md").exists()
+    assert (skill_dir / "references" / "r_visualization.md").exists()
     assert result.completion["status"] == "complete"
     assert result.completion["completed"] is True
+    assert lint_skill(skill_dir) == []
 
     registry = OmicsRegistry()
     registry.load_all(tmp_path)
@@ -140,10 +154,18 @@ def test_create_skill_scaffold_can_promote_autonomous_analysis(tmp_path: Path):
     assert "out = Path(AUTONOMOUS_OUTPUT_DIR) / 'detected.txt'" in script_text
     assert (skill_dir / "references" / "source_analysis_notebook.ipynb").exists()
     assert (skill_dir / "references" / "source_result_summary.md").exists()
+    # v2 layout co-exists with the source_* promotion artifacts.  Same
+    # existence-then-lint pairing as the default-scaffold test.
+    assert (skill_dir / "parameters.yaml").exists()
+    assert (skill_dir / "references" / "methodology.md").exists()
+    assert (skill_dir / "references" / "output_contract.md").exists()
+    assert (skill_dir / "references" / "parameters.md").exists()
+    assert (skill_dir / "references" / "r_visualization.md").exists()
     assert (skill_dir / "manifest.json").exists()
     assert (skill_dir / "completion_report.json").exists()
     assert result.completion["status"] == "complete"
     assert result.completion["completed"] is True
+    assert lint_skill(skill_dir) == []
 
 
 def test_create_skill_scaffold_rejects_incomplete_autonomous_analysis(tmp_path: Path):

@@ -22,9 +22,8 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "scripts"))
 
-from generate_parameters_md import render_parameters_md  # noqa: E402
+from omicsclaw.core.parameters_md import render_parameters_md  # noqa: E402
 
 REQUIRED_SECTIONS = (
     "## When to use",

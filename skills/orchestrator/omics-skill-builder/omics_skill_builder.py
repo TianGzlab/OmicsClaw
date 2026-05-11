@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skill-name", default="", help="Preferred hyphenated skill alias.")
     parser.add_argument(
         "--domain",
-        default="orchestrator",
+        default=None,
         choices=[
             "spatial",
             "singlecell",
@@ -35,7 +35,11 @@ def parse_args() -> argparse.Namespace:
             "bulkrna",
             "orchestrator",
         ],
-        help="Target OmicsClaw domain.",
+        help=(
+            "Target OmicsClaw domain.  Default: 'spatial' in --demo mode "
+            "(the demo scaffold is intentionally a spatial CellCharter example); "
+            "required otherwise."
+        ),
     )
     parser.add_argument("--summary", default="", help="One-line skill summary.")
     parser.add_argument("--source-analysis-dir", default="", help="Promote a successful autonomous analysis output directory into the new skill.")
@@ -70,9 +74,13 @@ def main() -> None:
         methods = args.methods or ["cellcharter"]
         input_formats = args.input_formats or ["AnnData with spatial coordinates"]
         primary_outputs = args.primary_outputs or ["processed.h5ad", "figures/domain_map.png"]
+        source_analysis_dir = args.source_analysis_dir
+        promote_from_latest = args.promote_from_latest
     else:
         if not args.request:
             raise SystemExit("--request is required unless --demo is used.")
+        if not args.domain:
+            raise SystemExit("--domain is required unless --demo is used.")
         request = args.request
         skill_name = args.skill_name
         domain = args.domain
@@ -83,9 +91,6 @@ def main() -> None:
         methods = args.methods
         input_formats = args.input_formats
         primary_outputs = args.primary_outputs
-    if args.demo:
-        source_analysis_dir = args.source_analysis_dir
-        promote_from_latest = args.promote_from_latest
 
     result = create_skill_scaffold(
         request=request,
