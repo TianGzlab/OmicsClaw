@@ -177,6 +177,14 @@ Every skill has a `SKILL.md` with YAML frontmatter + methodology, a Python scrip
 
 Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered from `skills/`.
 
+### Skill Metadata Rules
+
+- SKILL.md frontmatter (`metadata.omicsclaw`) is the single source of truth for skill metadata — canonical name, legacy aliases, allowed flags, `saves_h5ad`, and so on.
+- All primary skill scripts must expose a lightweight direct `--help` path.
+- Skill scripts write native artifacts; the shared runner writes the top-level `README.md` and `reproducibility/analysis_notebook.ipynb`.
+- Bot skill execution uses the same shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
+- Shared result construction and adapter coercion live in `omicsclaw/core/skill_result.py`; new execution surfaces should reuse that model instead of rebuilding legacy result dictionaries.
+
 ## How to Add a New Skill
 
 1. `mkdir skills/<your-skill-name>`
@@ -199,6 +207,21 @@ After creating or materially updating any PR, always run
 have a reviewer-oriented description with a TL;DR, recommended review order,
 diff buckets, generated/mechanical file notes, risk notes, and verification
 evidence.
+
+### Contract Tests
+
+Framework optimization guardrails are enforced by targeted contract tests:
+`tests/test_documentation_facts.py`, `tests/test_skill_runner_contract.py`, `tests/test_skill_metadata_contract.py`, `tests/test_skill_help_contract.py`, `tests/test_registry_alias_contract.py`, `tests/test_output_ownership_contract.py`, and `tests/test_bot_runner_contract.py`.
+
+### Architecture Contracts
+
+- [framework roadmap](docs/engineering/2026-05-07-framework-optimization-spec.md)
+- [skill runner](docs/engineering/2026-05-07-skill-runner-contract.md)
+- [output ownership](docs/engineering/2026-05-07-output-ownership-contract.md)
+- [alias ownership](docs/engineering/2026-05-07-alias-ownership-contract.md)
+- [bot runner](docs/engineering/2026-05-07-bot-runner-contract.md)
+- [skill help](docs/engineering/2026-05-07-skill-help-contract.md)
+- [domain input contracts](docs/engineering/domain-input-contracts.md)
 
 ## Graph Memory System
 
@@ -267,6 +290,14 @@ The app backend binds to `127.0.0.1:8765` by default and serves chat streaming, 
 
 - `OMICSCLAW_MEMORY_DB_URL`: SQLAlchemy connection URL (`sqlite+aiosqlite:///bot/data/memory.db`)
 - `OMICSCLAW_MEMORY_API_TOKEN`: Bearer token required when exposing the API beyond localhost.
+
+### Provider Backend Contract
+
+Desktop provider changes must preserve the OmicsClaw-App backend contract:
+
+- `/providers` reports the active provider, model, and endpoint.
+- `/providers/test` performs a short live LLM connectivity probe.
+- `/chat/stream` reinitializes the provider runtime when a request changes model, even if the provider id is unchanged.
 
 ## Bot Integration
 
@@ -441,3 +472,11 @@ pip install -e ".[interactive]"
 pip install -e ".[tui]"
 # then: pip install textual>=0.80
 ```
+
+### Provider Runtime Contract
+
+Interactive CLI provider changes share the runtime resolution path with the app backend: `LLM_PROVIDER=custom` must honor `LLM_BASE_URL`, `OMICSCLAW_MODEL`, and `LLM_API_KEY`; explicit CLI `--provider` / `--model` overrides win over environment defaults; malformed custom endpoints should return actionable diagnostics instead of `(no response)`.
+
+### TUI Implementation Notes
+
+TUI helpers under `omicsclaw/interactive/_tui_support.py` stay dependency-light so support tests can run without optional memory or Textual installs. When adding Textual containers, mount the parent widget into the live tree before mounting child widgets.
