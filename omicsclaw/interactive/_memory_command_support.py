@@ -1,4 +1,18 @@
-"""Shared scoped-memory command helpers for interactive CLI/TUI."""
+"""Shared scoped-memory command helpers for interactive CLI/TUI.
+
+Two memory layers coexist behind ``/memory``:
+
+  - **ScopedMemory** (markdown + frontmatter under ``.omicsclaw/scoped_memory/``):
+    workspace-local hints. Subcommands ``scope``, ``list``, ``add``, ``prune``.
+  - **Graph memory** (SQLite-backed ``MemoryEngine``): the cross-surface
+    knowledge graph, scoped per workspace via
+    ``cli_namespace_from_workspace(workspace_dir)``. Subcommands
+    ``remember``, ``recall``, ``search`` (see
+    ``build_graph_memory_command_view``).
+
+The CLI/TUI dispatcher routes by the first token; only ``remember/recall/
+search`` need the async path because they hit the engine.
+"""
 
 from __future__ import annotations
 
@@ -21,11 +35,19 @@ from omicsclaw.memory.scoped_memory_index import list_scoped_memory_records
 
 from ._session_command_support import SessionCommandView, normalize_session_metadata
 
+GRAPH_MEMORY_SUBCOMMANDS = frozenset({"remember", "recall", "search"})
+
 
 def resolve_active_scoped_memory_scope(
     metadata: Mapping[str, Any] | None,
 ) -> str:
     return normalize_scoped_memory_scope(dict(metadata or {}).get("active_memory_scope"))
+
+
+def is_graph_memory_subcommand(arg: str) -> bool:
+    """Return True if ``arg`` starts with a graph-memory subcommand token."""
+    tokens = shlex.split(arg.strip()) if arg.strip() else []
+    return bool(tokens) and tokens[0].lower() in GRAPH_MEMORY_SUBCOMMANDS
 
 
 def build_memory_command_view(
@@ -51,12 +73,16 @@ def build_memory_command_view(
                 f"Scoped memory root: {root_text}\n"
                 f"Active scoped memory scope: {active_scope or '(unset)'}\n"
                 f"Scopes: {', '.join(SCOPED_MEMORY_SCOPES)}\n"
-                "Usage:\n"
+                "Usage (ScopedMemory — markdown notes):\n"
                 "  /memory list [scope|all] [query]\n"
                 "  /memory add [scope] [--title <title>] [--freshness <level>] [--domain <name>] [--dataset <path>] [--keyword <term>] <text>\n"
                 "  /memory add project \"PBMC QC defaults :: Prefer mito cutoff 20% before Harmony.\"\n"
                 "  /memory prune [scope|all] [--days <n>] [--apply]\n"
-                "  /memory scope <scope|clear>"
+                "  /memory scope <scope|clear>\n"
+                "Usage (graph memory — workspace-scoped):\n"
+                "  /memory remember <domain://path> \"<text>\"\n"
+                "  /memory recall   <domain://path>\n"
+                "  /memory search   <query>"
             )
         )
 
@@ -333,7 +359,157 @@ def _parse_prune_args(tokens: list[str], *, active_scope: str) -> tuple[str, int
     return scope or active_scope, stale_days, apply_changes
 
 
+# ----------------------------------------------------------------------
+# Graph-memory subcommands (remember / recall / search)
+# ----------------------------------------------------------------------
+
+
+_GRAPH_USAGE = (
+    "Usage:\n"
+    "  /memory remember <domain://path> \"<text>\"\n"
+    "  /memory recall   <domain://path>\n"
+    "  /memory search   <query>"
+)
+
+
+def _parse_graph_uri(raw: str):
+    """Parse ``raw`` into a ``MemoryURI`` requiring an explicit ``domain://`` prefix.
+
+    The MemoryURI parser auto-prefixes bare paths with ``core://`` for
+    backward compatibility; the CLI surface disallows that to keep
+    ``remember <typo> ...`` from silently writing to the ``core`` domain.
+    """
+    from omicsclaw.memory.uri import SCHEME_SEPARATOR, MemoryURI
+
+    if SCHEME_SEPARATOR not in raw:
+        raise ValueError(
+            f"URI must be of the form 'domain://path' (got {raw!r})"
+        )
+    return MemoryURI.parse(raw)
+
+
+async def build_graph_memory_command_view(
+    arg: str,
+    *,
+    workspace_dir: str = "",
+) -> SessionCommandView:
+    """Handle ``/memory remember|recall|search`` against the graph engine.
+
+    The MemoryClient is constructed per-invocation against the singleton
+    engine (``get_memory_client``), bound to the workspace namespace
+    derived via ``cli_namespace_from_workspace(workspace_dir)``. The
+    namespace is reported in every response so users can confirm which
+    workspace they are reading/writing.
+    """
+    from omicsclaw.memory import cli_namespace_from_workspace, get_memory_client
+
+    tokens = shlex.split(arg.strip()) if arg.strip() else []
+    if not tokens:
+        return SessionCommandView(output_text=_GRAPH_USAGE, success=False)
+
+    subcommand = tokens[0].lower()
+    if subcommand not in GRAPH_MEMORY_SUBCOMMANDS:
+        return SessionCommandView(
+            output_text=f"Unknown graph-memory subcommand: {subcommand}",
+            success=False,
+        )
+
+    namespace = cli_namespace_from_workspace(workspace_dir or None)
+    client = get_memory_client(namespace=namespace)
+
+    if subcommand == "remember":
+        if len(tokens) < 3:
+            return SessionCommandView(
+                output_text=(
+                    "Usage: /memory remember <domain://path> \"<text>\""
+                ),
+                success=False,
+            )
+        try:
+            uri = _parse_graph_uri(tokens[1])
+        except ValueError as exc:
+            return SessionCommandView(output_text=str(exc), success=False)
+        body = " ".join(tokens[2:]).strip()
+        if not body:
+            return SessionCommandView(
+                output_text="Refusing to remember an empty body.",
+                success=False,
+            )
+        try:
+            result = await client.remember(str(uri), body)
+        except Exception as exc:  # pragma: no cover — engine errors surface as command failure
+            return SessionCommandView(
+                output_text=f"Failed to remember {uri}: {exc}",
+                success=False,
+            )
+        return SessionCommandView(
+            output_text=(
+                f"Remembered {result.get('uri', str(uri))} "
+                f"(namespace={result.get('namespace', namespace)})"
+            )
+        )
+
+    if subcommand == "recall":
+        if len(tokens) < 2:
+            return SessionCommandView(
+                output_text="Usage: /memory recall <domain://path>",
+                success=False,
+            )
+        try:
+            uri = _parse_graph_uri(tokens[1])
+        except ValueError as exc:
+            return SessionCommandView(output_text=str(exc), success=False)
+        record = await client.recall(str(uri))
+        if record is None:
+            return SessionCommandView(
+                output_text=(
+                    f"No memory found at {uri} (namespace={namespace})."
+                )
+            )
+        loaded_ns = getattr(record, "loaded_namespace", namespace)
+        return SessionCommandView(
+            output_text=(
+                f"Memory: {uri}\n"
+                f"Namespace: {loaded_ns}\n"
+                f"---\n"
+                f"{record.content}"
+            )
+        )
+
+    # subcommand == "search"
+    if len(tokens) < 2:
+        return SessionCommandView(
+            output_text="Usage: /memory search <query>",
+            success=False,
+        )
+    query = " ".join(tokens[1:]).strip()
+    hits = await client.search(query, limit=10)
+    if not hits:
+        return SessionCommandView(
+            output_text=(
+                f"No matches for '{query}' (namespace={namespace})."
+            )
+        )
+    lines = [
+        f"Search hits: {len(hits)}",
+        f"Namespace: {namespace}",
+        f"Query: {query}",
+        "",
+    ]
+    for hit in hits:
+        uri = hit.get("uri") or f"{hit.get('domain', '?')}://{hit.get('path', '')}"
+        snippet = (hit.get("content") or "").replace("\n", " ")[:120]
+        ns = hit.get("namespace", "?")
+        lines.append(f"- {uri} (namespace={ns})")
+        if snippet:
+            lines.append(f"  {snippet}")
+    return SessionCommandView(output_text="\n".join(lines))
+
+
 __all__ = [
+    "GRAPH_MEMORY_SUBCOMMANDS",
+    "build_graph_memory_command_view",
     "build_memory_command_view",
+    "is_graph_memory_subcommand",
     "resolve_active_scoped_memory_scope",
 ]
