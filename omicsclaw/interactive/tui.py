@@ -58,7 +58,9 @@ from ._llm_bridge_support import (
 )
 from ._mcp import list_mcp_servers, load_active_mcp_server_entries_for_prompt
 from ._memory_command_support import (
+    build_graph_memory_command_view,
     build_memory_command_view,
+    is_graph_memory_subcommand,
     resolve_active_scoped_memory_scope,
 )
 from ._omicsclaw_actions import (
@@ -730,6 +732,12 @@ if _HAS_TEXTUAL:
                 return
 
             elif command is not None and command.name == "/memory":
+                if is_graph_memory_subcommand(command.arg):
+                    self.run_worker(
+                        self._run_graph_memory_async(command.arg),
+                        exclusive=False,
+                    )
+                    return
                 view = build_memory_command_view(
                     command.arg,
                     session_metadata=self._session_metadata,
@@ -1169,6 +1177,14 @@ if _HAS_TEXTUAL:
                     surface="interactive",
                 )
             )
+
+        async def _run_graph_memory_async(self, arg: str) -> None:
+            """Dispatch ``/memory remember|recall|search`` against the graph engine."""
+            view = await build_graph_memory_command_view(
+                arg,
+                workspace_dir=self._workspace,
+            )
+            self._apply_session_command_view(view)
 
 
         # ------------------------------------------------------------------

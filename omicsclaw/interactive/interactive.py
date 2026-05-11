@@ -90,7 +90,9 @@ from ._mcp import (
     remove_mcp_server,
 )
 from ._memory_command_support import (
+    build_graph_memory_command_view,
     build_memory_command_view,
+    is_graph_memory_subcommand,
     resolve_active_scoped_memory_scope,
 )
 from ._omicsclaw_actions import (
@@ -897,7 +899,15 @@ async def _handle_delete(arg: str, state: SessionState) -> None:
 
 
 async def _handle_memory(arg: str, state: SessionState, *, model: str = "") -> None:
-    """Manage scoped memory entries for the active workspace."""
+    """Manage memory entries — ScopedMemory (markdown) and graph memory."""
+    if is_graph_memory_subcommand(arg):
+        graph_view = await build_graph_memory_command_view(
+            arg,
+            workspace_dir=state.workspace_dir or "",
+        )
+        _apply_session_command_view(state, graph_view)
+        return
+
     view = build_memory_command_view(
         arg,
         session_metadata=state.session_metadata,
