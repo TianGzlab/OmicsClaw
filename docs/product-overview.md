@@ -142,9 +142,9 @@ OmicsClaw 的架构、Skill 设计和 local-first 理念受 [ClawBio](https://gi
 | **Memory URI** | 一个 `domain://path` 字符串，给记忆一个逻辑地址，独立于行 id。例如 `dataset://pbmc.h5ad`、`core://agent` | `omicsclaw/memory/` |
 | **Memory Domain 记忆域** | Memory URI 的顶层段——`core`、`dataset`、`analysis`、`insight`、`preference`、`project`、`session` 之一。**注意**：这是记忆系统内部的 7 个域，与 Skill 的 8 个组学 Domain 是两个完全独立的命名空间 | `omicsclaw/memory/engine.py` |
 | **Namespace 命名空间** | 记忆隔离维度，存为 `paths`、`search_documents`、`glossary_keywords` 三张表的列。各 Surface 注入不同的值：CLI/TUI = workspace 绝对路径；Desktop = `app/<launch_id>`；Bot = `<platform>/<user_id>`；系统 = `__shared__`。**避免**：tenant、scope | `omicsclaw/memory/namespace_policy.py` |
-| **`__shared__`** | 保留 Namespace，里面的行对所有其他 Namespace 都通过 Read fallback 可见。承载 `core://agent`、`core://kh/*`（预留）、系统词表 | `omicsclaw/memory/namespace_policy.py` |
+| **`__shared__`** | 保留 Namespace，里面的行对所有其他 Namespace 都通过 Read fallback 可见。承载 `core://agent`、`core://kh/*`（每次 `init_db` 由 `seed_knowhows` 幂等种入）、系统词表 | `omicsclaw/memory/namespace_policy.py` |
 | **Read fallback 读回退** | `recall` 和 `search` 在当前 Namespace 命中之外，自动包含 `__shared__` 结果的规则。**故意**只对单行查询生效；`list_children` 和 `get_subtree` 不回退，避免跨用户子树污染 | `omicsclaw/memory/engine.py` |
-| **MemoryEngine** | 图记忆 Hot path 引擎。单一 SQLAlchemy 模块，对 `(uri, namespace)` 对暴露 7 个动词：`upsert`、`upsert_versioned`、`patch_edge_metadata`、`recall`、`search`、`list_children`、`get_subtree`。**取代**了遗留的 1584 行 `GraphService` | `omicsclaw/memory/engine.py` |
+| **MemoryEngine** | 图记忆 Hot path 引擎。单一 SQLAlchemy 模块，对 `(uri, namespace)` 对暴露 7 个动词：`upsert`、`upsert_versioned`、`patch_edge_metadata`、`recall`、`search`、`list_children`、`get_subtree`，加幂等的 `seed_shared`。**完全替代**了已退役的 `GraphService` 类（`graph.py` 已删除） | `omicsclaw/memory/engine.py` |
 | **ReviewLog** | 图记忆 Cold path 引擎。只被桌面 App 的 `/memory/review/*` 路由和 bot 清理路径调用，做版本链审计、回滚、孤儿检查、变更集审批 | `omicsclaw/memory/review_log.py` |
 | **MemoryClient** | Surface 与 `MemoryEngine` 之间的策略层。决定 Namespace（`resolve_namespace()`）和版本策略（`should_version()`）；Surface 只持有这一个把手 | `omicsclaw/memory/memory_client.py` |
 | **ScopedMemory** | 文件系统记忆层，住在 `.omicsclaw/scoped_memory/`（markdown + frontmatter）。承载 workspace 本地提示；当前 Live 消费方是 `/memory` slash 命令（CLI/TUI）和 `omicsclaw/diagnostics.py`。与图记忆**并存**在 CLI/TUI 表面上 | `omicsclaw/memory/scoped_memory.py` |
@@ -395,14 +395,18 @@ PR #107 引入 headline-only 后，baseline system prompt 缩短了约 70%；模
 |---|---|
 | KH 文件总数 | 30+（持续增长，单细胞分析占大头） |
 | 注入路径 | `KnowHowInjector` → `build_system_prompt` → 当前请求 system prompt |
-| 存储 | 文件系统 markdown，不进图记忆 |
-| `core://kh/*` 预留 | namespace_policy 已声明 KH 默认入 `__shared__`，但 bootstrap 脚本未决，目前没有任何行写入 |
+| 存储 | 文件系统 markdown（canonical）+ 图记忆 `__shared__/core://kh/<doc_id>`（每次 `init_db` 由 `seed_knowhows` 幂等同步） |
+| `core://kh/*` 状态 | ✅ **已落地**（PR #172）。`KnowHowInjector.iter_entries()` 枚举 → `MemoryEngine.seed_shared` 幂等写入；同内容重复种子是 no-op；失败降级为 warning log，不阻塞启动 |
+
+> **注**：`read_knowhow` 工具目前仍从文件读，没有改读图。图层是镜像，便于将来 `recall("core://kh/<id>")` 跨命名空间访问，但不是读路径的真源。
 
 #### 对应代码
 
 - `knowledge_base/knowhows/KH-*.md`
 - `omicsclaw/runtime/system_prompt.py`（`KnowHowInjector`、`build_system_prompt`）
 - `omicsclaw/runtime/predicates.py`
+- `omicsclaw/memory/bootstrap.py`（`seed_knowhows` 入口）
+- `omicsclaw/memory/engine.py`（`MemoryEngine.seed_shared` 幂等写入原语）
 - `omicsclaw/runtime/context_layers/`
 
 ---
@@ -532,21 +536,26 @@ POST   /memory/scoped/prune
 
 两者并存，slash 命令的 view 由 `build_graph_memory_command_view`（2026-05 wired）做桥接。
 
-#### 当前迁移状态
+#### 当前迁移状态（2026-05-11 全部完成）
 
-- ✅ `MemoryEngine` 已替换遗留 `GraphService` 大部分调用
-- 🟡 五个端点仍走 `GraphService` shim：`/memory/update`、`/memory/children`、`/memory/domains`、`MemoryClient.forget`、`MemoryClient.get_recent`
-- 🟡 `core://kh/*` 的 bootstrap 未决——KH 仍只从文件系统读，没有写入 `__shared__`
-- 🟡 CLI/TUI 的图记忆 wiring 在 PR #167 (`feat(interactive): wire CLI/TUI /memory to the graph engine`) 已完成
+- ✅ 桌面五个 GraphService 端点（`/memory/update`、`/memory/children`、`/memory/domains`、`MemoryClient.forget`、`MemoryClient.get_recent`）全部迁移到 `MemoryEngine` / `MemoryClient`
+- ✅ 三个 cold-path API 模块全部脱离 GraphService：`api/maintenance.py`（PR #173 → ReviewLog 上新增 `list_orphans_with_chain` / `get_orphan_detail` / `permanently_delete_orphan`），`api/review.py`（PR #174 → 新增 `get_memory_by_id` / `restore_path`），`api/browse.py`（PR #175 → 改 import 私有 `BrowseHelpers`）
+- ✅ `core://kh/*` bootstrap 落地：每个 `init_db` 入口调 `seed_knowhows`，幂等写入 `__shared__/core://kh/<doc_id>`（PR #172）
+- ✅ CLI/TUI 的图记忆 wiring（PR #167）
+- ✅ **GraphService 类已退役**：`omicsclaw/memory/graph.py` 删除，`get_graph_service()` 工厂消失（PR #175）。Path-based admin 操作以私有 `BrowseHelpers` 类保留在 `omicsclaw/memory/api/_browse_helpers.py`，仅供 `/api/browse/*` admin UI 消费——任何生产代码都不能从外部 import
+
+整个 2026-05 重构计划现已闭合，见 [`docs/2026-05-09-memory-refactor-plan.md`](2026-05-09-memory-refactor-plan.md) §5。
 
 #### 对应代码
 
-- `omicsclaw/memory/engine.py` — MemoryEngine
-- `omicsclaw/memory/review_log.py` — ReviewLog
+- `omicsclaw/memory/engine.py` — MemoryEngine（含 `seed_shared` 幂等原语）
+- `omicsclaw/memory/review_log.py` — ReviewLog（含桌面 admin 端点的 `get_memory_by_id` / `restore_path` / `list_orphans_with_chain` 等）
 - `omicsclaw/memory/memory_client.py` — MemoryClient
+- `omicsclaw/memory/bootstrap.py` — KH `seed_knowhows` 入口
 - `omicsclaw/memory/namespace_policy.py` — Namespace 派生 + Shared 前缀策略
 - `omicsclaw/memory/compat.py` — Bot 用的 CompatMemoryStore
 - `omicsclaw/memory/scoped_memory.py` — 文件系统层
+- `omicsclaw/memory/api/_browse_helpers.py` — 私有 legacy 路径操作（仅 `/api/browse/*` 消费，不要外部 import）
 - `docs/CONTEXT.md` — 完整词汇表 + 决策记录
 - `docs/engineering/memory.mdx` — 引擎细节
 
