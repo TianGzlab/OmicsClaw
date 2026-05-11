@@ -33,6 +33,7 @@ from .models import (
     Memory,
     Node,
     Path,
+    ROOT_NODE_UUID,
     SHARED_NAMESPACE,
     serialize_memory_ref,
     serialize_row,
@@ -603,6 +604,213 @@ class ReviewLog:
                 "rows_before": rows_before,
                 "rows_after": {},
             }
+
+    # ------------------------------------------------------------------
+    # Desktop review pane: diff fetch + path restoration.
+    #
+    # ``get_memory_by_id`` powers the ``/api/review/diff`` content
+    # lookup; ``restore_path`` is the rollback target for changeset
+    # entries that record a path deletion (``after is None``). Both
+    # mirror the legacy GraphService contract returned to the frontend.
+    # ``restore_path`` intentionally tightens one guard: see its
+    # docstring for the namespace-scope divergence vs legacy.
+    # ------------------------------------------------------------------
+
+    async def get_memory_by_id(self, memory_id: int) -> Optional[dict]:
+        """Return one memory row (active or deprecated) with incident paths.
+
+        Returns ``None`` if the id doesn't exist. Used by the diff view
+        to render before/after content for a memories row in the
+        changeset.
+        """
+        async with self._db.session() as s:
+            memory = (
+                await s.execute(
+                    sa.select(Memory).where(Memory.id == memory_id)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                return None
+
+            paths: list[str] = []
+            if memory.node_uuid:
+                rows = (
+                    await s.execute(
+                        sa.select(Path.domain, Path.path)
+                        .select_from(Path)
+                        .join(Edge, Path.edge_id == Edge.id)
+                        .where(Edge.child_uuid == memory.node_uuid)
+                    )
+                ).all()
+                paths = [f"{d}://{p}" for d, p in rows]
+
+            return {
+                "memory_id": memory.id,
+                "node_uuid": memory.node_uuid,
+                "content": memory.content,
+                "created_at": (
+                    memory.created_at.isoformat()
+                    if memory.created_at
+                    else None
+                ),
+                "deprecated": memory.deprecated,
+                "migrated_to": memory.migrated_to,
+                "paths": paths,
+            }
+
+    async def restore_path(
+        self,
+        *,
+        path: str,
+        domain: str,
+        namespace: str,
+        node_uuid: str,
+        parent_uuid: Optional[str] = None,
+        priority: int = 0,
+        disclosure: Optional[str] = None,
+    ) -> dict:
+        """Re-attach ``(domain, path)`` to ``node_uuid`` in ``namespace``.
+
+        Used by the desktop review pane to undo a path deletion. The
+        caller supplies the original ``node_uuid`` from the changeset
+        snapshot; the method:
+
+        1. verifies the node still exists,
+        2. re-activates the latest memory if the chain head was
+           deprecated (so the restored path resolves to a live row),
+        3. resolves or defaults the parent edge,
+        4. recreates the edge (or reuses an existing one) and the path,
+        5. refreshes the search index.
+
+        Raises ``ValueError`` on root path, missing node, or
+        already-existing path. Returns ``{"uri": ..., "node_uuid": ...}``.
+
+        **Deliberate divergence from legacy:** the "already exists"
+        check is scoped to ``(namespace, domain, path)`` rather than
+        the legacy ``(domain, path)`` only. The legacy check would
+        falsely reject a rollback whenever a *different* namespace
+        held the same ``(domain, path)``; the namespace-scoped check
+        matches the actual ``Path`` unique index and is the correct
+        invariant. The legacy GraphService method had this latent bug.
+
+        TODO(Phase 3): delete the duplicate ``GraphService.restore_path``
+        at ``omicsclaw/memory/graph.py:1464`` when ``graph.py`` is removed.
+        """
+        if path == "":
+            raise ValueError("Cannot restore the root path.")
+
+        async with self._db.session() as s:
+            node = (
+                await s.execute(
+                    sa.select(Node).where(Node.uuid == node_uuid)
+                )
+            ).scalar_one_or_none()
+            if node is None:
+                raise ValueError(f"Node '{node_uuid}' not found")
+
+            # If no active memory remains on the node, re-activate the
+            # most-recent deprecated one so the restored path resolves.
+            active = (
+                await s.execute(
+                    sa.select(Memory).where(
+                        Memory.node_uuid == node_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                )
+            ).scalar_one_or_none()
+            if active is None:
+                latest = (
+                    await s.execute(
+                        sa.select(Memory)
+                        .where(Memory.node_uuid == node_uuid)
+                        .order_by(Memory.created_at.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if latest is None:
+                    raise ValueError(
+                        f"Node '{node_uuid}' has no memory versions"
+                    )
+                await s.execute(
+                    sa.update(Memory)
+                    .where(Memory.id == latest.id)
+                    .values(deprecated=False, migrated_to=None)
+                )
+
+            existing = (
+                await s.execute(
+                    sa.select(Path).where(
+                        Path.namespace == namespace,
+                        Path.domain == domain,
+                        Path.path == path,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                raise ValueError(
+                    f"Path '{domain}://{path}' already exists"
+                )
+
+            if parent_uuid is None:
+                if "/" in path:
+                    parent_path_str = path.rsplit("/", 1)[0]
+                    parent_row = (
+                        await s.execute(
+                            sa.select(Path).where(
+                                Path.namespace == namespace,
+                                Path.domain == domain,
+                                Path.path == parent_path_str,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if parent_row is not None:
+                        parent_edge = await s.get(Edge, parent_row.edge_id)
+                        parent_uuid = (
+                            parent_edge.child_uuid
+                            if parent_edge is not None
+                            else ROOT_NODE_UUID
+                        )
+                    else:
+                        parent_uuid = ROOT_NODE_UUID
+                else:
+                    parent_uuid = ROOT_NODE_UUID
+
+            edge_name = path.rsplit("/", 1)[-1] if "/" in path else path
+            edge = (
+                await s.execute(
+                    sa.select(Edge).where(
+                        Edge.parent_uuid == parent_uuid,
+                        Edge.child_uuid == node_uuid,
+                        Edge.name == edge_name,
+                    )
+                )
+            ).scalar_one_or_none()
+            if edge is None:
+                edge = Edge(
+                    parent_uuid=parent_uuid,
+                    child_uuid=node_uuid,
+                    name=edge_name,
+                    priority=priority,
+                    disclosure=disclosure,
+                )
+                s.add(edge)
+                await s.flush()
+
+            s.add(
+                Path(
+                    namespace=namespace,
+                    domain=domain,
+                    path=path,
+                    edge_id=edge.id,
+                )
+            )
+            await s.flush()
+
+            await self._engine.search_indexer.refresh_search_documents_for_node(
+                node_uuid, session=s
+            )
+
+            return {"uri": f"{domain}://{path}", "node_uuid": node_uuid}
 
     # ------------------------------------------------------------------
     # private helpers
