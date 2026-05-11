@@ -231,9 +231,15 @@ def _extract_for_skill(
         expected = c.get("expected_pick")
         if not trigger:
             continue
-        if expected is not None and expected not in valid_skill_names:
+        if expected is not None and (
+            expected not in valid_skill_names or expected == entry.skill
+        ):
+            # Reject both unknown siblings (potential hallucination /
+            # injection) AND self-routing (host skill named as its own
+            # redirect — contradictory case that would put
+            # must_not_pick == expected_pick in the snapshot).
             LOGGER.warning(
-                "[%s] LLM proposed sibling %r not in valid list — dropping",
+                "[%s] LLM proposed invalid sibling %r — dropping",
                 entry.skill, expected,
             )
             continue

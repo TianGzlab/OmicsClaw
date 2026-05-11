@@ -70,3 +70,35 @@ def test_extract_for_skill_records_extraction_failed_on_bad_json(monkeypatch):
     assert result.get("extraction_failed") is True
     assert result.get("cases") == []
     assert "error" in result, "failure dict should carry a short error reason"
+
+
+def test_extract_for_skill_rejects_self_route_expected_pick(monkeypatch):
+    """If the LLM names the host skill as `expected_pick`, the case is
+    contradictory (must_not_pick == expected_pick) and must be dropped.
+    Closes a threat-model gap: the original whitelist check only required
+    membership in `valid_skill_names`, which includes the host — letting
+    an injected description steer routing back to the host.  Reported by
+    CodeRabbit on PR #170."""
+    entry = extractor.SkillEntry(
+        skill="spatial-de",
+        description="Load when ranking spatial cluster markers. Skip when single-cell (use sc-de).",
+        description_hash="sha256:abc",
+    )
+
+    def _fake_llm(prompt, *, api_key, base_url, model, temperature):
+        return (
+            '[{"trigger": "scrna DE", "must_not_pick": "spatial-de", '
+            '"expected_pick": "spatial-de"}]'
+        )
+
+    monkeypatch.setattr(extractor, "_call_llm", _fake_llm)
+    result = extractor._extract_for_skill(
+        entry,
+        valid_skill_names=["spatial-de", "sc-de"],
+        llm_config=("fake-key", "https://x", "fake-model"),
+        temperature=0.0,
+    )
+    assert result["extraction_failed"] is False
+    assert result["cases"] == [], (
+        f"self-route case must be dropped, got {result['cases']!r}"
+    )
