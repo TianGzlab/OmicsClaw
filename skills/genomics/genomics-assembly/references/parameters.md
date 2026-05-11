@@ -6,7 +6,7 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
+- `--genome-size`
 
 ## Per-method parameter hints
 

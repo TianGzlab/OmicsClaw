@@ -10,6 +10,7 @@ allowed_extra_flags:
 - --cell2location-detection-alpha
 - --cell2location-n-cells-per-spot
 - --cell2location-n-epochs
+- --cpu
 - --destvi-condscvi-epochs
 - --destvi-dropout-rate
 - --destvi-n-epochs
@@ -22,8 +23,8 @@ allowed_extra_flags:
 - --flashdeconv-n-markers-per-type
 - --flashdeconv-sketch-dim
 - --method
+- --n-epochs
 - --no-gpu
-- --no-spotlight-scale
 - --rctd-mode
 - --reference
 - --spotlight-min-prop
@@ -38,6 +39,7 @@ allowed_extra_flags:
 - --tangram-learning-rate
 - --tangram-mode
 - --tangram-n-epochs
+- --use-gpu
 param_hints:
   flashdeconv:
     priority: flashdeconv_lambda_spatial → flashdeconv_sketch_dim → flashdeconv_n_hvg

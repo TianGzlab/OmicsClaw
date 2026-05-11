@@ -4,7 +4,8 @@ trigger_keywords:
 - data import
 - convert proteomics
 - format conversion
-allowed_extra_flags: []
+allowed_extra_flags:
+- --format
 legacy_aliases:
 - data-import
 saves_h5ad: false

@@ -6,17 +6,18 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--gene-sets`
-- `--gene-set-db`
-- `--species`
-- `--groupby`
-- `--top-pathways`
 - `--aucell-auc-max-rank`
+- `--aucell-py-auc-threshold`
+- `--gene-set-db`
+- `--gene-sets`
+- `--groupby`
+- `--method`
+- `--r-enhanced`
 - `--score-genes-ctrl-size`
 - `--score-genes-n-bins`
-- `--aucell-py-auc-threshold`
-- `--r-enhanced`
+- `--seed`
+- `--species`
+- `--top-pathways`
 
 ## Per-method parameter hints
 

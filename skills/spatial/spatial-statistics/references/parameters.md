@@ -15,9 +15,6 @@
 - `--getis-star`
 - `--local-moran-geoda-quads`
 - `--n-top-genes`
-- `--no-getis-star`
-- `--no-local-moran-geoda-quads`
-- `--no-stats-two-tailed`
 - `--ripley-max-dist`
 - `--ripley-metric`
 - `--ripley-mode`

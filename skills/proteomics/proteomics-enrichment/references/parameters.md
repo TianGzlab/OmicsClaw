@@ -6,6 +6,7 @@
 
 ## Allowed extra CLI flags
 
+- `--background-size`
 - `--method`
 - `--species`
 

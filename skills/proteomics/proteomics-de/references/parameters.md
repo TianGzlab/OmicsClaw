@@ -6,7 +6,9 @@
 
 ## Allowed extra CLI flags
 
-_No extra flags beyond the standard `--input` / `--output` / `--demo` set._
+- `--alpha`
+- `--log2fc-threshold`
+- `--method`
 
 ## Per-method parameter hints
 

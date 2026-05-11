@@ -6,14 +6,16 @@
 
 ## Allowed extra CLI flags
 
+- `--doublet-score-threshold`
 - `--max-counts`
 - `--max-genes`
 - `--max-mt-percent`
 - `--min-cells`
 - `--min-counts`
 - `--min-genes`
-- `--tissue`
+- `--no-remove-doublets`
 - `--r-enhanced`
+- `--tissue`
 
 ## Per-method parameter hints
 

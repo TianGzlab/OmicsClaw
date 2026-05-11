@@ -1,49 +1,64 @@
-<!-- Hand-ported from the legacy SKILL.md ## Output Contract section. -->
-<!-- Future migrations recover this automatically (added "output contract" -->
-<!-- to OUTPUT_HEADINGS in scripts/migrate_skill.py). -->
+## Output Structure
 
-# Output Contract
+```
+output_directory/
+├── report.md
+├── result.json
+├── commands.sh
+├── input.h5ad
+├── manifest.json
+├── processed.h5ad
+├── requirements.txt
+├── tables/
+│   ├── counts.csv
+│   ├── de_full.csv
+│   ├── de_group_summary.csv
+│   ├── de_top_markers.csv
+│   ├── deseq2_results.csv
+│   ├── gene_expression.csv
+│   ├── markers_top.csv
+│   ├── mast_results.csv
+│   ├── metadata.csv
+│   └── pseudobulk_summary.csv
+└── figures/
+    ├── marker_dotplot.png
+    ├── pseudobulk_group_summary.png
+    ├── r_de_heatmap.png
+    ├── r_de_manhattan.png
+    ├── r_de_volcano.png
+    ├── r_feature_cor.png
+    ├── r_feature_violin.png
+    └── rank_genes_groups.png
+```
 
-A successful run writes:
+## File contents
 
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- `tables/de_full.csv`
-- `tables/markers_top.csv`
-- `figure_data/manifest.json`
-- `reproducibility/commands.sh`
+- `tables/counts.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/de_full.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/de_group_summary.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/de_top_markers.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/deseq2_results.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/gene_expression.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/markers_top.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/mast_results.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/metadata.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `tables/pseudobulk_summary.csv` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/marker_dotplot.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/pseudobulk_group_summary.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/r_de_heatmap.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/r_de_manhattan.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/r_de_volcano.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/r_feature_cor.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/r_feature_violin.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `figures/rank_genes_groups.png` — written by `sc_de.py` (or its imported `_lib/` helpers).
+- `commands.sh` — written by `sc_de.py`.
+- `input.h5ad` — written by `sc_de.py`.
+- `manifest.json` — written by `sc_de.py`.
+- `processed.h5ad` — written by `sc_de.py`.
+- `requirements.txt` — written by `sc_de.py`.
+- `report.md` — Markdown summary written by the common report helper.
+- `result.json` — standardised result envelope (`summary` + `data` keys).
 
-## Visualization Contract
+## Notes
 
-The current wrapper writes direct figure outputs rather than a recipe-driven
-gallery:
-
-**Exploratory methods** (`wilcoxon`, `t-test`, `logreg`, `mast`):
-
-- `figures/marker_dotplot.png`
-- `figures/rank_genes_groups.png`
-- `figures/de_effect_summary.png`
-- `figures/de_group_summary.png`
-
-**Pseudobulk path** (`deseq2_r`):
-
-- `figures/pseudobulk_group_summary.png`
-- per-celltype `*_volcano.png`
-- per-celltype `*_ma.png`
-
-## What Users Should Inspect First
-
-1. `report.md`
-2. `tables/de_full.csv`
-3. `tables/markers_top.csv`
-4. `figures/de_group_summary.png` or pseudobulk summary figures
-5. `processed.h5ad`
-
-## Result JSON Keys
-
-- `summary.expression_source` — which matrix actually drove DE: `layers.counts`,
-  `adata.raw`, or `adata.X`.  Sanity-check this is correct for the chosen
-  method (raw counts for `deseq2_r`; normalized for the rest).
-- `summary.method`, `summary.groupby`, `summary.group1`, `summary.group2` —
-  echo of the statistical question the run answered.
+Auto-generated from `sc_de.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.

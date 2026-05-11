@@ -7,6 +7,7 @@ trigger_keywords:
 - deletion
 - CNVkit
 allowed_extra_flags:
+- --alpha
 - --method
 legacy_aliases:
 - cnv-calling

@@ -10,7 +10,7 @@ trigger_keywords:
 - Mutect2
 - VQSR
 allowed_extra_flags:
-- --method
+- --n-variants
 legacy_aliases:
 - variant-call
 saves_h5ad: false

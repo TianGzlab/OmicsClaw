@@ -20,9 +20,8 @@ trigger_keywords:
 - combine count outputs
 - cellranger aggr alternative
 allowed_extra_flags:
-- --sample-id
-- --sample-key
 - --r-enhanced
+- --sample-id
 legacy_aliases:
 - scrna-multi-count
 saves_h5ad: true

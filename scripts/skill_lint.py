@@ -233,6 +233,196 @@ def _check_gotchas_anchors(
     return errors
 
 
+# --- Check: allowed_extra_flags ⊇ argparse --------------------------------
+#
+# When the user invokes `omicsclaw.py run <skill> --foo bar`, the runner at
+# `omicsclaw/core/skill_runner.py:354-378` filters out any --foo not listed
+# in the sidecar's `allowed_extra_flags`.  Empty / partial lists silently
+# drop user flags, producing wrong output with default parameters.  This
+# regression class was discovered in PR-F (proteomics / metabolomics) and
+# affects skills migrated in PR-D / PR-E too.
+
+# Locate each `add_argument(` call so we can scan its body for every
+# `--flag` literal — handles short+long pairs like `add_argument("-m",
+# "--method")` and multi-line calls.  Requires literal `--` so single-dash
+# short flags (e.g. `-m`) are correctly NOT captured.
+_ADD_ARGUMENT_OPEN_RE = re.compile(r'add_argument\s*\(')
+_FLAG_LITERAL_RE = re.compile(r'["\'](--[\w-]+)["\']')
+
+
+def _extract_argparse_flags(script_text: str) -> set[str]:
+    """Find every `--flag` literal inside an `add_argument(...)` call body.
+
+    Walks the source balancing parens so `default=foo(bar)` and similar
+    nested calls don't truncate the body early.
+    """
+    flags: set[str] = set()
+    i = 0
+    n = len(script_text)
+    while i < n:
+        match = _ADD_ARGUMENT_OPEN_RE.search(script_text, i)
+        if not match:
+            break
+        body_start = match.end()
+        depth = 1
+        j = body_start
+        while j < n and depth > 0:
+            if script_text[j] == "(":
+                depth += 1
+            elif script_text[j] == ")":
+                depth -= 1
+            j += 1
+        body = script_text[body_start: j - 1]
+        for fm in _FLAG_LITERAL_RE.finditer(body):
+            flags.add(fm.group(1))
+        i = j
+    return flags
+_RUNNER_BLOCKED_FLAGS = frozenset({"--input", "--output", "--demo"})
+
+
+def _check_allowed_extra_flags(skill_dir: Path, sidecar: dict) -> list[str]:
+    """Verify `allowed_extra_flags` covers every script argparse flag.
+
+    Excludes the runner-blocked trio (`--input`, `--output`, `--demo`),
+    which never need to be listed.
+    """
+    errors: list[str] = []
+    script_name = sidecar.get("script") or ""
+    script_path = skill_dir / script_name if script_name else None
+    if not (script_path and script_path.exists()):
+        return []  # script not co-located — skip rather than false-fail
+    script_text = script_path.read_text(encoding="utf-8")
+    declared = _extract_argparse_flags(script_text) - _RUNNER_BLOCKED_FLAGS
+    allowed = set(sidecar.get("allowed_extra_flags") or [])
+    missing = declared - allowed
+    extra = allowed - declared
+    for flag in sorted(missing):
+        errors.append(
+            f"parameters.yaml: allowed_extra_flags missing '{flag}' — "
+            f"declared in {script_name} via add_argument"
+        )
+    for flag in sorted(extra):
+        errors.append(
+            f"parameters.yaml: allowed_extra_flags lists '{flag}' but "
+            f"{script_name} does not declare it via add_argument"
+        )
+    return errors
+
+
+# --- Check: output_contract.md paths exist in the script ------------------
+#
+# `references/output_contract.md` is supposed to describe the files the
+# script actually writes.  PR-F discovered that migrate_skill.py copies the
+# legacy SKILL.md "Output Structure" section verbatim, so output_contract.md
+# often lists files the script never touches.  This lint forces every
+# `tables/X.csv` / `figures/X.png` / etc. mentioned in the contract to
+# appear as a substring in the script (and any sibling `_lib/*.py`).
+
+# Match file-shaped tokens with extension.  Multi-dot extensions like
+# `checksums.sha256` and `archive.tar.gz` are listed BEFORE their shorter
+# prefixes (regex alternation is leftmost — order matters).
+_OUTPUT_CONTRACT_PATH_RE = re.compile(
+    r"""
+    `?
+    (?:[a-z_<>-]+/)?       # optional parent dir
+    (
+        [a-zA-Z][\w._-]*    # filename stem
+        \.
+        (?:                 # extension — longest matches first
+            tar\.gz | sha256 | h5ad | narrowPeak | broadPeak |
+            fasta | fastq | json | jpeg | jpg | html |
+            csv | tsv | png | svg | pdf | bed | gmt | sam | bam | vcf | txt |
+            md  | sh  | fa
+        )
+    )
+    `?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+# Framework-standard files written by the common report helper (NOT by the
+# skill script directly) — exempt from the substring check.  Also exempt
+# self-referencing doc filenames that the migrate_skill.py header comment
+# may accidentally surface.
+_FRAMEWORK_FILES = frozenset({
+    "report.md", "result.json",
+    "commands.sh", "requirements.txt", "checksums.sha256",
+    "processed.h5ad", "processed.bam",
+    "SKILL.md", "output_contract.md", "parameters.md",
+    "methodology.md", "r_visualization.md",
+    "manifest.json",
+})
+# Strip HTML comments — migrate_skill.py prepends a `<!-- Generated ... -->`
+# header that contains references to output_contract.md / SKILL.md which
+# would otherwise be mis-counted as path claims.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# `from skills.<domain>._lib.<module> import ...` or
+# `from .._lib.<module> import ...` — captures <module> only, used to
+# scope the cross-file haystack search (avoid falsely-validating filenames
+# that live in unrelated _lib siblings).
+_LIB_IMPORT_RE = re.compile(
+    r"from\s+(?:[\w.]+\._lib\.|\.+_lib\.)(\w+)\s+import"
+)
+
+
+def _check_output_contract_paths(skill_dir: Path, sidecar: dict) -> list[str]:
+    """Verify every file path in output_contract.md is referenced in the script.
+
+    Searches the script + any `_lib/*.py` siblings for the basename as a
+    substring.  Framework-standard outputs (report.md, result.json,
+    processed.h5ad, etc.) are exempt — those are written by the common
+    report helper, not by the skill script directly.
+    """
+    errors: list[str] = []
+    contract = skill_dir / "references" / "output_contract.md"
+    if not contract.exists():
+        return []  # missing-file already flagged by _check_references
+
+    contract_text = _HTML_COMMENT_RE.sub("", contract.read_text(encoding="utf-8"))
+    # Strip code-fence content?  No — code fences in output_contract.md are
+    # the canonical "Output Structure" tree; the paths there ARE the claims.
+    referenced_paths = {
+        match.group(0).strip("`")
+        for match in _OUTPUT_CONTRACT_PATH_RE.finditer(contract_text)
+    }
+    if not referenced_paths:
+        return []  # nothing to validate
+
+    script_name = sidecar.get("script") or ""
+    script_path = skill_dir / script_name if script_name else None
+    if not (script_path and script_path.exists()):
+        return []  # script not co-located — skip rather than false-fail
+
+    script_text = script_path.read_text(encoding="utf-8")
+    haystack = script_text
+    # Also scan _lib/<X>.py — but ONLY the modules the script actually
+    # imports.  Otherwise spatial-domains' contract gets validated against
+    # _lib/communication.py, _lib/cnv.py, etc., and the lint passes for
+    # filenames that no spatial-domains output ever writes.  Walk up to the
+    # `skills/<domain>/` boundary so two-deep trees (singlecell/scrna/X)
+    # find _lib at the domain root.
+    imported_lib_names = set(_LIB_IMPORT_RE.findall(script_text))
+    for parent in (skill_dir, *skill_dir.parents):
+        lib_dir = parent / "_lib"
+        if lib_dir.is_dir():
+            for lib_py in sorted(lib_dir.glob("*.py")):
+                if lib_py.stem in imported_lib_names:
+                    haystack += "\n" + lib_py.read_text(encoding="utf-8")
+        if parent.name == "skills":
+            break
+
+    for path in sorted(referenced_paths):
+        basename = path.rsplit("/", 1)[-1]
+        if basename in _FRAMEWORK_FILES:
+            continue
+        if basename not in haystack:
+            errors.append(
+                f"output_contract.md: '{path}' not referenced in "
+                f"{script_name} (or sibling _lib/*.py)"
+            )
+    return errors
+
+
 def _check_references(skill_dir: Path, sidecar: dict) -> list[str]:
     errors: list[str] = []
     refs = skill_dir / "references"
@@ -276,6 +466,8 @@ def lint_skill(skill_dir: Path) -> list[str]:
     errors.extend(_check_sidecar(sidecar))
     errors.extend(_check_references(skill_dir, sidecar))
     errors.extend(_check_gotchas_anchors(skill_dir, body, sidecar))
+    errors.extend(_check_allowed_extra_flags(skill_dir, sidecar))
+    errors.extend(_check_output_contract_paths(skill_dir, sidecar))
     return errors
 
 

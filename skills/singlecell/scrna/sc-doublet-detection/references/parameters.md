@@ -6,15 +6,15 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--expected-doublet-rate`
-- `--threshold`
 - `--batch-key`
 - `--doubletdetection-n-iters`
 - `--doubletdetection-standard-scaling`
-- `--no-doubletdetection-standard-scaling`
-- `--scds-mode`
+- `--expected-doublet-rate`
+- `--method`
 - `--r-enhanced`
+- `--random-state`
+- `--scds-mode`
+- `--threshold`
 
 ## Per-method parameter hints
 

@@ -7,7 +7,8 @@ trigger_keywords:
 - DIA
 - DIA-NN
 - Skyline
-allowed_extra_flags: []
+allowed_extra_flags:
+- --method
 legacy_aliases:
 - quantification
 saves_h5ad: false

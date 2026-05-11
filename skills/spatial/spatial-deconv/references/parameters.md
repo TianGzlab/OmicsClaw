@@ -16,6 +16,7 @@
 - `--cell2location-detection-alpha`
 - `--cell2location-n-cells-per-spot`
 - `--cell2location-n-epochs`
+- `--cpu`
 - `--destvi-condscvi-epochs`
 - `--destvi-dropout-rate`
 - `--destvi-n-epochs`
@@ -28,8 +29,8 @@
 - `--flashdeconv-n-markers-per-type`
 - `--flashdeconv-sketch-dim`
 - `--method`
+- `--n-epochs`
 - `--no-gpu`
-- `--no-spotlight-scale`
 - `--rctd-mode`
 - `--reference`
 - `--spotlight-min-prop`
@@ -44,6 +45,7 @@
 - `--tangram-learning-rate`
 - `--tangram-mode`
 - `--tangram-n-epochs`
+- `--use-gpu`
 
 ## Per-method parameter hints
 

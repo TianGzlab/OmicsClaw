@@ -6,16 +6,15 @@
 
 ## Allowed extra CLI flags
 
+- `--celltypist-majority-voting`
+- `--cluster-key`
 - `--manual-map`
 - `--manual-map-file`
-- `--cluster-key`
+- `--marker-file`
 - `--method`
 - `--model`
-- `--reference`
-- `--marker-file`
-- `--celltypist-majority-voting`
-- `--no-celltypist-majority-voting`
 - `--r-enhanced`
+- `--reference`
 - `--scsa-foldchange`
 - `--scsa-pvalue`
 - `--species`

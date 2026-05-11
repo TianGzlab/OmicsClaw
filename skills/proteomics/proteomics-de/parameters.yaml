@@ -6,7 +6,10 @@ trigger_keywords:
 - MSstats
 - limma
 - volcano
-allowed_extra_flags: []
+allowed_extra_flags:
+- --alpha
+- --log2fc-threshold
+- --method
 legacy_aliases:
 - differential-abundance
 saves_h5ad: false

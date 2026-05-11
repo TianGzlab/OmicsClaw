@@ -11,6 +11,7 @@ trigger_keywords:
 allowed_extra_flags:
 - --assay
 - --method
+- --n-peaks
 legacy_aliases:
 - epigenomics
 saves_h5ad: false

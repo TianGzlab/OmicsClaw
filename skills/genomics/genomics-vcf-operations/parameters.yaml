@@ -5,7 +5,9 @@ trigger_keywords:
 - bcftools
 - variant filter
 - merge VCF
-allowed_extra_flags: []
+allowed_extra_flags:
+- --min-dp
+- --min-qual
 legacy_aliases:
 - vcf-ops
 saves_h5ad: false

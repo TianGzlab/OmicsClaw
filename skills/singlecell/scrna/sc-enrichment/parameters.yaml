@@ -1,9 +1,10 @@
 domain: singlecell
 allowed_extra_flags:
+- --engine
+- --fdr-threshold
 - --gene-set-db
 - --gene-set-from-markers
 - --gene-sets
-- --engine
 - --groupby
 - --gsea-max-size
 - --gsea-min-size
@@ -17,10 +18,10 @@ allowed_extra_flags:
 - --ora-log2fc-cutoff
 - --ora-max-genes
 - --ora-padj-cutoff
+- --r-enhanced
 - --ranking-method
 - --species
 - --top-terms
-- --r-enhanced
 param_hints:
   ora:
     priority: gene_sets/gene_set_db/gene_set_from_markers -> engine -> groupby/ranking_method

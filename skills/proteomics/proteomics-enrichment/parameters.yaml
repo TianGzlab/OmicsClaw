@@ -8,6 +8,7 @@ trigger_keywords:
 - g:Profiler
 - GO enrichment
 allowed_extra_flags:
+- --background-size
 - --method
 - --species
 legacy_aliases:

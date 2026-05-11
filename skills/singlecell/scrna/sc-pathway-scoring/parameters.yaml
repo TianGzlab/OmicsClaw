@@ -1,16 +1,17 @@
 domain: singlecell
 allowed_extra_flags:
-- --method
-- --gene-sets
-- --gene-set-db
-- --species
-- --groupby
-- --top-pathways
 - --aucell-auc-max-rank
+- --aucell-py-auc-threshold
+- --gene-set-db
+- --gene-sets
+- --groupby
+- --method
+- --r-enhanced
 - --score-genes-ctrl-size
 - --score-genes-n-bins
-- --aucell-py-auc-threshold
-- --r-enhanced
+- --seed
+- --species
+- --top-pathways
 param_hints:
   aucell_r:
     priority: gene_sets/gene_set_db -> groupby -> aucell_auc_max_rank -> top_pathways

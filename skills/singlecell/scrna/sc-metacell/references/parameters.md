@@ -6,13 +6,16 @@
 
 ## Allowed extra CLI flags
 
-- `--method`
-- `--use-rep`
-- `--n-metacells`
 - `--celltype-key`
-- `--min-iter`
 - `--max-iter`
+- `--method`
+- `--min-iter`
+- `--n-metacells`
+- `--n-neighbors`
+- `--n-pcs`
 - `--r-enhanced`
+- `--seed`
+- `--use-rep`
 
 ## Per-method parameter hints
 

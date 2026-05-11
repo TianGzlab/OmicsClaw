@@ -25,8 +25,6 @@
 - `--gsea-weight`
 - `--method`
 - `--n-top-terms`
-- `--no-gsea-ascending`
-- `--no-ssgsea-ascending`
 - `--source`
 - `--species`
 - `--ssgsea-ascending`

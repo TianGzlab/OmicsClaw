@@ -6,10 +6,11 @@
 
 ## Allowed extra CLI flags
 
+- `--engine`
+- `--fdr-threshold`
 - `--gene-set-db`
 - `--gene-set-from-markers`
 - `--gene-sets`
-- `--engine`
 - `--groupby`
 - `--gsea-max-size`
 - `--gsea-min-size`
@@ -23,10 +24,10 @@
 - `--ora-log2fc-cutoff`
 - `--ora-max-genes`
 - `--ora-padj-cutoff`
+- `--r-enhanced`
 - `--ranking-method`
 - `--species`
 - `--top-terms`
-- `--r-enhanced`
 
 ## Per-method parameter hints
 

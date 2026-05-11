@@ -10,7 +10,6 @@ trigger_keywords:
 - alignment QC
 allowed_extra_flags:
 - --method
-- --species
 legacy_aliases:
 - bulk-align-reads
 saves_h5ad: false
