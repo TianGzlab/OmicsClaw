@@ -164,3 +164,14 @@ async def test_seed_knowhows_swallows_per_entry_errors(engine, kh_injector):
         "core://kh/good", namespace=SHARED_NAMESPACE
     )
     assert record is not None
+
+    # Entries iterated AFTER the malformed one must still be written —
+    # one bad URI mustn't poison the rest of the corpus.
+    record_a = await engine.recall(
+        "core://kh/rule-a", namespace=SHARED_NAMESPACE
+    )
+    record_b = await engine.recall(
+        "core://kh/rule-b", namespace=SHARED_NAMESPACE
+    )
+    assert record_a is not None
+    assert record_b is not None

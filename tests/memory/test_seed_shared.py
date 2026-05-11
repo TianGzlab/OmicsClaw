@@ -195,6 +195,51 @@ async def test_seed_shared_always_targets_shared_namespace(engine):
 
 
 @pytest.mark.asyncio
+async def test_seed_shared_concurrent_first_writes_do_not_corrupt(engine):
+    """Two coroutines racing on the same fresh URI must converge to one
+    active row; neither call may leave the graph in a half-written state.
+
+    Pins the concurrency contract flagged in the Phase 1 5-axis review:
+    a TOCTOU window between the equality probe and the write must not
+    surface as data corruption or duplicate version chains.
+    """
+    import asyncio
+
+    eng, db = engine
+
+    results = await asyncio.gather(
+        eng.seed_shared("core://kh/raced", "body"),
+        eng.seed_shared("core://kh/raced", "body"),
+        return_exceptions=True,
+    )
+
+    # Both calls must complete cleanly. The loser of the PK race must
+    # transparently recover and report a valid ``MemoryRef`` rather than
+    # surfacing IntegrityError to the caller — bootstrap callers count
+    # exceptions as ``failed`` and a startup race shouldn't taint that.
+    # The ``written`` flag is best-effort under concurrency (a racing
+    # writer can legitimately observe ``True`` for both halves when the
+    # second probe still misses the first commit); we only require it
+    # never blows up.
+    exceptions = [r for r in results if isinstance(r, Exception)]
+    assert exceptions == [], f"seed_shared leaked exceptions under race: {exceptions}"
+    refs = [r[0] for r in results]
+    assert all(ref.uri == "core://kh/raced" for ref in refs)
+    assert all(ref.namespace == SHARED_NAMESPACE for ref in refs)
+
+    async with db.session() as s:
+        path_rows = (
+            await s.execute(
+                sa.select(Path).where(
+                    Path.namespace == SHARED_NAMESPACE,
+                    Path.path == "kh/raced",
+                )
+            )
+        ).scalars().all()
+        assert len(path_rows) == 1
+
+
+@pytest.mark.asyncio
 async def test_seed_shared_unchanged_versioned_uri_is_noop(engine):
     """Even for versioned URIs, seeding the same content twice must
     not append a new version — that's the whole point of an

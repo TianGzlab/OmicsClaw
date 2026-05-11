@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
 from sqlalchemy import and_, func, not_, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -483,11 +484,21 @@ class MemoryEngine:
         if existing is not None:
             return
         await self._ensure_shared_parent_chain(parent)
-        await self.upsert(
-            parent,
-            f"Container node: {parent}",
-            namespace=SHARED_NAMESPACE,
-        )
+        try:
+            await self.upsert(
+                parent,
+                f"Container node: {parent}",
+                namespace=SHARED_NAMESPACE,
+            )
+        except IntegrityError:
+            # Another coroutine raced us to create the same parent.
+            # If their row is now visible, treat the chain as ready;
+            # otherwise the error is something else worth surfacing.
+            recheck = await self.recall(
+                parent, namespace=SHARED_NAMESPACE, fallback_to_shared=False
+            )
+            if recheck is None:
+                raise
 
     async def seed_shared(
         self,
@@ -517,61 +528,93 @@ class MemoryEngine:
         parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
         canonical = str(parsed)
 
-        async with self._db.session() as s:
-            existing_path = await self._fetch_path(s, SHARED_NAMESPACE, parsed)
-            if existing_path is not None:
-                edge = await s.get(Edge, existing_path.edge_id)
-                if edge is not None:
-                    active = (
-                        await s.execute(
-                            select(Memory)
-                            .where(
-                                Memory.node_uuid == edge.child_uuid,
-                                Memory.deprecated == False,  # noqa: E712
-                            )
-                            .order_by(Memory.id.desc())
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                    if active is not None and active.content == content:
-                        return (
-                            MemoryRef(
-                                memory_id=active.id,
-                                node_uuid=edge.child_uuid,
-                                namespace=SHARED_NAMESPACE,
-                                uri=canonical,
-                            ),
-                            False,
-                        )
+        existing_ref = await self._active_shared_ref_if_matches(parsed, content)
+        if existing_ref is not None:
+            return existing_ref, False
 
-        await self._ensure_shared_parent_chain(parsed)
+        try:
+            await self._ensure_shared_parent_chain(parsed)
 
-        if should_version(parsed):
-            vref = await self.upsert_versioned(
+            if should_version(parsed):
+                vref = await self.upsert_versioned(
+                    parsed,
+                    content,
+                    namespace=SHARED_NAMESPACE,
+                    priority=priority,
+                    disclosure=disclosure,
+                )
+                return (
+                    MemoryRef(
+                        memory_id=vref.new_memory_id,
+                        node_uuid=vref.node_uuid,
+                        namespace=vref.namespace,
+                        uri=vref.uri,
+                    ),
+                    True,
+                )
+
+            ref = await self.upsert(
                 parsed,
                 content,
                 namespace=SHARED_NAMESPACE,
                 priority=priority,
                 disclosure=disclosure,
             )
-            return (
-                MemoryRef(
-                    memory_id=vref.new_memory_id,
-                    node_uuid=vref.node_uuid,
-                    namespace=vref.namespace,
-                    uri=vref.uri,
-                ),
-                True,
+            return ref, True
+        except IntegrityError:
+            # Lost a race with another coroutine seeding the same URI.
+            # The PK constraint on ``paths`` already guarantees we won't
+            # have produced a duplicate row; just adopt the winner's row
+            # and report no write.
+            winner = await self._active_shared_ref(parsed)
+            if winner is not None:
+                return winner, False
+            raise
+
+    async def _active_shared_ref(
+        self, parsed: MemoryURI
+    ) -> Optional[MemoryRef]:
+        """Return the active row's ``MemoryRef`` in ``__shared__`` or ``None``."""
+        canonical = str(parsed)
+        async with self._db.session() as s:
+            path_row = await self._fetch_path(s, SHARED_NAMESPACE, parsed)
+            if path_row is None:
+                return None
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is None:
+                return None
+            active = (
+                await s.execute(
+                    select(Memory)
+                    .where(
+                        Memory.node_uuid == edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                    .order_by(Memory.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if active is None:
+                return None
+            return MemoryRef(
+                memory_id=active.id,
+                node_uuid=edge.child_uuid,
+                namespace=SHARED_NAMESPACE,
+                uri=canonical,
             )
 
-        ref = await self.upsert(
-            parsed,
-            content,
-            namespace=SHARED_NAMESPACE,
-            priority=priority,
-            disclosure=disclosure,
-        )
-        return ref, True
+    async def _active_shared_ref_if_matches(
+        self, parsed: MemoryURI, content: str
+    ) -> Optional[MemoryRef]:
+        """Return the active row's ref iff its content equals ``content``."""
+        ref = await self._active_shared_ref(parsed)
+        if ref is None:
+            return None
+        async with self._db.session() as s:
+            active = await s.get(Memory, ref.memory_id)
+            if active is None or active.content != content:
+                return None
+        return ref
 
     async def delete(
         self,
