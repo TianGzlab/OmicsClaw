@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
 
 from sqlalchemy import and_, func, not_, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -462,6 +463,158 @@ class MemoryEngine:
             edge.disclosure = disclosure
 
         return old_id, new_memory.id, node_uuid
+
+    async def _ensure_shared_parent_chain(self, parsed: MemoryURI) -> None:
+        """Auto-vivify missing parent containers in ``__shared__``.
+
+        Engine writes refuse missing parents; ``seed_shared`` is a
+        high-level seeding primitive and should let callers seed a
+        leaf like ``core://kh/safety`` without first having to create
+        ``core://kh`` themselves. Mirrors ``MemoryClient._ensure_parent_chain``
+        but is hard-locked to ``__shared__``.
+        """
+        if "/" not in parsed.path:
+            return
+        parent = parsed.parent()
+        if parent is None or parent.is_root:
+            return
+        existing = await self.recall(
+            parent, namespace=SHARED_NAMESPACE, fallback_to_shared=False
+        )
+        if existing is not None:
+            return
+        await self._ensure_shared_parent_chain(parent)
+        try:
+            await self.upsert(
+                parent,
+                f"Container node: {parent}",
+                namespace=SHARED_NAMESPACE,
+            )
+        except IntegrityError:
+            # Another coroutine raced us to create the same parent.
+            # If their row is now visible, treat the chain as ready;
+            # otherwise the error is something else worth surfacing.
+            recheck = await self.recall(
+                parent, namespace=SHARED_NAMESPACE, fallback_to_shared=False
+            )
+            if recheck is None:
+                raise
+
+    async def seed_shared(
+        self,
+        uri: str | MemoryURI,
+        content: str,
+        *,
+        priority: PriorityArg = _UNSET,
+        disclosure: DisclosureArg = _UNSET,
+    ) -> tuple[MemoryRef, bool]:
+        """Idempotent write to ``__shared__``: skip if active content matches.
+
+        Returns ``(ref, written)``. ``written=False`` means the active
+        row already held this exact content and the call was a no-op
+        (no new ``Memory`` row, no version bump, no edge touch).
+
+        Honors ``VERSIONED_PREFIXES`` — a content change on
+        ``core://agent`` appends a new version; a content change on
+        ``core://kh/*`` overwrites in place (KH is shared but not
+        versioned, see ``namespace_policy``).
+
+        Used by the KH bootstrap so re-running ``init_db()`` on a
+        populated database doesn't bump version counters or churn the
+        search index for unchanged guards.
+        """
+        from .namespace_policy import should_version
+
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        canonical = str(parsed)
+
+        existing_ref = await self._active_shared_ref_if_matches(parsed, content)
+        if existing_ref is not None:
+            return existing_ref, False
+
+        try:
+            await self._ensure_shared_parent_chain(parsed)
+
+            if should_version(parsed):
+                vref = await self.upsert_versioned(
+                    parsed,
+                    content,
+                    namespace=SHARED_NAMESPACE,
+                    priority=priority,
+                    disclosure=disclosure,
+                )
+                return (
+                    MemoryRef(
+                        memory_id=vref.new_memory_id,
+                        node_uuid=vref.node_uuid,
+                        namespace=vref.namespace,
+                        uri=vref.uri,
+                    ),
+                    True,
+                )
+
+            ref = await self.upsert(
+                parsed,
+                content,
+                namespace=SHARED_NAMESPACE,
+                priority=priority,
+                disclosure=disclosure,
+            )
+            return ref, True
+        except IntegrityError:
+            # Lost a race with another coroutine seeding the same URI.
+            # The PK constraint on ``paths`` already guarantees we won't
+            # have produced a duplicate row; just adopt the winner's row
+            # and report no write.
+            winner = await self._active_shared_ref(parsed)
+            if winner is not None:
+                return winner, False
+            raise
+
+    async def _active_shared_ref(
+        self, parsed: MemoryURI
+    ) -> Optional[MemoryRef]:
+        """Return the active row's ``MemoryRef`` in ``__shared__`` or ``None``."""
+        canonical = str(parsed)
+        async with self._db.session() as s:
+            path_row = await self._fetch_path(s, SHARED_NAMESPACE, parsed)
+            if path_row is None:
+                return None
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is None:
+                return None
+            active = (
+                await s.execute(
+                    select(Memory)
+                    .where(
+                        Memory.node_uuid == edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                    .order_by(Memory.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if active is None:
+                return None
+            return MemoryRef(
+                memory_id=active.id,
+                node_uuid=edge.child_uuid,
+                namespace=SHARED_NAMESPACE,
+                uri=canonical,
+            )
+
+    async def _active_shared_ref_if_matches(
+        self, parsed: MemoryURI, content: str
+    ) -> Optional[MemoryRef]:
+        """Return the active row's ref iff its content equals ``content``."""
+        ref = await self._active_shared_ref(parsed)
+        if ref is None:
+            return None
+        async with self._db.session() as s:
+            active = await s.get(Memory, ref.memory_id)
+            if active is None or active.content != content:
+                return None
+        return ref
 
     async def delete(
         self,

@@ -418,6 +418,11 @@ async def lifespan(app: FastAPI):
         )
 
         await get_engine_db().init_db()
+
+        from omicsclaw.memory import get_memory_engine
+        from omicsclaw.memory.bootstrap import seed_knowhows
+
+        await seed_knowhows(get_memory_engine())
         _memory_client = get_memory_client(namespace=desktop_namespace())
         logger.info(
             "MemoryClient initialised (namespace=%s)", _memory_client.namespace

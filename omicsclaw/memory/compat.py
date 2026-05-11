@@ -345,6 +345,10 @@ class CompatMemoryStore:
             await self._db.init_db()
             self._search = SearchIndexer(self._db)
             self._engine = MemoryEngine(self._db, self._search)
+
+            from .bootstrap import seed_knowhows
+
+            await seed_knowhows(self._engine)
             self._session_client = MemoryClient(
                 engine=self._engine, namespace=SHARED_NAMESPACE
             )
