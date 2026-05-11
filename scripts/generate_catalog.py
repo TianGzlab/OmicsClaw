@@ -67,7 +67,12 @@ def generate_catalog() -> dict:
     skills = []
     for skill_md in sorted(SKILLS_DIR.rglob("SKILL.md")):
         skill_dir = skill_md.parent
-        if any(part.startswith((".", "__")) for part in skill_dir.parts):
+        # Use the path RELATIVE to SKILLS_DIR for the hidden/dunder filter,
+        # otherwise a worktree checked out at `.worktrees/<branch>` triggers
+        # the `.startswith(".")` rule on its own parent directory and the
+        # generator silently emits an empty catalog.
+        rel_parts = skill_dir.relative_to(SKILLS_DIR).parts
+        if any(part.startswith((".", "__")) for part in rel_parts):
             continue
 
         fm = parse_yaml_frontmatter(skill_md.read_text())
