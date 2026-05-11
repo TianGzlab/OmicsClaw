@@ -463,6 +463,116 @@ class MemoryEngine:
 
         return old_id, new_memory.id, node_uuid
 
+    async def _ensure_shared_parent_chain(self, parsed: MemoryURI) -> None:
+        """Auto-vivify missing parent containers in ``__shared__``.
+
+        Engine writes refuse missing parents; ``seed_shared`` is a
+        high-level seeding primitive and should let callers seed a
+        leaf like ``core://kh/safety`` without first having to create
+        ``core://kh`` themselves. Mirrors ``MemoryClient._ensure_parent_chain``
+        but is hard-locked to ``__shared__``.
+        """
+        if "/" not in parsed.path:
+            return
+        parent = parsed.parent()
+        if parent is None or parent.is_root:
+            return
+        existing = await self.recall(
+            parent, namespace=SHARED_NAMESPACE, fallback_to_shared=False
+        )
+        if existing is not None:
+            return
+        await self._ensure_shared_parent_chain(parent)
+        await self.upsert(
+            parent,
+            f"Container node: {parent}",
+            namespace=SHARED_NAMESPACE,
+        )
+
+    async def seed_shared(
+        self,
+        uri: str | MemoryURI,
+        content: str,
+        *,
+        priority: PriorityArg = _UNSET,
+        disclosure: DisclosureArg = _UNSET,
+    ) -> tuple[MemoryRef, bool]:
+        """Idempotent write to ``__shared__``: skip if active content matches.
+
+        Returns ``(ref, written)``. ``written=False`` means the active
+        row already held this exact content and the call was a no-op
+        (no new ``Memory`` row, no version bump, no edge touch).
+
+        Honors ``VERSIONED_PREFIXES`` — a content change on
+        ``core://agent`` appends a new version; a content change on
+        ``core://kh/*`` overwrites in place (KH is shared but not
+        versioned, see ``namespace_policy``).
+
+        Used by the KH bootstrap so re-running ``init_db()`` on a
+        populated database doesn't bump version counters or churn the
+        search index for unchanged guards.
+        """
+        from .namespace_policy import should_version
+
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+        canonical = str(parsed)
+
+        async with self._db.session() as s:
+            existing_path = await self._fetch_path(s, SHARED_NAMESPACE, parsed)
+            if existing_path is not None:
+                edge = await s.get(Edge, existing_path.edge_id)
+                if edge is not None:
+                    active = (
+                        await s.execute(
+                            select(Memory)
+                            .where(
+                                Memory.node_uuid == edge.child_uuid,
+                                Memory.deprecated == False,  # noqa: E712
+                            )
+                            .order_by(Memory.id.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if active is not None and active.content == content:
+                        return (
+                            MemoryRef(
+                                memory_id=active.id,
+                                node_uuid=edge.child_uuid,
+                                namespace=SHARED_NAMESPACE,
+                                uri=canonical,
+                            ),
+                            False,
+                        )
+
+        await self._ensure_shared_parent_chain(parsed)
+
+        if should_version(parsed):
+            vref = await self.upsert_versioned(
+                parsed,
+                content,
+                namespace=SHARED_NAMESPACE,
+                priority=priority,
+                disclosure=disclosure,
+            )
+            return (
+                MemoryRef(
+                    memory_id=vref.new_memory_id,
+                    node_uuid=vref.node_uuid,
+                    namespace=vref.namespace,
+                    uri=vref.uri,
+                ),
+                True,
+            )
+
+        ref = await self.upsert(
+            parsed,
+            content,
+            namespace=SHARED_NAMESPACE,
+            priority=priority,
+            disclosure=disclosure,
+        )
+        return ref, True
+
     async def delete(
         self,
         uri: str | MemoryURI,
