@@ -19,7 +19,7 @@ import logging
 import os
 from pathlib import Path
 import re
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 try:
     import yaml
@@ -532,6 +532,26 @@ class KnowHowInjector:
         """Return list of all loaded KH document identifiers."""
         self._ensure_loaded()
         return list(self._cache.keys())
+
+    def iter_entries(self) -> Iterable[tuple[str, str]]:
+        """Yield ``(uri, content)`` pairs for every loaded KH document.
+
+        URI shape: ``core://kh/<doc_id>``. ``doc_id`` comes from the
+        frontmatter when present, otherwise from the filename stem —
+        same fallback ``_metadata_from_document`` uses, so the URI key
+        is stable even if a file lacks frontmatter.
+
+        ``content`` is the full markdown text including frontmatter,
+        matching what ``read_knowhow`` returns. The init_db() bootstrap
+        feeds these pairs into ``MemoryEngine.seed_shared`` so the
+        ``__shared__`` partition mirrors the on-disk KH corpus.
+        """
+        self._ensure_loaded()
+        for filename, meta in self._metadata.items():
+            content = self._cache.get(filename, "")
+            if not content:
+                continue
+            yield f"core://kh/{meta.doc_id}", content
 
     def get_kh_for_skill(self, skill: str) -> list[str]:
         """Return KH filenames relevant to a specific skill."""
