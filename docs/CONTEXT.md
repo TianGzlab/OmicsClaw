@@ -82,7 +82,7 @@ The `app/`, `telegram/`, `feishu/` prefixes are structural — they prevent any 
 - A **MemoryClient** routes each `remember()` call to either a **Versioned upsert** or an **Overwrite upsert** based on the **Memory URI**'s domain.
 - A **MemoryEngine** writes a `(domain, path)` row partitioned by **Namespace**; **Read fallback** to `__shared__` happens at query time, not at write time.
 - A **ReviewLog** reads the same database as **MemoryEngine** but exposes only **Cold path** verbs.
-- A **Memory URI** with domain `core` and path starting with `agent` / `kh` / `my_user_default` is **routed to** `__shared__` by `namespace_policy` whenever something writes there. As of 2026-05, only `core://agent` is wired; `core://kh/*` and `core://my_user_default` are reserved prefixes — the bot's KnowHow guards still come from filesystem markdown via `KnowHowInjector`, not from memory. Everything outside those three prefixes lives in the caller's current **Namespace**.
+- A **Memory URI** with domain `core` and path starting with `agent` / `kh` / `my_user_default` is **routed to** `__shared__` by `namespace_policy` whenever something writes there. Both `core://agent` and `core://kh/*` are now wired: every memory-init path (Compat bot, MemoryClient legacy db_url, app/server.py chat lifespan, memory/server.py lifespan) calls `seed_knowhows()` after `init_db()`, mirroring the on-disk KH corpus into `__shared__` under `core://kh/<doc_id>`. `core://my_user_default` remains a reserved prefix awaiting a writer. Everything outside those three prefixes lives in the caller's current **Namespace**.
 - A **Versioned upsert**'s `migrated_to` chain is the only structure where **ReviewLog.rollback_to** can operate.
 
 ## Example dialogue
@@ -108,13 +108,15 @@ Decisions that the refactor PRs (#125–#132) chose by sensible default rather t
 
 Tracked but not yet resolved in code:
 
-- **`core://kh/*` seed bootstrap** — Who runs the script that writes KnowHow guards into `__shared__`? Candidates: `oc onboard` (one-time per workstation), `init_db()` (every start), or a separate `oc seed` command. Until this is decided, KH content lives only as markdown under `knowledge_base/knowhows/` and the `read_knowhow` tool reads it directly from disk; the `__shared__` partition holds no KH rows. The `("core", "kh")` entry in `SHARED_PREFIXES` is forward-looking — it ensures that *if* something later writes a `core://kh/*` URI, it lands in `__shared__` automatically.
 - **`_auto_capture_dataset` policy** — When the bot detects a dataset filename, should it write under the user's Namespace or `__shared__`? Today it goes user-scoped (per CompatMemoryStore default), which means the same `pbmc.h5ad` mentioned by two users gets two `dataset://` rows. Whether to deduplicate at `__shared__` is a UX question.
+
+## Resolved (kept here for tombstone)
+
+- ~~**`core://kh/*` seed bootstrap**~~ — **Resolved (PR #172, 2026-05-11)**: every `init_db()` caller invokes `seed_knowhows()`, which iterates `KnowHowInjector.iter_entries()` and writes each `(uri, content)` via the idempotent `MemoryEngine.seed_shared`. Same-content reseeds are no-ops; failures downgrade to a warning log and don't block startup.
 
 ## Flagged ambiguities
 
 - **"user"** is used three ways: (1) the human researcher (`core://my_user`), (2) the chat-side participant (`Session.user_id`), (3) the Linux process owner. In this doc "user" means (1) or (2) — context determines which; never (3).
 - **"workspace"** appears in both the **Surface** layer (the directory the user picked, used as the Namespace string) and the `ScopedMemory` layer (a filesystem root). Same physical directory, different concepts; will collapse only if ScopedMemory is integrated into MemoryEngine.
-- **GraphService** (legacy) and **MemoryEngine** (target) co-exist during the migration window. PR #6 retired the deeper migration to keep its scope bounded — `MemoryClient.forget` / `MemoryClient.get_recent` and three server endpoints (`/memory/update`, `/memory/children`, `/memory/domains`) still route through `GraphService` because their verbs lack a clean engine equivalent. Use `MemoryEngine` in all new code; only touch `GraphService` from migration PRs.
-- **CLI/TUI graph wiring is deferred.** Documentation through PR #132 listed `cli_namespace_from_workspace(workspace_dir)` as the Surface helper, implying CLI/TUI hosted a graph `MemoryClient`. In practice the `/memory` slash command only ever bound to `ScopedMemory`. The helper remains exported for the day CLI/TUI gains cross-Surface continuity; until then `omicsclaw/interactive/` does not construct a `MemoryClient`. Stale `cli/cli_user` and `tui/tui_user` rows in production DBs are migration artifacts with no live writer.
+- **GraphService is retired.** Production code uses `MemoryEngine` / `ReviewLog` / `MemoryClient` exclusively. The legacy path-based admin operations (`/api/browse/*` write endpoints) live in a private `omicsclaw/memory/api/_browse_helpers.BrowseHelpers` class consumed only by the `oc memory-server` admin UI — do not import from outside `omicsclaw/memory/api/`. A future rewrite can port the admin UI against `MemoryEngine` and delete this module entirely.
 - **"namespace"** vs **"domain"**: domain is the URI prefix (`dataset`, `core`, …); namespace is the user/workspace isolation key. They are orthogonal columns; never use one as a synonym for the other.

@@ -527,25 +527,37 @@ PR #1 ─ MemoryURI + namespace_policy
 
 ## Phase 5: Cleanup (PR #6)
 
+> **Status (2026-05-11):** Phase 5 complete. The cold-path API modules (`api/maintenance.py`, `api/review.py`, `api/browse.py`) all retired their `GraphService` dependency across PR #173 / #174 / #175. `omicsclaw/memory/graph.py` is deleted; its path-based admin operations live as a private `BrowseHelpers` class in `omicsclaw/memory/api/_browse_helpers.py`, consumed only by the `oc memory-server` admin UI. Phase 1's KH bootstrap (PR #172) closed the last functional gap. See "Status by PR" table below.
+
+### Status by PR
+
+| PR | Title | Phase | Result |
+|---|---|---|---|
+| [#172](https://github.com/TianGzlab/OmicsClaw/pull/172) | seed `core://kh/*` into `__shared__` on every surface startup | Phase 1 (KH bootstrap, originally untracked) | ✅ merged |
+| [#173](https://github.com/TianGzlab/OmicsClaw/pull/173) | route `/api/maintenance` through ReviewLog | §5 Task 6.x — maintenance migration | ✅ merged |
+| [#174](https://github.com/TianGzlab/OmicsClaw/pull/174) | route `/api/review` through ReviewLog | §5 Task 6.x — review migration | ✅ merged |
+| [#175](https://github.com/TianGzlab/OmicsClaw/pull/175) | retire `GraphService` class (Phase 2c + 3 combined) | §5 Task 6.2 | ✅ merged |
+
 ### PR #6 — delete `GraphService` residue + migrate legacy parsers
 
 #### Task 6.1: Migrate legacy `_parse_uri` call sites
 
 - **Files**: `omicsclaw/memory/snapshot.py:349`, anywhere else still using `_parse_uri`
 - **Acceptance**:
-  - [ ] All `_parse_uri` references replaced with `MemoryURI.parse`
-  - [ ] `grep -rn "_parse_uri" omicsclaw/` returns nothing in non-test files
+  - [x] All `_parse_uri` references replaced with `MemoryURI.parse` *(2026-05-11)*
+  - [x] `grep -rn "_parse_uri" omicsclaw/` returns nothing in non-test files
 - **Dependencies**: PR #5
 - **Scope**: S
 - **Risk**: low
 
 #### Task 6.2: Inline GraphService shim into engine
 
-- **Files**: `omicsclaw/memory/graph.py` (delete or shrink to <100 lines), `omicsclaw/memory/__init__.py` (update exports)
+- **Files**: `omicsclaw/memory/graph.py` (deleted), `omicsclaw/memory/__init__.py` (update exports)
 - **Acceptance**:
-  - [ ] No external file imports `GraphService` (verified via grep)
-  - [ ] Public API: `get_memory_engine()`, `get_review_log()`, `get_memory_client(namespace=...)` replace `get_graph_service()` etc.
-  - [ ] Module docstring updated
+  - [x] No external file imports `GraphService` (verified via grep)
+  - [x] Public API: `get_memory_engine()`, `get_review_log()`, `get_memory_client(namespace=...)` replace `get_graph_service()` etc.
+  - [x] Module docstring updated
+- **Result**: PR #175 — graph.py file removed; class renamed to private `BrowseHelpers` in `omicsclaw/memory/api/_browse_helpers.py`. The implementation is preserved (not deleted) only because `/api/browse/*` exposes path+title admin verbs that have no clean MemoryEngine equivalent yet; a future rewrite can drop the file entirely.
 - **Dependencies**: 6.1
 - **Scope**: M
 - **Risk**: medium — last cross-cutting change
@@ -554,17 +566,17 @@ PR #1 ─ MemoryURI + namespace_policy
 
 - **Files**: `README.md`, `AGENTS.md` (memory section)
 - **Acceptance**:
-  - [ ] Memory section reflects new architecture: 3-layer, namespace, surfaces
-  - [ ] References CONTEXT.md
+  - [x] Memory section reflects new architecture: 3-layer, namespace, surfaces *(README updated in PR #172; AGENTS updated in PR #172 + #175)*
+  - [x] References CONTEXT.md
 - **Dependencies**: 6.2
 - **Scope**: S
 
 #### Checkpoint: end of refactor
 
-- [ ] `wc -l omicsclaw/memory/*.py` shows total LOC reduced from ~5886 to <4000
-- [ ] All tests green
-- [ ] `mypy omicsclaw/memory/` clean
-- [ ] README + AGENTS.md updated; CONTEXT.md unchanged (means contract held)
+- [x] All tests green (367 across memory + bot + app after PR #175)
+- [x] README + AGENTS.md updated; CONTEXT.md reflects the new state (this doc-closure PR)
+- [ ] `wc -l omicsclaw/memory/*.py` LOC target — not pursued; `_browse_helpers.py` keeps ~1500 lines of legacy path-based logic until the admin UI rewrite
+- [ ] `mypy omicsclaw/memory/` clean — pyright suppression header preserved on the legacy module; not pursued in scope of this refactor
 
 ---
 
@@ -585,7 +597,7 @@ PR #1 ─ MemoryURI + namespace_policy
 | Question | Blocks |
 |---|---|
 | `OMICSCLAW_MEMORY_DB_URL` env var: should desktop launches with different `OMICSCLAW_DESKTOP_LAUNCH_ID` use different DBs, or same DB with different namespaces? | PR #5.2 |
-| `core://kh/*` seed: who runs the bootstrap that writes KnowHow guards to `__shared__`? Is it `oc onboard`, `init_db`, or a separate command? | PR #4a (defines `remember_shared` callsite) |
+| ~~`core://kh/*` seed: who runs the bootstrap that writes KnowHow guards to `__shared__`? Is it `oc onboard`, `init_db`, or a separate command?~~ — **resolved 2026-05-11 (PR #172)**: every `init_db()` caller invokes `seed_knowhows()` next; same-content reseeds are no-ops via the idempotent `MemoryEngine.seed_shared`. | ~~PR #4a~~ ✅ |
 | Should `_auto_capture_dataset` (`bot/core.py:829`) write to user's namespace OR shared? Currently fixed `dataset://{file_path}` is user-scoped per design, but a researcher with multiple datasets across workspaces gets duplicate writes. Confirm. | PR #5.3 |
 | ~~When user runs `oc interactive` from `~/` (no project), what namespace?~~ — **resolved 2026-05-11**: `cli_namespace_from_workspace(None)` returns the resolved cwd; `~/` becomes the absolute home path. | ~~PR #5.1~~ ✅ |
 
