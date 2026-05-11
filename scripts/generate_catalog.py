@@ -40,6 +40,28 @@ def parse_yaml_frontmatter(text: str) -> dict:
                 continue
             elif value.startswith("[") and value.endswith("]"):
                 value = [v.strip().strip('"').strip("'") for v in value[1:-1].split(",") if v.strip()]
+            elif value == "":
+                # YAML list syntax — `key:` followed by `- item` indented lines.
+                # Peek the next non-empty line: if it starts with `- ` it's a
+                # block sequence; collect until we hit a top-level key or EOF.
+                items: list[str] = []
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    if not next_stripped:
+                        j += 1
+                        continue
+                    if next_line.startswith("- "):
+                        items.append(next_line[2:].strip().strip('"').strip("'"))
+                        j += 1
+                        continue
+                    break  # top-level key or other non-sequence line
+                if items:
+                    result[key] = items
+                    i = j
+                    continue
+                # `value == ""` with no list items below: leave as empty string.
             result[key] = value
         i += 1
     return result

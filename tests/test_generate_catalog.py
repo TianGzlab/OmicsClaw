@@ -67,6 +67,31 @@ def test_generator_discovers_skills_under_dotted_ancestor(tmp_path, monkeypatch)
     assert catalog["skills"][0]["name"] == "fake-skill"
 
 
+def test_parse_yaml_frontmatter_handles_indented_list_syntax():
+    """YAML list-syntax (`key:\\n- item`) is the standard form used in every
+    SKILL.md `tags:` block.  The custom parser must produce a list, not the
+    empty string.  Reproducing CodeRabbit's finding on PR #170 — without
+    this, 89/89 catalog entries had `tags: ""` and every downstream
+    consumer that expected a list (e.g. `tags[0] if tags` in migrate_skill)
+    received a string-of-chars or empty."""
+    frontmatter = (
+        "---\n"
+        "name: fake-skill\n"
+        "description: Load when X. Skip when Y (use sibling).\n"
+        "tags:\n"
+        "- spatial\n"
+        "- velocity\n"
+        "- harmony\n"
+        "---\n"
+        "\n"
+        "# fake-skill\n"
+    )
+    parsed = generate_catalog.parse_yaml_frontmatter(frontmatter)
+    assert parsed.get("tags") == ["spatial", "velocity", "harmony"], (
+        f"YAML list syntax must parse to a list, got {parsed.get('tags')!r}"
+    )
+
+
 def test_generator_still_filters_hidden_dirs_relative_to_skills_dir(tmp_path, monkeypatch):
     """The filter must still exclude `.hidden` / `__dunder__` directories
     when they appear INSIDE the skills tree (e.g. `__pycache__`)."""

@@ -13,7 +13,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-batch-correction --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "batch-correction",
+        "ComBat",
+        "harmonization",
+        "batch-effect"
+      ],
       "trigger_keywords": []
     },
     {
@@ -26,7 +32,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-coexpression --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "coexpression",
+        "WGCNA",
+        "network",
+        "modules",
+        "hub-genes"
+      ],
       "trigger_keywords": []
     },
     {
@@ -39,7 +52,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-de --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "differential-expression",
+        "DESeq2",
+        "volcano",
+        "MA-plot",
+        "fold-change"
+      ],
       "trigger_keywords": []
     },
     {
@@ -52,7 +72,12 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-deconvolution --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "deconvolution",
+        "NNLS",
+        "cell-type-proportion"
+      ],
       "trigger_keywords": []
     },
     {
@@ -65,7 +90,16 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-enrichment --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "enrichment",
+        "GSEA",
+        "ORA",
+        "GO",
+        "KEGG",
+        "Reactome",
+        "pathway"
+      ],
       "trigger_keywords": []
     },
     {
@@ -78,7 +112,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-geneid-mapping --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "gene-id",
+        "mapping",
+        "Ensembl",
+        "Entrez",
+        "HGNC",
+        "annotation"
+      ],
       "trigger_keywords": []
     },
     {
@@ -91,7 +133,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-ppi-network --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "PPI",
+        "STRING",
+        "network",
+        "hub-genes",
+        "protein-interaction"
+      ],
       "trigger_keywords": []
     },
     {
@@ -104,7 +153,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-qc --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "QC",
+        "count-matrix",
+        "library-size",
+        "gene-detection",
+        "sample-correlation",
+        "CPM"
+      ],
       "trigger_keywords": []
     },
     {
@@ -117,7 +174,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-read-alignment --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "alignment",
+        "STAR",
+        "HISAT2",
+        "Salmon",
+        "mapping-rate",
+        "strandedness"
+      ],
       "trigger_keywords": []
     },
     {
@@ -130,7 +195,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-read-qc --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "FASTQ",
+        "QC",
+        "Phred",
+        "GC-content",
+        "adapter",
+        "read-quality"
+      ],
       "trigger_keywords": []
     },
     {
@@ -143,7 +216,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-splicing --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "splicing",
+        "alternative-splicing",
+        "PSI",
+        "rMATS",
+        "SUPPA2"
+      ],
       "trigger_keywords": []
     },
     {
@@ -156,7 +236,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-survival --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "survival",
+        "Kaplan-Meier",
+        "Cox",
+        "hazard-ratio",
+        "clinical"
+      ],
       "trigger_keywords": []
     },
     {
@@ -169,7 +256,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run bulkrna-trajblend --demo",
-      "tags": "",
+      "tags": [
+        "bulkrna",
+        "trajectory",
+        "pseudotime",
+        "deconvolution",
+        "single-cell"
+      ],
       "trigger_keywords": []
     },
     {
@@ -182,7 +275,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-alignment --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "alignment",
+        "bam",
+        "sam",
+        "bwa",
+        "bowtie2",
+        "minimap2"
+      ],
       "trigger_keywords": []
     },
     {
@@ -195,7 +296,16 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-assembly --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "assembly",
+        "n50",
+        "l50",
+        "contig",
+        "quast",
+        "spades",
+        "flye"
+      ],
       "trigger_keywords": []
     },
     {
@@ -208,7 +318,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-cnv-calling --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "cnv",
+        "copy-number",
+        "cbs",
+        "segmentation",
+        "cnvkit",
+        "gatk-gcnv"
+      ],
       "trigger_keywords": []
     },
     {
@@ -221,7 +339,16 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-epigenomics --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "epigenomics",
+        "atac-seq",
+        "chip-seq",
+        "cut-tag",
+        "peaks",
+        "macs",
+        "bed"
+      ],
       "trigger_keywords": []
     },
     {
@@ -234,7 +361,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-phasing --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "phasing",
+        "haplotype",
+        "whatshap",
+        "shapeit",
+        "eagle",
+        "ps"
+      ],
       "trigger_keywords": []
     },
     {
@@ -247,7 +382,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-qc --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "qc",
+        "fastq",
+        "phred",
+        "adapter",
+        "fastqc"
+      ],
       "trigger_keywords": []
     },
     {
@@ -260,7 +402,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-sv-detection --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "structural-variants",
+        "sv",
+        "manta",
+        "delly",
+        "sniffles",
+        "bnd"
+      ],
       "trigger_keywords": []
     },
     {
@@ -273,7 +423,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-variant-annotation --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "annotation",
+        "vep",
+        "snpeff",
+        "annovar",
+        "consequence",
+        "impact"
+      ],
       "trigger_keywords": []
     },
     {
@@ -286,7 +444,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-variant-calling --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "variant-calling",
+        "snv",
+        "indel",
+        "vcf",
+        "ti-tv"
+      ],
       "trigger_keywords": []
     },
     {
@@ -299,7 +464,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run genomics-vcf-operations --demo",
-      "tags": "",
+      "tags": [
+        "genomics",
+        "vcf",
+        "bcftools",
+        "filter",
+        "ti-tv",
+        "snv",
+        "indel"
+      ],
       "trigger_keywords": []
     },
     {
@@ -312,7 +485,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run literature --demo",
-      "tags": "",
+      "tags": [
+        "literature",
+        "pdf",
+        "doi",
+        "pubmed",
+        "geo",
+        "metadata"
+      ],
       "trigger_keywords": []
     },
     {
@@ -325,7 +505,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-annotation --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "annotation",
+        "hmdb",
+        "demo",
+        "mz-match"
+      ],
       "trigger_keywords": []
     },
     {
@@ -338,7 +524,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-de --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "de",
+        "ttest",
+        "pca",
+        "bh-fdr",
+        "biomarker"
+      ],
       "trigger_keywords": []
     },
     {
@@ -351,7 +544,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-normalization --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "normalization",
+        "pqn",
+        "quantile",
+        "median",
+        "log"
+      ],
       "trigger_keywords": []
     },
     {
@@ -364,7 +564,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-pathway-enrichment --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "pathway",
+        "enrichment",
+        "ora",
+        "fisher",
+        "demo"
+      ],
       "trigger_keywords": []
     },
     {
@@ -377,7 +584,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-peak-detection --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "peak-detection",
+        "find-peaks",
+        "xcms",
+        "mzmine"
+      ],
       "trigger_keywords": []
     },
     {
@@ -390,7 +603,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-quantification --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "quantification",
+        "imputation",
+        "normalization",
+        "knn",
+        "tic"
+      ],
       "trigger_keywords": []
     },
     {
@@ -403,7 +623,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-statistics --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "statistics",
+        "ttest",
+        "wilcoxon",
+        "anova",
+        "kruskal",
+        "bh-fdr"
+      ],
       "trigger_keywords": []
     },
     {
@@ -416,7 +644,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run metabolomics-xcms-preprocessing --demo",
-      "tags": "",
+      "tags": [
+        "metabolomics",
+        "xcms",
+        "preprocessing",
+        "peak-detection",
+        "lc-ms",
+        "gc-ms",
+        "centwave"
+      ],
       "trigger_keywords": []
     },
     {
@@ -429,7 +665,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run orchestrator --demo",
-      "tags": "",
+      "tags": [
+        "orchestrator",
+        "routing",
+        "meta",
+        "multi-omics",
+        "registry"
+      ],
       "trigger_keywords": []
     },
     {
@@ -442,7 +684,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run omics-skill-builder --demo",
-      "tags": "",
+      "tags": [
+        "orchestrator",
+        "scaffold",
+        "skill-builder",
+        "meta",
+        "code-generation"
+      ],
       "trigger_keywords": []
     },
     {
@@ -455,7 +703,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-data-import --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "import",
+        "maxquant",
+        "fragpipe",
+        "diann",
+        "spectronaut"
+      ],
       "trigger_keywords": []
     },
     {
@@ -468,7 +723,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-de --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "differential-expression",
+        "ttest",
+        "welch",
+        "mann-whitney",
+        "bh-fdr"
+      ],
       "trigger_keywords": []
     },
     {
@@ -481,7 +743,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-enrichment --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "enrichment",
+        "ora",
+        "fisher",
+        "demo",
+        "pathway"
+      ],
       "trigger_keywords": []
     },
     {
@@ -494,7 +763,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-identification --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "identification",
+        "peptides",
+        "psm",
+        "maxquant",
+        "msgf"
+      ],
       "trigger_keywords": []
     },
     {
@@ -507,7 +783,15 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-ms-qc --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "qc",
+        "ms",
+        "maxquant",
+        "intensity",
+        "missing-values",
+        "cv"
+      ],
       "trigger_keywords": []
     },
     {
@@ -520,7 +804,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-ptm --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "ptm",
+        "phosphorylation",
+        "acetylation",
+        "ubiquitination",
+        "site-localization"
+      ],
       "trigger_keywords": []
     },
     {
@@ -533,7 +824,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-quantification --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "quantification",
+        "lfq",
+        "ibaq",
+        "spectral-counting"
+      ],
       "trigger_keywords": []
     },
     {
@@ -546,7 +843,17 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run proteomics-structural --demo",
-      "tags": "",
+      "tags": [
+        "proteomics",
+        "structural",
+        "xl-ms",
+        "crosslinking",
+        "dss",
+        "bs3",
+        "dsso",
+        "dsbu",
+        "edc"
+      ],
       "trigger_keywords": []
     },
     {
@@ -559,7 +866,16 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run scatac-preprocessing --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scatac",
+        "atac",
+        "preprocessing",
+        "tfidf",
+        "lsi",
+        "clustering",
+        "leiden"
+      ],
       "trigger_keywords": []
     },
     {
@@ -572,7 +888,14 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-ambient-removal --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "ambient",
+        "cellbender",
+        "soupx",
+        "contamination"
+      ],
       "trigger_keywords": []
     },
     {
@@ -585,7 +908,17 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-batch-integration --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "batch-integration",
+        "harmony",
+        "scvi",
+        "scanvi",
+        "bbknn",
+        "scanorama",
+        "simba"
+      ],
       "trigger_keywords": []
     },
     {
@@ -598,7 +931,18 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-cell-annotation --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "cell-annotation",
+        "celltypist",
+        "popv",
+        "singler",
+        "scmap",
+        "scsa",
+        "knnpredict",
+        "markers"
+      ],
       "trigger_keywords": []
     },
     {
@@ -611,7 +955,16 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-cell-communication --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "cell-communication",
+        "ligand-receptor",
+        "liana",
+        "cellphonedb",
+        "cellchat",
+        "nichenet"
+      ],
       "trigger_keywords": []
     },
     {
@@ -624,7 +977,16 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-clustering --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "clustering",
+        "leiden",
+        "louvain",
+        "umap",
+        "tsne",
+        "phate"
+      ],
       "trigger_keywords": []
     },
     {
@@ -637,7 +999,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-count --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "counting",
+        "cellranger",
+        "starsolo",
+        "simpleaf",
+        "kb-python"
+      ],
       "trigger_keywords": []
     },
     {
@@ -650,7 +1020,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-cytotrace --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "cytotrace",
+        "potency",
+        "stemness",
+        "differentiation"
+      ],
       "trigger_keywords": []
     },
     {
@@ -663,7 +1040,13 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-de --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "differential-expression",
+        "markers",
+        "wilcoxon",
+        "deseq2"
+      ],
       "trigger_keywords": []
     },
     {
@@ -676,7 +1059,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-differential-abundance --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "differential-abundance",
+        "compositional",
+        "milo",
+        "sccoda",
+        "proportion-test"
+      ],
       "trigger_keywords": []
     },
     {
@@ -689,7 +1080,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-doublet-detection --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "doublet",
+        "scrublet",
+        "doubletfinder",
+        "scdblfinder"
+      ],
       "trigger_keywords": []
     },
     {
@@ -702,7 +1100,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-drug-response --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "drug-response",
+        "pharmacogenomics",
+        "cadrres",
+        "gdsc",
+        "prism"
+      ],
       "trigger_keywords": []
     },
     {
@@ -715,7 +1121,16 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-enrichment --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "enrichment",
+        "gsea",
+        "ora",
+        "gsva",
+        "decoupler",
+        "pathway-enrichment"
+      ],
       "trigger_keywords": []
     },
     {
@@ -728,7 +1143,13 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-fastq-qc --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "fastq",
+        "qc",
+        "read-quality"
+      ],
       "trigger_keywords": []
     },
     {
@@ -741,7 +1162,13 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-filter --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "filter",
+        "qc",
+        "mitochondrial"
+      ],
       "trigger_keywords": []
     },
     {
@@ -754,7 +1181,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-gene-programs --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "gene-programs",
+        "nmf",
+        "cnmf",
+        "factorisation"
+      ],
       "trigger_keywords": []
     },
     {
@@ -767,7 +1201,17 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-grn --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "grn",
+        "gene-regulatory-network",
+        "scenic",
+        "pyscenic",
+        "grnboost2",
+        "aucell",
+        "cistarget"
+      ],
       "trigger_keywords": []
     },
     {
@@ -780,7 +1224,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-in-silico-perturbation --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "in-silico-perturbation",
+        "knockout",
+        "grn",
+        "sctenifoldknk"
+      ],
       "trigger_keywords": []
     },
     {
@@ -793,7 +1244,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-markers --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "markers",
+        "cluster-markers",
+        "annotation",
+        "differential-expression",
+        "cosg"
+      ],
       "trigger_keywords": []
     },
     {
@@ -806,7 +1265,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-metacell --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "metacell",
+        "seacells",
+        "aggregation",
+        "pseudo-cells"
+      ],
       "trigger_keywords": []
     },
     {
@@ -819,7 +1285,13 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-multi-count --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "multi-sample",
+        "merge",
+        "aggregation"
+      ],
       "trigger_keywords": []
     },
     {
@@ -832,7 +1304,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-pathway-scoring --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "pathway-scoring",
+        "aucell",
+        "scanpy-score-genes",
+        "gene-sets",
+        "decoupler"
+      ],
       "trigger_keywords": []
     },
     {
@@ -845,7 +1325,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-perturb --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "perturbation",
+        "perturb-seq",
+        "crispr",
+        "mixscape",
+        "pertpy"
+      ],
       "trigger_keywords": []
     },
     {
@@ -858,7 +1346,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-perturb-prep --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "perturb-prep",
+        "perturb-seq",
+        "crispr",
+        "sgrna-assignment"
+      ],
       "trigger_keywords": []
     },
     {
@@ -871,7 +1366,18 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-preprocessing --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "preprocessing",
+        "normalization",
+        "hvg",
+        "pca",
+        "scanpy",
+        "seurat",
+        "sctransform",
+        "pearson_residuals"
+      ],
       "trigger_keywords": []
     },
     {
@@ -884,7 +1390,18 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-pseudotime --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "pseudotime",
+        "trajectory",
+        "dpt",
+        "palantir",
+        "via",
+        "cellrank",
+        "slingshot",
+        "monocle3"
+      ],
       "trigger_keywords": []
     },
     {
@@ -897,7 +1414,13 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-qc --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "qc",
+        "mitochondrial",
+        "ribosomal"
+      ],
       "trigger_keywords": []
     },
     {
@@ -910,7 +1433,13 @@
       "has_tests": false,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-standardize-input --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "input",
+        "standardization",
+        "anndata"
+      ],
       "trigger_keywords": []
     },
     {
@@ -923,7 +1452,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-velocity --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "velocity",
+        "rna-velocity",
+        "scvelo",
+        "latent-time",
+        "kinetics"
+      ],
       "trigger_keywords": []
     },
     {
@@ -936,7 +1473,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run sc-velocity-prep --demo",
-      "tags": "",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "velocity-prep",
+        "velocyto",
+        "starsolo",
+        "spliced-unspliced",
+        "kb-python"
+      ],
       "trigger_keywords": []
     },
     {
@@ -949,7 +1494,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-annotate --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "annotation",
+        "cell-type",
+        "marker-based",
+        "tangram",
+        "scanvi",
+        "cellassign"
+      ],
       "trigger_keywords": []
     },
     {
@@ -962,7 +1515,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-cnv --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "cnv",
+        "copy-number",
+        "infercnvpy",
+        "numbat",
+        "tumor"
+      ],
       "trigger_keywords": []
     },
     {
@@ -975,7 +1535,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-communication --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "communication",
+        "ligand-receptor",
+        "liana",
+        "cellphonedb",
+        "cellchat",
+        "fastccc"
+      ],
       "trigger_keywords": []
     },
     {
@@ -988,7 +1556,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-condition --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "condition",
+        "pseudobulk",
+        "pydeseq2",
+        "wilcoxon",
+        "differential-expression"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1001,7 +1576,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-de --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "differential-expression",
+        "markers",
+        "wilcoxon",
+        "t-test",
+        "pydeseq2",
+        "pseudobulk"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1014,7 +1597,18 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-deconv --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "deconvolution",
+        "cell2location",
+        "rctd",
+        "destvi",
+        "stereoscope",
+        "tangram",
+        "spotlight",
+        "card",
+        "flashdeconv"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1027,7 +1621,18 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-domains --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "domains",
+        "niches",
+        "spagcn",
+        "stagate",
+        "graphst",
+        "banksy",
+        "cellcharter",
+        "leiden",
+        "louvain"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1040,7 +1645,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-enrichment --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "enrichment",
+        "pathway",
+        "gsea",
+        "ssgsea",
+        "enrichr",
+        "gene-set"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1053,7 +1666,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-genes --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "svg",
+        "spatially-variable-genes",
+        "morans-i",
+        "spatialde",
+        "sparkx",
+        "flashs"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1066,7 +1687,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-integrate --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "integration",
+        "batch-correction",
+        "harmony",
+        "bbknn",
+        "scanorama",
+        "multi-sample"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1079,7 +1708,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-microenvironment-subset --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "microenvironment",
+        "niche",
+        "subsetting",
+        "neighbourhood",
+        "visium",
+        "xenium"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1092,7 +1729,17 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-preprocess --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "visium",
+        "xenium",
+        "preprocessing",
+        "qc",
+        "normalization",
+        "hvg",
+        "pca",
+        "leiden"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1105,7 +1752,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-raw-processing --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "raw-processing",
+        "fastq",
+        "st-pipeline",
+        "visium",
+        "slideseq"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1118,7 +1772,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-register --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "registration",
+        "alignment",
+        "paste",
+        "stalign",
+        "multi-slice"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1131,7 +1792,17 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-statistics --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "statistics",
+        "moran",
+        "geary",
+        "ripley",
+        "co-occurrence",
+        "nhood-enrichment",
+        "getis-ord",
+        "squidpy"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1144,7 +1815,15 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-trajectory --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "trajectory",
+        "pseudotime",
+        "dpt",
+        "cellrank",
+        "palantir",
+        "lineage"
+      ],
       "trigger_keywords": []
     },
     {
@@ -1157,7 +1836,14 @@
       "has_tests": true,
       "has_demo": true,
       "demo_command": "python omicsclaw.py run spatial-velocity --demo",
-      "tags": "",
+      "tags": [
+        "spatial",
+        "velocity",
+        "rna-velocity",
+        "scvelo",
+        "velovi",
+        "dynamics"
+      ],
       "trigger_keywords": []
     }
   ]
