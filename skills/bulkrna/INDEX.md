@@ -11,29 +11,29 @@ Bulk RNA-seq: FASTQ QC, alignment, count QC, DE (DESeq2), enrichment, splicing, 
 
 ## Skills
 
-- `bulkrna-batch-correction` — Batch effect correction for multi-cohort bulk RNA-seq data using ComBat, with PCA-based visualization before and after correction.
+- `bulkrna-batch-correction` — Load when removing batch effects from a multi-cohort bulk RNA-seq dataset using ComBat (R or Python implementation). Skip if there is only one batch, or for single-cell batch integration (use sc-batch-integration), or for spatial multi-slice integration (use spatial-integrate).
   triggers: batch correction, ComBat, batch effect, harmonize, multi-cohort, batch removal
-- `bulkrna-coexpression` — WGCNA-style weighted gene co-expression network analysis — module detection, soft thresholding, hub genes.
+- `bulkrna-coexpression` — Load when discovering gene co-expression modules and hub genes in a bulk RNA-seq cohort via WGCNA-style soft-thresholded networks. Skip for direct DE comparison (use bulkrna-de) or PPI lookup of an existing gene list (use bulkrna-ppi-network); single-cell co-expression uses sc-grn instead.
   triggers: coexpression, WGCNA, gene network, co-expression modules, hub genes, gene modules
-- `bulkrna-de` — Differential expression analysis via PyDESeq2 with Welch's t-test fallback — volcano plots, MA plots, p-value diagnostics.
+- `bulkrna-de` — Load when comparing gene expression between two conditions in bulk RNA-seq count data. Skip when the data is single-cell (use sc-de) or spatial (use spatial-de), or when you need exon-level alternative splicing (use bulkrna-splicing).
   triggers: differential expression, DE analysis, DESeq2, volcano plot, fold change, DEGs, bulk DE
-- `bulkrna-deconvolution` — Bulk RNA-seq cell type deconvolution using NNLS (built-in), with optional CIBERSORTx and MuSiC bridges.
+- `bulkrna-deconvolution` — Load when estimating cell-type proportions in bulk RNA-seq samples from a single-cell or signature-matrix reference. Skip if the data is already single-cell (no deconvolution needed) or for spatial deconvolution (use spatial-deconv).
   triggers: bulk deconvolution, cell type proportion, NNLS, CIBERSORTx, bulk deconv, cell fraction
-- `bulkrna-enrichment` — Pathway enrichment analysis for bulk RNA-seq — ORA and GSEA via GSEApy, with built-in hypergeometric fallback.
+- `bulkrna-enrichment` — Load when running pathway / GO term enrichment on a bulk RNA-seq DE result list. Skip if the input is single-cell (use sc-enrichment), spatial (use spatial-enrichment), or for metabolite pathways (use metabolomics-pathway-enrichment).
   triggers: bulk enrichment, pathway analysis, GSEA, ORA, GO enrichment, KEGG, bulk pathway
-- `bulkrna-geneid-mapping` — Gene identifier conversion between Ensembl, Entrez, HGNC symbols, and UniProt for bulk RNA-seq count matrices.
+- `bulkrna-geneid-mapping` — Load when converting gene identifiers between Ensembl, Entrez, and HGNC symbol in a bulk RNA-seq count matrix. Skip if the input is already in the desired identifier system, for organisms outside human/mouse, or for non-bulk-counts inputs.
   triggers: gene ID, Ensembl, Entrez, gene symbol, ID mapping, gene annotation, convert IDs
-- `bulkrna-ppi-network` — Protein-protein interaction network analysis from DEG lists — STRING API query, graph construction, hub gene identification.
+- `bulkrna-ppi-network` — Load when querying STRING for the protein-protein interaction subgraph induced by a bulk RNA-seq DEG list and finding hub genes. Skip for pathway enrichment of the same list (use bulkrna-enrichment) or for de novo co-expression network discovery (use bulkrna-coexpression).
   triggers: PPI, protein interaction, STRING, network, hub gene, interactome
-- `bulkrna-qc` — Bulk RNA-seq count matrix quality control — library sizes, gene detection, sample correlation, outlier detection, CPM normalization.
+- `bulkrna-qc` — Load when checking a bulk RNA-seq count matrix for library-size outliers, gene detection rates, and sample-sample correlation before DE. Skip if data is raw FASTQ (use bulkrna-read-qc) or aligner logs (use bulkrna-read-alignment), or for single-cell counts (use sc-qc).
   triggers: bulk QC, library size, count matrix, sample quality, gene detection, RNA-seq quality, count QC
-- `bulkrna-read-alignment` — RNA-seq read alignment and quantification statistics — STAR/HISAT2/Salmon log parsing, mapping rate, unique/multi-mapped reads, library strandedness, gene body coverage.
+- `bulkrna-read-alignment` — Load when summarising STAR / HISAT2 / Salmon alignment-rate logs in bulk RNA-seq. Skip if data is raw FASTQ (use bulkrna-read-qc) or already counted (use bulkrna-qc), or for genome-DNA alignment (use genomics-alignment).
   triggers: RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC
-- `bulkrna-read-qc` — FASTQ quality assessment for bulk RNA-seq — Phred scores, GC content, adapter detection, read length distribution, Q20/Q30 rates.
+- `bulkrna-read-qc` — Load when checking raw FASTQ quality (Phred / GC / adapter / Q20-Q30) before alignment in bulk RNA-seq. Skip if reads are already aligned (use bulkrna-read-alignment) or counted (use bulkrna-qc), or for single-cell FASTQ (use sc-fastq-qc).
   triggers: FASTQ QC, read quality, Phred, FastQC, adapter, GC content, Q20, Q30
-- `bulkrna-splicing` — Alternative splicing analysis — PSI quantification, differential splicing event detection from rMATS/SUPPA2 output.
+- `bulkrna-splicing` — Load when summarising rMATS / SUPPA2 alternative-splicing output and identifying significant differential splicing events. Skip if you only have count-level DE (use bulkrna-de) or for splicing in single-cell or spatial data (currently unsupported).
   triggers: alternative splicing, splicing analysis, PSI, rMATS, SUPPA2, exon skipping, differential splicing
-- `bulkrna-survival` — Survival analysis for bulk RNA-seq — Kaplan-Meier curves, Cox proportional hazards, expression-based patient stratification.
+- `bulkrna-survival` — Load when stratifying patients by gene expression and testing for survival differences (Kaplan-Meier + Cox) in bulk RNA-seq. Skip if no time-to-event clinical data exists, or for non-bulk cohorts (single-cell / spatial survival is not supported).
   triggers: survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome
-- `bulkrna-trajblend` — Bulk-to-single-cell trajectory interpolation — uses VAE and GNN to bridge bulk RNA-seq with single-cell reference data, generating synthetic single-cell profiles and embedding bulk samples into developmental trajectories.
+- `bulkrna-trajblend` — Load when placing bulk RNA-seq samples on a single-cell reference's pseudotime axis (NNLS deconvolution + nearest-neighbour mapping). Skip for plain cell-type proportions (use bulkrna-deconvolution alone) or for native single-cell trajectory inference (use sc-pseudotime).
   triggers: trajblend, trajectory, bulk to single cell, interpolation, bulk2single, VAE, deconvolution trajectory
