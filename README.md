@@ -23,11 +23,8 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/TianGzlab/OmicsClaw/actions)
+[![CI](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml/badge.svg)](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml)
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
-
-> [!NOTE]
-> 🚀 **v0.1.1** ships the unified `oc` CLI, graph memory, app backend, remote execution, bot frontends, and **89 generated skills**.
 
 OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans and operates; Python/R/CLI tools process data in your local or remote runtime.
 
@@ -104,14 +101,7 @@ Remote mode uses `127.0.0.1`, SSH tunneling, and `OMICSCLAW_REMOTE_AUTH_TOKEN`. 
 | 🖥️ **Desktop/web backend** | OmicsClaw-App or browser frontends | `oc app-server --host 127.0.0.1 --port 8765` |
 | 🧠 **Memory API** | Inspect graph memory over HTTP | `pip install -e ".[memory]"` then `oc memory-server` |
 
-📖 Details: [installation guide](docs/_legacy/INSTALLATION.md), [quickstart](docs/introduction/quickstart.mdx).
-
-**Dependency sources:** Python in [pyproject.toml](pyproject.toml), conda/R/CLIs in [environment.yml](environment.yml), GitHub-only R packages in [0_setup_env.sh](0_setup_env.sh). No root `requirements.txt` is used as the primary entrypoint.
-
-**Known `pip check` warning:** the full conda environment intentionally keeps
-`jinja2>=3.1.5` for the FastAPI/nbconvert runtime even though upstream
-`pygpcca==1.0.4` still pins `jinja2==3.0.3`. Treat that single warning as
-metadata noise when `oc doctor` and the targeted import checks pass.
+📖 Details: [installation guide](docs/_legacy/INSTALLATION.md), [quickstart](docs/introduction/quickstart.mdx). Dependencies live in [`pyproject.toml`](pyproject.toml), [`environment.yml`](environment.yml), and [`0_setup_env.sh`](0_setup_env.sh).
 
 ## 🧬 Domains
 
@@ -129,28 +119,17 @@ metadata noise when `oc doctor` and the targeted import checks pass.
 
 Run `oc list` for the current CLI catalog.
 
-## 🧠 Memory Architecture
+## 🧠 Memory
 
-Graph-backed agent memory at `omicsclaw/memory/`. Sessions, dataset / analysis / preference / insight lineage, and core agent identity persist across runs and replay back into chat context. Three layers:
+Graph-backed memory at `omicsclaw/memory/` carries your sessions, datasets, analyses, preferences, and insights across runs — chat history and lineage come back when you reopen any surface. Each surface stays isolated so state never leaks across users or workspaces:
 
-| Layer | Module | Role |
-|---|---|---|
-| Strategy | `MemoryClient(engine, namespace=...)` | Decides which **Namespace** a write lands in and whether it's versioned vs. overwrite. |
-| Hot path | `MemoryEngine` | 7 verbs over `(uri, namespace)`: `upsert`, `upsert_versioned`, `patch_edge_metadata`, `recall`, `search`, `list_children`, `get_subtree`. |
-| Cold path | `ReviewLog` | Version-chain inspection, rollback, orphan/GC, browse_shared, changeset approve/discard — for the desktop Review & Audit pane. |
-
-**Namespace partition** keeps surfaces isolated:
-
-| Surface | Namespace |
+| Surface | Memory scope |
 |---|---|
-| CLI / TUI | absolute workspace path (cwd unless `--workspace` is set) |
-| Desktop | `app/<OMICSCLAW_DESKTOP_LAUNCH_ID>` or `app/desktop_user` |
-| Telegram / Feishu bot | `f"{platform}/{user_id}"` |
-| Globally shared | `__shared__` (read-fallback target for every other namespace) |
+| CLI / TUI | Per workspace path |
+| Desktop app | Per launch (or per signed-in user) |
+| Telegram / Feishu bot | Per platform user |
 
-Read fallback is asymmetric: `recall` and `search` see `__shared__` content automatically; `list_children` and `get_subtree` are strict so private inventories don't get polluted by shared structure.
-
-Vocabulary, decisions, and architectural diagrams live in [`docs/CONTEXT.md`](docs/CONTEXT.md).
+A reserved `__shared__` pool (core agent identity, glossary) is the one thing every surface reads back automatically. Full vocabulary and architecture in [`docs/CONTEXT.md`](docs/CONTEXT.md).
 
 ## ❓ FAQ
 
@@ -175,54 +154,6 @@ Yes. Run `oc app-server` on the remote Linux host, keep it bound to `127.0.0.1`,
 
 </details>
 
-<details>
-<summary><b>🛠️ Developer Notes</b></summary>
-
-Before complex repository work, read [README.md](README.md), [AGENTS.md](AGENTS.md), [SPEC.md](SPEC.md), and the relevant code/docs.
-
-```bash
-python -m pytest -v
-make test
-python scripts/generate_catalog.py
-python omicsclaw.py doctor --workspace .
-```
-
-Use a brief plan, targeted tests, and verification evidence for non-trivial repository changes. New skills should follow [CONTRIBUTING.md](CONTRIBUTING.md) and [templates/skill/](templates/skill/) (the v2 scaffold — copy the whole directory). `oc doctor` reports environment readiness plus registry/catalog consistency and local graphify artifact health when present.
-
-Framework optimization guardrails are enforced by targeted contract tests:
-`tests/test_documentation_facts.py`, `tests/test_skill_runner_contract.py`,
-`tests/test_skill_metadata_contract.py`, `tests/test_skill_help_contract.py`,
-`tests/test_registry_alias_contract.py`, `tests/test_output_ownership_contract.py`,
-and `tests/test_bot_runner_contract.py`.
-
-All primary skill scripts must expose a lightweight direct `--help` path.
-SKILL.md frontmatter (`metadata.omicsclaw`) is the single source of truth
-for skill metadata — canonical name, legacy aliases, allowed flags,
-saves_h5ad, and so on. Skill scripts write native artifacts, while the
-shared runner writes top-level `README.md` and
-`reproducibility/analysis_notebook.ipynb`. Bot skill execution uses the same
-shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
-Shared result construction and adapter coercion live in
-`omicsclaw/core/skill_result.py`; new execution surfaces should reuse that
-model instead of rebuilding legacy result dictionaries.
-
-Architecture contract references:
-[framework roadmap](docs/engineering/2026-05-07-framework-optimization-spec.md),
-[skill runner](docs/engineering/2026-05-07-skill-runner-contract.md),
-[output ownership](docs/engineering/2026-05-07-output-ownership-contract.md),
-[alias ownership](docs/engineering/2026-05-07-alias-ownership-contract.md),
-[bot runner](docs/engineering/2026-05-07-bot-runner-contract.md),
-[skill help](docs/engineering/2026-05-07-skill-help-contract.md), and
-[domain input contracts](docs/engineering/domain-input-contracts.md).
-
-Desktop provider changes should preserve the OmicsClaw-App backend contract: `/providers` reports the active provider/model/endpoint, `/providers/test` performs a short live LLM connectivity probe, and `/chat/stream` must reinitialize the provider runtime when a request changes model even if the provider id is unchanged.
-
-Interactive CLI provider changes should share the same runtime resolution path: `LLM_PROVIDER=custom` must honor `LLM_BASE_URL`, `OMICSCLAW_MODEL`, and `LLM_API_KEY`; explicit CLI `--provider` / `--model` overrides must win over environment defaults; malformed custom endpoints should return actionable diagnostics instead of `(no response)`.
-
-TUI helpers under `omicsclaw/interactive/_tui_support.py` stay dependency-light so support tests can run without optional memory or Textual installs. When adding Textual containers, mount the parent widget into the live tree before mounting child widgets.
-
-</details>
-
 ## ⚠️ Safety
 
 | Rule | Meaning |
@@ -242,9 +173,12 @@ Maintainers: Luyi Tian (Principal Investigator), Weige Zhou (Lead Developer), Li
 
 ## 🙏 Acknowledgments
 
-OmicsClaw's architecture, skill design, local-first philosophy, and bot integration patterns are deeply inspired by **[ClawBio](https://github.com/ClawBio/ClawBio)**, the first bioinformatics-native AI agent skill library. The original ClawBio project featured **RoboTerri**, an AI persona modelled on Professor Teresa K. Attwood — a pioneer in bioinformatics education, creator of the PRINTS database, co-developer of InterPro, and co-founder of GOBLET. We gratefully acknowledge the ClawBio team and Professor Attwood's enduring contributions to the bioinformatics community.
+Architecture, skill design, and local-first philosophy are inspired by **[ClawBio](https://github.com/ClawBio/ClawBio)**, the first bioinformatics-native AI agent skill library. Memory and session-continuity patterns are inspired by [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory).
 
-Memory and session-continuity patterns are inspired by [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory).
+## 🛠️ Contributing
+
+- **New skills**: see [CONTRIBUTING.md](CONTRIBUTING.md) and the v2 scaffold under [`templates/skill/`](templates/skill/).
+- **Repository / agent work**: see [AGENTS.md](AGENTS.md) — covers contract tests, provider contracts, skill runner, and architecture references.
 
 ## 📜 License
 
