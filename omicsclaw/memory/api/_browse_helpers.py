@@ -1,32 +1,22 @@
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportGeneralTypeIssues=false, reportOperatorIssue=false, reportReturnType=false
+# TODO: drop this suppression block once the admin UI is rewritten
+# against MemoryEngine and this whole module can be deleted.
 
-"""
-Graph Service for OmicsClaw Memory System.
+"""Private path-based memory operations for the ``/api/browse/*`` admin pane.
 
-Ported from nocturne_memory with OmicsClaw adaptations.
+This module is the consolidated home for the legacy node/path/edge
+admin operations that used to live on ``GraphService``. It is loaded
+**only** by ``omicsclaw/memory/api/browse.py`` to serve the
+``oc memory-server`` admin API and is intentionally private (leading
+``_`` in the filename, no re-export through ``omicsclaw.memory``).
 
-Graph-based memory storage with:
-- Node: a conceptual entity (UUID), version-independent
-- Memory: a content version of a node
-- Edge: parent->child relationship between nodes, carrying metadata
-- Path: materialized URI cache (domain://path -> edge)
-
-All infrastructure (engine, session, migrations) lives in database.py.
-This module contains only graph-domain business logic.
-
-TODO(post-PR #6): retire this module per refactor plan §6.2. Five
-call sites still depend on its non-engine verbs:
-
-  * ``omicsclaw/app/server.py`` — ``/memory/update``,
-    ``/memory/children``, ``/memory/domains``
-  * ``omicsclaw/memory/memory_client.py`` — ``forget``, ``get_recent``
-
-Migrating these requires breaking-API surface work that was deferred
-out of PR #6's documentation-only scope. Once those callers move to
-``MemoryEngine`` / ``ReviewLog``, this whole file can be deleted.
-The shim's ``create_memory`` and ``update_memory`` already route
-through ``MemoryEngine.upsert_versioned`` (see PR #3c), so the
-remaining surface is small.
+New code MUST use ``MemoryEngine`` / ``ReviewLog`` / ``MemoryClient``
+instead. ``BrowseHelpers`` is preserved here only because the
+``/api/browse/*`` write endpoints (``/create``, PUT ``/node``,
+``/add-path``, DELETE ``/path``) expose a path-based UI contract
+that has no direct equivalent on the URI-based engine. A future
+rewrite can simplify or remove this module once the desktop UI is
+ported to the engine's surface.
 """
 
 import uuid as uuid_lib
@@ -42,8 +32,8 @@ from sqlalchemy import (
     not_,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from .engine import MemoryEngine
-from .models import (
+from ..engine import MemoryEngine
+from ..models import (
     ROOT_NODE_UUID,
     SHARED_NAMESPACE,
     Node,
@@ -58,25 +48,24 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from .database import DatabaseManager
-    from .search import SearchIndexer
+    from ..database import DatabaseManager
+    from ..search import SearchIndexer
 
 
-class GraphService:
-    """
-    Graph-domain service for memory operations.
+class BrowseHelpers:
+    """Private helper bundle for the ``/api/browse/*`` admin endpoints.
 
-    Owns all graph traversal, memory CRUD, path management, and
-    orphan/deprecated memory handling.  Receives a DatabaseManager
-    for session access and a SearchIndexer for post-mutation index
-    refreshes.
-
-    Core operations:
+    Carries the path-based memory operations the admin UI needs:
     - read: Get memory by path (Path -> Edge -> Memory via node_uuid)
     - create: New node + memory + edge + path
     - update: New memory version on same node; update edge metadata
     - add_path: Create alias (new Path, maybe new Edge)
     - remove_path: Delete paths; refuse if children would become unreachable
+
+    Receives a DatabaseManager for session access and a SearchIndexer
+    for post-mutation index refreshes. Not exported through
+    ``omicsclaw.memory`` — production callers must use
+    ``MemoryEngine`` / ``ReviewLog`` / ``MemoryClient`` instead.
     """
 
     def __init__(self, db: "DatabaseManager", search: "SearchIndexer"):

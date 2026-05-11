@@ -65,7 +65,12 @@ async def _setup_memory_review_runtime(monkeypatch, tmp_path: Path):
 
     store = ChangesetStore(snapshot_dir=str((tmp_path / "snapshots").resolve()))
     monkeypatch.setattr(server, "_get_changeset_store", lambda: store, raising=False)
-    return memory_pkg.get_graph_service(), store, memory_pkg
+    # The first tuple element is the legacy ``BrowseHelpers`` instance —
+    # tests use it as a thin DB-shaped fixture to seed paths/memories
+    # without going through the namespace-aware MemoryClient layer.
+    from omicsclaw.memory.api._browse_helpers import BrowseHelpers
+    helpers = BrowseHelpers(memory_pkg.get_db_manager(), memory_pkg.get_search_indexer())
+    return helpers, store, memory_pkg
 
 
 def test_app_server_main_uses_default_contract(monkeypatch):
