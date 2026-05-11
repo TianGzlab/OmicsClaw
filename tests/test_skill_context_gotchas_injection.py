@@ -97,6 +97,17 @@ def test_load_skill_context_logs_telemetry_with_count_and_tokens(monkeypatch, ca
     msg = rec.getMessage()
     assert "spatial-de" in msg or getattr(rec, "skill", "") == "spatial-de"
     assert "3" in msg or getattr(rec, "gotcha_count", 0) == 3
+    # Phase 2 gating contract: approx_tokens is the load-bearing telemetry
+    # field (ADR triggers Phase 2 when P90 > 500 tokens or worst > 800).
+    # The substring "3" alone could match the count, so we explicitly assert
+    # the token telemetry surface.
+    assert (
+        "approx_tokens" in msg
+        or getattr(rec, "approx_tokens", None) is not None
+    ), (
+        f"approx_tokens telemetry not emitted — Phase 2 gating depends on it; "
+        f"record fields: {vars(rec)}"
+    )
 
 
 def test_load_skill_context_real_spatial_de_includes_all_six_gotchas():
