@@ -79,6 +79,27 @@ list:
 catalog:
 	python scripts/generate_catalog.py
 
+# ADR 2026-05-11 (#1): verify every routing surface (catalog.json, every
+# domain INDEX.md, CLAUDE.md routing table) stays in sync with SKILL.md
+# descriptions.  Exits 1 on drift.  CI MUST call without --fix so drift is
+# blocking; local dev can use `make check-drift FIX=1` for one-step repair.
+check-drift:
+	python scripts/check_description_drift.py $(if $(FIX),--fix,) $(if $(VERBOSE),-v,)
+
+# ADR 2026-05-11: regenerate the Skip-when negative-routing eval snapshot.
+# Default domain = spatial (the POC scope).  Set DOMAIN=<other> to extend.
+# Set STUB=1 to emit a schema-only snapshot without calling the LLM.
+DOMAIN ?= spatial
+EVAL_OUT ?= tests/eval/skip_when_cases.json
+eval-snapshot:
+	python scripts/extract_skip_when_cases.py \
+		--domain $(DOMAIN) \
+		--output $(EVAL_OUT) \
+		$(if $(STUB),--stub,)
+	@echo
+	@echo "Snapshot written.  Review the diff before commit:"
+	@echo "  git diff -- $(EVAL_OUT)"
+
 demo-orchestrator:
 	python omicsclaw.py run orchestrator --demo --output /tmp/omicsclaw_orchestrator_demo
 
