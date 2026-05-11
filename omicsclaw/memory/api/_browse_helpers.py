@@ -1,4 +1,6 @@
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportGeneralTypeIssues=false, reportOperatorIssue=false, reportReturnType=false
+# TODO: drop this suppression block once the admin UI is rewritten
+# against MemoryEngine and this whole module can be deleted.
 
 """Private path-based memory operations for the ``/api/browse/*`` admin pane.
 

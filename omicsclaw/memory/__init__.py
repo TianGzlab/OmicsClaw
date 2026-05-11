@@ -29,6 +29,10 @@ Usage (lazy init):
     engine = get_memory_engine()
     client = get_memory_client(namespace="tg/userA")
     await client.remember("dataset://pbmc.h5ad", "scRNA dataset")
+
+Legacy admin path operations (used only by the `oc memory-server`
+``/api/browse/*`` UI) live in ``omicsclaw/memory/api/_browse_helpers.py``.
+Production code MUST NOT import that module.
 """
 
 from __future__ import annotations
