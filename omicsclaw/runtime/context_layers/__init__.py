@@ -388,6 +388,34 @@ def load_skill_context(
             + ", ".join(f"`{name}`" for name in nearby)
         )
 
+    # ADR 2026-05-11: surface SKILL.md Gotchas into runtime context so the
+    # agent can avoid documented pitfalls without a separate Read tool call.
+    # Phase 1 = inject all gotchas (no method-based filter); Phase 2 trigger
+    # is data-driven from the telemetry log line below.
+    gotchas = info.get("gotchas") or []
+    if gotchas:
+        lines.append("")
+        lines.append("## Known pitfalls (from SKILL.md Gotchas)")
+        lines.append("")
+        for lead in gotchas:
+            lead_str = str(lead).strip()
+            if lead_str:
+                lines.append(f"- {lead_str}")
+        # Telemetry: rough token estimate (4 chars / token) for Phase 2 gating.
+        approx_tokens = sum(len(str(g)) for g in gotchas) // 4
+        LOGGER.info(
+            "skill_context.gotchas_injected skill=%s gotcha_count=%d approx_tokens=%d",
+            selected_skill,
+            len(gotchas),
+            approx_tokens,
+            extra={
+                "event": "skill_context.gotchas_injected",
+                "skill": selected_skill,
+                "gotcha_count": len(gotchas),
+                "approx_tokens": approx_tokens,
+            },
+        )
+
     return "\n".join(lines).strip()
 
 

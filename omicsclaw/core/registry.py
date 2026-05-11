@@ -228,6 +228,7 @@ class OmicsRegistry:
                         "saves_h5ad": lazy.saves_h5ad,
                         "requires_preprocessed": lazy.requires_preprocessed,
                         "param_hints": lazy.param_hints,
+                        "gotchas": lazy.gotchas,
                     }
                 else:
                     # SKILL.md missing or has no description — minimal dynamic entry.
@@ -247,6 +248,7 @@ class OmicsRegistry:
                         "saves_h5ad": False,
                         "requires_preprocessed": False,
                         "param_hints": {},
+                        "gotchas": [],
                     }
 
                 self._register_skill_entry(

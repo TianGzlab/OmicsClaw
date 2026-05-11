@@ -11,6 +11,7 @@ Meta tooling: multi-omics query routing and skill scaffolding. Not an analysis �
 
 ## Skills
 
-- `omics-skill-builder` — Create OmicsClaw-native skill scaffolds for new reusable workflows that are not yet represented in the current skill catalog.
+- `omics-skill-builder` — Load when scaffolding a NEW OmicsClaw skill from a natural-language request — generates the skill directory layout (SKILL.md, parameters.yaml, references/, tests/) under the chosen domain. Skip when modifying an existing skill (edit its files directly) or when only routing a query (use `orchestrator`).
   triggers: create omicsclaw skill, add new skill, scaffold skill, create reusable workflow, 新增 skill, 创建 skill, 封装成 skill
-- `orchestrator` — Multi-omics query routing across all domains (spatial, single-cell, genomics, proteomics, metabolomics, bulk RNA-seq)
+- `orchestrator` — Load when routing a natural-language omics query to the correct domain skill across spatial / singlecell / genomics / proteomics / metabolomics / bulkrna domains via keyword / LLM / hybrid matching. Skip when the target skill is already known — invoke that skill directly.
+  triggers: which skill, route query, what should I run, orchestrate, pipeline, which analysis

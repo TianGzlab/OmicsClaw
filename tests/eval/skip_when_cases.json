@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "domain": "spatial",
+  "model": "claude-haiku-4-5-20251001 (STUB — set LLM_API_KEY and re-run to populate)",
+  "extracted_at": "2026-05-11T06:39:05+00:00",
+  "skills": [
+    {
+      "skill": "spatial-annotate",
+      "description_hash": "sha256:62bc3303c4d7c6152776ca98dc598e59",
+      "cases": []
+    },
+    {
+      "skill": "spatial-cnv",
+      "description_hash": "sha256:8ed3a9f041a3a6096d0ba05479d42089",
+      "cases": []
+    },
+    {
+      "skill": "spatial-communication",
+      "description_hash": "sha256:7e821159f525b8bff19767b29b4f7b6d",
+      "cases": []
+    },
+    {
+      "skill": "spatial-condition",
+      "description_hash": "sha256:240a81634d7c7e844049e4ff4b70c075",
+      "cases": []
+    },
+    {
+      "skill": "spatial-de",
+      "description_hash": "sha256:83b6cb5442d39b8ad40d40259ea1aa4e",
+      "cases": []
+    },
+    {
+      "skill": "spatial-deconv",
+      "description_hash": "sha256:95a573329c83f9d8b02598b5c5b9deaa",
+      "cases": []
+    },
+    {
+      "skill": "spatial-domains",
+      "description_hash": "sha256:06ab80c9666951b0332c190932be7a92",
+      "cases": []
+    },
+    {
+      "skill": "spatial-enrichment",
+      "description_hash": "sha256:78154328c9e2dbe8691b80cbac7508bd",
+      "cases": []
+    },
+    {
+      "skill": "spatial-genes",
+      "description_hash": "sha256:920705ff6d2dc201a162aba0c390cfcd",
+      "cases": []
+    },
+    {
+      "skill": "spatial-integrate",
+      "description_hash": "sha256:fecede3ceaa0669bc53d1505b50de48a",
+      "cases": []
+    },
+    {
+      "skill": "spatial-microenvironment-subset",
+      "description_hash": "sha256:78bf41d0b70b48c06cb9e349abd1be40",
+      "cases": []
+    },
+    {
+      "skill": "spatial-preprocess",
+      "description_hash": "sha256:c1bca43c51fbb1e507cdf2a6e56034e3",
+      "cases": []
+    },
+    {
+      "skill": "spatial-raw-processing",
+      "description_hash": "sha256:88db4a34ee515181b86f427904f44f15",
+      "cases": []
+    },
+    {
+      "skill": "spatial-register",
+      "description_hash": "sha256:da72bcd2e8da8aec91fef2f611583f8e",
+      "cases": []
+    },
+    {
+      "skill": "spatial-statistics",
+      "description_hash": "sha256:b5be037244c32faaff357c43e7f3dd0d",
+      "cases": []
+    },
+    {
+      "skill": "spatial-trajectory",
+      "description_hash": "sha256:7414678c864d726ce37f77273b8dfc38",
+      "cases": []
+    },
+    {
+      "skill": "spatial-velocity",
+      "description_hash": "sha256:356bd3e3fbab7e29b97e65dca1da9c1a",
+      "cases": []
+    }
+  ]
+}
