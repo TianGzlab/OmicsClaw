@@ -29,9 +29,13 @@ import sqlalchemy as sa
 from .engine import MemoryEngine, MemoryRef
 from .models import (
     Edge,
+    GlossaryKeyword,
     Memory,
+    Node,
     Path,
     SHARED_NAMESPACE,
+    serialize_memory_ref,
+    serialize_row,
 )
 from .namespace_policy import should_version
 from .uri import MemoryURI
@@ -409,6 +413,307 @@ class ReviewLog:
     async def discard_pending_changes(self) -> int:
         """Drop every pending row without integrating. Returns count dropped."""
         return self._store().discard_all()
+
+    # ------------------------------------------------------------------
+    # Desktop maintenance pane: dict-shaped orphan operations.
+    #
+    # These mirror the legacy GraphService contract used by
+    # ``/api/maintenance/*``. The shape is preserved so the existing
+    # frontend keeps working without changes after Phase 2a migrates
+    # the API routes off GraphService.
+    # ------------------------------------------------------------------
+
+    _SNIPPET_LIMIT: int = 200
+
+    async def list_orphans_with_chain(self) -> list[dict]:
+        """Return every deprecated memory with migration-target context.
+
+        Each entry carries ``id, content_snippet, created_at, deprecated,
+        migrated_to, category, migration_target``. ``category`` is
+        ``"deprecated"`` when ``migrated_to`` is set, else ``"orphaned"``.
+        ``migration_target`` contains the chain head's id/paths/snippet
+        when the chain still resolves, otherwise ``None``.
+        """
+        orphans: list[dict] = []
+        async with self._db.session() as s:
+            rows = (
+                await s.execute(
+                    sa.select(Memory)
+                    .where(Memory.deprecated == True)  # noqa: E712
+                    .order_by(Memory.created_at.desc())
+                )
+            ).scalars().all()
+
+            for memory in rows:
+                category = (
+                    "deprecated" if memory.migrated_to else "orphaned"
+                )
+                snippet = self._snippet(memory.content)
+                item: dict = {
+                    "id": memory.id,
+                    "content_snippet": snippet,
+                    "created_at": (
+                        memory.created_at.isoformat()
+                        if memory.created_at
+                        else None
+                    ),
+                    "deprecated": True,
+                    "migrated_to": memory.migrated_to,
+                    "category": category,
+                    "migration_target": None,
+                }
+                if memory.migrated_to:
+                    target = await self._resolve_migration_chain(
+                        s, memory.migrated_to
+                    )
+                    if target is not None:
+                        item["migration_target"] = {
+                            "id": target["id"],
+                            "paths": target["paths"],
+                            "content_snippet": target["content_snippet"],
+                        }
+                orphans.append(item)
+        return orphans
+
+    async def get_orphan_detail(self, memory_id: int) -> Optional[dict]:
+        """Return the full body + chain context for one memory id.
+
+        Returns ``None`` if the id doesn't exist. Used by the desktop
+        "view orphan" dialog. ``category`` is one of ``"active"``,
+        ``"deprecated"``, ``"orphaned"`` so the dialog can pick the
+        right banner.
+        """
+        async with self._db.session() as s:
+            memory = (
+                await s.execute(
+                    sa.select(Memory).where(Memory.id == memory_id)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                return None
+
+            if not memory.deprecated:
+                category = "active"
+            elif memory.migrated_to:
+                category = "deprecated"
+            else:
+                category = "orphaned"
+
+            detail: dict = {
+                "id": memory.id,
+                "content": memory.content,
+                "created_at": (
+                    memory.created_at.isoformat()
+                    if memory.created_at
+                    else None
+                ),
+                "deprecated": memory.deprecated,
+                "migrated_to": memory.migrated_to,
+                "category": category,
+                "migration_target": None,
+            }
+            if memory.migrated_to:
+                target = await self._resolve_migration_chain(
+                    s, memory.migrated_to
+                )
+                if target is not None:
+                    detail["migration_target"] = {
+                        "id": target["id"],
+                        "content": target["content"],
+                        "paths": target["paths"],
+                        "created_at": target["created_at"],
+                    }
+            return detail
+
+    async def permanently_delete_orphan(self, memory_id: int) -> dict:
+        """Hard-delete a deprecated memory row with chain repair + node GC.
+
+        Repairs the chain: any predecessor that pointed at this row now
+        points at this row's successor (``migrated_to``). After the row
+        is gone, if the node has no remaining ``Memory`` rows, the node
+        and all of its edges / paths / glossary keywords are cleaned up.
+
+        Raises ``ValueError`` if the id doesn't exist, ``PermissionError``
+        if the row is still active (deletion is gated on deprecated=True).
+        Returns the legacy audit dict shape:
+        ``{deleted_memory_id, chain_repaired_to, rows_before, rows_after}``.
+        """
+        async with self._db.session() as s:
+            target = (
+                await s.execute(
+                    sa.select(Memory).where(Memory.id == memory_id)
+                )
+            ).scalar_one_or_none()
+            if target is None:
+                raise ValueError(f"Memory ID {memory_id} not found")
+            if not target.deprecated:
+                raise PermissionError(
+                    f"Memory {memory_id} is active (deprecated=False). "
+                    f"Deletion aborted."
+                )
+
+            successor_id = target.migrated_to
+            node_uuid = target.node_uuid
+            deleted_before = serialize_memory_ref(target)
+
+            # Chain repair: anyone pointing at us now points at our successor.
+            await s.execute(
+                sa.update(Memory)
+                .where(Memory.migrated_to == memory_id)
+                .values(migrated_to=successor_id)
+            )
+
+            await s.execute(
+                sa.delete(Memory).where(Memory.id == memory_id)
+            )
+
+            rows_before: dict[str, list] = {
+                "nodes": [],
+                "memories": [deleted_before],
+                "edges": [],
+                "paths": [],
+                "glossary_keywords": [],
+            }
+
+            # GC the node if it now has zero memories. We keep this scoped:
+            # a memoryless node by definition has no remaining version chain,
+            # so we only clear its own structural rows (no recursive
+            # descent into children — the desktop maintenance API never
+            # exposes orphan branches with active descendants).
+            remaining = (
+                await s.execute(
+                    sa.select(sa.func.count())
+                    .select_from(Memory)
+                    .where(Memory.node_uuid == node_uuid)
+                )
+            ).scalar_one()
+            if remaining == 0:
+                await self._collect_and_clear_memoryless_node(
+                    s, node_uuid, rows_before
+                )
+
+            return {
+                "deleted_memory_id": memory_id,
+                "chain_repaired_to": successor_id,
+                "rows_before": rows_before,
+                "rows_after": {},
+            }
+
+    # ------------------------------------------------------------------
+    # private helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _snippet(cls, content: str) -> str:
+        if len(content) <= cls._SNIPPET_LIMIT:
+            return content
+        return content[: cls._SNIPPET_LIMIT] + "..."
+
+    async def _resolve_migration_chain(
+        self,
+        s: sa.ext.asyncio.AsyncSession,  # type: ignore[name-defined]
+        start_id: int,
+        *,
+        max_hops: int = 50,
+    ) -> Optional[dict]:
+        """Walk the ``migrated_to`` chain until a head (or dead end)."""
+        current_id = start_id
+        for _ in range(max_hops):
+            memory = (
+                await s.execute(
+                    sa.select(Memory).where(Memory.id == current_id)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                return None
+            if memory.migrated_to is None:
+                paths: list[str] = []
+                if memory.node_uuid:
+                    rows = (
+                        await s.execute(
+                            sa.select(Path.domain, Path.path)
+                            .select_from(Path)
+                            .join(Edge, Path.edge_id == Edge.id)
+                            .where(Edge.child_uuid == memory.node_uuid)
+                        )
+                    ).all()
+                    paths = [f"{d}://{p}" for d, p in rows]
+                return {
+                    "id": memory.id,
+                    "content": memory.content,
+                    "content_snippet": self._snippet(memory.content),
+                    "created_at": (
+                        memory.created_at.isoformat()
+                        if memory.created_at
+                        else None
+                    ),
+                    "deprecated": memory.deprecated,
+                    "paths": paths,
+                }
+            current_id = memory.migrated_to
+        return None
+
+    async def _collect_and_clear_memoryless_node(
+        self,
+        s,
+        node_uuid: str,
+        rows_before: dict[str, list],
+    ) -> None:
+        """Snapshot + delete edges/paths/glossary + node for a memoryless node."""
+        edge_rows = (
+            await s.execute(
+                sa.select(Edge).where(
+                    sa.or_(
+                        Edge.parent_uuid == node_uuid,
+                        Edge.child_uuid == node_uuid,
+                    )
+                )
+            )
+        ).scalars().all()
+        edge_ids = [e.id for e in edge_rows]
+        for e in edge_rows:
+            rows_before["edges"].append(serialize_row(e))
+
+        if edge_ids:
+            path_rows = (
+                await s.execute(
+                    sa.select(Path).where(Path.edge_id.in_(edge_ids))
+                )
+            ).scalars().all()
+            for p in path_rows:
+                rows_before["paths"].append(serialize_row(p))
+            await s.execute(
+                sa.delete(Path).where(Path.edge_id.in_(edge_ids))
+            )
+
+        if edge_ids:
+            await s.execute(
+                sa.delete(Edge).where(Edge.id.in_(edge_ids))
+            )
+
+        gk_rows = (
+            await s.execute(
+                sa.select(GlossaryKeyword).where(
+                    GlossaryKeyword.node_uuid == node_uuid
+                )
+            )
+        ).scalars().all()
+        for gk in gk_rows:
+            rows_before["glossary_keywords"].append(serialize_row(gk))
+        await s.execute(
+            sa.delete(GlossaryKeyword).where(
+                GlossaryKeyword.node_uuid == node_uuid
+            )
+        )
+
+        node = (
+            await s.execute(
+                sa.select(Node).where(Node.uuid == node_uuid)
+            )
+        ).scalar_one_or_none()
+        if node is not None:
+            rows_before["nodes"].append(serialize_row(node))
+            await s.execute(sa.delete(Node).where(Node.uuid == node_uuid))
 
     # ------------------------------------------------------------------
     # internal helper
