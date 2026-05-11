@@ -817,12 +817,14 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ToolSpec(
             name="create_omics_skill",
             description=(
-                "Create a new OmicsClaw-native skill scaffold under skills/<domain>/<skill-name>/. "
-                "(Note: the underlying scaffolder currently emits a legacy v1-shaped SKILL.md; "
-                "migration to the canonical v2 layout at templates/skill/ is tracked for PR-eval-3.) "
-                "Use this only when the user "
-                "explicitly wants a reusable new skill added to OmicsClaw. If a previous "
-                "custom_analysis_execute run succeeded, you can promote that notebook into the new skill."
+                "Create a new OmicsClaw-native skill scaffold under skills/<domain>/<skill-name>/ "
+                "using the canonical v2 layout (SKILL.md + parameters.yaml sidecar + "
+                "references/{methodology,output_contract,parameters,r_visualization}.md). "
+                "The emitted skill is lint-clean against scripts/skill_lint.py and ready "
+                "to register via the runtime registry. "
+                "Use this only when the user explicitly wants a reusable new skill added "
+                "to OmicsClaw. If a previous custom_analysis_execute run succeeded, you can "
+                "promote that notebook into the new skill."
             ),
             parameters={
                 "type": "object",
