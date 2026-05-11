@@ -180,6 +180,65 @@ async def test_restore_path_refuses_missing_node(env):
 
 
 @pytest.mark.asyncio
+async def test_restore_path_falls_back_to_root_for_nested_path_with_no_parent(env):
+    """When restoring a nested path whose parent doesn't exist in the
+    target namespace, the new edge attaches to ROOT_NODE_UUID rather
+    than failing. This matches the legacy fallback and ensures admin
+    rollbacks never block on a missing-parent technicality."""
+    engine, review, db = env
+
+    # Create + delete a nested path so we can rollback. Use a parent
+    # path that has its own memory to seed the namespace, then drop the
+    # parent before rolling back the child so the rollback hits the
+    # "parent not found → fall back to root" branch.
+    parent_ref = await engine.upsert(
+        "dataset://nested_parent", "parent body", namespace="tg/userA"
+    )
+    child_ref = await engine.upsert(
+        "dataset://nested_parent/leaf", "leaf body", namespace="tg/userA"
+    )
+
+    # Drop both paths so the restore is from scratch.
+    await engine.delete(
+        "dataset://nested_parent/leaf", namespace="tg/userA"
+    )
+    await engine.delete(
+        "dataset://nested_parent", namespace="tg/userA"
+    )
+
+    # Reactivate the deprecated child memory so restore_path doesn't
+    # need to flip a deprecated row (we've already covered that branch).
+    async with db.session() as s:
+        await s.execute(
+            sa.update(Memory)
+            .where(Memory.node_uuid == child_ref.node_uuid)
+            .values(deprecated=False, migrated_to=None)
+        )
+
+    result = await review.restore_path(
+        path="nested_parent/leaf",
+        domain="dataset",
+        namespace="tg/userA",
+        node_uuid=child_ref.node_uuid,
+    )
+
+    assert result["uri"] == "dataset://nested_parent/leaf"
+
+    async with db.session() as s:
+        restored = (
+            await s.execute(
+                sa.select(Path).where(
+                    Path.namespace == "tg/userA",
+                    Path.path == "nested_parent/leaf",
+                )
+            )
+        ).scalar_one()
+        edge = await s.get(Edge, restored.edge_id)
+        # Parent did not exist → fell back to ROOT.
+        assert edge.parent_uuid == ROOT_NODE_UUID
+
+
+@pytest.mark.asyncio
 async def test_restore_path_refuses_when_path_exists(env):
     engine, review, db = env
     ref = await engine.upsert(

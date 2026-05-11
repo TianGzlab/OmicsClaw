@@ -166,10 +166,12 @@ async def rollback_changes(req: RollbackRequest):
                 # Content was updated: rollback to the old memory version.
                 old_id = before.get("id")
                 if old_id:
-                    # ReviewLog.rollback_to is namespace-aware but the
-                    # rollback itself acts on a specific memory id, which
-                    # is namespace-independent in practice. We pass the
-                    # __shared__ default so the contract holds.
+                    # ReviewLog.rollback_to declares ``namespace`` as
+                    # a required kwarg for signature symmetry with the
+                    # rest of ReviewLog, but the chain rewrite itself
+                    # never consults the value (it acts on memory_id
+                    # → node_uuid, which is namespace-independent).
+                    # Pass __shared__ as the canonical placeholder.
                     await review.rollback_to(old_id, namespace="__shared__")
                     rolled_back.append(key)
                 else:

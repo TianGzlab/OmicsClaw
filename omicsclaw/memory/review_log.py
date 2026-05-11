@@ -611,8 +611,9 @@ class ReviewLog:
     # ``get_memory_by_id`` powers the ``/api/review/diff`` content
     # lookup; ``restore_path`` is the rollback target for changeset
     # entries that record a path deletion (``after is None``). Both
-    # mirror the legacy GraphService contract verbatim so the
-    # frontend keeps working.
+    # mirror the legacy GraphService contract returned to the frontend.
+    # ``restore_path`` intentionally tightens one guard: see its
+    # docstring for the namespace-scope divergence vs legacy.
     # ------------------------------------------------------------------
 
     async def get_memory_by_id(self, memory_id: int) -> Optional[dict]:
@@ -683,6 +684,14 @@ class ReviewLog:
 
         Raises ``ValueError`` on root path, missing node, or
         already-existing path. Returns ``{"uri": ..., "node_uuid": ...}``.
+
+        **Deliberate divergence from legacy:** the "already exists"
+        check is scoped to ``(namespace, domain, path)`` rather than
+        the legacy ``(domain, path)`` only. The legacy check would
+        falsely reject a rollback whenever a *different* namespace
+        held the same ``(domain, path)``; the namespace-scoped check
+        matches the actual ``Path`` unique index and is the correct
+        invariant. The legacy GraphService method had this latent bug.
 
         TODO(Phase 3): delete the duplicate ``GraphService.restore_path``
         at ``omicsclaw/memory/graph.py:1464`` when ``graph.py`` is removed.
