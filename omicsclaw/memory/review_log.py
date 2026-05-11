@@ -419,8 +419,9 @@ class ReviewLog:
     #
     # These mirror the legacy GraphService contract used by
     # ``/api/maintenance/*``. The shape is preserved so the existing
-    # frontend keeps working without changes after Phase 2a migrates
-    # the API routes off GraphService.
+    # frontend keeps working without changes; Phase 2a routed the API
+    # off GraphService onto these methods. Phase 3 will delete the
+    # GraphService copy once review.py and browse.py also migrate.
     # ------------------------------------------------------------------
 
     _SNIPPET_LIMIT: int = 200
@@ -566,6 +567,10 @@ class ReviewLog:
             await s.execute(
                 sa.delete(Memory).where(Memory.id == memory_id)
             )
+            # The count query below relies on the autoflush default to
+            # see the DELETE we just issued. Explicit flush here so
+            # future session-factory changes can't silently break the GC.
+            await s.flush()
 
             rows_before: dict[str, list] = {
                 "nodes": [],
@@ -616,7 +621,11 @@ class ReviewLog:
         *,
         max_hops: int = 50,
     ) -> Optional[dict]:
-        """Walk the ``migrated_to`` chain until a head (or dead end)."""
+        """Walk the ``migrated_to`` chain until a head (or dead end).
+
+        TODO(Phase 3): delete the duplicate ``GraphService._resolve_migration_chain``
+        at ``omicsclaw/memory/graph.py:1660`` when ``graph.py`` is removed.
+        """
         current_id = start_id
         for _ in range(max_hops):
             memory = (
@@ -659,7 +668,16 @@ class ReviewLog:
         node_uuid: str,
         rows_before: dict[str, list],
     ) -> None:
-        """Snapshot + delete edges/paths/glossary + node for a memoryless node."""
+        """Snapshot + delete edges/paths/glossary + node for a memoryless node.
+
+        Conservative scope: pathless aliases (``Path`` rows whose edge no
+        longer points at this node) are deliberately preserved, as are
+        any descendant subtrees reachable via outgoing edges. The legacy
+        ``GraphService.cascade_delete_node`` swept them all; the
+        ``permanently_delete_orphan`` contract intentionally avoids that
+        so an admin-button click cannot delete still-live descendants.
+        See ``test_permanently_delete_orphan_only_removes_direct_edges``.
+        """
         edge_rows = (
             await s.execute(
                 sa.select(Edge).where(

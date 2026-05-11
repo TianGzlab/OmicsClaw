@@ -104,7 +104,7 @@ async def test_list_orphans_with_chain_truncates_long_content(env):
 
 
 @pytest.mark.asyncio
-async def test_list_orphans_with_chain_classifies_orphaned_vs_deprecated(env, tmp_path):
+async def test_list_orphans_with_chain_classifies_orphaned_vs_deprecated(env):
     """A memory with migrated_to=NULL is 'orphaned'; with target is 'deprecated'."""
     engine, review, db = env
     await engine.upsert_versioned(
