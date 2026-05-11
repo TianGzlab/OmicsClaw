@@ -37,34 +37,51 @@ Subdomain nesting is also supported (e.g., `singlecell/scrna/sc-qc/sc_qc.py`).
 Copy and customize the template:
 
 ```bash
-cp templates/SKILL-TEMPLATE.md skills/<domain>/<skill-name>/SKILL.md
+cp -r templates/skill skills/<domain>/<skill-name>     # then rename + fill placeholders
 ```
 
-**Required YAML frontmatter fields:**
+The v2 layout splits user-visible metadata (SKILL.md frontmatter) from
+runtime contract (parameters.yaml sidecar):
+
+**SKILL.md frontmatter (only these keys):**
 
 ```yaml
 ---
 name: your-skill-name              # Must match folder name
 description: >-
-  One-line description shown in CLI and skill_search results.
+  Load when <user intent / data shape>. Skip when <neighbouring skill>.
+  (≤50 words, lint-enforced.)
 version: 0.1.0
-metadata:
-  omicsclaw:
-    domain: spatial                 # Your domain
-    trigger_keywords:               # How users find this skill via NLP
-      - preprocess
-      - QC
-      - normalize
-    allowed_extra_flags:            # CLI flags beyond --input/--output/--demo
-      - "--method"
-      - "--species"
-    legacy_aliases: [short-alias]   # Optional short names
-    saves_h5ad: false               # Does output include processed.h5ad?
-    requires_preprocessed: false    # Needs preprocessed input?
+author: OmicsClaw
+license: MIT
+tags: [domain, analysis-type, method]
+requires: [pyyaml]                 # Optional Python deps
 ---
 ```
 
-**Required markdown sections:** Why This Exists, Core Capabilities, Workflow, Input/Output Formats, CLI Reference (with `--demo` example), Dependencies, Safety disclaimer.
+**parameters.yaml sidecar (everything else):**
+
+```yaml
+domain: spatial                    # Domain bucket (matches skills/<domain>/)
+script: your_skill_name.py         # Runtime entrypoint (folder name with _ )
+saves_h5ad: false                  # Outputs include processed.h5ad?
+requires_preprocessed: false       # Needs preprocessed AnnData input?
+trigger_keywords:                  # Orchestrator routing keywords
+- preprocess
+- QC
+legacy_aliases: []                 # Old skill names this answers to
+allowed_extra_flags:               # Flags beyond --input/--output/--demo
+- --method
+- --species
+param_hints: {}                    # Per-method tuning hints (optional)
+```
+
+See `templates/skill/parameters.yaml` for the full inline schema with
+per-field documentation.
+
+**Required SKILL.md sections (lint-enforced at scripts/skill_lint.py):**
+`## When to use`, `## Inputs & Outputs`, `## Flow`, `## Gotchas`,
+`## Key CLI`, `## See also`. Body capped at 200 lines.
 
 ### Step 3: Implement the script
 
@@ -140,16 +157,18 @@ if __name__ == "__main__":
     main()
 ```
 
-**Standard output files** (in `--output` directory):
+**Standard output files** (in `--output` directory; describe yours
+exhaustively in `references/output_contract.md` — `scripts/skill_lint.py`
+verifies every claimed path appears in the script):
 
-| File | Purpose |
-|------|---------|
-| `report.md` | Analysis report with methodology, results, disclaimer |
-| `result.json` | Structured results for programmatic access |
-| `figures/` | PNG/SVG visualizations |
-| `tables/` | CSV/TSV data tables |
-| `reproducibility/` | commands.sh, requirements.txt, checksums.sha256 |
-| `processed.h5ad` | Output AnnData (if `saves_h5ad: true`) |
+| File | Purpose | Optional? |
+|------|---------|---|
+| `report.md` | Analysis report with methodology, results, disclaimer | always written |
+| `result.json` | Standardised envelope (`summary` + `data`) for programmatic access | always written |
+| `tables/<name>.csv` | CSV data tables | per skill |
+| `figures/<name>.png` | PNG/SVG visualizations | only if your script uses matplotlib |
+| `reproducibility/{commands.sh,requirements.txt,checksums.sha256}` | Replay artifacts | written by common report helper when applicable |
+| `processed.h5ad` | Output AnnData | only if `saves_h5ad: true` in `parameters.yaml` |
 
 ### Step 4: (Recommended) Use `_lib` for core logic
 

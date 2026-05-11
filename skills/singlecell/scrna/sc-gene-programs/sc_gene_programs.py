@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Single-cell gene program discovery.
-
-Template-aligned skill following SC-DEVELOPMENT-CHECKLIST.md.
-"""
+"""Single-cell gene program discovery (v2 OmicsClaw skill)."""
 
 from __future__ import annotations
 

@@ -157,7 +157,7 @@ OmicsClaw/
 ├── docs/                       # Project docs and Mintlify site content
 ├── SOUL.md                     # Bot/CLI persona (OmicsBot)
 ├── SPEC.md                     # Repository maintenance + AI development contract
-├── templates/SKILL-TEMPLATE.md # Template for new skills
+├── templates/skill/            # v2 scaffold for new skills (copy whole dir)
 ├── examples/                   # Shared demo data
 ├── sessions/                   # SpatialSession JSONs
 ├── CLAUDE.md                   # Agent routing instructions
@@ -180,7 +180,7 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 ## How to Add a New Skill
 
 1. `mkdir skills/<your-skill-name>`
-2. `cp templates/SKILL-TEMPLATE.md skills/<your-skill-name>/SKILL.md`
+2. `cp -r templates/skill skills/<domain>/<your-skill-name>` (then rename + fill placeholders)
 3. Fill in SKILL.md
 4. Add Python script accepting `--input`, `--output`, `--demo`
 5. Add tests in `tests/`
