@@ -1,25 +1,34 @@
 """
 OmicsClaw Memory — Unified graph-based memory system.
 
-Replaces the former bot/memory/ flat store with a nocturne_memory-derived
-graph engine. Provides:
+Three layers over a SQLite/PostgreSQL graph database (SQLAlchemy):
 
-  - GraphService  — core CRUD + graph traversal
-  - SearchIndexer — FTS search across memories
-  - GlossaryService — keyword-to-node bindings
-  - ChangesetStore — row-level before/after snapshots for review/rollback
-  - MemoryClient — high-level API for multi-agent pipelines
-  - CompatMemoryStore — drop-in replacement for old bot.memory.MemoryStore
+  - MemoryEngine — namespace-aware hot path (upsert, recall, search,
+    list_children, get_subtree, get_recent, delete).
+  - ReviewLog — cold-path operations (version-chain inspection,
+    rollback, orphans, GC, browse_shared, changeset approve/discard).
+  - MemoryClient — strategy layer (which namespace, versioned vs.
+    overwrite). Production callers build a client per surface.
+
+Plus:
+
+  - SearchIndexer — FTS search across memories.
+  - GlossaryService — keyword-to-node bindings.
+  - ChangesetStore — row-level before/after snapshots for review.
+  - CompatMemoryStore — drop-in replacement for the legacy bot store.
 
 Usage (lazy init):
 
-    from omicsclaw.memory import get_graph_service, get_db_manager
+    from omicsclaw.memory import (
+        get_db_manager, get_memory_engine, get_memory_client,
+    )
 
     db = get_db_manager()
     await db.init_db()
 
-    graph = get_graph_service()
-    result = await graph.create_memory("", "Hello", priority=0, title="greeting", domain="core")
+    engine = get_memory_engine()
+    client = get_memory_client(namespace="tg/userA")
+    await client.remember("dataset://pbmc.h5ad", "scRNA dataset")
 """
 
 from __future__ import annotations
@@ -54,14 +63,12 @@ from .snapshot import ChangesetStore, get_changeset_store
 if TYPE_CHECKING:
     from .database import DatabaseManager
     from .engine import MemoryEngine
-    from .graph import GraphService
     from .memory_client import MemoryClient
     from .review_log import ReviewLog
     from .search import SearchIndexer
     from .glossary import GlossaryService
 
 _db_manager: Optional["DatabaseManager"] = None
-_graph_service: Optional["GraphService"] = None
 _search_indexer: Optional["SearchIndexer"] = None
 _glossary_service: Optional["GlossaryService"] = None
 _memory_engine: Optional["MemoryEngine"] = None
@@ -69,7 +76,7 @@ _review_log: Optional["ReviewLog"] = None
 
 
 def _ensure_initialized():
-    global _db_manager, _graph_service, _search_indexer, _glossary_service
+    global _db_manager, _search_indexer, _glossary_service
     global _memory_engine, _review_log
     if _db_manager is not None:
         return
@@ -79,7 +86,6 @@ def _ensure_initialized():
     from .review_log import ReviewLog
     from .search import SearchIndexer
     from .glossary import GlossaryService
-    from .graph import GraphService
 
     database_url = os.getenv("OMICSCLAW_MEMORY_DB_URL")
     # database_url can be None — DatabaseManager will use defaults
@@ -87,7 +93,6 @@ def _ensure_initialized():
     _db_manager = DatabaseManager(database_url)
     _search_indexer = SearchIndexer(_db_manager)
     _glossary_service = GlossaryService(_db_manager, _search_indexer)
-    _graph_service = GraphService(_db_manager, _search_indexer)
     _memory_engine = MemoryEngine(_db_manager, _search_indexer)
     _review_log = ReviewLog(_db_manager, _memory_engine)
 
@@ -95,11 +100,6 @@ def _ensure_initialized():
 def get_db_manager() -> DatabaseManager:
     _ensure_initialized()
     return _db_manager  # type: ignore[return-value]
-
-
-def get_graph_service() -> "GraphService":
-    _ensure_initialized()
-    return _graph_service  # type: ignore[return-value]
 
 
 def get_search_indexer() -> "SearchIndexer":
@@ -222,12 +222,11 @@ def __getattr__(name: str):
 
 async def close_db():
     """Tear down all services and close the database connection."""
-    global _db_manager, _graph_service, _search_indexer, _glossary_service
+    global _db_manager, _search_indexer, _glossary_service
     global _memory_engine, _review_log
     if _db_manager:
         await _db_manager.close()
     _db_manager = None
-    _graph_service = None
     _search_indexer = None
     _glossary_service = None
     _memory_engine = None
@@ -236,7 +235,7 @@ async def close_db():
 
 __all__ = [
     "DatabaseManager",
-    "get_db_manager", "get_graph_service",
+    "get_db_manager",
     "get_search_indexer", "get_glossary_service",
     "get_memory_engine", "get_review_log", "get_memory_client",
     "get_engine_db",

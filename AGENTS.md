@@ -255,7 +255,7 @@ from omicsclaw.memory import (
 )
 ```
 
-> **Migration note.** `MemoryEngine` and `ReviewLog` are the canonical hot- and cold-path layers; all production endpoints route through them. The legacy `GraphService` is retained only as an internal implementation detail of three cold-path API modules (`omicsclaw/memory/api/{browse,maintenance,review}.py`) — those will be retired in a follow-up PR. New code MUST use `MemoryEngine` / `ReviewLog` / `MemoryClient`, never `GraphService` directly.
+> **Migration note.** `MemoryEngine` and `ReviewLog` are the canonical hot- and cold-path layers; all production endpoints route through them. The legacy `GraphService` class has been retired (`graph.py` deleted). Its path-based admin operations now live in a private `omicsclaw/memory/api/_browse_helpers.BrowseHelpers` class used only by the `oc memory-server` admin UI (`/api/browse/*`). New code MUST use `MemoryEngine` / `ReviewLog` / `MemoryClient`; do not import `_browse_helpers` from outside `omicsclaw/memory/api/`.
 
 > **KH bootstrap.** Every memory-init path (`CompatMemoryStore.initialize`, `MemoryClient.initialize` with `database_url`, `app/server.py` chat lifespan, `memory/server.py` lifespan) calls `seed_knowhows()` after `init_db()`. The function reads `KnowHowInjector.iter_entries()` and writes each entry to `__shared__` under `core://kh/<doc_id>` via the idempotent `MemoryEngine.seed_shared`. Failures downgrade to a log line; missing `knowledge_base/` does not block startup.
 
