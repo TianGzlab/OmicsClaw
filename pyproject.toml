@@ -511,3 +511,13 @@ exclude = ["tests", "tests.*", "output", "sessions"]
 
 [tool.setuptools.package-data]
 omicsclaw = ["py.typed"]
+
+# ADR 2026-05-11: Negative routing eval extracted at write-time and frozen
+# as a snapshot.  The model used to extract Skip-when cases is pinned here
+# so that bumping the model (which can re-extract differently) requires a
+# PR with a snapshot diff humans review.  See scripts/extract_skip_when_cases.py
+# and tests/test_routing_skip_when.py.
+[tool.omicsclaw.eval]
+skip_when_extractor_model = "claude-haiku-4-5-20251001"
+skip_when_extractor_temperature = 0.0
+skip_when_snapshot_schema_version = 1
