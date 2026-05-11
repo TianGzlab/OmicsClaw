@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 import yaml
 
@@ -30,11 +31,59 @@ _RUNTIME_DEFAULTS: dict[str, object] = {
 }
 
 
+_GOTCHA_BOLD_LEAD = re.compile(r"^\*\*(.+?)\*\*")
+_GOTCHA_PLACEHOLDER = re.compile(r"^_None\b", re.IGNORECASE)
+
+
+def _extract_gotcha_leads(body: str) -> list[str]:
+    """Extract the lead sentence of each `## Gotchas` bullet.
+
+    Reads the body until the next `## ` heading.  Each bullet starts with
+    `- ` at the line start (indented continuations are ignored).  The lead
+    sentence is the bold-marked first sentence; missing bold falls back to
+    the first '. '-terminated sentence.  Italic placeholder bullets like
+    `- _None yet — append as failure modes are reported._` are filtered.
+    """
+    in_section = False
+    bullets: list[str] = []
+    for line in body.splitlines():
+        stripped = line.lstrip()
+        if line.startswith("## "):
+            if in_section:
+                break
+            if line.startswith("## Gotchas"):
+                in_section = True
+            continue
+        if not in_section:
+            continue
+        if not line.startswith("- "):
+            continue
+        # `- ` at start = new bullet; capture the rest of the line.
+        bullets.append(stripped[2:].strip())
+
+    leads: list[str] = []
+    for bullet in bullets:
+        if _GOTCHA_PLACEHOLDER.match(bullet):
+            continue
+        m = _GOTCHA_BOLD_LEAD.match(bullet)
+        if m:
+            leads.append(m.group(1).strip())
+            continue
+        # Fallback: first sentence on '. ' boundary, else whole bullet.
+        first_period = bullet.find(". ")
+        if first_period > 0:
+            leads.append(bullet[: first_period + 1].strip())
+        else:
+            leads.append(bullet.rstrip("."))
+    return leads
+
+
 class LazySkillMetadata:
     def __init__(self, skill_path: Path):
         self.path = skill_path
         self._basic = None
         self._full = None
+        self._gotchas: list[str] | None = None
 
     def _parse_frontmatter(self) -> dict | None:
         skill_md = self.path / "SKILL.md"
@@ -147,6 +196,30 @@ class LazySkillMetadata:
         """Method-keyed parameter tuning hints declared in SKILL.md."""
         self._ensure_basic()
         return self._basic.get("param_hints", {})
+
+    @property
+    def gotchas(self) -> list[str]:
+        """Lead sentences of each `## Gotchas` bullet from SKILL.md body.
+
+        Loaded lazily on first access and cached.  Empty list when SKILL.md
+        is missing, has no `## Gotchas` section, or only contains the
+        template placeholder.
+        """
+        if self._gotchas is not None:
+            return self._gotchas
+        skill_md = self.path / "SKILL.md"
+        if not skill_md.exists():
+            self._gotchas = []
+            return self._gotchas
+        content = skill_md.read_text(encoding="utf-8")
+        # Strip frontmatter so `## ` matching only operates on the body.
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            body = parts[2] if len(parts) >= 3 else content
+        else:
+            body = content
+        self._gotchas = _extract_gotcha_leads(body)
+        return self._gotchas
 
     def _load_full(self):
         skill_md = self.path / "SKILL.md"
