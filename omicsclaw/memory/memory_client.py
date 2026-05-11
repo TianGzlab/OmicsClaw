@@ -103,6 +103,10 @@ class MemoryClient:
         await self._db.init_db()
         self._search = SearchIndexer(self._db)
         self._engine = MemoryEngine(self._db, self._search)
+
+        from .bootstrap import seed_knowhows
+
+        await seed_knowhows(self._engine)
         self._initialized = True
 
     async def _ensure_init(self) -> None:
