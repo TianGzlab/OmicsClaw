@@ -8,7 +8,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/*
-!build/routing-baselines/
 .eggs/
 .pytest_cache/
 .mypy_cache/
@@ -157,6 +156,9 @@ resources/
 .codex
 .planning/
 e2e_test
+
+# Claude Code local state (settings, scheduled task locks)
+.claude/
 
 # Eval suite per-run artifacts (every UTC-timestamped run dir)
 tests/eval/results/*/
