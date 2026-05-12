@@ -1,9 +1,16 @@
 """Default job executor wiring.
 
 The default local app/remote executor calls the shared
-``omicsclaw.core.skill_runner.run_skill`` contract directly. The legacy
-``default_command_factory`` remains available for external process executors
-such as SSH/Slurm wrappers that still need CLI argv.
+``omicsclaw.core.skill_runner.arun_skill`` contract — the async-native
+sibling of ``run_skill`` introduced in OMI-12 audit P1 #4. The previous
+``await asyncio.to_thread(run_skill)`` wrapping was the culprit behind
+ThreadPoolExecutor exhaustion under multi-user load (one parked worker
+per long-running skill); the async path spawns via
+``asyncio.create_subprocess_exec`` instead so concurrent skills only
+cost one event-loop task each.
+
+The legacy ``default_command_factory`` remains available for external
+process executors such as SSH/Slurm wrappers that still need CLI argv.
 
 Mapping from wire contract (``JobContext.inputs`` + ``JobContext.params``)
 to runner kwargs or CLI argv:
@@ -25,7 +32,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -88,19 +94,28 @@ def _params_to_extra_args(params: dict[str, Any]) -> list[str]:
 
 
 class SkillRunnerExecutor:
-    """Executor that invokes the shared in-process skill runner."""
+    """Executor that invokes the shared in-process skill runner.
+
+    Runs via ``omicsclaw.core.skill_runner.arun_skill`` (async-native) so
+    concurrent jobs cost one event-loop task each, not one parked
+    ``ThreadPoolExecutor`` worker per long-running skill — see OMI-12
+    audit P1 #4 for the original thread-pool-exhaustion regression.
+    """
 
     async def run(self, ctx: JobContext) -> JobOutcome:
+        # Late import so callers / tests that monkeypatch
+        # ``omicsclaw.core.skill_runner.arun_skill`` see the patched
+        # function at call time, the same way the previous
+        # ``run_skill`` monkeypatching worked.
         from omicsclaw.core import skill_runner
 
         input_path = ctx.inputs.get("input") or ctx.inputs.get("path")
         input_paths = ctx.inputs.get("inputs")
         demo = bool(ctx.inputs.get("demo"))
         extra_args = _params_to_extra_args(ctx.params)
-        cancel_event = threading.Event()
 
-        def _run() -> SkillRunResult:
-            return skill_runner.run_skill(
+        try:
+            run_result = await skill_runner.arun_skill(
                 ctx.skill,
                 input_path=str(input_path) if input_path else None,
                 input_paths=[str(item) for item in input_paths] if input_paths else None,
@@ -108,15 +123,11 @@ class SkillRunnerExecutor:
                 demo=demo,
                 session_path=str(ctx.inputs["session_path"]) if ctx.inputs.get("session_path") else None,
                 extra_args=extra_args or None,
-                cancel_event=cancel_event,
             )
-
-        try:
-            run_result = await asyncio.to_thread(_run)
         except asyncio.CancelledError:
-            # Forward asyncio cancellation to the worker thread / subprocess so
-            # the SIGTERM/SIGKILL path runs instead of leaking the child.
-            cancel_event.set()
+            # ``adrive_subprocess`` already SIGTERM/SIGKILL'd the process
+            # group before re-raising; just propagate so the jobs router
+            # records the cancelled-terminal state.
             raise
         except Exception as exc:
             text = f"skill_runner_failed: {exc}"
