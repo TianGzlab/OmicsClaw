@@ -602,7 +602,11 @@ def main():
     # mcp add
     mcp_add_p = mcp_sub.add_parser("add", help="Add an MCP server")
     mcp_add_p.add_argument("name", help="Server name")
-    mcp_add_p.add_argument("command", help="Command or URL")
+    # NB: positional dest cannot clash with the top-level subparser's
+    # ``dest="command"`` — otherwise ``args.command`` is overwritten by the
+    # MCP server command string and the ``if args.command == "mcp":`` branch
+    # below silently never fires.
+    mcp_add_p.add_argument("server_command", help="Command or URL")
     mcp_add_p.add_argument("args", nargs="*", help="Additional args for stdio transport")
     mcp_add_p.add_argument("--transport", choices=["stdio", "http", "sse", "websocket"], default=None)
     mcp_add_p.add_argument("--env", nargs="+", metavar="KEY=VAL", help="Environment variables")
@@ -1067,7 +1071,7 @@ def main():
             servers = list_mcp_servers()
             if not servers:
                 print(f"{YELLOW}No MCP servers configured.{RESET}")
-                print(f"{CYAN}Add with: python omicsclaw.py mcp add <name> <command>{RESET}")
+                print(f"{CYAN}Add with: oc mcp add <name> <command>{RESET}")
             else:
                 print(f"\n{BOLD}MCP Servers{RESET}")
                 print(f"{BOLD}{'=' * 50}{RESET}")
@@ -1085,7 +1089,7 @@ def main():
                     env_dict[k] = v
             try:
                 entry = add_mcp_server(
-                    args.name, args.command,
+                    args.name, args.server_command,
                     extra_args=args.args or None,
                     transport=getattr(args, "transport", None),
                     env=env_dict or None,
@@ -1110,7 +1114,7 @@ def main():
             sys.exit(0)
 
         else:
-            print(f"Usage: python omicsclaw.py mcp [list|add|remove|config]")
+            print(f"Usage: oc mcp [list|add|remove|config]")
             sys.exit(1)
 
     if args.command == "auth":
