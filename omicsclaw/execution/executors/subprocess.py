@@ -1,9 +1,8 @@
 """``SubprocessExecutor`` — spawn an OS process, stream its output.
 
-Where ``LocalExecutor`` is an instant-return stub, this executor runs a
-real command built from a ``command_factory(ctx)``. Stdout and stderr are
-merged and appended to ``ctx.stdout_log`` line-by-line so the Stage-4 SSE
-log-tail picks the output up live.
+This executor runs a real command built from a ``command_factory(ctx)``.
+Stdout and stderr are merged and appended to ``ctx.stdout_log``
+line-by-line so the Stage-4 SSE log-tail picks the output up live.
 
 Cooperative cancel path (user clicks "Cancel"):
     asyncio cancels the run task → executor catches ``CancelledError`` →

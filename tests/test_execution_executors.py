@@ -1,12 +1,11 @@
 """Executor abstraction scaffolding.
 
-``omicsclaw/execution/executors/`` provides the Executor Protocol and a
-baseline ``LocalExecutor`` that wraps today's ``executor_not_implemented``
-stub behavior. Keeping the same wire-level semantics lets us swap in a
-real in-process runner later without changing the App-facing contract.
-
-A matching Protocol makes SSH / Slurm executors a drop-in replacement once
-they land (plan §Non-Goals pins Slurm to Phase 9).
+``omicsclaw/execution/executors/`` provides the Executor Protocol that
+real executors (``SkillRunnerExecutor`` for the in-process runner,
+``SubprocessExecutor`` for the SSH/Slurm path) implement. The legacy
+``LocalExecutor`` ``executor_not_implemented`` stub was removed during
+OMI-12 P1.5 — tests that need an instant-return executor define one
+inline.
 """
 
 from __future__ import annotations
@@ -30,36 +29,10 @@ def test_base_module_exports_protocol_and_dataclasses() -> None:
     assert hasattr(Executor, "run")
 
 
-def test_local_executor_returns_executor_not_implemented_outcome(tmp_path: Path) -> None:
-    from omicsclaw.execution.executors import (
-        JobContext,
-        JobOutcome,
-        LocalExecutor,
-    )
-
-    stdout_log = tmp_path / "stdout.log"
-    artifact_root = tmp_path / "artifacts"
-    ctx = JobContext(
-        job_id="job-1",
-        workspace=tmp_path,
-        skill="spatial-preprocess",
-        inputs={"dataset_id": "abc"},
-        params={},
-        artifact_root=artifact_root,
-        stdout_log=stdout_log,
-    )
-    outcome = asyncio.run(LocalExecutor().run(ctx))
-    assert isinstance(outcome, JobOutcome)
-    assert outcome.exit_code == 1
-    assert outcome.error == "executor_not_implemented"
-    assert outcome.stdout_text
-    assert "executor_not_implemented" in outcome.stdout_text
-
-
-def test_local_executor_supports_custom_implementations() -> None:
-    """LocalExecutor itself can be replaced by any Executor-compatible
-    callable. Smoke-check Protocol duck-typing so alternate executors
-    don't need to subclass anything."""
+def test_executor_protocol_accepts_duck_typed_implementations() -> None:
+    """Any callable that exposes ``async def run(ctx) -> JobOutcome`` is a
+    valid ``Executor`` — no subclassing required. This is the contract that
+    SSH / Slurm / mock executors all rely on."""
     from omicsclaw.execution.executors import Executor, JobContext, JobOutcome
 
     class FakeExecutor:

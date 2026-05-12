@@ -32,7 +32,6 @@ from omicsclaw.execution.executors import (
     JobOutcome,
     build_default_executor,
 )
-from omicsclaw.execution.executors.local import EXECUTOR_NOT_IMPLEMENTED_LINE
 from omicsclaw.remote.schemas import (
     Job,
     JobListResponse,
@@ -47,7 +46,12 @@ router = APIRouter(tags=["remote"])
 logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "canceled"})
 _STUB_JOB_TASKS: dict[str, asyncio.Task[None]] = {}
-_EXECUTOR_NOT_IMPLEMENTED_LINE = EXECUTOR_NOT_IMPLEMENTED_LINE
+# Default stdout marker for failed jobs whose executor produced no stdout.
+# Kept stable so the App's failure-diagnostic flow can pattern-match it.
+_EXECUTOR_NOT_IMPLEMENTED_LINE = (
+    "executor_not_implemented: see omicsclaw/execution/ "
+    "for the upcoming Executor abstraction"
+)
 _DEFAULT_EXECUTOR: Executor = build_default_executor()
 _ORPHANED_JOB_LINE = (
     "server_restart_orphaned_job: job was in 'running' state when the "
@@ -214,8 +218,8 @@ def _finalize_stdout(workspace: Path, job_id: str, stdout_text: str) -> None:
 
     Preserve anything the executor streamed during run (so live-tailed
     SSE output isn't wiped). Only fall back to ``stdout_text`` when the
-    executor left the file empty / missing — this is the instant-return
-    stub-executor path, e.g. ``LocalExecutor``.
+    executor left the file empty / missing — this is the path taken by
+    instant-return stub executors used in tests.
     """
     stdout_path = _job_dir(workspace, job_id) / "stdout.log"
     if stdout_path.is_file() and stdout_path.stat().st_size > 0:
@@ -336,7 +340,7 @@ async def _run_job(workspace: Path, job_id: str) -> None:
         _write_job(workspace, running)
 
         # Yield so the SSE poll loop observes the 'running' transition
-        # before an instant-return executor (e.g. LocalExecutor stub) flips
+        # before an instant-return executor (e.g. a test stub) flips
         # the job to its terminal state.
         await asyncio.sleep(0.02)
 

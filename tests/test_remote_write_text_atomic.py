@@ -4,8 +4,8 @@ Stage 7 made ``_write_job`` atomic for ``job.json``. This file extends
 the same guarantee to the diagnostic artifacts written through
 ``_write_text``:
 
-- ``stdout.log`` (when the executor didn't stream — e.g. LocalExecutor
-  stub — and ``_finalize_stdout`` seeds it)
+- ``stdout.log`` (when the executor didn't stream — e.g. an instant-return
+  test stub — and ``_finalize_stdout`` seeds it)
 - ``diagnostics/stdout.log`` (failure diagnostic snapshot)
 - ``diagnostics/env_doctor.json`` (env probe snapshot attached to
   failed jobs)
