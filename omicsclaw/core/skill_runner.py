@@ -40,7 +40,7 @@ from omicsclaw.core.runtime.output_finalize import (
 )
 from omicsclaw.core.runtime.pipeline_runner import SPATIAL_PIPELINE, run_spatial_pipeline
 from omicsclaw.core.runtime.subprocess_driver import drive_subprocess
-from omicsclaw.core.skill_result import build_skill_run_result
+from omicsclaw.core.skill_result import SkillRunResult, build_skill_run_result
 
 
 OMICSCLAW_DIR = Path(__file__).resolve().parents[2]
@@ -102,13 +102,19 @@ def run_skill(
     stdout_callback: Callable[[str], None] | None = None,
     stderr_callback: Callable[[str], None] | None = None,
     cancel_event: threading.Event | None = None,
-) -> dict:
-    """Run a single skill via subprocess and return a stable result dict.
+) -> SkillRunResult:
+    """Run a single skill via subprocess and return a ``SkillRunResult``.
+
+    The runner returns a typed ``SkillRunResult`` natively (OMI-12 P1.6);
+    callers that still expect the legacy dict shape should call
+    ``.to_legacy_dict()`` at their own boundary. Internal consumers that
+    used to immediately do ``coerce_skill_run_result(run_skill(...))`` can
+    drop the coercion and use the returned model directly.
 
     When ``stdout_callback`` / ``stderr_callback`` are supplied the runner
     invokes them once per line as the skill emits output (newline stripped),
     so long-running skills produce visible logs in real time. Aggregated
-    ``stdout`` / ``stderr`` strings are still returned in the result dict.
+    ``stdout`` / ``stderr`` strings are still returned on the result.
 
     When ``cancel_event`` is supplied the runner watches it; if the event is
     set while the skill is running the child process group receives SIGTERM,
@@ -248,9 +254,9 @@ def run_skill(
         method=actual_method,
         readme_path=readme_path,
         notebook_path=notebook_path,
-    ).to_legacy_dict()
+    )
 
-    if session_path and result["success"]:
+    if session_path and result.success:
         _store_result_in_session(session_path, skill_name, final_out_dir)
 
     return result
@@ -278,7 +284,7 @@ def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) 
         pass
 
 
-def _err(skill: str, msg: str, duration: float = 0) -> dict:
+def _err(skill: str, msg: str, duration: float = 0) -> SkillRunResult:
     return build_skill_run_result(
         skill=skill,
         success=False,
@@ -286,7 +292,7 @@ def _err(skill: str, msg: str, duration: float = 0) -> dict:
         output_dir=None,
         stderr=msg,
         duration_seconds=duration,
-    ).to_legacy_dict()
+    )
 
 
 __all__ = [

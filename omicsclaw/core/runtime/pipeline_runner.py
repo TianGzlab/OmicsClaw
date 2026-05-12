@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from omicsclaw.common.report import build_output_dir_name
-from omicsclaw.core.skill_result import build_skill_run_result
+from omicsclaw.core.skill_result import SkillRunResult, build_skill_run_result
 
 from .output_finalize import write_pipeline_readme
 
@@ -35,13 +35,16 @@ def run_spatial_pipeline(
     output_dir: str | None = None,
     demo: bool = False,
     session_path: str | None = None,
-) -> dict:
+) -> SkillRunResult:
     """Run the standard spatial analysis pipeline end-to-end.
 
     ``err_factory`` is the runner's ``_err`` helper, injected to avoid an
     import cycle. ``default_output_root`` is also injected so tests that
     monkeypatch ``skill_runner.DEFAULT_OUTPUT_ROOT`` for the regular
     ``run_skill`` path do not need to learn about this module.
+
+    Returns a ``SkillRunResult`` natively (OMI-12 P1.6); callers that need
+    the legacy dict shape should call ``.to_legacy_dict()`` themselves.
     """
     if not input_path and not session_path and not demo:
         return err_factory("spatial-pipeline", "Requires --input, --demo, or --session.")
@@ -71,17 +74,17 @@ def run_spatial_pipeline(
             session_path=session_path,
         )
         all_results[skill_name] = {
-            "success": result["success"],
-            "duration": result["duration_seconds"],
-            "method": result.get("method"),
-            "output_dir": result.get("output_dir", ""),
-            "readme_path": result.get("readme_path", ""),
-            "notebook_path": result.get("notebook_path", ""),
+            "success": result.success,
+            "duration": result.duration_seconds,
+            "method": result.method,
+            "output_dir": result.output_dir or "",
+            "readme_path": result.readme_path,
+            "notebook_path": result.notebook_path,
         }
-        if not result["success"]:
+        if not result.success:
             print(f"FAILED: {skill_name}")
-            if result.get("stderr"):
-                print(f"    {result['stderr'][:200]}")
+            if result.stderr:
+                print(f"    {result.stderr[:200]}")
             break
 
         processed = skill_out / "processed.h5ad"
@@ -115,4 +118,4 @@ def run_spatial_pipeline(
         duration_seconds=sum(result["duration"] for result in all_results.values()),
         readme_path=pipeline_readme,
         notebook_path="",
-    ).to_legacy_dict()
+    )

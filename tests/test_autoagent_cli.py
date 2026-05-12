@@ -37,10 +37,17 @@ def test_run_still_forwards_unknown_flags(monkeypatch):
     oc = _load_omicsclaw_script()
     captured: dict[str, object] = {}
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(skill, **kwargs):
         captured["skill"] = skill
         captured.update(kwargs)
-        return {"success": True, "skill": skill}
+        return build_skill_run_result(
+            skill=skill,
+            success=True,
+            exit_code=0,
+            output_dir=None,
+        )
 
     monkeypatch.setattr(oc, "run_skill", fake_run_skill)
     monkeypatch.setattr(

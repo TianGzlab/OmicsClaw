@@ -50,6 +50,28 @@ def test_skill_runner_module_exposes_run_skill_contract():
     ]
 
 
+def test_run_skill_returns_skill_run_result_natively():
+    """OMI-12 P1.6: ``run_skill`` returns the typed model — not a dict.
+
+    The unknown-skill error path is the cheapest exit; pin the native
+    return type here so a future "convenience dict-wrap" cannot silently
+    regress the contract and reintroduce the dict↔model round-trip.
+    """
+    from omicsclaw.core.skill_result import SkillRunResult
+    from omicsclaw.core.skill_runner import run_skill
+
+    result = run_skill("__definitely_not_a_real_skill__", demo=True)
+    assert isinstance(result, SkillRunResult)
+    assert result.success is False
+    assert "Unknown skill" in result.stderr
+
+    # The legacy dict shape is still reachable for callers that need it.
+    legacy = result.to_legacy_dict()
+    assert isinstance(legacy, dict)
+    assert legacy["success"] is False
+    assert "Unknown skill" in legacy["stderr"]
+
+
 def test_root_omicsclaw_reexports_shared_run_skill():
     root = importlib.import_module("omicsclaw")
     runner = importlib.import_module("omicsclaw.core.skill_runner")
@@ -106,13 +128,13 @@ def test_run_skill_streams_stdout_and_stderr_lines_via_callbacks(tmp_path, monke
         stderr_callback=stderr_lines.append,
     )
 
-    assert result["success"] is True, result.get("stderr")
+    assert result.success is True, result.stderr
     assert stdout_lines == ["epoch 0/3", "epoch 1/3", "epoch 2/3", "done"]
     assert stderr_lines == ["warning: synthetic stderr"]
     # Aggregated stdout/stderr fields must still contain the same content.
     for line in stdout_lines:
-        assert line in result["stdout"]
-    assert "warning: synthetic stderr" in result["stderr"]
+        assert line in result.stdout
+    assert "warning: synthetic stderr" in result.stderr
 
 
 def test_run_skill_callback_exception_does_not_break_run(tmp_path, monkeypatch):
@@ -155,8 +177,8 @@ def test_run_skill_callback_exception_does_not_break_run(tmp_path, monkeypatch):
         output_dir=str(tmp_path / "out"),
         stdout_callback=boom,
     )
-    assert result["success"] is True
-    assert "hello" in result["stdout"]
+    assert result.success is True
+    assert "hello" in result.stdout
 
 
 def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypatch):
@@ -214,8 +236,8 @@ def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypa
     # Without cancellation the fake script would run for ~30s. Cancellation
     # must interrupt within a few seconds (1s pre-cancel + grace + cleanup).
     assert elapsed < 10, f"cancel did not interrupt; ran for {elapsed:.1f}s"
-    assert result["success"] is False
-    assert result["exit_code"] != 0
+    assert result.success is False
+    assert result.exit_code != 0
 
 
 def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_success(
@@ -285,7 +307,7 @@ def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_succ
 
     # The partial result.json was on disk when SIGKILL fired, which used to
     # trip the -9 → 0 heuristic. Cancellation must override the heuristic.
-    assert result["success"] is False, (
+    assert result.success is False, (
         "cancelled run with partial result.json must NOT be reported as success"
     )
-    assert result["exit_code"] != 0
+    assert result.exit_code != 0
