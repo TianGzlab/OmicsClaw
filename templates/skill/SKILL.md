@@ -1,6 +1,6 @@
 ---
 name: skill-template
-description: Load when copying this directory to bootstrap a new OmicsClaw v2 skill (rename, fill in, then `git add`). Skip when migrating an existing legacy skill — use `scripts/migrate_skill.py` instead, which generates the same layout from the legacy SKILL.md.
+description: Load when copying this directory to bootstrap a new OmicsClaw v2 skill (rename, fill in, then `git add`). Skip when an existing skill already covers the request.
 version: 0.1.0
 author: OmicsClaw
 license: MIT
@@ -8,39 +8,21 @@ tags:
 - template
 - scaffold
 - v2
-requires:
-- pyyaml
 ---
 
 <!--
-AUTHORING GUIDE — read once, then delete this comment block.
+Authoring checklist (delete this comment block before committing):
 
-This scaffold is the canonical v2 OmicsClaw skill skeleton.  It is consumed by:
-  * humans copying this dir to start a new skill
-  * `omics-skill-builder` (programmatic scaffolder)
-  * `scripts/migrate_skill.py` (legacy → v2 migrator)
+  1. Rename: copy this directory, rename `replace_me.py` and the `tests/`
+     file, update frontmatter `name`, `parameters.yaml::script`.
+  2. Fill: `description` (≤50 words, "Load when … Skip when …"), the six
+     `##` sections below, and the three `references/*.md` stubs.
+  3. Implement: replace the synthetic-CSV demo in the script with real I/O.
+  4. Verify: `python scripts/generate_parameters_md.py <skill_dir>` then
+     `python scripts/skill_lint.py <skill_dir>` then `pytest tests/`.
 
-Filling-in checklist (loosely follows Perplexity's skill-design framework):
-
-1. **Description** is the most important field.  It is the routing trigger
-   read by every agent invocation, NOT documentation.
-   - Format: "Load when <user intent / data shape>. Skip when <neighbouring
-     skill / wrong input>."
-   - Hard cap: 50 words (lint-enforced).
-   - Mirror real user queries, not workflow summaries.
-
-2. **Body** is loaded into context every time an agent picks this skill.
-   - Hard cap: 200 lines (lint-enforced).  Conditional / heavy logic belongs
-     in `references/*` (lazy-loaded).
-   - "Skip the obvious" — only document things the agent would otherwise get
-     wrong.  If removing a sentence wouldn't confuse a future reader, drop it.
-   - Every Gotcha bullet should anchor a code reference (`<file>.py:LINE` or
-     `result.json[X]` or `tables/X.csv`) — the lint at
-     `scripts/skill_lint.py:_check_gotchas_anchors` enforces this.
-
-3. **Gotchas Flywheel** — append-mostly maintenance.  When a reviewer or
-   user reports a failure mode, add a Gotcha bullet.  Don't lengthen
-   existing instructions; let gotchas accrue value over time.
+Full usage notes, lint rules, and soft conventions live in
+`templates/skill/README.md`.
 -->
 
 # REPLACE_SKILL_NAME
@@ -48,9 +30,9 @@ Filling-in checklist (loosely follows Perplexity's skill-design framework):
 ## When to use
 
 <!--
-Replace this with one short paragraph (3-6 lines).  Mirror the frontmatter
-`description` ("Load when… Skip when…") and explicitly call out the closest
-adjacent skill so the agent knows when to redirect.
+One short paragraph (3-6 lines).  Mirror the frontmatter description
+("Load when … Skip when …") and explicitly call out the closest adjacent
+skill so the agent knows when to redirect.
 -->
 
 The user has `<input shape>` and wants `<output shape>`.  Pick this skill
@@ -90,7 +72,8 @@ helps reviewers verify the contract.  Don't recapitulate idiomatic Python.
 <!--
 Empirically the highest-leverage section.  Each bullet should:
   * State the trap in the lead sentence.
-  * Anchor to a code line (`<file>.py:LINE`) or output filename.
+  * Anchor to a code line (`<file>.py:LINE`) or output filename — lint at
+    `scripts/skill_lint.py::_check_gotchas_anchors` enforces this.
   * Explain WHY (the reason the trap exists), not just WHAT.
 
 Skip obvious things — Python-101 advice or framework-standard behaviour.
