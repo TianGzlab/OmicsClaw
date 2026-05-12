@@ -633,8 +633,7 @@ async def execute_replot_skill(args: dict, session_id: str = None, chat_id: int 
         # Check for common R-side warnings/errors that _classify_env_error missed
         r_hints: list[str] = []
         if "there is no package called" in combined_output:
-            import re as _re
-            pkgs = _re.findall(r"there is no package called '([^']+)'", combined_output)
+            pkgs = re.findall(r"there is no package called '([^']+)'", combined_output)
             if pkgs:
                 install_cmd = ", ".join(f'"{p}"' for p in pkgs)
                 r_hints.append(
