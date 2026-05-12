@@ -141,19 +141,19 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
 
     result = oc.run_skill("fake-skill", demo=True, extra_args=["--method", "cellcharter"])
 
-    assert result["success"] is True
-    assert result["method"] == "cellcharter"
-    assert "__cellcharter__" in Path(result["output_dir"]).name
-    assert Path(result["readme_path"]).exists()
-    assert Path(result["notebook_path"]).exists()
-    assert "README.md" in result["files"]
-    assert "analysis_notebook.ipynb" in result["files"]
-    readme_text = Path(result["readme_path"]).read_text(encoding="utf-8")
+    assert result.success is True
+    assert result.method == "cellcharter"
+    assert "__cellcharter__" in Path(result.output_dir).name
+    assert Path(result.readme_path).exists()
+    assert Path(result.notebook_path).exists()
+    assert "README.md" in result.files
+    assert "analysis_notebook.ipynb" in result.files
+    readme_text = Path(result.readme_path).read_text(encoding="utf-8")
     assert "Synthetic test skill" in readme_text
     assert "cellcharter" in readme_text
     assert "analysis_notebook.ipynb" in readme_text
 
-    notebook = nbformat.read(result["notebook_path"], as_version=4)
+    notebook = nbformat.read(result.notebook_path, as_version=4)
     assert notebook.metadata["omicsclaw"]["skill"] == "fake-skill"
     sources = "\n".join(cell.source for cell in notebook.cells)
     assert "load_skill" in sources

@@ -117,6 +117,8 @@ def test_format_skills_catalog_plain_renders_sections():
 
 
 def test_run_skill_command_forwards_skill_run_args(monkeypatch):
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     calls: list[tuple[str, str | None, str | None, bool, list[str] | None]] = []
 
     def _run_skill(
@@ -128,7 +130,12 @@ def test_run_skill_command_forwards_skill_run_args(monkeypatch):
         extra_args: list[str] | None = None,
     ):
         calls.append((skill, input_path, output_dir, demo, extra_args))
-        return {"success": True, "output_dir": output_dir}
+        return build_skill_run_result(
+            skill=skill,
+            success=True,
+            exit_code=0,
+            output_dir=output_dir,
+        )
 
     monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", _run_skill)
 
@@ -142,7 +149,10 @@ def test_run_skill_command_forwards_skill_run_args(monkeypatch):
         )
     )
 
-    assert result == {"success": True, "output_dir": "./workspace"}
+    # ``run_skill_command`` translates back to the legacy dict shape at the
+    # interactive boundary; the runner itself returns ``SkillRunResult``.
+    assert result["success"] is True
+    assert result["output_dir"] == "./workspace"
     assert calls == [
         ("spatial-preprocess", "data.h5ad", "./workspace", True, ["--method", "scanpy"])
     ]

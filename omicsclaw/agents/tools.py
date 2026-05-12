@@ -154,11 +154,11 @@ def omicsclaw_execute(
         from omicsclaw.core.skill_runner import run_skill
 
         result = run_skill(skill, **kwargs)
-        success = result.get("success", False)
-        out_dir = result.get("output_dir", "")
-        stdout = result.get("stdout", "")
-        stderr = result.get("stderr", "")
-        duration = result.get("duration_seconds", 0)
+        success = result.success
+        out_dir = result.output_dir or ""
+        stdout = result.stdout
+        stderr = result.stderr
+        duration = result.duration_seconds
 
         if success:
             summary = (

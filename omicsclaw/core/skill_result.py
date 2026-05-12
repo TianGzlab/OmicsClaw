@@ -141,8 +141,15 @@ def build_skill_run_result(
 
 
 def result_json_fallback(result: SkillRunResult) -> str:
-    """Serialize the original runner mapping for log fallback text."""
-    return json.dumps(result.raw, ensure_ascii=False, default=str)
+    """Serialize the result for log fallback text.
+
+    Prefers the captured ``raw`` mapping when the result came from
+    ``coerce_skill_run_result`` (which preserves any extra keys the runner
+    emitted), otherwise falls back to ``to_legacy_dict()`` so the snapshot
+    is non-empty for natively-built ``SkillRunResult`` instances.
+    """
+    payload: Mapping[str, Any] = result.raw or result.to_legacy_dict()
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 __all__ = [

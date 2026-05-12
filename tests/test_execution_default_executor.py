@@ -160,16 +160,19 @@ def test_skill_runner_executor_maps_job_context_to_run_skill(monkeypatch, tmp_pa
 
     captured: dict[str, object] = {}
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(skill, **kwargs):
         captured["skill"] = skill
         captured.update(kwargs)
-        return {
-            "success": True,
-            "exit_code": 0,
-            "stdout": "runner-ok",
-            "stderr": "",
-            "output_dir": str(tmp_path / "artifacts"),
-        }
+        return build_skill_run_result(
+            skill=skill,
+            success=True,
+            exit_code=0,
+            output_dir=str(tmp_path / "artifacts"),
+            stdout="runner-ok",
+            stderr="",
+        )
 
     monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
 
@@ -213,18 +216,21 @@ def test_skill_runner_executor_sets_cancel_event_on_asyncio_cancel(monkeypatch, 
 
     captured_events: list[threading.Event] = []
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(skill, **kwargs):
         cancel_event = kwargs["cancel_event"]
         captured_events.append(cancel_event)
         # Block until the executor signals cancellation, with a safety timeout.
         signaled = cancel_event.wait(timeout=10.0)
-        return {
-            "success": not signaled,
-            "exit_code": 137 if signaled else 0,
-            "stdout": "",
-            "stderr": "cancelled" if signaled else "",
-            "output_dir": str(tmp_path / "artifacts"),
-        }
+        return build_skill_run_result(
+            skill=skill,
+            success=not signaled,
+            exit_code=137 if signaled else 0,
+            output_dir=str(tmp_path / "artifacts"),
+            stdout="",
+            stderr="cancelled" if signaled else "",
+        )
 
     monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
 
@@ -257,14 +263,17 @@ def test_skill_runner_executor_normalizes_failed_zero_exit(monkeypatch, tmp_path
 
     from omicsclaw.execution.executors.default import SkillRunnerExecutor
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(_skill, **_kwargs):
-        return {
-            "success": False,
-            "exit_code": 0,
-            "stdout": "",
-            "stderr": "missing dependency",
-            "output_dir": str(tmp_path / "artifacts"),
-        }
+        return build_skill_run_result(
+            skill=_skill,
+            success=False,
+            exit_code=0,
+            output_dir=str(tmp_path / "artifacts"),
+            stdout="",
+            stderr="missing dependency",
+        )
 
     monkeypatch.setattr("omicsclaw.core.skill_runner.run_skill", fake_run_skill)
 

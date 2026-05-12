@@ -472,7 +472,7 @@ async def _run_skill_via_shared_runner(
     out_dir: Path,
 ) -> dict:
     from omicsclaw.core import skill_runner
-    from omicsclaw.core.skill_result import coerce_skill_run_result
+    from omicsclaw.core.skill_result import SkillRunResult
 
     runner_skill = "spatial-pipeline" if skill_key == "pipeline" else skill_key
     skill_info = _lookup_skill_info(runner_skill)
@@ -500,7 +500,7 @@ async def _run_skill_via_shared_runner(
 
     cancel_event = threading.Event()
 
-    def _run() -> dict:
+    def _run() -> SkillRunResult:
         return skill_runner.run_skill(
             runner_skill,
             input_path=str(input_path) if input_path else None,
@@ -514,11 +514,10 @@ async def _run_skill_via_shared_runner(
         )
 
     try:
-        result = await asyncio.to_thread(_run)
+        run_result = await asyncio.to_thread(_run)
     except asyncio.CancelledError:
         cancel_event.set()
         raise
-    run_result = coerce_skill_run_result(result)
     stdout_str = run_result.stdout
     stderr_str = run_result.stderr
     guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))

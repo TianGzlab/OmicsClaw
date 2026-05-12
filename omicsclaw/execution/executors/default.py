@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from omicsclaw.autoagent.constants import param_to_cli_flag
-from omicsclaw.core.skill_result import coerce_skill_run_result, result_json_fallback
+from omicsclaw.core.skill_result import SkillRunResult, result_json_fallback
 
 from .base import JobContext, JobOutcome
 
@@ -99,7 +99,7 @@ class SkillRunnerExecutor:
         extra_args = _params_to_extra_args(ctx.params)
         cancel_event = threading.Event()
 
-        def _run() -> dict[str, Any]:
+        def _run() -> SkillRunResult:
             return skill_runner.run_skill(
                 ctx.skill,
                 input_path=str(input_path) if input_path else None,
@@ -112,7 +112,7 @@ class SkillRunnerExecutor:
             )
 
         try:
-            result = await asyncio.to_thread(_run)
+            run_result = await asyncio.to_thread(_run)
         except asyncio.CancelledError:
             # Forward asyncio cancellation to the worker thread / subprocess so
             # the SIGTERM/SIGKILL path runs instead of leaking the child.
@@ -124,7 +124,6 @@ class SkillRunnerExecutor:
             ctx.stdout_log.write_text(text, encoding="utf-8")
             return JobOutcome(exit_code=1, error=text, stdout_text=text)
 
-        run_result = coerce_skill_run_result(result)
         stdout_text = run_result.combined_output
         if not stdout_text:
             stdout_text = result_json_fallback(run_result)

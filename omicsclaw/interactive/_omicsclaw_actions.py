@@ -200,10 +200,13 @@ def list_registered_skill_names() -> list[str]:
 def run_skill_command(command: SkillRunCommandArgs) -> dict[str, Any]:
     from omicsclaw.core.skill_runner import run_skill
 
+    # Interactive display helpers (``build_skill_run_display_view``) consume
+    # the legacy dict shape; ``.to_legacy_dict()`` translates here so the
+    # surface stays stable while the runner returns a typed model natively.
     return run_skill(
         command.skill,
         input_path=command.input_path,
         output_dir=command.output_dir,
         demo=command.demo,
         extra_args=command.extra_args,
-    )
+    ).to_legacy_dict()

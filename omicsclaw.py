@@ -1435,22 +1435,22 @@ def main():
             extra_args=extra if extra else None,
         )
 
-        if result["success"]:
-            print(f"{GREEN}Success{RESET}: {result['skill']}")
-            if result.get("method"):
-                print(f"  Method: {result['method']}")
-            if result.get("output_dir"):
-                print(f"  Output: {result['output_dir']}")
-            if result.get("readme_path"):
-                print(f"  Guide:  {result['readme_path']}")
-            if result.get("notebook_path"):
-                print(f"  Notebook: {result['notebook_path']}")
-            if result.get("stdout"):
-                print(result["stdout"], end="")
+        if result.success:
+            print(f"{GREEN}Success{RESET}: {result.skill}")
+            if result.method:
+                print(f"  Method: {result.method}")
+            if result.output_dir:
+                print(f"  Output: {result.output_dir}")
+            if result.readme_path:
+                print(f"  Guide:  {result.readme_path}")
+            if result.notebook_path:
+                print(f"  Notebook: {result.notebook_path}")
+            if result.stdout:
+                print(result.stdout, end="")
         else:
-            print(f"{RED}Failed{RESET}: {result['skill']}", file=sys.stderr)
-            if result.get("stderr"):
-                print(result["stderr"], file=sys.stderr)
+            print(f"{RED}Failed{RESET}: {result.skill}", file=sys.stderr)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
             sys.exit(1)
 
 

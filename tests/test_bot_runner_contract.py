@@ -101,6 +101,8 @@ def test_bot_run_skill_via_shared_runner_streams_lines_to_bot_logger(
     out_dir = tmp_path / "bot_streaming_out"
     out_dir.mkdir()
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(skill_name=None, *, stdout_callback=None, stderr_callback=None, **kwargs):
         if stdout_callback is not None:
             stdout_callback("epoch 1/3")
@@ -108,19 +110,16 @@ def test_bot_run_skill_via_shared_runner_streams_lines_to_bot_logger(
             stdout_callback("epoch 3/3")
         if stderr_callback is not None:
             stderr_callback("warning: synthetic")
-        return {
-            "skill": skill_name,
-            "success": True,
-            "exit_code": 0,
-            "output_dir": str(out_dir),
-            "files": [],
-            "stdout": "epoch 1/3\nepoch 2/3\nepoch 3/3\n",
-            "stderr": "warning: synthetic\n",
-            "duration_seconds": 0.1,
-            "method": None,
-            "readme_path": "",
-            "notebook_path": "",
-        }
+        return build_skill_run_result(
+            skill=skill_name,
+            success=True,
+            exit_code=0,
+            output_dir=str(out_dir),
+            files=[],
+            stdout="epoch 1/3\nepoch 2/3\nepoch 3/3\n",
+            stderr="warning: synthetic\n",
+            duration_seconds=0.1,
+        )
 
     monkeypatch.setattr(runner_module, "run_skill", fake_run_skill)
 
@@ -156,25 +155,24 @@ def test_bot_run_skill_via_shared_runner_propagates_asyncio_cancel(tmp_path, mon
     out_dir.mkdir()
     captured_events: list[threading.Event] = []
 
+    from omicsclaw.core.skill_result import build_skill_run_result
+
     def fake_run_skill(skill_name=None, *, cancel_event=None, **kwargs):
         assert cancel_event is not None, (
             "bot adapter must pass a cancel_event so cancellation propagates"
         )
         captured_events.append(cancel_event)
         signaled = cancel_event.wait(timeout=10.0)
-        return {
-            "skill": skill_name,
-            "success": not signaled,
-            "exit_code": 137 if signaled else 0,
-            "output_dir": str(out_dir),
-            "files": [],
-            "stdout": "",
-            "stderr": "cancelled" if signaled else "",
-            "duration_seconds": 0.1,
-            "method": None,
-            "readme_path": "",
-            "notebook_path": "",
-        }
+        return build_skill_run_result(
+            skill=skill_name,
+            success=not signaled,
+            exit_code=137 if signaled else 0,
+            output_dir=str(out_dir),
+            files=[],
+            stdout="",
+            stderr="cancelled" if signaled else "",
+            duration_seconds=0.1,
+        )
 
     monkeypatch.setattr(runner_module, "run_skill", fake_run_skill)
 
