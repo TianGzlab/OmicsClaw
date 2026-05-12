@@ -231,10 +231,9 @@ def skill_search(
     from pathlib import Path
 
     try:
-        from omicsclaw.core.registry import OmicsRegistry
+        from omicsclaw.core.registry import ensure_registry_loaded
 
-        registry = OmicsRegistry()
-        registry.load_all()
+        registry = ensure_registry_loaded()
 
         query_lower = query.lower()
         domain_lower = domain.lower() if domain else ""

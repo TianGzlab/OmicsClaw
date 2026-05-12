@@ -213,7 +213,6 @@ domain keys and their static metadata:
 "spatial": {
     "name": "Spatial Transcriptomics",
     "primary_data_types": ["h5ad", "h5", "zarr", "loom"],
-    "skill_count": 17,                # refreshed at runtime, see below
     "summary": "Spatial transcriptomics for Visium/Xenium/MERFISH/...",
     "representative_skills": [
         "spatial-preprocess", "spatial-domains", "spatial-de", ...
@@ -221,11 +220,11 @@ domain keys and their static metadata:
 },
 ```
 
-`skill_count` values in `_HARDCODED_DOMAINS` are only initial
-placeholders; `_refresh_domain_skill_counts()`
-(`omicsclaw/core/registry.py:378`) overwrites them after `load_all()`
-with the real count per domain. The `summary` and `representative_skills`
-fields drive the 7-domain briefing (§5).
+`skill_count` is not declared in `_HARDCODED_DOMAINS` — it is computed
+from the live filesystem by `_refresh_domain_skill_counts()` after every
+`load_all()` (or `reload()`) so the value cannot drift from the actual
+contents of `skills/`. The `summary` and `representative_skills` fields
+drive the 7-domain briefing (§5).
 
 ### Lazy metadata
 

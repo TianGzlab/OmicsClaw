@@ -13,7 +13,7 @@ import json
 import re
 from typing import Any
 
-from omicsclaw.core.registry import OmicsRegistry
+from omicsclaw.core.registry import OmicsRegistry, ensure_registry_loaded
 
 try:
     from omicsclaw.loaders import detect_domain_from_path
@@ -465,8 +465,7 @@ def resolve_capability(
             reasoning=["empty request"],
         )
 
-    registry = OmicsRegistry()
-    registry.load_all()
+    registry = ensure_registry_loaded()
 
     skill_creation_requested = _requests_skill_creation(query)
 

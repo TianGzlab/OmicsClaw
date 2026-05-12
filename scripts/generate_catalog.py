@@ -8,63 +8,29 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
+
 OMICSCLAW_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = OMICSCLAW_DIR / "skills"
 
 
 def parse_yaml_frontmatter(text: str) -> dict:
-    """Extract YAML frontmatter from a SKILL.md file (simple parser, supports >- blocks)."""
+    """Extract YAML frontmatter from a SKILL.md file via ``yaml.safe_load``.
+
+    Uses the same parser as ``omicsclaw.core.lazy_metadata`` so the catalog
+    cannot diverge from the runtime registry on nested structures, folded
+    scalars, or list/dict shapes.
+    """
     if not text.startswith("---"):
         return {}
-    end = text.index("---", 3)
-    yaml_block = text[3:end].strip()
-
-    result: dict = {}
-    lines = yaml_block.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-        if ":" in stripped and not stripped.startswith("-") and not stripped.startswith("#"):
-            key, _, value = stripped.partition(":")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if value in (">-", ">", "|", "|-"):
-                # Collect following indented lines as a folded scalar
-                folded_parts = []
-                i += 1
-                while i < len(lines) and (lines[i].startswith("  ") or lines[i].strip() == ""):
-                    folded_parts.append(lines[i].strip())
-                    i += 1
-                result[key] = " ".join(p for p in folded_parts if p)
-                continue
-            elif value.startswith("[") and value.endswith("]"):
-                value = [v.strip().strip('"').strip("'") for v in value[1:-1].split(",") if v.strip()]
-            elif value == "":
-                # YAML list syntax — `key:` followed by `- item` indented lines.
-                # Peek the next non-empty line: if it starts with `- ` it's a
-                # block sequence; collect until we hit a top-level key or EOF.
-                items: list[str] = []
-                j = i + 1
-                while j < len(lines):
-                    next_line = lines[j]
-                    next_stripped = next_line.strip()
-                    if not next_stripped:
-                        j += 1
-                        continue
-                    if next_line.startswith("- "):
-                        items.append(next_line[2:].strip().strip('"').strip("'"))
-                        j += 1
-                        continue
-                    break  # top-level key or other non-sequence line
-                if items:
-                    result[key] = items
-                    i = j
-                    continue
-                # `value == ""` with no list items below: leave as empty string.
-            result[key] = value
-        i += 1
-    return result
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    try:
+        loaded = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def build_cli_alias_map() -> dict[str, str]:

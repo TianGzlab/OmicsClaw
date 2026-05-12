@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Fields that lazy_metadata exposes as properties.  When a v2 sidecar
 # (`parameters.yaml`) is present, every field except name/description is read
@@ -100,7 +103,12 @@ class LazySkillMetadata:
 
         try:
             return yaml.safe_load(parts[1]) or {}
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            logger.warning(
+                "Failed to parse SKILL.md frontmatter at %s: %s",
+                skill_md,
+                exc,
+            )
             return None
 
     def _load_sidecar(self) -> dict | None:
@@ -109,7 +117,12 @@ class LazySkillMetadata:
             return None
         try:
             data = yaml.safe_load(sidecar.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            logger.warning(
+                "Failed to parse parameters.yaml at %s: %s",
+                sidecar,
+                exc,
+            )
             return None
         return data if isinstance(data, dict) else None
 
@@ -239,7 +252,12 @@ class LazySkillMetadata:
 
         try:
             self._full = yaml.safe_load(parts[1])
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            logger.warning(
+                "Failed to parse SKILL.md frontmatter at %s: %s",
+                skill_md,
+                exc,
+            )
             self._full = {}
 
     def get_full(self) -> dict:

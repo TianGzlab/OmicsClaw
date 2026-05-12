@@ -1215,9 +1215,8 @@ except Exception:
     pass
 
 def load_skill(name):
-    from omicsclaw.core.registry import OmicsRegistry
-    reg = OmicsRegistry()
-    reg.load_all()
+    from omicsclaw.core.registry import ensure_registry_loaded
+    reg = ensure_registry_loaded()
     info = reg.skills.get(name)
     if not info:
         raise ValueError(
