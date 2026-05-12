@@ -77,6 +77,87 @@ def test_validate_custom_analysis_code_allows_basic_analysis():
     assert issues == []
 
 
+def test_resolve_capability_no_skill_fallback_defaults_should_search_web_to_false():
+    """``should_search_web`` used to be hard-coded ``True`` on every
+    ``no_skill`` outcome, defaulting the bot's LLM tool-use loop into a
+    web-search step even when the query had no web/literature wording.
+    After OMI-12 audit P1 #3 the flag only fires when ``_WEB_HINTS``
+    matches (or the request is the explicit "implement from literature"
+    case, handled by ``_requests_new_literature_implementation``).
+    """
+    # An omics-shaped query that doesn't match any skill (single-cell
+    # doublet detection — the resolver lacks a strong-signal skill, so it
+    # falls through to no_skill). No web/literature wording → False.
+    decision = resolve_capability(
+        "Detect doublets in my single-cell data using scDblFinder"
+    )
+    assert decision.coverage == "no_skill"
+    assert decision.should_search_web is False
+
+
+def test_resolve_capability_no_skill_with_web_hints_still_searches_web():
+    """The flip in the test above must NOT mute the path the user actually
+    asked for web search on. Adding ``documentation`` / ``latest`` /
+    ``literature`` / etc. to an omics-shaped no_skill query reverts the
+    flag to ``True``.
+    """
+    decision = resolve_capability(
+        "Detect doublets in my single-cell data; check the latest documentation about scDblFinder"
+    )
+    assert decision.coverage == "no_skill"
+    assert decision.should_search_web is True
+
+
+def test_resolve_capability_literature_implementation_still_searches_web():
+    """The "implement a new method from latest literature" path is
+    independent of ``_WEB_HINTS`` — it has its own explicit branch (via
+    ``_requests_new_literature_implementation``) and must keep
+    ``should_search_web=True``.
+    """
+    decision = resolve_capability(
+        "Implement a hidden Markov model for chromatin state transition analysis from latest literature"
+    )
+    assert decision.coverage == "no_skill"
+    assert decision.should_search_web is True
+
+
+def test_score_skills_and_detect_domain_visits_each_skill_once():
+    """The pre-refactor resolver walked ``iter_primary_skills`` twice for
+    every chat turn — once in ``_detect_domain``, once in
+    ``resolve_capability``. The single-pass helper introduced in
+    OMI-12 audit P1 #1 must visit each skill exactly one time per call.
+
+    Asserted by monkey-patching ``iter_primary_skills`` to count calls.
+    """
+    from omicsclaw.core import capability_resolver as cr
+
+    real_registry = cr.ensure_registry_loaded()
+    call_counts: list[int] = []
+    real_iter = real_registry.__class__.iter_primary_skills
+
+    def counting_iter(self, domain=None):
+        items = real_iter(self, domain=domain)
+        call_counts.append(len(items))
+        return items
+
+    # Patch the bound method on the singleton.
+    original = real_registry.iter_primary_skills
+    real_registry.iter_primary_skills = counting_iter.__get__(real_registry)
+    try:
+        cr.resolve_capability("preprocess my Visium spatial transcriptomics dataset")
+    finally:
+        real_registry.iter_primary_skills = original
+
+    # One scoring pass over every primary skill — no domain filter inside
+    # ``_score_skills_and_detect_domain``; the per-domain filter happens
+    # on the precomputed candidate list, not via a second walk.
+    assert len(call_counts) == 1, (
+        f"resolve_capability invoked iter_primary_skills {len(call_counts)} "
+        f"times (per-call sizes={call_counts}); the post-refactor flow must "
+        f"call it exactly once."
+    )
+
+
 def test_resolve_capability_breaks_score_ties_alphabetically():
     """The candidate sort must tie-break on the canonical alias so the same
     query produces the same ``chosen_skill`` regardless of which order

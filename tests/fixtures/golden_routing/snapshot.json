@@ -18,7 +18,7 @@
           "score": 1.7
         },
         {
-          "skill": "spatial-de",
+          "skill": "spatial-annotate",
           "score": 0.85
         }
       ]
@@ -140,19 +140,19 @@
       "chosen_skill": "",
       "coverage": "no_skill",
       "domain": "bulkrna",
-      "should_search_web": true,
+      "should_search_web": false,
       "should_create_skill": false,
       "top_3_candidates": [
-        {
-          "skill": "bulkrna-survival",
-          "score": 2.55
-        },
         {
           "skill": "bulkrna-de",
           "score": 2.55
         },
         {
           "skill": "bulkrna-deconvolution",
+          "score": 2.55
+        },
+        {
+          "skill": "bulkrna-splicing",
           "score": 2.55
         }
       ]
@@ -171,11 +171,11 @@
           "score": 4.7
         },
         {
-          "skill": "sc-cytotrace",
+          "skill": "sc-cell-communication",
           "score": 1.7
         },
         {
-          "skill": "sc-markers",
+          "skill": "sc-clustering",
           "score": 1.7
         }
       ]
@@ -240,7 +240,7 @@
           "score": 2.55
         },
         {
-          "skill": "bulkrna-trajblend",
+          "skill": "bulkrna-qc",
           "score": 2.55
         }
       ]
@@ -286,7 +286,7 @@
           "score": 2.35
         },
         {
-          "skill": "genomics-variant-calling",
+          "skill": "genomics-phasing",
           "score": 1.7
         }
       ]
@@ -309,7 +309,7 @@
           "score": 2.35
         },
         {
-          "skill": "proteomics-structural",
+          "skill": "proteomics-data-import",
           "score": 0.85
         }
       ]
@@ -390,7 +390,7 @@
           "score": 1.7
         },
         {
-          "skill": "spatial-de",
+          "skill": "spatial-annotate",
           "score": 0.85
         }
       ]
