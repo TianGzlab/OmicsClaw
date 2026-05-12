@@ -39,7 +39,8 @@ from typing import Any
 
 def _configure_stdio_error_handling(*streams: Any) -> None:
     """Avoid hard failures when a terminal cannot encode Unicode output."""
-    for stream in streams or (sys.stdout, sys.stderr):
+    targets = streams if streams else (sys.stdout, sys.stderr)
+    for stream in targets:
         reconfigure = getattr(stream, "reconfigure", None)
         if not callable(reconfigure):
             continue
@@ -47,9 +48,6 @@ def _configure_stdio_error_handling(*streams: Any) -> None:
             reconfigure(errors="backslashreplace")
         except (OSError, ValueError):
             continue
-
-
-_configure_stdio_error_handling()
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -1056,6 +1054,7 @@ class OmicsClawParser(argparse.ArgumentParser):
 
 
 def main():
+    _configure_stdio_error_handling()
     # Ensure .env is loaded for all subcommands (memory-server, etc.)
     from omicsclaw.common.runtime_env import load_project_dotenv
 

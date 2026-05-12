@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -21,7 +22,7 @@ def _load_omicsclaw_script():
     return module
 
 
-def _iter_string_fragments(node: ast.AST):
+def _iter_string_fragments(node: ast.AST) -> Iterator[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         yield node.value
         return
