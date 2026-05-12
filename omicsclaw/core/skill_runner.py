@@ -25,7 +25,7 @@ from omicsclaw.common.report import (
     load_result_json,
     write_output_readme,
 )
-from omicsclaw.core.registry import registry
+from omicsclaw.core.registry import ensure_registry_loaded, registry
 from omicsclaw.core.skill_result import build_skill_run_result
 
 
@@ -35,10 +35,6 @@ PYTHON = sys.executable
 
 if str(OMICSCLAW_DIR) not in sys.path:
     sys.path.insert(0, str(OMICSCLAW_DIR))
-
-registry.load_all()
-SKILLS = registry.skills
-DOMAINS = registry.domains
 
 _COLOUR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 BOLD = "\033[1m" if _COLOUR else ""
@@ -64,17 +60,18 @@ def _get_write_analysis_notebook():
 
 def resolve_skill_alias(skill_name: str) -> str:
     """Resolve a user-facing skill name or legacy alias to its canonical alias."""
-    if skill_name in SKILLS:
-        return SKILLS[skill_name].get("alias", skill_name)
+    skills = ensure_registry_loaded().skills
+    if skill_name in skills:
+        return skills[skill_name].get("alias", skill_name)
 
-    for skill_key, skill_info in SKILLS.items():
+    for skill_key, skill_info in skills.items():
         legacy_aliases = skill_info.get("legacy_aliases", [])
         if skill_name in legacy_aliases:
             return skill_key
 
     if ":" in skill_name:
         _domain, skill = skill_name.split(":", 1)
-        if skill in SKILLS:
+        if skill in skills:
             return skill
 
     return skill_name
@@ -280,9 +277,10 @@ def run_skill(
             session_path=session_path,
         )
 
-    skill_info = SKILLS.get(skill_name)
+    skills = ensure_registry_loaded().skills
+    skill_info = skills.get(skill_name)
     if skill_info is None:
-        return _err(skill_name, f"Unknown skill '{skill_name}'. Available: {list(SKILLS.keys())}")
+        return _err(skill_name, f"Unknown skill '{skill_name}'. Available: {list(skills.keys())}")
 
     script_path: Path = skill_info["script"]
     if not script_path.exists():
@@ -328,7 +326,7 @@ def run_skill(
     cmd.extend(["--output", str(out_dir)])
 
     domain = skill_info.get("domain", "unknown")
-    domain_display = DOMAINS.get(domain, {}).get("name", domain.title())
+    domain_display = registry.domains.get(domain, {}).get("name", domain.title())
     if demo:
         mode_str = f"{CYAN}demo mode{RESET}"
     elif resolved_input_paths:

@@ -542,10 +542,9 @@ async def _run_skill_via_shared_runner(
 def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
     skill_registry = registry
     if force_reload:
-        skill_registry._loaded = False
-        skill_registry.skills.clear()
-        skill_registry.lazy_skills.clear()
-    skill_registry.load_all()
+        skill_registry.reload()
+    else:
+        skill_registry.load_all()
 
     info = skill_registry.skills.get(skill_key)
     if info:

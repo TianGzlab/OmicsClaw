@@ -84,3 +84,82 @@ def test_registry_loads_top_level_literature_skill():
     assert ("literature", registry.skills["literature"]) in registry.iter_primary_skills()
     assert registry.domains["literature"]["skill_count"] == 1
     assert len(registry.iter_primary_skills()) == 89
+
+
+def test_skill_runner_sees_registry_invalidate_after_load():
+    """``registry.invalidate()`` must affect subsequent reads by the runner.
+
+    Pre-fix ``omicsclaw.core.skill_runner`` cached ``SKILLS = registry.skills``
+    at module-import time, so calls to ``registry.invalidate()`` /
+    ``registry.reload()`` left the runner pointing at a stale dict and
+    operators saw "skill not found" errors that did not match the live
+    filesystem.
+    """
+    from omicsclaw.core import skill_runner
+
+    registry.load_all()
+    assert "spatial-preprocess" in registry.skills, "preconditions failed"
+
+    try:
+        registry.invalidate()
+        # After invalidate the live dict is empty and the runner must see it.
+        from omicsclaw.core.registry import ensure_registry_loaded as _ensure
+
+        # Re-bind the live view the runner reads from; the runner accesses
+        # ``ensure_registry_loaded().skills`` per call, not a frozen snapshot.
+        assert _ensure is not None
+        assert len(registry.skills) == 0
+        # ``resolve_skill_alias`` reads ``registry.skills`` lazily and will
+        # repopulate via ``ensure_registry_loaded`` — i.e. it must NOT raise
+        # KeyError because of a stale module-level snapshot.
+        resolved = skill_runner.resolve_skill_alias("spatial-preprocess")
+        assert resolved == "spatial-preprocess"
+        assert "spatial-preprocess" in registry.skills, (
+            "ensure_registry_loaded() should have repopulated the live registry"
+        )
+    finally:
+        registry.load_all()
+
+
+def test_registry_reload_clears_stale_entries_for_runner():
+    """``registry.reload()`` must let the runner pick up filesystem changes
+    rather than continuing to return entries from a stale dict snapshot.
+    """
+    from omicsclaw.core import skill_runner
+    from omicsclaw.core.registry import ensure_registry_loaded
+
+    registry.load_all()
+    assert "spatial-preprocess" in registry.skills
+
+    # Simulate the SKILL.md / parameters.yaml edit lifecycle: inject a fake
+    # entry, then call reload() and verify that both the registry AND the
+    # runner observe the rebuilt dict (i.e. the fake entry is gone).
+    registry.skills["__stale_only__"] = {
+        "alias": "__stale_only__",
+        "domain": "demo",
+        "script": Path("/does/not/exist"),
+        "demo_args": [],
+        "description": "synthetic stale entry",
+        "trigger_keywords": [],
+        "allowed_extra_flags": set(),
+        "legacy_aliases": [],
+        "saves_h5ad": False,
+        "requires_preprocessed": False,
+        "param_hints": {},
+    }
+    try:
+        # Before reload, the entry is observable.
+        assert "__stale_only__" in registry.skills
+
+        registry.reload()
+
+        # After reload, both the registry and the runner's live read must
+        # show the rebuilt state, NOT the stale snapshot.
+        assert "__stale_only__" not in registry.skills
+        assert "__stale_only__" not in ensure_registry_loaded().skills
+        # And the runner's resolver does not fall through to the stale dict.
+        assert skill_runner.resolve_skill_alias("__stale_only__") == "__stale_only__"
+        assert "spatial-preprocess" in registry.skills, "real skills came back"
+    finally:
+        registry.skills.pop("__stale_only__", None)
+        registry.load_all()

@@ -10,6 +10,27 @@ import time
 from pathlib import Path
 
 
+def _install_fake_skills(monkeypatch, skills: dict, domains: dict | None = None) -> None:
+    """Inject fake skills/domains into the live registry for the duration of a test.
+
+    The runner no longer caches ``SKILLS`` / ``DOMAINS`` at module-import time
+    (so that ``registry.reload()`` actually takes effect for downstream
+    callers). Tests therefore patch ``registry.skills`` / ``registry.domains``
+    directly and freeze ``_loaded`` so that any internal
+    ``ensure_registry_loaded()`` calls become a no-op rather than rescanning
+    disk and clobbering the fake.
+    """
+    from omicsclaw.core.registry import SKILLS_DIR, registry
+
+    monkeypatch.setattr(registry, "skills", skills, raising=False)
+    monkeypatch.setattr(
+        registry, "domains", domains if domains is not None else {"demo": {"name": "Demo"}},
+        raising=False,
+    )
+    monkeypatch.setattr(registry, "_loaded", True, raising=False)
+    monkeypatch.setattr(registry, "_loaded_dir", SKILLS_DIR.resolve(), raising=False)
+
+
 def test_skill_runner_module_exposes_run_skill_contract():
     module = importlib.import_module("omicsclaw.core.skill_runner")
 
@@ -64,7 +85,7 @@ def test_run_skill_streams_stdout_and_stderr_lines_via_callbacks(tmp_path, monke
     """), encoding="utf-8")
 
     monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
-    monkeypatch.setattr(skill_runner, "SKILLS", {
+    _install_fake_skills(monkeypatch, {
         "fake-streamer": {
             "script": fake_script,
             "domain": "demo",
@@ -73,7 +94,6 @@ def test_run_skill_streams_stdout_and_stderr_lines_via_callbacks(tmp_path, monke
             "description": "Streaming test skill",
         }
     })
-    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -116,7 +136,7 @@ def test_run_skill_callback_exception_does_not_break_run(tmp_path, monkeypatch):
     """), encoding="utf-8")
 
     monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
-    monkeypatch.setattr(skill_runner, "SKILLS", {
+    _install_fake_skills(monkeypatch, {
         "fake-one-line": {
             "script": fake_script,
             "domain": "demo",
@@ -125,7 +145,6 @@ def test_run_skill_callback_exception_does_not_break_run(tmp_path, monkeypatch):
             "description": "One-line test skill",
         }
     })
-    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
     def boom(_line: str) -> None:
         raise RuntimeError("callback exploded")
@@ -163,7 +182,7 @@ def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypa
     """), encoding="utf-8")
 
     monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
-    monkeypatch.setattr(skill_runner, "SKILLS", {
+    _install_fake_skills(monkeypatch, {
         "fake-long": {
             "script": fake_script,
             "domain": "demo",
@@ -172,7 +191,6 @@ def test_run_skill_cancel_event_kills_long_running_subprocess(tmp_path, monkeypa
             "description": "Long-running test skill",
         }
     })
-    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
     cancel_event = threading.Event()
 
@@ -239,7 +257,7 @@ def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_succ
     """), encoding="utf-8")
 
     monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
-    monkeypatch.setattr(skill_runner, "SKILLS", {
+    _install_fake_skills(monkeypatch, {
         "fake-partial": {
             "script": fake_script,
             "domain": "demo",
@@ -248,7 +266,6 @@ def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_succ
             "description": "Partial-then-sleep test skill",
         }
     })
-    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
 
     cancel_event = threading.Event()
 

@@ -118,6 +118,28 @@ def test_default_command_factory_ignores_none_param_values(tmp_path: Path) -> No
     assert argv[argv.index("--threshold") + 1] == "0.5"
 
 
+def test_default_command_factory_serialises_list_and_dict_params(tmp_path: Path) -> None:
+    """Non-scalar params (list/dict) must round-trip through ``json.dumps`` —
+    pre-fix the helper called ``json.dumps`` without importing ``json`` and
+    raised ``NameError`` whenever an LLM forwarded a list-typed argument like
+    ``--resolutions [0.4, 0.6, 0.8]``."""
+    import json as _json
+
+    ctx = _make_ctx(
+        tmp_path=tmp_path,
+        params={
+            "resolutions": [0.4, 0.6, 0.8],
+            "labels": {"control": "ctrl", "treatment": "trt"},
+        },
+    )
+    argv = default_command_factory(ctx)
+
+    assert "--resolutions" in argv
+    assert _json.loads(argv[argv.index("--resolutions") + 1]) == [0.4, 0.6, 0.8]
+    assert "--labels" in argv
+    assert _json.loads(argv[argv.index("--labels") + 1]) == {"control": "ctrl", "treatment": "trt"}
+
+
 def test_build_default_executor_returns_skill_runner_executor() -> None:
     executor = build_default_executor()
     assert isinstance(executor, SkillRunnerExecutor)

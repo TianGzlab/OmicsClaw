@@ -93,10 +93,7 @@ from omicsclaw.core.skill_runner import (
     resolve_skill_alias,
     run_skill,
 )
-from omicsclaw.core.registry import registry
-registry.load_all()
-SKILLS = registry.skills
-DOMAINS = registry.domains
+from omicsclaw.core.registry import ensure_registry_loaded, registry
 
 SPATIAL_PIPELINE = [
     "spatial-preprocess",
@@ -312,7 +309,7 @@ _WORKFLOW_ORDER: dict[str, list[str]] = {
 
 
 def list_skills(domain_filter: str | None = None) -> dict:
-    """按 Domain 分组打印所有可用技能，并返回 SKILLS 字典。"""
+    """按 Domain 分组打印所有可用技能，并返回 skills 字典。"""
     print(f"\n{BOLD}OmicsClaw Skills{RESET}")
     if domain_filter:
         print(f"{BOLD}{'=' * 60}{RESET}")
@@ -320,17 +317,20 @@ def list_skills(domain_filter: str | None = None) -> dict:
     else:
         print(f"{BOLD}{'=' * 60}{RESET}\n")
 
+    skills = ensure_registry_loaded().skills
+    domains = registry.domains
+
     # 1. 按 domain 分组构建索引（跳过 legacy alias 条目，避免重复显示）
     domain_skills: dict[str, list[tuple[str, dict]]] = {}
-    for alias, info in SKILLS.items():
+    for alias, info in skills.items():
         # Legacy aliases point to the same dict but under a different key; skip them.
         if alias != info.get("alias", alias):
             continue
         d = info.get("domain", "other")
         domain_skills.setdefault(d, []).append((alias, info))
 
-    # 2. 按 DOMAINS 中定义的顺序依次输出
-    for domain_key, domain_info in DOMAINS.items():
+    # 2. 按 domain 中定义的顺序依次输出
+    for domain_key, domain_info in domains.items():
         if domain_filter and domain_key != domain_filter:
             continue
         skills_in_domain = domain_skills.get(domain_key, [])
@@ -361,9 +361,9 @@ def list_skills(domain_filter: str | None = None) -> dict:
 
         print()
 
-    # 3. 展示未在 DOMAINS 中注册的动态发现技能
-    known_domains = set(DOMAINS.keys())
-    extra = [(a, i) for a, i in SKILLS.items() if i.get("domain", "other") not in known_domains]
+    # 3. 展示未在 domain 列表中注册的动态发现技能
+    known_domains = set(domains.keys())
+    extra = [(a, i) for a, i in skills.items() if i.get("domain", "other") not in known_domains]
     if extra:
         print(f"{BOLD}{YELLOW}[Other (Dynamically Discovered)]{RESET}")
         print(f"   {'-' * 54}")
@@ -374,9 +374,9 @@ def list_skills(domain_filter: str | None = None) -> dict:
             print(f"   {CYAN}{alias:<18}{RESET} [{status}] {desc}")
         print()
 
-    total = sum(1 for a, i in SKILLS.items() if a == i.get("alias", a))
-    print(f"{BOLD}Total: {total} skills across {len(DOMAINS)} domains{RESET}\n")
-    return SKILLS
+    total = sum(1 for a, i in skills.items() if a == i.get("alias", a))
+    print(f"{BOLD}Total: {total} skills across {len(domains)} domains{RESET}\n")
+    return skills
 
 
 # ---------------------------------------------------------------------------
@@ -916,7 +916,7 @@ def main():
             # or fall back to <renderer>.png
             # We need the filename — import the skill module lazily to get R_ENHANCED_PLOTS
             filename = f"{renderer}.png"
-            skill_info = SKILLS.get(skill_alias)
+            skill_info = ensure_registry_loaded().skills.get(skill_alias)
             if skill_info:
                 script_path = skill_info.get("script")
                 if script_path and Path(script_path).exists():

@@ -91,9 +91,12 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
     fake_script.write_text("print('fake')\n", encoding="utf-8")
 
     monkeypatch.setattr(skill_runner, "DEFAULT_OUTPUT_ROOT", tmp_path)
+
+    from omicsclaw.core.registry import SKILLS_DIR, registry
+
     monkeypatch.setattr(
-        skill_runner,
-        "SKILLS",
+        registry,
+        "skills",
         {
             "fake-skill": {
                 "script": fake_script,
@@ -103,8 +106,11 @@ def test_run_skill_generates_readme_and_human_readable_dir(monkeypatch, tmp_path
                 "description": "Synthetic test skill",
             }
         },
+        raising=False,
     )
-    monkeypatch.setattr(skill_runner, "DOMAINS", {"demo": {"name": "Demo"}})
+    monkeypatch.setattr(registry, "domains", {"demo": {"name": "Demo"}}, raising=False)
+    monkeypatch.setattr(registry, "_loaded", True, raising=False)
+    monkeypatch.setattr(registry, "_loaded_dir", SKILLS_DIR.resolve(), raising=False)
 
     import io
 
