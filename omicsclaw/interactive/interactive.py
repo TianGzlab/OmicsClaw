@@ -1395,6 +1395,12 @@ def _init_llm(config: dict) -> tuple[str, str]:
         return core.OMICSCLAW_MODEL, core.LLM_PROVIDER_NAME
     except Exception as e:
         logger.warning("LLM init error: %s", e)
+        console.print(
+            f"[yellow]⚠ LLM init failed:[/yellow] {e}\n"
+            "[yellow]Set [bold]LLM_API_KEY[/bold] (or [bold]OPENAI_API_KEY[/bold]) "
+            "in your environment or .env file, then restart `oc chat`.\n"
+            "To configure interactively, run [bold]oc onboard[/bold].[/yellow]"
+        )
         return os.environ.get("OMICSCLAW_MODEL", "unknown"), os.environ.get("LLM_PROVIDER", "")
 
 

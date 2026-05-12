@@ -807,7 +807,13 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
 
     _ensure_system_prompt()
     if _core.llm is None:
-        return "Error: LLM client not initialised. Call core.init() first."
+        return (
+            "⚠ LLM is not configured.\n"
+            "\n"
+            "Set LLM_API_KEY (or OPENAI_API_KEY) in your environment or "
+            ".env file, then restart `oc chat`. To configure interactively, "
+            "run `oc onboard`."
+        )
 
     transcript_store.max_history = MAX_HISTORY
     transcript_store.max_history_chars = MAX_HISTORY_CHARS or None

@@ -114,6 +114,41 @@ def test_extract_timeout_seconds_from_text_recognises_timeout_phrases():
     assert _extract_timeout_seconds_from_text(None) is None
 
 
+def test_llm_tool_loop_returns_actionable_message_when_llm_uninitialised():
+    """If ``bot.core.llm`` is ``None`` (e.g. ``oc chat`` started without an
+    API key), sending a message must return an actionable hint — naming
+    the env var to set and the onboard command — rather than the cryptic
+    ``Error: LLM client not initialised. Call core.init() first.`` that
+    blames the user for not running a function they cannot reach.
+    """
+    import asyncio
+    import bot.agent_loop as agent_loop
+    import bot.core as core
+
+    saved = core.llm
+    core.llm = None
+    try:
+        result = asyncio.run(
+            agent_loop.llm_tool_loop(
+                chat_id="__test_uninitialised__",
+                user_content="hi",
+            )
+        )
+    finally:
+        core.llm = saved
+
+    lower = result.lower()
+    assert "call core.init" not in lower, (
+        f"message still tells the user to call a private function: {result!r}"
+    )
+    assert "llm_api_key" in lower or "openai_api_key" in lower, (
+        f"message must name the env var to set: {result!r}"
+    )
+    assert "onboard" in lower, (
+        f"message must point at the onboard remediation: {result!r}"
+    )
+
+
 def test_format_llm_api_error_message_provides_actionable_text_for_common_errors():
     """When the OpenAI SDK raises, this formatter turns the exception into
     a user-facing message with hints (rate limit, auth, network). The
