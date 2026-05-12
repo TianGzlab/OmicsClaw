@@ -23,6 +23,7 @@ reuse the same argv shape.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 from pathlib import Path
