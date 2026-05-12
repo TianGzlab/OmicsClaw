@@ -15,15 +15,17 @@ surface that needs to run a skill should import ``run_skill`` from here.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from omicsclaw.common.report import build_output_dir_name
 from omicsclaw.core.registry import ensure_registry_loaded, registry
@@ -33,6 +35,7 @@ from omicsclaw.core.runtime.argv_builder import (
     extract_flag_value,
     filter_forwarded_args,
 )
+from omicsclaw.core.runtime.async_subprocess_driver import adrive_subprocess
 from omicsclaw.core.runtime.output_finalize import (
     deduplicate_path,
     finalize_output_directory,
@@ -73,6 +76,195 @@ _build_user_run_command = build_user_run_command
 _deduplicate_path = deduplicate_path
 _finalize_output_directory = finalize_output_directory
 _write_pipeline_readme = write_pipeline_readme
+
+
+@dataclass(frozen=True)
+class _PreparedSkillRun:
+    """Everything ``run_skill`` / ``arun_skill`` need after setup, before spawn.
+
+    Carved out of ``run_skill`` so the sync (CLI / bot / pipeline) path and
+    the async executor path (OMI-12 audit P1 #4) can share the same
+    resolution, argv build, and output-finalize logic without duplicating
+    ~70 lines of bookkeeping. The two entry points differ only in *which*
+    subprocess driver they call (sync ``drive_subprocess`` vs async
+    ``adrive_subprocess``).
+    """
+
+    skill_name: str
+    skill_info: dict[str, Any]
+    script_path: Path
+    resolved_input: str | None
+    resolved_input_paths: list[str] | None
+    out_dir: Path
+    user_supplied_output_dir: bool
+    generated_ts: str
+    requested_method: str | None
+    cmd: list[str]
+    filtered_extra_args: list[str]
+    env: dict[str, str]
+    demo: bool
+    session_path: str | None
+
+
+def _prepare_skill_run(
+    skill_name: str,
+    *,
+    input_path: str | None,
+    input_paths: list[str] | None,
+    output_dir: str | None,
+    demo: bool,
+    session_path: str | None,
+    extra_args: list[str] | None,
+    log_banner: bool = True,
+) -> _PreparedSkillRun | SkillRunResult:
+    """Resolve skill, build argv, prepare output dir. Returns the prepared
+    run or a stable ``_err`` ``SkillRunResult`` on setup failure.
+
+    ``log_banner`` controls whether the human-readable "Running …" banner
+    prints; the async executor path keeps it silent because the jobs
+    router has its own log stream.
+    """
+    skills = ensure_registry_loaded().skills
+    skill_info = skills.get(skill_name)
+    if skill_info is None:
+        return _err(skill_name, f"Unknown skill '{skill_name}'. Available: {list(skills.keys())}")
+
+    script_path: Path = skill_info["script"]
+    if not script_path.exists():
+        return _err(skill_name, f"Script not found: {script_path}")
+
+    resolved_input_paths: list[str] | None = None
+    if input_paths and len(input_paths) >= 2:
+        resolved_input_paths = [str(Path(p).resolve()) for p in input_paths]
+
+    resolved_input = input_path
+    if session_path and not input_path and not demo and not resolved_input_paths:
+        from omicsclaw.common.session import SpatialSession
+
+        session = SpatialSession.load(session_path)
+        if session.h5ad_path:
+            resolved_input = session.h5ad_path
+
+    if resolved_input:
+        resolved_input = str(Path(resolved_input).resolve())
+
+    user_supplied_output_dir = output_dir is not None
+    generated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    requested_method = extract_flag_value(extra_args, "--method")
+
+    if output_dir:
+        out_dir = Path(output_dir).resolve()
+    else:
+        auto_name = build_output_dir_name(skill_name, generated_ts, method=requested_method)
+        out_dir = deduplicate_path(DEFAULT_OUTPUT_ROOT / auto_name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = build_skill_argv(
+        python_executable=PYTHON,
+        script_path=script_path,
+        skill_info=skill_info,
+        demo=demo,
+        input_path=resolved_input,
+        input_paths=resolved_input_paths,
+        output_dir=out_dir,
+    )
+    if cmd is None:
+        return _err(skill_name, "No --input, --demo, or --session provided.")
+
+    if log_banner:
+        domain = skill_info.get("domain", "unknown")
+        domain_display = registry.domains.get(domain, {}).get("name", domain.title())
+        if demo:
+            mode_str = f"{CYAN}demo mode{RESET}"
+        elif resolved_input_paths:
+            mode_str = f"inputs: {', '.join(resolved_input_paths)}"
+        else:
+            mode_str = f"input: {resolved_input}"
+        print(f"\n{BOLD}Running {domain_display} skill:{RESET} {GREEN}{skill_name}{RESET} ({mode_str})")
+        print(f"{BOLD}Output:{RESET} {out_dir}\n")
+
+    filtered = filter_forwarded_args(
+        extra_args,
+        allowed_extra_flags=skill_info.get("allowed_extra_flags", set()),
+    )
+    cmd.extend(filtered)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(OMICSCLAW_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+
+    return _PreparedSkillRun(
+        skill_name=skill_name,
+        skill_info=skill_info,
+        script_path=script_path,
+        resolved_input=resolved_input,
+        resolved_input_paths=resolved_input_paths,
+        out_dir=out_dir,
+        user_supplied_output_dir=user_supplied_output_dir,
+        generated_ts=generated_ts,
+        requested_method=requested_method,
+        cmd=cmd,
+        filtered_extra_args=filtered,
+        env=env,
+        demo=demo,
+        session_path=session_path,
+    )
+
+
+def _finalize_skill_run(
+    prepared: _PreparedSkillRun,
+    proc: subprocess.CompletedProcess,
+    duration: float,
+) -> SkillRunResult:
+    """Run output finalization, build a ``SkillRunResult``, store session.
+
+    Shared between the sync ``run_skill`` and the async ``arun_skill`` so
+    success / failure shape stays identical regardless of which subprocess
+    driver fired.
+    """
+    final_out_dir = prepared.out_dir
+    actual_method = prepared.requested_method
+    readme_path = ""
+    notebook_path = ""
+    if proc.returncode == 0:
+        user_command = build_user_run_command(
+            skill_name=prepared.skill_name,
+            demo=prepared.demo,
+            input_path=prepared.resolved_input,
+            output_dir=prepared.out_dir,
+            forwarded_args=prepared.filtered_extra_args,
+        )
+        final_out_dir, actual_method, readme_path, notebook_path, _ = finalize_output_directory(
+            prepared.out_dir,
+            skill_name=prepared.skill_name,
+            skill_info=prepared.skill_info,
+            timestamp=prepared.generated_ts,
+            user_supplied_output_dir=prepared.user_supplied_output_dir,
+            preferred_method=prepared.requested_method,
+            actual_command=user_command,
+        )
+
+    output_files = sorted(
+        [path.name for path in final_out_dir.rglob("*") if path.is_file()]
+    ) if final_out_dir.exists() else []
+
+    result = build_skill_run_result(
+        skill=prepared.skill_name,
+        success=proc.returncode == 0,
+        exit_code=proc.returncode,
+        output_dir=final_out_dir,
+        files=output_files,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        duration_seconds=duration,
+        method=actual_method,
+        readme_path=readme_path,
+        notebook_path=notebook_path,
+    )
+
+    if prepared.session_path and result.success:
+        _store_result_in_session(prepared.session_path, prepared.skill_name, final_out_dir)
+
+    return result
 
 
 def resolve_skill_alias(skill_name: str) -> str:
@@ -145,79 +337,25 @@ def run_skill(
         if pipeline_result is not None:
             return pipeline_result
 
-    skills = ensure_registry_loaded().skills
-    skill_info = skills.get(skill_name)
-    if skill_info is None:
-        return _err(skill_name, f"Unknown skill '{skill_name}'. Available: {list(skills.keys())}")
-
-    script_path: Path = skill_info["script"]
-    if not script_path.exists():
-        return _err(skill_name, f"Script not found: {script_path}")
-
-    resolved_input_paths: list[str] | None = None
-    if input_paths and len(input_paths) >= 2:
-        resolved_input_paths = [str(Path(p).resolve()) for p in input_paths]
-
-    resolved_input = input_path
-    if session_path and not input_path and not demo and not resolved_input_paths:
-        from omicsclaw.common.session import SpatialSession
-
-        session = SpatialSession.load(session_path)
-        if session.h5ad_path:
-            resolved_input = session.h5ad_path
-
-    if resolved_input:
-        resolved_input = str(Path(resolved_input).resolve())
-
-    user_supplied_output_dir = output_dir is not None
-    generated_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    requested_method = extract_flag_value(extra_args, "--method")
-
-    if output_dir:
-        out_dir = Path(output_dir).resolve()
-    else:
-        auto_name = build_output_dir_name(skill_name, generated_ts, method=requested_method)
-        out_dir = deduplicate_path(DEFAULT_OUTPUT_ROOT / auto_name)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    cmd = build_skill_argv(
-        python_executable=PYTHON,
-        script_path=script_path,
-        skill_info=skill_info,
+    prepared = _prepare_skill_run(
+        skill_name,
+        input_path=input_path,
+        input_paths=input_paths,
+        output_dir=output_dir,
         demo=demo,
-        input_path=resolved_input,
-        input_paths=resolved_input_paths,
-        output_dir=out_dir,
+        session_path=session_path,
+        extra_args=extra_args,
     )
-    if cmd is None:
-        return _err(skill_name, "No --input, --demo, or --session provided.")
-
-    domain = skill_info.get("domain", "unknown")
-    domain_display = registry.domains.get(domain, {}).get("name", domain.title())
-    if demo:
-        mode_str = f"{CYAN}demo mode{RESET}"
-    elif resolved_input_paths:
-        mode_str = f"inputs: {', '.join(resolved_input_paths)}"
-    else:
-        mode_str = f"input: {resolved_input}"
-    print(f"\n{BOLD}Running {domain_display} skill:{RESET} {GREEN}{skill_name}{RESET} ({mode_str})")
-    print(f"{BOLD}Output:{RESET} {out_dir}\n")
-
-    filtered = filter_forwarded_args(
-        extra_args,
-        allowed_extra_flags=skill_info.get("allowed_extra_flags", set()),
-    )
-    cmd.extend(filtered)
+    if isinstance(prepared, SkillRunResult):
+        return prepared
 
     t0 = time.time()
     try:
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(OMICSCLAW_DIR) + os.pathsep + env.get("PYTHONPATH", "")
         proc = drive_subprocess(
-            cmd,
-            cwd=script_path.parent,
-            env=env,
-            out_dir=out_dir,
+            prepared.cmd,
+            cwd=prepared.script_path.parent,
+            env=prepared.env,
+            out_dir=prepared.out_dir,
             stdout_callback=stdout_callback,
             stderr_callback=stderr_callback,
             cancel_event=cancel_event,
@@ -227,51 +365,85 @@ def run_skill(
         return _err(skill_name, str(exc), duration=duration)
 
     duration = time.time() - t0
+    return _finalize_skill_run(prepared, proc, duration)
 
-    final_out_dir = out_dir
-    actual_method = requested_method
-    readme_path = ""
-    notebook_path = ""
-    if proc.returncode == 0:
-        user_command = build_user_run_command(
-            skill_name=skill_name,
-            demo=demo,
-            input_path=resolved_input,
-            output_dir=out_dir,
-            forwarded_args=filtered,
-        )
-        final_out_dir, actual_method, readme_path, notebook_path, _ = finalize_output_directory(
-            out_dir,
-            skill_name=skill_name,
-            skill_info=skill_info,
-            timestamp=generated_ts,
-            user_supplied_output_dir=user_supplied_output_dir,
-            preferred_method=requested_method,
-            actual_command=user_command,
-        )
 
-    output_files = sorted(
-        [path.name for path in final_out_dir.rglob("*") if path.is_file()]
-    ) if final_out_dir.exists() else []
+async def arun_skill(
+    skill_name: str,
+    *,
+    input_path: str | None = None,
+    input_paths: list[str] | None = None,
+    output_dir: str | None = None,
+    demo: bool = False,
+    session_path: str | None = None,
+    extra_args: list[str] | None = None,
+) -> SkillRunResult:
+    """Async sibling of :func:`run_skill` for callers already in an event loop.
 
-    result = build_skill_run_result(
-        skill=skill_name,
-        success=proc.returncode == 0,
-        exit_code=proc.returncode,
-        output_dir=final_out_dir,
-        files=output_files,
-        stdout=proc.stdout,
-        stderr=proc.stderr,
-        duration_seconds=duration,
-        method=actual_method,
-        readme_path=readme_path,
-        notebook_path=notebook_path,
+    OMI-12 audit P1 #4: ``SkillRunnerExecutor`` used to wrap the blocking
+    ``run_skill`` in ``asyncio.to_thread``, which parked one
+    ``ThreadPoolExecutor`` worker for every active skill. With the default
+    32-worker pool, busy app-server traffic could exhaust the pool and
+    stall unrelated async work. This async-native entry point spawns the
+    skill subprocess via :func:`asyncio.create_subprocess_exec` instead,
+    so concurrent skills only cost one async task each, not one OS thread.
+
+    Behavior parity with ``run_skill``:
+
+    - Same skill resolution, argv build, env (``PYTHONPATH``), cwd
+      (script's parent dir), and output-finalize logic (rename, README,
+      notebook) — they share ``_prepare_skill_run`` and
+      ``_finalize_skill_run``.
+    - Same status-field + ``-9 → 0`` fallback for deciding success.
+    - Same ``SkillRunResult`` return shape.
+
+    Behavior deltas (documented):
+
+    - Pipeline dispatch (``<name>-pipeline``) is **not** handled here.
+      The async path is meant for the executor (one skill at a time);
+      pipelines run via the sync ``run_skill`` from CLI / bot.
+    - ``stdout_callback`` / ``stderr_callback`` are not supported.
+      Per-line log streaming stays on the sync path that the bot uses.
+    - Cancellation flows via :class:`asyncio.CancelledError` instead of
+      a ``threading.Event`` — propagating the cancel through the
+      awaiting task is enough; the underlying
+      :func:`omicsclaw.core.runtime.async_subprocess_driver.adrive_subprocess`
+      SIGTERM/SIGKILLs the process group on its way out.
+    """
+    skill_name = resolve_skill_alias(skill_name)
+
+    prepared = _prepare_skill_run(
+        skill_name,
+        input_path=input_path,
+        input_paths=input_paths,
+        output_dir=output_dir,
+        demo=demo,
+        session_path=session_path,
+        extra_args=extra_args,
+        log_banner=False,
     )
+    if isinstance(prepared, SkillRunResult):
+        return prepared
 
-    if session_path and result.success:
-        _store_result_in_session(session_path, skill_name, final_out_dir)
+    t0 = time.time()
+    try:
+        proc = await adrive_subprocess(
+            prepared.cmd,
+            cwd=prepared.script_path.parent,
+            env=prepared.env,
+            out_dir=prepared.out_dir,
+        )
+    except asyncio.CancelledError:
+        # Re-raise so the awaiting task sees the cancellation. The driver
+        # already SIGTERM/SIGKILL'd the process group on its way out, so
+        # no child is left behind.
+        raise
+    except Exception as exc:
+        duration = time.time() - t0
+        return _err(skill_name, str(exc), duration=duration)
 
-    return result
+    duration = time.time() - t0
+    return _finalize_skill_run(prepared, proc, duration)
 
 
 def _store_result_in_session(session_path: str, skill_name: str, out_dir: Path) -> None:
