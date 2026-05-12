@@ -34,6 +34,7 @@ for _candidate in _HERE.parents:
 from omicsclaw.common.report import (  # noqa: E402
     generate_report_footer,
     generate_report_header,
+    mark_result_status,
     write_result_json,
 )
 
@@ -189,6 +190,12 @@ def main(argv: list[str] | None = None) -> int:
         method=args.method,
         input_path=input_path,
     )
+    # Mark the run as successful AS THE LAST STEP — if any earlier write
+    # had crashed, this line would never execute and the runner would
+    # fall back to its exit-code heuristic. This opts the skill out of
+    # the legacy ``-9 → 0`` SIGKILL-race workaround and gives the runner
+    # an explicit success signal (OMI-12 audit P1 #2).
+    mark_result_status(args.output, "ok")
     logger.info("Wrote outputs to %s", args.output)
     return 0
 
