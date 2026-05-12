@@ -442,16 +442,50 @@ def _detect_domain(
     file_path: str = "",
     domain_hint: str = "",
 ) -> str:
+    """Pick the most likely omics domain for ``query``.
+
+    Kept for callers that want domain detection on its own. The main
+    ``resolve_capability`` flow no longer calls this — it uses
+    :func:`_score_skills_and_detect_domain` to compute the domain and the
+    candidate scores in a single walk over ``iter_primary_skills`` (OMI-12
+    audit P1 #1).
+    """
     if domain_hint:
         return domain_hint
+    domain, _candidates = _score_skills_and_detect_domain(
+        registry, query, file_path=file_path
+    )
+    return domain
 
+
+def _score_skills_and_detect_domain(
+    registry: OmicsRegistry,
+    query: str,
+    *,
+    file_path: str = "",
+) -> tuple[str, list["CapabilityCandidate"]]:
+    """Single-pass scoring: walk every primary skill exactly once and emit
+    both the detected domain *and* every skill's per-candidate score.
+
+    Pre-refactor the resolver walked ``iter_primary_skills`` twice — once
+    inside ``_detect_domain`` (89 skills × per-domain accumulation), then
+    again inside ``resolve_capability`` (the same skills, this time with
+    the per-skill weights). The two passes used different weights but read
+    the same SKILL.md fields (alias, legacy aliases, description tokens,
+    trigger keywords), so the duplicate filesystem-derived work was pure
+    overhead. This helper accumulates both score sets in one pass.
+
+    Returns ``(detected_domain, candidates)``. ``candidates`` is the full
+    list of skills that scored positively (unsorted, unfiltered); callers
+    that want only the detected-domain slice filter it themselves.
+    """
     query_lower = query.lower()
     query_tokens = _tokenize(query_lower)
-    domain_scores: dict[str, float] = {
-        domain: 0.0
-        for domain in registry.domains
-    }
+    method_tokens = _method_mentions(query_lower)
 
+    # File-path domain detection seeds the domain accumulator before any
+    # skill-level signals fire.
+    domain_scores: dict[str, float] = {domain: 0.0 for domain in registry.domains}
     if file_path and detect_domain_from_path is not None:
         detected = str(detect_domain_from_path(file_path, fallback="")).strip()
         if detected:
@@ -459,68 +493,80 @@ def _detect_domain(
                 domain_scores.get(detected, 0.0) + _DOMAIN_SCORE_FILE_PATH
             )
 
+    candidates: list[CapabilityCandidate] = []
+    for alias, skill_info in registry.iter_primary_skills():
+        # Iterate each skill's OWN trigger_keywords once and reuse the
+        # match list on both the per-skill (limit=3) and per-domain
+        # (limit=2) sides. The previous "compute keyword matches via
+        # ``registry.build_keyword_map(domain=None)``" optimisation was
+        # incorrect: ``build_keyword_map`` overwrites shared keywords by
+        # last-write-wins, so a keyword that lives on multiple skills
+        # silently dropped its score from every skill except the last
+        # inserted (e.g. ``bulkrna-de`` lost ~3.8 points on shared
+        # "differential" keywords because some other-domain skill happened
+        # to be inserted later).
+        _, all_kw_matches = _score_trigger_keyword_matches(
+            query_lower,
+            skill_info.get("trigger_keywords", []),
+            limit=_SCORE_TRIGGER_KEYWORD_LIMIT,
+        )
+
+        # ---- candidate-side scoring (per-skill weights, up to 3 keywords) ----
+        candidate = _candidate_score(
+            alias,
+            skill_info,
+            query_lower,
+            query_tokens,
+            method_tokens,
+            keyword_matches=all_kw_matches,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+
+        # ---- domain-side scoring (per-domain weights, accumulated into
+        # the skill's home domain; keyword limit drops to 2).
+        skill_domain = str(skill_info.get("domain", ""))
+        if not skill_domain:
+            continue
+        delta = 0.0
+        if _mentions_phrase(query_lower, alias.lower()):
+            delta += _DOMAIN_SCORE_ALIAS_MENTION
+        for legacy in skill_info.get("legacy_aliases", []):
+            legacy_lower = str(legacy).lower()
+            if legacy_lower and _mentions_phrase(query_lower, legacy_lower):
+                delta += _DOMAIN_SCORE_LEGACY_ALIAS_MENTION
+        description = str(skill_info.get("description", "")).lower()
+        overlap = query_tokens & _tokenize(description)
+        delta += (
+            min(len(overlap), _DOMAIN_SCORE_DESCRIPTION_OVERLAP_CAP)
+            * _DOMAIN_SCORE_DESCRIPTION_OVERLAP_PER_TOKEN
+        )
+        # Reuse the same keyword matches with the tighter per-domain limit
+        # so the loop body never rescans this skill's trigger_keywords.
+        for kw_phrase in all_kw_matches[:_DOMAIN_SCORE_TRIGGER_KEYWORD_LIMIT]:
+            delta += _trigger_keyword_score(kw_phrase)
+        domain_scores[skill_domain] = domain_scores.get(skill_domain, 0.0) + delta
+
+    # Domain-name and domain-key textual matches contribute independently of
+    # any skill — keep these post-loop so the loop body has one concern.
+    for domain_key, info in registry.domains.items():
+        domain_name = str(info.get("name", domain_key)).lower()
+        if domain_name in query_lower or domain_key.lower() in query_lower:
+            domain_scores[domain_key] = (
+                domain_scores.get(domain_key, 0.0) + _DOMAIN_SCORE_DOMAIN_NAME_MATCH
+            )
+
+    # Pick the highest-scoring domain. Strict ``>`` matches the old
+    # ``_detect_domain`` behaviour: ties go to the first-seen domain in
+    # ``registry.domains`` insertion order, which is deterministic because
+    # the domain list is hardcoded in ``registry._HARDCODED_DOMAINS``.
     best_domain = ""
     best_score = 0.0
-
-    for domain, info in registry.domains.items():
-        score = domain_scores.get(domain, 0.0)
-        for alias, skill_info in registry.iter_primary_skills(domain=domain):
-            if _mentions_phrase(query_lower, alias.lower()):
-                score += _DOMAIN_SCORE_ALIAS_MENTION
-
-            for legacy in skill_info.get("legacy_aliases", []):
-                legacy_lower = str(legacy).lower()
-                if legacy_lower and _mentions_phrase(query_lower, legacy_lower):
-                    score += _DOMAIN_SCORE_LEGACY_ALIAS_MENTION
-
-            description = str(skill_info.get("description", "")).lower()
-            overlap = query_tokens & _tokenize(description)
-            score += (
-                min(len(overlap), _DOMAIN_SCORE_DESCRIPTION_OVERLAP_CAP)
-                * _DOMAIN_SCORE_DESCRIPTION_OVERLAP_PER_TOKEN
-            )
-
-            keyword_score, _ = _score_trigger_keyword_matches(
-                query_lower,
-                skill_info.get("trigger_keywords", []),
-                limit=_DOMAIN_SCORE_TRIGGER_KEYWORD_LIMIT,
-            )
-            score += keyword_score
-
-        domain_name = str(info.get("name", domain)).lower()
-        if domain_name in query_lower or domain.lower() in query_lower:
-            score += _DOMAIN_SCORE_DOMAIN_NAME_MATCH
-
-        if score > best_score:
-            best_score = score
-            best_domain = domain
-
-    return best_domain
-
-
-def _collect_query_keyword_matches(
-    registry: OmicsRegistry,
-    domain: str | None,
-    query_lower: str,
-) -> dict[str, list[str]]:
-    """Precompute ``{alias: [matched_keywords]}`` for the query.
-
-    Uses ``registry.build_keyword_map()`` so each (keyword → skill) entry is
-    inspected at most once per resolve call, instead of iterating every
-    skill's trigger keywords from inside ``_candidate_score``. The matcher
-    is still ``_mentions_phrase`` so behavior matches the previous
-    implementation byte-for-byte; this only avoids redundant lookups.
-    """
-    keyword_map = registry.build_keyword_map(domain=domain)
-    matches_by_alias: dict[str, list[str]] = {}
-    for keyword, alias in keyword_map.items():
-        phrase = str(keyword).strip().lower()
-        if not phrase or not _mentions_phrase(query_lower, phrase):
-            continue
-        bucket = matches_by_alias.setdefault(alias, [])
-        if len(bucket) < _SCORE_TRIGGER_KEYWORD_LIMIT:
-            bucket.append(phrase)
-    return matches_by_alias
+    for d, s in domain_scores.items():
+        if s > best_score:
+            best_score = s
+            best_domain = d
+    return best_domain, candidates
 
 
 def _candidate_score(
@@ -613,9 +659,24 @@ def resolve_capability(
         )
 
     query_lower = query.lower()
-    query_tokens = _tokenize(query_lower)
-    method_tokens = _method_mentions(query_lower)
-    domain = _detect_domain(registry, query, file_path=file_path, domain_hint=domain_hint)
+
+    # Domain detection + per-skill candidate scoring share a single walk
+    # over ``iter_primary_skills`` (OMI-12 audit P1 #1) — the pre-refactor
+    # code visited each skill twice with different weights for what was
+    # effectively the same set of SKILL.md reads.
+    if domain_hint:
+        domain = domain_hint
+        # When the caller forces a domain, we still need candidate scores
+        # for that domain; do the single-pass scoring and discard the
+        # detection result.
+        _, all_candidates = _score_skills_and_detect_domain(
+            registry, query, file_path=file_path
+        )
+    else:
+        domain, all_candidates = _score_skills_and_detect_domain(
+            registry, query, file_path=file_path
+        )
+
     if _requests_new_literature_implementation(query_lower):
         return CapabilityDecision(
             query=query,
@@ -632,25 +693,14 @@ def resolve_capability(
             ],
         )
 
-    # Precompute keyword matches once via the registry's inverted keyword
-    # index — capability_resolver used to rescan every skill's
-    # ``trigger_keywords`` from inside the per-skill loop (OMI-12 P2.8).
-    keyword_matches_by_alias = _collect_query_keyword_matches(
-        registry, domain or None, query_lower
-    )
-
-    candidates: list[CapabilityCandidate] = []
-    for alias, info in registry.iter_primary_skills(domain=domain or None):
-        candidate = _candidate_score(
-            alias,
-            info,
-            query_lower,
-            query_tokens,
-            method_tokens,
-            keyword_matches=keyword_matches_by_alias.get(alias, []),
-        )
-        if candidate is not None:
-            candidates.append(candidate)
+    # Filter the precomputed candidates to the detected domain — same
+    # restriction the pre-refactor ``iter_primary_skills(domain=...)`` loop
+    # applied; we just compute candidates for every domain up front so the
+    # walk happens once.
+    if domain:
+        candidates = [c for c in all_candidates if c.domain == domain]
+    else:
+        candidates = list(all_candidates)
 
     # Sort by score DESC with a stable alphabetical tie-break on the skill
     # alias. Without the tie-break, the post-PR audit caught WGCNA flapping
@@ -671,6 +721,16 @@ def resolve_capability(
         missing = ["no existing OmicsClaw skill sufficiently matches the requested task"]
         if web_requested:
             missing.append("request explicitly asks for external literature or documentation lookup")
+        # OMI-12 audit P1 #3: ``should_search_web`` used to be hard-coded
+        # ``True`` for every ``no_skill`` outcome. That defaulted the bot's
+        # LLM tool-use loop into a web-search step even when the user asked
+        # a perfectly normal omics question that just didn't match any
+        # currently-registered skill ("do PCA on my data, no skill needed"
+        # → False is correct). Now the flag fires only when the query
+        # explicitly mentions web/literature wording (the ``_WEB_HINTS``
+        # corpus is in this file). The literature-from-paper branch above
+        # still sets it ``True`` directly because that path is the explicit
+        # "go look up external literature" case.
         return CapabilityDecision(
             query=query,
             domain=domain,
@@ -683,7 +743,7 @@ def resolve_capability(
                     _RESOLVE_NO_SKILL_CONFIDENCE_CAP,
                 )
             ),
-            should_search_web=True,
+            should_search_web=web_requested,
             should_create_skill=skill_creation_requested,
             skill_candidates=candidates[:5],
             missing_capabilities=missing,
