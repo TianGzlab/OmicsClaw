@@ -485,9 +485,22 @@ def _resolve_workspace(
 
 
 class OmicsClawParser(argparse.ArgumentParser):
-    """Custom parser for beautiful OmicsClaw CLI help output."""
+    """Custom parser for beautiful OmicsClaw CLI help output.
+
+    Only the root parser renders the curated top-level help. Subparsers created
+    via ``add_subparsers`` inherit this class (argparse copies the parser
+    class), so without the ``is_root`` gate ``oc <command> --help`` would
+    re-render the top-level help instead of the subcommand's own options.
+    """
+
+    def __init__(self, *args, is_root: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._is_root = is_root
 
     def print_help(self, file=None):
+        if not self._is_root:
+            return super().print_help(file=file)
+
         if file is None:
             file = sys.stdout
 
@@ -535,6 +548,7 @@ def main():
     parser = OmicsClawParser(
         description="OmicsClaw -- Multi-Omics Skills Runner",
         formatter_class=argparse.RawTextHelpFormatter,
+        is_root=True,
     )
     parser.add_argument(
         "-V",
