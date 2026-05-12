@@ -1,0 +1,24 @@
+# Spatial transcriptomics pipeline.
+#
+# Standard chain: preprocess → domain detection → DE → SVG → spatial stats.
+# Each step reads ``processed.h5ad`` from the previous step's output dir
+# (see ``chain_output_basename`` below) and writes its own ``processed.h5ad``
+# so the chain can flow.
+#
+# Schema:
+#   name                   (required, str)  Canonical pipeline name; must end with ``-pipeline``.
+#   description            (optional, str)  One-line summary for catalogs / READMEs.
+#   chain_output_basename  (optional, str)  File name the runner looks for in each step's
+#                                           output dir to feed the next step as ``--input``.
+#                                           Default: ``processed.h5ad``.
+#   steps                  (required, list) Ordered list of {skill: <alias>} entries.
+
+name: spatial-pipeline
+description: Standard spatial transcriptomics pipeline (preprocess → domains → DE → genes → statistics).
+chain_output_basename: processed.h5ad
+steps:
+  - skill: spatial-preprocess
+  - skill: spatial-domains
+  - skill: spatial-de
+  - skill: spatial-genes
+  - skill: spatial-statistics

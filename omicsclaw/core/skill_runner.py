@@ -38,7 +38,11 @@ from omicsclaw.core.runtime.output_finalize import (
     finalize_output_directory,
     write_pipeline_readme,
 )
-from omicsclaw.core.runtime.pipeline_runner import SPATIAL_PIPELINE, run_spatial_pipeline
+from omicsclaw.core.runtime.pipeline_runner import (
+    SPATIAL_PIPELINE,
+    run_pipeline_by_name,
+    run_spatial_pipeline,
+)
 from omicsclaw.core.runtime.subprocess_driver import drive_subprocess
 from omicsclaw.core.skill_result import SkillRunResult, build_skill_run_result
 
@@ -123,8 +127,14 @@ def run_skill(
     """
     skill_name = resolve_skill_alias(skill_name)
 
-    if skill_name == "spatial-pipeline":
-        return run_spatial_pipeline(
+    # Any ``<name>-pipeline`` whose YAML lives in ``pipelines/`` is dispatched
+    # through the generic chain runner. ``run_pipeline_by_name`` returns
+    # ``None`` when no YAML matches the alias, in which case we fall through
+    # to the regular skill registry lookup so genuinely unknown aliases still
+    # surface the standard "Unknown skill" error.
+    if skill_name.endswith("-pipeline"):
+        pipeline_result = run_pipeline_by_name(
+            skill_name,
             default_output_root=DEFAULT_OUTPUT_ROOT,
             err_factory=_err,
             input_path=input_path,
@@ -132,6 +142,8 @@ def run_skill(
             demo=demo,
             session_path=session_path,
         )
+        if pipeline_result is not None:
+            return pipeline_result
 
     skills = ensure_registry_loaded().skills
     skill_info = skills.get(skill_name)
