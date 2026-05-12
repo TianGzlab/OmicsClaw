@@ -20,9 +20,24 @@ pytest.importorskip("fastapi")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from omicsclaw.execution.executors import LocalExecutor
+from omicsclaw.execution.executors import JobContext, JobOutcome
 from omicsclaw.remote.app_integration import register_remote_routers
 from omicsclaw.remote.routers import jobs as jobs_module
+
+
+class _NotImplementedStub:
+    """Instant-return ``Executor`` stub used by contract tests.
+
+    Contract tests pin the wire format, not executor behavior, so submitted
+    jobs must deterministically end in ``failed`` with a known stdout marker.
+    Inlined here in lieu of the removed ``LocalExecutor`` (OMI-12 P1.5);
+    real executor behaviour is covered by ``test_execution_default_executor``
+    and ``test_subprocess_executor``.
+    """
+
+    async def run(self, ctx: JobContext) -> JobOutcome:
+        text = "executor_not_implemented: stub executor for contract tests"
+        return JobOutcome(exit_code=1, error="executor_not_implemented", stdout_text=text)
 
 
 @pytest.fixture()
@@ -30,11 +45,7 @@ def client(monkeypatch, tmp_path: Path) -> TestClient:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("OMICSCLAW_WORKSPACE", str(workspace))
-    # Contract tests pin wire format, not executor behavior. Keep the
-    # cheap instant-return stub so every submitted job deterministically
-    # ends in ``failed`` with ``executor_not_implemented`` — the real
-    # default (``SubprocessExecutor``) is covered separately.
-    monkeypatch.setattr(jobs_module, "_DEFAULT_EXECUTOR", LocalExecutor())
+    monkeypatch.setattr(jobs_module, "_DEFAULT_EXECUTOR", _NotImplementedStub())
 
     app = FastAPI()
     register_remote_routers(app)
