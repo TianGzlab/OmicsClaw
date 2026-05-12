@@ -27,6 +27,13 @@ output_directory/
   columns: `feature, value, rank, method`.
 - `report.md` — Markdown summary written by the common report helper.
 - `result.json` — standardised result envelope (`summary` + `data` keys).
+  When the script finishes cleanly it tail-calls `mark_result_status(output_dir, "ok")`,
+  which adds a top-level `status: "ok"` field. The runner reads that
+  field and trusts it over any exit-code anomaly (e.g. a SIGKILL race
+  with the orphan reaper). If the script crashes before the
+  `mark_result_status` call, the field is absent and the runner falls
+  back to a `-9 + result.json exists → success` heuristic instead.
+  Valid values: `"ok"`, `"partial"`, `"failed"`.
 
 ## Notes
 

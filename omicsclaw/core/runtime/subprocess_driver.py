@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from omicsclaw.common.report import read_result_status
+
 
 _CANCEL_GRACE_SECONDS = 5.0
 _THREAD_JOIN_TIMEOUT_SECONDS = 5.0
@@ -69,10 +71,22 @@ def drive_subprocess(
 ) -> subprocess.CompletedProcess:
     """Run ``cmd`` as a subprocess, return a ``CompletedProcess``.
 
-    ``out_dir`` is consulted by the ``-9 → 0`` heuristic only: when the main
-    process is SIGKILL'd but had already produced a ``result.json``, we treat
-    it as success — unless the kill was caused by ``cancel_event`` firing,
-    in which case the cancellation must remain visible to the caller.
+    ``out_dir`` is consulted twice:
+
+    1. Skills may opt into explicit success/failure signalling by
+       tail-calling ``omicsclaw.common.report.mark_result_status`` and
+       leaving a top-level ``status`` field in ``result.json``. When
+       present the runner trusts that value — ``"ok"`` zeroes the
+       return code, ``"partial"`` / ``"failed"`` make sure the code is
+       non-zero even if the process exited 0.
+    2. As a backward-compat fallback for skills that don't write
+       ``status`` yet, the legacy ``-9 → 0`` heuristic still fires:
+       when the main process is SIGKILL'd but had already produced a
+       ``result.json``, we treat it as success.
+
+    Cancellation always wins: if ``cancel_event`` fired we never
+    reclassify the outcome as success regardless of what the skill
+    wrote to disk.
     """
     popen = subprocess.Popen(
         cmd,
@@ -150,19 +164,27 @@ def drive_subprocess(
     stderr = "".join(stderr_lines)
     return_code = popen.returncode or 0
 
-    # The ``-9 → 0`` heuristic was a workaround for the orphan reaper's
-    # SIGKILL race when the main process had already produced its
-    # ``result.json``. Once ``cancel_event`` was wired to escalate to
-    # SIGKILL, ``-9`` also became the *normal* outcome of cancellation —
-    # skip the heuristic when the run was actually cancelled, otherwise a
-    # cancelled run that happened to leave a partial ``result.json`` would
-    # be silently reported as success.
+    # Cancellation always wins: if the user / asyncio task killed the
+    # skill, we never reclassify the outcome as success, regardless of
+    # what the skill may have written to ``result.json`` before dying.
     was_cancelled = cancel_event is not None and cancel_event.is_set()
-    if (
-        not was_cancelled
-        and return_code == -9
-        and (out_dir / "result.json").exists()
-    ):
-        return_code = 0
+    if not was_cancelled:
+        # OMI-12 audit P1 #2: prefer an explicit status the skill wrote
+        # to ``result.json`` over the exit-code heuristic. Skills opt in
+        # by tail-calling ``omicsclaw.common.report.mark_result_status``
+        # at the end of their script — a status field present in the
+        # envelope means the skill said "I finished, here's how"; the
+        # runner trusts that over any race with the orphan reaper's
+        # SIGKILL. Skills that never call ``mark_result_status`` keep
+        # the legacy ``-9 → 0 when result.json exists`` heuristic so
+        # the 89 already-shipped skills don't have to migrate at once.
+        status = read_result_status(out_dir)
+        if status == "ok":
+            return_code = 0
+        elif status in ("partial", "failed"):
+            if return_code == 0:
+                return_code = 1
+        elif return_code == -9 and (out_dir / "result.json").exists():
+            return_code = 0
 
     return subprocess.CompletedProcess(cmd, return_code, stdout, stderr)

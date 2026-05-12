@@ -338,6 +338,88 @@ def write_result_json(
     return result_path
 
 
+_RESULT_STATUS_VALUES = frozenset({"ok", "partial", "failed"})
+
+
+def mark_result_status(
+    output_dir: str | Path,
+    status: str,
+) -> bool:
+    """Patch ``result.json`` with a top-level ``status`` field.
+
+    Skills opt in to explicit success/failure signalling by calling this
+    helper **as their last step**, after every disk write that would
+    affect correctness. The runner reads the field via
+    :func:`read_result_status` and uses it to decide success / failure
+    instead of relying on the exit code; when no status is present the
+    runner falls back to the legacy ``-9 → 0`` heuristic for backward
+    compatibility (OMI-12 audit P1 #2).
+
+    Why "last step"? If a skill writes the status early and then crashes,
+    ``result.json`` would carry ``status: ok`` from a crashed run and the
+    runner would incorrectly report success. Calling this after every
+    other write means a crash before the patch leaves the file
+    status-less, and the legacy heuristic stays in charge.
+
+    Args:
+        output_dir: Skill output directory; the ``result.json`` envelope
+            ``write_result_json`` already produced must live here.
+        status: One of ``"ok"``, ``"partial"``, or ``"failed"``.
+
+    Returns:
+        ``True`` when the field was written; ``False`` when the envelope
+        was missing, unreadable, or the status value was rejected. The
+        function never raises so callers can tail-call it without an
+        exception handler.
+    """
+    if status not in _RESULT_STATUS_VALUES:
+        logger.warning(
+            "mark_result_status: ignoring unknown status %r (allowed: %s)",
+            status,
+            sorted(_RESULT_STATUS_VALUES),
+        )
+        return False
+
+    result_path = Path(output_dir) / "result.json"
+    if not result_path.exists():
+        return False
+    try:
+        envelope = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(envelope, dict):
+        return False
+
+    envelope["status"] = status
+    try:
+        result_path.write_text(json.dumps(envelope, indent=2, default=str))
+    except OSError:
+        return False
+    return True
+
+
+def read_result_status(output_dir: str | Path) -> str | None:
+    """Return the top-level ``status`` field from ``result.json``, or None.
+
+    Only returns one of the documented values (``"ok"``, ``"partial"``,
+    ``"failed"``); any other shape is treated as "no status" so the
+    runner falls back to its exit-code heuristic.
+    """
+    result_path = Path(output_dir) / "result.json"
+    if not result_path.exists():
+        return None
+    try:
+        envelope = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(envelope, dict):
+        return None
+    value = envelope.get("status")
+    if isinstance(value, str) and value in _RESULT_STATUS_VALUES:
+        return value
+    return None
+
+
 def write_replot_hint(
     output_dir: str | Path,
     skill_alias: str,
