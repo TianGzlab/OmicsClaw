@@ -18,7 +18,7 @@
           "score": 1.7
         },
         {
-          "skill": "spatial-domains",
+          "skill": "spatial-de",
           "score": 0.85
         }
       ]
@@ -144,15 +144,15 @@
       "should_create_skill": false,
       "top_3_candidates": [
         {
-          "skill": "bulkrna-de",
-          "score": 2.55
-        },
-        {
           "skill": "bulkrna-survival",
           "score": 2.55
         },
         {
-          "skill": "bulkrna-splicing",
+          "skill": "bulkrna-de",
+          "score": 2.55
+        },
+        {
+          "skill": "bulkrna-deconvolution",
           "score": 2.55
         }
       ]
@@ -171,11 +171,11 @@
           "score": 4.7
         },
         {
-          "skill": "sc-cell-communication",
+          "skill": "sc-cytotrace",
           "score": 1.7
         },
         {
-          "skill": "sc-standardize-input",
+          "skill": "sc-markers",
           "score": 1.7
         }
       ]
@@ -183,22 +183,22 @@
     {
       "query": "Build a WGCNA co-expression network on my bulk RNA-seq counts, return hub genes",
       "file_path": null,
-      "chosen_skill": "bulkrna-ppi-network",
+      "chosen_skill": "bulkrna-coexpression",
       "coverage": "exact_skill",
       "domain": "bulkrna",
       "should_search_web": false,
       "should_create_skill": false,
       "top_3_candidates": [
         {
-          "skill": "bulkrna-ppi-network",
-          "score": 7.25
-        },
-        {
           "skill": "bulkrna-coexpression",
           "score": 7.25
         },
         {
-          "skill": "bulkrna-trajblend",
+          "skill": "bulkrna-ppi-network",
+          "score": 7.25
+        },
+        {
+          "skill": "bulkrna-enrichment",
           "score": 2.55
         }
       ]
@@ -236,11 +236,11 @@
           "score": 7.883333333333334
         },
         {
-          "skill": "bulkrna-trajblend",
+          "skill": "bulkrna-enrichment",
           "score": 2.55
         },
         {
-          "skill": "bulkrna-qc",
+          "skill": "bulkrna-trajblend",
           "score": 2.55
         }
       ]
@@ -259,11 +259,11 @@
           "score": 11.516666666666666
         },
         {
-          "skill": "spatial-microenvironment-subset",
+          "skill": "spatial-annotate",
           "score": 0.85
         },
         {
-          "skill": "spatial-annotate",
+          "skill": "spatial-deconv",
           "score": 0.85
         }
       ]
@@ -286,7 +286,7 @@
           "score": 2.35
         },
         {
-          "skill": "genomics-phasing",
+          "skill": "genomics-variant-calling",
           "score": 1.7
         }
       ]
@@ -343,11 +343,11 @@
           "score": 15.016666666666666
         },
         {
-          "skill": "spatial-register",
+          "skill": "spatial-de",
           "score": 1.7
         },
         {
-          "skill": "spatial-de",
+          "skill": "spatial-register",
           "score": 1.7
         }
       ]
@@ -390,7 +390,7 @@
           "score": 1.7
         },
         {
-          "skill": "spatial-preprocess",
+          "skill": "spatial-de",
           "score": 0.85
         }
       ]
