@@ -6,7 +6,7 @@
 
 ## Allowed extra CLI flags
 
-_No extra flags beyond the standard `--input` / `--output` / `--demo` set._
+- `--method`
 
 ## Per-method parameter hints
 
