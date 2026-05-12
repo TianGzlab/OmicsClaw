@@ -95,14 +95,6 @@ from omicsclaw.core.skill_runner import (
 )
 from omicsclaw.core.registry import ensure_registry_loaded, registry
 
-SPATIAL_PIPELINE = [
-    "spatial-preprocess",
-    "spatial-domains",
-    "spatial-de",
-    "spatial-genes",
-    "spatial-statistics",
-]
-
 
 def _module_available(module_name: str) -> bool:
     """Return True when a Python module is importable in this environment."""
