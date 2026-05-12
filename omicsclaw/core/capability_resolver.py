@@ -652,7 +652,13 @@ def resolve_capability(
         if candidate is not None:
             candidates.append(candidate)
 
-    candidates.sort(key=lambda c: c.score, reverse=True)
+    # Sort by score DESC with a stable alphabetical tie-break on the skill
+    # alias. Without the tie-break, the post-PR audit caught WGCNA flapping
+    # between ``bulkrna-coexpression`` and ``bulkrna-ppi-network`` depending
+    # on the order ``registry.iter_primary_skills`` happened to return them
+    # in — which itself depends on filesystem traversal at registry load
+    # time. Alphabetical order gives a deterministic winner.
+    candidates.sort(key=lambda c: (-c.score, c.skill))
 
     custom_requested = any(h in query_lower for h in _CUSTOM_FALLBACK_HINTS)
     web_requested = any(h in query_lower for h in _WEB_HINTS)

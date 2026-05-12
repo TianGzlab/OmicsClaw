@@ -283,10 +283,13 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
     if batch_key:
         hint_cmd.extend(["--batch-key", batch_key])
     if n_epochs is not None:
-        if canonical_skill == "spatial-domain-identification":
-            hint_cmd.extend(["--epochs", str(int(n_epochs))])
-        else:
-            hint_cmd.extend(["--n-epochs", str(int(n_epochs))])
+        # ``argv_builder.filter_forwarded_args`` rewrites ``--n-epochs`` to
+        # ``--epochs`` (or vice versa) per the receiving skill's
+        # ``allowed_extra_flags``; the legacy
+        # ``if canonical_skill == "spatial-domain-identification"`` branch
+        # never fired because the registry resolves that alias to
+        # ``spatial-domains`` before this code runs.
+        hint_cmd.extend(["--n-epochs", str(int(n_epochs))])
     hint_cmd.extend(_normalize_extra_args(extra_args))
     param_hint = _build_param_hint(skill_key, method, hint_cmd)
 
