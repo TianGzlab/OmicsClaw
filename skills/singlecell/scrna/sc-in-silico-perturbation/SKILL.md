@@ -1,204 +1,100 @@
 ---
 name: sc-in-silico-perturbation
-description: >-
-  In-silico perturbation analysis for scRNA-seq. Simulates the effect of
-  knocking out a target gene and identifies differentially regulated genes.
+description: Load when predicting in-silico gene knockout effects on a normalised scRNA AnnData via GRN-based propagation (Python) or scTenifoldKnk (R). Skip when you have a real Perturb-seq / CRISPR screen (use sc-perturb / sc-perturb-prep) or for predicting drug sensitivity (use sc-drug-response).
 version: 0.2.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, virtual-knockout, grn, perturbation, sctenifoldknk]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--method"
-      - "--ko-gene"
-      - "--n-top-genes"
-      - "--corr-threshold"
-      - "--qc"
-      - "--qc-min-lib-size"
-      - "--qc-min-cells"
-      - "--n-net"
-      - "--n-cells"
-      - "--n-comp"
-      - "--q"
-      - "--td-k"
-      - "--ma-dim"
-      - "--n-cores"
-      - "--r-enhanced"
+tags:
+- singlecell
+- scrna
+- in-silico-perturbation
+- knockout
+- grn
+- sctenifoldknk
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# In-Silico Perturbation
+# sc-in-silico-perturbation
 
-## Why This Exists
+## When to use
 
-- Without it: virtual perturbation analysis requires manual GRN construction and comparison, or running R scripts outside the scRNA pipeline.
-- With it: this skill provides a unified interface for in-silico gene knockout simulation, ranking downstream-affected genes.
+The user has an unperturbed scRNA AnnData (no real CRISPR screen) and
+wants to predict which genes / pathways would be affected if a target
+gene were knocked out. Two methods:
 
-## Data / State Requirements
+- `grn_ko` (default) — Python-native: builds a correlation-based GRN
+  on top variable genes, propagates the KO signal, ranks differential
+  regulation. No R required.
+- `sctenifoldknk` — R-backed scTenifoldKnk pipeline (manifold alignment
+  KO). Requires `Rscript` + the `scTenifoldKnk` R package.
 
-- **Input matrix**: raw counts preferred (in `layers["counts"]` or `X`).
-- **Gene names**: the KO gene must exist in `adata.var_names`.
-- **No upstream clustering required**: this skill operates on the expression matrix directly.
+For **real** Perturb-seq / CRISPR screen data use `sc-perturb` (Mixscape
+classification) and upstream `sc-perturb-prep`. For drug-target /
+sensitivity prediction use `sc-drug-response`.
 
-### Upstream Step
+## Inputs & Outputs
 
-Run `sc-preprocessing` first if your data is not yet in AnnData format. If you already have a count matrix (h5ad, CSV, or 10X), this skill can load it directly.
-
-## Methods
-
-### Method Selection Table
-
-| Scenario | Recommended method | Example |
-|----------|-------------------|---------|
-| Quick Python-only analysis | `grn_ko` (default) | `--method grn_ko --ko-gene TP53` |
-| Need official scTenifoldKnk results | `sctenifoldknk` | `--method sctenifoldknk --ko-gene TP53` |
-| No R installed | `grn_ko` | `--method grn_ko` |
-
-### grn_ko (Python, default)
-
-Builds a Pearson correlation-based gene regulatory network from the expression matrix, zeroes the KO gene's edges, and scores differential regulation per gene. Fast, no R required.
-
-### sctenifoldknk (R)
-
-Official scTenifoldKnk pipeline via Rscript. Constructs multiple subnetworks via pcNet, applies tensor decomposition, aligns WT and KO manifolds, and tests for differential regulation. Requires R with the `scTenifoldKnk` package installed.
-
-## Public Parameters
-
-### Shared
-
-| Parameter | Meaning |
-|---|---|
-| `--method` | `grn_ko` (Python, default) or `sctenifoldknk` (R) |
-| `--ko-gene` | Target gene to virtually knock out |
-
-### grn_ko parameters
-
-| Parameter | Default | Meaning |
+| Input | Format | Required |
 |---|---|---|
-| `--n-top-genes` | 2000 | Number of HVGs used for GRN construction |
-| `--corr-threshold` | 0.05 | Minimum absolute Pearson correlation for GRN edges |
+| Normalised scRNA AnnData | `.h5ad` (raw counts in `layers["counts"]` recommended) | yes (unless `--demo`) |
+| KO gene | `--ko-gene` (must exist in `var_names`) | yes |
 
-### sctenifoldknk parameters (R only)
-
-| Parameter | Default | Meaning |
+| Output | Path | Notes |
 |---|---|---|
-| `--qc` | off | Enable official internal QC |
-| `--qc-min-lib-size` | 0 | Minimum library size for QC |
-| `--qc-min-cells` | 10 | Minimum cells per gene after QC |
-| `--n-net` | 2 | Number of subnetworks to construct |
-| `--n-cells` | 100 | Cells subsampled per network |
-| `--n-comp` | 3 | Principal components used in network construction |
-| `--q` | 0.8 | Top-edge quantile retained |
-| `--td-k` | 2 | CP tensor rank |
-| `--ma-dim` | 2 | Manifold alignment dimensions |
-| `--n-cores` | 1 | Parallel cores used by the R backend |
+| AnnData (preserved) | `processed.h5ad` | unchanged; perturbation effect is reported in tables |
+| Diff regulation | `tables/diff_regulation.csv` | per-gene KO effect (logFC / score / p-value) |
+| `sctenifoldknk` raw output | `tables/tenifold_diff_regulation.csv` | when method == `sctenifoldknk` |
+| Figures | `figures/top_perturbed_genes.png`, `figures/pvalue_distribution.png` | always |
+| Report | `report.md` + `result.json` | always |
 
-## Workflow
+## Flow
 
-1. Load expression data (h5ad or demo)
-2. Preflight: validate KO gene exists, check matrix semantics, detect species
-3. Build GRN from WT expression matrix
-4. Simulate knockout by removing the target gene's edges
-5. Score and rank differentially regulated genes
-6. Persist results: `processed.h5ad`, tables, figures
-7. Render gallery and write manifests
+1. Load AnnData (`--input`) or generate demo data with `G10` as the default KO gene.
+2. Preflight `--ko-gene` is in `var_names` (`SystemExit(1)` with sample-genes hint if not).
+3. Warn if `layers["counts"]` is missing (uses `.X` for GRN), if `n_obs < 50`, or `n_vars < 20`.
+4. For `sctenifoldknk`: check `Rscript` is on PATH; SystemExit(1) with install hint if not.
+5. Detect species hint (UPPER → human, Title → mouse) from `var_names` casing.
+6. Run the chosen backend; for Python `grn_ko` build the correlation GRN at `--corr-threshold` and propagate the KO.
+7. Detect degenerate output (no significant regulation) → record diagnostics; do NOT raise.
+8. Save `processed.h5ad`, tables, figures, `report.md`, `result.json`.
 
-## Outputs
+## Gotchas
 
-- `processed.h5ad` -- annotated AnnData with perturbation scores in `adata.var`
-- `tables/diff_regulation.csv` -- full differential regulation table
-- `figures/top_perturbed_genes.png` -- bar chart of top perturbed genes
-- `figures/pvalue_distribution.png` -- p-value distribution histogram
-- `figures/manifest.json` -- figure gallery manifest
-- `figure_data/manifest.json` -- plot-ready data manifest
-- `result.json` -- machine-readable results with diagnostics
-- `report.md` -- human-readable analysis report
+- **All preflight failures `raise SystemExit(1)`, not `ValueError`.** `sc_in_silico_perturbation.py:162` raises `SystemExit(1)` when `--ko-gene` is not in `var_names` (after printing a multi-option fix message including the first 5 sample genes); `:197` raises `SystemExit(1)` when `sctenifoldknk` is selected but `Rscript` isn't on PATH; `:545` raises `SystemExit("Provide --input or use --demo")` when neither is given. Wrappers expecting `ValueError` need to catch `SystemExit`.
+- **`grn_ko` is forgiving on data quality — only warnings.** When `layers["counts"]` is absent / `n_obs < 50` / `n_vars < 20`, the script logs warnings and continues (`sc_in_silico_perturbation.py:166-186`). The GRN built from `.X` (instead of raw counts) is still scored, but the result is a "best-effort" — check `result.json["preflight_warnings"]` before quoting it.
+- **`--ko-gene` default is `G10`.** `sc_in_silico_perturbation.py:93` defaults to a synthetic gene name. On real data without specifying `--ko-gene`, the preflight at `:162` will reject the run unless the data happens to contain `G10`.
+- **Degenerate output is a soft fail.** When the GRN finds no significantly regulated genes, `sc_in_silico_perturbation.py:389-390` records `diagnostics["n_significant"] = 0` and the report's degenerate-block fix-suggestion list starts at `sc_in_silico_perturbation.py:499` — but the script returns 0. Always check `result.json["n_significant"]` before consuming the regulated-gene table.
+- **`sctenifoldknk` does its own validation.** Once `Rscript` is found, the R-side script runs and may fail with R-specific errors not captured by the Python preflight. Check the stderr of the run and `tables/tenifold_diff_regulation.csv` existence after.
+- **`--input` mandatory unless `--demo`.** `sc_in_silico_perturbation.py:545` raises `SystemExit("Provide --input or use --demo")`.
 
-## Matrix Contract
-
-This skill reads raw counts and preserves them:
-- `X = raw_counts`
-- `layers["counts"] = raw_counts`
-- Output `processed.h5ad` includes `omicsclaw_input_contract` and `omicsclaw_matrix_contract`
-
-## Reference Data Guide
-
-This skill does not require external reference data. All computation is performed on the input expression matrix.
-
-## Usual Next Step
-
-After identifying perturbed genes, consider:
-- `sc-enrichment` -- pathway enrichment on the top perturbed genes
-- `sc-grn` -- full gene regulatory network inference for deeper analysis
-
-## CLI Parameters
-
-### Shared parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | None | Input AnnData file (`.h5ad`) | Required unless `--demo` |
-| `--output` | str | — | Output directory | Required |
-| `--demo` | flag | off | Run with built-in demo data | — |
-| `--method` | str | `grn_ko` | Analysis method: `grn_ko` (Python) or `sctenifoldknk` (R) | Choices: `grn_ko`, `sctenifoldknk` |
-| `--ko-gene` | str | `G10` | Target gene to virtually knock out | Must exist in `adata.var_names`; raises error if absent |
-| `--r-enhanced` | flag | off | Generate R Enhanced plots (requires R + ggplot2) | — |
-
-### grn_ko parameters (Python, default)
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--n-top-genes` | int | 2000 | Number of HVGs used for GRN construction |
-| `--corr-threshold` | float | 0.05 | Minimum absolute Pearson correlation for GRN edges |
-
-### sctenifoldknk parameters (R only)
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--qc` | flag | off | Enable official scTenifoldKnk internal QC |
-| `--qc-min-lib-size` | int | 0 | Minimum library size for internal QC |
-| `--qc-min-cells` | int | 10 | Minimum cells per gene after QC |
-| `--n-net` | int | 2 | Number of subnetworks to construct |
-| `--n-cells` | int | 100 | Cells subsampled per network |
-| `--n-comp` | int | 3 | Principal components for network construction |
-| `--q` | float | 0.8 | Top-edge quantile retained |
-| `--td-k` | int | 2 | CP tensor rank |
-| `--ma-dim` | int | 2 | Manifold alignment dimensions |
-| `--n-cores` | int | 1 | Parallel cores used by the R backend |
-
-## R Enhanced Plots
-
-| Renderer | Output file | Description |
-|----------|-------------|-------------|
-| `plot_embedding_discrete` | `figures/r_enhanced/r_embedding_discrete.png` | UMAP colored by discrete cluster labels |
-| `plot_embedding_feature` | `figures/r_enhanced/r_embedding_feature.png` | UMAP colored by perturbation score |
-
-## Special Requirements
-
-### KO Gene Must Exist in the Data
-
-`--ko-gene` must match a gene symbol in `adata.var_names`. The preflight check raises a `SystemExit` with the first 5 available gene names if the specified gene is not found.
+## Key CLI
 
 ```bash
-# Check available gene names first
-python -c "import scanpy as sc; a = sc.read_h5ad('data.h5ad'); print(list(a.var_names[:10]))"
+# Demo (synthetic GRN with G10 as KO target)
+python omicsclaw.py run sc-in-silico-perturbation --demo --output /tmp/sc_iko_demo
 
-# Then run with the correct gene name
+# Default GRN-based KO on real data (must specify --ko-gene)
 python omicsclaw.py run sc-in-silico-perturbation \
-  --input data.h5ad \
-  --ko-gene TP53 \
-  --output results/
+  --input clustered.h5ad --output results/ --ko-gene EGFR
 
-# R-backed method (requires R + scTenifoldKnk)
+# Tighter GRN (more stringent correlation threshold)
 python omicsclaw.py run sc-in-silico-perturbation \
-  --input data.h5ad \
-  --method sctenifoldknk \
-  --ko-gene TP53 \
-  --output results/
+  --input clustered.h5ad --output results/ \
+  --ko-gene EGFR --corr-threshold 0.1 --n-top-genes 3000
+
+# scTenifoldKnk (R-backed)
+python omicsclaw.py run sc-in-silico-perturbation \
+  --input clustered.h5ad --output results/ \
+  --method sctenifoldknk --ko-gene EGFR --n-cores 4
 ```
 
-## Workflow Position
+## See also
 
-**Upstream:** sc-clustering or sc-cell-annotation
-**Downstream:** sc-enrichment (enrich perturbed genes)
+- `references/parameters.md` — every CLI flag, GRN tunables
+- `references/methodology.md` — `grn_ko` correlation-GRN math vs scTenifoldKnk manifold alignment
+- `references/output_contract.md` — `tables/diff_regulation.csv` column schema
+- Adjacent skills: `sc-perturb` / `sc-perturb-prep` (parallel — REAL Perturb-seq data, NOT in-silico), `sc-drug-response` (parallel — drug-target sensitivity prediction, NOT genetic KO), `sc-grn` (parallel — explicit GRN construction; this skill builds one internally for `grn_ko`), `sc-clustering` / `sc-cell-annotation` (upstream — produces the labelled AnnData; KO predictions are more interpretable per-cluster)

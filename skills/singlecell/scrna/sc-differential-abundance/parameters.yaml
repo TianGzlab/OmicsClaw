@@ -1,0 +1,22 @@
+domain: singlecell
+allowed_extra_flags:
+- --cell-type-key
+- --condition-key
+- --contrast
+- --fdr
+- --method
+- --min-count
+- --n-neighbors
+- --n-permutations
+- --prop
+- --r-enhanced
+- --reference-cell-type
+- --sample-key
+saves_h5ad: true
+requires_preprocessed: true
+script: sc_differential_abundance.py
+legacy_aliases:
+- sc-da
+- sc-compositional
+param_hints: {}
+trigger_keywords: []

@@ -131,24 +131,6 @@ def omicsclaw_execute(
     Returns:
         Skill execution result with output paths and summary
     """
-    import importlib.util
-    import sys
-    from pathlib import Path
-
-    # Locate omicsclaw.py script
-    omicsclaw_dir = Path(__file__).resolve().parent.parent.parent
-    script_path = omicsclaw_dir / "omicsclaw.py"
-
-    if not script_path.exists():
-        return f"Error: omicsclaw.py not found at {script_path}"
-
-    # Load the script module
-    spec = importlib.util.spec_from_file_location("_oc_script", script_path)
-    if spec is None or spec.loader is None:
-        return f"Error: cannot load omicsclaw.py"
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
     # Build keyword arguments
     kwargs: dict = {}
     if input_path:
@@ -166,10 +148,12 @@ def omicsclaw_execute(
         import shlex
         extra.extend(shlex.split(extra_args))
     if extra:
-        kwargs["extra_flags"] = extra
+        kwargs["extra_args"] = extra
 
     try:
-        result = mod.run_skill(skill, **kwargs)
+        from omicsclaw.core.skill_runner import run_skill
+
+        result = run_skill(skill, **kwargs)
         success = result.get("success", False)
         out_dir = result.get("output_dir", "")
         stdout = result.get("stdout", "")
@@ -247,10 +231,9 @@ def skill_search(
     from pathlib import Path
 
     try:
-        from omicsclaw.core.registry import OmicsRegistry
+        from omicsclaw.core.registry import ensure_registry_loaded
 
-        registry = OmicsRegistry()
-        registry.load_all()
+        registry = ensure_registry_loaded()
 
         query_lower = query.lower()
         domain_lower = domain.lower() if domain else ""

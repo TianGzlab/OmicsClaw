@@ -9,8 +9,16 @@ from omicsclaw.common.user_guidance import (
     extract_user_guidance_payloads,
     render_guidance_block,
 )
+from omicsclaw.core.llm_patches import apply_deepseek_reasoning_passback
 
-from .context_compaction import ContextCompactionConfig, prepare_model_messages
+from .context_budget import estimate_message_size
+from .context_compaction import (
+    CompactionEvent,
+    ContextCompactionConfig,
+    PreparedModelMessages,
+    prepare_model_messages,
+    wrap_compaction_summary,
+)
 from .events import (
     EVENT_SESSION_RESUME,
     EVENT_SESSION_START,
@@ -73,6 +81,7 @@ class MaterializedToolCall:
 class MaterializedMessage:
     content: str | None
     tool_calls: list[MaterializedToolCall] | None
+    reasoning_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,12 @@ class QueryEngineContext:
     hook_runtime: LifecycleHookRuntime | None = None
     tool_runtime_context: dict[str, Any] | None = None
     token_budget: int | str | None = None
+    # Phase 1 (tool-list-compression): when set, this tuple replaces the
+    # full ``tool_runtime.openai_tools`` payload sent to the LLM, so
+    # callers can exercise ``ToolRegistry.to_openai_tools_for_request``
+    # to filter tools per request. ``None`` (default) preserves legacy
+    # behavior — the full registered tool list is sent.
+    request_tools: tuple[dict[str, Any], ...] | None = None
 
 
 @dataclass(slots=True)
@@ -94,9 +109,14 @@ class QueryEngineCallbacks:
     on_stream_content: Callable[[str], Any] | None = None
     on_stream_reasoning: Callable[[str], Any] | None = None
     before_tool: Callable[[ToolExecutionRequest], Any] | None = None
-    after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = None
-    request_tool_approval: Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None = None
+    after_tool: Callable[[ToolExecutionResult, ToolResultRecord, Any], Any] | None = (
+        None
+    )
+    request_tool_approval: (
+        Callable[[ToolExecutionRequest, ToolExecutionResult], Any] | None
+    ) = None
     on_llm_error: Callable[[Exception], Any] | None = None
+    on_context_compacted: Callable[["CompactionEvent"], Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +129,10 @@ class QueryEngineConfig:
         default_factory=ContextCompactionConfig
     )
     extra_api_params: dict[str, Any] = field(default_factory=dict)
+    # DeepSeek thinking-mode endpoints reject requests where any historical
+    # assistant message lacks ``reasoning_content``. Set to True for the
+    # ``deepseek`` provider so the chat path mirrors the autoagent passback.
+    deepseek_reasoning_passback: bool = False
 
 
 def _extract_completion_tokens(response_usage, delta) -> int:
@@ -160,10 +184,21 @@ def _is_prompt_too_long_error(exc: BaseException) -> bool:
     return any(pattern in message for pattern in patterns)
 
 
+_EMPTY_COMPLETION_MESSAGE = (
+    "LLM provider returned an empty completion. Check that the configured "
+    "provider endpoint is OpenAI-compatible, the model name is valid, and for "
+    "custom endpoints include the API base path such as /v1 when required."
+)
+
+
 def _merge_response_segments(segments: list[str], current: str) -> str:
-    merged = [segment.strip() for segment in [*segments, current] if segment and segment.strip()]
+    merged = [
+        segment.strip()
+        for segment in [*segments, current]
+        if segment and segment.strip()
+    ]
     if not merged:
-        return "(no response)"
+        return _EMPTY_COMPLETION_MESSAGE
     return "\n\n".join(merged)
 
 
@@ -203,7 +238,11 @@ def _normalize_permission_resolution(
         ToolPolicyState.from_mapping(
             policy_state_raw,
             surface=str(
-                ((request.runtime_context or {}).get("surface") or fallback_surface or "")
+                (
+                    (request.runtime_context or {}).get("surface")
+                    or fallback_surface
+                    or ""
+                )
             ).strip(),
         )
         if policy_state_raw is not None
@@ -291,9 +330,16 @@ def _materialize_message_from_choice_message(message) -> MaterializedMessage:
             )
             for tc in message.tool_calls
         ]
+    reasoning_content: str | None = None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(message, attr, None)
+        if isinstance(value, str) and value:
+            reasoning_content = value
+            break
     return MaterializedMessage(
         content=getattr(message, "content", None),
         tool_calls=tool_calls,
+        reasoning_content=reasoning_content,
     )
 
 
@@ -304,6 +350,7 @@ async def _materialize_message_from_stream(
     on_usage_delta: Callable[[Any, Any], None] | None = None,
 ) -> MaterializedMessage:
     final_content = ""
+    final_reasoning = ""
     tool_calls_dict: dict[int, MaterializedToolCall] = {}
     # Some OpenAI-compatible proxies (ccproxy, LiteLLM, some Gemini transports)
     # emit cumulative `chunk.usage` on every chunk, not just the terminal one.
@@ -320,6 +367,7 @@ async def _materialize_message_from_stream(
         delta = chunk.choices[0].delta
         text_chunks, reasoning_chunks = _extract_stream_delta_chunks(delta)
         for reasoning_chunk in reasoning_chunks:
+            final_reasoning += reasoning_chunk
             if callbacks.on_stream_reasoning:
                 await _maybe_await(callbacks.on_stream_reasoning(reasoning_chunk))
         for text_chunk in text_chunks:
@@ -341,7 +389,8 @@ async def _materialize_message_from_stream(
                     tool_calls_dict[tc_index] = MaterializedToolCall(
                         id=existing.id or tc_chunk.id or "",
                         name=existing.name + (tc_chunk.function.name or ""),
-                        arguments=existing.arguments + (tc_chunk.function.arguments or ""),
+                        arguments=existing.arguments
+                        + (tc_chunk.function.arguments or ""),
                     )
 
     if last_usage is not None:
@@ -351,6 +400,7 @@ async def _materialize_message_from_stream(
     return MaterializedMessage(
         content=final_content or None,
         tool_calls=tool_calls,
+        reasoning_content=final_reasoning or None,
     )
 
 
@@ -374,6 +424,57 @@ async def _materialize_message(
             on_usage_delta=on_usage_delta,
         )
     return _materialize_message_from_choice_message(response.choices[0].message)
+
+
+async def _emit_compaction_event(
+    *,
+    callbacks: QueryEngineCallbacks,
+    pre_chars: int,
+    post_chars: int,
+    history_len: int,
+    kept_len: int,
+    applied_stages: tuple[str, ...],
+) -> None:
+    """Build a CompactionEvent and dispatch via the callback.
+
+    Failures in the user-supplied callback are logged at WARNING and
+    swallowed — compaction itself succeeded; failing to notify must
+    not abort the turn.
+    """
+    saved_chars = max(0, pre_chars - post_chars)
+    omitted = max(0, history_len - kept_len)
+    event = CompactionEvent(
+        messages_compressed=omitted,
+        tokens_saved_estimate=int(saved_chars / 3.5),
+        applied_stages=applied_stages,
+    )
+    try:
+        await _maybe_await(callbacks.on_context_compacted(event))
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "on_context_compacted callback raised; ignoring.",
+            exc_info=True,
+        )
+
+
+def _persist_prepared_compaction(
+    *,
+    transcript_store: TranscriptStore,
+    chat_id: int | str,
+    prepared_messages: PreparedModelMessages,
+) -> None:
+    if not prepared_messages.persisted_summary.strip():
+        return
+    compacted_history = [
+        {
+            "role": "system",
+            "content": wrap_compaction_summary(prepared_messages.persisted_summary),
+        },
+        *prepared_messages.messages,
+    ]
+    transcript_store.replace_history(chat_id, compacted_history)
 
 
 async def run_query_engine(
@@ -418,7 +519,9 @@ async def run_query_engine(
         if context_fragments:
             system_prompt = (
                 f"{system_prompt.rstrip()}\n\n## Active Session Hooks\n\n"
-                + "\n\n".join(fragment for fragment in context_fragments if fragment.strip())
+                + "\n\n".join(
+                    fragment for fragment in context_fragments if fragment.strip()
+                )
             ).strip()
 
     transcript_store.touch(context.chat_id)
@@ -435,9 +538,7 @@ async def run_query_engine(
     ).strip()
     workspace = str((tool_runtime_context or {}).get("workspace", "") or "").strip()
     compaction_metadata = (
-        {"pipeline_workspace": pipeline_workspace}
-        if pipeline_workspace
-        else None
+        {"pipeline_workspace": pipeline_workspace} if pipeline_workspace else None
     )
     compaction_workspace = pipeline_workspace or workspace or None
 
@@ -449,6 +550,7 @@ async def run_query_engine(
     last_message: MaterializedMessage | None = None
     for _ in range(config.max_iterations):
         history = transcript_store.prepare_history(context.chat_id)
+        pre_chars = sum(estimate_message_size(m) for m in history)
         prepared_messages = prepare_model_messages(
             system_prompt=system_prompt,
             history=history,
@@ -460,6 +562,22 @@ async def run_query_engine(
         )
         request_system_prompt = prepared_messages.system_prompt
         request_messages = prepared_messages.messages
+        if config.deepseek_reasoning_passback:
+            request_messages = apply_deepseek_reasoning_passback(request_messages)
+        _persist_prepared_compaction(
+            transcript_store=transcript_store,
+            chat_id=context.chat_id,
+            prepared_messages=prepared_messages,
+        )
+        if prepared_messages.applied_stages and callbacks.on_context_compacted:
+            await _emit_compaction_event(
+                callbacks=callbacks,
+                pre_chars=pre_chars,
+                post_chars=prepared_messages.estimated_chars,
+                history_len=len(history),
+                kept_len=len(prepared_messages.messages),
+                applied_stages=prepared_messages.applied_stages,
+            )
         try:
             while True:
                 kwargs = {}
@@ -469,12 +587,21 @@ async def run_query_engine(
                     kwargs.update(config.extra_api_params)
 
                 try:
+                    # Phase 1 (tool-list-compression): use per-request tool
+                    # list when caller provided one (via
+                    # ``QueryEngineContext.request_tools``). Falls back to
+                    # the full registry payload for backward compatibility.
+                    request_tools = (
+                        list(context.request_tools)
+                        if context.request_tools is not None
+                        else list(tool_runtime.openai_tools)
+                    )
                     response = await llm.chat.completions.create(
                         model=config.model,
                         max_tokens=config.max_tokens,
                         messages=[{"role": "system", "content": request_system_prompt}]
                         + request_messages,
-                        tools=list(tool_runtime.openai_tools),
+                        tools=request_tools,
                         **kwargs,
                     )
                     last_message = await _materialize_message(
@@ -491,6 +618,7 @@ async def run_query_engine(
                     ):
                         raise
 
+                    reactive_pre_chars = sum(estimate_message_size(m) for m in history)
                     reactive_messages = prepare_model_messages(
                         system_prompt=system_prompt,
                         history=history,
@@ -502,15 +630,30 @@ async def run_query_engine(
                         force_reactive_compact=True,
                     )
                     has_attempted_reactive_compact = True
-                    if (
-                        reactive_messages.applied_stages
-                        and (
-                            reactive_messages.system_prompt != request_system_prompt
-                            or reactive_messages.messages != request_messages
-                        )
+                    if reactive_messages.applied_stages and (
+                        reactive_messages.system_prompt != request_system_prompt
+                        or reactive_messages.messages != request_messages
                     ):
                         request_system_prompt = reactive_messages.system_prompt
                         request_messages = reactive_messages.messages
+                        if config.deepseek_reasoning_passback:
+                            request_messages = apply_deepseek_reasoning_passback(
+                                request_messages
+                            )
+                        _persist_prepared_compaction(
+                            transcript_store=transcript_store,
+                            chat_id=context.chat_id,
+                            prepared_messages=reactive_messages,
+                        )
+                        if callbacks.on_context_compacted:
+                            await _emit_compaction_event(
+                                callbacks=callbacks,
+                                pre_chars=reactive_pre_chars,
+                                post_chars=reactive_messages.estimated_chars,
+                                history_len=len(history),
+                                kept_len=len(reactive_messages.messages),
+                                applied_stages=reactive_messages.applied_stages,
+                            )
                         continue
                     raise
         except config.llm_error_types as exc:
@@ -535,6 +678,7 @@ async def run_query_engine(
             context.chat_id,
             content=last_message.content or "",
             tool_calls=assistant_tool_calls,
+            reasoning_content=last_message.reasoning_content,
         )
 
         if not last_message.tool_calls:
@@ -548,7 +692,9 @@ async def run_query_engine(
                     budget_decision.nudge_message,
                 )
                 continue
-            return _merge_response_segments(accumulated_response_segments, current_response)
+            return _merge_response_segments(
+                accumulated_response_segments, current_response
+            )
 
         execution_requests: list[ToolExecutionRequest] = []
         tool_states: dict[str, Any] = {}
@@ -647,7 +793,9 @@ async def run_query_engine(
                                 ),
                             )
                         approved_runtime_context = dict(request.runtime_context or {})
-                        approved_runtime_context["policy_state"] = effective_policy_state
+                        approved_runtime_context["policy_state"] = (
+                            effective_policy_state
+                        )
                         approved_request = ToolExecutionRequest(
                             call_id=request.call_id,
                             name=request.name,
@@ -720,13 +868,33 @@ async def run_query_engine(
                 )
                 notices = hook_runtime.consume_pending_messages(
                     mode=HOOK_MODE_NOTICE,
-                    event_names=(EVENT_TOOL_BEFORE, EVENT_TOOL_AFTER, EVENT_TOOL_FAILURE),
+                    event_names=(
+                        EVENT_TOOL_BEFORE,
+                        EVENT_TOOL_AFTER,
+                        EVENT_TOOL_FAILURE,
+                    ),
                     call_id=request.call_id,
                 )
                 if notices:
-                    record_output = "\n".join(
-                        [*notices, str(record_output)]
-                    ).strip()
+                    record_output = "\n".join([*notices, str(record_output)]).strip()
+            # Phase 4 (system-prompt-compression refactor): prepend the
+            # matched pre-call rule preamble (engineering / skill-execution
+            # discipline) to the tool result so the model sees the rule
+            # right before it reasons about the result. This is the
+            # runtime wiring of ``PreCallRuleInjector`` —
+            # ``build_pre_call_rule_text`` is otherwise dead abstraction.
+            from .tool_execution_hooks import (
+                DEFAULT_PRE_CALL_RULE_INJECTORS,
+                build_pre_call_rule_text,
+            )
+
+            preamble_text = build_pre_call_rule_text(
+                tool_name=request.name,
+                tool_args=request.arguments or {},
+                injectors=DEFAULT_PRE_CALL_RULE_INJECTORS,
+            )
+            if preamble_text:
+                record_output = f"{preamble_text}\n\n{record_output}".strip()
             result_record = tool_result_store.record(
                 chat_id=context.chat_id,
                 tool_call_id=request.call_id,
@@ -771,5 +939,7 @@ async def run_query_engine(
             return interruption_message
 
     if last_message and last_message.content:
-        return _merge_response_segments(accumulated_response_segments, last_message.content)
+        return _merge_response_segments(
+            accumulated_response_segments, last_message.content
+        )
     return "(max tool iterations reached)"

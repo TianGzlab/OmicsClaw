@@ -1,371 +1,77 @@
 ---
 name: sc-qc
-description: >-
-  Review cell quality before filtering. Computes counts, detected genes,
-  mitochondrial percentage, and ribosomal percentage, but does not remove
-  cells.
-version: 0.2.0
+description: Load when computing per-cell QC metrics (n_genes, total counts, mt%, ribo%) on a single-cell AnnData before filtering. Skip when reads are still raw FASTQ (use sc-fastq-qc) or you want to filter cells now (use sc-filter).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, qc, quality-control, metrics, visualization]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--species"
-      - "--r-enhanced"
-    param_hints:
-      qc_metrics:
-        priority: "species"
-        params: ["species"]
-        defaults: {species: "human"}
-        requires: ["count_like_matrix_in_layers.raw_or_X", "gene_symbols_with_species_prefix_convention"]
-        tips:
-          - "--species: Wrapper-level control for mitochondrial / ribosomal gene-prefix detection; use `human` for `MT-` / `RP[SL]`, `mouse` for `mt-` / `Rp[sl]`."
-          - "Current OmicsClaw implementation exposes one public QC path, `qc_metrics`; it always computes ribosomal percentage in addition to mitochondrial percentage."
-          - "This skill is diagnostic-only and does not remove cells or genes."
-    saves_h5ad: true
-    requires_preprocessed: false
-    requires:
-      bins:
-        - python3
-      env: []
-      config: []
-    emoji: "📊"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: scanpy
-        bins: []
-    trigger_keywords:
-      - scRNA QC
-      - single-cell QC
-      - quality control
-      - mitochondrial percentage
-      - ribosomal percentage
-      - QC violin
-      - QC scatter
-      - n genes per cell
+tags:
+- singlecell
+- scrna
+- qc
+- mitochondrial
+- ribosomal
+requires:
+- anndata
+- scanpy
+- matplotlib
 ---
 
-# 📊 Single-Cell QC
+# sc-qc
 
-You are **SC QC**, the OmicsClaw skill for first-pass single-cell RNA-seq
-quality assessment. Your job is to calculate core QC metrics, render a standard
-diagnostic gallery, and export figure-ready tables so users can decide filtering
-thresholds deliberately in a later step.
+## When to use
 
-## Why This Exists
+The user has a single-cell AnnData (post-counting / post-standardisation)
+and wants to *review* cell quality — counts, detected genes, mitochondrial
+percentage, ribosomal percentage — before any filtering.  This skill
+**reports**, it does not remove cells.  Use `sc-filter` to actually drop
+cells based on these metrics.
 
-- **Without it**: users jump straight to filtering with vague or tissue-misaligned thresholds
-- **With it**: one run produces a stable QC summary, diagnostic plots, and reusable per-cell metric tables
-- **Why OmicsClaw**: the wrapper keeps a standard output contract across CLI / bot / chat usage and records analysis metadata back into AnnData for downstream reuse
+## Inputs & Outputs
 
-## Scope Boundary
+| Input | Format | Required |
+|---|---|---|
+| Single-cell AnnData | `.h5ad` | yes (unless `--demo`) |
 
-Current OmicsClaw `sc-qc` exposes **one implemented analysis path**:
-`qc_metrics`.
+| Output | Path | Notes |
+|---|---|---|
+| QC summary | `tables/qc_metrics_summary.csv` | one row per metric, with stats |
+| Per-cell metrics | `tables/qc_metrics_per_cell.csv` | one row per cell |
+| Top expressed genes | `tables/highest_expr_genes.csv` | by mean expression |
+| Diagnostic figures | `figures/qc_violin.png`, `figures/qc_scatter.png` | always rendered |
+| Provenance | `result.json` | `summary` includes `n_cells`, `n_genes`, `expression_source` |
+| Report | `report.md` | always written |
 
-This skill:
+## Flow
 
-1. calculates QC metrics
-2. visualizes QC distributions
-3. exports per-cell and summary tables
-4. saves an AnnData with QC annotations
+1. Load AnnData via the shared single-cell loader.
+2. Detect mitochondrial / ribosomal gene patterns from species hint (or `var_names` heuristic).
+3. Compute per-cell QC metrics with `scanpy.pp.calculate_qc_metrics`.
+4. Emit summary stats + per-cell metrics tables.
+5. Render violin + scatter figures and `tables/highest_expr_genes.csv`.
+6. Emit `report.md` + `result.json` (no cell filtering performed).
 
-This skill does **not**:
+## Gotchas
 
-1. filter cells
-2. filter genes
-3. perform doublet detection
-4. normalize or cluster the data
+- **No filtering happens here.** Despite the name, `sc-qc` does not remove cells or genes — it computes metrics and produces figures.  Run `sc-filter` next with thresholds chosen from the QC violins.  The `result.json` `summary` carries `n_cells` / `n_genes` *as observed*, not as filtered.
+- **Input file missing → hard fail.** `sc_qc.py:635` raises `FileNotFoundError` when `--input` does not resolve.  Pre-flight your path before the skill, especially in batch pipelines.
+- **`expression_source` records which matrix the run used.** `result.json["summary"]["expression_source"]` reads `layers.counts`, `adata.raw`, or `adata.X` depending on what the loader picked; QC fractions (mt%, ribo%) are only meaningful on a count-like source.  Verify after every run, especially if the input came from outside `sc-standardize-input`.
 
-Use `sc-preprocessing` or another downstream filtering workflow after reviewing
-the QC outputs.
-
-## Core Capabilities
-
-1. **QC metric calculation**: `n_genes_by_counts`, `total_counts`, `pct_counts_mt`, optional log metrics, and ribosomal percentage
-2. **Species-aware gene tagging**: mitochondrial and ribosomal features are detected from `--species`
-3. **Standard Python gallery**: QC violin, scatter, histogram, and highest-expressed-gene panels
-4. **Structured figure-data contract**: `figure_data/` exports figure-ready CSVs plus a manifest for downstream plotting or styling
-5. **Stable processed AnnData output**: a canonical `processed.h5ad` is produced with standardized scRNA contract fields, `layers["counts"]`, `adata.raw`, QC metrics in `.obs`, marker flags in `.var`, and OmicsClaw metadata in `.uns`
-6. **Notebook-friendly reproducibility**: report, structured result JSON, reproducibility shell command, pinned requirements bundle, README, and analysis notebook
-
-## Input Formats
-
-The current wrapper uses `skills.singlecell._lib.io.smart_load(...)`.
-
-| Format | Extension / form | Current wrapper support | Notes |
-|--------|------------------|-------------------------|-------|
-| AnnData | `.h5ad` | yes | preferred path |
-| 10x HDF5 | `.h5` | yes | delegated to shared single-cell loader |
-| Loom | `.loom` | yes | delegated to shared single-cell loader |
-| Delimited matrix | `.csv`, `.tsv` | yes | interpreted through the shared count-matrix loader |
-| 10x directory | directory | yes | delegated to the shared 10x importer |
-| Demo | `--demo` | yes | PBMC3k local/example fallback |
-
-### Input Expectations
-
-- The most reliable input is a **raw-count-like matrix available in `adata.layers["counts"]`, aligned `adata.raw`, or `adata.X`**.
-- If explicit counts are not in `adata.X`, the wrapper now auto-selects the best count-like source before QC.
-- Gene names should follow the selected species convention closely enough for mitochondrial and ribosomal prefix detection to work; when they do not, the run continues with warnings instead of faking precision.
-
-## Workflow
-
-1. **Load**: read input data with the shared single-cell loader or demo data.
-2. **Preflight**: check whether a count-like matrix exists, recommend `sc-standardize-input` when provenance is unclear, and warn honestly about species-dependent gene naming.
-3. **Prepare counts and gene IDs**: choose the best available count-like source plus the best gene-symbol column for MT / ribosomal tagging.
-4. **Calculate metrics**: run Scanpy QC metric calculation and add log-transformed helper columns.
-5. **Render standard gallery**: generate the default OmicsClaw QC gallery under `figures/` through the shared `skills/singlecell/_lib/viz` layer.
-6. **Export figure data and tables**: write stable CSV exports under `figure_data/` and `tables/`.
-7. **Write outputs**: save `processed.h5ad`, `report.md`, `result.json`, README, notebook, and reproducibility bundle.
-
-## CLI Reference
+## Key CLI
 
 ```bash
-# Basic usage
-python skills/singlecell/scrna/sc-qc/sc_qc.py \
-  --input <data.h5ad> --output <dir>
+# Demo (built-in PBMC3K)
+python omicsclaw.py run sc-qc --demo --output /tmp/sc_qc_demo
 
-# Mouse gene naming convention
-python skills/singlecell/scrna/sc-qc/sc_qc.py \
-  --input <data.h5ad> --species mouse --output <dir>
+# Real run
+python omicsclaw.py run sc-qc --input processed.h5ad --output results/
 
-# Demo mode
-python skills/singlecell/scrna/sc-qc/sc_qc.py \
-  --demo --output /tmp/sc_qc_demo
-
-# Via OmicsClaw
-oc run sc-qc --input <data.h5ad> --output <dir>
+# With R Enhanced figures
+python omicsclaw.py run sc-qc --input processed.h5ad --output results/ --r-enhanced
 ```
 
-## Public Parameters
+## See also
 
-| Parameter | Default | Type | Role |
-|-----------|---------|------|------|
-| `--input` | required unless `--demo` | path | input dataset |
-| `--output` | required | path | output directory |
-| `--demo` | `false` | flag | run built-in demo data |
-| `--species` | `human` | enum | wrapper-level control for MT / ribosomal gene-prefix detection |
-
-### Parameter Design Notes
-
-- `--species` is the only public extra flag because the current wrapper exposes
-  a single QC path and does not surface thresholding knobs here.
-- `calculate_ribo=True` is fixed in the current implementation and is not a
-  public CLI parameter.
-- Do **not** present `sc-qc` as if users were choosing among multiple QC
-  algorithms today. The main decision in current OmicsClaw is how to interpret
-  the output, not how to configure many QC backends.
-
-## Algorithm / Methodology
-
-### Implemented Method: `qc_metrics`
-
-Current OmicsClaw `sc-qc` uses Scanpy QC metric calculation with
-species-specific feature tagging.
-
-1. **Species-aware feature tagging**
-   - `human`: mitochondrial genes start with `MT-`; ribosomal genes match `^RP[SL]`
-   - `mouse`: mitochondrial genes start with `mt-`; ribosomal genes match `^Rp[sl]`
-2. **Metric calculation**
-   - `scanpy.pp.calculate_qc_metrics(..., qc_vars=["mt", "ribo"], percent_top=None, log1p=False, inplace=True)`
-3. **Derived helper metrics**
-   - `log10_total_counts`
-   - `log10_n_genes_by_counts`
-4. **Standard gallery renderers**
-   - QC violin plots
-   - QC scatter plots
-   - QC histograms
-   - highest expressed genes summary
-
-### Current Input Robustness Behavior
-
-- `smart_load(...)` is now loader-only: it reads the object and records a minimal input contract.
-- User-facing standardization advice is emitted by shared `preflight`, not by the loader.
-- `prepare_count_like_adata(...)` then selects `layers["counts"]` → aligned `adata.raw` → count-like `adata.X` in that order.
-- The saved `processed.h5ad` declares matrix semantics explicitly in `adata.uns["omicsclaw_matrix_contract"]`: here `adata.X` is raw count-like, `adata.layers["counts"]` is the canonical raw layer, and `adata.raw` is a count-like snapshot.
-- If no mitochondrial or ribosomal genes match the selected species convention, the run continues with warnings and counts-based QC metrics remain available.
-
-### Guaranteed Metric Columns After Success
-
-The saved `processed.h5ad` is expected to contain at least:
-
-```text
-adata.obs["n_genes_by_counts"]
-adata.obs["total_counts"]
-adata.obs["pct_counts_mt"]
-adata.obs["log10_total_counts"]
-adata.obs["log10_n_genes_by_counts"]
-```
-
-When ribosomal pattern matching succeeds, the wrapper also writes:
-
-```text
-adata.obs["pct_counts_ribo"]
-adata.var["ribo"]
-```
-
-The feature-tag columns below are written during QC metric setup:
-
-```text
-adata.var["mt"]
-adata.var["ribo"]
-```
-
-OmicsClaw analysis metadata is also persisted in:
-
-```text
-adata.uns["omicsclaw_analyses"]
-```
-
-## Interpretation Guidance
-
-### Read These Metrics As Diagnostics, Not Hard Laws
-
-- `n_genes_by_counts`: low values often indicate empty droplets or low-complexity cells; very high values may indicate doublets
-- `total_counts`: very low values may indicate poor capture; very high values may reflect doublets or highly loaded droplets
-- `pct_counts_mt`: elevated mitochondrial percentage often suggests stressed or dying cells, but acceptable ranges vary by tissue
-- `pct_counts_ribo`: useful supporting context, especially when translation-heavy cell states dominate
-
-### Practical First-Pass Reading
-
-- **PBMC-like data** often tolerates stricter mitochondrial cutoffs
-- **solid tissues / tumors** often require broader tolerance
-- **highly metabolic tissues** may show biologically elevated mitochondrial fractions
-
-Do not convert these plots directly into filtering without considering tissue,
-chemistry, ambient RNA burden, and expected cell complexity.
-
-## Output Contract
-
-### Stable Files
-
-```text
-output_dir/
-├── README.md
-├── report.md
-├── result.json
-├── processed.h5ad
-├── figures/
-│   ├── qc_violin.png
-│   ├── qc_scatter.png
-│   ├── qc_histograms.png
-│   ├── highest_expr_genes.png
-│   ├── barcode_rank.png
-│   ├── qc_correlation_heatmap.png
-│   └── manifest.json
-├── figure_data/
-│   ├── manifest.json
-│   ├── qc_run_summary.csv
-│   ├── qc_metrics_summary.csv
-│   ├── qc_metrics_per_cell.csv
-│   ├── highest_expr_genes.csv
-│   ├── barcode_rank_curve.csv
-│   └── qc_metric_correlations.csv
-├── tables/
-│   ├── qc_metrics_summary.csv
-│   ├── qc_metrics_per_cell.csv
-│   ├── highest_expr_genes.csv
-│   ├── barcode_rank_curve.csv
-│   └── qc_metric_correlations.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── analysis_notebook.ipynb
-```
-
-### What Users Should Inspect First
-
-1. `report.md`
-2. `figures/qc_violin.png` and `figures/qc_scatter.png`
-3. `tables/qc_metrics_summary.csv`
-4. `tables/qc_metrics_per_cell.csv`
-5. `tables/barcode_rank_curve.csv` and `tables/qc_metric_correlations.csv` for deeper QC review
-6. `processed.h5ad` for downstream filtering workflows
-
-### Structured Result Contract
-
-`result.json` includes:
-
-- `summary.method = "qc_metrics"`
-- `data.params.species`
-- `data.effective_params.calculate_ribo = true`
-- `data.visualization.recipe_id = "standard-sc-qc-gallery"`
-- `data.visualization.available_figure_data`
-- top-level summary values such as `n_cells`, `n_genes`, `median_genes`, and `median_counts`
-
-`data.params` records replayable public CLI parameters.
-`data.effective_params` records the actual runtime configuration, including
-fixed wrapper behavior.
-
-## Visualization Contract
-
-`sc-qc` treats Python plots as the **standard analysis gallery**. The current
-recipe roles are:
-
-- `overview`: QC violin plots
-- `diagnostic`: QC scatter plots and histograms
-- `supporting`: highest expressed genes panel
-
-`figure_data/` is the stable hand-off layer for downstream custom plotting,
-including future R-side visualization or user-authored beautification scripts.
-
-## Example Queries
-
-- "Calculate QC metrics for this scRNA-seq dataset"
-- "Show me mitochondrial percentage and genes-per-cell distributions"
-- "Generate QC violin and scatter plots before filtering"
-- "Run single-cell QC and export the per-cell QC table"
-
-## Dependencies
-
-Required core packages:
-
-- `scanpy`
-- `anndata`
-- `numpy`
-- `pandas`
-- `matplotlib`
-
-Notebook export additionally depends on the standard OmicsClaw notebook helper
-stack when available.
-
-## Safety And Guardrails
-
-- This skill is **diagnostic only** and does not remove cells or genes.
-- Species choice affects mitochondrial / ribosomal pattern matching and should
-  be stated explicitly before the run.
-- If gene symbols do not follow expected human or mouse prefixes, explain that
-  percentage estimates may be incomplete.
-- For short execution guardrails, see
-  `knowledge_base/knowhows/KH-sc-qc-guardrails.md`.
-- For longer method and interpretation guidance, see
-  `knowledge_base/skill-guides/singlecell/sc-qc.md`.
-
-## Workflow Position
-
-- **Upstream step**: Input should come from `sc-count`, `sc-multi-count`, or `sc-standardize-input`
-- **Usual next step**: `sc-filter` to remove low-quality cells based on the QC metrics visualized here
-- **Optional**: Run `sc-doublet-detection` before or after filtering
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | path | — | Input AnnData file (`.h5ad`); required unless `--demo` | — |
-| `--output` | path | — | Output directory (required) | — |
-| `--demo` | flag | `false` | Run with built-in PBMC3K demo data | — |
-| `--species` | enum | `human` | Species for MT/ribosomal gene prefix detection: `human`, `mouse` | — |
-| `--r-enhanced` | flag | `false` | Generate R Enhanced figures via ggplot2 renderers | — |
-
-Note: `calculate_ribo=True` is fixed and not exposed as a CLI parameter.
-
-## R Enhanced Plots
-
-| Renderer | Output file | What it shows | R packages |
-|----------|-------------|---------------|------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | Cell scatter colored by discrete group/cluster label | ggplot2, ggrepel, cowplot |
-| `plot_cell_barplot` | `r_cell_barplot.png` | Cell count bar chart per group/sample | ggplot2, cowplot |
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — mt/ribo gene-pattern detection, scanpy QC parameters
+- `references/output_contract.md` — table column schemas + figure roles
+- Adjacent skills: `sc-standardize-input` (upstream — required if input is external), `sc-filter` (next step — actually removes cells), `sc-doublet-detection` (parallel — finds doublets)

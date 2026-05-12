@@ -1,0 +1,116 @@
+---
+title: "远程执行模式 - 把分析放到远端服务器"
+description: "OmicsClaw-App 支持 UI 留本地、计算放远端 Linux 服务器的分离架构，通过 SSH bootstrap 完成首次部署。"
+keywords: ["远程执行", "remote", "SSH", "OmicsClaw-App", "分离部署"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么需要远程执行
+
+本地笔记本或台式机的 GPU 和内存往往不足以运行 scVI、Cell2Location 等计算密集型 skill；与此同时，原始数据（`.h5ad` / `.csv`）通常已经落在实验室 Linux 服务器上，重新上传既浪费带宽又存在安全风险。远程执行模式让 OmicsClaw-App 的 UI 和聊天界面留在本地，所有数据处理与作业执行都在远端服务器上完成，团队还可共享同一台 GPU 机器而无需各自部署一套完整环境。
+
+## 启用前 / 启用后架构对比
+
+**本地全栈（Bundled / Local-Python Runtime）：**
+
+```text
+┌─────────────────────────────────┐
+│  OmicsClaw-App                  │
+│   Next.js UI · Electron         │
+│   + Python skills               │
+│   + 本地 dataset / workspace    │
+└─────────────────────────────────┘
+```
+
+**远程分离（Remote-SSH Runtime）：**
+
+```text
+┌──────────────────────┐            ┌──────────────────────────────┐
+│  OmicsClaw-App       │            │  远程 Linux 服务器           │
+│  (control plane)     │            │  (execution plane)           │
+│  Next.js UI          │ ─SSH隧道─▶ │  oc app-server 127.0.0.1:8765│
+│  Electron            │            │  + Python skills             │
+│  TunnelManager       │            │  + dataset / workspace       │
+└──────────────────────┘            └──────────────────────────────┘
+```
+
+App 通过 TunnelManager 将本地动态端口前向到远端 `oc app-server`，所有通信走 SSH 加密隧道，无需对外开放任何端口。
+
+## 配置步骤
+
+**Step 1 — 在远端启动 `oc app-server`**
+
+SSH 登录到远端服务器后执行：
+
+```bash
+# 激活 Python 环境
+source .venv/bin/activate        # 或 conda activate omicsclaw
+
+# 设置 workspace 根目录
+export OMICSCLAW_WORKSPACE=/data/omicsclaw-workspace
+mkdir -p "$OMICSCLAW_WORKSPACE"
+
+# 设置 Bearer token（SSH 之外的第二层鉴权）
+export OMICSCLAW_REMOTE_AUTH_TOKEN="your-secret-token-here"
+
+# 启动 app-server（仅绑 127.0.0.1，勿暴露公网）
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+自检：
+
+```bash
+curl http://127.0.0.1:8765/health
+curl -X POST http://127.0.0.1:8765/connections/test \
+  -H "Authorization: Bearer $OMICSCLAW_REMOTE_AUTH_TOKEN"
+```
+
+**Step 2 — 在 Runtimes 页面新建 Remote Runtime**
+
+打开 App → **Runtimes** 页面 → **New Runtime** → 填写以下字段：
+
+| 字段 | 存库键 | 示例 |
+|---|---|---|
+| Name | `name` | Lab GPU Server |
+| SSH Host | `ssh_host` | 192.168.1.100 |
+| SSH Port | `ssh_port` | 22 |
+| SSH User | `ssh_user` | zhouwg |
+| SSH Key Path | `ssh_key_path` | `~/.ssh/id_ed25519` |
+| Remote Port | `remote_port` | 8765 |
+| Auth Token | `auth_token` | your-secret-token-here |
+| Auto-start Command | `remote_bootstrap_command` | `bash -lc 'cd ~/omicsclaw && nohup oc app-server --host 127.0.0.1 --port 8765 > app-server.log 2>&1 &'` |
+
+`remote_bootstrap_command` 为可选字段：填写后，App 激活该 runtime 时若远端端口未监听，会通过 SSH exec 自动执行该命令并轮询直到端口可用。留空则需手动完成 Step 1。
+
+**Step 3 — 验证连接**
+
+保存 → 选中该条目 → 点 **Run Ping**。App 依次探测 `/health` 和 `/env/doctor`（携带 Bearer token），全绿后点 **Make Active**。
+
+**Step 4 — 导入数据**
+
+- **大文件**：先用 `scp` / `rsync` 将文件传到远端 `$OMICSCLAW_WORKSPACE`，再在 **Datasets** 面板点 **Register Remote Path** 登记绝对路径。
+- **小文件**：在 **Datasets** 面板直接 **Upload**，App 通过 HTTP multipart 上传（超过约 1 GiB 建议改用 `scp`）。
+
+**Step 5 — 提交分析任务**
+
+在聊天窗口发起请求，或在 **Jobs** 面板手动提交（选择 Skill + Dataset + 参数 → Submit）。实时日志通过 SSE 流式显示，可随时 Cancel 或 Retry。
+
+**Step 6 — 查看产物**
+
+Job 完成后进入 **Artifacts** 面板，按 job 分组浏览：`report.md` / `figures/*.png` / `result.json` / 处理后的 `.h5ad`。断线或 App 重启后，运行中的 job 与会话可从远端状态恢复。
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| Run Ping `/health` 失败 | SSH 无法连通或远端 `oc app-server` 未启动 | 先确认 `ssh -i <key> <user>@<host>` 可登录；再确认 `remote_port` 与远端监听端口一致 |
+| `/health` 绿但 `/env/doctor` 红 | Bearer token 不匹配 | 核对远端 `OMICSCLAW_REMOTE_AUTH_TOKEN` 与 profile `auth_token`（GET 返回遮罩值 `***<后8位>`） |
+| workspace 未配置 / 目录不存在 | 远端未 export `OMICSCLAW_WORKSPACE` 或目录不存在 | 远端执行 `mkdir -p $OMICSCLAW_WORKSPACE` 并重新启动 `oc app-server` |
+| Job 很快失败 | 环境或数据问题 | 查看 job 的 `stdout.log` 和 `diagnostics/env_doctor.json` |
+| SSE 日志不显示 | SSH 隧道断开 | 检查隧道是否存活，或在 Runtimes 页面重新 **Make Active** |
+
+## 下一步阅读
+
+- [OmicsClaw-App 桌面端](/docs/ecosystem/omicsclaw-app)
+- [整体架构](/docs/architecture/overview)
+- [Memory 系统](/docs/engineering/memory)

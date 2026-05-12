@@ -1,281 +1,117 @@
 ---
 name: sc-pseudotime
-description: >-
-  Single-cell pseudotime and lineage inference after clustering, with DPT,
-  Palantir, VIA, CellRank, or Slingshot plus post-hoc trajectory gene ranking.
+description: Load when ordering cells along a developmental trajectory in a normalised scRNA AnnData via DPT, Palantir, VIA, CellRank, Slingshot (R), or Monocle3 (R). Skip when ranking marker genes per cluster (use sc-markers) or for RNA velocity vector fields (use sc-velocity).
 version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, pseudotime, trajectory, dpt, palantir, via, cellrank, slingshot]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--method"
-      - "--cluster-key"
-      - "--use-rep"
-      - "--root-cluster"
-      - "--root-cell"
-      - "--end-clusters"
-      - "--n-neighbors"
-      - "--n-pcs"
-      - "--n-dcs"
-      - "--n-genes"
-      - "--corr-method"
-      - "--palantir-knn"
-      - "--palantir-n-components"
-      - "--palantir-num-waypoints"
-      - "--palantir-max-iterations"
-      - "--palantir-seed"
-      - "--via-knn"
-      - "--via-seed"
-      - "--cellrank-n-states"
-      - "--cellrank-schur-components"
-      - "--cellrank-frac-to-keep"
-      - "--cellrank-use-velocity"
-      - "--r-enhanced"
-    param_hints:
-      dpt:
-        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> n_neighbors -> n_pcs -> n_dcs -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "n_neighbors", "n_pcs", "n_dcs", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", n_neighbors: 15, n_pcs: 50, n_dcs: 10, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "cluster_labels_in_obs", "trajectory_representation"]
-      palantir:
-        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> palantir_knn -> palantir_n_components -> palantir_num_waypoints -> palantir_max_iterations -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "palantir_knn", "palantir_n_components", "palantir_num_waypoints", "palantir_max_iterations", "palantir_seed", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", palantir_knn: 30, palantir_n_components: 10, palantir_num_waypoints: 1200, palantir_max_iterations: 25, palantir_seed: 20, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "palantir", "explicit_root_choice"]
-      via:
-        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> via_knn -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "via_knn", "via_seed", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", via_knn: 30, via_seed: 20, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "pyVIA", "explicit_root_choice"]
-      cellrank:
-        priority: "cluster_key -> use_rep -> root_cluster/root_cell -> cellrank_n_states -> cellrank_schur_components -> cellrank_frac_to_keep -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "root_cell", "cellrank_n_states", "cellrank_schur_components", "cellrank_frac_to_keep", "cellrank_use_velocity", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", cellrank_n_states: 3, cellrank_schur_components: 20, cellrank_frac_to_keep: 0.3, cellrank_use_velocity: false, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "cellrank", "explicit_root_choice"]
-      slingshot_r:
-        priority: "cluster_key -> use_rep -> root_cluster -> end_clusters -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "end_clusters", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", end_clusters: null, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "slingshot", "SingleCellExperiment", "zellkonverter", "explicit_root_choice"]
-      monocle3_r:
-        priority: "cluster_key -> use_rep -> root_cluster -> corr_method"
-        params: ["cluster_key", "use_rep", "root_cluster", "n_genes", "corr_method"]
-        defaults: {cluster_key: "leiden", root_cluster: null, n_genes: 50, corr_method: "pearson"}
-        requires: ["normalized_expression", "monocle3", "SingleCellExperiment", "zellkonverter"]
-    saves_h5ad: true
-    requires_preprocessed: true
-    trigger_keywords:
-      - pseudotime
-      - trajectory
-      - lineage
-      - diffusion pseudotime
-      - palantir
-      - via
-      - cellrank
-      - monocle3
-      - slingshot
+tags:
+- singlecell
+- scrna
+- pseudotime
+- trajectory
+- dpt
+- palantir
+- via
+- cellrank
+- slingshot
+- monocle3
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# Single-Cell Pseudotime
+# sc-pseudotime
 
-## What This Skill Does
+## When to use
 
-`sc-pseudotime` is the trajectory step after clustering. It takes a normalized, cluster-labeled AnnData object, picks a start state, infers a trajectory, then ranks genes associated with that trajectory.
+The user has a clustered, normalised scRNA AnnData and wants a
+trajectory / pseudotime ordering across the cells. Six methods:
 
-This skill answers questions like:
-- which cluster should be treated as the start of a biological transition
-- how cells order along a continuous trajectory
-- which genes change most strongly along that ordering
-- whether the method also supports branch or fate information
+- `dpt` (default) — diffusion pseudotime (Scanpy native).
+- `palantir` — Palantir waypoint-based pseudotime + fate probabilities.
+- `via` — VIA, scalable lineage with branching.
+- `cellrank` — CellRank macrostates + fate probabilities (optionally
+  velocity-coupled with `--cellrank-use-velocity`).
+- `slingshot_r` — R-backed Slingshot lineage curves.
+- `monocle3_r` — R-backed Monocle3 trajectory graph.
 
-## What Should Usually Come Before It
+Required: a normalised AnnData with a cluster column (`leiden` by
+default) and a low-D representation (`obsm["X_pca"]` / `X_harmony` /
+etc.). For per-cluster marker ranking use `sc-markers`; for velocity
+vector fields (kinetics, not ordering) use `sc-velocity`.
 
-- `sc-preprocessing`
-- if needed, `sc-batch-integration`
-- `sc-clustering`
-- optionally `sc-cell-annotation` if the user wants to define the start state by biology instead of just cluster number
+## Inputs & Outputs
 
-If the user only says “do pseudotime”, the first thing to explain is:
-- pseudotime needs a biologically defensible start state
-- pseudotime should usually use the same representation that drove clustering or integration
+| Input | Format | Required |
+|---|---|---|
+| Normalised clustered AnnData | `.h5ad` with cluster column + low-D rep in `obsm` | yes (unless `--demo`) |
+| Root anchor | `--root-cluster` or `--root-cell` (recommended for `dpt` / `palantir` / `cellrank`) | conditional |
 
-## Matrix / State Requirements
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | adds `obs["pseudotime"]`, optional `obsm["trajectory_fate_probabilities"]` (palantir / via / cellrank) |
+| Per-cell pseudotime | `tables/pseudotime_cells.csv` | always |
+| Trajectory genes | `tables/trajectory_genes.csv` | top-`--n-genes` correlated with pseudotime |
+| Run summary | `tables/trajectory_summary.csv` | always |
+| Fate probabilities | `tables/fate_probabilities.csv` | palantir / via / cellrank |
+| Slingshot curves | `tables/slingshot_curves.csv` | slingshot_r |
+| Monocle3 trajectory | `monocle3_trajectory.csv` | monocle3_r |
+| Figures | `figures/pseudotime_embedding.png`, `figures/pseudotime_distribution_by_group.png` | always |
+| Report | `report.md` + `result.json` | always |
 
-- `X` must represent `normalized_expression`
-- a cluster or label column must already exist in `adata.obs`
-- at least one trajectory representation must exist; the current wrapper defaults to `X_umap` when it is already present, otherwise it falls back to integrated or PCA embeddings such as `X_harmony`, `X_scvi`, `X_scanvi`, `X_scanorama`, or `X_pca`
-- `layers["counts"]` may still exist, but trajectory-gene ranking is performed on normalized `adata.X`
+## Flow
 
-## Public Methods
+1. Load AnnData (`--input`) or auto-build a demo with the largest cluster as the root.
+2. Validate `cluster_key` exists; require `X = normalized_expression`.
+3. Resolve representation (`--use-rep`) — auto-pick from `obsm` if unset.
+4. Resolve root cell from `--root-cluster` or `--root-cell` (integer index or `obs_name`).
+5. Dispatch to the method-specific runner; the R-backed methods exec via `RScriptRunner` against the bundled R scripts.
+6. Build trajectory-gene correlations (`--n-genes`, `--corr-method`).
+7. Save `processed.h5ad`, tables, figures, `report.md`, `result.json` (incl. `backend`, `n_clusters`, `n_trajectory_genes`).
 
-1. `dpt`
-2. `palantir`
-3. `via`
-4. `cellrank`
-5. `slingshot_r`
-6. `monocle3_r`
+## Gotchas
 
-## Beginner-Friendly Method Summary
+- **Hard-fails when `.X` isn't normalised.** `sc_pseudotime.py:1122` raises `ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")` based on the matrix-contract metadata. If you skipped `sc-preprocessing`, the contract check rejects the run before any pseudotime work happens.
+- **No suitable representation → hard fail.** `sc_pseudotime.py:283` raises `ValueError("Embedding `<rep>` was not found in adata.obsm.")` for an explicit-but-missing `--use-rep`; `:287` raises `ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")` when no embedding key resolves.
+- **`cluster_key` validated twice.** `sc_pseudotime.py:1118` raises `ValueError("`<key>` was not found in adata.obs.")` for the top-level `--cluster-key`. Default is `leiden`; pass `--cluster-key louvain` (or whatever you have) explicitly.
+- **`--root-cell` accepts obs_name OR integer index.** `sc_pseudotime.py:308` raises `ValueError("`--root-cell <x>` was not found. Provide a valid obs_name or integer cell index.")` if neither resolves. The integer path lets you avoid copy-pasting a long barcode.
+- **R-backed methods need a working R env.** `sc_pseudotime.py:746` raises `ImportError("Slingshot R dependencies are missing: <list>")` (slingshot / SingleCellExperiment / zellkonverter); `:824` raises the same shape for Monocle3 (monocle3 / SingleCellExperiment / zellkonverter). Both messages append the full `suggest_r_install(...)` install hint.
+- **`result.json["backend"]` records the actually-used backend.** `sc_pseudotime.py:604` (dpt) / `:646` (palantir) / `:681` (via) / `:721` (cellrank) / `:800` (slingshot_r) / `:890` (monocle3_r) write the literal backend label. Useful when `--method` was an alias or fell through any future fallback.
+- **`--input` is `parser.error`, not a Python `ValueError`.** `sc_pseudotime.py:1092` calls `parser.error("--input is required unless --demo is used")` which exits with code 2 — caller wrappers expecting `SystemExit(1)` or `ValueError` need to handle code 2 separately. Once `--input` is given, `:1095` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
 
-| Method | Best first use | What it adds |
-|--------|----------------|--------------|
-| `dpt` | most users’ first trajectory pass | classic diffusion pseudotime after graph construction |
-| `palantir` | when entropy / fate probabilities are important | waypoint-based pseudotime and terminal-state probabilities |
-| `via` | when users want graph-based terminal-state discovery | fast graph trajectory with branch-aware outputs |
-| `cellrank` | when users explicitly want macrostates or fate inference | transition-kernel / fate model on top of a graph |
-| `slingshot_r` | when users want explicit branch curves | lineage-centric branch inference through the R bridge |
-| `monocle3_r` | when users want principal graph trajectory with branching | Monocle3 principal graph trajectory and pseudotime via R bridge. Produces monocle3_pseudotime in obs and MST trajectory edges. Requires monocle3 R package. |
-
-**Note on monocle3_r root selection**: monocle3_r auto-selects the root principal node by finding the principal graph node nearest to the centroid of the `--root-cluster` cells in UMAP space. If `--root-cluster` is not specified, the largest cluster is used. Pass `--root-cluster <name>` to control trajectory direction.
-
-## Key Parameters
-
-### Always important
-
-- `--method`
-- `--cluster-key`
-- `--use-rep`
-- `--root-cluster` or `--root-cell`
-- `--n-genes`
-- `--corr-method`
-
-### Method-specific
-
-- `dpt`
-  - `--n-neighbors`
-  - `--n-pcs`
-  - `--n-dcs`
-- `palantir`
-  - `--palantir-knn`
-  - `--palantir-n-components`
-  - `--palantir-num-waypoints`
-  - `--palantir-max-iterations`
-  - `--palantir-seed`
-- `via`
-  - `--via-knn`
-  - `--via-seed`
-- `cellrank`
-  - `--cellrank-n-states`
-  - `--cellrank-schur-components`
-  - `--cellrank-frac-to-keep`
-  - `--cellrank-use-velocity`
-- `slingshot_r`
-  - `--end-clusters`
-- `monocle3_r`
-  - `--root-cluster` (auto-selects largest cluster if not specified)
-
-### Usage Examples
+## Key CLI
 
 ```bash
-# Monocle3 pseudotime demo
-python omicsclaw.py run sc-pseudotime --demo --method monocle3_r --output /tmp/monocle3_demo
+# Demo (auto-chooses largest cluster as root)
+python omicsclaw.py run sc-pseudotime --demo --output /tmp/sc_pt_demo
 
-# Monocle3 pseudotime with user data
-python omicsclaw.py run sc-pseudotime --input <processed.h5ad> --method monocle3_r --cluster-key leiden --output <dir>
+# DPT with explicit root cluster
+python omicsclaw.py run sc-pseudotime \
+  --input clustered.h5ad --output results/ \
+  --cluster-key leiden --root-cluster "0" --use-rep X_pca
 
-# Monocle3 with explicit root cluster
-python omicsclaw.py run sc-pseudotime --input <processed.h5ad> --method monocle3_r --cluster-key cell_type --root-cluster "HSC" --output <dir>
+# Palantir with custom waypoints + seed
+python omicsclaw.py run sc-pseudotime \
+  --input clustered.h5ad --output results/ \
+  --method palantir --root-cell ATCACG-1 \
+  --palantir-num-waypoints 1500 --palantir-seed 42
+
+# CellRank coupled with velocity (requires layers from sc-velocity)
+python omicsclaw.py run sc-pseudotime \
+  --input velocity.h5ad --output results/ \
+  --method cellrank --cellrank-use-velocity --cellrank-n-states 5
+
+# Slingshot R lineage curves
+python omicsclaw.py run sc-pseudotime \
+  --input clustered.h5ad --output results/ \
+  --method slingshot_r --cluster-key leiden --root-cluster "0"
 ```
 
-## Workflow
+## See also
 
-1. load
-2. preflight
-3. verify normalized matrix state and trajectory representation
-4. resolve root cluster or root cell
-5. run method
-6. rank trajectory-associated genes with `corr_method`
-7. write `processed.h5ad`
-8. render figures, tables, and `figure_data`
-
-## Output Contract
-
-Successful runs write:
-
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- `tables/trajectory_genes.csv`
-- `tables/pseudotime_cells.csv`
-- `tables/trajectory_summary.csv`
-- `figure_data/`
-- `figures/`
-
-Common figures include:
-
-- `pseudotime_embedding.png`
-- `pseudotime_distribution_by_group.png`
-- `trajectory_gene_heatmap.png`
-- `trajectory_gene_trends.png`
-- `fate_probability_heatmap.png` when available
-- `paga_graph.png` for `dpt`
-- `lineage_curves.png` for `slingshot_r`
-- `monocle3_trajectory_graph.png` for `monocle3_r`
-
-## Usual Next Steps
-
-- `sc-pathway-scoring` for lineage signatures
-- `sc-enrichment` for statistical pathway interpretation of trajectory genes
-- `sc-de` if the user wants condition-level testing after states are stabilized
-
-## Current Guardrails
-
-- do not run pseudotime on raw counts
-- do not hide the start state
-- do not flatten `method` and `corr_method` into one story
-- do not silently switch representations when multiple plausible embeddings exist
-
-For short guardrails see `knowledge_base/knowhows/KH-sc-pseudotime-guardrails.md`.  
-For longer method guidance see `knowledge_base/skill-guides/singlecell/sc-pseudotime.md`.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled PBMC3k data | — |
-| `--method` | str | `dpt` | Trajectory method: `dpt`, `palantir`, `via`, `cellrank`, `slingshot_r`, `monocle3_r` | validated against METHOD_REGISTRY |
-| `--cluster-key` | str | `leiden` | Cluster/label column in `obs` | — |
-| `--use-rep` | str | None | Embedding to use (e.g., `X_pca`, `X_harmony`) | auto-detected when omitted |
-| `--root-cluster` | str | None | Cluster name to use as trajectory root | — |
-| `--root-cell` | str | None | Specific cell (obs_name or integer index) to use as root | — |
-| `--end-clusters` | str | None | Comma-separated terminal cluster names | slingshot_r only |
-| `--n-neighbors` | int | 15 | KNN size for graph construction | dpt only |
-| `--n-pcs` | int | 50 | PCs to use for diffusion map | dpt only |
-| `--n-dcs` | int | 10 | Number of diffusion components | dpt only |
-| `--n-genes` | int | 50 | Number of trajectory-correlated genes to rank | — |
-| `--corr-method` | str | `pearson` | Gene-pseudotime correlation method | choices: pearson, spearman |
-| `--palantir-knn` | int | 30 | KNN for Palantir graph | palantir only |
-| `--palantir-n-components` | int | 10 | Diffusion components for Palantir | palantir only |
-| `--palantir-num-waypoints` | int | 1200 | Waypoints for Palantir | palantir only |
-| `--palantir-max-iterations` | int | 25 | Max Palantir iterations | palantir only |
-| `--palantir-seed` | int | 20 | Palantir random seed | palantir only |
-| `--via-knn` | int | 30 | KNN for VIA graph | via only |
-| `--via-seed` | int | 20 | VIA random seed | via only |
-| `--cellrank-n-states` | int | 3 | Number of macrostates | cellrank only |
-| `--cellrank-schur-components` | int | 20 | Schur decomposition components | cellrank only |
-| `--cellrank-frac-to-keep` | float | 0.3 | Fraction of cells to keep for macrostate estimation | cellrank only |
-| `--cellrank-use-velocity` | flag | off | Use velocity kernel in CellRank | cellrank only |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_pseudotime_lineage` | `r_pseudotime_lineage.png` | `pseudotime_points.csv` | Pseudotime lineage scatter with loess trajectory curves | ggplot2 |
-| `plot_pseudotime_dynamic` | `r_pseudotime_dynamic.png` | `trajectory_genes.csv` | Dynamic gene expression trends along pseudotime | ggplot2 |
-| `plot_pseudotime_heatmap` | `r_pseudotime_heatmap.png` | `gene_expression.csv` | Heatmap of top trajectory genes ordered by pseudotime | ggplot2, ComplexHeatmap |
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `embedding_points.csv` | UMAP/embedding colored by cluster labels | ggplot2 |
-| `plot_embedding_feature` | `r_embedding_feature.png` | `embedding_points.csv` | UMAP/embedding colored by pseudotime score | ggplot2 |
-| `plot_cell_density` | `r_cell_density.png` | `embedding_points.csv` | 2D density overlay on embedding | ggplot2, ggdensity |
-
-## Workflow Position
-
-**Upstream:** sc-clustering
-**Downstream:** sc-velocity (RNA velocity), sc-gene-programs (temporal gene programs)
+- `references/parameters.md` — every CLI flag, per-method tunables
+- `references/methodology.md` — method selection guide; root-cell heuristics
+- `references/output_contract.md` — `obs["pseudotime"]` / `obsm["trajectory_fate_probabilities"]` schema
+- Adjacent skills: `sc-clustering` (upstream — produces `obs["leiden"]` + `obsm["X_*"]`), `sc-preprocessing` (upstream — required for normalised `.X`), `sc-velocity` (parallel — kinetics-based ordering, can feed CellRank), `sc-markers` (parallel — cluster-level marker ranking, NOT trajectory)

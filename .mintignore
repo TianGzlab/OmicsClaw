@@ -1,0 +1,69 @@
+# .mintignore — Mintlify scanner exclusion list (gitignore syntax)
+#
+# Mintlify dev/build scans the whole working directory by default and reports
+# MDX parse errors for every .md/.mdx it encounters, regardless of the
+# `navigation` array in mint.json. This file scopes the scan to the actual
+# docs site at docs/{introduction,architecture,domains,engineering,ecosystem,safety}/.
+# All other paths are excluded.
+
+# ── Python virtual environments (third-party dist-info / docs)
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# ── Node modules
+node_modules/
+
+# ── Separate React projects (not part of the docs site)
+frontend/
+website/
+
+# ── Internal knowledge base (developer reference, never user docs)
+knowledge_base/
+
+# ── Skill methodology source files (linked from docs/domains/*.mdx via GitHub URLs,
+# not rendered as standalone Mintlify pages)
+skills/
+
+# ── Repo-level developer documentation (not user-facing)
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+README.md
+README_zh-CN.md
+SOUL.md
+SPEC.md
+LICENSE
+llms.txt
+
+# ── Code, tests, examples
+bot/
+build/
+data/
+examples/
+omicsclaw/
+scripts/
+templates/
+tests/
+tools/
+
+# ── Build / config files at root
+*.sh
+*.py
+environment.yml
+pyproject.toml
+Makefile
+setup.py
+
+# ── Quarantined docs subdirs (already in mint.json `excludes`, mirrored here for v2)
+docs/_legacy/
+docs/superpowers/
+
+# ── IDE / OS noise
+.claude/
+.vscode/
+.idea/
+.DS_Store

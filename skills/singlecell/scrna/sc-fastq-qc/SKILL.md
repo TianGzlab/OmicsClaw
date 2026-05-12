@@ -1,266 +1,77 @@
 ---
 name: sc-fastq-qc
-description: >-
-  Start here if you have raw single-cell FASTQ files. Checks read quality
-  before counting with FastQC and MultiQC when available, plus a stable local
-  fallback summary.
-version: 0.1.0
+description: Load when checking raw single-cell FASTQ read quality (Phred / GC / adapter / length) before counting. Skip when reads are already counted (use sc-qc) or for bulk FASTQ (use bulkrna-read-qc).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, fastq, qc, fastqc, multiqc]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    requires:
-      bins:
-        - python3
-      env: []
-      config: []
-    emoji: "🧪"
-    homepage: https://github.com/TianGzlab/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: pandas
-        bins: []
-    trigger_keywords:
-      - scRNA FASTQ QC
-      - FastQC single-cell
-      - MultiQC single-cell
-      - raw read quality
-      - read-level QC
-    allowed_extra_flags:
-      - "--max-reads"
-      - "--read2"
-      - "--sample"
-      - "--threads"
-      - "--r-enhanced"
-    legacy_aliases: [scrna-fastq-qc]
-    saves_h5ad: false
-    requires_preprocessed: false
-    param_hints:
-      fastqc:
-        priority: "threads -> sample -> read2 -> max_reads"
-        params: ["threads", "sample", "read2", "max_reads"]
-        defaults: {threads: 4, max_reads: 20000}
-        requires: ["fastq_or_fastq_dir"]
-        tips:
-          - "--threads: forwarded to FastQC when installed, and used for external tool runs."
-          - "--sample: choose one sample when the input directory contains multiple FASTQ groups."
-          - "--max-reads: Python fallback only samples this many reads per FASTQ for lightweight local summaries."
+tags:
+- singlecell
+- scrna
+- fastq
+- qc
+- read-quality
+requires:
+- pandas
+- matplotlib
 ---
 
-# 🧪 Single-Cell FASTQ QC
+# sc-fastq-qc
 
-You are **SC FASTQ QC**, a specialized OmicsClaw agent for single-cell
-RNA-seq raw-read quality assessment before alignment and counting.
+## When to use
 
-## Why This Exists
+The user has raw scRNA-seq FASTQ files (one or more, or a directory of
+samples) and wants per-file / per-sample / per-base quality summaries
+before running `sc-count` or `cellranger`.  Uses FastQC + MultiQC when
+those tools are installed; falls back to a stable Python-only summary
+otherwise so the skill always returns something useful.
 
-- **Without it**: users must run FastQC and MultiQC manually, then separately
-  inspect read quality before choosing Cell Ranger or STARsolo.
-- **With it**: one wrapper produces a stable QC summary, figures, and
-  reproducibility bundle from raw FASTQ input.
-- **Why OmicsClaw**: it preserves the mainstream FastQC/MultiQC workflow when
-  installed, but still writes a local-first Python summary so downstream
-  reporting stays stable.
+## Inputs & Outputs
 
-## Core Capabilities
+| Input | Format | Required |
+|---|---|---|
+| Raw scRNA reads | `.fastq` / `.fastq.gz` (single file or directory) | yes (unless `--demo`) |
 
-1. **FASTQ discovery**: recognizes single-file or directory-based scRNA FASTQ
-   inputs and groups lane-split files by sample.
-2. **Mainstream QC backend**: runs FastQC and MultiQC when those tools are
-   available.
-3. **Stable local fallback**: computes sampled read-level quality summaries even
-   when external tools are unavailable.
-4. **Standard output layer**: writes canonical figures, summary tables, and
-   figure-ready exports under `figure_data/`.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
-   and rerun commands.
+| Output | Path | Notes |
+|---|---|---|
+| Per-file table | `tables/fastq_per_file_summary.csv` | one row per FASTQ |
+| Per-sample table | `tables/fastq_per_sample_summary.csv` | aggregated by sample |
+| Per-base table | `tables/fastq_per_base_quality.csv` | quality vs read position |
+| Quality figures | `figures/fastq_q30_summary.png`, `figures/per_base_quality.png`, `figures/fastq_file_quality.png`, `figures/fastq_read_structure.png` | all four always rendered |
+| Report | `report.md` + `result.json` | always written |
 
-## Input Formats
+## Flow
 
-| Format | Extension | Required Fields / Structure | Example |
-|--------|-----------|-----------------------------|---------|
-| FASTQ file | `.fastq`, `.fq`, `.fastq.gz`, `.fq.gz` | one raw read file; pair `--read2` when needed | `sample_R1.fastq.gz` |
-| FASTQ directory | directory | one or more lane-split FASTQs with common sample stems | `fastqs/` |
-| Demo | n/a | `--demo` flag | built-in synthetic summary |
+1. Discover FASTQ files from `--input` (single file or directory).
+2. If `fastqc` is on `$PATH`, run it; if `multiqc` is on `$PATH`, run that too.
+3. In parallel run a Python-only fallback that samples up to `--max-reads` per FASTQ for Phred / GC / adapter / length.
+4. Merge tool output + fallback into per-file / per-sample / per-base tables.
+5. Render quality + adapter / GC diagnostic figures.
+6. Emit `report.md` + `result.json`.
 
-## Data / State Requirements
+## Gotchas
 
-| Requirement | Where it should exist | Why it matters |
-|-------------|------------------------|----------------|
-| Raw reads | input FASTQ file(s) | FastQC and fallback summaries operate on raw reads |
-| Stable sample grouping | FASTQ filenames or `--sample` | needed to avoid mixing multiple samples in one report |
+- **`--max-reads 20000` (default) caps the Python-fallback path only.** When FastQC is available the full FASTQ is processed; when not, only the first 20K reads per file are sampled.  Sampling depth is recorded per file in `tables/fastq_per_file_summary.csv`; bump `--max-reads` if a FASTQ has high variance across the file.
+- **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only.  Pass freely, expect no R Enhanced output.
+- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`).  All four panels are emitted unconditionally (`sc_fastq_qc.py:430-433`), so absence of an entry typically means upstream tool failure rather than a configuration choice — inspect `summary.warnings` before assuming a panel was suppressed.
 
-## Workflow
-
-1. **Load**: discover FASTQ files and group them into logical samples.
-2. **Validate**: ensure the chosen sample exists and paired-end inputs are aligned when requested.
-3. **Run method**: execute FastQC and MultiQC when available, and always build a lightweight sampled summary.
-4. **Persist results**: write summary tables and figure-ready CSVs.
-5. **Visualize / summarize**: generate per-base quality and sample-level overview plots.
-6. **Report**: write `README.md`, `report.md`, `result.json`, and the reproducibility bundle.
-
-## CLI Reference
+## Key CLI
 
 ```bash
-oc run sc-fastq-qc --input fastqs/ --output results/
-oc run sc-fastq-qc --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
-oc run sc-fastq-qc --input fastqs/ --sample PBMC_1 --threads 8 --output results/
-python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --demo --output /tmp/sc_fastq_qc_demo
-```
+# Demo (built-in synthetic FASTQ)
+python omicsclaw.py run sc-fastq-qc --demo --output /tmp/sc_fastq_qc_demo
 
-## Example Queries
-
-- "先看看这些单细胞 FASTQ 质量怎么样"
-- "给我跑 FastQC 和 MultiQC"
-- "上游 raw reads 先做个 scRNA FASTQ QC"
-
-## Algorithm / Methodology
-
-### FastQC Wrapper Path
-
-1. **Discover FASTQs**: infer sample groupings from common Illumina naming patterns.
-2. **Run FastQC**: call FastQC on all matching FASTQs when the binary is available.
-3. **Aggregate with MultiQC**: restrict aggregation to the FastQC module for faster local reports.
-4. **Fallback summary**: sample reads directly in Python to keep stable numeric outputs even without external tools.
-
-**Key parameters**:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--threads` | `4` | thread count for external FastQC runs |
-| `--sample` | none | choose one sample from a multi-sample FASTQ directory |
-| `--read2` | none | explicit mate file when `--input` points to one FASTQ file |
-| `--max-reads` | `20000` | per-FASTQ sampling depth for the Python fallback summary |
-
-> **Current OmicsClaw behavior**: FastQC and MultiQC artifacts are optional.
-> The wrapper always writes its own summary tables and figures so downstream
-> reporting does not depend on external binaries being present.
-
-## Visualization Contract
-
-1. **Python standard gallery**: per-base quality and sample-level quality overview.
-2. **Figure-ready exports**: `figure_data/` tables for custom plotting or audit.
-3. **Gallery manifest**: `figures/manifest.json` records the standard quick-look QC gallery.
-
-## Output Structure
-
-```text
-output_directory/
-├── README.md
-├── report.md
-├── result.json
-├── figures/
-│   ├── fastq_q30_summary.png
-│   └── per_base_quality.png
-│   ├── fastq_read_structure.png
-│   └── manifest.json
-├── tables/
-│   ├── fastq_per_file_summary.csv
-│   ├── fastq_per_sample_summary.csv
-│   └── fastq_per_base_quality.csv
-├── figure_data/
-│   ├── manifest.json
-│   ├── fastq_per_file_summary.csv
-│   ├── fastq_per_sample_summary.csv
-│   └── fastq_per_base_quality.csv
-├── artifacts/
-│   ├── fastqc/
-│   └── multiqc/
-└── reproducibility/
-    ├── analysis_notebook.ipynb
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Reproducibility Contract
-
-- The wrapper records whether FastQC and MultiQC were actually available.
-- The Python summary is always emitted so comparative reruns stay possible.
-
-## Knowledge Companions
-
-- `knowledge_base/knowhows/KH-sc-fastq-qc-guardrails.md`: short execution guardrails for scope, input grouping, and interpretation.
-- `knowledge_base/skill-guides/singlecell/sc-fastq-qc.md`: longer operator guide for FastQC / MultiQC usage and result interpretation.
-
-## Dependencies
-
-**Required**:
-
-- Python 3
-- `pandas`, `numpy`, `matplotlib`
-
-**Optional but recommended**:
-
-- `fastqc`
-- `multiqc`
-
-## Environment Management
-
-- Python extras:
-  - `pip install -e ".[singlecell-upstream]"`
-- External tools that OmicsClaw does **not** auto-install:
-  - `fastqc`
-  - `multiqc`
-
-Recommended user guidance:
-
-- Do not auto-download these tools during a normal skill run.
-- If `fastqc` or `multiqc` is missing, tell the user how to install them in the active environment or on `PATH`.
-- For shared lab machines, recommend a dedicated scRNA upstream environment rather than mixing these tools into every OmicsClaw workflow environment.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | None | FASTQ file (`.fastq`, `.fq`, `.fastq.gz`, `.fq.gz`) or directory of FASTQs | Required unless `--demo` |
-| `--output` | str | — | Output directory | Required |
-| `--demo` | flag | off | Run with built-in demo data | — |
-| `--read2` | str | None | Optional read-2 FASTQ when `--input` points to a single read-1 file | — |
-| `--sample` | str | None | Choose one sample from a multi-sample FASTQ directory | — |
-| `--threads` | int | 4 | Thread count forwarded to external FastQC runs | — |
-| `--max-reads` | int | 20000 | Per-FASTQ read sampling depth for the Python fallback summary | — |
-| `--r-enhanced` | flag | off | Accepted for CLI consistency; no R Enhanced plots for this skill | No-op |
-
-## R Enhanced Plots
-
-This skill has **no R Enhanced plots**. The `--r-enhanced` flag is accepted for CLI consistency but produces no additional output.
-
-## Special Requirements
-
-### FASTQ Input Formats
-
-This skill accepts raw scRNA-seq FASTQ input only — it does not accept AnnData or count matrices.
-
-| Input type | Example |
-|------------|---------|
-| Single FASTQ file (R1) | `--input sample_R1.fastq.gz` |
-| Paired-end (R1 + R2) | `--input sample_R1.fastq.gz --read2 sample_R2.fastq.gz` |
-| Directory of FASTQs | `--input fastqs/` |
-| Multi-sample directory (pick one) | `--input fastqs/ --sample PBMC_1` |
-
-For 10x Chromium data, R1 carries the cell barcode + UMI (typically 28 bp) and R2 carries the cDNA read (typically 91 bp+). Both files should be assessed.
-
-### External Tools (Optional)
-
-FastQC and MultiQC are used when available on `PATH`. The wrapper always produces a stable Python fallback summary even if they are absent.
-
-```bash
-# Assess a FASTQ directory
-python omicsclaw.py run sc-fastq-qc --input fastqs/ --output results/
-
-# Explicit paired-end input
+# Single-file with paired-end
 python omicsclaw.py run sc-fastq-qc \
   --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
 
-# Multi-sample directory — choose one sample
+# Directory of samples, deeper sampling for the Python fallback
 python omicsclaw.py run sc-fastq-qc \
-  --input fastqs/ --sample PBMC_1 --threads 8 --output results/
+  --input fastq_dir/ --output results/ --max-reads 100000 --threads 8
 ```
 
-## Workflow Position
+## See also
 
-- **Upstream step**: None (this is the first step in the scRNA workflow)
-- **Usual next step**: `sc-count` to generate a count matrix from FASTQs
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — FastQC integration + Python fallback rationale
+- `references/output_contract.md` — table column schemas + figure roles
+- Adjacent skills: `sc-count` (next step — FASTQ → AnnData), `bulkrna-read-qc` (bulk RNA-seq variant), `sc-qc` (downstream count-matrix QC)

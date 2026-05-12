@@ -1,0 +1,71 @@
+---
+title: "Memory 系统 - 让 OmicsClaw 记住你"
+description: "OmicsClaw 用两层 memory：图谱级（跨会话持久）+ 作用域级（工作区本地）。两者各自的写入触发与读取时机。"
+keywords: ["memory", "持久化", "用户偏好", "OmicsClaw memory"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么需要 Memory
+
+**跨会话不能失忆**：Agent 与用户每次新建会话不应重新介绍偏好、项目背景和分析谱系；重复解释的代价让高效协作无从实现。
+
+**不能把一切塞进提示词**：把所有历史对话和上下文直接注入 system prompt，既昂贵又会稀释当前指令；Memory 把持久状态存在提示词之外，按需召回。
+
+**分两层**：图谱级 memory（Graph Memory）跨会话跨平台持久保存全局知识；作用域级 memory（Scoped Memory）保存工作区本地的项目或数据集约定，两者职责不重叠。
+
+## 启用前 / 启用后
+
+| 场景 | 无 memory | 有 memory |
+|---|---|---|
+| 第二次会话用户偏好 | 重新设置语言与配置 | 自动从图谱层恢复 |
+| 工作区 QC 阈值约定 | 用户手动每次告知 | 作用域层自动注入 |
+| 跨 skill 分析谱系 | 每次重新描述来源 | 图谱层保留节点关系 |
+
+## 两层 Memory 架构
+
+```text
+                     用户问题 / Skill 执行
+                            │
+                            ▼
+     ┌──────────────────────────────────────────┐
+     │  Layer 1：图谱级 Memory (Graph Memory)   │
+     │   ─ 后端：SQLite / PostgreSQL (SA)       │
+     │   ─ 节点类型：session:// dataset://      │
+     │   ─ 节点类型：preference:// insight://   │
+     │   ─ 存储路径：~/.config/omicsclaw/       │
+     │   ─ 跨会话、跨平台持久保留               │
+     └──────────────────────────────────────────┘
+                            │ 写入 / 召回
+                            ▼
+     ┌──────────────────────────────────────────┐
+     │  Layer 2：作用域级 Memory (Scoped Memory)│
+     │   ─ 格式：Markdown，工作区本地文件       │
+     │   ─ 存储路径：.omicsclaw/scoped_memory/  │
+     │   ─ scope：project / dataset / lab_policy│
+     │   ─ 会话结束后仍保留，随工作区迁移       │
+     └──────────────────────────────────────────┘
+```
+
+## 写入与读取触发时机
+
+| 触发事件 | 写入哪一层 | 由谁触发 |
+|---|---|---|
+| 用户表达语言或输出偏好 | 图谱级（preference://） | LLM agent 自动 |
+| Skill 成功执行并产出文件 | 图谱级（insight:// + dataset://） | runner 自动 |
+| 用户明确描述工作区约定 | 作用域级（project/dataset/lab） | LLM agent 自动 |
+| 工作区首次激活 / onboard | 两层均初始化 | orchestrator 提示或用户主动 |
+| 提示词组装时召回上下文 | 读取两层并注入 `## Scoped Memory` | runtime 并发拉取 |
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| 第二次会话忘掉偏好 | 图谱层未初始化或依赖缺失 | `pip install -e "[memory]"` 后重启 |
+| 工作区约定未被注入 | 作用域文件路径不匹配 | 确认在正确工作区目录运行 |
+| 两个项目 memory 互相干扰 | 作用域层未按项目隔离 | 分项目目录分别运行，路径各自独立 |
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview)
+- [远程执行模式](/docs/engineering/remote-execution)
+- [R Enhanced 重绘](/docs/engineering/replot)

@@ -1,0 +1,30 @@
+domain: spatial
+script: spatial_microenvironment_subset.py
+allowed_extra_flags:
+- --center-key
+- --center-values
+- --data-type
+- --exclude-centers
+- --microns-per-coordinate-unit
+- --radius-microns
+- --radius-native
+- --target-key
+- --target-values
+legacy_aliases:
+- spatial-neighborhood-subset
+- spatial-proximity-subset
+- microenvironment
+- microenvironment subset
+- tumor microenvironment
+- neighborhood subset
+saves_h5ad: true
+requires_preprocessed: false
+trigger_keywords:
+- microenvironment
+- neighborhood subset
+- spatial radius
+- neighboring cells
+- nearby cells
+- tumor microenvironment
+- extract cells within 50 microns
+param_hints: {}

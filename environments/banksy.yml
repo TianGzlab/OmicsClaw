@@ -1,0 +1,26 @@
+# Sub-env for pybanksy: requires numpy<2.0, conflicts with main OmicsClaw env
+# (numpy>=2.0 via scvi-tools/numba). Bootstrap via:
+#   bash 0_setup_env.sh --with-banksy
+#       (or: OMICSCLAW_WITH_BANKSY=1 bash 0_setup_env.sh)
+# Invoked at runtime by skills/spatial/_lib/domains.py
+# `identify_domains_banksy` through omicsclaw.core.external_env.
+name: omicsclaw_banksy
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy<2.0
+  - pandas<2.2
+  - scipy
+  - scikit-learn
+  - anndata>=0.10,<0.11        # match main-env writer protocol
+  - scanpy<1.10                # banksy upstream tested against scanpy 1.9
+  - python-igraph
+  - leidenalg
+  - umap-learn
+  - h5py
+  - pip:
+      - pybanksy>=1.3.0

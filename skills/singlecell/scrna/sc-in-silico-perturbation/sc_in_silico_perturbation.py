@@ -34,7 +34,6 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -704,14 +703,6 @@ def main() -> int:
 
     # -- report.md --
     _write_report(output_dir, summary, params, input_path, diagnostics, preflight_warnings)
-
-    # -- README.md --
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Single-cell in-silico perturbation analysis.",
-        preferred_method=executed_method,
-    )
 
     logger.info("Done: %s", output_dir)
 

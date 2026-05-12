@@ -1,75 +1,70 @@
 ---
 name: bulkrna-read-alignment
-description: >-
-  RNA-seq read alignment and quantification statistics — STAR/HISAT2/Salmon log parsing, mapping rate, unique/multi-mapped reads, library strandedness, gene body coverage.
+description: Load when summarising STAR / HISAT2 / Salmon alignment-rate logs in bulk RNA-seq. Skip if data is raw FASTQ (use bulkrna-read-qc) or already counted (use bulkrna-qc), or for genome-DNA alignment (use genomics-alignment).
 version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [bulkrna, alignment, STAR, HISAT2, Salmon, mapping-rate, strandedness]
-requires: [numpy, pandas, matplotlib]
-metadata:
-  omicsclaw:
-    domain: bulkrna
-    emoji: "🧬"
-    trigger_keywords: [RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC]
-    allowed_extra_flags:
-      - "--method"
-      - "--species"
-    legacy_aliases: [bulk-align-reads]
-    saves_h5ad: false
+tags:
+- bulkrna
+- alignment
+- STAR
+- HISAT2
+- Salmon
+- mapping-rate
+- strandedness
+requires:
+- numpy
+- pandas
+- matplotlib
 ---
 
-# Bulk RNA-seq Read Alignment & Quantification Statistics
+# bulkrna-read-alignment
 
-Parses alignment logs from STAR, HISAT2, or Salmon to produce comprehensive mapping quality metrics. When run in demo mode, generates synthetic alignment statistics to demonstrate the full reporting pipeline.
+## When to use
 
-## Core Capabilities
+Run after the aligner / quantifier finishes, on the log file produced by
+STAR (`Log.final.out`), HISAT2 (`.log`), or Salmon (`meta_info.json`).
+Yields a one-page mapping-rate summary, strandedness inference, and a
+gene-body coverage profile — the QC bridge between raw FASTQ and the
+count matrix.
 
-- Parse STAR `Log.final.out`, HISAT2 summary, or Salmon `meta_info.json`
-- Compute total reads, uniquely mapped, multi-mapped, unmapped rates
-- Alignment quality assessment (unmapped > 20% = warning, > 40% = fail)
-- Strandedness estimation from alignment stats
-- Library complexity estimation
-- Gene body coverage distribution (5' to 3')
+## Inputs & Outputs
 
-## Why This Exists
+| Input | Format | Required |
+|---|---|---|
+| Aligner log | `Log.final.out` (STAR), `.log` (HISAT2), `meta_info.json` (Salmon) | yes (or `--demo`) |
 
-- **Without it**: Users manually inspect STAR/HISAT2/Salmon logs, compute mapping rates in spreadsheets, and lack standardized quality thresholds.
-- **With it**: A single command parses any common RNA-seq aligner output and produces publication-ready figures with automatic quality assessment.
-- **Why OmicsClaw**: Bridges the gap between raw FASTQ QC and count matrix QC, completing the upstream portion of the bulk RNA-seq pipeline.
+| Output | Path | Notes |
+|---|---|---|
+| Mapping summary figure | `figures/mapping_summary.png` | unique vs multi vs unmapped |
+| Gene body coverage | `figures/gene_body_coverage.png` | 5'→3' bias profile |
+| Alignment composition | `figures/alignment_composition.png` | breakdown of mapping outcomes |
+| Stats table | `tables/alignment_stats.csv` | parsed numeric metrics |
+| Report | `report.md` + `result.json` | always |
 
-## Input Formats
+## Flow
 
-| Format | Extension | Description |
-|--------|-----------|-------------|
-| STAR log | `Log.final.out` | STAR alignment final summary |
-| HISAT2 log | `.log` | HISAT2 alignment summary |
-| Salmon log | `meta_info.json` | Salmon quantification metadata |
+1. Auto-detect aligner from filename (`bulkrna_read_alignment.py:305-311`): `log.final.out` → STAR; `meta_info` → Salmon; otherwise → HISAT2.
+2. Parse the log into a numeric stats dict.
+3. Run quality assessment heuristics (high/medium/low mapping-rate buckets).
+4. Render figures and write `report.md` + `tables/alignment_stats.csv`.
 
-## CLI Reference
+## Gotchas
+
+- **Aligner detection is filename-based, not content-based.**  `bulkrna_read_alignment.py:305-311` dispatches by `input_path.name.lower()` — anything that is neither `log.final.out` nor `meta_info` (case-insensitive substring) is silently parsed as a HISAT2 log.  A renamed STAR log will produce nonsense.  Pass `--method star` explicitly if your STAR file isn't named conventionally.
+- **The skill consumes the LOG, not the BAM.**  Feeding a `.bam` or `.sam` file as `--input` will not raise — the parser just finds zero matchable lines and reports an empty stats dict.  Sanity-check `result.json["summary"]["total_reads"]` is non-zero before trusting any downstream summary.
+- **Gene body coverage is synthetic in `--demo` mode** (`bulkrna_read_alignment.py:142-150`).  The 5'→3' bias profile in demo runs is a fixed reproducible curve, not derived from real input — useful for layout previews but not for assessing real RNA degradation.
+
+## Key CLI
 
 ```bash
 python omicsclaw.py run bulkrna-read-alignment --demo
 python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output results/
 ```
 
-## Output Structure
+## See also
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── figures/
-│   ├── mapping_summary.png
-│   ├── gene_body_coverage.png
-│   └── alignment_composition.png
-├── tables/
-│   └── alignment_stats.csv
-└── reproducibility/
-    └── commands.sh
-```
-
-## Related Skills
-
-- `bulkrna-read-qc` — Upstream: FASTQ QC before alignment
-- `bulkrna-qc` — Downstream: count matrix QC after quantification
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — STAR / HISAT2 / Salmon parsers, strandedness inference
+- `references/output_contract.md` — exact output directory layout
+- Adjacent skills: `bulkrna-read-qc` (upstream FASTQ QC), `bulkrna-qc` (downstream count-matrix QC), `genomics-alignment` (DNA-alignment sibling: BAM/SAM, not log files)

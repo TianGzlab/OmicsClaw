@@ -1,0 +1,41 @@
+domain: singlecell
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🧬
+homepage: https://github.com/TianGzlab/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: scanpy
+  bins: []
+trigger_keywords:
+- merge count matrices
+- multi-sample count
+- aggregate samples
+- combine count outputs
+- cellranger aggr alternative
+allowed_extra_flags:
+- --r-enhanced
+- --sample-id
+legacy_aliases:
+- scrna-multi-count
+saves_h5ad: true
+requires_preprocessed: false
+param_hints:
+  merge:
+    priority: input (multiple) -> sample-id -> output
+    params:
+    - input
+    - sample-id
+    defaults: {}
+    requires:
+    - two_or_more_processed_h5ad
+    tips:
+    - '--input: repeat for each sample, e.g. --input s1/processed.h5ad --input s2/processed.h5ad'
+    - '--sample-id: optional labels; if omitted, derived from directory or file names.'
+script: sc_multi_count.py

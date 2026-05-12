@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+from omicsclaw.core.external_env import is_env_available
+
 # Mappings of packages to their respective domain tiers.
 DOMAIN_TIERS = {
     # Core dependencies (always installed via pip install -e .)
@@ -137,7 +139,7 @@ def get_installed_tiers() -> dict[str, bool]:
         "spatial-integration": importlib.util.find_spec("harmonypy") is not None or importlib.util.find_spec("bbknn") is not None,
         "spatial-registration": importlib.util.find_spec("paste") is not None,
         "r-bridge": _check_r_available(),
-        "banksy": importlib.util.find_spec("pybanksy") is not None,
+        "banksy": is_env_available("omicsclaw_banksy"),  # Layer-4 sub-env check
     }
     return tiers_status
 
@@ -195,7 +197,8 @@ def validate_r_environment(
         raise ImportError(
             "[OmicsClaw] R is not available.\n"
             "Install R (>= 4.3) and ensure 'Rscript' is on your PATH.\n"
-            "Then run: Rscript install_r_dependencies.R"
+            "The recommended path is `bash 0_setup_env.sh` which provisions\n"
+            "R 4.3 and all required packages via mamba/conda."
         )
 
     if required_r_packages:
@@ -206,7 +209,8 @@ def validate_r_environment(
         if missing:
             raise ImportError(
                 f"[OmicsClaw] Missing R packages: {', '.join(missing)}.\n"
-                f"Install with: Rscript install_r_dependencies.R\n"
+                f"The recommended path is `bash 0_setup_env.sh` which provisions\n"
+                f"R 4.3 and all required packages via mamba/conda.\n"
                 f"Or manually: Rscript -e 'BiocManager::install(c({', '.join(repr(p) for p in missing)}))'"
             )
 

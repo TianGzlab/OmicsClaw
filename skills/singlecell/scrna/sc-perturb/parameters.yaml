@@ -1,0 +1,18 @@
+domain: singlecell
+allowed_extra_flags:
+- --control
+- --logfc-threshold
+- --method
+- --n-neighbors
+- --pert-key
+- --perturbation-type
+- --pval-cutoff
+- --r-enhanced
+- --seed
+- --split-by
+saves_h5ad: true
+script: sc_perturb.py
+param_hints: {}
+requires_preprocessed: false
+trigger_keywords: []
+legacy_aliases: []

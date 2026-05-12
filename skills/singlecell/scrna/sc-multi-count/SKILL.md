@@ -1,202 +1,83 @@
 ---
 name: sc-multi-count
-description: >-
-  Merge multiple single-sample scRNA-seq count matrices (from sc-count) into
-  one downstream-ready AnnData with sample labels.
-version: 0.1.0
+description: Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count) into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData (use sc-standardize-input) or for FASTQ→counts on each sample (use sc-count first).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, count, merge, multi-sample, aggregate]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    requires:
-      bins:
-        - python3
-      env: []
-      config: []
-    emoji: "🧬"
-    homepage: https://github.com/TianGzlab/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: scanpy
-        bins: []
-    trigger_keywords:
-      - merge count matrices
-      - multi-sample count
-      - aggregate samples
-      - combine count outputs
-      - cellranger aggr alternative
-    allowed_extra_flags:
-      - "--sample-id"
-      - "--r-enhanced"
-    legacy_aliases: [scrna-multi-count]
-    saves_h5ad: true
-    requires_preprocessed: false
-    param_hints:
-      merge:
-        priority: "input (multiple) -> sample-id -> output"
-        params: ["input", "sample-id"]
-        defaults: {}
-        requires: ["two_or_more_processed_h5ad"]
-        tips:
-          - "--input: repeat for each sample, e.g. --input s1/processed.h5ad --input s2/processed.h5ad"
-          - "--sample-id: optional labels; if omitted, derived from directory or file names."
+tags:
+- singlecell
+- scrna
+- multi-sample
+- merge
+- aggregation
+requires:
+- anndata
+- pandas
 ---
 
-# Multi-Sample Count Merge
+# sc-multi-count
 
-You are **SC Multi-Count**, a specialized OmicsClaw agent for merging multiple
-single-sample scRNA-seq count matrices into one downstream-ready AnnData.
+## When to use
 
-## Why This Exists
+The user has run `sc-count` (or another counting backend) on multiple
+samples separately and now needs them merged into one AnnData with a
+canonical sample-label column for downstream batch-aware analysis.
+Replaces `cellranger aggr` for the OmicsClaw pipeline — preserves the
+canonical AnnData contract instead of re-counting.
 
-- **Without it**: users manually concatenate AnnData objects, handle barcode
-  collisions, and lose provenance metadata.
-- **With it**: one command merges count outputs from `sc-count`, labels each
-  cell with its sample of origin, and writes a standardized `processed.h5ad`.
-- **Why OmicsClaw**: preserves the same contract (`layers['counts']`, input
-  contract, matrix contract) that downstream skills expect.
+## Inputs & Outputs
 
-## Core Capabilities
+| Input | Format | Required |
+|---|---|---|
+| Per-sample inputs | repeated `--input <path>` flag, one per sample (`action="append"`) | yes (unless `--demo`); minimum two paths |
 
-1. **Multi-sample merge**: outer-join concatenation with barcode prefixing.
-2. **Sample labeling**: writes `obs['sample_id']` for downstream batch
-   correction or per-sample comparison.
-3. **Stable downstream contract**: writes `processed.h5ad` with
-   `layers['counts']` and OmicsClaw input-contract metadata.
-4. **Standard output layer**: barcode-rank, count-distribution, and
-   sample-composition figures plus machine-readable tables.
-5. **Reproducibility layer**: writes `README.md`, `report.md`, `result.json`,
-   and rerun commands.
+| Output | Path | Notes |
+|---|---|---|
+| Merged AnnData | `processed.h5ad` | adds `obs["sample"]` from filename or label arg |
+| Per-barcode summary | `tables/barcode_metrics.csv` | per-barcode count summary with sample labels |
+| Per-sample summary | `tables/per_sample_summary.csv` | per-sample summary statistics |
+| Diagnostic figures | `figures/barcode_rank.png`, `figures/count_distributions.png`, `figures/count_complexity_scatter.png`, `figures/sample_composition.png` | always rendered |
+| Report | `report.md` + `result.json` | always written |
 
-## Input Formats
+## Flow
 
-| Format | Extension | Required Fields / Structure | Example |
-|--------|-----------|-----------------------------|---------|
-| Multiple H5AD | `.h5ad` | each from `sc-count` output | `--input s1/processed.h5ad --input s2/processed.h5ad` |
-| Demo | n/a | `--demo` flag | built-in split of PBMC demo |
+1. Collect per-sample AnnData paths from each `--input <path>` flag (`action="append"`); paired `--sample-id <id>` flags assign sample labels.
+2. Load each, normalise the single-cell contract (`layers["counts"]`, `adata.raw`, gene name harmonisation).
+3. Stack with explicit sample-label per cell.
+4. Write merged AnnData; emit per-sample / per-barcode summary tables.
+5. Render barcode-rank + composition figures.
+6. Emit `report.md` + `result.json`.
 
-## Data / State Requirements
+## Gotchas
 
-| Requirement | Where it should exist | Why it matters |
-|-------------|------------------------|----------------|
-| Per-sample count H5AD | `--input` (repeated) | each must be a count-level AnnData |
-| Sample labels | `--sample-id` or inferred | needed for `obs['sample_id']` |
+- **`--input` is `action="append"` — repeat the flag, do not comma-split.** `sc_multi_count.py:315` declares `--input` with `action="append"`.  Pass `--input s1.h5ad --input s2.h5ad --input s3.h5ad`; a single comma-separated value (`--input s1.h5ad,s2.h5ad`) is treated as one literal path that does not exist and triggers `FileNotFoundError`.  No directory expansion.
+- **At least two `--input` paths are required.** `sc_multi_count.py:335` calls `parser.error("At least two --input paths required when not using --demo.")` if you pass zero or one.  For a single-sample run you don't need this skill — just use the upstream `sc-count` output directly.
+- **Missing input file → hard fail.** `sc_multi_count.py:346` raises `FileNotFoundError` when any individual `--input` path does not resolve.  In batch pipelines, a single mistyped sample name aborts the whole merge — pre-flight your file list.
+- **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only; the flag exists for CLI consistency.
+- **No within-sample re-counting.** This is a stitching skill — it stacks already-canonical AnnData objects.  If a per-sample input has a non-canonical matrix layout, run `sc-standardize-input` on each before this; otherwise the merged contract may surface incoherent per-cell metrics downstream.
 
-## Workflow
-
-1. **Load**: read each input H5AD and tag with sample ID.
-2. **Validate**: check at least two inputs; warn on barcode collisions.
-3. **Merge**: outer-join concatenation with barcode prefixing to avoid collisions.
-4. **Standardize**: create `layers['counts']`, record OmicsClaw contracts.
-5. **Visualize**: barcode-rank, count distributions, complexity scatter, sample composition.
-6. **Report**: write `report.md`, `result.json`, and reproducibility bundle.
-7. **Export**: write `processed.h5ad`.
-
-## CLI Reference
+## Key CLI
 
 ```bash
-# Merge two sc-count outputs
-oc run sc-multi-count \
-  --input sample1/processed.h5ad \
-  --input sample2/processed.h5ad \
-  --output merged/
+# Demo (built-in two synthetic samples)
+python omicsclaw.py run sc-multi-count --demo --output /tmp/sc_multi_demo
 
-# With explicit sample IDs
-oc run sc-multi-count \
-  --input s1/processed.h5ad --sample-id Patient_A \
-  --input s2/processed.h5ad --sample-id Patient_B \
-  --output merged/
+# Three samples — repeat --input per file
+python omicsclaw.py run sc-multi-count \
+  --input s1.h5ad --input s2.h5ad --input s3.h5ad \
+  --output results/
 
-# Demo mode
-python omicsclaw.py run sc-multi-count --demo --output /tmp/sc_multi_count_demo
+# With explicit per-sample labels (paired with --input order)
+python omicsclaw.py run sc-multi-count \
+  --input s1.h5ad --sample-id ctrl_a \
+  --input s2.h5ad --sample-id ctrl_b \
+  --input s3.h5ad --sample-id treat_a \
+  --output results/
 ```
 
-## Example Queries
+## See also
 
-- "把这两个样本的 count 矩阵合并到一起"
-- "merge these two sc-count outputs"
-- "多样本计数矩阵合并"
-
-## Algorithm / Methodology
-
-### Merge Path
-
-1. **Load samples**: read each `processed.h5ad`, prefix barcodes with sample ID.
-2. **Outer-join concatenation**: union of gene sets, zero-fill for missing genes.
-3. **Standardize**: write `layers['counts']`, `adata.raw`, and OmicsClaw contracts.
-4. **Quality checks**: detect empty samples, extreme imbalance, zero cells.
-
-**Key parameters**:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--input` | required | path to a `processed.h5ad` (repeat for each sample) |
-| `--sample-id` | inferred | explicit sample label (repeat, matching order of `--input`) |
-
-## Visualization Contract
-
-1. **Python standard gallery**: barcode-rank, count distributions, complexity scatter, sample composition.
-2. **Figure-ready exports**: barcode metrics and per-sample summary under `figure_data/`.
-3. **Gallery manifest**: `figures/manifest.json`.
-
-## Output Structure
-
-```text
-output_directory/
-├── README.md
-├── report.md
-├── result.json
-├── processed.h5ad
-├── standardized_input.h5ad -> processed.h5ad
-├── figures/
-│   ├── barcode_rank.png
-│   ├── count_distributions.png
-│   ├── count_complexity_scatter.png
-│   ├── sample_composition.png
-│   └── manifest.json
-├── tables/
-│   ├── barcode_metrics.csv
-│   └── per_sample_summary.csv
-├── figure_data/
-│   ├── manifest.json
-│   ├── barcode_metrics.csv
-│   └── per_sample_summary.csv
-└── reproducibility/
-    ├── analysis_notebook.ipynb
-    ├── commands.sh
-    └── requirements.txt
-```
-
-## Workflow Position
-
-- **Upstream step**: `sc-count` (run once per sample to produce individual `processed.h5ad` files)
-- **Usual next step**: `sc-qc` for quality assessment on the merged object
-
-## Recommended Next Steps
-
-- `sc-qc` or `sc-preprocessing` on the merged `processed.h5ad`.
-- `sc-batch-integration` if samples have batch effects.
-
-## Dependencies
-
-**Required**:
-
-- Python 3
-- `scanpy`, `anndata`, `pandas`, `numpy`, `matplotlib`
-
-## CLI Parameters
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--input` | path (repeatable) | — | Path to a `processed.h5ad` from `sc-count`; repeat once per sample (required unless `--demo`) |
-| `--output` | path | — | Output directory (required) |
-| `--demo` | flag | `false` | Run with built-in demo data (splits PBMC demo into two synthetic samples) |
-| `--sample-id` | str (repeatable) | inferred | Explicit sample label for the corresponding `--input`; repeat in the same order as `--input` |
-| `--r-enhanced` | flag | `false` | Accepted for CLI consistency; no R Enhanced plots are generated by this skill |
-
-## R Enhanced Plots
-
-This skill has no R Enhanced plots. `--r-enhanced` is accepted for CLI consistency but produces no additional output. The skill's purpose is multi-sample merging, not visualization beyond the standard Python gallery.
+- `references/parameters.md` — every CLI flag and tuning hint
+- `references/methodology.md` — sample-label derivation, contract harmonisation rules
+- `references/output_contract.md` — merged `obs` schema, table layout
+- Adjacent skills: `sc-count` (upstream — produces single-sample AnnData inputs), `sc-standardize-input` (per-sample contract canonicaliser, run before this when inputs are external), `sc-batch-integration` (downstream — corrects batch effects in the merged AnnData)

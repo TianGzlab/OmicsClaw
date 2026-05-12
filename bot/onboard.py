@@ -13,6 +13,7 @@ from omicsclaw.core.provider_registry import (
     PROVIDER_CHOICES,
     PROVIDER_PRESETS,
     detect_provider_from_env,
+    normalize_model_for_provider,
 )
 
 try:
@@ -419,6 +420,9 @@ def _configure_llm(env_vars: dict[str, str | None]) -> tuple[bool, str]:
     preset_base_url, preset_model, _ = PROVIDER_PRESETS.get(provider, ("", "", ""))
 
     current_model = str(env_vars.get("OMICSCLAW_MODEL", "") or "")
+    if current_provider == provider and current_model:
+        current_model, _ = normalize_model_for_provider(provider, current_model)
+        env_vars["OMICSCLAW_MODEL"] = current_model
     model_default = current_model if current_provider == provider and current_model else preset_model
     if not _prompt_field(
         env_vars,

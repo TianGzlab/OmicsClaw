@@ -1,161 +1,92 @@
 ---
 name: sc-clustering
-description: >-
-  Build the neighbor graph, run a low-dimensional embedding, and cluster single-cell data from a
-  normalized scRNA AnnData object.
-version: 0.1.0
+description: Load when building the neighbour graph, embedding (UMAP/t-SNE/diffmap/PHATE), and clustering (Leiden/Louvain) on a normalised single-cell AnnData. Skip when QC/normalisation/HVG/PCA have not run yet (use sc-preprocessing) or for marker ranking after clustering (use sc-markers).
+version: 0.3.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, scrna, clustering, embedding, umap, tsne, diffmap, phate, leiden, louvain]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--embedding-method"
-      - "--cluster-method"
-      - "--use-rep"
-      - "--n-neighbors"
-      - "--n-pcs"
-      - "--resolution"
-      - "--umap-min-dist"
-      - "--umap-spread"
-      - "--tsne-perplexity"
-      - "--tsne-metric"
-      - "--diffmap-n-comps"
-      - "--phate-knn"
-      - "--phate-decay"
-      - "--r-enhanced"
-    param_hints:
-      umap:
-        priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "umap_min_dist", "umap_spread"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, umap_min_dist: 0.5, umap_spread: 1.0}
-        requires: ["normalized_expression", "embedding_or_pca"]
-        tips:
-          - "`use_rep` is the most important selector if multiple embeddings are available."
-      tsne:
-        priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "tsne_perplexity", "tsne_metric"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, tsne_perplexity: 30.0, tsne_metric: euclidean}
-        requires: ["normalized_expression", "embedding_or_pca"]
-        tips:
-          - "`tsne` is mainly for visualization; the clustering still comes from the neighbor graph."
-      diffmap:
-        priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "diffmap_n_comps"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, diffmap_n_comps: 15}
-        requires: ["normalized_expression", "embedding_or_pca"]
-        tips:
-          - "`diffmap` often emphasizes continuous trajectories more than compact clusters."
-      phate:
-        priority: "use_rep -> cluster_method -> n_neighbors/resolution"
-        params: ["use_rep", "cluster_method", "n_neighbors", "n_pcs", "resolution", "phate_knn", "phate_decay"]
-        defaults: {cluster_method: leiden, n_neighbors: 15, n_pcs: 50, resolution: 1.0, phate_knn: 15, phate_decay: 40}
-        requires: ["normalized_expression", "embedding_or_pca", "phate"]
-        tips:
-          - "`phate` is optional and may need extra installation before use."
-    saves_h5ad: true
-    requires_preprocessed: true
-    legacy_aliases: [sc-dimred-cluster]
+tags:
+- singlecell
+- scrna
+- clustering
+- leiden
+- louvain
+- umap
+- tsne
+- phate
+requires:
+- anndata
+- scanpy
+- numpy
 ---
 
-# Single-Cell Clustering
+# sc-clustering
 
-This skill starts from a normalized scRNA AnnData and performs:
-1. neighbor graph construction
-2. low-dimensional embedding (`umap`, `tsne`, `diffmap`, or `phate`)
-3. graph clustering (`leiden` or `louvain`)
+## When to use
 
-Expected input:
-- `processed.h5ad` from `sc-preprocessing`
-- or an integrated object from `sc-batch-integration`
-- `X = normalized_expression`
-- `obsm["X_pca"]` or another explicit embedding chosen by `--use-rep`
+The user has a normalised AnnData with PCA / integrated embedding
+already populated and wants the standard scRNA neighbour-graph →
+embedding → cluster workflow.  Combinable in one call: pick an
+embedding method (`umap` default, also `tsne` / `diffmap` / `phate`)
+and a clustering method (`leiden` default, also `louvain`), with an
+explicit resolution or auto-resolution search.  Designed to read from
+`obsm["X_pca"]` / `obsm["X_harmony"]` / etc. via `--use-rep`.
 
-Dependency note:
-- `leiden` is the recommended default path.
-- `louvain` is optional; if the Python package `louvain` is missing, the skill should stop and ask the user to install it explicitly rather than trying to install it automatically.
+## Inputs & Outputs
 
-Main tuning knobs:
-- `--embedding-method`: how to render the low-dimensional view (`umap`, `tsne`, `diffmap`, `phate`)
-- `--cluster-method`: graph clustering backend (`leiden`, `louvain`)
-- `--use-rep`: which embedding in `adata.obsm` should drive the neighbor graph
-- `--n-neighbors`: local neighborhood size
-- `--n-pcs`: number of PCA dimensions when the neighbor graph is built from `X_pca`
-- `--resolution`: cluster granularity (numeric value or `auto`)
+| Input | Format | Required |
+|---|---|---|
+| Normalised AnnData | `.h5ad` with `obsm["X_pca"]` (or `--use-rep <key>`) | yes (unless `--demo`) |
 
-## Auto Resolution Selection
+| Output | Path | Notes |
+|---|---|---|
+| Clustered AnnData | `processed.h5ad` | adds `obs["leiden"]` / `obs["louvain"]`, `obsm["X_<embedding>"]` |
+| Per-cluster summary | `tables/cluster_summary.csv` | cells per cluster |
+| Run-level summary | `tables/clustering_summary.csv` | resolution, n_clusters, modularity |
+| Embedding points | `tables/embedding_points.csv` | per-cell embedding coordinates |
+| Diagnostic figures | embedding gallery (always); `figures/auto_resolution_search.png` only when `--resolution auto` | gallery + conditional sweep figure |
+| Report | `report.md` + `result.json` | always written |
 
-When `--resolution auto` is specified, the skill automatically searches for the
-optimal clustering resolution using bootstrap subsampling and silhouette scoring:
+## Flow
 
-1. Candidate resolutions (0.4, 0.6, 0.8, 1.0, 1.2, 1.4) are evaluated.
-2. For each resolution, the data is subsampled 5 times (80% of cells each).
-3. Each subsample is clustered, and a co-clustering distance matrix is built.
-4. The silhouette score of the full-data clustering against the co-clustering
-   distances is computed.
-5. The resolution with the highest silhouette score is selected.
+1. Load AnnData; pick embedding source (`--use-rep` or default).
+2. If `--resolution` is `auto`, run the auto-resolution search and write `figures/auto_resolution_search.png`; otherwise parse it as a single float.
+3. Build the neighbour graph (`--n-neighbors` × `--n-pcs`).
+4. Compute the chosen `--embedding-method` low-dim embedding.
+5. Cluster with `--cluster-method` at the chosen `--resolution`.
+6. Render the embedding gallery + cluster-summary tables; emit `report.md` + `result.json`.
 
-The search results (resolution vs silhouette score) are saved as
-`figures/auto_resolution_search.png` and in `result.json` under the
-`auto_resolution` key.
+## Gotchas
 
-**Example:**
+- **No embedding source → hard fail.** `sc_cluster.py:336` raises `ValueError("No embedding available for clustering.")` when neither `obsm["X_pca"]` is present nor `--use-rep` is set to a valid `obsm` key.  Run `sc-preprocessing` (or `sc-batch-integration` for a multi-sample dataset) before this skill, or pass `--use-rep X_pca` explicitly when the input has a non-default embedding name.
+- **`--input` is required without `--demo`.** `sc_cluster.py:851` raises `ValueError("--input required when not using --demo")`.  Common when running in a pipeline where the upstream step didn't write a valid path.
+- **`--resolution` is either a single float or the literal `auto`.** `sc_cluster.py:856-857` parses `args.resolution`: if `lower() == "auto"` it triggers the auto-resolution search; otherwise it calls `float(args.resolution)`.  Comma-separated values (`"0.3,0.6,1.0"`) raise `ValueError` from `float()` — there is no built-in multi-value sweep mode beyond `auto`.
+- **The skill writes the chosen `--cluster-method` column verbatim into `obs`.** `obs["leiden"]` (or `obs["louvain"]`) overwrites any pre-existing column with that name.  Save the input separately if you need to compare the new clustering against a prior one.
+
+## Key CLI
+
 ```bash
-python omicsclaw.py run sc-clustering --demo --resolution auto --output /tmp/clustering_auto
+# Demo (built-in PBMC3K, Leiden + UMAP)
+python omicsclaw.py run sc-clustering --demo --output /tmp/sc_cluster_demo
+
+# Default Leiden on integrated embedding
+python omicsclaw.py run sc-clustering \
+  --input integrated.h5ad --output results/ \
+  --use-rep X_harmony --resolution 1.0
+
+# Auto-resolution search with t-SNE embedding
+python omicsclaw.py run sc-clustering \
+  --input preprocessed.h5ad --output results/ \
+  --embedding-method tsne --resolution auto
+
+# PHATE embedding + Louvain
+python omicsclaw.py run sc-clustering \
+  --input preprocessed.h5ad --output results/ \
+  --embedding-method phate --cluster-method louvain --n-neighbors 30
 ```
 
-Method-specific parameters:
-- `umap`: `--umap-min-dist`, `--umap-spread`
-- `tsne`: `--tsne-perplexity`, `--tsne-metric`
-- `diffmap`: `--diffmap-n-comps`
-- `phate`: `--phate-knn`, `--phate-decay`
+## See also
 
-Typical path:
-- if the object still has batch effects: `sc-preprocessing -> sc-batch-integration -> sc-clustering`
-- if no batch correction is needed: `sc-preprocessing -> sc-clustering`
-- after clustering, continue to `sc-markers`, `sc-cell-annotation`, or `sc-de`
-
-Standard output:
-- `processed.h5ad`
-- `figures/`
-- `tables/`
-- `figure_data/`
-- `report.md`
-- `result.json`
-
-## Workflow Position
-
-**Upstream:** sc-preprocessing (single batch) or sc-batch-integration (multi-batch)
-**Downstream:** sc-cell-annotation, sc-markers, sc-pseudotime, sc-velocity-prep, sc-cell-communication, sc-grn
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | path | — | Input AnnData file; required unless `--demo` | — |
-| `--output` | path | — | Output directory (required) | — |
-| `--demo` | flag | `false` | Run with built-in demo data | — |
-| `--embedding-method` | enum | `umap` | Low-dimensional embedding: `umap`, `tsne`, `diffmap`, `phate` | — |
-| `--cluster-method` | enum | `leiden` | Graph clustering algorithm: `leiden`, `louvain` | — |
-| `--use-rep` | str | auto | Embedding key in `adata.obsm` to drive the neighbor graph (e.g. `X_pca`, `X_harmony`) | — |
-| `--n-neighbors` | int | `15` | Number of nearest neighbors for the neighbor graph | Must be >= 2 |
-| `--n-pcs` | int | `50` | PCA dimensions used when building the neighbor graph from `X_pca` | Must be >= 1 |
-| `--resolution` | str | `1.0` | Clustering resolution; use `auto` for silhouette-based search | Must be > 0 and <= 50 when numeric |
-| `--umap-min-dist` | float | `0.5` | UMAP minimum distance between embedded points (umap only) | — |
-| `--umap-spread` | float | `1.0` | UMAP effective scale of embedded points (umap only) | — |
-| `--tsne-perplexity` | float | `30.0` | t-SNE perplexity (tsne only) | Must be >= 1 |
-| `--tsne-metric` | str | `euclidean` | Distance metric for t-SNE (tsne only) | — |
-| `--diffmap-n-comps` | int | `15` | Number of diffusion map components (diffmap only) | Must be >= 2 |
-| `--phate-knn` | int | `15` | Number of nearest neighbors for PHATE (phate only) | Must be >= 2 |
-| `--phate-decay` | int | `40` | Alpha decay for PHATE kernel (phate only) | — |
-| `--r-enhanced` | flag | `false` | Generate R Enhanced figures via ggplot2 renderers | — |
-
-## R Enhanced Plots
-
-| Renderer | Output file | What it shows | R packages |
-|----------|-------------|---------------|------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | Cell embedding scatter colored by cluster labels (CellDimPlot equivalent) | ggplot2, ggrepel, cowplot |
-| `plot_embedding_feature` | `r_embedding_feature.png` | Cell embedding scatter with continuous feature expression overlay (FeatureDimPlot equivalent) | ggplot2, viridis, cowplot |
-| `plot_cell_barplot` | `r_cell_barplot.png` | Cell count bar chart per cluster (CellStatPlot bar equivalent) | ggplot2, cowplot |
-| `plot_cell_proportion` | `r_cell_proportion.png` | Cell proportion stacked bar across groups (CellStatPlot proportion equivalent) | ggplot2, cowplot |
+- `references/parameters.md` — every CLI flag and per-method tuning hint
+- `references/methodology.md` — embedding choice guide, auto-resolution heuristic
+- `references/output_contract.md` — `obs` / `obsm` keys + table schemas
+- Adjacent skills: `sc-preprocessing` (upstream — normalise/HVG/PCA before this), `sc-batch-integration` (parallel — produces the integrated embedding `--use-rep` reads from), `sc-markers` (downstream — rank cluster markers from `obs["leiden"]`)

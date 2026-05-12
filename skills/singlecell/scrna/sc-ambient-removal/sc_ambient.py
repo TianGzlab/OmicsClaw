@@ -28,7 +28,6 @@ from omicsclaw.common.report import (
     generate_report_header,
     generate_report_footer,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -98,34 +97,6 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Ambient RNA contamination correction for droplet-based scRNA-seq.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", "simple"),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Ambient RNA contamination correction for droplet-based scRNA-seq.",
-            result_payload=result_payload,
-            preferred_method=summary.get("method", "simple"),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "cellbender": MethodConfig(
@@ -1031,7 +1002,6 @@ def main():
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
     if (output_dir / "README.md").exists():
         summary["output_bundle"]["readme_md"] = "README.md"
     for candidate in ["analysis_notebook.ipynb", "analysis.ipynb"]:

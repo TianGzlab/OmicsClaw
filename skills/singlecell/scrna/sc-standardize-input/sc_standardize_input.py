@@ -26,7 +26,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
@@ -386,13 +385,6 @@ def main() -> None:
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Canonicalize single-cell input into a stable AnnData contract for downstream OmicsClaw skills.",
-        result_payload=result_payload,
-        preferred_method=METHOD_NAME,
-    )
 
     # Print UX guidance if issues detected
     _print_ux_guidance(summary, diagnostics)

@@ -1,310 +1,103 @@
 ---
 name: spatial-register
-description: >-
-  Spatial registration and multi-slice alignment for spatial transcriptomics
-  data using PASTE or STalign, with method-specific parameter hints,
-  standardized aligned-coordinate outputs, and a unified registration
-  visualization contract.
-version: 0.5.0
-author: OmicsClaw Team
+description: Load when aligning multiple spatial slices into a common coordinate frame on a multi-slice spatial AnnData via PASTE optimal transport or STalign image-aware registration. Skip when data is single-slice (no registration needed) or for cross-sample integration in the gene-expression space (use spatial-integrate).
+version: 0.4.0
+author: OmicsClaw
 license: MIT
-tags: [spatial, registration, alignment, paste, stalign, multi-slice]
-metadata:
-  omicsclaw:
-    domain: spatial
-    allowed_extra_flags:
-      - "--method"
-      - "--paste-alpha"
-      - "--paste-dissimilarity"
-      - "--paste-use-gpu"
-      - "--reference-slice"
-      - "--slice-key"
-      - "--stalign-a"
-      - "--stalign-image-size"
-      - "--stalign-niter"
-      - "--use-expression"
-    param_hints:
-      paste:
-        priority: "slice_key/reference_slice → paste_alpha → paste_dissimilarity"
-        params: ["slice_key", "reference_slice", "paste_alpha", "paste_dissimilarity", "paste_use_gpu"]
-        defaults: {paste_alpha: 0.1, paste_dissimilarity: "kl", paste_use_gpu: false}
-        requires: ["obsm.spatial", "obs.slice", "shared_genes", "X_expression"]
-        tips:
-          - "--slice-key: practical wrapper control; OmicsClaw requires a real slice label column instead of fabricating one."
-          - "--paste-alpha: public PASTE weight between expression dissimilarity and spatial distance in `pairwise_align`."
-          - "--paste-dissimilarity: public PASTE expression dissimilarity choice; the wrapper exposes the documented `kl` / `euclidean` options."
-          - "--paste-use-gpu: public PASTE backend switch; only matters when a compatible Torch backend is available."
-      stalign:
-        priority: "slice_key/reference_slice → stalign_a → stalign_niter"
-        params: ["slice_key", "reference_slice", "stalign_niter", "stalign_a", "stalign_image_size", "use_expression"]
-        defaults: {stalign_niter: 2000, stalign_a: 500.0, stalign_image_size: 400, use_expression: false}
-        requires: ["obsm.spatial", "obs.slice", "pairwise_two_slices", "X_expression_optional"]
-        tips:
-          - "--stalign-a / --stalign-niter: public STalign LDDMM controls that directly affect deformation smoothness and optimization depth."
-          - "--stalign-image-size: current OmicsClaw wrapper rasterization resolution before calling LDDMM; this is wrapper-level, not the core scientific STalign parameter."
-          - "--use-expression: current wrapper-level switch that uses PC1 of shared genes as image intensity instead of uniform weights."
-    legacy_aliases: [register]
-    saves_h5ad: true
-    requires_preprocessed: true
-    requires:
-      bins:
-        - python3
-      env: []
-      config: []
-    emoji: "📐"
-    homepage: https://github.com/TianGzlab/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: scanpy
-        bins: []
-    trigger_keywords:
-      - spatial registration
-      - slice alignment
-      - coordinate alignment
-      - PASTE
-      - STalign
-      - multi-slice
----
-
-# 📐 Spatial Register
-
-You are **Spatial Register**, the OmicsClaw skill for aligning spatial
-coordinates across serial sections or related slices. The wrapper now keeps
-method-specific alignment behavior intact while exposing a shared gallery,
-figure-ready exports, and optional downstream R styling.
-
-## Why This Exists
-
-- **Without it**: users have to manually handle slice labels, coordinate systems, and method-specific alignment APIs.
-- **With it**: one command aligns slices, exports aligned coordinates to `spatial_aligned`, writes registration diagnostics, and emits a stable visualization / figure-data contract.
-- **Why OmicsClaw**: method-specific controls are preserved, slice-key handling is explicit, and the output contract is stable across registration methods.
-
-## Core Capabilities
-
-1. **PASTE registration**: optimal-transport alignment using expression dissimilarity plus spatial distance.
-2. **STalign registration**: pairwise diffeomorphic alignment through LDDMM.
-3. **Explicit slice handling**: the wrapper can auto-detect common slice columns or accept `--slice-key`.
-4. **Expression-aware alignment**: PASTE always uses expression; STalign can optionally use a wrapper-generated expression signal.
-5. **Aligned coordinate export**: aligned coordinates are written to `adata.obsm["spatial_aligned"]`.
-6. **Shift diagnostics**: OmicsClaw annotates per-observation coordinate displacement as `adata.obs["registration_shift_distance"]`.
-7. **Standard Python gallery**: emits a recipe-driven registration gallery with before/after slice overlays, shift diagnostics, and per-slice summaries.
-8. **Figure-ready exports**: writes `figure_data/` CSVs plus a manifest so downstream tools can restyle the same registration result without recomputing PASTE or STalign.
-9. **Structured outputs**: writes `report.md`, `result.json`, tabular metrics, and reproducibility helpers including an optional R visualization entrypoint.
-
-## Input Formats
-
-| Format | Extension | Required Fields | Example |
-|--------|-----------|-----------------|---------|
-| AnnData (multi-slice) | `.h5ad` | `X`, `obsm["spatial"]` or `obsm["X_spatial"]`, real slice labels in `obs[...]` | `serial_sections.h5ad` |
-| Demo | n/a | `--demo` flag | runs `spatial-preprocess --demo`, then synthesizes two shifted slices |
-
-## Method-Specific Input Requirements
-
-| Method | Input requirements | Notes |
-|--------|--------------------|-------|
-| `paste` | expression matrix, spatial coordinates, slice labels, shared genes | current wrapper aligns all non-reference slices to a chosen reference |
-| `stalign` | exactly 2 slices, spatial coordinates, optional expression-derived signal | current wrapper rasterizes coordinates into images and calls STalign LDDMM |
-
-Important:
-
-- PASTE is not a coordinates-only method; expression matters.
-- STalign in the current wrapper requires exactly two slices.
-- OmicsClaw does not fabricate synthetic slice labels for real input data; a real slice column is required.
-
-## Workflow
-
-1. **Load**: read the multi-slice AnnData.
-2. **Validate**: confirm spatial coordinates and a real slice-label column exist.
-3. **Run the selected backend**.
-4. **Store aligned coordinates**: write `adata.obsm["spatial_aligned"]`.
-5. **Annotate shift metrics**: compute `registration_shift_distance` and mark the reference slice in `adata.obs`.
-6. **Render the standard gallery**: build the OmicsClaw registration gallery with before/after slice maps, shift diagnostics, and uncertainty panels.
-7. **Export figure-ready data**: write `figure_data/*.csv` and `figure_data/manifest.json`.
-8. **Report and export**: write summary tables, `report.md`, `result.json`, `processed.h5ad`, and reproducibility outputs.
-
-## Visualization Contract
-
-OmicsClaw treats `spatial-register` visualization as a two-layer system:
-
-1. **Python standard gallery**: the canonical registration result layer.
-2. **R customization layer**: an optional styling layer that reads `figure_data/` and does not rerun PASTE or STalign.
-
-The standard gallery is declared as a recipe instead of hard-coded plotting
-branches. It reuses the shared `skills/spatial/_lib/viz` feature-map layer for
-slice overlays and shift projections, while skill-local renderers handle
-registration-specific summaries such as per-slice displacement bars and shift
-distance distributions.
-
-Current gallery roles include:
-
-- `overview`: slice labels before and after registration
-- `diagnostic`: shift magnitude projected onto the aligned coordinate frame
-- `supporting`: per-slice shift summary and method-reported disparity plots
-- `uncertainty`: shift-distance distribution across slices
-
-## CLI Reference
-
-```bash
-# Default alias used by OmicsClaw
-oc run spatial-registration \
-  --input <multi_slice.h5ad> --output <dir>
-
-# PASTE with explicit reference and alpha
-oc run spatial-registration \
-  --input <multi_slice.h5ad> --method paste \
-  --slice-key slice --reference-slice slice_1 \
-  --paste-alpha 0.1 --paste-dissimilarity kl --output <dir>
-
-# PASTE with GPU backend when available
-oc run spatial-registration \
-  --input <multi_slice.h5ad> --method paste \
-  --paste-use-gpu --output <dir>
-
-# STalign pairwise registration
-oc run spatial-registration \
-  --input <two_slices.h5ad> --method stalign \
-  --slice-key slice --reference-slice slice_1 \
-  --stalign-niter 3000 --stalign-a 800 --stalign-image-size 600 \
-  --use-expression --output <dir>
-
-# Demo mode
-oc run spatial-registration --demo --output /tmp/register_demo
-
-# Direct script entrypoint
-python skills/spatial/spatial-register/spatial_register.py \
-  --input <multi_slice.h5ad> --method paste --output <dir>
-```
-
-Every successful standard OmicsClaw wrapper run, including `oc run` and
-conversational skill execution, also writes a top-level `README.md` and
-`reproducibility/analysis_notebook.ipynb` to make the output directory easier
-to inspect and rerun. Direct script execution primarily produces the
-skill-native outputs plus `reproducibility/commands.sh`.
-
-## Example Queries
-
-- "Align my serial tissue sections using PASTE and explain alpha first."
-- "Register these two slices with STalign and tell me what `a` changes."
-- "Use `batch` as the slice key and align everything to sample A."
-
-## Algorithm / Methodology
-
-### PASTE
-
-1. detect the slice column and choose a reference slice
-2. intersect genes across slices
-3. normalize each slice with `normalize_total` and `log1p`
-4. run `paste.pairwise_align()` from each source slice to the reference
-5. map source coordinates into the reference frame using the transport plan
-
-**Core exposed controls**:
-
-- `slice_key`: wrapper control selecting the obs column that defines slices
-- `reference_slice`: fixed slice
-- `paste_alpha`: public PASTE weight balancing expression dissimilarity and spatial distance
-- `paste_dissimilarity`: public expression dissimilarity choice
-- `paste_use_gpu`: public backend switch
-
-### STalign
-
-1. require exactly 2 slices
-2. choose the reference slice and source slice
-3. optionally derive a 1-D expression signal from PC1 of shared genes
-4. rasterize the point clouds into images
-5. run STalign LDDMM and warp source coordinates onto the target
-
-**Core exposed controls**:
-
-- `slice_key`
-- `reference_slice`
-- `stalign_niter`: public optimization-iteration control
-- `stalign_a`: public smoothness / kernel bandwidth control
-- `stalign_image_size`: wrapper-level rasterization resolution
-- `use_expression`: wrapper-level switch using PC1 intensity instead of uniform intensity
-
-## Output Structure
-
-```text
-output_dir/
-├── README.md
-├── report.md
-├── result.json
-├── processed.h5ad
-├── figures/
-│   ├── slices_before.png
-│   ├── slices_after.png
-│   ├── registration_shift_map.png
-│   ├── registration_shift_by_slice.png
-│   ├── registration_disparities.png       # when method-reported disparities exist
-│   ├── registration_shift_distribution.png
-│   └── manifest.json
-├── figure_data/
-│   ├── registration_points.csv
-│   ├── registration_shift_by_slice.csv
-│   ├── registration_disparities.csv       # when method-reported disparities exist
-│   ├── registration_run_summary.csv
-│   └── manifest.json
-├── tables/
-│   ├── registration_summary.csv
-│   └── registration_metrics.csv
-└── reproducibility/
-    ├── analysis_notebook.ipynb
-    ├── commands.sh
-    ├── environment.txt
-    └── r_visualization.sh
-```
-
-The bundled optional R templates live under:
-
-```text
-skills/spatial/spatial-register/r_visualization/
-├── README.md
-└── register_publication_template.R
-```
-
-## Safety
-
-- **Local-first**: all registration stays local.
-- **Real slice labels required**: the wrapper fails fast if no slice label column can be detected.
-- **Audit trail**: reports, `result.json`, `figures/manifest.json`, and `figure_data/manifest.json` record only the parameters relevant to the selected backend plus the gallery outputs.
-- **Method-aware explanation**: PASTE and STalign are not interchangeable and should not be described as such.
-- **Canonical output boundary**: Python gallery is canonical; optional R styling consumes `figure_data/` and must not rerun registration.
-
-## Dependencies
-
-**Required**:
-
-- `scanpy`
-- `anndata`
-- `scipy`
-- `numpy`, `pandas`, `matplotlib`
-
-**Optional (Python)**:
-
-- `paste-bio` + `POT`
-- `STalign` + `torch`
-
-**Optional (R)**:
-
-- `ggplot2`
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-
-- spatial registration
-- slice alignment
-- coordinate alignment
+tags:
+- spatial
+- registration
+- alignment
 - paste
 - stalign
+- multi-slice
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
+---
 
-**Chaining partners**:
+# spatial-register
 
-- `spatial-preprocess` — preprocessing before registration
-- `spatial-integrate` — downstream integration after coordinate alignment
+## When to use
 
-## Citations
+The user has a multi-slice spatial AnnData (slices stacked into one
+object with a `--slice-key` column) and wants the slices registered
+into a shared coordinate frame so a downstream analysis can use the
+common axes. Two methods:
 
-- [PASTE](https://doi.org/10.1038/s41592-022-01459-6) — Zeira et al., *Nature Methods* 2022
-- [STalign](https://doi.org/10.1038/s41467-023-43915-7) — Clifton et al., *Nature Communications* 2023
+- `paste` (default) — PASTE optimal-transport alignment based on gene
+  expression similarity + spatial proximity (`--paste-alpha`,
+  `--paste-dissimilarity`). Requires `paste-bio` + `pot` (+ optional
+  `torch` for GPU).
+- `stalign` — STalign image-aware diffeomorphic registration; best
+  when histology images are available (`--stalign-niter`,
+  `--stalign-image-size`, `--stalign-a`). Requires `STalign` + `torch`.
+
+For *expression-space* batch correction across slices use
+`spatial-integrate`. For aligning a single slice to a reference atlas
+use the same skill with that atlas as the reference slice.
+
+## Inputs & Outputs
+
+| Input | Format | Required |
+|---|---|---|
+| Multi-slice AnnData | `.h5ad` with `obs[--slice-key]` (≥ 2 slices) | yes (unless `--demo`) |
+| Histology images | `obsm` keys (`stalign` only) | conditional |
+
+| Output | Path | Notes |
+|---|---|---|
+| Registered AnnData | `processed.h5ad` | adds `obsm["spatial_aligned"]` (registered coords from `_lib/register.py:184/476`); the original `obsm["spatial"]` is preserved as-is (the script does NOT overwrite it). A legacy duplicate also lives at `obsm["X_spatial"]` (`spatial_register.py:80/83`). |
+| Registration summary | `tables/registration_summary.csv` | per-slice shift / disparity stats |
+| Per-slice metrics | `tables/registration_metrics.csv` | always |
+| Report | `report.md` + `result.json` | always |
+
+## Flow
+
+1. Load AnnData (`--input`) or build a multi-slice demo via the bundled `spatial-preprocess` runner (chains across slices).
+2. `parser.error` validates numeric flag ranges (`--paste-alpha` ∈ [0, 1]; `--stalign-niter`/`-image-size`/`-a` > 0).
+3. Resolve `--slice-key` (auto-pick from `slice` / `sample` / `library_id` if unset); raise if `< 2` slices.
+4. Pick a reference slice (largest by default) and align all others to it.
+5. For PASTE: compute pairwise transport plans using `--paste-alpha` (gene-vs-spatial weight); apply translations.
+6. For STalign: run iterative image-aware diffeomorphism with `--stalign-niter` iterations.
+7. Save `processed.h5ad` (registered coords in `obsm["spatial_aligned"]`; original `obsm["spatial"]` preserved unchanged), tables, figures, `report.md`, `result.json`.
+
+## Gotchas
+
+- **All input + parameter validation goes through `parser.error` (exit code 2).** `spatial_register.py:896` for missing `--input`; `:898` for missing path; `:901` for `--paste-alpha` out of [0, 1]; `:903-907` for non-positive STalign params. Wrappers expecting `ValueError` need to catch exit-2 separately.
+- **Slice-key validation raises `ValueError` post-argparse.** `spatial_register.py:913` raises `ValueError(f"Slice key '<requested_key>' not found in adata.obs")`; `:915` raises `ValueError(f"Slice key '<requested_key>' must contain at least 2 slices")`. These fire after argparse, so they're real Python `ValueError`s — different from the `parser.error` group above.
+- **`paste` requires `paste-bio` + `pot`; `stalign` requires `STalign` + `torch`.** `spatial_register.py:827-829` lists the optional packages by method; the actual import sites raise `ImportError` if missing. The skill records what's installed in `reproducibility/environment.txt`.
+- **Registered coordinates land in `obsm["spatial_aligned"]`, NOT in `obsm["spatial"]`.** The original `obsm["spatial"]` is preserved unchanged; the aligned coords are added as a separate key. Downstream tools that consume `obsm["spatial"]` will keep using the *original* coords unless they explicitly switch to `obsm["spatial_aligned"]`. The legacy duplicate `obsm["X_spatial"]` also exists (`spatial_register.py:80/83`) for back-compat.
+- **Demo mode chains through `spatial-preprocess` first.** `spatial_register.py:988` raises `FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")` if the sibling skill is missing from the install; `:1005` raises `FileNotFoundError(f"Expected {processed}")` when the demo preprocess output isn't where expected. Real runs skip this chain.
+- **Disparity / shift metrics are best-effort.** When `paste-bio` or `STalign` doesn't expose disparity scores, the metric columns in `tables/registration_metrics.csv` will be NaN — `:178` documents the column initialisation. Quote the per-slice shifts (`mean_shift`, `median_shift`, `max_shift`) instead.
+
+## Key CLI
+
+```bash
+# Demo (multi-slice synthetic; chains through spatial-preprocess)
+python omicsclaw.py run spatial-register --demo --output /tmp/spatial_reg_demo
+
+# PASTE alignment on a multi-slice Visium object
+python omicsclaw.py run spatial-register \
+  --input multi_slice.h5ad --output results/ \
+  --slice-key library_id --method paste --paste-alpha 0.1
+
+# STalign with strong image regularisation
+python omicsclaw.py run spatial-register \
+  --input multi_slice.h5ad --output results/ \
+  --slice-key sample --method stalign \
+  --stalign-niter 200 --stalign-image-size 256 --stalign-a 100
+
+# PASTE on GPU
+python omicsclaw.py run spatial-register \
+  --input multi_slice.h5ad --output results/ \
+  --method paste --paste-alpha 0.1 --paste-use-gpu
+```
+
+## See also
+
+- `references/parameters.md` — every CLI flag, per-method tunables
+- `references/methodology.md` — when PASTE vs STalign wins; reference-slice heuristic
+- `references/output_contract.md` — `obsm["spatial"]` preserved + `obsm["spatial_aligned"]` registered coords + legacy `obsm["X_spatial"]`
+- Adjacent skills: `spatial-raw-processing` / `spatial-preprocess` (upstream — produce per-slice AnnData), `spatial-integrate` (parallel — corrects in expression space, NOT spatial coords), `spatial-domains` (downstream — domain detection works better on registered coords), `spatial-condition` (downstream — cross-condition comparison after alignment)

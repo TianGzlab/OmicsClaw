@@ -1,7 +1,11 @@
 """
-Browse API — Read/write endpoints for the memory graph.
+Browse API — Read/write endpoints for the memory graph (admin pane).
 
-Ported from nocturne_memory with OmicsClaw adaptations.
+Serves ``/api/browse/*`` for the standalone admin UI shipped by
+``oc memory-server``. The path-based read/write logic lives in the
+private ``_browse_helpers.BrowseHelpers`` class; this module is just
+the FastAPI thin wrapper that translates request params and records
+changeset entries.
 """
 
 import os
@@ -21,6 +25,18 @@ _DEFAULT_DOMAINS = "core,project,dataset,analysis,preference,insight,notes,sessi
 def _get_valid_domains():
     raw = os.getenv("OMICSCLAW_MEMORY_VALID_DOMAINS", _DEFAULT_DOMAINS)
     return [d.strip() for d in raw.split(",") if d.strip()]
+
+
+def _browse_helpers():
+    """Build a fresh BrowseHelpers bound to the singleton db + indexer.
+
+    The helper is a thin DB-backed object (no per-process state), so
+    re-creating it per request is fine and keeps imports lazy.
+    """
+    from .. import get_db_manager, get_search_indexer
+    from ._browse_helpers import BrowseHelpers
+
+    return BrowseHelpers(get_db_manager(), get_search_indexer())
 
 
 # ------------------------------------------------------------------
@@ -69,14 +85,13 @@ class RemoveGlossaryRequest(BaseModel):
 @router.get("/domains")
 async def list_domains():
     """List configured valid domains with node counts."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
 
     valid = _get_valid_domains()
     result = []
     for d in valid:
         try:
-            children = await graph.get_children(
+            children = await helpers.get_children(
                 node_uuid="00000000-0000-0000-0000-000000000000",
                 context_domain=d,
             )
@@ -93,22 +108,21 @@ async def get_node(
     domain: str = Query("core", description="Domain"),
 ):
     """Get a node's current memory content along with children and breadcrumbs."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
 
-    result = await graph.get_memory_by_path(path, domain)
+    result = await helpers.get_memory_by_path(path, domain)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Path '{domain}://{path}' not found")
-        
-    children = await graph.get_children(
+
+    children = await helpers.get_children(
         node_uuid=result["node_uuid"],
         context_domain=domain,
         context_path=path,
     )
-    
+
     breadcrumbs = []
     breadcrumbs.append({"path": "", "name": domain, "domain": domain})
-    
+
     if path:
         parts = path.split("/")
         current_path = ""
@@ -130,10 +144,9 @@ async def get_children(
     path: Optional[str] = Query(None),
 ):
     """Get direct children of a node."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
 
-    children = await graph.get_children(
+    children = await helpers.get_children(
         node_uuid=node_uuid,
         context_domain=domain,
         context_path=path,
@@ -144,10 +157,9 @@ async def get_children(
 @router.get("/paths")
 async def get_all_paths(domain: Optional[str] = Query(None)):
     """Get all paths (optionally filtered by domain)."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
 
-    paths = await graph.get_all_paths(domain=domain)
+    paths = await helpers.get_all_paths(domain=domain)
     return {"paths": paths}
 
 
@@ -168,18 +180,16 @@ async def search_memories(
 @router.get("/recent")
 async def get_recent(limit: int = Query(10, ge=1, le=50)):
     """Get recently created/updated memories."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
 
-    memories = await graph.get_recent_memories(limit=limit)
+    memories = await helpers.get_recent_memories(limit=limit)
     return {"memories": memories}
 
 
 @router.post("/create")
 async def create_memory(req: CreateMemoryRequest):
     """Create a new memory node."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
     store = get_changeset_store()
 
     valid_domains = _get_valid_domains()
@@ -190,7 +200,7 @@ async def create_memory(req: CreateMemoryRequest):
         )
 
     try:
-        result = await graph.create_memory(
+        result = await helpers.create_memory(
             parent_path=req.parent_path,
             content=req.content,
             priority=req.priority,
@@ -219,12 +229,11 @@ async def update_node(
     import logging
     log = logging.getLogger(__name__)
 
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
     store = get_changeset_store()
 
     try:
-        result = await graph.update_memory(
+        result = await helpers.update_memory(
             path=path,
             content=req.content,
             priority=req.priority,
@@ -253,12 +262,11 @@ async def update_node(
 @router.post("/add-path")
 async def add_path(req: AddPathRequest):
     """Create an alias path for an existing node."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
     store = get_changeset_store()
 
     try:
-        result = await graph.add_path(
+        result = await helpers.add_path(
             new_path=req.new_path,
             target_path=req.target_path,
             new_domain=req.new_domain,
@@ -283,12 +291,11 @@ async def remove_path(
     domain: str = Query("core"),
 ):
     """Remove a path (with orphan prevention)."""
-    from .. import get_graph_service
-    graph = get_graph_service()
+    helpers = _browse_helpers()
     store = get_changeset_store()
 
     try:
-        result = await graph.remove_path(path=path, domain=domain)
+        result = await helpers.remove_path(path=path, domain=domain)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -477,15 +477,6 @@ def build_engineering_tool_specs() -> list[ToolSpec]:
             input_validator=_validate_web_url_input,
             speculative_classifier=_classify_network_access,
         ),
-        ToolSpec(
-            name="mcp_list",
-            description="List configured MCP servers with sanitized metadata.",
-            parameters={"type": "object", "properties": {}},
-            surfaces=("bot", "interactive"),
-            read_only=True,
-            concurrency_safe=True,
-            policy_tags=("mcp", "config", "inspection"),
-        ),
     ]
 
 
@@ -987,9 +978,6 @@ def build_engineering_tool_executors(
             content = content[:max_chars].rstrip() + "\n\n... [truncated]"
         return f"URL: {url}\n\n{content}"
 
-    async def mcp_list(args: dict[str, Any]) -> str:
-        return _json_payload({"servers": _load_mcp_servers()})
-
     return {
         "tool_search": tool_search,
         "file_read": file_read,
@@ -1003,7 +991,6 @@ def build_engineering_tool_executors(
         "task_update": task_update,
         "todo_write": todo_write,
         "web_fetch": web_fetch,
-        "mcp_list": mcp_list,
     }
 
 

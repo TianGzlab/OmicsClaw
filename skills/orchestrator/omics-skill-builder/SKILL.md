@@ -1,140 +1,95 @@
 ---
 name: omics-skill-builder
-description: >-
-  Create OmicsClaw-native skill scaffolds for new reusable workflows that are
-  not yet represented in the current skill catalog.
-version: 0.1.0
+description: Load when scaffolding a NEW OmicsClaw skill from a natural-language request — generates the skill directory layout (SKILL.md, parameters.yaml, references/, tests/) under the chosen domain. Skip when modifying an existing skill (edit its files directly) or when only routing a query (use `orchestrator`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [orchestrator, meta-skill, skill-scaffold, automation]
-metadata:
-  omicsclaw:
-    domain: orchestrator
-    script: omics_skill_builder.py
-    requires:
-      bins:
-        - python3
-      env: []
-      config: []
-    emoji: "🛠"
-    homepage: https://github.com/TianGzlab/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: pyyaml
-        bins: []
-    trigger_keywords:
-      - create omicsclaw skill
-      - add new skill
-      - scaffold skill
-      - create reusable workflow
-      - 新增 skill
-      - 创建 skill
-      - 封装成 skill
-    allowed_extra_flags:
-      - "--request"
-      - "--skill-name"
-      - "--domain"
-      - "--summary"
-      - "--trigger-keyword"
-      - "--method"
-      - "--input-format"
-      - "--output-item"
-      - "--no-tests"
-    legacy_aliases: []
-    saves_h5ad: false
-    requires_preprocessed: false
+tags:
+- orchestrator
+- scaffold
+- skill-builder
+- meta
+- code-generation
+requires:
+- pyyaml
 ---
 
-# 🛠 Omics Skill Builder
+# omics-skill-builder
 
-You are **Omics Skill Builder**, the OmicsClaw meta-skill for turning a missing
-analysis workflow into a reusable, repo-native skill scaffold.
+## When to use
 
-## Why This Exists
+The user wants to add a NEW skill to the OmicsClaw catalog from a
+natural-language request. This skill produces a directory scaffold
+under the chosen `--domain` (`spatial` / `singlecell` / `genomics`
+/ `proteomics` / `metabolomics` / `bulkrna` / `orchestrator`) with
+the v2 layout: `SKILL.md`, `parameters.yaml`, `references/`,
+`tests/`, plus a reproducibility manifest.
 
-- **Without it**: one-off analyses remain trapped in ad hoc prompts or notebooks.
-- **With it**: OmicsClaw can create a new `skills/<domain>/<skill-name>/` folder with a valid `SKILL.md`, runnable entrypoint, test stub, and scaffold spec.
-- **Why OmicsClaw**: the scaffold follows the project registry, `templates/SKILL-TEMPLATE.md`, and the CLI conventions already used by `oc run`.
+For modifying an existing skill, edit its files directly — this
+skill is for net-new additions only. For dispatching queries to
+existing skills, use `orchestrator`.
 
-## When To Use
+## Inputs & Outputs
 
-- The user explicitly asks to **add**, **create**, **package**, or **persist** a new OmicsClaw skill.
-- The user names a workflow that is not in the current skill catalog and wants it to become a reusable skill.
-- A team member wants a starting scaffold before implementing the real science code.
-- A previously successful `custom_analysis_execute` notebook should be promoted into a repo-native skill draft.
+| Input | Format | Required |
+|---|---|---|
+| User request | `--request <text>` (natural-language description of the desired skill) | yes (unless `--demo`) |
+| Domain | `--domain {spatial,singlecell,genomics,proteomics,metabolomics,bulkrna,orchestrator}` (default `orchestrator`) | no |
+| Skill alias | `--skill-name <hyphenated>` | no |
+| Summary | `--summary <one-line>` | no |
+| Promote source | `--source-analysis-dir <path>` or `--promote-from-latest` | no |
+| Trigger keywords | `--trigger-keyword <kw>` (repeatable) | no |
+| Methods / formats | `--method <m>` / `--input-format <f>` / `--output-item <o>` (each repeatable) | no |
+| Skip tests | `--no-tests` | no |
 
-Do **not** use this for one-off analyses. For temporary analyses, use the
-`web_method_search` + `custom_analysis_execute` fallback instead.
+| Output | Path | Notes |
+|---|---|---|
+| Scaffold summary | `output_dir/SCAFFOLD_SUMMARY.md` | what was generated, written at `omics_skill_builder.py:129` |
+| Report | `output_dir/report.md` | written at `omics_skill_builder.py:130` |
+| Reproducibility | `output_dir/reproducibility/commands.sh` | replay command, written at `omics_skill_builder.py:132-137` |
+| Result envelope | `output_dir/result.json` | written at `omics_skill_builder.py:139-141` |
 
-## What It Creates
+## Flow
 
-1. `SKILL.md` generated from the OmicsClaw template structure.
-2. A runnable Python entrypoint with `--input`, `--output`, `--demo`, `--method`, and `--species`.
-3. A minimal `tests/` stub so the new skill has an executable validation hook.
-4. `scaffold_spec.json` capturing the original creation intent.
+1. Parse `--request` (or `--demo`); raise `SystemExit("--request is required unless --demo is used.")` at `omics_skill_builder.py:75` when missing.
+2. Optionally promote a previous autonomous-analysis output via `--source-analysis-dir <path>` or `--promote-from-latest`.
+3. Call `create_skill_scaffold` (`omicsclaw.core.skill_scaffolder`); it writes the new skill directory under `skills/<domain>/<skill-name>/`.
+4. Write `SCAFFOLD_SUMMARY.md` + `report.md` + `reproducibility/commands.sh` + `result.json` into `--output`.
 
-## Required Decisions
+## Gotchas
 
-Before finalizing a new scaffold, capture:
+- **`--request` REQUIRED unless `--demo` — raises `SystemExit` (exit 1).** `omics_skill_builder.py:75` raises `SystemExit("--request is required unless --demo is used.")`. Different from most OmicsClaw skills which use `ValueError` / `parser.error`; the exit code is 1, not 2.
+- **`--domain` defaults to `orchestrator` — usually NOT what you want.** `omics_skill_builder.py:30` defaults to `orchestrator`; pass `--domain spatial` (or whichever) explicitly. Choices are 7 fixed values; an unknown domain is rejected by argparse.
+- **The new skill is written to `skills/<domain>/<skill-name>/`, not `--output`.** `--output` only receives the scaffold summary + report + commands.sh; the actual skill code goes under `skills/`. Don't confuse the two.
+- **`--trigger-keyword`, `--method`, `--input-format`, `--output-item` are REPEATABLE flags.** Pass `--trigger-keyword kw1 --trigger-keyword kw2` to add multiple. Single quoting won't help — argparse honours `action="append"`.
+- **`--promote-from-latest` requires a recent autonomous-analysis output.** If no recent output exists, the promotion silently no-ops.
+- **`--demo` lands in the orchestrator domain, NOT the implied target domain.** `omics_skill_builder.py:65` resolves `domain = args.domain or "spatial"`, but `args.domain` defaults to `"orchestrator"` (truthy), so the demo scaffold is written to `skills/orchestrator/spatial-cellcharter-domains/` rather than `skills/spatial/...`. For real scaffolds always pass `--domain <target>` explicitly.
 
-- **Skill name**: short, lowercase, hyphenated alias
-- **Domain**: one of `spatial`, `singlecell`, `genomics`, `proteomics`, `metabolomics`, `bulkrna`, `orchestrator`
-- **Summary**: one sentence describing the reusable workflow
-- **Methods**: the major backends or algorithm names
-- **Trigger keywords**: 3-6 routing phrases users might say naturally
-
-## Workflow
-
-1. Resolve whether the user wants a reusable skill or a one-off analysis.
-2. Normalize the requested skill name and target domain.
-3. Generate the scaffold under `skills/<domain>/<skill-name>/`.
-4. If a successful autonomous notebook is supplied, reuse its Python code and copy the source notebook into `references/`.
-4. Refresh the registry so the new skill is discoverable immediately.
-5. Return the created file paths and the next implementation steps.
-
-## CLI Reference
+## Key CLI
 
 ```bash
-oc run omics-skill-builder \
-  --output output/skill_builder \
-  --request "Create a CellCharter spatial domains skill" \
-  --skill-name spatial-cellcharter-domains \
-  --domain spatial \
-  --summary "Spatial domain identification scaffold for CellCharter-based workflows." \
-  --method cellcharter \
-  --trigger-keyword "cellcharter domains"
+# Demo (built-in scaffold example)
+python omicsclaw.py run omics-skill-builder --demo --output /tmp/builder_demo
 
-# Promote the most recent successful custom notebook into a skill draft
-oc run omics-skill-builder \
-  --output output/promoted_skill \
-  --request "Package the last successful autonomous analysis into a reusable OmicsClaw skill" \
-  --skill-name peak-detection-skill \
-  --promote-from-latest
+# Real scaffold for a spatial skill
+python omicsclaw.py run omics-skill-builder \
+  --request "Compute Moran's I per gene on Visium data" \
+  --domain spatial --skill-name spatial-moran \
+  --summary "Per-gene spatial autocorrelation via Moran's I" \
+  --trigger-keyword "Moran" --trigger-keyword "spatial autocorrelation" \
+  --method "moran-i" --input-format "h5ad" --output-item "tables/moran_per_gene.csv" \
+  --output /tmp/scaffold_out
+
+# Promote from a successful autonomous analysis
+python omicsclaw.py run omics-skill-builder \
+  --request "Promote the Moran analysis from yesterday into a real skill" \
+  --domain spatial --source-analysis-dir /path/to/autonomous_run \
+  --output /tmp/promoted
 ```
 
-## Example Queries
+## See also
 
-- "Add a new OmicsClaw skill for CellCharter-based spatial domains."
-- "Please scaffold a reusable phosphoproteomics kinase activity skill."
-- "把这个 workflow 封装成一个新的 OmicsClaw skill。"
-
-## Output Contract
-
-The scaffolded skill folder will contain:
-
-```text
-skills/<domain>/<skill-name>/
-├── SKILL.md
-├── <skill_name>.py
-├── scaffold_spec.json
-└── tests/
-    ├── __init__.py
-    └── test_<skill_name>.py
-```
-
-## Guardrails
-
-- Create a new skill only when the user explicitly wants a reusable artifact.
-- Do not overwrite an existing skill directory silently.
-- Keep the scaffold OmicsClaw-native: valid frontmatter, stable CLI flags, standard output artifacts.
+- `references/parameters.md` — every CLI flag, repeatable behaviour
+- `references/methodology.md` — scaffold layout, when to scaffold vs edit
+- `references/output_contract.md` — `SCAFFOLD_SUMMARY.md` + `result.json` schema
+- Adjacent skills: `orchestrator` (parallel — routes queries to EXISTING skills)

@@ -13,7 +13,7 @@ import json
 import re
 from typing import Any
 
-from omicsclaw.core.registry import OmicsRegistry
+from omicsclaw.core.registry import OmicsRegistry, ensure_registry_loaded
 
 try:
     from omicsclaw.loaders import detect_domain_from_path
@@ -72,6 +72,19 @@ _WEB_HINTS = (
     "官网",
 )
 
+_IMPLEMENTATION_FROM_LITERATURE_HINTS = (
+    "implement",
+    "build",
+    "develop",
+    "code",
+    "from latest literature",
+    "from recent literature",
+    "from literature",
+    "基于最新文献实现",
+    "根据最新文献实现",
+    "按文献实现",
+)
+
 
 def _score_trigger_keyword_matches(
     query_lower: str,
@@ -90,6 +103,19 @@ def _score_trigger_keyword_matches(
         if len(matches) >= limit:
             break
     return score, matches
+
+
+def _requests_new_literature_implementation(query_lower: str) -> bool:
+    """Return True for requests to implement new methods from literature."""
+    has_implementation = any(
+        _mentions_phrase(query_lower, hint)
+        for hint in _IMPLEMENTATION_FROM_LITERATURE_HINTS[:4]
+    )
+    has_literature_source = any(
+        _mentions_phrase(query_lower, hint)
+        for hint in _IMPLEMENTATION_FROM_LITERATURE_HINTS[4:]
+    ) or any(_mentions_phrase(query_lower, hint) for hint in _WEB_HINTS)
+    return has_implementation and has_literature_source
 
 
 _SKILL_CREATION_HINTS = (
@@ -439,8 +465,7 @@ def resolve_capability(
             reasoning=["empty request"],
         )
 
-    registry = OmicsRegistry()
-    registry.load_all()
+    registry = ensure_registry_loaded()
 
     skill_creation_requested = _requests_skill_creation(query)
 
@@ -454,6 +479,21 @@ def resolve_capability(
     query_tokens = _tokenize(query_lower)
     method_tokens = _method_mentions(query_lower)
     domain = _detect_domain(registry, query, file_path=file_path, domain_hint=domain_hint)
+    if _requests_new_literature_implementation(query_lower):
+        return CapabilityDecision(
+            query=query,
+            domain=domain,
+            coverage="no_skill",
+            confidence=0.0,
+            should_search_web=True,
+            should_create_skill=skill_creation_requested,
+            missing_capabilities=[
+                "request asks to implement a new method from external literature",
+            ],
+            reasoning=[
+                "request asks for new method implementation rather than literature parsing",
+            ],
+        )
 
     candidates: list[CapabilityCandidate] = []
     for alias, info in registry.iter_primary_skills(domain=domain or None):

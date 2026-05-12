@@ -1,0 +1,395 @@
+{
+  "request": {
+    "surface": "bot",
+    "skill": "",
+    "query": "implement and save a sc-de variant under output/",
+    "workspace": "",
+    "pipeline_workspace": "",
+    "capability_context": ""
+  },
+  "total_chars": 9993,
+  "tool_count": 10,
+  "tool_names": [
+    "consult_knowledge",
+    "custom_analysis_execute",
+    "file_read",
+    "glob_files",
+    "inspect_data",
+    "list_directory",
+    "list_skills_in_domain",
+    "omicsclaw",
+    "read_knowhow",
+    "resolve_capability"
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "omicsclaw",
+        "description": "Run an OmicsClaw multi-omics analysis skill.\n\n(test)\n\nPREFER `skill='auto'` + `query=<user request>` (auto-routes deterministically). Pick a specific skill only if the user named it. `mode='demo'` ONLY when explicitly asked. `return_media` empty = text summary; pass a keyword ('umap','qc','cluster',comma-sep) or 'all' for figures. For sc-batch-integration upstream-prep pause, rerun with `auto_prepare=true`. Preserve exact numbers, warnings, errors, and file paths when relaying results.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill": {
+              "type": "string",
+              "enum": [
+                "sc-de"
+              ],
+              "description": "Skill alias to run. Default to 'auto' and pass `query`; use a specific alias only if the user named it or auto-routing asked you to disambiguate."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "file",
+                "demo",
+                "path"
+              ],
+              "description": "'demo' = built-in synthetic data; 'file' = user uploaded a file via messaging; 'path' = user provided a file path on the server."
+            },
+            "return_media": {
+              "type": "string",
+              "description": "Filter for which figures/tables to send back. Omit or leave empty for text summary only (default). 'all' = send all figures and tables. Otherwise a comma-separated list of keywords to match filenames (e.g. 'umap', 'qc', 'violin', 'cluster', 'umap,qc'). Only set when the user explicitly asks for visual results."
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Server-side file path or filename for mode='path'."
+            },
+            "query": {
+              "type": "string",
+              "description": "Natural language query for auto-routing."
+            },
+            "extra_args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Additional CLI arguments (e.g. ['--method', 'spagcn'])."
+            },
+            "method": {
+              "type": "string",
+              "description": "Analysis method override passed as --method."
+            },
+            "batch_key": {
+              "type": "string",
+              "description": "Batch/sample metadata column passed as --batch-key. Especially important for sc-batch-integration. If omitted for sc-batch-integration, OmicsClaw will inspect the AnnData object and ask the user to choose before running."
+            },
+            "confirm_workflow_skip": {
+              "type": "boolean",
+              "description": "Only for explicit user overrides. If true, bypasses the standardize/preprocess workflow pause for sc-batch-integration and runs direct integration anyway."
+            },
+            "auto_prepare": {
+              "type": "boolean",
+              "description": "Only when the user explicitly agrees to preparatory steps. For sc-batch-integration, automatically runs the recommended upstream workflow (`sc-standardize-input` and/or `sc-preprocessing`) before the final integration step."
+            },
+            "n_epochs": {
+              "type": "integer",
+              "description": "Number of training epochs for deep learning methods. Defaults per method if omitted: cell2location=30000, destvi=2500, stereoscope=150000, tangram=1000. Only set when the user explicitly requests a custom epoch count."
+            },
+            "data_type": {
+              "type": "string",
+              "description": "Data platform type passed as --data-type."
+            }
+          },
+          "required": [
+            "skill",
+            "mode"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_skills_in_domain",
+        "description": "Lazy-load the full skill list for one OmicsClaw domain. Call this ONLY when the 8-domain briefing in the `omicsclaw` tool description isn't enough to pick a skill, or when the user asks 'what tools do you have for <domain>?'. The result is a markdown block with each skill's alias, one-line description, and trigger keywords. For most routing, prefer `omicsclaw(skill='auto', query=...)` — the resolver picks the right skill without this extra round-trip.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string",
+              "enum": [
+                "spatial",
+                "singlecell",
+                "genomics",
+                "proteomics",
+                "metabolomics",
+                "bulkrna",
+                "orchestrator",
+                "literature"
+              ],
+              "description": "Which domain's skills to list."
+            },
+            "filter": {
+              "type": "string",
+              "description": "Optional case-insensitive substring. Matches against skill alias, description, and trigger keywords. Omit to see the whole domain."
+            }
+          },
+          "required": [
+            "domain"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_directory",
+        "description": "List contents of a directory. Use when user wants to see files in a folder.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory path (default: current data directory)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_knowhow",
+        "description": "Fetch the full markdown body of a Mandatory Scientific Constraint (KnowHow guard) by name. Call this when the headline-only Active Guards block in the system prompt does not give enough detail — for example, when the user asks WHY a guard requires a specific threshold, when a method name is ambiguous, or when the headline mentions parameters the user is uncertain about. Accepts the filename (e.g. KH-sc-de-guardrails.md), the doc_id (sc-de-guardrails), or the human-readable label. Returns the full markdown text, or an empty string if no guard matches.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "KH identifier. Accepts filename (KH-sc-de-guardrails.md), doc_id (sc-de-guardrails), or label (Single-Cell Differential Expression Guardrails)."
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "consult_knowledge",
+        "description": "Query the OmicsClaw knowledge base for analysis guidance. Use this PROACTIVELY when: (1) user is unsure which analysis to run, (2) user asks about method selection or parameters, (3) an analysis fails and user needs troubleshooting, (4) user asks 'how to' or 'which method' questions, (5) before running complex analyses to check best practices. Returns relevant decision guides, best practices, or troubleshooting advice.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Natural language question about methodology, parameters, or troubleshooting"
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "decision-guide",
+                "best-practices",
+                "troubleshooting",
+                "workflow",
+                "method-reference",
+                "interpretation",
+                "preprocessing-qc",
+                "statistics",
+                "tool-setup",
+                "domain-knowledge",
+                "knowhow",
+                "reference-script",
+                "all"
+              ],
+              "description": "Filter by document type. Default: 'all'"
+            },
+            "domain": {
+              "type": "string",
+              "enum": [
+                "spatial",
+                "singlecell",
+                "genomics",
+                "proteomics",
+                "metabolomics",
+                "bulkrna",
+                "general",
+                "all"
+              ],
+              "description": "Filter by omics domain. Default: 'all'"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "resolve_capability",
+        "description": "Resolve whether a user request is fully covered by an existing OmicsClaw skill, partially covered, or not covered. Use this before non-trivial analysis requests when skill coverage is uncertain.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The user's analysis request in natural language."
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Optional server-side data path or filename mentioned by the user."
+            },
+            "domain_hint": {
+              "type": "string",
+              "enum": [
+                "spatial",
+                "singlecell",
+                "genomics",
+                "proteomics",
+                "metabolomics",
+                "bulkrna",
+                ""
+              ],
+              "description": "Optional domain hint if the user has already narrowed the domain."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "custom_analysis_execute",
+        "description": "Execute custom analysis code in a restricted Jupyter notebook when an existing OmicsClaw skill does not fully cover the request. Provide one self-contained Python snippet. The notebook exposes INPUT_FILE, ANALYSIS_GOAL, ANALYSIS_CONTEXT, WEB_CONTEXT, and AUTONOMOUS_OUTPUT_DIR. Shell, package install, and direct network access are blocked.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string",
+              "description": "Short statement of the analysis objective."
+            },
+            "analysis_plan": {
+              "type": "string",
+              "description": "Concise markdown plan describing what the custom analysis will do."
+            },
+            "python_code": {
+              "type": "string",
+              "description": "A single self-contained Python snippet to execute inside the restricted notebook."
+            },
+            "context": {
+              "type": "string",
+              "description": "Optional local context from the conversation or prior skill outputs."
+            },
+            "web_context": {
+              "type": "string",
+              "description": "Optional external method notes returned by web_method_search."
+            },
+            "file_path": {
+              "type": "string",
+              "description": "Optional input file path to expose as INPUT_FILE inside the notebook."
+            },
+            "sources": {
+              "type": "string",
+              "description": "Optional markdown list of cited URLs or source notes to persist alongside the notebook."
+            },
+            "output_label": {
+              "type": "string",
+              "description": "Optional short label for the output directory prefix."
+            }
+          },
+          "required": [
+            "goal",
+            "analysis_plan",
+            "python_code"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inspect_data",
+        "description": "Instantly inspect an AnnData (.h5ad) file's metadata — cell/gene counts, obs/var columns, embeddings (obsm), layers, uns keys — WITHOUT loading the expression matrix. Fast even for very large files. Also supports pre-run method suitability and parameter preview when `method` (and optionally `skill`) is provided. ALWAYS call this when the user asks to 'explore', 'inspect', 'what can I do with', or vaguely 'analyze' a dataset WITHOUT specifying a concrete analysis pipeline. Returns a formatted summary and suggested analysis directions. Do NOT call omicsclaw for open-ended exploratory queries.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "Path to the .h5ad file to inspect."
+            },
+            "skill": {
+              "type": "string",
+              "description": "Optional skill alias for preflight preview (e.g. spatial-domain-identification)."
+            },
+            "method": {
+              "type": "string",
+              "description": "Optional method name for suitability + parameter preview."
+            },
+            "preview_params": {
+              "type": "boolean",
+              "description": "If true, include a pre-run method suitability and default parameter preview block."
+            }
+          },
+          "required": [
+            "file_path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "file_read",
+        "description": "Read a text file from the active workspace, pipeline workspace, or trusted project directories.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path to read."
+            },
+            "start_line": {
+              "type": "integer",
+              "description": "1-based starting line number. Default: 1."
+            },
+            "end_line": {
+              "type": "integer",
+              "description": "1-based ending line number. Default: end of file."
+            },
+            "max_chars": {
+              "type": "integer",
+              "description": "Maximum characters to return. Default: 12000."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "Find files under the active workspace or project directories using a glob pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Glob pattern such as '**/*.py' or 'data/*.csv'."
+            },
+            "root": {
+              "type": "string",
+              "description": "Optional root directory to search from."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of matches to return. Default: 200."
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    }
+  ]
+}

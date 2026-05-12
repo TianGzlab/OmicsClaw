@@ -1,0 +1,18 @@
+domain: bulkrna
+emoji: 🔍
+trigger_keywords:
+- FASTQ QC
+- read quality
+- Phred
+- FastQC
+- adapter
+- GC content
+- Q20
+- Q30
+allowed_extra_flags: []
+legacy_aliases:
+- bulk-fastqc
+saves_h5ad: false
+script: bulkrna_read_qc.py
+param_hints: {}
+requires_preprocessed: false

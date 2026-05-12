@@ -1,0 +1,14 @@
+domain: singlecell
+script: sc_drug_response.py
+allowed_extra_flags:
+- --cluster-key
+- --drug-db
+- --method
+- --model-dir
+- --n-drugs
+- --r-enhanced
+param_hints: {}
+saves_h5ad: true
+requires_preprocessed: true
+trigger_keywords: []
+legacy_aliases: []

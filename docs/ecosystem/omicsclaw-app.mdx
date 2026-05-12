@@ -1,0 +1,63 @@
+---
+title: "OmicsClaw-App 桌面端 - 本地 GUI 与聊天面板"
+description: "OmicsClaw-App 是基于 Next.js / Electron 的本地桌面应用，提供聊天界面、结果浏览与可选的远程执行，与 CLI / Bot 共享同一套 skill 系统。"
+keywords: ["OmicsClaw-App", "桌面端", "GUI", "Electron", "Next.js"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么有桌面端
+
+**CLI 适合开发者，Bot 适合协作**：桌面端面向"科研日常工作流"场景——打开 App，点击发送消息，无需记忆任何 CLI 参数，也无需配置 Telegram / 飞书 token，即可调用全部 88 个 skill。
+
+**结果浏览（图、表、报告）GUI 比终端友好**：运行完 `spatial-domains` 或 `bulkrna-de` 后，App 内置结果浏览面板可直接渲染 UMAP、火山图、热图，无需在文件管理器和终端之间来回切换。聊天面板同时展示对话历史与分析产物，上下文不丢失。
+
+**三种入口共用同一套 skill 系统**：CLI、Bot 与 App 调用的是完全相同的 88 个 skill，输出格式与结果目录结构一致。用户可以在 App 里启动任务，再通过 CLI 补跑后处理，或反之——产物完全可互换。
+
+## 启用前 / 启用后
+
+| 维度 | CLI 用户 | App 用户 |
+|---|---|---|
+| Onboarding | 学命令与参数 | 装 App 即用，GUI 引导 |
+| 结果浏览 | 终端 + 文件管理器 | 内置结果浏览面板 |
+| 远程接入 | 自己 SSH + 端口转发 | App 内置 Remote-SSH Runtime |
+
+## 部署形态
+
+OmicsClaw-App 基于 **Next.js + Electron** 构建，是与本仓库并列的独立桌面应用，维护在独立代码库（`OmicsClaw-App/`）中，不包含在本仓库的 `frontend/` 目录内（后者是 Vite/React 内存浏览仪表盘，用途不同）。
+
+App 当前发布版本为 **v0.1.3+**，支持四种 Runtime：
+
+| RuntimeKind | 说明 | 典型场景 |
+|---|---|---|
+| `bundled` | App 自带便携 Python，零配置 | 开箱即用（Linux / macOS / Windows）|
+| `local-python` | 指向用户本机解释器 | 已有 conda / venv 环境 |
+| `remote-ssh` | SSH 隧道前向到远端 `oc app-server` | GPU 服务器 / 实验室集群 |
+| `remote-url` | 直连已有后端 URL | 有 VPN / 公网 URL |
+
+**本地全栈启动**（bundled runtime，安装 App 后直接双击即可，无需额外命令）。
+
+**远端分离部署**，在服务器端执行：
+
+```bash
+# 激活 Python 环境
+source .venv/bin/activate   # 或 conda activate omicsclaw
+
+# 启动 app-server（监听本机 8765，App 通过 SSH 隧道接入）
+oc app-server --host 127.0.0.1 --port 8765
+```
+
+完整配置步骤见 [远程执行模式](/docs/engineering/remote-execution)。
+
+## 故障排查
+
+| 症状 | 可能原因 | 解决 |
+|---|---|---|
+| App 不启动 / 白屏 | 依赖缺失或 Electron 版本冲突 | 查看 App 内置日志（Help → Show Logs）；重装 App |
+| 后端连接失败（红点） | `oc app-server` 未运行或端口被占 | 服务器端确认 `oc app-server` 进程存活；检查 8765 端口 |
+| 远程 session 断开 | SSH 连接超时或 ssh-agent 失效 | 重新 `ssh-add`；在 Runtimes 页面点 Reconnect |
+
+## 下一步阅读
+
+- [聊天机器人](/docs/ecosystem/chat-bot)
+- [远程执行模式](/docs/engineering/remote-execution)
+- [整体架构](/docs/architecture/overview)

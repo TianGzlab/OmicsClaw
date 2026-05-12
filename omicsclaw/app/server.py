@@ -28,14 +28,15 @@ import sys
 import time
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 try:
     from omicsclaw.app.notebook.kernel_manager import get_kernel_manager
@@ -53,6 +54,12 @@ except ImportError as _nb_err:
     install_live_session_support = None  # type: ignore[assignment]
     notebook_router = None  # type: ignore[assignment]
 from omicsclaw.runtime.policy_state import ToolPolicyState
+from omicsclaw.remote.routers.jobs import (
+    append_job_stdout_line,
+    bind_chat_stream_job,
+    finalize_chat_stream_job,
+)
+from omicsclaw.remote.storage import resolve_workspace
 from omicsclaw.version import __version__
 
 # ---------------------------------------------------------------------------
@@ -74,6 +81,19 @@ _DEFAULT_APP_CORS_ORIGINS: tuple[str, ...] = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
+_OUTPUT_RUNNING_STALE_SECONDS = 30 * 60
+_FILE_TREE_IGNORED_DIRS: frozenset[str] = frozenset({
+    "node_modules",
+    ".git",
+    "dist",
+    ".next",
+    "__pycache__",
+    ".cache",
+    ".turbo",
+    "coverage",
+    ".output",
+    "build",
+})
 
 # ---------------------------------------------------------------------------
 # Lazy references to bot.core — resolved once at startup via lifespan
@@ -221,6 +241,7 @@ _THINKING_INCOMPATIBLE_PROVIDERS: frozenset[str] = frozenset({
 # gateway providers (openrouter, nvidia, volcengine, …) whose capability
 # depends on which upstream model is selected rather than the gateway itself.
 _THINKING_CAPABLE_MODEL_PATTERNS: tuple[str, ...] = (
+    "deepseek-v4",
     "deepseek-r1",
     "deepseek-reasoner",
     "deepseek-chat",
@@ -369,6 +390,7 @@ async def lifespan(app: FastAPI):
         auth_mode=auth_mode,
         ccproxy_port=ccproxy_port,
         strict_oauth=False,
+        allow_missing_credentials=True,
     )
     logger.info(
         "OmicsClaw core initialised: provider=%s model=%s",
@@ -383,12 +405,28 @@ async def lifespan(app: FastAPI):
             _NOTEBOOK_IMPORT_ERROR or "(import failed without message)",
         )
 
-    # Optionally expose MemoryClient for browse/search endpoints
+    # Optionally expose MemoryClient for browse/search endpoints. The
+    # desktop client is bound to a launch-id-derived namespace
+    # (``app/<launch_id>`` or ``app/desktop_user`` for single-user runs)
+    # so its writes/reads are partitioned from the bot's per-user
+    # namespaces and from CLI workspace namespaces.
     try:
-        from omicsclaw.memory.memory_client import MemoryClient
-        _memory_client = MemoryClient()
-        await _memory_client.initialize()
-        logger.info("MemoryClient initialised")
+        from omicsclaw.memory import (
+            desktop_namespace,
+            get_engine_db,
+            get_memory_client,
+        )
+
+        await get_engine_db().init_db()
+
+        from omicsclaw.memory import get_memory_engine
+        from omicsclaw.memory.bootstrap import seed_knowhows
+
+        await seed_knowhows(get_memory_engine())
+        _memory_client = get_memory_client(namespace=desktop_namespace())
+        logger.info(
+            "MemoryClient initialised (namespace=%s)", _memory_client.namespace
+        )
     except Exception as exc:
         logger.warning("MemoryClient unavailable (non-fatal): %s", exc)
         _memory_client = None
@@ -471,6 +509,10 @@ _register_optional_kg_router(app)
 if _NOTEBOOK_AVAILABLE:
     app.include_router(notebook_router, prefix="/notebook", tags=["notebook"])
 
+# Remote control-plane API consumed by OmicsClaw-App (see omicsclaw/remote/).
+from omicsclaw.remote.app_integration import register_remote_routers  # noqa: E402
+register_remote_routers(app)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -487,6 +529,7 @@ class ProviderConfig(BaseModel):
 class ChatRequest(BaseModel):
     """POST /chat/stream body."""
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    job_id: str = ""
     content: str
     workspace: str = ""
     pipeline_workspace: str = ""
@@ -599,6 +642,7 @@ def _runtime_health_payload(core: Any) -> dict[str, Any]:
         "python_version": platform.python_version(),
         "skill_python_executable": skill_python,
         "omicsclaw_dir": omicsclaw_dir,
+        "launch_id": str(os.getenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "") or ""),
         "dependencies": {
             "cellcharter": _module_available("cellcharter"),
             "squidpy": _module_available("squidpy"),
@@ -620,6 +664,43 @@ def _resolve_scoped_memory_workspace(explicit_workspace: str = "") -> str:
         return str(getattr(core, "DATA_DIR", "") or "").strip()
     except Exception:
         return ""
+
+
+def _apply_runtime_workspace(core: Any, workspace: str) -> tuple[Path, Path, list[str]]:
+    """Apply the active Desktop workspace to runtime trust and outputs."""
+    ws = str(workspace or "").strip()
+    if not ws:
+        raise HTTPException(400, detail="workspace is required")
+    ws_path = Path(ws)
+    if not ws_path.is_absolute():
+        raise HTTPException(400, detail="workspace must be an absolute path")
+    if not ws_path.is_dir():
+        raise HTTPException(400, detail=f"directory does not exist: {ws}")
+
+    output_dir = ws_path / "output"
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(500, detail=f"cannot create output directory: {exc}") from exc
+
+    trusted_dirs = getattr(core, "TRUSTED_DATA_DIRS", None)
+    if trusted_dirs is None:
+        trusted_dirs = []
+        setattr(core, "TRUSTED_DATA_DIRS", trusted_dirs)
+    if ws_path not in trusted_dirs:
+        trusted_dirs.append(ws_path)
+        logger.info("Added workspace to trusted dirs: %s", ws)
+
+    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
+    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
+    if ws not in dirs:
+        dirs.append(ws)
+    os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
+    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    os.environ["OMICSCLAW_OUTPUT_DIR"] = str(output_dir)
+    setattr(core, "OUTPUT_DIR", output_dir)
+
+    return ws_path, output_dir, dirs
 
 
 def _permission_profile_to_policy_state(
@@ -695,7 +776,12 @@ def _tool_names_from_permission_suggestions(
     return tool_names
 
 
-def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> dict[str, Any]:
+def _build_token_usage(
+    response_usage: Any,
+    usage_totals: dict[str, float],
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
     prompt_tokens = int(getattr(response_usage, "prompt_tokens", 0) or 0)
     completion_tokens = int(getattr(response_usage, "completion_tokens", 0) or 0)
 
@@ -732,7 +818,7 @@ def _build_token_usage(response_usage: Any, usage_totals: dict[str, float]) -> d
     cost_usd = 0.0
     get_prices = getattr(core, "_get_token_price", None)
     if callable(get_prices):
-        input_price, output_price = get_prices(core.OMICSCLAW_MODEL)
+        input_price, output_price = get_prices(model or core.OMICSCLAW_MODEL)
         cost_usd = (
             usage_totals["input_tokens"] / 1_000_000 * float(input_price or 0.0)
             + usage_totals["output_tokens"] / 1_000_000 * float(output_price or 0.0)
@@ -774,42 +860,64 @@ def _extract_blocked_path(arguments: dict[str, Any]) -> str:
 # Multimodal content helpers
 # ---------------------------------------------------------------------------
 
-def _build_multimodal_content(text: str, files: list[dict]) -> str | list[dict]:
+def _resolve_uploads_dir(workspace: str) -> Path:
+    """Pick the directory used to persist chat attachments for this turn.
+
+    Priority:
+    1. ``<workspace>/.uploads`` when the request supplied a workspace.
+    2. ``<core.DATA_DIR>/.uploads`` as the fallback so the desktop app
+       always has a writable location even before the user picks a
+       workspace.
+    """
+    if workspace:
+        return Path(workspace) / ".uploads"
+    core = _get_core()
+    return Path(core.DATA_DIR) / ".uploads"
+
+
+def _register_attachment_for_session(session_id: str, meta: dict) -> None:
+    """Mirror the Telegram/Feishu pattern: stash the saved path in the
+    shared ``bot.core.received_files`` registry so existing tools
+    (parse_literature, the omicsclaw skill runner with mode='file') can
+    pick it up without the model having to specify the path explicitly.
+    """
+    if not session_id:
+        return
+    core = _get_core()
+    core.received_files[session_id] = {
+        "path": meta["path"],
+        "filename": meta["filename"],
+        "mime": meta.get("mime", ""),
+    }
+
+
+def _build_multimodal_content(
+    text: str,
+    files: list[dict],
+    *,
+    session_id: str = "",
+    workspace: str = "",
+) -> str | list[dict]:
     """Convert text + FileAttachment list to OpenAI multimodal content.
 
-    Returns a plain ``str`` when no images are present (text files are
-    inlined as context), or a ``list[dict]`` with ``image_url`` blocks
-    when images are attached.
+    Delegates to :mod:`omicsclaw.app._attachments`. Non-image files are
+    saved to disk and referenced by absolute path in the user message
+    so the model can use ``parse_literature`` / ``inspect_file`` /
+    ``omicsclaw`` skill tools to open them. Images are forwarded inline
+    as multimodal ``image_url`` blocks (and also saved to disk for tool
+    access).
     """
-    import base64 as _b64
+    from omicsclaw.app._attachments import build_chat_content
 
-    image_parts: list[dict] = []
-    text_addendum: list[str] = []
-
-    for f in files:
-        mime = f.get("type", "application/octet-stream")
-        name = f.get("name", "file")
-        data = f.get("data", "")
-
-        if mime.startswith("image/"):
-            image_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{data}"},
-            })
-        else:
-            try:
-                decoded = _b64.b64decode(data).decode("utf-8", errors="replace")
-                text_addendum.append(f"### File: {name}\n```\n{decoded[:50000]}\n```")
-            except Exception:
-                text_addendum.append(f"### File: {name}\n(binary, {f.get('size', 0)} bytes)")
-
-    full_text = text
-    if text_addendum:
-        full_text = text + "\n\n" + "\n\n".join(text_addendum)
-
-    if image_parts:
-        return [{"type": "text", "text": full_text}] + image_parts
-    return full_text
+    uploads_dir = _resolve_uploads_dir(workspace)
+    return build_chat_content(
+        text,
+        files,
+        uploads_dir=uploads_dir,
+        on_file_saved=lambda meta: _register_attachment_for_session(
+            session_id, meta
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -956,7 +1064,37 @@ async def chat_stream(req: ChatRequest):
       - {"type": "error",              "data": "..."}   — error
     """
     core = _get_core()
+    if req.workspace.strip():
+        _apply_runtime_workspace(core, req.workspace)
     session_id = req.session_id
+    bound_remote_job_id = str(req.job_id or "").strip()
+    bound_remote_workspace: Path | None = None
+    if bound_remote_job_id:
+        try:
+            bound_remote_workspace = resolve_workspace()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            bound_job = bind_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                session_id=session_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # ``bind_chat_stream_job`` intentionally passes through
+        # already-canceled jobs so the cancel handler can finalize them
+        # without clobbering state — but that's not a valid input for
+        # starting the tool loop. Bail with 409 so the caller drops the
+        # request instead of running a chat turn whose job row is
+        # permanently ``canceled``.
+        if bound_job.status == "canceled":
+            raise HTTPException(
+                status_code=409,
+                detail=f"chat stream job was canceled before bind: {bound_remote_job_id}",
+            )
 
     # If a provider config override is supplied, re-init the core.
     # NOTE: In a production multi-tenant setup you would scope this per-request
@@ -965,13 +1103,24 @@ async def chat_stream(req: ChatRequest):
     try:
         if req.provider_config and req.provider_config.provider:
             pc = req.provider_config
+            provider = str(pc.provider or "").strip()
+            model = str(pc.model or "").strip()
+            base_url = str(pc.base_url or "").strip()
+            if provider.lower() == "custom" and not base_url:
+                base_url = _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+            _validate_custom_provider_input(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                allow_env_base_url=True,
+            )
             core.init(
                 api_key=pc.api_key,
-                base_url=pc.base_url or None,
-                model=pc.model,
-                provider=pc.provider,
+                base_url=base_url or None,
+                model=model,
+                provider=provider,
             )
-        elif req.provider_id and req.provider_id.lower() != core.LLM_PROVIDER_NAME.lower():
+        elif _chat_request_requires_provider_reinit(core, req.provider_id, req.model or ""):
             _apply_chat_provider_switch(core, req.provider_id, req.model or "")
     except HTTPException:
         raise
@@ -1014,10 +1163,19 @@ async def chat_stream(req: ChatRequest):
 
     max_tokens_override = 16384 if req.context_1m else 0
 
-    # Convert file attachments to multimodal content
+    # Convert file attachments to multimodal content. Non-image files are
+    # saved to disk under the active workspace's ``.uploads`` directory and
+    # registered in ``core.received_files`` so the model can locate them
+    # via the existing tool surface (parse_literature, omicsclaw skill
+    # runner with mode='file', etc.).
     user_content: str | list = req.content
     if req.files:
-        user_content = _build_multimodal_content(req.content, req.files)
+        user_content = _build_multimodal_content(
+            req.content,
+            req.files,
+            session_id=session_id,
+            workspace=req.workspace,
+        )
 
     # asyncio.Queue bridges callbacks (invoked inside llm_tool_loop's task)
     # to the SSE generator running in the response.
@@ -1091,7 +1249,32 @@ async def chat_stream(req: ChatRequest):
         "output_style": req.output_style or "",
     }
 
+    def _finalize_bound_remote_job(status: str, error: str | None = None) -> None:
+        if not bound_remote_workspace or not bound_remote_job_id:
+            return
+        try:
+            finalize_chat_stream_job(
+                bound_remote_workspace,
+                bound_remote_job_id,
+                status=status,  # type: ignore[arg-type]
+                error=error,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to finalize bound remote chat job %s with status %s",
+                bound_remote_job_id,
+                status,
+            )
+
     async def _queue_event(event_type: str, data: Any) -> None:
+        if (
+            bound_remote_workspace is not None
+            and bound_remote_job_id
+            and event_type == "tool_output"
+            and isinstance(data, str)
+        ):
+            for line in data.splitlines():
+                append_job_stdout_line(bound_remote_workspace, bound_remote_job_id, line)
         await queue.put({"type": event_type, "data": data})
 
     def _current_tool_use_id(tool_name: str) -> str:
@@ -1266,6 +1449,48 @@ async def chat_stream(req: ChatRequest):
             return media
         return media
 
+    def _pending_media_item_to_block(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+        path = str(item.get("path") or item.get("localPath") or "").strip()
+        if not path or not os.path.isfile(path):
+            return None
+        item_type = str(item.get("type") or "").strip().lower()
+        mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        if item_type in {"photo", "image"} or mime_type.startswith("image/"):
+            media_type = "image"
+        elif item_type == "video" or mime_type.startswith("video/"):
+            media_type = "video"
+        elif item_type == "audio" or mime_type.startswith("audio/"):
+            media_type = "audio"
+        elif item_type in {"document", "file"}:
+            media_type = "file"
+        else:
+            return None
+        return {
+            "type": media_type,
+            "mimeType": mime_type,
+            "localPath": path,
+        }
+
+    def _consume_pending_media_for_session() -> list[dict[str, Any]]:
+        pending = getattr(core, "pending_media", None)
+        if not isinstance(pending, dict):
+            return []
+        items = pending.pop(session_id, []) or []
+        media: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            block = _pending_media_item_to_block(item)
+            if not block:
+                continue
+            local_path = str(block["localPath"])
+            if local_path in seen:
+                continue
+            seen.add(local_path)
+            media.append(block)
+        return media
+
     async def on_stream_content(chunk: str):
         nonlocal streamed_text, streamed_text_chunks
         streamed_text += chunk
@@ -1320,6 +1545,13 @@ async def chat_stream(req: ChatRequest):
             await _queue_event("tool_output", f"Completed {tool_name}")
 
         media = _extract_media_from_display_output(tool_name, display_output)
+        pending_media = _consume_pending_media_for_session()
+        if pending_media:
+            existing = {str(item.get("localPath", "")) for item in media}
+            media.extend(
+                item for item in pending_media
+                if str(item.get("localPath", "")) not in existing
+            )
 
         result_data: dict[str, Any] = {
             "tool_use_id": tool_use_id,
@@ -1370,7 +1602,11 @@ async def chat_stream(req: ChatRequest):
                 ),
                 "total_tokens": int(getattr(response_usage, "total_tokens", 0) or 0),
             }
-        usage_payload = _build_token_usage(response_usage, usage_totals)
+        usage_payload = _build_token_usage(
+            response_usage,
+            usage_totals,
+            model=effective_model,
+        )
         return delta
 
     async def request_tool_approval(request: Any, execution_result: Any) -> dict[str, Any]:
@@ -1509,10 +1745,17 @@ async def chat_stream(req: ChatRequest):
                 except Exception as mcp_exc:
                     logger.warning("Failed to load MCP servers: %s", mcp_exc)
 
+            from omicsclaw.app._compaction_event_bridge import (
+                make_compaction_event_handler,
+            )
+
+            on_context_compacted = make_compaction_event_handler(queue)
+
+            from omicsclaw.memory import desktop_chat_user_id
             result = await core.llm_tool_loop(
                 chat_id=session_id,
                 user_content=user_content,
-                user_id="desktop_user",
+                user_id=desktop_chat_user_id(),
                 workspace=req.workspace,
                 pipeline_workspace=req.pipeline_workspace,
                 output_style=req.output_style,
@@ -1522,6 +1765,7 @@ async def chat_stream(req: ChatRequest):
                 on_tool_result=on_tool_result,
                 on_stream_content=on_stream_content,
                 on_stream_reasoning=on_stream_reasoning,
+                on_context_compacted=on_context_compacted,
                 usage_accumulator=usage_accumulator,
                 request_tool_approval=request_tool_approval,
                 policy_state=current_policy_state.to_dict(),
@@ -1562,11 +1806,14 @@ async def chat_stream(req: ChatRequest):
                     default=str,
                 ),
             )
+            _finalize_bound_remote_job("succeeded")
         except asyncio.CancelledError:
             await _queue_event("error", "Session aborted")
+            _finalize_bound_remote_job("canceled", error="session_aborted")
         except Exception as exc:
             logger.exception("llm_tool_loop error for session %s", session_id)
             await _queue_event("error", str(exc))
+            _finalize_bound_remote_job("failed", error=str(exc))
         finally:
             for permission_request_id in list(permission_request_ids):
                 pending = _pending_permission_requests.pop(permission_request_id, None)
@@ -1757,22 +2004,7 @@ async def set_workspace(req: WorkspaceRequest):
     if not ws_path.is_dir():
         raise HTTPException(400, detail=f"directory does not exist: {ws}")
     core = _get_core()
-
-    # Add to TRUSTED_DATA_DIRS at runtime so tools can access files there
-    if ws_path not in core.TRUSTED_DATA_DIRS:
-        core.TRUSTED_DATA_DIRS.append(ws_path)
-        logger.info("Added workspace to trusted dirs: %s", ws)
-
-    # Update env var so _build_trusted_dirs() picks it up on next rebuild
-    existing = os.environ.get("OMICSCLAW_DATA_DIRS", "")
-    dirs = [d.strip() for d in existing.split(",") if d.strip()] if existing else []
-    if ws not in dirs:
-        dirs.append(ws)
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-    else:
-        os.environ["OMICSCLAW_DATA_DIRS"] = ",".join(dirs)
-
-    os.environ["OMICSCLAW_WORKSPACE"] = ws
+    ws_path, output_dir, dirs = _apply_runtime_workspace(core, ws)
 
     # Persist to .env for next restart
     env_path = _get_omicsclaw_env_path()
@@ -1782,6 +2014,7 @@ async def set_workspace(req: WorkspaceRequest):
             {
                 "OMICSCLAW_DATA_DIRS": ",".join(dirs),
                 "OMICSCLAW_WORKSPACE": ws,
+                "OMICSCLAW_OUTPUT_DIR": str(output_dir),
             },
         )
 
@@ -1790,7 +2023,241 @@ async def set_workspace(req: WorkspaceRequest):
         "workspace": ws,
         "trusted_dirs": [str(d) for d in core.TRUSTED_DATA_DIRS],
         "workspace_env": os.environ.get("OMICSCLAW_WORKSPACE", ""),
+        "output_dir": str(output_dir),
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /files/browse — directory browser for remote-runtime folder pickers
+# ---------------------------------------------------------------------------
+#
+# Desktop clients need to let the user pick a workspace directory that
+# lives on THIS host (the backend's filesystem), not on the client's
+# local machine. The App's local `/api/files/browse` only works for
+# co-located backends; when the backend is on a remote SSH runtime the
+# App proxies here instead.
+#
+# Read-only. Authorization is the same bearer-token middleware the rest
+# of the app_server already enforces, plus OS filesystem permissions
+# (we can only surface what the backend process itself can read). The
+# endpoint deliberately does NOT consult TRUSTED_DATA_DIRS — the user
+# is in the middle of PICKING a workspace, so gating by trust would
+# prevent the first-time-pick flow. `PUT /workspace` does the
+# is_dir() + absolute-path validation when the choice is committed.
+
+@app.get("/files/browse")
+async def browse_directories(path: Optional[str] = None):
+    """List subdirectories under `path` (or $HOME when omitted).
+
+    Response shape matches the App's existing local
+    `/api/files/browse` route so `<FolderPicker/>` can consume either
+    implementation interchangeably.
+    """
+    base_raw = (path or "").strip()
+    try:
+        base = Path(base_raw).expanduser() if base_raw else Path.home()
+        base = base.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    directories: list[dict[str, Any]] = []
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+
+    for entry in entries:
+        # Skip dotfiles to match the App's local implementation — users
+        # expect the same filter on both sides, and cluttered pickers
+        # get ignored.
+        if entry.name.startswith("."):
+            continue
+        is_symlink = entry.is_symlink()
+        try:
+            is_dir = entry.is_dir()  # follows symlinks
+        except OSError:
+            continue
+        if not is_dir:
+            continue
+        item: dict[str, Any] = {
+            "name": entry.name,
+            "path": str(entry),
+            "isSymbolicLink": is_symlink,
+        }
+        if is_symlink:
+            try:
+                item["targetPath"] = str(entry.resolve())
+            except OSError:
+                # Broken symlink — skip rather than return a bogus entry.
+                continue
+        directories.append(item)
+
+    directories.sort(key=lambda d: d["name"].lower())
+
+    parent_path = str(base.parent) if str(base.parent) != str(base) else None
+    return {
+        "current": str(base),
+        "parent": parent_path,
+        "directories": directories,
+    }
+
+
+def _classify_tree_file(path: Path) -> dict[str, Any]:
+    return {
+        "name": path.name,
+        "path": str(path),
+        "type": "file",
+        "size": path.stat().st_size,
+        "extension": path.suffix,
+    }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _trusted_file_roots() -> list[Path]:
+    core = _get_core()
+    roots: list[Path] = []
+    for raw in getattr(core, "TRUSTED_DATA_DIRS", []) or []:
+        try:
+            roots.append(Path(raw).expanduser().resolve(strict=True))
+        except OSError:
+            continue
+    output_dir = getattr(core, "OUTPUT_DIR", None)
+    if output_dir:
+        try:
+            roots.append(Path(output_dir).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    workspace = str(os.getenv("OMICSCLAW_WORKSPACE", "") or "").strip()
+    if workspace:
+        try:
+            roots.append(Path(workspace).expanduser().resolve(strict=True))
+        except OSError:
+            pass
+    unique: list[Path] = []
+    for root in roots:
+        if root not in unique:
+            unique.append(root)
+    return unique
+
+
+def _resolve_trusted_file_path(raw_path: str) -> Path:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        target = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="file does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not target.is_file():
+        raise HTTPException(400, detail="path is not a file")
+    trusted_roots = _trusted_file_roots()
+    if not any(_is_relative_to(target, root) for root in trusted_roots):
+        raise HTTPException(403, detail="access denied")
+    return target
+
+
+def _scan_file_tree(base: Path, depth: int, visited: set[Path] | None = None) -> list[dict[str, Any]]:
+    if depth <= 0:
+        return []
+
+    seen = visited if visited is not None else set()
+    try:
+        entries = list(base.iterdir())
+    except PermissionError as exc:
+        raise HTTPException(403, detail="permission denied") from exc
+    except OSError as exc:
+        raise HTTPException(400, detail=f"cannot read directory: {exc}") from exc
+
+    resolved_entries: list[tuple[str, Path, bool, bool]] = []
+    for entry in entries:
+        if entry.name.startswith(".") and not entry.name.startswith(".env"):
+            continue
+        try:
+            is_dir = entry.is_dir()
+            is_file = entry.is_file()
+        except OSError:
+            continue
+        if is_dir or is_file:
+            resolved_entries.append((entry.name, entry, is_dir, is_file))
+
+    resolved_entries.sort(key=lambda item: (not item[2], item[0].lower()))
+
+    nodes: list[dict[str, Any]] = []
+    for name, entry, is_dir, is_file in resolved_entries:
+        if is_dir:
+            if name in _FILE_TREE_IGNORED_DIRS:
+                continue
+            try:
+                real = entry.resolve(strict=True)
+            except OSError:
+                continue
+            if real in seen:
+                continue
+            next_seen = set(seen)
+            next_seen.add(real)
+            nodes.append({
+                "name": name,
+                "path": str(entry),
+                "type": "directory",
+                "children": _scan_file_tree(entry, depth - 1, next_seen),
+            })
+        elif is_file:
+            try:
+                nodes.append(_classify_tree_file(entry))
+            except OSError:
+                continue
+    return nodes
+
+
+@app.get("/files/tree")
+async def files_tree(
+    path: str = Query(..., description="Directory path on the backend host"),
+    depth: int = Query(3, ge=1, le=10),
+):
+    """Return files and directories under a backend-host directory."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise HTTPException(400, detail="path is required")
+    try:
+        base = Path(raw).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail="directory does not exist") from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, detail=f"invalid path: {exc}") from exc
+    if not base.is_dir():
+        raise HTTPException(400, detail="path is not a directory")
+
+    return {
+        "root": str(base),
+        "tree": _scan_file_tree(base, depth),
+    }
+
+
+@app.get("/files/serve")
+async def files_serve(path: str = Query(..., description="Trusted file path on the backend host")):
+    """Serve a file from the backend host under trusted workspace/output roots."""
+    target = _resolve_trusted_file_path(path)
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(
+        str(target),
+        media_type=media_type or "application/octet-stream",
+        filename=target.name,
+        headers={"Cache-Control": "private, max-age=60"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2007,6 +2474,40 @@ async def uninstall_skill(req: SkillUninstallRequest):
 # GET /memory/browse — browse memory graph nodes
 # ---------------------------------------------------------------------------
 
+async def _decorate_analysis_titles(children: list) -> None:
+    """Replace ``name`` with a derived display label for analysis://*
+    children, in-place. See
+    docs/adr/0002-derived-display-label-for-analysis-memory.md.
+
+    The engine's ``list_children_rich`` returns a 100-char
+    ``content_snippet`` that's too short to carry the full
+    ``executed_at``/``parameters.input``, so we fetch the full content
+    via ``recall`` for each analysis child. Cost = N indexed reads where
+    N = number of analysis children rendered in the current tree level
+    (typically ≤ 50 in the desktop UI). Silent fallback to ``edge.name``
+    on parse failure or missing fields means the UI never renders blank.
+    """
+    if _memory_client is None:
+        return
+    from omicsclaw.memory.compat import _analysis_content_to_title
+
+    for child in children:
+        if child.get("domain") != "analysis":
+            continue
+        path = child.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        try:
+            record = await _memory_client.recall(f"analysis://{path}")
+        except Exception:
+            continue
+        if record is None or not getattr(record, "content", None):
+            continue
+        title = _analysis_content_to_title(record.content)
+        if title is not None:
+            child["name"] = title
+
+
 @app.get("/memory/browse")
 async def memory_browse(
     path: str = Query("", description="Node path to browse"),
@@ -2016,19 +2517,44 @@ async def memory_browse(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
+        from dataclasses import asdict
+
+        from omicsclaw.memory.namespace_policy import should_version
+        from omicsclaw.memory.uri import MemoryURI
+
         uri = f"{domain}://{path}" if path else f"{domain}://"
-        children = await _memory_client.list_children(uri)
+        # list_children_rich returns the desktop-tree dict shape
+        # (name, path, domain, content_snippet, approx_children_count, …)
+        # the UI's MemoryTree/MemoryContent rely on for labels and the
+        # directory-vs-leaf icon. include_shared=True so __shared__
+        # children (e.g., core://agent/*) appear alongside the user's own.
+        children = await _memory_client.list_children_rich(
+            uri,
+            context_domain=domain,
+            context_path=path,
+            include_shared=True,
+        )
+        await _decorate_analysis_titles(children)
 
         # Also get the node itself if path is provided
         node = None
         if path:
-            node = await _memory_client.recall(f"{domain}://{path}")
+            record = await _memory_client.recall(f"{domain}://{path}")
+            if record is not None:
+                node = asdict(record)
+
+        # is_versioned tells the desktop UI whether the URI has a
+        # version chain (and therefore whether to surface the
+        # History/rollback button). Mirrors the namespace_policy rule
+        # the engine uses to pick upsert_versioned vs upsert.
+        is_versioned = should_version(MemoryURI.parse(uri))
 
         return {
             "path": path,
             "domain": domain,
             "node": node,
             "children": children,
+            "is_versioned": is_versioned,
         }
     except Exception as exc:
         logger.exception("Memory browse error")
@@ -2096,13 +2622,20 @@ class ScopedPruneRequest(BaseModel):
 
 # -- Helper: get graph / glossary / changeset services ----------------------
 
-def _get_graph_service():
-    """Return GraphService, raising 503 if the memory module is not available."""
+def _get_review_log():
+    """Return the singleton ReviewLog (cold-path operations).
+
+    Used by /memory/review/* endpoints. Falls back with a 503 if the
+    memory module isn't installed or is mid-initialization.
+    """
     try:
-        from omicsclaw.memory import get_graph_service
-        return get_graph_service()
+        from omicsclaw.memory import get_review_log
     except Exception as exc:
-        raise HTTPException(503, detail=f"Memory graph service unavailable: {exc}")
+        raise HTTPException(503, detail=f"Memory system unavailable: {exc}")
+    try:
+        return get_review_log()
+    except Exception as exc:
+        raise HTTPException(503, detail=f"Memory system unavailable: {exc}")
 
 
 def _get_glossary_service():
@@ -2158,7 +2691,10 @@ def _memory_snapshot_row_identity(table: str, row: dict[str, Any]):
     if table in {"memories", "edges"}:
         return row["id"]
     if table == "paths":
-        return (row["domain"], row["path"])
+        # PK is (namespace, domain, path) post-001_namespace migration. Older
+        # snapshots predating the namespace column default to "__shared__".
+        namespace = row.get("namespace") or "__shared__"
+        return (namespace, row["domain"], row["path"])
     if table == "glossary_keywords":
         if "id" in row and row["id"] is not None:
             return row["id"]
@@ -2360,12 +2896,10 @@ async def memory_update(req: MemoryUpdateRequest):
         raise HTTPException(400, detail="At least one of content or priority must be provided")
 
     try:
-        graph = _get_graph_service()
-        result = await graph.update_memory(
-            path=req.path,
+        result = await _memory_client.update_existing(
+            f"{req.domain}://{req.path}",
             content=req.content,
             priority=req.priority,
-            domain=req.domain,
         )
         return {"ok": True, "path": req.path, "domain": req.domain, "result": result}
     except ValueError as exc:
@@ -2410,15 +2944,33 @@ async def memory_children(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
         from omicsclaw.memory.models import ROOT_NODE_UUID
-        parent_uuid = node_uuid if node_uuid else ROOT_NODE_UUID
-        children = await graph.get_children(
-            node_uuid=parent_uuid,
-            context_domain=domain,
-            context_path=path or None,
+
+        # Normalise FastAPI ``Query(...)`` defaults so the endpoint
+        # behaves sanely when called directly (tests, in-process
+        # tooling) rather than only over HTTP. Without this, ``path``
+        # is a ``Query`` instance that is truthy and would corrupt the
+        # URI build below.
+        node_uuid_str = node_uuid if isinstance(node_uuid, str) else ""
+        domain_str = domain if isinstance(domain, str) else "core"
+        path_str = path if isinstance(path, str) else ""
+
+        parent_uuid = node_uuid_str if node_uuid_str else ROOT_NODE_UUID
+        # URI-based lookup: ``domain://`` resolves to ROOT, ``domain://path``
+        # to the path's child node. Front-end sends consistent
+        # ``(node_uuid, domain, path)`` triples returned from a previous
+        # list_children_rich call so the URI lookup hits the same parent.
+        parent_uri = (
+            f"{domain_str}://{path_str}" if path_str else f"{domain_str}://"
         )
-        return {"node_uuid": parent_uuid, "domain": domain, "children": children}
+        children = await _memory_client.list_children_rich(
+            parent_uri,
+            context_domain=domain_str,
+            context_path=path_str or None,
+            include_shared=True,
+        )
+        await _decorate_analysis_titles(children)
+        return {"node_uuid": parent_uuid, "domain": domain_str, "children": children}
     except Exception as exc:
         logger.exception("Memory children error")
         raise HTTPException(500, detail=str(exc))
@@ -2433,8 +2985,10 @@ async def memory_domains():
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
-        all_paths = await graph.get_all_paths(domain=None)
+        all_paths = await _memory_client.list_paths(
+            domain=None,
+            include_shared=True,
+        )
 
         # Group by domain and count
         domain_counts: dict[str, int] = {}
@@ -2463,7 +3017,13 @@ async def memory_recent(
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        results = await _memory_client.get_recent(limit=limit)
+        # Desktop UI mode: include_shared=True surfaces user-customised
+        # core://agent/* alongside per-namespace rows. Multi-tenant bot
+        # surfaces use the default (strict) so one user's shared writes
+        # don't bleed into another's view.
+        results = await _memory_client.get_recent(
+            limit=limit, include_shared=True
+        )
         return {"results": results, "count": len(results)}
     except Exception as exc:
         logger.exception("Memory recent error")
@@ -2509,20 +3069,125 @@ async def memory_review_approve():
 
 @app.post("/memory/review/rollback")
 async def memory_review_rollback(req: MemoryRollbackRequest):
-    """Rollback a specific memory to a previous version."""
+    """Rollback a specific memory to a previous version.
+
+    PR #5: routed through ReviewLog instead of GraphService. Namespace
+    is the desktop's launch-derived namespace so the rollback is
+    confined to whatever partition the desktop user is editing.
+    """
     if _memory_client is None:
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        graph = _get_graph_service()
-        result = await graph.rollback_to_memory(target_memory_id=req.target_memory_id)
-        return {"ok": True, "result": result}
+        from omicsclaw.memory import desktop_namespace
+
+        review = _get_review_log()
+        result = await review.rollback_to(
+            req.target_memory_id, namespace=desktop_namespace()
+        )
+        return {
+            "ok": True,
+            "result": {
+                "restored_memory_id": result.restored_memory_id,
+                "node_uuid": result.node_uuid,
+                "was_already_active": result.was_already_active,
+            },
+        }
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc))
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Memory review rollback error")
+        raise HTTPException(500, detail=str(exc))
+
+
+# -- GET /memory/review/orphans ----------------------------------------------
+
+@app.get("/memory/review/orphans")
+async def memory_review_orphans(
+    namespace: Optional[str] = Query(
+        None,
+        description=(
+            "Restrict to one namespace. Omit for the desktop's own "
+            "namespace; pass an empty string for the global view."
+        ),
+    ),
+):
+    """List deprecated memories whose successor was deleted (orphan chains).
+
+    Default namespace is the desktop's own; an explicit empty string
+    means "across all partitions" (admin view).
+    """
+    if _memory_client is None:
+        raise HTTPException(503, detail="Memory system not available")
+
+    try:
+        from dataclasses import asdict
+
+        from omicsclaw.memory import desktop_namespace
+
+        review = _get_review_log()
+
+        if namespace is None:
+            ns_filter: Optional[str] = desktop_namespace()
+        elif namespace == "":
+            ns_filter = None
+        else:
+            ns_filter = namespace
+
+        orphans = await review.list_orphans(namespace=ns_filter)
+        return {
+            "namespace": ns_filter,
+            "count": len(orphans),
+            "orphans": [asdict(o) for o in orphans],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Memory review orphans error")
+        raise HTTPException(500, detail=str(exc))
+
+
+# -- GET /memory/review/version-chain ----------------------------------------
+
+@app.get("/memory/review/version-chain")
+async def memory_review_version_chain(
+    uri: str = Query(..., description="Memory URI (e.g. 'core://agent')"),
+    namespace: Optional[str] = Query(
+        None,
+        description="Override the desktop default namespace.",
+    ),
+):
+    """List the version chain for a versioned URI in age order.
+
+    Returns 400 if the URI is overwrite-only (``dataset://``,
+    ``analysis://``) — those structurally cannot have a chain.
+    """
+    if _memory_client is None:
+        raise HTTPException(503, detail="Memory system not available")
+
+    try:
+        from dataclasses import asdict
+
+        from omicsclaw.memory import desktop_namespace
+        from omicsclaw.memory.review_log import NoVersionHistoryError
+
+        review = _get_review_log()
+        ns = namespace or desktop_namespace()
+        chain = await review.list_version_chain(uri, namespace=ns)
+        return {
+            "uri": uri,
+            "namespace": ns,
+            "count": len(chain),
+            "entries": [asdict(e) for e in chain],
+        }
+    except NoVersionHistoryError as exc:
+        raise HTTPException(400, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Memory review version-chain error")
         raise HTTPException(500, detail=str(exc))
 
 
@@ -2822,6 +3487,11 @@ async def list_providers():
                 "description_zh": "",
                 "tier": "local",
                 "models": [default_model] if default_model else [],
+                "model_metadata": (
+                    [{"id": default_model, "context_window": None}]
+                    if default_model
+                    else []
+                ),
             }
             for name, (base_url, default_model, env_key) in PROVIDER_PRESETS.items()
         ]
@@ -2837,13 +3507,24 @@ async def list_providers():
     for entry in provider_entries:
         name = str(entry.get("name", "") or "")
         env_key = str(entry.get("env_key", "") or "")
+        active = name == core.LLM_PROVIDER_NAME
+        entry_payload = dict(entry)
+        base_url_source = _provider_base_url_source(name, core.LLM_PROVIDER_NAME)
+        if base_url_source:
+            entry_payload["base_url"] = (
+                _read_first_env(f"{name.upper()}_BASE_URL")
+                or _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+                or str(entry_payload.get("base_url", "") or "")
+            )
+        if active and core.OMICSCLAW_MODEL and not str(entry_payload.get("default_model", "") or "").strip():
+            entry_payload["default_model"] = core.OMICSCLAW_MODEL
         credential_source = _provider_configuration_source(name, env_key, core.LLM_PROVIDER_NAME)
         oauth_supported = provider_supports_oauth(name)
         providers.append({
-            **entry,
+            **entry_payload,
             "configured": bool(credential_source),
             "configured_via": credential_source or None,
-            "active": name == core.LLM_PROVIDER_NAME,
+            "active": active,
             "oauth_supported": oauth_supported,
             "oauth_authenticated": (
                 oauth_statuses.get(name, {}).get("authenticated", False)
@@ -2911,6 +3592,37 @@ class ProviderSwitchRequest(BaseModel):
     ccproxy_port: int = 11435
 
 
+class ProviderTestRequest(BaseModel):
+    provider: str = ""
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+def _validate_custom_provider_input(
+    *,
+    provider: str,
+    model: str = "",
+    base_url: str = "",
+    allow_env_base_url: bool = False,
+) -> None:
+    if str(provider or "").strip().lower() != "custom":
+        return
+    if not str(model or "").strip():
+        raise HTTPException(
+            400,
+            detail="Custom Endpoint requires an explicit model name.",
+        )
+    if str(base_url or "").strip():
+        return
+    if allow_env_base_url and _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL"):
+        return
+    raise HTTPException(
+        400,
+        detail="Custom Endpoint requires an explicit Base URL.",
+    )
+
+
 @app.put("/providers")
 async def switch_provider(req: ProviderSwitchRequest):
     """Switch the active LLM provider. Re-initializes the core LLM client.
@@ -2945,6 +3657,11 @@ async def switch_provider(req: ProviderSwitchRequest):
                 "Supported: anthropic, openai"
             ),
         )
+    _validate_custom_provider_input(
+        provider=req.provider,
+        model=req.model,
+        base_url=req.base_url,
+    )
 
     # Reject ccproxy_port == app-server's own port: ccproxy serve would
     # fail to bind (the app-server already owns the port), leaving the
@@ -2995,11 +3712,11 @@ async def switch_provider(req: ProviderSwitchRequest):
         remove_keys: set[str] = set()
         if auth_mode == "oauth":
             updates["CCPROXY_PORT"] = str(requested_port)
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         else:
             remove_keys.add("CCPROXY_PORT")
             if req.provider != "custom" and not req.base_url:
-                remove_keys.add("LLM_BASE_URL")
+                remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(
@@ -3014,6 +3731,92 @@ async def switch_provider(req: ProviderSwitchRequest):
         "provider": core.LLM_PROVIDER_NAME,
         "model": core.OMICSCLAW_MODEL,
         "auth_mode": auth_mode,
+    }
+
+
+@app.post("/providers/test")
+async def test_provider(req: ProviderTestRequest):
+    """Run a minimal live test against an OpenAI-compatible provider config."""
+    core = _get_core()
+    provider = str(req.provider or getattr(core, "LLM_PROVIDER_NAME", "") or "").strip()
+    model = str(req.model or getattr(core, "OMICSCLAW_MODEL", "") or "").strip()
+    base_url = str(req.base_url or "").strip()
+    api_key = str(req.api_key or "").strip()
+
+    _validate_custom_provider_input(
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        allow_env_base_url=True,
+    )
+
+    try:
+        from omicsclaw.core.provider_runtime import (
+            provider_requires_api_key,
+            resolve_provider_runtime,
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"Provider runtime unavailable: {exc}") from exc
+
+    runtime = resolve_provider_runtime(
+        provider=provider,
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+    )
+    if not runtime.model:
+        raise HTTPException(400, detail="No model resolved for provider test.")
+    if provider_requires_api_key(runtime.provider) and not runtime.api_key:
+        raise HTTPException(400, detail="No API key resolved for provider test.")
+
+    start = time.monotonic()
+    client = AsyncOpenAI(
+        api_key=runtime.api_key,
+        base_url=runtime.base_url or None,
+        timeout=15.0,
+    )
+    try:
+        response = await client.chat.completions.create(
+            model=runtime.model,
+            messages=[{"role": "user", "content": "Say OK"}],
+            max_tokens=8,
+        )
+        content = str(response.choices[0].message.content or "").strip()
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "ok": False,
+            "status": "failed",
+            "provider": runtime.provider,
+            "model": runtime.model,
+            "base_url": runtime.base_url,
+            "message": f"Live provider test failed: {exc}",
+            "duration_ms": duration_ms,
+        }
+    finally:
+        with suppress(Exception):
+            await client.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    if not content:
+        return {
+            "ok": False,
+            "status": "failed",
+            "provider": runtime.provider,
+            "model": runtime.model,
+            "base_url": runtime.base_url,
+            "message": "Live provider test returned an empty response.",
+            "duration_ms": duration_ms,
+        }
+
+    return {
+        "ok": True,
+        "status": "passed",
+        "provider": runtime.provider,
+        "model": runtime.model,
+        "base_url": runtime.base_url,
+        "message": "Live provider test passed.",
+        "duration_ms": duration_ms,
     }
 
 
@@ -3526,6 +4329,19 @@ def _collect_key_files(run_dir: Path) -> list[dict]:
     return results
 
 
+def _latest_file_mtime(run_dir: Path) -> float:
+    latest = 0.0
+    try:
+        for entry in run_dir.rglob("*"):
+            try:
+                latest = max(latest, entry.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return latest
+
+
 def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     Read ``result.json`` and extract status + summary.
@@ -3534,10 +4350,17 @@ def _read_result_json(run_dir: Path) -> tuple[str, Any]:
     """
     result_file = run_dir / "result.json"
     if not result_file.is_file():
-        # No result.json — infer status from presence of output files
-        figures_dir = run_dir / "figures"
-        if figures_dir.is_dir() and any(figures_dir.iterdir()):
-            return ("completed", None)
+        # result.json is the completion contract. Without it, a run is either
+        # still active or was interrupted before finalization.
+        latest_mtime = max(
+            run_dir.stat().st_mtime,
+            _latest_file_mtime(run_dir),
+        )
+        if time.time() - latest_mtime > _OUTPUT_RUNNING_STALE_SECONDS:
+            return (
+                "failed",
+                f"stale incomplete run: no result.json and no output update for more than {_OUTPUT_RUNNING_STALE_SECONDS // 60} minutes",
+            )
         return ("running", None)
 
     try:
@@ -3853,7 +4676,18 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
     would let the chat run against the old model while the UI reports the
     requested one.
     """
-    core.init(provider=provider_id, model=model)
+    _validate_custom_provider_input(
+        provider=provider_id,
+        model=model,
+        base_url="",
+        allow_env_base_url=True,
+    )
+    base_url = (
+        _read_first_env("LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+        if str(provider_id or "").strip().lower() == "custom"
+        else ""
+    )
+    core.init(provider=provider_id, model=model, base_url=base_url or None)
 
     env_path = _get_omicsclaw_env_path()
     if env_path:
@@ -3865,7 +4699,7 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
             updates["OMICSCLAW_MODEL"] = core.OMICSCLAW_MODEL
         remove_keys: set[str] = {"CCPROXY_PORT"}
         if provider_id != "custom":
-            remove_keys.add("LLM_BASE_URL")
+            remove_keys.update({"LLM_BASE_URL", "OMICSCLAW_BASE_URL"})
         _update_env_file(env_path, updates, remove_keys=remove_keys)
 
     logger.info(
@@ -3873,6 +4707,23 @@ def _apply_chat_provider_switch(core: Any, provider_id: str, model: str) -> None
         getattr(core, "LLM_PROVIDER_NAME", provider_id),
         getattr(core, "OMICSCLAW_MODEL", ""),
     )
+
+
+def _chat_request_requires_provider_reinit(core: Any, provider_id: str, model: str) -> bool:
+    requested_provider = str(provider_id or "").strip()
+    if not requested_provider:
+        return False
+
+    current_provider = str(getattr(core, "LLM_PROVIDER_NAME", "") or "").strip()
+    if requested_provider.lower() != current_provider.lower():
+        return True
+
+    requested_model = str(model or "").strip()
+    if not requested_model:
+        return False
+
+    current_model = str(getattr(core, "OMICSCLAW_MODEL", "") or "").strip()
+    return requested_model != current_model
 
 
 # ---- Pydantic models for bridge endpoints --------------------------------

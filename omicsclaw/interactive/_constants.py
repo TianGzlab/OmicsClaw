@@ -8,7 +8,7 @@ WELCOME_SLOGANS = [
     "Spatial, single-cell, genomics, proteomics, metabolomics — all at your command.",
     "Science doesn't sleep. Neither does OmicsClaw.",
     "From raw data to biological insights — let's go.",
-    "50+ analysis skills, one intelligent interface.",
+    "89 analysis skills, one intelligent interface.",
     "Type your question, or /run <skill> to execute directly.",
     "What omics mystery shall we solve today?",
     "Your multi-omics co-pilot is ready for takeoff.",

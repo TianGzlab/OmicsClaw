@@ -1,266 +1,111 @@
 ---
 name: sc-cell-annotation
-description: >-
-  Annotate cell types from normalized scRNA-seq data using marker scoring,
-  CellTypist, PopV-style reference mapping, lightweight KNNPredict-style
-  mapping, SingleR, or scmap through shared Python/R backends.
-version: 0.9.0
+description: Load when assigning cell-type labels to a clustered scRNA AnnData via marker dictionaries, CellTypist, PopV, KNNPredict, SingleR, scmap, SCSA, or a manual cluster-to-label map. Skip when ranking marker genes per cluster (use sc-markers) or for condition-vs-control DE (use sc-de).
+version: 0.6.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, annotation, celltypist, popv, knnpredict, singler, scmap]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--manual-map"
-      - "--manual-map-file"
-      - "--cluster-key"
-      - "--method"
-      - "--model"
-      - "--reference"
-      - "--marker-file"
-      - "--celltypist-majority-voting"
-      - "--no-celltypist-majority-voting"
-      - "--r-enhanced"
-    param_hints:
-      manual:
-        priority: "cluster_key -> manual_map/manual_map_file"
-        params: ["cluster_key", "manual_map", "manual_map_file"]
-        defaults: {cluster_key: auto}
-        requires: ["cluster_labels_in_obs"]
-        tips:
-          - "--method manual: explicit relabeling from user-provided cluster mappings."
-          - "--manual-map example: `0=T cell;1,2=Myeloid`."
-      markers:
-        priority: "cluster_key -> marker_file"
-        params: ["cluster_key", "marker_file"]
-        defaults: {cluster_key: auto, marker_file: null}
-        requires: ["normalized_expression", "cluster_labels_in_obs"]
-        tips:
-          - "--method markers: use when clusters already exist and you want a quick label proposal from known markers."
-          - "Built-in markers cover blood (PBMC), brain, and general tissue cell types (human gene symbols)."
-          - "For non-human organisms or specialized tissues, provide --marker-file markers.json."
-          - "If ALL cells are 'Unknown', it means marker genes were not found — see Reference Data Guide below."
-      celltypist:
-        priority: "model -> celltypist_majority_voting"
-        params: ["model", "celltypist_majority_voting"]
-        defaults: {model: "Immune_All_Low", celltypist_majority_voting: false}
-        requires: ["celltypist", "normalized_expression_matrix"]
-        tips:
-          - "--model: CellTypist model name or model file stem."
-          - "--celltypist-majority-voting: optional neighborhood/cluster smoothing for CellTypist labels."
-      popv:
-        priority: "reference -> cluster_key"
-        params: ["reference", "cluster_key"]
-        defaults: {cluster_key: auto}
-        requires: ["labeled_reference_h5ad", "normalized_expression_matrix"]
-        tips:
-          - "--method popv: official PopV path when possible, else lightweight reference mapping fallback."
-      knnpredict:
-        priority: "reference -> cluster_key"
-        params: ["reference", "cluster_key"]
-        defaults: {cluster_key: auto}
-        requires: ["labeled_reference_h5ad", "normalized_expression_matrix"]
-        tips:
-          - "--method knnpredict: lightweight AnnData-first projection inspired by SCOP KNNPredict."
-      singler:
-        priority: "reference"
-        params: ["reference"]
-        defaults: {reference: "HPCA"}
-        requires: ["R_SingleR_stack"]
-        tips:
-          - "--method singler: R SingleR path using celldex / ExperimentHub atlases or a labeled local H5AD reference."
-      scmap:
-        priority: "reference"
-        params: ["reference"]
-        defaults: {reference: "HPCA"}
-        requires: ["R_scmap_stack"]
-        tips:
-          - "--method scmap: R scmap path using celldex / ExperimentHub atlases or a labeled local H5AD reference."
-    legacy_aliases: [sc-annotate]
-    saves_h5ad: true
-    requires_preprocessed: true
+tags:
+- singlecell
+- scrna
+- cell-annotation
+- celltypist
+- popv
+- singler
+- scmap
+- scsa
+- knnpredict
+- markers
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
 ---
 
-# Single-Cell Cell Annotation
+# sc-cell-annotation
 
-## Why This Exists
+## When to use
 
-- Without it: users hand-label clusters inconsistently or trust opaque defaults.
-- With it: annotation method, reference/model choice, label outputs, and figures are standardized.
-- Why OmicsClaw: one wrapper unifies marker-based and reference-style annotation while preserving an AnnData-first workflow.
+The user has a clustered AnnData (e.g. `obs["leiden"]`) and wants
+labelled cell types in `obs["cell_type"]`. Pick a method by
+data / reference availability:
 
-## Scope Boundary
+- `markers` (default) — built-in or custom marker-gene scoring.
+- `manual` — user-supplied cluster-to-label map (`--manual-map` or `--manual-map-file`).
+- `celltypist` — pretrained `Immune_All_Low.pkl` style classifier.
+- `popv` / `knnpredict` — reference AnnData mapping (PopV consensus or lightweight KNN).
+- `singler` / `scmap` — R-backed reference annotation.
+- `scsa` — Fisher-test DB scoring (`--species`, `--tissue`).
 
-Implemented methods:
+This skill labels — for **ranking** the genes that justify a label use
+`sc-markers`; for replicate-aware condition DE use `sc-de`.
 
-1. `manual`
-2. `markers`
-3. `celltypist`
-4. `popv`
-5. `knnpredict`
-6. `singler`
-7. `scmap`
+## Inputs & Outputs
 
-This skill annotates cells or clusters. It does not replace marker discovery or replicate-aware DE.
-
-## Input Expectations
-
-- Expected state: normalized expression in `adata.X`
-- Typical upstream step: `sc-clustering`
-- Typical downstream steps: `sc-markers`, `sc-de`, or interpretation/reporting
-- Marker mode needs an existing cluster/label column; it will not auto-cluster anymore
-
-## Public Parameters
-
-- `--method`
-- `--manual-map`
-- `--manual-map-file`
-- `--cluster-key`
-- `--model`
-- `--reference`
-- `--marker-file`
-- `--celltypist-majority-voting`
-
-## Output Contract
-
-Successful runs write:
-
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- `figures/embedding_cell_type.png`
-- `figures/embedding_cluster_vs_cell_type.png`
-- `figures/cluster_to_cell_type_heatmap.png`
-- `figures/cell_type_counts.png`
-- `figures/embedding_annotation_score.png` when scores are available
-- `figures/manifest.json`
-- `figure_data/manifest.json`
-- `tables/annotation_summary.csv`
-- `tables/cell_type_counts.csv`
-- `tables/cluster_annotation_matrix.csv`
-- `reproducibility/commands.sh`
-
-## What Users Should Inspect First
-
-1. `report.md`
-2. `figures/embedding_cell_type.png`
-3. `figures/embedding_cluster_vs_cell_type.png`
-4. `tables/annotation_summary.csv`
-5. `processed.h5ad`
-
-## Reference Data Guide
-
-### Which method should I use?
-
-| Scenario | Recommended method | Example |
+| Input | Format | Required |
 |---|---|---|
-| **PBMC / immune cells (human)** | `markers` (default) or `celltypist` | `--method markers` |
-| **Immune cells (any tissue, human)** | `celltypist` | `--method celltypist --model Immune_All_Low.pkl` |
-| **Mouse data** | `celltypist` with mouse model, or custom markers | `--method celltypist --model Mouse_Isocortex_Hippocampus.pkl` |
-| **Specialized tissue (brain, lung, etc.)** | `celltypist` with tissue model, or `--marker-file` | `--method celltypist --model Human_Lung_Atlas.pkl` |
-| **Have a labeled reference dataset** | `knnpredict` or `popv` | `--method knnpredict --reference ref.h5ad` |
-| **R environment available** | `singler` or `scmap` | `--method singler --reference HPCA` |
+| Clustered AnnData | `.h5ad` with normalised `.X` and a cluster column in `obs` | yes (unless `--demo`) |
+| Reference (popv / knnpredict / singler / scmap) | `.h5ad` (popv / knnpredict) or atlas selector ("HPCA", etc.) | conditional |
+| Manual map (`manual`) | inline string `'0=T cell;1,2=Myeloid'` or `--manual-map-file` | conditional |
+| Custom marker file (`markers`) | JSON / CSV via `--marker-file` | optional |
 
-### Custom marker file format
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | adds `obs["cell_type"]`, `obs["annotation_requested_method"]`, optional `obs["annotation_score"]`, optional `obsm["cell_type_prob"]` |
+| Annotation overview | `tables/annotation_summary.csv` | always |
+| Counts / proportions | `tables/cell_type_counts.csv` | always |
+| Cluster ↔ cell-type | `tables/cluster_annotation_matrix.csv` | when a `cluster_key` is resolved |
+| Figures | `figures/embedding_cell_type.png`, `figures/embedding_cluster_vs_cell_type.png`, `figures/cluster_to_cell_type_heatmap.png`, `figures/cell_type_counts.png`, `figures/embedding_annotation_score.png` | last is conditional on a numeric score |
+| Report | `report.md` + `result.json` | always |
 
-JSON format (recommended):
-```json
-{
-  "T cell": ["CD3D", "CD3E", "CD4"],
-  "B cell": ["MS4A1", "CD79A", "CD79B"],
-  "Macrophage": ["CD68", "CD163"]
-}
+## Flow
+
+1. Load AnnData; preflight method-specific requirements (e.g., `manual` needs a map; `popv` / `knnpredict` need a reference).
+2. Resolve `--cluster-key` (auto-pick from `leiden` / `louvain` / `cell_type` if unset).
+3. Dispatch to the method-specific annotator (`_METHOD_DISPATCH[method]`).
+4. Record `requested_method`, `actual_method`, `used_fallback`, optional `fallback_reason` into `obs` + `result.json`.
+5. Build counts / cluster-matrix tables and standard figures.
+6. Save `processed.h5ad`, `tables/`, `figures/`, `report.md`, `result.json`.
+
+## Gotchas
+
+- **`celltypist` silently falls back to marker-based annotation.** `sc_annotate.py:508-518` swaps to `annotate_markers` when input validation fails (e.g., wrong gene-name space, missing genes); `sc_annotate.py:552-562` does the same on any CellTypist runtime exception. Always check `result.json["actual_method"]` — if it differs from your `--method`, `result.json["fallback_reason"]` records why.
+- **`popv` actual backend is decided at runtime, not from `--method`.** `sc_annotate.py:577` reads `metadata["backend"]` from `apply_popv_annotation` (rapids / scvi / scanvi / classical, depending on what's installed). `result.json["backend"]` records the actually-used backend.
+- **R-backed `singler` / `scmap` hard-fail when the R subprocess returns nothing.** `sc_annotate.py:637` raises `RuntimeError("R annotation method '<m>' returned no predictions")`. Confirm `R`, `SingleR` / `scmap`, and `SingleCellExperiment` are installed before picking these methods.
+- **`manual` requires a map file or inline string.** `sc_annotate.py:477` raises `ValueError("Manual annotation requires --manual-map or --manual-map-file.")`. Inline form: `'0=T cell;1,2=Myeloid'`. File form supports JSON / CSV / TSV / TXT.
+- **Custom marker file errors are explicit.** `sc_annotate.py:220` raises `FileNotFoundError(f"Marker file not found: {p}")`; `sc_annotate.py:238` raises `ValueError(f"No valid marker entries found in {p}")` for empty / malformed JSON / CSV.
+- **`--input` is mandatory unless `--demo`.** `sc_annotate.py:1541` raises `ValueError("--input required when not using --demo")`.
+
+## Key CLI
+
+```bash
+# Demo (built-in PBMC3K, marker-based)
+python omicsclaw.py run sc-cell-annotation --demo --output /tmp/sc_annot_demo
+
+# Marker-based (default) on existing leiden clusters
+python omicsclaw.py run sc-cell-annotation \
+  --input clustered.h5ad --output results/ --cluster-key leiden
+
+# CellTypist immune model with majority voting
+python omicsclaw.py run sc-cell-annotation \
+  --input clustered.h5ad --output results/ \
+  --method celltypist --model Immune_All_Low --celltypist-majority-voting
+
+# PopV reference mapping (provide labelled reference)
+python omicsclaw.py run sc-cell-annotation \
+  --input clustered.h5ad --output results/ \
+  --method popv --reference labelled_atlas.h5ad --cluster-key leiden
+
+# Manual relabeling
+python omicsclaw.py run sc-cell-annotation \
+  --input clustered.h5ad --output results/ \
+  --method manual --cluster-key leiden \
+  --manual-map '0=T cell;1,2=Myeloid;3=B cell'
 ```
 
-CSV format:
-```
-T cell,CD3D;CD3E;CD4
-B cell,MS4A1;CD79A;CD79B
-Macrophage,CD68;CD163
-```
+## See also
 
-### CellTypist models
-
-List all available models:
-```python
-import celltypist
-celltypist.models.models_description()
-```
-
-Common models:
-- `Immune_All_Low.pkl` / `Immune_All_High.pkl` — pan-immune (human)
-- `Human_Lung_Atlas.pkl` — human lung
-- `Cells_Intestinal_Tract.pkl` — human intestinal
-- `Human_AdultAged_Hippocampus.pkl` — human brain
-- `Mouse_Isocortex_Hippocampus.pkl` — mouse brain
-- `Developing_Mouse_Brain.pkl` — developing mouse brain
-- `Pan_Fetal_Human.pkl` — human fetal tissues
-
-Download a specific model:
-```python
-celltypist.models.download_models(model="Immune_All_Low.pkl")
-```
-
-### Reference H5AD for knnpredict / popv
-
-Your reference must be an H5AD file with:
-- Normalized expression in `.X`
-- A `cell_type` column in `.obs` (or another label column)
-
-Sources for labeled references:
-- [CZ CELLxGENE Census](https://cellxgene.cziscience.com/) — download tissue-specific datasets
-- [Human Cell Atlas](https://www.humancellatlas.org/learn-more/data-access/) — curated atlases
-- [Tabula Muris](https://tabula-muris.ds.czbiohub.org/) — mouse atlas
-
-### Species and gene naming
-
-- **Human** genes are typically UPPERCASE: `CD3D`, `MS4A1`, `EPCAM`
-- **Mouse** genes are typically Title case: `Cd3d`, `Ms4a1`, `Epcam`
-- The `markers` method will auto-detect species mismatch and attempt case-insensitive matching
-- For best results with mouse data, use `celltypist` with a mouse-specific model or provide a custom `--marker-file` with mouse gene names
-
-## Guardrails
-
-- Treat `method` and its corresponding `model` / `reference` / `cluster_key` as the key scientific choices.
-- Use normalized expression for public annotation workflows.
-- If CellTypist falls back to `markers`, report both requested and executed methods.
-- If `singler` / `scmap` use celldex atlases, remember they may still fail in restricted-network or empty-cache environments even when R packages are installed.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled PBMC3k data | — |
-| `--method` | str | `markers` | Annotation method: `manual`, `markers`, `celltypist`, `popv`, `knnpredict`, `singler`, `scmap` | validated against METHOD_REGISTRY |
-| `--model` | str | `Immune_All_Low` | CellTypist model name or file stem | celltypist only |
-| `--reference` | str | `HPCA` | SingleR/scmap atlas key or path to labeled H5AD (popv/knnpredict) | — |
-| `--cluster-key` | str | None | Cluster/label column for marker summaries; auto-detected when omitted | — |
-| `--manual-map` | str | None | Inline cluster-to-label mapping, e.g. `0=T cell;1,2=Myeloid` | manual only |
-| `--manual-map-file` | str | None | Path to mapping file (json/csv/tsv/txt) | manual only |
-| `--marker-file` | str | None | Path to custom marker gene file (JSON or CSV) | markers only |
-| `--celltypist-majority-voting` | flag | off | Enable CellTypist neighborhood majority-voting smoothing | celltypist only |
-| `--species` | str | `Human` | SCSA species filter (`Human`/`Mouse`) | scsa only |
-| `--tissue` | str | `All` | SCSA tissue filter (e.g. `Blood`, `Brain`, `All`) | scsa only |
-| `--scsa-foldchange` | float | 1.5 | SCSA DE fold-change threshold | scsa only |
-| `--scsa-pvalue` | float | 0.05 | SCSA DE p-value threshold | scsa only |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `annotation_embedding_points.csv` | UMAP/embedding colored by annotated cell types | ggplot2 |
-| `plot_embedding_feature` | `r_embedding_feature.png` | `annotation_embedding_points.csv` | UMAP/embedding colored by annotation confidence score | ggplot2 |
-| `plot_cell_barplot` | `r_cell_barplot.png` | `cell_type_counts.csv` | Bar chart of cell type counts | ggplot2 |
-| `plot_cell_proportion` | `r_cell_proportion.png` | `cell_type_counts.csv` | Stacked proportion bar chart per sample or cluster | ggplot2 |
-| `plot_cell_sankey` | `r_cell_sankey.png` | `cluster_annotation_matrix.csv` | Sankey/alluvial diagram from cluster to cell type | ggplot2, ggalluvial |
-
-## Workflow Position
-
-**Upstream:** sc-clustering
-**Downstream:** sc-markers, sc-de, sc-cell-communication, sc-differential-abundance
+- `references/parameters.md` — every CLI flag, per-method parameter hints
+- `references/methodology.md` — when each backend wins; reference / model notes
+- `references/output_contract.md` — `obs["cell_type"]` / `obsm["cell_type_prob"]` / `result.json` keys
+- Adjacent skills: `sc-clustering` (upstream — produces the cluster column), `sc-markers` (parallel — ranks the marker genes that *justify* a label; can be run before or after), `sc-de` (downstream — replicate-aware condition DE between labelled groups)

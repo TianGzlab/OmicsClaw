@@ -1,8 +1,121 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from string import Formatter
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+
+_LOGGER = logging.getLogger("omicsclaw.runtime.tool_execution_hooks")
+
+
+@dataclass(frozen=True, slots=True)
+class PreCallRuleInjector:
+    """Injects a small block of rule_text into the chain that a tool's
+    *result* will pass through, just before the model sees the result.
+
+    Phase 4 mechanism for context-conditional rules whose right injection
+    point is "the moment the agent has actually decided to run this tool"
+    rather than "every system prompt unconditionally". E.g. the
+    engineering-discipline rules that govern code edits should fire only
+    when ``file_edit`` is called, not on every chat turn.
+
+    Fields:
+      - ``name``: stable identifier (used in logs/telemetry).
+      - ``matches``: callable ``(tool_name, tool_args) -> bool``. A
+        raising matcher is treated as no-match (fail-closed).
+      - ``rule_text``: the static text block to prepend.
+    """
+
+    name: str
+    matches: Callable[[str, Mapping[str, Any]], bool]
+    rule_text: str
+
+
+_CODE_FILE_EXTENSIONS = (".py", ".R", ".r", ".ipynb")
+
+
+def _is_code_file_write(tool_name: str, tool_args: Mapping[str, Any]) -> bool:
+    if tool_name != "file_write":
+        return False
+    path = str(tool_args.get("path", "") or "")
+    return path.endswith(_CODE_FILE_EXTENSIONS)
+
+
+def _engineering_preamble_matches(tool_name: str, tool_args: Mapping[str, Any]) -> bool:
+    if tool_name == "file_edit":
+        return True
+    if tool_name == "custom_analysis_execute":
+        return True
+    return _is_code_file_write(tool_name, tool_args)
+
+
+_ENGINEERING_PREAMBLE_TEXT = (
+    "## Engineering preamble (read before this tool's result)\n"
+    "- Read existing files first; choose the smallest clear change.\n"
+    "- No speculative abstractions, no broad cleanups, no rewriting "
+    "code outside the scope you were asked about.\n"
+    "- Trust internal-call invariants; only validate at system boundaries.\n"
+    "- Never write `.sh` / `.bash` shell scripts. `.py` / `.R` only when "
+    "the user explicitly asks; save under `output/`.\n"
+    "- Fix any OWASP-class issue you notice (command injection, SQL "
+    "injection, unsafe deserialization)."
+)
+
+_SKILL_EXECUTION_PREAMBLE_TEXT = (
+    "## Skill execution preamble (read before this tool's result)\n"
+    "- Pass method names lowercase via the `method` parameter.\n"
+    "- Prefer canonical backend names / canonical skill aliases; legacy "
+    "aliases work but are not preferred.\n"
+    "- Warn the user before deep-learning analyses (10-60 minutes).\n"
+    "- Outputs land in a per-analysis subdirectory under `output/`."
+)
+
+DEFAULT_PRE_CALL_RULE_INJECTORS: tuple[PreCallRuleInjector, ...] = (
+    PreCallRuleInjector(
+        name="engineering_preamble",
+        matches=_engineering_preamble_matches,
+        rule_text=_ENGINEERING_PREAMBLE_TEXT,
+    ),
+    PreCallRuleInjector(
+        name="skill_execution_preamble",
+        matches=lambda tool_name, _args: tool_name == "omicsclaw",
+        rule_text=_SKILL_EXECUTION_PREAMBLE_TEXT,
+    ),
+)
+
+
+def build_pre_call_rule_text(
+    *,
+    tool_name: str,
+    tool_args: Mapping[str, Any] | None,
+    injectors: tuple[PreCallRuleInjector, ...] | list[PreCallRuleInjector],
+) -> str:
+    """Resolve the concatenated rule_text for a particular tool call.
+
+    Each injector's ``matches`` callback is called under try/except.
+    A misbehaving matcher is skipped (and logged at WARNING). The output
+    is the joined ``rule_text`` of every injector that returned True,
+    in the order they appear in ``injectors``. Returns ``""`` when no
+    injector matches — caller should treat that as no preamble to
+    prepend.
+    """
+    args = dict(tool_args or {})
+    pieces: list[str] = []
+    for injector in injectors:
+        try:
+            matched = bool(injector.matches(tool_name, args))
+        except Exception as exc:
+            _LOGGER.warning(
+                "Pre-call rule matcher for %r raised %s: %s; skipping",
+                injector.name,
+                exc.__class__.__name__,
+                exc,
+            )
+            continue
+        if matched and injector.rule_text:
+            pieces.append(injector.rule_text)
+    return "\n\n".join(pieces)
 
 from omicsclaw.extensions.runtime import (
     ExtensionToolExecutionHookEntry,

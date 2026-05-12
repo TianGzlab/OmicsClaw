@@ -1,0 +1,18 @@
+domain: bulkrna
+emoji: 🕸️
+trigger_keywords:
+- coexpression
+- WGCNA
+- gene network
+- co-expression modules
+- hub genes
+- gene modules
+allowed_extra_flags:
+- --min-module-size
+- --power
+legacy_aliases:
+- bulk-wgcna
+saves_h5ad: false
+script: bulkrna_coexpression.py
+param_hints: {}
+requires_preprocessed: false

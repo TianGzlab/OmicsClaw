@@ -40,7 +40,7 @@ def test_demo_mode(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert (tmp_output / "README.md").exists()
+    assert not (tmp_output / "README.md").exists()
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
     assert (tmp_output / "figures" / "fastq_q30_summary.png").exists()
@@ -50,7 +50,7 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "figures" / "manifest.json").exists()
     assert (tmp_output / "figure_data" / "manifest.json").exists()
     assert (tmp_output / "tables" / "fastq_per_sample_summary.csv").exists()
-    assert (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
+    assert not (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
 
 
 def test_demo_result_json(tmp_output):

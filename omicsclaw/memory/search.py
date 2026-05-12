@@ -18,9 +18,11 @@ from .models import (
     Path,
     GlossaryKeyword,
     SearchDocument,
+    SHARED_NAMESPACE,
     escape_like_literal,
 )
 from .search_terms import build_document_search_terms, expand_query_terms
+from .uri import MemoryURI
 
 if TYPE_CHECKING:
     from .database import DatabaseManager
@@ -105,28 +107,45 @@ class SearchIndexer:
 
         path_rows = (
             await session.execute(
-                select(Path.domain, Path.path, Edge.priority, Edge.disclosure)
+                select(
+                    Path.namespace, Path.domain, Path.path, Edge.priority, Edge.disclosure
+                )
                 .select_from(Path)
                 .join(Edge, Path.edge_id == Edge.id)
                 .where(Edge.child_uuid == node_uuid)
-                .order_by(Path.domain, Path.path)
+                .order_by(Path.namespace, Path.domain, Path.path)
             )
         ).all()
         if not path_rows:
             return []
 
-        keyword_rows = await session.execute(
-            select(GlossaryKeyword.keyword)
-            .where(GlossaryKeyword.node_uuid == node_uuid)
-            .order_by(GlossaryKeyword.keyword)
-        )
-        glossary_text = " ".join(row[0] for row in keyword_rows if row[0])
+        # Glossary keywords are partitioned by namespace; for each search
+        # row we include only keywords visible from its namespace, i.e. the
+        # row's own namespace plus the global ``__shared__`` namespace.
+        keyword_rows = (
+            await session.execute(
+                select(GlossaryKeyword.keyword, GlossaryKeyword.namespace)
+                .where(GlossaryKeyword.node_uuid == node_uuid)
+                .order_by(GlossaryKeyword.namespace, GlossaryKeyword.keyword)
+            )
+        ).all()
+        keyword_by_ns: Dict[str, List[str]] = {}
+        for kw, ns in keyword_rows:
+            if not kw:
+                continue
+            keyword_by_ns.setdefault(ns, []).append(kw)
 
         documents = []
+        shared_keywords = keyword_by_ns.get(SHARED_NAMESPACE, [])
         for row in path_rows:
+            visible = list(keyword_by_ns.get(row.namespace, []))
+            if row.namespace != SHARED_NAMESPACE:
+                visible.extend(shared_keywords)
+            glossary_text = " ".join(visible)
             uri = f"{row.domain}://{row.path}"
             documents.append(
                 {
+                    "namespace": row.namespace,
                     "domain": row.domain,
                     "path": row.path,
                     "node_uuid": node_uuid,
@@ -182,9 +201,9 @@ class SearchIndexer:
                     text(
                         """
                         INSERT INTO search_documents_fts (
-                            domain, path, node_uuid, uri, content, disclosure, search_terms
+                            namespace, domain, path, node_uuid, uri, content, disclosure, search_terms
                         ) VALUES (
-                            :domain, :path, :node_uuid, :uri, :content, coalesce(:disclosure, ''), :search_terms
+                            :namespace, :domain, :path, :node_uuid, :uri, :content, coalesce(:disclosure, ''), :search_terms
                         )
                         """
                     ),
@@ -196,11 +215,114 @@ class SearchIndexer:
     async def refresh_search_documents_for_node(
         self, node_uuid: str, session: Optional[AsyncSession] = None
     ) -> None:
-        """Rebuild derived search rows for one node."""
+        """Rebuild derived search rows for one node (all namespaces).
+
+        Used when a node's content or structural metadata changed and every
+        path pointing at it needs to be reindexed.
+        """
         async with self._optional_session(session) as session:
             documents = await self._build_search_documents_for_node(session, node_uuid)
             await self._delete_search_documents_for_node(session, node_uuid)
             await self._insert_search_documents(session, documents)
+
+    async def refresh_search_documents_for(
+        self,
+        namespace: str,
+        uri: str | MemoryURI,
+        session: Optional[AsyncSession] = None,
+    ) -> None:
+        """Surgically rebuild ONE search row at (namespace, domain, path).
+
+        Useful when a write touches only a single (namespace, uri) and we
+        don't want to disturb sibling rows for the same node in other
+        namespaces. No-op if the path doesn't exist or has no active memory.
+        """
+        parsed = uri if isinstance(uri, MemoryURI) else MemoryURI.parse(uri)
+
+        async with self._optional_session(session) as s:
+            path_row = (
+                await s.execute(
+                    select(Path).where(
+                        Path.namespace == namespace,
+                        Path.domain == parsed.domain,
+                        Path.path == parsed.path,
+                    )
+                )
+            ).scalar_one_or_none()
+            if path_row is None:
+                return
+
+            edge = await s.get(Edge, path_row.edge_id)
+            if edge is None:
+                return
+
+            memory = (
+                await s.execute(
+                    select(Memory)
+                    .where(
+                        Memory.node_uuid == edge.child_uuid,
+                        Memory.deprecated == False,  # noqa: E712
+                    )
+                    .order_by(Memory.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if memory is None:
+                return
+
+            keyword_rows = (
+                await s.execute(
+                    select(GlossaryKeyword.keyword)
+                    .where(
+                        GlossaryKeyword.node_uuid == edge.child_uuid,
+                        GlossaryKeyword.namespace.in_(
+                            [namespace, SHARED_NAMESPACE]
+                        ),
+                    )
+                    .order_by(GlossaryKeyword.keyword)
+                )
+            ).all()
+            glossary_text = " ".join(row[0] for row in keyword_rows if row[0])
+
+            uri_str = f"{parsed.domain}://{parsed.path}"
+            doc = {
+                "namespace": namespace,
+                "domain": parsed.domain,
+                "path": parsed.path,
+                "node_uuid": edge.child_uuid,
+                "memory_id": memory.id,
+                "uri": uri_str,
+                "content": memory.content,
+                "disclosure": edge.disclosure,
+                "search_terms": build_document_search_terms(
+                    parsed.path,
+                    uri_str,
+                    memory.content,
+                    edge.disclosure,
+                    glossary_text,
+                ),
+                "priority": edge.priority,
+            }
+
+            if self.db_type == "sqlite":
+                try:
+                    await s.execute(
+                        text(
+                            "DELETE FROM search_documents_fts "
+                            "WHERE namespace = :ns AND domain = :d AND path = :p"
+                        ),
+                        {"ns": namespace, "d": parsed.domain, "p": parsed.path},
+                    )
+                except Exception:
+                    pass
+            await s.execute(
+                delete(SearchDocument).where(
+                    SearchDocument.namespace == namespace,
+                    SearchDocument.domain == parsed.domain,
+                    SearchDocument.path == parsed.path,
+                )
+            )
+            await self._insert_search_documents(s, [doc])
 
     async def get_node_uuids_for_prefix(
         self, session: AsyncSession, domain: str, base_path: str
@@ -250,26 +372,54 @@ class SearchIndexer:
     # -----------------------------------------------------------------
 
     async def search(
-        self, query: str, limit: int = 10, domain: Optional[str] = None
+        self,
+        query: str,
+        limit: int = 10,
+        domain: Optional[str] = None,
+        namespace: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Search memories by path and content using the derived FTS index."""
+        """Search memories by path and content using the derived FTS index.
+
+        When ``namespace`` is provided, results are restricted to that
+        namespace plus the shared partition; per-namespace hits are sorted
+        ahead of shared ones. ``namespace=None`` preserves legacy
+        unfiltered behavior for callers that haven't migrated.
+        """
         async with self._session() as session:
             candidate_limit = max(limit * 5, 50)
             params: Dict[str, Any] = {"candidate_limit": candidate_limit}
+
             domain_clause = ""
             if domain is not None:
                 params["domain"] = domain
                 domain_clause = "AND sd.domain = :domain"
 
+            namespace_clause, namespace_order = "", ""
+            if namespace is not None:
+                params["current_ns"] = namespace
+                params["shared_ns"] = SHARED_NAMESPACE
+                namespace_clause = (
+                    "AND sd.namespace IN (:current_ns, :shared_ns)"
+                )
+                namespace_order = (
+                    "CASE WHEN sd.namespace = :current_ns THEN 0 ELSE 1 END ASC,"
+                )
+
             if self.db_type == "sqlite":
                 # Try FTS5 first, fall back to LIKE search
                 try:
                     return await self._search_sqlite_fts(
-                        session, query, params, domain_clause, limit
+                        session,
+                        query,
+                        params,
+                        domain_clause,
+                        namespace_clause,
+                        namespace_order,
+                        limit,
                     )
                 except Exception:
                     return await self._search_sqlite_like(
-                        session, query, limit, domain
+                        session, query, limit, domain, namespace
                     )
             else:
                 normalized = expand_query_terms(query)
@@ -288,6 +438,7 @@ class SearchIndexer:
                             sd.priority,
                             sd.content,
                             sd.disclosure,
+                            sd.namespace AS namespace,
                             ts_rank_cd(
                                 to_tsvector(
                                     'simple',
@@ -309,7 +460,8 @@ class SearchIndexer:
                                 coalesce(sd.search_terms, '')
                               ) @@ websearch_to_tsquery('simple', :ts_query)
                           {domain_clause}
-                        ORDER BY score DESC, sd.priority ASC, char_length(sd.path) ASC
+                          {namespace_clause}
+                        ORDER BY {namespace_order} score DESC, sd.priority ASC, char_length(sd.path) ASC
                         LIMIT :candidate_limit
                         """
                     ),
@@ -324,6 +476,8 @@ class SearchIndexer:
         query: str,
         params: Dict[str, Any],
         domain_clause: str,
+        namespace_clause: str,
+        namespace_order: str,
         limit: int,
     ) -> List[Dict[str, Any]]:
         """Search using SQLite FTS5."""
@@ -343,14 +497,22 @@ class SearchIndexer:
                     sd.priority,
                     sd.content,
                     sd.disclosure,
-                    bm25(search_documents_fts, 0.0, 2.5, 0.0, 2.0, 1.0, 1.0, 0.75) AS score
+                    sd.namespace AS namespace,
+                    -- 8 bm25 weights, one per FTS column in declaration order:
+                    -- namespace, domain, path, node_uuid, uri, content,
+                    -- disclosure, search_terms. namespace gets 0.0 because
+                    -- the JOIN already filters it; domain/node_uuid stay 0.0
+                    -- so they don't influence ranking.
+                    bm25(search_documents_fts, 0.0, 0.0, 2.5, 0.0, 2.0, 1.0, 1.0, 0.75) AS score
                 FROM search_documents AS sd
                 JOIN search_documents_fts
-                  ON search_documents_fts.domain = sd.domain
-                 AND search_documents_fts.path = sd.path
+                  ON search_documents_fts.namespace = sd.namespace
+                 AND search_documents_fts.domain    = sd.domain
+                 AND search_documents_fts.path      = sd.path
                 WHERE search_documents_fts MATCH :match_query
                   {domain_clause}
-                ORDER BY score ASC, sd.priority ASC, length(sd.path) ASC
+                  {namespace_clause}
+                ORDER BY {namespace_order} score ASC, sd.priority ASC, length(sd.path) ASC
                 LIMIT :candidate_limit
                 """
             ),
@@ -364,6 +526,7 @@ class SearchIndexer:
         query: str,
         limit: int,
         domain: Optional[str],
+        namespace: Optional[str],
     ) -> List[Dict[str, Any]]:
         """Fallback search using LIKE when FTS5 is unavailable."""
         safe_query = f"%{escape_like_literal(query)}%"
@@ -373,6 +536,17 @@ class SearchIndexer:
         if domain:
             params["domain"] = domain
             domain_clause = "AND sd.domain = :domain"
+
+        namespace_clause, namespace_order = "", ""
+        if namespace is not None:
+            params["current_ns"] = namespace
+            params["shared_ns"] = SHARED_NAMESPACE
+            namespace_clause = (
+                "AND sd.namespace IN (:current_ns, :shared_ns)"
+            )
+            namespace_order = (
+                "CASE WHEN sd.namespace = :current_ns THEN 0 ELSE 1 END ASC,"
+            )
 
         result = await session.execute(
             text(
@@ -385,11 +559,13 @@ class SearchIndexer:
                     sd.priority,
                     sd.content,
                     sd.disclosure,
+                    sd.namespace AS namespace,
                     0 AS score
                 FROM search_documents AS sd
                 WHERE (sd.content LIKE :query ESCAPE '\\' OR sd.path LIKE :query ESCAPE '\\')
                   {domain_clause}
-                ORDER BY sd.priority ASC, length(sd.path) ASC
+                  {namespace_clause}
+                ORDER BY {namespace_order} sd.priority ASC, length(sd.path) ASC
                 LIMIT :limit
                 """
             ),
@@ -408,6 +584,7 @@ class SearchIndexer:
             seen_nodes.add(row["node_uuid"])
             matches.append(
                 {
+                    "namespace": row.get("namespace"),
                     "domain": row["domain"],
                     "path": row["path"],
                     "uri": row["uri"],

@@ -276,6 +276,17 @@ def render_output_style_layer(
             )
         )
 
+    lines.extend(
+        (
+            "",
+            "### Output Efficiency",
+            "- Lead with the answer or the action; the reasoning, if needed, comes after.",
+            "- If you can say it in one sentence, don't use three. Skip filler transitions.",
+            "- Reserve text output for: (a) decisions needing user input, (b) status at natural milestones, (c) errors or blockers that change the plan.",
+            "- This brevity rule applies to your prose only — code blocks and tool-call arguments stay as detailed as the work requires.",
+        )
+    )
+
     return "\n".join(lines).strip()
 
 

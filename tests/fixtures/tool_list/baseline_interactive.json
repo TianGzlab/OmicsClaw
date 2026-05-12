@@ -1,0 +1,76 @@
+{
+  "request": {
+    "surface": "interactive",
+    "skill": "",
+    "query": "",
+    "workspace": "",
+    "pipeline_workspace": "",
+    "capability_context": ""
+  },
+  "total_chars": 933,
+  "tool_count": 2,
+  "tool_names": [
+    "file_read",
+    "glob_files"
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "file_read",
+        "description": "Read a text file from the active workspace, pipeline workspace, or trusted project directories.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path to read."
+            },
+            "start_line": {
+              "type": "integer",
+              "description": "1-based starting line number. Default: 1."
+            },
+            "end_line": {
+              "type": "integer",
+              "description": "1-based ending line number. Default: end of file."
+            },
+            "max_chars": {
+              "type": "integer",
+              "description": "Maximum characters to return. Default: 12000."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "Find files under the active workspace or project directories using a glob pattern.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Glob pattern such as '**/*.py' or 'data/*.csv'."
+            },
+            "root": {
+              "type": "string",
+              "description": "Optional root directory to search from."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of matches to return. Default: 200."
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    }
+  ]
+}

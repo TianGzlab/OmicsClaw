@@ -6,9 +6,6 @@ from .context_assembler import assemble_prompt_context
 from .context_layers import (
     DEFAULT_SOUL_MD,
     ContextAssemblyRequest,
-    get_execution_discipline,
-    get_role_guardrails,
-    get_skill_contract,
     load_base_persona,
 )
 
@@ -35,9 +32,6 @@ def build_system_prompt(
     pipeline_workspace: str = "",
     mcp_servers: tuple[object, ...] | list[object] | None = None,
     base_persona: str = "",
-    include_role_guardrails: bool = True,
-    include_execution_discipline: bool = True,
-    include_skill_contract: bool = True,
     include_knowhow: bool | None = None,
     include_knowledge_guidance: bool | None = None,
     include_extension_prompt_packs: bool = True,
@@ -65,9 +59,6 @@ def build_system_prompt(
             pipeline_workspace=pipeline_workspace,
             mcp_servers=tuple(mcp_servers or ()),
             soul_md=soul_md,
-            include_role_guardrails=include_role_guardrails,
-            include_execution_discipline=include_execution_discipline,
-            include_skill_contract=include_skill_contract,
             include_knowhow=include_knowhow,
             include_knowledge_guidance=include_knowledge_guidance,
             include_extension_prompt_packs=include_extension_prompt_packs,
@@ -80,8 +71,5 @@ def build_system_prompt(
 __all__ = [
     "DEFAULT_SOUL_MD",
     "build_system_prompt",
-    "get_execution_discipline",
-    "get_role_guardrails",
-    "get_skill_contract",
     "load_base_persona",
 ]

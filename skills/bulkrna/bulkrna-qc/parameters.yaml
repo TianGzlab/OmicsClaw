@@ -1,0 +1,17 @@
+domain: bulkrna
+emoji: 📊
+trigger_keywords:
+- bulk QC
+- library size
+- count matrix
+- sample quality
+- gene detection
+- RNA-seq quality
+- count QC
+allowed_extra_flags: []
+legacy_aliases:
+- bulk-align
+saves_h5ad: false
+script: bulkrna_qc.py
+param_hints: {}
+requires_preprocessed: false

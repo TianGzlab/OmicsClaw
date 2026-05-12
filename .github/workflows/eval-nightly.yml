@@ -1,0 +1,77 @@
+name: Behavioral Parity Eval (weekly)
+
+# Runs the @pytest.mark.eval suite against the production prompt + tool list
+# every Monday at midnight UTC. Endpoint + model are resolved from the
+# same env semantics as bot/run.py — set `LLM_PROVIDER` (e.g. `deepseek`,
+# `anthropic`) as a repo variable and the matching API key as a repo
+# secret. Skipped automatically when no provider key secret is
+# configured (e.g. on forks), so PRs from contributors don't fail when
+# they lack credentials.
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"  # Mondays 00:00 UTC
+  workflow_dispatch:      # also allow manual trigger
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository == 'TianGzlab/OmicsClaw' }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal eval deps
+        run: |
+          python -m pip install --upgrade pip
+          # Only deps the eval harness actually exercises — avoids the
+          # heavy bioinformatics stack (scanpy / R / etc) that the eval
+          # corpus doesn't touch.
+          pip install -e .
+          pip install pytest pytest-asyncio openai anthropic
+
+      - name: Detect missing API key (graceful skip)
+        id: detect_key
+        run: |
+          if [ -z "${{ secrets.LLM_API_KEY }}" ] \
+             && [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ] \
+             && [ -z "${{ secrets.DEEPSEEK_API_KEY }}" ] \
+             && [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "no_credentials=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Eval workflow has no provider API key secret configured; nothing to run."
+          else
+            echo "no_credentials=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run eval suite
+        if: steps.detect_key.outputs.no_credentials != 'true'
+        env:
+          # Provider + endpoint + model resolve via omicsclaw.core.provider_registry,
+          # matching bot/run.py. Set LLM_PROVIDER as a repo variable and the
+          # matching API key as a repo secret; LLM_BASE_URL / EVAL_MODEL are
+          # optional overrides that take precedence over the provider preset.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          OMICSCLAW_MODEL: ${{ vars.OMICSCLAW_MODEL }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+        run: |
+          python scripts/run_eval.py
+
+      - name: Upload eval artifacts
+        if: always() && steps.detect_key.outputs.no_credentials != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: tests/eval/results/
+          retention-days: 30
+          if-no-files-found: warn

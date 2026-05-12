@@ -33,6 +33,11 @@ Base = declarative_base()
 # Using a fixed UUID instead of NULL avoids SQLite's NULL != NULL uniqueness quirk.
 ROOT_NODE_UUID = "00000000-0000-0000-0000-000000000000"
 
+# Shared (cross-namespace) partition. Read fallback target for recall/search;
+# also the implicit default for legacy callers that don't pass ``namespace``.
+# Single source of truth — engine.py / search.py / migrations import from here.
+SHARED_NAMESPACE = "__shared__"
+
 
 # =============================================================================
 # Shared Utilities
@@ -142,14 +147,20 @@ class Edge(Base):
 
 
 class Path(Base):
-    """Materialized URI cache: (domain, path_string) → edge.
+    """Materialized URI cache: (namespace, domain, path_string) → edge.
 
     The source of truth for tree structure is the edges table.
-    Paths are a routing convenience for URI resolution.
+    Paths are a routing convenience for URI resolution. ``namespace``
+    partitions identical (domain, path) URIs across surfaces/users.
+    Default ``__shared__`` keeps legacy callers (GraphService) writing into
+    the same partition they always have.
     """
 
     __tablename__ = "paths"
 
+    namespace = Column(
+        String(128), primary_key=True, nullable=False, default="__shared__"
+    )
     domain = Column(String(64), primary_key=True, default="core")
     path = Column(String(512), primary_key=True)
     edge_id = Column(Integer, ForeignKey("edges.id"), nullable=True)
@@ -159,10 +170,11 @@ class Path(Base):
 
 
 class GlossaryKeyword(Base):
-    """Glossary keyword-to-node binding.
+    """Glossary keyword-to-node binding, partitioned by namespace.
 
     When a keyword appears in a memory's content, the frontend highlights
-    the keyword and links it to the associated node.
+    the keyword and links it to the associated node. Each namespace owns
+    its own keyword set; ``__shared__`` keywords are visible to all.
     """
 
     __tablename__ = "glossary_keywords"
@@ -174,20 +186,32 @@ class GlossaryKeyword(Base):
         ForeignKey("nodes.uuid", ondelete="CASCADE"),
         nullable=False,
     )
+    namespace = Column(
+        String(128), nullable=False, default="__shared__"
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("keyword", "node_uuid", name="uq_glossary_keyword_node"),
+        UniqueConstraint(
+            "namespace", "keyword", "node_uuid", name="uq_glossary_keyword_node"
+        ),
     )
 
     node = relationship("Node")
 
 
 class SearchDocument(Base):
-    """Derived search row for one reachable path of an active node."""
+    """Derived search row for one reachable path of an active node.
+
+    Composite PK ``(namespace, domain, path)`` matches Path's so the indexer
+    can refresh exactly one row per write target.
+    """
 
     __tablename__ = "search_documents"
 
+    namespace = Column(
+        String(128), primary_key=True, nullable=False, default="__shared__"
+    )
     domain = Column(String(64), primary_key=True, default="core")
     path = Column(String(512), primary_key=True)
     node_uuid = Column(

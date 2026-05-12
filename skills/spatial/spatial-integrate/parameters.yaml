@@ -1,0 +1,108 @@
+domain: spatial
+allowed_extra_flags:
+- --batch-key
+- --method
+- --harmony-theta
+- --harmony-lambda
+- --harmony-max-iter
+- --bbknn-neighbors-within-batch
+- --bbknn-n-pcs
+- --bbknn-trim
+- --scanorama-knn
+- --scanorama-sigma
+- --scanorama-alpha
+- --scanorama-batch-size
+param_hints:
+  harmony:
+    priority: harmony_theta → harmony_lambda → harmony_max_iter
+    params:
+    - batch_key
+    - harmony_theta
+    - harmony_lambda
+    - harmony_max_iter
+    defaults:
+      batch_key: batch
+      harmony_theta: 2.0
+      harmony_lambda: 1.0
+      harmony_max_iter: 10
+    requires:
+    - obsm.X_pca
+    - obs.batch_key
+    tips:
+    - '--harmony-theta: Diversity penalty; raise it to encourage stronger batch mixing.'
+    - '--harmony-lambda: Ridge penalty; smaller values increase correction strength,
+      while `-1` enables Harmony auto-lambda estimation.'
+    - '--harmony-max-iter: Maximum Harmony outer iterations before convergence.'
+  bbknn:
+    priority: bbknn_neighbors_within_batch → bbknn_n_pcs → bbknn_trim
+    params:
+    - batch_key
+    - bbknn_neighbors_within_batch
+    - bbknn_n_pcs
+    - bbknn_trim
+    defaults:
+      batch_key: batch
+      bbknn_neighbors_within_batch: 3
+      bbknn_n_pcs: 50
+      bbknn_trim: null
+    requires:
+    - obsm.X_pca
+    - obs.batch_key
+    tips:
+    - '--bbknn-neighbors-within-batch: Main integration knob controlling how many
+      neighbors BBKNN draws from each batch.'
+    - '--bbknn-n-pcs: Number of PCs used to build the batch-balanced graph; OmicsClaw
+      clamps it to the PCs actually available in `X_pca`.'
+    - '--bbknn-trim: Optional edge trimming after graph construction; leave unset
+      to keep the package default.'
+  scanorama:
+    priority: scanorama_knn → scanorama_sigma → scanorama_alpha → scanorama_batch_size
+    params:
+    - batch_key
+    - scanorama_knn
+    - scanorama_sigma
+    - scanorama_alpha
+    - scanorama_batch_size
+    defaults:
+      batch_key: batch
+      scanorama_knn: 20
+      scanorama_sigma: 15.0
+      scanorama_alpha: 0.1
+      scanorama_batch_size: 5000
+    requires:
+    - obsm.X_pca
+    - obs.batch_key
+    tips:
+    - '--scanorama-knn: Number of nearest neighbors used while matching batches.'
+    - '--scanorama-sigma: Gaussian kernel width for smoothing Scanorama correction
+      vectors.'
+    - '--scanorama-alpha: Alignment-score cutoff controlling which batch matches are
+      accepted.'
+    - '--scanorama-batch-size: Incremental alignment batch size for large datasets.'
+legacy_aliases:
+- integrate
+- spatial-integration
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🔗
+homepage: https://github.com/TianGzlab/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: scanpy
+  bins: []
+trigger_keywords:
+- multi-sample integration
+- batch correction
+- Harmony
+- BBKNN
+- Scanorama
+- merge samples
+script: spatial_integrate.py

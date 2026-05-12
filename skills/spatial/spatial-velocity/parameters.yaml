@@ -1,0 +1,251 @@
+domain: spatial
+allowed_extra_flags:
+- --cluster-key
+- --dynamical-fit-scaling
+- --dynamical-fit-steady-states
+- --dynamical-fit-time
+- --dynamical-max-iter
+- --dynamical-n-jobs
+- --dynamical-n-top-genes
+- --method
+- --no-dynamical-fit-scaling
+- --no-dynamical-fit-steady-states
+- --no-dynamical-fit-time
+- --no-velocity-fit-offset
+- --no-velocity-fit-offset2
+- --no-velocity-graph-approx
+- --no-velocity-graph-sqrt-transform
+- --no-velocity-use-highly-variable
+- --no-velovi-early-stopping
+- --velocity-fit-offset
+- --velocity-fit-offset2
+- --velocity-graph-approx
+- --velocity-graph-n-neighbors
+- --velocity-graph-sqrt-transform
+- --velocity-min-likelihood
+- --velocity-min-r2
+- --velocity-min-shared-counts
+- --velocity-n-neighbors
+- --velocity-n-pcs
+- --velocity-n-top-genes
+- --velocity-use-highly-variable
+- --velovi-batch-size
+- --velovi-dropout-rate
+- --velovi-early-stopping
+- --velovi-lr
+- --velovi-max-epochs
+- --velovi-n-hidden
+- --velovi-n-latent
+- --velovi-n-layers
+- --velovi-n-samples
+- --velovi-weight-decay
+param_hints:
+  stochastic:
+    priority: velocity_n_neighbors/n_pcs → velocity_fit_offset/min_r2 → velocity_graph_*
+    params:
+    - cluster_key
+    - velocity_min_shared_counts
+    - velocity_n_top_genes
+    - velocity_n_pcs
+    - velocity_n_neighbors
+    - velocity_use_highly_variable
+    - velocity_fit_offset
+    - velocity_fit_offset2
+    - velocity_min_r2
+    - velocity_min_likelihood
+    - velocity_graph_n_neighbors
+    - velocity_graph_sqrt_transform
+    - velocity_graph_approx
+    defaults:
+      cluster_key: leiden
+      velocity_min_shared_counts: 30
+      velocity_n_top_genes: 2000
+      velocity_n_pcs: 30
+      velocity_n_neighbors: 30
+      velocity_use_highly_variable: true
+      velocity_fit_offset: false
+      velocity_fit_offset2: false
+      velocity_min_r2: 0.01
+      velocity_min_likelihood: 0.001
+      velocity_graph_n_neighbors: null
+      velocity_graph_sqrt_transform: null
+      velocity_graph_approx: null
+    requires:
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '`stochastic` uses official `scv.tl.velocity(mode=''stochastic'')` after OmicsClaw
+      rebuilds moments with the requested preprocessing controls.'
+    - '--velocity-fit-offset / --velocity-fit-offset2 / --velocity-min-r2 / --velocity-min-likelihood:
+      official `scv.tl.velocity()` controls.'
+    - '--velocity-graph-n-neighbors / --velocity-graph-sqrt-transform / --velocity-graph-approx:
+      official `scv.tl.velocity_graph()` controls.'
+  deterministic:
+    priority: velocity_n_neighbors/n_pcs → velocity_fit_offset/min_r2 → velocity_graph_*
+    params:
+    - cluster_key
+    - velocity_min_shared_counts
+    - velocity_n_top_genes
+    - velocity_n_pcs
+    - velocity_n_neighbors
+    - velocity_use_highly_variable
+    - velocity_fit_offset
+    - velocity_fit_offset2
+    - velocity_min_r2
+    - velocity_min_likelihood
+    - velocity_graph_n_neighbors
+    - velocity_graph_sqrt_transform
+    - velocity_graph_approx
+    defaults:
+      cluster_key: leiden
+      velocity_min_shared_counts: 30
+      velocity_n_top_genes: 2000
+      velocity_n_pcs: 30
+      velocity_n_neighbors: 30
+      velocity_use_highly_variable: true
+      velocity_fit_offset: false
+      velocity_fit_offset2: false
+      velocity_min_r2: 0.01
+      velocity_min_likelihood: 0.001
+      velocity_graph_n_neighbors: null
+      velocity_graph_sqrt_transform: null
+      velocity_graph_approx: null
+    requires:
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '`deterministic` uses the same scVelo engine as `stochastic` but switches to
+      `mode=''deterministic''`.'
+    - The shared `velocity_*` preprocessing settings are wrapper-level controls around
+      the official scVelo preprocessing recipe and materially affect the result.
+  dynamical:
+    priority: dynamical_n_top_genes/max_iter → velocity_min_r2/min_likelihood → velocity_graph_*
+    params:
+    - cluster_key
+    - velocity_min_shared_counts
+    - velocity_n_top_genes
+    - velocity_n_pcs
+    - velocity_n_neighbors
+    - velocity_use_highly_variable
+    - velocity_min_r2
+    - velocity_min_likelihood
+    - dynamical_n_top_genes
+    - dynamical_max_iter
+    - dynamical_fit_time
+    - dynamical_fit_scaling
+    - dynamical_fit_steady_states
+    - dynamical_n_jobs
+    - velocity_graph_n_neighbors
+    - velocity_graph_sqrt_transform
+    - velocity_graph_approx
+    defaults:
+      cluster_key: leiden
+      velocity_min_shared_counts: 30
+      velocity_n_top_genes: 2000
+      velocity_n_pcs: 30
+      velocity_n_neighbors: 30
+      velocity_use_highly_variable: true
+      velocity_min_r2: 0.01
+      velocity_min_likelihood: 0.001
+      dynamical_n_top_genes: null
+      dynamical_max_iter: 10
+      dynamical_fit_time: true
+      dynamical_fit_scaling: true
+      dynamical_fit_steady_states: true
+      dynamical_n_jobs: null
+      velocity_graph_n_neighbors: null
+      velocity_graph_sqrt_transform: null
+      velocity_graph_approx: null
+    requires:
+    - layers.spliced
+    - layers.unspliced
+    tips:
+    - '--dynamical-n-top-genes / --dynamical-max-iter / --dynamical-fit-time / --dynamical-fit-scaling
+      / --dynamical-fit-steady-states / --dynamical-n-jobs: official `scv.tl.recover_dynamics()`
+      controls.'
+    - '`dynamical` additionally exports latent-time support when `scv.tl.latent_time()`
+      succeeds.'
+  velovi:
+    priority: velovi_max_epochs/n_samples → velovi_n_hidden/n_latent/n_layers → velocity_graph_*
+    params:
+    - cluster_key
+    - velocity_min_shared_counts
+    - velocity_n_top_genes
+    - velocity_n_pcs
+    - velocity_n_neighbors
+    - velocity_use_highly_variable
+    - velovi_n_hidden
+    - velovi_n_latent
+    - velovi_n_layers
+    - velovi_dropout_rate
+    - velovi_max_epochs
+    - velovi_lr
+    - velovi_weight_decay
+    - velovi_batch_size
+    - velovi_n_samples
+    - velovi_early_stopping
+    - velocity_graph_n_neighbors
+    - velocity_graph_sqrt_transform
+    - velocity_graph_approx
+    defaults:
+      cluster_key: leiden
+      velocity_min_shared_counts: 30
+      velocity_n_top_genes: 2000
+      velocity_n_pcs: 30
+      velocity_n_neighbors: 30
+      velocity_use_highly_variable: true
+      velovi_n_hidden: 256
+      velovi_n_latent: 10
+      velovi_n_layers: 1
+      velovi_dropout_rate: 0.1
+      velovi_max_epochs: 500
+      velovi_lr: 0.01
+      velovi_weight_decay: 0.01
+      velovi_batch_size: 256
+      velovi_n_samples: 25
+      velovi_early_stopping: true
+      velocity_graph_n_neighbors: null
+      velocity_graph_sqrt_transform: null
+      velocity_graph_approx: null
+    requires:
+    - layers.spliced
+    - layers.unspliced
+    - scvi_tools
+    tips:
+    - OmicsClaw still runs shared scVelo preprocessing first because VELOVI consumes
+      moment-smoothed `Ms` / `Mu` layers.
+    - '--velovi-n-hidden / --velovi-n-latent / --velovi-n-layers / --velovi-dropout-rate:
+      official `scvi.external.VELOVI(...)` model controls.'
+    - '--velovi-max-epochs / --velovi-lr / --velovi-weight-decay / --velovi-batch-size
+      / --velovi-early-stopping: official `VELOVI.train()` controls.'
+    - '--velovi-n-samples: official posterior-sampling control for `get_velocity()`
+      and `get_latent_time()` extraction.'
+legacy_aliases:
+- velocity
+saves_h5ad: true
+requires_preprocessed: true
+requires:
+  bins:
+  - python3
+  env: []
+  config: []
+emoji: 🏎️
+homepage: https://github.com/TianGzlab/OmicsClaw
+os:
+- macos
+- linux
+install:
+- kind: pip
+  package: scvelo
+  bins: []
+- kind: pip
+  package: scvi-tools
+  bins: []
+trigger_keywords:
+- RNA velocity
+- cellular dynamics
+- scVelo
+- VELOVI
+- latent time
+- spliced unspliced
+script: spatial_velocity.py

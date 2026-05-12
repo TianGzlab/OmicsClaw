@@ -1,10 +1,27 @@
-.PHONY: demo test list demo-all catalog demo-orchestrator demo-bulkrna \
+.PHONY: setup-env setup-env-name \
+        demo test list demo-all catalog demo-orchestrator demo-bulkrna \
         install install-spatial-domains install-full install-dev \
         install-oc oc-link \
         bot-telegram bot-feishu bot-multi bot-list \
         memory-server
 
-## ── Virtual-environment + installation targets ──────────────────────────────
+## ── Conda environment (recommended, full functionality) ──────────────
+## Single-command install of R 4.3, ~30 R packages, ~15 bioconda CLIs,
+## OmicsClaw (editable), and all Python optional extras.
+## Requires mamba (recommended) or conda — install Miniforge:
+##   https://github.com/conda-forge/miniforge
+
+setup-env:
+	bash 0_setup_env.sh
+
+# Use a custom env name: `make setup-env-name NAME=foo`
+NAME ?= OmicsClaw
+setup-env-name:
+	bash 0_setup_env.sh "$(NAME)"
+
+## ── Legacy lightweight venv path (Python-only skills) ────────────────────────
+## NOTE: this path does NOT install R, samtools, STAR, fastqc, etc.
+## For full functionality use:  make setup-env  (or: bash 0_setup_env.sh)
 
 venv:
 	python3 -m venv .venv
@@ -61,6 +78,27 @@ list:
 
 catalog:
 	python scripts/generate_catalog.py
+
+# ADR 2026-05-11 (#1): verify every routing surface (catalog.json, every
+# domain INDEX.md, CLAUDE.md routing table) stays in sync with SKILL.md
+# descriptions.  Exits 1 on drift.  CI MUST call without --fix so drift is
+# blocking; local dev can use `make check-drift FIX=1` for one-step repair.
+check-drift:
+	python scripts/check_description_drift.py $(if $(FIX),--fix,) $(if $(VERBOSE),-v,)
+
+# ADR 2026-05-11: regenerate the Skip-when negative-routing eval snapshot.
+# Default domain = spatial (the POC scope).  Set DOMAIN=<other> to extend.
+# Set STUB=1 to emit a schema-only snapshot without calling the LLM.
+DOMAIN ?= spatial
+EVAL_OUT ?= tests/eval/skip_when_cases.json
+eval-snapshot:
+	python scripts/extract_skip_when_cases.py \
+		--domain $(DOMAIN) \
+		--output $(EVAL_OUT) \
+		$(if $(STUB),--stub,)
+	@echo
+	@echo "Snapshot written.  Review the diff before commit:"
+	@echo "  git diff -- $(EVAL_OUT)"
 
 demo-orchestrator:
 	python omicsclaw.py run orchestrator --demo --output /tmp/omicsclaw_orchestrator_demo

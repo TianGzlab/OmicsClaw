@@ -1,0 +1,72 @@
+---
+title: "聊天机器人 - Telegram + Feishu"
+description: "OmicsClaw 提供 Telegram 与 Feishu 双通道聊天机器人，共享 LLM 工具调用核心，复用 88 个 skill。"
+keywords: ["Telegram bot", "Feishu", "飞书", "聊天机器人", "LLM agent"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么需要 Bot 通道
+
+**不是所有用户都用命令行**：大多数湿实验研究员不熟悉终端操作，希望在 Telegram 或飞书里直接输入问题，让 OmicsClaw 自动完成分析并返回结果图表。Bot 通道让非计算背景的研究员也能随时调用全部 88 个 skill，无需记忆任何 CLI 参数。
+
+**群协作场景**：实验室可以把 OmicsClaw bot 拉进共享群组，多名成员同时提问、共享结果，分析过程对整个团队可见，避免重复运行相同任务。Bot 支持 @mention 响应，在群内不会打扰无关成员。
+
+**移动端访问**：在路上或会议间隙，研究员可用手机发送消息查看分析进度、上传小文件，或让 bot 对已存放在服务器的大文件（如 `.h5ad`）发起任务。分析结果图片直接发回手机，随时随地可以查看。
+
+## 启用前 / 启用后
+
+| 维度 | 仅 CLI | 加 Bot |
+|---|---|---|
+| 远程访问 | SSH 进服务器操作 | 直接发消息即可 |
+| 群协作 | 无，各自独立运行 | 群里 @bot 共享分析 |
+| 移动端 | 无法操作 | 手机随时发消息 |
+
+## 启动命令
+
+```bash
+# Telegram
+python -m bot.run --channels telegram
+# 或：
+make bot-telegram
+```
+
+```bash
+# Feishu（飞书）
+python -m bot.run --channels feishu
+# 或：
+make bot-feishu
+```
+
+两个通道也可在同一进程中并发启动：
+
+```bash
+python -m bot.run --channels telegram,feishu
+```
+
+## 配置环境变量
+
+在项目根目录创建 `.env` 文件，填入以下变量：
+
+| 变量 | 用途 | 来源 |
+|---|---|---|
+| `LLM_API_KEY` | OpenAI 兼容 API key | 自填 / OpenAI / 自托管 LLM |
+| `LLM_BASE_URL` | LLM 端点（非 OpenAI 时） | 自填 |
+| `TELEGRAM_BOT_TOKEN` | Telegram only | @BotFather |
+| `FEISHU_APP_ID` | Feishu only | 飞书开发者后台 |
+| `FEISHU_APP_SECRET` | Feishu only | 飞书开发者后台 |
+
+> 也可仅设置提供商专属 key（如 `DEEPSEEK_API_KEY`），系统会自动检测，无需同时设置 `LLM_API_KEY`。完整变量列表见 `bot/README.md`。
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| Bot 启动后无响应 | `.env` 缺少必要变量 | 检查 `LLM_API_KEY` 与通道 token 是否已设 |
+| Bot 路由 skill 出错 | 可能是 skill 本身问题 | 单独跑 CLI 验证：`python omicsclaw.py run <skill> ...` |
+| 图片识别不准确 | 当前图像理解能力有限 | 发图时附加文字说明（组织类型、染色方式等） |
+
+## 下一步阅读
+
+- [OmicsClaw-App 桌面端](/docs/ecosystem/omicsclaw-app)
+- [编排器](/docs/architecture/orchestrator)
+- [整体架构](/docs/architecture/overview)

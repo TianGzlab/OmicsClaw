@@ -21,7 +21,6 @@ from omicsclaw.common.checksums import sha256_file
 from omicsclaw.common.report import (
     load_result_json,
     write_result_json,
-    write_standard_run_artifacts,
 )
 from skills.spatial._lib.exceptions import (
     DataError,
@@ -337,15 +336,6 @@ def main() -> None:
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description=SKILL_DESCRIPTION,
-        result_payload=result_payload,
-        preferred_method=CONTRACT_SPEC.method,
-        script_path=Path(__file__).resolve(),
-        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-    )
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

@@ -1,181 +1,99 @@
+---
+name: sc-drug-response
+description: Load when scoring drug sensitivity per cluster on an annotated scRNA AnnData via simple-correlation against drug-target signatures or via CaDRReS-Sc pretrained models (GDSC / PRISM). Skip when the AnnData has no cluster labels yet (run sc-clustering first) or for predicting genetic-perturbation effects (use sc-in-silico-perturbation).
+version: 0.2.0
+author: OmicsClaw
+license: MIT
+tags:
+- singlecell
+- scrna
+- drug-response
+- pharmacogenomics
+- cadrres
+- gdsc
+- prism
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
+---
+
 # sc-drug-response
 
-**Single-cell drug response prediction** — predict drug sensitivity from single-cell transcriptomes using pharmacogenomic models or gene expression correlation with known drug targets.
+## When to use
 
-## Data / State Requirements
+The user has a clustered / labelled scRNA AnnData with HGNC-symbol gene
+names and wants per-cluster drug sensitivity rankings. Two methods:
 
-| Requirement | Details |
-|---|---|
-| **Input** | Preprocessed AnnData (`.h5ad`) with normalized expression in `X` |
-| **Matrix** | Normalized expression (log1p-transformed) |
-| **Layers** | `layers["counts"]` recommended for CaDRReS |
-| **Metadata** | Cluster labels in `.obs` (leiden, louvain, or custom) |
-| **Gene names** | HGNC symbols required (e.g., BRCA1, EGFR). Ensembl IDs will fail — run `sc-standardize-input` or `bulkrna-geneid-mapping` first |
-| **Upstream** | `sc-preprocessing` must be completed first |
-| **Reference** | `cadrres` method requires pretrained model files (see Reference Data Guide) |
+- `simple_correlation` (default) — built-in lightweight scorer:
+  correlates per-cluster mean expression with drug-target signatures
+  from `_BUILTIN_DRUG_TARGETS`. No external models, no CaDRReS install.
+- `cadrres` — runs CaDRReS-Sc against pretrained GDSC or PRISM models.
+  Requires the CaDRReS-Sc script directory plus model files locally
+  (cache at `~/.cache/omicsclaw/cadrres/<drug-db>/`).
 
-## Method Selection Table
+For *genetic* perturbation predictions (KO / KD / overexpression on
+unperturbed data) use `sc-in-silico-perturbation`. For real Perturb-seq
+classification use `sc-perturb`.
 
-| Scenario | Recommended Method | Example |
+## Inputs & Outputs
+
+| Input | Format | Required |
 |---|---|---|
-| Quick exploration, no external data | `simple_correlation` | `--method simple_correlation` |
-| Publication-quality predictions with GDSC | `cadrres` | `--method cadrres --drug-db gdsc --model-dir ~/.cache/omicsclaw/drug_response/` |
-| PRISM drug library | `cadrres` | `--method cadrres --drug-db prism --model-dir ~/.cache/omicsclaw/drug_response/` |
-| Mouse data | `simple_correlation` | `--method simple_correlation` (auto-detects species) |
+| Clustered AnnData (HGNC symbols in `var_names`) | `.h5ad` with cluster column in `obs` | yes (unless `--demo`) |
+| CaDRReS model dir | path (`--model-dir`) | required for `cadrres` (real runs only) |
 
-### Method Details
-
-#### `simple_correlation` (default, no external data needed)
-
-Scores drug sensitivity per cluster by computing mean expression of known drug target genes. Built-in target gene sets cover 15 common drugs (Cisplatin, Paclitaxel, Doxorubicin, etc.). Higher score = higher predicted sensitivity.
-
-**Pros**: No model download required, fast, interpretable.
-**Cons**: Simplified scoring, limited to built-in drug-target mappings.
-
-#### `cadrres` (CaDRReS-Sc)
-
-Uses CaDRReS-Sc pretrained pharmacogenomic models to predict IC50 (GDSC) or AUC (PRISM) from single-cell cluster expression profiles. Provides cell death proportion estimates for GDSC.
-
-**Pros**: Model-based, covers hundreds of drugs, validated on GDSC/PRISM.
-**Cons**: Requires model download (~500MB), currently human-only.
-
-## Parameters
-
-| Parameter | Default | Description |
+| Output | Path | Notes |
 |---|---|---|
-| `--method` | `simple_correlation` | `cadrres` or `simple_correlation` |
-| `--model-dir` | `~/.cache/omicsclaw/drug_response/` | CaDRReS model directory (cadrres only) |
-| `--drug-db` | `gdsc` | Drug database: `gdsc` or `prism` |
-| `--n-drugs` | `10` | Number of top drugs to report/visualize |
-| `--cluster-key` | auto-detect | `.obs` column with cluster labels |
-| `--demo` | off | Run with synthetic data |
+| AnnData (preserved) | `processed.h5ad` | unchanged unless cluster_key was auto-resolved |
+| Drug rankings | `tables/drug_rankings.csv` | per-cluster × drug score table; column `Score` |
+| Figures | `figures/top_drugs_bar.png`, `figures/drug_cluster_heatmap.png`, `figures/drug_sensitivity_umap.png` | best-effort: UMAP overlay skipped when `obsm["X_umap"]` is missing (`sc_drug_response.py:447-449`); bar / heatmap calls are wrapped in `try / except` (`:814-826`) and only log on failure |
+| Report | `report.md` + `result.json` | always |
 
-## Workflow
+## Flow
 
-1. **Load** — Read preprocessed `.h5ad` or generate demo data
-2. **Preflight** — Validate cluster key exists, check model files (cadrres), detect species
-3. **Run method** — Compute drug sensitivity scores per cluster
-4. **Detect degenerate output** — Check for empty results, report actionable guidance
-5. **Store results** — Drug scores in `adata.obs` columns (`drug_score_<DrugName>`)
-6. **Render gallery** — UMAP overlay, bar chart, heatmap
-7. **Export** — `processed.h5ad`, `tables/drug_rankings.csv`, `report.md`, `result.json`
+1. Load AnnData; resolve `--cluster-key` (auto-pick from `leiden` / `louvain` / `cell_type` / first categorical if unset).
+2. Preflight: `cluster_key` exists + has ≥ 2 groups (warn-only on < 2); gene-name overlap with drug targets.
+3. For `cadrres`: validate `--model-dir` has the GDSC / PRISM files + locate the CaDRReS-Sc script directory; run via `Drug_Response` wrapper.
+4. For `simple_correlation`: compute per-cluster expression means, correlate against `_BUILTIN_DRUG_TARGETS`, rank drugs per cluster.
+5. Detect degenerate output (empty rankings / all-NaN scores) → print multi-action fix message; do NOT raise.
+6. Render bar / heatmap / UMAP figures, write `tables/drug_rankings.csv`, save `report.md`, `result.json`.
 
-## Output Contract
+## Gotchas
 
-| Output | Location | Description |
-|---|---|---|
-| `processed.h5ad` | `<output>/` | AnnData with drug scores in `.obs` |
-| `drug_rankings.csv` | `<output>/tables/` | Full drug ranking (Drug, Cluster, Score, Rank) |
-| `drug_sensitivity_umap.png` | `<output>/figures/` | Top drug sensitivity overlaid on UMAP |
-| `top_drugs_bar.png` | `<output>/figures/` | Bar chart of top N drugs |
-| `drug_cluster_heatmap.png` | `<output>/figures/` | Drug sensitivity heatmap across clusters |
-| `report.md` | `<output>/` | Analysis report |
-| `result.json` | `<output>/` | Machine-readable results with diagnostics |
+- **Gene-name nomenclature is enforced.** `sc_drug_response.py:193` raises `ValueError` when 0% of `_BUILTIN_DRUG_TARGETS` overlap with `var_names`. The error inspects sample gene names — if they look like `ENSG*` / `ENSMUSG*`, the message points to `bulkrna-geneid-mapping`; otherwise to `sc-standardize-input`. Below 20 % overlap is a warning (not a fail) — results may still be unreliable.
+- **`cadrres` needs both model files AND a CaDRReS-Sc script dir.** `sc_drug_response.py:146` raises `FileNotFoundError` listing missing model files in `--model-dir`; `sc_drug_response.py:385` raises a separate `FileNotFoundError("CaDRReS-Sc script directory not found.")` when the script dir isn't at `<model-dir>/../CaDRReS-Sc` or `~/CaDRReS-Sc`. Both error messages embed the full `CADRRES_DOWNLOAD_INSTRUCTIONS`.
+- **`cadrres` demo bypasses real model.** `sc_drug_response.py:761-764` auto-generates synthetic CaDRReS scores when `--method cadrres --demo` — reported drugs are random; only use for plumbing checks.
+- **Auto-cluster-key resolution falls through to "first categorical".** `sc_drug_response.py:729` searches `("leiden", "louvain", "cluster", "cell_type", "celltype")` in order; `:733-737` falls through to the first categorical-dtype obs column (with a warning); `:739-742` raises `ValueError("No cluster labels found in adata.obs. Run sc-preprocessing first, or specify --cluster-key.")` only when nothing is categorical. Using a stray categorical column (e.g., `sample_id` cast as Category) silently produces meaningless rankings — always pass `--cluster-key` explicitly on real data.
+- **Degenerate output is a soft fail.** When `simple_correlation` finds no overlapping drug targets or `cadrres` returns empty, lines 770+ print a multi-option fix message but the script returns 0. Always check `result.json["n_drugs_scored"]` (line 846) — `0` means the run was uninformative.
+- **`--input` mandatory unless `--demo`.** `sc_drug_response.py:722` raises `ValueError("--input required when not using --demo")`.
+- **Unknown `--method` rejected post-argparse.** `sc_drug_response.py:767` raises `ValueError(f"Unknown method: {method}")`. argparse `choices` should catch this first via METHOD_REGISTRY (`:697`); the manual raise is a safety net.
 
-### AnnData output schema
-
-```
-adata.obs["drug_score_Cisplatin"]   # float, sensitivity score for Cisplatin
-adata.obs["drug_score_Paclitaxel"]  # float, sensitivity score for Paclitaxel
-# ... one column per scored drug
-adata.uns["omicsclaw_input_contract"]
-adata.uns["omicsclaw_matrix_contract"]
-```
-
-## Reference Data Guide
-
-### CaDRReS-Sc Model Files (cadrres method only)
-
-The `simple_correlation` method requires NO external data.
-
-For `cadrres`, you need:
-
-| File | Source | Size |
-|---|---|---|
-| `cadrres-wo-sample-bias_param_dict_all_genes.pickle` | CaDRReS-Sc release | ~200MB |
-| `cadrres-wo-sample-bias_param_dict_prism.pickle` | CaDRReS-Sc release | ~200MB |
-| `masked_drugs.csv` | CaDRReS-Sc release | <1MB |
-| `GDSC_exp.tsv.gz` | CaDRReS-Sc release | ~100MB |
-
-#### Download instructions
+## Key CLI
 
 ```bash
-# 1. Create cache directory
-mkdir -p ~/.cache/omicsclaw/drug_response/
+# Demo (synthetic scores, simple_correlation)
+python omicsclaw.py run sc-drug-response --demo --output /tmp/sc_drug_demo
 
-# 2. Clone CaDRReS-Sc (for scripts + preprocessed data)
-git clone https://github.com/CSB5/CaDRReS-Sc.git
+# Default simple correlation against built-in drug targets
+python omicsclaw.py run sc-drug-response \
+  --input clustered.h5ad --output results/ --cluster-key leiden
 
-# 3. Download pretrained models
-wget https://github.com/CSB5/CaDRReS-Sc/releases/download/v1.0/CaDRReS-Sc-model.tar.gz
-tar -xzf CaDRReS-Sc-model.tar.gz -C ~/.cache/omicsclaw/drug_response/
+# CaDRReS with GDSC model
+python omicsclaw.py run sc-drug-response \
+  --input clustered.h5ad --output results/ \
+  --method cadrres --drug-db gdsc --model-dir ~/.cache/omicsclaw/cadrres/gdsc/
 
-# 4. Download GDSC expression (for kernel features)
-wget https://github.com/CSB5/CaDRReS-Sc/releases/download/v1.0/GDSC_exp.tsv.gz
-mv GDSC_exp.tsv.gz ~/.cache/omicsclaw/drug_response/
+# CaDRReS with PRISM, top 50 drugs
+python omicsclaw.py run sc-drug-response \
+  --input clustered.h5ad --output results/ \
+  --method cadrres --drug-db prism --n-drugs 50
 ```
 
-#### Choosing GDSC vs PRISM
+## See also
 
-- **GDSC**: 265 drugs, IC50-based, broader coverage of cancer drugs
-- **PRISM**: 1,448 compounds, AUC-based, includes non-oncology compounds
-
-## Next Steps
-
-After drug response prediction:
-
-| Goal | Skill | Command |
-|---|---|---|
-| Identify markers for sensitive clusters | `sc-markers` | `python omicsclaw.py run sc-markers --input processed.h5ad --output markers/` |
-| Pathway analysis of sensitive clusters | `sc-enrichment` | `python omicsclaw.py run sc-enrichment --input processed.h5ad --output enrichment/` |
-| DE between sensitive vs resistant clusters | `sc-de` | `python omicsclaw.py run sc-de --input processed.h5ad --output de/` |
-| Cell-cell communication in tumor | `sc-cell-communication` | `python omicsclaw.py run sc-cell-communication --input processed.h5ad --output comm/` |
-
-## Example Commands
-
-```bash
-# Demo mode (no data needed)
-python omicsclaw.py run sc-drug-response --demo --output /tmp/drug_demo
-
-# Simple correlation (no model needed)
-python omicsclaw.py run sc-drug-response \
-  --input preprocessed.h5ad --output results/ \
-  --method simple_correlation --n-drugs 15
-
-# CaDRReS with GDSC
-python omicsclaw.py run sc-drug-response \
-  --input preprocessed.h5ad --output results/ \
-  --method cadrres --drug-db gdsc \
-  --model-dir ~/.cache/omicsclaw/drug_response/
-
-# Custom cluster key
-python omicsclaw.py run sc-drug-response \
-  --input preprocessed.h5ad --output results/ \
-  --method simple_correlation --cluster-key cell_type
-```
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with synthetic demo data | — |
-| `--method` | str | `simple_correlation` | Prediction method: `simple_correlation`, `cadrres` | validated against METHOD_REGISTRY |
-| `--model-dir` | path | `~/.cache/omicsclaw/drug_response/` | Directory containing CaDRReS model files | cadrres only |
-| `--drug-db` | str | `gdsc` | Drug database: `gdsc` or `prism` | choices: gdsc, prism |
-| `--n-drugs` | int | 10 | Number of top drugs to report/visualize | — |
-| `--cluster-key` | str | None | `.obs` column with cluster labels; auto-detected when omitted | — |
-| `--r-enhanced` | flag | off | Accepted for CLI consistency; no R Enhanced plots available | no-op |
-
-## Methods
-
-| Method | Description | Required packages | Fallback |
-|--------|-------------|-------------------|---------|
-| `simple_correlation` | Mean expression of known drug-target genes per cluster. Covers 15 built-in drugs (Cisplatin, Paclitaxel, Doxorubicin, etc.). No model download needed. Fast and interpretable. | scanpy, numpy, pandas | None (always available) |
-| `cadrres` | CaDRReS-Sc pretrained pharmacogenomic model predicting IC50 (GDSC) or AUC (PRISM) from cluster expression profiles. Requires ~500 MB model download. Human-only. | scanpy, numpy, pandas + pretrained model files | Falls back to `simple_correlation` with a warning if model files are missing |
-
-## Workflow Position
-
-**Upstream:** sc-clustering or sc-cell-annotation
-**Downstream:** Terminal analysis.
+- `references/parameters.md` — every CLI flag, model-dir conventions
+- `references/methodology.md` — `simple_correlation` math vs CaDRReS; gene-symbol expectations
+- `references/output_contract.md` — `tables/drug_rankings.csv` column schema
+- Adjacent skills: `sc-clustering` (upstream — produces the cluster column), `sc-cell-annotation` (parallel — biological labels often work better than `leiden` for drug interpretability), `sc-in-silico-perturbation` (parallel — predicts genetic perturbation effects, NOT drug sensitivity), `bulkrna-geneid-mapping` / `sc-standardize-input` (upstream remediation — convert Ensembl IDs to HGNC symbols if the preflight fails)

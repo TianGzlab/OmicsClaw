@@ -39,11 +39,9 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_repro_requirements,
     write_result_json,
     write_replot_hint,
-    write_standard_run_artifacts,
 )
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
@@ -852,15 +850,6 @@ def main() -> int:
         "summary": summary,
         "data": result_data,
     }
-    write_standard_run_artifacts(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Sample-aware differential abundance and compositional analysis for scRNA-seq.",
-        result_payload=result_payload,
-        preferred_method=args.method,
-        script_path=Path(__file__).resolve(),
-        actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-    )
 
     # R Enhanced figures (only when --r-enhanced flag is set)
     r_enhanced_figures = _render_r_enhanced(

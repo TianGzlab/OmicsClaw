@@ -26,7 +26,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -1006,13 +1005,6 @@ def main():
     write_result_json(output_dir, SKILL_NAME, SKILL_VERSION, summary, result_data, checksum)
     write_replot_hint(output_dir, SKILL_NAME, R_ENHANCED_PLOTS)
     result_payload = load_result_json(output_dir) or {"skill": SKILL_NAME, "summary": summary, "data": result_data}
-    write_output_readme(
-        output_dir,
-        skill_alias=SKILL_NAME,
-        description="Single-cell graph construction, UMAP, and clustering.",
-        result_payload=result_payload,
-        preferred_method=args.cluster_method,
-    )
 
     print(f"Success: {SKILL_NAME}")
     print(f"  Output: {output_dir}")

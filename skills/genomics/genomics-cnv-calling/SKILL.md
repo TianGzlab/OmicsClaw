@@ -1,274 +1,86 @@
 ---
 name: genomics-cnv-calling
-description: >-
-  Copy number variant detection from exome/WGS data using CNVkit, Control-FREEC,
-  or GATK gCNV. Supports tumor-normal pairs, tumor-only, and germline modes.
-version: 0.2.0
+description: Load when calling CNV segments via CBS-style segmentation on a bin-level log2-ratio CSV from exome / WGS coverage — emits per-segment 5-class CN state (`amplification` / `gain` / `neutral` / `loss` / `deep_deletion`), per-chromosome summary, genome-fraction-altered. Skip when working with single-cell / spatial CNV (use `spatial-cnv`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [genomics, CNV, copy-number, CNVkit, GATK]
-metadata:
-  omicsclaw:
-    domain: genomics
-    emoji: "📊"
-    trigger_keywords: [CNV, copy number, amplification, deletion, CNVkit]
-    allowed_extra_flags:
-      - "--method"
-    legacy_aliases: [cnv-calling]
-    saves_h5ad: false
+tags:
+- genomics
+- cnv
+- copy-number
+- cbs
+- segmentation
+- cnvkit
+- gatk-gcnv
+requires:
+- pandas
+- numpy
 ---
 
-# 📊 Copy Number Variant Calling
+# genomics-cnv-calling
 
-Detect copy number variants from targeted/exome/WGS sequencing data.
+## When to use
 
-## Core Capabilities
+The user has a bin-level log2-ratio CSV (typically from CNVkit
+`cnr` files, GATK gCNV `denoised copy ratios`, or Control-FREEC
+ratio output) and wants to segment into discrete CNV calls. Each
+segment is classified into one of five copy-number states based on
+mean log2 ratio: `amplification` (> +1.0), `gain` (> +0.3),
+`neutral`, `loss` (< -0.3), `deep_deletion` (< -1.0). `--alpha`
+controls segmentation significance (default 0.01).
 
-1. **CNVkit**: Read-depth-based CNV detection for exome/targeted/WGS data
-2. **GATK gCNV**: GATK's germline CNV discovery tool
-3. **Control-FREEC**: Control-free copy number and LOH caller
+This skill does NOT generate the bin-level log2-ratio CSV — it
+consumes the output of CNVkit / GATK gCNV / Control-FREEC. For
+spatial / single-cell CNV use `spatial-cnv`.
 
-## CLI Reference
+## Inputs & Outputs
 
-```bash
-python omicsclaw.py run cnv-calling --demo
-python omicsclaw.py run cnv-calling --input <tumor.bam> --output <dir>
-```
+| Input | Format | Required |
+|---|---|---|
+| Bin-level log2 ratios | `.csv` with columns `chrom`, `start`, `end`, `log2_ratio` | yes (unless `--demo`) |
+| Segmentation significance | `--alpha <float>` (default 0.01) | no |
 
-## Algorithm / Methodology
+| Output | Path | Notes |
+|---|---|---|
+| CNV segments | `tables/cnv_segments.csv` | per-segment columns: `chrom`, `start`, `end`, `n_bins`, `log2_ratio`, `cn_state` (5-class), `estimated_cn` |
+| Per-chromosome | `tables/cnv_per_chromosome.csv` | n_segments + altered fraction per chromosome |
+| Report | `report.md` + `result.json` | summary includes `n_amplifications`, `n_deep_deletions`, `n_gains`, `n_losses`, `genome_fraction_altered` |
 
-### CNVkit Basic Workflow
+## Flow
 
-**Goal:** Run the complete CNVkit pipeline on a tumor-normal pair.
+1. Load bin CSV (`--input <bins.csv>`) or generate a demo bin file at `output_dir/demo_cnv_bins.csv` (`genomics_cnv_calling.py:229`).
+2. Read columns via `pd.read_csv` (`genomics_cnv_calling.py:250`); group by `df["chrom"]` (`:254`) and segment per chromosome.
+3. Classify each segment via `np.select` (`genomics_cnv_calling.py:161-162`) into one of `amplification` / `gain` / `neutral` / `loss` / `deep_deletion` based on mean log2.
+4. Aggregate per-chromosome counts + genome-fraction-altered (`:281-291`).
+5. Write `tables/cnv_segments.csv` (`genomics_cnv_calling.py:373`) + `tables/cnv_per_chromosome.csv` (`:382`) + `report.md` + `result.json` (`:385`).
 
-```bash
-# Complete pipeline for tumor-normal pair
-cnvkit.py batch tumor.bam \
-    --normal normal.bam \
-    --targets targets.bed \
-    --fasta reference.fa \
-    --output-reference my_reference.cnn \
-    --output-dir results/
-```
+## Gotchas
 
-### Build Reference from Panel of Normals
+- **Required CSV column is `chrom`, NOT `chromosome`.** Code reads `df["chrom"]` at `genomics_cnv_calling.py:254`. CNVkit `cnr` files have a `chromosome` column — rename to `chrom` first (`pd.read_csv(...).rename(columns={"chromosome": "chrom"})`). Other required columns are `start`, `end`, `log2_ratio`.
+- **`cn_state` has 5 classes, NOT 3.** `genomics_cnv_calling.py:161-162` produces `amplification` (log2 > 1.0), `gain` (> 0.3), `neutral`, `loss` (< -0.3), `deep_deletion` (< -1.0). The summary reports `n_gains` and `n_losses` as **inclusive** of `amplification` / `deep_deletion` (`:281-282`); inspect `n_amplifications` / `n_deep_deletions` for the high-magnitude subset.
+- **No bin generator is invoked.** This skill consumes a bin-level log2-ratio CSV — it does NOT run CNVkit / GATK gCNV / Control-FREEC. Run them upstream and feed the bin file here.
+- **`--input` REQUIRED unless `--demo`.** `genomics_cnv_calling.py:363` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError` at `:366`.
+- **`--alpha` controls segmentation aggressiveness.** Lower values (e.g. 0.001) yield fewer / larger segments; higher values (0.1) yield more / smaller. Default 0.01 is suitable for clean exome / WGS data; for noisy panels consider `--alpha 0.001`.
+- **Classification thresholds are hard-coded.** ±0.3 (gain/loss) and ±1.0 (amplification/deep_deletion) at `genomics_cnv_calling.py:50-52` — no CLI flag to tune. For tumour-purity-corrected calling, scale the input log2 ratios upstream.
 
-```bash
-# Step 1: Build reference from multiple normals (recommended)
-cnvkit.py batch \
-    --normal normal1.bam normal2.bam normal3.bam \
-    --targets targets.bed \
-    --fasta reference.fa \
-    --output-reference pooled_reference.cnn
-
-# Step 2: Run on tumor samples using pre-built reference
-cnvkit.py batch tumor1.bam tumor2.bam \
-    --reference pooled_reference.cnn \
-    --output-dir results/
-```
-
-### Flat Reference (No Matched Normal)
+## Key CLI
 
 ```bash
-cnvkit.py batch tumor.bam \
-    --targets targets.bed \
-    --fasta reference.fa \
-    --output-reference flat_reference.cnn \
-    --output-dir results/
+# Demo
+python omicsclaw.py run genomics-cnv-calling --demo --output /tmp/cnv_demo
+
+# Real CNVkit bins (rename `chromosome` → `chrom` first)
+python omicsclaw.py run genomics-cnv-calling \
+  --input sample_renamed.cnr.csv --output results/ --alpha 0.01
+
+# Stricter segmentation for noisy panel data
+python omicsclaw.py run genomics-cnv-calling \
+  --input panel.cnr.csv --output results/ --alpha 0.001
 ```
 
-### WGS Mode
+## See also
 
-```bash
-cnvkit.py batch tumor.bam \
-    --normal normal.bam \
-    --fasta reference.fa \
-    --method wgs \
-    --output-dir results/
-```
-
-### Step-by-Step Pipeline
-
-```bash
-# 1. Generate target and antitarget regions
-cnvkit.py target targets.bed --annotate refFlat.txt -o targets.target.bed
-cnvkit.py antitarget targets.bed -o targets.antitarget.bed
-
-# 2. Calculate coverage
-cnvkit.py coverage tumor.bam targets.target.bed -o tumor.targetcoverage.cnn
-cnvkit.py coverage tumor.bam targets.antitarget.bed -o tumor.antitargetcoverage.cnn
-cnvkit.py coverage normal.bam targets.target.bed -o normal.targetcoverage.cnn
-cnvkit.py coverage normal.bam targets.antitarget.bed -o normal.antitargetcoverage.cnn
-
-# 3. Build reference
-cnvkit.py reference normal.targetcoverage.cnn normal.antitargetcoverage.cnn \
-    --fasta reference.fa -o reference.cnn
-
-# 4. Fix, segment, and call
-cnvkit.py fix tumor.targetcoverage.cnn tumor.antitargetcoverage.cnn reference.cnn -o tumor.cnr
-cnvkit.py segment tumor.cnr -o tumor.cns
-cnvkit.py call tumor.cns -o tumor.call.cns
-```
-
-### Segmentation Options
-
-```bash
-# Default CBS (Circular Binary Segmentation)
-cnvkit.py segment sample.cnr -o sample.cns
-
-# HMM for tumor samples (broader state transitions)
-cnvkit.py segment sample.cnr --method hmm-tumor -o sample.cns
-
-# HMM for germline (tighter priors around diploid)
-cnvkit.py segment sample.cnr --method hmm-germline -o sample.cns
-```
-
-### CNV Calling with Ploidy/Purity
-
-```bash
-cnvkit.py call sample.cns --purity 0.7 --ploidy 2 -o sample.call.cns
-
-# With B-allele frequencies (from VCF)
-cnvkit.py call sample.cns --vcf sample.vcf --purity 0.7 -o sample.call.cns
-```
-
-### Visualization
-
-```bash
-# Scatter plot with segments
-cnvkit.py scatter sample.cnr -s sample.cns -o sample_scatter.png
-
-# Single chromosome
-cnvkit.py scatter sample.cnr -s sample.cns -c chr17 -o sample_chr17.png
-
-# Diagram (ideogram style)
-cnvkit.py diagram sample.cnr -s sample.cns -o sample_diagram.pdf
-
-# Heatmap across samples
-cnvkit.py heatmap *.cns -o heatmap.pdf
-```
-
-### Export Results
-
-```bash
-cnvkit.py export bed sample.call.cns -o sample.cnv.bed
-cnvkit.py export vcf sample.call.cns -o sample.cnv.vcf
-cnvkit.py export seg *.cns -o samples.seg          # For GISTIC2
-```
-
-### Python API
-
-```python
-import cnvlib
-
-# Load data
-cnr = cnvlib.read('sample.cnr')
-cns = cnvlib.read('sample.cns')
-
-# Filter by chromosome
-chr17 = cnr[cnr.chromosome == 'chr17']
-
-# log2 > 0.5 (~3+ copies): moderate amplification
-amps = cns[cns['log2'] > 0.5]
-# log2 < -0.5 (~1 copy): moderate deletion
-dels = cns[cns['log2'] < -0.5]
-```
-
-### Quality Control
-
-```bash
-cnvkit.py metrics *.cnr -s *.cns
-cnvkit.py sex *.cnr *.cnn
-cnvkit.py segmetrics sample.cnr -s sample.cns --ci --pi -o sample.segmetrics.cns
-cnvkit.py genemetrics sample.cnr -s sample.cns --threshold 0.2 --ci -o sample.genemetrics.tsv
-```
-
-## Key Output Files
-
-| Extension | Description |
-|-----------|-------------|
-| `.cnn` | Reference or coverage file |
-| `.cnr` | Copy ratios (log2) per bin |
-| `.cns` | Segmented copy ratios |
-| `.call.cns` | Called copy number states |
-
-## Key Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--method` | `hybrid` | hybrid, wgs, amplicon |
-| `--segment-method` | `cbs` | cbs, hmm, hmm-tumor, hmm-germline |
-| `--purity` | `1.0` | Tumor purity (0-1) |
-| `--ploidy` | `2` | Sample ploidy |
-
-## Why This Exists
-
-- **Without it**: Raw coverage depth is noisy due to GC-bias causing false structural variants
-- **With it**: Strict background normalization and segmentation reveals true CNV events
-- **Why OmicsClaw**: Wraps complex tools like CNVkit into reproducible one-shot commands
-
-## Workflow
-
-1. **Calculate**: Map out local depth coverage and background noise.
-2. **Execute**: Evaluate log-ratio changes over target intervals.
-3. **Assess**: Perform segmentation algorithms (e.g., CBS).
-4. **Generate**: Output structural segments and variation boundaries.
-5. **Report**: Tabulate key amplification/deletion events.
-
-## Example Queries
-
-- "Call copy number variants on this bam using CNVkit"
-- "Detect amplifications in the tumor matched normal pair"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── segments.cns
-├── figures/
-│   └── scatter_diagram.png
-├── tables/
-│   └── cnv_calls.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `align` — Upstream BAM processing
-- `annotation` — Downstream gene mapping of duplications
-
-## Version Compatibility
-
-Reference examples tested with: CNVkit 0.9+, GATK 4.5+
-
-## Dependencies
-
-**Required**: CNVkit (cnvkit.py)
-**Optional**: GATK (for gCNV), Control-FREEC
-
-## Citations
-
-- [CNVkit](https://doi.org/10.1371/journal.pcbi.1004873) — Talevich et al., PLoS Computational Biology 2016
-- [GATK gCNV](https://gatk.broadinstitute.org/) — Broad Institute
-- [Control-FREEC](https://doi.org/10.1093/bioinformatics/btr670) — Boeva et al., Bioinformatics 2012
-
-## Related Skills
-
-- `variant-call` — SNV/Indel calling in same samples
-- `sv-detect` — Structural variant detection
-- `variant-annotate` — Annotate CNV regions
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — segmentation algorithm, 5-class threshold rationale
+- `references/output_contract.md` — `tables/cnv_segments.csv` schema
+- Adjacent skills: `genomics-alignment` (upstream — BAM that generates depth bins), `genomics-sv-detection` (parallel — large structural variants), `spatial-cnv` (parallel — single-cell / spatial CNV via infercnvpy / Numbat), `genomics-variant-calling` (parallel — small variants on the same BAM)

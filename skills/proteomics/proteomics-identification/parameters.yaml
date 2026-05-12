@@ -1,0 +1,18 @@
+domain: proteomics
+emoji: 🔬
+trigger_keywords:
+- peptide identification
+- database search
+- MaxQuant
+- MS-GF+
+- Comet
+- Mascot
+allowed_extra_flags:
+- --fdr
+- --n-spectra
+legacy_aliases:
+- peptide-id
+saves_h5ad: false
+script: proteomics_identification.py
+param_hints: {}
+requires_preprocessed: false

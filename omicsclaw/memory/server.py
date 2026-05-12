@@ -61,9 +61,12 @@ def _build_app():
 
     @asynccontextmanager
     async def lifespan(app):
-        from . import get_db_manager
+        from . import get_db_manager, get_memory_engine
+        from .bootstrap import seed_knowhows
+
         db = get_db_manager()
         await db.init_db()
+        await seed_knowhows(get_memory_engine())
         yield
         from . import close_db
         await close_db()

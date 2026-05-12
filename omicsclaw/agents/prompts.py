@@ -328,8 +328,6 @@ def get_system_prompt(*, workspace: str = "") -> str:
         omicsclaw_dir=str(OMICSCLAW_DIR),
         base_persona=base_persona,
         workspace=workspace,
-        include_role_guardrails=False,
-        include_skill_contract=False,
         include_knowhow=False,
         workspace_placement="system",
     )

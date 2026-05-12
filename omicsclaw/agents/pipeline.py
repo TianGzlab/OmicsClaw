@@ -60,6 +60,7 @@ from omicsclaw.runtime.verification import (
     update_workspace_manifest,
     write_completion_report,
 )
+from omicsclaw.version import __version__
 
 logger = logging.getLogger(__name__)
 _OMICSCLAW_ROOT = Path(__file__).resolve().parents[2]
@@ -137,7 +138,7 @@ PIPELINE_AGENT_STAGE_MAP = {
     "writing-agent": "write",
     "reviewer-agent": "review",
 }
-PIPELINE_VERSION = "0.1.0"
+PIPELINE_VERSION = __version__
 
 
 def _task_summary(task: TaskRecord) -> str:

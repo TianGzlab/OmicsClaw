@@ -7,7 +7,7 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
-build/
+build/*
 .eggs/
 .pytest_cache/
 .mypy_cache/
@@ -37,18 +37,19 @@ token.json
 output/
 sessions/
 
-# Superpowers (internal skills)
+# Superpowers (local/internal agent workflow notes)
 superpowers/
-docs/superpowers/**
-!docs/superpowers/
-!docs/superpowers/README.md
-!docs/superpowers/playbooks/
-!docs/superpowers/playbooks/*.md
-!docs/superpowers/plans/
-!docs/superpowers/plans/README.md
-!docs/superpowers/specs/
-!docs/superpowers/specs/README.md
-!docs/superpowers/specs/2026-04-10-repository-spec-migration.md
+docs/superpowers/
+
+# Local implementation notes (non-contract scratch notes)
+docs/engineering/2026-05-07-*.md
+!docs/engineering/2026-05-07-framework-optimization-spec.md
+!docs/engineering/2026-05-07-alias-ownership-contract.md
+!docs/engineering/2026-05-07-bot-runner-contract.md
+!docs/engineering/2026-05-07-output-ownership-contract.md
+!docs/engineering/2026-05-07-skill-help-contract.md
+!docs/engineering/2026-05-07-skill-runner-contract.md
+!docs/engineering/domain-input-contracts.md
 
 # User data (large, not committed)
 data/*
@@ -145,6 +146,9 @@ nature_new_insight2/
 # Knowledge base and workspace (local only)
 workspace/
 
+# Graphify knowledge graph (local development artifact)
+graphify-out/
+
 # Local references / external tools (user-downloaded, large)
 resources/
 
@@ -152,3 +156,10 @@ resources/
 .codex
 .planning/
 e2e_test
+
+# Claude Code local state (settings, scheduled task locks)
+.claude/
+
+# Eval suite per-run artifacts (every UTC-timestamped run dir)
+tests/eval/results/*/
+!tests/eval/results/.gitkeep

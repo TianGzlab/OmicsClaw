@@ -1,0 +1,60 @@
+---
+title: "蛋白组学 - proteomics · 8 skills"
+description: "质谱蛋白组学：raw MS QC、肽段/蛋白鉴定、LFQ/TMT/DIA 定量、差异丰度、PTM 分析、通路富集。"
+keywords: ["proteomics", "蛋白组学", "mass spec", "TMT", "DIA", "LFQ", "PTM"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 本领域解决什么问题
+
+蛋白组学域覆盖基于质谱的蛋白质组完整链路：从原始 MS 数据质控与格式导入，到肽段/蛋白鉴定、LFQ/TMT/DIA 定量、差异丰度分析、PTM 翻译后修饰解析、通路富集及结构蛋白组（XL-MS），与基于抗体的蛋白定量（Olink/SOMAscan）方法不同，本域专注质谱驱动的高通量蛋白鉴定与定量。
+
+## 典型分析流程 ASCII 图
+
+```text
+原始 MS 数据 (.raw / .mzML)
+   │
+   ▼
+proteomics-data-import       ← 格式转换 (MaxQuant / DIA-NN / Spectronaut)
+   │
+   ▼
+proteomics-ms-qc             ← MS 质量控制 (PTXQC / rawTools)
+   │
+   ▼
+proteomics-identification    ← 肽段 / 蛋白鉴定 (MaxQuant / MS-GF+ / Comet)
+   │
+   ▼
+proteomics-quantification    ← LFQ / TMT / DIA 定量 (DIA-NN / Skyline)
+   │
+   ├─→ proteomics-de           ← 差异丰度 (MSstats / limma / proDA)
+   ├─→ proteomics-ptm          ← 翻译后修饰 (MSstatsPTM / A-score)
+   ├─→ proteomics-enrichment   ← 通路富集 (STRING / g:Profiler)
+   └─→ proteomics-structural   ← 结构蛋白组 / XL-MS (XlinkX / pLink)
+```
+
+## 关键 skill 列表
+
+| Skill | 用途 | CLI 一行示例 | 文档 |
+|---|---|---|---|
+| proteomics-data-import | 格式导入转换 | `python omicsclaw.py run proteomics-data-import --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-data-import/SKILL.md) |
+| proteomics-ms-qc | MS 质量控制 | `python omicsclaw.py run proteomics-ms-qc --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-ms-qc/SKILL.md) |
+| proteomics-identification | 肽段蛋白鉴定 | `python omicsclaw.py run proteomics-identification --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-identification/SKILL.md) |
+| proteomics-quantification | LFQ/TMT/DIA 定量 | `python omicsclaw.py run proteomics-quantification --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-quantification/SKILL.md) |
+| proteomics-de | 差异丰度分析 | `python omicsclaw.py run proteomics-de --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-de/SKILL.md) |
+| proteomics-ptm | 翻译后修饰 | `python omicsclaw.py run proteomics-ptm --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-ptm/SKILL.md) |
+| proteomics-enrichment | 通路功能富集 | `python omicsclaw.py run proteomics-enrichment --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-enrichment/SKILL.md) |
+| proteomics-structural | 结构蛋白 XL-MS | `python omicsclaw.py run proteomics-structural --demo` | [SKILL.md](https://github.com/TianGzlab/OmicsClaw/blob/main/skills/proteomics/proteomics-structural/SKILL.md) |
+
+## 何时不适用本领域
+
+- **基于抗体的蛋白定量（Olink / SOMAscan）**：不覆盖
+- **结构生物学（X 射线晶体 / cryo-EM）**：不覆盖
+- **代谢组（小分子）**：用 [代谢组学](/docs/domains/metabolomics)
+- **空间蛋白组学**：不覆盖
+
+## 下一步阅读
+
+- [代谢组学](/docs/domains/metabolomics)
+- [Bulk RNA-seq](/docs/domains/bulkrna)
+- [整体架构](/docs/architecture/overview)
+- [编排器](/docs/architecture/orchestrator)

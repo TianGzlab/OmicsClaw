@@ -136,6 +136,11 @@ class DatabaseManager:
                 if not is_initialized:
                     await conn.run_sync(Base.metadata.create_all)
 
+            # Run any pending schema migrations after the base schema exists.
+            # Imported lazily to avoid a circular import at module load time.
+            from omicsclaw.memory.migrations import run_pending
+            await run_pending(self)
+
             # Ensure the root node exists (all edges reference it as parent)
             await self._ensure_root_node()
 
@@ -195,6 +200,7 @@ class DatabaseManager:
                         text("""
                             CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
                             USING fts5(
+                                namespace,
                                 domain,
                                 path,
                                 node_uuid,

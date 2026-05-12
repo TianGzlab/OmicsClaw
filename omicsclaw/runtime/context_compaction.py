@@ -18,6 +18,41 @@ STAGE_CONTEXT_COLLAPSE = "context_collapse"
 STAGE_AUTO_COMPACT = "auto_compact"
 STAGE_REACTIVE_COMPACT = "reactive_compact"
 
+# Marker that wraps the body of a manual /compact summary message stored in
+# the transcript. The next /compact invocation uses this to skip
+# re-summarising the previous summary (CodePilot bug #7 — boundary tracking).
+COMPACTION_SUMMARY_OPEN = "<compaction-summary>"
+COMPACTION_SUMMARY_CLOSE = "</compaction-summary>"
+
+
+def wrap_compaction_summary(body: str) -> str:
+    """Wrap a summary body so subsequent compactions can detect and skip it."""
+    return f"{COMPACTION_SUMMARY_OPEN}\n{body.strip()}\n{COMPACTION_SUMMARY_CLOSE}"
+
+
+def unwrap_compaction_summary(content: str) -> str:
+    """Return the inner body of a wrapped summary, or pass through unchanged."""
+    text = (content or "").strip()
+    if not text.startswith(COMPACTION_SUMMARY_OPEN):
+        return content
+    inner = text[len(COMPACTION_SUMMARY_OPEN) :]
+    end = inner.rfind(COMPACTION_SUMMARY_CLOSE)
+    if end == -1:
+        return content
+    return inner[:end].strip()
+
+
+def is_compaction_summary_message(message: dict[str, Any]) -> bool:
+    """True if ``message`` is a manual-/compact summary header."""
+    if not isinstance(message, dict):
+        return False
+    if message.get("role") != "system":
+        return False
+    content = message.get("content")
+    if not isinstance(content, str):
+        return False
+    return content.lstrip().startswith(COMPACTION_SUMMARY_OPEN)
+
 
 @dataclass(frozen=True, slots=True)
 class ContextCompactionConfig:
@@ -47,6 +82,7 @@ class PreparedModelMessages:
     messages: list[dict[str, Any]]
     estimated_chars: int
     applied_stages: tuple[str, ...] = ()
+    persisted_summary: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +143,20 @@ def _truncate_text(text: str, *, max_chars: int, label: str) -> str:
 def _append_system_summary(system_prompt: str, heading: str, summary: str) -> str:
     if not summary.strip():
         return system_prompt
-    return (
-        f"{system_prompt.rstrip()}\n\n{heading}\n\n{summary.strip()}"
-    ).strip()
+    return (f"{system_prompt.rstrip()}\n\n{heading}\n\n{summary.strip()}").strip()
+
+
+def _combine_persisted_summaries(
+    previous_summary: str,
+    sections: list[tuple[str, str]],
+) -> str:
+    parts: list[str] = []
+    if previous_summary.strip():
+        parts.append(previous_summary.strip())
+    for heading, summary in sections:
+        if summary.strip():
+            parts.append(f"### {heading}\n\n{summary.strip()}")
+    return "\n\n---\n\n".join(parts).strip()
 
 
 def _threshold_chars(max_prompt_chars: int | None, ratio: float) -> int | None:
@@ -197,9 +244,7 @@ def _apply_micro_compaction(
         return [copy.deepcopy(message) for message in messages], False
 
     tool_indexes = [
-        index
-        for index, message in enumerate(messages)
-        if message.get("role") == "tool"
+        index for index, message in enumerate(messages) if message.get("role") == "tool"
     ]
     keep_recent = max(0, config.micro_keep_recent_tool_messages)
     protected_indexes = set(tool_indexes[-keep_recent:]) if keep_recent else set()
@@ -236,21 +281,35 @@ def _message_preview(message: dict[str, Any], *, max_chars: int = 180) -> str:
             if isinstance(function_block, dict) and function_block.get("name"):
                 tool_names.append(str(function_block.get("name")))
         if tool_names:
-            return _truncate_text(
-                ", ".join(tool_names),
-                max_chars=max_chars,
-                label="tool-call summary",
-            ).replace("\n", " ").strip()
+            # XML self-closing tag — Claude/DeepSeek treat structural tags
+            # as metadata and don't reproduce them as text. Bare prose form
+            # ("Read, Edit") triggers few-shot mimicry: the model writes
+            # plain-text tool descriptions on the next turn instead of
+            # invoking real tool_calls.
+            joined_names = (
+                _truncate_text(
+                    ",".join(tool_names),
+                    max_chars=max(16, max_chars - 32),
+                    label="tool-call summary",
+                )
+                .replace("\n", " ")
+                .strip()
+            )
+            return f'<prior-tool-calls names="{joined_names}"/>'
 
     content = _flatten_message_content(message.get("content", ""))
     if not content:
         return ""
     preview = " ".join(content.split())
-    return _truncate_text(
-        preview,
-        max_chars=max_chars,
-        label="collapsed summary",
-    ).replace("\n", " ").strip()
+    return (
+        _truncate_text(
+            preview,
+            max_chars=max_chars,
+            label="collapsed summary",
+        )
+        .replace("\n", " ")
+        .strip()
+    )
 
 
 def _collect_role_highlights(
@@ -330,6 +389,35 @@ def _build_collapse_summary(
     return "\n".join(lines).strip()
 
 
+def compact_history(
+    messages: list[dict[str, Any]],
+    *,
+    preserve_messages: int,
+    preserve_chars: int | None,
+    config: ContextCompactionConfig,
+    metadata: dict[str, Any] | None = None,
+    workspace: str | None = None,
+) -> "_CollapseResult":
+    """Public entry point for on-demand transcript compaction.
+
+    Returns a result with:
+      * ``messages`` — the trimmed tail (preserved messages, sanitized).
+      * ``summary`` — a deterministic, template-built summary of what was
+        omitted (empty when nothing was compacted).
+      * ``omitted_count`` — number of messages dropped from the head.
+
+    No LLM call. Intended for slash-command surfaces (e.g. ``/compact``).
+    """
+    return _collapse_history(
+        messages,
+        preserve_messages=preserve_messages,
+        preserve_chars=preserve_chars,
+        metadata=metadata,
+        workspace=workspace,
+        config=config,
+    )
+
+
 def _collapse_history(
     messages: list[dict[str, Any]],
     *,
@@ -383,7 +471,20 @@ def prepare_model_messages(
             estimated_chars=estimate_prompt_chars(prompt, messages),
         )
 
+    previous_summary = ""
+    if messages and is_compaction_summary_message(messages[0]):
+        previous_summary = unwrap_compaction_summary(
+            str(messages[0].get("content", "") or "")
+        )
+        prompt = _append_system_summary(
+            prompt,
+            "## Persisted Compacted Context",
+            previous_summary,
+        )
+        messages = messages[1:]
+
     applied_stages: list[str] = []
+    summary_sections: list[tuple[str, str]] = []
 
     messages, snip_changed = _apply_snip_compaction(messages, config=config)
     if snip_changed:
@@ -408,18 +509,24 @@ def prepare_model_messages(
             config=config,
         )
         if reactive_result.omitted_count > 0:
+            heading = "Reactive Compact Context"
             prompt = _append_system_summary(
                 prompt,
-                "## Reactive Compact Context",
+                f"## {heading}",
                 reactive_result.summary,
             )
             messages = reactive_result.messages
             applied_stages.append(STAGE_REACTIVE_COMPACT)
+            summary_sections.append((heading, reactive_result.summary))
         return PreparedModelMessages(
             system_prompt=prompt,
             messages=messages,
             estimated_chars=estimate_prompt_chars(prompt, messages),
             applied_stages=tuple(applied_stages),
+            persisted_summary=_combine_persisted_summaries(
+                previous_summary,
+                summary_sections,
+            ),
         )
 
     collapse_threshold = _threshold_chars(
@@ -442,13 +549,15 @@ def prepare_model_messages(
             config=config,
         )
         if collapse_result.omitted_count > 0:
+            heading = "Context Collapse"
             prompt = _append_system_summary(
                 prompt,
-                "## Context Collapse",
+                f"## {heading}",
                 collapse_result.summary,
             )
             messages = collapse_result.messages
             applied_stages.append(STAGE_CONTEXT_COLLAPSE)
+            summary_sections.append((heading, collapse_result.summary))
             current_chars = estimate_prompt_chars(prompt, messages)
 
     if auto_threshold is not None and current_chars > auto_threshold:
@@ -461,17 +570,67 @@ def prepare_model_messages(
             config=config,
         )
         if auto_result.omitted_count > 0:
+            heading = "Auto Compacted Context"
             prompt = _append_system_summary(
                 prompt,
-                "## Auto Compacted Context",
+                f"## {heading}",
                 auto_result.summary,
             )
             messages = auto_result.messages
             applied_stages.append(STAGE_AUTO_COMPACT)
+            summary_sections.append((heading, auto_result.summary))
 
     return PreparedModelMessages(
         system_prompt=prompt,
         messages=messages,
         estimated_chars=estimate_prompt_chars(prompt, messages),
         applied_stages=tuple(applied_stages),
+        persisted_summary=_combine_persisted_summaries(
+            previous_summary,
+            summary_sections,
+        ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionEvent:
+    """One compaction occurrence — emitted to the chat surface as a toast."""
+
+    messages_compressed: int
+    tokens_saved_estimate: int
+    applied_stages: tuple[str, ...]
+
+
+def build_compaction_status_payload(event: CompactionEvent) -> dict[str, Any]:
+    """Build the CodePilot-shape SSE 'status' payload for a compaction event.
+
+    Returned dict is the JSON object that goes inside the SSE
+    ``data`` field; the caller json.dumps it.
+    """
+    if event.messages_compressed <= 0:
+        if event.tokens_saved_estimate > 0:
+            msg = (
+                "Context compressed: prompt context trimmed, "
+                f"~{event.tokens_saved_estimate:,} tokens saved"
+            )
+        else:
+            msg = "Context compressed: prompt context trimmed"
+    elif event.tokens_saved_estimate > 0:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            f"messages summarized, ~{event.tokens_saved_estimate:,} tokens saved"
+        )
+    else:
+        msg = (
+            f"Context compressed: {event.messages_compressed} older "
+            "messages summarized"
+        )
+    return {
+        "notification": True,
+        "subtype": "context_compressed",
+        "message": msg,
+        "stats": {
+            "messagesCompressed": event.messages_compressed,
+            "tokensSaved": event.tokens_saved_estimate,
+        },
+    }

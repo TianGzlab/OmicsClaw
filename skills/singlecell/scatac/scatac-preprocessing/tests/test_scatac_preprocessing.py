@@ -26,7 +26,7 @@ def test_demo_mode(tmp_output):
         cwd=str(SKILL_SCRIPT.parent),
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    assert (tmp_output / "README.md").exists()
+    assert not (tmp_output / "README.md").exists()
     assert (tmp_output / "report.md").exists()
     assert (tmp_output / "result.json").exists()
     assert (tmp_output / "figures" / "manifest.json").exists()
@@ -37,7 +37,7 @@ def test_demo_mode(tmp_output):
     assert (tmp_output / "tables" / "lsi_variance_ratio.csv").exists()
     assert (tmp_output / "tables" / "qc_metrics_per_cell.csv").exists()
     assert (tmp_output / "processed.h5ad").exists()
-    assert (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
+    assert not (tmp_output / "reproducibility" / "analysis_notebook.ipynb").exists()
     assert (tmp_output / "reproducibility" / "requirements.txt").exists()
     assert not (tmp_output / "reproducibility" / "environment.txt").exists()
 

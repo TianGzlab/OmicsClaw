@@ -1,0 +1,120 @@
+---
+title: "编排器 Orchestrator - OmicsClaw 的大脑"
+description: "Orchestrator 把用户的自然语言问题映射到具体的 skill 调用，处理跨领域查询的拆分与编排。它本身也是一个 skill，由 LLM 驱动。"
+keywords: ["orchestrator", "skill routing", "LLM agent", "意图识别"]
+og:image: "/docs/images/og-cover.png"
+---
+
+## 为什么需要 Orchestrator
+
+**用户不应该记 89 个 skill 名**：OmicsClaw 横跨 8 个组学/支撑领域，共有 89 个 skill，每个都有不同的 CLI 参数与前置要求。对非专业工程师来说，自然语言才是正确的入口，不应让用户学习 `spatial-svg-detection` 和 `genomics-variant-calling` 的区别。
+
+**跨领域查询需要拆分**：一个问题可能同时涉及多个领域，比如"比较两个样本的 domain 差异"需要先跑 `spatial-domains`（每个样本），再跑 `spatial-condition`（样本间比较）。Orchestrator 把单条问题拆解成有序的 skill 调用序列。
+
+**Skill 之间有前后依赖**：`spatial-domains` 必须在 `spatial-preprocess` 之后运行，否则输入数据不符合要求。Orchestrator 通过 `resolve_capability`（来自 `omicsclaw.core.capability_resolver`）自动验证前置产物是否就绪，阻止无效调用。
+
+## 路由流程 ASCII 图
+
+```
+用户提问（自然语言）
+  "比较两个样本的 domain 差异"
+         │
+         ▼
+┌───────────────────────────────────────────┐
+│          Orchestrator（LLM 驱动）         │
+│                                           │
+│  步骤 1  识别意图 → 选定领域              │
+│          关键词匹配 / LLM 语义理解        │
+│          → 领域：spatial                  │
+│                                           │
+│  步骤 2  检查前置 → 数据是否已 preprocess │
+│          resolve_capability 验证产物      │
+│                                           │
+│  步骤 3  拆分调用 → 组合 skill 序列       │
+│          spatial-domains（样本 A）        │
+│          spatial-domains（样本 B）        │
+│          spatial-condition（比较）        │
+│                                           │
+│  步骤 4  拼接 CLI 参数 → 调度执行         │
+└───────────────────────────────────────────┘
+         │
+         ▼
+  顺序 / 并行执行各 skill
+         │
+         ▼
+  汇聚输出 → 统一报告
+```
+
+## 启用前 / 启用后
+
+| 维度 | 无 orchestrator | 有 orchestrator |
+|---|---|---|
+| 用户输入 | `python omicsclaw.py run spatial-domains ...` | "比较两个样本的 domain 差异" |
+| 跨 skill 编排 | 自己手写 shell 串联多步 | Orchestrator 自动生成调用序列 |
+| 前置检查 | 自己确保数据已预处理 | `resolve_capability` 自动验证产物 |
+
+## 三种调用方式
+
+### 1. 命令行直接走 orchestrator
+
+Orchestrator 脚本支持 `--query`（自然语言）、`--input`（文件类型自动检测领域）以及 `--routing-mode`（keyword / llm / hybrid）三种模式。通过 `omicsclaw.py run` 当前需配合 `--demo` 或 `--input` 使用；若只需传 query，建议直接调用脚本：
+
+```bash
+# 自然语言路由（keyword 模式，默认）
+python skills/orchestrator/omics_orchestrator.py \
+  --query "find spatially variable genes" \
+  --output output/
+
+# 文件类型自动检测领域
+python skills/orchestrator/omics_orchestrator.py \
+  --input data.vcf --output output/variants/
+
+# 混合模式：keyword 置信度低时回退到 LLM
+python skills/orchestrator/omics_orchestrator.py \
+  --query "analyze cell-cell interactions in my tissue" \
+  --output output/comm/ --routing-mode hybrid
+
+# demo 模式：遍历所有领域展示路由结果
+python skills/orchestrator/omics_orchestrator.py \
+  --demo --output output/demo/
+```
+
+### 2. 通过 Bot（自然对话）
+
+所有消息频道（Telegram、Feishu、DingTalk 等）的每条用户消息都经由 `bot/core.py` 的 LLM 工具调用循环，路由到对应 skill。无需用户指定 skill 名称：
+
+```bash
+# 启动 Telegram 频道
+python -m bot.run --channels telegram
+
+# 启动飞书频道
+python -m bot.run --channels feishu
+
+# 多频道同时运行
+python -m bot.run --channels telegram,feishu
+
+# Makefile 快捷方式
+make bot-telegram
+make bot-feishu
+```
+
+需在项目根目录 `.env` 中配置 `LLM_API_KEY`、`LLM_BASE_URL` 及对应频道凭证（如 `TELEGRAM_BOT_TOKEN`）。
+
+### 3. 通过桌面端聊天面板（规划中 / WIP）
+
+OmicsClaw-App 的本地聊天面板将把用户输入发送至本地 orchestrator，与命令行路由共享同一套逻辑。该集成当前处于规划阶段，完整说明见 [生态系统 / OmicsClaw App](/docs/ecosystem/omicsclaw-app)。
+
+## 故障排查
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| Orchestrator 选错 skill | LLM 误解意图或关键词不足 | 提问时明示领域名，如"用 bulkrna 跑..." |
+| LLM 无响应 | `.env` 缺 `LLM_API_KEY` 或端点不通 | 检查 `.env` 配置及网络连通性 |
+| Skill 路由后参数缺失 | 用户未提供必需输入文件 | Orchestrator 会主动追问，按提示补充 |
+
+## 下一步阅读
+
+- [整体架构](/docs/architecture/overview)
+- [技能系统](/docs/architecture/skill-system)
+- [Bot 与生态](/docs/ecosystem/chat-bot)
+- [编排域 skill 列表](/docs/domains/orchestrator)

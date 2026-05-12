@@ -32,6 +32,7 @@ def estimate_message_size(message: dict[str, Any]) -> int:
             size += len(str(function_block))
 
     size += len(str(message.get("tool_call_id", "") or ""))
+    size += len(str(message.get("reasoning_content", "") or ""))
     return size
 
 

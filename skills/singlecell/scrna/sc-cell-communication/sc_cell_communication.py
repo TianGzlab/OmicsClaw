@@ -26,7 +26,6 @@ from omicsclaw.common.report import (
     generate_report_footer,
     generate_report_header,
     load_result_json,
-    write_output_readme,
     write_result_json,
     write_replot_hint,
 )
@@ -262,34 +261,6 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def write_standard_run_artifacts(output_dir: Path, result_payload: dict, summary: dict) -> None:
-    notebook_path = None
-    try:
-        from omicsclaw.common.notebook_export import write_analysis_notebook
-
-        notebook_path = write_analysis_notebook(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Cell-cell communication analysis for annotated scRNA-seq data.",
-            result_payload=result_payload,
-            preferred_method=summary.get("executed_method", summary.get("method", DEFAULT_METHOD)),
-            script_path=Path(__file__).resolve(),
-            actual_command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
-        )
-    except Exception as exc:
-        logger.warning("Failed to write analysis notebook: %s", exc)
-
-    try:
-        write_output_readme(
-            output_dir,
-            skill_alias=SKILL_NAME,
-            description="Cell-cell communication analysis for annotated scRNA-seq data.",
-            result_payload=result_payload,
-            preferred_method=summary.get("executed_method", summary.get("method", DEFAULT_METHOD)),
-            notebook_path=notebook_path,
-        )
-    except Exception as exc:
-        logger.warning("Failed to write README.md: %s", exc)
 
 BUILTIN_LR = [
     ("TGFB1", "TGFBR1"),
@@ -1562,7 +1533,6 @@ def main():
         "summary": {k: v for k, v in summary.items() if k not in SUMMARY_FRAME_KEYS},
         "data": result_data,
     }
-    write_standard_run_artifacts(output_dir, result_payload, summary)
 
     # R Enhanced figures (only when --r-enhanced flag is set)
     r_enhanced_figures = _render_r_enhanced(

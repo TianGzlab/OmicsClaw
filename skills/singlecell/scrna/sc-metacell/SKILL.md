@@ -1,131 +1,107 @@
 ---
 name: sc-metacell
-description: >-
-  Compress scRNA-seq data into metacell-level summaries using SEACells or a
-  lightweight k-means aggregation fallback.
-version: 0.1.0
+description: Load when aggregating single cells into metacells (sample-aware coarse-grained pseudo-cells) on a normalised scRNA AnnData via SEACells or KMeans on a low-D embedding. Skip when ranking marker genes per cluster (use sc-markers) or for trajectory pseudotime ordering (use sc-pseudotime).
+version: 0.2.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, metacell, seacells, compression]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--method"
-      - "--use-rep"
-      - "--n-metacells"
-      - "--celltype-key"
-      - "--min-iter"
-      - "--max-iter"
-      - "--r-enhanced"
-    saves_h5ad: true
-    requires_preprocessed: true
+tags:
+- singlecell
+- scrna
+- metacell
+- seacells
+- aggregation
+- pseudo-cells
+requires:
+- anndata
+- scanpy
+- numpy
+- pandas
+- scikit-learn
 ---
 
-# Single-Cell Metacell
+# sc-metacell
 
-## Why This Exists
+## When to use
 
-- Without it: large noisy single-cell datasets are hard to summarize stably.
-- With it: cells are compressed into metacell-level profiles for downstream DE, trajectory, and visualization.
+The user has a normalised scRNA AnnData with a low-D embedding
+(`obsm["X_pca"]` by default) and wants compact metacell aggregates
+suitable for downstream GRN inference, slow-RNA-velocity analysis, or
+robust cluster-level statistics that need fewer but higher-coverage
+units. Two methods:
 
-## Data / State Requirements
+- `seacells` (default) — kernel archetypal analysis with iterative
+  refinement (`--min-iter` / `--max-iter`). Aggregates similar cells
+  into archetypes. Auto-falls back to `kmeans` if the SEACells package
+  isn't installed.
+- `kmeans` — KMeans clustering on the embedding; faster, no SEACells
+  dependency.
 
-- **Input matrix**: normalized expression in `adata.X` (log-normalized preferred)
-- **Raw counts**: `adata.layers["counts"]` is used for metacell aggregation when available; otherwise `adata.X` is used
-- **Embedding**: `adata.obsm["X_pca"]` (or another embedding specified via `--use-rep`) must exist
-- **Neighbors graph**: required for SEACells; computed automatically if missing
-- **Upstream step**: run `sc-preprocessing` first to obtain normalized expression + PCA
+Output is a new AnnData (`madata`) where each row is one metacell.
+For per-cluster marker discovery on the original AnnData, use
+`sc-markers`. For ordering cells, use `sc-pseudotime`.
 
-## Current Methods
+## Inputs & Outputs
 
-| Method | When to use | Needs neighbors? | Example |
-|--------|-------------|-------------------|---------|
-| `seacells` | Structure-aware aggregation; preserves manifold topology | Yes (auto-computed) | `--method seacells` |
-| `kmeans` | Lightweight baseline; fast compression | No | `--method kmeans` |
-
-## Key Parameters
-
-| Parameter | Meaning | Default |
+| Input | Format | Required |
 |---|---|---|
-| `--method` | `seacells` or `kmeans` | `seacells` |
-| `--use-rep` | embedding in `adata.obsm` used for aggregation | `X_pca` |
-| `--n-metacells` | target metacell count (must be < n_cells) | `30` |
-| `--celltype-key` | label column for dominant-type summary (SEACells) | `leiden` |
-| `--min-iter` / `--max-iter` | SEACells optimization iteration bounds | `10` / `30` |
-| `--seed` | random seed for reproducibility | `0` |
+| Normalised AnnData | `.h5ad` with `obsm[--use-rep]` (default `X_pca`) | yes (unless `--demo`) |
 
-## Workflow
+| Output | Path | Notes |
+|---|---|---|
+| Cell-level AnnData with metacell labels | `processed.h5ad` | **rows = original cells**; adds `obs["metacell"]` holding the metacell ID. This is the primary downstream object — `sc-de` / `sc-enrichment` expect this shape. |
+| Metacell-aggregated AnnData | `tables/metacells.h5ad` | rows = metacells; per-metacell aggregated expression for cluster-level / GRN downstream |
+| Metacell summary | `tables/metacell_summary.csv` | per-metacell `obs` (size, dominant celltype, etc.) |
+| Cell → metacell map | `tables/cell_to_metacell.csv` | always |
+| Figures | `figures/metacell_centroids.png`, `figures/metacell_size_distribution.png` | first only when an embedding is plottable |
+| Report | `report.md` + `result.json` | always |
 
-1. Load data (`--input` or `--demo`)
-2. Preflight: validate embedding, n_metacells, matrix semantics
-3. Run metacell construction (SEACells or k-means)
-4. Assign metacell labels to original cells
-5. Aggregate expression per metacell
-6. Render gallery (centroid plot, size distribution)
-7. Export `processed.h5ad` (original cells + metacell labels + contracts)
+## Flow
 
-## Outputs
+1. SEACells fallback check: try `import SEACells`; if it fails, silently switch `--method` to `kmeans`.
+2. Load AnnData (`--input`) or build a demo.
+3. Preflight: `obsm[--use-rep]` exists; `--n-metacells` is `< n_cells` and `≥ 2`; warn if no `layers["counts"]`.
+4. For SEACells: run kernel archetypal analysis with `--min-iter` / `--max-iter`; for KMeans: cluster the embedding.
+5. Aggregate cell-level expression into metacell-level expression (sum over `layers["counts"]` if present, else `.X`).
+6. Build per-metacell summary (size, dominant `--celltype-key` label).
+7. Save metacell AnnData, tables, figures, `report.md`, `result.json`.
 
-| File | Description |
-|------|-------------|
-| `processed.h5ad` | Original cell-level object with `obs["metacell"]` assignment and OmicsClaw contracts |
-| `tables/metacells.h5ad` | Aggregated metacell expression profiles |
-| `tables/cell_to_metacell.csv` | Cell-to-metacell mapping |
-| `tables/metacell_summary.csv` | Metacell-level summary (n_cells, dominant label) |
-| `figures/metacell_centroids.png` | Centroid overlay on embedding |
-| `figures/metacell_size_distribution.png` | Histogram of cells per metacell |
-| `figures/manifest.json` | Figure manifest for gallery rendering |
-| `figure_data/manifest.json` | Plot-ready data manifest |
-| `report.md` | Human-readable analysis report |
-| `result.json` | Machine-readable result envelope |
+## Gotchas
 
-## Matrix Contract (Output)
+- **`--method seacells` silently auto-falls back to `kmeans` if SEACells isn't installed.** `sc_metacell.py:326-332` catches `ImportError` from `import SEACells` and logs a warning, then sets `args.method = "kmeans"`. The actually-used method is recorded in `result.json["method"]` (the post-fallback value), but the request-vs-execute distinction isn't preserved as separate keys here. Inspect logs / report.md to confirm.
+- **All preflight failures `raise SystemExit(1)`, not `ValueError`.** `sc_metacell.py:113` raises `SystemExit(1)` when `obsm[--use-rep]` is missing (with available-embedding hint); `:123` raises when `--n-metacells >= n_cells` (with a sane suggested value); `:128` raises when `--n-metacells < 2`; `:340` raises `SystemExit("Provide --input or use --demo")`. Wrappers expecting `ValueError` need to catch `SystemExit`.
+- **`processed.h5ad` is the cell-level AnnData with metacell labels — NOT the metacell-aggregated AnnData.** `sc_metacell.py:463` saves the original `adata` (with `obs["metacell"]` added) to `processed.h5ad`; `sc_metacell.py:393` writes the aggregated metacell-shape `madata` to `tables/metacells.h5ad`. Downstream skills like `sc-de` / `sc-enrichment` (advertised in the next-step block at `sc_metacell.py:534-535`) consume `processed.h5ad`, not the aggregated shape — pass `tables/metacells.h5ad` explicitly when you actually need per-metacell rows.
+- **Aggregation prefers `layers["counts"]` over `.X`.** The preflight warns if `layers["counts"]` is absent (`sc_metacell.py:131-134`); when it's missing the script aggregates from `.X` (typically log-normalised) which is mathematically less defensible than summing raw counts.
+- **`--celltype-key` defaults to `leiden`.** `sc_metacell.py:77` defaults to `leiden`; if your AnnData has labels under a different key (e.g., `cell_type`), pass `--celltype-key cell_type` so the per-metacell "dominant cell type" column is meaningful.
 
-- `X` = `normalized_expression`
-- `layers["counts"]` = `raw_counts` (when available from input)
-- `raw` = `raw_counts_snapshot` (when available from input)
-- `producer_skill` = `sc-metacell`
+## Key CLI
 
-## Usual Next Steps
+```bash
+# Demo
+python omicsclaw.py run sc-metacell --demo --output /tmp/sc_metacell_demo
 
-After metacell construction, common next steps include:
-- **Differential expression** (`sc-de`) on metacell-level profiles
-- **Trajectory analysis** (`sc-pseudotime`) using metacell-smoothed data
-- **Visualization** of metacell-level gene expression patterns
+# Default SEACells, 30 metacells
+python omicsclaw.py run sc-metacell \
+  --input clustered.h5ad --output results/
 
-## References Inside OmicsClaw
+# KMeans (fast, no SEACells dependency)
+python omicsclaw.py run sc-metacell \
+  --input clustered.h5ad --output results/ \
+  --method kmeans --n-metacells 50
 
-- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-metacell-guardrails.md`.
-- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-metacell.md`.
+# Use Harmony-corrected embedding + custom celltype key
+python omicsclaw.py run sc-metacell \
+  --input integrated.h5ad --output results/ \
+  --use-rep X_harmony --celltype-key cell_type --n-metacells 100
 
-## CLI Parameters
+# More refinement iterations for SEACells (slower, smoother archetypes)
+python omicsclaw.py run sc-metacell \
+  --input clustered.h5ad --output results/ \
+  --min-iter 20 --max-iter 60
+```
 
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | None | Input AnnData file (`.h5ad`) | Required unless `--demo` |
-| `--output` | str | — | Output directory | Required |
-| `--demo` | flag | off | Run with built-in demo data | — |
-| `--method` | str | `seacells` | Metacell construction method: `seacells` or `kmeans` | Choices: `seacells`, `kmeans`; falls back to `kmeans` if SEACells not installed |
-| `--use-rep` | str | `X_pca` | Embedding in `adata.obsm` to use for aggregation | Must exist in `adata.obsm` |
-| `--n-metacells` | int | 30 | Target number of metacells | Must be >= 2 and < n_cells |
-| `--celltype-key` | str | `leiden` | `adata.obs` column used for dominant-type summary (SEACells) | — |
-| `--min-iter` | int | 10 | Minimum SEACells optimization iterations | Must be >= 1; must be <= `--max-iter` |
-| `--max-iter` | int | 30 | Maximum SEACells optimization iterations | Must be >= `--min-iter` |
-| `--seed` | int | 0 | Random seed for reproducibility | — |
-| `--n-neighbors` | int | 15 | Neighbors for SEACells graph construction | Must be >= 2 |
-| `--n-pcs` | int | 20 | PCs used for SEACells neighbor computation | Must be >= 1 |
-| `--r-enhanced` | flag | off | Generate R Enhanced plots (requires R + ggplot2) | — |
+## See also
 
-## R Enhanced Plots
-
-| Renderer | Output file | Description |
-|----------|-------------|-------------|
-| `plot_embedding_discrete` | `figures/r_enhanced/r_embedding_discrete.png` | Embedding colored by metacell assignment |
-| `plot_embedding_feature` | `figures/r_enhanced/r_embedding_feature.png` | Embedding colored by a continuous feature |
-| `plot_cell_barplot` | `figures/r_enhanced/r_cell_barplot.png` | Bar chart of cells per metacell |
-
-## Workflow Position
-
-**Upstream:** sc-clustering or sc-cell-annotation
-**Downstream:** sc-de, sc-enrichment (using metacell AnnData)
+- `references/parameters.md` — every CLI flag, SEACells vs KMeans tunables
+- `references/methodology.md` — when metacells help; SEACells archetypal math
+- `references/output_contract.md` — `madata.obs` schema; cell-to-metacell map columns
+- Adjacent skills: `sc-clustering` (upstream — produces `obs["leiden"]` for the celltype-key default), `sc-batch-integration` (upstream — produces `X_harmony` embedding for `--use-rep`), `sc-grn` (downstream — GRN inference is more stable on metacells than single cells), `sc-de` (parallel — sample-aware DE between conditions; complements per-metacell aggregation)

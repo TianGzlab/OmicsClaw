@@ -12,44 +12,59 @@ Core rules:
 
 - Reply in the user's language, usually Chinese or English.
 - Stay concise, practical, and execution-focused.
-- Use `docs/superpowers/playbooks/` as the repository's on-demand workflow
-  guidance for debugging, TDD, planning, parallelization, verification,
-  code review, and branch completion.
-- Treat those playbooks as binding workflow guardrails with iron laws, red
-  flags, and required evidence, not as optional summaries.
+- For non-trivial changes, work from a concise plan, keep edits scoped, and
+  verify claims with concrete commands or file inspections before reporting
+  completion.
 - When you make an important decision or complete a meaningful milestone,
   update `README.md` while preserving its existing structure.
 
 ## Project Overview
 
-OmicsClaw is a multi-omics analysis platform supporting 5 domains: spatial transcriptomics, single-cell omics, genomics, proteomics, and metabolomics. Each skill is a self-contained module that performs a specific analysis task via CLI or Python API. All processing is local-first. Design is inspired by [ClawBio](https://github.com/ClawBio/ClawBio).
+OmicsClaw is a multi-omics analysis platform supporting 89 registered skills
+across 8 domains: spatial transcriptomics, single-cell omics, genomics,
+proteomics, metabolomics, Bulk RNA-seq, orchestration, and literature. Each
+skill is a self-contained module that performs a specific analysis task via CLI
+or Python API. All processing is local-first. Design is inspired by
+[ClawBio](https://github.com/ClawBio/ClawBio).
 
 **Note**: OmicsClaw evolved from SpatialClaw and now uses a unified `omicsclaw.py` entrypoint.
 
 ## Setup
 
 ```bash
-cd /data1/TianLab/zhouwg/project/OmicsClaw
-pip install -e .
+cd /path/to/OmicsClaw
 
-# Add optional extras only when needed
-# pip install -e ".[interactive]"
-# pip install -e ".[tui]"
-# pip install -e ".[memory]"
-# pip install -e ".[full]"
+# Recommended: full conda-primary install (R + CLIs + Python in one shot)
+bash 0_setup_env.sh
+conda activate OmicsClaw
+
+# Lightweight alternative (Python-only skills, no R or external CLIs):
+# pip install -e .
+# pip install -e ".[interactive]" / ".[tui]" / ".[memory]" / ".[full]"
 
 python omicsclaw.py list   # or: oc list
 python omicsclaw.py run spatial-preprocess --demo
 ```
 
-> **`oc` short alias**: After `pip install -e .`, both `omicsclaw` and `oc` commands
-> are available system-wide. `oc` is registered via `[project.scripts]` in
-> `pyproject.toml` and points to `omicsclaw.cli:main` — the same entry point as
-> `omicsclaw`. No PATH tricks needed.
+> **`oc` short alias**: After installing OmicsClaw (either path), both
+> `omicsclaw` and `oc` commands are available system-wide via the
+> `[project.scripts]` entry in `pyproject.toml`.
 >
-> **Dependency source of truth**: Root dependency management lives in
-> `pyproject.toml`. The repository does not use a root `requirements.txt` as a
-> primary install entrypoint.
+> **Dependency source of truth**:
+> - **Python deps** live in `pyproject.toml` (used by both install paths).
+> - **R packages, bioinformatics CLIs, build toolchain** live in
+>   `environment.yml` (conda path only).
+> - **GitHub-only R packages** are installed inline by `0_setup_env.sh`
+>   Tier 3 (`devtools::install_github` for spacexr, CARD, CellChat, numbat,
+>   SPARK, DoubletFinder).
+>
+> The repository does not use a root `requirements.txt` as a primary
+> install entrypoint.
+>
+> **Known `pip check` warning**: the full conda environment keeps
+> `jinja2>=3.1.5` for FastAPI/nbconvert even though upstream
+> `pygpcca==1.0.4` still pins `jinja2==3.0.3`. Treat that single warning as
+> metadata noise when `oc doctor` and targeted import checks pass.
 
 ## Commands
 
@@ -58,7 +73,7 @@ python omicsclaw.py run spatial-preprocess --demo
 
 | Command | Purpose |
 |---------|---------|
-| `oc list` | List all 50+ skills across 5 domains |
+| `oc list` | List all 89 skills across 8 domains |
 | `oc run <skill> --demo` | Run a skill with demo data |
 | `oc run <skill> --input <file> --output <dir>` | Run with user data |
 | `oc interactive` | **Start interactive terminal chat (CLI mode)** |
@@ -100,7 +115,7 @@ OmicsClaw/
 │       ├── interactive.py      # prompt_toolkit REPL loop (CLI mode)
 │       └── tui.py              # Textual full-screen TUI (TUI mode)
 ├── skills/                     # Domain-organized skills + shared utilities
-│   ├── spatial/                # 15 spatial transcriptomics skills
+│   ├── spatial/                # 17 spatial transcriptomics skills
 │   │   ├── _lib/               # ★ Shared spatial utilities (adata_utils, viz, loader, etc.)
 │   │   │   ├── viz/            # Unified visualization package (13 modules)
 │   │   │   ├── adata_utils.py  # AnnData helper functions
@@ -112,7 +127,7 @@ OmicsClaw/
 │   │   ├── spatial-domains/    # Tissue region identification
 │   │   ├── spatial-annotate/   # Cell type annotation
 │   │   └── ...
-│   ├── singlecell/             # 14 single-cell omics skills
+│   ├── singlecell/             # 30 single-cell omics skills
 │   │   ├── _lib/               # ★ Shared single-cell utilities (19 modules)
 │   │   │   ├── io.py, qc.py, preprocessing.py, markers.py, ...
 │   │   │   ├── r_bridge.py     # R/Seurat integration bridge
@@ -127,9 +142,10 @@ OmicsClaw/
 │   │   └── _lib/               # Shared proteomics utilities
 │   ├── metabolomics/           # 8 metabolomics skills
 │   │   └── _lib/               # Shared metabolomics utilities
-│   ├── bulkrna/                # Bulk RNA skills
+│   ├── bulkrna/                # 13 bulk RNA skills
 │   │   └── _lib/               # Shared bulk RNA utilities
-│   └── orchestrator/           # Multi-domain routing
+│   ├── orchestrator/           # 2 orchestration skills
+│   └── literature/             # 1 literature skill
 ├── bot/                        # Messaging bot frontends
 │   ├── core.py                 # Shared LLM engine + tool loop (reused by interactive)
 │   ├── run.py                  # Unified bot runner
@@ -138,11 +154,10 @@ OmicsClaw/
 │   ├── requirements.txt        # Bot-specific dependencies
 │   ├── README.md               # Bot setup guide
 │   └── logs/                   # Audit logs (auto-created)
-├── docs/                       # Project docs, including AI workflow support
-│   └── superpowers/            # Playbooks plus dated plans/specs for agents
+├── docs/                       # Project docs and Mintlify site content
 ├── SOUL.md                     # Bot/CLI persona (OmicsBot)
 ├── SPEC.md                     # Repository maintenance + AI development contract
-├── templates/SKILL-TEMPLATE.md # Template for new skills
+├── templates/skill/            # v2 scaffold for new skills (copy whole dir)
 ├── examples/                   # Shared demo data
 ├── sessions/                   # SpatialSession JSONs
 ├── CLAUDE.md                   # Agent routing instructions
@@ -162,10 +177,18 @@ Every skill has a `SKILL.md` with YAML frontmatter + methodology, a Python scrip
 
 Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered from `skills/`.
 
+### Skill Metadata Rules
+
+- SKILL.md frontmatter (`metadata.omicsclaw`) is the single source of truth for skill metadata — canonical name, legacy aliases, allowed flags, `saves_h5ad`, and so on.
+- All primary skill scripts must expose a lightweight direct `--help` path.
+- Skill scripts write native artifacts; the shared runner writes the top-level `README.md` and `reproducibility/analysis_notebook.ipynb`.
+- Bot skill execution uses the same shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
+- Shared result construction and adapter coercion live in `omicsclaw/core/skill_result.py`; new execution surfaces should reuse that model instead of rebuilding legacy result dictionaries.
+
 ## How to Add a New Skill
 
 1. `mkdir skills/<your-skill-name>`
-2. `cp templates/SKILL-TEMPLATE.md skills/<your-skill-name>/SKILL.md`
+2. `cp -r templates/skill skills/<domain>/<your-skill-name>` (then rename + fill placeholders)
 3. Fill in SKILL.md
 4. Add Python script accepting `--input`, `--output`, `--demo`
 5. Add tests in `tests/`
@@ -173,30 +196,68 @@ Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered
 7. Add test path to `pytest.ini`
 8. Regenerate catalog: `python scripts/generate_catalog.py`
 
-## Development Workflow Playbooks
+## Development Workflow
 
-For repository development work, consult these playbooks on demand:
+For repository development work, start with a short plan when the task spans
+multiple files, debug from root cause before editing, and verify the affected
+behavior before committing, pushing, or opening a PR.
 
-- `docs/superpowers/playbooks/skill_systematic_debugging.md`
-- `docs/superpowers/playbooks/skill_test_driven_development.md`
-- `docs/superpowers/playbooks/skill_verification_before_completion.md`
-- `docs/superpowers/playbooks/skill_writing_plans.md`
-- `docs/superpowers/playbooks/skill_dispatching_parallel_agents.md`
-- `docs/superpowers/playbooks/skill_requesting_code_review.md`
-- `docs/superpowers/playbooks/skill_finishing_a_development_branch.md`
+After creating or materially updating any PR, always run
+`cursor-team-kit:make-pr-easy-to-review` before handing it off. The PR should
+have a reviewer-oriented description with a TL;DR, recommended review order,
+diff buckets, generated/mechanical file notes, risk notes, and verification
+evidence.
+
+### Contract Tests
+
+Framework optimization guardrails are enforced by targeted contract tests:
+`tests/test_documentation_facts.py`, `tests/test_skill_runner_contract.py`, `tests/test_skill_metadata_contract.py`, `tests/test_skill_help_contract.py`, `tests/test_registry_alias_contract.py`, `tests/test_output_ownership_contract.py`, and `tests/test_bot_runner_contract.py`.
+
+### Architecture Contracts
+
+- [framework roadmap](docs/engineering/2026-05-07-framework-optimization-spec.md)
+- [skill runner](docs/engineering/2026-05-07-skill-runner-contract.md)
+- [output ownership](docs/engineering/2026-05-07-output-ownership-contract.md)
+- [alias ownership](docs/engineering/2026-05-07-alias-ownership-contract.md)
+- [bot runner](docs/engineering/2026-05-07-bot-runner-contract.md)
+- [skill help](docs/engineering/2026-05-07-skill-help-contract.md)
+- [domain input contracts](docs/engineering/domain-input-contracts.md)
 
 ## Graph Memory System
 
-OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`.
+OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`. Vocabulary, decisions, and architectural diagrams live in [`docs/CONTEXT.md`](docs/CONTEXT.md).
 
 ### Architecture
 
-The memory system is backed by SQLite/PostgreSQL and is built as a graph database overlay using SQLAlchemy.
+Three layers over a SQLite/PostgreSQL graph database (SQLAlchemy):
 
-- **Nodes & Edges**: Every entity (session, dataset, user preference) is a node connected via edges to a central root node (`ROOT_NODE_UUID`). Nodes are addressed by URIs (e.g., `session://user123/cli`).
-- **MemoryClient**: High-level abstract client (`omicsclaw/memory/memory_client.py`) used by multi-agent pipelines to `remember()`, `recall()`, and `search()`.
-- **Compat Layer**: To maintain backward compatibility with old bot memory, `omicsclaw/memory/compat.py` implements the old interface but routes it through the graph engine.
-- **REST API**: A FastAPI backend provides management capabilities, accessible via `oc memory-server`.
+| Layer | Module | Role |
+|---|---|---|
+| Strategy | `MemoryClient(engine, namespace=...)` | Decides which Namespace a write lands in and whether it's versioned vs. overwrite. |
+| Hot path | `MemoryEngine` (`omicsclaw/memory/engine.py`) | 7 verbs over `(uri, namespace)`: `upsert`, `upsert_versioned`, `patch_edge_metadata`, `recall`, `search`, `list_children`, `get_subtree`. |
+| Cold path | `ReviewLog` (`omicsclaw/memory/review_log.py`) | Version-chain inspection, rollback, orphan/GC, browse_shared, changeset approve/discard — for the desktop Review & Audit pane. |
+
+- **Nodes & Edges**: Every entity (session, dataset, user preference) is a node connected via edges to a central root (`ROOT_NODE_UUID`). Nodes are addressed by URIs (e.g., `core://agent`, `dataset://pbmc.h5ad`).
+- **Namespace partition**: `paths`, `search_documents`, and `glossary_keywords` carry a `namespace` column; surfaces inject the value (CLI = workspace path, Desktop = `app/<launch_id>`, Bot = `<platform>/<user_id>`, system = `__shared__`).
+- **Read fallback is asymmetric**: `recall` and `search` see `__shared__` content automatically; `list_children` and `get_subtree` are strict so private inventories don't get polluted by shared structure.
+- **Compat Layer**: `omicsclaw/memory/compat.py` (`CompatMemoryStore`) is the bot's drop-in replacement for the legacy `bot.memory.MemoryStore`; it derives a per-session namespace from `(platform, user_id)`.
+- **REST API**: A FastAPI backend provides management capabilities (browse, search, review, rollback, orphan inspection), accessible via `oc memory-server`. The desktop's `/memory/review/*` routes go through `ReviewLog`.
+
+#### Surface helpers
+
+```python
+from omicsclaw.memory import (
+    cli_namespace_from_workspace,  # absolute workspace path (cwd if None)
+    desktop_namespace,             # app/<OMICSCLAW_DESKTOP_LAUNCH_ID> or app/desktop_user
+    get_memory_client,             # factory: MemoryClient bound to a namespace
+    get_memory_engine,             # singleton MemoryEngine
+    get_review_log,                # singleton ReviewLog
+)
+```
+
+> **Migration note.** `MemoryEngine` and `ReviewLog` are the canonical hot- and cold-path layers; all production endpoints route through them. The legacy `GraphService` class has been retired (`graph.py` deleted). Its path-based admin operations now live in a private `omicsclaw/memory/api/_browse_helpers.BrowseHelpers` class used only by the `oc memory-server` admin UI (`/api/browse/*`). New code MUST use `MemoryEngine` / `ReviewLog` / `MemoryClient`; do not import `_browse_helpers` from outside `omicsclaw/memory/api/`.
+
+> **KH bootstrap.** Every memory-init path (`CompatMemoryStore.initialize`, `MemoryClient.initialize` with `database_url`, `app/server.py` chat lifespan, `memory/server.py` lifespan) calls `seed_knowhows()` after `init_db()`. The function reads `KnowHowInjector.iter_entries()` and writes each entry to `__shared__` under `core://kh/<doc_id>` via the idempotent `MemoryEngine.seed_shared`. Failures downgrade to a log line; missing `knowledge_base/` does not block startup.
 
 ### Running the Dashboard API
 
@@ -232,6 +293,14 @@ The app backend binds to `127.0.0.1:8765` by default and serves chat streaming, 
 - `OMICSCLAW_MEMORY_DB_URL`: SQLAlchemy connection URL (`sqlite+aiosqlite:///bot/data/memory.db`)
 - `OMICSCLAW_MEMORY_API_TOKEN`: Bearer token required when exposing the API beyond localhost.
 
+### Provider Backend Contract
+
+Desktop provider changes must preserve the OmicsClaw-App backend contract:
+
+- `/providers` reports the active provider, model, and endpoint.
+- `/providers/test` performs a short live LLM connectivity probe.
+- `/chat/stream` reinitializes the provider runtime when a request changes model, even if the provider id is unchanged.
+
 ## Bot Integration
 
 OmicsClaw includes multi-channel messaging frontends in `bot/`:
@@ -261,7 +330,7 @@ bot/
 All channels share `bot/core.py` which contains:
 - LLM tool-use loop (OpenAI function calling)
 - TOOLS definition (omicsclaw, save_file, write_file, generate_audio)
-- `execute_omicsclaw()` — runs `omicsclaw.py run <skill>` as subprocess
+- `execute_omicsclaw()` — executes normal skills via the shared runner contract
 - Security helpers (path sanitization, file size limits)
 - Audit logging (JSONL)
 
@@ -405,3 +474,11 @@ pip install -e ".[interactive]"
 pip install -e ".[tui]"
 # then: pip install textual>=0.80
 ```
+
+### Provider Runtime Contract
+
+Interactive CLI provider changes share the runtime resolution path with the app backend: `LLM_PROVIDER=custom` must honor `LLM_BASE_URL`, `OMICSCLAW_MODEL`, and `LLM_API_KEY`; explicit CLI `--provider` / `--model` overrides win over environment defaults; malformed custom endpoints should return actionable diagnostics instead of `(no response)`.
+
+### TUI Implementation Notes
+
+TUI helpers under `omicsclaw/interactive/_tui_support.py` stay dependency-light so support tests can run without optional memory or Textual installs. When adding Textual containers, mount the parent widget into the live tree before mounting child widgets.

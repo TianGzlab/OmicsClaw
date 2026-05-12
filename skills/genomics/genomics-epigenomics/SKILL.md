@@ -1,225 +1,82 @@
 ---
 name: genomics-epigenomics
-description: >-
-  Epigenomics analysis including ATAC-seq peak calling with MACS3,
-  ChIP-seq analysis, motif enrichment, and chromatin accessibility.
-version: 0.2.0
+description: Load when summarising a peak file (BED / narrowPeak) from ATAC-seq / ChIP-seq / CUT&Tag — peak count, width distribution, per-chromosome counts, score statistics. Skip when calling peaks from BAM (run MACS / Genrich externally first) or when working with single-cell ATAC (use `scatac-preprocessing`).
+version: 0.5.0
 author: OmicsClaw
 license: MIT
-tags: [genomics, epigenomics, ATAC-seq, ChIP-seq, MACS, peaks, motif]
-metadata:
-  omicsclaw:
-    domain: genomics
-    emoji: "🧬"
-    trigger_keywords: [epigenomics, ATAC-seq, ChIP-seq, peak calling, MACS, motif, chromatin]
-    allowed_extra_flags:
-      - "--assay"
-      - "--method"
-    legacy_aliases: [epigenomics]
-    saves_h5ad: false
+tags:
+- genomics
+- epigenomics
+- atac-seq
+- chip-seq
+- cut-tag
+- peaks
+- macs
+- bed
+requires:
+- pandas
+- numpy
 ---
 
-# 🧬 Epigenomics Analysis
+# genomics-epigenomics
 
-Peak calling and chromatin accessibility analysis for ATAC-seq and ChIP-seq data.
+## When to use
 
-## Core Capabilities
+The user has a peak file (BED, narrowPeak, or broadPeak) from
+ATAC-seq, ChIP-seq, or CUT&Tag and wants peak summary statistics:
+total peak count, median / mean width, per-chromosome distribution,
+optional score column statistics. The script consumes peak files —
+it does NOT call peaks from BAM. `--method` (`macs2` / `macs3` /
+`homer` / `genrich`) and `--assay` (`chip-seq` / `atac-seq` /
+`cut-tag`) are recorded as metadata only.
 
-1. **MACS3 peak calling**: ATAC-specific and ChIP-seq peak detection
-2. **Motif analysis**: Homer, MEME motif enrichment in open chromatin regions
-3. **Quality control**: Fragment size distribution, TSS enrichment, FRiP scores
-4. **Differential accessibility**: Condition comparison of chromatin regions
-5. **IDR replicate analysis**: Irreproducible Discovery Rate for peak reproducibility
+For single-cell ATAC processing use `scatac-preprocessing`.
 
-## CLI Reference
+## Inputs & Outputs
 
-```bash
-python omicsclaw.py run epigenomics --demo
-python omicsclaw.py run epigenomics --input <data.bam> --output <dir>
-```
+| Input | Format | Required |
+|---|---|---|
+| Peaks | `.bed` (3-col or 6-col) or `.narrowPeak` (10-col); broadPeak (9-col) loads as BED6 with cols 7-9 dropped | yes (unless `--demo`) |
+| Assay metadata | `--assay {chip-seq,atac-seq,cut-tag}` (default `chip-seq`) | no |
+| Caller metadata | `--method {macs2,macs3,homer,genrich}` (default `macs2`) | no |
 
-## Algorithm / Methodology
+| Output | Path | Notes |
+|---|---|---|
+| Peaks summary | `tables/peaks_summary.csv` | per-peak start/end/width/score |
+| Per-chromosome | `tables/peaks_per_chromosome.csv` | peaks count per chromosome |
+| Report | `report.md` + `result.json` | always; `result.json["data"]["peaks_per_chrom"]` mirrors the table |
 
-### MACS3 for ATAC-seq
+## Flow
 
-**Goal:** Identify open chromatin regions from ATAC-seq data using ATAC-specific parameters.
+1. Load peak file (`--input <peaks.bed|narrowPeak>`) or generate a demo at `output_dir/demo_peaks.narrowPeak` (`genomics_epigenomics.py:211`).
+2. Parse coordinates; compute per-peak width.
+3. Aggregate per-chromosome counts; per-`--assay` expected-width range is added to the report (`genomics_epigenomics.py:172-178`).
+4. Write `tables/peaks_summary.csv` (`genomics_epigenomics.py:352`) + `tables/peaks_per_chromosome.csv` (`:360`) + `report.md` + `result.json` (`:366`).
 
-**Approach:** Run MACS3 in paired-end mode with Tn5 shift correction, no model building, and duplicate retention.
+## Gotchas
 
-```bash
-macs3 callpeak \
-    -t sample.bam \
-    -f BAMPE \
-    -g hs \
-    -n sample \
-    --outdir peaks/ \
-    -q 0.05 \
-    --nomodel \
-    --shift -75 \
-    --extsize 150 \
-    --keep-dup all \
-    -B \
-    --call-summits
-```
+- **No peak caller is invoked.** This skill summarises an existing BED/narrowPeak file — it does NOT run MACS / Genrich. Run them upstream and feed the output here.
+- **`--method` is metadata-only; `--assay` changes the report.** `--method` is recorded in `result.json` only. `--assay` controls the per-assay expected-peak-width range injected into the summary (`genomics_epigenomics.py:172-178`) — `chip-seq` reports 200-2000 bp, `atac-seq` 150-500 bp, `cut-tag` 150-300 bp. Peak parsing itself is identical across assays.
+- **`--input` REQUIRED unless `--demo`.** `genomics_epigenomics.py:334` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError` at `:337`.
+- **3-column BED has no score column.** Without a score (col 5 in BED6 / narrowPeak), the summary statistics for "score" are NaN. Pre-convert to narrowPeak or BED6 for score-aware stats. Note: broadPeak's "signalValue" (col 7) and qValue (col 9) are NOT read — the parser only handles up to BED6 plus the narrowPeak 10-col extension.
+- **Coordinate convention is 0-based half-open (BED).** Width = `end - start`. If your input uses 1-based closed coordinates, widths are off-by-one.
+- **Demo BED has 500 fixed-pattern peaks.** Useful for orchestrator smoke tests; not biologically meaningful.
 
-### Why These Parameters?
-
-| Parameter | Reason |
-|-----------|--------|
-| `--nomodel` | ATAC doesn't have control, can't build model |
-| `--shift -75` | Centers on Tn5 insertion site |
-| `--extsize 150` | Smooths signal around cut sites |
-| `--keep-dup all` | Tn5 creates duplicate cuts at accessible sites |
-| `-f BAMPE` | Uses actual fragment size from paired-end |
-
-### Call Peaks on NFR Only
+## Key CLI
 
 ```bash
-# Filter to nucleosome-free reads (<100bp fragments)
-samtools view -h sample.bam | \
-    awk 'substr($0,1,1)=="@" || ($9>0 && $9<100) || ($9<0 && $9>-100)' | \
-    samtools view -b > nfr.bam
+# Demo
+python omicsclaw.py run genomics-epigenomics --demo --output /tmp/epi_demo
 
-# Call peaks on NFR
-macs3 callpeak -t nfr.bam -f BAMPE -g hs -n sample_nfr \
-    --nomodel --shift -37 --extsize 75 --keep-dup all -q 0.01
+# Real ATAC-seq peaks
+python omicsclaw.py run genomics-epigenomics \
+  --input sample_peaks.narrowPeak --output results/ \
+  --assay atac-seq --method macs3
 ```
 
-### Broad Peaks (Optional)
+## See also
 
-```bash
-macs3 callpeak -t sample.bam -f BAMPE -g hs -n sample_broad \
-    --nomodel --shift -75 --extsize 150 --broad --broad-cutoff 0.1
-```
-
-### Batch Processing
-
-```bash
-#!/bin/bash
-GENOME=hs  # hs for human, mm for mouse
-OUTDIR=peaks
-
-mkdir -p $OUTDIR
-
-for bam in *.bam; do
-    sample=$(basename $bam .bam)
-    macs3 callpeak -t $bam -f BAMPE -g $GENOME -n $sample --outdir $OUTDIR \
-        --nomodel --shift -75 --extsize 150 --keep-dup all -q 0.05 -B --call-summits
-done
-```
-
-### IDR for Replicate Consistency
-
-```bash
-# Call peaks on each replicate separately
-macs3 callpeak -t rep1.bam -f BAMPE -g hs -n rep1 ...
-macs3 callpeak -t rep2.bam -f BAMPE -g hs -n rep2 ...
-
-# Run IDR
-idr --samples rep1_peaks.narrowPeak rep2_peaks.narrowPeak \
-    --input-file-type narrowPeak --output-file idr_peaks.txt --plot
-
-# Filter by IDR threshold
-awk '$5 >= 540' idr_peaks.txt > reproducible_peaks.bed
-```
-
-### Convert to BigWig
-
-```bash
-sort -k1,1 -k2,2n sample_treat_pileup.bdg > sample.sorted.bdg
-bedGraphToBigWig sample.sorted.bdg chrom.sizes sample.bw
-```
-
-## Output Files
-
-| File | Description |
-|------|-------------|
-| `_peaks.narrowPeak` | Peak locations (BED-like) |
-| `_summits.bed` | Peak summit positions |
-| `_peaks.xls` | Peak statistics |
-| `_treat_pileup.bdg` | Signal track (bedGraph) |
-
-## narrowPeak Format
-
-Columns: chrom, start, end, name, score, strand, signalValue, pValue, qValue, summit_offset
-
-## Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--method` | `macs3` | macs3, homer, genrich |
-| `--mode` | `atac` | atac, chipseq |
-| `--genome` | `hs` | hs (human), mm (mouse) |
-| `--qvalue` | `0.05` | FDR threshold |
-
-## Why This Exists
-
-- **Without it**: Open chromatin peaks are modeled with poor shifting logic or non-reproducible parameters
-- **With it**: ATAC-specific logic correctly infers true transposase insertions vs nucleosomes
-- **Why OmicsClaw**: Exposes high-level biology queries directly mapped to strictly modeled peak calling routines
-
-## Workflow
-
-1. **Calculate**: Prepare cross-correlation and fragment histograms.
-2. **Execute**: Test local enrichment over poisson distribution null.
-3. **Assess**: Perform IDR replicates and FDR significance tests.
-4. **Generate**: Output structured summit maps and bedGraph.
-5. **Report**: Tabulate core peaks and TF motifs.
-
-## Example Queries
-
-- "Run ATAC peak calling with MACS3 on this bam file"
-- "Perform motif analysis on epigenomics data BED"
-
-## Output Structure
-
-```
-output_directory/
-├── report.md
-├── result.json
-├── peaks.narrowPeak
-├── figures/
-│   └── footprint_plot.png
-├── tables/
-│   └── motif_enrichment.csv
-└── reproducibility/
-    ├── commands.sh
-    ├── requirements.txt
-    └── checksums.sha256
-```
-
-## Safety
-
-- **Local-first**: Strict offline processing without external upload.
-- **Disclaimer**: Requires OmicsClaw reporting structures and disclaimers.
-- **Audit trail**: Hyperparameters and operational flow states are logged fully.
-
-## Integration with Orchestrator
-
-**Trigger conditions**:
-- Automatically invoked dynamically based on tool metadata and user intent matching.
-
-**Chaining partners**:
-- `align` — Upstream generation of BAM
-- `genomics-qc` — Upstream filtering
-
-## Version Compatibility
-
-Reference examples tested with: MACS3 3.0+, samtools 1.19+
-
-## Dependencies
-
-**Required**: MACS3 (macs3), samtools
-**Optional**: Homer, Genrich, IDR, bedtools, pyGenomeTracks
-
-## Citations
-
-- [MACS3](https://doi.org/10.1186/gb-2008-9-9-r137) — Zhang et al., Genome Biology 2008
-- [Homer](http://homer.ucsd.edu/) — Heinz et al., Molecular Cell 2010
-- [IDR](https://doi.org/10.1214/11-AOAS466) — Li et al., Annals of Applied Statistics 2011
-- [ATAC-seq](https://doi.org/10.1038/nmeth.2688) — Buenrostro et al., Nature Methods 2013
-
-## Related Skills
-
-- `genomics-qc` — QC before peak calling
-- `align` — Read alignment upstream
+- `references/parameters.md` — every CLI flag
+- `references/methodology.md` — peak-file format conventions, score interpretation
+- `references/output_contract.md` — `tables/peaks_summary.csv` + per-chromosome
+- Adjacent skills: `scatac-preprocessing` (parallel — single-cell ATAC), `genomics-alignment` (upstream — BAMs feed peak callers), `genomics-qc` (upstream — FASTQ QC before alignment), `bulkrna-de` (parallel — bulk RNA-seq differential expression)

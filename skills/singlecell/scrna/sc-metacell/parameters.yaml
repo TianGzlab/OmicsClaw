@@ -1,0 +1,18 @@
+domain: singlecell
+allowed_extra_flags:
+- --celltype-key
+- --max-iter
+- --method
+- --min-iter
+- --n-metacells
+- --n-neighbors
+- --n-pcs
+- --r-enhanced
+- --seed
+- --use-rep
+saves_h5ad: true
+requires_preprocessed: true
+script: sc_metacell.py
+param_hints: {}
+trigger_keywords: []
+legacy_aliases: []

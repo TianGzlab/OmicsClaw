@@ -1841,7 +1841,13 @@ def preflight_sc_enrichment(
     return decision
 
 
-def apply_preflight(decision: PreflightDecision, logger, *, demo_mode: bool = False) -> None:
+def apply_preflight(
+    decision: PreflightDecision,
+    logger,
+    *,
+    demo_mode: bool = False,
+    confirmed: bool = False,
+) -> None:
     """Emit user-facing guidance and raise on blocking conditions.
 
     When *demo_mode* is ``True``, confirmation-level blocks (``needs_user_input``)
@@ -1849,10 +1855,11 @@ def apply_preflight(decision: PreflightDecision, logger, *, demo_mode: bool = Fa
     input.  Hard ``blocked`` status is **not** downgraded because it typically
     indicates genuinely missing data layers or packages.
     """
-    if demo_mode and decision.status == "needs_user_input":
-        # In demo mode, treat user-confirmation prompts as non-blocking guidance.
+    if (demo_mode or confirmed) and decision.status == "needs_user_input":
+        # Treat user-confirmation prompts as non-blocking guidance once accepted.
+        prefix = "demo auto-accepted" if demo_mode else "user confirmed"
         for msg in decision.confirmations:
-            decision.guidance.append(f"[demo auto-accepted] {msg}")
+            decision.guidance.append(f"[{prefix}] {msg}")
         decision.confirmations.clear()
         decision.pending_fields.clear()
         decision.status = "proceed_with_guidance"

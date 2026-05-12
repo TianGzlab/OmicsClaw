@@ -1,0 +1,16 @@
+domain: genomics
+emoji: 🔀
+trigger_keywords:
+- haplotype phasing
+- WhatsHap
+- SHAPEIT
+- Eagle
+- phasing
+allowed_extra_flags:
+- --n-variants
+legacy_aliases:
+- phase
+saves_h5ad: false
+script: genomics_phasing.py
+param_hints: {}
+requires_preprocessed: false

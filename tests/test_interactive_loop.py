@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import inspect
 import io
+import logging
+import os
+import subprocess
 import sys
 from types import ModuleType
 from types import SimpleNamespace
@@ -11,11 +14,44 @@ from rich.console import Console
 
 from omicsclaw.core.registry import OmicsRegistry
 from omicsclaw.interactive import interactive
+from omicsclaw.interactive._session_state import SessionState
 from omicsclaw.interactive._session_command_support import (
     SessionCommandView,
     SessionListEntry,
     SessionListView,
 )
+
+
+def test_interactive_import_does_not_require_graph_memory_dependencies():
+    env = dict(os.environ)
+    env["OMICSCLAW_MEMORY_ENABLED"] = "false"
+    code = """
+import builtins
+
+original_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name == "sqlalchemy" or name.startswith("sqlalchemy."):
+        raise ModuleNotFoundError("No module named 'sqlalchemy'")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import omicsclaw.interactive.interactive
+print("ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(interactive._OMICSCLAW_DIR),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
 
 
 @pytest.mark.asyncio
@@ -121,6 +157,92 @@ def test_init_llm_does_not_force_registry_load(monkeypatch):
     assert model == "test-model"
     assert provider == "custom"
     assert calls == []
+
+
+def test_init_llm_prefers_explicit_config_over_environment(monkeypatch):
+    captured: dict[str, str | None] = {}
+    core_module = ModuleType("bot.core")
+    core_module.OMICSCLAW_MODEL = "config-model"
+    core_module.LLM_PROVIDER_NAME = "custom"
+
+    def _init(**kwargs):
+        captured.update(kwargs)
+        core_module.OMICSCLAW_MODEL = str(kwargs["model"])
+        core_module.LLM_PROVIDER_NAME = str(kwargs["provider"])
+
+    core_module.init = _init
+    bot_package = ModuleType("bot")
+    bot_package.core = core_module
+
+    monkeypatch.setitem(sys.modules, "bot", bot_package)
+    monkeypatch.setitem(sys.modules, "bot.core", core_module)
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_API_KEY", "env-key")
+    monkeypatch.setenv("OMICSCLAW_MODEL", "env-model")
+    monkeypatch.setenv("LLM_BASE_URL", "https://env.example/v1")
+
+    model, provider = interactive._init_llm(
+        {
+            "provider": "custom",
+            "api_key": "config-key",
+            "model": "config-model",
+            "base_url": "https://config.example/v1",
+        }
+    )
+
+    assert captured == {
+        "api_key": "config-key",
+        "base_url": "https://config.example/v1",
+        "model": "config-model",
+        "provider": "custom",
+    }
+    assert model == "config-model"
+    assert provider == "custom"
+
+
+def test_configure_cli_loggers_falls_back_to_error_for_invalid_env(monkeypatch):
+    monkeypatch.setenv("OMICSCLAW_LOG_LEVEL", "INF0")
+
+    interactive._configure_cli_loggers()
+
+    assert logging.getLogger("openai").level == logging.ERROR
+
+
+@pytest.mark.asyncio
+async def test_single_shot_passes_cli_model_and_provider_to_init(monkeypatch):
+    captured: dict[str, str] = {}
+
+    def _fake_init(config):
+        captured.update(config)
+        return "cli-model", "custom"
+
+    async def _fake_stream_response(messages, **kwargs):
+        messages.append({"role": "assistant", "content": "OK"})
+        return "OK"
+
+    async def _fake_save_session(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(interactive, "_init_llm", _fake_init)
+    monkeypatch.setattr(interactive, "_stream_llm_response", _fake_stream_response)
+    monkeypatch.setattr(interactive, "save_session", _fake_save_session)
+    monkeypatch.setattr(
+        interactive,
+        "console",
+        Console(file=io.StringIO(), force_terminal=False),
+    )
+
+    await interactive._single_shot(
+        prompt="Say OK",
+        workspace_dir="/tmp/workspace",
+        model="cli-model",
+        provider="custom",
+        config={"base_url": "https://config.example/v1"},
+    )
+
+    assert captured["model"] == "cli-model"
+    assert captured["provider"] == "custom"
+    assert captured["base_url"] == "https://config.example/v1"
 
 
 @pytest.mark.asyncio
@@ -247,7 +369,10 @@ async def test_handle_resume_falls_back_to_session_search_for_unique_match(monke
     )
     monkeypatch.setattr(interactive, "console", Console(file=output, force_terminal=False))
 
-    await interactive._handle_resume("brain", {"session_id": "current"})
+    await interactive._handle_resume(
+        "brain",
+        SessionState(session_id="current", workspace_dir="/tmp", ui_backend="cli"),
+    )
 
     assert calls == ["brain", "abc12345"]
     assert [view.session_id for view in applied] == ["abc12345"]
@@ -520,12 +645,11 @@ async def test_stream_llm_response_marks_followup_tool_batches_as_updates(monkey
 
 def test_handle_doctor_applies_shared_diagnostics_view(monkeypatch):
     captured: dict[str, object] = {}
-    state = {
-        "workspace_dir": "/tmp/workspace",
-        "pipeline_workspace": "",
-        "session_metadata": {},
-        "messages": [],
-    }
+    state = SessionState(
+        session_id="doctor",
+        workspace_dir="/tmp/workspace",
+        ui_backend="cli",
+    )
 
     monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
 
@@ -549,12 +673,13 @@ def test_handle_doctor_applies_shared_diagnostics_view(monkeypatch):
 
 def test_handle_context_passes_session_state_to_shared_builder(monkeypatch):
     captured: dict[str, object] = {}
-    state = {
-        "workspace_dir": "/tmp/workspace",
-        "pipeline_workspace": "",
-        "session_metadata": {"active_style": "teaching"},
-        "messages": [{"role": "user", "content": "inspect sample.h5ad"}],
-    }
+    state = SessionState(
+        session_id="ctx",
+        workspace_dir="/tmp/workspace",
+        ui_backend="cli",
+        session_metadata={"active_style": "teaching"},
+        messages=[{"role": "user", "content": "inspect sample.h5ad"}],
+    )
 
     monkeypatch.setattr(interactive, "_active_pipeline_workspace", lambda state: "/tmp/pipeline")
     monkeypatch.setattr(interactive, "_active_output_style", lambda state: "teaching")
@@ -583,7 +708,7 @@ def test_handle_context_passes_session_state_to_shared_builder(monkeypatch):
 
 def test_handle_usage_applies_shared_usage_view(monkeypatch):
     captured: dict[str, object] = {}
-    state = {"session_id": "demo"}
+    state = SessionState(session_id="demo", workspace_dir="/tmp", ui_backend="cli")
 
     monkeypatch.setattr(
         interactive,

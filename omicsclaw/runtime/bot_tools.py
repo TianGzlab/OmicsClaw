@@ -21,27 +21,97 @@ from .tool_spec import (
 @dataclass(frozen=True, slots=True)
 class BotToolContext:
     skill_names: tuple[str, ...]
-    skill_desc_text: str
+    # ``skill_desc_text`` is retained for backward compatibility with older
+    # callers/tests, but is no longer embedded verbatim in the tool
+    # description. The LLM now receives a compact 7-domain briefing built
+    # from ``omicsclaw.core.domain_briefing`` instead.
+    skill_desc_text: str = ""
+    domain_briefing: str = ""
+
+
+def build_default_bot_tool_context() -> BotToolContext:
+    """Production-shape ``BotToolContext`` with the full skill registry.
+
+    Mirrors ``bot/core.py:_build_bot_tool_context`` so external callers
+    (e.g. the behavioral-parity eval suite) can build the *same* tool
+    list the production bot path sends to the LLM. Without this, eval
+    callers tend to stub ``skill_names=("sc-de", "spatial-preprocess")``
+    and end up testing a fictional tool surface where the ``omicsclaw``
+    tool's ``skill`` parameter is restricted to two enums and the
+    ``"auto"`` routing path is missing — fatal for routing parity.
+    """
+    from omicsclaw.core.domain_briefing import build_domain_briefing
+    from omicsclaw.core.registry import ensure_registry_loaded
+
+    registry = ensure_registry_loaded()
+    skill_names = tuple(list(registry.skills.keys()) + ["auto"])
+    briefing = build_domain_briefing(
+        lead_in=(
+            "OmicsClaw dispatches multi-omics analysis across 7 domains. "
+            "Each line below summarizes a domain and lists a few representative skills."
+        ),
+        trailing_hint=(
+            "The `skill` parameter accepts any canonical skill alias or legacy alias "
+            "(resolved automatically). For the complete skill list of one domain, "
+            "call the `list_skills_in_domain` tool (preferred, paginated) or read "
+            "`skills/<domain>/INDEX.md` on disk. "
+            "Prefer skill='auto' with a natural-language `query` to let the capability "
+            "resolver pick the best match programmatically."
+        ),
+        ensure_loaded=False,
+    )
+    return BotToolContext(
+        skill_names=skill_names,
+        skill_desc_text="",
+        domain_briefing=briefing,
+    )
+
+
+def _resolve_domain_briefing(context: BotToolContext) -> str:
+    """Return the briefing text, computing it lazily if not preset.
+
+    Allows tests to inject a pre-rendered briefing (cheap, deterministic),
+    while production callers can omit it and let the registry render.
+    """
+    if context.domain_briefing:
+        return context.domain_briefing
+    try:
+        from omicsclaw.core.domain_briefing import build_domain_briefing
+        return build_domain_briefing(
+            lead_in=(
+                "OmicsClaw dispatches multi-omics analysis across 8 domains. "
+                "Each line below summarizes a domain and lists a few representative skills."
+            ),
+            trailing_hint=(
+                "The `skill` parameter accepts any canonical skill alias or legacy alias "
+                "(resolved automatically). For the complete skill list of one domain, "
+                "call the `list_skills_in_domain` tool (preferred, paginated) or read "
+                "`skills/<domain>/INDEX.md` on disk. "
+                "Prefer skill='auto' with a natural-language `query` to let the capability "
+                "resolver pick the best match programmatically."
+            ),
+        )
+    except Exception:
+        # Fallback when registry isn't importable (e.g. partial test envs).
+        return context.skill_desc_text
 
 
 def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
+    briefing = _resolve_domain_briefing(context)
     specs = [
         ToolSpec(
             name="omicsclaw",
             description=(
-                f"Run an OmicsClaw multi-omics analysis skill. Available canonical skills: {context.skill_desc_text}. "
-                "Legacy aliases are also accepted and resolved automatically. "
-                "Use mode='demo' to run with built-in synthetic data. "
-                "Use mode='file' when the user has sent an omics data file. "
-                "If `sc-batch-integration` recommends upstream preparation and the user explicitly agrees, "
-                "rerun this tool with `auto_prepare=true` so OmicsClaw performs the recommended "
-                "`sc-standardize-input` / `sc-preprocessing` steps before the final integration call. "
-                "IMPORTANT: Preserve exact numerical values, warnings, errors, and file paths when relaying results. "
-                "By default only a text summary is returned (return_media omitted or empty). "
-                "Set return_media ONLY when the user explicitly asks for figures/plots/tables. "
-                "Use 'all' to send everything, or a keyword to filter "
-                "(e.g. 'umap' for UMAP plots, 'qc' for QC violin, 'cluster' for cluster tables). "
-                "Multiple keywords can be comma-separated (e.g. 'umap,qc')."
+                "Run an OmicsClaw multi-omics analysis skill.\n\n"
+                f"{briefing}\n\n"
+                "PREFER `skill='auto'` + `query=<user request>` "
+                "(auto-routes deterministically). Pick a specific skill only "
+                "if the user named it. `mode='demo'` ONLY when explicitly "
+                "asked. `return_media` empty = text summary; pass a keyword "
+                "('umap','qc','cluster',comma-sep) or 'all' for figures. "
+                "For sc-batch-integration upstream-prep pause, rerun with "
+                "`auto_prepare=true`. Preserve exact numbers, warnings, "
+                "errors, and file paths when relaying results."
             ),
             parameters={
                 "type": "object",
@@ -49,6 +119,11 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
                     "skill": {
                         "type": "string",
                         "enum": list(context.skill_names),
+                        "description": (
+                            "Skill alias to run. Default to 'auto' and pass `query`; "
+                            "use a specific alias only if the user named it or auto-routing "
+                            "asked you to disambiguate."
+                        ),
                     },
                     "mode": {
                         "type": "string",
@@ -141,21 +216,16 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ToolSpec(
             name="replot_skill",
             description=(
-                "Re-render R Enhanced (ggplot2) plots from an existing skill output directory "
-                "WITHOUT re-running the analysis. "
-                "Use this when the user explicitly asks to 're-draw with R', 'use R Enhanced', "
-                "'make it prettier', or 'replot'. "
-                "The skill must have been run first (via the omicsclaw tool). "
-                "R Enhanced is currently supported for single-cell scRNA skills only "
-                "(sc-qc, sc-de, sc-markers, sc-preprocessing, sc-clustering, etc.). "
-                "output_path is the output directory from a previous omicsclaw call. "
-                "If output_path is unknown, omit it — OmicsClaw will auto-resolve from session history. "
-                "By default returns all generated R Enhanced figures. "
-                "IMPORTANT: If this tool returns an error or reports that no figures were generated, "
-                "relay the error message and fix instructions directly to the user. "
-                "Do NOT fall back to custom_analysis_execute, Python plotting, or any other tool "
-                "to substitute for R Enhanced. Only use alternative plotting tools if the user "
-                "explicitly requests it (e.g. 'use Python instead', 'draw it with matplotlib')."
+                "Re-render R Enhanced (ggplot2) plots from a prior skill "
+                "output WITHOUT re-running. Use for 're-draw with R', "
+                "'make it prettier', 'replot', or to tune params. Skill "
+                "must have run first via `omicsclaw`. ALWAYS call for R "
+                "Enhanced — never assume lack of R support. Use `renderer` "
+                "to pick one sub-plot; tune via `top-n`/`font-size`/"
+                "`width`/`height`/`dpi`/`palette`/`title`. Omit "
+                "`output_path` to auto-resolve. If R missing, relay "
+                "returned install instructions; do NOT fall back to "
+                "`custom_analysis_execute` or Python plotting."
             ),
             parameters={
                 "type": "object",
@@ -198,6 +268,46 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             risk_level=RISK_LEVEL_MEDIUM,
             writes_workspace=True,
             policy_tags=("analysis", "workflow"),
+        ),
+        ToolSpec(
+            name="list_skills_in_domain",
+            description=(
+                "Lazy-load the full skill list for one OmicsClaw domain. "
+                "Call this ONLY when the 8-domain briefing in the `omicsclaw` tool "
+                "description isn't enough to pick a skill, or when the user asks "
+                "'what tools do you have for <domain>?'. The result is a markdown "
+                "block with each skill's alias, one-line description, and trigger "
+                "keywords. For most routing, prefer `omicsclaw(skill='auto', query=...)` "
+                "— the resolver picks the right skill without this extra round-trip."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": [
+                            "spatial", "singlecell", "genomics",
+                            "proteomics", "metabolomics", "bulkrna",
+                            "orchestrator", "literature",
+                        ],
+                        "description": "Which domain's skills to list.",
+                    },
+                    "filter": {
+                        "type": "string",
+                        "description": (
+                            "Optional case-insensitive substring. Matches against "
+                            "skill alias, description, and trigger keywords. "
+                            "Omit to see the whole domain."
+                        ),
+                    },
+                },
+                "required": ["domain"],
+            },
+            surfaces=("bot",),
+            read_only=True,
+            concurrency_safe=True,
+            result_policy=RESULT_POLICY_KNOWLEDGE_REFERENCE,
+            policy_tags=("knowledge", "reference", "routing"),
         ),
         ToolSpec(
             name="save_file",
@@ -340,72 +450,6 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             read_only=True,
             concurrency_safe=True,
             policy_tags=("workspace", "inspection"),
-        ),
-        ToolSpec(
-            name="download_file",
-            description="Download a file from a URL. Use when user provides a direct file URL.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "File URL"},
-                    "destination": {"type": "string", "description": "Destination path (optional)"},
-                },
-                "required": ["url"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_HIGH,
-            approval_mode=APPROVAL_MODE_ASK,
-            writes_workspace=True,
-            touches_network=True,
-            allowed_in_background=False,
-            policy_tags=("network", "workspace", "artifact"),
-        ),
-        ToolSpec(
-            name="create_json_file",
-            description="Create a JSON file from structured data. Saved to output/ by default. ONLY use when user explicitly asks to save data as JSON.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "data": {"type": "object", "description": "Data to save as JSON"},
-                    "filename": {"type": "string", "description": "Filename (without extension)"},
-                    "destination": {"type": "string", "description": "Destination folder (optional)"},
-                },
-                "required": ["data", "filename"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_MEDIUM,
-            writes_workspace=True,
-            policy_tags=("workspace", "artifact"),
-        ),
-        ToolSpec(
-            name="create_csv_file",
-            description="Create a CSV file from tabular data. Saved to output/ by default. ONLY use when user explicitly asks to save data as CSV.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": {},
-                        },
-                        "description": "Array of row objects",
-                    },
-                    "filename": {"type": "string", "description": "Filename (without extension)"},
-                    "destination": {"type": "string", "description": "Destination folder (optional)"},
-                },
-                "required": ["data", "filename"],
-            },
-            surfaces=("bot",),
-            read_only=False,
-            concurrency_safe=False,
-            risk_level=RISK_LEVEL_MEDIUM,
-            writes_workspace=True,
-            policy_tags=("workspace", "artifact"),
         ),
         ToolSpec(
             name="make_directory",
@@ -626,6 +670,39 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             policy_tags=("memory", "knowledge"),
         ),
         ToolSpec(
+            name="read_knowhow",
+            description=(
+                "Fetch the full markdown body of a Mandatory Scientific Constraint "
+                "(KnowHow guard) by name. Call this when the headline-only "
+                "Active Guards block in the system prompt does not give enough "
+                "detail — for example, when the user asks WHY a guard requires a "
+                "specific threshold, when a method name is ambiguous, or when "
+                "the headline mentions parameters the user is uncertain about. "
+                "Accepts the filename (e.g. KH-sc-de-guardrails.md), the doc_id "
+                "(sc-de-guardrails), or the human-readable label. Returns the "
+                "full markdown text, or an empty string if no guard matches."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "KH identifier. Accepts filename "
+                            "(KH-sc-de-guardrails.md), doc_id (sc-de-guardrails), "
+                            "or label (Single-Cell Differential Expression Guardrails)."
+                        ),
+                    },
+                },
+                "required": ["name"],
+            },
+            surfaces=("bot",),
+            read_only=True,
+            concurrency_safe=True,
+            result_policy=RESULT_POLICY_KNOWLEDGE_REFERENCE,
+            policy_tags=("knowledge", "knowhow", "reference"),
+        ),
+        ToolSpec(
             name="consult_knowledge",
             description=(
                 "Query the OmicsClaw knowledge base for analysis guidance. "
@@ -741,9 +818,13 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             name="create_omics_skill",
             description=(
                 "Create a new OmicsClaw-native skill scaffold under skills/<domain>/<skill-name>/ "
-                "using templates/SKILL-TEMPLATE.md as the base structure. Use this only when the user "
-                "explicitly wants a reusable new skill added to OmicsClaw. If a previous "
-                "custom_analysis_execute run succeeded, you can promote that notebook into the new skill."
+                "using the canonical v2 layout (SKILL.md + parameters.yaml sidecar + "
+                "references/{methodology,output_contract,parameters,r_visualization}.md). "
+                "The emitted skill is lint-clean against scripts/skill_lint.py and ready "
+                "to register via the runtime registry. "
+                "Use this only when the user explicitly wants a reusable new skill added "
+                "to OmicsClaw. If a previous custom_analysis_execute run succeeded, you can "
+                "promote that notebook into the new skill."
             ),
             parameters={
                 "type": "object",
@@ -909,7 +990,16 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
         ),
     ]
     specs.extend(build_engineering_tool_specs())
-    return specs
+    # Phase 1 (tool-list-compression): attach the predicate field to each
+    # lazy-load tool from the centralized TOOL_PREDICATE_MAP. The 8
+    # always-on tools (omicsclaw, resolve_capability, consult_knowledge,
+    # inspect_data, list_directory, glob_files, file_read, read_knowhow)
+    # are absent from the map and keep predicate=None. The runtime
+    # ``select_tool_specs`` filter then drops the lazy tools whose
+    # predicate doesn't fire for the current request.
+    from .tool_predicates import attach_predicates as _attach_predicates
+
+    return list(_attach_predicates(tuple(specs)))
 
 
 def build_bot_tool_registry(context: BotToolContext) -> ToolRegistry:

@@ -1,258 +1,102 @@
 ---
 name: sc-velocity
-description: >-
-  Run scVelo on a velocity-ready h5ad using stochastic, dynamical, or
-  steady-state modes. Use `sc-velocity-prep` first if spliced/unspliced layers
-  are missing.
-version: 0.3.0
+description: Load when computing RNA velocity vectors and latent time on a scRNA AnnData with spliced / unspliced layers via scVelo (stochastic / dynamical / steady-state). Skip when input lacks spliced+unspliced layers (run sc-velocity-prep first) or for trajectory pseudotime ordering (use sc-pseudotime).
+version: 0.4.0
 author: OmicsClaw
 license: MIT
-tags: [singlecell, velocity, scvelo, latent-time, dynamics]
-metadata:
-  omicsclaw:
-    domain: singlecell
-    allowed_extra_flags:
-      - "--method"
-      - "--mode"
-      - "--n-jobs"
-      - "--r-enhanced"
-    param_hints:
-      scvelo_stochastic:
-        priority: "n_jobs"
-        params: ["n_jobs"]
-        defaults: {n_jobs: 4}
-        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
-        tips:
-          - "--method scvelo_stochastic or --mode stochastic: default velocity path."
-      scvelo_dynamical:
-        priority: "n_jobs"
-        params: ["n_jobs"]
-        defaults: {n_jobs: 4}
-        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
-        tips:
-          - "--method scvelo_dynamical or --mode dynamical: computes latent time when the fit succeeds."
-      scvelo_steady_state:
-        priority: "n_jobs"
-        params: ["n_jobs"]
-        defaults: {n_jobs: 4}
-        requires: ["scvelo", "layers.spliced", "layers.unspliced"]
-        tips:
-          - "--method scvelo_steady_state or --mode steady_state: steady-state approximation path."
-    saves_h5ad: true
-    requires_preprocessed: true
-    requires:
-      bins: [python3]
-      env: []
-      config: []
-    emoji: "S"
-    homepage: https://github.com/OmicsClaw/OmicsClaw
-    os: [macos, linux]
-    install:
-      - kind: pip
-        package: scvelo
-        bins: []
-    trigger_keywords:
-      - rna velocity
-      - velocity
-      - scvelo
-      - spliced unspliced
-      - cellular dynamics
-      - velovi
-      - velocity pseudotime
+tags:
+- singlecell
+- scrna
+- velocity
+- rna-velocity
+- scvelo
+- latent-time
+- kinetics
+requires:
+- anndata
+- scanpy
+- scvelo
+- numpy
+- pandas
 ---
 
-# Single-Cell Velocity
+# sc-velocity
 
-## Why This Exists
+## When to use
 
-- Without it: velocity analyses are hard to standardize because they require special input layers and backend-specific wording.
-- With it: velocity backend selection and output naming are consistent across runs.
-- Why OmicsClaw: one wrapper captures velocity figures, latent-time summaries, and method provenance.
+The user has a scRNA AnnData with `layers["spliced"]` and
+`layers["unspliced"]` already populated (typically from
+`sc-velocity-prep` running `velocyto` / `STARsolo` / `kb-python`) and
+wants per-cell velocity vectors, magnitude maps, and optional latent
+time. Three scVelo modes:
 
-## Core Capabilities
+- `scvelo_stochastic` (default) — fast, robust to noise.
+- `scvelo_dynamical` — full splicing-kinetics model + latent time
+  (slower, more interpretable).
+- `scvelo_steady_state` — simplest approximation, fastest.
 
-1. **Three scVelo modes**: stochastic, dynamical, and steady-state.
-2. **Public alias compatibility**: both `--method` and `--mode` map into the same backend selection logic.
-3. **Velocity-specific exports**: stream plot, magnitude plot, and optional latent-time view.
-4. **Explicit layer contract**: requires `spliced` and `unspliced` layers before execution.
-5. **Downstream-ready export**: writes `processed.h5ad`, a compatibility alias `adata_with_velocity.h5ad`, report, result JSON, README, notebook artifacts, and figure-data tables.
+For ordering cells along a trajectory without splicing kinetics use
+`sc-pseudotime`. To **generate** the spliced/unspliced layers from raw
+FASTQs / cellranger output, run `sc-velocity-prep` first.
 
-## Data / State Requirements
+## Inputs & Outputs
 
-| Requirement | Where it should exist | Why it matters |
-|-------------|------------------------|----------------|
-| Velocity-ready layers | `layers["spliced"]`, `layers["unspliced"]` | required for every scVelo mode |
-| Raw counts source | `layers["counts"]` preferred | retained for downstream provenance and matrix-contract stability |
-| Embedding / graph state | `obsm["X_umap"]`, `uns["neighbors"]` preferred | improves interpretability and avoids unnecessary recomputation |
+| Input | Format | Required |
+|---|---|---|
+| AnnData with spliced + unspliced layers | `.h5ad` | yes (unless `--demo`) |
 
-Matrix expectations:
+| Output | Path | Notes |
+|---|---|---|
+| Annotated AnnData | `processed.h5ad` | adds `layers["velocity"]`, optional `obs["latent_time"]` (dynamical mode), velocity-graph in `obsp` |
+| Run summary | `tables/velocity_summary.csv` | always |
+| Per-cell summary | `tables/velocity_cells.csv` | velocity magnitude, latent time per cell |
+| Top genes | `tables/top_velocity_genes.csv` | ranked by mean absolute velocity |
+| Figures | `figures/velocity_stream.png`, `figures/velocity_magnitude_umap.png`, `figures/velocity_magnitude_distribution.png`, `figures/velocity_top_genes.png` | always |
+| Latent time UMAP | `figures/latent_time_umap.png` | when `mode == scvelo_dynamical` (i.e., `has_latent_time = True`) |
+| Report | `report.md` + `result.json` | always |
 
-- input object: velocity-ready single-cell AnnData
-- output object: `processed.h5ad`
-- `adata.X`: `normalized_expression`
-- `layers["counts"]`: raw counts
-- `adata.raw`: raw-count snapshot
+## Flow
 
-## Scope Boundary
+1. Load AnnData (`--input`) or build a synthetic demo with spliced / unspliced layers.
+2. Preflight `requires_layers=("spliced", "unspliced")` for the chosen method.
+3. Run scVelo: filter & normalise → moments → velocity (mode-specific) → velocity graph.
+4. If `scvelo_dynamical`: also compute latent time and gene-level dynamics.
+5. Detect degenerate output (zero velocity genes / all-NaN) and emit a multi-action fix message in `result.json["suggested_actions"]` — does NOT raise.
+6. Render figures, write tables, save `processed.h5ad`, `report.md`, `result.json`.
 
-Implemented backends:
+## Gotchas
 
-1. `scvelo_stochastic`
-2. `scvelo_dynamical`
-3. `scvelo_steady_state`
+- **Missing `spliced` / `unspliced` layers fail at preflight.** The METHOD_REGISTRY entries at `sc_velocity.py:112` / `:118` / `:124` declare `requires_layers=("spliced", "unspliced")`; the shared preflight aborts before scVelo runs. Generate the layers with `sc-velocity-prep` (`--method velocyto`, `starsolo`, or `kb-python`) first.
+- **Degenerate velocity is a soft fail, not an exception.** When scVelo can't fit a meaningful kinetics model, `sc_velocity.py:795-806` records `result.json["degenerate"]=True`, `n_velocity_genes=0`, `all_zero_velocity=True` and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_velocity_genes"]` before consuming the `velocity` layer downstream (e.g., before passing to `sc-pseudotime --method cellrank --cellrank-use-velocity`).
+- **`--method` accepts both METHOD_REGISTRY names and `_MODE_ALIAS_MAP` keys.** `sc_velocity.py:656` builds `choices` as the union — passing a legacy alias (e.g., `--mode stochastic`) silently maps to `scvelo_stochastic`. The actual mode used is recorded in `result.json["mode"]`.
+- **`scvelo_dynamical` is the only mode that produces `latent_time`.** `sc_velocity.py:818-822` writes `result.json["latent_time_range"]` only when `obs["latent_time"]` is populated. Stochastic / steady-state modes return velocity but no latent time — `figures/latent_time_umap.png` won't be written.
+- **`--input` is mandatory unless `--demo` (parser.error, exit code 2).** `sc_velocity.py:682` calls `parser.error("--input required when not using --demo")`. Once `--input` is provided, `:685` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
+- **All scVelo backends require the `scvelo` Python package.** All 3 METHOD_REGISTRY entries declare `dependencies=("scvelo",)`. The shared dependency manager raises `ImportError` if scvelo isn't installed.
 
-Public alias behavior:
-
-1. `--method scvelo_dynamical`
-2. `--mode dynamical`
-
-Both point to the same backend selection logic.
-
-## Input Formats
-
-| Format | Extension / form | Current wrapper support | Notes |
-|--------|------------------|-------------------------|-------|
-| AnnData | `.h5ad` | preferred | most realistic path with velocity layers |
-| Loom | `.loom` | technically loadable | useful only when spliced/unspliced layers are present |
-| Shared-loader formats | `.h5`, `.csv`, `.tsv`, 10x directory | technically loadable | rarely suitable unless velocity layers survive conversion |
-| Demo | `--demo` | yes | bundled fallback |
-
-### Input Expectations
-
-- Required layers: `layers["spliced"]` and `layers["unspliced"]`.
-- Expected upstream state: normalized / preprocessed single-cell AnnData.
-- Latent time should only be promised for the dynamical path when the fit succeeds.
-
-## Workflow
-
-1. Validate scVelo availability and required layers.
-2. Run the selected velocity backend.
-3. Generate stream, magnitude, and optional latent-time plots.
-4. Save `processed.h5ad`, `report.md`, `result.json`, gallery manifests, and figure-data tables.
-5. Record both the public method id and the internal mode used.
-
-## CLI Reference
+## Key CLI
 
 ```bash
-python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
-  --input <data.h5ad> --method scvelo_stochastic --output <dir>
+# Demo (synthetic spliced/unspliced)
+python omicsclaw.py run sc-velocity --demo --output /tmp/sc_velocity_demo
 
-python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
-  --input <data.h5ad> --mode dynamical --n-jobs 8 --output <dir>
+# Default stochastic on real velocity-prepped data
+python omicsclaw.py run sc-velocity \
+  --input velocity_ready.h5ad --output results/
+
+# Dynamical (full kinetics + latent time)
+python omicsclaw.py run sc-velocity \
+  --input velocity_ready.h5ad --output results/ \
+  --method scvelo_dynamical --n-jobs 8
+
+# Steady-state (fastest approximation)
+python omicsclaw.py run sc-velocity \
+  --input velocity_ready.h5ad --output results/ \
+  --method scvelo_steady_state
 ```
 
-## Public Parameters
+## See also
 
-| Parameter | Role | Notes |
-|-----------|------|-------|
-| `--method` | velocity backend id | accepts `scvelo_stochastic`, `scvelo_dynamical`, or `scvelo_steady_state` |
-| `--mode` | scVelo-style alias | accepts `stochastic`, `dynamical`, or `steady_state` |
-| `--n-jobs` | parallelism control | runtime knob for scVelo fitting |
-
-## Algorithm / Methodology
-
-Current OmicsClaw `sc-velocity` always:
-
-1. validates the required spliced/unspliced layers
-2. resolves the requested public alias into an internal scVelo mode
-3. runs velocity estimation
-4. renders stream and magnitude figures
-5. writes latent-time outputs only when the chosen mode and fit actually support them
-
-Important implementation notes:
-
-- `scvelo_dynamical` and `mode=dynamical` point to the same backend logic.
-- latent time is mode- and fit-dependent, not a guaranteed output for every run.
-
-## Output Contract
-
-Successful runs write:
-
-- `processed.h5ad`
-- `adata_with_velocity.h5ad`
-- `report.md`
-- `result.json`
-- `figures/velocity_stream.png`
-- `figures/velocity_magnitude_umap.png`
-- `figures/velocity_magnitude_distribution.png`
-- `figures/velocity_top_genes.png`
-- `figures/latent_time_umap.png` when latent time is available
-- `figures/latent_time_distribution.png` when latent time is available
-- `figures/manifest.json`
-- `figure_data/manifest.json`
-- `tables/velocity_summary.csv`
-- `tables/velocity_cells.csv`
-- `tables/top_velocity_genes.csv`
-
-### Visualization Contract
-
-The current wrapper writes a standard Python gallery plus plot-ready tables:
-
-- `figures/velocity_stream.png`
-- `figures/velocity_magnitude_umap.png`
-- `figures/velocity_magnitude_distribution.png`
-- `figures/velocity_top_genes.png`
-- `figures/latent_time_umap.png` when available
-- `figures/latent_time_distribution.png` when available
-- `figures/manifest.json`
-- `figure_data/manifest.json`
-- `tables/velocity_summary.csv`
-- `tables/velocity_cells.csv`
-- `tables/top_velocity_genes.csv`
-
-### What Users Should Inspect First
-
-1. `report.md`
-2. `figures/velocity_stream.png`
-3. `figures/velocity_magnitude_umap.png`
-4. `figures/latent_time_umap.png` when available
-5. `processed.h5ad`
-
-## Current Limitations
-
-- This wrapper depends on spliced/unspliced layers already being present.
-- The standard OmicsClaw upstream path is now `sc-velocity-prep` -> `sc-velocity`.
-- This skill writes `README.md` and notebook-style reproducibility artifacts when notebook export dependencies are available.
-
-## Safety And Guardrails
-
-- Validate `layers['spliced']` and `layers['unspliced']` before promising any velocity run.
-- Do not promise latent time for every run; it is tied to the dynamical path and successful fitting.
-- For short execution guardrails, see `knowledge_base/knowhows/KH-sc-velocity-guardrails.md`.
-- For longer method and interpretation guidance, see `knowledge_base/skill-guides/singlecell/sc-velocity.md`.
-
-## Environment Management
-
-- Python extras:
-  - `pip install -e ".[singlecell-velocity]"`
-- External tools are not required for this modeling step itself, but are required upstream when users still need to generate velocity-ready layers.
-
-Recommended user guidance:
-
-- Do not auto-install scVelo during a normal skill run; if it is missing, ask the user to install the velocity extra explicitly.
-- If `spliced` / `unspliced` layers are missing, direct users to `sc-velocity-prep` and clearly state that upstream BAM/STAR tools remain manual installs.
-
-## CLI Parameters
-
-| Flag | Type | Default | Description | Validation |
-|------|------|---------|-------------|------------|
-| `--input` | str | — | Input `.h5ad` file with spliced/unspliced layers | required unless `--demo` |
-| `--output` | str | — | Output directory | required |
-| `--demo` | flag | off | Run with bundled velocity-ready demo data | — |
-| `--method` / `--mode` | str | `scvelo_stochastic` | Velocity backend: `scvelo_stochastic`, `scvelo_dynamical`, `scvelo_steady_state` (or shorthand `stochastic`, `dynamical`, `steady_state`) | validated against METHOD_REGISTRY |
-| `--n-jobs` | int | 4 | Parallel jobs for scVelo fitting | — |
-| `--r-enhanced` | flag | off | Also render R Enhanced ggplot2 figures | — |
-
-## R Enhanced Plots
-
-Activated by `--r-enhanced`. Files written to `figures/r_enhanced/`.
-
-| Renderer | Output file | figure_data CSV | Plot description | Required R packages |
-|----------|-------------|-----------------|------------------|---------------------|
-| `plot_velocity` | `r_velocity.png` | `velocity_cells.csv` | Velocity stream/arrow overlay on embedding | ggplot2 |
-| `plot_embedding_discrete` | `r_embedding_discrete.png` | `embedding_points.csv` | UMAP/embedding colored by cluster labels | ggplot2 |
-
-## Workflow Position
-
-**Upstream:** sc-velocity-prep
-**Downstream:** Terminal analysis. Consider: sc-pseudotime, sc-cytotrace
+- `references/parameters.md` — every CLI flag, per-mode notes
+- `references/methodology.md` — when each scVelo mode wins; degenerate-output checklist
+- `references/output_contract.md` — `layers["velocity"]` / `obs["latent_time"]` schema
+- Adjacent skills: `sc-velocity-prep` (upstream — produces `layers["spliced"]` / `layers["unspliced"]`), `sc-pseudotime` (parallel — graph-based trajectory ordering, can consume velocity via `--cellrank-use-velocity`), `sc-clustering` (upstream — provides `obsm["X_umap"]` for the stream plot)
