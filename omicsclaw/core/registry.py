@@ -38,6 +38,7 @@ class OmicsRegistry:
             for domain, info in _HARDCODED_DOMAINS.items()
         }
         self._loaded = False
+        self._loaded_dir: Path | None = None
         self.lazy_skills: dict[str, LazySkillMetadata] = {}
 
     @staticmethod
@@ -174,11 +175,18 @@ class OmicsRegistry:
         whose name comes from the directory; all per-skill metadata
         (legacy aliases, allowed flags, saves_h5ad, etc.) must live in
         SKILL.md.
-        """
-        if self._loaded:
-            return
 
-        target_dir = skills_dir or SKILLS_DIR
+        ``skills_dir`` is part of the cache key — re-calling with a
+        different directory triggers a fresh scan instead of silently
+        returning the previous snapshot. Pass ``None`` to use the
+        repo-default ``SKILLS_DIR``.
+        """
+        target_dir = (skills_dir or SKILLS_DIR).resolve()
+        if self._loaded and self._loaded_dir == target_dir:
+            return
+        if self._loaded and self._loaded_dir != target_dir:
+            self.invalidate()
+
         if not target_dir.exists():
             return
 
@@ -259,6 +267,7 @@ class OmicsRegistry:
 
         self._refresh_domain_skill_counts()
         self._loaded = True
+        self._loaded_dir = target_dir
 
     def load_lightweight(self, skills_dir: Path | None = None) -> None:
         """Load only basic skill metadata for fast startup."""
@@ -357,6 +366,27 @@ class OmicsRegistry:
 
         return keyword_map
 
+    def invalidate(self) -> None:
+        """Reset the in-memory registry so the next ``load_all`` rescans disk.
+
+        Long-running surfaces (``oc app-server``, interactive REPL) can call
+        this after editing ``SKILL.md`` / ``parameters.yaml`` to pick up the
+        change without restarting the process.
+        """
+        self.skills = {}
+        self.lazy_skills = {}
+        self.domains = {
+            domain: dict(info)
+            for domain, info in _HARDCODED_DOMAINS.items()
+        }
+        self._loaded = False
+        self._loaded_dir = None
+
+    def reload(self, skills_dir: Path | None = None) -> None:
+        """Invalidate then immediately reload from ``skills_dir`` (or default)."""
+        self.invalidate()
+        self.load_all(skills_dir)
+
     def _refresh_domain_skill_counts(self) -> None:
         """Update domain skill counts from loaded canonical entries."""
         counts: dict[str, int] = {
@@ -387,11 +417,14 @@ def ensure_registry_loaded(skills_dir: Path | None = None) -> OmicsRegistry:
 # Baseline hardcoded definitions for stable legacy mapping
 # ---------------------------------------------------------------------------
 
+# ``skill_count`` is intentionally omitted — ``_refresh_domain_skill_counts``
+# overwrites it from the live ``skills/`` filesystem after every ``load_all``.
+# Hardcoding the count here just rotted (e.g. singlecell drifted from 14 → 30)
+# and misled readers of this file.
 _HARDCODED_DOMAINS = {
     "spatial": {
         "name": "Spatial Transcriptomics",
         "primary_data_types": ["h5ad", "h5", "zarr", "loom"],
-        "skill_count": 17,
         "summary": (
             "Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, "
             "domain detection, SVG, deconvolution, cell communication, trajectories, CNV."
@@ -404,7 +437,6 @@ _HARDCODED_DOMAINS = {
     "singlecell": {
         "name": "Single-Cell Omics",
         "primary_data_types": ["h5ad", "h5", "loom", "mtx"],
-        "skill_count": 14,
         "summary": (
             "scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, "
             "normalize→HVG→PCA→UMAP→cluster, annotation, DE, trajectory, velocity, GRN, CCC."
@@ -417,7 +449,6 @@ _HARDCODED_DOMAINS = {
     "genomics": {
         "name": "Genomics",
         "primary_data_types": ["vcf", "bam", "cram", "fasta", "fastq", "bed"],
-        "skill_count": 10,
         "summary": (
             "Bulk DNA-seq: FASTQ QC, alignment, SNV/indel/SV/CNV calling, VCF ops, "
             "variant annotation, phasing, de novo assembly, ATAC/ChIP peak calling."
@@ -430,7 +461,6 @@ _HARDCODED_DOMAINS = {
     "proteomics": {
         "name": "Proteomics",
         "primary_data_types": ["mzml", "mzxml", "csv"],
-        "skill_count": 8,
         "summary": (
             "Mass spec proteomics: raw MS QC, peptide/protein ID, LFQ/TMT/DIA "
             "quantification, differential abundance, PTM, pathway enrichment."
@@ -443,7 +473,6 @@ _HARDCODED_DOMAINS = {
     "metabolomics": {
         "name": "Metabolomics",
         "primary_data_types": ["mzml", "cdf", "csv"],
-        "skill_count": 8,
         "summary": (
             "LC-MS metabolomics: XCMS preprocessing, peak detection, metabolite "
             "annotation (SIRIUS/GNPS), normalization, DE, pathway enrichment."
@@ -456,7 +485,6 @@ _HARDCODED_DOMAINS = {
     "bulkrna": {
         "name": "Bulk RNA-seq",
         "primary_data_types": ["csv", "tsv", "fastq", "bam"],
-        "skill_count": 13,
         "summary": (
             "Bulk RNA-seq: FASTQ QC, alignment, count QC, DE (DESeq2), enrichment, "
             "splicing, WGCNA, deconvolution, PPI, survival, TrajBlend bulk-to-sc."
@@ -469,7 +497,6 @@ _HARDCODED_DOMAINS = {
     "orchestrator": {
         "name": "Orchestrator",
         "primary_data_types": ["*"],
-        "skill_count": 1,
         "summary": (
             "Meta tooling: multi-omics query routing and skill scaffolding. "
             "Not an analysis — dispatches to the right domain skill."
@@ -479,7 +506,6 @@ _HARDCODED_DOMAINS = {
     "literature": {
         "name": "Literature",
         "primary_data_types": ["pdf", "txt", "doi", "url"],
-        "skill_count": 1,
         "summary": (
             "Scientific literature parsing for PDFs, URLs, DOIs, PubMed IDs, "
             "GEO accession extraction, and dataset metadata handoff."
