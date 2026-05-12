@@ -1,0 +1,409 @@
+{
+  "queries": [
+    {
+      "query": "preprocess my Visium spatial transcriptomics dataset",
+      "file_path": null,
+      "chosen_skill": "spatial-preprocess",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-preprocess",
+          "score": 14.716666666666669
+        },
+        {
+          "skill": "spatial-raw-processing",
+          "score": 1.7
+        },
+        {
+          "skill": "spatial-domains",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "run spatial domain detection with leiden clustering",
+      "file_path": null,
+      "chosen_skill": "spatial-domains",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-domains",
+          "score": 7.033333333333333
+        },
+        {
+          "skill": "spatial-preprocess",
+          "score": 4.05
+        },
+        {
+          "skill": "spatial-statistics",
+          "score": 2.55
+        }
+      ]
+    },
+    {
+      "query": "identify spatially variable genes in my Visium data",
+      "file_path": null,
+      "chosen_skill": "spatial-genes",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-genes",
+          "score": 15.383333333333335
+        },
+        {
+          "skill": "spatial-de",
+          "score": 3.4
+        },
+        {
+          "skill": "spatial-preprocess",
+          "score": 3.2
+        }
+      ]
+    },
+    {
+      "query": "Extract a tumor microenvironment neighborhood subset within 50 microns around tumor cells",
+      "file_path": null,
+      "chosen_skill": "spatial-microenvironment-subset",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-microenvironment-subset",
+          "score": 39.05
+        },
+        {
+          "skill": "spatial-cnv",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "run st_pipeline on these Visium spatial FASTQs with barcode coordinates",
+      "file_path": "/tmp/sample_R1.fastq.gz",
+      "chosen_skill": "spatial-raw-processing",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-raw-processing",
+          "score": 11.016666666666666
+        },
+        {
+          "skill": "spatial-preprocess",
+          "score": 4.9
+        },
+        {
+          "skill": "spatial-integrate",
+          "score": 2.55
+        }
+      ]
+    },
+    {
+      "query": "Run scRNA-seq preprocessing: QC, normalization, HVG selection, PCA, UMAP, leiden",
+      "file_path": null,
+      "chosen_skill": "spatial-preprocess",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-preprocess",
+          "score": 17.066666666666666
+        },
+        {
+          "skill": "spatial-domains",
+          "score": 3.85
+        },
+        {
+          "skill": "spatial-communication",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "Detect doublets in my single-cell data using scDblFinder",
+      "file_path": null,
+      "chosen_skill": "",
+      "coverage": "no_skill",
+      "domain": "bulkrna",
+      "should_search_web": true,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "bulkrna-de",
+          "score": 2.55
+        },
+        {
+          "skill": "bulkrna-survival",
+          "score": 2.55
+        },
+        {
+          "skill": "bulkrna-splicing",
+          "score": 2.55
+        }
+      ]
+    },
+    {
+      "query": "Cell-type annotation with CellTypist on my single-cell h5ad",
+      "file_path": null,
+      "chosen_skill": "sc-cell-annotation",
+      "coverage": "exact_skill",
+      "domain": "singlecell",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "sc-cell-annotation",
+          "score": 4.7
+        },
+        {
+          "skill": "sc-cell-communication",
+          "score": 1.7
+        },
+        {
+          "skill": "sc-standardize-input",
+          "score": 1.7
+        }
+      ]
+    },
+    {
+      "query": "Build a WGCNA co-expression network on my bulk RNA-seq counts, return hub genes",
+      "file_path": null,
+      "chosen_skill": "bulkrna-ppi-network",
+      "coverage": "exact_skill",
+      "domain": "bulkrna",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "bulkrna-ppi-network",
+          "score": 7.25
+        },
+        {
+          "skill": "bulkrna-coexpression",
+          "score": 7.25
+        },
+        {
+          "skill": "bulkrna-trajblend",
+          "score": 2.55
+        }
+      ]
+    },
+    {
+      "query": "Run Kaplan-Meier survival for TP53 expression with clinical overall survival",
+      "file_path": null,
+      "chosen_skill": "bulkrna-survival",
+      "coverage": "exact_skill",
+      "domain": "bulkrna",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "bulkrna-survival",
+          "score": 9.566666666666666
+        },
+        {
+          "skill": "bulkrna-de",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "Run differential expression on bulk RNA-seq counts with DESeq2",
+      "file_path": null,
+      "chosen_skill": "bulkrna-de",
+      "coverage": "exact_skill",
+      "domain": "bulkrna",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "bulkrna-de",
+          "score": 7.883333333333334
+        },
+        {
+          "skill": "bulkrna-trajblend",
+          "score": 2.55
+        },
+        {
+          "skill": "bulkrna-qc",
+          "score": 2.55
+        }
+      ]
+    },
+    {
+      "query": "Preprocess this LC-MS dataset with XCMS: peak detection and RT alignment",
+      "file_path": null,
+      "chosen_skill": "spatial-preprocess",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-preprocess",
+          "score": 11.516666666666666
+        },
+        {
+          "skill": "spatial-microenvironment-subset",
+          "score": 0.85
+        },
+        {
+          "skill": "spatial-annotate",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "Annotate variants in this VCF using SnpEff",
+      "file_path": "/tmp/sample.vcf.gz",
+      "chosen_skill": "genomics-variant-annotation",
+      "coverage": "exact_skill",
+      "domain": "genomics",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "genomics-variant-annotation",
+          "score": 3.2
+        },
+        {
+          "skill": "genomics-vcf-operations",
+          "score": 2.35
+        },
+        {
+          "skill": "genomics-phasing",
+          "score": 1.7
+        }
+      ]
+    },
+    {
+      "query": "Run LFQ quantification on my MaxQuant results",
+      "file_path": null,
+      "chosen_skill": "proteomics-quantification",
+      "coverage": "exact_skill",
+      "domain": "proteomics",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "proteomics-quantification",
+          "score": 11.35
+        },
+        {
+          "skill": "proteomics-identification",
+          "score": 2.35
+        },
+        {
+          "skill": "proteomics-structural",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "Extract GEO accessions from this paper PDF",
+      "file_path": "/tmp/paper.pdf",
+      "chosen_skill": "literature",
+      "coverage": "partial_skill",
+      "domain": "literature",
+      "should_search_web": true,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "literature",
+          "score": 5.566666666666666
+        }
+      ]
+    },
+    {
+      "query": "Run spatial preprocessing and then compute a custom neighborhood entropy score not in OmicsClaw",
+      "file_path": null,
+      "chosen_skill": "spatial-preprocess",
+      "coverage": "partial_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-preprocess",
+          "score": 15.016666666666666
+        },
+        {
+          "skill": "spatial-register",
+          "score": 1.7
+        },
+        {
+          "skill": "spatial-de",
+          "score": 1.7
+        }
+      ]
+    },
+    {
+      "query": "Implement a hidden Markov model for chromatin state transitions from latest literature",
+      "file_path": null,
+      "chosen_skill": "",
+      "coverage": "no_skill",
+      "domain": "",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": []
+    },
+    {
+      "query": "what is the weather in Beijing today",
+      "file_path": null,
+      "chosen_skill": "",
+      "coverage": "no_skill",
+      "domain": "",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": []
+    },
+    {
+      "query": "Create a new OmicsClaw skill for CellCharter-based spatial domain analysis",
+      "file_path": null,
+      "chosen_skill": "spatial-domains",
+      "coverage": "exact_skill",
+      "domain": "spatial",
+      "should_search_web": false,
+      "should_create_skill": true,
+      "top_3_candidates": [
+        {
+          "skill": "spatial-domains",
+          "score": 5.016666666666667
+        },
+        {
+          "skill": "spatial-statistics",
+          "score": 1.7
+        },
+        {
+          "skill": "spatial-preprocess",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "query": "help",
+      "file_path": null,
+      "chosen_skill": "",
+      "coverage": "no_skill",
+      "domain": "",
+      "should_search_web": false,
+      "should_create_skill": false,
+      "top_3_candidates": []
+    }
+  ]
+}
