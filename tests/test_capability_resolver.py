@@ -75,3 +75,27 @@ def test_validate_custom_analysis_code_allows_basic_analysis():
         "import scanpy as sc\nimport pandas as pd\nprint('ok')\n"
     )
     assert issues == []
+
+
+def test_resolve_capability_breaks_score_ties_alphabetically():
+    """The candidate sort must tie-break on the canonical alias so the same
+    query produces the same ``chosen_skill`` regardless of which order
+    ``registry.iter_primary_skills`` happens to return tied skills in.
+
+    Pre-fix this test failed about half the time depending on filesystem
+    traversal at registry load — ``bulkrna-coexpression`` and
+    ``bulkrna-ppi-network`` both score 7.25 for this WGCNA query, and
+    Python's stable sort kept whichever the registry yielded first.
+    """
+    decision = resolve_capability(
+        "Build a WGCNA co-expression network on my bulk RNA-seq counts, return hub genes"
+    )
+    top_two = [c.skill for c in decision.skill_candidates[:2]]
+    if len(top_two) >= 2 and decision.skill_candidates[0].score == decision.skill_candidates[1].score:
+        assert top_two == sorted(top_two), (
+            f"tied top candidates must be sorted alphabetically; got {top_two}"
+        )
+    # And the specific query that originally exposed the flake must produce
+    # ``bulkrna-coexpression`` (alphabetically before ``bulkrna-ppi-network``)
+    # under any registry iteration order.
+    assert decision.chosen_skill == "bulkrna-coexpression"

@@ -486,10 +486,14 @@ async def _run_skill_via_shared_runner(
     if batch_key:
         forwarded_args.extend(["--batch-key", batch_key])
     if n_epochs is not None:
-        if canonical_skill == "spatial-domain-identification":
-            forwarded_args.extend(["--epochs", str(int(n_epochs))])
-        else:
-            forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
+        # The legacy alias ``spatial-domain-identification`` was the only skill
+        # that wanted ``--epochs`` instead of ``--n-epochs``, but the registry
+        # now resolves that alias to canonical ``spatial-domains`` before we
+        # land here — the conditional was dead code. ``argv_builder``'s
+        # ``--epochs`` ↔ ``--n-epochs`` rewrite (see
+        # ``omicsclaw/core/runtime/argv_builder.py``) handles whichever flag
+        # each skill's ``allowed_extra_flags`` actually accepts.
+        forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
     forwarded_args.extend(_normalize_extra_args(extra_args))
 
     def _emit_stdout(line: str) -> None:
