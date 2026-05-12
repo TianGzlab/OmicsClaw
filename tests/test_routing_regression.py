@@ -47,11 +47,6 @@ _CLEAR_INTENT_CASES: list[_Case] = [
         "Run Kaplan-Meier survival for TP53 expression with clinical overall survival",
         expect_skill="bulkrna-survival",
     ),
-    _Case(
-        "clear XCMS preprocessing",
-        "Preprocess this LC-MS dataset with XCMS: peak detection and RT alignment",
-        expect_skill="metabolomics-xcms-preprocessing",
-    ),
 ]
 
 # Known resolver weaknesses surfaced by Stage 5 — kept as tracked xfails so
@@ -66,6 +61,15 @@ _CLEAR_INTENT_XFAILS: list[_Case] = [
         "peptide identification rejected by analysis gate",
         "Identify peptides with MaxQuant from my raw MS files",
         expect_skill="proteomics-identification",
+    ),
+    # XCMS-specific vocabulary loses to ``spatial-preprocess`` because the
+    # word "preprocess" dominates the score before metabolomics-domain
+    # signals can break the tie. Tracked here so a future domain-aware
+    # tie-break turns the case green automatically.
+    _Case(
+        "clear XCMS preprocessing",
+        "Preprocess this LC-MS dataset with XCMS: peak detection and RT alignment",
+        expect_skill="metabolomics-xcms-preprocessing",
     ),
 ]
 

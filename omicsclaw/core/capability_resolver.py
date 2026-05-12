@@ -4,6 +4,14 @@ Determines whether a user request is:
 - fully covered by an existing skill
 - partially covered and needs custom post-processing
 - not covered and should fall back to web-guided custom analysis
+
+Scoring weights and decision thresholds are kept as module-level named
+constants (see ``_SCORE_*`` / ``_DOMAIN_SCORE_*`` / ``_RESOLVE_*`` below).
+Previous revisions buried those magic numbers inside arithmetic in
+``_candidate_score`` and ``resolve_capability`` — OMI-12 P2.8 lifted them
+out so future weight tuning is reviewable diff-by-diff, and the matching
+golden routing snapshot (``tests/test_capability_resolver_golden.py``) flags
+any silent re-ranking that slips through.
 """
 
 from __future__ import annotations
@@ -19,6 +27,88 @@ try:
     from omicsclaw.loaders import detect_domain_from_path
 except Exception:  # pragma: no cover - fallback for partial installs
     detect_domain_from_path = None
+
+
+# ---------------------------------------------------------------------------
+# Scoring weights (lifted from inline magic numbers — OMI-12 P2.8).
+#
+# Each constant documents what its signal source is and why the weight has
+# the value it does. Changing any of these will likely re-rank some queries;
+# the golden routing test snapshots ``chosen_skill`` for ~20 representative
+# queries so re-rankings surface as a single, reviewable test diff.
+# ---------------------------------------------------------------------------
+
+# ----- _candidate_score: per-skill scoring -----
+
+# A direct mention of a skill's canonical alias in the query is the strongest
+# signal we have — the user named the skill they want. Outweighs every other
+# signal so a single alias hit can dominate even a long description overlap.
+_SCORE_ALIAS_MENTION = 12.0
+
+# Pre-rename / shorthand aliases (SKILL.md ``legacy_aliases``) score slightly
+# lower than the canonical alias so canonical wins on ties.
+_SCORE_LEGACY_ALIAS_MENTION = 9.0
+
+# Each shared token between the query and the skill's SKILL.md description
+# adds a small bonus. Capped so a very long description can't dominate
+# alias mentions or trigger keywords.
+_SCORE_DESCRIPTION_OVERLAP_PER_TOKEN = 0.85
+_SCORE_DESCRIPTION_OVERLAP_CAP = 8  # max overlap tokens counted
+
+# Trigger keywords (SKILL.md ``trigger_keywords``) get a length-weighted bonus
+# so a multi-word phrase ("differential expression") is worth more than a
+# generic single word ("run"). Bounded to keep the keyword signal in the
+# same order of magnitude as the alias signal.
+_SCORE_TRIGGER_KEYWORD_MIN = 1.5
+_SCORE_TRIGGER_KEYWORD_MAX = 4.5
+_SCORE_TRIGGER_KEYWORD_LENGTH_DIVISOR = 6.0
+_SCORE_TRIGGER_KEYWORD_LIMIT = 3  # max distinct keywords counted per skill
+
+# Param-hint match: the user named a specific method (``--method leiden``)
+# and that method appears as a parameter hint for the skill's SKILL.md
+# methodology block.
+_SCORE_PARAM_HINT_MATCH = 3.0
+
+
+# ----- _detect_domain: per-domain scoring -----
+
+# File path with a known extension is the strongest domain signal.
+_DOMAIN_SCORE_FILE_PATH = 5.0
+# Per-domain mirrors of the per-skill scores, intentionally weaker so the
+# domain detector is more forgiving than the skill picker.
+_DOMAIN_SCORE_ALIAS_MENTION = 8.0
+_DOMAIN_SCORE_LEGACY_ALIAS_MENTION = 6.0
+_DOMAIN_SCORE_DESCRIPTION_OVERLAP_PER_TOKEN = 0.6
+_DOMAIN_SCORE_DESCRIPTION_OVERLAP_CAP = 5
+_DOMAIN_SCORE_TRIGGER_KEYWORD_LIMIT = 2
+# The user typed the domain name verbatim ("bulk RNA-seq", "spatial").
+_DOMAIN_SCORE_DOMAIN_NAME_MATCH = 4.0
+
+
+# ----- resolve_capability: decision thresholds -----
+
+# Below this top-1 score the resolver returns ``coverage="no_skill"`` instead
+# of guessing. Tuned so a single description-token overlap (~0.85) or a
+# single short keyword hit (~1.5) is not enough to commit.
+_RESOLVE_NO_SKILL_THRESHOLD = 3.0
+
+# If top-1 minus top-2 is smaller than this and the query also has composite
+# wording ("and then ...", "再 ..."), the resolver downgrades from
+# ``exact_skill`` to ``partial_skill`` rather than blindly picking top-1.
+_RESOLVE_CLOSE_SECOND_GAP = 1.5
+
+# Top-1 score divided by this gives the reported confidence ∈ [0, 1].
+# Chosen so a single strong alias hit (12) + a few description tokens lands
+# near 1.0 without saturating on every clear-intent query.
+_RESOLVE_CONFIDENCE_DIVISOR = 14.0
+
+# Same idea but tighter, used only on the ``no_skill`` fallback path so that
+# a marginal top score doesn't claim higher confidence than the cap below.
+_RESOLVE_NO_SKILL_CONFIDENCE_DIVISOR = 10.0
+
+# Confidence ceiling for the ``no_skill`` fallback path; we never claim
+# strong confidence when we're below the no-skill threshold.
+_RESOLVE_NO_SKILL_CONFIDENCE_CAP = 0.35
 
 
 _NON_ANALYSIS_HINTS = (
@@ -86,11 +176,19 @@ _IMPLEMENTATION_FROM_LITERATURE_HINTS = (
 )
 
 
+def _trigger_keyword_score(phrase: str) -> float:
+    """Length-weighted keyword score, clamped to ``[MIN, MAX]``."""
+    return max(
+        _SCORE_TRIGGER_KEYWORD_MIN,
+        min(_SCORE_TRIGGER_KEYWORD_MAX, len(phrase) / _SCORE_TRIGGER_KEYWORD_LENGTH_DIVISOR),
+    )
+
+
 def _score_trigger_keyword_matches(
     query_lower: str,
     keywords: list[str] | tuple[str, ...],
     *,
-    limit: int = 3,
+    limit: int = _SCORE_TRIGGER_KEYWORD_LIMIT,
 ) -> tuple[float, list[str]]:
     matches: list[str] = []
     score = 0.0
@@ -99,7 +197,7 @@ def _score_trigger_keyword_matches(
         if not phrase or not _mentions_phrase(query_lower, phrase):
             continue
         matches.append(phrase)
-        score += max(1.5, min(4.5, len(phrase) / 6.0))
+        score += _trigger_keyword_score(phrase)
         if len(matches) >= limit:
             break
     return score, matches
@@ -357,7 +455,9 @@ def _detect_domain(
     if file_path and detect_domain_from_path is not None:
         detected = str(detect_domain_from_path(file_path, fallback="")).strip()
         if detected:
-            domain_scores[detected] = domain_scores.get(detected, 0.0) + 5.0
+            domain_scores[detected] = (
+                domain_scores.get(detected, 0.0) + _DOMAIN_SCORE_FILE_PATH
+            )
 
     best_domain = ""
     best_score = 0.0
@@ -366,27 +466,30 @@ def _detect_domain(
         score = domain_scores.get(domain, 0.0)
         for alias, skill_info in registry.iter_primary_skills(domain=domain):
             if _mentions_phrase(query_lower, alias.lower()):
-                score += 8.0
+                score += _DOMAIN_SCORE_ALIAS_MENTION
 
             for legacy in skill_info.get("legacy_aliases", []):
                 legacy_lower = str(legacy).lower()
                 if legacy_lower and _mentions_phrase(query_lower, legacy_lower):
-                    score += 6.0
+                    score += _DOMAIN_SCORE_LEGACY_ALIAS_MENTION
 
             description = str(skill_info.get("description", "")).lower()
             overlap = query_tokens & _tokenize(description)
-            score += min(len(overlap), 5) * 0.6
+            score += (
+                min(len(overlap), _DOMAIN_SCORE_DESCRIPTION_OVERLAP_CAP)
+                * _DOMAIN_SCORE_DESCRIPTION_OVERLAP_PER_TOKEN
+            )
 
             keyword_score, _ = _score_trigger_keyword_matches(
                 query_lower,
                 skill_info.get("trigger_keywords", []),
-                limit=2,
+                limit=_DOMAIN_SCORE_TRIGGER_KEYWORD_LIMIT,
             )
             score += keyword_score
 
         domain_name = str(info.get("name", domain)).lower()
         if domain_name in query_lower or domain.lower() in query_lower:
-            score += 4.0
+            score += _DOMAIN_SCORE_DOMAIN_NAME_MATCH
 
         if score > best_score:
             best_score = score
@@ -395,49 +498,83 @@ def _detect_domain(
     return best_domain
 
 
+def _collect_query_keyword_matches(
+    registry: OmicsRegistry,
+    domain: str | None,
+    query_lower: str,
+) -> dict[str, list[str]]:
+    """Precompute ``{alias: [matched_keywords]}`` for the query.
+
+    Uses ``registry.build_keyword_map()`` so each (keyword → skill) entry is
+    inspected at most once per resolve call, instead of iterating every
+    skill's trigger keywords from inside ``_candidate_score``. The matcher
+    is still ``_mentions_phrase`` so behavior matches the previous
+    implementation byte-for-byte; this only avoids redundant lookups.
+    """
+    keyword_map = registry.build_keyword_map(domain=domain)
+    matches_by_alias: dict[str, list[str]] = {}
+    for keyword, alias in keyword_map.items():
+        phrase = str(keyword).strip().lower()
+        if not phrase or not _mentions_phrase(query_lower, phrase):
+            continue
+        bucket = matches_by_alias.setdefault(alias, [])
+        if len(bucket) < _SCORE_TRIGGER_KEYWORD_LIMIT:
+            bucket.append(phrase)
+    return matches_by_alias
+
+
 def _candidate_score(
     alias: str,
     info: dict[str, Any],
     query_lower: str,
     query_tokens: set[str],
     method_tokens: set[str],
+    *,
+    keyword_matches: list[str] | None = None,
 ) -> CapabilityCandidate | None:
     score = 0.0
     reasons: list[str] = []
 
     alias_lower = alias.lower()
     if _mentions_phrase(query_lower, alias_lower):
-        score += 12.0
+        score += _SCORE_ALIAS_MENTION
         reasons.append(f"query explicitly mentions skill '{alias}'")
 
     for legacy in info.get("legacy_aliases", []):
         legacy_lower = str(legacy).lower()
         if legacy_lower and _mentions_phrase(query_lower, legacy_lower):
-            score += 9.0
+            score += _SCORE_LEGACY_ALIAS_MENTION
             reasons.append(f"query mentions legacy alias '{legacy}'")
 
     description = str(info.get("description", ""))
     description_lower = description.lower()
     overlap = query_tokens & _tokenize(description_lower)
     if overlap:
-        overlap_score = min(len(overlap), 8) * 0.85
+        overlap_score = (
+            min(len(overlap), _SCORE_DESCRIPTION_OVERLAP_CAP)
+            * _SCORE_DESCRIPTION_OVERLAP_PER_TOKEN
+        )
         score += overlap_score
         reasons.append("description token overlap: " + ", ".join(sorted(list(overlap))[:5]))
 
-    keyword_score, keyword_matches = _score_trigger_keyword_matches(
-        query_lower,
-        info.get("trigger_keywords", []),
-    )
+    if keyword_matches is None:
+        keyword_score, kw_match_list = _score_trigger_keyword_matches(
+            query_lower,
+            info.get("trigger_keywords", []),
+        )
+    else:
+        kw_match_list = keyword_matches
+        keyword_score = sum(_trigger_keyword_score(kw) for kw in kw_match_list)
     if keyword_score:
         score += keyword_score
         reasons.append(
-            "trigger keyword match: " + ", ".join(keyword_matches[:3])
+            "trigger keyword match: " + ", ".join(kw_match_list[:3])
         )
 
     for kw in info.get("param_hints", {}):
         kw_lower = str(kw).lower()
         if kw_lower in method_tokens:
-            score += 3.0
+            score += _SCORE_PARAM_HINT_MATCH
             reasons.append(f"requested method '{kw_lower}' appears in param hints")
 
     if score <= 0:
@@ -495,9 +632,23 @@ def resolve_capability(
             ],
         )
 
+    # Precompute keyword matches once via the registry's inverted keyword
+    # index — capability_resolver used to rescan every skill's
+    # ``trigger_keywords`` from inside the per-skill loop (OMI-12 P2.8).
+    keyword_matches_by_alias = _collect_query_keyword_matches(
+        registry, domain or None, query_lower
+    )
+
     candidates: list[CapabilityCandidate] = []
     for alias, info in registry.iter_primary_skills(domain=domain or None):
-        candidate = _candidate_score(alias, info, query_lower, query_tokens, method_tokens)
+        candidate = _candidate_score(
+            alias,
+            info,
+            query_lower,
+            query_tokens,
+            method_tokens,
+            keyword_matches=keyword_matches_by_alias.get(alias, []),
+        )
         if candidate is not None:
             candidates.append(candidate)
 
@@ -507,7 +658,7 @@ def resolve_capability(
     web_requested = any(h in query_lower for h in _WEB_HINTS)
     composite_requested = any(h in query_lower for h in _COMPOSITE_HINTS)
 
-    if not candidates or candidates[0].score < 3.0:
+    if not candidates or candidates[0].score < _RESOLVE_NO_SKILL_THRESHOLD:
         reasons = ["no skill achieved a meaningful semantic match"]
         if skill_creation_requested:
             reasons.append("query explicitly asks to create or package a reusable skill")
@@ -518,7 +669,14 @@ def resolve_capability(
             query=query,
             domain=domain,
             coverage="no_skill",
-            confidence=0.0 if not candidates else min(candidates[0].score / 10.0, 0.35),
+            confidence=(
+                0.0
+                if not candidates
+                else min(
+                    candidates[0].score / _RESOLVE_NO_SKILL_CONFIDENCE_DIVISOR,
+                    _RESOLVE_NO_SKILL_CONFIDENCE_CAP,
+                )
+            ),
             should_search_web=True,
             should_create_skill=skill_creation_requested,
             skill_candidates=candidates[:5],
@@ -528,8 +686,8 @@ def resolve_capability(
 
     top = candidates[0]
     second = candidates[1] if len(candidates) > 1 else None
-    confidence = min(1.0, top.score / 14.0)
-    close_second = bool(second and (top.score - second.score) < 1.5)
+    confidence = min(1.0, top.score / _RESOLVE_CONFIDENCE_DIVISOR)
+    close_second = bool(second and (top.score - second.score) < _RESOLVE_CLOSE_SECOND_GAP)
 
     reasoning = [f"top candidate '{top.skill}' scored {round(top.score, 2)}"]
     reasoning.extend(top.reasons[:3])
