@@ -4810,7 +4810,7 @@ async def bridge_start(req: BridgeStartRequest):
         )
 
     try:
-        from bot.run import CHANNEL_BUILDERS, _build_middleware
+        from bot.run import CHANNEL_BUILDERS
         from bot.channels.manager import ChannelManager
     except ImportError as exc:
         raise HTTPException(503, detail=f"Cannot import channel system: {exc}")
@@ -4866,8 +4866,7 @@ async def bridge_start(req: BridgeStartRequest):
                 errors[name] = str(exc)
                 logger.error("Failed to hot-add channel '%s': %s", name, exc)
     else:
-        middleware = _build_middleware()
-        manager = ChannelManager(middleware=middleware)
+        manager = ChannelManager()
         for name in to_start:
             if name not in CHANNEL_BUILDERS:
                 errors[name] = f"No builder for channel '{name}'"

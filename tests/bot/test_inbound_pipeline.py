@@ -83,14 +83,9 @@ def test_middleware_module_deleted() -> None:
     assert find_spec("bot.channels.middleware") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR-0003 task #4: drop bot.run._build_middleware and the "
-    "/bridge/start middleware wiring in omicsclaw/app/server.py",
-)
 def test_run_py_does_not_build_middleware() -> None:
     """``bot/run.py`` and ``omicsclaw/app/server.py`` must not reference
-    ``_build_middleware`` once the dead pipeline is removed."""
+    ``_build_middleware`` (deleted in Phase 1 P0-A Slice A)."""
     offenders: list[str] = []
     for rel in ("bot/run.py", "omicsclaw/app/server.py"):
         path = REPO_ROOT / rel
