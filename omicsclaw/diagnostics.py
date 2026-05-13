@@ -546,6 +546,232 @@ def _collect_knowledge_check() -> DiagnosticCheck:
     )
 
 
+def _resolve_memory_db_path(database_url: str) -> Path | None:
+    """Extract the SQLite file path from a memory DB URL.
+
+    Returns ``None`` for non-SQLite URLs (PostgreSQL, etc.) — the doctor's
+    local-file probe is meaningful only for SQLite.
+    """
+    if "sqlite" not in database_url:
+        return None
+    if "///" not in database_url:
+        return None
+    raw = database_url.split("///", 1)[-1]
+    return Path(raw).expanduser()
+
+
+def _redact_memory_db_url(database_url: str) -> str:
+    """Replace any embedded password with ``***`` for safe logging.
+
+    Mirrors ``omicsclaw/memory/database.py``'s redaction so doctor
+    output never echoes credentials.
+    """
+    if "@" not in database_url or ":" not in database_url:
+        return database_url
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(database_url)
+        if parsed.password:
+            return database_url.replace(f":{parsed.password}@", ":***@")
+    except Exception:
+        pass
+    return database_url
+
+
+_MEMORY_REQUIRED_TABLES: tuple[str, ...] = (
+    "nodes",
+    "memories",
+    "edges",
+    "paths",
+    "_schema_version",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _MemorySchemaProbe:
+    missing_tables: tuple[str, ...]
+    schema_version: str | None
+    migrations_applied: int
+    shared_paths: int
+    kh_seed_paths: int
+
+
+def _probe_memory_schema(db_path: Path) -> _MemorySchemaProbe:
+    """Read-only probe of the memory SQLite database schema and content.
+
+    Reports missing required tables, the highest applied migration
+    version and total migration count, plus ``__shared__`` path
+    population (overall and specifically the KH bootstrap seeds at
+    ``core://kh/*``). Raises ``sqlite3.Error`` if the database cannot
+    be opened.
+    """
+    connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+        present = {row[0] for row in rows}
+        missing = tuple(t for t in _MEMORY_REQUIRED_TABLES if t not in present)
+
+        schema_version: str | None = None
+        migrations_applied = 0
+        if "_schema_version" in present:
+            version_rows = connection.execute(
+                "SELECT version FROM _schema_version"
+            ).fetchall()
+            versions = [str(r[0]) for r in version_rows if r[0] is not None]
+            migrations_applied = len(versions)
+            if versions:
+                schema_version = max(versions)
+
+        shared_paths = 0
+        kh_seed_paths = 0
+        if "paths" in present:
+            shared_paths = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM paths WHERE namespace=?",
+                    ("__shared__",),
+                ).fetchone()[0]
+            )
+            kh_seed_paths = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM paths "
+                    "WHERE namespace=? AND domain=? AND path LIKE 'kh/%'",
+                    ("__shared__", "core"),
+                ).fetchone()[0]
+            )
+        return _MemorySchemaProbe(
+            missing_tables=missing,
+            schema_version=schema_version,
+            migrations_applied=migrations_applied,
+            shared_paths=shared_paths,
+            kh_seed_paths=kh_seed_paths,
+        )
+    finally:
+        connection.close()
+
+
+def _collect_memory_check() -> DiagnosticCheck:
+    """Health-probe the graph memory subsystem.
+
+    Side-effect-free: reads the on-disk SQLite database without invoking
+    ``init_db`` so the doctor stays a read-only diagnostic. PostgreSQL
+    deployments degrade to an info status since the file probe doesn't
+    apply.
+    """
+    try:
+        from omicsclaw.memory.database import _get_database_url
+    except Exception as exc:
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Memory subsystem import failed: {exc}",
+        )
+
+    database_url = _get_database_url()
+    db_path = _resolve_memory_db_path(database_url)
+
+    if db_path is None:
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_INFO,
+            summary="Graph memory configured for a non-SQLite backend.",
+            details=(
+                f"url={_redact_memory_db_url(database_url)}",
+                "Non-SQLite backend — file probe skipped.",
+            ),
+        )
+
+    details = [f"path={db_path}"]
+    parent = db_path.parent
+    if not parent.exists():
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Memory DB directory is missing: {parent}",
+            details=tuple(details),
+        )
+    if not os.access(parent, os.W_OK):
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Memory DB directory is not writable: {parent}",
+            details=tuple(details),
+        )
+
+    if not db_path.exists():
+        details.append("Database has not been created yet; it will be initialized on first memory write.")
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="Memory database path is writable but not yet initialized.",
+            details=tuple(details),
+        )
+    if not db_path.is_file():
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Expected a file but found a non-file path: {db_path}",
+            details=tuple(details),
+        )
+    if not os.access(db_path, os.R_OK | os.W_OK):
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Memory database is not readable/writable: {db_path}",
+            details=tuple(details),
+        )
+
+    details.append(f"size={db_path.stat().st_size} bytes")
+
+    try:
+        probe = _probe_memory_schema(db_path)
+    except sqlite3.Error as exc:
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_FAIL,
+            summary=f"Memory database exists but could not be opened: {exc}",
+            details=tuple(details),
+        )
+
+    if probe.missing_tables:
+        details.append(f"missing_tables={','.join(probe.missing_tables)}")
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary="Memory database is missing required tables; rerun init.",
+            details=tuple(details),
+        )
+
+    details.append(f"schema_version={probe.schema_version or 'baseline'}")
+    details.append(f"migrations_applied={probe.migrations_applied}")
+    details.append(f"shared_paths={probe.shared_paths}")
+    details.append(f"kh_seed_paths={probe.kh_seed_paths}")
+
+    if probe.shared_paths > 0 and probe.kh_seed_paths == 0:
+        return DiagnosticCheck(
+            name="Graph Memory",
+            status=DIAGNOSTIC_STATUS_WARN,
+            summary=(
+                "Memory database has __shared__ entries but no KH bootstrap seeds — "
+                "rerun a surface (CLI/Desktop/Bot) to reseed."
+            ),
+            details=tuple(details),
+        )
+
+    return DiagnosticCheck(
+        name="Graph Memory",
+        status=DIAGNOSTIC_STATUS_OK,
+        summary=(
+            f"Memory database OK (schema={probe.schema_version or 'baseline'}, "
+            f"migrations={probe.migrations_applied}, "
+            f"shared={probe.shared_paths}, kh_seeds={probe.kh_seed_paths})"
+        ),
+        details=tuple(details),
+    )
+
+
 def _resolve_project_root(omicsclaw_dir: str) -> Path:
     text = str(omicsclaw_dir or "").strip()
     if text:
@@ -895,6 +1121,7 @@ def build_doctor_report(
     checks.append(_collect_provider_check())
     checks.append(_collect_session_db_check())
     checks.append(_collect_knowledge_check())
+    checks.append(_collect_memory_check())
     checks.append(_collect_skill_catalog_check(str(omicsclaw_dir or "").strip()))
     checks.append(_collect_graphify_check(str(omicsclaw_dir or "").strip()))
     checks.append(_collect_extensions_check(str(omicsclaw_dir or "").strip()))
