@@ -238,6 +238,7 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             input_path=input_path,
             session_id=session_id,
             chat_id=chat_id,
+            output_root=OUTPUT_DIR,
         )
         if prepared:
             return prepared

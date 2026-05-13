@@ -27,6 +27,7 @@ import logging
 import re
 from pathlib import Path
 
+from omicsclaw.runtime.skill_chain import run_omics_skill_step
 from omicsclaw.runtime.skill_lookup import lookup_skill_info
 
 logger = logging.getLogger("omicsclaw.runtime.preflight.sc_batch")
@@ -450,26 +451,23 @@ async def _auto_prepare_sc_batch_integration(
     input_path: str,
     session_id: str | None,
     chat_id: int | str,
+    output_root: Path,
 ) -> str:
     """Auto-chain ``sc-standardize-input`` → ``sc-preprocessing`` →
     ``sc-batch-integration`` when the input needs upstream prep.
-
-    Late-imports ``_run_omics_skill_step`` and ``execute_omicsclaw`` from
-    ``bot.core`` (they will move to ``bot/skill_orchestration`` and
-    ``bot/tool_executors`` in subsequent slices).
     """
     plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
     if not plan:
         return ""
 
-    from bot.skill_orchestration import _run_omics_skill_step
     from bot.tool_executors import execute_omicsclaw
 
     step_records: list[dict] = []
     current_input = str(plan["file_path"])
 
     if int(plan.get("start_step", 1)) <= 1:
-        standardize_result = await _run_omics_skill_step(
+        standardize_result = await run_omics_skill_step(
+            output_root=output_root,
             skill_key="sc-standardize-input",
             input_path=current_input,
             mode="path",
@@ -491,7 +489,8 @@ async def _auto_prepare_sc_batch_integration(
         step_records.append({"skill": "sc-standardize-input", "output_path": current_input})
 
     if int(plan.get("start_step", 1)) <= 2:
-        preprocess_result = await _run_omics_skill_step(
+        preprocess_result = await run_omics_skill_step(
+            output_root=output_root,
             skill_key="sc-preprocessing",
             input_path=current_input,
             mode="path",
