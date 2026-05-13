@@ -82,9 +82,13 @@ def _build_trusted_dirs() -> list[Path]:
 
 
 def _ensure_trusted_dirs():
-    global TRUSTED_DATA_DIRS
+    # Mutate in place — bot.core / bot.tool_executors / omicsclaw.app.server
+    # all import ``TRUSTED_DATA_DIRS`` by reference at module load time.
+    # A rebind here would leave those importers stuck on the original empty
+    # list, defeating the trusted-dir check (and silently breaking server.py's
+    # workspace.append() handshake).
     if not TRUSTED_DATA_DIRS:
-        TRUSTED_DATA_DIRS = _build_trusted_dirs()
+        TRUSTED_DATA_DIRS[:] = _build_trusted_dirs()
         logger.info(f"Trusted data dirs: {[str(d) for d in TRUSTED_DATA_DIRS]}")
 
 

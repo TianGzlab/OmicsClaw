@@ -570,7 +570,13 @@ def __getattr__(name: str):
     if name == "TOOL_RUNTIME":
         return get_tool_runtime()
     if name == "TOOLS":
-        return get_tools()
+        # ``get_tools`` lives in bot.agent_loop, which is reached lazily
+        # via _AGENT_LOOP_REEXPORTS below. Resolve through that path —
+        # a direct ``get_tools()`` call here raises NameError because
+        # the name was never imported at module scope.
+        import bot.agent_loop
+        value = bot.agent_loop.get_tools()
+        return value
     if name == "TOOL_EXECUTORS":
         return get_tool_executors()
     if name in _AGENT_LOOP_REEXPORTS:

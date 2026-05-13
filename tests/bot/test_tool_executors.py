@@ -272,3 +272,168 @@ def test_tool_executors_dispatch_table_lists_all_24_executors():
     # Spot-check a few canonical entries
     for name in ("omicsclaw", "save_file", "inspect_data", "remember", "consult_knowledge"):
         assert name in table, f"Tool name '{name}' missing from dispatch table"
+
+
+# ---------------------------------------------------------------------------
+# Regression: path_validation helpers must be importable from bot.tool_executors
+# ---------------------------------------------------------------------------
+
+
+PATH_VALIDATION_SYMBOLS = (
+    "_ensure_trusted_dirs",
+    "TRUSTED_DATA_DIRS",
+    "validate_input_path",
+    "discover_file",
+    # Also missed by the carve-out — used by execute_save_file /
+    # execute_write_file / execute_generate_audio (lines ~758, 787, 814).
+    "resolve_dest",
+    "sanitize_filename",
+    "validate_path",
+)
+
+
+# Symbols from bot.core / bot.skill_orchestration / preflight.sc_batch that
+# the carve-out left as bare references inside ``execute_*`` bodies. Each
+# one is an unexercised NameError waiting for the right tool call. Pinning
+# them at module level catches the whole class of bug, not just the
+# _ensure_trusted_dirs incident.
+CARVED_OUT_SIBLING_SYMBOLS = (
+    # bot.core
+    "DEEP_LEARNING_METHODS",
+    "OMICSCLAW_PY",
+    "_path_names",
+    # bot.skill_orchestration
+    "_infer_skill_for_method",
+    "_run_skill_via_shared_runner",
+    # omicsclaw.runtime.preflight.sc_batch
+    "_resolve_requested_batch_key",
+)
+
+
+def test_tool_executors_imports_path_validation_helpers():
+    """bot.tool_executors uses ``_ensure_trusted_dirs`` / ``TRUSTED_DATA_DIRS``
+    / ``validate_input_path`` / ``discover_file`` in several executors (lines
+    ~140, 224, 1012, 1057, 1088, 1277, 1307, 1334, 1361, 1666, 1786, 1788 at
+    the time of writing). When the module was carved out of bot.core per
+    ADR 0001, the import of these names was left behind in bot.core. Every
+    call into ``execute_omicsclaw`` with ``mode='file'`` (no staged input)
+    fires ``_ensure_trusted_dirs()`` and raises ``NameError`` instead of
+    returning the friendly 'place your file in a data directory' message.
+
+    Pin the contract: the four names must resolve as module-level
+    attributes on bot.tool_executors."""
+    import bot.core  # noqa: F401 — load bot.core first (production order)
+    import bot.tool_executors
+
+    missing = [
+        name for name in PATH_VALIDATION_SYMBOLS
+        if not hasattr(bot.tool_executors, name)
+    ]
+    assert not missing, (
+        f"bot.tool_executors is missing path_validation symbols: {missing}. "
+        f"Add them to the `from bot.path_validation import ...` block."
+    )
+
+
+def test_tool_executors_imports_carved_out_sibling_helpers():
+    """Same bug class as ``test_tool_executors_imports_path_validation_helpers``,
+    but covers the carve-out leftovers from bot.core / bot.skill_orchestration
+    / preflight.sc_batch. Each is referenced bare inside an ``execute_*``
+    body and would raise NameError on the first call that exercises it
+    (pyflakes audit on 2026-05-13)."""
+    import bot.core  # noqa: F401 — load bot.core first (production order)
+    import bot.tool_executors
+
+    missing = [
+        name for name in CARVED_OUT_SIBLING_SYMBOLS
+        if not hasattr(bot.tool_executors, name)
+    ]
+    assert not missing, (
+        f"bot.tool_executors is missing carve-out sibling symbols: {missing}. "
+        f"Each one is an unexercised NameError waiting for the right tool "
+        f"call. Add them to the existing per-module import blocks at the "
+        f"top of bot/tool_executors.py."
+    )
+
+
+def test_trusted_data_dirs_mutation_visible_to_tool_executors():
+    """``_ensure_trusted_dirs()`` populates ``bot.path_validation.TRUSTED_DATA_DIRS``,
+    but if it *rebinds* the global instead of mutating in place, modules
+    that imported the name (bot.tool_executors, bot.core,
+    omicsclaw.app.server) stay stuck on the original empty list.
+
+    Symptom observed via the executor probe on 2026-05-13:
+        Trusted data dirs: ['/.../data', '/.../examples', ...]   (path_validation)
+        Access denied: /.../data is not in trusted directories ()  (tool_executors)
+
+    omicsclaw/app/server.py:686-691 also relies on appending to
+    ``bot.core.TRUSTED_DATA_DIRS`` being visible to ``validate_input_path``
+    — same root cause.
+
+    Contract: after the helper runs, every module's view is non-empty and
+    is the *same list object* as ``bot.path_validation.TRUSTED_DATA_DIRS``."""
+    import bot.core
+    import bot.path_validation
+    import bot.tool_executors
+
+    bot.path_validation._ensure_trusted_dirs()
+
+    pv = bot.path_validation.TRUSTED_DATA_DIRS
+    assert pv, "Sanity: path_validation.TRUSTED_DATA_DIRS unexpectedly empty after _ensure"
+
+    assert bot.tool_executors.TRUSTED_DATA_DIRS, (
+        "bot.tool_executors.TRUSTED_DATA_DIRS is empty after _ensure_trusted_dirs() "
+        "ran in bot.path_validation. The helper rebinds the global instead of "
+        "mutating in place — fix it with `TRUSTED_DATA_DIRS[:] = _build_trusted_dirs()`."
+    )
+    assert bot.tool_executors.TRUSTED_DATA_DIRS is pv, (
+        "bot.tool_executors.TRUSTED_DATA_DIRS diverged from "
+        "bot.path_validation.TRUSTED_DATA_DIRS — they must be the same list "
+        "object so server.py's runtime append() is visible to validate_input_path."
+    )
+    assert bot.core.TRUSTED_DATA_DIRS is pv, (
+        "bot.core.TRUSTED_DATA_DIRS diverged from path_validation. server.py "
+        "appends workspace dirs to bot.core.TRUSTED_DATA_DIRS — that mutation "
+        "must propagate to validate_input_path."
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_list_directory_allows_data_dir_after_ensure():
+    """Behavioral consequence of the rebind bug: ``execute_list_directory``
+    rejects the legit DATA_DIR with 'Access denied ... is not in trusted
+    directories ()' because its module-local TRUSTED_DATA_DIRS view is still
+    the empty list. Once the helper mutates in place, DATA_DIR is trusted
+    and the listing proceeds."""
+    import bot.core
+    from bot.tool_executors import execute_list_directory
+
+    result = await execute_list_directory({"path": str(bot.core.DATA_DIR)})
+    assert "Access denied" not in result, (
+        f"execute_list_directory denied access to DATA_DIR — the trusted-dirs "
+        f"check is reading a stale empty list. Got: {result!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_omicsclaw_file_mode_without_input_returns_friendly_error():
+    """End-to-end regression for the 2026-05-13 incident: user invoked
+    ``omicsclaw({"mode": "file", "skill": "sc-standardize-input", ...})``
+    and got ``NameError: name '_ensure_trusted_dirs' is not defined``
+    instead of the documented 'no input file' guidance.
+
+    Contract: when ``mode='file'`` and nothing is staged for the session,
+    the executor returns a human-readable error string starting with
+    'No input file available' — never raises NameError."""
+    import bot.core  # noqa: F401 — load bot.core first (production order)
+    from bot.tool_executors import execute_omicsclaw
+
+    result = await execute_omicsclaw(
+        args={"mode": "file", "skill": "sc-standardize-input"},
+        session_id="missing-session-for-regression-test",
+    )
+    assert isinstance(result, str), f"expected str, got {type(result).__name__}"
+    assert "No input file available" in result, (
+        f"execute_omicsclaw did not return the friendly no-input-file guidance; "
+        f"got: {result!r}"
+    )
