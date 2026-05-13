@@ -36,10 +36,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCAN_ROOT = REPO_ROOT / "omicsclaw"
 
 
-# Lazy reverse imports that already exist as of Phase 1 P0-D (16 total).
-# All are inside function bodies; none execute at import time. Each
-# entry is a deferred dependency that the corresponding bot helper
-# should eventually move into omicsclaw/ to retire.
+# Lazy reverse imports remaining as the bot-side helpers are progressively
+# moved into ``omicsclaw/``. All are inside function bodies; none execute
+# at import time. Each entry is a deferred dependency the next slice can
+# retire by lifting the bot helper into ``omicsclaw/``.
 GRANDFATHERED_LAZY_IMPORTS: frozenset[tuple[str, int]] = frozenset(
     {
         # omicsclaw/app/server.py — desktop /bridge/* endpoints reach
@@ -61,14 +61,13 @@ GRANDFATHERED_LAZY_IMPORTS: frozenset[tuple[str, int]] = frozenset(
         ("omicsclaw/interactive/tui.py", 856),
         ("omicsclaw/interactive/tui.py", 872),
         ("omicsclaw/interactive/tui.py", 1016),
-        # omicsclaw/runtime/preflight/sc_batch.py — explicitly
-        # late-imports per the author's comment at L265-267. Future
-        # fix: move _lookup_skill_info / _run_omics_skill_step /
-        # execute_omicsclaw into omicsclaw/runtime/.
-        ("omicsclaw/runtime/preflight/sc_batch.py", 271),
-        ("omicsclaw/runtime/preflight/sc_batch.py", 378),
-        ("omicsclaw/runtime/preflight/sc_batch.py", 477),
-        ("omicsclaw/runtime/preflight/sc_batch.py", 478),
+        # omicsclaw/runtime/preflight/sc_batch.py — auto-prepare chain
+        # late-imports the bot-side skill runner + tool entry. Future
+        # fix: move _run_omics_skill_step into omicsclaw/runtime/, and
+        # invert control flow so execute_omicsclaw runs the final step
+        # itself.
+        ("omicsclaw/runtime/preflight/sc_batch.py", 465),
+        ("omicsclaw/runtime/preflight/sc_batch.py", 466),
     }
 )
 
@@ -178,5 +177,5 @@ def test_grandfathered_set_documents_phase_2_target() -> None:
     leaving the strict checks (top-level + lazy = ∅) as the
     canonical guards."""
     assert (
-        len(GRANDFATHERED_LAZY_IMPORTS) == 16
+        len(GRANDFATHERED_LAZY_IMPORTS) == 14
     ), "Allowlist size changed — update the count or remove this test once allowlist is empty."

@@ -13,19 +13,12 @@ will consult a Skill's declared prerequisite schema instead of these
 hard-coded helpers; for now the module owns its own scoring rules and
 clarification-message rendering.
 
-External dependencies during execution time (late-imported inside
-functions to avoid a load-order circular):
-
-* ``bot.core._lookup_skill_info`` — resolves an alias-form skill key to
-  its registry metadata; used to detect that the caller really is
-  asking for ``sc-batch-integration``.
-* ``bot.core._run_omics_skill_step`` — runs an upstream skill (e.g.
-  ``sc-standardize-input``) in the auto-prepare chain.
-* ``bot.core.execute_omicsclaw`` — the tool dispatch entry, called at
-  the end of the auto-prepare chain to actually run the integration.
-
-When ``bot/skill_orchestration.py`` and ``bot/tool_executors.py`` land
-those late imports can move to the new modules.
+Skill registry metadata is resolved via
+``omicsclaw.runtime.skill_lookup.lookup_skill_info`` (top-level import).
+The auto-prepare chain still late-imports ``_run_omics_skill_step`` and
+``execute_omicsclaw`` from ``bot.skill_orchestration`` and
+``bot.tool_executors``; those reverse edges are tracked in the
+boundary guardrail and will move in subsequent slices.
 """
 
 from __future__ import annotations
@@ -33,6 +26,8 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+
+from omicsclaw.runtime.skill_lookup import lookup_skill_info
 
 logger = logging.getLogger("omicsclaw.runtime.preflight.sc_batch")
 
@@ -261,16 +256,11 @@ def _format_batch_key_clarification(
 def _maybe_require_batch_key_selection(skill_key: str, input_path: str | None, args: dict) -> str:
     """If the caller is asking for ``sc-batch-integration`` but didn't
     supply a valid ``batch_key``, return a clarification message; else "".
-
-    Late-imports ``_lookup_skill_info`` from ``bot.core`` to identify the
-    alias-form skill key without coupling the module at import time.
     """
     if not input_path:
         return ""
 
-    from bot.skill_orchestration import _lookup_skill_info
-
-    skill_info = _lookup_skill_info(skill_key)
+    skill_info = lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
     if canonical_skill != "sc-batch-integration":
         return ""
@@ -375,9 +365,7 @@ def _get_sc_batch_integration_workflow_plan(skill_key: str, input_path: str | No
     if not input_path:
         return None
 
-    from bot.skill_orchestration import _lookup_skill_info
-
-    skill_info = _lookup_skill_info(skill_key)
+    skill_info = lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
     if canonical_skill != "sc-batch-integration":
         return None

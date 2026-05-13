@@ -139,6 +139,7 @@ from omicsclaw.common.user_guidance import (
     strip_user_guidance_lines,
 )
 from omicsclaw.core.registry import registry
+from omicsclaw.runtime.skill_lookup import lookup_skill_info
 
 logger = logging.getLogger("omicsclaw.bot.skill_orchestration")
 
@@ -542,21 +543,10 @@ async def _run_skill_via_shared_runner(
     }
 
 
-def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
-    skill_registry = registry
-    if force_reload:
-        skill_registry.reload()
-    else:
-        skill_registry.load_all()
-
-    info = skill_registry.skills.get(skill_key)
-    if info:
-        return info
-
-    for _k, meta in skill_registry.skills.items():
-        if meta.get("alias") == skill_key:
-            return meta
-    return {}
+# Re-export from the canonical home (omicsclaw.runtime.skill_lookup) so
+# existing ``bot.skill_orchestration._lookup_skill_info`` / ``bot.core``
+# call sites keep working without churn.
+_lookup_skill_info = lookup_skill_info
 
 
 def _resolve_param_hint_info(skill_key: str, method: str) -> tuple[str, dict, dict]:
