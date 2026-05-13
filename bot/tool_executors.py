@@ -32,6 +32,7 @@ import inspect
 import io
 import json
 import logging
+from difflib import get_close_matches
 import os
 import re
 import shutil
@@ -106,6 +107,70 @@ from omicsclaw.runtime.preflight.sc_batch import (
 )
 
 logger = logging.getLogger("omicsclaw.bot.tool_executors")
+
+
+# Runtime-internal flags injected by the preflight chain (not part of
+# the LLM-facing tool schema). Validator accepts them so auto-prep
+# self-recursion via execute_omicsclaw doesn't trip its own guard, but
+# they're omitted from error messages so the LLM doesn't try to set them.
+_OMICSCLAW_INTERNAL_ARG_KEYS: frozenset[str] = frozenset({"confirmed_preflight"})
+
+
+def _compute_omicsclaw_schema_arg_keys() -> frozenset[str]:
+    """Derive the LLM-facing arg-key set from the tool spec.
+
+    Single source of truth: adding a new property to the ``omicsclaw``
+    tool spec auto-extends what the validator accepts and surfaces in
+    error messages — no parallel hardcoded list to drift.
+    """
+    from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_specs
+
+    for spec in build_bot_tool_specs(BotToolContext(skill_names=())):
+        if spec.name == "omicsclaw":
+            return frozenset(spec.parameters["properties"].keys())
+    raise RuntimeError("omicsclaw tool spec missing from build_bot_tool_specs output")
+
+
+_OMICSCLAW_SCHEMA_ARG_KEYS: frozenset[str] = _compute_omicsclaw_schema_arg_keys()
+_OMICSCLAW_ALLOWED_ARG_KEYS: frozenset[str] = (
+    _OMICSCLAW_SCHEMA_ARG_KEYS | _OMICSCLAW_INTERNAL_ARG_KEYS
+)
+
+
+def _validate_omicsclaw_args(args: dict) -> str:
+    """Catch malformed ``omicsclaw`` tool args before any I/O.
+
+    Returns an empty string when ``args`` only contains keys declared
+    by the tool's OpenAI schema (plus a small set of runtime-internal
+    flags); otherwise returns an LLM-readable error string naming the
+    unknown keys and — when applicable — pointing at the closest
+    matching schema key.
+    """
+    unknown = sorted(set(args.keys()) - _OMICSCLAW_ALLOWED_ARG_KEYS)
+    if not unknown:
+        return ""
+
+    lines = [f"Unknown parameter(s) in omicsclaw call: {unknown}."]
+
+    suggestions: list[str] = []
+    for key in unknown:
+        matches = get_close_matches(
+            key, _OMICSCLAW_SCHEMA_ARG_KEYS, n=1, cutoff=0.6
+        )
+        if matches:
+            suggestions.append(f"  '{key}' → did you mean '{matches[0]}'?")
+    if suggestions:
+        lines.append("Did you mean:")
+        lines.extend(suggestions)
+
+    if "params" in unknown:
+        lines.append(
+            "Note: the omicsclaw tool does not accept nested 'params'. "
+            "Pass path as `file_path='/abs/path.h5ad'` at the top level."
+        )
+
+    lines.append(f"Accepted keys: {sorted(_OMICSCLAW_SCHEMA_ARG_KEYS)}.")
+    return "\n".join(lines)
 
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
