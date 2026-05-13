@@ -530,7 +530,8 @@ def build_bot_tool_specs(context: BotToolContext) -> list[ToolSpec]:
             name="remember",
             description=(
                 "Save important information to persistent memory so you can recall it "
-                "in future conversations. Use this to remember: user preferences "
+                "in future conversations. Call this (not `task_create`) for "
+                "'记住 X' / 'remember X' requests. Use to remember: user preferences "
                 "(language, default methods, DPI settings), biological insights "
                 "(cell type annotations, spatial domains found), and project context "
                 "(research goals, species, tissue type, disease model). "

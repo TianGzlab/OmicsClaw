@@ -162,6 +162,22 @@ def test_memory_hygiene_rule_content() -> None:
     assert "scoped" in text or "preference" in text or "transient" in text
 
 
+def test_memory_hygiene_rule_disambiguates_task_create() -> None:
+    """Regression for the chat path where the LLM routed "记住 X" requests
+    to ``task_create`` instead of ``remember`` (session 945434f1 in the
+    desktop trace). The rule must explicitly name the wrong tool so the
+    model breaks the tie correctly when both are visible.
+    """
+    req = ContextAssemblyRequest(surface="bot", query="please remember my preference")
+    text = _layer_text(req, "memory_hygiene_rule")
+    assert "remember" in text.lower()
+    assert "task_create" in text.lower(), (
+        "memory_hygiene_rule must name ``task_create`` explicitly as the "
+        "wrong tool — naming only ``remember`` is not enough to break the "
+        "ambiguity in practice."
+    )
+
+
 # --- non_trivial_no_capability → capability_routing_hint_rule ---------------
 
 

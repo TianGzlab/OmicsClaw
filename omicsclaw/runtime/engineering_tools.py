@@ -279,7 +279,10 @@ def build_engineering_tool_specs() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="task_create",
-            description="Create a persisted engineering task for the current session.",
+            description=(
+                "Create a persisted engineering task for the current session. "
+                "Not for '记住 X' / 'remember X' — use `remember` for those."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
