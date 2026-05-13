@@ -31,9 +31,33 @@ _DEFAULT_DB_DIR = Path.home() / ".config" / "omicsclaw"
 _DEFAULT_DB_URL = f"sqlite+aiosqlite:///{_DEFAULT_DB_DIR / 'memory.db'}"
 
 
+def _expand_sqlite_home(url: str) -> str:
+    """Expand a leading ``~`` in a SQLite URL's path component.
+
+    aiosqlite passes the path straight to the OS, so a URL like
+    ``sqlite+aiosqlite:///~/.config/omicsclaw/memory.db`` (written by the
+    onboard wizard or copied by hand into ``.env``) gets opened as a
+    literal ``~`` directory relative to the process cwd — silently
+    creating a ghost database that no other tool can find.
+
+    This normalises any SQLite URL whose path starts with ``~`` against
+    the user's real home directory. URLs without ``~``, non-SQLite URLs,
+    and the in-memory form (``sqlite:///:memory:``) are returned
+    unchanged.
+    """
+    if not url.startswith("sqlite"):
+        return url
+    prefix, sep, db_path = url.partition("///")
+    if not sep or not db_path or db_path.startswith(":"):
+        return url
+    if "~" not in db_path:
+        return url
+    return f"{prefix}///{Path(db_path).expanduser()}"
+
+
 def _get_database_url() -> str:
     """Resolve database URL from environment or default."""
-    return os.getenv("OMICSCLAW_MEMORY_DB_URL", _DEFAULT_DB_URL)
+    return _expand_sqlite_home(os.getenv("OMICSCLAW_MEMORY_DB_URL", _DEFAULT_DB_URL))
 
 
 class DatabaseManager:
@@ -44,7 +68,10 @@ class DatabaseManager:
     """
 
     def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or _get_database_url()
+        # _get_database_url already expands ~; re-apply here so callers
+        # passing an explicit ``database_url`` (e.g. CompatMemoryStore,
+        # tests, integrations) get the same defensive treatment.
+        self.database_url = _expand_sqlite_home(database_url or _get_database_url())
         self.db_type = self._detect_database_type(self.database_url)
 
         # Ensure SQLite directory exists

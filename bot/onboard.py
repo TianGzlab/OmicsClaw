@@ -552,7 +552,10 @@ def _configure_core_runtime(env_vars: dict[str, str | None]) -> bool:
             FieldSpec(
                 "OMICSCLAW_MEMORY_DB_URL",
                 "Memory database URL",
-                default="sqlite+aiosqlite:///~/.config/omicsclaw/memory.db",
+                # Absolute path — aiosqlite does not expand ``~`` and the
+                # backend used to silently open a literal ``~`` directory
+                # relative to cwd when this default landed in ``.env``.
+                default=f"sqlite+aiosqlite:///{Path.home() / '.config' / 'omicsclaw' / 'memory.db'}",
             ),
             FieldSpec("OMICSCLAW_MEMORY_API_TOKEN", "Memory API bearer token", secret=True),
             FieldSpec("OMICSCLAW_MEMORY_HOST", "Memory API host", default="127.0.0.1"),
