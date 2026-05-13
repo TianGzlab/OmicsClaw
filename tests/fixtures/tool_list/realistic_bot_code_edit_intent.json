@@ -7,7 +7,7 @@
     "pipeline_workspace": "",
     "capability_context": ""
   },
-  "total_chars": 9993,
+  "total_chars": 10203,
   "tool_count": 10,
   "tool_names": [
     "consult_knowledge",
@@ -26,7 +26,7 @@
       "type": "function",
       "function": {
         "name": "omicsclaw",
-        "description": "Run an OmicsClaw multi-omics analysis skill.\n\n(test)\n\nPREFER `skill='auto'` + `query=<user request>` (auto-routes deterministically). Pick a specific skill only if the user named it. `mode='demo'` ONLY when explicitly asked. `return_media` empty = text summary; pass a keyword ('umap','qc','cluster',comma-sep) or 'all' for figures. For sc-batch-integration upstream-prep pause, rerun with `auto_prepare=true`. Preserve exact numbers, warnings, errors, and file paths when relaying results.",
+        "description": "Run an OmicsClaw multi-omics analysis skill.\n\n(test)\n\nPREFER `skill='auto'` + `query=<user request>` (auto-routes deterministically). Pick a specific skill only if the user named it. `mode='demo'` ONLY when explicitly asked. For a server-side file, use `mode='path'` and pass the path at the top level as `file_path='/abs/path.h5ad'` — do NOT nest args under a `params` key. `mode='file'` is only for files the user uploaded via chat. `return_media` empty = text summary; pass a keyword ('umap','qc','cluster',comma-sep) or 'all' for figures. For sc-batch-integration upstream-prep pause, rerun with `auto_prepare=true`. Preserve exact numbers, warnings, errors, and file paths when relaying results.",
         "parameters": {
           "type": "object",
           "properties": {

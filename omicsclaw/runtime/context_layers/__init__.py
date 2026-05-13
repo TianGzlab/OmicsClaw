@@ -950,11 +950,13 @@ _PREDICATE_GATED_RULES: dict[str, str] = {
     ),
     "memory_hygiene_rule": (
         "## Memory Hygiene\n"
-        "- Use `remember` for stable preferences, confirmed biological insights, "
-        "and durable project context. Never store secrets, API keys, PII, "
-        "transient file paths, temporary errors, or unconfirmed annotations.\n"
-        "- Treat injected `## Scoped Memory` as local project/dataset/lab "
-        "heuristics, not general scientific knowledge."
+        "- \"记住 X\" / \"remember X\" / \"save X for me\" → call `remember`, "
+        "NEVER `task_create` (which is for multi-step engineering work only).\n"
+        "- `remember` is for stable preferences, biological insights, durable "
+        "project context. Never store secrets, API keys, PII, transient "
+        "paths, or unconfirmed annotations.\n"
+        "- Scoped Memory = local project/dataset heuristics, not general "
+        "scientific knowledge."
     ),
     "capability_routing_hint_rule": (
         "## Capability Routing\n"
