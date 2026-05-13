@@ -3054,6 +3054,127 @@ async def test_memory_domains_endpoint_counts_user_plus_shared_only(
         await memory_pkg.close_db()
 
 
+@pytest.mark.asyncio
+async def test_memory_domains_endpoint_admin_view_aggregates_all_namespaces(
+    monkeypatch, tmp_path
+):
+    """``/memory/domains?namespace=`` (empty value) is the admin view: it
+    sums every partition's paths, including ones the current desktop
+    user cannot otherwise reach. Used when an operator needs to find
+    data stranded under a legacy namespace."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop = MemoryClient(engine=engine, namespace="app/desktop_user")
+        legacy = MemoryClient(engine=engine, namespace="app/legacy-launch-uuid")
+        monkeypatch.setattr(server, "_memory_client", desktop)
+
+        await desktop.remember("dataset://now.h5ad", "current")
+        await legacy.remember("dataset://stranded.h5ad", "stranded")
+        await legacy.remember("analysis://a/run", "stranded too")
+
+        result = await server.memory_domains(namespace="")
+        counts = {d["domain"]: d["node_count"] for d in result["domains"]}
+
+        # Both partitions visible: 2 datasets, 2 analysis paths (the
+        # parent ``analysis://a`` container is auto-created alongside
+        # the ``analysis://a/run`` leaf).
+        assert counts["dataset"] == 2, (
+            f"Admin view missed a partition's data: {counts}"
+        )
+        assert counts.get("analysis", 0) >= 1
+        # Default-scoped (no namespace param) sees only the desktop's
+        # row — assert the admin view sees strictly more.
+        default = await server.memory_domains()
+        default_total = default["total_nodes"]
+        assert result["total_nodes"] > default_total, (
+            f"Admin view {result['total_nodes']} did not exceed default "
+            f"{default_total} — namespace override is not taking effect."
+        )
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_namespaces_endpoint_lists_partitions_and_current(
+    monkeypatch, tmp_path,
+):
+    """``/memory/namespaces`` powers the admin UI dropdown: every partition
+    holding at least one path is listed, and the response identifies which
+    one the desktop client is currently bound to so the UI can preselect it."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop = MemoryClient(engine=engine, namespace="app/desktop_user")
+        legacy = MemoryClient(engine=engine, namespace="app/old-launch-uuid")
+        monkeypatch.setattr(server, "_memory_client", desktop)
+
+        await desktop.remember("dataset://d.h5ad", "d")
+        await legacy.remember("dataset://stranded.h5ad", "s")
+        await desktop.remember_shared("core://agent/style", "shared")
+
+        result = await server.memory_namespaces()
+        assert "namespaces" in result
+        names = result["namespaces"]
+        assert "app/desktop_user" in names
+        assert "app/old-launch-uuid" in names
+        assert "__shared__" in names
+        # Current namespace is exposed so the UI can preselect it.
+        assert result["current"] == "app/desktop_user"
+    finally:
+        await memory_pkg.close_db()
+
+
+@pytest.mark.asyncio
+async def test_memory_domains_endpoint_explicit_namespace_scopes_query(
+    monkeypatch, tmp_path
+):
+    """``/memory/domains?namespace=app/foo`` lets an operator inspect a
+    specific partition without spinning up that client. Returns just
+    that namespace + shared, dedupe on collision."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+    from omicsclaw.memory.memory_client import MemoryClient
+
+    graph, _, memory_pkg = await _setup_memory_review_runtime(monkeypatch, tmp_path)
+
+    try:
+        engine = memory_pkg.get_memory_engine()
+        desktop = MemoryClient(engine=engine, namespace="app/desktop_user")
+        target = MemoryClient(engine=engine, namespace="app/target")
+        monkeypatch.setattr(server, "_memory_client", desktop)
+
+        await desktop.remember("dataset://desktop.h5ad", "d")
+        await target.remember("dataset://target.h5ad", "t")
+        await target.remember("dataset://shared.h5ad", "t-collision")
+        await desktop.remember_shared("dataset://shared.h5ad", "shared-copy")
+
+        result = await server.memory_domains(namespace="app/target")
+        uris = {d["domain"] for d in result["domains"]}
+
+        # target sees its own row + shared row (deduped); desktop's
+        # private row is NOT visible.
+        assert result["total_nodes"] == 2, (
+            f"Explicit-namespace query leaked or missed: {result}"
+        )
+        assert "dataset" in uris
+    finally:
+        await memory_pkg.close_db()
+
+
 # ---------------------------------------------------------------------------
 # T2 S6 — /memory/delete is namespace-scoped (no cross-namespace blast)
 # ---------------------------------------------------------------------------
