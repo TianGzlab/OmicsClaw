@@ -356,6 +356,65 @@ def test_tool_executors_imports_carved_out_sibling_helpers():
     )
 
 
+def test_trusted_data_dirs_mutation_visible_to_tool_executors():
+    """``_ensure_trusted_dirs()`` populates ``bot.path_validation.TRUSTED_DATA_DIRS``,
+    but if it *rebinds* the global instead of mutating in place, modules
+    that imported the name (bot.tool_executors, bot.core,
+    omicsclaw.app.server) stay stuck on the original empty list.
+
+    Symptom observed via the executor probe on 2026-05-13:
+        Trusted data dirs: ['/.../data', '/.../examples', ...]   (path_validation)
+        Access denied: /.../data is not in trusted directories ()  (tool_executors)
+
+    omicsclaw/app/server.py:686-691 also relies on appending to
+    ``bot.core.TRUSTED_DATA_DIRS`` being visible to ``validate_input_path``
+    — same root cause.
+
+    Contract: after the helper runs, every module's view is non-empty and
+    is the *same list object* as ``bot.path_validation.TRUSTED_DATA_DIRS``."""
+    import bot.core
+    import bot.path_validation
+    import bot.tool_executors
+
+    bot.path_validation._ensure_trusted_dirs()
+
+    pv = bot.path_validation.TRUSTED_DATA_DIRS
+    assert pv, "Sanity: path_validation.TRUSTED_DATA_DIRS unexpectedly empty after _ensure"
+
+    assert bot.tool_executors.TRUSTED_DATA_DIRS, (
+        "bot.tool_executors.TRUSTED_DATA_DIRS is empty after _ensure_trusted_dirs() "
+        "ran in bot.path_validation. The helper rebinds the global instead of "
+        "mutating in place — fix it with `TRUSTED_DATA_DIRS[:] = _build_trusted_dirs()`."
+    )
+    assert bot.tool_executors.TRUSTED_DATA_DIRS is pv, (
+        "bot.tool_executors.TRUSTED_DATA_DIRS diverged from "
+        "bot.path_validation.TRUSTED_DATA_DIRS — they must be the same list "
+        "object so server.py's runtime append() is visible to validate_input_path."
+    )
+    assert bot.core.TRUSTED_DATA_DIRS is pv, (
+        "bot.core.TRUSTED_DATA_DIRS diverged from path_validation. server.py "
+        "appends workspace dirs to bot.core.TRUSTED_DATA_DIRS — that mutation "
+        "must propagate to validate_input_path."
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_list_directory_allows_data_dir_after_ensure():
+    """Behavioral consequence of the rebind bug: ``execute_list_directory``
+    rejects the legit DATA_DIR with 'Access denied ... is not in trusted
+    directories ()' because its module-local TRUSTED_DATA_DIRS view is still
+    the empty list. Once the helper mutates in place, DATA_DIR is trusted
+    and the listing proceeds."""
+    import bot.core
+    from bot.tool_executors import execute_list_directory
+
+    result = await execute_list_directory({"path": str(bot.core.DATA_DIR)})
+    assert "Access denied" not in result, (
+        f"execute_list_directory denied access to DATA_DIR — the trusted-dirs "
+        f"check is reading a stale empty list. Got: {result!r}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_execute_omicsclaw_file_mode_without_input_returns_friendly_error():
     """End-to-end regression for the 2026-05-13 incident: user invoked
