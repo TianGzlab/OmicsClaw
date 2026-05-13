@@ -1212,6 +1212,99 @@ async def test_chat_stream_emits_protocol_events_and_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_emits_preflight_pending_event_for_omicsclaw_tool(monkeypatch):
+    """Desktop regression: when an omicsclaw tool result carries the
+    ``preflight_pending`` metadata marker, the server must:
+
+      - keep the ``tool_result`` event with ``is_error=False`` so the
+        frontend renders the guidance content (otherwise the user only
+        sees a collapsed error tile, as in the original sc-preprocessing
+        bug report)
+      - additionally emit a dedicated ``preflight_pending`` SSE event
+        with the structured payload so the frontend can light up a
+        confirmation prompt without parsing free-form text
+    """
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    payload = {
+        "kind": "preflight",
+        "status": "needs_user_input",
+        "skill_name": "sc-preprocessing",
+        "confirmations": ["Confirm defaults are acceptable"],
+        "pending_fields": [],
+    }
+
+    async def fake_llm_tool_loop(**kwargs):
+        await kwargs["on_tool_call"](
+            "omicsclaw", {"skill": "preprocess", "file_path": "/tmp/x.h5ad"}
+        )
+        await kwargs["on_tool_result"](
+            "omicsclaw",
+            "USER_GUIDANCE: confirm defaults",
+            {
+                "success": False,
+                "is_error": False,
+                "preflight_pending": True,
+                "preflight_payload": payload,
+            },
+        )
+        await kwargs["on_stream_content"]("waiting on your confirm")
+        return "waiting on your confirm"
+
+    fake_core = SimpleNamespace(
+        init=lambda **kwargs: None,
+        llm_tool_loop=fake_llm_tool_loop,
+        LLM_PROVIDER_NAME="env",
+        OMICSCLAW_MODEL="gpt-test",
+        OUTPUT_DIR=ROOT / "output",
+        _skill_registry=lambda: SimpleNamespace(skills={}),
+        get_tool_executors=lambda: {"omicsclaw": object()},
+        _accumulate_usage=lambda response_usage: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        _get_token_price=lambda model: (0.0, 0.0),
+    )
+
+    monkeypatch.setattr(server, "_core", fake_core, raising=False)
+    monkeypatch.setattr(server, "_mcp_load_fn", None, raising=False)
+
+    response = await server.chat_stream(
+        server.ChatRequest(
+            session_id="session-preflight",
+            content="please preprocess",
+            mode="plan",
+            permission_profile="full_access",
+        )
+    )
+    payload_str = await _read_streaming_response(response)
+    events = _parse_sse_events(payload_str)
+    event_types = [event["type"] for event in events]
+
+    assert "tool_result" in event_types
+    assert "preflight_pending" in event_types, (
+        "desktop must emit a dedicated preflight_pending SSE event so the "
+        "frontend can render a confirmation UI instead of relying on the LLM "
+        "to verbalise the structured guidance"
+    )
+
+    tool_result_event = next(e for e in events if e["type"] == "tool_result")
+    # is_error MUST NOT be set for a preflight-pending result — that's
+    # what was hiding the guidance in the original bug report.
+    assert "is_error" not in tool_result_event["data"] or tool_result_event["data"]["is_error"] is False
+
+    preflight_event = next(e for e in events if e["type"] == "preflight_pending")
+    pf_data = preflight_event["data"]
+    assert pf_data["tool_name"] == "omicsclaw"
+    assert pf_data["session_id"] == "session-preflight"
+    assert pf_data["payload"]["skill_name"] == "sc-preprocessing"
+    assert pf_data["payload"]["status"] == "needs_user_input"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_updates_bound_remote_chat_job_lifecycle(monkeypatch, tmp_path: Path):
     pytest.importorskip("fastapi")
 
