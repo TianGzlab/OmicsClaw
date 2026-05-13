@@ -91,11 +91,13 @@ def test_execute_omicsclaw_short_circuits_on_malformed_params_call() -> None:
     validator's actionable error (mentioning ``file_path``) and not
     the legacy ``No input file available...`` fallback that previously
     trapped the LLM in a discovery loop."""
+    # The validator short-circuits before any disk check, so a fake
+    # path is enough — keeps the test portable across machines.
     bad_args = {
         "mode": "file",
         "skill": "sc-preprocessing",
         "params": {
-            "input": "/data/beifen/zhouwg_data/project/OmicsClaw/data/pbmc3k_raw.h5ad",
+            "input": "/tmp/nonexistent.h5ad",
             "species": "human",
         },
     }
@@ -109,7 +111,15 @@ def test_execute_omicsclaw_short_circuits_on_malformed_params_call() -> None:
 def test_omicsclaw_tool_description_includes_file_path_example() -> None:
     """Priming: the OpenAI-facing description must show a concrete
     file_path usage so the LLM has an in-context anchor and is less
-    likely to fall back on the 'params' nesting prior."""
+    likely to fall back on the 'params' nesting prior.
+
+    Pins the three pieces of the priming so a future reword cannot
+    silently strip any of them without this test going red:
+        * the ``file_path`` literal (the correct key)
+        * a ``mode='path'`` cue (so the LLM picks the right mode)
+        * the explicit anti-``params`` warning (anchors the LLM
+          against the documented hallucination).
+    """
     from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_specs
 
     specs = build_bot_tool_specs(BotToolContext(skill_names=()))
@@ -117,4 +127,12 @@ def test_omicsclaw_tool_description_includes_file_path_example() -> None:
     description = omicsclaw_spec.description
     assert "file_path" in description, (
         "tool description should prime the LLM with a file_path example"
+    )
+    assert "mode='path'" in description, (
+        "tool description should pair file_path with mode='path' so the "
+        "LLM picks the right mode"
+    )
+    assert "params" in description, (
+        "tool description should keep the explicit anti-`params` callout — "
+        "without it, the priming silently weakens"
     )
