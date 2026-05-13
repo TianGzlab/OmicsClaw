@@ -208,3 +208,64 @@ async def test_list_paths_filter_by_domain(env):
     assert all(p["domain"] == "dataset" for p in paths)
     assert any(p["uri"] == "dataset://x.h5ad" for p in paths)
     assert not any(p["domain"] == "analysis" for p in paths)
+
+
+@pytest.mark.asyncio
+async def test_list_paths_admin_view_returns_all_namespaces(env):
+    """``namespace=None`` is the admin view: every namespace's paths show
+    up, deduped by (namespace, domain, path) so each row appears once.
+
+    Used by ``/memory/domains?namespace=`` so an operator can find data
+    written under another desktop user-id or a legacy launch-id partition
+    without spinning up that client.
+    """
+    engine, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    b = MemoryClient(engine=engine, namespace="tg/B")
+    await a.remember("dataset://onlyA.h5ad", "A")
+    await b.remember("dataset://onlyB.h5ad", "B")
+
+    paths = await engine.list_paths(namespace=None)
+    uris = {p["uri"] for p in paths}
+    assert "dataset://onlyA.h5ad" in uris
+    assert "dataset://onlyB.h5ad" in uris
+    # Namespaces preserved on each row so the caller can group/filter.
+    by_uri = {p["uri"]: p["namespace"] for p in paths}
+    assert by_uri["dataset://onlyA.h5ad"] == "tg/A"
+    assert by_uri["dataset://onlyB.h5ad"] == "tg/B"
+
+
+@pytest.mark.asyncio
+async def test_list_namespaces_returns_distinct_used_namespaces(env):
+    """``list_namespaces()`` powers the admin UI's namespace dropdown:
+    every partition that currently holds at least one path is returned,
+    deduped, sorted for a stable display order. Empty namespaces are
+    omitted — there's nothing to inspect there."""
+    engine, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    b = MemoryClient(engine=engine, namespace="tg/B")
+    await a.remember("dataset://x.h5ad", "x")
+    await b.remember("dataset://y.h5ad", "y")
+    await a.remember_shared("core://agent/style", "shared")
+
+    namespaces = await engine.list_namespaces()
+    assert namespaces == sorted(set(namespaces)), "should be deduped + sorted"
+    assert "tg/A" in namespaces
+    assert "tg/B" in namespaces
+    assert "__shared__" in namespaces
+
+
+@pytest.mark.asyncio
+async def test_list_paths_admin_view_ignores_include_shared(env):
+    """``namespace=None`` already covers every partition, including
+    ``__shared__``; ``include_shared`` becomes a no-op rather than a
+    contradiction. Pin the behavior so the endpoint can accept any
+    combination without surprising the caller."""
+    engine, _ = env
+    a = MemoryClient(engine=engine, namespace="tg/A")
+    await a.remember_shared("core://agent/style", "shared")
+    await a.remember("dataset://x.h5ad", "user")
+
+    with_shared = await engine.list_paths(namespace=None, include_shared=True)
+    without_shared = await engine.list_paths(namespace=None, include_shared=False)
+    assert {p["uri"] for p in with_shared} == {p["uri"] for p in without_shared}

@@ -1475,10 +1475,23 @@ class MemoryEngine:
             pass
         return content
 
+    async def list_namespaces(self) -> list[str]:
+        """Return every distinct namespace that currently holds at least
+        one path, sorted for a stable display order.
+
+        Powers the admin/debug UI dropdown so an operator can find data
+        stranded in a stale partition (e.g. an old ``app/<launch-uuid>``
+        from before the namespace-stability fix).
+        """
+        async with self._db.session() as s:
+            stmt = select(Path.namespace).distinct().order_by(Path.namespace)
+            rows = (await s.execute(stmt)).all()
+            return [r[0] for r in rows]
+
     async def list_paths(
         self,
         *,
-        namespace: str,
+        namespace: Optional[str],
         domain: Optional[str] = None,
         include_shared: bool = False,
     ) -> list[dict]:
@@ -1489,11 +1502,19 @@ class MemoryEngine:
         ``node_uuid``. Used by ``/memory/domains`` to count nodes per
         domain and by power-user tooling that wants the full path list.
 
-        ``include_shared=True`` returns rows from ``namespace`` *or*
-        ``__shared__``, deduped by ``(domain, path)`` so the same URI
-        never appears twice — the namespace-matched copy wins via
-        ordering, mirroring ``GraphService.get_all_paths`` scoped-view.
+        ``namespace=None`` is the admin view: every partition's paths
+        are returned, deduped by ``(namespace, domain, path)`` so each
+        row appears once. ``include_shared`` becomes a no-op in this
+        mode (shared rows are already included). Used by
+        ``/memory/domains?namespace=`` (empty value) to expose data
+        written under stale launch-id partitions.
+
+        ``include_shared=True`` (with a concrete ``namespace``) returns
+        rows from ``namespace`` *or* ``__shared__``, deduped by
+        ``(domain, path)`` so the same URI never appears twice — the
+        namespace-matched copy wins via ordering.
         """
+        admin_view = namespace is None
         async with self._db.session() as s:
             stmt = (
                 select(Path, Edge, Memory)
@@ -1509,7 +1530,9 @@ class MemoryEngine:
             )
             if domain is not None:
                 stmt = stmt.where(Path.domain == domain)
-            if include_shared:
+            if admin_view:
+                pass  # No namespace filter — every partition is in scope.
+            elif include_shared:
                 stmt = stmt.where(
                     Path.namespace.in_([namespace, SHARED_NAMESPACE])
                 )
@@ -1522,15 +1545,23 @@ class MemoryEngine:
             # Within scoped+include_shared, order namespace-matched
             # first so dedupe keeps the user's copy when the same URI
             # exists in both partitions.
-            if include_shared:
+            if include_shared and not admin_view:
                 rows.sort(
                     key=lambda triple: 0 if triple[0].namespace == namespace else 1
                 )
 
+            # Admin view dedupes on (namespace, domain, path) so the
+            # same URI can legitimately appear once per namespace.
+            # Scoped view dedupes on (domain, path) — the namespace
+            # filter already restricts which partitions contribute.
             results: list[dict] = []
             seen: set[tuple] = set()
             for path_obj, edge, memory in rows:
-                key = (path_obj.domain, path_obj.path)
+                key = (
+                    (path_obj.namespace, path_obj.domain, path_obj.path)
+                    if admin_view
+                    else (path_obj.domain, path_obj.path)
+                )
                 if key in seen:
                     continue
                 seen.add(key)

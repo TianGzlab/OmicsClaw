@@ -3009,16 +3009,50 @@ async def memory_children(
 # -- GET /memory/domains ----------------------------------------------------
 
 @app.get("/memory/domains")
-async def memory_domains():
-    """List all memory domains with node counts."""
+async def memory_domains(
+    namespace: Optional[str] = Query(
+        None,
+        description=(
+            "Optional override. Omit for the desktop user's own scope "
+            "(its namespace + ``__shared__``). Pass a concrete namespace "
+            "(``app/foo``) to inspect that partition + shared. Pass an "
+            "empty string for the admin view — every partition aggregated."
+        ),
+    ),
+):
+    """List memory domains with node counts.
+
+    Default scope mirrors what the desktop chat user can address. Pass
+    ``namespace=`` (empty) for an admin/debug view that surfaces data
+    written under any partition, including stale launch-id namespaces
+    or other multi-user slots.
+    """
     if _memory_client is None:
         raise HTTPException(503, detail="Memory system not available")
 
     try:
-        all_paths = await _memory_client.list_paths(
-            domain=None,
-            include_shared=True,
-        )
+        from omicsclaw.memory import get_memory_engine
+
+        ns_value = namespace if isinstance(namespace, str) else None
+        if ns_value is None:
+            # Default: desktop user's reachable paths (own ns + shared).
+            all_paths = await _memory_client.list_paths(
+                domain=None,
+                include_shared=True,
+            )
+        elif ns_value == "":
+            # Admin view: aggregate every partition.
+            all_paths = await get_memory_engine().list_paths(
+                namespace=None,
+                domain=None,
+            )
+        else:
+            # Operator inspecting a specific partition.
+            all_paths = await get_memory_engine().list_paths(
+                namespace=ns_value,
+                domain=None,
+                include_shared=True,
+            )
 
         # Group by domain and count
         domain_counts: dict[str, int] = {}
@@ -3033,6 +3067,34 @@ async def memory_domains():
         return {"domains": domains, "total_nodes": len(all_paths)}
     except Exception as exc:
         logger.exception("Memory domains error")
+        raise HTTPException(500, detail=str(exc))
+
+
+# -- GET /memory/namespaces --------------------------------------------------
+
+@app.get("/memory/namespaces")
+async def memory_namespaces():
+    """List every namespace currently holding memory, plus the desktop's
+    own namespace.
+
+    Powers the admin/debug dropdown that lets an operator inspect a
+    specific partition via ``/memory/domains?namespace=<value>``. The
+    ``current`` field is the namespace the running ``_memory_client``
+    is bound to — so the UI can preselect it.
+    """
+    if _memory_client is None:
+        raise HTTPException(503, detail="Memory system not available")
+
+    try:
+        from omicsclaw.memory import desktop_namespace, get_memory_engine
+
+        names = await get_memory_engine().list_namespaces()
+        return {
+            "namespaces": names,
+            "current": desktop_namespace(),
+        }
+    except Exception as exc:
+        logger.exception("Memory namespaces error")
         raise HTTPException(500, detail=str(exc))
 
 
