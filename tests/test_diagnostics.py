@@ -149,6 +149,11 @@ def test_build_doctor_report_flags_invalid_installed_extensions(tmp_path, monkey
     )
     monkeypatch.setattr(
         diagnostics,
+        "_collect_memory_check",
+        lambda: DiagnosticCheck("Graph Memory", DIAGNOSTIC_STATUS_OK, "ok"),
+    )
+    monkeypatch.setattr(
+        diagnostics,
         "_collect_mcp_check",
         lambda: DiagnosticCheck("MCP Config", DIAGNOSTIC_STATUS_OK, "ok"),
     )
@@ -163,6 +168,192 @@ def test_build_doctor_report_flags_invalid_installed_extensions(tmp_path, monkey
     assert extensions_check.status == DIAGNOSTIC_STATUS_WARN
     assert "1 installed" in extensions_check.summary
     assert "bad-ext" in extensions_check.details[0]
+
+
+def test_collect_memory_check_warns_when_db_not_yet_created(tmp_path, monkeypatch):
+    db_dir = tmp_path / "memdb"
+    db_dir.mkdir()
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL",
+        f"sqlite+aiosqlite:///{db_dir / 'memory.db'}",
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.name == "Graph Memory"
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "not yet initialized" in check.summary
+
+
+def test_collect_memory_check_info_for_postgres_backend(monkeypatch):
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL",
+        "postgresql+asyncpg://user:pw@example.com:5432/memdb",
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == diagnostics.DIAGNOSTIC_STATUS_INFO
+    assert "non-SQLite" in check.summary
+
+
+def test_collect_memory_check_redacts_password_in_postgres_url(monkeypatch):
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL",
+        "postgresql+asyncpg://alice:s3cret@example.com:5432/memdb",
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    detail_text = "\n".join(check.details)
+    assert "s3cret" not in detail_text
+    assert "alice:***@example.com" in detail_text
+
+
+def _build_memory_sqlite(
+    db_path: Path,
+    *,
+    applied_versions: list[str] | None = None,
+    shared_paths: list[tuple[str, str]] | None = None,
+) -> None:
+    """Create a minimal SQLite DB that mirrors the memory subsystem schema.
+
+    Only the tables the doctor probes are created — enough to drive
+    schema-version, table-presence, and shared-namespace checks without
+    pulling in the full SQLAlchemy stack. ``shared_paths`` seeds
+    ``(domain, path)`` rows into the ``__shared__`` namespace.
+    """
+    import sqlite3 as _sqlite3
+
+    connection = _sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE nodes (uuid TEXT PRIMARY KEY);
+            CREATE TABLE memories (id INTEGER PRIMARY KEY);
+            CREATE TABLE edges (id INTEGER PRIMARY KEY);
+            CREATE TABLE paths (
+                namespace TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                path TEXT NOT NULL,
+                PRIMARY KEY (namespace, domain, path)
+            );
+            CREATE TABLE _schema_version (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            """
+        )
+        for v in applied_versions or []:
+            connection.execute(
+                "INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)",
+                (v, "2026-01-01T00:00:00+00:00"),
+            )
+        for domain, path in shared_paths or []:
+            connection.execute(
+                "INSERT INTO paths (namespace, domain, path) VALUES (?, ?, ?)",
+                ("__shared__", domain, path),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_collect_memory_check_reports_schema_version_when_initialized(tmp_path, monkeypatch):
+    db_path = tmp_path / "memory.db"
+    _build_memory_sqlite(db_path, applied_versions=["001", "002"])
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}"
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == DIAGNOSTIC_STATUS_OK
+    assert "schema=002" in check.summary
+    assert "migrations=2" in check.summary
+    detail_text = "\n".join(check.details)
+    assert "schema_version=002" in detail_text
+    assert "migrations_applied=2" in detail_text
+
+
+def test_collect_memory_check_reports_shared_and_kh_counts(tmp_path, monkeypatch):
+    db_path = tmp_path / "memory.db"
+    _build_memory_sqlite(
+        db_path,
+        applied_versions=["001"],
+        shared_paths=[
+            ("core", "kh"),
+            ("core", "kh/data-analysis-best-practices"),
+            ("core", "kh/de-padj-guardrails"),
+            ("analysis", "sc-preprocessing"),
+        ],
+    )
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}"
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == DIAGNOSTIC_STATUS_OK
+    assert "shared=4" in check.summary
+    assert "kh_seeds=2" in check.summary
+    detail_text = "\n".join(check.details)
+    assert "shared_paths=4" in detail_text
+    assert "kh_seed_paths=2" in detail_text
+
+
+def test_collect_memory_check_warns_when_shared_lacks_kh_seeds(tmp_path, monkeypatch):
+    db_path = tmp_path / "memory.db"
+    _build_memory_sqlite(
+        db_path,
+        applied_versions=["001"],
+        shared_paths=[("analysis", "sc-preprocessing")],
+    )
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}"
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "no KH bootstrap seeds" in check.summary
+
+
+def test_collect_memory_check_ok_for_empty_initialized_store(tmp_path, monkeypatch):
+    db_path = tmp_path / "memory.db"
+    _build_memory_sqlite(db_path, applied_versions=["001"])
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}"
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == DIAGNOSTIC_STATUS_OK
+    assert "shared=0" in check.summary
+    assert "kh_seeds=0" in check.summary
+
+
+def test_collect_memory_check_warns_when_required_tables_missing(tmp_path, monkeypatch):
+    import sqlite3 as _sqlite3
+
+    db_path = tmp_path / "memory.db"
+    connection = _sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE _schema_version (version TEXT, applied_at TEXT)")
+        connection.commit()
+    finally:
+        connection.close()
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", f"sqlite+aiosqlite:///{db_path}"
+    )
+
+    check = diagnostics._collect_memory_check()
+
+    assert check.status == DIAGNOSTIC_STATUS_WARN
+    assert "missing required tables" in check.summary
+    detail_text = "\n".join(check.details)
+    for table in ("nodes", "memories", "edges", "paths"):
+        assert table in detail_text
 
 
 def test_build_context_report_surfaces_plan_layer_and_budget_warning(tmp_path, monkeypatch):
