@@ -14,12 +14,14 @@ its companion resolver. Phase 1 P0-C will land the main loop here as
 
 from __future__ import annotations
 
+from ._dependencies import EngineDependencies
 from ._identity_anchor import (
     apply_model_identity_anchor,
     resolve_effective_model_provider,
 )
 
 __all__ = [
+    "EngineDependencies",
     "apply_model_identity_anchor",
     "resolve_effective_model_provider",
 ]
