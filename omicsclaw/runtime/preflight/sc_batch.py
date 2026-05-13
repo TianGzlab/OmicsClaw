@@ -13,19 +13,13 @@ will consult a Skill's declared prerequisite schema instead of these
 hard-coded helpers; for now the module owns its own scoring rules and
 clarification-message rendering.
 
-External dependencies during execution time (late-imported inside
-functions to avoid a load-order circular):
-
-* ``bot.core._lookup_skill_info`` — resolves an alias-form skill key to
-  its registry metadata; used to detect that the caller really is
-  asking for ``sc-batch-integration``.
-* ``bot.core._run_omics_skill_step`` — runs an upstream skill (e.g.
-  ``sc-standardize-input``) in the auto-prepare chain.
-* ``bot.core.execute_omicsclaw`` — the tool dispatch entry, called at
-  the end of the auto-prepare chain to actually run the integration.
-
-When ``bot/skill_orchestration.py`` and ``bot/tool_executors.py`` land
-those late imports can move to the new modules.
+Skill registry metadata is resolved via
+``omicsclaw.runtime.skill_lookup.lookup_skill_info`` and chain steps
+run through ``omicsclaw.runtime.skill_chain.run_omics_skill_step`` —
+both top-level imports. ``_auto_prepare_sc_batch_integration`` returns
+a control-signal dict so the user-facing tool entry can run the final
+``sc-batch-integration`` step itself; this module never reaches back
+into ``bot/``.
 """
 
 from __future__ import annotations
@@ -33,6 +27,9 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+
+from omicsclaw.runtime.skill_chain import run_omics_skill_step
+from omicsclaw.runtime.skill_lookup import lookup_skill_info
 
 logger = logging.getLogger("omicsclaw.runtime.preflight.sc_batch")
 
@@ -261,16 +258,11 @@ def _format_batch_key_clarification(
 def _maybe_require_batch_key_selection(skill_key: str, input_path: str | None, args: dict) -> str:
     """If the caller is asking for ``sc-batch-integration`` but didn't
     supply a valid ``batch_key``, return a clarification message; else "".
-
-    Late-imports ``_lookup_skill_info`` from ``bot.core`` to identify the
-    alias-form skill key without coupling the module at import time.
     """
     if not input_path:
         return ""
 
-    from bot.skill_orchestration import _lookup_skill_info
-
-    skill_info = _lookup_skill_info(skill_key)
+    skill_info = lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
     if canonical_skill != "sc-batch-integration":
         return ""
@@ -375,9 +367,7 @@ def _get_sc_batch_integration_workflow_plan(skill_key: str, input_path: str | No
     if not input_path:
         return None
 
-    from bot.skill_orchestration import _lookup_skill_info
-
-    skill_info = _lookup_skill_info(skill_key)
+    skill_info = lookup_skill_info(skill_key)
     canonical_skill = skill_info.get("alias", skill_key)
     if canonical_skill != "sc-batch-integration":
         return None
@@ -462,26 +452,38 @@ async def _auto_prepare_sc_batch_integration(
     input_path: str,
     session_id: str | None,
     chat_id: int | str,
-) -> str:
-    """Auto-chain ``sc-standardize-input`` → ``sc-preprocessing`` →
-    ``sc-batch-integration`` when the input needs upstream prep.
+    output_root: Path,
+) -> dict | None:
+    """Auto-chain ``sc-standardize-input`` → ``sc-preprocessing`` before
+    the final ``sc-batch-integration`` run when the input needs upstream
+    prep.
 
-    Late-imports ``_run_omics_skill_step`` and ``execute_omicsclaw`` from
-    ``bot.core`` (they will move to ``bot/skill_orchestration`` and
-    ``bot/tool_executors`` in subsequent slices).
+    Returns one of:
+
+    * ``None`` — the input is already prepped; the caller should fall
+      through to its normal execution path.
+    * ``{"final_message": str}`` — preparation reached a terminal state
+      (a step failed, or a follow-up clarification is required); the
+      caller should return ``final_message`` to the user as-is.
+    * ``{"chained_args": dict, "summary_prefix": str}`` — preparation
+      succeeded; the caller should re-invoke its skill-dispatch entry
+      with ``chained_args`` and prefix the resulting reply with
+      ``summary_prefix + "\\n\\n---\\n"``.
+
+    The control inversion (returning a signal rather than invoking the
+    bot tool entry directly) keeps the engine-side preflight free of
+    any back-reference into ``bot/``.
     """
     plan = _get_sc_batch_integration_workflow_plan(skill_key, input_path, args)
     if not plan:
-        return ""
-
-    from bot.skill_orchestration import _run_omics_skill_step
-    from bot.tool_executors import execute_omicsclaw
+        return None
 
     step_records: list[dict] = []
     current_input = str(plan["file_path"])
 
     if int(plan.get("start_step", 1)) <= 1:
-        standardize_result = await _run_omics_skill_step(
+        standardize_result = await run_omics_skill_step(
+            output_root=output_root,
             skill_key="sc-standardize-input",
             input_path=current_input,
             mode="path",
@@ -492,18 +494,22 @@ async def _auto_prepare_sc_batch_integration(
                 f"`sc-standardize-input` failed during automatic preparation "
                 f"(exit {standardize_result['returncode']}):\n{standardize_result['error_text']}"
             )
-            return guidance + f"\n\n---\n{failure}" if guidance else failure
+            message = guidance + f"\n\n---\n{failure}" if guidance else failure
+            return {"final_message": message}
         standardized_path = standardize_result["out_dir"] / "processed.h5ad"
         if not standardized_path.exists():
-            return (
-                "Automatic preparation stopped because `sc-standardize-input` did not produce "
-                f"`processed.h5ad` in `{standardize_result['out_dir']}`."
-            )
+            return {
+                "final_message": (
+                    "Automatic preparation stopped because `sc-standardize-input` did not produce "
+                    f"`processed.h5ad` in `{standardize_result['out_dir']}`."
+                )
+            }
         current_input = str(standardized_path)
         step_records.append({"skill": "sc-standardize-input", "output_path": current_input})
 
     if int(plan.get("start_step", 1)) <= 2:
-        preprocess_result = await _run_omics_skill_step(
+        preprocess_result = await run_omics_skill_step(
+            output_root=output_root,
             skill_key="sc-preprocessing",
             input_path=current_input,
             mode="path",
@@ -516,13 +522,15 @@ async def _auto_prepare_sc_batch_integration(
             )
             prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
             message = prefix + "\n\n---\n" + failure
-            return guidance + "\n\n---\n" + message if guidance else message
+            return {"final_message": guidance + "\n\n---\n" + message if guidance else message}
         processed_path = preprocess_result["out_dir"] / "processed.h5ad"
         if not processed_path.exists():
-            return (
-                "Automatic preparation stopped because `sc-preprocessing` did not produce "
-                f"`processed.h5ad` in `{preprocess_result['out_dir']}`."
-            )
+            return {
+                "final_message": (
+                    "Automatic preparation stopped because `sc-preprocessing` did not produce "
+                    f"`processed.h5ad` in `{preprocess_result['out_dir']}`."
+                )
+            }
         current_input = str(processed_path)
         step_records.append({"skill": "sc-preprocessing", "output_path": current_input})
 
@@ -532,10 +540,10 @@ async def _auto_prepare_sc_batch_integration(
     chained_args["confirm_workflow_skip"] = True
     chained_args["auto_prepare"] = False
 
-    batch_clarification = _maybe_require_batch_key_selection(skill_key, current_input, chained_args)
-    prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
-    if batch_clarification:
-        return prefix + "\n\n---\n" + batch_clarification
+    summary_prefix = _format_auto_prepare_summary(step_records, final_input_path=current_input)
 
-    final_result = await execute_omicsclaw(chained_args, session_id=session_id, chat_id=chat_id)
-    return prefix + "\n\n---\n" + final_result
+    batch_clarification = _maybe_require_batch_key_selection(skill_key, current_input, chained_args)
+    if batch_clarification:
+        return {"final_message": summary_prefix + "\n\n---\n" + batch_clarification}
+
+    return {"chained_args": chained_args, "summary_prefix": summary_prefix}

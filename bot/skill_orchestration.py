@@ -139,6 +139,12 @@ from omicsclaw.common.user_guidance import (
     strip_user_guidance_lines,
 )
 from omicsclaw.core.registry import registry
+from omicsclaw.runtime.skill_chain import (
+    normalize_extra_args as _normalize_extra_args,
+    run_omics_skill_step,
+    run_skill_via_shared_runner as _run_skill_via_shared_runner,
+)
+from omicsclaw.runtime.skill_lookup import lookup_skill_info
 
 logger = logging.getLogger("omicsclaw.bot.skill_orchestration")
 
@@ -396,167 +402,20 @@ def _format_next_steps(result_data: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_extra_args(extra_args) -> list[str]:
-    if not extra_args or not isinstance(extra_args, list):
-        return []
-    filtered = []
-    skip_next = False
-    for arg in extra_args:
-        if skip_next:
-            skip_next = False
-            continue
-        if arg == "--output":
-            skip_next = True
-            continue
-        if arg.startswith("--output="):
-            continue
-        if arg.startswith("--"):
-            eq_pos = arg.find("=")
-            if eq_pos > 0:
-                flag_part = arg[:eq_pos].replace("_", "-")
-                arg = flag_part + arg[eq_pos:]
-            else:
-                arg = arg.replace("_", "-")
-        filtered.append(arg)
-    return filtered
-
-
-async def _run_omics_skill_step(
-    *,
-    skill_key: str,
-    input_path: str | None,
-    mode: str,
-    method: str = "",
-    data_type: str = "",
-    batch_key: str = "",
-    n_epochs: int | None = None,
-    extra_args: list[str] | None = None,
-) -> dict:
-    import uuid
-
+async def _run_omics_skill_step(**kwargs) -> dict:
+    """Bot-side adapter for ``run_omics_skill_step``: defaults the
+    output root to the bot's ``OUTPUT_DIR`` so existing callers don't
+    have to thread the path through."""
     from bot.core import OUTPUT_DIR
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = OUTPUT_DIR / build_output_dir_name(
-        skill_key,
-        ts,
-        method=method,
-        unique_suffix=uuid.uuid4().hex[:8],
-    )
-
-    return await _run_skill_via_shared_runner(
-        skill_key=skill_key,
-        input_path=input_path,
-        session_path=None,
-        mode=mode,
-        method=method,
-        data_type=data_type,
-        batch_key=batch_key,
-        n_epochs=n_epochs,
-        extra_args=extra_args,
-        out_dir=out_dir,
-    )
+    kwargs.setdefault("output_root", OUTPUT_DIR)
+    return await run_omics_skill_step(**kwargs)
 
 
-async def _run_skill_via_shared_runner(
-    *,
-    skill_key: str,
-    input_path: str | None,
-    session_path: str | None,
-    mode: str,
-    method: str = "",
-    data_type: str = "",
-    batch_key: str = "",
-    n_epochs: int | None = None,
-    extra_args: list[str] | None = None,
-    out_dir: Path,
-) -> dict:
-    from omicsclaw.core import skill_runner
-    from omicsclaw.core.skill_result import SkillRunResult
-
-    runner_skill = "spatial-pipeline" if skill_key == "pipeline" else skill_key
-    skill_info = _lookup_skill_info(runner_skill)
-    canonical_skill = skill_info.get("alias") or runner_skill
-
-    forwarded_args: list[str] = []
-    if method:
-        forwarded_args.extend(["--method", method])
-    if data_type:
-        forwarded_args.extend(["--data-type", data_type])
-    if batch_key:
-        forwarded_args.extend(["--batch-key", batch_key])
-    if n_epochs is not None:
-        # The legacy alias ``spatial-domain-identification`` was the only skill
-        # that wanted ``--epochs`` instead of ``--n-epochs``, but the registry
-        # now resolves that alias to canonical ``spatial-domains`` before we
-        # land here — the conditional was dead code. ``argv_builder``'s
-        # ``--epochs`` ↔ ``--n-epochs`` rewrite (see
-        # ``omicsclaw/core/runtime/argv_builder.py``) handles whichever flag
-        # each skill's ``allowed_extra_flags`` actually accepts.
-        forwarded_args.extend(["--n-epochs", str(int(n_epochs))])
-    forwarded_args.extend(_normalize_extra_args(extra_args))
-
-    def _emit_stdout(line: str) -> None:
-        logger.info("[%s:stdout] %s", canonical_skill, line)
-
-    def _emit_stderr(line: str) -> None:
-        logger.info("[%s:stderr] %s", canonical_skill, line)
-
-    cancel_event = threading.Event()
-
-    def _run() -> SkillRunResult:
-        return skill_runner.run_skill(
-            runner_skill,
-            input_path=str(input_path) if input_path else None,
-            output_dir=str(out_dir),
-            demo=mode == "demo",
-            session_path=session_path,
-            extra_args=forwarded_args or None,
-            stdout_callback=_emit_stdout,
-            stderr_callback=_emit_stderr,
-            cancel_event=cancel_event,
-        )
-
-    try:
-        run_result = await asyncio.to_thread(_run)
-    except asyncio.CancelledError:
-        cancel_event.set()
-        raise
-    stdout_str = run_result.stdout
-    stderr_str = run_result.stderr
-    guidance_block = render_guidance_block(extract_user_guidance_lines(stderr_str))
-    clean_stderr = strip_user_guidance_lines(stderr_str)
-    clean_stdout = strip_user_guidance_lines(stdout_str)
-    error_text = clean_stderr[-1500:] if clean_stderr else clean_stdout[-1500:] if clean_stdout else "unknown error"
-    returncode = run_result.adapter_exit_code
-    output_dir = run_result.output_path or out_dir
-    return {
-        "success": run_result.success,
-        "returncode": returncode,
-        "out_dir": output_dir,
-        "output_dir": str(output_dir),
-        "stdout": stdout_str,
-        "stderr": stderr_str,
-        "guidance_block": guidance_block,
-        "error_text": error_text,
-    }
-
-
-def _lookup_skill_info(skill_key: str, force_reload: bool = False) -> dict:
-    skill_registry = registry
-    if force_reload:
-        skill_registry.reload()
-    else:
-        skill_registry.load_all()
-
-    info = skill_registry.skills.get(skill_key)
-    if info:
-        return info
-
-    for _k, meta in skill_registry.skills.items():
-        if meta.get("alias") == skill_key:
-            return meta
-    return {}
+# Re-export from the canonical home (omicsclaw.runtime.skill_lookup) so
+# existing ``bot.skill_orchestration._lookup_skill_info`` / ``bot.core``
+# call sites keep working without churn.
+_lookup_skill_info = lookup_skill_info
 
 
 def _resolve_param_hint_info(skill_key: str, method: str) -> tuple[str, dict, dict]:
