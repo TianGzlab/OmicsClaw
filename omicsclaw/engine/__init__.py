@@ -19,9 +19,19 @@ from ._identity_anchor import (
     apply_model_identity_anchor,
     resolve_effective_model_provider,
 )
+from .loop import (
+    DEFAULT_MAX_TOKENS,
+    LLM_NOT_CONFIGURED_MESSAGE,
+    MAX_TOOL_ITERATIONS,
+    run_engine_loop,
+)
 
 __all__ = [
+    "DEFAULT_MAX_TOKENS",
     "EngineDependencies",
+    "LLM_NOT_CONFIGURED_MESSAGE",
+    "MAX_TOOL_ITERATIONS",
     "apply_model_identity_anchor",
     "resolve_effective_model_provider",
+    "run_engine_loop",
 ]
