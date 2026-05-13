@@ -61,12 +61,6 @@ GRANDFATHERED_LAZY_IMPORTS: frozenset[tuple[str, int]] = frozenset(
         ("omicsclaw/interactive/tui.py", 856),
         ("omicsclaw/interactive/tui.py", 872),
         ("omicsclaw/interactive/tui.py", 1016),
-        # omicsclaw/runtime/preflight/sc_batch.py — the auto-prepare
-        # chain late-imports the bot-side tool entry at the very end.
-        # Future fix: invert control flow so the bot's execute_omicsclaw
-        # runs the final step itself rather than being called back from
-        # the engine side.
-        ("omicsclaw/runtime/preflight/sc_batch.py", 463),
     }
 )
 
@@ -176,5 +170,5 @@ def test_grandfathered_set_documents_phase_2_target() -> None:
     leaving the strict checks (top-level + lazy = ∅) as the
     canonical guards."""
     assert (
-        len(GRANDFATHERED_LAZY_IMPORTS) == 13
+        len(GRANDFATHERED_LAZY_IMPORTS) == 12
     ), "Allowlist size changed — update the count or remove this test once allowlist is empty."

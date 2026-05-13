@@ -240,8 +240,18 @@ async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | s
             chat_id=chat_id,
             output_root=OUTPUT_DIR,
         )
-        if prepared:
-            return prepared
+        if prepared is not None:
+            if "final_message" in prepared:
+                return prepared["final_message"]
+            # Auto-prep succeeded: run the chained args (auto_prepare=False
+            # in chained_args, so this self-call cannot recurse further)
+            # and prefix the response with the summary of what we just did.
+            final_result = await execute_omicsclaw(
+                prepared["chained_args"],
+                session_id=session_id,
+                chat_id=chat_id,
+            )
+            return prepared["summary_prefix"] + "\n\n---\n" + final_result
 
     workflow_clarification = _maybe_require_batch_integration_workflow(skill_key, input_path, args)
     if workflow_clarification:
