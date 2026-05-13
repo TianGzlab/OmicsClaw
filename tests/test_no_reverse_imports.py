@@ -23,14 +23,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCAN_ROOT = REPO_ROOT / "omicsclaw"
 
-# Pre-existing reverse-import sites at HEAD = e59f89d (16 total).
-# Phase 1 P0-A → P0-D will drive this set to empty. When that happens,
-# delete the allowlist and let the strict check (set must equal {}) stand.
+# Pre-existing reverse-import sites at HEAD (16 total).
+# Phase 1 P0-A narrowed server.py:4813 from
+# ``from bot.run import CHANNEL_BUILDERS, _build_middleware`` to
+# ``from bot.run import CHANNEL_BUILDERS`` but the import statement
+# itself remains, so the site count is unchanged. Phase 1 P0-D will
+# redirect all 16 sites to ``omicsclaw.engine``, at which point this
+# allowlist (and the test_grandfathered_set_documents_phase_1_target
+# assertion below) should be deleted, leaving the strict check
+# (set must equal {}) standing.
 GRANDFATHERED_VIOLATIONS: frozenset[tuple[str, int]] = frozenset(
     {
-        # omicsclaw/app/server.py — 4753-4814 removed by Phase 1 P0-A
-        # (delete /bridge/start middleware wiring); 351 / 4602 redirected
-        # to omicsclaw.engine by Phase 1 P0-D.
+        # omicsclaw/app/server.py — redirected to omicsclaw.engine at
+        # Phase 1 P0-D.
         ("omicsclaw/app/server.py", 351),
         ("omicsclaw/app/server.py", 4602),
         ("omicsclaw/app/server.py", 4753),

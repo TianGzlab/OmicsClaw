@@ -9,9 +9,9 @@ DingTalk, Discord, etc.) must implement. Provides common functionality:
 - Message deduplication
 - Typing indicator management
 
-Inspired by EvoScientist's channels/base.py, adapted for OmicsClaw's
-lightweight AsyncOpenAI-based design: channels call core.llm_tool_loop()
-directly instead of going through a separate MessageBus + InboundConsumer.
+Channels call ``core.llm_tool_loop()`` directly from their platform
+handlers; cross-cutting concerns (rate limit, dedup, audit) live in
+``bot.core`` / ``bot.rate_limit`` rather than a separate pipeline.
 """
 
 from __future__ import annotations

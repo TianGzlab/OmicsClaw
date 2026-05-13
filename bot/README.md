@@ -34,7 +34,7 @@ User (Telegram / Feishu / DingTalk / Discord / Slack / WeChat / QQ / Email / iMe
 │  ┌──────────┬──────┬────────┬───────┬──────┬──────┬────────┐ │
 │  │ Telegram │Feishu│DingTalk│Discord│ Slack│WeChat│QQ/Email│ │
 │  └──────────┴──────┴────────┴───────┴──────┴──────┴────────┘ │
-│         ↕ MessageBus + MiddlewarePipeline ↕                  │
+│         ↓ each channel calls core.llm_tool_loop directly     │
 │  ┌──────────────────────────────────────────┐                │
 │  │  ChannelManager (lifecycle + health)     │                │
 │  └──────────────────────────────────────────┘                │
@@ -51,8 +51,6 @@ User (Telegram / Feishu / DingTalk / Discord / Slack / WeChat / QQ / Email / iMe
 |--------|--------|
 | `core.py` | LLM client, TOOLS, skill execution, security, audit |
 | `channels/base.py` | Channel ABC, chunk_text, DedupCache, RateLimiter |
-| `channels/bus.py` | MessageBus — async inbound/outbound queues |
-| `channels/middleware.py` | Composable dedup/rate-limit/allow-list/audit pipeline |
 | `channels/manager.py` | ChannelManager — multi-channel lifecycle + /healthz |
 | `channels/telegram.py` | TelegramChannel (python-telegram-bot) |
 | `channels/feishu.py` | FeishuChannel (lark-oapi WebSocket) |

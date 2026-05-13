@@ -67,19 +67,13 @@ def test_no_production_publish_inbound_callers() -> None:
 # --- Phase 1 P0-A target assertions (xfail until task #4 ships) ----------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR-0003 task #4: delete bot/channels/bus.py",
-)
 def test_message_bus_module_deleted() -> None:
+    """``bot/channels/bus.py`` was deleted in Phase 1 P0-A Slice C."""
     assert find_spec("bot.channels.bus") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR-0003 task #4: delete bot/channels/middleware.py",
-)
 def test_middleware_module_deleted() -> None:
+    """``bot/channels/middleware.py`` was deleted in Phase 1 P0-A Slice C."""
     assert find_spec("bot.channels.middleware") is None
 
 

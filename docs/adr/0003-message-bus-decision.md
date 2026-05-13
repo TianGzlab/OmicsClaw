@@ -90,9 +90,12 @@ middleware argument and calls `start_all()`.
   needs (e.g. global allow-list) will be added per-channel or via a
   decorator on the channel's handler — *not* by re-introducing a
   pipeline.
-- `omicsclaw/app/server.py:/bridge/start` loses its `from bot.run import
-  _build_middleware` and three sibling reverse imports, dropping the
-  reverse-import allowlist count from 16 to 12 ahead of Phase 1 P0-D.
+- `omicsclaw/app/server.py:/bridge/start` loses its `_build_middleware`
+  reference; the surrounding `from bot.run import …` /
+  `from bot.channels import …` / `from bot.channels.manager import …`
+  imports remain (now narrower) and continue to count toward the
+  reverse-import allowlist. Phase 1 P0-D will redirect all 16 sites
+  through `omicsclaw.engine` and drop the allowlist entirely.
 - The `bot/billing.py`, `bot/rate_limit.py`, and `bot/core.py` audit
   hooks remain the canonical implementations for those concerns. Phase
   2 will revisit their concurrency-safety story (per-chat actor /
