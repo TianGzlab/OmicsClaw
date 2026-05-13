@@ -78,8 +78,10 @@ from bot.tool_executors import (
 from omicsclaw.common.user_guidance import strip_user_guidance_lines
 from omicsclaw.core.llm_timeout import build_llm_timeout_policy
 from omicsclaw.engine import (
+    EngineDependencies,
     apply_model_identity_anchor,
     resolve_effective_model_provider,
+    run_engine_loop,
 )
 from omicsclaw.runtime.bot_tools import (
     BotToolContext,
@@ -810,127 +812,58 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
         return resumed_result
 
     _ensure_system_prompt()
-    if _core.llm is None:
-        return (
-            "⚠ LLM is not configured.\n"
-            "\n"
-            "Set LLM_API_KEY (or OPENAI_API_KEY) in your environment or "
-            ".env file, then restart `oc chat`. To configure interactively, "
-            "run `oc onboard`."
-        )
 
-    transcript_store.max_history = MAX_HISTORY
-    transcript_store.max_history_chars = MAX_HISTORY_CHARS or None
-    transcript_store.max_conversations = MAX_CONVERSATIONS
-    transcript_context = build_selective_replay_context(
-        transcript_store.get_history(chat_id),
-        metadata={"pipeline_workspace": pipeline_workspace} if pipeline_workspace else None,
-        workspace=workspace,
-        max_messages=transcript_store.max_history,
-        max_chars=transcript_store.max_history_chars,
-        sanitizer=transcript_store.sanitizer,
+    def _bind_callbacks_builder(**engine_kwargs):
+        # Engine doesn't carry the bot's logger; bind it here so the
+        # callback builder still gets the right ``logger_obj`` arg.
+        return _build_bot_query_engine_callbacks(logger_obj=logger, **engine_kwargs)
+
+    deps = EngineDependencies(
+        transcript_store=transcript_store,
+        tool_result_store=tool_result_store,
+        llm=_core.llm,
+        omicsclaw_model=_core.OMICSCLAW_MODEL or "",
+        llm_provider_name=_core.LLM_PROVIDER_NAME or "",
+        session_manager=_core.session_manager,
+        omicsclaw_dir=str(OMICSCLAW_DIR),
+        max_history=MAX_HISTORY,
+        max_history_chars=MAX_HISTORY_CHARS or None,
+        max_conversations=MAX_CONVERSATIONS,
+        audit_fn=audit,
+        usage_accumulator=usage_accumulator or _accumulate_usage,
+        skill_aliases=tuple(_skill_registry().skills.keys()),
+        deep_learning_methods=DEEP_LEARNING_METHODS,
+        tool_runtime=_build_tool_runtime(),
+        tool_registry=get_tool_registry(),
+        callbacks_builder=_bind_callbacks_builder,
     )
 
-    chat_context = await _assemble_chat_context(
+    return await run_engine_loop(
+        deps=deps,
         chat_id=chat_id,
         user_content=user_content,
         user_id=user_id,
         platform=platform,
-        session_manager=_core.session_manager,
-        system_prompt_builder=build_system_prompt,
-        skill_aliases=tuple(_skill_registry().skills.keys()),
         plan_context=plan_context,
-        transcript_context=transcript_context,
-        omicsclaw_dir=str(OMICSCLAW_DIR),
         workspace=workspace,
         pipeline_workspace=pipeline_workspace,
         scoped_memory_scope=scoped_memory_scope,
-        mcp_servers=tuple(mcp_servers or ()),
+        mcp_servers=mcp_servers,
         output_style=output_style,
-    )
-    session_id = chat_context.session_id
-    system_prompt = chat_context.system_prompt
-
-    effective_model, effective_provider = resolve_effective_model_provider(
-        model_override, _core.OMICSCLAW_MODEL, _core.LLM_PROVIDER_NAME
-    )
-    system_prompt = apply_model_identity_anchor(
-        system_prompt, effective_model, effective_provider
-    )
-
-    # Apply per-request system prompt additions
-    if system_prompt_append:
-        system_prompt = system_prompt.rstrip() + "\n\n" + system_prompt_append.strip()
-    if mode and mode != "ask":
-        _mode_hints = {
-            "code": "You are in code mode. Prefer writing and editing code to accomplish the user's goals.",
-            "plan": "You are in plan mode. Create detailed plans and explain your reasoning before taking action.",
-        }
-        hint = _mode_hints.get(mode, "")
-        if hint:
-            system_prompt = system_prompt.rstrip() + "\n\n## Mode\n" + hint
-
-    tool_runtime = _build_tool_runtime()
-    # Phase 1 (tool-list-compression): build the per-request filtered
-    # tool payload. ``chat_context.prompt_context.request`` carries the
-    # ContextAssemblyRequest that drove system-prompt assembly; reusing
-    # it here means tool selection sees the same query / surface /
-    # workspace / capability context the system prompt did.
-    _tool_selection_request = chat_context.prompt_context.request
-    request_tools = tuple(
-        get_tool_registry().to_openai_tools_for_request(_tool_selection_request)
-    )
-    hook_runtime = build_default_lifecycle_hook_runtime(OMICSCLAW_DIR)
-    callbacks = _build_bot_query_engine_callbacks(
-        chat_id=chat_id,
         progress_fn=progress_fn,
         progress_update_fn=progress_update_fn,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_stream_content=on_stream_content,
         on_stream_reasoning=on_stream_reasoning,
-        request_tool_approval=request_tool_approval,
-        logger_obj=logger,
-        audit_fn=audit,
-        deep_learning_methods=DEEP_LEARNING_METHODS,
-        usage_accumulator=usage_accumulator or _accumulate_usage,
         on_context_compacted=on_context_compacted,
-    )
-    resolved_policy_state = ToolPolicyState.from_mapping(
-        policy_state,
-        surface=platform or "bot",
-    )
-    return await run_query_engine(
-        llm=_core.llm,
-        context=QueryEngineContext(
-            chat_id=chat_id,
-            session_id=session_id,
-            system_prompt=system_prompt,
-            user_message_content=chat_context.user_message_content,
-            surface=platform or "bot",
-            policy_state=resolved_policy_state,
-            hook_runtime=hook_runtime,
-            tool_runtime_context={
-                "omicsclaw_dir": str(OMICSCLAW_DIR),
-                "workspace": workspace,
-                "pipeline_workspace": pipeline_workspace,
-            },
-            request_tools=request_tools,
-        ),
-        tool_runtime=tool_runtime,
-        transcript_store=transcript_store,
-        tool_result_store=tool_result_store,
-        config=QueryEngineConfig(
-            model=model_override or _core.OMICSCLAW_MODEL,
-            max_iterations=MAX_TOOL_ITERATIONS,
-            max_tokens=max_tokens_override if max_tokens_override > 0 else 8192,
-            llm_error_types=(APIError,),
-            extra_api_params=extra_api_params or {},
-            deepseek_reasoning_passback=(
-                (_core.LLM_PROVIDER_NAME or "").strip().lower() == "deepseek"
-            ),
-        ),
-        callbacks=callbacks,
+        model_override=model_override,
+        extra_api_params=extra_api_params,
+        max_tokens_override=max_tokens_override,
+        system_prompt_append=system_prompt_append,
+        mode=mode,
+        request_tool_approval=request_tool_approval,
+        policy_state=policy_state,
     )
 
 
