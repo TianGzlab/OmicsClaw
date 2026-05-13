@@ -190,6 +190,92 @@ def test_memory_in_use_quiet_on_empty_query() -> None:
     assert memory_in_use(_req(query="")) is False
 
 
+# --- preference_statement_intent ---------------------------------------------
+# Gates the ``remember`` tool when the user states a persistent preference
+# without uttering an explicit "记住 / remember" trigger. Co-exists with
+# ``memory_in_use`` — ``remember`` fires on either predicate.
+
+def test_preference_statement_fires_on_chinese_persistent_preference() -> None:
+    from omicsclaw.runtime.predicates import preference_statement_intent
+
+    # Real symptom from the desktop-app bug: user states a language preference
+    # in Chinese without saying 记住.
+    assert preference_statement_intent(_req(query="以后请用中文回答")) is True
+    assert preference_statement_intent(_req(query="今后都用 DESeq2 跑 DE")) is True
+    assert preference_statement_intent(_req(query="总是用 harmony 做整合")) is True
+    assert preference_statement_intent(_req(query="默认用 leiden 聚类")) is True
+    assert preference_statement_intent(_req(query="我习惯把 DPI 设成 300")) is True
+
+
+def test_preference_statement_fires_on_english_persistent_preference() -> None:
+    from omicsclaw.runtime.predicates import preference_statement_intent
+
+    assert preference_statement_intent(
+        _req(query="from now on use DESeq2 for DE")
+    ) is True
+    assert preference_statement_intent(
+        _req(query="going forward, please reply in English")
+    ) is True
+    assert preference_statement_intent(
+        _req(query="always use harmony for batch correction")
+    ) is True
+    assert preference_statement_intent(
+        _req(query="I prefer to skip the doublet step")
+    ) is True
+    assert preference_statement_intent(
+        _req(query="default to leiden clustering")
+    ) is True
+
+
+def test_preference_statement_quiet_on_non_preference_query() -> None:
+    """Probes for false-positive triggers — common scientific phrasings
+    that contain ``以后``/``默认``/``always`` as time/state adverbs rather
+    than expressed preferences. These must NOT fire."""
+    from omicsclaw.runtime.predicates import preference_statement_intent
+
+    assert preference_statement_intent(_req(query="run sc-de")) is False
+    assert preference_statement_intent(_req(query="explain UMAP")) is False
+    # "以后" + 时间名词（不是动词）
+    assert preference_statement_intent(_req(query="以后再说")) is False
+    # "默认" 作形容词修饰参数名
+    assert preference_statement_intent(
+        _req(query="show me the default parameters")
+    ) is False
+    # bare "always" without a preference verb
+    assert preference_statement_intent(
+        _req(query="cells are always changing during differentiation")
+    ) is False
+
+
+def test_preference_statement_quiet_on_empty_query() -> None:
+    from omicsclaw.runtime.predicates import preference_statement_intent
+
+    assert preference_statement_intent(_req(query="")) is False
+
+
+def test_preference_statement_acceptable_overfire_on_casual_taste() -> None:
+    """Documents an intentional, low-cost over-fire boundary.
+
+    Casual personal-taste statements ("我喜欢 X", "我习惯 X", momentary
+    "请用 X" / "帮我把 X") fire this predicate even though they are not
+    workflow preferences. The cost of an over-fire is one tool's schema
+    (~600 tokens) briefly visible to the LLM, which still has to decide
+    whether to actually call ``remember`` with a valid ``memory_type``
+    (preference / insight / project_context). Keeping the regex
+    permissive here trades a small context cost for not missing real
+    declarative preferences — narrowing this would risk regressing the
+    fix for the desktop-app silent-preference-loss bug.
+
+    Future contributors: do not tighten without checking the regression
+    suite in ``test_tool_list_lazy_exposure.py`` still passes.
+    """
+    from omicsclaw.runtime.predicates import preference_statement_intent
+
+    assert preference_statement_intent(_req(query="我喜欢这首歌")) is True
+    assert preference_statement_intent(_req(query="我习惯早起")) is True
+    assert preference_statement_intent(_req(query="请用 git 提交这条")) is True
+
+
 # --- non_trivial_no_capability ------------------------------------------------
 
 def test_non_trivial_no_capability_fires_on_substantive_query_without_capability_block() -> None:

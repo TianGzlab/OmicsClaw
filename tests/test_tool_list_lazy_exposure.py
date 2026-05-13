@@ -129,6 +129,44 @@ def test_memory_tool_hidden_on_unrelated_query(tool: str) -> None:
     assert tool not in _selected_names(query="run sc-de")
 
 
+# Regression: desktop-app users state preferences declaratively
+# ("以后请用中文回答") without saying 记住/remember. Before, none of the
+# 3 memory tools were exposed, so LLM-initiated persistence silently
+# failed. Now ``remember`` co-gates on ``preference_statement_intent``,
+# but ``recall`` / ``forget`` stay strict — those are explicit user
+# actions, not LLM-initiated.
+
+PREFERENCE_STATEMENT_QUERIES = (
+    "以后请用中文回答",
+    "from now on use DESeq2 for DE",
+    "总是用 harmony 做整合",
+    "I prefer to skip the doublet step",
+    "默认用 leiden 聚类",
+)
+
+
+@pytest.mark.parametrize("query", PREFERENCE_STATEMENT_QUERIES)
+def test_remember_appears_on_preference_statement(query: str) -> None:
+    assert "remember" in _selected_names(query=query), (
+        f"remember tool must be exposed on declarative preference "
+        f"statement {query!r} so the LLM can persist it without the "
+        f"user uttering 记住/remember explicitly."
+    )
+
+
+@pytest.mark.parametrize("query", PREFERENCE_STATEMENT_QUERIES)
+def test_recall_forget_hidden_on_preference_statement(query: str) -> None:
+    selected = _selected_names(query=query)
+    assert "recall" not in selected, (
+        f"recall is an explicit-user-action tool; should NOT be exposed "
+        f"merely because the user stated a preference: {query!r}"
+    )
+    assert "forget" not in selected, (
+        f"forget is an explicit-user-action tool; should NOT be exposed "
+        f"merely because the user stated a preference: {query!r}"
+    )
+
+
 # --- Lazy-load mapping: implementation intent --------------------------------
 
 

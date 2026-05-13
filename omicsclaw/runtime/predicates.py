@@ -42,6 +42,35 @@ _MEMORY_KEYWORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Catches statements of *persistent* preferences without an explicit
+# 记住 / remember cue. Used to gate the ``remember`` tool so the LLM can
+# proactively persist a preference the user states declaratively
+# (e.g. "以后请用中文回答", "from now on use DESeq2"). Deliberately
+# narrower than "anything containing 总是/always": each branch requires
+# a preference verb / preference-shaped collocation so that scientific
+# phrasings like "cells are always changing" or "以后再说" don't fire.
+_PREFERENCE_STATEMENT_RE = re.compile(
+    # English: temporal-scope leaders ("from now on", "going forward")
+    r"\b(from now on|going forward)\b|"
+    # English: always/never/usually + preference verb
+    r"\b(always|never|usually)\s+"
+    r"(use|do|run|reply|respond|answer|chat|talk|skip|avoid|prefer|set|show)\b|"
+    # English: "I prefer/usually/like/want to ..." + verb
+    r"\bi\s+(prefer|usually|always|like|want)\s+(to\s+\w+|using\s+|\w+ing)\b|"
+    # English: "prefer to ...", "default to ...", "please always/never ..."
+    r"\b(prefer\s+to|default\s+to|please\s+(always|never))\b|"
+    # Chinese: persistent-scope adverb + preference verb
+    r"(以后|今后|始终|一直|总是|每次)\s*(都|请|改|帮我)?\s*"
+    r"(用|不用|不要|要|改用|换成|采用|设为|设成|配置)|"
+    # Chinese: "默认" as a verb / setting ("默认用 X", "默认是 X")
+    r"默认\s*(用|是|为|采用|设|配置)|"
+    # Chinese: I-prefer constructions
+    r"我(习惯|喜欢|偏好|常用)|"
+    # Chinese: "请用 X / 帮我把 X / 请帮我记 X"
+    r"(请|帮我)(用|改用|换成|总是|始终|一直|把|记)",
+    re.IGNORECASE,
+)
+
 _PLOT_KEYWORDS_RE = re.compile(
     # Plot-type words that are unambiguous (violin/heatmap/barplot/boxplot).
     # ``umap`` / ``tsne`` excluded — algorithm names without plot intent.
@@ -148,6 +177,18 @@ def memory_in_use(req: ContextAssemblyRequest) -> bool:
     Triggers the memory hygiene rule (no secrets / PII / transient errors).
     """
     return bool(_MEMORY_KEYWORDS_RE.search(req.query or ""))
+
+
+def preference_statement_intent(req: ContextAssemblyRequest) -> bool:
+    """Fires when the user *declaratively* expresses a persistent preference,
+    without uttering a 记住 / remember trigger word.
+
+    Gates the ``remember`` tool so the LLM can persist preferences like
+    "以后请用中文回答" or "from now on use DESeq2" proactively. ``recall`` /
+    ``forget`` remain gated by ``memory_in_use`` alone — those are
+    explicit user actions, not LLM-initiated.
+    """
+    return bool(_PREFERENCE_STATEMENT_RE.search(req.query or ""))
 
 
 def plot_intent(req: ContextAssemblyRequest) -> bool:
