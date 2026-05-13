@@ -55,15 +55,33 @@ import bot.core as _core
 # is pulled in via re-export.
 from bot.core import (
     DATA_DIR,
+    DEEP_LEARNING_METHODS,
     EXAMPLES_DIR,
     OMICSCLAW_DIR,
+    OMICSCLAW_PY,
     OUTPUT_DIR,
+    _path_names,
     audit,
     get_skill_runner_python,
     pending_media,
     pending_preflight_requests,
     pending_text,
     received_files,
+)
+
+# Path-validation helpers carved out to bot.path_validation per ADR 0001.
+# Import directly (not via bot.core) since bot.core only re-exports them
+# *after* this module finishes loading — by the time these executors run,
+# the bot.core re-export has resolved but lookups inside execute_* bodies
+# resolve against this module's globals, not bot.core's.
+from bot.path_validation import (
+    TRUSTED_DATA_DIRS,
+    _ensure_trusted_dirs,
+    discover_file,
+    resolve_dest,
+    sanitize_filename,
+    validate_input_path,
+    validate_path,
 )
 
 from omicsclaw.common.report import build_output_dir_name
@@ -91,11 +109,13 @@ from bot.skill_orchestration import (
     _format_auto_disambiguation,
     _format_auto_route_banner,
     _format_next_steps,
+    _infer_skill_for_method,
     _lookup_skill_info,
     _normalize_extra_args,
     _read_result_json,
     _resolve_last_output_dir,
     _run_omics_skill_step,
+    _run_skill_via_shared_runner,
     _update_preprocessing_state,
     OutputMediaPaths,
 )
@@ -103,6 +123,7 @@ from omicsclaw.runtime.preflight.sc_batch import (
     _auto_prepare_sc_batch_integration,
     _maybe_require_batch_integration_workflow,
     _maybe_require_batch_key_selection,
+    _resolve_requested_batch_key,
 )
 
 logger = logging.getLogger("omicsclaw.bot.tool_executors")
