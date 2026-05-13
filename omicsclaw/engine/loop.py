@@ -182,9 +182,10 @@ async def run_engine_loop(
         on_context_compacted=on_context_compacted,
     )
 
-    resolved_policy_state = ToolPolicyState.from_mapping(
-        policy_state, surface=platform or "bot"
-    )
+    # Surface flows into audit/metrics; an absent platform is caller misuse,
+    # not bot traffic — keep it visible as "unknown" instead of masquerading.
+    surface = platform or "unknown"
+    resolved_policy_state = ToolPolicyState.from_mapping(policy_state, surface=surface)
 
     return await run_query_engine(
         llm=deps.llm,
@@ -193,7 +194,7 @@ async def run_engine_loop(
             session_id=chat_context.session_id,
             system_prompt=system_prompt,
             user_message_content=chat_context.user_message_content,
-            surface=platform or "bot",
+            surface=surface,
             policy_state=resolved_policy_state,
             hook_runtime=hook_runtime,
             tool_runtime_context={
