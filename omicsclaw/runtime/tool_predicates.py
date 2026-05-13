@@ -33,6 +33,20 @@ def _audio_intent(req: ContextAssemblyRequest) -> bool:
     return bool(_AUDIO_KEYWORDS_RE.search(req.query or ""))
 
 
+def _remember_intent(req: ContextAssemblyRequest) -> bool:
+    """Gate for the ``remember`` tool.
+
+    Fires on either an explicit memory keyword (``记住 / remember`` ...) OR
+    a declarative preference statement (``以后请用中文`` / ``from now on
+    use ...``). The OR matters because LLM-initiated preference writes
+    must work without the user uttering a trigger word — otherwise a
+    user stating "以后请用中文回答" silently never gets persisted (the
+    desktop-app bug). ``recall`` and ``forget`` keep ``memory_in_use``
+    alone — those are explicit user actions, not LLM-initiated.
+    """
+    return _pred.memory_in_use(req) or _pred.preference_statement_intent(req)
+
+
 # --- The mapping -------------------------------------------------------------
 
 TOOL_PREDICATE_MAP: dict[str, Callable[[ContextAssemblyRequest], bool]] = {
@@ -51,8 +65,8 @@ TOOL_PREDICATE_MAP: dict[str, Callable[[ContextAssemblyRequest], bool]] = {
     # PDF / paper → pdf_or_paper_intent
     "parse_literature": _pred.pdf_or_paper_intent,
     "fetch_geo_metadata": _pred.pdf_or_paper_intent,
-    # Memory → memory_in_use
-    "remember": _pred.memory_in_use,
+    # Memory → memory_in_use (remember widens to preference-statement intent).
+    "remember": _remember_intent,
     "recall": _pred.memory_in_use,
     "forget": _pred.memory_in_use,
     # Implementation intent → custom code execution
