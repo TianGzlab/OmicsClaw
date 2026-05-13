@@ -175,26 +175,34 @@ _DESKTOP_DEFAULT_USER_ID = "desktop_user"
 
 
 def desktop_chat_user_id() -> str:
-    """User-id portion of the Desktop chat agent loop's CompatMemoryStore session.
+    """Stable user-id portion of the Desktop namespace.
 
     The chat path constructs its namespace as ``f"app/{user_id}"`` (see
-    ``CompatMemoryStore._client_for_session``). Returning the same id
+    ``CompatMemoryStore._client_for_session``); returning the same id
     component ``desktop_namespace()`` derives keeps the chat-write and
-    endpoint-read namespaces aligned, including under
-    ``OMICSCLAW_DESKTOP_LAUNCH_ID`` multi-launch deployments where
-    they would otherwise diverge.
+    endpoint-read partitions aligned across surface entry points.
+
+    Reads ``OMICSCLAW_DESKTOP_USER_ID`` for explicit override (multi-
+    user/sandboxed deployments where each user is a distinct partition).
+    Falls back to the single-user constant so the same machine
+    consistently lands in the same namespace launch after launch.
+
+    NOTE: This deliberately does *not* read ``OMICSCLAW_DESKTOP_LAUNCH_ID``.
+    That env var is a per-launch random token used only by the Electron
+    shell's /health probe (cross-launch port-collision detection).
+    Treating it as a namespace token — as earlier versions did — created
+    a fresh empty partition every launch and orphaned previous writes.
     """
-    launch_id = (os.getenv("OMICSCLAW_DESKTOP_LAUNCH_ID") or "").strip()
-    return launch_id or _DESKTOP_DEFAULT_USER_ID
+    user_id = (os.getenv("OMICSCLAW_DESKTOP_USER_ID") or "").strip()
+    return user_id or _DESKTOP_DEFAULT_USER_ID
 
 
 def desktop_namespace() -> str:
     """Derive the Desktop FastAPI namespace.
 
-    Reads ``OMICSCLAW_DESKTOP_LAUNCH_ID`` if set (multi-user desktop or
-    sandboxed launch), otherwise the single-user default. The launch id
-    is prefixed with ``app/`` so cross-surface collisions with bot
-    namespaces (``telegram/...``, ``feishu/...``) are impossible.
+    Returns ``app/<user_id>`` where ``user_id`` is the stable id from
+    ``desktop_chat_user_id()``. The ``app/`` prefix prevents collisions
+    with bot namespaces (``telegram/...``, ``feishu/...``).
     """
     return f"app/{desktop_chat_user_id()}"
 

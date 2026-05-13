@@ -3,8 +3,14 @@
 Each surface (CLI, Desktop, Bot) derives its namespace differently:
 
   - CLI/TUI:    absolute workspace path (cwd or --workspace flag)
-  - Desktop:    OMICSCLAW_DESKTOP_LAUNCH_ID, falling back to "app/desktop_user"
+  - Desktop:    OMICSCLAW_DESKTOP_USER_ID, falling back to "app/desktop_user"
   - Bot:        f"{platform}/{user_id}" (already done in CompatMemoryStore)
+
+OMICSCLAW_DESKTOP_LAUNCH_ID is a *separate* per-launch random token used
+only by the Electron shell's /health probe (cross-launch port collision
+detection). It deliberately does NOT participate in namespace derivation
+— mixing it in would create a fresh empty partition on every launch
+and orphan previous writes.
 
 These helpers live in ``omicsclaw.memory`` so any surface can derive a
 namespace consistently. Bot's logic stays in CompatMemoryStore because
@@ -65,16 +71,18 @@ def test_cli_namespace_strips_trailing_slash(tmp_path):
 # ----------------------------------------------------------------------
 
 
-def test_desktop_namespace_uses_launch_id_when_set(monkeypatch):
+def test_desktop_namespace_uses_user_id_when_set(monkeypatch):
     from omicsclaw.memory import desktop_namespace
 
-    monkeypatch.setenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "launch-abc123")
-    assert desktop_namespace() == "app/launch-abc123"
+    monkeypatch.setenv("OMICSCLAW_DESKTOP_USER_ID", "alice")
+    monkeypatch.delenv("OMICSCLAW_DESKTOP_LAUNCH_ID", raising=False)
+    assert desktop_namespace() == "app/alice"
 
 
-def test_desktop_namespace_default_when_no_launch_id(monkeypatch):
+def test_desktop_namespace_default_when_no_user_id(monkeypatch):
     from omicsclaw.memory import desktop_namespace
 
+    monkeypatch.delenv("OMICSCLAW_DESKTOP_USER_ID", raising=False)
     monkeypatch.delenv("OMICSCLAW_DESKTOP_LAUNCH_ID", raising=False)
     assert desktop_namespace() == "app/desktop_user"
 
@@ -82,8 +90,23 @@ def test_desktop_namespace_default_when_no_launch_id(monkeypatch):
 def test_desktop_namespace_strips_whitespace(monkeypatch):
     from omicsclaw.memory import desktop_namespace
 
-    monkeypatch.setenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "  launch-xyz  ")
-    assert desktop_namespace() == "app/launch-xyz"
+    monkeypatch.setenv("OMICSCLAW_DESKTOP_USER_ID", "  bob  ")
+    assert desktop_namespace() == "app/bob"
+
+
+def test_desktop_namespace_ignores_launch_id(monkeypatch):
+    """LAUNCH_ID is a per-launch health-check token, not a namespace.
+
+    Regression test for memory_bug.png: with the old behavior, every
+    Electron launch would generate a random UUID launch_id and the
+    desktop namespace would become ``app/<random-uuid>`` — orphaning
+    all data written under the previous launch's namespace.
+    """
+    from omicsclaw.memory import desktop_namespace
+
+    monkeypatch.delenv("OMICSCLAW_DESKTOP_USER_ID", raising=False)
+    monkeypatch.setenv("OMICSCLAW_DESKTOP_LAUNCH_ID", "random-uuid-12345")
+    assert desktop_namespace() == "app/desktop_user"
 
 
 # ----------------------------------------------------------------------
