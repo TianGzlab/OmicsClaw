@@ -221,7 +221,7 @@ async def _cmd_recent(ctx: SlashCommandContext) -> str:
                     if report.exists():
                         lines = report.read_text(encoding="utf-8").split("\n")
                         summary = next(
-                            (l.strip("# ") for l in lines if l.startswith("# ")),
+                            (line.strip("# ") for line in lines if line.startswith("# ")),
                             "Analysis complete",
                         )
                     items.append(f"📊 {item.name}\n   {mtime} - {summary}")
