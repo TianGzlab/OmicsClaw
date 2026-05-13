@@ -1303,7 +1303,6 @@ async def execute_make_directory(args: dict) -> str:
     ):
         dirs_str = ", ".join(str(d) for d in TRUSTED_DATA_DIRS)
         return f"Access denied: {target_path} is not in trusted directories ({dirs_str})"
-        target_path = DATA_DIR / target_path
 
     try:
         target_path.mkdir(parents=True, exist_ok=True)
