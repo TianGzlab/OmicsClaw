@@ -302,9 +302,8 @@ def init(
             from omicsclaw.memory.database import DatabaseManager as _DatabaseManager
             from omicsclaw.memory.search import SearchIndexer as _SearchIndexer
             from omicsclaw.memory.glossary import GlossaryService as _GlossaryService
-            from omicsclaw.memory.graph import GraphService as _GraphService
 
-            del _DatabaseManager, _SearchIndexer, _GlossaryService, _GraphService
+            del _DatabaseManager, _SearchIndexer, _GlossaryService
 
             db_url = os.getenv("OMICSCLAW_MEMORY_DB_URL")
 
