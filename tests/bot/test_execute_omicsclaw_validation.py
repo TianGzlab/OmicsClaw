@@ -104,3 +104,17 @@ def test_execute_omicsclaw_short_circuits_on_malformed_params_call() -> None:
     )
     assert "file_path" in result
     assert "Upload a file" not in result
+
+
+def test_omicsclaw_tool_description_includes_file_path_example() -> None:
+    """Priming: the OpenAI-facing description must show a concrete
+    file_path usage so the LLM has an in-context anchor and is less
+    likely to fall back on the 'params' nesting prior."""
+    from omicsclaw.runtime.bot_tools import BotToolContext, build_bot_tool_specs
+
+    specs = build_bot_tool_specs(BotToolContext(skill_names=()))
+    omicsclaw_spec = next(s for s in specs if s.name == "omicsclaw")
+    description = omicsclaw_spec.description
+    assert "file_path" in description, (
+        "tool description should prime the LLM with a file_path example"
+    )
