@@ -77,6 +77,10 @@ from bot.tool_executors import (
 
 from omicsclaw.common.user_guidance import strip_user_guidance_lines
 from omicsclaw.core.llm_timeout import build_llm_timeout_policy
+from omicsclaw.engine import (
+    apply_model_identity_anchor,
+    resolve_effective_model_provider,
+)
 from omicsclaw.runtime.bot_tools import (
     BotToolContext,
     build_bot_tool_registry,
@@ -847,20 +851,12 @@ For more info: https://github.com/TianGzlab/OmicsClaw"""
     session_id = chat_context.session_id
     system_prompt = chat_context.system_prompt
 
-    # Identity anchor: many open-source / distilled models will claim to be
-    # Claude or GPT when asked about their base model because of training-data
-    # contamination. Tell them the truth about what is actually serving them,
-    # using the per-request model override when the frontend provided one.
-    effective_model = (model_override or _core.OMICSCLAW_MODEL or "").strip()
-    effective_provider = (_core.LLM_PROVIDER_NAME or "").strip()
-    if effective_model and effective_provider:
-        system_prompt = system_prompt.rstrip() + (
-            "\n\n## Underlying model identity\n"
-            f"You are powered by the LLM `{effective_model}` served via the `{effective_provider}` provider. "
-            "If the user asks which model or provider backs you, answer truthfully with these exact names. "
-            "Do NOT claim to be Claude, GPT, Gemini, DeepSeek, or any other assistant unless it matches the names above. "
-            "Do NOT claim to be built by Anthropic, OpenAI, or Google unless the provider above matches."
-        )
+    effective_model, effective_provider = resolve_effective_model_provider(
+        model_override, _core.OMICSCLAW_MODEL, _core.LLM_PROVIDER_NAME
+    )
+    system_prompt = apply_model_identity_anchor(
+        system_prompt, effective_model, effective_provider
+    )
 
     # Apply per-request system prompt additions
     if system_prompt_append:
