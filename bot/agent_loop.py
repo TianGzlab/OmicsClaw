@@ -279,12 +279,24 @@ def _extract_tool_timeout_seconds(execution_result, display_output) -> int | Non
     return None
 
 
-def _build_tool_result_callback_metadata(execution_result, display_output) -> dict[str, object]:
+def _build_tool_result_callback_metadata(
+    execution_result,
+    display_output,
+    *,
+    pending_preflight: dict | None = None,
+) -> dict[str, object]:
     timeout_seconds = _extract_tool_timeout_seconds(execution_result, display_output)
+    is_error = bool(not getattr(execution_result, "success", False) or timeout_seconds)
+    # A preflight that needs user input is not a failure — the subprocess
+    # exits non-zero by design so callers can stash state and prompt. UIs
+    # gating on ``is_error`` would otherwise hide the confirmation text.
+    if pending_preflight and not timeout_seconds:
+        is_error = False
+
     metadata: dict[str, object] = {
         "status": getattr(execution_result, "status", ""),
         "success": bool(getattr(execution_result, "success", False)),
-        "is_error": bool(not getattr(execution_result, "success", False) or timeout_seconds),
+        "is_error": is_error,
     }
 
     error = getattr(execution_result, "error", None)
@@ -293,6 +305,9 @@ def _build_tool_result_callback_metadata(execution_result, display_output) -> di
     if timeout_seconds is not None:
         metadata["timed_out"] = True
         metadata["elapsed_seconds"] = timeout_seconds
+    if pending_preflight:
+        metadata["preflight_pending"] = True
+        metadata["preflight_payload"] = pending_preflight
     return metadata
 
 
@@ -405,6 +420,7 @@ def _build_bot_query_engine_callbacks(
 
         if request.executor:
             display_output = result_record.content
+            pending_payload_for_metadata: dict | None = None
             if func_name == "omicsclaw":
                 pending_payload = _extract_pending_preflight_payload(display_output)
                 if _preflight_payload_needs_reply(pending_payload):
@@ -413,6 +429,7 @@ def _build_bot_query_engine_callbacks(
                         args=func_args,
                         payload=pending_payload,
                     )
+                    pending_payload_for_metadata = pending_payload
                 else:
                     pending_preflight_requests.pop(chat_id, None)
             if func_name == "consult_knowledge":
@@ -428,7 +445,11 @@ def _build_bot_query_engine_callbacks(
                 on_tool_result,
                 func_name,
                 display_output,
-                _build_tool_result_callback_metadata(execution_result, display_output),
+                _build_tool_result_callback_metadata(
+                    execution_result,
+                    display_output,
+                    pending_preflight=pending_payload_for_metadata,
+                ),
             )
 
     def on_llm_error(exc: Exception) -> str:

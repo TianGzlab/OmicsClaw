@@ -1533,6 +1533,21 @@ async def chat_stream(req: ChatRequest):
     def _tool_result_is_error(metadata: Any) -> bool:
         return isinstance(metadata, dict) and bool(metadata.get("is_error"))
 
+    def _tool_result_preflight_payload(metadata: Any) -> dict | None:
+        """Return the preflight ``needs_user_input`` payload when present.
+
+        ``bot.agent_loop`` tags tool results that ended in a preflight
+        confirmation request with ``preflight_pending=True`` and the
+        original payload. The desktop surface uses this to render a
+        dedicated prompt rather than collapsing the result as an error.
+        """
+        if not isinstance(metadata, dict):
+            return None
+        if not metadata.get("preflight_pending"):
+            return None
+        payload = metadata.get("preflight_payload")
+        return payload if isinstance(payload, dict) else None
+
     async def on_tool_result(tool_name: str, display_output: Any, metadata: Any = None):
         content_str = str(display_output) if display_output is not None else ""
         pending_ids = tool_call_ids_by_name.get(tool_name)
@@ -1567,6 +1582,21 @@ async def chat_stream(req: ChatRequest):
             "tool_result",
             json.dumps(result_data, ensure_ascii=False, default=str),
         )
+        preflight_payload = _tool_result_preflight_payload(metadata)
+        if preflight_payload is not None:
+            await _queue_event(
+                "preflight_pending",
+                json.dumps(
+                    {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "session_id": session_id,
+                        "payload": preflight_payload,
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
         if timeout_seconds is not None:
             await _queue_event(
                 "tool_timeout",
