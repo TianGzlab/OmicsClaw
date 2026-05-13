@@ -11,9 +11,11 @@ from __future__ import annotations
 # bot.core must load first so its forward-declared symbols are in place
 # before bot.tool_executors completes import (the two modules are
 # mutually recursive at module scope — see bot/tool_executors.py:11-25).
+import asyncio
+
 import bot.core  # noqa: F401  (load order, see docstring)
 
-from bot.tool_executors import _validate_omicsclaw_args
+from bot.tool_executors import _validate_omicsclaw_args, execute_omicsclaw
 
 
 def test_minimal_valid_args_returns_empty_string() -> None:
@@ -81,3 +83,24 @@ def test_full_realistic_args_dict_passes_silently() -> None:
         "confirm_workflow_skip": False,
         "auto_prepare": True,
     }) == ""
+
+
+def test_execute_omicsclaw_short_circuits_on_malformed_params_call() -> None:
+    """End-to-end: feed execute_omicsclaw the exact malformed shape
+    captured in bot/logs/audit.jsonl. The function must return the
+    validator's actionable error (mentioning ``file_path``) and not
+    the legacy ``No input file available...`` fallback that previously
+    trapped the LLM in a discovery loop."""
+    bad_args = {
+        "mode": "file",
+        "skill": "sc-preprocessing",
+        "params": {
+            "input": "/data/beifen/zhouwg_data/project/OmicsClaw/data/pbmc3k_raw.h5ad",
+            "species": "human",
+        },
+    }
+    result = asyncio.run(
+        execute_omicsclaw(bad_args, session_id="__interactive__", chat_id=0)
+    )
+    assert "file_path" in result
+    assert "Upload a file" not in result

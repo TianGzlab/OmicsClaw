@@ -175,6 +175,10 @@ def _validate_omicsclaw_args(args: dict) -> str:
 
 async def execute_omicsclaw(args: dict, session_id: str = None, chat_id: int | str = 0) -> str:
     """Execute an OmicsClaw skill via the shared runner contract."""
+    arg_shape_error = _validate_omicsclaw_args(args)
+    if arg_shape_error:
+        return arg_shape_error
+
     skill_key = args.get("skill", "auto")
     mode = args.get("mode", "demo")
     query = args.get("query", "")
