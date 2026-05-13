@@ -129,6 +129,21 @@ from omicsclaw.runtime.preflight.sc_batch import (
 
 logger = logging.getLogger("omicsclaw.bot.tool_executors")
 
+# Returned by execute_remember / execute_recall / execute_forget when
+# bot.core.memory_store is None. Default is OMICSCLAW_MEMORY_ENABLED=true,
+# so reaching this branch usually means init failed silently at startup
+# (e.g. stale import, missing dep, unreachable DB) — the bot logs carry
+# the actual reason. Naming the real env vars saves users a doc dive
+# through .env.example.
+_MEMORY_DISABLED_HINT = (
+    "Memory system is not initialized. It defaults to enabled, so this "
+    "usually means initialization failed silently at startup — check the "
+    'bot logs for "Memory init failed" or "Memory dependencies not '
+    'installed". Verify OMICSCLAW_MEMORY_ENABLED is not set to "false" '
+    "and that OMICSCLAW_MEMORY_DB_URL points at a reachable database "
+    '(see .env.example § "Graph Memory System").'
+)
+
 
 # Runtime-internal flags injected by the preflight chain (not part of
 # the LLM-facing tool schema). Validator accepts them so auto-prep
@@ -1467,7 +1482,7 @@ async def execute_get_file_size(args: dict) -> str:
 async def execute_remember(args: dict, session_id: str = None) -> str:
     """Save information to persistent memory (preferences, insights, project context)."""
     if not _core.memory_store:
-        return "Memory system not enabled. Set OMICSCLAW_MEMORY_BACKEND=sqlite in .env"
+        return _MEMORY_DISABLED_HINT
     if not session_id:
         return "Memory save requires an active session (user_id + platform)."
 
@@ -1554,7 +1569,7 @@ async def execute_remember(args: dict, session_id: str = None) -> str:
 async def execute_recall(args: dict, session_id: str = None) -> str:
     """Retrieve memories from persistent storage."""
     if not _core.memory_store:
-        return "Memory system not enabled."
+        return _MEMORY_DISABLED_HINT
 
     try:
         mem_type = args.get("memory_type", "")
@@ -1615,7 +1630,7 @@ async def execute_recall(args: dict, session_id: str = None) -> str:
 async def execute_forget(args: dict, session_id: str = None) -> str:
     """Delete a specific memory by searching for it."""
     if not _core.memory_store:
-        return "Memory system not enabled."
+        return _MEMORY_DISABLED_HINT
 
     memory_id = args.get("memory_id", "")
     query = args.get("query", "")

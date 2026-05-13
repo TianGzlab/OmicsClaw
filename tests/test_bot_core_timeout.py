@@ -103,6 +103,47 @@ def test_init_uses_generic_custom_env_without_explicit_args(monkeypatch):
     assert captured["base_url"] == "https://custom.example.com/v1"
 
 
+def test_init_populates_memory_store_when_dependencies_available(monkeypatch):
+    """Regression: stale ``from omicsclaw.memory.graph import GraphService``
+    in ``bot/session.py`` raised ``ModuleNotFoundError`` (graph module was
+    retired in c5987a5); the ``except ImportError`` arm silently set
+    ``memory_store = None``, so the interactive CLI's ``remember`` tool
+    bottomed out on "Memory system not enabled" even though deps were
+    installed and ``OMICSCLAW_MEMORY_ENABLED`` defaulted to ``true``.
+    """
+    captured: dict[str, object] = {}
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setattr(core, "AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr(core, "memory_store", None)
+    monkeypatch.setattr(core, "session_manager", None)
+    monkeypatch.setenv("OMICSCLAW_MEMORY_ENABLED", "true")
+    monkeypatch.setenv(
+        "OMICSCLAW_MEMORY_DB_URL", "sqlite+aiosqlite:///:memory:"
+    )
+
+    core.init(
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        model="test-model",
+        provider="custom",
+    )
+
+    from omicsclaw.memory.compat import CompatMemoryStore
+
+    assert captured["api_key"] == "test-key"
+    assert core.memory_store is not None, (
+        "memory init silently failed — check bot/session.py memory-init "
+        "block for stale imports against omicsclaw.memory.*"
+    )
+    assert isinstance(core.memory_store, CompatMemoryStore)
+    assert core.session_manager is not None
+
+
 def test_init_disables_memory_when_graph_dependencies_missing(monkeypatch):
     captured: dict[str, object] = {}
     original_import = builtins.__import__

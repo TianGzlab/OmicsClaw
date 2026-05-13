@@ -257,6 +257,51 @@ async def test_execute_remember_preference_update_versions_existing_value(
     assert "Chinese" in deprecated[0].content
 
 
+# ---------------------------------------------------------------------------
+# Disabled-memory-store user message: actionable + names real env vars
+# (regression for "Set OMICSCLAW_MEMORY_BACKEND=sqlite in .env" — that env
+# var never existed; the real switches are OMICSCLAW_MEMORY_ENABLED and
+# OMICSCLAW_MEMORY_DB_URL, documented under §"Graph Memory System" in
+# .env.example.)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "executor_name, kwargs",
+    [
+        ("execute_remember", {"args": {"memory_type": "preference"}, "session_id": "s1"}),
+        ("execute_recall", {"args": {}, "session_id": "s1"}),
+        ("execute_forget", {"args": {"query": "x"}, "session_id": "s1"}),
+    ],
+)
+async def test_memory_tools_disabled_message_names_real_env_vars(
+    executor_name, kwargs, monkeypatch
+):
+    import bot.core
+    import bot.tool_executors
+
+    monkeypatch.setattr(bot.core, "memory_store", None)
+    executor = getattr(bot.tool_executors, executor_name)
+
+    result = await executor(**kwargs)
+
+    assert isinstance(result, str)
+    assert "OMICSCLAW_MEMORY_BACKEND" not in result, (
+        f"{executor_name} still names the bogus env var "
+        f"OMICSCLAW_MEMORY_BACKEND. Real switches are "
+        f"OMICSCLAW_MEMORY_ENABLED + OMICSCLAW_MEMORY_DB_URL."
+    )
+    assert "OMICSCLAW_MEMORY_ENABLED" in result, (
+        f"{executor_name} disabled-message should name the real switch "
+        f"OMICSCLAW_MEMORY_ENABLED so users know what to inspect."
+    )
+    assert "OMICSCLAW_MEMORY_DB_URL" in result, (
+        f"{executor_name} disabled-message should name the DB URL var so "
+        f"users can verify it points at a reachable database."
+    )
+
+
 def test_tool_executors_dispatch_table_lists_all_24_executors():
     """``_available_tool_executors()`` returns the full dispatch map.
     The lazy ``bot.core.TOOL_EXECUTORS`` attribute also adds the
