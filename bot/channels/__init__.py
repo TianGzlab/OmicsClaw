@@ -5,23 +5,21 @@ Provides an extensible interface for different messaging channels
 to communicate with the OmicsClaw LLM engine.
 
 Architecture:
-    Channel   → sends InboundMessage → MessageBus → Consumer → core.py
-    core.py   → OutboundMessage      → MessageBus → Dispatcher → Channel
+    Channel handler → core.llm_tool_loop → reply via channel.send
+
+Each channel calls ``bot.core.llm_tool_loop`` directly from its
+platform handler. Cross-cutting concerns (rate limit, dedup, audit)
+live in ``bot.core`` / ``bot.rate_limit`` rather than a separate
+middleware pipeline.
 
 Components:
     - Channel ABC:          base interface for all channels
     - ChannelCapabilities:  feature declaration per channel
-    - MessageBus:           async queue decoupling channels ↔ LLM core
-    - MiddlewarePipeline:   composable message processing (dedup, rate limit, ...)
-    - ChannelManager:       multi-channel lifecycle + routing orchestrator
-    - run.py:               CLI entry point ``python -m bot.run --channels telegram,feishu``
-
-Inspired by EvoScientist's Multi-Channel architecture, adapted for
-OmicsClaw's lightweight AsyncOpenAI-based design.
+    - ChannelManager:       multi-channel lifecycle + health
+    - run.py:               CLI entry ``python -m bot.run --channels telegram,feishu``
 """
 
 from .base import Channel, chunk_text, DedupCache, RateLimiter, TypingManager
-from .bus import InboundMessage, MessageBus, OutboundMessage
 from .capabilities import ChannelCapabilities
 from .config import BaseChannelConfig
 
@@ -63,11 +61,6 @@ __all__ = [
     "Channel",
     "ChannelCapabilities",
     "BaseChannelConfig",
-    # Message types
-    "InboundMessage",
-    "OutboundMessage",
-    # Infrastructure
-    "MessageBus",
     # Registry
     "CHANNEL_REGISTRY",
     "get_channel_class",

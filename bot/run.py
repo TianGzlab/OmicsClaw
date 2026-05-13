@@ -50,14 +50,6 @@ for _p in [_PROJECT_ROOT / ".env", Path.cwd() / ".env"]:
 
 from bot import core  # noqa: E402
 from bot.channels import CHANNEL_REGISTRY, get_channel_class  # noqa: E402
-from bot.channels.middleware import (  # noqa: E402
-    AllowListMiddleware,
-    AuditMiddleware,
-    DedupMiddleware,
-    MiddlewarePipeline,
-    RateLimitMiddleware,
-    TextLimitMiddleware,
-)
 
 logger = logging.getLogger("omicsclaw.runner")
 
@@ -299,29 +291,6 @@ CHANNEL_BUILDERS = {
 
 
 
-def _build_middleware() -> MiddlewarePipeline:
-    """Build the default middleware pipeline from environment settings."""
-    pipeline = MiddlewarePipeline()
-
-    # Inbound middleware
-    pipeline.add_inbound(DedupMiddleware())
-    pipeline.add_inbound(RateLimitMiddleware(
-        max_per_hour=int(os.environ.get("GLOBAL_RATE_LIMIT", "120")),
-    ))
-
-    # AllowList (if configured)
-    allowed_raw = os.environ.get("ALLOWED_SENDERS", "")
-    if allowed_raw:
-        allowed = {s.strip() for s in allowed_raw.split(",") if s.strip()}
-        pipeline.add_inbound(AllowListMiddleware(allowed_senders=allowed))
-
-    # Outbound middleware
-    pipeline.add_outbound(TextLimitMiddleware(max_length=50000))
-    pipeline.add_outbound(AuditMiddleware(audit_fn=core.audit))
-
-    return pipeline
-
-
 async def _run_channels(channel_names: list[str], health_port: int = 0) -> None:
     """Start and run the specified channels."""
     from bot.channels.manager import ChannelManager
@@ -350,9 +319,7 @@ async def _run_channels(channel_names: list[str], health_port: int = 0) -> None:
         strict_oauth=False,
     )
 
-    # Build manager with middleware
-    middleware = _build_middleware()
-    manager = ChannelManager(middleware=middleware)
+    manager = ChannelManager()
 
     # Build and register requested channels
     for name in channel_names:
