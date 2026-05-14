@@ -25,6 +25,9 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![CI](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml/badge.svg)](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml)
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
+[![Latest Release](https://img.shields.io/github/v/release/TianGzlab/OmicsClaw?label=desktop%20app&color=blue)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/TianGzlab/OmicsClaw/total?label=installer%20downloads&color=brightgreen)](https://github.com/TianGzlab/OmicsClaw/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 
 OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans and operates; Python/R/CLI tools process data in your local or remote runtime.
 
@@ -37,6 +40,21 @@ OmicsClaw turns local multi-omics tools into AI-callable skills. The LLM plans a
 <p align="center">
   <b>One workspace for chat, datasets, skills, execution, memory, and analysis outputs.</b>
 </p>
+
+<p align="center">
+  <a href="https://github.com/TianGzlab/OmicsClaw/releases/latest"><b>📥 Download the OmicsClaw Desktop App</b></a>
+</p>
+
+The **[Releases](https://github.com/TianGzlab/OmicsClaw/releases)** tab hosts the prebuilt desktop installers — same `oc app-server` the CLI ships, wrapped in a chat-ready Electron UI.
+
+| Platform | Asset |
+|---|---|
+| macOS — Apple Silicon · Intel | `OmicsClaw-<ver>-arm64.dmg` · `OmicsClaw-<ver>-x64.dmg` |
+| Windows — x64 · ARM64 | `OmicsClaw.Setup.<ver>-x64.exe` · `OmicsClaw.Setup.<ver>-arm64.exe` |
+| Linux — x64 | `.AppImage` · `.deb` · `.rpm` |
+| Linux — ARM64 | `.AppImage` |
+
+Verify with `SHA256SUMS.txt` next to the installers. The desktop client and the CLI talk to the same backend — analyses, memory, and remote runtimes stay portable across both.
 
 ## 💡 Why OmicsClaw?
 
