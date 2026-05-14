@@ -2044,6 +2044,111 @@ async def test_provider_test_closes_async_openai_client(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_provider_test_accepts_reasoning_only_response(monkeypatch):
+    """Reasoning models (DeepSeek-R1, etc.) emit final text in
+    `reasoning_content` when the `max_tokens` budget is spent on
+    chain-of-thought — that must still count as PASSED, not empty."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._create)
+            )
+
+        async def _create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            reasoning_content="Thinking about OK...",
+                            tool_calls=None,
+                        ),
+                        finish_reason="length",
+                    )
+                ]
+            )
+
+        async def close(self):
+            pass
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = ""
+        OMICSCLAW_MODEL = ""
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+    monkeypatch.setattr(server, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="deepseek-reasoner",
+            base_url="https://api.deepseek.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "passed"
+    assert "reasoning_content" in result.get("detail", "")
+    assert "finish_reason=length" in result.get("detail", "")
+
+
+@pytest.mark.asyncio
+async def test_provider_test_empty_response_includes_finish_reason(monkeypatch):
+    """When everything is empty, surface finish_reason so the user can
+    tell e.g. content_filter from length cap."""
+    pytest.importorskip("fastapi")
+
+    from omicsclaw.app import server
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._create)
+            )
+
+        async def _create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            reasoning_content="",
+                            tool_calls=None,
+                        ),
+                        finish_reason="content_filter",
+                    )
+                ]
+            )
+
+        async def close(self):
+            pass
+
+    class FakeCore:
+        LLM_PROVIDER_NAME = ""
+        OMICSCLAW_MODEL = ""
+
+    monkeypatch.setattr(server, "_get_core", lambda: FakeCore())
+    monkeypatch.setattr(server, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    result = await server.test_provider(
+        server.ProviderTestRequest(
+            provider="custom",
+            model="qwen-plus",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test",
+        )
+    )
+
+    assert result["ok"] is False
+    assert "finish_reason=content_filter" in result["message"]
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_omits_adaptive_thinking_for_siliconflow(monkeypatch):
     """SiliconFlow gateway rejects non-standard thinking types — adaptive must omit."""
     pytest.importorskip("fastapi")

@@ -3871,9 +3871,17 @@ async def test_provider(req: ProviderTestRequest):
         response = await client.chat.completions.create(
             model=runtime.model,
             messages=[{"role": "user", "content": "Say OK"}],
-            max_tokens=8,
+            max_tokens=64,
         )
-        content = str(response.choices[0].message.content or "").strip()
+        choice = response.choices[0]
+        message = choice.message
+        content = str(getattr(message, "content", "") or "").strip()
+        # Reasoning models (DeepSeek-R1, etc.) may emit final text in a
+        # non-standard `reasoning_content` field while leaving `content`
+        # empty when the token budget is consumed by chain-of-thought.
+        reasoning = str(getattr(message, "reasoning_content", "") or "").strip()
+        tool_calls = getattr(message, "tool_calls", None) or []
+        finish_reason = str(getattr(choice, "finish_reason", "") or "").strip()
     except Exception as exc:
         duration_ms = int((time.monotonic() - start) * 1000)
         return {
@@ -3890,16 +3898,29 @@ async def test_provider(req: ProviderTestRequest):
             await client.close()
 
     duration_ms = int((time.monotonic() - start) * 1000)
-    if not content:
+    has_signal = bool(content) or bool(reasoning) or bool(tool_calls)
+    if not has_signal:
+        hint = f" (finish_reason={finish_reason})" if finish_reason else ""
         return {
             "ok": False,
             "status": "failed",
             "provider": runtime.provider,
             "model": runtime.model,
             "base_url": runtime.base_url,
-            "message": "Live provider test returned an empty response.",
+            "message": f"Live provider test returned no content{hint}.",
             "duration_ms": duration_ms,
         }
+
+    detail_bits: list[str] = []
+    if content:
+        detail_bits.append("content")
+    if reasoning:
+        detail_bits.append("reasoning_content")
+    if tool_calls:
+        detail_bits.append("tool_calls")
+    if finish_reason:
+        detail_bits.append(f"finish_reason={finish_reason}")
+    detail = ", ".join(detail_bits)
 
     return {
         "ok": True,
@@ -3908,6 +3929,7 @@ async def test_provider(req: ProviderTestRequest):
         "model": runtime.model,
         "base_url": runtime.base_url,
         "message": "Live provider test passed.",
+        "detail": detail,
         "duration_ms": duration_ms,
     }
 
