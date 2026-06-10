@@ -1,0 +1,37 @@
+domain: epigenomics
+script: bulkatac-peak-calling.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - peak-calling
+  - macs2
+  - narrowpeak
+  - consensus-peaks
+  - frip
+  - idr
+  - featurecounts
+  - peak-annotation
+  - tss-heatmap
+  - encode-naive-overlap
+legacy_aliases: []
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --qvalue
+  - --shift
+  - --extsize
+  - --overlap-fraction
+  - --gtf
+  - --threads
+  - --skip-annotation
+  - --skip-qc
+  - --idr
+param_hints: {}
+
+# Soft fields (non-lint-enforced).
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

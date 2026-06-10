@@ -604,4 +604,8 @@ To rebuild from scratch:
 To vendor a new tool (currently no vendored tools):
   see tools/README.md and 0_build_vendored_tools.sh
 
+For bulk ATAC-seq (skills/epigenomics/bulkatac/*), set up the two extra
+conda sub-envs (omicsclaw_bulkatac + omicsclaw_tobias) with:
+  bash 0_setup_env_for_bulkatac.sh
+
 EOF

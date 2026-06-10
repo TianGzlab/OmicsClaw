@@ -1,0 +1,28 @@
+domain: epigenomics
+script: bulkhic-tads.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - tad
+  - insulation
+  - insulation-score
+  - boundary
+  - topological-domain
+  - cooltools
+legacy_aliases:
+  - bulkhic-insulation
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --resolutions
+  - --window-multiple
+  - --windows
+  - --threshold
+  - --threads
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

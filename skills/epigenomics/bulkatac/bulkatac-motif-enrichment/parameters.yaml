@@ -1,0 +1,34 @@
+domain: epigenomics
+script: bulkatac-motif-enrichment.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - motif-enrichment
+  - motif-discovery
+  - homer
+  - findmotifsgenome
+  - tf-motif
+  - denovo-motif
+  - knownmotif
+  - transcription-factor
+legacy_aliases: []
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --genome
+  - --genome-fasta
+  - --size
+  - --mask
+  - --no-mask
+  - --denovo-length
+  - --n-motifs
+  - --threads
+param_hints: {}
+
+# Soft fields (non-lint-enforced).
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

@@ -1,0 +1,43 @@
+domain: epigenomics
+script: bulkatac-mapping.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - mapping
+  - alignment
+  - bowtie2
+  - bwa
+  - bam-filter
+  - nrf
+  - pbc1
+  - pbc2
+  - tss-enrichment
+  - fragment-length
+  - bigwig
+  - encode-qc
+legacy_aliases: []
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --genome
+  - --ref-dir
+  - --aligner
+  - --bwa-index
+  - --bowtie2-index
+  - --fasta-url
+  - --blacklist-url
+  - --no-blacklist
+  - --blacklist
+  - --cell-type
+  - --threads
+  - --downsample
+  - --keep-intermediates
+param_hints: {}
+
+# Soft fields (non-lint-enforced).
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

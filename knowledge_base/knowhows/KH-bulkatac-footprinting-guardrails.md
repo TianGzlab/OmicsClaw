@@ -1,0 +1,24 @@
+---
+doc_id: bulkatac-footprinting-guardrails
+title: Bulk ATAC Footprinting Guardrails
+doc_type: knowhow
+critical_rule: MUST verify the `omicsclaw_tobias` sub-env runs Python <3.14 (TOBIAS 0.17.3 breaks on 3.14's forkserver default), confirm a bulkatac-peak-calling result.json carrying the mapping chain is resolvable, explain that BINDetect's spatial test is not replicate-aware before running, and never claim replicate-aware differential accessibility — that requires bulkatac-DA
+domains: [epigenomics]
+related_skills: [bulkatac-footprinting]
+phases: [before_run, on_warning, after_run]
+search_terms: [bulk ATAC footprinting, TOBIAS, ATACorrect, BINDetect, TF binding, JASPAR motifs, Tn5 bias correction, 足迹分析, multiprocessing forkserver, Python 3.14]
+priority: 1.0
+---
+
+# Bulk ATAC Footprinting Guardrails
+
+- **Inspect first**: confirm `samtools` + `bedtools` are on `PATH` and a Step-3 `peak_calling/result.json` carrying the `mapping` chain (so BAM paths resolve) is resolvable via `--prev-result` (alias `--input`) or sibling-detection. There is no `--demo` flag.
+- **Env quirk — Python 3.14 breaks TOBIAS**: TOBIAS 0.17.3's logger calls `multiprocessing.Process.start()` on a `QueueListener` containing unpicklable internals (`RLock`, file handle). On Python ≤3.13 the default `fork` start method bypasses pickling and it works; on **Python 3.14** (Oct 2025, new `forkserver` default on Linux per PEP-711) ATACorrect crashes immediately in `reduction.dump(process_obj, buf)` before any real work. The `omicsclaw_tobias` env must be built with `python>=3.12,<3.14`. If footprinting fails with a stack trace ending in `popen_forkserver.py → reduction.dump`, the env is on 3.14 — rebuild it: `conda env remove -n omicsclaw_tobias -y && bash 0_setup_env_for_bulkatac.sh`, then verify `…/envs/omicsclaw_tobias/bin/python --version` reports 3.13.x.
+- **Env quirk — pandas 3 breaks BINDetect**: TOBIAS 0.17.3 declares `pandas` with no upper pin, so a fresh `pip install tobias` resolves to pandas 3.x. At `bindetect.py:770` (`info_table.at[names[i], base + "_highlighted"] = False`), `names[i]` does `Series.__getitem__(integer)` on a non-integer-indexed Series — pandas 2 had a positional-access fallback, pandas 3 removed it and raises `KeyError: 0`. ATACorrect and ScoreBigwig succeed (they barely touch pandas), then BINDetect dies. Pin `pandas<3` in the `omicsclaw_tobias` env: `conda activate omicsclaw_tobias && pip install 'pandas<3'`. The fix is env-local — `omicsclaw_bulkatac` has its own pandas<2 pin (pyDESeq2 requirement) and is unaffected.
+- **NEVER diagnose footprinting failures by guessing path-handling bugs.** Quote the actual `[bulkatac-footprinting:stderr]` traceback verbatim. The 3.14 multiprocessing failure looks superficially like a path/permission/env error if you skim it; read the real stack. Do NOT suggest "convert to relative paths", "symlink TOBIAS into the bulkatac env", or "`conda install tobias` in the bulkatac env" — all three are antipatterns (relative paths break subprocess cwd; symlinks don't bring Python modules; co-installing TOBIAS breaks the pandas<2 pin pyDESeq2 needs).
+- **Do not overclaim scope**: this skill does Tn5-bias-corrected footprinting + per-TF bound/unbound classification only — it does NOT do replicate-aware differential accessibility (`bulkatac-DA` on peak counts) or HOMER motif over-representation (`bulkatac-motif-enrichment`).
+- **Explain the run before execution**: state the resolved `--genome-fasta`, `--motifs` (auto-downloaded JASPAR 2024 CORE by organism group when omitted — network on first run), `--threads`, and `--treat`/`--control` (these only set BINDetect log2-change ordering, not significance). TOBIAS runs in the auto-provisioned `omicsclaw_tobias` sub-env, not on PATH.
+- **Use wrapper-correct language**: BINDetect's spatial test compares each TFBS log2FC to ~100 random genomic-background log2FCs — it needs no biological replicates and its p-value reflects how anomalous the shift is, NOT reproducibility across replicates; unknown genomes silently fall back to JASPAR vertebrates — pass `--motifs` explicitly for exotic organisms.
+- **Preserve the contract**: successful runs emit `report.md`, `result.json`, `merged_bams/`, `merged_peaks.bed`, `atacorrect/<cond>/`, `footprints/<cond>/`, `bindetect/` (`bindetect_results.txt`, `bindetect_figures.pdf`, per-TF BEDs), `top_tf_ranking.tsv`, and `plots/aggregate/`.
+- **Interpret outputs correctly**: differential change/pvalue columns and `tf_differential_volcano.pdf` exist only with ≥ 2 conditions — check `result.json["footprinting"]["bindetect"]["is_differential"]`; input BAMs must be unshifted because ATACorrect applies the +4/-5 offset itself.
+- **For detailed method strategy**: see `knowledge_base/skill-guides/epigenomics/bulkatac-footprinting.md`.

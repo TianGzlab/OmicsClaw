@@ -1,0 +1,29 @@
+domain: epigenomics
+script: bulkhic-pileup.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - pileup
+  - apa
+  - aggregate-peak-analysis
+  - aggregate
+  - coolpup
+  - cooltools
+legacy_aliases:
+  - bulkhic-apa
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --features
+  - --features-format
+  - --kind
+  - --resolution
+  - --flank
+  - --threads
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

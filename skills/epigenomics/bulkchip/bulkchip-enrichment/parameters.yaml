@@ -1,0 +1,36 @@
+domain: epigenomics
+script: bulkchip-enrichment.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - chip
+  - chip-seq
+  - chipseq
+  - functional-enrichment
+  - enrichment
+  - go
+  - kegg
+  - gseapy
+  - enrichr
+  - ora
+  - over-representation
+  - target-genes
+  - pathway
+legacy_aliases:
+  - bulkchip-go-kegg
+  - bulkchip-functional-enrichment
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --gene-sets
+  - --organism
+  - --gmt
+  - --padj
+  - --threads
+  - --genome
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

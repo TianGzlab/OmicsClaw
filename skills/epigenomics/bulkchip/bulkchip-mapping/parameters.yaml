@@ -1,0 +1,46 @@
+domain: epigenomics
+script: bulkchip-mapping.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - chip
+  - chip-seq
+  - chipseq
+  - mapping
+  - alignment
+  - bwa-mem2
+  - bwa
+  - bowtie2
+  - encode-qc
+  - nrf
+  - pbc
+  - cross-correlation
+  - nsc
+  - rsc
+  - fingerprint
+  - deeptools
+legacy_aliases:
+  - bulkchip-alignment
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --genome
+  - --ref-dir
+  - --aligner
+  - --bwa-mem2-index
+  - --bwa-index
+  - --bowtie2-index
+  - --fasta-url
+  - --blacklist-url
+  - --blacklist
+  - --no-blacklist
+  - --threads
+  - --downsample
+  - --skip-qc
+  - --keep-intermediates
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

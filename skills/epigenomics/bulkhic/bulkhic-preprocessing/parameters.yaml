@@ -1,0 +1,34 @@
+domain: epigenomics
+script: bulkhic-preprocessing.py
+saves_h5ad: false
+requires_preprocessed: false
+trigger_keywords:
+  - hi-c
+  - hic
+  - hi-c-seq
+  - 3c
+  - chromosome-conformation
+  - contact-map
+  - preprocessing
+  - adapter-trimming
+  - fastp
+  - fastqc
+legacy_aliases:
+  - bulkhic-preprocess
+allowed_extra_flags:
+  - --wd
+  - --demo-n-reads
+  - --genome
+  - --tool
+  - --threads
+  - --adapter
+  - --min-length
+  - --quality
+  - --no-fastqc
+  - --trim
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

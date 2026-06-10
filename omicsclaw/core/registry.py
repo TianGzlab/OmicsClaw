@@ -196,7 +196,16 @@ class OmicsRegistry:
 
         # Scan domain directories
         for domain_path in target_dir.iterdir():
-            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__', '_')):
+            # Skip dotted/underscored dirs and any *_backup/ copy. A backup
+            # domain dir (e.g. skills/epigenomics_backup/) holds same-named
+            # skill dirs that would shadow the real skills — lazy_skills is
+            # keyed by bare dir name, so the collision silently overwrites
+            # the live metadata with the backup's stale copy.
+            if (
+                not domain_path.is_dir()
+                or domain_path.name.startswith(('.', '__', '_'))
+                or domain_path.name.endswith('_backup')
+            ):
                 continue
 
             domain_name = domain_path.name
@@ -276,7 +285,16 @@ class OmicsRegistry:
             return
 
         for domain_path in target_dir.iterdir():
-            if not domain_path.is_dir() or domain_path.name.startswith(('.', '__', '_')):
+            # Skip dotted/underscored dirs and any *_backup/ copy. A backup
+            # domain dir (e.g. skills/epigenomics_backup/) holds same-named
+            # skill dirs that would shadow the real skills — lazy_skills is
+            # keyed by bare dir name, so the collision silently overwrites
+            # the live metadata with the backup's stale copy.
+            if (
+                not domain_path.is_dir()
+                or domain_path.name.startswith(('.', '__', '_'))
+                or domain_path.name.endswith('_backup')
+            ):
                 continue
 
             candidate_skill_dirs = []
@@ -492,6 +510,24 @@ _HARDCODED_DOMAINS = {
         "representative_skills": [
             "bulkrna-de", "bulkrna-enrichment", "bulkrna-coexpression",
             "bulkrna-deconvolution", "bulkrna-survival",
+        ],
+    },
+    "epigenomics": {
+        "name": "Epigenomics",
+        "primary_data_types": ["fastq", "bam", "bed", "narrowpeak", "broadpeak", "pairs", "cool", "mcool"],
+        "summary": (
+            "Bulk ATAC-seq + ChIP-seq + Hi-C. ATAC/ChIP: FASTQ QC + trimming, "
+            "alignment + ENCODE QC, MACS2 peak calling + consensus, differential "
+            "accessibility/binding (pyDESeq2), motif enrichment (HOMER); ATAC adds "
+            "TF footprinting (TOBIAS), ChIP adds input-control peak calling + "
+            "GO/KEGG peak annotation. Hi-C: bwa-mem2 -SP5M + pairtools → .pairs, "
+            "cooler balanced .mcool, then cooltools compartments / TADs (insulation) "
+            "/ loops (dots) / pileup."
+        ),
+        "representative_skills": [
+            "bulkatac-mapping", "bulkatac-peak-calling", "bulkatac-footprinting",
+            "bulkchip-mapping", "bulkchip-peak-calling",
+            "bulkhic-mapping", "bulkhic-matrix", "bulkhic-compartments",
         ],
     },
     "orchestrator": {

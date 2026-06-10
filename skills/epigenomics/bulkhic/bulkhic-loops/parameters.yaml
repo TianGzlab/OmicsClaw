@@ -1,0 +1,28 @@
+domain: epigenomics
+script: bulkhic-loops.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - loop
+  - chromatin-loop
+  - dots
+  - hiccups
+  - cooltools
+  - bedpe
+legacy_aliases:
+  - bulkhic-dots
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --resolutions
+  - --resolution
+  - --fdr
+  - --max-dist
+  - --threads
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

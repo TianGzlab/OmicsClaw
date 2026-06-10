@@ -1,0 +1,33 @@
+domain: epigenomics
+script: bulkhic-matrix.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - cooler
+  - cool
+  - mcool
+  - contact-matrix
+  - balancing
+  - ice-normalization
+  - zoomify
+  - hic-matrix
+legacy_aliases:
+  - bulkhic-cooler
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --base-binsize
+  - --resolutions
+  - --p-curve-resolutions
+  - --scc-resolutions
+  - --viz-resolution
+  - --threads
+  - --format
+  - --no-combine
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

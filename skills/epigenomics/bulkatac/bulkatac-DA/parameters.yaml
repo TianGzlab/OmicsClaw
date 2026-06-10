@@ -1,0 +1,33 @@
+domain: epigenomics
+script: bulkatac-DA.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - differential-accessibility
+  - differential-peaks
+  - pydeseq2
+  - deseq2
+  - volcano
+  - contrast
+  - igv-tracks
+legacy_aliases:
+  - bulkatac-differential-accessibility
+  - bulkatac-da
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --treat
+  - --control
+  - --padj
+  - --lfc
+  - --threads
+  - --skip-annotation
+param_hints: {}
+
+# Soft fields (non-lint-enforced).
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

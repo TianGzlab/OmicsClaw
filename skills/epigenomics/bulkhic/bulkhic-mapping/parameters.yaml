@@ -1,0 +1,33 @@
+domain: epigenomics
+script: bulkhic-mapping.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - 3c
+  - chromosome-conformation
+  - mapping
+  - alignment
+  - bwa-mem2
+  - pairtools
+  - pairs
+  - ligation-junction
+legacy_aliases:
+  - bulkhic-alignment
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --genome
+  - --ref-dir
+  - --aligner
+  - --bwa-mem2-index
+  - --bwa-index
+  - --fasta-url
+  - --threads
+  - --min-mapq
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

@@ -26,6 +26,7 @@ _DOMAIN_DISPLAY_ORDER = (
     "proteomics",
     "metabolomics",
     "bulkrna",
+    "epigenomics",
     "orchestrator",
     "literature",
 )

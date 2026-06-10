@@ -1,0 +1,33 @@
+domain: epigenomics
+script: bulkatac-preprocessing.py
+saves_h5ad: false
+requires_preprocessed: false
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - preprocessing
+  - adapter-trimming
+  - fastp
+  - trim-galore
+  - trim_galore
+  - fastqc
+  - encode-qc
+legacy_aliases:
+  - bulkatac-preprocess
+allowed_extra_flags:
+  - --wd
+  - --demo-n-reads
+  - --genome
+  - --tool
+  - --threads
+  - --adapter
+  - --min-length
+  - --quality
+  - --no-fastqc
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

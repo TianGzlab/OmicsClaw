@@ -1,0 +1,35 @@
+domain: epigenomics
+script: bulkchip-peak-annotation.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - chip
+  - chip-seq
+  - chipseq
+  - peak-annotation
+  - annotation
+  - annotate-peaks
+  - nearest-gene
+  - target-genes
+  - tss
+  - homer
+  - chipseeker
+legacy_aliases:
+  - bulkchip-annotation
+  - bulkchip-peak-annotate
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --peak-subset
+  - --de-result
+  - --gtf
+  - --tss-window
+  - --genome
+  - --threads
+  - --consensus-only
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

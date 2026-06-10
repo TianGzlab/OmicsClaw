@@ -1,0 +1,36 @@
+domain: epigenomics
+script: bulkchip-motif-enrichment.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - chip
+  - chip-seq
+  - chipseq
+  - motif-enrichment
+  - motif
+  - homer
+  - findmotifsgenome
+  - known-motifs
+  - de-novo-motifs
+  - transcription-factor
+legacy_aliases:
+  - bulkchip-motif
+  - bulkchip-motif-enrichment
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --peak-subset
+  - --de-result
+  - --size
+  - --len
+  - --threads
+  - --genome
+  - --genome-fasta
+  - --n-motifs
+  - --no-mask
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

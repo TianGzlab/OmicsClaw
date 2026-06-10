@@ -34,6 +34,7 @@ DOMAIN_ORDER = [
     ("proteomics", "Proteomics"),
     ("metabolomics", "Metabolomics"),
     ("bulkrna", "Bulk RNA-seq"),
+    ("epigenomics", "Epigenomics"),
     ("orchestrator", "Orchestration"),
 ]
 

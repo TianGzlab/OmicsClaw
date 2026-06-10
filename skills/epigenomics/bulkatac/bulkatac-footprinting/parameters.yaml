@@ -1,0 +1,33 @@
+domain: epigenomics
+script: bulkatac-footprinting.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - atac
+  - atac-seq
+  - bulk-atac
+  - footprinting
+  - tf-footprint
+  - tobias
+  - atacorrect
+  - bindetect
+  - jaspar
+  - motif-scanning
+  - tf-binding
+  - differential-tf-binding
+legacy_aliases: []
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --genome-fasta
+  - --motifs
+  - --blacklist
+  - --treat
+  - --control
+  - --threads
+param_hints: {}
+
+# Soft fields (non-lint-enforced).
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

@@ -1,0 +1,27 @@
+domain: epigenomics
+script: bulkhic-compartments.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - hi-c
+  - hic
+  - compartment
+  - a-b-compartment
+  - eigenvector
+  - eigs
+  - saddle
+  - cooltools
+  - chromatin-compartment
+legacy_aliases:
+  - bulkhic-ab-compartments
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --resolutions
+  - --n-eigs
+  - --threads
+param_hints: {}
+
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

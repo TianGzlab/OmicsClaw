@@ -1,0 +1,32 @@
+domain: epigenomics
+script: bulkchip-DA.py
+saves_h5ad: false
+requires_preprocessed: true
+trigger_keywords:
+  - chip
+  - chip-seq
+  - chipseq
+  - differential-binding
+  - differential-peaks
+  - pydeseq2
+  - deseq2
+  - volcano
+  - contrast
+  - igv-tracks
+legacy_aliases:
+  - bulkchip-differential-binding
+  - bulkchip-da
+allowed_extra_flags:
+  - --prev-result
+  - --wd
+  - --treat
+  - --control
+  - --padj
+  - --lfc
+  - --threads
+param_hints: {}
+
+# Soft fields (non-lint-enforced) — informational only.
+emoji: "🧬"
+homepage: https://github.com/OmicsClaw/OmicsClaw
+os: [linux, macos]

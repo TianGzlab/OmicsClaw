@@ -40,6 +40,7 @@ _DOMAIN_ORDER = (
     "proteomics",
     "metabolomics",
     "bulkrna",
+    "epigenomics",
     "orchestrator",
 )
 
