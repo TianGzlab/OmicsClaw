@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "generated_by": "scripts/generate_catalog.py",
-  "skill_count": 89,
+  "skill_count": 90,
   "skills": [
     {
       "name": "bulkrna-batch-correction",
@@ -289,7 +289,7 @@
     {
       "name": "genomics-assembly",
       "cli_alias": "genomics-assembly",
-      "description": "Load when computing genome-assembly QC metrics \u2014 N50/N90, L50/L90, total length, contig count, GC content, longest-contig \u2014 from a FASTA produced by any assembler (SPAdes / Megahit / Flye / Canu). Skip when running the assembly itself or when assessing alignment quality (use `genomics-alignment`).",
+      "description": "Load when computing genome-assembly QC metrics — N50/N90, L50/L90, total length, contig count, GC content, longest-contig — from a FASTA produced by any assembler (SPAdes / Megahit / Flye / Canu). Skip when running the assembly itself or when assessing alignment quality (use `genomics-alignment`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -311,7 +311,7 @@
     {
       "name": "genomics-cnv-calling",
       "cli_alias": "genomics-cnv-calling",
-      "description": "Load when calling CNV segments via CBS-style segmentation on a bin-level log2-ratio CSV from exome / WGS coverage \u2014 emits per-segment 5-class CN state (`amplification` / `gain` / `neutral` / `loss` / `deep_deletion`), per-chromosome summary, genome-fraction-altered. Skip when working with single-cell / spatial CNV (use `spatial-cnv`).",
+      "description": "Load when calling CNV segments via CBS-style segmentation on a bin-level log2-ratio CSV from exome / WGS coverage — emits per-segment 5-class CN state (`amplification` / `gain` / `neutral` / `loss` / `deep_deletion`), per-chromosome summary, genome-fraction-altered. Skip when working with single-cell / spatial CNV (use `spatial-cnv`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -332,7 +332,7 @@
     {
       "name": "genomics-epigenomics",
       "cli_alias": "genomics-epigenomics",
-      "description": "Load when summarising a peak file (BED / narrowPeak) from ATAC-seq / ChIP-seq / CUT&Tag \u2014 peak count, width distribution, per-chromosome counts, score statistics. Skip when calling peaks from BAM (run MACS / Genrich externally first) or when working with single-cell ATAC (use `scatac-preprocessing`).",
+      "description": "Load when summarising a peak file (BED / narrowPeak) from ATAC-seq / ChIP-seq / CUT&Tag — peak count, width distribution, per-chromosome counts, score statistics. Skip when calling peaks from BAM (run MACS / Genrich externally first) or when working with single-cell ATAC (use `scatac-preprocessing`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -354,7 +354,7 @@
     {
       "name": "genomics-phasing",
       "cli_alias": "genomics-phasing",
-      "description": "Load when summarising a phased VCF (output of WhatsHap / SHAPEIT5 / Eagle2) \u2014 phased fraction of het variants, phase-block N50, PS-field parsing, pipe-delimited genotype detection. Skip when the input is unphased (run a phaser first) or when calling small variants (use `genomics-variant-calling`).",
+      "description": "Load when summarising a phased VCF (output of WhatsHap / SHAPEIT5 / Eagle2) — phased fraction of het variants, phase-block N50, PS-field parsing, pipe-delimited genotype detection. Skip when the input is unphased (run a phaser first) or when calling small variants (use `genomics-variant-calling`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -375,7 +375,7 @@
     {
       "name": "genomics-qc",
       "cli_alias": "genomics-qc",
-      "description": "Load when running pre-alignment FASTQ quality control \u2014 Phred quality scores, Q20/Q30 rates, GC / N content, read-length distribution, adapter-contamination detection. Skip when working with already-aligned BAMs (use `genomics-alignment`) or when peak / variant files are the input (use the relevant downstream skill).",
+      "description": "Load when running pre-alignment FASTQ quality control — Phred quality scores, Q20/Q30 rates, GC / N content, read-length distribution, adapter-contamination detection. Skip when working with already-aligned BAMs (use `genomics-alignment`) or when peak / variant files are the input (use the relevant downstream skill).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -395,7 +395,7 @@
     {
       "name": "genomics-sv-detection",
       "cli_alias": "genomics-sv-detection",
-      "description": "Load when summarising structural variants from an SV VCF (DEL / DUP / INV / TRA) \u2014 BND-notation parsing, size classification, per-type counts. Skip when working with small SNVs / indels (use `genomics-variant-calling`) or calling SVs from BAM (run Manta / Delly / Sniffles first).",
+      "description": "Load when summarising structural variants from an SV VCF (DEL / DUP / INV / TRA) — BND-notation parsing, size classification, per-type counts. Skip when working with small SNVs / indels (use `genomics-variant-calling`) or calling SVs from BAM (run Manta / Delly / Sniffles first).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -416,7 +416,7 @@
     {
       "name": "genomics-variant-annotation",
       "cli_alias": "genomics-variant-annotation",
-      "description": "Load when summarising functional impact of an annotated variant CSV \u2014 per-IMPACT counts (HIGH / MODERATE / LOW / MODIFIER), top consequences, gene-affected count. Skip when input is a raw VCF (convert with `bcftools +split-vep` first), when calling raw variants (use `genomics-variant-calling`), or filtering VCFs (use `genomics-vcf-operations`).",
+      "description": "Load when summarising functional impact of an annotated variant CSV — per-IMPACT counts (HIGH / MODERATE / LOW / MODIFIER), top consequences, gene-affected count. Skip when input is a raw VCF (convert with `bcftools +split-vep` first), when calling raw variants (use `genomics-variant-calling`), or filtering VCFs (use `genomics-vcf-operations`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -457,7 +457,7 @@
     {
       "name": "genomics-vcf-operations",
       "cli_alias": "genomics-vcf-operations",
-      "description": "Load when summarising / filtering a VCF \u2014 variant classification (SNP / MNP / INS / DEL / COMPLEX), Ti/Tv ratio, QUAL / DP threshold filtering, INFO-field parsing. Skip when the input is a BAM (use `genomics-variant-calling` upstream first) or when adding functional annotations (use `genomics-variant-annotation`).",
+      "description": "Load when summarising / filtering a VCF — variant classification (SNP / MNP / INS / DEL / COMPLEX), Ti/Tv ratio, QUAL / DP threshold filtering, INFO-field parsing. Skip when the input is a BAM (use `genomics-variant-calling` upstream first) or when adding functional annotations (use `genomics-variant-annotation`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -498,7 +498,7 @@
     {
       "name": "metabolomics-annotation",
       "cli_alias": "metabolomics-annotation",
-      "description": "Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary by m/z within a `--ppm` tolerance \u2014 emits a per-feature annotation table. Skip when needing real HMDB / KEGG / LipidMaps / METLIN look-up (this skill is demo-only) or for raw spectra (use `metabolomics-xcms-preprocessing` first).",
+      "description": "Load when annotating LC-MS features against a built-in 15-metabolite HMDB demo dictionary by m/z within a `--ppm` tolerance — emits a per-feature annotation table. Skip when needing real HMDB / KEGG / LipidMaps / METLIN look-up (this skill is demo-only) or for raw spectra (use `metabolomics-xcms-preprocessing` first).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -517,7 +517,7 @@
     {
       "name": "metabolomics-de",
       "cli_alias": "metabolomics-de",
-      "description": "Load when running two-group metabolomics DE (t-test + log2FC + BH-FDR + PCA) on a feature \u00d7 sample CSV using `--group-a-prefix` / `--group-b-prefix` (default `ctrl` / `treat`). Skip when needing tunable test backends (use `metabolomics-statistics` for Wilcoxon / ANOVA / Kruskal) or for raw spectra.",
+      "description": "Load when running two-group metabolomics DE (t-test + log2FC + BH-FDR + PCA) on a feature × sample CSV using `--group-a-prefix` / `--group-b-prefix` (default `ctrl` / `treat`). Skip when needing tunable test backends (use `metabolomics-statistics` for Wilcoxon / ANOVA / Kruskal) or for raw spectra.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -537,7 +537,7 @@
     {
       "name": "metabolomics-normalization",
       "cli_alias": "metabolomics-normalization",
-      "description": "Load when normalising a feature \u00d7 sample metabolomics CSV via median, quantile, total (sum), PQN (probabilistic quotient), or log methods \u2014 emits a normalised wide-form table. Skip when also imputing (use `metabolomics-quantification`) or for raw spectra (run `metabolomics-xcms-preprocessing` first).",
+      "description": "Load when normalising a feature × sample metabolomics CSV via median, quantile, total (sum), PQN (probabilistic quotient), or log methods — emits a normalised wide-form table. Skip when also imputing (use `metabolomics-quantification`) or for raw spectra (run `metabolomics-xcms-preprocessing` first).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -577,7 +577,7 @@
     {
       "name": "metabolomics-peak-detection",
       "cli_alias": "metabolomics-peak-detection",
-      "description": "Load when running per-sample peak picking on a feature \u00d7 intensity table via `scipy.signal.find_peaks` \u2014 emits per-(sample, feature) detected peaks with prominence and width. Skip when working with mz / RT raw scans (use `metabolomics-xcms-preprocessing` upstream) or when only normalising / quantifying (use `metabolomics-quantification`).",
+      "description": "Load when running per-sample peak picking on a feature × intensity table via `scipy.signal.find_peaks` — emits per-(sample, feature) detected peaks with prominence and width. Skip when working with mz / RT raw scans (use `metabolomics-xcms-preprocessing` upstream) or when only normalising / quantifying (use `metabolomics-quantification`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -596,7 +596,7 @@
     {
       "name": "metabolomics-quantification",
       "cli_alias": "metabolomics-quantification",
-      "description": "Load when imputing missing values (min / median / KNN) and normalising (TIC / median / log) a feature \u00d7 sample metabolomics CSV. Skip when only normalisation is needed (use `metabolomics-normalization`) or when the input is raw spectra (run `metabolomics-xcms-preprocessing` first).",
+      "description": "Load when imputing missing values (min / median / KNN) and normalising (TIC / median / log) a feature × sample metabolomics CSV. Skip when only normalisation is needed (use `metabolomics-normalization`) or when the input is raw spectra (run `metabolomics-xcms-preprocessing` first).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -616,7 +616,7 @@
     {
       "name": "metabolomics-statistics",
       "cli_alias": "metabolomics-statistics",
-      "description": "Load when running univariate two-group testing (t-test / Wilcoxon / ANOVA / Kruskal-Wallis) on a feature \u00d7 sample metabolomics CSV with `--group1-prefix` / `--group2-prefix` column matching, BH-FDR adjusted. Skip when working with raw spectra (run `metabolomics-xcms-preprocessing`) or for two-group DE with default `ctrl` / `treat` prefixes (use `metabolomics-de`).",
+      "description": "Load when running univariate two-group testing (t-test / Wilcoxon / ANOVA / Kruskal-Wallis) on a feature × sample metabolomics CSV with `--group1-prefix` / `--group2-prefix` column matching, BH-FDR adjusted. Skip when working with raw spectra (run `metabolomics-xcms-preprocessing`) or for two-group DE with default `ctrl` / `treat` prefixes (use `metabolomics-de`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -637,7 +637,7 @@
     {
       "name": "metabolomics-xcms-preprocessing",
       "cli_alias": "metabolomics-xcms-preprocessing",
-      "description": "Load when running an XCMS-style preprocessing summary on LC-MS metabolomics raw / vendor-converted files \u2014 emits a peak table with m/z, retention time, and per-sample intensities. Skip when working with an already-built peak table (use `metabolomics-peak-detection`) or when only annotation is needed (use `metabolomics-annotation`).",
+      "description": "Load when running an XCMS-style preprocessing summary on LC-MS metabolomics raw / vendor-converted files — emits a peak table with m/z, retention time, and per-sample intensities. Skip when working with an already-built peak table (use `metabolomics-peak-detection`) or when only annotation is needed (use `metabolomics-annotation`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -658,7 +658,7 @@
     {
       "name": "orchestrator",
       "cli_alias": "orchestrator",
-      "description": "Load when routing a natural-language omics query to the correct domain skill across spatial / singlecell / genomics / proteomics / metabolomics / bulkrna domains via keyword / LLM / hybrid matching. Skip when the target skill is already known \u2014 invoke that skill directly.",
+      "description": "Load when routing a natural-language omics query to the correct domain skill across spatial / singlecell / genomics / proteomics / metabolomics / bulkrna domains via keyword / LLM / hybrid matching. Skip when the target skill is already known — invoke that skill directly.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -677,7 +677,7 @@
     {
       "name": "omics-skill-builder",
       "cli_alias": "omics-skill-builder",
-      "description": "Load when scaffolding a NEW OmicsClaw skill from a natural-language request \u2014 generates the skill directory layout (SKILL.md, parameters.yaml, references/, tests/) under the chosen domain. Skip when modifying an existing skill (edit its files directly) or when only routing a query (use `orchestrator`).",
+      "description": "Load when scaffolding a NEW OmicsClaw skill from a natural-language request — generates the skill directory layout (SKILL.md, parameters.yaml, references/, tests/) under the chosen domain. Skip when modifying an existing skill (edit its files directly) or when only routing a query (use `orchestrator`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -696,7 +696,7 @@
     {
       "name": "proteomics-data-import",
       "cli_alias": "proteomics-data-import",
-      "description": "Load when ingesting a MaxQuant `proteinGroups.txt`, FragPipe `combined_protein.tsv`, DIA-NN report, or generic CSV / TSV protein-quantification table \u2014 normalises columns to a standard schema, emits `tables/proteins.csv`. Skip when raw spectra are the input (run the search engine first) or when the file is already OmicsClaw schema.",
+      "description": "Load when ingesting a MaxQuant `proteinGroups.txt`, FragPipe `combined_protein.tsv`, DIA-NN report, or generic CSV / TSV protein-quantification table — normalises columns to a standard schema, emits `tables/proteins.csv`. Skip when raw spectra are the input (run the search engine first) or when the file is already OmicsClaw schema.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -716,7 +716,7 @@
     {
       "name": "proteomics-de",
       "cli_alias": "proteomics-de",
-      "description": "Load when computing two-group differential protein abundance (group2 vs group1, log2FC + p-value + BH-adjusted FDR) via Welch t-test, equal-variance t-test, or Mann-Whitney on a wide protein \u00d7 sample CSV. Skip when you need multi-condition DE (run pairwise contrasts manually) or label-based TMT linear-mixed models.",
+      "description": "Load when computing two-group differential protein abundance (group2 vs group1, log2FC + p-value + BH-adjusted FDR) via Welch t-test, equal-variance t-test, or Mann-Whitney on a wide protein × sample CSV. Skip when you need multi-condition DE (run pairwise contrasts manually) or label-based TMT linear-mixed models.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -736,7 +736,7 @@
     {
       "name": "proteomics-enrichment",
       "cli_alias": "proteomics-enrichment",
-      "description": "Load when running over-representation analysis (ORA) on a list of proteins via Fisher's exact test against a built-in 8-pathway DEMO dictionary, with BH-FDR correction. Skip when needing a real pathway database (this skill is demo-only \u2014 use `bulkrna-enrichment` for real KEGG / Reactome / MSigDB) or for rank-based GSEA.",
+      "description": "Load when running over-representation analysis (ORA) on a list of proteins via Fisher's exact test against a built-in 8-pathway DEMO dictionary, with BH-FDR correction. Skip when needing a real pathway database (this skill is demo-only — use `bulkrna-enrichment` for real KEGG / Reactome / MSigDB) or for rank-based GSEA.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -776,7 +776,7 @@
     {
       "name": "proteomics-ms-qc",
       "cli_alias": "proteomics-ms-qc",
-      "description": "Load when computing protein-table QC \u2014 proteins \u00d7 samples count, missing-value rate, intensity CV (median + mean) \u2014 from a MaxQuant / FragPipe / DIA-NN protein-quantification CSV. Skip when raw mzML / RAW spectra are the input (run a search engine first) or when peptide-level QC is needed (use `proteomics-identification`).",
+      "description": "Load when computing protein-table QC — proteins × samples count, missing-value rate, intensity CV (median + mean) — from a MaxQuant / FragPipe / DIA-NN protein-quantification CSV. Skip when raw mzML / RAW spectra are the input (run a search engine first) or when peptide-level QC is needed (use `proteomics-identification`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -797,7 +797,7 @@
     {
       "name": "proteomics-ptm",
       "cli_alias": "proteomics-ptm",
-      "description": "Load when summarising PTM sites (phosphorylation, acetylation, ubiquitination, etc.) from a per-site CSV \u2014 site-class assignment (Olsen et al. Class I/II/III by `localization_probability`), per-PTM-type counts, amino-acid distribution, sites-per-protein. Skip when raw spectra are the input or when you only need protein-level abundance (use `proteomics-quantification`).",
+      "description": "Load when summarising PTM sites (phosphorylation, acetylation, ubiquitination, etc.) from a per-site CSV — site-class assignment (Olsen et al. Class I/II/III by `localization_probability`), per-PTM-type counts, amino-acid distribution, sites-per-protein. Skip when raw spectra are the input or when you only need protein-level abundance (use `proteomics-quantification`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -836,7 +836,7 @@
     {
       "name": "proteomics-structural",
       "cli_alias": "proteomics-structural",
-      "description": "Load when summarising cross-linking MS (XL-MS) results \u2014 intra/inter-protein link split, optional FDR filtering, distance-constraint validation against a per-crosslinker (DSS / BS3 / EDC / DSSO / DSBU) max distance. Skip when raw spectra are the input (run XlinkX / pLink / xiSEARCH first) or no XL-MS experiment was performed.",
+      "description": "Load when summarising cross-linking MS (XL-MS) results — intra/inter-protein link split, optional FDR filtering, distance-constraint validation against a per-crosslinker (DSS / BS3 / EDC / DSSO / DSBU) max distance. Skip when raw spectra are the input (run XlinkX / pLink / xiSEARCH first) or no XL-MS experiment was performed.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -859,7 +859,7 @@
     {
       "name": "scatac-preprocessing",
       "cli_alias": "scatac-preprocessing",
-      "description": "Load when preprocessing a single-cell ATAC peak \u00d7 cell AnnData via Signac-style TF-IDF + LSI + Leiden, producing a clustered UMAP-ready object. Skip when input is fragments or BAM (peak calling not implemented here) or for scRNA preprocessing (use sc-preprocessing).",
+      "description": "Load when preprocessing a single-cell ATAC peak × cell AnnData via Signac-style TF-IDF + LSI + Leiden, producing a clustered UMAP-ready object. Skip when input is fragments or BAM (peak calling not implemented here) or for scRNA preprocessing (use sc-preprocessing).",
       "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
@@ -948,7 +948,7 @@
     {
       "name": "sc-cell-communication",
       "cli_alias": "sc-cell-communication",
-      "description": "Load when computing cell-cell ligand-receptor communication on an annotated scRNA AnnData via builtin scorer, LIANA, CellPhoneDB, CellChat (R), or NicheNet (R). Skip when assigning cell-type labels (use sc-cell-annotation) or for transcription factor \u2192 target regulatory networks (use sc-grn).",
+      "description": "Load when computing cell-cell ligand-receptor communication on an annotated scRNA AnnData via builtin scorer, LIANA, CellPhoneDB, CellChat (R), or NicheNet (R). Skip when assigning cell-type labels (use sc-cell-annotation) or for transcription factor → target regulatory networks (use sc-grn).",
       "version": "0.4.0",
       "status": "mvp",
       "has_script": true,
@@ -1155,7 +1155,7 @@
     {
       "name": "sc-filter",
       "cli_alias": "sc-filter",
-      "description": "Load when removing low-quality cells and lowly-detected genes from a single-cell AnnData using QC-derived thresholds or tissue presets. Skip for the full normalize\u2192HVG\u2192PCA\u2192cluster pipeline (use sc-preprocessing) or when reads are still raw FASTQ (use sc-fastq-qc \u2192 sc-count first).",
+      "description": "Load when removing low-quality cells and lowly-detected genes from a single-cell AnnData using QC-derived thresholds or tissue presets. Skip for the full normalize→HVG→PCA→cluster pipeline (use sc-preprocessing) or when reads are still raw FASTQ (use sc-fastq-qc → sc-count first).",
       "version": "0.3.0",
       "status": "mvp",
       "has_script": true,
@@ -1174,7 +1174,7 @@
     {
       "name": "sc-gene-programs",
       "cli_alias": "sc-gene-programs",
-      "description": "Load when extracting gene programs (NMF / cNMF factorisation) and per-cell program usage scores from a non-negative scRNA AnnData. Skip when ranking marker genes per cluster (use sc-markers) or for inferring TF \u2192 target regulons (use sc-grn).",
+      "description": "Load when extracting gene programs (NMF / cNMF factorisation) and per-cell program usage scores from a non-negative scRNA AnnData. Skip when ranking marker genes per cluster (use sc-markers) or for inferring TF → target regulons (use sc-grn).",
       "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
@@ -1192,9 +1192,30 @@
       "trigger_keywords": []
     },
     {
+      "name": "sc-geo-download",
+      "cli_alias": "sc-geo-download",
+      "description": "Load when fetching public Gene Expression Omnibus (GEO) series datasets (GSE accessions) over HTTPS from NCBI — downloads the SOFT family file, series matrix, and supplementary `_RAW.tar` bundles into a layout that `sc-geo-import` consumes for AnnData reconstruction. Skip when the files are already on disk (use `sc-geo-import` directly), when you need raw FASTQ from SRA (not supported in this skill), or when working with non-GEO sources.",
+      "version": "0.1.0",
+      "status": "mvp",
+      "has_script": true,
+      "has_tests": true,
+      "has_demo": true,
+      "demo_command": "python omicsclaw.py run sc-geo-download --demo",
+      "tags": [
+        "singlecell",
+        "scrna",
+        "geo",
+        "ncbi",
+        "download",
+        "ingest",
+        "entrez"
+      ],
+      "trigger_keywords": []
+    },
+    {
       "name": "sc-grn",
       "cli_alias": "sc-grn",
-      "description": "Load when inferring TF \u2192 target gene regulatory networks on a normalised scRNA AnnData via pySCENIC (GRNBoost2 + cisTarget + AUCell) or correlation-based GRN fallback (when arboreto is unavailable, in --demo, or with --allow-simplified-grn). Skip when computing ligand-receptor cell-cell signalling (use sc-cell-communication) or for predicting genetic-KO effects (use sc-in-silico-perturbation).",
+      "description": "Load when inferring TF → target gene regulatory networks on a normalised scRNA AnnData via pySCENIC (GRNBoost2 + cisTarget + AUCell) or correlation-based GRN fallback (when arboreto is unavailable, in --demo, or with --allow-simplified-grn). Skip when computing ligand-receptor cell-cell signalling (use sc-cell-communication) or for predicting genetic-KO effects (use sc-in-silico-perturbation).",
       "version": "0.4.0",
       "status": "mvp",
       "has_script": true,
@@ -1278,7 +1299,7 @@
     {
       "name": "sc-multi-count",
       "cli_alias": "sc-multi-count",
-      "description": "Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count) into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData (use sc-standardize-input) or for FASTQ\u2192counts on each sample (use sc-count first).",
+      "description": "Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count) into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData (use sc-standardize-input) or for FASTQ→counts on each sample (use sc-count first).",
       "version": "0.3.0",
       "status": "mvp",
       "has_script": true,
@@ -1339,7 +1360,7 @@
     {
       "name": "sc-perturb-prep",
       "cli_alias": "sc-perturb-prep",
-      "description": "Load when attaching cell-barcode \u2192 sgRNA assignments from a mapping TSV/CSV onto a Perturb-seq expression AnnData, producing standardised perturbation / sgRNA / target-gene obs columns. Skip when the AnnData already has perturbation labels (go straight to sc-perturb) or for raw guide-calling from FASTQ (use upstream demuxlet / cellranger guide pipelines).",
+      "description": "Load when attaching cell-barcode → sgRNA assignments from a mapping TSV/CSV onto a Perturb-seq expression AnnData, producing standardised perturbation / sgRNA / target-gene obs columns. Skip when the AnnData already has perturbation labels (go straight to sc-perturb) or for raw guide-calling from FASTQ (use upstream demuxlet / cellranger guide pipelines).",
       "version": "0.2.0",
       "status": "mvp",
       "has_script": true,
@@ -1466,7 +1487,7 @@
     {
       "name": "sc-velocity-prep",
       "cli_alias": "sc-velocity-prep",
-      "description": "Load when generating spliced / unspliced layers from Cell Ranger BAM, FASTQ, STARsolo output, or velocyto loom \u2014 the prerequisite for sc-velocity. Skip when AnnData already has spliced+unspliced layers (go straight to sc-velocity) or for any non-velocity preprocessing (use sc-preprocessing).",
+      "description": "Load when generating spliced / unspliced layers from Cell Ranger BAM, FASTQ, STARsolo output, or velocyto loom — the prerequisite for sc-velocity. Skip when AnnData already has spliced+unspliced layers (go straight to sc-velocity) or for any non-velocity preprocessing (use sc-preprocessing).",
       "version": "0.3.0",
       "status": "mvp",
       "has_script": true,
@@ -1508,7 +1529,7 @@
     {
       "name": "spatial-cnv",
       "cli_alias": "spatial-cnv",
-      "description": "Load when inferring copy-number variation per spot on a preprocessed spatial AnnData with chromosome-annotated genes via infercnvpy (default \u2014 log-ratio sliding-window) or Numbat (R, allele-aware clone deconvolution). Skip when `var[\"chromosome\"]` / `var[\"start\"]` / `var[\"end\"]` gene-coord metadata is missing or when no normal-reference subset can be defined.",
+      "description": "Load when inferring copy-number variation per spot on a preprocessed spatial AnnData with chromosome-annotated genes via infercnvpy (default — log-ratio sliding-window) or Numbat (R, allele-aware clone deconvolution). Skip when `var[\"chromosome\"]` / `var[\"start\"]` / `var[\"end\"]` gene-coord metadata is missing or when no normal-reference subset can be defined.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -1549,7 +1570,7 @@
     {
       "name": "spatial-condition",
       "cli_alias": "spatial-condition",
-      "description": "Load when comparing two or more experimental conditions (treatment vs control) on a multi-sample preprocessed spatial AnnData via PyDESeq2 pseudobulk or Wilcoxon DE \u2014 needs `obs[condition_key]`, `obs[sample_key]`, and cluster labels. Skip when running per-cluster DE on one condition (use `spatial-de`) or comparing two slices without replicates.",
+      "description": "Load when comparing two or more experimental conditions (treatment vs control) on a multi-sample preprocessed spatial AnnData via PyDESeq2 pseudobulk or Wilcoxon DE — needs `obs[condition_key]`, `obs[sample_key]`, and cluster labels. Skip when running per-cluster DE on one condition (use `spatial-de`) or comparing two slices without replicates.",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -1590,7 +1611,7 @@
     {
       "name": "spatial-deconv",
       "cli_alias": "spatial-deconv",
-      "description": "Load when deconvolving spot-level cell-type proportions on a Visium-style spatial AnnData using a labelled scRNA reference (FlashDeconv / Cell2location / RCTD / DestVI / Tangram / others). Skip when each spot is a single cell already (Xenium / MERFISH \u2014 use spatial-annotate) or for tissue-domain detection (use spatial-domains).",
+      "description": "Load when deconvolving spot-level cell-type proportions on a Visium-style spatial AnnData using a labelled scRNA reference (FlashDeconv / Cell2location / RCTD / DestVI / Tangram / others). Skip when each spot is a single cell already (Xenium / MERFISH — use spatial-annotate) or for tissue-domain detection (use spatial-domains).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
@@ -1680,7 +1701,7 @@
     {
       "name": "spatial-integrate",
       "cli_alias": "spatial-integrate",
-      "description": "Load when removing batch effects across multiple spatial samples on a multi-batch spatial AnnData via Harmony, BBKNN, or Scanorama before downstream analysis. Skip when aligning physical slice coordinates (use spatial-register) or for single-batch data (no integration needed \u2014 go straight to spatial-domains).",
+      "description": "Load when removing batch effects across multiple spatial samples on a multi-batch spatial AnnData via Harmony, BBKNN, or Scanorama before downstream analysis. Skip when aligning physical slice coordinates (use spatial-register) or for single-batch data (no integration needed — go straight to spatial-domains).",
       "version": "0.4.0",
       "status": "mvp",
       "has_script": true,
@@ -1808,7 +1829,7 @@
     {
       "name": "spatial-trajectory",
       "cli_alias": "spatial-trajectory",
-      "description": "Load when inferring pseudotime / lineage trajectories on a preprocessed spatial AnnData via DPT (default \u2014 diffusion pseudotime), CellRank (terminal-state + fate-probability), or Palantir (waypoint branch probabilities). Skip when the data has spliced/unspliced layers and you want velocity-driven dynamics (use `spatial-velocity`) or for non-spatial scRNA pseudotime (use `sc-pseudotime`).",
+      "description": "Load when inferring pseudotime / lineage trajectories on a preprocessed spatial AnnData via DPT (default — diffusion pseudotime), CellRank (terminal-state + fate-probability), or Palantir (waypoint branch probabilities). Skip when the data has spliced/unspliced layers and you want velocity-driven dynamics (use `spatial-velocity`) or for non-spatial scRNA pseudotime (use `sc-pseudotime`).",
       "version": "0.5.0",
       "status": "mvp",
       "has_script": true,
