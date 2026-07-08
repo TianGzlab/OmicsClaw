@@ -1,0 +1,68 @@
+# sc-geo-download — fetch public GEO datasets from NCBI over HTTPS.
+domain: singlecell
+script: sc_geo_download.py
+saves_h5ad: false
+requires_preprocessed: false
+input_required: false
+emoji: ⬇️
+
+# Words in the user query that should route to this skill.
+trigger_keywords:
+- download GEO
+- fetch GSE
+- get GEO dataset
+- pull GEO series
+- GSE accession
+- NCBI GEO download
+- public dataset download
+- GEO series download
+- download from PubMed
+- GSE109564
+
+legacy_aliases: []
+
+# CLI flags the skill accepts beyond --input / --output / --demo. Note that
+# --input is not used by this skill (downloads are keyed on --accession).
+allowed_extra_flags:
+- --accession
+- --pubmed-id
+- --include-supp
+- --no-include-supp
+- --extract-tar
+- --no-extract-tar
+- --no-metadata
+- --timeout
+
+# Hints for the agent when generating flag combinations.
+param_hints:
+  accession:
+    repeatable: true
+    type: "GSE<digits>"
+    notes: |
+      One or more GSE accessions to download. Each accession becomes a
+      subdirectory under <output>/geo/<accession>/. Examples:
+        --accession GSE109564
+        --accession GSE109564 --accession GSE149689
+  pubmed-id:
+    type: "PubMed ID (integer)"
+    notes: |
+      Resolves linked GEO Series via NCBI Entrez and adds them to the
+      download set. Combine with --accession to merge sources.
+  include-supp:
+    default: true
+    notes: |
+      Download the optional `_RAW.tar` supplementary archive (per-sample
+      raw bundles). Set --no-include-supp to skip when only the series
+      matrix is needed.
+  extract-tar:
+    default: true
+    notes: |
+      Auto-extract `_RAW.tar` into <accession>/samples/<GSM>/ so
+      `sc-geo-import` can discover per-sample files directly. Set
+      --no-extract-tar to leave the archive packed.
+
+# Suggested follow-ups the agent can offer after a successful download.
+recommended_next_skills:
+- sc-geo-import
+- sc-standardize-input
+- sc-qc
