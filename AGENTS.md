@@ -27,7 +27,9 @@ skill is a self-contained module that performs a specific analysis task via CLI
 or Python API. All processing is local-first. Design is inspired by
 [ClawBio](https://github.com/ClawBio/ClawBio).
 
-**Note**: OmicsClaw evolved from SpatialClaw and now uses a unified `omicsclaw.py` entrypoint.
+**Note**: OmicsClaw evolved from SpatialClaw. The agent framework was rebuilt
+layer by layer during 2026; `docs/FRAMEWORK-REBUILD.md` is the living account
+of what shipped, what was deleted, and what is still carried forward.
 
 ## Setup
 
@@ -42,8 +44,7 @@ conda activate OmicsClaw
 # pip install -e .
 # pip install -e ".[interactive]" / ".[tui]" / ".[memory]" / ".[channels]" / ".[full]"
 
-python omicsclaw.py list   # or: oc list
-python omicsclaw.py run spatial-preprocess --demo
+oc cli                     # terminal REPL
 ```
 
 > **`oc` short alias**: After installing OmicsClaw (either path), both
@@ -72,142 +73,173 @@ python omicsclaw.py run spatial-preprocess --demo
 > **Known `pip check` warning**: the full conda environment keeps
 > `jinja2>=3.1.5` for FastAPI/nbconvert even though upstream
 > `pygpcca==1.0.4` still pins `jinja2==3.0.3`. Treat that single warning as
-> metadata noise when `oc doctor` and targeted import checks pass.
+> metadata noise when targeted import checks pass.
 
 ## Commands
 
-> Both `python omicsclaw.py <cmd>` and the short alias `oc <cmd>` work identically
-> after `pip install -e .` (or `make install-oc`).
+`oc` takes a **surface**, not a subcommand. Deployment flags go before `--`;
+a surface's own flags go after it.
 
 | Command | Purpose |
 |---------|---------|
-| `oc list` | List all 96 skills across 8 domains |
-| `oc run <skill> --demo` | Run a skill with demo data |
-| `oc run <skill> --input <file> --output <dir>` | Run with user data |
-| `oc replay <replay.json> [--input <file>]` | Create a fresh Skill Run and verify it against a Replay Capsule |
-| `oc interactive` | **Start interactive terminal chat (CLI mode)** |
-| `oc interactive --ui tui` | **Start full-screen Textual TUI** |
-| `oc interactive -p "<prompt>"` | **Single-shot mode (non-interactive)** |
-| `oc interactive --session <id>` | **Resume a previous session** |
-| `oc tui` | Alias for `interactive --ui tui` |
-| `oc desktop-server` | Start the FastAPI backend used by OmicsClaw-App / web frontends |
-| `oc mcp list` | List configured MCP servers |
-| `oc mcp add <name> <cmd> [args]` | Add an MCP server |
-| `oc mcp remove <name>` | Remove an MCP server |
-| `oc mcp config` | Show MCP config file path |
-| `oc onboard` | Run interactive setup wizard for LLM, runtime, memory, and channels |
-| `python -m pytest -v` | Run the deterministic fast suite (excludes demo/slow/eval) |
-| `make test` | Run the fast suite in parallel |
-| `make test-slow` | Run Skill demo + slow scientific integration tests |
-| `make test-all` | Run all tests except real-LLM evals |
-| `make demo` | Run preprocess demo |
+| `oc cli` | Terminal REPL — the default way to use OmicsClaw |
+| `oc cli --prompt-file <f>` | One exchange, non-interactive |
+| `oc cli -- --session <id>` | Continue a stored conversation |
+| `oc desktop` | HTTP backend for the OmicsClaw-App client |
+| `oc channel` | Instant-messaging adapters (Telegram, Feishu) |
+| `oc <surface> --help` | That surface's own flags |
+| `python -m pytest -v` | Deterministic fast suite (excludes demo/slow/eval) |
+| `make test` / `test-slow` / `test-all` | Fast / scientific / everything-but-eval |
 | `make install-oc` | (Re)install package + activate `oc` alias |
-| `make oc-link` | Quick wrapper script in `~/.local/bin/oc` (no pip) |
-| `make bot-telegram` | Start Telegram bot |
+
+There is **no `oc run <skill>`**. The skill runner and the other 33
+subcommands lived in `omicsclaw/surfaces/cli/_main.py`, which the framework
+rebuild retired; see "Running a skill" below for what replaced it.
+
+> **Stale Makefile targets.** `make demo`, `demo-all`, `demo-bulkrna`,
+> `demo-orchestrator`, `list`, `catalog`, `bot-telegram`, `bot-multi`,
+> `bot-list` and `memory-server` still call `omicsclaw.py run|list`,
+> `omicsclaw.py memory-server` or `python -m omicsclaw.surfaces.channels`.
+> None of those entry points exists any more. Fixing the Makefile is
+> outstanding work; do not treat a green target list as evidence.
 
 ## Project Structure
 
-Boundary-led layout (see ADRs 0004 + 0005 for the design history). Each
-top-level sub-package of `omicsclaw/` corresponds to one architectural
-boundary; new code lands in the sub-package whose name matches its
-concern.
+`omicsclaw/` is one Python package of one-way layers. **Every layer may
+import `schema`; `schema` imports nothing.** `docs/FRAMEWORK-REBUILD.md`
+is the living account of how the stack got here and is the file to read
+before changing a layer boundary.
 
 ```
 OmicsClaw/
-├── omicsclaw.py                # Main CLI script (SKILLS dict, DOMAINS registry, `oc list`/`oc run`/`oc desktop-server`)
-├── omicsclaw/                  # The single top-level Python package
-│   ├── surfaces/               # ← Ingress layer (ADR 0005). The three user-facing entry points.
-│   │   ├── channels/           #   Channel Surface — Telegram text/photo + Feishu text authoritative; legacy adapters gated
-│   │   ├── desktop/            #   Desktop Surface — FastAPI server for Electron / Next.js frontends
-│   │   └── cli/                #   CLI Surface — prompt_toolkit REPL, Textual TUI, setup wizard, `oc` launcher
-│   ├── schema/                 # ← The shared contract (ADR 0077). Stdlib-only, vendor-neutral leaf: Message/ToolCall/ToolResult/ToolDefinition/Usage/StreamChunk. Every boundary may import it; it imports none of them.
-│   ├── provider/               # ← The model adapter layer (plan 0026). Singular. LLMProvider + OpenAI/Anthropic adapters; imports only schema.
-│   ├── engine/                 # ← The ReAct Main Loop (plan 0027). Imports only schema + provider.
-│   ├── runtime/                # Agent loop, context assembly, tool registry, policy, transcript storage (ADR 0004 P3)
-│   │   ├── agent/, context/, tools/, policy/, storage/
-│   │   └── engine/             #   Legacy surface-agnostic loop (run_engine_loop) — was omicsclaw/engine/, moved by plan 0027 task 0
-│   ├── control/                # Authoritative control.db schema, lifetime lock, typed repository commands (ADR 0053–0064)
-│   ├── skill/                  # Skill registry, runner, lookup, subprocess execution (ADR 0004 P2)
-│   ├── providers/              # LLM provider registry + OpenAI/ccproxy adapters (ADR 0004 P1)
-│   ├── memory/                 # Graph memory system (MemoryEngine, MemoryClient, ReviewLog)
-│   ├── services/               # Cross-cutting: audit, billing, rate_limit, path_validation
-│   ├── core/                   # Thin base layer: dependency_manager, external_env, r_* helpers
-│   ├── loaders/                # File-extension → domain detection
-│   ├── routing/                # Multi-agent routing
-│   ├── agents/                 # Agent definitions
-│   ├── remote/                 # Remote runtime (jobs, workspace resolution)
-│   ├── knowledge/              # Knowhow / semantic index
-│   ├── extensions/             # MCP integration etc.
-│   ├── execution/              # Execution helpers
-│   ├── interactive/ ⛔          # MOVED → surfaces/cli/ (ADR 0005)
-│   ├── channels/    ⛔          # MOVED → surfaces/channels/ (ADR 0005)
-│   ├── app/         ⛔          # MOVED → surfaces/desktop/ (ADR 0005)
-│   └── __main__.py             # `python -m omicsclaw` entry hook (stays at package root)
-├── skills/                     # Domain-organized skills + shared utilities
-│   ├── spatial/                # 19 spatial transcriptomics skills (+ _lib/)
-│   ├── singlecell/             # 34 single-cell omics skills (+ _lib/)
-│   ├── genomics/               # 10 genomics skills (+ _lib/)
-│   ├── proteomics/             # 8 proteomics skills (+ _lib/)
-│   ├── metabolomics/           # 8 metabolomics skills (+ _lib/)
-│   ├── bulkrna/                # 14 bulk RNA skills (+ _lib/)
-│   ├── orchestrator/           # 2 orchestration skills
-│   └── literature/             # 1 literature skill
-├── docs/                       # Project docs (CONTEXT.md vocabulary, adr/ history)
-│   ├── CONTEXT.md              # Authoritative glossary for Surfaces, Memory, Namespaces, etc.
-│   └── adr/                    # Architecture Decision Records (0001..0005)
-├── tests/                      # Test suite (mirrors omicsclaw/ structure)
-├── SOUL.md                     # OmicsBot persona used by the Channel Surface
-├── SPEC.md                     # Repository maintenance + AI development contract
-├── templates/skill/            # v2 scaffold for new skills (copy whole dir)
-├── examples/                   # Shared demo data
-├── CLAUDE.md                   # Agent routing instructions (Claude Code entry)
-└── AGENTS.md                   # This file
+├── omicsclaw/
+│   │  ── the rebuilt stack: this is where new code goes ──
+│   ├── schema/         Stdlib-only vendor-neutral leaf. Message, ToolCall,
+│   │                   ToolResult, ToolDefinition, Usage, StreamChunk.
+│   ├── provider/       Model adapters. LLMProvider + OpenAI-compatible and
+│   │                   Anthropic; imports only schema.
+│   ├── engine/         The ReAct main loop. Imports schema + provider.
+│   ├── tools/          Tool registry, policy, dispatch; builtin/ holds
+│   │                   read_file, write_file, edit_file, bash, web_*.
+│   ├── context/        Prompt assembly, token budget, progressive compaction.
+│   ├── skills/         Skill **loader** (plural). Reads skills/*/SKILL.md into
+│   │                   a catalogue; `use_skill` fetches one body on demand.
+│   ├── memory/         Session store + long-term recall + MEMORY.md precis.
+│   ├── mcp/            MCP client: .mcp.json, stdio + Streamable HTTP.
+│   ├── planning/       The execution plan the agent keeps outside the chat.
+│   ├── permission/     Rules, modes, danger patterns; decides if a call happens.
+│   ├── sandbox/        Docker/Podman isolation for `bash`. Stdlib-only leaf.
+│   ├── hooks/          Tool-call interception seam + the audit hook.
+│   ├── observability/  Spans, six instruments, optional OpenTelemetry.
+│   ├── entry/          Composition root, sessions, turns, events, approval,
+│   │                   plus the cli/, desktop/ and channel/ facades.
+│   ├── launch/         `oc` argv grammar; picks a surface and builds the app.
+│   │  ── kept from the old stack ──
+│   ├── common/         Shared science helpers: report, checksums, runtime_env,
+│   │                   workspace. 96 skill scripts import these. NOT legacy.
+│   ├── core/           R script runner, dependency managers. Same: NOT legacy.
+│   ├── autoagent/      Autonomous coding agent. Kept for a later migration
+│   │                   of its ideas; does not import today.
+│   ├── runtime/        Only consensus/, workflow/ and output_styles.py remain.
+│   │                   Kept for a later migration; consensus.run is broken.
+│   ├── remote/         SSH remote execution. Imports.
+│   ├── attachments/    Immutable attachment store. Imports; the store half
+│   │                   needs the deleted control plane.
+│   ├── routing/        Orchestrator routing. Does not import.
+│   ├── surfaces/       The old three surfaces + the 35-subcommand CLI. Kept
+│   │                   as read-only reference; does not import.
+│   └── diagnostics.py  Old `oc doctor`. Does not import.
+├── skills/             96 skills across 8 domains, each a SKILL.md plus scripts
+│   ├── spatial/ singlecell/ genomics/ proteomics/ metabolomics/ bulkrna/
+│   ├── orchestrator/ literature/
+│   └── <domain>/_lib/  Domain-shared utilities, not registered as skills
+├── tests/              schema/ provider/ engine/ tools/ context/ skills/ entry/
+│                       mcp/ memory/ permission/ planning/ launch/ sandbox/
+│                       hooks/ observability/ are the rebuilt stack's suite
+├── docs/FRAMEWORK-REBUILD.md   Living status of the rebuild — read this first
+├── docs/plans/         Numbered plans, one per rebuild step
+├── SOUL.md             Persona used by the Channel surface
+├── SPEC.md             Repository maintenance + AI development contract
+├── CLAUDE.md           Agent routing instructions (Claude Code entry)
+└── AGENTS.md           This file
 ```
 
-Within a domain, Backend-authored publications derived from claimed Autonomous
-Runs live at `skills/<domain>/run-derived/<skill>`. This `collection` is a
-physical/navigation distinction only; `skill.yaml` remains authoritative for
-provenance, lifecycle, validation, routing metadata, and resources. New runtime
-or projection consumers must use `omicsclaw.skill.inventory.SkillInventory`
-instead of adding another recursive scanner; raw validators/migrations may scan
-manifests directly when diagnosing malformed or legacy trees is their purpose.
+**Five packages are kept but do not import**: `autoagent`, `routing`,
+`surfaces`, `diagnostics.py` and `runtime/workflow` all reach
+`omicsclaw.skill` or `omicsclaw.providers`, which the rebuild deleted.
+Their source is intact and readable, which is the point of keeping them —
+but never cite one as working prior art without importing it first.
 
 > **Import convention**: domain-specific skill utilities live in
-> `skills/<domain>/_lib/` and are imported via
-> `from skills.<domain>._lib.<module> import <name>`. The `_lib/` directories
-> are internal shared packages and are not registered as skills (the registry
-> ignores directories starting with `_`). The `omicsclaw/` package contains
-> only domain-agnostic framework code; ingress lives in `surfaces/`, agent
-> machinery in `runtime/`, skill machinery in `skill/`.
+> `skills/<domain>/_lib/` and are imported as
+> `from skills.<domain>._lib.<module> import <name>`. A directory starting
+> with `_` is never a skill. The `omicsclaw/` package holds only
+> domain-agnostic framework code.
 
 ## Skill Architecture
 
-Every skill has a `SKILL.md` with YAML frontmatter + methodology, a Python script accepting `--input`, `--output`, `--demo`, and optionally `tests/` and `data/`.
+Every skill has a `SKILL.md` with YAML frontmatter + methodology, a Python
+script accepting `--input`, `--output`, `--demo`, and optionally `tests/`
+and `data/`.
 
-Skills are registered in `omicsclaw/core/registry.py` and dynamically discovered from `skills/`.
+### Running a skill
+
+`oc run <skill>` is gone. A skill script is now invoked **directly**, by a
+person or by the agent through `bash`:
+
+```bash
+python skills/<domain>/<skill>/<script>.py --input <file> --output <dir>
+python skills/<domain>/<skill>/<script>.py --demo --output /tmp/<skill>_demo
+```
+
+`omicsclaw/skills/` puts a one-line catalogue of all 96 into the system
+prompt and lets the model fetch one body with `use_skill`; the model then
+runs the script itself. What was lost with the old runner is the
+deterministic half — the `result.json` envelope check, the run receipt, the
+replay capsule and the output-directory claim. Do not describe those as
+current behaviour.
+
+`scripts/generate_skill_md.py` and `scripts/generate_routing_table.py` both
+import the deleted `omicsclaw.skill`, so **SKILL.md files cannot be
+regenerated today**; edit them by hand and treat "generated from skill.yaml"
+in older docs as historical.
 
 ### Skill Metadata Rules
 
-- `skill.yaml` (ADR 0037) is the single machine-contract source of truth for skill metadata — canonical name, aliases, allowed flags, `saves_h5ad`, param hints, and so on; `SKILL.md` is generated from it by `scripts/generate_skill_md.py`.
-- `interface.outputs.files` is an output inventory. The shared runner enforces the declared `result.json` envelope and required keys, unconditional `outputs.artifacts`, and the matching `method_scopes` guarantees before reporting success; do not turn optional inventory entries into unconditional promises.
-- `security` is omitted until its three fields have been deliberately reviewed. An explicit block is a declarative capability statement propagated to audit surfaces, not proof of OS network/filesystem confinement.
-- `resources.compute`, when calibrated, must contain the complete static Candidate-plan admission reservation (`cpu_cores`, `memory_mib`, `gpu_devices`, `threads`, `temporary_disk_mib`). Do not invent defaults: uncalibrated skills must remain resource-unready for whole-plan execution. These reservations are not OS-enforced quotas.
-- `lifecycle.status: deprecated` requires one different canonical `superseded_by` Skill that is currently `mvp` or `stable` and `demo-validated` or higher; non-deprecated Skills must omit `superseded_by`. Use Backend Skill evolution governance for evidence-bound deprecation instead of hand-editing lifecycle state. Deprecated Skills remain auditable but are removed from automatic/LLM routing and blocked by the shared runner with a replacement hint.
-- All primary skill scripts must expose a lightweight direct `--help` path.
-- Skill scripts write native artifacts; the shared runner writes the top-level `README.md` plus `reproducibility/replay.json`, `environment.json`, and `replay.sh`. Standard Skill Runs do not synthesize notebooks; genuine notebooks remain owned by explicit notebook/code-agent workflows.
-- Bot skill execution uses the same shared runner contract as CLI, interactive, agent tools, app, and remote jobs.
-- Shared result construction and adapter coercion live in `omicsclaw/core/skill_result.py`; new execution surfaces should reuse that model instead of rebuilding legacy result dictionaries.
+`skill.yaml` is the machine-contract source for a skill's metadata —
+canonical name, aliases, allowed flags, `saves_h5ad`, param hints. Rules
+that still hold:
+
+- `security` is omitted until its three fields have been deliberately
+  reviewed. An explicit block is a declarative capability statement
+  propagated to audit surfaces, not proof of OS confinement.
+- `resources.compute`, when calibrated, must carry the complete reservation
+  (`cpu_cores`, `memory_mib`, `gpu_devices`, `threads`,
+  `temporary_disk_mib`). Do not invent defaults. These are not OS-enforced
+  quotas.
+- `lifecycle.status: deprecated` requires one different canonical
+  `superseded_by` skill that is `mvp` or `stable`; a non-deprecated skill
+  must omit `superseded_by`.
+- Every primary skill script must expose a lightweight direct `--help`.
+- `interface.outputs.files` is an inventory, not a promise. Do not turn an
+  optional entry into an unconditional one.
+
+Rules that **lapsed with the shared runner** and are kept here only so
+nobody re-derives them from an old document: the `result.json` envelope
+check, `reproducibility/replay.json` + `environment.json` + `replay.sh`,
+the generated top-level `README.md`, and the routing block that hid a
+deprecated skill. Nothing enforces any of them today.
 
 ## How to Add a New Skill
 
-1. `mkdir skills/<your-skill-name>`
-2. `cp -r templates/skill skills/<domain>/<your-skill-name>` (then rename + fill placeholders)
-3. Fill in SKILL.md
-4. Add Python script accepting `--input`, `--output`, `--demo`
-5. Add tests in `tests/`
-6. Register stable aliases in `omicsclaw/core/registry.py` (or rely on dynamic discovery)
-7. Add test path to `pytest.ini`
-8. Regenerate catalog: `python scripts/generate_catalog.py`
+1. `cp -r templates/skill skills/<domain>/<your-skill-name>`, then rename
+   and fill the placeholders.
+2. Fill in `SKILL.md` — including a worked `python skills/.../<script>.py`
+   invocation, because that is now the only way anyone learns the CLI.
+3. Add the Python script, accepting `--input`, `--output`, `--demo`.
+4. Add tests under the skill's own `tests/`.
+5. Add the test path to `pyproject.toml`'s `[tool.pytest.ini_options]
+   testpaths` if it should run in the default suite.
 
 ## Development Workflow
 
@@ -215,274 +247,135 @@ For repository development work, start with a short plan when the task spans
 multiple files, debug from root cause before editing, and verify the affected
 behavior before committing, pushing, or opening a PR.
 
-After creating or materially updating any PR, always run
-`cursor-team-kit:make-pr-easy-to-review` before handing it off. The PR should
-have a reviewer-oriented description with a TL;DR, recommended review order,
-diff buckets, generated/mechanical file notes, risk notes, and verification
-evidence.
+A PR description should be reviewer-oriented: a TL;DR, a recommended review
+order, diff buckets, a note on generated or mechanical files, risk notes,
+and the verification evidence you actually ran.
 
-### Contract Tests
+### Running the tests
 
-Framework optimization guardrails are enforced by targeted contract tests:
-`tests/test_documentation_facts.py`, `tests/test_skill_execution_contract.py`,
-`tests/test_skill_runner_contract.py`, `tests/test_skill_metadata_contract.py`,
-`tests/test_skill_help_contract.py`, `tests/test_registry_alias_contract.py`,
-and `tests/test_output_ownership_contract.py`.
+The interpreter matters: the repo needs Python 3.11+ and the default
+`python3` on a dev box is often older. The rebuilt stack's own suite is
+
+```bash
+python -m pytest tests/schema tests/provider tests/engine tests/tools \
+  tests/context tests/skills tests/entry tests/mcp tests/memory \
+  tests/permission tests/planning tests/launch tests/sandbox tests/hooks \
+  tests/observability -p no:cacheprovider -q -o addopts=""
+# 4412 passed, 10 skipped
+```
+
+Treat that as the regression signal. `tests/` also still holds suites for
+the kept-but-not-importable packages (`tests/test_autoagent_*.py`,
+`tests/surfaces/`, `tests/runtime/`, `tests/bot/`); those do not collect and
+are not a signal about your change either way.
+
+> **Several sessions write this tree at once.** Before reading a red suite
+> as evidence about your own change, check `git status` for files you did
+> not touch.
 
 ### Architecture Contracts
 
 - [domain input contracts](docs/engineering/domain-input-contracts.md)
 
-## Graph Memory System
+## Memory
 
-OmicsClaw uses a centralized graph-based memory system to persist context across sessions, agents, and tool invocations. The core system is located in `omicsclaw/memory/`. Vocabulary, decisions, and architectural diagrams live in [`docs/CONTEXT.md`](docs/CONTEXT.md).
+`omicsclaw/memory/` is a session store plus long-term recall, opened by
+`build_app` at `<workspace>/.omicsclaw/memory.db`. It replaced a 28-module
+graph memory system (nodes, edges, URIs, namespaces, `ReviewLog`, a
+FastAPI dashboard at `oc memory-server`) that the rebuild deleted; if you
+find a document describing that, it is historical.
 
-### Architecture
+| Piece | Role |
+|---|---|
+| `SqliteSessionStore` | Conversations, one database per workspace. `list` filters nothing -- the file *is* the isolation boundary. |
+| long-term store | Rated entries reached by the `memory_search` / `memory_write` tools. |
+| `MEMORY.md` precis | The top-rated entries, rendered into the **last** block of the system prompt behind a closure, so a write during a run is visible on the next turn. |
+| extractor | Every compaction hands the messages it is about to summarize to an extractor first, so what was said survives the summary. |
 
-Three layers over a SQLite/PostgreSQL graph database (SQLAlchemy):
+`--memory false` turns all of it off in one switch, and then conversations
+are held in memory only.
 
-| Layer | Module | Role |
-|---|---|---|
-| Strategy | `MemoryClient(engine, namespace=...)` | Decides which Namespace a write lands in and whether it's versioned vs. overwrite. |
-| Hot path | `MemoryEngine` (`omicsclaw/memory/engine.py`) | 7 verbs over `(uri, namespace)`: `upsert`, `upsert_versioned`, `patch_edge_metadata`, `recall`, `search`, `list_children`, `get_subtree`. |
-| Cold path | `ReviewLog` (`omicsclaw/memory/review_log.py`) | Version-chain inspection, rollback, orphan/GC, browse_shared, changeset approve/discard — for the desktop Review & Audit pane. |
+## Surfaces
 
-- **Nodes & Edges**: Every entity (session, dataset, user preference) is a node connected via edges to a central root (`ROOT_NODE_UUID`). Nodes are addressed by URIs (e.g., `core://agent`, `dataset://pbmc.h5ad`).
-- **Namespace partition**: `paths`, `search_documents`, and `glossary_keywords` carry a `namespace` column; surfaces inject the value (CLI = workspace path, Desktop = `app/<launch_id>`, Bot = `<platform>/<user_id>`, system = `__shared__`).
-- **Read fallback is asymmetric**: `recall` and `search` see `__shared__` content automatically; `list_children` and `get_subtree` are strict so private inventories don't get polluted by shared structure.
-- **Compat Layer**: `omicsclaw/memory/compat.py` (`CompatMemoryStore`) is the bot's drop-in replacement for the legacy `bot.memory.MemoryStore`; it derives a per-session namespace from `(platform, user_id)`.
-- **REST API**: A FastAPI backend provides management capabilities (browse, search, review, rollback, orphan inspection), accessible via `oc memory-server`. The desktop's `/memory/review/*` routes go through `ReviewLog`.
+Three user-facing surfaces, all under `omicsclaw/entry/`, all reached
+through `oc <surface>` and all driving the same `AgentApp` built by
+`omicsclaw.entry.build_app`.
 
-#### Surface helpers
+| Surface | Code | Entry | Audience |
+|---|---|---|---|
+| **CLI** | `omicsclaw/entry/cli/` | `oc cli` | Terminal users |
+| **Desktop** | `omicsclaw/entry/desktop/` | `oc desktop` | OmicsClaw-App client |
+| **Channel** | `omicsclaw/entry/channel/` | `oc channel` | Telegram / Feishu |
 
-```python
-from omicsclaw.memory import (
-    cli_namespace_from_workspace,  # absolute workspace path (cwd if None)
-    desktop_namespace,             # app/<OMICSCLAW_DESKTOP_LAUNCH_ID> or app/desktop_user
-    get_memory_client,             # factory: MemoryClient bound to a namespace
-    get_memory_engine,             # singleton MemoryEngine
-    get_review_log,                # singleton ReviewLog
-)
-```
+These are a **port** of `omicsclaw/surfaces/`, not a rewrite. When a
+behaviour looks odd, the old file is still on disk and is the reference --
+but it does not import, so read it rather than running it.
 
-> **Migration note.** `MemoryEngine` and `ReviewLog` are the canonical hot- and cold-path layers; all production endpoints route through them. The legacy `GraphService` class has been retired (`graph.py` deleted). Its path-based admin operations now live in a private `omicsclaw/memory/api/_browse_helpers.BrowseHelpers` class used only by the `oc memory-server` admin UI (`/api/browse/*`). New code MUST use `MemoryEngine` / `ReviewLog` / `MemoryClient`; do not import `_browse_helpers` from outside `omicsclaw/memory/api/`.
-
-> **KH bootstrap.** Every memory-init path (`CompatMemoryStore.initialize`, `MemoryClient.initialize` with `database_url`, `app/server.py` chat lifespan, `memory/server.py` lifespan) calls `seed_knowhows()` after `init_db()`. The function reads `KnowHowInjector.iter_entries()` and writes each entry to `__shared__` under `core://kh/<doc_id>` via the idempotent `MemoryEngine.seed_shared`. Failures downgrade to a log line; missing `knowledge_base/` does not block startup.
-
-### Running the Dashboard API
-
-You can spin up the backend API to inspect and manage memories. **Note**: `fastapi` and `uvicorn` are optional dependencies, you must install them first:
-
-```bash
-# Install memory API dependencies
-pip install fastapi uvicorn
-# OR: pip install -e ".[memory]"
-
-# Starts the FastAPI server on port 8766
-oc memory-server
-```
-
-The memory API binds to `127.0.0.1:8766` by default. If you bind it to a non-local interface, set `OMICSCLAW_MEMORY_API_TOKEN` as well.
-
-## Surfaces (Ingress Layer)
-
-OmicsClaw exposes three user-facing **Surfaces** — Channel, Desktop, CLI —
-that all live under `omicsclaw/surfaces/` and dispatch into the same
-agent entry, `omicsclaw.runtime.agent.state.llm_tool_loop`. Authoritative
-vocabulary is in [`docs/CONTEXT.md`](docs/CONTEXT.md) §"Surfaces"; the
-restructure history is in [ADR 0005](docs/adr/0005-surfaces-umbrella-for-ingress.md).
-
-| Surface | Location | Primary entry |
-|---|---|---|
-| **Channel Surface** | `omicsclaw/surfaces/channels/` | `python -m omicsclaw.surfaces.channels --channels telegram` / `--channels feishu` |
-| **Desktop Surface** | `omicsclaw/surfaces/desktop/` | `oc desktop-server --host 127.0.0.1 --port 8765` |
-| **CLI Surface** | `omicsclaw/surfaces/cli/` | `oc interactive` (REPL) / `oc tui` (TUI) |
-
-### Desktop Surface — FastAPI backend for desktop / web frontends
+### Desktop surface
 
 ```bash
 pip install -e ".[desktop]"
-oc desktop-server --host 127.0.0.1 --port 8765
+oc desktop            # 127.0.0.1:8765 by default
 ```
 
-Binds `127.0.0.1:8765` by default and serves chat streaming, skills,
-providers, MCP, outputs, bridge control, and memory proxy endpoints
-for the OmicsClaw-App Electron/Next.js frontend.
+Serves chat streaming (SSE) and the endpoints the Electron / Next.js client
+needs. The wire contract's `*_SCHEMA_VERSION` values are byte-identical to
+the pre-port ones because an external client depends on them -- changing one
+is a cross-repository milestone, not a refactor.
 
-**Cross-repository ownership**: this repository owns Backend policy, execution,
-persistence, file mutation, and stable HTTP contracts. The separate
-`OmicsClaw-App` repository owns Electron/Next.js proxy routes, TypeScript view
-models, and UI interaction. Do not add React/Next.js UI here, and do not move
-Skill governance, manifest writes, registry refresh, or scientific validation
-into the App. Coordinate contract changes across repositories as separate
-milestones rather than duplicating logic.
+**Cross-repository ownership**: this repository owns backend policy,
+execution, persistence, file mutation and the stable HTTP contracts. The
+separate `OmicsClaw-App` repository owns Electron / Next.js proxy routes,
+TypeScript view models and UI interaction. Do not add React here, and do not
+move backend policy into the App.
 
-**Environment variables**:
-- `OMICSCLAW_MEMORY_DB_URL` — SQLAlchemy connection URL (e.g. `sqlite+aiosqlite:///~/.omicsclaw/memory.db`).
-- `OMICSCLAW_MEMORY_API_TOKEN` — Bearer token required when exposing the API beyond localhost.
+**Two known gaps, named rather than hidden**: `/chat/abort` and
+`/chat/permission` were not ported, so an approval-gated tool on this
+surface waits for its timeout instead of asking. The frontend also has no
+`case` for the `event_omitted` frame, so a slow observer's GAP notice never
+reaches the UI.
 
-**Provider backend contract** (must hold across provider changes):
-- `/providers` reports the active provider, model, and endpoint.
-- `/providers/test` performs a short live LLM connectivity probe.
-- `/chat/stream` reinitializes the provider runtime when a request changes model, even if the provider id is unchanged.
-
-**Authoritative attachment ingress**:
-- `POST /v1/turns` is the Backend-owned strict multipart image Interface: one
-  `request` JSON part plus 1–8 exactly matched JPEG/PNG/GIF/WebP file parts,
-  each with a client-generated 32-hex identity and declared full SHA-256.
-- Novel acceptance returns `202`; matching `Idempotency-Key` retry returns
-  `200` and never opens the upload source. Receipt/Event/cancel operations use
-  `/v1/turns/{turn_id}` (with unversioned compatibility aliases).
-- Keep the manual parser's counted transport cap, strict UTF-8/depth checks,
-  60-second body-read deadline, complete-boundary/provisional-spool proof and
-  two-slot in-flight cap together; every exit must close every created spool.
-- `/chat/stream` remains text-only for authoritative ingress. Never route the
-  new Adapter through legacy JSON `files`, `.uploads`, `received_files`, path,
-  or Base64 helpers. File Reference and OmicsClaw-App UI adoption are separate
-  milestones.
-
-**Canonical Simple Skill Run Runtime**:
-- `POST /v1/runs` is the Backend-owned JSON Adapter for one strict V1 subset:
-  canonical Skill id, demo input, empty parameters, explicit typed Scope and a
-  complete caller-declared simple resource contract. Novel acceptance returns
-  `202`; a matching 32-hex `Idempotency-Key` duplicate returns `200` before
-  current Registry, Project, budget or Dispatcher gates.
-- The prompt-toolkit REPL's exact `/run <canonical-skill> --demo`, the root
-  exact-demo Scope command family, and Desktop text chat's explicit named demo
-  request are canonical submission Adapters. Desktop authoritative dispatch
-  must propagate the process-local `RunRuntime` through `ControlRuntimePorts`;
-  a planned exact demo bypasses the LLM and must never fall back to the legacy
-  runner.
-  Each creates one fresh 32-hex Submission ID, resolves the canonical Skill and
-  complete resource request through Backend Registry authority, and never falls
-  back to the legacy runner after canonical routing. The REPL uses explicit
-  `UnassignedScope`; root accepts exactly omitted Scope, fixed-order
-  `--demo --project <32-lower-hex-id>`, or `--demo --no-project`. Only omission
-  may read the bounded, side-effect-free current-Project navigation hint.
-  Explicit Project and explicit Unassigned bypass it; novel missing/archived
-  explicit Projects fail without downgrade or execution. Every other
-  demo-shaped root request fails closed before Runtime and legacy execution.
-  Scope validation stays behind `RunRuntime`, and an unconfirmed Run owner
-  prevents Control close or a clean success/interrupt projection. Root
-  non-demo/unsupported-option forms, Textual TUI,
-  `/interpret`, and non-demo/option-bearing prompt-toolkit forms remain legacy.
-- CLI terminal waiting is a bounded pure-observation `RunRuntime` Interface.
-  Success deep-verifies Receipt, Assignment, Manifest completion and artifact
-  inventory before projecting local output paths; other terminal states expose
-  only a closed terminal code. The CLI must not read `control.db`, Run Store or
-  Manifest internals. Canceling a waiter never cancels the Run; Ctrl-C sends an
-  explicit `RunRuntime.cancel()` first and then observes the terminal result.
-- `GET /v1/runs/{run_id}` is pure Receipt observation and
-  `POST /v1/runs/{run_id}/cancel` is the only Desktop cancel command. Neither
-  observation nor legacy Job SSE may enqueue, lease, assign or resume a Run.
-- `POST /v1/runs/{run_id}/replay` is the explicit path-free Desktop replay
-  command. It resolves a successful source Run's Capsule behind `RunRuntime`,
-  creates a fresh Unassigned Run with `retry_of_run_id`, verifies both Capsules,
-  and returns no local path. Its 32-hex `Idempotency-Key` is the new Run
-  Submission ID; observation never starts replay.
-- `GET /v1/run-integrity-incidents` is the bounded, content-free audit
-  Interface. It may filter by opaque Run ID and page by opaque Incident ID,
-  including while recovery quarantine is active, but must never read a
-  Manifest, inspect/stop an owner, mutate a Receipt, enqueue, lease, assign,
-  replay or repair work. Incident rows contain only closed type/reason codes,
-  opaque Run/Assignment IDs, Receipt revision, evidence version/digest and time;
-  never store or hash raw exceptions, paths, parameters, logs, credentials,
-  Manifest content or Execution References.
-- Keep the order owned by `RunRuntime`: bounded Dispatcher reservation,
-  verified Manifest header, atomic Receipt+Binding, FIFO enqueue, first
-  Resource Lease, sole Assignment+write-once Process Tree Owner CAS, shared
-  runner, verified completion evidence, fenced terminal Receipt. The canonical
-  Linux Adapter must use the exact persisted user-systemd scope, retain the
-  parent-death launcher plus bubblewrap PID/cgroup namespace, and prove the
-  unit absent or `cgroup.events populated=0` before stop/Lease release.
-- Restart and shutdown never reconstruct executable payloads. Unassigned queued
-  Runs may become interrupted directly; assigned Runs first reconcile the
-  durable Owner and then prefer exact verified Manifest completion. Missing or
-  unconfirmed ownership/evidence keeps the Receipt nonterminal and quarantines
-  novel scientific admission; duplicate, Receipt and cancel observation remain
-  available. Do not restore bulk assigned-Run interruption as a shortcut.
-- These Adapters do not authorize Workflow/Candidate-plan/Autonomous/legacy
-  Job, remaining CLI or Agent-tool migration, ADR 0062 dynamic envelopes,
-  optimistic resources, or a persistent/cross-process executable queue.
-
-### Channel Surface — authoritative Telegram text/photo + Feishu text
+### Channel surface
 
 ```bash
 pip install -e ".[channels]"     # platform SDKs are extras
-python -m omicsclaw.surfaces.channels --channels telegram
-python -m omicsclaw.surfaces.channels --channels feishu
-python -m omicsclaw.surfaces.channels --list
-make bot-telegram                # Makefile alias
+oc channel -- --channels telegram
+oc channel -- --channels feishu
 ```
 
-Adapter implementations remain for Telegram, Feishu, Slack, Discord, WeChat,
-WeCom, DingTalk, iMessage, Email and QQ. The production scope is the shared
-runner and `ControlRuntime`: Owner-only Telegram text plus one ordinary photo
-with an optional caption, and Owner-only Feishu text-only. Telegram photos use
-the Backend-owned Attachment Store and durable structured References; terminal
-text commits one canonical Outbound Delivery with the Turn and leaves through
-the persistent Delivery Pump. `FEISHU_ALLOWED_SENDERS` and
-`FEISHU_BOT_OPEN_ID` are mandatory; the Bot open ID proves a group message
-mentioned this Bot. The other Channel Adapters remain gated. Telegram albums,
-documents and audio/video, Feishu attachments/rich post/cards, and all outbound
-media remains incomplete and fail-closed. This is not full ADR or media
-completion. Do not restore legacy direct-dispatch startup as a compatibility
-shortcut. Cross-cutting concerns live in `omicsclaw/services/`.
+Telegram and Feishu are the cut-over adapters; the rest stay gated. Several
+channels in one process share one `ControlRuntime`.
 
-The OmicsBot persona used across all Channel adapters is in `SOUL.md`.
-Configuration goes in `.env` at the project root — see
-`omicsclaw/surfaces/channels/README.md` for the per-platform variables.
+Required environment, beyond the provider keys:
 
-### CLI Surface — prompt_toolkit REPL + Textual TUI
+- `TELEGRAM_BOT_TOKEN` — from @BotFather.
+- `FEISHU_APP_ID` + `FEISHU_APP_SECRET` — from the Feishu dev console.
+- `FEISHU_ALLOWED_SENDERS` — comma-separated owner `open_id` values.
+  **Required**: ingress admits nobody else and refuses to start without it.
+- `FEISHU_BOT_OPEN_ID` — this bot's own `open_id`. Optional, but group chats
+  fail closed without it, because a group @-mention cannot otherwise be
+  attributed to this bot rather than to another mentioned human.
 
-```
-omicsclaw.py interactive
-    └── omicsclaw/surfaces/cli/interactive.py   # prompt_toolkit REPL
-           ├── omicsclaw/runtime/agent/state.py # LLM tool loop (shared with other Surfaces)
-           ├── _session.py                     # SQLite session persistence
-           ├── _mcp.py                         # MCP server management
-           └── _constants.py                   # Banner, slash commands
+A sender outside the allow-list produces **no turn at all**, not a polite
+refusal. The persona every adapter shares is `SOUL.md`; per-platform
+configuration goes in `.env` at the project root.
 
-omicsclaw.py tui   (or --ui tui)
-    └── omicsclaw/surfaces/cli/tui.py           # Textual full-screen TUI
-```
-
-The CLI Surface also hosts the one-shot interactive setup wizard
-(`omicsclaw/surfaces/cli/setup_wizard.py`) reached via `oc onboard`,
-and the `oc` console-script launcher (`omicsclaw/surfaces/cli/launcher.py`)
-that loads the repo-root `omicsclaw.py` skill runner.
-
-### Interactive Mode Commands
+### CLI surface
 
 ```bash
-# Enter interactive CLI (default, uses prompt_toolkit REPL)
-oc interactive
-
-# Enter full-screen TUI (requires: pip install textual)
-oc tui
-oc interactive --ui tui
-
-# Single-shot (non-interactive)
-oc interactive -p "run spatial-preprocessing demo"
-
-# Resume a previous session
-oc interactive --session <session-id>
-
-# Override model/provider
-oc interactive --provider deepseek --model deepseek-chat
-
-# Set working directory
-oc interactive --workspace /path/to/workdir
-
-# Daemon mode (persistent workspace, default behavior)
-oc interactive --mode daemon
-
-# Run mode (isolated per-session workspace)
-oc interactive --mode run
-
-# Run mode with a named workspace
-oc interactive --mode run --name my-analysis
+oc cli                          # REPL
+oc cli --prompt-file task.md    # one exchange, then exit
+oc cli -- --session <id>        # continue a stored conversation
 ```
+
+`oc cli --help` lists the deployment flags (provider, model, workspace,
+`--permission-mode`, `--skills-index`, `--memory`); `oc cli -- --help`
+lists the REPL's own.
+
+The Textual TUI was **not** ported. A faithful port drags in twelve modules
+that do not import, and keeping only the Textual skeleton would be a
+rewrite rather than a port.
+
 
 ### Slash Commands (inside interactive session)
 
@@ -526,31 +419,27 @@ Sessions live in `<workspace>/.omicsclaw/memory.db`. `SqliteSessionStore.list`
 filters nothing — the database file is the only isolation boundary — so a
 multi-user surface must not share one file and offer `/resume`.
 
-### MCP Server Management
+### MCP servers
 
-```bash
-# Add an MCP server (stdio transport)
-oc mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
+Servers are declared in `<workspace>/.mcp.json` and connected by
+`open_app(config)` **before** the tool registry is built, so their tools are
+in the tool snapshot and the context budget from the first turn. They join
+the registry as `mcp__{server}__{tool}` and the main loop runs them with no
+special case.
 
-# Add an HTTP-based MCP server
-oc mcp add my-server http://localhost:8080
+Both transports are supported: stdio and Streamable HTTP. A server that
+fails to connect is logged and left out rather than failing start-up.
 
-# List all configured MCP servers
-oc mcp list
+Two rules worth knowing before adding one:
 
-# Remove an MCP server
-oc mcp remove sequential-thinking
+- **Every MCP call asks for approval**, showing the arguments and where they
+  go. A remote server is a way for data to leave this machine.
+- **Stdio servers inherit a minimal environment**, so API keys and bot
+  tokens stay out of third-party processes.
 
-# Show config file location
-oc mcp config
-# → ~/.config/omicsclaw/mcp.yaml
-```
+`/mcp` inside the REPL reports what this deployment actually connected.
+There is no `oc mcp add`; edit `.mcp.json`.
 
-MCP tools are loaded from `~/.config/omicsclaw/mcp.yaml` at session start.
-Requires `langchain-mcp-adapters` for actual tool execution:
-```bash
-pip install langchain-mcp-adapters
-```
 
 ### Session Persistence
 
@@ -567,28 +456,38 @@ The legacy surface used `~/.config/omicsclaw/sessions.db`; that path belongs to
 ### Dependencies
 
 ```bash
-# Minimal (CLI mode)
-pip install prompt-toolkit rich questionary pyyaml aiosqlite
-
-# Or via pyproject.toml extras
-pip install -e ".[interactive]"
-
-# Full TUI support
-pip install -e ".[tui]"
-# then: pip install textual>=0.80
+pip install -e ".[interactive]"   # prompt_toolkit REPL
+pip install -e ".[desktop]"       # FastAPI backend
+pip install -e ".[channels]"      # platform SDKs
 ```
+
+Neither vendor SDK is required to run the test suite: both provider adapters
+import theirs lazily inside a client factory, and no test may need one.
 
 ### Provider Runtime Contract
 
-Interactive CLI provider changes share the runtime resolution path with the app backend: `LLM_PROVIDER=custom` must honor `LLM_BASE_URL`, `OMICSCLAW_MODEL`, and `LLM_API_KEY`; explicit CLI `--provider` / `--model` overrides win over environment defaults; malformed custom endpoints should return actionable diagnostics instead of `(no response)`.
-
-### TUI Implementation Notes
-
-TUI helpers under `omicsclaw/surfaces/cli/_tui_support.py` stay dependency-light so support tests can run without optional memory or Textual installs. When adding Textual containers, mount the parent widget into the live tree before mounting child widgets.
+`LLM_PROVIDER=custom` must honour `LLM_BASE_URL`, `OMICSCLAW_MODEL` and
+`LLM_API_KEY`. An explicit `--provider` / `--model` wins over the
+environment. A malformed custom endpoint must produce an actionable
+diagnostic rather than `(no response)`.
 
 ## Safety Boundaries
 
-1. **Local-first**: No data upload
-2. **Disclaimer required**: Every report must include the OmicsClaw disclaimer
-3. **No hallucinated science**: All parameters trace to SKILL.md or cited tools
-4. **Security filtering**: `omicsclaw.py` enforces `allowed_extra_flags` whitelists
+1. **Local-first**: no data upload. `omicsclaw/tools/_websafety.py` is the
+   network half of that rule — scheme allow-list, userinfo rejection, DNS
+   checked against 14 CIDR ranges with every resolved address judged,
+   fail-closed on lookup failure, re-checked on every redirect hop, and the
+   socket pinned to the address that was validated.
+2. **Disclaimer required**: every report must carry the OmicsClaw
+   disclaimer — research and educational tool, not a medical device.
+3. **No hallucinated science**: every parameter traces to a `SKILL.md` or a
+   cited tool.
+4. **Permission gate**: `omicsclaw/permission/` decides whether a tool call
+   happens, from a rule file at `<workspace>/.omicsclaw/settings.json` plus
+   the session's `--permission-mode`. 28 built-in patterns escalate a
+   dangerous shell command to an approval prompt that says why, five of them
+   for data **leaving** the machine (`scp`, remote `rsync`, `ssh`, `curl`
+   uploads). `require_approval` fails closed.
+5. **Workspace containment**: the file tools resolve every path through
+   `omicsclaw/tools/_workspace.py`, which refuses an escape by comparing
+   path components and refuses a credential path even inside the workspace.
