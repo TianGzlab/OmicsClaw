@@ -120,8 +120,12 @@ OmicsClaw/
 │   │   ├── channels/           #   Channel Surface — Telegram text/photo + Feishu text authoritative; legacy adapters gated
 │   │   ├── desktop/            #   Desktop Surface — FastAPI server for Electron / Next.js frontends
 │   │   └── cli/                #   CLI Surface — prompt_toolkit REPL, Textual TUI, setup wizard, `oc` launcher
+│   ├── schema/                 # ← The shared contract (ADR 0077). Stdlib-only, vendor-neutral leaf: Message/ToolCall/ToolResult/ToolDefinition/Usage/StreamChunk. Every boundary may import it; it imports none of them.
+│   ├── provider/               # ← The model adapter layer (plan 0026). Singular. LLMProvider + OpenAI/Anthropic adapters; imports only schema.
+│   ├── engine/                 # ← The ReAct Main Loop (plan 0027). Imports only schema + provider.
 │   ├── runtime/                # Agent loop, context assembly, tool registry, policy, transcript storage (ADR 0004 P3)
 │   │   ├── agent/, context/, tools/, policy/, storage/
+│   │   └── engine/             #   Legacy surface-agnostic loop (run_engine_loop) — was omicsclaw/engine/, moved by plan 0027 task 0
 │   ├── control/                # Authoritative control.db schema, lifetime lock, typed repository commands (ADR 0053–0064)
 │   ├── skill/                  # Skill registry, runner, lookup, subprocess execution (ADR 0004 P2)
 │   ├── providers/              # LLM provider registry + OpenAI/ccproxy adapters (ADR 0004 P1)
@@ -134,7 +138,6 @@ OmicsClaw/
 │   ├── remote/                 # Remote runtime (jobs, workspace resolution)
 │   ├── knowledge/              # Knowhow / semantic index
 │   ├── extensions/             # MCP integration etc.
-│   ├── engine/                 # Shared engine primitives
 │   ├── execution/              # Execution helpers
 │   ├── interactive/ ⛔          # MOVED → surfaces/cli/ (ADR 0005)
 │   ├── channels/    ⛔          # MOVED → surfaces/channels/ (ADR 0005)
@@ -483,23 +486,45 @@ oc interactive --mode run --name my-analysis
 
 ### Slash Commands (inside interactive session)
 
+What the rebuilt REPL (`omicsclaw/entry/cli/`, reached by `oc cli`) answers.
+The 38-row catalogue in `_constants.py` is the ported table, not the menu:
+anything not listed here is answered with "not available in this build"
+rather than being sent to the model as a question.
+
 | Command | Description |
 |---------|-------------|
-| `/skills [domain]` | List all skills (optionally filter by domain) |
-| `/run <skill> [--demo] [--input <path>]` | Run a skill directly |
-| `/sessions` | List recent sessions |
-| `/resume [id]` | Resume a session (interactive picker if no ID) |
-| `/delete <id>` | Delete a saved session |
-| `/current` | Show current session info |
-| `/new` | Start a new session |
-| `/clear` | Clear conversation history |
-| `/mcp list` | List MCP servers |
-| `/mcp add <name> <cmd> [args]` | Add MCP server |
-| `/mcp remove <name>` | Remove MCP server |
-| `/config list` | View configuration |
-| `/config set <key> <val>` | Update configuration |
-| `/help` | Show all commands |
-| `/exit` | Quit OmicsClaw |
+| `/skills [domain]` | List indexed skills (optionally filter by domain) |
+| `/sessions` | List recent conversations and say whether they are stored |
+| `/resume [id\|number]` | Continue an earlier conversation; no argument lists them |
+| `/current` | Show the current session id and workspace |
+| `/new` | Start a new conversation |
+| `/clear` | Same as `/new`: a conversation with no history |
+| `/compact` | Summarize this conversation now, keeping the recent messages |
+| `/plan`, `/tasks` | Show this conversation's plan and task statuses (read-only) |
+| `/usage` | Show accumulated input/output tokens |
+| `/mcp` | Report the MCP servers this deployment connected |
+| `/help` | List these commands |
+| `/exit` | Quit OmicsClaw (aliases: `/quit`, `/q`) |
+
+Two non-slash prefixes:
+
+| Prefix | Description |
+|---------|-------------|
+| `!<cmd>` | Run a shell command in the workspace, bypassing the model and the approval gate; the record is prefixed to the next question. Bounded by `_shell.SHELL_TIMEOUT_S` (60 s) — a separate number from `tool_timeout_s`, because a person is waiting for this one. |
+
+Approval cards take three grants: `y` allows once, `s` allows that exact call
+for the rest of the conversation without writing anything, `a` writes an
+`allow` rule into `<workspace>/.omicsclaw/settings.json`. Anything else denies,
+and whatever was typed becomes the denial reason.
+
+`/plan` and `/tasks` are read-only by decision: the agent decides when a job is
+worth planning, so there is no `/approve-plan`, `/resume-task` or
+`/do-current-task`. `/run`, `/doctor`, `/context`, `/memory` and the extension
+commands belong to families that are each a step of their own.
+
+Sessions live in `<workspace>/.omicsclaw/memory.db`. `SqliteSessionStore.list`
+filters nothing — the database file is the only isolation boundary — so a
+multi-user surface must not share one file and offer `/resume`.
 
 ### MCP Server Management
 
@@ -529,8 +554,15 @@ pip install langchain-mcp-adapters
 
 ### Session Persistence
 
-Sessions are saved to `~/.config/omicsclaw/sessions.db` (SQLite).
-Conversation history is preserved across restarts and can be resumed by ID.
+The rebuilt REPL stores conversations in `<workspace>/.omicsclaw/memory.db`
+(SQLite), beside the long-term memory entries — one file per workspace, not one
+per machine user. History survives a restart and `oc cli -- --session <id>` or
+`/resume <id>` continues it. With `memory` switched off there is no database and
+conversations are held in memory only; `/sessions` says which of the two this
+deployment is.
+
+The legacy surface used `~/.config/omicsclaw/sessions.db`; that path belongs to
+`omicsclaw/surfaces/cli/`, which does not import today.
 
 ### Dependencies
 

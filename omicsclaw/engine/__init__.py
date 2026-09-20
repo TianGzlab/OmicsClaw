@@ -1,37 +1,73 @@
-"""Surface-agnostic LLM engine helpers.
+"""``omicsclaw.engine`` — the ReAct main loop.
 
-This package exists so user-facing surfaces (``bot/``,
-``omicsclaw/app/``, ``omicsclaw/interactive/``) can share the
-``llm_tool_loop`` and its supporting helpers without any of them
-having to reach back into ``bot/`` (which would create a cycle and
-which the ``tests/test_no_reverse_imports.py`` guardrail forbids).
+Plan 0027, step 3 of the staged rebuild. Steps 1 and 2 delivered the
+vocabulary (:mod:`omicsclaw.schema`) and the interpreter that speaks it
+(:mod:`omicsclaw.provider`); this package is the loop that moves those
+types until the model has nothing left to ask for::
 
-Phase 1 P0-B (this module) seeds the package with the pure helpers
-extracted from ``bot/agent_loop.py`` — the model-identity anchor and
-its companion resolver. Phase 1 P0-C will land the main loop here as
-``omicsclaw/engine/loop.py``.
+    from omicsclaw.engine import AgentEngine, EngineConfig
+
+    engine = AgentEngine(provider, tools, EngineConfig(max_turns=50))
+    result = await engine.run(messages)
+
+The loop owns turn orchestration, tool scheduling, Observation injection
+and the decision to stop — and owns nothing else. Prompt assembly,
+session persistence and the tools themselves live elsewhere; compaction
+reaches the loop through :class:`~omicsclaw.engine.compactor.
+HistoryCompactor`, an optional per-run argument, and
+:class:`~omicsclaw.engine.augmentor.TurnAugmentor` is its sibling — also
+optional, also per run, consulted after it, and able only to *append* to
+the call being made. :class:`~omicsclaw.engine.executor.ToolExecutor`
+is exported as the seam those tools will satisfy **structurally**,
+without importing this package, exactly as an adapter satisfies
+``LLMProvider``.
+
+``execute_tool_calls`` and ``observations`` are exported beside it
+because scheduling policy — concurrency, per-tool timeouts, the ordering
+of Observations — is the loop's business rather than any tool's, and a
+caller assembling its own turn should reach for the same scheduler the
+engine uses instead of writing a second one.
+
+:class:`~omicsclaw.engine.executor.ConcurrencyAwareExecutor` and
+:class:`~omicsclaw.engine.executor.DeadlineAwareExecutor` are the two
+**optional** halves of that seam: the first lets an executor mark a tool
+as a barrier so it runs alone, the second lets it carry the per-call
+timeout pause down to a tool waiting on a human. An executor that
+implements neither is driven exactly as the two-method seam always was.
+
+This package imports ``omicsclaw.schema``, ``omicsclaw.provider`` and the
+standard library, and nothing else. No vendor SDK, no logging, no I/O:
+importing the loop never requires an optional extra to be installed.
 """
 
-from __future__ import annotations
-
-from ._dependencies import EngineDependencies
-from ._identity_anchor import (
-    apply_model_identity_anchor,
-    resolve_effective_model_provider,
+from .augmentor import TurnAugmentor
+from .compactor import HistoryCompactor
+from .config import EngineConfig
+from .executor import (
+    ConcurrencyAwareExecutor,
+    DeadlineAwareExecutor,
+    TimeoutPause,
+    ToolExecutor,
+    execute_tool_calls,
+    observations,
 )
-from .loop import (
-    DEFAULT_MAX_TOKENS,
-    LLM_NOT_CONFIGURED_MESSAGE,
-    MAX_TOOL_ITERATIONS,
-    run_engine_loop,
-)
+from .loop import AgentEngine
+from .types import EngineError, EngineEvent, EngineEventType, RunResult, StopReason
 
 __all__ = [
-    "DEFAULT_MAX_TOKENS",
-    "EngineDependencies",
-    "LLM_NOT_CONFIGURED_MESSAGE",
-    "MAX_TOOL_ITERATIONS",
-    "apply_model_identity_anchor",
-    "resolve_effective_model_provider",
-    "run_engine_loop",
+    "AgentEngine",
+    "ConcurrencyAwareExecutor",
+    "DeadlineAwareExecutor",
+    "EngineConfig",
+    "EngineError",
+    "EngineEvent",
+    "EngineEventType",
+    "HistoryCompactor",
+    "RunResult",
+    "StopReason",
+    "TimeoutPause",
+    "ToolExecutor",
+    "TurnAugmentor",
+    "execute_tool_calls",
+    "observations",
 ]

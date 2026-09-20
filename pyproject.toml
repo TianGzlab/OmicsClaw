@@ -355,6 +355,21 @@ channels = [
 # python-dotenv, pyyaml, nbformat, jupyter_client, ipykernel moved to         #
 # environment.yml Tier 4.                                                      #
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# OpenTelemetry export — optional, and deliberately so.                       #
+# `omicsclaw/observability/` declares its own Span/Tracer/Meter contract in   #
+# the standard library and ships a stdlib `stdout` backend, so tracing works  #
+# with nothing installed here. This extra is needed only for                  #
+# OTEL_EXPORTER_TYPE=otlp (Langfuse / Grafana / Jaeger). Without it that      #
+# setting degrades to no-op with one warning, never a crash —                 #
+# `omicsclaw/observability/otel.py` is the only module that imports it, and   #
+# it does so inside a function for exactly this reason.                       #
+# --------------------------------------------------------------------------- #
+otel = [
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp-proto-http>=1.24",
+]
+
 desktop = [
     # python-multipart is required by FastAPI's File / Form parsing.
     # The /notebook/files/upload endpoint in omicsclaw.surfaces.desktop.notebook.router
@@ -438,11 +453,15 @@ dev = [
 Homepage = "https://github.com/OmicsClaw/OmicsClaw"
 Repository = "https://github.com/OmicsClaw/OmicsClaw"
 
+# Two names, one landing point (plan 0037 §6). `omicsclaw-chat` / `oc-chat`
+# were removed rather than repointed: `oc cli` is the same thing, and a
+# fourth name for it is what the redesign is for. Nothing was broken by
+# either change -- all four scripts already died on import (`oc`, `omicsclaw`)
+# or on the first call (`oc-chat`, which imports and then raises
+# ModuleNotFoundError: omicsclaw.control), measured 2026-09-20.
 [project.scripts]
-omicsclaw = "omicsclaw.surfaces.cli.launcher:main"
-omicsclaw-chat = "omicsclaw.surfaces.cli:main"
-oc = "omicsclaw.surfaces.cli.launcher:main"
-oc-chat = "omicsclaw.surfaces.cli:main"
+omicsclaw = "omicsclaw.launch:main"
+oc = "omicsclaw.launch:main"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

@@ -39,13 +39,3 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if _is_skill_demo_test(item):
             item.add_marker(pytest.mark.demo)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_process_resource_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prevent one test's detected host budget leaking into another test."""
-
-    from omicsclaw.skill import resource_scheduler
-
-    monkeypatch.setattr(resource_scheduler, "_PROCESS_SCHEDULER", None)
-    monkeypatch.setattr(resource_scheduler, "_PROCESS_SCHEDULER_LOOP", None)

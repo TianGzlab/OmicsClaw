@@ -183,3 +183,7 @@ tests/eval/results/*/
 npm/dist/
 npm/**/*.tgz
 npm/**/node_modules/
+
+# Agent state written into a workspace: offloaded tool results,
+# compaction logs (plan 0035), remote uploads.
+.omicsclaw/

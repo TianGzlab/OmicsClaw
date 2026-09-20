@@ -1,250 +1,143 @@
-# pyright: reportArgumentType=false, reportCallIssue=false
+"""SQLite connection management and schema for the memory layer.
 
-"""
-Database connection and session management for OmicsClaw Graph Memory.
-
-Ported from nocturne_memory with OmicsClaw configuration.
-Supports both SQLite (local, default) and PostgreSQL (remote).
+One :class:`Database` owns one connection and serialises every statement
+through a lock, so callers may reach it from any thread — which is what
+``asyncio.to_thread`` does on their behalf.
 """
 
-import os
-from contextlib import asynccontextmanager
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+import threading
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse, parse_qs
+from typing import Any, Callable, TypeVar
 
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+T = TypeVar("T")
 
-# async_sessionmaker added in SQLAlchemy 2.0; fall back to sessionmaker for 1.4+
-try:
-    from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
-except ImportError:
-    _async_sessionmaker = None  # type: ignore
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id  TEXT PRIMARY KEY,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    summary     TEXT NOT NULL DEFAULT '',
+    anchors     TEXT NOT NULL DEFAULT '',
+    values_json TEXT NOT NULL DEFAULT ''
+);
 
-from .models import Base
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL DEFAULT '',
+    reasoning   TEXT NOT NULL DEFAULT '',
+    tool_calls  TEXT NOT NULL DEFAULT '',
+    tool_call_id TEXT NOT NULL DEFAULT '',
+    name        TEXT NOT NULL DEFAULT '',
+    is_error    INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (session_id) REFERENCES sessions (session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_session
+    ON messages (session_id, position);
+
+CREATE TABLE IF NOT EXISTS long_term_memories (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    category     TEXT NOT NULL DEFAULT '',
+    importance   INTEGER NOT NULL DEFAULT 0,
+    signature    TEXT UNIQUE,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL,
+    last_used_at REAL,
+    use_count    INTEGER NOT NULL DEFAULT 0,
+    ttl_days     INTEGER,
+    disabled     INTEGER NOT NULL DEFAULT 0,
+    tags         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+    USING fts5(id UNINDEXED, title, content);
+"""
 
 
-# Default DB URL — uses ~/.config/omicsclaw/memory.db
-_DEFAULT_DB_DIR = Path.home() / ".config" / "omicsclaw"
-_DEFAULT_DB_URL = f"sqlite+aiosqlite:///{_DEFAULT_DB_DIR / 'memory.db'}"
+BUSY_TIMEOUT_S = 15.0
+"""How long a statement waits for another connection to let go."""
 
 
-def _expand_sqlite_home(url: str) -> str:
-    """Expand a leading ``~`` in a SQLite URL's path component.
+class Database:
+    """A SQLite connection shared safely across threads.
 
-    aiosqlite passes the path straight to the OS, so a URL like
-    ``sqlite+aiosqlite:///~/.config/omicsclaw/memory.db`` (written by the
-    onboard wizard or copied by hand into ``.env``) gets opened as a
-    literal ``~`` directory relative to the process cwd — silently
-    creating a ghost database that no other tool can find.
-
-    This normalises any SQLite URL whose path starts with ``~`` against
-    the user's real home directory. URLs without ``~``, non-SQLite URLs,
-    and the in-memory form (``sqlite:///:memory:``) are returned
-    unchanged.
+    :param path: File to open, or ``":memory:"`` for a transient database.
     """
-    if not url.startswith("sqlite"):
-        return url
-    prefix, sep, db_path = url.partition("///")
-    if not sep or not db_path or db_path.startswith(":"):
-        return url
-    if "~" not in db_path:
-        return url
-    return f"{prefix}///{Path(db_path).expanduser()}"
 
-
-def _get_database_url() -> str:
-    """Resolve database URL from environment or default."""
-    return _expand_sqlite_home(os.getenv("OMICSCLAW_MEMORY_DB_URL", _DEFAULT_DB_URL))
-
-
-class DatabaseManager:
-    """Async database connection manager.
-
-    Provides session lifecycle management (commit/rollback) and table creation.
-    All business-logic services receive a ``DatabaseManager`` via injection.
-    """
-
-    def __init__(self, database_url: Optional[str] = None):
-        # _get_database_url already expands ~; re-apply here so callers
-        # passing an explicit ``database_url`` (e.g. CompatMemoryStore,
-        # tests, integrations) get the same defensive treatment.
-        self.database_url = _expand_sqlite_home(database_url or _get_database_url())
-        self.db_type = self._detect_database_type(self.database_url)
-
-        # Ensure SQLite directory exists
-        if self.db_type == "sqlite":
-            db_path = self.database_url.split("///", 1)[-1] if "///" in self.database_url else ""
-            if db_path:
-                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-        engine_kwargs = {"echo": False}
-        if self.db_type == "postgresql":
-            parsed = urlparse(self.database_url)
-            is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-
-            connect_args = {}
-            parsed_qs = parse_qs(parsed.query, keep_blank_values=True)
-            ssl_values = parsed_qs.get("ssl", []) + parsed_qs.get("sslmode", [])
-            ssl_value = ssl_values[-1].lower() if ssl_values else ""
-            ssl_disabled = ssl_value in ("disable", "false", "off", "0", "no")
-
-            if not is_local and not ssl_disabled:
-                connect_args["ssl"] = "require"
-                connect_args["statement_cache_size"] = 0
-
-            engine_kwargs.update(
-                {
-                    "pool_size": 10,
-                    "max_overflow": 20,
-                    "pool_recycle": 3600,
-                    "pool_pre_ping": True,
-                    "connect_args": connect_args,
-                }
-            )
-
-        self.engine = create_async_engine(self.database_url, **engine_kwargs)
-
-        if self.db_type == "sqlite":
-            @event.listens_for(self.engine.sync_engine, "connect")
-            def set_sqlite_pragma(dbapi_connection, connection_record):
-                cursor = dbapi_connection.cursor()
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.close()
-
-        if _async_sessionmaker is not None:
-            self.async_session = _async_sessionmaker(
-                self.engine, class_=AsyncSession, expire_on_commit=False
-            )
-        else:
-            # SQLAlchemy 1.4 fallback
-            self.async_session = sessionmaker(
-                self.engine, class_=AsyncSession, expire_on_commit=False  # type: ignore
-            )
-
-    @staticmethod
-    def _detect_database_type(url: str) -> str:
-        if "postgresql" in url:
-            return "postgresql"
-        return "sqlite"
-
-    @asynccontextmanager
-    async def session(self):
-        """Get an async session context manager."""
-        async with self.async_session() as session:
+    def __init__(self, path: str | Path = ":memory:") -> None:
+        self.path = str(path)
+        if self.path != ":memory:":
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False plus the lock below: one connection
+        # reached from many worker threads, rather than one connection per
+        # thread, which would give ":memory:" a separate empty database per
+        # thread.
+        # ``timeout`` is the busy timeout: a statement blocked by another
+        # connection waits this long before giving up, which is what makes
+        # several processes on one file workable.
+        self._conn = sqlite3.connect(
+            self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_S
+        )
+        self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            # Switching the journal mode needs the database to itself, and
+            # SQLite answers SQLITE_BUSY without consulting the busy
+            # handler rather than waiting. Another process opening the same
+            # file at the same moment is therefore expected, not an error:
+            # whichever connection gets there first converts the file, and
+            # the mode is a property of the file, not of this connection.
             try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+                self._conn.execute("PRAGMA journal_mode = WAL")
+            except sqlite3.OperationalError:
+                pass
+            self._conn.executescript(SCHEMA)
+            self._conn.commit()
 
-    @asynccontextmanager
-    async def _optional_session(self, session: Optional[AsyncSession] = None):
-        """Helper to use an existing session or create a new one."""
-        if session:
-            yield session
-        else:
-            async with self.session() as new_session:
-                yield new_session
+    def run(self, work: Callable[[sqlite3.Connection], T]) -> T:
+        """Call *work* with the connection held, committing on success.
 
-    async def init_db(self):
-        """Create tables if they don't exist, and ensure root node is present."""
-        try:
-            from sqlalchemy import inspect as sa_inspect
-
-            def check_initialized(connection):
-                return sa_inspect(connection).has_table("memories")
-
-            async with self.engine.begin() as conn:
-                is_initialized = await conn.run_sync(check_initialized)
-                if not is_initialized:
-                    await conn.run_sync(Base.metadata.create_all)
-
-            # Run any pending schema migrations after the base schema exists.
-            # Imported lazily to avoid a circular import at module load time.
-            from omicsclaw.memory.migrations import run_pending
-            await run_pending(self)
-
-            # Ensure the root node exists (all edges reference it as parent)
-            await self._ensure_root_node()
-
-            # Create FTS5 virtual table for SQLite if not exists
-            if self.db_type == "sqlite":
-                await self._create_fts_table()
-
-        except Exception as e:
-            db_url = self.database_url
-            if "@" in db_url and ":" in db_url:
-                try:
-                    parsed = urlparse(db_url)
-                    if parsed.password:
-                        db_url = db_url.replace(f":{parsed.password}@", ":***@")
-                except Exception:
-                    pass
-            raise RuntimeError(
-                f"Failed to connect to database.\n"
-                f"  URL: {db_url}\n"
-                f"  Error: {e}\n\n"
-                f"Troubleshooting:\n"
-                f"  - Check OMICSCLAW_MEMORY_DB_URL in .env\n"
-                f"  - For SQLite, ensure the directory exists\n"
-                f"  - For PostgreSQL, ensure the host is reachable"
-            ) from e
-
-    async def _ensure_root_node(self):
-        """Insert the root node into the nodes table if it doesn't exist.
-
-        The graph is a tree rooted at ROOT_NODE_UUID. All top-level edges
-        reference it as parent_uuid, so the row in `nodes` MUST exist before
-        any edge can be created (due to FOREIGN KEY constraints).
+        :param work: Receives the connection; its return value is passed
+            through.
+        :returns: Whatever *work* returned.
+        :raises sqlite3.Error: Propagated after the transaction is rolled
+            back.
         """
-        from sqlalchemy import select
-        from .models import Node, ROOT_NODE_UUID
-
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Node).where(Node.uuid == ROOT_NODE_UUID)
-            )
-            if result.scalars().first() is None:
-                session.add(Node(uuid=ROOT_NODE_UUID))
-                await session.commit()
-
-    async def _create_fts_table(self):
-        """Create SQLite FTS5 virtual table for full-text search."""
-        from sqlalchemy import text
-
-        async with self.async_session() as session:
+        with self._lock:
             try:
-                # Check if FTS table already exists
-                result = await session.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='search_documents_fts'")
-                )
-                if result.scalar() is None:
-                    await session.execute(
-                        text("""
-                            CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
-                            USING fts5(
-                                namespace,
-                                domain,
-                                path,
-                                node_uuid,
-                                uri,
-                                content,
-                                disclosure,
-                                search_terms,
-                                content=search_documents,
-                                content_rowid=rowid
-                            )
-                        """)
-                    )
-                    await session.commit()
-            except Exception:
-                # FTS5 may not be available on all SQLite builds
-                await session.rollback()
+                result = work(self._conn)
+            except BaseException:
+                self._conn.rollback()
+                raise
+            self._conn.commit()
+            return result
 
-    async def close(self):
-        """Close the database connection."""
-        await self.engine.dispose()
+    async def arun(self, work: Callable[[sqlite3.Connection], T]) -> T:
+        """Await :meth:`run` on a worker thread.
+
+        :param work: Receives the connection; its return value is passed
+            through.
+        :returns: Whatever *work* returned.
+        """
+        return await asyncio.to_thread(self.run, work)
+
+    def close(self) -> None:
+        """Close the connection. Calling this twice is harmless."""
+        with self._lock:
+            self._conn.close()
+
+    def __enter__(self) -> "Database":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()

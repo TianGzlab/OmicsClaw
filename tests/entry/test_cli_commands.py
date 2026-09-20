@@ -1,0 +1,495 @@
+"""The commands plan 0041 reconnected: sessions, resume, compact, tasks.
+
+Every test here builds a **real**
+:class:`~omicsclaw.entry.assembly.AgentApp` — real registry, real SQLite
+session store under ``tmp_path``, real plan book — over the scripted
+provider ``test_turn_runner.py`` defines, and reads what the surface
+printed out of a :class:`io.StringIO`. The point of that is the same as
+in ``test_cli_repl.py``: the commands below are all *wiring*, and a
+double in the middle of wiring proves only that the double was called.
+
+There is no ``pytest-asyncio`` on this machine, so every test drives
+:func:`asyncio.run` itself and **every await is inside an
+:func:`asyncio.wait_for`** — a defect in this loop shows up as a hang,
+and a hang with no timeout plugin is a test run that never finishes.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import io
+import json
+import pathlib
+
+from omicsclaw.context import ContextBudget
+from omicsclaw.engine import AgentEngine
+from omicsclaw.entry.cli import Repl, ScriptedSource, Screen
+from omicsclaw.entry.session import SessionRegistry, attach_sessions
+from omicsclaw.memory import SqliteSessionStore, StoredSession
+from omicsclaw.planning import PLAN_WRITE_TOOL_NAME
+from omicsclaw.schema import Message, Role, ToolCall
+from tests.entry.test_cli_repl import (  # type: ignore[import-not-found]
+    WAIT_S,
+    answering,
+    build,
+    repl_over,
+)
+from tests.entry.test_session import Canned  # type: ignore[import-not-found]
+from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
+    Scripted,
+    Sleeping,
+    calling,
+    make_app,
+)
+
+
+def run(coro):
+    """One bounded await, driven without a timeout plugin."""
+    return asyncio.run(asyncio.wait_for(coro, WAIT_S))
+
+
+async def drive_repl(app, lines, **kwargs) -> str:
+    """Run a whole REPL over *lines* and return everything it printed."""
+    repl, _source, buffer = repl_over(app, lines, **kwargs)
+    await asyncio.wait_for(repl.run(), WAIT_S)
+    return buffer.getvalue()
+
+
+# ---- /sessions --------------------------------------------------------
+
+
+def test_sessions_tells_a_stored_deployment_from_an_unstored_one(tmp_path):
+    """One test, both deployments, because one line used to cover both.
+
+    ``/sessions`` printed "Sessions are in-memory only in this build"
+    whatever the deployment was, and that sentence became false the day
+    ``attach_sessions`` started defaulting to the app's own SQLite
+    database. Asserting the two wordings *in the same test* is what makes
+    the regression — one sentence standing in for two truths — impossible
+    to reintroduce by editing one branch.
+    """
+
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "lost").mkdir()
+
+    async def drive():
+        stored = build(tmp_path / "kept", answering("unused"))
+        kept = await drive_repl(stored, ["/sessions", "/exit"])
+        await asyncio.wait_for(stored.aclose(), WAIT_S)
+
+        forgetful = build(tmp_path / "lost", answering("unused"), memory=False)
+        lost = await drive_repl(forgetful, ["/sessions", "/exit"])
+        await asyncio.wait_for(forgetful.aclose(), WAIT_S)
+        return kept, lost
+
+    kept, lost = asyncio.run(drive())
+
+    assert "in-memory only" not in kept
+    assert "keeps them between runs" in kept
+    assert "stores no conversations" in lost
+    assert "keeps them between runs" not in lost
+
+
+def test_sessions_lists_the_conversations_earlier_runs_left(tmp_path):
+    """Not just the one being had — that is what it used to report.
+
+    Two processes leave two conversations in one workspace database; a
+    third has to be able to see both of them, or ``/resume`` has nothing
+    to resume and no way to find out what there is.
+    """
+
+    async def drive():
+        first = build(tmp_path, answering("one"))
+        await drive_repl(first, ["hello", "/exit"], session_id="s-alpha")
+        await asyncio.wait_for(first.aclose(), WAIT_S)
+
+        second = build(tmp_path, answering("two"))
+        await drive_repl(second, ["hello again", "/exit"], session_id="s-beta")
+        await asyncio.wait_for(second.aclose(), WAIT_S)
+
+        third = build(tmp_path, answering("three"))
+        printed = await drive_repl(
+            third, ["/sessions", "/exit"], session_id="s-gamma"
+        )
+        await asyncio.wait_for(third.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "s-alpha" in printed
+    assert "s-beta" in printed
+    assert "2 message(s)" in printed
+    assert "nothing has been saved under it yet" in printed, (
+        "the conversation being had is named too, or the list reads as "
+        "though the current one were missing"
+    )
+
+
+# ---- /resume ----------------------------------------------------------
+
+
+def test_resume_continues_a_stored_conversation_rather_than_starting_one(
+    tmp_path,
+):
+    """The whole point of ``/resume``, asserted against the database.
+
+    The history is read back through a **third** app, so what is compared
+    is what reached SQLite rather than what one registry happened to be
+    holding in memory.
+    """
+
+    async def drive():
+        first = build(tmp_path, answering("first answer"))
+        await drive_repl(first, ["first question", "/exit"], session_id="s-old")
+        await asyncio.wait_for(first.aclose(), WAIT_S)
+
+        second = build(tmp_path, answering("second answer"))
+        printed = await drive_repl(
+            second, ["/resume s-old", "second question", "/exit"]
+        )
+        await asyncio.wait_for(second.aclose(), WAIT_S)
+
+        reader = build(tmp_path, answering("unused"))
+        stored = await asyncio.wait_for(
+            reader.sessions.load_session("s-old"), WAIT_S
+        )
+        await asyncio.wait_for(reader.aclose(), WAIT_S)
+        return printed, [message.content for message in stored.history]
+
+    printed, history = asyncio.run(drive())
+
+    assert "Resumed s-old: 2 message(s)." in printed
+    assert history == [
+        "first question",
+        "first answer",
+        "second question",
+        "second answer",
+    ]
+
+
+def test_resume_takes_the_number_the_listing_printed(tmp_path):
+    """The other half of "by number or by id" the prompt advertises."""
+
+    async def drive():
+        first = build(tmp_path, answering("one"))
+        await drive_repl(first, ["hello", "/exit"], session_id="s-only")
+        await asyncio.wait_for(first.aclose(), WAIT_S)
+
+        second = build(tmp_path, answering("two"))
+        printed = await drive_repl(second, ["/resume 1", "/current", "/exit"])
+        await asyncio.wait_for(second.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "Resumed s-only: 2 message(s)." in printed
+    assert "Session s-only in" in printed
+
+
+def test_resume_refuses_an_id_nothing_was_saved_under(tmp_path):
+    """Switching to it anyway would silently discard the conversation.
+
+    The person would go on talking, believing they had returned to an
+    earlier thread, and the messages would land in a session that has
+    never existed under a name they chose by mistake.
+    """
+
+    async def drive():
+        app = build(tmp_path, answering("unused"))
+        repl, _source, buffer = repl_over(app, ["/resume s-nope", "/exit"])
+        before = repl.state.session_id
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        after = repl.state.session_id
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return buffer.getvalue(), before, after
+
+    printed, before, after = asyncio.run(drive())
+
+    assert "No conversation s-nope." in printed
+    assert before == after, "the refused resume changed the session anyway"
+
+
+def test_bare_resume_lists_what_there_is_to_resume(tmp_path):
+    """A picker with no argument has to show the choices."""
+
+    async def drive():
+        first = build(tmp_path, answering("one"))
+        await drive_repl(first, ["hello", "/exit"], session_id="s-listed")
+        await asyncio.wait_for(first.aclose(), WAIT_S)
+
+        second = build(tmp_path, answering("two"))
+        printed = await drive_repl(second, ["/resume", "/exit"])
+        await asyncio.wait_for(second.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "s-listed" in printed
+    assert "/resume <id> or /resume <number>" in printed
+
+
+# ---- /compact ---------------------------------------------------------
+
+
+def _bulk() -> tuple[Message, ...]:
+    """A conversation big enough that compacting it plainly changes it."""
+    messages: list[Message] = []
+    for index in range(20):
+        messages.append(Message(role=Role.USER, content=f"q{index} " + "q" * 300))
+        messages.append(
+            Message(role=Role.ASSISTANT, content=f"a{index} " + "a" * 300)
+        )
+    return tuple(messages)
+
+
+def _compactable(tmp_path: pathlib.Path, provider):
+    """An app whose window is small enough for a forced compaction to hold."""
+    app = make_app(tmp_path, provider, tools=())
+    app = dataclasses.replace(
+        app,
+        budget=ContextBudget(
+            context_tokens=200_000,
+            reserve_output_tokens=0,
+            reserve_tool_tokens=0,
+            safety_ratio=0.0,
+        ),
+        summarizer=Canned(),
+    )
+    app = dataclasses.replace(
+        app, engine=AgentEngine(provider, app.registry, app.config.engine_config())
+    )
+    return attach_sessions(app)
+
+
+def test_compact_asks_the_registry_to_compact_and_reports_what_it_saved(
+    tmp_path, monkeypatch
+):
+    """``/compact`` is a compaction, not a question about compaction.
+
+    A surface that sent the word to the model would produce a confident
+    paragraph about summarizing and change nothing, and the history is
+    the only place that difference shows — so the spy records *which*
+    entry point was used and the assertions read the conversation
+    afterwards.
+    """
+    seen: list[str] = []
+    real_compact = SessionRegistry.compact
+    real_submit = SessionRegistry.submit
+
+    async def spy_compact(self, session_id):
+        seen.append("compact")
+        return await real_compact(self, session_id)
+
+    async def spy_submit(self, session_id, text, **kwargs):
+        seen.append("submit")
+        return await real_submit(self, session_id, text, **kwargs)
+
+    monkeypatch.setattr(SessionRegistry, "compact", spy_compact)
+    monkeypatch.setattr(SessionRegistry, "submit", spy_submit)
+
+    async def drive():
+        app = _compactable(tmp_path, answering("unused"))
+        store = SqliteSessionStore(app.memory.database)
+        await asyncio.wait_for(
+            store.save(StoredSession(session_id="s-big", history=_bulk())), WAIT_S
+        )
+        printed = await drive_repl(app, ["/compact", "/exit"], session_id="s-big")
+        left = app.sessions.session("s-big").history
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return seen, printed, left
+
+    calls, printed, left = asyncio.run(drive())
+
+    assert calls == ["compact"], "the command went somewhere other than compact"
+    assert "Compacted:" in printed
+    assert "tokens" in printed and "smaller)" in printed
+    assert len(left) < len(_bulk()), "the conversation was not actually compacted"
+
+
+def test_compact_says_so_when_there_is_nothing_to_compact(tmp_path):
+    """Silence after a command is indistinguishable from a command that
+    did not run, and a short conversation is the ordinary case."""
+
+    async def drive():
+        app = build(tmp_path, answering("hi"))
+        printed = await drive_repl(app, ["hello", "/compact", "/exit"])
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "Nothing to compact" in printed
+
+
+def test_compact_is_refused_while_this_conversation_is_busy(tmp_path):
+    """The reference harness refuses ``/compact`` while a turn runs
+    (``tui_update.go:330-349``) and the reason survives: a compaction
+    queued behind an exchange rewrites a history that exchange is still
+    adding to, and the report describes a conversation that moved on."""
+
+    async def drive():
+        sleeping = Sleeping()
+        app = build(
+            tmp_path,
+            Scripted(calling("sleep"), Message(role=Role.ASSISTANT, content="done")),
+            tools=(sleeping,),
+        )
+        buffer = io.StringIO()
+        repl = Repl(
+            app,
+            source=ScriptedSource(()),
+            screen=Screen.into(buffer),
+        )
+        asking = asyncio.create_task(repl.ask("hang please"))
+        await asyncio.wait_for(sleeping.entered.wait(), WAIT_S)
+
+        await asyncio.wait_for(repl._dispatch("/compact"), WAIT_S)
+        refusal = buffer.getvalue()
+
+        repl.interrupt()
+        await asyncio.wait_for(asking, WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return refusal
+
+    printed = asyncio.run(drive())
+
+    assert "This conversation is busy" in printed
+    assert "Compacted:" not in printed
+    assert "Nothing to compact" not in printed
+
+
+# ---- /plan and /tasks -------------------------------------------------
+
+
+def _three_tasks() -> Message:
+    """One ``plan_write`` call writing three steps, one of them started."""
+    return Message(
+        role=Role.ASSISTANT,
+        content="",
+        tool_calls=(
+            ToolCall(
+                id="c1",
+                name=PLAN_WRITE_TOOL_NAME,
+                arguments=json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "id": "1",
+                                "content": "load the matrix",
+                                "status": "completed",
+                            },
+                            {
+                                "id": "2",
+                                "content": "cluster the spots",
+                                "status": "in_progress",
+                            },
+                            {
+                                "id": "3",
+                                "content": "call the markers",
+                                "status": "pending",
+                            },
+                        ]
+                    }
+                ),
+            ),
+        ),
+    )
+
+
+def test_tasks_shows_the_plan_the_model_wrote_in_its_own_shape(tmp_path):
+    """The plan was invisible here: ``plan_write`` rendered as ``<-
+    plan_write ok`` like any other tool call, and nothing could show what
+    it had written. ``/tasks`` reads the book — and prints a task list
+    rather than the tool's JSON, which is the difference between a
+    person being able to read it and a person being handed the wire
+    format."""
+
+    async def drive():
+        app = attach_sessions(
+            make_app(
+                tmp_path,
+                Scripted(
+                    _three_tasks(), Message(role=Role.ASSISTANT, content="planned")
+                ),
+            )
+        )
+        printed = await drive_repl(app, ["plan this", "/tasks", "/exit"])
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "Tasks" in printed and "1/3 done" in printed and "1 active" in printed
+    for content in ("load the matrix", "cluster the spots", "call the markers"):
+        assert content in printed
+    for status in ("completed", "in_progress", "pending"):
+        assert f"[{status}]" in printed
+    assert '"status": "in_progress"' not in printed, (
+        "this is the tool's JSON, not a task list"
+    )
+
+
+def test_plan_shows_the_same_thing_tasks_does(tmp_path):
+    """Two names for one read-only view; a ``/plan`` that showed
+    something else would be a second, disagreeing answer."""
+
+    async def drive():
+        app = attach_sessions(
+            make_app(
+                tmp_path,
+                Scripted(
+                    _three_tasks(), Message(role=Role.ASSISTANT, content="planned")
+                ),
+            )
+        )
+        printed = await drive_repl(app, ["plan this", "/plan", "/exit"])
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "cluster the spots" in printed
+    assert "[in_progress]" in printed
+
+
+def test_tasks_on_a_session_with_no_plan_says_so(tmp_path):
+    """An empty state, not an exception and not a blank line."""
+
+    async def drive():
+        app = attach_sessions(make_app(tmp_path, answering("unused")))
+        printed = await drive_repl(app, ["/tasks", "/exit"])
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "No tasks yet" in printed
+
+
+def test_the_three_plan_control_commands_are_still_refused(tmp_path):
+    """Read-only is the decision, not a stage on the way to a control panel.
+
+    ``/approve-plan``, ``/resume-task`` and ``/do-current-task`` are in
+    the catalogue and stay unimplemented: the agent decides when to plan
+    and when to move on, and a person driving that from the side would be
+    a second answer to the same question. Naming them here is what makes
+    a later "while we are in there" addition a red test rather than a
+    quiet expansion of scope.
+    """
+
+    async def drive():
+        provider = answering("unused")
+        app = attach_sessions(make_app(tmp_path, provider, tools=()))
+        printed = await drive_repl(
+            app,
+            ["/approve-plan", "/resume-task 2", "/do-current-task", "/exit"],
+        )
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return provider.calls, printed
+
+    calls, printed = asyncio.run(drive())
+
+    assert calls == 0
+    for name in ("/approve-plan", "/resume-task", "/do-current-task"):
+        assert f"{name} is not available in this build." in printed

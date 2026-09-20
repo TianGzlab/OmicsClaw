@@ -1,328 +1,965 @@
-"""Smoke tests for ``omicsclaw.engine.run_engine_loop``.
+"""Contract tests for ``omicsclaw.engine.loop`` (plan 0027 §6, task B).
 
-Full end-to-end coverage lives in ``tests/bot/test_agent_loop.py``
-(via the bot wirer landed in 6c). The tests here focus on the
-contract the engine itself owns: the LLM-not-configured early
-return, and the helper string functions used to compose the
-system prompt.
+The blocking half of the kernel: does the ReAct cycle converge, does it
+terminate, and does every Observation it injects belong to the call it
+claims to answer. Traps 3, 4, 7, 8 and 9 of plan 0027 §7 each have a
+named test here, and the two that do damage *silently* — a truncated turn
+whose half-parsed calls get executed anyway, and an Observation shifted
+into a neighbour's slot — are tested for the damage rather than for the
+symptom.
+
+No network and no vendor SDK: both seams are Protocols, so a scripted
+provider and a recording executor drive every case. Neither imports the
+Protocol it satisfies, which is how we know the structural typing is
+real.
 """
 
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-from types import SimpleNamespace
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Sequence,
+)
+from typing import Any, TypeVar
 
 import pytest
 
-from omicsclaw.engine import (
-    EngineDependencies,
-    LLM_NOT_CONFIGURED_MESSAGE,
-    run_engine_loop,
+from omicsclaw.engine import AgentEngine, EngineConfig
+from omicsclaw.engine.loop import _answer_every_call
+from omicsclaw.engine.types import (
+    EngineError,
+    EngineEventType,
+    RunResult,
+    StopReason,
 )
-from omicsclaw.engine.loop import (
-    _maybe_append_caller_addition,
-    _maybe_append_mode_hint,
-    _maybe_append_stage_fragment,
-    resolve_max_prompt_tokens,
+from omicsclaw.provider import Completion, LLMProvider, ProviderError
+from omicsclaw.schema import (
+    Message,
+    Role,
+    StreamChunk,
+    ToolCall,
+    ToolDefinition,
+    ToolResult,
+    Usage,
 )
-import omicsclaw.engine.loop as _engine_loop
+
+_T = TypeVar("_T")
+
+_DEADLINE = 5.0
+"""Seconds any one scenario may take. A hang guard, not a measurement.
+
+A loop that fails to terminate does not fail, it spins — and a spin
+wedges the whole suite instead of naming the test that caught it.
+"""
 
 
-def test_resolve_max_prompt_tokens_scales_with_window(monkeypatch):
-    """ADR 0039: token budget = min(TOKEN_CAP=85_000, floor((window-8192)*0.5)).
-    Window-relative below the cap (small windows shrink; mid-size use their window),
-    capped for large windows (latency backstop), default for unknown windows,
-    honors OMICSCLAW_MAX_PROMPT_TOKENS, and converts the deprecated _CHARS var."""
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_TOKENS", raising=False)
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_CHARS", raising=False)
+class ScriptedProvider:
+    """A model that says what it was told to say, one turn at a time.
 
-    windows = {
-        "big": 1_000_000,
-        "small": 16_000,
-        "small_real": 131_072,  # smallest registered window
-        "unknown": None,
-    }
-    monkeypatch.setattr(_engine_loop, "get_context_window", lambda m: windows.get(m))
+    The last line of the script repeats forever, so "keeps asking for
+    tools until something stops it" needs no special case. Every call is
+    recorded, because what the loop *hands* the provider is half of what
+    is under test here: the tools of that turn, and the history as it
+    stood when the turn began.
 
-    # Large window: capped at the token cap (bounded cold/re-warm latency).
-    assert resolve_max_prompt_tokens("big") == 85_000
-    # Small synthetic window: shrinks below the cap.
-    assert resolve_max_prompt_tokens("small") == min(85_000, (16_000 - 8192) // 2)
-    assert resolve_max_prompt_tokens("small") < 85_000
-    # Real small-window model (131072 tok) below the cap → window-relative budget.
-    assert resolve_max_prompt_tokens("small_real") == (131_072 - 8192) // 2
-    assert resolve_max_prompt_tokens("small_real") == 61_440
-    # Unknown window (Ollama → None): token-cap fallback.
-    assert resolve_max_prompt_tokens("unknown") == 85_000
+    The history is recorded **as given and never copied**. Taking a
+    ``tuple()`` of it here would be the double quietly making its own
+    snapshot, and the test that asks whether the engine passed one would
+    then pass whether it did or not.
+    """
 
-    # Explicit token override wins regardless of window.
-    monkeypatch.setenv("OMICSCLAW_MAX_PROMPT_TOKENS", "12345")
-    assert resolve_max_prompt_tokens("big") == 12345
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_TOKENS", raising=False)
+    def __init__(self, *turns: Completion | BaseException) -> None:
+        self._turns = list(turns)
+        self.seen: list[tuple[Sequence[Message], tuple[ToolDefinition, ...]]]
+        self.seen = []
 
-    # Deprecated char override is honored for one release, converted chars→tokens (÷4).
-    monkeypatch.setenv("OMICSCLAW_MAX_PROMPT_CHARS", "40000")
-    assert resolve_max_prompt_tokens("big") == 10_000  # 40000 // 4
-    # A tiny deprecated char value must never convert to a 0-token budget (clamp≥1).
-    monkeypatch.setenv("OMICSCLAW_MAX_PROMPT_CHARS", "3")
-    assert resolve_max_prompt_tokens("big") == 1
-    # When both are set, the token env wins.
-    monkeypatch.setenv("OMICSCLAW_MAX_PROMPT_TOKENS", "9000")
-    assert resolve_max_prompt_tokens("big") == 9000
+    @property
+    def name(self) -> str:
+        return "scripted"
 
+    async def generate(
+        self,
+        messages: Sequence[Message],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> Completion:
+        self.seen.append((messages, tuple(tools or ())))
+        turn = self._turns[min(len(self.seen) - 1, len(self._turns) - 1)]
+        if isinstance(turn, BaseException):
+            raise turn
+        return turn
 
-def test_resolve_max_prompt_tokens_small_window_never_zero(monkeypatch):
-    """G / ADR 0039: a known window at/near reserved_output (8192) must NOT yield a 0
-    budget. A 0 ``max_prompt_tokens`` silently disables proactive collapse — the sole
-    overflow handler — because the collapse/auto thresholds become None. Fall back to a
-    fraction of the window so proactive collapse still fires on tiny/edge windows."""
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_TOKENS", raising=False)
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_CHARS", raising=False)
-    windows = {"w8192": 8192, "w8193": 8193, "w4096": 4096, "w16000": 16_000}
-    monkeypatch.setattr(_engine_loop, "get_context_window", lambda m: windows.get(m))
+    def generate_stream(
+        self,
+        messages: Sequence[Message],
+        tools: Sequence[ToolDefinition] | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        raise AssertionError("run() must never reach the streaming path")
 
-    # Windows where floor((window - 8192) * 0.5) collapses to 0 must stay positive.
-    assert resolve_max_prompt_tokens("w8192") > 0
-    assert resolve_max_prompt_tokens("w8193") > 0
-    assert resolve_max_prompt_tokens("w4096") > 0
-    # A window comfortably above reserved_output keeps the standard window-relative
-    # budget (no behavior change for normal windows).
-    assert resolve_max_prompt_tokens("w16000") == (16_000 - 8192) // 2
+    def bind(self, **overrides: Any) -> ScriptedProvider:
+        return self
 
 
-def test_collapse_llm_summary_env_toggle(monkeypatch):
-    # ADR 0039 D5: default-ON; OMICSCLAW_COLLAPSE_LLM_SUMMARY=0 disables it.
-    from omicsclaw.engine.loop import _collapse_llm_summary_enabled
+class RecordingExecutor:
+    """A tool layer whose list of tools can change while a run is running.
 
-    monkeypatch.delenv("OMICSCLAW_COLLAPSE_LLM_SUMMARY", raising=False)
-    assert _collapse_llm_summary_enabled() is True  # default-ON
-    monkeypatch.setenv("OMICSCLAW_COLLAPSE_LLM_SUMMARY", "0")
-    assert _collapse_llm_summary_enabled() is False
-    monkeypatch.setenv("OMICSCLAW_COLLAPSE_LLM_SUMMARY", "1")
-    assert _collapse_llm_summary_enabled() is True
+    ``tools`` is a plain list on purpose: a test that appends to it
+    between turns is reproducing what an MCP server does when it finishes
+    connecting.
+    """
 
+    def __init__(
+        self,
+        tools: Sequence[ToolDefinition] = (),
+        behaviour: Callable[[ToolCall], Awaitable[ToolResult]] | None = None,
+    ) -> None:
+        self.tools = list(tools)
+        self._behaviour = behaviour
+        self.executed: list[ToolCall] = []
+        self.reads = 0
 
-def test_build_compaction_config_sets_budget_relative_targets(monkeypatch):
-    # §9.3 slice 3 + ADR 0039: the engine wires budget-relative compress-to-target
-    # ratios so the collapse/auto preserve budgets scale with the model's TOKEN
-    # budget instead of fixed magic constants. The ratios must stay below their
-    # triggers (byte-stability) and stack collapse > auto (auto is more aggressive).
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_TOKENS", raising=False)
-    monkeypatch.delenv("OMICSCLAW_MAX_PROMPT_CHARS", raising=False)
-    monkeypatch.setattr(_engine_loop, "get_context_window", lambda m: 1_000_000)
+    def available_tools(self) -> Sequence[ToolDefinition]:
+        self.reads += 1
+        return tuple(self.tools)
 
-    cfg = _engine_loop._build_compaction_config("big")
-
-    # ADR 0039: large window → capped at the token cap (85_000).
-    assert cfg.max_prompt_tokens == 85_000
-    assert cfg.collapse_target_ratio is not None
-    assert cfg.auto_compact_target_ratio is not None
-    # Targets sit below their triggers so the re-warmed next turn cannot re-collapse.
-    assert cfg.collapse_target_ratio < cfg.collapse_trigger_ratio
-    assert cfg.auto_compact_target_ratio < cfg.auto_compact_trigger_ratio
-    # Auto compaction preserves less than collapse (strictly more aggressive).
-    assert cfg.auto_compact_target_ratio < cfg.collapse_target_ratio
-
-
-def _make_deps(**overrides) -> EngineDependencies:
-    """Build a full EngineDependencies with minimal sentinel values."""
-    field_names = {f.name for f in dataclasses.fields(EngineDependencies)}
-    defaults = {name: None for name in field_names}
-    defaults["omicsclaw_model"] = "test-model"
-    defaults["llm_provider_name"] = "test-provider"
-    defaults["omicsclaw_dir"] = "/tmp/oc-test"
-    defaults["max_history"] = 80
-    defaults["max_history_chars"] = None
-    defaults["max_conversations"] = 200
-    defaults["skill_aliases"] = ()
-    defaults["deep_learning_methods"] = frozenset()
-    defaults.update(overrides)
-    return EngineDependencies(**defaults)
-
-
-def test_returns_setup_prompt_when_llm_is_none() -> None:
-    """If omicsclaw.runtime.agent.state.llm is None at request time, the engine returns
-    a setup-instructions message instead of raising. This is the
-    contract the bot has relied on since core.py was carved up."""
-    deps = _make_deps(llm=None)
-
-    result = asyncio.run(
-        run_engine_loop(
-            deps=deps,
-            chat_id="chat-1",
-            user_content="hello",
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.executed.append(call)
+        if self._behaviour is not None:
+            return await self._behaviour(call)
+        return ToolResult(
+            tool_call_id=call.id, name=call.name, output=f"{call.name} ran"
         )
+
+
+def _run(main: Coroutine[Any, Any, _T]) -> _T:
+    """``pytest-asyncio`` is not installed; ``tests/provider/`` drives
+    async tests with :func:`asyncio.run` and so does this."""
+
+    async def guarded() -> _T:
+        return await asyncio.wait_for(main, _DEADLINE)
+
+    return asyncio.run(guarded())
+
+
+def _tool(name: str) -> ToolDefinition:
+    return ToolDefinition(name=name, description=f"the {name} skill")
+
+
+def _call(index: int, name: str = "spatial_de") -> ToolCall:
+    return ToolCall(id=f"c{index}", name=name, arguments="{}")
+
+
+def _acts(
+    *calls: ToolCall,
+    finish_reason: str = "tool_calls",
+    usage: Usage | None = None,
+    text: str = "",
+) -> Completion:
+    return Completion(
+        message=Message.assistant(text, tool_calls=calls),
+        usage=usage if usage is not None else Usage(),
+        finish_reason=finish_reason,
     )
 
-    assert result == LLM_NOT_CONFIGURED_MESSAGE
-    assert "LLM is not configured" in result
-    assert "LLM_API_KEY" in result
+
+def _answers(
+    text: str = "three markers stood out",
+    finish_reason: str = "stop",
+    usage: Usage | None = None,
+) -> Completion:
+    return Completion(
+        message=Message.assistant(text),
+        usage=usage if usage is not None else Usage(),
+        finish_reason=finish_reason,
+    )
 
 
-def test_engine_assembles_stored_content_with_the_same_message_context(monkeypatch):
-    rendered_content = [
-        {
-            "type": "image_url",
-            "image_url": {"url": "data:image/png;base64,EPHEMERAL"},
-        }
+def _engine(
+    provider: ScriptedProvider,
+    tools: RecordingExecutor | None = None,
+    config: EngineConfig | None = None,
+) -> tuple[AgentEngine, RecordingExecutor]:
+    executor = tools if tools is not None else RecordingExecutor()
+    return AgentEngine(provider, executor, config), executor
+
+
+# --- the cycle ------------------------------------------------------------
+
+
+def test_a_model_that_asks_for_nothing_converges_on_its_first_turn():
+    provider = ScriptedProvider(_answers("done"))
+    engine, executor = _engine(provider)
+
+    result = _run(engine.run([Message.user("what changed?")]))
+
+    assert result.stop_reason is StopReason.CONVERGED
+    assert result.turns == 1
+    assert executor.executed == []
+    assert result.final_message == Message.assistant("done")
+
+
+def test_a_requested_tool_is_executed_and_its_observation_fed_back():
+    provider = ScriptedProvider(_acts(_call(1)), _answers("done"))
+    engine, executor = _engine(provider)
+
+    result = _run(engine.run([Message.user("run the DE")]))
+
+    assert [call.id for call in executor.executed] == ["c1"]
+    assert [m.role for m in result.messages] == [
+        Role.USER,
+        Role.ASSISTANT,
+        Role.TOOL,
+        Role.ASSISTANT,
     ]
-    durable_content = [
-        {"type": "attachment_ref", "attachment_id": "attachment-1"}
+    assert result.messages[2].content == "spatial_de ran"
+    assert result.messages[2].tool_call_id == "c1"
+    assert result.turns == 2
+    assert result.stop_reason is StopReason.CONVERGED
+
+
+def test_the_observation_is_visible_to_the_turn_that_follows_it():
+    """The whole point of injecting it: the loop is a loop because turn
+    ``n + 1`` reasons over what turn ``n`` learned."""
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider)
+
+    _run(engine.run([Message.user("run the DE")]))
+
+    second_turn = provider.seen[1][0]
+    assert [m.role for m in second_turn] == [Role.USER, Role.ASSISTANT, Role.TOOL]
+    assert second_turn[2].content == "spatial_de ran"
+
+
+def test_the_trajectory_returned_starts_with_the_conversation_passed_in():
+    """So the result can be fed straight back into the next run instead
+    of every caller re-splicing history by hand."""
+    conversation = [Message.system("you are OmicsClaw"), Message.user("hello")]
+    provider = ScriptedProvider(_answers("hi"))
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run(conversation))
+
+    assert result.messages[:2] == tuple(conversation)
+    assert len(result.messages) == 3
+
+
+def test_the_provider_is_handed_a_snapshot_and_not_a_live_history():
+    """An adapter that keeps what it was sent must not find the record
+    rewritten by the turns that came after it.
+
+    Only meaningful because ``ScriptedProvider`` stores the sequence it
+    was handed rather than a copy of it: a double that snapshots on the
+    way in would report one message here no matter what the engine did.
+    """
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen[0][0]) == 1
+    assert len(provider.seen[1][0]) == 3
+    assert len(result.messages) == 4
+
+
+def test_usage_is_summed_across_every_turn_of_the_run():
+    provider = ScriptedProvider(
+        _acts(_call(1), usage=Usage(input_tokens=10, output_tokens=5)),
+        _answers(usage=Usage(input_tokens=3, output_tokens=1)),
+    )
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.usage == Usage(input_tokens=13, output_tokens=6)
+
+
+def test_turns_counts_model_calls_rather_than_messages():
+    provider = ScriptedProvider(_acts(_call(1), _call(2)), _answers())
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.turns == 2
+    assert len(result.messages) == 5
+
+
+def test_an_engine_keeps_no_conversation_between_two_runs():
+    """A run's history arrives as an argument and leaves in its result,
+    so nothing needs resetting between runs."""
+    provider = ScriptedProvider(_answers("first"), _answers("second"))
+    engine, _ = _engine(provider)
+
+    first = _run(engine.run([Message.user("one")]))
+    second = _run(engine.run([Message.user("two")]))
+
+    assert len(first.messages) == 2
+    assert len(second.messages) == 2
+    assert provider.seen[1][0] == (Message.user("two"),)
+
+
+def test_an_engine_given_no_configuration_uses_the_default_budget():
+    engine, _ = _engine(ScriptedProvider(_answers()), config=None)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.stop_reason is StopReason.CONVERGED
+    assert isinstance(result, RunResult)
+
+
+# --- trap 9: the turn ceiling is checked before the call ------------------
+
+
+def test_a_ceiling_of_one_permits_exactly_one_model_call():
+    provider = ScriptedProvider(_acts(_call(1)))
+    engine, _ = _engine(provider, config=EngineConfig(max_turns=1))
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen) == 1
+    assert result.turns == 1
+    assert result.stop_reason is StopReason.MAX_TURNS
+
+
+def test_a_ceiling_of_two_permits_a_second_model_call():
+    """The other side of the boundary. Without it, an off-by-one that
+    allows zero calls would pass the test above just as happily."""
+    provider = ScriptedProvider(_acts(_call(1)))
+    engine, _ = _engine(provider, config=EngineConfig(max_turns=2))
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen) == 2
+    assert result.turns == 2
+    assert result.stop_reason is StopReason.MAX_TURNS
+
+
+def test_a_run_stopped_by_the_ceiling_keeps_the_work_it_did():
+    """The reference harness discards the whole trajectory here, which is
+    what makes its budget exhaustion indistinguishable from a crash."""
+    provider = ScriptedProvider(_acts(_call(1)))
+    engine, _ = _engine(provider, config=EngineConfig(max_turns=1))
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert [m.role for m in result.messages] == [
+        Role.USER,
+        Role.ASSISTANT,
+        Role.TOOL,
     ]
-    message_context = "MESSAGE CONTEXT"
-    adapter = object()
-    captured = {}
+    assert result.messages[2].content == "spatial_de ran"
 
-    async def fake_assemble_chat_context(**_kwargs):
-        return SimpleNamespace(
-            session_id="session-1",
-            system_prompt="SYSTEM",
-            user_message_content=[
-                {"type": "text", "text": message_context},
-                *rendered_content,
-            ],
-            prompt_context=SimpleNamespace(
-                request=object(),
-                message_context=message_context,
-            ),
-        )
 
-    async def fake_run_query_engine(**kwargs):
-        captured.update(kwargs)
-        return "done"
+@pytest.mark.parametrize("ceiling", [0, -1])
+def test_a_ceiling_of_zero_or_less_means_there_is_no_ceiling(ceiling: int):
+    """``EngineConfig.max_turns`` promises this in as many words, so an
+    implementation that stopped anyway would make that docstring a lie."""
+    provider = ScriptedProvider(
+        _acts(_call(1)), _acts(_call(2)), _acts(_call(3)), _answers()
+    )
+    engine, _ = _engine(provider, config=EngineConfig(max_turns=ceiling))
 
-    monkeypatch.setattr(
-        _engine_loop,
-        "_assemble_chat_context",
-        fake_assemble_chat_context,
-    )
-    monkeypatch.setattr(_engine_loop, "run_query_engine", fake_run_query_engine)
-    monkeypatch.setattr(
-        _engine_loop,
-        "build_default_lifecycle_hook_runtime",
-        lambda _root: None,
-    )
+    result = _run(engine.run([Message.user("go")]))
 
-    transcript_store = SimpleNamespace(
-        max_history=0,
-        max_history_chars=None,
-        max_conversations=0,
-        sanitizer=lambda messages, warn=True: messages,
-        get_history=lambda _chat_id: [],
-    )
-    tool_registry = SimpleNamespace(
-        to_openai_tools_for_request=lambda *_args, **_kwargs: []
-    )
-    deps = _make_deps(
-        llm=object(),
-        transcript_store=transcript_store,
-        tool_result_store=object(),
-        tool_runtime=object(),
-        tool_registry=tool_registry,
-        callbacks_builder=lambda **_kwargs: object(),
-    )
+    assert result.turns == 4
+    assert result.stop_reason is StopReason.CONVERGED
 
-    result = asyncio.run(
-        run_engine_loop(
-            deps=deps,
-            chat_id="chat-1",
-            user_content=rendered_content,
-            stored_user_content=durable_content,
-            content_adapter=adapter,
-            user_turn_context="VOLATILE CONTEXT",
-        )
-    )
 
-    assert result == "done"
-    context = captured["context"]
-    assert context.user_message_content == [
-        {"type": "text", "text": "VOLATILE CONTEXT"},
-        {"type": "text", "text": message_context},
-        *rendered_content,
+# --- trap 3: a truncated turn is not a converged one ----------------------
+
+
+@pytest.mark.parametrize("reason", ["length", "max_tokens"])
+def test_the_output_ceiling_ends_a_run_as_truncated(reason: str):
+    """``length`` is the OpenAI family's spelling, ``max_tokens`` is
+    Anthropic's. Both mean the answer was severed mid-sentence, and
+    without this the loop would report one as a completed task."""
+    provider = ScriptedProvider(_answers("half a sen", finish_reason=reason))
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.stop_reason is StopReason.TRUNCATED
+    assert result.turns == 1
+    assert result.final_message == Message.assistant("half a sen")
+
+
+@pytest.mark.parametrize("reason", ["LENGTH", "Max_Tokens"])
+def test_a_finish_reason_is_read_without_regard_to_its_case(reason: str):
+    provider = ScriptedProvider(_answers(finish_reason=reason))
+    engine, _ = _engine(provider)
+
+    assert _run(engine.run([])).stop_reason is StopReason.TRUNCATED
+
+
+@pytest.mark.parametrize(
+    "reason", ["stop", "end_turn", "tool_calls", "tool_use", "", "lengthy"]
+)
+def test_any_other_finish_reason_leaves_the_run_converged(reason: str):
+    """A vendor token nobody recognises means *not* truncated: guessing
+    the other way would abandon runs that had in fact finished."""
+    provider = ScriptedProvider(_answers(finish_reason=reason))
+    engine, _ = _engine(provider)
+
+    assert _run(engine.run([])).stop_reason is StopReason.CONVERGED
+
+
+def test_a_truncated_turn_does_not_execute_the_tool_calls_it_carried():
+    """The case that does damage silently.
+
+    A call accumulated from a stream that stopped mid-argument can be
+    half-parsed while still looking well-formed, so acting on it is
+    strictly worse than stopping — the model never finished asking. The
+    severed turn is still recorded, because it is what the model said.
+    """
+    provider = ScriptedProvider(
+        _acts(_call(1, "delete_everything"), finish_reason="length")
+    )
+    engine, executor = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert executor.executed == []
+    assert result.stop_reason is StopReason.TRUNCATED
+    assert len(provider.seen) == 1
+    assert [m.role for m in result.messages] == [Role.USER, Role.ASSISTANT]
+
+
+def test_truncation_outranks_a_turn_that_also_asked_for_tools():
+    """``is_action`` and ``finish_reason`` disagree here, and the order
+    the two are tested in is the whole of trap 3."""
+    provider = ScriptedProvider(_acts(_call(1), finish_reason="max_tokens"))
+    engine, executor = _engine(provider)
+
+    result = _run(engine.run([]))
+
+    assert result.stop_reason is StopReason.TRUNCATED
+    assert executor.executed == []
+
+
+# --- trap 7: the tool list is re-read every turn --------------------------
+
+
+def test_a_tool_registered_mid_run_is_offered_on_the_very_next_turn():
+    """MCP servers connect asynchronously, so a registry's contents
+    change while a run is in flight. Reading the list once at
+    construction would hide every tool registered after that moment —
+    silently, because the model simply never asks for what it was never
+    offered.
+    """
+    executor = RecordingExecutor(tools=[_tool("spatial_de")])
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        executor.tools.append(_tool("spatial_domains"))
+        return ToolResult(tool_call_id=call.id, name=call.name, output="ok")
+
+    executor._behaviour = behaviour
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider, executor)
+
+    _run(engine.run([Message.user("go")]))
+
+    assert [t.name for t in provider.seen[0][1]] == ["spatial_de"]
+    assert [t.name for t in provider.seen[1][1]] == [
+        "spatial_de",
+        "spatial_domains",
     ]
-    assert context.stored_user_content == [
-        {"type": "text", "text": "VOLATILE CONTEXT"},
-        {"type": "text", "text": message_context},
-        *durable_content,
-    ]
-    assert context.content_adapter is adapter
+    assert executor.reads == 2
 
 
-class TestMaybeAppendCallerAddition:
-    def test_no_op_for_empty(self) -> None:
-        assert _maybe_append_caller_addition("base", "") == "base"
+def test_an_executor_offering_nothing_offers_nothing_rather_than_a_default():
+    """Empty means empty. An adapter substituting a default tool list is
+    what plan 0026 forbids, and the loop must not do it either."""
+    provider = ScriptedProvider(_answers())
+    engine, _ = _engine(provider)
 
-    def test_strips_added_section(self) -> None:
-        assert (
-            _maybe_append_caller_addition("base", "  extra  ") == "base\n\nextra"
+    _run(engine.run([]))
+
+    assert provider.seen[0][1] == ()
+
+
+# --- trap 8: the whole assistant message goes into history ----------------
+
+
+def test_the_assistant_message_is_appended_whole_and_not_as_a_view():
+    """A display copy loses the turn on the next call, and Anthropic's
+    user/assistant alternation breaks with it."""
+    said = Message.assistant(
+        "I will look",
+        reasoning_content="the user wants markers",
+        tool_calls=(_call(1),),
+    )
+    provider = ScriptedProvider(
+        Completion(message=said, finish_reason="tool_calls"), _answers()
+    )
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.messages[1] == said
+    assert result.messages[1].reasoning_content == "the user wants markers"
+    assert provider.seen[1][0][1] == said
+
+
+# --- one Observation per tool call, paired by position --------------------
+
+
+def test_a_call_whose_execution_vanished_still_gets_an_observation():
+    """Anthropic requires every ``tool_use`` to be answered in the very
+    next message; a missing ``tool_result`` is a 400 raised on the
+    *following* turn, far from the tool that caused it.
+
+    The gap is real: ``execute_tool_calls`` leaves an empty slot for a
+    call whose execution raised a bare ``CancelledError``, deliberately,
+    because a cancellation is not an Observation.
+    """
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        if call.id == "c2":
+            raise asyncio.CancelledError
+        return ToolResult(tool_call_id=call.id, name=call.name, output=call.id)
+
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1), _call(2), _call(3)), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observations = [m for m in result.messages if m.role is Role.TOOL]
+    assert [m.tool_call_id for m in observations] == ["c1", "c2", "c3"]
+
+
+def test_the_survivors_keep_their_own_answers_when_one_goes_missing():
+    """Trap 1 end to end, with the missing slot in the middle and the
+    slowest tool first.
+
+    Zipping a *compacted* result list onto the calls would shift every
+    survivor up into a neighbour's slot and hand the model one tool's
+    answer under another tool's name. So would filing results in
+    completion order, which is why ``c3`` here finishes before ``c1``
+    even starts to return: both mistakes put ``output of c3`` under
+    ``c1``, and only a scheduler that writes each result into its own
+    slot survives.
+    """
+    third_finished = asyncio.Event()
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        if call.id == "c2":
+            raise asyncio.CancelledError
+        if call.id == "c1":
+            await third_finished.wait()
+        else:
+            third_finished.set()
+        return ToolResult(
+            tool_call_id=call.id, name=call.name, output=f"output of {call.id}"
         )
 
-    def test_strips_trailing_whitespace_on_base(self) -> None:
-        assert (
-            _maybe_append_caller_addition("base   \n\n", "extra")
-            == "base\n\nextra"
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1), _call(2), _call(3)), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observations = [m for m in result.messages if m.role is Role.TOOL]
+    assert [m.tool_call_id for m in observations] == ["c1", "c2", "c3"]
+    assert [m.content for m in observations][0] == "output of c1"
+    assert [m.content for m in observations][2] == "output of c3"
+    assert [m.is_error for m in observations] == [False, True, False]
+
+
+def test_two_calls_the_vendor_left_unidentified_keep_their_own_answers():
+    """R2, and the reason the pairing moved off ``tool_call_id``.
+
+    ``openai_provider.decode_tool_call`` reads ``id`` straight off the
+    payload and mints nothing when the field is absent, so a backend that
+    omits it — ``ollama`` is a shipped preset — produces two calls that
+    both carry ``""``. A ``{result.tool_call_id: result}`` dict collapses
+    them into one entry, and the model is told ``read_file`` returned
+    what ``delete_file`` did: a destructive answer filed under a harmless
+    question, silently, with nothing in the trajectory to show for it.
+    """
+    anonymous = (
+        ToolCall(id="", name="read_file", arguments="{}"),
+        ToolCall(id="", name="delete_file", arguments="{}"),
+    )
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        return ToolResult(
+            tool_call_id=call.id, name=call.name, output=f"{call.name} ran"
         )
 
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(*anonymous), _answers())
+    engine, _ = _engine(provider, executor)
 
-class TestMaybeAppendModeHint:
-    def test_unknown_mode_is_no_op(self) -> None:
-        assert _maybe_append_mode_hint("base", "wat") == "base"
+    result = _run(engine.run([Message.user("go")]))
 
-    def test_ask_mode_is_no_op(self) -> None:
-        # "ask" is the implicit default — emitting a mode hint for it
-        # would just add noise to every system prompt.
-        assert _maybe_append_mode_hint("base", "ask") == "base"
-
-    def test_empty_mode_is_no_op(self) -> None:
-        assert _maybe_append_mode_hint("base", "") == "base"
-
-    def test_code_mode_appends_section(self) -> None:
-        result = _maybe_append_mode_hint("base", "code")
-        assert "## Mode" in result
-        assert "code mode" in result
-        assert result.startswith("base")
-
-    def test_plan_mode_appends_section(self) -> None:
-        result = _maybe_append_mode_hint("base", "plan")
-        assert "## Mode" in result
-        assert "plan mode" in result
+    observations = [m for m in result.messages if m.role is Role.TOOL]
+    assert [m.name for m in observations] == ["read_file", "delete_file"]
+    assert [m.content for m in observations] == ["read_file ran", "delete_file ran"]
 
 
-class TestMaybeAppendStageFragment:
-    # Bench (ADR 0020): stage stance fragment is additive; empty/unknown = no-op.
-    def test_empty_stage_is_no_op(self) -> None:
-        assert _maybe_append_stage_fragment("base", "") == "base"
+def test_a_result_re_issued_under_another_id_is_still_that_calls_answer():
+    """R3. A ``tool_call_id`` is not an identity the loop controls.
 
-    def test_unknown_stage_is_no_op(self) -> None:
-        assert _maybe_append_stage_fragment("base", "bogus") == "base"
+    A retrying or wrapping registry, or an MCP proxy, can answer under a
+    derived id. Looked up by id, that genuine output matches nothing: it
+    is dropped, the call is told the tool "produced no result", and the
+    model's cheapest repair is to run it again — which for a mutating
+    tool means doing the work twice. Position is what makes the answer
+    findable.
+    """
 
-    def test_read_stage_appends_section(self) -> None:
-        result = _maybe_append_stage_fragment("base", "read")
-        assert "## Stage" in result
-        assert "Read" in result
-        assert result.startswith("base")
+    async def behaviour(call: ToolCall) -> ToolResult:
+        return ToolResult(
+            tool_call_id=f"{call.id}-attempt-2",
+            name=call.name,
+            output="42 spots removed",
+        )
 
-    def test_analyze_stage_appends_section(self) -> None:
-        result = _maybe_append_stage_fragment("base", "analyze")
-        assert "## Stage" in result
-        assert "Analyze" in result
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1, "spatial_filter")), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observation = [m for m in result.messages if m.role is Role.TOOL][0]
+    assert observation.content == "42 spots removed"
+    assert observation.is_error is False
+    assert len(executor.executed) == 1
 
 
-def test_max_tool_iterations_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The constant is read from env at import time. Reimporting
-    the module after setting the env var should yield the new value
-    — proves the engine isn't ignoring the user's override."""
-    import importlib
+def test_an_observation_reaching_history_carries_the_id_its_call_was_issued_under():
+    """Position decides *which* call an answer belongs to; the id is what
+    the wire is validated against, and both have to be right.
 
-    monkeypatch.setenv("OMICSCLAW_MAX_TOOL_ITERATIONS", "42")
-    import omicsclaw.engine.loop as loop_module
+    Anthropic matches every ``tool_result`` to its ``tool_use`` by id, so
+    a mislabelled answer let through as-is converts somebody else's
+    labelling bug into a hard 400 on the following request — the exact
+    failure one-Observation-per-call exists to prevent. The engine
+    appended the assistant message that carries the authoritative id, so
+    it is the executor's that is in doubt here, not the call's.
+    """
 
-    reloaded = importlib.reload(loop_module)
-    assert reloaded.MAX_TOOL_ITERATIONS == 42
+    async def behaviour(call: ToolCall) -> ToolResult:
+        return ToolResult(
+            tool_call_id="whatever-the-proxy-felt-like",
+            name=call.name,
+            output="42 spots removed",
+        )
 
-    # Restore the default so other tests in this session see the
-    # original module-level value (importlib.reload mutates the
-    # actual module object, so we reload again with the env unset).
-    monkeypatch.delenv("OMICSCLAW_MAX_TOOL_ITERATIONS", raising=False)
-    importlib.reload(loop_module)
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1, "spatial_filter")), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observation = [m for m in result.messages if m.role is Role.TOOL][0]
+    assert observation.tool_call_id == "c1"
+    assert observation.content == "42 spots removed"
+
+
+def test_the_id_the_executor_reported_is_kept_as_evidence_not_discarded():
+    """The correction is silent, so the evidence must not be.
+
+    Rewriting an id hides a registry that is mislabelling its answers,
+    which is a real objection to doing it. ``ToolResult.metadata`` is
+    where that is answered: execution facts no vendor has a field for,
+    documented as never reaching a model, so the diagnostic survives on
+    the record while the wire stays valid.
+    """
+    call = _call(1, "spatial_filter")
+    reported = ToolResult(
+        tool_call_id="c1-attempt-2", name="spatial_filter", output="42 spots removed"
+    )
+
+    answered = _answer_every_call((call,), [reported])
+
+    assert answered[0].tool_call_id == "c1"
+    assert answered[0].metadata["reported_tool_call_id"] == "c1-attempt-2"
+    assert answered[0].output == "42 spots removed"
+    assert answered[0].name == "spatial_filter"
+
+
+def test_a_result_already_wearing_its_own_calls_id_is_passed_through_untouched():
+    """The correction fires only on a mismatch.
+
+    Rebuilding every result would put a ``reported_tool_call_id`` on
+    every Observation of every run, which would make the entry useless as
+    a signal — the thing it is there to be.
+    """
+    result = ToolResult(tool_call_id="c1", name="spatial_de", output="3 markers")
+
+    answered = _answer_every_call((_call(1),), [result])
+
+    assert answered[0] is result
+    assert "reported_tool_call_id" not in answered[0].metadata
+
+
+def test_a_missing_observation_reports_a_failure_rather_than_silence():
+    """It genuinely produced no answer, and ``is_error`` is how the model
+    is told so. Reporting silence as success invites it to build on an
+    answer that does not exist."""
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        raise asyncio.CancelledError
+
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1, "spatial_cnv")), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observation = [m for m in result.messages if m.role is Role.TOOL][0]
+    assert observation.is_error
+    assert "spatial_cnv" in observation.content
+    assert observation.tool_call_id == "c1"
+
+
+def test_a_failed_tool_reaches_the_model_as_a_failure():
+    """``ToolResult.is_error`` survives the projection into history, so
+    the model can fix a bad argument instead of parsing prose."""
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        raise ValueError("threshold must be positive")
+
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observation = [m for m in result.messages if m.role is Role.TOOL][0]
+    assert observation.is_error
+    assert "threshold must be positive" in observation.content
+
+
+def test_an_empty_tool_output_becomes_the_configured_placeholder():
+    """Substituted before any message reaches an adapter, because some
+    backends reject an empty ``tool_result`` outright."""
+
+    async def behaviour(call: ToolCall) -> ToolResult:
+        return ToolResult(tool_call_id=call.id, name=call.name, output="")
+
+    executor = RecordingExecutor(behaviour=behaviour)
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider, executor)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    observation = [m for m in result.messages if m.role is Role.TOOL][0]
+    assert observation.content == EngineConfig().empty_output_placeholder
+
+
+# --- failures and cancellation --------------------------------------------
+
+
+def test_a_provider_failure_is_raised_rather_than_returned():
+    """There is no ``StopReason.ERROR``: a ``RunResult`` exists only when
+    the loop stopped on its own terms."""
+    provider = ScriptedProvider(ProviderError("502 bad gateway", status_code=400))
+    engine, _ = _engine(provider)
+
+    with pytest.raises(ProviderError):
+        _run(engine.run([Message.user("go")]))
+
+
+def test_a_transient_provider_failure_does_not_kill_the_run():
+    """The budget exists so one bad minute does not cost an agent its
+    trajectory. The base delay is a millisecond here so the backoff is
+    real without being paid for."""
+    provider = ScriptedProvider(
+        ProviderError("503", status_code=503), _answers("recovered")
+    )
+    config = EngineConfig(generate_retries=2, generate_retry_base=0.001)
+    engine, _ = _engine(provider, config=config)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen) == 2
+    assert result.turns == 1
+    assert result.final_message == Message.assistant("recovered")
+
+
+class EmptyProvider(ScriptedProvider):
+    """A provider that answers with ``None``, which the Protocol permits.
+
+    Not a contrived double: ``LLMProvider`` is structural and
+    ``runtime_checkable`` compares method *names*, so this class is an
+    ``LLMProvider`` by every check the engine can make. An adapter that
+    forgets a ``return`` on one branch, or hands back its SDK's "no
+    choices" case, is this.
+    """
+
+    def __init__(self, empty_turns: int = 1_000) -> None:
+        super().__init__(_answers("recovered"))
+        self._empty_turns = empty_turns
+
+    async def generate(self, messages, tools=None):
+        if len(self.seen) < self._empty_turns:
+            self.seen.append((messages, tuple(tools or ())))
+            return None
+        return await super().generate(messages, tools)
+
+
+def test_a_provider_that_answers_with_nothing_is_retried_rather_than_crashing():
+    """R8, the blocking twin of a stream that never sent its DONE.
+
+    Dereferenced, this is ``AttributeError: 'NoneType' object has no
+    attribute 'usage'`` — neither a ``ProviderError`` nor an
+    ``EngineError``, so it sits outside every budget and
+    ``generate_retries=5`` buys nothing while the run dies on the first
+    occurrence. The type annotation does not prevent it: nothing checks
+    return types at runtime, which the assertion below states rather than
+    assumes.
+    """
+    provider = EmptyProvider()
+    config = EngineConfig(generate_retries=3, generate_retry_base=0.001)
+    engine, _ = _engine(provider, config=config)
+
+    assert isinstance(provider, LLMProvider)
+    with pytest.raises(ProviderError) as raised:
+        _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen) == 3
+    assert "no completion" in str(raised.value)
+    assert raised.value.provider == "scripted"
+
+
+def test_a_provider_that_answers_with_nothing_once_can_still_finish_the_run():
+    """Retryable means recoverable, not merely renamed.
+
+    The reference harness treats an empty response as transient for this
+    reason (``retry.go:64-68``): the alternative is a whole trajectory
+    thrown away because one call came back blank.
+    """
+    provider = EmptyProvider(empty_turns=1)
+    config = EngineConfig(generate_retries=3, generate_retry_base=0.001)
+    engine, _ = _engine(provider, config=config)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert len(provider.seen) == 2
+    assert result.turns == 1
+    assert result.stop_reason is StopReason.CONVERGED
+    assert result.final_message == Message.assistant("recovered")
+
+
+def test_a_cancelled_run_stays_cancelled():
+    """Trap 4. Cancellation is not a failure and it is not a result —
+    turning it into either would tell a caller who cancelled a run that
+    the run had an opinion about it."""
+
+    class HangingProvider(ScriptedProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reached = asyncio.Event()
+
+        async def generate(self, messages, tools=None):
+            self.reached.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")  # pragma: no cover
+
+    async def scenario() -> tuple[bool, BaseException]:
+        provider = HangingProvider()
+        engine, _ = _engine(provider)
+        task = asyncio.ensure_future(engine.run([Message.user("go")]))
+        await provider.reached.wait()
+        task.cancel()
+        outcome = (await asyncio.gather(task, return_exceptions=True))[0]
+        return task.cancelled(), outcome
+
+    cancelled, outcome = _run(scenario())
+
+    assert cancelled
+    assert isinstance(outcome, asyncio.CancelledError)
+
+
+def test_run_never_reaches_the_streaming_entry_point():
+    """A blocking caller must not pay for streaming, and ``generate`` is
+    the path on which ``finish_reason`` has never been in doubt."""
+    provider = ScriptedProvider(_acts(_call(1)), _answers())
+    engine, _ = _engine(provider)
+
+    result = _run(engine.run([Message.user("go")]))
+
+    assert result.stop_reason is StopReason.CONVERGED
+    # The double's streaming half is a landmine, so "never reached it" is
+    # the run above having finished at all rather than an absence nobody
+    # can see.
+    with pytest.raises(AssertionError):
+        provider.generate_stream(())
+
+
+def test_the_blocking_strategy_reports_what_the_turn_cost_like_the_other_one():
+    """Reaching past ``run`` on purpose.
+
+    ``run`` discards the kernel's events, so the blocking strategy's half
+    of the outcome holder has no public observer — and an unobserved
+    field is one that quietly stops being filled. Driving the kernel
+    directly is the only way to hold both strategies to the same seam.
+    """
+    provider = ScriptedProvider(_answers(usage=Usage(input_tokens=9)))
+    engine, _ = _engine(provider)
+
+    async def scenario() -> list[Any]:
+        return [event async for event in engine._kernel([], engine._blocking_turn)]
+
+    events = _run(scenario())
+    turn_end = [e for e in events if e.usage is not None]
+
+    assert len(turn_end) == 1
+    assert turn_end[0].usage == Usage(input_tokens=9)
+
+
+def test_the_blocking_path_cannot_say_that_the_backend_reported_nothing():
+    """The one asymmetry between the two strategies, pinned as a limit.
+
+    ``EngineEvent.usage`` is ``None`` when a backend reported nothing —
+    but only a *streamed* turn can say so, because ``StreamChunk.usage``
+    is optional and ``Completion.usage`` is not. ``_blocking_turn`` has
+    nothing but zeros to copy, so a silent backend is indistinguishable
+    here from a turn that genuinely cost nothing, and both arrive as
+    ``Usage()``.
+
+    Closing that gap means teaching ``Completion`` to express "not
+    reported", which belongs to ``omicsclaw.provider``. Until it does,
+    this is what the blocking path *does*, and the docstrings on
+    ``_TurnOutcome.usage`` and ``EngineEvent.usage`` say so rather than
+    promising past it.
+    """
+    provider = ScriptedProvider(_answers())
+    engine, _ = _engine(provider)
+
+    async def scenario() -> list[Any]:
+        return [event async for event in engine._kernel([], engine._blocking_turn)]
+
+    events = _run(scenario())
+    turn_end = [e for e in events if e.type is EngineEventType.TURN_END]
+
+    assert len(turn_end) == 1
+    assert turn_end[0].usage == Usage()
+    assert turn_end[0].usage is not None
+
+
+def test_run_refuses_to_invent_a_result_when_the_kernel_produces_none():
+    """``run`` reads its answer off the kernel's ``DONE`` event. If that
+    event never arrives, the honest report is a broken invariant — never
+    an empty, successful-looking run.
+
+    This is also ``EngineError``'s one reachable case now that a dead
+    provider stream raises ``ProviderError`` instead (R6): the kernel is
+    code this package wrote, so no backend can be blamed for it going
+    quiet, and that is exactly the distinction the two types keep.
+    """
+    engine, _ = _engine(ScriptedProvider(_answers()))
+
+    async def kernel_that_says_nothing(*args: Any) -> AsyncIterator[Any]:
+        return
+        yield
+
+    engine._kernel = kernel_that_says_nothing
+
+    with pytest.raises(EngineError):
+        _run(engine.run([Message.user("go")]))
