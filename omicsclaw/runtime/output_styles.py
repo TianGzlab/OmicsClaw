@@ -128,72 +128,17 @@ def get_builtin_output_style_profiles() -> tuple[OutputStyleProfile, ...]:
     return _BUILTIN_OUTPUT_STYLE_PROFILES
 
 
-def _coerce_output_style_profile(raw: Any) -> OutputStyleProfile | None:
-    if not isinstance(raw, OutputStyleProfile):
-        return None
-    if not raw.instructions.strip():
-        return None
-    return raw
-
-
-def load_extension_output_style_profiles(
-    omicsclaw_dir: str | None = None,
-) -> tuple[OutputStyleProfile, ...]:
-    root = str(omicsclaw_dir or "").strip()
-    if not root:
-        return ()
-
-    try:
-        from omicsclaw.extensions import load_enabled_output_style_packs
-    except Exception:
-        return ()
-
-    profiles: list[OutputStyleProfile] = []
-    for pack in load_enabled_output_style_packs(root):
-        for entry in pack.styles:
-            profile = OutputStyleProfile(
-                name=normalize_output_style_name(entry.name),
-                description=entry.description,
-                instructions=entry.instructions,
-                source=f"extension:{pack.name}",
-                aliases=tuple(
-                    alias
-                    for alias in (
-                        normalize_output_style_name(value) for value in entry.aliases
-                    )
-                    if alias
-                ),
-                supported_surfaces=tuple(
-                    surface
-                    for surface in (
-                        normalize_output_style_surface(value)
-                        for value in entry.supported_surfaces
-                    )
-                    if surface in _SUPPORTED_SURFACES
-                ),
-                metadata={
-                    "pack_name": pack.name,
-                    "pack_version": pack.version,
-                    "relative_path": entry.relative_path,
-                    **dict(entry.metadata),
-                },
-            )
-            if profile.name and profile.instructions.strip():
-                profiles.append(profile)
-    return tuple(profiles)
-
-
 def get_output_style_profiles(
     omicsclaw_dir: str | None = None,
 ) -> tuple[OutputStyleProfile, ...]:
-    profiles: list[OutputStyleProfile] = list(get_builtin_output_style_profiles())
-    seen = {profile.name for profile in profiles}
-    for profile in load_extension_output_style_profiles(omicsclaw_dir):
-        if profile.name in seen:
-            continue
-        profiles.append(profile)
-        seen.add(profile.name)
-    return tuple(profiles)
+    """Return every output style this deployment offers.
+
+    ``omicsclaw_dir`` used to select extension packs on top of the
+    built-ins; ``omicsclaw/extensions/`` was removed with the old stack,
+    so the built-ins are now the whole set. The parameter is kept because
+    callers pass it positionally and a style source may return.
+    """
+    return get_builtin_output_style_profiles()
 
 
 def build_output_style_registry(
@@ -300,7 +245,6 @@ __all__ = [
     "build_output_style_registry",
     "get_builtin_output_style_profiles",
     "get_output_style_profiles",
-    "load_extension_output_style_profiles",
     "normalize_output_style_name",
     "normalize_output_style_surface",
     "render_output_style_layer",
