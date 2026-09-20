@@ -10,25 +10,24 @@ therefore pinned twice, from both sides, and the two halves are adjacent
 so a reader can see the pair.
 
 The second subject is plan 0029 §4 Q1: this module re-implements what
-``omicsclaw/services/path_validation.py`` does for the layer being
-replaced, because ``omicsclaw/tools/`` may not import it. A re-write with
-no comparison is a guess, so
+``omicsclaw/services/path_validation.py`` did for the layer being
+replaced. A re-write with no comparison is a guess, so
 :func:`test_containment_agrees_with_the_legacy_path_validator` runs both
 over one corpus and asserts zero disagreements on the half they share,
 and the tests around it pin each place they deliberately differ.
 
-**The layering rule does not apply to this file.** It forbids the
-*package* from importing anything but ``omicsclaw.schema``;
-``tests/tools/`` is not scanned, which is what lets the comparison above
-exist.
+That comparison used to load the legacy module from disk. The framework
+rebuild deleted it, so :func:`_legacy_validate_path` below is a **frozen
+copy** of the one function this file ever called, taken verbatim from the
+last revision that shipped it and verified to answer identically over the
+whole corpus at capture time. Freezing the function rather than a table
+of its answers keeps the comparison live: a new corpus entry is still
+answered by the legacy rule instead of needing a recorded verdict.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
-import sys
-from typing import Any
 
 import pytest
 
@@ -43,39 +42,28 @@ from omicsclaw.tools._workspace import (
     is_sensitive,
 )
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_LEGACY_VALIDATOR = _REPO_ROOT / "omicsclaw" / "services" / "path_validation.py"
 
+def _legacy_validate_path(filepath: pathlib.Path, allowed_root: pathlib.Path) -> bool:
+    """Answer whether ``filepath`` resolves inside ``allowed_root``.
 
-def _load_legacy_path_validation() -> Any:
-    """The legacy validator, loaded from its file rather than as a package.
+    A verbatim copy of ``validate_path`` from
+    ``omicsclaw/services/path_validation.py`` at revision ``ed3c6cc4``,
+    the last one to ship that module. Copying it is exact rather than
+    approximate: this was the whole function, it read no module state,
+    and its ``except ValueError`` is load-bearing — that is what refuses
+    a NUL byte, because :meth:`pathlib.Path.resolve` raises for one.
 
-    The same device ``tests/tools/test_function_tool.py`` uses on
-    ``runtime/tools/validation.py`` and for the same reason: importing
-    ``omicsclaw.services.path_validation`` the ordinary way is fine at
-    the top but the module under it late-imports
-    ``omicsclaw.runtime.agent.state``, and nothing in this comparison
-    needs a runtime. Loaded by path it pulls in
-    ``omicsclaw.services.audit`` and stops.
-
-    Only :func:`validate_path` is exercised. Its neighbours —
-    ``validate_input_path``, ``resolve_dest``, ``discover_file`` — reach
-    for ``DATA_DIR`` and friends through that late import, and they
-    answer a different question anyway (*which* of several trusted roots
-    holds this file), compared by hand in the module docstring rather
-    than here.
+    Its neighbours in that module — ``validate_input_path``,
+    ``resolve_dest``, ``discover_file`` — were never called here. They
+    answer a different question (*which* of several trusted roots holds
+    this file) and reach for ``DATA_DIR`` and friends through a late
+    import of the deleted runtime.
     """
-    spec = importlib.util.spec_from_file_location(
-        "legacy_path_validation", _LEGACY_VALIDATOR
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_LEGACY = _load_legacy_path_validation()
+    try:
+        filepath.resolve().relative_to(allowed_root.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 @pytest.fixture
@@ -617,7 +605,7 @@ def test_containment_agrees_with_the_legacy_path_validator(
     for raw in (*_CORPUS, str(workspace.root), str(tmp_path / "outside.txt")):
         candidate = pathlib.Path(raw)
         joined = candidate if candidate.is_absolute() else workspace.root / candidate
-        legacy = _LEGACY.validate_path(joined, workspace.root)
+        legacy = _legacy_validate_path(joined, workspace.root)
         try:
             workspace.resolve(raw)
             mine = True
@@ -640,7 +628,7 @@ def test_the_legacy_validator_allows_a_credential_this_one_refuses(
     """
     key = workspace.root / ".ssh" / "id_rsa"
 
-    assert _LEGACY.validate_path(key, workspace.root) is True
+    assert _legacy_validate_path(key, workspace.root) is True
     with pytest.raises(PathIsSensitive):
         workspace.resolve(".ssh/id_rsa")
 
@@ -656,7 +644,7 @@ def test_the_legacy_validator_reports_a_bool_where_this_one_says_why(
     neither. Here the class carries that, and the message carries a
     sentence the model can act on.
     """
-    assert _LEGACY.validate_path(workspace.root / ".." / "x", workspace.root) is False
+    assert _legacy_validate_path(workspace.root / ".." / "x", workspace.root) is False
 
     with pytest.raises(PathEscapesWorkspace):
         workspace.resolve("../x")
