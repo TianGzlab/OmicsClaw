@@ -20,8 +20,9 @@ engine gained one optional seam for it (`TurnAugmentor`), consulted after
 the compactor and able only to append to the call being made. That step's
 own measurement (`schema provider engine tools context skills entry mcp
 memory permission planning launch`) was **3,679 passed, 7 skipped**.
-What is left before this replaces the old stack: the migration that retires
-`omicsclaw/surfaces/`.**
+**The migration has run** (2026-09-20) and the rebuilt stack is the only
+one: eleven packages removed across four commits, `c23ec181..6a1533f8`.
+See "The migration" below for what went, what was kept and why.**
 
 > ⚠️ **Several sessions write this tree at once.** Step 6.9's parity
 > evaluation reported six regressions that did not exist; both evaluations
@@ -1678,10 +1679,10 @@ DeepSeek half of `patches.py`, then collapse the two packages.
   Verify line length with `awk 'length > 88' <files>` (must print nothing)
   and hand-check for constructs black would rewrap.
 - **`pytest-asyncio` is not installed** either, despite being declared in
-  `pyproject.toml`. Async tests are driven with `asyncio.run`. ~112
-  pre-existing failures elsewhere in `tests/runtime/` are this missing
-  plugin, not regressions — verified by an A/B run with the new packages
-  removed.
+  `pyproject.toml`. Async tests are driven with `asyncio.run`. The ~112
+  pre-existing failures this used to cause were in `tests/runtime/`, which
+  the migration removed; the rebuilt suite has no such exemption and is
+  expected to be fully green.
 - **Vendor SDK imports must be visible.** A plain `import` inside the
   client factory, never `importlib.import_module`. Laziness comes from
   *where* the import sits, not from making it dynamic — a dynamic import
@@ -1703,9 +1704,11 @@ DeepSeek half of `patches.py`, then collapse the two packages.
   such criterion as a fast failure with an asserted upper bound. The
   general shape: **a test that only asserts "it eventually happened"
   cannot test that it happened in time.**
-- **`tests/tools/test_workspace.py` fails at collection** — it imports
-  `omicsclaw/services/path_validation.py`, deleted by other work. Add
-  `--ignore=tests/tools/test_workspace.py` when taking a baseline.
+- ~~**`tests/tools/test_workspace.py` fails at collection**~~ **RESOLVED,
+  the migration.** It loaded `omicsclaw/services/path_validation.py` from
+  disk to diff against; that file is gone and the test now carries a frozen
+  verbatim copy of its `validate_path`, verified identical over the whole
+  corpus at capture time. No `--ignore` is needed for a baseline any more.
 - **Two known load-sensitive flakes**, named exemptions in plan 0030 §9-1
   and plan 0031 §9-1:
   `tests/tools/test_websafety.py::test_a_server_dripping_bytes_cannot_outlast_the_budget`
@@ -1721,7 +1724,7 @@ DeepSeek half of `patches.py`, then collapse the two packages.
 | Go reference harness | `/workspace/dataset/private/zhouwg_data/harness9/internal/` |
 | Its schema (10 types, 109 lines) | `internal/schema/message.go`, `stream.go`, `subagent.go` |
 | Its provider layer (1,906 lines) | `internal/provider/` — `interface.go`, `openai.go`, `anthropic.go`, `tool_call_accumulator.go`, `orcarouter.go` |
-| Step 1 decision record | `docs/adr/0077-one-top-level-vendor-neutral-schema-package.md` |
+| Step 1 decision record | **Does not exist.** Cited throughout this document as ADR 0077; it is in no revision and the ADR series stopped at 0076, which the migration then deleted along with the rest. The decision itself — schema as a top-level peer of `engine` / `provider` / `tools` — is described in "Step 1" above and is the only surviving record. |
 | Step 2 plan + outcome | `docs/plans/0026-provider-layer-simultaneous-interpreter.md` (§5 the nine traps, §11 the outcome) |
 | Step 3 plan + outcome | `docs/plans/0027-react-main-loop.md` (appendix B) |
 | Step 4 plan + outcome | `docs/plans/0028-tool-registry.md` (§5 the capability table, §11 the 16 debts, appendix B) |
@@ -1738,24 +1741,62 @@ bytes; the directory then disappeared mid-session.** Do not rely on it.
 Its chapter-2 reference schema was captured before it vanished and is
 reflected in ADR 0077.
 
-## Next step
+## The migration
 
-**Step 7 — session persistence and long-term recall**
-(`omicsclaw/memory/`, plan 0033). The name question step 3 had to settle
-for `engine` does not arise: the owner deleted the old 28-module graph
-memory system, so the name is free. Step 6 already left the two seams,
-and this layer lands in them without changing a line of `entry/` — the
-`SessionStore` Protocol and `attach_sessions(app, store=)`.
+Ran 2026-09-20, `c23ec181..6a1533f8`, four commits plus a README entry.
+Each was gated on the rebuilt stack's own suite — **4,412 passed, 10
+skipped** — and each is reviewable on its own.
 
-Then the **migration** (plan 0031 §10), which is a separate task and
-larger than it looks: four `[project.scripts]` entry points to repoint,
-`web_fetch` / `web_search` existing under the same name in both layers
-with one side to retire, and the deletion of the old
-`omicsclaw/surfaces/` — which cannot happen until the `RunRuntime` and
-persistent-memory families land and `_main.py`'s 35 subcommands have
-somewhere to live. Plan 0031 §10-2b gives the unlock order by measured
-change size rather than by intuition: Channel (13 lines) → Desktop
-`/chat/stream` (4 lines) → the CLI REPL's agent half.
+**Removed because a successor shipped**: `skill/`, `providers/`,
+`control/`, `services/`, `autonomous/`, `execution/`, `loaders/`, plus the
+old occupants of `engine/` and `memory/` and
+`runtime/{agent,context,policy,storage,tools}`.
+
+**Removed although nothing replaces them** — an owner ruling, not a
+cleanup, because each removal drops the capability: `agents/` (the
+multi-agent research pipeline), `knowledge/` (the `knowledge_base/` FTS5
+index), `extensions/`, `analysis_router/`, `research/`.
+
+**Kept and importable**: `common/` and `core/` — the science layer 96 skill
+scripts depend on, never legacy despite being old (`omicsclaw.common.report`
+alone has 91 call sites) — plus `remote/` and `attachments/`.
+
+**Kept and *not* importable**, read-only reference for later work:
+`autoagent/`, `runtime/{consensus,workflow}`, `routing/`, `surfaces/`,
+`diagnostics.py`. Each reaches `omicsclaw.skill` or `omicsclaw.providers`.
+Never cite one as working prior art without importing it first.
+
+### The skill runner was not re-homed
+
+Plan 0031 §10 assumed `omicsclaw/surfaces/` could not go until
+`_main.py`'s 35 subcommands had somewhere to live. Two facts overtook it:
+the `[project.scripts]` cut-over to `omicsclaw.launch:main` had already
+removed all 35 from `oc`, and `_main.py` itself stopped importing when the
+owner deleted `omicsclaw/skill/` on 2026-09-19. So `oc run <skill> --demo`
+was not a thing the migration could lose — it was already gone and not
+restorable in place.
+
+The owner's ruling, taken with that cost stated: leave it out. A skill is
+reached by the agent, which reads its `SKILL.md` and runs the script with
+`bash`. `surfaces/` is kept as reference rather than deleted, which is why
+the 38k lines are still on disk.
+
+What that costs, so nobody rediscovers it as a bug: the `result.json`
+envelope check, the run receipt, `reproducibility/replay.json`,
+`environment.json`, `replay.sh`, the output-directory claim, and the
+routing block that hid a deprecated skill. Nothing enforces any of them.
+
+### Open after the migration
+
+| Open | Detail |
+|---|---|
+| 22 skills write a dead `replot` hint | `common/report.py:write_replot_hint` patches `result.json` with a block pointing at `python omicsclaw.py replot`. That command is gone. This is a false string in **product output**, not in a document. |
+| `scripts/` is 18/29 broken | Including `generate_skill_md.py` and `generate_routing_table.py`, both on `omicsclaw.skill`. SKILL.md files cannot be regenerated; edit by hand. |
+| Ten Makefile targets call dead entry points | `demo`, `demo-all`, `demo-bulkrna`, `demo-orchestrator`, `list`, `catalog`, `bot-telegram`, `bot-multi`, `bot-list`, `memory-server`. |
+| 96 SKILL.md still document `oc run` | Their own flags are only written there, so this is the highest-value documentation left. |
+| `README.md`, `README_zh-CN.md`, `docs/product-overview.md` | 36 / 32 / 137 stale references. `AGENTS.md` and `CLAUDE.md` were repaired in `4b4fe681`; these were left for a later round. |
+| `docs/adr/` no longer exists | All 76 ADRs were deleted. Documents under `docs/plans/`, `docs/reviews/` and `docs/architecture/` still cite them and were **deliberately not rewritten** — they are dated records of what was true when written. |
+| ADR 0077 never existed | This document cited `docs/adr/0077-one-top-level-vendor-neutral-schema-package.md` as step 1's decision record. It is in no revision; the ADR series stops at 0076. |
 
 ~~**Step 5 — the assembly layer** (`omicsclaw/context/`)~~ **shipped**,
 and **step 5.6** (`omicsclaw/skills/`) shipped after it. One consequence
