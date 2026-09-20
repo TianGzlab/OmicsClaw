@@ -21,18 +21,26 @@ developer-facing tasks rather than end-user omics analysis:
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `zhou-1314/OmicsClaw`. See
-`docs/agents/issue-tracker.md`.
+Issues and PRDs live in GitHub Issues for `zhou-1314/OmicsClaw`. Use the `gh`
+CLI (`gh issue create|view|list|comment|edit|close`), and infer the repository
+from the current clone unless a command needs an explicit
+`--repo zhou-1314/OmicsClaw`. "Publish to the issue tracker" means create an
+issue; "fetch the relevant ticket" means read its body, labels and comments.
 
 ### Triage labels
 
-Use the canonical labels `needs-triage`, `needs-info`, `ready-for-agent`,
-`ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+Five canonical roles, each mapping to the GitHub label of the same name:
 
-### Domain docs
+| Label | Meaning |
+| --- | --- |
+| `needs-triage` | A maintainer must evaluate the issue. |
+| `needs-info` | More information is required from the reporter. |
+| `ready-for-agent` | Fully specified and safe for an AFK agent. |
+| `ready-for-human` | Requires human implementation or judgement. |
+| `wontfix` | Will not be actioned. |
 
-Use a single primary context with a Bench-specific supplement. See
-`docs/agents/domain.md`.
+The first four may not exist yet. Create one only when a workflow first needs
+to apply it; never create or mutate labels during read-only diagnosis.
 
 ## Skill Routing Table
 

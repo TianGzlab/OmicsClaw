@@ -4,7 +4,7 @@
 Phase 1 P0-E (Task #8). The registry lives in ``bot/commands/``
 because the handlers read bot-side state (transcript_store,
 DATA_DIR, format_skills_table, …) heavily — moving them to
-``omicsclaw/engine/`` would require an even larger DI surface
+``omicsclaw/runtime/engine/`` would require an even larger DI surface
 than EngineDependencies and re-introduce reverse-import temptation.
 """
 
