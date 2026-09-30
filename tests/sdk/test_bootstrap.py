@@ -146,6 +146,11 @@ def test_23b_a_copy_outside_the_repository_uses_pythonpath(tmp_path):
     assert with_path.returncode == 0, with_path.stderr[-2000:]
     assert f"PROBE_ROOT={REPO_ROOT}" in with_path.stdout
 
+    installed = subprocess.run(
+        [sys.executable, "-c", "import skills"], cwd=trial, env=_env(), capture_output=True
+    )
+    if installed.returncode == 0:
+        pytest.skip("this interpreter has OmicsClaw installed, so skills imports without PYTHONPATH")
     without = _help(probe, trial, _env())
     assert without.returncode != 0
     assert "No module named 'skills'" in without.stderr

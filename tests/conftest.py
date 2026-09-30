@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -87,12 +88,18 @@ def load_known_failures(path: Path = KNOWN_FAILURES_FILE) -> dict[str, tuple[str
 
 
 def pytest_collection_modifyitems(config, items):
-    """Mark every test listed in ``tests/ci_known_failures.txt`` as xfail.
+    """Skip ``requires_r`` tests without ``Rscript`` on PATH, and mark every
+    test listed in ``tests/ci_known_failures.txt`` as xfail.
 
     Entries are strict unless tagged ``env``: a strict entry that starts
     passing fails the run as XPASS, so it has to be removed from the
     list when its test is fixed.
     """
+    if shutil.which("Rscript") is None:
+        no_r = pytest.mark.skip(reason="requires_r: Rscript is not on PATH")
+        for item in items:
+            if item.get_closest_marker("requires_r") is not None:
+                item.add_marker(no_r)
     known = load_known_failures()
     if not known:
         return
