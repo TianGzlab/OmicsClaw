@@ -182,3 +182,118 @@ def test_a_shared_provider_instance_is_refused(tmp_path):
     run_case(case, tmp_path / "1")
     with pytest.raises(ValueError, match="already used"):
         run_case(case, tmp_path / "2")
+
+
+def test_a_compaction_written_back_before_the_trigger_call_is_headroom_missed(tmp_path):
+    """The offload case's compaction lands before call 4; declaring call 5 makes it early.
+
+    ``headroom_budget`` only checks the first call. This is the check
+    that the calls between the first and the trigger call stayed in a
+    tier that writes nothing back.
+    """
+    import dataclasses
+
+    from tests.evals.dataset.test_compaction import CASES
+
+    original = next(case for case in CASES if case.id == "compaction/large_result_offloaded")
+    assert original.headroom is not None
+    late = dataclasses.replace(
+        original, headroom=dataclasses.replace(original.headroom, trigger_call=5), assertions=()
+    )
+    result = run_case(late, tmp_path)
+    missed = [failure for failure in result.failures if failure.assertion == "headroom_missed"]
+    assert missed, result.failures
+    assert "before call 4" in missed[0].message and "trigger_call=5" in missed[0].message
+    assert "B=" in missed[0].message and "U=" in missed[0].message
+
+
+def _probe_network(seen):
+    """A telemetry factory that runs inside the hermetic block and records what sockets do."""
+    from omicsclaw.observability import Telemetry
+
+    def factory():
+        seen["connect"] = socket.socket.connect
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if seen["try"]:
+                probe.connect(("192.0.2.1", 80))
+        except OSError as error:
+            seen["error"] = str(error)
+        finally:
+            probe.close()
+        return Telemetry()
+
+    return factory
+
+
+def test_the_network_stays_blocked_by_default_and_opens_on_request(tmp_path):
+    original = socket.socket.connect
+    blocked = {"try": True}
+    case = Case(id="context/net", category="context", prompt="p",
+                provider=lambda: ScriptedProvider(ScriptedTurn(text="x")), assertions=(),
+                telemetry=_probe_network(blocked))
+    assert run_case(case, tmp_path / "a").passed
+    assert NETWORK_DISABLED in blocked["error"]
+
+    opened = {"try": False}
+    import dataclasses
+
+    run_case(dataclasses.replace(case, network=True, telemetry=_probe_network(opened)), tmp_path / "b")
+    assert opened["connect"] is original
+    assert socket.socket.connect is original
+
+
+def test_an_approval_policy_answers_every_request(tmp_path):
+    from omicsclaw.tools import ApprovalDecision
+
+    asked = []
+
+    def policy(request):
+        asked.append(request.tool_name)
+        return ApprovalDecision(approved=request.tool_name == "write_file")
+
+    case = Case(
+        id="safety/policy",
+        category="safety",
+        prompt="write and clean",
+        provider=lambda: ScriptedProvider(
+            ScriptedTurn(tool_calls=(tool_call("write_file", {"path": "n.md", "content": "hi"}),)),
+            ScriptedTurn(tool_calls=(tool_call("bash", {"command": "rm -rf results/"}),)),
+            ScriptedTurn(text="ok"),
+        ),
+        assertions=(),
+        permission="ask",
+        approvals=policy,
+        files={"results/a.txt": "keep"},
+    )
+    result = run_case(case, tmp_path)
+    assert result.passed, result.failures
+    assert asked == ["write_file", "bash"]
+    assert [(a.tool, a.approved, a.scripted) for a in result.approvals] == [
+        ("write_file", True, True),
+        ("bash", False, True),
+    ]
+    assert (tmp_path / "ws" / "n.md").exists() and (tmp_path / "ws" / "results" / "a.txt").exists()
+
+
+def test_a_skill_fallback_answers_skills_without_a_fixture(tmp_path):
+    from omicsclaw.evals import StubResult
+    from omicsclaw.evals.stubs import REPO_ROOT
+
+    script = REPO_ROOT / "skills" / "bulkrna" / "bulkrna-de" / "bulkrna_de.py"
+    turns = (
+        ScriptedTurn(tool_calls=(tool_call("bash", {"command": f"python {script} --input c.csv --output out"}),)),
+        ScriptedTurn(text="done"),
+    )
+    base = Case(id="skill_routing/fallback", category="skill_routing", prompt="de",
+                provider=lambda: ScriptedProvider(*turns), assertions=())
+    import dataclasses
+
+    fallback = run_case(dataclasses.replace(base, skill_fallback=StubResult(stdout="FALLBACK {skill}")), tmp_path / "a")
+    assert [(r.skill, r.stubbed) for r in fallback.skill_runs] == [("bulkrna-de", True)]
+    assert "FALLBACK bulkrna-de" in fallback.tool_results[0].output
+    assert not fallback.warnings
+
+    real = run_case(base, tmp_path / "b")
+    assert [(r.skill, r.stubbed) for r in real.skill_runs] == [("bulkrna-de", False)]
+    assert [w.assertion for w in real.warnings] == ["skill_ran_unstubbed"]

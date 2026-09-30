@@ -131,7 +131,7 @@ def test_cli_happy_path_produces_5_artifacts_exit_0(tmp_path: Path, monkeypatch:
     rc = ci.main([
         "--input", str(typed_run_dir),
         "--output", str(out),
-        "--tissue", "brain",
+        "--tissue", "brain", "--llm",
     ])
     assert rc == 0
 
@@ -163,6 +163,35 @@ def test_cli_no_llm_degrade_mode(tmp_path: Path) -> None:
     assert data["banner"] == banner
     assert data["clusters"] == []
     assert data["next_steps"] == []
+
+
+def test_cli_default_is_structural_only(tmp_path: Path) -> None:
+    """Without --llm the run writes the structural report, as --no-llm does."""
+    import consensus_interpret as ci  # type: ignore[import-not-found]
+
+    typed_run_dir, _ = _make_typed_run_with_real_de(tmp_path)
+    out = tmp_path / "interp_default"
+
+    rc = ci.main(["--input", str(typed_run_dir), "--output", str(out), "--tissue", "brain"])
+    assert rc == 0
+    banner = (out / "interpreted_report.md").read_text().splitlines()[0]
+    assert banner == "[I-noLLM: Structural patterns only — biology annotation disabled]"
+
+
+def test_cli_llm_without_a_model_client_exits_6_and_says_so(tmp_path: Path, capsys) -> None:
+    """--llm reaches the default model call, which reports that LLM naming is unavailable."""
+    import consensus_interpret as ci  # type: ignore[import-not-found]
+    from _llm import LLM_UNAVAILABLE  # type: ignore[import-not-found]
+
+    typed_run_dir, _ = _make_typed_run_with_real_de(tmp_path)
+
+    rc = ci.main([
+        "--input", str(typed_run_dir),
+        "--output", str(tmp_path / "llm_off"),
+        "--tissue", "brain", "--llm",
+    ])
+    assert rc == 6
+    assert LLM_UNAVAILABLE in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------- #
@@ -203,7 +232,7 @@ def test_cli_unknown_tissue_no_markers_exits_5(tmp_path: Path, monkeypatch: pyte
     rc = ci.main([
         "--input", str(typed_run_dir),
         "--output", str(tmp_path / "fail5"),
-        "--tissue", "totally_made_up",
+        "--tissue", "totally_made_up", "--llm",
     ])
     assert rc == 5
 
@@ -216,7 +245,7 @@ def test_cli_no_tissue_and_no_markers_with_llm_exits_5(tmp_path: Path, monkeypat
 
     rc = ci.main([
         "--input", str(typed_run_dir),
-        "--output", str(tmp_path / "fail5b"),
+        "--output", str(tmp_path / "fail5b"), "--llm",
     ])
     assert rc == 5
 
@@ -235,7 +264,7 @@ def test_cli_llm_returns_none_exits_6(tmp_path: Path, monkeypatch: pytest.Monkey
     rc = ci.main([
         "--input", str(typed_run_dir),
         "--output", str(tmp_path / "fail6"),
-        "--tissue", "brain",
+        "--tissue", "brain", "--llm",
     ])
     assert rc == 6
 
@@ -253,7 +282,7 @@ def test_cli_invariant_violation_exits_7(tmp_path: Path, monkeypatch: pytest.Mon
     rc = ci.main([
         "--input", str(typed_run_dir),
         "--output", str(tmp_path / "fail7"),
-        "--tissue", "brain",
+        "--tissue", "brain", "--llm",
     ])
     assert rc == 7
 
@@ -280,6 +309,6 @@ def test_cli_coverage_below_threshold_exits_8(tmp_path: Path, monkeypatch: pytes
         "--input", str(typed_run_dir),
         "--output", str(tmp_path / "fail8"),
         "--tissue", "brain",
-        "--coverage-floor", "0.5",
+        "--coverage-floor", "0.5", "--llm",
     ])
     assert rc == 8

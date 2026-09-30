@@ -1,8 +1,8 @@
 ---
 name: consensus-interpret
 description: Load when biologically interpreting a finished verified consensus run (consensus-domains
-  / sc-consensus-clustering) — inline DE, marker-DB lookup, and LLM cell-type naming with mandatory marker
-  citations + evidence-bound next-step recommendations. Skip when the consensus run failed (fix it first);
+  / sc-consensus-clustering) — inline DE, marker-DB lookup and a structural-only report by default; LLM
+  cell-type naming (--llm) is not available in this version and exits 6. Skip when the consensus run failed (fix it first);
   no consensus has been run yet (use consensus-domains or sc-consensus-clustering).
 trigger: consensus interpret, interpret consensus, explain consensus, annotate consensus, consensus cell type, name clusters, biological interpretation, next step after consensus, interpreted consensus, consensus biology
 tags:
@@ -65,7 +65,8 @@ Skip when:
    │    --markers <path> if given;
    │    else bundled `data/markers/panglaodb_<tissue>.tsv` for --tissue;
    │    else exit 5 (MarkerDBUnavailable)
-   └─ If LLM required and unreachable AND --no-llm not set → exit 6 (LLMUnavailable)
+   └─ Without --llm the run stops after step 2 with the structural-only report;
+      with --llm the model call reports that LLM naming is unavailable → exit 6
 
 2. Per-cluster differential expression (deterministic, scanpy)
    └─ scanpy.tl.rank_genes_groups(adata, groupby=consensus_<operator>, method='wilcoxon')
@@ -111,6 +112,9 @@ Skip when:
 - **Marker citations are mandatory.** Every cluster's `evidence.markers[]` and
   every next-step's `evidence_refs[]` must be non-empty, or the run exits 7
   (InvariantViolation). Ungrounded LLM output is rejected, not silently kept.
+- **LLM naming is not available in this version.** The skill has no model
+  client, so the default run is structural-only (`--no-llm` is accepted and
+  means the same) and `--llm` exits 6 with a message saying so.
 - **`--no-llm` changes the banner, not just the content.** Structural-only mode
   emits `[I-noLLM: ...]` and drops all cell-type claims; downstream consumers
   must branch on the banner, not assume biology is present.
@@ -127,7 +131,7 @@ Skip when:
 | 3 | TypedRunInvalid | `plan.json` missing / malformed / not from a typed run |
 | 4 | AdataMismatch | adata `obs` index disjoint from `consensus_labels.tsv` `observation` |
 | 5 | MarkerDBUnavailable | `--tissue` not in bundled DBs and `--markers` not provided |
-| 6 | LLMUnavailable | LLM endpoint unreachable and `--no-llm` not given |
+| 6 | LLMUnavailable | `--llm` given; LLM naming is not available in this version |
 | 7 | InvariantViolation | LLM violated marker-grounding or evidence-ref contract (T3) |
 | 8 | CoverageBelowThreshold | < 50% of clusters interpretable (after T2 degradation) |
 
@@ -142,7 +146,8 @@ python skills/spatial/consensus-domains/consensus_domains.py --input preprocesse
 
 python skills/spatial/consensus-interpret/consensus_interpret.py --input run1/ --output run1_interpreted/ \
   --tissue brain
-# → run1_interpreted/interpreted_report.md begins with [A+I: ...]
+# → structural-only for now: interpreted_report.md begins with [I-noLLM: ...]
+# (with --llm it would begin with [A+I: ...]; that path exits 6 in this version)
 ```
 
 ### CI / offline (structural-only)

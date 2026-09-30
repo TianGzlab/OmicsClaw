@@ -25,13 +25,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      # fastapi is left out on purpose: with it installed,
-      # tests/launch/test_surfaces.py starts a real server and hangs.
-      # The desktop HTTP tests are therefore skipped in CI.
-      - run: pip install -e . pytest numpy "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat
-      # The framework layers only. Tests known to fail are listed in
-      # tests/ci_known_failures.txt and run as strict xfail.
+      # fastapi, httpx and uvicorn let the desktop HTTP tests
+      # (tests/entry/test_desktop_*.py) run here instead of skipping.
+      - run: pip install -e . pytest numpy "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat fastapi httpx uvicorn
+      # The framework layers, the launch shell, attachments and the
+      # top-level tests. tests/ensemble is not included yet. Tests known
+      # to fail are listed in tests/ci_known_failures.txt and run as xfail.
       - name: Run unit tests
         run: >-
           pytest
@@ -39,6 +40,7 @@ jobs:
           tests/permission tests/hooks tests/memory tests/planning
           tests/observability tests/schema tests/skills tests/subagent
           tests/sandbox tests/skillenv tests/mcp tests/sdk tests/evals
+          tests/launch tests/attachments tests/test_*.py
           -m "not slow and not demo and not eval and not scripted_eval"
           -p no:cacheprovider
 
@@ -53,6 +55,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e . pytest
       - name: Run the eval dataset
         run: pytest tests/evals/dataset -m scripted_eval -p no:cacheprovider

@@ -273,11 +273,7 @@ def test_the_blocking_exchange_really_produces_a_two_level_tree(tmp_path, offlin
         _config(tmp_path),
         tools=[Echo()],
         telemetry=telemetry,
-    )
-    app = dataclasses.replace(app, provider=_TwoTurnProvider())
-    app = dataclasses.replace(
-        app,
-        engine=_engine_over(app),
+        provider=_TwoTurnProvider(),
     )
 
     _run(run_turn(app, (), "hi", session_id="sess-blocking"))
@@ -290,6 +286,9 @@ def test_the_blocking_exchange_really_produces_a_two_level_tree(tmp_path, offlin
     root = tracer.named("omicsclaw.interaction")[0]
     assert root.attributes["session.id"] == "sess-blocking"
     assert root.attributes["agent.turns"] == 2, "the turn count still arrives"
+    requests = tracer.named("omicsclaw.llm_request")
+    assert len(requests) == 2, "one request span per model call"
+    assert all(span.chain == ["omicsclaw.llm_request", "omicsclaw.interaction"] for span in requests)
     assert all(
         span.chain == [span.name, "omicsclaw.interaction"]
         for span in tracer.spans
@@ -327,12 +326,6 @@ class _TwoTurnProvider:
 
     def bind(self, **overrides):
         return self
-
-
-def _engine_over(app):
-    from omicsclaw.engine import AgentEngine
-
-    return AgentEngine(app.provider, app.registry, app.config.engine_config())
 
 
 def test_the_blocking_exchange_says_it_reports_no_turns():

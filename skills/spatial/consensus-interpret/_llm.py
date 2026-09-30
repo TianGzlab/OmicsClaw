@@ -74,10 +74,19 @@ class NextStep:
 # Default LLM call                                                            #
 # --------------------------------------------------------------------------- #
 
+LLM_UNAVAILABLE = (
+    "LLM cell-type naming is not available in this version: the skill has no "
+    "model client. Run without --llm for the structural-only report."
+)
+"""The message of the :class:`LLMUnavailableError` the default call raises."""
+
+
 def _default_llm_call(prompt: str) -> str | None:
-    """Best-effort delegate to providers.chat_completion."""
-    from omicsclaw.providers.chat_completion import call_chat_completion
-    return call_chat_completion(prompt, timeout=60.0, temperature=0.0)
+    """The model call used when none is injected.
+
+    :raises LLMUnavailableError: always, with :data:`LLM_UNAVAILABLE`.
+    """
+    raise LLMUnavailableError(LLM_UNAVAILABLE)
 
 
 # --------------------------------------------------------------------------- #

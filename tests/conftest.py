@@ -37,17 +37,15 @@ _DOTENV_KEYS = _dotenv_key_names()
 def _isolated_dotenv_environ(monkeypatch):
     """Clear repo-root-``.env``-sourced keys before every test.
 
-    ``omicsclaw.runtime.agent.state`` and ``omicsclaw.routing.llm_router``
-    each call ``load_project_dotenv(..., override=False)`` at *import* time,
-    pulling a developer's local ``.env`` (real ``LLM_PROVIDER``,
-    ``LLM_API_KEY``, ``OMICSCLAW_WORKSPACE``, etc.) into the process
-    environment. Because Python imports a module only once per process,
-    whichever test first triggers that import — directly or transitively,
-    possibly during collection rather than any specific test's own body —
-    permanently leaks those values into every test that runs afterward in
-    the same invocation, silently changing results in tests that assert on
-    "no provider configured" / "no workspace set" behavior based purely on
-    unrelated execution order. Deleting exactly the keys ``.env`` could set
+    Loading the repository's ``.env`` into the process environment (the
+    launch shell does it through ``load_env_file`` when a surface starts,
+    and a developer's shell may have exported the same keys) puts real
+    ``LLM_PROVIDER``, ``LLM_API_KEY``, ``OMICSCLAW_WORKSPACE`` and similar
+    values into ``os.environ``. A test that triggers such a load leaves
+    those values behind for every later test in the same invocation,
+    which changes the results of tests that assert on "no provider
+    configured" or "no workspace set" depending only on which test ran
+    first. Deleting exactly the keys ``.env`` could set
     (never touching anything else, including pytest's own
     ``PYTEST_CURRENT_TEST`` — a blanket ``os.environ`` snapshot/restore
     tried that first and broke pytest's internal teardown) makes results

@@ -8,6 +8,10 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
+
+# The skill script imports scanpy when it starts.
+pytest.importorskip("scanpy")
 
 AMBIENT_SCRIPT = Path("skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py").resolve()
 

@@ -8,7 +8,7 @@
 
 **Domain key:** `singlecell`
 
-**Skill count:** 34
+**Skill count:** 31
 
 **Primary data types:** h5ad, h5, loom, mtx
 
@@ -24,12 +24,6 @@ scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, normalize�
 - `sc-cell-communication` — Load when computing cell-cell ligand-receptor communication on an annotated scRNA AnnData via builtin scorer, LIANA, CellPhoneDB, CellChat (R), or NicheNet (R). Skip when assigning cell-type labels (use sc-cell-annotation); transcription factor → target regulatory networks (use sc-grn).
   triggers: cell communication, cell-cell communication, ligand receptor, cellchat, liana, cellphonedb, nichenet
 - `sc-clustering` — Load when building the neighbour graph, embedding (UMAP/t-SNE/diffmap/PHATE), and clustering (Leiden/Louvain) on a normalised single-cell AnnData. Skip when QC/normalisation/HVG/PCA have not run yet (use sc-preprocessing); marker ranking after clustering (use sc-markers).
-- `sc-consensus-clustering` — Load when you want resolution-robust single-cell clusters on a preprocessed scRNA AnnData — fanning out leiden/louvain across a resolution sweep, scoring members by silhouette + cross-method NMI, and voting a typed consensus. Skip when one resolution suffices (use sc-clustering); spatial domains (use consensus-domains).
-  triggers: consensus clustering, consensus celltype clustering, multi-resolution clustering, robust scrna clustering, resolution sweep consensus, single cell consensus clustering
-- `sc-consensus-integration` — Load when you want a multi-sample single-cell (scRNA) clustering robust to the choice of integration method — fanning out Harmony/Scanorama/scVI + an unintegrated baseline, scoring each by a batch-mixing intrinsic panel, and voting a consensus. Skip when single-batch (use sc-consensus-clustering); one integration method is fixed.
-  triggers: consensus integration, batch correction consensus, integration method consensus, robust scrna integration clustering, which clusters survive integration
-- `sc-consensus-pseudotime` — Load when you want a single-cell pseudotime ordering robust to the choice of trajectory method — fanning out DPT/Palantir/VIA from a shared root, rank-aligning them, and voting a consensus pseudotime with per-cell uncertainty. Skip when you have branching multi-lineage trajectories; no defined root.
-  triggers: consensus pseudotime, robust pseudotime, trajectory method consensus, pseudotime across methods, which ordering survives the trajectory method
 - `sc-count` — Load when turning scRNA FASTQ (or existing CellRanger/STARsolo/SimpleAF/kb-python output) into a downstream-ready AnnData. Skip when reads are already counted into AnnData (use sc-standardize-input); raw quality assessment only (use sc-fastq-qc).
   triggers: Cell Ranger count, STARsolo count, fastq to adata, raw single-cell counting, generate count matrix
 - `sc-cytotrace` — Load when computing per-cell differentiation potency / stemness scores from gene-expression complexity on a scRNA AnnData via the CytoTRACE-simple method. Skip when ordering cells along a trajectory (use sc-pseudotime); marker-based cell-type labelling (use sc-cell-annotation).

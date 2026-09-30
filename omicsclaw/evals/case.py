@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from omicsclaw.context import CompactionRecord, Pressure
 from omicsclaw.engine import StopReason
 from omicsclaw.schema import ToolCall, ToolResult
-from omicsclaw.tools import ApprovalDecision
+from omicsclaw.tools import ApprovalDecision, ApprovalRequest
 
 from .assertions import Assertion, Failure
-from .provider import RecordedCall, ScriptedProvider
+from .provider import RecordedCall
 
 if TYPE_CHECKING:
     from omicsclaw.observability import Telemetry
@@ -21,13 +21,40 @@ if TYPE_CHECKING:
     from .stubs import StubResult
 
 __all__ = [
+    "ApprovalPolicy",
     "ApprovalRecord",
     "Case",
+    "CaseProvider",
     "FsChange",
     "Headroom",
     "Result",
     "SkillRun",
 ]
+
+
+@runtime_checkable
+class CaseProvider(Protocol):
+    """What the Runner reads from a case's provider, besides the LLM protocol.
+
+    :class:`~omicsclaw.evals.provider.ScriptedProvider` has all four; so
+    does a recording wrapper around a real provider.
+    """
+
+    @property
+    def calls(self) -> tuple[RecordedCall, ...]: ...
+
+    @property
+    def side_calls(self) -> tuple[RecordedCall, ...]: ...
+
+    @property
+    def turn_index(self) -> int: ...
+
+    @property
+    def exhausted(self) -> int: ...
+
+
+ApprovalPolicy = Callable[[ApprovalRequest], ApprovalDecision]
+"""A function that answers each approval request as it arrives."""
 
 
 @dataclass(frozen=True)
@@ -36,7 +63,14 @@ class Headroom:
 
     The Runner sizes the context window from these numbers so that the
     first model call is below ``WARN`` and call *trigger_call* lands in
-    *target*.
+    *target*. For a ``FULL`` target the first-call condition means
+    ``B < 3G`` (``B`` the first call's tokens, ``G`` *trigger_tokens*),
+    about 14.1k tokens for ``G = 4700``.
+
+    The calls in between may still reach ``WARN``. That writes nothing
+    back when there is no large result to offload, so it does not
+    disturb the case. A compaction that does write back before
+    *trigger_call* fails the run with ``headroom_missed``.
 
     :param target: The tier to reach: ``WARN``, ``SOFT`` or ``FULL``.
     :param trigger_call: The main-line call (0-based) before which the
@@ -58,8 +92,10 @@ class Case:
     :param id: ``"<category>/<name>"``.
     :param category: Must equal the prefix of *id*.
     :param prompt: The first user message.
-    :param provider: A factory returning a fresh
-        :class:`~omicsclaw.evals.provider.ScriptedProvider` per run.
+    :param provider: A factory returning a fresh provider per run: a
+        :class:`~omicsclaw.evals.provider.ScriptedProvider`, or any
+        :class:`~omicsclaw.provider.LLMProvider` that is also a
+        :class:`CaseProvider`.
     :param assertions: What is checked after the run.
     :param followups: Further user messages, sent in the same session
         after the first exchange ends.
@@ -70,9 +106,15 @@ class Case:
         asks.
     :param approvals: Answers to approval requests, in the order the
         requests arrive. A ``bool`` becomes an
-        :class:`~omicsclaw.tools.ApprovalDecision`.
+        :class:`~omicsclaw.tools.ApprovalDecision`. May instead be an
+        :data:`ApprovalPolicy`, called once per request; a policy never
+        runs out, so it never records ``approval_unscripted``.
     :param skill_stubs: Skill name to the output a run of its script
         returns instead of running.
+    :param skill_fallback: The output a run of any other skill's script
+        returns instead of running (see
+        :func:`~omicsclaw.evals.stubs.stubbed_skill_runs`). ``None`` runs
+        those scripts for real.
     :param compaction: Whether compaction is expected. When false, any
         compaction fails the case.
     :param headroom: Required when *compaction* is true.
@@ -81,6 +123,8 @@ class Case:
     :param outside_files: Files written into a sibling directory of the
         workspace, which the case can check is left alone.
     :param env: Extra environment variables for the run.
+    :param network: Whether outbound connections are allowed. The rest of
+        the hermetic environment applies either way.
     :param config: :class:`~omicsclaw.entry.AppConfig` field overrides.
     :param telemetry: A factory for the telemetry to assemble with.
         ``None`` uses an inactive one.
@@ -91,18 +135,20 @@ class Case:
     id: str
     category: str
     prompt: str
-    provider: Callable[[], ScriptedProvider]
+    provider: Callable[[], CaseProvider]
     assertions: tuple[Assertion, ...]
     followups: tuple[str, ...] = ()
     max_turns: int = 20
     permission: Literal["auto", "ask"] = "auto"
-    approvals: tuple[bool | ApprovalDecision, ...] = ()
+    approvals: tuple[bool | ApprovalDecision, ...] | ApprovalPolicy = ()
     skill_stubs: Mapping[str, StubResult] = field(default_factory=dict)
+    skill_fallback: StubResult | None = None
     compaction: bool = False
     headroom: Headroom | None = None
     files: Mapping[str, str | bytes] = field(default_factory=dict)
     outside_files: Mapping[str, str] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
+    network: bool = False
     config: Mapping[str, object] = field(default_factory=dict)
     telemetry: Callable[[], Telemetry] | None = None
 

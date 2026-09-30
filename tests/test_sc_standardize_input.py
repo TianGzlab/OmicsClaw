@@ -8,7 +8,11 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
 from scipy import sparse
+
+# Both skill scripts import scanpy when they start.
+pytest.importorskip("scanpy")
 
 STANDARDIZE_SCRIPT = Path("skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py").resolve()
 QC_SCRIPT = Path("skills/singlecell/scrna/sc-qc/sc_qc.py").resolve()

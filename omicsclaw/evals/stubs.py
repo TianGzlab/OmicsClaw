@@ -208,6 +208,8 @@ def stubbed_skill_runs(
     index: SkillIndex,
     record: list[SkillRun],
     failures: list[Failure] | None = None,
+    *,
+    fallback: StubResult | None = None,
 ) -> Iterator[None]:
     """Answer runs of the stubbed skills' scripts from *stubs* inside the block.
 
@@ -226,6 +228,13 @@ def stubbed_skill_runs(
     :param failures: Receives a hard ``stub_target_missing`` failure
         when a stubbed skill's script does not exist or the command has
         no ``--output``. The command then returns exit status 2.
+    :param fallback: The stub for a skill that has none in *stubs*.
+        ``{skill}`` in its ``stdout`` becomes the skill name. With a
+        fallback no skill script runs for real except for ``--help``: a
+        command without ``--output`` returns exit status 2 and a message
+        saying ``--output`` is required, and a script that does not exist
+        returns exit status 2; neither is a failure. A fallback run is
+        recorded with ``stubbed=True``. ``None`` keeps the behaviour above.
     :raises KeyError: a stub names a skill that is not in *index*.
     """
     for name in stubs:
@@ -241,6 +250,8 @@ def stubbed_skill_runs(
         if run.wants_help:
             return await original(command, cwd, timeout)
         stub = stubs.get(run.skill.name)
+        if stub is None and fallback is not None:
+            return _fallback_run(run, command, cwd)
         if stub is None:
             record.append(
                 SkillRun(run.skill.name, run.skill.domain, command, stubbed=False)
@@ -266,6 +277,27 @@ def stubbed_skill_runs(
             ),
             False,
         )
+
+    def _fallback_run(
+        run: _Invocation, command: str, cwd: Path
+    ) -> tuple[_bash.CommandOutcome, bool]:
+        assert fallback is not None
+        if not run.script.is_file():
+            return _bash.CommandOutcome(
+                output=f"python: can't open file {str(run.script)!r}: No such file or directory",
+                exit_code=2,
+            ), False
+        if not run.output:
+            return _bash.CommandOutcome(
+                output=f"{run.script.name}: error: --output is required", exit_code=2
+            ), False
+        output = Path(run.output)
+        if not output.is_absolute():
+            output = cwd / output
+        _write_stub(fallback, output)
+        record.append(SkillRun(run.skill.name, run.skill.domain, command, stubbed=True))
+        text = fallback.stdout.replace("{skill}", run.skill.name).replace("{output}", str(output))
+        return _bash.CommandOutcome(output=text, exit_code=fallback.exit_code), False
 
     _bash._locally = locally  # type: ignore[assignment]
     try:

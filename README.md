@@ -29,11 +29,12 @@
 OmicsClaw is an AI agent for multi-omics analysis. You describe the analysis
 you want; the model picks a skill, reads its instructions and runs its Python,
 R or command-line tools in your own environment, on your machine or on a
-server. It ships 94 skills in seven domains, and the same agent answers in the
+server. It ships 90 skills in seven domains, and the same agent answers in the
 terminal, in the desktop app and on chat platforms.
 
 ## What's new
 
+- A real-model routing eval (`tests/evals/live/`, run by hand) measures whether the model picks the right skill for 26 seed requests, and the CI unit-test job now also runs the launch shell, attachments, top-level and desktop HTTP tests. Four consensus skills whose scripts could not start are out of the skill index for now ([0068](docs/plans/0068-eval-hardening.md)).
 - The agent framework has been rebuilt around three entry points, `oc cli`, `oc desktop` and `oc channel`, and the old `oc interactive`, `oc tui`, `oc onboard` and `oc run` commands are gone ([rebuild status](docs/FRAMEWORK-REBUILD.md)).
 - The Desktop App works with the rebuilt backend, including remote mode over SSH and setting up a model from the App ([0064](docs/plans/0064-desktop-app-alignment.md), [0065](docs/plans/0065-desktop-management-pages-and-retirement.md), [0066](docs/plans/0066-desktop-remote-mode.md)).
 - The agent tells you which of a skill's packages your environment lacks, and with `OMICSCLAW_SKILL_ENV=install` it can install them after you approve, into a separate overlay that leaves the base environment untouched ([0061](docs/plans/0061-adaptive-env-provisioning.md)).
@@ -142,7 +143,7 @@ library. The dependency lists are [`environment.yml`](environment.yml) and
 
 ## Domains
 
-94 skills in seven domains. `make list` prints the current index.
+90 skills in seven domains. `make list` prints the current index.
 
 | Domain | Skills | Examples | Guide |
 |---|---|---|---|

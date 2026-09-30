@@ -46,18 +46,14 @@ from tests.sdk._scan import (
 
 SDK = REPO_ROOT / "skills" / "_sdk"
 
-B2_KNOWN = {
-    # 0058: the consensus-interpret helper still reaches the deleted providers package.
-    ("skills/spatial/consensus-interpret/_llm.py", "omicsclaw.providers.chat_completion"),
-}
+B2_KNOWN: set[tuple[str, str]] = set()
 
 B3_KNOWN = {
-    # 0058 replaces the four consensus shells and the interpreter helper.
+    # 0058 replaces the four consensus shells (out of the index until then).
     ("skills/singlecell/scrna/sc-consensus-clustering/sc_consensus_clustering.py", "omicsclaw.runtime.consensus.run"),
     ("skills/singlecell/scrna/sc-consensus-integration/sc_consensus_integration.py", "omicsclaw.runtime.consensus.run"),
     ("skills/singlecell/scrna/sc-consensus-pseudotime/sc_consensus_pseudotime.py", "omicsclaw.runtime.consensus.run"),
     ("skills/spatial/consensus-domains/consensus_domains.py", "omicsclaw.runtime.consensus.run"),
-    ("skills/spatial/consensus-interpret/_llm.py", "omicsclaw.providers.chat_completion"),
 }
 
 B4_KNOWN: set[str] = set()

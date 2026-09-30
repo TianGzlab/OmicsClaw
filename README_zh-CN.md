@@ -28,7 +28,7 @@
 
 OmicsClaw 是一个做多组学分析的 AI agent。你用自然语言说明要做的分析，模型挑选合适的
 skill，读它的说明，再在你自己的环境里（本机或服务器）运行其中的 Python、R 或命令行工具。
-仓库自带 7 个领域共 94 个 skill；终端、桌面 App 和聊天平台背后是同一个 agent。
+仓库自带 7 个领域共 90 个 skill；终端、桌面 App 和聊天平台背后是同一个 agent。
 
 ## 最新动态
 
@@ -127,7 +127,7 @@ HTTP 接口约定见 [`docs/core-features/surfaces.md`](docs/core-features/surfa
 
 ## 领域
 
-7 个领域共 94 个 skill，`make list` 可以打印当前索引。
+7 个领域共 90 个 skill，`make list` 可以打印当前索引。
 
 | 领域 | skill 数 | 示例 | 指南 |
 |---|---|---|---|

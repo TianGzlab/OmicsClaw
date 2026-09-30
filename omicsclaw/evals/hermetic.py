@@ -118,17 +118,27 @@ def block_network() -> Iterator[None]:
         socket.socket.connect_ex = original_connect_ex  # type: ignore[method-assign]
 
 
+_block_network = block_network
+
+
 def _tzset() -> None:
     if hasattr(time, "tzset"):
         time.tzset()
 
 
 @contextmanager
-def hermetic_env(home: Path, extra: Mapping[str, str] | None = None) -> Iterator[None]:
+def hermetic_env(
+    home: Path,
+    extra: Mapping[str, str] | None = None,
+    *,
+    block_network: bool = True,
+) -> Iterator[None]:
     """Run the block in a hermetic environment, then restore the original.
 
     :param home: The directory to use as ``HOME``. Created if missing.
     :param extra: Variables set last, over the hermetic ones.
+    :param block_network: Refuse outbound connections inside the block.
+        ``False`` keeps every other edit and leaves sockets alone.
     """
     home.mkdir(parents=True, exist_ok=True)
     saved = dict(os.environ)
@@ -140,7 +150,10 @@ def hermetic_env(home: Path, extra: Mapping[str, str] | None = None) -> Iterator
         if extra:
             os.environ.update(extra)
         _tzset()
-        with block_network():
+        if block_network:
+            with _block_network():
+                yield
+        else:
             yield
     finally:
         os.environ.clear()

@@ -148,7 +148,10 @@ def test_with_run_skill_the_tool_comes_after_it(tmp_path, offline):
     _, config = _golden_install(tmp_path, ensemble=True)
     app = assembly.build_app(config, ensemble=_runner(config))
     try:
-        assert _names(app)[-3:] == ["run_skill", "install_skill_deps", "task"]
+        names = _names(app)
+        # The ensemble mounts run_skill, then its other tools (optimize_params last).
+        assert names.index("run_skill") < names.index("install_skill_deps")
+        assert names[-3:] == ["optimize_params", "install_skill_deps", "task"]
     finally:
         _close(app)
 

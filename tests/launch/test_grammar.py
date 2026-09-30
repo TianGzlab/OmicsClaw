@@ -276,6 +276,20 @@ MODULE_GUARDS = {
         "python -m omicsclaw.ensemble.tuning.inspect, what inspect_trials "
         "computes. Parses only its spec file."
     ),
+    "evals/report.py": (
+        "python -m omicsclaw.evals.report, prints the Markdown summary of "
+        "an eval report for the CI step summary. Parses only its report "
+        "path, never a deployment."
+    ),
+    "evals/live.py": (
+        "python -m omicsclaw.evals.live compare, prints how two live "
+        "routing eval reports differ. Parses only the two report paths."
+    ),
+    "evals/stubs.py": (
+        "python -m omicsclaw.evals.stubs record, runs one skill script for "
+        "real and saves its output as a stub fixture. Parses only the "
+        "skill, the script arguments and the fixture path."
+    ),
 }
 """Every ``__main__`` guard outside the legacy trees, with its reason.
 

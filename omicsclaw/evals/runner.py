@@ -4,7 +4,7 @@
 :func:`~omicsclaw.entry.build_app`, handing it the case's scripted
 provider, attaches an in-memory session store, and drives every message
 through :meth:`~omicsclaw.entry.session.SessionRegistry.submit` the way a
-surface does. It answers approval requests from the case's script,
+surface does. It answers approval requests from the case's script or policy,
 records the frames it observes, snapshots the case's temporary directory
 before and after, then checks the case's assertions.
 
@@ -121,6 +121,9 @@ def headroom_budget(
     the target tier's threshold, the usable window is
     ``U = floor((B + G) / t)``. It is feasible when ``B / U`` is below
     the ``WARN`` threshold and ``(B + G) / U`` is below the next tier's.
+    For a ``FULL`` target the first condition works out to ``B < 3G``.
+    Only the first call is checked here; :func:`arun_case` reports a
+    compaction written back before the trigger call as ``headroom_missed``.
 
     :returns: ``(budget, "")`` when feasible, or ``(None, reason)``.
     :raises ValueError: the target is not ``WARN``, ``SOFT`` or ``FULL``.
@@ -192,6 +195,36 @@ def _write(root: Path, files: Mapping[str, str | bytes]) -> None:
             target.write_text(content, encoding="utf-8")
 
 
+def _check_trigger(
+    headroom: Headroom | None,
+    record: CompactionRecord,
+    calls_made: int,
+    sizing: str,
+    failures: list[Failure],
+) -> None:
+    """Record ``headroom_missed`` when a compaction writes back too early.
+
+    A compaction observed after *calls_made* model calls precedes call
+    number *calls_made*. It is too early when that is before
+    ``headroom.trigger_call``. Compactions that were not written back
+    are ignored, as is a case without a headroom.
+
+    *calls_made* is read when the Runner sees the frame. A frame seen
+    late gives a higher count, so a delay can hide an early compaction
+    but cannot report one that did not happen.
+    """
+    if headroom is None or not record.written_back or calls_made >= headroom.trigger_call:
+        return
+    failures.append(
+        Failure(
+            "headroom_missed",
+            f"a {record.pressure} compaction was written back before call {calls_made}, "
+            f"earlier than trigger_call={headroom.trigger_call} ({sizing}); "
+            "the calls before the trigger call already reached a tier that writes back",
+        )
+    )
+
+
 def _decision(answer: bool | ApprovalDecision) -> ApprovalDecision:
     if isinstance(answer, ApprovalDecision):
         return answer
@@ -204,10 +237,11 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
     Creates ``ws`` (the workspace), ``outside`` (a sibling directory for
     ``outside_files``) and ``home`` under *tmp_path*. Besides the case's
     own assertions, the run fails on: an approval request the script had
-    no answer for (``approval_unscripted``), a compaction in a case that
+    no answer for (``approval_unscripted``; never with an approval policy), a compaction in a case that
     does not expect one (``compaction_unexpected``), a ``GAP`` frame
     (``stream_gap``), a window that cannot be sized from the case's
-    headroom (``headroom_infeasible``), a run longer than *timeout_s*
+    headroom (``headroom_infeasible``), a compaction written back before
+    the headroom's trigger call (``headroom_missed``), a run longer than *timeout_s*
     (``case_timeout``) and a stubbed skill script that is missing or
     called without ``--output`` (``stub_target_missing``).
 
@@ -244,10 +278,11 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
     engine_turns = 0
     final_output = ""
     run_error: BaseException | None = None
-    queue = list(case.approvals)
+    policy = case.approvals if callable(case.approvals) else None
+    queue = [] if policy is not None else list(case.approvals)
 
     started = time.monotonic()
-    with hermetic_env(home, case.env):
+    with hermetic_env(home, case.env, block_network=not case.network):
         before = _snapshot(tmp_path)
         config = eval_config(case, workspace)
         app = build_app(
@@ -258,11 +293,13 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
         )
         try:
             feasible = True
+            sizing = ""
             if case.compaction:
                 assert case.headroom is not None
                 messages, _ = compose(app, (), case.prompt)
+                baseline = estimate_messages_tokens(messages)
                 budget, reason = headroom_budget(
-                    estimate_messages_tokens(messages),
+                    baseline,
                     estimate_tool_tokens(app.tools_snapshot),
                     case.headroom,
                 )
@@ -271,6 +308,10 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
                     feasible = False
                 else:
                     app = dataclasses.replace(app, budget=budget)
+                    sizing = (
+                        f"B={baseline}, G={case.headroom.trigger_tokens}, "
+                        f"U={budget.context_tokens - budget.reserve_output_tokens - budget.reserve_tool_tokens}"
+                    )
             app = attach_sessions(app, store=InMemorySessionStore(), abandon_grace_s=None)
             assert app.sessions is not None
 
@@ -291,7 +332,10 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
                                     tool_results.append(frame.engine.tool_result)
                             elif kind is TurnEventType.APPROVAL_REQUIRED and frame.approval is not None:
                                 request = frame.approval
-                                if queue:
+                                if policy is not None:
+                                    decision = _decision(policy(request))
+                                    scripted = True
+                                elif queue:
                                     decision = _decision(queue.pop(0))
                                     scripted = True
                                 else:
@@ -318,6 +362,9 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
                                 await handle.approve(frame.request_id, decision)
                             elif kind is TurnEventType.COMPACTION and frame.compaction is not None:
                                 compactions.append(frame.compaction)
+                                _check_trigger(
+                                    case.headroom, frame.compaction, len(provider.calls), sizing, failures
+                                )
                             elif kind is TurnEventType.GAP:
                                 failures.append(
                                     Failure("stream_gap", f"frames lost: {frame.gap}")
@@ -340,7 +387,9 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
                     final_output = outcome.reply
 
             if feasible:
-                with stubbed_skill_runs(case.skill_stubs, app.skills, skill_runs, failures):
+                with stubbed_skill_runs(
+                    case.skill_stubs, app.skills, skill_runs, failures, fallback=case.skill_fallback
+                ):
                     try:
                         async with asyncio.timeout(timeout_s):
                             await drive()

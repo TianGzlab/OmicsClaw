@@ -32,10 +32,10 @@ Routing across domains is not a skill — it is the skill index in this prompt p
 
 When the user asks an analysis question, match it to a skill and act. OmicsClaw covers 7 domains; pick one, then consult its INDEX for the full skill list if the briefing below isn't enough.
 
-- **spatial** (19 skills — Spatial Transcriptomics)
+- **spatial** (18 skills — Spatial Transcriptomics)
   Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, domain detection, SVG, deconvolution, cell communication, trajectories, CNV.
   Key skills: spatial-preprocess, spatial-domains, spatial-de, spatial-deconv, spatial-communication
-- **singlecell** (34 skills — Single-Cell Omics)
+- **singlecell** (31 skills — Single-Cell Omics)
   scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, normalize→HVG→PCA→UMAP→cluster, annotation, DE, trajectory, velocity, GRN, CCC.
   Key skills: sc-preprocessing, sc-cell-annotation, sc-de, sc-batch-integration, sc-pseudotime
 - **genomics** (10 skills — Genomics)
@@ -58,8 +58,8 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 
 | Domain | Skills | Full index |
 |---|---|---|
-| Spatial Transcriptomics | 19 | [`skills/spatial/INDEX.md`](skills/spatial/INDEX.md) |
-| Single-Cell Omics | 34 | [`skills/singlecell/INDEX.md`](skills/singlecell/INDEX.md) |
+| Spatial Transcriptomics | 18 | [`skills/spatial/INDEX.md`](skills/spatial/INDEX.md) |
+| Single-Cell Omics | 31 | [`skills/singlecell/INDEX.md`](skills/singlecell/INDEX.md) |
 | Genomics | 10 | [`skills/genomics/INDEX.md`](skills/genomics/INDEX.md) |
 | Proteomics | 8 | [`skills/proteomics/INDEX.md`](skills/proteomics/INDEX.md) |
 | Metabolomics | 8 | [`skills/metabolomics/INDEX.md`](skills/metabolomics/INDEX.md) |
@@ -94,7 +94,10 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 5. If the user has no input file, offer `--demo`.
 
 Some domains have shared helpers under `skills/<domain>/_lib/`. A directory
-whose name starts with `_` is never a skill.
+whose name starts with `_` is never a skill. Neither is one whose `SKILL.md`
+has been renamed `SKILL.md.disabled`: `sc-consensus-clustering`,
+`sc-consensus-integration`, `sc-consensus-pseudotime` and `consensus-domains`
+are kept on disk that way because their scripts cannot start. Do not run them.
 
 ### Dependencies
 
@@ -115,7 +118,7 @@ input it expects.
 ## Finding a skill
 
 Skills are disclosed **progressively**. The system prompt carries one
-`- name: description` line per skill — about 8.4k tokens over all 94,
+`- name: description` line per skill — about 8k tokens over all 90,
 against ~125k if the bodies were injected. The bodies stay on disk until
 something asks for one.
 

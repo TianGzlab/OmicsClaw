@@ -1,4 +1,4 @@
-"""error_handling: provider errors, retries, the turn ceiling."""
+"""error_handling: provider errors, retries, the turn ceiling, an unknown tool."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from omicsclaw.engine import StopReason
 from omicsclaw.evals import Error, NoError, OutputContains, ScriptedProvider, ScriptedTurn, tool_call
 from omicsclaw.provider import ProviderError
 
-from ._checks import CountIs, StopReasonIs
+from ._checks import CountIs, StopReasonIs, ToolResultContains
 from ._harness import check, seed
 
 
@@ -29,6 +29,13 @@ def _transient():
 def _keeps_reading():
     return ScriptedProvider(
         *(ScriptedTurn(tool_calls=(tool_call("read_file", {"path": "a.txt"}),)) for _ in range(6)),
+    )
+
+
+def _unknown_tool():
+    return ScriptedProvider(
+        ScriptedTurn(tool_calls=(tool_call("no_such_tool", {"x": 1}),)),
+        ScriptedTurn(text="That tool does not exist; I used none."),
     )
 
 
@@ -59,6 +66,16 @@ CASES = [
         CountIs("read_file calls kept in the trajectory", lambda r: r.tool_calls_executed.count("read_file"), 3),
         max_turns=3,
         files={"a.txt": "alpha\n"},
+    ),
+    seed(
+        "error_handling/unknown_tool_is_observation",
+        "Use the special tool.",
+        _unknown_tool,
+        ToolResultContains("no_such_tool", "read_file", is_error=True),
+        NoError(),
+        StopReasonIs(StopReason.CONVERGED),
+        CountIs("approvals", lambda r: len(r.approvals), 0),
+        CountIs("turn_count", lambda r: r.turn_count, 2),
     ),
 ]
 

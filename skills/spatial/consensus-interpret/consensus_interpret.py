@@ -82,8 +82,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="override plan.json:input_path; required for legacy runs without it")
     parser.add_argument("--markers", default=None,
                         help="user-provided marker TSV (overrides --tissue)")
+    parser.add_argument("--llm", action="store_true",
+                        help="ask for LLM cell-type naming; not available in this version, exits 6")
     parser.add_argument("--no-llm", action="store_true",
-                        help="structural-only degrade mode; banner [I-noLLM: ...]; no biology annotation")
+                        help="structural-only mode (the default); banner [I-noLLM: ...]; no biology annotation")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--top-k-markers", type=int, default=_DEFAULT_TOP_K_MARKERS)
     parser.add_argument("--top-k-next-steps", type=int, default=_DEFAULT_TOP_K_NEXT_STEPS,
@@ -165,9 +167,9 @@ def _run(args: argparse.Namespace) -> int:
         top_k=args.top_k_markers,
     )
 
-    # 4. Degrade path: --no-llm
-    if args.no_llm:
-        logger.info("--no-llm set; skipping biology annotation; writing structural-only report")
+    # 4. Structural-only path, taken unless --llm is given
+    if args.no_llm or not args.llm:
+        logger.info("no --llm; skipping biology annotation; writing structural-only report")
         write_artifacts(
             output_dir=output_dir, bundle=bundle, annotations=[], next_steps=[],
             de_df=de_df, audit={"marker_db_source": None, "llm_model": "disabled (--no-llm)"},

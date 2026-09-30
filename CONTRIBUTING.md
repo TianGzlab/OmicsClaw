@@ -304,10 +304,13 @@ the ones marked `scripted_eval`. Those are the scripted agent evals in
 `tests/evals/dataset/`: the model's replies are written into each case,
 so they need no API key and no network and finish in seconds. `eval` is
 for tests that call a real model. They need a key, run by hand or
-nightly, and never gate a PR.
+nightly, and never gate a PR. The real-model routing eval in
+`tests/evals/live/` also needs `OMICSCLAW_EVAL_LIVE=1`; see
+`docs/core-features/eval.md` §2.4 for the command.
 
 The `Eval CI` workflow (`.github/workflows/eval.yml`) runs the framework
-unit tests, then the scripted evals. A PR is green only when every hard
+unit tests (with fastapi installed, so the desktop HTTP tests run too),
+then the scripted evals. A PR is green only when every hard
 eval assertion passes; the step summary shows the pass rate and warnings
 per category. Tests that already fail are listed in
 `tests/ci_known_failures.txt` and run as strict xfail, so a fixed test

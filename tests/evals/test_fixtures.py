@@ -50,3 +50,17 @@ def test_the_routing_seed_names_skills_that_still_exist():
             continue
         for name in case["expected_skills"]:
             assert index.get(name) is not None, f"{case['id']}: {name}"
+
+
+def test_every_seed_names_its_inputs_and_its_expected_args_exist():
+    """``inputs`` is explicit on every seed; each expected argument appears in the skill's ``SKILL.md``."""
+    seed = json.loads((FIXTURES / "live_routing_seed.json").read_text(encoding="utf-8"))
+    index = skill_index()
+    assert seed["schema_version"] == 2
+    for case in seed["cases"]:
+        assert "inputs" in case, case["id"]
+        assert bool(case["inputs"]) == (case["decision"] == "route"), case["id"]
+        for flag, value in case.get("expected_args", {}).items():
+            (name,) = case["expected_skills"]
+            text = index.get(name).path.read_text(encoding="utf-8")
+            assert f"{flag} {value}" in text, f"{case['id']}: {flag} {value} not in {name}'s SKILL.md"

@@ -8,7 +8,7 @@
 
 **Domain key:** `spatial`
 
-**Skill count:** 19
+**Skill count:** 18
 
 **Primary data types:** h5ad, h5, zarr, loom
 
@@ -16,9 +16,7 @@ Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, domain detectio
 
 ## Skills
 
-- `consensus-domains` — Load when you want a verified multi-method consensus over spatial tissue domains on a preprocessed spatial AnnData — fanning out N domain methods, ranking base clusterings, and emitting a typed consensus with cross-method disagreement. Skip when one method suffices (use spatial-domains); the data is single-cell (use sc-consensus-clustering).
-  triggers: consensus domains, consensus tissue regions, multi-method spatial domains, robust spatial clustering, expert in the loop spatial, bc ranking, saccelerator-like consensus
-- `consensus-interpret` — Load when biologically interpreting a finished verified consensus run (consensus-domains / sc-consensus-clustering) — inline DE, marker-DB lookup, and LLM cell-type naming with mandatory marker citations + evidence-bound next-step recommendations. Skip when the consensus run failed (fix it first); no consensus has been run yet (use consensus-domains or sc-consensus-clustering).
+- `consensus-interpret` — Load when biologically interpreting a finished verified consensus run (consensus-domains / sc-consensus-clustering) — inline DE, marker-DB lookup and a structural-only report by default; LLM cell-type naming (--llm) is not available in this version and exits 6. Skip when the consensus run failed (fix it first); no consensus has been run yet (use consensus-domains or sc-consensus-clustering).
   triggers: consensus interpret, interpret consensus, explain consensus, annotate consensus, consensus cell type, name clusters, biological interpretation, next step after consensus, interpreted consensus, consensus biology
 - `spatial-annotate` — Load when assigning per-spot cell-type labels on a spatial AnnData via marker-gene scoring or scRNA-reference mapping (Tangram / scANVI / CellAssign). Skip when computing spot-level cell-type proportions for multi-cell-per-spot platforms (use spatial-deconv); tissue-domain detection (use spatial-domains).
   triggers: cell type annotation, annotate cell types, Tangram, scANVI, CellAssign, marker genes, label transfer, spatial annotation

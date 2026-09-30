@@ -129,6 +129,9 @@ def test_a_real_trial_records_its_interpreter(tmp_path):
     import numpy as np
 
     runner = _golden_runner(tmp_path)
+    # The fake skills live under tests/ensemble, so the config's repo root
+    # is that directory; the trial needs the real one for the seed and PYTHONPATH.
+    runner.repo_root = REPO
     source = tmp_path / "data" / "in.h5ad"
     source.parent.mkdir()
     adata = anndata.AnnData(X=np.zeros((50, 2), dtype=np.float32))

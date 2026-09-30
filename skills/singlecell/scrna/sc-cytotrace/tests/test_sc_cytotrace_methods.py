@@ -11,12 +11,23 @@ import scanpy as sc
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from skills.singlecell.scrna.sc_cytotrace.sc_cytotrace import (
-    run_cytotrace_simple,
-    _compute_gene_counts,
-    _knn_smooth,
-    POTENCY_LABELS,
-)
+
+def _load_script(name: str, path: Path):
+    """Import the skill script at *path* under *name*; its directory name has hyphens."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_cytotrace = _load_script("sc_cytotrace", Path(__file__).resolve().parent.parent / "sc_cytotrace.py")
+run_cytotrace_simple = _cytotrace.run_cytotrace_simple
+_compute_gene_counts = _cytotrace._compute_gene_counts
+_knn_smooth = _cytotrace._knn_smooth
+POTENCY_LABELS = _cytotrace.POTENCY_LABELS
 
 
 @pytest.fixture

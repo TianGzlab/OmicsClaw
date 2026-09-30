@@ -1,7 +1,7 @@
 {
   "source": "tests/fixtures/routing_oracle/v1.json at commit 88215396 (oracle_version 2026-07-13.v1)",
-  "purpose": "Prompts for the scripted skill_routing eval cases, and the seed set for a later real-model routing eval. The orchestrator cases, the precondition fields and the capability_resolver thresholds were dropped because the code they scored is gone.",
-  "schema_version": 1,
+  "purpose": "Prompts for the scripted skill_routing eval cases, and the seeds of the real-model routing eval (omicsclaw.evals.live). Each case lists its workspace input files (created empty and named on an 'Input:' line after the query) and, where the query names a method, the arguments the executed command should carry. The orchestrator cases, the precondition fields and the capability_resolver thresholds were dropped because the code they scored is gone.",
+  "schema_version": 2,
   "cases": [
     {
       "id": "spatial__preprocess_visium",
@@ -10,7 +10,10 @@
       "expected_skills": [
         "spatial-preprocess"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/visium.h5ad"
+      ]
     },
     {
       "id": "spatial__spot_deconvolution",
@@ -19,7 +22,11 @@
       "expected_skills": [
         "spatial-deconv"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/visium.h5ad",
+        "data/sc_reference.h5ad"
+      ]
     },
     {
       "id": "spatial__ligand_receptor",
@@ -28,7 +35,13 @@
       "expected_skills": [
         "spatial-communication"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/spatial_annotated.h5ad"
+      ],
+      "expected_args": {
+        "--method": "liana"
+      }
     },
     {
       "id": "spatial__domains_auto_compute_pca",
@@ -37,7 +50,10 @@
       "expected_skills": [
         "spatial-domains"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/spatial.h5ad"
+      ]
     },
     {
       "id": "singlecell__cluster_leiden",
@@ -46,7 +62,10 @@
       "expected_skills": [
         "sc-clustering"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/normalized.h5ad"
+      ]
     },
     {
       "id": "singlecell__cluster_raw_precondition",
@@ -55,7 +74,10 @@
       "expected_skills": [
         "sc-clustering"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/raw_counts.h5ad"
+      ]
     },
     {
       "id": "singlecell__cluster_incompatible_input",
@@ -64,7 +86,10 @@
       "expected_skills": [
         "sc-clustering"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/object.h5ad"
+      ]
     },
     {
       "id": "singlecell__cell_annotation",
@@ -73,7 +98,13 @@
       "expected_skills": [
         "sc-cell-annotation"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/clustered.h5ad"
+      ],
+      "expected_args": {
+        "--method": "celltypist"
+      }
     },
     {
       "id": "singlecell__batch_harmony",
@@ -82,7 +113,13 @@
       "expected_skills": [
         "sc-batch-integration"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/batches.h5ad"
+      ],
+      "expected_args": {
+        "--method": "harmony"
+      }
     },
     {
       "id": "singlecell__velocity_route_noun",
@@ -91,7 +128,10 @@
       "expected_skills": [
         "sc-velocity"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/spliced_unspliced.h5ad"
+      ]
     },
     {
       "id": "singlecell__de_route_verb",
@@ -100,7 +140,10 @@
       "expected_skills": [
         "sc-de"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/clustered.h5ad"
+      ]
     },
     {
       "id": "genomics__alignment_qc",
@@ -109,7 +152,10 @@
       "expected_skills": [
         "genomics-alignment"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/sample.bam"
+      ]
     },
     {
       "id": "genomics__small_variants",
@@ -118,7 +164,10 @@
       "expected_skills": [
         "genomics-variant-calling"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/sample.vcf"
+      ]
     },
     {
       "id": "genomics__structural_variants",
@@ -127,7 +176,10 @@
       "expected_skills": [
         "genomics-sv-detection"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/sv.vcf"
+      ]
     },
     {
       "id": "proteomics__peptide_identification",
@@ -136,7 +188,10 @@
       "expected_skills": [
         "proteomics-identification"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/peptides.csv"
+      ]
     },
     {
       "id": "proteomics__lfq_quantification",
@@ -145,7 +200,10 @@
       "expected_skills": [
         "proteomics-quantification"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/peptides.csv"
+      ]
     },
     {
       "id": "proteomics__ptm_sites",
@@ -154,7 +212,10 @@
       "expected_skills": [
         "proteomics-ptm"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/phospho_sites.csv"
+      ]
     },
     {
       "id": "metabolomics__xcms_raw",
@@ -163,7 +224,10 @@
       "expected_skills": [
         "metabolomics-xcms-preprocessing"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/raw/sample1.mzML"
+      ]
     },
     {
       "id": "metabolomics__feature_annotation",
@@ -172,7 +236,10 @@
       "expected_skills": [
         "metabolomics-annotation"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/features.csv"
+      ]
     },
     {
       "id": "metabolomics__two_group_de",
@@ -181,7 +248,10 @@
       "expected_skills": [
         "metabolomics-de"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/features.csv"
+      ]
     },
     {
       "id": "bulkrna__fastq_qc",
@@ -190,7 +260,10 @@
       "expected_skills": [
         "bulkrna-read-qc"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/sample_R1.fastq.gz"
+      ]
     },
     {
       "id": "bulkrna__deseq2",
@@ -199,7 +272,10 @@
       "expected_skills": [
         "bulkrna-de"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/counts.csv"
+      ]
     },
     {
       "id": "bulkrna__wgcna",
@@ -208,7 +284,10 @@
       "expected_skills": [
         "bulkrna-coexpression"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/cohort_counts.csv"
+      ]
     },
     {
       "id": "literature__geo_accessions",
@@ -217,7 +296,10 @@
       "expected_skills": [
         "literature"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/paper.pdf"
+      ]
     },
     {
       "id": "literature__paper_pdf",
@@ -226,14 +308,18 @@
       "expected_skills": [
         "literature"
       ],
-      "decision": "route"
+      "decision": "route",
+      "inputs": [
+        "data/paper.pdf"
+      ]
     },
     {
       "id": "literature__new_method_boundary",
       "domain": "literature",
       "query": "Read recent literature and implement a brand-new analysis method that OmicsClaw does not have.",
       "expected_skills": [],
-      "decision": "no_skill"
+      "decision": "no_skill",
+      "inputs": []
     }
   ]
 }

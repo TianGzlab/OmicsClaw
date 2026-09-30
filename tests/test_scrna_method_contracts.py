@@ -6,6 +6,10 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
+
+# The skill modules import the shared plotting helpers, which need seaborn.
+pytest.importorskip("seaborn")
 
 
 ROOT = Path(__file__).resolve().parent.parent

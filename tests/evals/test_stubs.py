@@ -139,3 +139,38 @@ def test_a_stub_round_trips_through_its_fixture(tmp_path):
     stub = StubResult(stdout="x", exit_code=1, files={"b": "2", "a": "1"}, provenance={"skill": "s"})
     stub.dump(tmp_path / "s.json")
     assert StubResult.load(tmp_path / "s.json") == stub
+
+
+def test_the_fallback_answers_a_skill_without_a_stub_and_nothing_runs(tmp_path):
+    """With a fallback, no skill script runs for real; what follows it on the line does not run either."""
+    runs, failures = [], []
+    fallback = StubResult(stdout="[eval] {skill} ran into {output}", files={"result.json": "{}"})
+    script = SKILLS / "bulkrna" / "bulkrna-de" / "bulkrna_de.py"
+    with stubbed_skill_runs({}, skill_index(), runs, failures, fallback=fallback):
+        output = _bash(tmp_path, f"python {script} --input c.csv --output o; touch ran.txt")
+    assert output == f"[eval] bulkrna-de ran into {tmp_path / 'o;'}"
+    assert (tmp_path / "o;" / "result.json").is_file()
+    assert not (tmp_path / "ran.txt").exists()
+    assert [(r.skill, r.stubbed) for r in runs] == [("bulkrna-de", True)]
+    assert failures == []
+
+
+def test_the_fallback_refuses_a_run_without_output_with_exit_2(tmp_path):
+    runs, failures = [], []
+    directory = SKILLS / "bulkrna" / "bulkrna-de"
+    with stubbed_skill_runs({}, skill_index(), runs, failures, fallback=StubResult(stdout="X")):
+        bare = _bash(tmp_path, f"python {directory}/bulkrna_de.py --demo; touch ran.txt")
+        gone = _bash(tmp_path, f"python {directory}/renamed.py --output out")
+    assert "--output is required" in bare and "[exit status 2]" in bare
+    assert "No such file" in gone
+    assert not (tmp_path / "ran.txt").exists()
+    assert runs == [] and failures == []
+
+
+def test_a_recorded_stub_still_wins_over_the_fallback(tmp_path):
+    runs = []
+    script = SKILLS / "spatial" / "spatial-preprocess" / "spatial_preprocess.py"
+    with stubbed_skill_runs(
+        {"spatial-preprocess": StubResult(stdout="RECORDED")}, skill_index(), runs, fallback=StubResult(stdout="FALLBACK")
+    ):
+        assert _bash(tmp_path, f"python {script} --output o") == "RECORDED"

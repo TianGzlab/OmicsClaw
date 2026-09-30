@@ -1,7 +1,7 @@
 # Agent Skills —— 组学 Skill 体系
 
 > Skill 是 OmicsClaw 与通用 coding agent 最大的区别：
-> 7 个组学领域、94 个 skill，每个 skill 是一份 `SKILL.md` 方法学 + 一个可直接运行的 Python 脚本。
+> 7 个组学领域、90 个 skill，每个 skill 是一份 `SKILL.md` 方法学 + 一个可直接运行的 Python 脚本。
 > 本文以 `omicsclaw/skills/`、`omicsclaw/entry/assembly.py`、`skills/` 语料与 `tests/skills/` 为唯一事实来源
 > （2026-09-23 工作树实测）。
 
@@ -18,13 +18,13 @@ Skill 分两段交给模型：
 
 | 量 | 数值 |
 |---|---|
-| 被索引的 `SKILL.md` | 94 个，`skipped` 为空 |
+| 被索引的 `SKILL.md` | 90 个，`skipped` 为空（另有 4 个 consensus skill 的 `SKILL.md` 改名为 `SKILL.md.disabled`，不被扫描） |
 | `full` 索引正文（`prompt_body()`） | 29,357 字符（plan 0032 在 96 个 skill 时测得约 7.5k tokens） |
 | `compact` 索引正文（`prompt_body(compact=True)`） | 2,105 字符（约 550 tokens） |
 | 全部正文之和 | 440,733 字符（约 125k tokens） |
 | 全量扫描耗时 | 约 20 ms |
 
-把 94 份正文全部塞进 prompt 需要约 125k tokens，已超过许多模型的上下文；索引只需其 6% 左右。
+把 90 份正文全部塞进 prompt 需要约 125k tokens，已超过许多模型的上下文；索引只需其 6% 左右。
 
 第二段拿到的不只是方法学文本：OmicsClaw 的 skill **自带脚本**，
 所以 `use_skill` 还会把 skill 目录告诉模型，模型随后用 `bash` 直接执行脚本（见 §9）。
@@ -35,7 +35,7 @@ Skill 分两段交给模型：
 ## 2. 架构总览
 
 ```
-                      skills/<domain>/.../<skill>/SKILL.md   (94 个，磁盘上)
+                      skills/<domain>/.../<skill>/SKILL.md   (90 个，磁盘上)
                                     │  只读 frontmatter
                                     ▼
              omicsclaw.skills.load_skills(root) ──► SkillIndex (不可变快照)
@@ -107,8 +107,8 @@ skills/spatial/spatial-preprocess/
 | 深度 | 数量 | 例子 |
 |---|---|---|
 | `skills/<domain>/SKILL.md` | 1 | `skills/literature/SKILL.md`（领域本身就是一个 skill） |
-| `skills/<domain>/<skill>/SKILL.md` | 58 | `skills/spatial/spatial-de/SKILL.md` |
-| `skills/<domain>/<sub>/<skill>/SKILL.md` | 35 | `skills/singlecell/scrna/sc-de/SKILL.md`、`skills/singlecell/scatac/scatac-preprocessing/SKILL.md` |
+| `skills/<domain>/<skill>/SKILL.md` | 57 | `skills/spatial/spatial-de/SKILL.md` |
+| `skills/<domain>/<sub>/<skill>/SKILL.md` | 32 | `skills/singlecell/scrna/sc-de/SKILL.md`、`skills/singlecell/scatac/scatac-preprocessing/SKILL.md` |
 
 `Skill.domain` 取"扫描根下的第一级目录"，因此 `scrna/`、`scatac/` 不是领域，它们下面的 skill 都归入 `singlecell`。
 
@@ -116,14 +116,14 @@ skills/spatial/spatial-preprocess/
 
 | 领域（`Skill.domain`） | skill 数 | 基础步 / 代表 skill | 领域索引 |
 |---|---|---|---|
-| `spatial` | 19 | `spatial-preprocess` → `spatial-domains` / `spatial-de` / `spatial-deconv` / `spatial-communication` | `skills/spatial/INDEX.md` |
-| `singlecell` | 34 | `sc-preprocessing` → `sc-cell-annotation` / `sc-de` / `sc-batch-integration` / `sc-pseudotime` | `skills/singlecell/INDEX.md` |
+| `spatial` | 18 | `spatial-preprocess` → `spatial-domains` / `spatial-de` / `spatial-deconv` / `spatial-communication` | `skills/spatial/INDEX.md` |
+| `singlecell` | 31 | `sc-preprocessing` → `sc-cell-annotation` / `sc-de` / `sc-batch-integration` / `sc-pseudotime` | `skills/singlecell/INDEX.md` |
 | `genomics` | 10 | `genomics-alignment` / `genomics-variant-calling` / `genomics-variant-annotation` | `skills/genomics/INDEX.md` |
 | `proteomics` | 8 | `proteomics-identification` / `proteomics-quantification` / `proteomics-de` | `skills/proteomics/INDEX.md` |
 | `metabolomics` | 8 | `metabolomics-peak-detection` / `metabolomics-annotation` / `metabolomics-de` | `skills/metabolomics/INDEX.md` |
 | `bulkrna` | 14 | `bulkrna-de` / `bulkrna-enrichment` / `bulkrna-coexpression` / `bulkrna-survival` | `skills/bulkrna/INDEX.md` |
 | `literature` | 1 | `literature` | `skills/literature/INDEX.md` |
-| **合计** | **94** | | |
+| **合计** | **90** | | |
 
 核对命令：`find skills/<domain> -name SKILL.md | wc -l`，或 `make list`（调用 `load_skills` 并打印 `domain_summary()`）。
 
@@ -203,7 +203,7 @@ skill 的 Python 依赖写在正文的 `## Dependencies` 小节里，**没有任
 from omicsclaw.skills import load_skills
 
 index = load_skills("skills")           # 相对根 → 相对路径；绝对根 → 绝对路径
-print(len(index), index.skipped)        # 94 ()
+print(len(index), index.skipped)        # 90 ()
 ```
 
 行为要点（`omicsclaw/skills/loader.py`）：
@@ -247,7 +247,7 @@ print(len(index), index.skipped)        # 94 ()
 
 | `AppConfig.skills_index` | prompt 中的 skills 段 | `use_skill` | 适用 |
 |---|---|---|---|
-| `full`（默认） | `summary()`：94 行，每行含完整 description | 挂载 | 常规部署；这段稳定，适合放在缓存前缀里 |
+| `full`（默认） | `summary()`：90 行，每行含完整 description | 挂载 | 常规部署；这段稳定，适合放在缓存前缀里 |
 | `compact` | `domain_summary()`：7 行，只有名字 | 挂载 | 上下文紧张的模型；只能按名字路由，必要时读 `skills/<domain>/INDEX.md` |
 | `off` | 整段消失（prompt 回到 5 段） | **不挂载** | 语料迁移期；"给模型一个取不到任何东西的工具"比两者都没有更糟 |
 
@@ -307,7 +307,7 @@ Skill directory: skills/bulkrna/bulkrna-de
 | 场景 | 行为 |
 |---|---|
 | `skill_name` 为空白 | `ToolArgumentError`：提示给出索引里的 `name` |
-| 名字不在索引 | `ToolArgumentError(str(SkillNotFound))`，例如 `no skill named 'spatial-deconvolution'. Did you mean: spatial-deconv, spatial-condition, spatial-communication, bulkrna-deconvolution, spatial-cnv? The skill index in the system prompt lists all 94.` |
+| 名字不在索引 | `ToolArgumentError(str(SkillNotFound))`，例如 `no skill named 'spatial-deconvolution'. Did you mean: spatial-deconv, spatial-condition, spatial-communication, bulkrna-deconvolution, spatial-cnv? The skill index in the system prompt lists all 90.` |
 | 索引里有但文件已删或读不了 | `OSError` / `UnicodeDecodeError` 向上抛，由工具层作为错误结果返回 |
 | `../../etc/passwd` 之类 | 只是一个查不到的名字：模型的字符串**从不**被拼成路径，`Skill.path` 永远由加载器写入 |
 

@@ -1,6 +1,6 @@
 # 计划 0068：Eval 加固（真实模型路由 eval、压缩用例事后检查与 0067 遗留限制分诊）
 
-**状态**：第 2.3 版（2026-09-30）。owner 已裁定 Q1 至 Q8（§7.0）与 PQ1 至 PQ5（§7.0.1），全部阶段可派发实施（H-F 的对外动作仍需 owner 逐步同意）。
+**状态**：已实现，待验收（2026-09-30）。H-A、H-B、H-C、H-D、H-E、H-H 已实施，实施记录见 §8；H-F 未做（对外动作需 owner 逐步同意），H-G 延后。计划正文为第 2.3 版，owner 已裁定 Q1 至 Q8（§7.0）与 PQ1 至 PQ5（§7.0.1）。
 
 ### 修订说明
 
@@ -778,3 +778,109 @@ H-H4 的评估：
 - b. 保留白名单，只加 `tests/launch`、`tests/attachments` 与顶层 `tests/test_*.py`，ensemble 按 Q5 延后。
 
 起草者推荐 a（理由见 H-H4）：`tests/ensemble` 在 rapids 里 557 条全过，pip 环境只有一个收集错误要补 `importorskip`；白名单留着，以后新加的测试目录会默默漏在 CI 外，`tests/launch/test_grammar.py` 这次就是这样坏掉的。
+
+---
+
+## 8. 实施记录（2026-09-30）
+
+按 §4 的顺序实施：H-A → H-B → H-C → H-H1、H-H2 → H-D → H-H3 → H-H4 与 H-E。H-F 与 H-G 没做。每个阶段只跑计划列出的新增与相关测试。没有提交、没有推送，没有碰 git 索引，删除一律用 `rm`。
+
+### 8.1 文件清单
+
+新建：
+- `omicsclaw/evals/live.py`
+- `tests/evals/test_live.py`、`tests/evals/live/__init__.py`、`tests/evals/live/conftest.py`、`tests/evals/live/test_live_routing.py`
+- `skills/singlecell/scrna/sc-integrate-cluster/tests/test_sc_integrate_cluster.py`、`_synth.py`（从 `tests/runtime/consensus/` 移来）
+
+修改：
+- `omicsclaw/evals/`：`case.py`（`CaseProvider` 协议、`ApprovalPolicy`、`Case.approvals` 接受函数、`Case.network`、`Case.skill_fallback`、`Headroom` docstring）、`runner.py`（`headroom_missed`、审批函数分支、`network`、`skill_fallback` 透传、docstring）、`hermetic.py`（`hermetic_env(..., block_network=)`）、`stubs.py`（`stubbed_skill_runs(..., fallback=)`）、`__init__.py`（导出与延迟导入）
+- `.github/workflows/eval.yml`：job1 注释改为事实、两个 `setup-python` 加 `cache-dependency-path: pyproject.toml`、job1 加装 `fastapi httpx uvicorn`、白名单加 `tests/launch tests/attachments tests/test_*.py`
+- `tests/launch/test_grammar.py`：`MODULE_GUARDS` 登记 `evals/report.py`、`evals/stubs.py`、`evals/live.py`
+- `tests/entry/test_assembly.py`（H-A3 docstring）、`tests/entry/test_telemetry_wiring.py`（H-A4：`build_app(provider=)`，删 `_engine_over`，加两条 `llm_request` 断言）
+- `tests/evals/`：`test_runner.py`（`headroom_missed`、断网默认、审批函数、兜底桩）、`test_stubs.py`（兜底桩 3 条）、`test_fixtures.py`（种子 `inputs` 与 `expected_args`）、`test_dataset_floor.py`（`BASELINE = 29`）、`dataset/test_safety.py`（2 条用例）、`dataset/test_error_handling.py`（1 条用例）、`dataset/test_compaction.py`（模块 docstring）、`fixtures/live_routing_seed.json`（第 2 版）
+- `tests/conftest.py`（`.env` 隔离 fixture 的 docstring 按事实改写）、`tests/ci_known_failures.txt`（删两条 b 类，加一条 `env`，改表头）
+- `tests/skillenv/test_ensemble_environment.py`、`tests/skillenv/test_install_wiring.py`（两条 b 类改测试）
+- `tests/test_sc_ambient_removal.py`、`tests/test_sc_standardize_input.py`（`importorskip("scanpy")`）、`tests/test_scrna_method_contracts.py`（`importorskip("seaborn")`）
+- `skills/singlecell/scrna/sc-cytotrace/tests/test_sc_cytotrace_methods.py`、`skills/singlecell/scrna/sc-drug-response/tests/test_sc_drug_response_methods.py`（按文件路径加载脚本）
+- PQ1：4 个 consensus skill 的 `SKILL.md` 改名为 `SKILL.md.disabled`；`OMICSCLAW.md`（spatial 19 → 18、singlecell 34 → 31、"all 94" → "all 90"，写明 `SKILL.md.disabled` 的目录不是 skill）；`skills/spatial/INDEX.md`、`skills/singlecell/INDEX.md`（用 `OMICSCLAW_WRITE_SKILL_INDEX=1` 重新生成）；`tests/sdk/test_bootstrap.py`、`tests/sdk/test_help_probe.py`、`tests/skillenv/test_dependencies_section.py`（94 → 90，help 探针不再有预期失败）；`tests/sdk/test_boundary.py`（B3 注释；B2 与 B3 去掉 `_llm.py`）
+- PQ4：`skills/spatial/consensus-interpret/`：`consensus_interpret.py`（默认走结构化路径，新增 `--llm`）、`_llm.py`（默认模型调用抛 `LLMUnavailableError`，消息 `LLM_UNAVAILABLE`）、`SKILL.md`（description、流程、Gotchas、退出码、示例）、`tests/test_cli_smoke.py`（LLM 路径的用例加 `--llm`，新增 2 条）
+- PQ3：`omicsclaw/entry/cli/__init__.py` 的 docstring、`docs/core-features/README.md` 的阅读约定
+- 文档：`docs/core-features/eval.md`、`docs/core-features/agent-skills.md`（计数）、`CONTRIBUTING.md`、`README.md`、`README_zh-CN.md`（计数与 What's new）
+
+删除：
+- H-H1：`tests/test_skill_runner_contract.py`、`tests/test_bot_n_epochs_routing.py`、`tests/test_discover_file_trust.py`、`tests/test_control_plane_documentation_contract.py`、`tests/runtime/preflight/`、`tests/routing/`、`tests/bot/`、`tests/runtime/tools/`
+- H-H3：`tests/runtime/workflow/`；`tests/runtime/consensus/` 里 13 个失败或收集错误的文件（`continuous_driver`、`driver`、`integration_panel`、`lca_wrapper`、`plan_narrative`、`report_panel_diagnostics`、`run_entry`、`team_runtime`、`templates`、`planners`、`continuous_planner_reader`、`spatial_panel`、`spatial_metrics`），保留 §3.1 列出的 8 个
+- PQ3：`omicsclaw/routing/`（删除前 grep 过，只有 `entry/cli/__init__.py` 的 docstring 提到它）
+
+### 8.2 与计划的偏差
+
+1. PQ1 c 的"目录加 `_` 前缀"不可行：`omicsclaw/skills/loader.py` 只跳过 `.` 开头的目录和 `__pycache__`、`node_modules`，`_` 开头的目录照样被扫描、被索引。改用"`SKILL.md` 改名为 `SKILL.md.disabled`"：加载器只认 `SKILL.md` 这个文件名，目录和脚本原地不动，改回原名即恢复，不需要改加载器，也不会像 `.` 前缀那样挪动路径。代价是 `tests/sdk/test_bootstrap.py` 的规范引导块检查不再覆盖这 4 个脚本（`main_scripts()` 按 `SKILL.md` 找脚本）。
+2. `test_output_ux.py::test_spatial_genes_help_does_not_require_scanpy_runtime` 没有补 `importorskip`：这条测试要证明的正是"没装 scanpy 时 `--help` 能跑"，补了 `importorskip("scanpy")` 它就只在测不出问题的环境里运行。它在 pip 环境失败是真问题（`spatial_genes.py` 第 29 行在模块顶层 import scanpy），改为写进 `tests/ci_known_failures.txt` 的 `| env` 条目并注明原因。skill 代码没改，见 §8.5。
+3. `test_scrna_method_contracts.py` 在 CI 模拟 venv 里本来就通过（CI 装了 seaborn），失败只出现在最小 venv，缺的是 seaborn 而不是 scanpy，所以补的是 `importorskip("seaborn")`。
+4. `test_sc_integrate_cluster.py` 的 `importorskip("igraph")` 只加在需要 Leiden 的那一条上：另两条（Harmony 的 PCA 复用、单 batch 报错）不用 igraph，模块级跳过会把它们一起跳掉。它依赖的 `_sc_integration_synth.py` 一并移过去，改名 `_synth.py`，按文件路径加载（仓库用 `--import-mode=importlib`，同目录模块不能直接 import）。
+5. `test_install_wiring.py` 的断言改为"`run_skill` 在 `install_skill_deps` 之前、末尾三个是 `optimize_params, install_skill_deps, task`"，因为 ensemble 现在在 `run_skill` 之后还挂 `optimize_params`。`test_ensemble_environment.py` 的那条在测试里把 `runner.repo_root` 设成仓库根：fake skill 放在 `tests/ensemble/` 下，`AppConfig.repo_root()` 由 `skills_dir` 推出，指到了 `tests/ensemble`。
+6. `headroom_missed` 在 Runner 看到 `COMPACTION` 帧时读 `len(provider.calls)`。帧晚到只会让次数偏大，所以这条检查可能漏报、不会误报；两条压缩用例实测读到的都是 4，连跑 5 次一致。
+7. H-D 的判分与报告放在 `live.py` 一个文件里，另有 `TrialRecord`、`SeedReport`、`to_dict`、`markdown`、`run_meta`、`trial_record` 几个辅助名，计划没有逐一列出。策略拒绝的类别多了 `help_not_strict`（`--help` 被识别但不是严格形式，例如 `--help && pip install foo`）：计划表里这类落到"其余"，单列出来是为了不把它们算进 L3 需要的 `unmatched_skill_command`。
+8. 兜底桩在脚本不存在时也返回退出码 2、不记失败（计划只写了缺 `--output` 的情形），避免模型拼错脚本名时整条命令真实执行。有 fixture 的 skill 缺 `--output` 时仍按原规则记 `stub_target_missing`，在 live 报告里作为 `harness_failures` 列出。
+9. 可选的"live 桩放行 help 前再按严格规则复查"没有做：策略在 `_locally` 之前完成，旁路测试已经覆盖。
+10. 种子输入按 `SKILL.md` 核对后改了三处：`proteomics__peptide_identification` 与 `proteomics__lfq_quantification` 用 `data/peptides.csv`，`proteomics__ptm_sites` 用 `data/phospho_sites.csv`（两个 skill 的文档都用 csv）。`genomics__alignment_qc` 保留 `data/sample.bam`：query 写的是 BAM，skill 只读文本 SAM，模型需要自己处理这个差别。`expected_args` 只填了三条（harmony、celltypist、liana）；`bulkrna-de`、`bulkrna-coexpression`、`metabolomics-xcms-preprocessing` 没有 `--method` 参数，不填。
+11. job1 白名单另外加了顶层 `tests/test_*.py`（PQ5 允许按文件加入，这里用 glob 一次加全）。
+12. `tests/conftest.py` 的 docstring 按事实改写：原文说 `omicsclaw.runtime.agent.state` 与 `omicsclaw.routing.llm_router` 在 import 时加载 `.env`，前者已不存在，后者随 PQ3 删除；现在把 `.env` 读进进程环境的是 launch 在启动 surface 时调用的 `load_env_file`。
+13. PQ4 的"默认走 `--no-llm`"做成：新增 `--llm` 开关，不带它时走结构化路径（`--no-llm` 保留，含义相同）；带 `--llm` 时走原 LLM 路径，默认模型调用抛 `LLMUnavailableError`（退出码 6），消息写明这个版本没有模型客户端。skill 的 description 相应改了一句（它是路由用的文字），两个 domain 的 `INDEX.md` 重新生成。
+14. 计划里 H-E3 的起点（`tests/launch` 三条 180 s 超时）这次没有复现：三条都在约 3.3 s 内通过，所以没有加 `| env` 条目。
+
+### 8.3 测试命令与结果
+
+解释器默认 `/opt/conda/envs/rapids_singlecell/bin/python -m pytest -q -p no:randomly`。"CI 模拟 venv"是 scratchpad 里 0067 建的 `venvci`（job1 的整张 pip 列表），本次加装了 `fastapi httpx uvicorn`；"最小 venv"是 `venv311`（只有 `pip install -e . pytest`）。
+
+| 阶段 | 命令 | 结果 |
+|---|---|---|
+| H-A | `tests/entry/test_assembly.py tests/entry/test_telemetry_wiring.py tests/launch/test_grammar.py tests/evals/test_ci_known_failures.py`；`yaml.safe_load(eval.yml)` | 98 passed、1 xfailed（清单里的 `test_this_layer_reads_no_provider_attribute_the_protocol_omits`）；YAML 可解析 |
+| H-B | `tests/evals/test_runner.py tests/evals/dataset/test_compaction.py`；`headroom_missed` 那条连跑 5 次 | 12 passed；5 次一致 |
+| H-C | `tests/evals/dataset -m scripted_eval` 连跑 3 次；`tests/evals/test_dataset_floor.py` | 每次 29 passed（约 1.6 s）；5 passed |
+| H-C 变异 | 去掉 `gate.py` 里的 `DOTENV_NAME` 检查；`ChildRunner._child_registry` 把 `bash` 的 `approval_mode` 改成 `AUTO`（均从 scratchpad 备份恢复） | 前者 `protected_dotenv_asked_in_auto_mode` 失败（没出审批，`write_file` 自己的 `PathIsSensitive` 仍然拒绝写入）；后者 `subagent_approval_reaches_session` 失败（没有审批请求） |
+| H-H1 | `pytest --co -q tests` | 7389/7407 collected，无收集错误 |
+| H-H2 | `tests/skillenv/test_ensemble_environment.py tests/skillenv/test_install_wiring.py tests/evals/test_ci_known_failures.py tests/test_output_ux.py tests/test_sc_ambient_removal.py tests/test_sc_standardize_input.py tests/test_scrna_method_contracts.py` 与三个 skill 测试目录（rapids） | 77 passed、1 skipped（缺 igraph 的那条），662 s（skill 测试真实计算） |
+| H-H2 | CI 模拟 venv 与最小 venv 里的 4 个顶层文件（改之前） | 定位失败原因：CI venv 8 条缺 scanpy，最小 venv 另 4 条缺 seaborn |
+| H-H3 | `tests/runtime tests/skills tests/sdk/test_boundary.py tests/sdk/test_bootstrap.py` 与 3 个 consensus 相关的 skill 测试目录 | 590 passed、4 skipped、4 failed（`consensus-domains` 与 `sc-consensus-clustering` 各 2 条，skill 代码没修，符合 PQ1 c） |
+| H-H3 | `tests/skillenv/test_dependencies_section.py`；`OMICSCLAW_TEST_BASE_PYTHON=/opt/conda/envs/OmicsClaw/bin/python ... -m slow tests/sdk/test_help_probe.py` | 100 passed；1 passed（90 个脚本的 `--help` 全部返回 0） |
+| H-H3 | `tests/ensemble/tuning/test_a3_prompt.py` | 1 failed、3 passed，见 §8.5 |
+| H-D | `tests/evals/test_live.py tests/evals/test_stubs.py tests/evals/test_runner.py tests/evals/test_fixtures.py tests/evals/test_evals_is_not_imported.py tests/launch/test_grammar.py` | 全部通过（`test_live.py` 42 条，OmicsClaw env 里 `test_live.py` + `test_stubs.py` 58 passed） |
+| H-D | `tests/evals/live`（不设 `OMICSCLAW_EVAL_LIVE`；以及 `-m eval`） | 26 deselected；26 skipped |
+| H-D | `tests/evals` 整目录（rapids 与最小 venv） | 各 167 passed、26 deselected |
+| H-E3 | CI 模拟 venv，job1 最终白名单一次（`-m "not slow and not demo and not eval and not scripted_eval" -p no:cacheprovider`，CI 的空 key 与 `OTEL_ENABLED=false`） | 6847 passed、42 skipped、6 xfailed，无 XPASS，无失败，349 s |
+
+H-E3 之后的已知失败清单（`tests/ci_known_failures.txt`）：
+- strict：`tests/entry/test_assembly.py::test_this_layer_reads_no_provider_attribute_the_protocol_omits`、`tests/entry/test_session.py::test_a_second_compaction_extends_the_first_instead_of_restarting`、`tests/entry/test_turn.py::test_the_system_message_survives_a_successful_summarization`
+- env：`tests/sdk/test_banksy_fallback.py::test_missing_banksy_and_missing_sub_env_raise_env_not_found`、`tests/skillenv/test_overlay_real.py::test_the_overlay_sees_the_base_and_uses_the_base_pip`、`tests/test_output_ux.py::test_spatial_genes_help_does_not_require_scanpy_runtime`（新增）
+
+### 8.4 live 冒烟
+
+先在 OmicsClaw env 里跑了 `tests/evals/test_live.py` 与 `tests/evals/test_stubs.py`（58 passed），确认审批策略与兜底桩生效，再跑一次冒烟：
+
+```bash
+OMICSCLAW_EVAL_LIVE=1 OMICSCLAW_EVAL_LIVE_TRIALS=1 OMICSCLAW_EVAL_REPORT_DIR=<scratchpad>/live-smoke \
+/opt/conda/envs/OmicsClaw/bin/python -m pytest -q -p no:randomly -m eval tests/evals/live \
+  -k "bulkrna__deseq2 or singlecell__batch_harmony"
+```
+
+- provider `deepseek`，model `deepseek-v4-flash`，base_url `https://api.deepseek.com`，temperature 0.3（`.env` 解析结果）。
+- 2 条种子各 1 次，2 passed，35 秒。两条都判为 `correct`：`bulkrna__deseq2` 第一次 `use_skill` 是 `bulkrna-de`（5 次模型调用），`singlecell__batch_harmony` 是 `sc-batch-integration`（3 次）。两条都没有在 6 轮内执行脚本，所以 `executed_skill` 为空、`args_ok` 为空。
+- token：输入 116,186（缓存命中 95,616），输出 3,134，8 次模型调用。
+- 策略拒绝 2 条命令，都是 `not_permitted`：`ls -la; echo "---"; ls -la data/ ...; head -3 data/counts.csv ...` 和 `ls -la data/ 2>&1; python -c "import anndata, scanpy; ..."`。都是探查输入文件的写法，被拒的原因是 `;` 与重定向。没有 `unmatched_skill_command`，没有 harness failure。
+- 完整的 26 × 3 没有跑，留给 owner 手动触发。
+
+### 8.5 需要 owner 决定的新问题
+
+1. `tests/ensemble/tuning/test_a3_prompt.py::test_the_pinned_prompt_is_the_development_prompt` 现在失败：`golden/a3_dev_prompt.txt` 是 0057 开发运行时见到的系统提示，里面有这 4 个 consensus skill 和 `consensus-interpret` 的旧 description。更新 golden 会让"与开发运行时的提示逐字相同"不再成立；不更新则这条测试一直红。`tests/ensemble` 不在 CI 里，本次没有改 golden。
+2. `consensus-interpret` 的 description 仍然让模型"use consensus-domains or sc-consensus-clustering"，而这两个已移出 index；它的输入是 consensus 运行的结果，现在只能来自旧运行。`sc-integrate-cluster` 的 description 也说自己"normally fanned out as a member of sc-consensus-integration"。是否改这两段路由文字、或把 `consensus-interpret` 一并移出 index，需要 owner 决定。
+3. `skills/spatial/spatial-genes/spatial_genes.py` 在模块顶层 import scanpy，`--help` 在没有 scanpy 的环境里失败（`test_output_ux.py` 那条测试本来就在防这个）。现在记为 `env` 已知失败；修 skill 代码不在本计划范围。
+4. 冒烟里模型的探查命令（带 `;`、`2>&1`、`python -c`）都被策略拒绝，6 轮内两条种子都没走到执行脚本。完整运行时这会压低 `executed_skill` 的比例，主指标退回 `first_use_skill`。是否放宽只读规则（例如允许 `2>&1`），或把 `max_turns` 调高，等完整运行的数据出来再定。
+5. `tests/runtime/consensus` 保留的 8 个文件和 `tests/ensemble` 一样不在 job1 白名单里；要不要加进去，按 PQ5 的精神由 owner 定。
+
+### 8.6 仍待 owner 的对外动作（H-F）
+
+- 推到分支、开到 `main` 的草稿 PR，检查 job1 在 30 分钟内结束（本地模拟约 6 分钟）、已知失败显示为 xfail、job2 全过、Step Summary 与 artifact、第二次运行的 pip 缓存命中。
+- 在草稿 PR 上推一个故意改坏用例的提交，确认 job2 变红后撤销。
+- 合并或推到 `main` 后看一次 `push` 触发的运行与 README 徽章。
+- 手动跑一次完整的 live eval（26 × 3），把总通过率、每域通过率、`no_skill_called` 细分、`unmatched_skill_command` 的次数与写法、实际 token 与耗时补进本节。

@@ -3,8 +3,10 @@
 Both cases size the window with a ``Headroom``. The ``trigger_tokens``
 values are the growth the token estimator reports for these scripts,
 rounded down a little so the trigger call lands inside the target tier
-and the call before it stays below ``WARN``. If the estimator changes,
-the compaction records' ``pressure`` shows which way the tier moved.
+and no compaction writes back before the trigger call. If the estimator
+changes, the compaction records' ``pressure`` shows which way the tier
+moved, and the Runner's ``headroom_missed`` names a compaction that came
+too early.
 
 ``summary_replaces_head`` reaches ``FULL`` by reading two tables in one
 turn after three small reads. The first call's baseline is about 10k

@@ -6,7 +6,8 @@ production assembly (:func:`~omicsclaw.entry.build_app` with
 ``provider=``) and a real session, then checks its assertions. Skill
 scripts can be answered from recorded :class:`StubResult` fixtures, and
 :func:`build_report` turns a suite's results into JSON, Markdown and a CI
-step summary.
+step summary. :mod:`omicsclaw.evals.live` runs the routing seeds against
+a real model and scores which skill it chose.
 
 This package imports from :mod:`omicsclaw.entry` and the layers below
 it. Nothing else in ``omicsclaw`` imports it.
@@ -28,7 +29,16 @@ from .assertions import (
     ToolCalled,
     ToolNotCalled,
 )
-from .case import ApprovalRecord, Case, FsChange, Headroom, Result, SkillRun
+from .case import (
+    ApprovalPolicy,
+    ApprovalRecord,
+    Case,
+    CaseProvider,
+    FsChange,
+    Headroom,
+    Result,
+    SkillRun,
+)
 from .hermetic import hermetic_env
 from .provider import RecordedCall, ScriptedProvider, ScriptedTurn, tool_call
 
@@ -40,6 +50,10 @@ _LAZY = {
     "write_markdown": "report",
     "arun_case": "runner",
     "run_case": "runner",
+    "RecordingProvider": "live",
+    "judge": "live",
+    "live_case": "live",
+    "routing_policy": "live",
     "StubResult": "stubs",
     "record_stub_result": "stubs",
     "stubbed_skill_runs": "stubs",
@@ -49,7 +63,7 @@ _LAZY = {
 def __getattr__(name: str):
     """Import the report, runner and stub names on first use.
 
-    ``report`` and ``stubs`` are also command-line modules
+    ``live``, ``report`` and ``stubs`` are also command-line modules
     (``python -m omicsclaw.evals.report``); importing them here eagerly
     would make ``runpy`` warn that the module was already imported.
 
@@ -66,9 +80,11 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "ApprovalPolicy",
     "ApprovalRecord",
     "Assertion",
     "Case",
+    "CaseProvider",
     "Error",
     "Failure",
     "FsChange",
@@ -81,6 +97,7 @@ __all__ = [
     "OutputExcludes",
     "PermissionRequested",
     "RecordedCall",
+    "RecordingProvider",
     "Result",
     "ScriptedProvider",
     "ScriptedTurn",
@@ -94,7 +111,10 @@ __all__ = [
     "arun_case",
     "build_report",
     "hermetic_env",
+    "judge",
+    "live_case",
     "record_stub_result",
+    "routing_policy",
     "run_case",
     "step_summary",
     "stubbed_skill_runs",

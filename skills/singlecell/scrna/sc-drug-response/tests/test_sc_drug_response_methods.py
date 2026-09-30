@@ -15,7 +15,19 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent.pare
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from skills.singlecell.scrna.sc_drug_response import sc_drug_response as dr
+
+def _load_script(name: str, path: Path):
+    """Import the skill script at *path* under *name*; its directory name has hyphens."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+dr = _load_script("sc_drug_response", Path(__file__).resolve().parent.parent / "sc_drug_response.py")
 
 
 class TestDemoDataGeneration:

@@ -897,12 +897,11 @@ def test_the_app_is_frozen_so_a_turn_cannot_reconfigure_it(tmp_path):
 
 
 def test_a_scripted_provider_can_be_substituted_after_assembly(tmp_path):
-    """The seam :func:`build_app` does not offer as a parameter.
+    """``dataclasses.replace`` swaps the provider of a frozen, slotted app.
 
-    Plan 0031 §3.2 froze ``build_app(config, *, tools, sections)`` before
-    §8.3 asked for an end-to-end turn driven by a scripted provider, so
-    the substitution happens afterwards. Recorded as a test because the
-    next lane needs to know it works on a ``frozen``/``slots`` dataclass.
+    Only the ``provider`` field changes: an engine or runner built from
+    the old provider keeps it. To assemble with another provider, pass
+    ``build_app(..., provider=)``.
     """
     app = _app(tmp_path, object())
     other = _ScriptedProvider(reply="different")

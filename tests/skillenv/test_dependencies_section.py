@@ -22,8 +22,9 @@ _HEAD = "# x\n\nSome text.\n\n## Dependencies\n\n"
 _PROSE = "Python packages this skill's script needs.\n\n"
 
 
-def test_there_are_94_skill_files():
-    assert len(SKILL_FILES) == 94
+def test_there_are_90_skill_files():
+    """94 skills, less the four consensus shells whose ``SKILL.md`` is renamed ``SKILL.md.disabled``."""
+    assert len(SKILL_FILES) == 90
 
 
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)

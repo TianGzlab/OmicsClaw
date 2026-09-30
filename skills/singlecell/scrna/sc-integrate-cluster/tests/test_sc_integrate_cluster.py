@@ -15,15 +15,28 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from tests.runtime.consensus._sc_integration_synth import make_multibatch_adata
+_HERE = Path(__file__).resolve().parent
+_SKILL = _HERE.parent / "sc_integrate_cluster.py"
 
-_SKILL = (
-    Path(__file__).resolve().parents[3]
-    / "skills/singlecell/scrna/sc-integrate-cluster/sc_integrate_cluster.py"
-)
+
+def _load_synth():
+    """The ``_synth`` helper next to this file, loaded by path."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("sc_integrate_cluster_synth", _HERE / "_synth.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def make_multibatch_adata(**kwargs):
+    """Build the synthetic multi-batch AnnData; skips when scanpy is missing."""
+    pytest.importorskip("scanpy")
+    return _load_synth().make_multibatch_adata(**kwargs)
 
 
 def test_none_baseline_emits_reader_and_panel_artifacts(tmp_path: Path) -> None:
+    pytest.importorskip("igraph")  # Leiden clustering in the skill needs it
     adata = make_multibatch_adata(n_per_group=20, n_batches=2, n_types=2, n_genes=100, seed=0)
     inp = tmp_path / "synth.h5ad"
     adata.write_h5ad(inp)

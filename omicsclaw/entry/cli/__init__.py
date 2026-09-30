@@ -29,7 +29,7 @@ will make the same estimate:
 *The eight "strictly clean" modules are five.* ``_style_support`` imports
 ``omicsclaw.runtime.output_styles``, ``_diagnostics_support`` imports
 ``omicsclaw.diagnostics`` (deleted), and ``_interpret_command_support``
-imports ``omicsclaw.routing``. All three already failed to import at the
+imports ``omicsclaw.routing`` (since deleted). All three already failed to import at the
 time of the port, and two of the three named packages that
 ``tests/entry/test_entry_is_the_top_layer.py`` forbids any file here to
 name. ``_history_support`` did import, and formatted a *research
