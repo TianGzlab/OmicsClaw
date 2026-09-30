@@ -1009,6 +1009,18 @@ def test_a_server_dripping_bytes_cannot_outlast_the_budget():
     assert elapsed < 1.5, f"the deadline did not bound the read ({elapsed:.2f}s)"
 
 
+
+def test_a_body_that_stalls_past_the_budget_is_reported_as_the_budget_running_out():
+    """The read waiting when the deadline passes times out on the socket;
+    that is the budget running out, not a connection that failed."""
+    port, thread = _serve(b"z" * 4, drip=1.0)
+
+    with pytest.raises(_websafety.TransportFailed) as failure:
+        _websafety._open_blocking(_local_target(port), "GET", {}, None, 0.3, 4096)
+
+    thread.join(timeout=3.0)
+    assert "time budget ran out" in str(failure.value)
+
 def test_the_byte_ceiling_stops_an_endless_stream_rather_than_the_server():
     """The memory bound, pinned against a body that never ends.
 

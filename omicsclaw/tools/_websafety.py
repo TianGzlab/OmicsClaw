@@ -788,13 +788,15 @@ def _read_bounded(
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TransportFailed(
-                f"{url} was still sending data when the time budget ran "
-                "out; the response was abandoned"
-            )
+            raise _budget_ran_out(url)
         if connection.sock is not None:
             connection.sock.settimeout(remaining)
-        chunk = raw.read1(min(_READ_CHUNK, wanted))
+        try:
+            chunk = raw.read1(min(_READ_CHUNK, wanted))
+        except TimeoutError as exc:
+            # The socket timeout was set to what was left of the budget, so
+            # a read that times out is the budget running out.
+            raise _budget_ran_out(url) from exc
         if not chunk:
             break
         chunks.append(chunk)
@@ -804,6 +806,14 @@ def _read_bounded(
     if len(payload) > max_bytes:
         return payload[:max_bytes], True
     return payload, False
+
+
+def _budget_ran_out(url: str) -> TransportFailed:
+    """The failure for a body still arriving when the deadline passed."""
+    return TransportFailed(
+        f"{url} was still sending data when the time budget ran "
+        "out; the response was abandoned"
+    )
 
 
 def _failure(url: str, exc: BaseException) -> str:
