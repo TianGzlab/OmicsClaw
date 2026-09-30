@@ -124,7 +124,8 @@ def test_this_repository_is_found_from_its_skills_directory(tmp_path):
     assert config.code_mounts() == (REPO / "omicsclaw", REPO / "skills")
 
 
-def test_the_pool_memory_follows_the_container_limit_in_the_sandbox(tmp_path):
+def test_the_pool_memory_follows_the_container_limit_in_the_sandbox(tmp_path, monkeypatch):
+    from omicsclaw.entry import ensemble
     from omicsclaw.entry.ensemble import _pool_memory
     from omicsclaw.entry.sandbox import SandboxBinding
     from omicsclaw.sandbox import SandboxConfig
@@ -134,8 +135,9 @@ def test_the_pool_memory_follows_the_container_limit_in_the_sandbox(tmp_path):
         mode=SandboxMode.DOCKER, environment=object(), config=SandboxConfig(image="omics:1", memory="1557g")
     )
     assert _pool_memory(config, running) == pytest.approx(1557 - 64 - 128 - 64)
+    monkeypatch.setattr(ensemble, "mem_total_gib", lambda: 100.0)
     local = _pool_memory(config, SandboxBinding())
-    assert local == pytest.approx(mem_total_gib() * 0.8 - 64)
+    assert local == pytest.approx(100.0 * 0.8 - 64)
     capped = AppConfig(workspace=tmp_path, ensemble_memory_gb=100)
     assert _pool_memory(capped, running) == 100
 

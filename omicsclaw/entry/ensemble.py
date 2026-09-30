@@ -221,12 +221,14 @@ async def open_ensemble(
 ) -> EnsembleRunner | None:
     """Detect GPUs, self-check the execution environment and build the runner.
 
-    A failed self-check refuses start-up when :attr:`AppConfig.ensemble` is
-    ``True``, and otherwise logs a warning and returns ``None`` so the rest of
-    the deployment starts without ``run_skill``.
+    A failed self-check, or a host whose memory leaves the trial pool
+    nothing after :attr:`AppConfig.ensemble_reserved_gb`, refuses start-up
+    when :attr:`AppConfig.ensemble` is ``True``. Otherwise either one logs a
+    warning and returns ``None``, so the rest of the deployment starts
+    without ``run_skill``.
 
-    :raises AppConfigError: The self-check failed and the ensemble was
-        explicitly enabled, or the pool would have no memory.
+    :raises AppConfigError: The self-check failed or the pool would have no
+        memory, and the ensemble was explicitly enabled.
     """
     catalog = _catalog(config, skills)
     if catalog is None:
@@ -250,4 +252,14 @@ async def open_ensemble(
             failure,
         )
         return None
-    return build_ensemble(config, skills, binding, gpus=gpus, executor=executor, catalog=catalog)
+    try:
+        return build_ensemble(config, skills, binding, gpus=gpus, executor=executor, catalog=catalog)
+    except AppConfigError as exc:
+        if config.ensemble is True:
+            raise
+        _log.warning(
+            "run_skill is not mounted: %s (lower OMICSCLAW_ENSEMBLE_RESERVED_GB to leave the "
+            "pool memory, or set --ensemble false to silence this warning)",
+            exc,
+        )
+        return None

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from omicsclaw.entry import assembly, open_app
+from omicsclaw.entry import ensemble as entry_ensemble
 from omicsclaw.entry.config import AppConfig, AppConfigError, SkillsIndex
 from omicsclaw.entry.ensemble import SELF_CHECK_IMPORTS, self_check
 from omicsclaw.ensemble.execution import CommandResult
@@ -91,6 +92,30 @@ def test_a_failing_check_refuses_start_up_when_explicitly_enabled(tmp_path, offl
     with pytest.raises(AppConfigError, match="self-check failed.*no scanpy here"):
         _open(_config(tmp_path, ensemble=True, ensemble_python=failing))
 
+
+
+def test_a_host_too_small_for_the_pool_by_default_warns_and_starts_without_run_skill(
+    tmp_path, offline, caplog, monkeypatch
+):
+    monkeypatch.setattr(entry_ensemble, "mem_total_gib", lambda: 16.0)
+    passing = _script(tmp_path / "ok", "exit 0")
+    with caplog.at_level(logging.WARNING, logger="omicsclaw.entry"):
+        app, names = _open(_config(tmp_path, ensemble_python=passing))
+    assert "run_skill" not in names
+    assert {"bash", "use_skill", "task"} <= set(names)
+    assert app.ensemble is None
+    warning = "\n".join(record.getMessage() for record in caplog.records)
+    assert "run_skill is not mounted" in warning and "ensemble pool" in warning
+    assert "OMICSCLAW_ENSEMBLE_RESERVED_GB" in warning
+
+
+def test_a_host_too_small_for_the_pool_refuses_start_up_when_explicitly_enabled(
+    tmp_path, offline, monkeypatch
+):
+    monkeypatch.setattr(entry_ensemble, "mem_total_gib", lambda: 16.0)
+    passing = _script(tmp_path / "ok", "exit 0")
+    with pytest.raises(AppConfigError, match="ensemble pool"):
+        _open(_config(tmp_path, ensemble=True, ensemble_python=passing))
 
 def test_ensemble_false_never_runs_the_check(tmp_path, offline):
     marker = tmp_path / "ran"
