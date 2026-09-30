@@ -137,8 +137,8 @@ class InboundMessage:
 def parse_senders(raw: str) -> frozenset[str]:
     """Split a comma-separated allowlist, the spelling ``.env`` uses.
 
-    ``FEISHU_ALLOWED_SENDERS`` is documented in ``CLAUDE.md`` as
-    comma-separated owner ``open_id`` values. Blanks are dropped and
+    ``FEISHU_ALLOWED_SENDERS`` holds comma-separated owner ``open_id``
+    values. Blanks are dropped and
     entries are stripped, so a trailing comma does not add an empty
     identity — which would otherwise admit every message whose sender the
     platform failed to report.
@@ -158,13 +158,13 @@ def parse_senders(raw: str) -> frozenset[str]:
 class SenderPolicy:
     """Who may drive this agent. Deny by default, and deny loudly.
 
-    ``CLAUDE.md`` states the rule this class is: ``FEISHU_ALLOWED_SENDERS``
-    is *required*, "authoritative Feishu ingress admits nobody else and
-    refuses to start without it", and group chats "fail closed" without
+    The rule this class is: ``FEISHU_ALLOWED_SENDERS`` is *required* —
+    authoritative Feishu ingress admits nobody else and refuses to start
+    without it — and group chats fail closed without
     ``FEISHU_BOT_OPEN_ID``.
 
     Both halves are enforced here rather than in an adapter, because
-    nine adapters means nine chances to forget one.
+    seven adapters means seven chances to forget one.
     """
 
     allowed_senders: frozenset[str]

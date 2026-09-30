@@ -25,13 +25,15 @@ from omicsclaw.entry.desktop.turn_observation import (
     desktop_chat_frame,
     desktop_terminal_frames,
 )
+from omicsclaw.entry.desktop.interactions import DesktopInteractions
 from omicsclaw.entry.desktop.server import open_chat_stream
 from omicsclaw.entry.events import TurnEvent, TurnEventType
 from omicsclaw.entry.session import attach_sessions
 from omicsclaw.entry.stream import DEFAULT_OBSERVER_QUEUE, TurnStream
 from omicsclaw.entry.turn import TurnHandle
 from omicsclaw.provider import Completion
-from omicsclaw.schema import Message, Role, StreamChunk, StreamChunkType
+from omicsclaw.schema import Message, Role, StreamChunk, StreamChunkType, Usage
+from omicsclaw.tools import ApprovalRequest
 from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
     Exploding,
     Scripted,
@@ -104,18 +106,34 @@ class Paused(Scripted):
         yield StreamChunk(type=StreamChunkType.DONE, message=completion.message)
 
 
-def decode(frame: str) -> dict:
-    """One rendered SSE frame back to the object the client parses.
+def split_frame(frame: str) -> tuple[int | None, dict]:
+    """One rendered SSE frame: its ``id:`` if it has one, and the object
+    the client parses.
 
-    Asserts the two invariants ``OmicsClaw-App/src/app/api/chat/route.ts``
-    depends on (``:88-97``): the frame is one ``data: `` line, and the
-    object it carries has exactly the two keys ``type`` and ``data``.
+    Asserts the invariants ``OmicsClaw-App/src/app/api/chat/route.ts``
+    depends on: at most one ``id: <n>`` line, then exactly one ``data: ``
+    line, and the object it carries has exactly the two keys ``type`` and
+    ``data``.
     """
-    assert frame.startswith("data: "), frame[:40]
     assert frame.endswith("\n\n"), frame[-10:]
-    payload = json.loads(frame[len("data: ") : -2])
+    lines = frame[:-2].split("\n")
+    event_id: int | None = None
+    if lines[0].startswith("id: "):
+        event_id = int(lines[0][len("id: ") :])
+        lines = lines[1:]
+    assert len(lines) == 1 and lines[0].startswith("data: "), frame[:60]
+    payload = json.loads(lines[0][len("data: ") :])
     assert sorted(payload) == ["data", "type"], sorted(payload)
-    return payload
+    return event_id, payload
+
+
+def decode(frame: str) -> dict:
+    """The object a rendered SSE frame carries (see :func:`split_frame`)."""
+    return split_frame(frame)[1]
+
+
+def id_of(frame: str) -> int | None:
+    return split_frame(frame)[0]
 
 
 def text_of(frames: list[str]) -> str:
@@ -287,6 +305,7 @@ def stream_app(tmp_path: pathlib.Path, provider, **overrides):
 
 def document(**overrides) -> dict:
     body = {
+        "ingress_schema_version": 3,
         "content": "分析这份 Visium 数据",
         "session_id": "s1",
         "source_request_id": "a" * 32,
@@ -498,29 +517,37 @@ def test_an_abandoned_exchange_is_cancelled_once_the_grace_expires(
 def test_a_reconnect_resumes_the_same_exchange_from_its_cursor(
     tmp_path: pathlib.Path,
 ):
-    """Q14 and Q24 meeting: idempotent redelivery *is* the reconnect.
+    """Q14 and Q24 meeting: idempotent redelivery resolves to the same
+    exchange.
 
-    ``/chat/stream`` frames carry no SSE ``id:`` line — the published
-    client reads ``lines[0]`` and slices ``"data: "`` off it — so a
-    reconnect cannot be a ``Last-Event-ID`` replay. It is a redelivery of
-    the same ``source_request_id``, which resolves to the same exchange,
-    plus a cursor the caller carries.
+    A redelivery of the same ``source_request_id`` resolves to the same
+    exchange, observed from a cursor the caller carries. The desktop
+    client reconnects with ``resume: true`` instead (see
+    ``test_resuming_from_the_last_id_loses_and_repeats_nothing``), because
+    a redelivery that no longer finds its exchange starts a new one.
 
     **Mutation**: ignore ``source_request_id`` in
     ``SessionRegistry.submit`` ⇒ ``second.turn_id`` becomes a new
     exchange and the identity assertion fails.
     """
     app = stream_app(tmp_path, Chatty())
+    interactions = DesktopInteractions(app)
 
     async def scenario() -> tuple[str, str, bool, str, str]:
-        first = await open_chat_stream(app, document(), keepalive_s=None)
+        first = await open_chat_stream(
+            app, document(), keepalive_s=None, interactions=interactions
+        )
         async with first.body as body:
             frame = await asyncio.wait_for(anext(body), WAIT_S)
             cursor = first.body.last_seq
         assert decode(frame)["type"] == "text"
 
         second = await open_chat_stream(
-            app, document(), after_seq=cursor, keepalive_s=None
+            app,
+            document(),
+            after_seq=cursor,
+            keepalive_s=None,
+            interactions=interactions,
         )
         rest = await asyncio.wait_for(collect(second), WAIT_S)
         return (
@@ -603,20 +630,206 @@ def test_a_gap_becomes_an_event_omitted_frame():
         TurnEventType.EXCHANGE_START,
         TurnEventType.QUEUED,
         TurnEventType.CONTEXT,
-        TurnEventType.REASONING_DELTA,
         TurnEventType.TURN_END,
         TurnEventType.APPROVAL_SETTLED,
     ],
 )
-def test_an_event_with_no_published_name_produces_no_frame(kind: TurnEventType):
-    """Q24's hard edge: a name this client has never seen is not minted here.
+def test_an_event_with_no_frame_in_the_contract_produces_none(kind: TurnEventType):
+    """Contract v2 names every frame it sends; these types have none.
 
-    Every type listed has a perfectly good internal meaning and no entry in
-    ``route.ts``. Publishing one unilaterally would make a backend-internal
-    rebuild step into a protocol change.
+    ``TURN_END`` is not a frame of its own: its usage is summed into the
+    ``result`` frame the body sends before ``done``.
     """
     event = TurnEvent(type=kind, seq=1, session_id="s", turn_id="t")
     assert desktop_chat_frame(event) is None
+
+
+def a_reasoning_delta(delta: str) -> TurnEvent:
+    return TurnEvent(
+        type=TurnEventType.REASONING_DELTA,
+        seq=3,
+        session_id="s",
+        turn_id="t",
+        engine=EngineEvent(type=EngineEventType.REASONING_DELTA, delta=delta, turn=1),
+    )
+
+
+def test_a_reasoning_delta_becomes_a_thinking_frame():
+    """v2 sends reasoning as ``thinking``, a plain-string delta like ``text``."""
+    assert desktop_chat_frame(a_reasoning_delta("weighing Visium vs Xenium")) == (
+        "thinking",
+        "weighing Visium vs Xenium",
+    )
+    assert desktop_chat_frame(a_reasoning_delta("")) is None
+
+
+def test_a_permission_request_frame_carries_the_v2_fields():
+    """Field by field, because the client's admission check reads them all.
+
+    ``reason_shows_call``, ``ask_every_time`` and ``can_remember`` are not
+    in ``to_wire``'s approval payload; the desktop projection adds them —
+    the first two from the request, ``can_remember`` from its caller
+    (``False`` unless told). ``arguments`` stays the raw JSON string.
+    """
+    request = ApprovalRequest(
+        tool_name="bash",
+        arguments='{"command": "echo hi"}',
+        reason="run: echo hi",
+        reason_shows_call=True,
+        ask_every_time=True,
+    )
+    event = TurnEvent.approval_required(
+        request, "t" * 32 + "#1", seq=9, session_id="s1", turn_id="t" * 32
+    )
+    name, data = desktop_chat_frame(event)
+
+    assert name == "permission_request"
+    assert data == {
+        "sequence": 9,
+        "session_id": "s1",
+        "turn_id": "t" * 32,
+        "request_id": "t" * 32 + "#1",
+        "tool_name": "bash",
+        "arguments": '{"command": "echo hi"}',
+        "reason": "run: echo hi",
+        "risk_level": "high",
+        "approval_mode": "ask",
+        "reason_shows_call": True,
+        "ask_every_time": True,
+        "can_remember": False,
+    }
+    assert desktop_chat_frame(event, can_remember=True)[1]["can_remember"] is True
+
+
+def a_turn_end(usage: Usage | None) -> TurnEvent:
+    return TurnEvent(
+        type=TurnEventType.TURN_END,
+        seq=0,
+        session_id="s",
+        turn_id="t",
+        engine=EngineEvent(type=EngineEventType.TURN_END, turn=1, usage=usage),
+    )
+
+
+def body_over(events: list[TurnEvent], **options) -> list[str]:
+    """Publish *events* then a converged ending, and drain a body over them."""
+
+    async def scenario() -> list[str]:
+        stream = TurnStream("s", "t")
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=None, **options)
+        for event in events:
+            stream.publish(event)
+        stream.publish(
+            TurnEvent.exchange_end("converged", session_id="s", turn_id="t")
+        )
+        frames: list[str] = []
+        async with body:
+            async for frame in body:
+                frames.append(frame)
+        return frames
+
+    return asyncio.run(scenario())
+
+
+def test_a_converged_body_sends_one_result_with_summed_usage_before_done():
+    """``result.usage`` sums every model call the body saw, key by key.
+
+    Two model calls — a tool call and the answer — is the ordinary shape of
+    one exchange, and the client records one usage per exchange. The keys
+    are ``to_wire``'s, including ``cache_write_tokens``.
+    """
+    frames = body_over(
+        [
+            a_turn_end(Usage(10, 2, cache_read_tokens=4, cache_write_tokens=1)),
+            a_turn_end(Usage(20, 3, cache_read_tokens=5, cache_write_tokens=0)),
+        ],
+        provider="deepseek",
+        model="deepseek-chat",
+    )
+
+    assert types_of(frames) == ["result", "done"]
+    result = json.loads(decode(frames[0])["data"])
+    assert result == {
+        "usage": {
+            "input_tokens": 30,
+            "output_tokens": 5,
+            "cache_read_tokens": 9,
+            "cache_write_tokens": 1,
+        },
+        "usage_reported": True,
+        "model_calls": 2,
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+    }
+
+
+def test_a_call_that_reported_no_usage_is_not_counted_as_zero():
+    """``usage_reported`` is true only when every observed call reported.
+
+    A missing count and a zero count are different facts, so a partial sum
+    says so rather than passing for the whole.
+    """
+    partial = json.loads(
+        decode(body_over([a_turn_end(Usage(7, 1)), a_turn_end(None)])[0])["data"]
+    )
+    assert partial["usage"]["input_tokens"] == 7
+    assert partial["usage_reported"] is False
+    assert partial["model_calls"] == 2
+
+    silent = json.loads(decode(body_over([a_turn_end(None)])[0])["data"])
+    assert silent["usage"] is None
+    assert silent["usage_reported"] is False
+
+
+def test_a_cancelled_or_failed_exchange_sends_no_result():
+    """``result`` means "completed"; the client marks the turn done on it."""
+    for terminal in ("cancelled", "failed"):
+        event = TurnEvent.exchange_end(terminal, session_id="s", turn_id="t")
+        assert all(name != "result" for name, _ in desktop_terminal_frames(event))
+
+    async def scenario() -> list[str]:
+        stream = TurnStream("s", "t")
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=None)
+        stream.publish(a_turn_end(Usage(1, 1)))
+        stream.publish(
+            TurnEvent.exchange_end("cancelled", session_id="s", turn_id="t")
+        )
+        return [frame async for frame in body]
+
+    assert types_of(asyncio.run(scenario())) == ["error", "done"]
+
+
+class Thoughtful(Scripted):
+    """A backend that reasons, answers, and reports what it cost."""
+
+    async def _stream(self, messages, tools=None):
+        completion = await self.generate(messages, tools)
+        yield StreamChunk(type=StreamChunkType.REASONING_DELTA, delta="hmm ")
+        yield StreamChunk(type=StreamChunkType.TEXT_DELTA, delta="ok")
+        yield StreamChunk(
+            type=StreamChunkType.DONE,
+            message=completion.message,
+            usage=Usage(input_tokens=12, output_tokens=3),
+        )
+
+
+def test_a_real_exchange_streams_thinking_text_result_then_done(
+    tmp_path: pathlib.Path,
+):
+    """End to end through the registry and the engine, in wire order."""
+    app = stream_app(tmp_path, Thoughtful(Message(role=Role.ASSISTANT, content="ok")))
+
+    async def scenario() -> list[str]:
+        stream = await open_chat_stream(app, document(), keepalive_s=None)
+        return await asyncio.wait_for(collect(stream), WAIT_S)
+
+    frames = asyncio.run(scenario())
+    assert types_of(frames) == ["thinking", "text", "result", "done"]
+    assert decode(frames[0])["data"] == "hmm "
+    result = json.loads(decode(frames[2])["data"])
+    assert result["usage"]["input_tokens"] == 12
+    assert result["model_calls"] == 1
+    assert result["provider"] == "scripted"
 
 
 def test_the_terminal_projection_always_ends_in_done():
@@ -700,3 +913,451 @@ def test_leaving_the_body_early_detaches_it():
 
     during, after = asyncio.run(scenario())
     assert (during, after) == (1, 0)
+
+
+def test_the_wire_hides_credential_keys_by_the_tool_layer_s_rule():
+    """The Desktop wire and the approval-card preview hide the same keys.
+
+    The key list lives in ``omicsclaw/tools/preview.py`` so the preview can
+    share it, since the tool layer may not import this one. Two things are
+    pinned: the list itself, written out, so a change to it is a visible
+    change to what the wire hides; and the projection still applies it, at
+    depth, while leaving usage counts such as ``input_tokens`` alone.
+    """
+    from omicsclaw.entry.desktop.turn_observation import _wire_json_value
+    from omicsclaw.tools.preview import CREDENTIAL_KEY_FAMILIES
+
+    assert CREDENTIAL_KEY_FAMILIES == frozenset(
+        {
+            "accesskey",
+            "accesskeyid",
+            "accesstoken",
+            "apikey",
+            "authorization",
+            "clientsecret",
+            "cookie",
+            "credential",
+            "credentials",
+            "password",
+            "passwd",
+            "privatekey",
+            "refreshtoken",
+            "secret",
+            "secretaccesskey",
+            "secretkey",
+            "setcookie",
+            "token",
+        }
+    )
+
+    projected = _wire_json_value(
+        {"usage": {"input_tokens": 3}, "headers": [{"X-Api-Key": "k", "ok": 1}]}
+    )
+
+    assert projected == {
+        "usage": {"input_tokens": 3},
+        "headers": [{"X-Api-Key": "[redacted]", "ok": 1}],
+    }
+
+
+def _a_compaction_record(written_back: bool):
+    from omicsclaw.context.budget import Pressure
+    from omicsclaw.context.compaction import CompactionRecord
+
+    return CompactionRecord(
+        pressure=Pressure.FULL,
+        tokens_before=9_000,
+        tokens_after=3_000 if written_back else 9_000,
+        msgs_before=12,
+        msgs_after=4 if written_back else 12,
+        summarized=8 if written_back else 0,
+        preserved_tail=3,
+        written_back=written_back,
+    )
+
+
+class _FinishedCompaction:
+    def __init__(self, record) -> None:
+        self._record = record
+
+    async def wait(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(compaction=self._record)
+
+
+def test_a_compact_body_reports_a_published_compaction_exactly_once():
+    record = _a_compaction_record(written_back=True)
+    frames = body_over(
+        [TurnEvent.compacted(record, seq=1, session_id="s", turn_id="t")],
+        compaction=_FinishedCompaction(record),
+    )
+    assert types_of(frames) == ["status", "result", "done"]
+    status = json.loads(decode(frames[0])["data"])
+    assert (status["kind"], status["written_back"]) == ("compaction", True)
+    assert status["msgs_before"] - status["msgs_after"] == 8
+
+
+def test_a_compact_body_reports_a_compaction_that_changed_nothing():
+    frames = body_over([], compaction=_FinishedCompaction(_a_compaction_record(False)))
+    assert types_of(frames) == ["status", "result", "done"]
+    status = json.loads(decode(frames[0])["data"])
+    assert (status["kind"], status["written_back"]) == ("compaction", False)
+    assert status["turn_id"] == "t"
+
+
+def test_an_ordinary_body_invents_no_compaction_report():
+    assert types_of(body_over([])) == ["result", "done"]
+
+
+# ---- contract v3: the id line, resume, usage per exchange ----------------
+
+
+def test_a_frame_an_event_produced_carries_that_event_s_sequence_number():
+    """Non-terminal frames carry ``id: <seq>``; ``TURN_END`` takes a
+    number and sends nothing, so the ids skip it rather than counting
+    frames. The ending (``result``, ``done``) carries none."""
+    frames = body_over(
+        [a_delta(0), a_turn_end(Usage(1, 1)), a_delta(1), a_reasoning_delta("hm")]
+    )
+
+    assert [(id_of(f), decode(f)["type"]) for f in frames] == [
+        (1, "text"),
+        (3, "text"),
+        (4, "thinking"),
+        (None, "result"),
+        (None, "done"),
+    ]
+
+
+def test_the_frames_that_end_a_stream_carry_no_id():
+    """``error`` and ``done`` of a cancelled exchange, the ``done`` a body
+    adds when its observation ends without one, and ``keep_alive``."""
+
+    async def cancelled() -> list[str]:
+        stream = TurnStream("s", "t")
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=None)
+        stream.publish(a_delta(0))
+        stream.publish(TurnEvent.exchange_end("cancelled", session_id="s", turn_id="t"))
+        return [frame async for frame in body]
+
+    async def late() -> list[str]:
+        stream = TurnStream("s", "t")
+        stream.publish(TurnEvent.exchange_end("converged", session_id="s", turn_id="t"))
+        body = DesktopChatSSEBody(stream.observe(after_seq=99), keepalive_s=None)
+        return [frame async for frame in body]
+
+    async def idle() -> str:
+        stream = TurnStream("s", "t")
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=0.01)
+        async with body:
+            return await asyncio.wait_for(anext(body), WAIT_S)
+
+    assert [(id_of(f), decode(f)["type"]) for f in asyncio.run(cancelled())] == [
+        (1, "text"),
+        (None, "error"),
+        (None, "done"),
+    ]
+    assert [id_of(f) for f in asyncio.run(late())] == [None]
+    keep_alive = asyncio.run(idle())
+    assert (id_of(keep_alive), decode(keep_alive)["type"]) == (None, "keep_alive")
+
+
+def test_an_event_omitted_frame_carries_a_cursor_that_resumes_after_the_hole():
+    """A gap's id is one before the oldest event still held, so resuming
+    from it asks for exactly what the gap did not eat. An oversized frame
+    keeps the id of the event it replaced."""
+
+    async def scenario() -> list[str]:
+        stream = TurnStream("s", "t", ring_size=4)
+        for index in range(6):
+            stream.publish(a_delta(index))
+        huge = TurnEvent(
+            type=TurnEventType.TEXT_DELTA,
+            seq=0,
+            session_id="s",
+            turn_id="t",
+            engine=EngineEvent(
+                type=EngineEventType.TEXT_DELTA, delta="x" * (5 * 1024 * 1024), turn=1
+            ),
+        )
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=None)
+        stream.publish(huge)
+        stream.publish(TurnEvent.exchange_end("converged", session_id="s", turn_id="t"))
+        return [frame async for frame in body]
+
+    frames = asyncio.run(scenario())
+    first_id, first = split_frame(frames[0])
+    assert first["type"] == "event_omitted"
+    assert first_id == 2
+    assert json.loads(first["data"])["oldest_available"] == 3
+    assert [id_of(f) for f in frames[1:5]] == [3, 4, 5, 6]
+    oversized_id, oversized = split_frame(frames[5])
+    assert (oversized_id, oversized["type"]) == (7, "event_omitted")
+    assert json.loads(oversized["data"])["reason"] == "frame_too_large"
+
+
+def test_resuming_from_the_last_id_loses_and_repeats_nothing(tmp_path: pathlib.Path):
+    """The client's cursor is the last ``id:`` it received, not the last
+    event the server read: ``last_seq`` may be ahead of what reached the
+    socket, and resuming from it would lose the difference."""
+    app = stream_app(tmp_path, Chatty())
+    interactions = DesktopInteractions(app)
+
+    async def scenario() -> tuple[str, list[str], bool, str, str]:
+        first = await open_chat_stream(
+            app, document(), keepalive_s=None, interactions=interactions
+        )
+        received: list[str] = []
+        async with first.body as body:
+            for _ in range(7):
+                received.append(await asyncio.wait_for(anext(body), WAIT_S))
+        cursor = id_of(received[-1])
+        assert cursor is not None
+        second = await open_chat_stream(
+            app,
+            document(resume=True, content=""),
+            after_seq=cursor,
+            keepalive_s=None,
+            interactions=interactions,
+        )
+        rest = await asyncio.wait_for(collect(second), WAIT_S)
+        return first.turn_id, rest, second.resumed, second.turn_id, text_of(received)
+
+    first_turn, rest, resumed, second_turn, head = asyncio.run(scenario())
+    assert (resumed, second_turn) == (True, first_turn)
+    assert head + text_of(rest) == Chatty().text
+    assert types_of(rest)[-2:] == ["result", "done"]
+
+
+def test_a_resume_of_nothing_retained_starts_nothing(tmp_path: pathlib.Path):
+    """A restarted backend, or an exchange aged out: 409, not a new run."""
+    from omicsclaw.entry.desktop.turn_submission import DesktopIngressError
+
+    provider = Scripted(Message(role=Role.ASSISTANT, content="ok"))
+    app = stream_app(tmp_path, provider)
+
+    async def scenario() -> None:
+        await open_chat_stream(
+            app, document(resume=True), keepalive_s=None
+        )
+
+    with pytest.raises(DesktopIngressError) as caught:
+        asyncio.run(scenario())
+    assert (caught.value.code, caught.value.status_code) == (
+        "exchange_not_retained",
+        409,
+    )
+    assert provider.calls == 0
+    assert app.sessions.running() == ()
+
+
+def _usage_events() -> list[TurnEvent]:
+    """Two model calls around a stretch of text: seqs 1–7."""
+    return [
+        a_delta(0),
+        a_turn_end(Usage(10, 2, cache_read_tokens=4, cache_write_tokens=1)),
+        a_delta(1),
+        a_delta(2),
+        a_turn_end(Usage(20, 3, cache_read_tokens=5, cache_write_tokens=0)),
+        a_delta(3),
+    ]
+
+
+def test_a_resumed_body_reports_the_usage_of_the_whole_exchange(
+    tmp_path: pathlib.Path,
+):
+    """The first body reads past the second ``TURN_END`` but the client
+    only received up to id 3; the second body reads that ``TURN_END``
+    again. Each call counts once, and the sum is what one unbroken body
+    reports."""
+    interactions = DesktopInteractions(stream_app(tmp_path, Scripted()))
+    unbroken = json.loads(decode(body_over(_usage_events())[-2])["data"])
+
+    async def scenario() -> list[str]:
+        stream = TurnStream("s", "t")
+        first = DesktopChatSSEBody(
+            stream.observe(), keepalive_s=None, interactions=interactions
+        )
+        for event in _usage_events():
+            stream.publish(event)
+        async with first:
+            seen = [await asyncio.wait_for(anext(first), WAIT_S) for _ in range(4)]
+        assert [id_of(f) for f in seen] == [1, 3, 4, 6]
+        second = DesktopChatSSEBody(
+            stream.observe(after_seq=3), keepalive_s=None, interactions=interactions
+        )
+        stream.publish(TurnEvent.exchange_end("converged", session_id="s", turn_id="t"))
+        async with second:
+            return [frame async for frame in second]
+
+    rest = asyncio.run(scenario())
+    assert [id_of(f) for f in rest] == [4, 6, None, None]
+    resumed = json.loads(decode(rest[-2])["data"])
+    assert resumed == unbroken
+    assert resumed["model_calls"] == 2
+    assert resumed["usage_reported"] is True
+
+
+def test_a_call_that_left_the_ring_unread_makes_the_usage_unreported():
+    """Nobody observed the exchange while its first ``TURN_END`` was
+    pushed out of the ring. The sum is what was read; it does not claim
+    to be the whole."""
+
+    async def scenario() -> list[str]:
+        stream = TurnStream("s", "t", ring_size=4)
+        stream.publish(a_turn_end(Usage(7, 1)))
+        for index in range(5):
+            stream.publish(a_delta(index))
+        body = DesktopChatSSEBody(stream.observe(), keepalive_s=None)
+        stream.publish(a_turn_end(Usage(20, 3)))
+        stream.publish(TurnEvent.exchange_end("converged", session_id="s", turn_id="t"))
+        async with body:
+            return [frame async for frame in body]
+
+    frames = asyncio.run(scenario())
+    assert decode(frames[0])["type"] == "event_omitted"
+    result = json.loads(decode(frames[-2])["data"])
+    assert result["usage"]["input_tokens"] == 20
+    assert result["model_calls"] == 1
+    assert result["usage_reported"] is False
+
+
+def test_deltas_a_slow_observer_dropped_do_not_make_the_usage_unreported():
+    """A ``GAP`` in the middle of a body only ever stands for deltas, so
+    no model call can hide in it."""
+
+    async def scenario() -> list[str]:
+        handle = TurnHandle(
+            session_id="s", turn_id="t", ring_size=BURST * 2, observer_queue_size=8
+        )
+        body = DesktopChatSSEBody(handle.observe(), keepalive_s=None)
+        handle.stream.publish(a_turn_end(Usage(1, 1)))
+        for index in range(BURST):
+            handle.stream.publish(a_delta(index))
+        handle.stream.publish(a_turn_end(Usage(2, 2)))
+        handle.stream.publish(
+            TurnEvent.exchange_end("converged", session_id="s", turn_id="t")
+        )
+        async with body:
+            return [frame async for frame in body]
+
+    frames = asyncio.run(scenario())
+    assert "event_omitted" in types_of(frames)
+    result = json.loads(decode(frames[-2])["data"])
+    assert (result["model_calls"], result["usage_reported"]) == (2, True)
+
+
+def _compacting_app(tmp_path: pathlib.Path):
+    """A registry whose ``/compact`` really compacts a long session."""
+    import dataclasses
+
+    from omicsclaw.context import ContextBudget
+    from omicsclaw.entry.session import Session
+    from tests.entry.test_session import Canned  # type: ignore[import-not-found]
+
+    app = make_app(
+        tmp_path,
+        Scripted(Message(role=Role.ASSISTANT, content="done")),
+        tools=(),
+        memory=False,
+        subagents=False,
+    )
+    app = dataclasses.replace(
+        app,
+        summarizer=Canned(),
+        budget=ContextBudget(
+            context_tokens=9_000, reserve_output_tokens=200, reserve_tool_tokens=200
+        ),
+    )
+    attached = attach_sessions(app, abandon_grace_s=None)
+    history: list[Message] = []
+    for index in range(30):
+        history.append(Message.user(f"question {index} " + "q" * 300))
+        history.append(Message.assistant("answer " + "a" * 300))
+    return attached, Session(session_id="s1", history=tuple(history))
+
+
+def test_a_resumed_compaction_does_not_report_its_status_twice(
+    tmp_path: pathlib.Path,
+):
+    """The client received the ``status`` of a real compaction, then lost
+    the connection before the ending. Resuming after its id sends the
+    ending only."""
+    app, session = _compacting_app(tmp_path)
+    interactions = DesktopInteractions(app)
+
+    async def scenario() -> tuple[list[str], list[str]]:
+        await app.sessions._store.save(session)
+        first = await open_chat_stream(
+            app, document(content="/compact"), keepalive_s=None, interactions=interactions
+        )
+        async with first.body as body:
+            head = [await asyncio.wait_for(anext(body), WAIT_S)]
+        cursor = id_of(head[0])
+        assert cursor is not None
+        second = await open_chat_stream(
+            app,
+            document(resume=True),
+            after_seq=cursor,
+            keepalive_s=None,
+            interactions=interactions,
+        )
+        return head, await asyncio.wait_for(collect(second), WAIT_S)
+
+    head, rest = asyncio.run(scenario())
+    assert types_of(head) == ["status"]
+    assert json.loads(decode(head[0])["data"])["written_back"] is True
+    assert types_of(rest) == ["result", "done"]
+
+
+def test_a_resumed_compaction_that_changed_nothing_still_reports(
+    tmp_path: pathlib.Path,
+):
+    """Nothing was compacted, so no event carried the ``status``; it is
+    part of the ending, which a resume sends whole."""
+    app = stream_app(tmp_path, Scripted())
+    interactions = DesktopInteractions(app)
+
+    async def scenario() -> list[str]:
+        first = await open_chat_stream(
+            app, document(content="/compact"), keepalive_s=None, interactions=interactions
+        )
+        await first.body.aclose()
+        second = await open_chat_stream(
+            app, document(resume=True), keepalive_s=None, interactions=interactions
+        )
+        return await asyncio.wait_for(collect(second), WAIT_S)
+
+    frames = asyncio.run(scenario())
+    assert types_of(frames) == ["status", "result", "done"]
+    assert json.loads(decode(frames[0])["data"])["written_back"] is False
+
+
+def test_an_exchange_with_every_observer_slot_taken_answers_429(
+    tmp_path: pathlib.Path,
+):
+    from omicsclaw.entry.desktop.turn_submission import DesktopIngressError
+
+    app = stream_app(tmp_path, Paused())
+    interactions = DesktopInteractions(app)
+
+    async def scenario() -> None:
+        first = await open_chat_stream(
+            app, document(), keepalive_s=None, interactions=interactions
+        )
+        handle = app.sessions.handle(first.turn_id)
+        held = [handle.observe() for _ in range(15)]
+        try:
+            await open_chat_stream(
+                app, document(resume=True), keepalive_s=None, interactions=interactions
+            )
+        finally:
+            for observation in held:
+                await observation.aclose()
+            await first.body.aclose()
+            handle.cancel()
+
+    with pytest.raises(DesktopIngressError) as caught:
+        asyncio.run(scenario())
+    assert (caught.value.code, caught.value.status_code) == ("too_many_observers", 429)

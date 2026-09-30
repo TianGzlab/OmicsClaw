@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run prot-enrichment --demo
-python omicsclaw.py run prot-enrichment --input <proteins.csv> --output <dir>
+python skills/proteomics/proteomics-enrichment/prot_enrichment.py --demo
+python skills/proteomics/proteomics-enrichment/prot_enrichment.py --input <proteins.csv> --output <dir>
 ```
 
 

@@ -23,12 +23,17 @@ from pathlib import Path
 from scipy import stats as sp_stats
 
 import sys, os
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from omicsclaw.common.report import (
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
+from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
-    write_result_json,
 )
+from skills._sdk.result import write_result_json
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +110,13 @@ def _run_combat_r(
     Returns corrected expression DataFrame (same shape as input).
     """
     import tempfile
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
     validate_r_environment(required_r_packages=["sva"])
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_combat_") as tmpdir:

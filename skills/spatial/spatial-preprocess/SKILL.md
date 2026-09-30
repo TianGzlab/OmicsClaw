@@ -1,15 +1,10 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: spatial-preprocess
 description: Load when running the foundational spatial transcriptomics QC + filtering + normalisation
   + HVG + PCA + neighbour-graph + Leiden pipeline on a Visium / Xenium / generic spatial AnnData. Skip
   when raw FASTQs need converting first (use spatial-raw-processing); tissue-domain detection on already-preprocessed
   data (use spatial-domains).
-version: 0.6.0
-author: OmicsClaw
-license: MIT
-emoji: 🔬
+trigger: preprocess, spatial preprocessing, spatial QC, normalize, visium, xenium, merfish, slide-seq, load spatial data, leiden, umap
 tags:
 - spatial
 - visium
@@ -20,14 +15,6 @@ tags:
 - hvg
 - pca
 - leiden
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # spatial-preprocess
@@ -49,8 +36,6 @@ explicit tissue-domain detection (SpaGCN / STAGATE) on top of this
 output use `spatial-domains`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -94,35 +79,35 @@ output use `spatial-domains`.
 
 ## Gotchas
 
-- **All input + parameter validation goes through `parser.error` (exit code 2), not `ValueError` / `SystemExit(1)`.** `spatial_preprocess.py:1006` for missing `--input`; `:1008` for missing path; `:1010` for unknown `--tissue`; `:1012-1028` for negative / out-of-range numeric flags. Wrappers expecting standard `ValueError` need to handle exit code 2 separately.
-- **`result.json["n_pcs_used"]` may be smaller than the requested `--n-pcs`.** The dimensionality is clipped in the helper at `skills/spatial/_lib/preprocessing.py:307` (cross-file anchor — lint skips). The clipped value is surfaced into the per-row metrics CSV at `spatial_preprocess.py:193` (`n_pcs_used`) and `:191` (`n_pcs_requested`). Pass `n_pcs_used` (not `n_pcs_requested`) to downstream skills like `spatial-domains --n-pcs`.
+- **All input + parameter validation goes through `parser.error` (exit code 2), not `ValueError` / `SystemExit(1)`.** `spatial_preprocess.py` for missing `--input`; for missing path; for unknown `--tissue`; for negative / out-of-range numeric flags. Wrappers expecting standard `ValueError` need to handle exit code 2 separately.
+- **`result.json["n_pcs_used"]` may be smaller than the requested `--n-pcs`.** The dimensionality is clipped in the helper at `skills/spatial/_lib/preprocessing.py`. The clipped value is surfaced into the per-row metrics CSV at `spatial_preprocess.py` (`n_pcs_used` and `n_pcs_requested`). Pass `n_pcs_used` (not `n_pcs_requested`) to downstream skills like `spatial-domains --n-pcs`.
 - **`--tissue` overrides numeric defaults silently.** When a preset matches, `TISSUE_PRESETS` rewrites `--min-genes` / `--min-cells` / `--max-mt-pct` / `--max-genes` from the preset table. Pass values explicitly to override; `result.json["effective_params"]` records what was actually applied.
-- **No UMAP fallback — missing `umap-learn` aborts the run.** `sc.tl.umap` is called unconditionally; if `umap-learn` (or igraph for Leiden) isn't installed, the run raises `ImportError` and exits non-zero. There is no `_safe_umap` shim in the script — install `umap-learn` and `igraph` before running on a fresh env.
-- **`--resolutions` parsing errors via `parser.error`.** `spatial_preprocess.py:1026` raises on malformed comma-separated values; `:1028` raises if any value is `<= 0`. Format: `0.4,0.6,0.8,1.0` (no spaces inside the value).
-- **Default `--tissue` is `None` (no preset).** When unset, the skill uses the generic defaults from `defaults` dict at `:956-958` — typically the right call. Tissue presets (`brain`, `tumor`, etc.) tighten thresholds and may filter aggressively on tissues with low UMI counts.
+- **No UMAP fallback — missing `umap-learn` aborts the run.** `sc.tl.umap` is called unconditionally; if `umap-learn` (or igraph for Leiden) isn't installed, the run raises `ImportError` and exits non-zero — install `umap-learn` and `igraph` before running on a fresh env.
+- **`--resolutions` parsing errors via `parser.error`.** `spatial_preprocess.py` raises on malformed comma-separated values; raises if any value is `<= 0`. Format: `0.4,0.6,0.8,1.0` (no spaces inside the value).
+- **Default `--tissue` is `None` (no preset).** When unset, the skill uses the generic defaults from `defaults` dict — typically the right call. Tissue presets (`brain`, `tumor`, etc.) tighten thresholds and may filter aggressively on tissues with low UMI counts.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic Visium)
-python omicsclaw.py run spatial-preprocess --demo --output /tmp/spatial_pp_demo
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/spatial_pp_demo
 
 # Visium with default presets
-python omicsclaw.py run spatial-preprocess \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input visium.h5ad --output results/
 
 # Tissue preset + custom resolution
-python omicsclaw.py run spatial-preprocess \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input visium.h5ad --output results/ \
   --data-type visium --tissue brain --leiden-resolution 1.2
 
 # Multi-resolution sweep for picking optimal clustering
-python omicsclaw.py run spatial-preprocess \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input visium.h5ad --output results/ \
   --resolutions 0.4,0.6,0.8,1.0,1.4
 
 # Mouse Xenium
-python omicsclaw.py run spatial-preprocess \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input xenium.h5ad --output results/ \
   --data-type xenium --species mouse --max-mt-pct 15
 ```
@@ -133,3 +118,9 @@ python omicsclaw.py run spatial-preprocess \
 - `references/methodology.md` — when to override defaults; multi-resolution heuristic
 - `references/output_contract.md` — `obs` / `obsm` / `var` schema written by this skill
 - Adjacent skills: `spatial-raw-processing` (upstream — produces the input from FASTQ / SpaceRanger output), `spatial-integrate` (parallel — multi-sample alternative when batch effects need correction first), `spatial-domains` (downstream — consumes `obsm["X_pca"]` / `obs["leiden"]` for SpaGCN / STAGATE), `spatial-de` (downstream — DE between Leiden clusters)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

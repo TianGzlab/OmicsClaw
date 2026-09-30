@@ -20,7 +20,7 @@ durable half — outbox ordering, receipts, replay — is not in this step eithe
    :class:`~omicsclaw.entry.ingress.SenderPolicy` **before** it touches
    :class:`~omicsclaw.entry.session.SessionRegistry`, so a message from
    outside the allowlist creates no exchange at all — not an exchange that
-   answers "no". ``CLAUDE.md``: authoritative ingress "admits nobody else".
+   answers "no". Authoritative ingress admits nobody else.
 2. *Close the observation.* ``TurnStream.observer_count()`` does not decrease
    when an ``async for`` breaks, so the grace period that abandons an unwatched
    exchange can only start if this file calls ``aclose()``. Every observation
@@ -68,7 +68,6 @@ __all__ = [
     "TurnAcceptanceResult",
     "TurnAcceptanceStatus",
     "VALUE_REPLY_TARGET",
-    "collect_reply",
     "compose_channel_runtime",
 ]
 
@@ -372,21 +371,17 @@ class ChannelRuntime:
 
     # ---- ingress ---------------------------------------------------------
 
-    async def submit(
-        self,
-        message: InboundMessage,
-        *,
-        deliver_reply: bool = True,
-    ) -> ChannelSubmission:
+    async def submit(self, message: InboundMessage) -> ChannelSubmission:
         """Admit one message and start the exchange it earns, immediately.
 
         Returns as soon as the exchange has a handle — it may still be queued
         behind another on the same conversation (plan 0031 Q7) — so a vendor
         SDK's callback thread is never blocked behind an analysis.
 
-        ``deliver_reply=False`` runs the exchange without a reply pump, for
-        the adapters that send the answer themselves through
-        :meth:`~omicsclaw.entry.channel.base.Channel.process_message`.
+        **Every accepted message gets a reply pump**, and there is no way to
+        ask for one without. The alternative used to exist for adapters that
+        sent the answer themselves, and a second outbound path is exactly
+        what nothing upstream can account for.
 
         **Order matters and is the security control.** The allowlist is
         consulted before the registry, so a refused sender leaves no trace in
@@ -435,8 +430,7 @@ class ChannelRuntime:
         self._remember(
             message.session_id, message.source_request_id, handle.turn_id
         )
-        if deliver_reply:
-            self._start_reply(binding, handle, message)
+        self._start_reply(binding, handle, message)
         return ChannelSubmission(
             acceptance=TurnAcceptanceResult(
                 status=TurnAcceptanceStatus.ACCEPTED,
@@ -445,12 +439,7 @@ class ChannelRuntime:
             handle=handle,
         )
 
-    async def submit_and_wait(
-        self,
-        message: InboundMessage,
-        *,
-        deliver_reply: bool = True,
-    ) -> ChannelSubmission:
+    async def submit_and_wait(self, message: InboundMessage) -> ChannelSubmission:
         """:meth:`submit`, then wait for the exchange to reach a verdict.
 
         For an adapter whose callback can afford to wait — Telegram's, which
@@ -458,7 +447,7 @@ class ChannelRuntime:
         WebSocket thread, so waiting there would serialise every conversation
         behind one analysis.
         """
-        submission = await self.submit(message, deliver_reply=deliver_reply)
+        submission = await self.submit(message)
         if submission.handle is not None:
             await submission.handle.wait()
         return submission
@@ -732,75 +721,6 @@ def _refused(code: str) -> ChannelSubmission:
     return ChannelSubmission(
         acceptance=TurnAcceptanceResult(status=TurnAcceptanceStatus.REJECTED, code=code)
     )
-
-
-async def collect_reply(
-    handle: TurnHandle,
-    *,
-    progress_fn: Callable[[str], Awaitable[Any]] | None = None,
-    progress_update_fn: Callable[[Any, str], Awaitable[Any]] | None = None,
-) -> str:
-    """Watch one exchange and return its answer as a single string.
-
-    The shape :meth:`~omicsclaw.entry.channel.base.Channel.process_message`
-    needs: the adapters that send their own replies want the text back rather
-    than a pump behind them. It replaces the event routing that method used
-    to do over the deleted dispatcher, member for member — ``ProgressStart``
-    became the first :attr:`~omicsclaw.entry.events.TurnEventType.PROGRESS`
-    frame for a tool, ``ProgressUpdate`` the ones after it, ``Final`` the
-    accumulated text, and ``Error`` the terminal frame.
-
-    :raises BaseException: whatever ended the exchange, when it failed. The
-        original object, so the traceback survives — the same bargain
-        ``TurnEvent.error`` makes.
-    """
-    renderer = TextRenderer()
-    handles: dict[str, Any] = {}
-    parts: list[str] = []
-    async with handle.observe() as observation:
-        async for event in observation:
-            if event.type is TurnEventType.PROGRESS:
-                await _report(event, handles, progress_fn, progress_update_fn)
-                continue
-            if event.type is TurnEventType.TEXT_DELTA:
-                text = renderer.feed(event)
-                if text:
-                    parts.append(text)
-                continue
-            if event.type is TurnEventType.EXCHANGE_END:
-                if event.terminal == "failed" and event.error is not None:
-                    raise event.error
-                break
-    parts.append(renderer.flush())
-    return "".join(parts)
-
-
-async def _report(
-    event: Any,
-    handles: dict[str, Any],
-    progress_fn: Callable[[str], Awaitable[Any]] | None,
-    progress_update_fn: Callable[[Any, str], Awaitable[Any]] | None,
-) -> None:
-    """Route one progress frame to whichever callback the adapter supplied.
-
-    Keyed by tool name: the first heartbeat from a tool opens a placeholder
-    message and the rest edit it, which is what the two callbacks meant when
-    they were named for a dispatcher that had a start event and an update
-    event.
-    """
-    update = event.progress
-    if update is None:
-        return
-    key = update.tool_name or ""
-    line = f"{key}: {update.message}" if key else update.message
-    if key not in handles:
-        if progress_fn is not None:
-            handles[key] = await progress_fn(line)
-        else:
-            handles[key] = None
-        return
-    if progress_update_fn is not None and handles[key] is not None:
-        await progress_update_fn(handles[key], line)
 
 
 async def compose_channel_runtime(

@@ -566,7 +566,7 @@ def calculate_doublet_scores(
 
     Adds ``doublet_score`` and ``predicted_doublet`` to ``adata.obs``.
     """
-    from . import dependency_manager as dm
+    from skills._sdk import deps as dm
     scr = dm.require("scrublet", feature="doublet detection")
 
     logger.info("Calculating doublet scores with Scrublet ...")
@@ -607,7 +607,7 @@ def run_scrublet_detection(
     Adds ``doublet_score``, ``predicted_doublet`` to ``adata.obs`` and
     stores batch stats in ``adata.uns['scrublet_detection']``.
     """
-    from . import dependency_manager as dm
+    from skills._sdk import deps as dm
     scr = dm.require("scrublet", feature="doublet detection")
 
     logger.info("Running Scrublet doublet detection ...")

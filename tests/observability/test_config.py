@@ -121,7 +121,11 @@ def test_the_repr_never_prints_a_credential():
 
 
 def test_content_capture_is_off_unless_asked_for_by_its_own_variable():
-    """The safety default. ``CLAUDE.md``: genetic data never leaves the machine."""
+    """The safety default.
+
+    :data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1: genetic data never
+    leaves the machine.
+    """
     everything_on = ObservabilityConfig.from_env(
         {
             "OTEL_ENABLED": "true",

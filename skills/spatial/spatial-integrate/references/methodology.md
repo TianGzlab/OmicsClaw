@@ -72,27 +72,27 @@ Each method consumes the preprocessed data differently:
 
 ```bash
 # Standard usage (Harmony, default)
-oc run spatial-integration \
+python skills/spatial/spatial-integrate/spatial_integrate.py \
   --input <merged.h5ad> --output <dir> --batch-key sample_id
 
 # Harmony tuning
-oc run spatial-integration \
+python skills/spatial/spatial-integrate/spatial_integrate.py \
   --input <data.h5ad> --method harmony --batch-key batch \
   --harmony-theta 3.0 --harmony-lambda -1 --harmony-max-iter 15 --output <dir>
 
 # BBKNN tuning
-oc run spatial-integration \
+python skills/spatial/spatial-integrate/spatial_integrate.py \
   --input <data.h5ad> --method bbknn --batch-key sample_id \
   --bbknn-neighbors-within-batch 5 --bbknn-n-pcs 30 --bbknn-trim 60 --output <dir>
 
 # Scanorama tuning
-oc run spatial-integration \
+python skills/spatial/spatial-integrate/spatial_integrate.py \
   --input <data.h5ad> --method scanorama --batch-key batch \
   --scanorama-knn 30 --scanorama-sigma 12 --scanorama-alpha 0.15 \
   --scanorama-batch-size 4000 --output <dir>
 
 # Demo mode
-oc run spatial-integration --demo
+python skills/spatial/spatial-integrate/spatial_integrate.py --demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-integrate/spatial_integrate.py \

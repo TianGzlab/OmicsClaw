@@ -172,6 +172,11 @@ ADDED_SLASH_COMMANDS: list[tuple[str, str]] = [
         "/compact",
         "Summarize this conversation now, keeping the recent messages",
     ),
+    (
+        "/auto",
+        "Stop asking about ordinary tool calls, now and at the next start: "
+        "/auto [on|off|status]",
+    ),
 ]
 """Commands this build has that the ported catalogue never listed.
 

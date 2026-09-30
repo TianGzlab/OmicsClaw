@@ -91,12 +91,35 @@ def test_the_folded_descriptions_survive_whole():
     assert "\n" not in skill.description
 
 
-def test_a_skill_directory_that_holds_another_skill_yields_both():
-    """``skills/orchestrator/`` is a skill and the parent of one."""
-    names = load_skills(SKILLS_ROOT).names()
+def test_no_skill_directory_currently_holds_another_skill():
+    """The corpus has no nested skill today — recorded, not relied on.
 
-    assert "orchestrator" in names
-    assert "omics-skill-builder" in names
+    ``skills/orchestrator/`` used to be one: a skill *and* the parent of
+    ``omics-skill-builder``. That pair is what proved the walk has to
+    descend **past** a ``SKILL.md`` rather than stop at it — a loader
+    that stopped loaded 95 of 96. Both skills were deleted when the old
+    skill system went, and with them the only real-corpus witness for
+    that rule.
+
+    So this asserts the absence rather than quietly dropping the case.
+    The rule itself is still enforced, by
+    ``test_loader.py::test_a_skill_directory_may_itself_contain_skills``
+    over a tree built for it; if a nested skill is ever added back here,
+    this test fails and the real-corpus coverage can be restored instead
+    of being rediscovered.
+    """
+    index = load_skills(SKILLS_ROOT)
+    directories = {skill.directory: skill.name for skill in index.skills}
+
+    nested = {
+        skill.name: directories[parent]
+        for skill in index.skills
+        for parent in directories
+        if parent != skill.directory
+        and skill.directory.is_relative_to(parent)
+    }
+
+    assert nested == {}, f"a nested skill is back: {nested}"
 
 
 def test_loading_the_corpus_twice_renders_the_same_bytes():

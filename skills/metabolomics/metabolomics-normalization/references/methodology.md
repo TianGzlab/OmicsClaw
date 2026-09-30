@@ -4,7 +4,7 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-normalize --demo
+python skills/metabolomics/metabolomics-normalization/metabolomics_normalization.py --demo
 ```
 
 

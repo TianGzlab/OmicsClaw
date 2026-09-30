@@ -27,7 +27,7 @@ OmicsClaw 的 skill 脚本直接调用本机 Python 环境，不依赖云端计�
 
 > "OmicsClaw 是用于多组学分析的研究与教育工具。它不是医疗器械，不提供临床诊断。在基于这些结果做决定前请咨询领域专家。"
 
-该声明在各 skill 的 `report.md` 生成逻辑中硬编码为必填项，不可被用户配置跳过。这条规则来源于 CLAUDE.md Safety Rules 第 2 条，原文为："*OmicsClaw is a research and educational tool for multi-omics analysis. It is not a medical device and does not provide clinical diagnoses. Consult a domain expert before making decisions based on these results.*"
+该声明在各 skill 的 `report.md` 生成逻辑中硬编码为必填项，不可被用户配置跳过。这条规则来源于 `SAFETY_RULES`（`omicsclaw/entry/assembly.py`）第 2 条，原文为："*OmicsClaw is a research and educational tool for multi-omics analysis. It is not a medical device and does not provide clinical diagnoses. Consult a domain expert before making decisions based on these results.*"
 
 ### 3. 严守 SKILL.md 方法论
 

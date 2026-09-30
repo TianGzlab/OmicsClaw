@@ -90,11 +90,11 @@ details:
 
 ```bash
 # Default stochastic scVelo run
-oc run spatial-velocity \
+python skills/spatial/spatial-velocity/spatial_velocity.py \
   --input <processed.h5ad> --output <dir>
 
 # Deterministic comparison run
-oc run spatial-velocity \
+python skills/spatial/spatial-velocity/spatial_velocity.py \
   --input <processed.h5ad> \
   --method deterministic \
   --velocity-min-r2 0.02 \
@@ -102,7 +102,7 @@ oc run spatial-velocity \
   --output <dir>
 
 # Lightweight dynamical smoke test
-oc run spatial-velocity \
+python skills/spatial/spatial-velocity/spatial_velocity.py \
   --input <processed.h5ad> \
   --method dynamical \
   --dynamical-n-top-genes 500 \
@@ -111,7 +111,7 @@ oc run spatial-velocity \
   --output <dir>
 
 # VELOVI
-oc run spatial-velocity \
+python skills/spatial/spatial-velocity/spatial_velocity.py \
   --input <processed.h5ad> \
   --method velovi \
   --velovi-max-epochs 200 \
@@ -119,7 +119,7 @@ oc run spatial-velocity \
   --output <dir>
 
 # Demo
-oc run spatial-velocity --demo --output /tmp/velocity_demo
+python skills/spatial/spatial-velocity/spatial_velocity.py --demo --output /tmp/velocity_demo
 ```
 
 

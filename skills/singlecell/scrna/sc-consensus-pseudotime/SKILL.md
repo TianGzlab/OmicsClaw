@@ -1,35 +1,22 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-consensus-pseudotime
 description: Load when you want a single-cell pseudotime ordering robust to the choice of trajectory method
   — fanning out DPT/Palantir/VIA from a shared root, rank-aligning them, and voting a consensus pseudotime
   with per-cell uncertainty. Skip when you have branching multi-lineage trajectories; no defined root.
-version: 0.1.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: consensus pseudotime, robust pseudotime, trajectory method consensus, pseudotime across methods, which ordering survives the trajectory method
 tags:
 - singlecell
 - scrna
 - consensus
 - pseudotime
 - trajectory
-requires:
-- anndata
-- numpy
-- pandas
-- PyYAML
-- scanpy
-- scikit-learn
-- scipy
 ---
 
 # sc-consensus-pseudotime
 
 ## When to use
 
-Verified **continuous** consensus over **pseudotime methods** (ADR 0031). A single
+Verified **continuous** consensus over **pseudotime methods**. A single
 pseudotime is sensitive to which algorithm produced it: DPT, Palantir and VIA make
 different assumptions and can order cells differently. Use this when you have a
 preprocessed single-cell AnnData and a **defined root** (a `--root-cluster` or
@@ -43,8 +30,6 @@ consensus by per-cell `median` (default) or agreement-`weighted` mean, re-ranked
 `[0, 1]`. v1 is agreement-only (scored by mean pairwise Spearman).
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -86,10 +71,10 @@ consensus by per-cell `median` (default) or agreement-`weighted` mean, re-ranked
 ## Key CLI
 
 ```bash
-python omicsclaw.py run sc-consensus-pseudotime \
+python skills/singlecell/scrna/sc-consensus-pseudotime/sc_consensus_pseudotime.py \
   --input preprocessed.h5ad --output out/ --root-cluster Stem
 # choose methods + the weighted operator
-python omicsclaw.py run sc-consensus-pseudotime --input preprocessed.h5ad \
+python skills/singlecell/scrna/sc-consensus-pseudotime/sc_consensus_pseudotime.py --input preprocessed.h5ad \
   --output out/ --root-cell 42 --pseudotime-methods dpt,palantir --operator weighted
 ```
 
@@ -97,4 +82,10 @@ python omicsclaw.py run sc-consensus-pseudotime --input preprocessed.h5ad \
 
 - `sc-pseudotime` — the per-method member skill fanned out here.
 - `sc-consensus-integration` / `sc-consensus-clustering` — the categorical consensus
-  flavours (clustering robustness); ADR 0016 (templates), ADR 0031 (this flavour).
+  flavours (clustering robustness).
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `numpy`, `pandas`, `PyYAML`, `scanpy`, `scikit-learn`, `scipy`

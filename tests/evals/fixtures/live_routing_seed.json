@@ -1,0 +1,239 @@
+{
+  "source": "tests/fixtures/routing_oracle/v1.json at commit 88215396 (oracle_version 2026-07-13.v1)",
+  "purpose": "Prompts for the scripted skill_routing eval cases, and the seed set for a later real-model routing eval. The orchestrator cases, the precondition fields and the capability_resolver thresholds were dropped because the code they scored is gone.",
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "spatial__preprocess_visium",
+      "domain": "spatial",
+      "query": "Run QC, normalization, PCA and Leiden on a Visium spatial transcriptomics AnnData.",
+      "expected_skills": [
+        "spatial-preprocess"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "spatial__spot_deconvolution",
+      "domain": "spatial",
+      "query": "Estimate cell-type proportions in Visium spots using a labelled scRNA reference.",
+      "expected_skills": [
+        "spatial-deconv"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "spatial__ligand_receptor",
+      "domain": "spatial",
+      "query": "Infer ligand-receptor communication between spatial cell types with LIANA.",
+      "expected_skills": [
+        "spatial-communication"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "spatial__domains_auto_compute_pca",
+      "domain": "spatial",
+      "query": "Detect tissue domains in this spatial AnnData with Leiden and spatial neighbors.",
+      "expected_skills": [
+        "spatial-domains"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__cluster_leiden",
+      "domain": "singlecell",
+      "query": "Cluster normalized single-cell RNA data with a neighbor graph, UMAP and Leiden.",
+      "expected_skills": [
+        "sc-clustering"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__cluster_raw_precondition",
+      "domain": "singlecell",
+      "query": "Run neighbor graph, UMAP and Leiden clustering on this scRNA-seq AnnData.",
+      "expected_skills": [
+        "sc-clustering"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__cluster_incompatible_input",
+      "domain": "singlecell",
+      "query": "Apply a neighbor graph, UMAP and Leiden clustering to this single-cell RNA object.",
+      "expected_skills": [
+        "sc-clustering"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__cell_annotation",
+      "domain": "singlecell",
+      "query": "Assign cell-type labels to clustered scRNA-seq cells with CellTypist.",
+      "expected_skills": [
+        "sc-cell-annotation"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__batch_harmony",
+      "domain": "singlecell",
+      "query": "Integrate multiple scRNA batches with Harmony to remove batch effects.",
+      "expected_skills": [
+        "sc-batch-integration"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__velocity_route_noun",
+      "domain": "singlecell",
+      "query": "What is the best route for RNA velocity analysis in scRNA-seq data?",
+      "expected_skills": [
+        "sc-velocity"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "singlecell__de_route_verb",
+      "domain": "singlecell",
+      "query": "Route this scRNA-seq differential expression analysis appropriately.",
+      "expected_skills": [
+        "sc-de"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "genomics__alignment_qc",
+      "domain": "genomics",
+      "query": "Calculate mapping rate, MAPQ, insert size and duplicate rate from a BAM file.",
+      "expected_skills": [
+        "genomics-alignment"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "genomics__small_variants",
+      "domain": "genomics",
+      "query": "Summarize SNVs and indels in a VCF and compute the Ti/Tv ratio.",
+      "expected_skills": [
+        "genomics-variant-calling"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "genomics__structural_variants",
+      "domain": "genomics",
+      "query": "Summarize deletions, duplications, inversions and translocations from an SV VCF.",
+      "expected_skills": [
+        "genomics-sv-detection"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "proteomics__peptide_identification",
+      "domain": "proteomics",
+      "query": "Summarize peptide identifications and PSM counts from a FragPipe peptide CSV.",
+      "expected_skills": [
+        "proteomics-identification"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "proteomics__lfq_quantification",
+      "domain": "proteomics",
+      "query": "Compute LFQ protein abundance from a peptide intensity table.",
+      "expected_skills": [
+        "proteomics-quantification"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "proteomics__ptm_sites",
+      "domain": "proteomics",
+      "query": "Summarize phosphorylation-site localization probabilities and sequence motifs.",
+      "expected_skills": [
+        "proteomics-ptm"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "metabolomics__xcms_raw",
+      "domain": "metabolomics",
+      "query": "Run XCMS peak picking and retention-time alignment on raw LC-MS metabolomics files.",
+      "expected_skills": [
+        "metabolomics-xcms-preprocessing"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "metabolomics__feature_annotation",
+      "domain": "metabolomics",
+      "query": "Annotate LC-MS m/z features against metabolite databases with a ppm tolerance.",
+      "expected_skills": [
+        "metabolomics-annotation"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "metabolomics__two_group_de",
+      "domain": "metabolomics",
+      "query": "Run a two-group metabolomics differential analysis with log2FC and BH-FDR.",
+      "expected_skills": [
+        "metabolomics-de"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "bulkrna__fastq_qc",
+      "domain": "bulkrna",
+      "query": "Run FastQC-style Phred, adapter and GC checks on bulk RNA-seq FASTQ files.",
+      "expected_skills": [
+        "bulkrna-read-qc"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "bulkrna__deseq2",
+      "domain": "bulkrna",
+      "query": "Compare two conditions in a bulk RNA count matrix using DESeq2.",
+      "expected_skills": [
+        "bulkrna-de"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "bulkrna__wgcna",
+      "domain": "bulkrna",
+      "query": "Discover WGCNA co-expression modules and hub genes in a bulk RNA cohort.",
+      "expected_skills": [
+        "bulkrna-coexpression"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "literature__geo_accessions",
+      "domain": "literature",
+      "query": "Extract GEO accessions and dataset metadata from this PubMed paper.",
+      "expected_skills": [
+        "literature"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "literature__paper_pdf",
+      "domain": "literature",
+      "query": "Parse a paper PDF and find downloadable omics datasets for downstream analysis.",
+      "expected_skills": [
+        "literature"
+      ],
+      "decision": "route"
+    },
+    {
+      "id": "literature__new_method_boundary",
+      "domain": "literature",
+      "query": "Read recent literature and implement a brand-new analysis method that OmicsClaw does not have.",
+      "expected_skills": [],
+      "decision": "no_skill"
+    }
+  ]
+}

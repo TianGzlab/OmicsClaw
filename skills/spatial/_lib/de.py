@@ -587,7 +587,7 @@ def run_pydeseq2(
     pydeseq2_n_cpus: int | None = METHOD_PARAM_DEFAULTS["pydeseq2"]["pydeseq2_n_cpus"],
 ) -> dict:
     """Run sample-aware pseudobulk DE with PyDESeq2."""
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     require("pydeseq2", feature="PyDESeq2 pseudobulk differential expression")
     from pydeseq2.dds import DeseqDataSet

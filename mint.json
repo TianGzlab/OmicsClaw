@@ -45,8 +45,7 @@
       "group": "架构",
       "pages": [
         "docs/architecture/overview",
-        "docs/architecture/skill-system",
-        "docs/architecture/orchestrator"
+        "docs/architecture/skill-system"
       ]
     },
     {
@@ -57,8 +56,7 @@
         "docs/domains/genomics",
         "docs/domains/proteomics",
         "docs/domains/metabolomics",
-        "docs/domains/bulkrna",
-        "docs/domains/orchestrator"
+        "docs/domains/bulkrna"
       ]
     },
     {
@@ -107,9 +105,9 @@
     "AGENTS.md",
     "CLAUDE.md",
     "CONTRIBUTING.md",
+    "OMICSCLAW.md",
     "README.md",
     "README_zh-CN.md",
-    "SOUL.md",
     "SPEC.md",
     "llms.txt"
   ],

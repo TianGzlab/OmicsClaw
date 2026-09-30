@@ -59,20 +59,22 @@ Bot 通道引入了两条额外路径，需要明确区分。
 
 App UI 在本地运行，数据和计算在用户自己控制的远端服务器上执行，通过 SSH 隧道连接。
 
+> **现状（plan 0064）**：App 的远程模式尚未与重建后的后端对齐，由后续计划 R 重新对齐并验证；在此之前，下面的数据流只作设计参考。
+
 ```text
 本地 OmicsClaw-App（UI / Electron）
    │
    │  SSH 隧道（加密，仅 127.0.0.1 绑定）
    ▼
 远端服务器（用户自控）
-   oc desktop-server → skill 脚本 → workspace 目录
+   oc desktop → skill 脚本 → workspace 目录
    原始数据、中间产物、报告全部留在远端磁盘
 
 App 只拉取：图表 / report.md 等 artifact
 原始数据不回传本地
 ```
 
-远端服务器是用户自己拥有的机器，等同于本地处理——前提是用户确实 own 该服务器且无他人共享访问权限。需要用户保证：SSH 密钥安全存放、远端 `oc desktop-server` 仅绑 `127.0.0.1` 不暴露公网（控制面端点额外要求 `OMICSCLAW_REMOTE_AUTH_TOKEN` Bearer token）、服务器访问控制到位、多用户共享 GPU 服务器时设独立工作目录与文件权限隔离。
+远端服务器是用户自己拥有的机器，等同于本地处理——前提是用户确实 own 该服务器且无他人共享访问权限。需要用户保证：SSH 密钥安全存放、远端 `oc desktop` 仅绑 `127.0.0.1` 不暴露公网（绑定非回环地址时必须设置 `OMICSCLAW_REMOTE_AUTH_TOKEN`；设置后，除 `/health` 的简化应答外，每个路由都要求该 bearer token）、服务器访问控制到位、多用户共享 GPU 服务器时设独立工作目录与文件权限隔离。
 
 ## 启用前 / 启用后（与云端工具对比）
 

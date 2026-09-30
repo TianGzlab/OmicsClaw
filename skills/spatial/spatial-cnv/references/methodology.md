@@ -75,11 +75,11 @@ If `layers["counts"]` is missing, OmicsClaw falls back to `adata.raw` or
 
 ```bash
 # inferCNVpy default run
-oc run spatial-cnv \
+python skills/spatial/spatial-cnv/spatial_cnv.py \
   --input <processed.h5ad> --output <dir>
 
 # inferCNVpy with explicit reference cells and broader smoothing
-oc run spatial-cnv \
+python skills/spatial/spatial-cnv/spatial_cnv.py \
   --input <processed.h5ad> --method infercnvpy \
   --reference-key cell_type --reference-cat Normal Stroma \
   --window-size 150 --step 20 \
@@ -90,14 +90,14 @@ oc run spatial-cnv \
   --output <dir>
 
 # inferCNVpy including sex chromosomes
-oc run spatial-cnv \
+python skills/spatial/spatial-cnv/spatial_cnv.py \
   --input <processed.h5ad> --method infercnvpy \
   --reference-key cell_type --reference-cat Normal \
   --infercnv-include-sex-chromosomes \
   --output <dir>
 
 # Numbat (requires raw counts, allele counts, and diploid references)
-oc run spatial-cnv \
+python skills/spatial/spatial-cnv/spatial_cnv.py \
   --input <processed.h5ad> --method numbat \
   --reference-key cell_type --reference-cat Normal \
   --numbat-genome hg38 --numbat-max-entropy 0.8 \
@@ -105,7 +105,7 @@ oc run spatial-cnv \
   --output <dir>
 
 # Demo mode
-oc run spatial-cnv --demo --output /tmp/cnv_demo
+python skills/spatial/spatial-cnv/spatial_cnv.py --demo --output /tmp/cnv_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-cnv/spatial_cnv.py \

@@ -10,6 +10,10 @@ changes and no third:
    render to different places;
 2. lines over 88 columns are wrapped (plan 0031 §9-3).
 
+Everything printed is first made inert by
+:func:`~omicsclaw.entry.display.inert_prose`: line breaks and tabs are
+kept, every other control or format character is written as an escape.
+
 **Why a streaming formatter and not ``rich.markdown.Markdown``.** The
 model's answer arrives one delta at a time and a Markdown parser needs a
 whole document. The rule this file implements instead is: a *complete
@@ -28,6 +32,8 @@ import re
 from typing import Any
 
 from rich.text import Text
+
+from omicsclaw.entry.display import inert_prose
 
 __all__ = ["MarkdownStreamFormatter", "render_markdown_line"]
 
@@ -86,8 +92,12 @@ def _split_line_ending(line: str) -> tuple[str, str]:
 
 
 def render_markdown_line(line: str) -> Text:
-    """One line of Markdown as styled :class:`rich.text.Text`."""
-    body, ending = _split_line_ending(line)
+    """One line of Markdown as styled :class:`rich.text.Text`.
+
+    The line is made inert by :func:`~omicsclaw.entry.display.inert_prose`
+    before it is parsed.
+    """
+    body, ending = _split_line_ending(inert_prose(line))
     output = Text()
 
     if not body.strip():
@@ -170,7 +180,12 @@ class MarkdownStreamFormatter:
         self._pending = ""
 
     def write(self, chunk: str) -> None:
-        """Take one delta and print whatever it made safe."""
+        """Take one delta and print whatever it made safe.
+
+        A ``\\r`` that would end what is printed of an unfinished line is
+        held back instead, so that a ``\\r\\n`` split across two deltas is
+        read as one line break.
+        """
         self._pending += str(chunk or "")
         self._emit_available()
 
@@ -191,11 +206,13 @@ class MarkdownStreamFormatter:
             self._emit_rendered(line)
 
         safe_prefix_len = _find_safe_plain_prefix_length(self._pending)
+        if self._pending[:safe_prefix_len].endswith("\r"):
+            safe_prefix_len -= 1
         if safe_prefix_len <= 0:
             return
         plain_prefix = self._pending[:safe_prefix_len]
         self._pending = self._pending[safe_prefix_len:]
-        self._console.print(Text(plain_prefix), end="", soft_wrap=True)
+        self._console.print(Text(inert_prose(plain_prefix)), end="", soft_wrap=True)
 
     def _emit_rendered(self, line: str) -> None:
         self._console.print(render_markdown_line(line), end="", soft_wrap=True)

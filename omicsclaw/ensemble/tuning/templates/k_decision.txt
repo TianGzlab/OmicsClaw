@@ -1,0 +1,61 @@
+You are choosing the number of spatial domains, K, for one spatial transcriptomics dataset. Every clustering method will afterwards be tuned at the K you choose, so choose the K whose partition best reflects the tissue's real regional structure.
+
+You are given the skill's documentation, a description of the data, the tissue (when known), stability curves computed over the grid K = ${grid_text}, the top marker genes of one representative partition at every K of the grid, and fuller marker blocks for the K listed as stable peaks. Nothing here tells you the right answer: weigh the evidence yourself.
+
+## How to reply
+
+Reply with one JSON object and nothing else.
+
+Before deciding you may, once, ask for the full marker block of one or two K from the grid that are not stable peaks:
+{"request_markers": [<K>, <K>]}
+
+Otherwise reply with your decision:
+{
+  "chosen_k": <an integer from the grid>,
+  "rationale": "<at most 1200 characters>",
+  "evidence": [
+    {"k": <K>, "kind": "markers", "domain": "<the domain label exactly as listed, e.g. \"3\", without the word domain>", "genes": ["<gene>", "..."], "reading": "<at most 200 characters>"},
+    {"k": <K>, "kind": "curve", "curve": "f | c | a", "reading": "<at most 200 characters>"},
+    {"k": <K>, "kind": "skill_md", "quote": "<at most 200 characters copied exactly from the skill documentation>", "reading": "<at most 200 characters>"}
+  ],
+  "confidence": "low | medium | high"
+}
+Give between 1 and 10 evidence items. A markers item must name a domain label listed for that K (the label only, such as "3") and only genes listed for that domain. A skill_md quote must be copied exactly, character for character, from the skill documentation below.
+
+## Skill documentation
+
+${skill_md}
+
+## Data
+
+${data}
+
+## Tissue
+
+${tissue}
+
+## Stability curves
+
+${curves}
+
+## Markers of one representative partition per K (top 3 genes per domain)
+
+${compact_markers}
+
+## Full marker blocks for the stable peaks
+
+${full_markers}
+
+## How the partitions of consecutive K above nest
+
+${nesting}
+----8<---- follow-up
+## Full marker blocks you asked for
+
+${full_markers}
+
+## How the partitions nest, including the K you asked for
+
+${nesting}
+
+Now reply with your decision as the JSON object described above. You cannot ask for more markers.

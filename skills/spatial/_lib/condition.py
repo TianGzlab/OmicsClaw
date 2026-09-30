@@ -157,7 +157,7 @@ def run_pydeseq2(
     n_cpus: int | None = METHOD_PARAM_DEFAULTS["pydeseq2"]["pydeseq2_n_cpus"],
 ) -> pd.DataFrame:
     """Run PyDESeq2 on pseudobulk counts."""
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     require("pydeseq2", feature="DESeq2-style pseudobulk analysis")
     from pydeseq2.dds import DeseqDataSet

@@ -58,3 +58,46 @@ def _isolated_dotenv_environ(monkeypatch):
     """
     for key in _DOTENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+KNOWN_FAILURES_FILE = Path(__file__).resolve().parent / "ci_known_failures.txt"
+
+
+def load_known_failures(path: Path = KNOWN_FAILURES_FILE) -> dict[str, tuple[str, bool]]:
+    """Read ``tests/ci_known_failures.txt`` as ``{node id: (reason, strict)}``.
+
+    One entry per line, ``<node id> | <reason>``, or
+    ``<node id> | <reason> | env`` for a test that fails only in some
+    environments, which is marked non-strict. Blank lines and lines
+    starting with ``#`` are ignored. A missing file means no entries.
+    """
+    if not path.is_file():
+        return {}
+    entries: dict[str, tuple[str, bool]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        parts = [part.strip() for part in text.split("|")]
+        node = parts[0]
+        reason = parts[1] if len(parts) > 1 and parts[1] else "known failure"
+        strict = not (len(parts) > 2 and parts[2] == "env")
+        entries[node] = (reason, strict)
+    return entries
+
+
+def pytest_collection_modifyitems(config, items):
+    """Mark every test listed in ``tests/ci_known_failures.txt`` as xfail.
+
+    Entries are strict unless tagged ``env``: a strict entry that starts
+    passing fails the run as XPASS, so it has to be removed from the
+    list when its test is fixed.
+    """
+    known = load_known_failures()
+    if not known:
+        return
+    for item in items:
+        entry = known.get(item.nodeid)
+        if entry is not None:
+            reason, strict = entry
+            item.add_marker(pytest.mark.xfail(strict=strict, reason=f"known failure: {reason}"))

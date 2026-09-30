@@ -305,3 +305,47 @@ def test_the_bodies_are_not_read_at_load_time(tmp_path, monkeypatch):
 
     assert at_load == 1, "the header read"
     assert len(reads) == 2, "and exactly one more when the body is asked for"
+
+
+def test_a_trigger_spelled_as_a_block_sequence_reads_like_a_scalar(tmp_path):
+    """Both spellings reach :attr:`Skill.triggers` the same way.
+
+    The corpus writes a comma-separated scalar and the harness's own
+    example writes one too, but a block sequence is the spelling a YAML
+    author reaches for and dropping it silently would be the same defect
+    as the description folding this parser exists to handle.
+    """
+    directory = tmp_path / "spatial" / "spatial-de"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        "---\nname: spatial-de\ndescription: d\n"
+        "trigger:\n- marker gene\n- pseudobulk\n---\nbody",
+        encoding="utf-8",
+    )
+
+    skill = load_skills(tmp_path).get("spatial-de")
+
+    assert skill.trigger == "marker gene, pseudobulk"
+    assert skill.triggers == ("marker gene", "pseudobulk")
+
+
+def test_a_comma_separated_trigger_splits_into_keywords(tmp_path):
+    write_skill(
+        tmp_path / "spatial-de",
+        "spatial-de",
+        trigger="marker gene,  pseudobulk , ",
+    )
+
+    skill = load_skills(tmp_path).get("spatial-de")
+
+    assert skill.trigger == "marker gene,  pseudobulk ,"
+    assert skill.triggers == ("marker gene", "pseudobulk")
+
+
+def test_a_skill_with_no_trigger_has_no_keywords(tmp_path):
+    write_skill(tmp_path / "spatial-de", "spatial-de")
+
+    skill = load_skills(tmp_path).get("spatial-de")
+
+    assert skill.trigger == ""
+    assert skill.triggers == ()

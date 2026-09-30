@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "skill": "literature",
+    "command": "python '{repo}/skills/literature/literature_parse.py' --demo --output '{output}'",
+    "git_commit": "0881aa7b",
+    "date": "2026-09-30",
+    "python": "3.11.15",
+    "environment": "OmicsClaw"
+  },
+  "exit_code": 0,
+  "stdout": "Parsing input: We profiled human brain spatial transcriptomics with Visium and deposited the processed data in GEO under accession GSE123456.\nDetected input type: text\nExtracting metadata...\nFound 1 GEO datasets: GSE123456\nOrganism: homo sapiens\nTissue: brain\nTechnology: Visium\n\n✓ Results saved to {output}\n  - Report: {output}/report.md\n  - Metadata: {output}/extracted_metadata.json\n",
+  "files": {
+    "extracted_metadata.json": "{\n  \"geo_accessions\": {\n    \"gse\": [\n      \"GSE123456\"\n    ],\n    \"gsm\": [],\n    \"gpl\": []\n  },\n  \"organism\": \"homo sapiens\",\n  \"tissue\": \"brain\",\n  \"technology\": \"Visium\"\n}",
+    "report.md": "# Literature Parsing Report\n\n**Generated**: 2000-01-01T00:00:00\n\n## Extracted Metadata\n\n- **Organism**: homo sapiens\n- **Tissue**: brain\n- **Technology**: Visium\n\n## GEO Datasets\n\n- **GSE123456**\n\n## Next Steps\n\nYou can now analyze the downloaded data using OmicsClaw skills:\n- Detected **spatial transcriptomics** data → start with `spatial-preprocess`",
+    "result.json": "{\n  \"skill\": \"literature\",\n  \"version\": \"0.5.0\",\n  \"success\": true,\n  \"completed_at\": \"2000-01-01T00:00:00\",\n  \"input_checksum\": \"\",\n  \"summary\": {\n    \"method\": \"metadata-extraction\",\n    \"gse_count\": 1,\n    \"organism\": \"homo sapiens\",\n    \"technology\": \"Visium\"\n  },\n  \"data\": {\n    \"metadata\": {\n      \"geo_accessions\": {\n        \"gse\": [\n          \"GSE123456\"\n        ],\n        \"gsm\": [],\n        \"gpl\": []\n      },\n      \"organism\": \"homo sapiens\",\n      \"tissue\": \"brain\",\n      \"technology\": \"Visium\"\n    },\n    \"download_results\": [],\n    \"source_text_path\": \"{output}/source.txt\",\n    \"source\": {\n      \"value\": \"We profiled human brain spatial transcriptomics with Visium and deposited the processed data in GEO under accession GSE123456.\",\n      \"type\": \"text\"\n    },\n    \"params\": {\n      \"input_type\": \"text\",\n      \"no_download\": true,\n      \"demo\": true\n    }\n  }\n}",
+    "source.txt": "We profiled human brain spatial transcriptomics with Visium and deposited the processed data in GEO under accession GSE123456."
+  },
+  "binary_files": []
+}

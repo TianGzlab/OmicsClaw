@@ -14,10 +14,10 @@ by :func:`open_prompt_source` **only** when standard input is a terminal
 and the package is installed.
 
 :class:`StreamSource` — ``readline`` on any text stream. What a pipe gets,
-and what ``oc cli < script.txt`` gets. The read
-happens on a worker thread (:func:`asyncio.to_thread`) so that a blocking
-``readline`` does not stop the event loop the session registry's lanes
-live on.
+and what ``oc cli < script.txt`` gets. The read happens on a daemon
+thread of its own, so that a blocking ``readline`` stops neither the
+event loop the session registry's lanes live on nor that loop's
+shutdown.
 
 :class:`ScriptedSource` — a fixed list, for tests and for
 ``--prompt-file``.
@@ -45,16 +45,18 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any, Iterable, Protocol, Sequence, TextIO
+import threading
+from typing import Any, Iterable, Protocol, Sequence, TextIO, runtime_checkable
 
 from ._slash_command_support import (
     REPL_SLASH_COMMAND_SPECS,
     SlashCommandSpec,
-    complete_run_skill_names,
     complete_slash_command_rows,
+    slash_token,
 )
 
 __all__ = [
+    "ChoiceSource",
     "PromptSource",
     "PromptToolkitSource",
     "ScriptedSource",
@@ -83,6 +85,28 @@ class PromptSource(Protocol):
 
     def close(self) -> None:
         """Release whatever the source holds. Idempotent."""
+        ...
+
+
+@runtime_checkable
+class ChoiceSource(Protocol):
+    """A source that can also let a person pick one of several options.
+
+    Optional: a surface checks ``isinstance(source, ChoiceSource)`` and
+    falls back to printing the options when it is not one. Only
+    :class:`PromptToolkitSource` implements it; a line-oriented source
+    does not, because reading "the next line" as a choice would consume a
+    piped script's next question.
+    """
+
+    async def choose(
+        self, message: str, options: Sequence[str], *, default: int = 0
+    ) -> int | None:
+        """The index of the option picked, or ``None`` if the person declined.
+
+        :raises EOFError: the source was closed.
+        :raises NotImplementedError: this installation cannot show a picker.
+        """
         ...
 
 
@@ -131,22 +155,22 @@ class ScriptedSource:
 class StreamSource:
     """``readline`` on a text stream, off the event loop's thread.
 
-    ``asyncio.to_thread`` rather than a direct call: the registry's lane
-    pumps and any MCP connection live on the same loop, and a blocking
-    ``readline`` on the loop's thread would freeze them for as long as the
-    user is thinking. The worker thread cannot be cancelled while it is
-    blocked in ``read(2)``; a source read from a pipe or a closed terminal
-    unblocks at EOF, and this is written down rather than defended against
-    because the alternative — a non-blocking reader per platform — is a
-    platform layer this surface does not need.
+    Each ``readline`` runs on a daemon thread of its own, and its line is
+    handed back to the loop. A ``readline`` still waiting holds up neither
+    the loop, where the registry's lane pumps and any MCP connection live,
+    nor the loop's shutdown, so the process can exit while its input stays
+    open. The thread cannot be interrupted while it waits; it ends at the
+    next line or at end of input.
 
-    One reader at a time, because there is one stream: two ``readline``
-    threads on one stdin both block in ``read(2)`` and the line the user
-    typed goes to whichever the kernel wakes, so the question they
-    answered is not necessarily the one their answer settles.
+    One ``readline`` at a time, because there is one stream. A read
+    cancelled while its ``readline`` still waits leaves that ``readline``
+    running, and the next read returns its line rather than starting
+    another: every line read is returned to exactly one reader, in the
+    order the stream gave them. A line read after :meth:`close`, or after
+    the loop has closed, is discarded.
     """
 
-    __slots__ = ("_closed", "_echo", "_reading", "_stream", "_write")
+    __slots__ = ("_closed", "_echo", "_pending", "_reading", "_stream", "_write")
 
     def __init__(
         self,
@@ -163,6 +187,7 @@ class StreamSource:
         self._write = echo
         self._closed = False
         self._reading = asyncio.Lock()
+        self._pending: asyncio.Future[str] | None = None
 
     async def read(self, prompt: str) -> str:
         """The next line, waiting for any earlier reader to be answered.
@@ -171,6 +196,13 @@ class StreamSource:
         while this call was queued has no line left to give, and saying so
         with :exc:`EOFError` is what lets a caller fail closed instead of
         waiting on a stream nobody owns.
+
+        :param prompt: Written to the echo stream first, if there is one.
+        :returns: The line, without its line ending.
+        :raises EOFError: At the end of the stream, or once closed.
+        :raises asyncio.CancelledError: When the awaiting Task is
+            cancelled; a line still being read goes to the next read.
+        :raises Exception: Whatever ``readline`` raised.
         """
         if self._closed:
             raise EOFError
@@ -180,13 +212,64 @@ class StreamSource:
             if self._write is not None:
                 self._write.write(prompt)
                 self._write.flush()
-            line = await asyncio.to_thread(self._stream.readline)
+            if self._pending is None:
+                self._pending = _readline_on_a_thread(self._stream)
+            pending = self._pending
+            try:
+                line = await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                if pending.cancelled():
+                    self._pending = None
+                raise
+            except BaseException:
+                self._pending = None
+                raise
+            self._pending = None
         if line == "":
             raise EOFError
         return line.rstrip("\n").rstrip("\r")
 
     def close(self) -> None:
         self._closed = True
+
+
+def _readline_on_a_thread(stream: TextIO) -> "asyncio.Future[str]":
+    """Start ``stream.readline()`` on a daemon thread; its outcome, as a future.
+
+    The future belongs to the running loop and is set with the line, or
+    with the exception ``readline`` raised. If the loop has closed by the
+    time ``readline`` returns, the outcome is discarded.
+
+    :param stream: The stream to read one line from.
+    :returns: A future for the line.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[str] = loop.create_future()
+
+    def settle(line: str, error: BaseException | None) -> None:
+        if future.done():
+            return
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(line)
+
+    def read() -> None:
+        try:
+            line, error = stream.readline(), None
+        except BaseException as raised:  # noqa: BLE001 - handed to the reader
+            line, error = "", raised
+        try:
+            loop.call_soon_threadsafe(settle, line, error)
+        except RuntimeError:  # the loop has closed
+            pass
+
+    threading.Thread(target=read, name="omicsclaw-stdin", daemon=True).start()
+    return future
+
+
+class _PickerCancelled(Exception):
+    """Raised inside the picker by Esc or Ctrl-C, and caught by ``choose``."""
 
 
 class PromptToolkitSource:
@@ -225,6 +308,54 @@ class PromptToolkitSource:
                 raise EOFError
             return await session.prompt_async(prompt)
 
+    async def choose(
+        self, message: str, options: Sequence[str], *, default: int = 0
+    ) -> int | None:
+        """Show *options* as an arrow-key list and return the one picked.
+
+        Up/Down (or ``j``/``k``, or a digit) move, Enter picks, Esc and
+        Ctrl-C decline. Runs on the same input and output as the line
+        prompt, and waits for the terminal like :meth:`read` does.
+
+        :returns: the index of the option picked, or ``None`` if declined.
+        :raises EOFError: the source was closed.
+        :raises NotImplementedError: the installed ``prompt_toolkit`` has
+            no ``ChoiceInput`` (it arrived in 3.0.52).
+        """
+        try:
+            from prompt_toolkit.application import create_app_session
+            from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.shortcuts.choice_input import ChoiceInput
+        except ImportError as exc:
+            raise NotImplementedError(
+                "this prompt_toolkit has no ChoiceInput"
+            ) from exc
+
+        bindings = KeyBindings()
+
+        @bindings.add("escape", eager=True)
+        def _decline(event: Any) -> None:
+            event.app.exit(exception=_PickerCancelled())
+
+        async with self._reading:
+            session = self._session
+            if session is None:
+                raise EOFError
+            picker = ChoiceInput(
+                message=message,
+                options=[(index, text) for index, text in enumerate(options)],
+                default=default,
+                key_bindings=bindings,
+                interrupt_exception=_PickerCancelled,
+            )
+            try:
+                with create_app_session(
+                    input=session.input, output=session.output
+                ):
+                    return await picker.prompt_async()
+            except _PickerCancelled:
+                return None
+
     def close(self) -> None:
         self._session = None
 
@@ -248,21 +379,19 @@ def _history_path() -> Any:
 
 
 def build_completer(
-    skill_names: Sequence[str],
     *,
     specs: Sequence[SlashCommandSpec] = REPL_SLASH_COMMAND_SPECS,
 ) -> Any:
-    """The slash / skill / path completer, over this deployment's skills.
+    """The slash-command and file-path completer.
 
-    **Ported** from ``interactive.py``'s ``_make_completer`` (its lines
-    286-342). One change: the skill names are an argument rather than a
-    call to the deleted registry's ``list_registered_skill_names()``, so
-    the completion offers exactly what
-    :attr:`~omicsclaw.entry.assembly.AgentApp.skills` loaded — the list
-    the model was shown, not a second scan that could disagree with it.
+    A line that is still its first token and names a command (see
+    :func:`~omicsclaw.entry.cli._slash_command_support.slash_token`)
+    completes against *specs*. Anything else completes its last word as a
+    path when that word starts with ``./``, ``/`` or ``~/`` — including
+    ``/data/ru``, which is a path and not a command.
 
     Imports ``prompt_toolkit`` in the body, so naming this function costs
-    nothing (trap 13).
+    nothing.
     """
     from prompt_toolkit.completion import Completer, Completion, PathCompleter
     from prompt_toolkit.document import Document
@@ -270,13 +399,16 @@ def build_completer(
     class _OmniCompleter(Completer):
         def __init__(self) -> None:
             self.path_completer = PathCompleter(expanduser=True)
-            self._skills = list(skill_names)
 
         def get_completions(self, document: Document, complete_event: Any):
             text = document.text_before_cursor
 
             # 1. Slash commands
-            if text.startswith("/") and " " not in text.strip():
+            if (
+                text.startswith("/")
+                and " " not in text.strip()
+                and (text == "/" or slash_token(text) is not None)
+            ):
                 for cmd, desc in complete_slash_command_rows(text, specs):
                     if cmd.startswith(text):
                         yield Completion(
@@ -287,17 +419,7 @@ def build_completer(
                         )
                 return
 
-            # 2. Skill completion for /run <skill>
-            if text.startswith("/run "):
-                skill_prefix = text[len("/run ") :].lstrip()
-                for skill_name in complete_run_skill_names(text, self._skills):
-                    yield Completion(
-                        skill_name,
-                        start_position=-len(skill_prefix),
-                        display_meta="OmicsClaw Skill",
-                    )
-
-            # 3. File path completion
+            # 2. File path completion
             words = text.split(" ")
             last_word = words[-1]
             if last_word.startswith(("./", "/", "~/")):
@@ -309,9 +431,11 @@ def build_completer(
                         path_doc, complete_event
                     )
                     for comp in completions:
+                        # PathCompleter yields the rest of the name, not the
+                        # whole word, so its own start position is kept.
                         yield Completion(
                             comp.text,
-                            start_position=-len(last_word),
+                            start_position=comp.start_position,
                             display=comp.display,
                             display_meta="File Path",
                         )
@@ -322,7 +446,6 @@ def build_completer(
 
 
 def open_prompt_source(
-    skill_names: Sequence[str] = (),
     *,
     stream: TextIO | None = None,
     interactive: bool | None = None,
@@ -376,7 +499,7 @@ def open_prompt_source(
     session = PromptSession(
         history=FileHistory(str(_history_path())),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=build_completer(skill_names),
+        completer=build_completer(),
         complete_style=CompleteStyle.COLUMN,
         complete_while_typing=True,
         style=style,

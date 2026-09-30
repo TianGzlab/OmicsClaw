@@ -58,7 +58,7 @@ def test_a_pipe_is_read_as_a_stream_and_not_through_a_terminal_library():
 
     piped = io.StringIO("what is Moran's I?\n")
 
-    assert isinstance(open_prompt_source((), stream=piped), StreamSource)
+    assert isinstance(open_prompt_source(stream=piped), StreamSource)
 
 
 def test_the_surface_still_works_with_neither_optional_package_installed():
@@ -85,7 +85,7 @@ def test_the_surface_still_works_with_neither_optional_package_installed():
         from omicsclaw.entry.cli import Repl, Screen, open_prompt_source
         from omicsclaw.entry.cli._input import StreamSource
 
-        source = open_prompt_source((), stream=io.StringIO(""), interactive=True)
+        source = open_prompt_source(stream=io.StringIO(""), interactive=True)
         assert isinstance(source, StreamSource), type(source)
         print("ok")
         """

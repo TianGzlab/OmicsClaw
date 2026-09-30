@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: bulkrna-survival
 description: Load when stratifying patients by gene expression and testing for survival differences (Kaplan-Meier
   + Cox) in bulk RNA-seq. Skip when no time-to-event clinical data exists; non-bulk cohorts (single-cell
   / spatial survival is not supported).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 📈
+trigger: survival, Kaplan-Meier, Cox, prognosis, hazard ratio, overall survival, clinical outcome
 tags:
 - bulkrna
 - survival
@@ -16,11 +11,6 @@ tags:
 - Cox
 - hazard-ratio
 - clinical
-requires:
-- matplotlib
-- numpy
-- pandas
-- scipy
 ---
 
 # bulkrna-survival
@@ -34,8 +24,6 @@ median-cutoff stratification, log-rank p-value, Kaplan-Meier curve, and
 Cox proportional-hazards hazard ratio.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -55,29 +43,29 @@ Cox proportional-hazards hazard ratio.
 
 1. Load expression matrix + clinical data; align by sample ID.
 2. For each gene in `--genes` (or all):
-   - Skip with warning at `bulkrna_survival.py:630` if gene not in expression matrix.
+   - Skip with warning at `bulkrna_survival.py` if gene not in expression matrix.
    - Stratify samples by `--cutoff-method` (default `median`; alt `optimal` finds the maxstat cut).
    - Run log-rank test on the stratified groups.
-   - Compute a simple events/time hazard ratio.  Warn at `:326` ("Heavy censoring (X%). KM tail estimates may be unreliable.") when the censoring rate exceeds 80%.
-3. Try R `survival` package first; fall back to Python `lifelines` (`:626` warns "R survival not available (...); using Python fallback.").
+   - Compute a simple events/time hazard ratio.  Warn ("Heavy censoring (X%). KM tail estimates may be unreliable.") when the censoring rate exceeds 80%.
+3. Try R `survival` package first; fall back to Python `lifelines` (warns "R survival not available (...); using Python fallback.").
 4. Render KM curves + forest plot; emit `tables/survival_results.csv`.
 
 ## Gotchas
 
-- **Genes not in the expression matrix are silently skipped.**  `bulkrna_survival.py:630` logs a warning per missing gene and continues.  After the run, count the rows in `tables/survival_results.csv` (or inspect `result.json["results"]`) and compare against the `--genes` list — a typo'd or wrong-namespace gene produces no obvious error.
+- **Genes not in the expression matrix are silently skipped.**  `bulkrna_survival.py` logs a warning per missing gene and continues.  After the run, count the rows in `tables/survival_results.csv` (or inspect `result.json["results"]`) and compare against the `--genes` list — a typo'd or wrong-namespace gene produces no obvious error.
 - **`--cutoff-method optimal` p-values are NOT corrected for multiple testing.**  The `optimal` cutoff scans all possible cuts and picks the maximally separating one, which inflates Type I error.  Reported log-rank p-values are raw — apply Bonferroni / BH correction externally if you scan many genes.
-- **The hazard ratio is a simple events/person-time ratio, not a Cox MLE.**  The script computes `(events_high / time_high) / (events_low / time_low)` (`bulkrna_survival.py:328-333`), not a Cox proportional-hazards regression coefficient.  This estimator is biased when proportional-hazards holds with unequal exposure — for publication-grade HRs, re-fit a proper Cox model in R or `lifelines` against the same stratification.
-- **R-vs-Python backend silently switches.**  `:626` warns and falls back to a NumPy log-rank implementation when R `survival` isn't importable; the per-gene HR estimator is the same simple events/time ratio in both cases, but the chosen backend isn't recorded in the summary dict — only in the warning log.  Verify R availability before relying on the result for downstream papers.
-- **Heavy censoring distorts KM tail estimates.**  `:326` fires when ≥80% of patients are censored; the printed median survival numbers are dominated by extrapolation past the last event time.  Treat `median_survival_*` as "≥ X" rather than a point estimate when the corresponding gene's censoring rate is high.
+- **The hazard ratio is a simple events/person-time ratio, not a Cox MLE.**  The script computes `(events_high / time_high) / (events_low / time_low)` (`bulkrna_survival.py`), not a Cox proportional-hazards regression coefficient.  This estimator is biased when proportional-hazards holds with unequal exposure — for publication-grade HRs, re-fit a proper Cox model in R or `lifelines` against the same stratification.
+- **R-vs-Python backend silently switches.**  `main` warns and falls back to a NumPy log-rank implementation when R `survival` isn't importable; the per-gene HR estimator is the same simple events/time ratio in both cases, but the chosen backend isn't recorded in the summary dict — only in the warning log.  Verify R availability before relying on the result for downstream papers.
+- **Heavy censoring distorts KM tail estimates.**  `analyze_gene` warns when ≥80% of patients are censored; the printed median survival numbers are dominated by extrapolation past the last event time.  Treat `median_survival_*` as "≥ X" rather than a point estimate when the corresponding gene's censoring rate is high.
 
 ## Key CLI
 
 ```bash
-python omicsclaw.py run bulkrna-survival --demo
-python omicsclaw.py run bulkrna-survival \
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py --demo --output /tmp/bulkrna-survival_demo
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py \
   --input expression.csv --clinical clinical.csv \
   --genes TP53,BRCA1,EGFR --output results/
-python omicsclaw.py run bulkrna-survival \
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py \
   --input expression.csv --clinical clinical.csv \
   --genes TP53 --cutoff-method optimal --output results/
 ```
@@ -88,3 +76,9 @@ python omicsclaw.py run bulkrna-survival \
 - `references/methodology.md` — KM + log-rank + Cox theory, R vs Python backend differences, optimal-cutoff caveats
 - `references/output_contract.md` — exact output directory layout
 - Adjacent skills: `bulkrna-de` (parallel: differential expression — survival adds the time-to-event dimension), `bulkrna-coexpression` (parallel: module-level survival via eigengene if traits include time-to-event)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`matplotlib`, `numpy`, `pandas`, `scipy`

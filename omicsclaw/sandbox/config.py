@@ -56,8 +56,10 @@ class SandboxConfig:
     """``docker run --gpus`` value, e.g. ``"all"``. Needs the NVIDIA
     container toolkit on the host."""
 
-    pids_limit: int = 4096
-    """Ceiling on processes **and threads** inside the container."""
+    pids_limit: int = 65536
+    """Ceiling on processes **and threads** inside the container. Threads of
+    every BLAS, OpenMP, torch and numba pool count, so concurrent analyses need
+    tens of thousands."""
 
     user: str | None = field(default_factory=host_user)
     """``--user`` value. ``None`` keeps the image's default user."""
@@ -65,8 +67,16 @@ class SandboxConfig:
     read_only_mounts: tuple[Path, ...] = ()
     """Host directories mounted read-only at the same path."""
 
-    tmpfs_size: str = "1g"
-    """Size of the tmpfs mounted at ``/tmp``."""
+    tmpfs_size: str = "64g"
+    """Size of the tmpfs mounted at ``/tmp``. A tmpfs takes memory only for
+    what is written to it, and counts against :attr:`memory`."""
+
+    shm_size: str = "128g"
+    """``--shm-size`` for ``/dev/shm``; empty keeps the runtime's default
+    (64 MiB for Docker). PyTorch data loaders and joblib memory-map through it."""
+
+    nofile: int = 65536
+    """``--ulimit nofile`` soft and hard limit; ``0`` keeps the image's."""
 
     bootstrap: str = ""
     """Command run once in the workspace after the container is ready.
@@ -94,7 +104,7 @@ class SandboxConfig:
         _require_token("network", self.network)
         if not self.runtime.strip():
             raise SandboxConfigError("runtime must not be empty")
-        for name in ("memory", "cpus", "gpus", "tmpfs_size"):
+        for name in ("memory", "cpus", "gpus", "tmpfs_size", "shm_size"):
             value = getattr(self, name)
             if value:
                 _require_token(name, value)
@@ -104,6 +114,8 @@ class SandboxConfig:
             raise SandboxConfigError(
                 f"pids_limit must be at least 1; got {self.pids_limit}"
             )
+        if self.nofile < 0:
+            raise SandboxConfigError(f"nofile must not be negative; got {self.nofile}")
         for name in ("bootstrap_timeout_s", "start_timeout_s"):
             if getattr(self, name) <= 0:
                 raise SandboxConfigError(f"{name} must be positive")

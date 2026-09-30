@@ -1,31 +1,15 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-integrate-cluster
 description: Load when running a single batch-correction representation (none/Harmony/Scanorama/scVI)
   + clustering of single-cell data as one self-contained unit — normally fanned out as a member of sc-consensus-integration.
   Skip when you want the full integration consensus (use sc-consensus-integration); resolution-robust
   clustering (use sc-consensus-clustering).
-version: 0.1.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
 - integration
 - clustering
 - consensus
-requires:
-- anndata
-- harmonypy
-- matplotlib
-- numpy
-- pandas
-- scanorama
-- scanpy
-- scikit-learn
-- seaborn
-- torch
 ---
 
 # sc-integrate-cluster
@@ -35,7 +19,7 @@ requires:
 ## When to use
 
 One self-contained *integrate + cluster* unit, used as a fan-out member of
-`sc-consensus-integration` (ADR 0016 / 0029). It produces a batch-correction
+`sc-consensus-integration`. It produces a batch-correction
 representation **and** clusters on it at a fixed resolution, emitting the standard
 `sc-clustering` artifact schema so the consensus `ScClusteringArtifactReader`
 reads it unchanged. You normally do **not** call this directly — the consensus
@@ -47,8 +31,6 @@ This is the single-cell analog of `spatial-domains --method <m>`: the integratio
 consensus fans out genuinely different batch-correction representations.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -78,7 +60,7 @@ consensus fans out genuinely different batch-correction representations.
 
 - **`processed.h5ad` carries the member's integrated embedding** — the consensus
   driver reads `obsm[representation_used]` from it to compute the integration
-  intrinsic panel (ADR 0029). Do not strip obsm keys before the driver runs.
+  intrinsic panel. Do not strip obsm keys before the driver runs.
 - **`result.json["representation_used"]` records which embedding was used** —
   `X_pca` for `--method none`, `X_<method>` otherwise; the consensus reader keys
   off this rather than re-deriving it.
@@ -92,7 +74,7 @@ consensus fans out genuinely different batch-correction representations.
 
 ```bash
 # Synthetic smoke demo (no input needed)
-python omicsclaw.py run sc-integrate-cluster --demo --output /tmp/sic_demo
+python skills/singlecell/scrna/sc-integrate-cluster/sc_integrate_cluster.py --demo --output /tmp/sic_demo
 
 python skills/singlecell/scrna/sc-integrate-cluster/sc_integrate_cluster.py \
   --input <preprocessed.h5ad> --output <member_dir> \
@@ -103,6 +85,11 @@ python skills/singlecell/scrna/sc-integrate-cluster/sc_integrate_cluster.py \
 
 - `references/methodology.md` — integrate-then-cluster member rationale
 - `references/output_contract.md` — the `figure_data/` schema the consensus reads
-- `references/parameters.md` — every CLI flag (generated from `skill.yaml`)
+- `references/parameters.md` — every CLI flag, per-method tunables
 - Adjacent skills: `sc-preprocessing` (upstream), `sc-consensus-integration` (the consensus that fans this out), `sc-clustering` (the non-integration single-resolution clusterer)
-- ADR 0016/0029 — workflow runtime, integration intrinsic panel
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `harmonypy`, `matplotlib`, `numpy`, `pandas`, `scanorama`, `scanpy`, `scikit-learn`, `scvi-tools`, `seaborn`, `torch`

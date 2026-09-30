@@ -113,6 +113,24 @@ class SkillIndex:
                 return skill
         return None
 
+    def search(self, query: str) -> tuple[Skill, ...]:
+        """Every skill whose name, domain, tags or triggers match *query*.
+
+        Case-insensitive substring matching, in index order, with each
+        skill answering at most once. A blank *query* matches everything,
+        so ``/skills`` and ``/skills spatial`` share one code path.
+
+        This is a *discovery* helper for a human at a prompt. The model
+        routes from the descriptions in the system prompt, and a trigger
+        keyword appearing in a turn does not load anything by itself.
+        """
+        wanted = query.strip().lower()
+        if not wanted:
+            return self.skills
+        return tuple(
+            skill for skill in self.skills if _matches(skill, wanted)
+        )
+
     def by_domain(self) -> tuple[tuple[str, tuple[Skill, ...]], ...]:
         """Group the skills by :attr:`~omicsclaw.skills.skill.Skill.domain`.
 
@@ -179,13 +197,26 @@ class SkillIndex:
 
         :raises SkillNotFound: *name* is not in the index.
         :raises OSError: the file is in the index but cannot be read.
+        :raises UnicodeDecodeError: it can be read but is no longer valid
+            in :attr:`encoding`. Not an :exc:`OSError` — it is a
+            :exc:`ValueError` — so a caller guarding the read has to name
+            both, as :func:`~omicsclaw.skills.loader.load_skills` does.
         """
         skill = self.get(name)
         if skill is None:
-            raise SkillNotFound(name, self._close_matches(name), len(self.skills))
+            raise SkillNotFound(name, self.close_names(name), len(self.skills))
         text = skill.path.read_text(encoding=self.encoding)
         return parse_frontmatter(text).body.strip()
 
-    def _close_matches(self, name: str) -> tuple[str, ...]:
-        """Return up to five indexed names spelled similarly to *name*."""
+    def close_names(self, name: str) -> tuple[str, ...]:
+        """Up to five indexed names spelled similarly to *name*.
+
+        What :class:`SkillNotFound` offers the model as "did you mean".
+        """
         return tuple(difflib.get_close_matches(name, self.names(), n=5, cutoff=0.5))
+
+
+def _matches(skill: Skill, wanted: str) -> bool:
+    """Whether *wanted* occurs in any of *skill*'s searchable fields."""
+    haystacks = (skill.name, skill.domain, *skill.tags, *skill.triggers)
+    return any(wanted in field.lower() for field in haystacks)

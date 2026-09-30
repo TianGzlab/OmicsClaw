@@ -37,14 +37,36 @@ READ_BY_THE_STACK = (
     "OMICSCLAW_MAX_TURNS",
     "OMICSCLAW_COMPACT_AT",
     "OMICSCLAW_SKILLS_INDEX",
+    "OMICSCLAW_SKILL_ENV",
+    "OMICSCLAW_SKILL_ENV_DIR",
+    "OMICSCLAW_SKILL_ENV_INSTALL_TIMEOUT_S",
     "OMICSCLAW_PERMISSION_MODE",
+    "OMICSCLAW_CLI_PERMISSION_MODE",
     "OMICSCLAW_SANDBOX",
+    "OMICSCLAW_SANDBOX_SHM_SIZE",
+    "OMICSCLAW_SANDBOX_CODE_IN_IMAGE",
+    "OMICSCLAW_ENSEMBLE",
+    "OMICSCLAW_ENSEMBLE_PYTHON",
+    "OMICSCLAW_ENSEMBLE_GPUS",
+    "OMICSCLAW_ENSEMBLE_TOOLS",
+    "OMICSCLAW_ENSEMBLE_RUN_BUDGET",
+    "OMICSCLAW_ENSEMBLE_TUNING_MODEL",
+    "OMICSCLAW_ENSEMBLE_OBS_ALLOWLIST",
     "OMICSCLAW_MCP_CONFIG",
     # the surfaces that can be started
     "OMICSCLAW_REMOTE_AUTH_TOKEN",
     "TELEGRAM_BOT_TOKEN",
     "FEISHU_APP_ID",
     "FEISHU_ALLOWED_SENDERS",
+    # the platforms the channel cut-over lit
+    "SLACK_BOT_TOKEN",
+    "SLACK_ALLOWED_SENDERS",
+    "DISCORD_BOT_TOKEN",
+    "DINGTALK_CLIENT_ID",
+    "QQ_APP_ID",
+    "EMAIL_IMAP_HOST",
+    "EMAIL_SMTP_HOST",
+    "EMAIL_ALLOWED_SENDERS",
 )
 """Variables a deployment can actually set today.
 
@@ -55,26 +77,27 @@ here would give two things to update and one of them would rot.
 """
 
 RETIRED = (
-    "SLACK_BOT_TOKEN",
-    "DISCORD_BOT_TOKEN",
-    "WECHAT_APP_ID",
-    "WECOM_CORP_ID",
-    "DINGTALK_CLIENT_ID",
-    "QQ_APP_ID",
-    "IMESSAGE_CLI_PATH",
-    "EMAIL_IMAP_HOST",
     "OMICSCLAW_MEMORY_DB_URL",
     "OMICSCLAW_MAX_HISTORY",
     "OMICSCLAW_MAX_TOOL_ITERATIONS",
     "OMICSCLAW_DATA_DIRS",
     "GLOBAL_RATE_LIMIT",
+    "OMICSCLAW_ADAPTIVE_ENV",
+    "OMICSCLAW_SKIP_ADAPTIVE_ENV",
+    "OMICSCLAW_ENV_DIR",
+    "OMICSCLAW_RUN_PYTHON",
 )
 """Variables the rebuilt stack ignores.
 
 Kept in the template on purpose: someone upgrading has them in their own
 ``.env`` and needs to be told they do nothing, which is a different
-message from silence. The eight chat platforms are gated rather than
-deleted —— ``build_channel`` has a builder for Telegram and Feishu only.
+message from silence.
+
+Six chat platforms left this tuple when the channel cut-over gave them a
+launch builder. The iMessage variables left it a different way: that adapter
+was deleted rather than lit, because its notifications carry no stable
+message id and so nothing can deduplicate a redelivery — so the template
+does not mention them either.
 """
 
 

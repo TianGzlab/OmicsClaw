@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run struct-proteomics --demo
-python omicsclaw.py run struct-proteomics --input <data.csv> --output <dir>
+python skills/proteomics/proteomics-structural/struct_proteomics.py --demo
+python skills/proteomics/proteomics-structural/struct_proteomics.py --input <data.csv> --output <dir>
 ```
 
 

@@ -13,7 +13,6 @@ communication    : Cell-cell communication (LIANA, CellPhoneDB, FastCCC, CellCha
 condition        : Pseudobulk condition comparison (PyDESeq2, Wilcoxon)
 de               : Differential expression (rank_genes_groups, PyDESeq2)
 deconvolution    : Cell type deconvolution (8 methods incl. R-based)
-dependency_manager : Lazy dependency import and R environment validation
 domains          : Spatial domain identification (6 algorithms)
 enrichment       : Pathway enrichment (Enrichr, GSEA, ssGSEA)
 exceptions       : Domain-specific exception classes

@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: metabolomics-pathway-enrichment
 description: Load when running over-representation analysis (ORA) on a metabolite list via Fisher's exact
   test against a built-in 9-pathway DEMO dictionary, BH-FDR adjusted. Skip when needing real KEGG / Reactome
   (this skill is demo-only); `mummichog` / `fella` topology methods (CLI accepts them but only ORA runs).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
-emoji: 🗺️
+trigger: metabolomics pathway, KEGG, MetaboAnalyst, enrichment, mummichog
 tags:
 - metabolomics
 - pathway
@@ -16,10 +11,6 @@ tags:
 - ora
 - fisher
 - demo
-requires:
-- numpy
-- pandas
-- scipy
 ---
 
 # metabolomics-pathway-enrichment
@@ -33,15 +24,13 @@ enrichment via Fisher's exact test, with BH-adjusted FDR.
 
 **This is a demo-only enrichment.** The pathway database is the
 hard-coded 9-pathway `DEMO_METABOLIC_PATHWAYS` dict at
-`met_pathway.py:45-104` (e.g. glycolysis, TCA cycle, amino-acid
+`met_pathway.py` (e.g. glycolysis, TCA cycle, amino-acid
 metabolism). There is NO CLI flag to load real KEGG / Reactome /
 SMPDB. For production metabolomics enrichment, route to
 external tools (MetaboAnalystR, mummichog, FELLA) or send the
 metabolite list through `bulkrna-enrichment` after gene-mapping.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -56,31 +45,31 @@ metabolite list through `bulkrna-enrichment` after gene-mapping.
 
 ## Flow
 
-1. Load CSV (`--input <metabolites.csv>`) or generate a demo at `output_dir/<demo>.csv` (`met_pathway.py:300`).
-2. Pick the metabolite-list column: `metabolite` if present, otherwise the first column (`met_pathway.py:307`).
-3. For each pathway in `DEMO_METABOLIC_PATHWAYS` (`met_pathway.py:45`), run Fisher's exact test (hypergeometric) (`met_pathway.py:132-200`); apply BH FDR adjustment (`:198`).
-4. Write `tables/pathway_enrichment.csv` (`met_pathway.py:314`) + `report.md` + `result.json`.
+1. Load CSV (`--input <metabolites.csv>`) or generate a demo at `output_dir/<demo>.csv` (`met_pathway.py`).
+2. Pick the metabolite-list column: `metabolite` if present, otherwise the first column (`met_pathway.py`).
+3. For each pathway in `DEMO_METABOLIC_PATHWAYS` (`met_pathway.py`), run Fisher's exact test (hypergeometric); apply BH FDR adjustment.
+4. Write `tables/pathway_enrichment.csv` (`met_pathway.py`) + `report.md` + `result.json`.
 
 ## Gotchas
 
-- **Pathway database is HARD-CODED 9 demo pathways.** `met_pathway.py:45-104` defines `DEMO_METABOLIC_PATHWAYS` (e.g. glycolysis, TCA cycle, urea cycle). The `n_pathways_tested = 9` in `result.json` (`:320`) is constant. For real enrichment, use MetaboAnalystR / mummichog / FELLA externally.
-- **`--method mummichog` and `--method fella` are RECORDED-ONLY.** `met_pathway.py:293` accepts `choices=["ora", "mummichog", "fella"]` but `pathway_enrichment` (`:132-200`) ignores the `method` parameter — only ORA (Fisher's exact + BH FDR) is implemented. Calling with `--method mummichog` produces ORA results plus a misleading `method=mummichog` label in `result.json`.
-- **Metabolite-name matching is CASE-INSENSITIVE substring.** `met_pathway.py:165` lower-cases both query and pathway-member names. `glucose`, `Glucose`, `D-Glucose` all match a pathway entry `D-Glucose` — but `Hexose` will NOT.
-- **Column auto-detection: `metabolite` first, else first column.** `met_pathway.py:307` uses `met_col = "metabolite" if "metabolite" in df.columns else df.columns[0]`. Pre-rename if your CSV has multiple ID columns (`name`, `hmdb_id`, `kegg`).
-- **`--input` REQUIRED unless `--demo`.** `met_pathway.py:303` raises `ValueError("--input required when not using --demo")`.
+- **Pathway database is HARD-CODED 9 demo pathways.** `met_pathway.py` defines `DEMO_METABOLIC_PATHWAYS` (e.g. glycolysis, TCA cycle, urea cycle). The `n_pathways_tested = 9` in `result.json` is constant. For real enrichment, use MetaboAnalystR / mummichog / FELLA externally.
+- **`--method mummichog` and `--method fella` are RECORDED-ONLY.** `met_pathway.py` accepts `choices=["ora", "mummichog", "fella"]` but `pathway_enrichment` ignores the `method` parameter — only ORA (Fisher's exact + BH FDR) is implemented. Calling with `--method mummichog` produces ORA results plus a misleading `method=mummichog` label in `result.json`.
+- **Metabolite-name matching is CASE-INSENSITIVE substring.** `met_pathway.py` lower-cases both query and pathway-member names. `glucose`, `Glucose`, `D-Glucose` all match a pathway entry `D-Glucose` — but `Hexose` will NOT.
+- **Column auto-detection: `metabolite` first, else first column.** `met_pathway.py` uses `met_col = "metabolite" if "metabolite" in df.columns else df.columns[0]`. Pre-rename if your CSV has multiple ID columns (`name`, `hmdb_id`, `kegg`).
+- **`--input` REQUIRED unless `--demo`.** `met_pathway.py` raises `ValueError("--input required when not using --demo")`.
 
 ## Key CLI
 
 ```bash
 # Demo (9-pathway DEMO_METABOLIC_PATHWAYS)
-python omicsclaw.py run metabolomics-pathway-enrichment --demo --output /tmp/path_demo
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py --demo --output /tmp/path_demo
 
 # Real metabolite list (CSV with `metabolite` column)
-python omicsclaw.py run metabolomics-pathway-enrichment \
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py \
   --input significant_metabolites.csv --output results/
 
 # `--method mummichog` is accepted but produces ORA results regardless
-python omicsclaw.py run metabolomics-pathway-enrichment \
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py \
   --input significant_metabolites.csv --output results/ \
   --method mummichog
 ```
@@ -91,3 +80,9 @@ python omicsclaw.py run metabolomics-pathway-enrichment \
 - `references/methodology.md` — Fisher's exact ORA, BH FDR, demo-DB caveats
 - `references/output_contract.md` — `tables/pathway_enrichment.csv` schema
 - Adjacent skills: `metabolomics-de` (upstream — significant feature list), `metabolomics-statistics` (upstream — multi-test backends), `metabolomics-annotation` (upstream — m/z → metabolite name mapping), `proteomics-enrichment` (parallel — same demo-only ORA pattern but for proteins)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`numpy`, `pandas`, `scipy`

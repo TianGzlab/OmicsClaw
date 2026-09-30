@@ -45,9 +45,9 @@
 ## CLI Reference
 
 ```bash
-oc run sc-fastq-qc --input fastqs/ --output results/
-oc run sc-fastq-qc --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
-oc run sc-fastq-qc --input fastqs/ --sample PBMC_1 --threads 8 --output results/
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --input fastqs/ --output results/
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --input fastqs/ --sample PBMC_1 --threads 8 --output results/
 python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --demo --output /tmp/sc_fastq_qc_demo
 ```
 
@@ -136,14 +136,14 @@ FastQC and MultiQC are used when available on `PATH`. The wrapper always produce
 
 ```bash
 # Assess a FASTQ directory
-python omicsclaw.py run sc-fastq-qc --input fastqs/ --output results/
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --input fastqs/ --output results/
 
 # Explicit paired-end input
-python omicsclaw.py run sc-fastq-qc \
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
   --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
 
 # Multi-sample directory — choose one sample
-python omicsclaw.py run sc-fastq-qc \
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
   --input fastqs/ --sample PBMC_1 --threads 8 --output results/
 ```
 

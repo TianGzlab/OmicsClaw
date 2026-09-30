@@ -1,6 +1,9 @@
 """The session-wide permission posture.
 
-One setting, chosen at start-up, that shifts every gate decision at once.
+One setting, chosen at start-up, that shifts every gate decision at once. The
+terminal's ``/auto`` can move it between :attr:`PermissionMode.DEFAULT` and
+:attr:`PermissionMode.AUTO_APPROVE` mid-session (plan 0050); the other two are
+deployment promises and only a start-up setting can make or break them.
 It answers questions no per-call detail answers — "this is a throwaway
 container", "I want to read this cohort and change nothing" are properties of
 the session, not of a tool or an argument.

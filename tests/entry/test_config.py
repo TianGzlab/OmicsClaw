@@ -237,6 +237,39 @@ def test_the_deployment_half_no_longer_answers_to_the_surface_flag_name():
         resolve_app_config(argv=["--prompt-file", "brief.md"], env={})
 
 
+def test_delegation_is_on_until_a_deployment_says_otherwise():
+    """The switch that mounts or unmounts ``task`` and the whole of delegation.
+
+    Both spellings, because they reach different code: ``--subagents``
+    goes through the argv scan and ``OMICSCLAW_SUBAGENTS`` through the
+    environment one, and an ``_Option`` missing either half leaves that
+    source silently ignoring the flag.
+
+    Mutation: delete the ``subagents`` row from ``_OPTIONS`` and the two
+    ``is False`` assertions go red — the argv one as an ``AppConfigError``
+    about an unknown flag, the environment one by resolving to the
+    default.
+    """
+    assert _config().subagents is True
+    assert resolve_app_config(argv=["--subagents", "false"], env={}).subagents is False
+    assert (
+        resolve_app_config(argv=[], env={"OMICSCLAW_SUBAGENTS": "off"}).subagents
+        is False
+    )
+    assert (
+        resolve_app_config(
+            argv=["--subagents", "true"], env={"OMICSCLAW_SUBAGENTS": "false"}
+        ).subagents
+        is True
+    )
+
+
+def test_a_subagents_value_that_is_not_a_boolean_is_refused():
+    """``--subagents maybe`` must not resolve to the permissive default."""
+    with pytest.raises(AppConfigError, match="boolean"):
+        resolve_app_config(argv=["--subagents", "maybe"], env={})
+
+
 def test_a_deadline_can_be_switched_off_from_a_shell():
     """A shell cannot write ``None``; ``none`` is how an operator will."""
     config = resolve_app_config(argv=["--approval-timeout", "none"], env={})

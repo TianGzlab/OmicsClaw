@@ -26,8 +26,8 @@ engine beside it already settled "no I/O, no logging"; a
 :data:`SectionSource` is an *arbitrary callable* — not the harness's one
 fixed ``os.ReadFile`` — and swallowing arbitrary exceptions is a Python
 anti-pattern; and the failure mode it produced was the wrong one. A
-``SOUL.md`` that fails to read turning quietly into "the agent has no
-persona" is more expensive than a crash, because nobody finds out. The
+prompt file that fails to read turning quietly into "the prompt lacks
+that section" is more expensive than a crash, because nobody finds out. The
 consequence is real and belongs to the caller: wrap a source that may
 fail if a degraded prompt is genuinely better than no prompt.
 """
@@ -96,15 +96,15 @@ def text_from_file(
     The only place in this package that touches a filesystem, and it is
     a convenience rather than a mechanism: the caller decides which
     files are prompt material by building sections, because encoding
-    ``CLAUDE.md`` + ``AGENTS.md`` + ``SOUL.md`` + eight
-    ``skills/<domain>/INDEX.md`` as parameters of this layer would nail
+    ``OMICSCLAW.md`` and the per-domain ``skills/<domain>/INDEX.md``
+    files as parameters of this layer would nail
     that policy to the bottom of the stack.
 
     **A file that is not there yields ``""``**, which makes the section
     disappear whole — the harness's treatment of a missing ``AGENTS.md``
-    (``builder.go:107-110``) and what plan 0030 §5.1 asks for when
-    ``SOUL.md`` is absent ("the persona section is empty, the caller
-    supplies its own fallback"). Absence is a state, not a failure.
+    (``builder.go:107-110``) and what plan 0030 §5.1 asks for of an
+    absent prompt file: the section is empty and the caller supplies its
+    own fallback. Absence is a state, not a failure.
 
     Every other error — unreadable, undecodable, a directory — is a
     failure and propagates, per the module docstring. Nothing is cached:

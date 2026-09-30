@@ -48,55 +48,55 @@
 
 ```bash
 # Default neighborhood enrichment
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --output <dir>
 
 # Ripley's L with more simulations
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type ripley \
   --ripley-mode L --ripley-n-simulations 200 --ripley-n-steps 60 \
   --output <dir>
 
 # Co-occurrence with custom distance-bin count
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type co_occurrence \
   --coocc-interval 80 --output <dir>
 
 # Global Moran's I for a curated gene list
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type moran \
   --genes "EPCAM,VIM,CD3D" \
   --stats-n-neighs 8 --stats-n-perms 499 --stats-corr-method fdr_bh \
   --output <dir>
 
 # Global Geary's C on top variable genes
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type geary \
   --n-top-genes 50 --stats-two-tailed --output <dir>
 
 # Local Moran hotspots
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type local_moran \
   --genes "EPCAM,CD3D" --stats-n-perms 499 \
   --output <dir>
 
 # Getis-Ord Gi*
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type getis_ord \
   --genes "CXCL13" --getis-star --output <dir>
 
 # Bivariate Moran
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type bivariate_moran \
   --genes "EPCAM,VIM" --output <dir>
 
 # Spatial graph topology summary
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type network_properties \
   --stats-n-neighs 6 --stats-n-rings 1 --output <dir>
 
 # Cluster graph centrality
-oc run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input <processed.h5ad> --analysis-type spatial_centrality \
   --centrality-score degree_centrality,closeness_centrality \
   --output <dir>

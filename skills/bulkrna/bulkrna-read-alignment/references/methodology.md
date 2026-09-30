@@ -23,6 +23,6 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-read-alignment --demo
-python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output results/
+python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --demo
+python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --input Log.final.out --output results/
 ```

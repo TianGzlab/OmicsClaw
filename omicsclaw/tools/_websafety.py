@@ -12,8 +12,8 @@ ask. A URL prefix check does not prevent it; this repository's existing
 ``runtime/tools/builders/engineering.py`` ``web_fetch`` has only that, so
 the metadata endpoint is reachable from it today.
 
-**What this does NOT protect.** ``CLAUDE.md``'s first safety rule is that
-genetic data never leaves this machine, and nothing here enforces it. A
+**What this does NOT protect.** :data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1
+is that genetic data never leaves this machine, and nothing here enforces it. A
 blocklist of destinations cannot: ``https://example.com/?q=`` plus a
 patient identifier is a perfectly public address. Data egress is governed
 by the ``ASK`` policy on the tools themselves.

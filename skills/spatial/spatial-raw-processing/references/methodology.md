@@ -53,35 +53,35 @@ Important boundary:
 
 ```bash
 # Standard usage with explicit FASTQ paths
-oc run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --read1 sample_R1.fastq.gz --read2 sample_R2.fastq.gz \
   --ids ids/barcodes.txt --ref-map refs/star_index --ref-annotation refs/genes.gtf \
   --output /tmp/spatial_raw_out
 
 # Resolve the FASTQ pair from an input directory
-oc run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --input fastq_run/ \
   --ids ids/barcodes.txt --ref-map refs/star_index --ref-annotation refs/genes.gtf \
   --platform visium --output /tmp/spatial_raw_out
 
 # Use a local st_pipeline repository clone instead of a global install
-oc run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --read1 sample_R1.fastq.gz --read2 sample_R2.fastq.gz \
   --ids ids/barcodes.txt --ref-map refs/star_index --ref-annotation refs/genes.gtf \
   --stpipeline-repo /path/to/st_pipeline \
   --output /tmp/spatial_raw_out
 
 # Enable saturation reporting
-oc run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --read1 sample_R1.fastq.gz --read2 sample_R2.fastq.gz \
   --ids ids/barcodes.txt --ref-map refs/star_index --ref-annotation refs/genes.gtf \
   --compute-saturation --output /tmp/spatial_raw_out
 
 # Config-driven execution
-oc run spatial-raw-processing --input st_run.yaml --output /tmp/spatial_raw_out
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py --input st_run.yaml --output /tmp/spatial_raw_out
 
 # Demo mode
-oc run spatial-raw-processing --demo --output /tmp/spatial_raw_demo
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py --demo --output /tmp/spatial_raw_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \

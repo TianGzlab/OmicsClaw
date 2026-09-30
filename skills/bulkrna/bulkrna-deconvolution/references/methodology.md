@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-deconvolution --demo
-python omicsclaw.py run bulkrna-deconvolution --input <counts.csv> --output <dir> --reference <signature.csv>
+python skills/bulkrna/bulkrna-deconvolution/bulkrna_deconvolution.py --demo
+python skills/bulkrna/bulkrna-deconvolution/bulkrna_deconvolution.py --input <counts.csv> --output <dir> --reference <signature.csv>
 python bulkrna_deconvolution.py --input counts.csv --output results/ --reference signature.csv
 python bulkrna_deconvolution.py --demo --output /tmp/deconv_demo
 ```

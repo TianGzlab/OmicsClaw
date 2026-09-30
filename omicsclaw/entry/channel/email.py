@@ -1,26 +1,39 @@
 """
 Email channel implementation for OmicsClaw using standard IMAP + SMTP.
 
-Polls an IMAP mailbox for new messages and replies via SMTP.
-Supports Gmail (App Password), Outlook, and any IMAP/SMTP server.
-All processing uses stdlib (imaplib, smtplib, email) — no extra deps.
+Polls an IMAP mailbox for unseen messages and replies over SMTP. Works with
+Gmail (app password), Outlook and any standard server, using only the
+standard library. Both protocols are blocking, so every call is awaited back
+onto the loop through an executor — there is no callback thread here and
+nothing hops between loops.
 
-Configuration via environment variables:
-    EMAIL_IMAP_HOST         — IMAP server (e.g. imap.gmail.com)
-    EMAIL_IMAP_PORT         — IMAP port (default: 993)
-    EMAIL_IMAP_USERNAME     — IMAP login username / email address
-    EMAIL_IMAP_PASSWORD     — IMAP password or App Password
-    EMAIL_IMAP_MAILBOX      — Mailbox to monitor (default: INBOX)
-    EMAIL_IMAP_USE_SSL      — Use SSL (default: 1)
-    EMAIL_SMTP_HOST         — SMTP server (e.g. smtp.gmail.com)
-    EMAIL_SMTP_PORT         — SMTP port (default: 587)
-    EMAIL_SMTP_USERNAME     — SMTP login username
-    EMAIL_SMTP_PASSWORD     — SMTP password or App Password
-    EMAIL_SMTP_STARTTLS     — Use STARTTLS (default: 1, port 587)
-    EMAIL_FROM_ADDRESS      — Sender display address (defaults to smtp_username)
-    EMAIL_POLL_INTERVAL     — Seconds between IMAP polls (default: 30)
-    EMAIL_MARK_SEEN         — Mark emails as read after processing (default: 1)
-    EMAIL_ALLOWED_SENDERS   — Comma-separated email addresses (empty = all)
+**There are no groups and no mentions, so this bot has no identity.**
+:attr:`~omicsclaw.entry.ingress.SenderPolicy.bot_identity` is left empty on
+purpose: should a message ever arrive labelled as a group message, an empty
+identity makes :meth:`~omicsclaw.entry.ingress.SenderPolicy.admits` refuse it
+rather than answer it to whoever wrote it.
+
+**Inbound attachments are not stored.** The path this replaces wrote every
+attachment to ``/tmp`` under a filename taken straight from the mail's
+``Content-Disposition`` header, and then nothing ever read the result: the
+whole feature was a write. A header is attacker-controlled input, so a
+``filename`` containing ``../`` wrote outside the directory it named. Both
+problems end the same way — there is nowhere for an attachment to go in this
+layer, so it is not fetched.
+
+**Idempotency does not survive a restart, and that is known rather than
+fixed.** Inbound de-duplication is the IMAP ``\\Seen`` flag plus the
+runtime's own record of accepted ``Message-ID`` values, and that record lives
+in this process. A crash between fetching a message and flagging it means the
+message is answered again after a restart. Durable ingress is deferred for
+the whole layer, not for this adapter.
+
+Configuration via environment variables (read by ``omicsclaw/launch/``, never
+here):
+    EMAIL_IMAP_HOST / PORT / USERNAME / PASSWORD / MAILBOX / USE_SSL
+    EMAIL_SMTP_HOST / PORT / USERNAME / PASSWORD / STARTTLS
+    EMAIL_FROM_ADDRESS, EMAIL_POLL_INTERVAL, EMAIL_MARK_SEEN
+    EMAIL_ALLOWED_SENDERS
 
 References:
     - https://docs.python.org/3/library/imaplib.html
@@ -30,46 +43,59 @@ References:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import email as email_lib
 import html
 import imaplib
 import logging
 import re
-import smtplib
 import ssl
 from dataclasses import dataclass
-from email import encoders
 from email.header import decode_header, make_header
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from email.utils import parseaddr
-from pathlib import Path
 from typing import Any
 
+from omicsclaw.entry.ingress import (
+    SenderPolicy,
+    VALUE_CHAT_TYPE,
+    VALUE_MENTIONS,
+)
+
+from . import reply_target
 from .base import Channel
+from .binding import ChannelSurfaceBinding
 from .capabilities import EMAIL as EMAIL_CAPS
 from .config import BaseChannelConfig
+from .email_delivery import EmailDeliveryAdapter, SmtpSettings
+from .runtime import TurnAcceptanceStatus
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("omicsclaw.channel.email")
 
-_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20 MB
+MAX_MESSAGES_PER_POLL = 20
+
+EMAIL_TEXT_CHUNK_LIMIT = 100_000
+"""Characters per outbound mail when the deployment does not say.
+
+A real number and not the capability profile's ``0``. That zero means "no
+practical limit" to a reader and *a per-chunk budget of zero* to
+:func:`~omicsclaw.entry.channel.base.chunk_text`, which is one of its two
+non-terminating inputs. 100,000 is a generous bound on a single mail body
+and is a number the chunker can act on.
+"""
 
 
 # ─ Helpers ────────────────────────
 
 
-def _decode_hdr(raw: str) -> str:
-    """Decode a RFC2047-encoded email header value."""
+def decode_header_value(raw: str) -> str:
+    """Decode an RFC 2047 header value, falling back to what was sent."""
     try:
         return str(make_header(decode_header(raw))) if raw else ""
     except Exception:
         return raw or ""
 
 
-def _strip_html(text: str) -> str:
-    """Convert basic HTML to plain text."""
+def strip_html(text: str) -> str:
+    """Reduce a basic HTML body to the text it is made of."""
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
     text = re.sub(r"<p[^>]*>", "\n", text, flags=re.I)
     text = re.sub(r"</p>", "\n", text, flags=re.I)
@@ -98,79 +124,143 @@ class EmailConfig(BaseChannelConfig):
     smtp_password: str = ""
     smtp_starttls: bool = True  # True=STARTTLS (587), False=implicit SSL (465)
     from_address: str = ""
-    # Behavior
+    # Behaviour
     poll_interval: int = 30
     mark_seen: bool = True
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
-    text_chunk_limit: int = 4096
+    text_chunk_limit: int = EMAIL_TEXT_CHUNK_LIMIT
 
 
 # ─ Channel ────────────────────────
 
 
 class EmailChannel(Channel):
-    """Email channel using IMAP polling + SMTP sending.
+    """Email channel using IMAP polling and SMTP sending.
 
-    Works with Gmail (App Password), Outlook, and any standard IMAP/SMTP server.
-    No extra Python dependencies — uses only stdlib.
-
-    Lifecycle:
-        channel = EmailChannel(config)
-        await channel.start()    # connect IMAP, start polling task
-        await channel.run()      # blocks
-        await channel.stop()     # cleanup
+    Owner mail enters the authoritative
+    :class:`~omicsclaw.entry.channel.runtime.ChannelRuntime`; answers leave
+    only through its delivery pump, which is what classifies whether they
+    were accepted. Attachments, in both directions, are fail-closed.
     """
 
     name = "email"
     capabilities = EMAIL_CAPS
+    authoritative_ingress = True
 
     def __init__(self, config: EmailConfig):
         super().__init__(config)
+        self.email_config = config
         self._imap: imaplib.IMAP4_SSL | imaplib.IMAP4 | None = None
-        self._poll_task: asyncio.Task | None = None
+        self._poll_task: asyncio.Task[None] | None = None
+        self._account_namespace = ""
 
     # ─ Lifecycle ──────────────────────
 
-    async def start(self) -> None:
-        self.require_authoritative_ingress()
-        cfg = self.config
+    def _owner_subjects(self) -> frozenset[str]:
+        """The allowlist, folded to lower case.
+
+        An address is the identity on this channel, and the case of one is
+        not part of it: a mail from ``Owner@Example.com`` is from the person
+        configured as ``owner@example.com``.
+        """
+        return frozenset(
+            str(value).strip().lower()
+            for value in (self.config.allowed_senders or set())
+            if str(value).strip()
+        )
+
+    def _is_owner(self, subject: str | None) -> bool:
+        """Compare an address the same way the allowlist was folded."""
+
+        return super()._is_owner(str(subject or "").lower())
+
+    async def prepare_control_binding(self) -> ChannelSurfaceBinding:
+        """Describe this mailbox's control binding before polling starts."""
+
+        owners = self._owner_subjects()
+        if not owners:
+            raise RuntimeError(
+                "Email authoritative ingress requires EMAIL_ALLOWED_SENDERS"
+            )
+        cfg = self.email_config
         if not cfg.imap_host or not cfg.imap_username:
             raise RuntimeError("EMAIL_IMAP_HOST and EMAIL_IMAP_USERNAME are required")
         if not cfg.smtp_host or not cfg.smtp_username:
             raise RuntimeError("EMAIL_SMTP_HOST and EMAIL_SMTP_USERNAME are required")
 
+        from_address = (cfg.from_address or cfg.smtp_username).strip()
+        if not from_address:
+            raise RuntimeError("Email sender address is unavailable")
+        self._account_namespace = from_address
+
+        return ChannelSurfaceBinding(
+            adapter="email",
+            account_namespace=from_address,
+            # No identity: there are no groups here, and an empty identity is
+            # what makes a message labelled as one fail closed.
+            sender_policy=SenderPolicy(allowed_senders=owners, bot_identity=""),
+            delivery_adapter=EmailDeliveryAdapter(
+                SmtpSettings(
+                    host=cfg.smtp_host,
+                    port=cfg.smtp_port,
+                    username=cfg.smtp_username,
+                    password=cfg.smtp_password,
+                    from_address=from_address,
+                    starttls=cfg.smtp_starttls,
+                    subject_prefix=cfg.subject_prefix,
+                )
+            ),
+            # The capability profile's ``max_text_length`` is 0 here, which
+            # the chunker cannot act on; see EMAIL_TEXT_CHUNK_LIMIT.
+            text_chunk_limit=cfg.text_chunk_limit or EMAIL_TEXT_CHUNK_LIMIT,
+            attachment_input_enabled=False,
+        )
+
+    async def start(self) -> None:
+        """Phase 2: connect IMAP and begin polling once the runtime is bound."""
+
+        if self._control_runtime is None:
+            raise RuntimeError(
+                "Email requires the shared ChannelRuntime to be bound before start()"
+            )
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._connect_imap)
         self._running = True
-
-        self._poll_task = asyncio.create_task(self._poll_loop())
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(), name="omicsclaw-email"
+        )
         logger.info(
-            f"Email channel started "
-            f"(IMAP: {cfg.imap_host}, poll every {cfg.poll_interval}s)"
+            "Email channel started (IMAP %s, poll every %ds)",
+            self.email_config.imap_host,
+            self.email_config.poll_interval,
         )
 
     async def stop(self) -> None:
+        self.deactivate_ingress()
         self._running = False
-        if self._poll_task:
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
-        if self._imap:
+        task = self._poll_task
+        self._poll_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if self._imap is not None:
             try:
                 self._imap.close()
                 self._imap.logout()
-            except Exception:
-                pass
+            except Exception as error:
+                logger.warning("IMAP shutdown failed (%s)", type(error).__name__)
             self._imap = None
+        # The shared runtime is owned and closed by the runner, not by any one
+        # channel: several channels share one agent.
+        self._control_runtime = None
+        self._control_loop = None
         logger.info("Email channel stopped")
 
     # ─ IMAP connection ────────────────────
 
     def _connect_imap(self) -> None:
-        cfg = self.config
+        cfg = self.email_config
         try:
             if cfg.imap_use_ssl:
                 self._imap = imaplib.IMAP4_SSL(
@@ -182,14 +272,15 @@ class EmailChannel(Channel):
                 self._imap = imaplib.IMAP4(cfg.imap_host, cfg.imap_port)
             self._imap.login(cfg.imap_username, cfg.imap_password)
             self._imap.select(cfg.imap_mailbox)
-            logger.debug(f"IMAP connected: {cfg.imap_host}:{cfg.imap_port}")
-        except Exception as e:
-            raise RuntimeError(f"IMAP connection failed: {e}") from e
+        except Exception as error:
+            raise RuntimeError(
+                f"IMAP connection failed ({type(error).__name__})"
+            ) from None
 
     def _reconnect_imap(self) -> None:
-        """Reconnect IMAP if the connection was dropped."""
+        """Reconnect only when the existing connection has actually gone."""
         try:
-            if self._imap:
+            if self._imap is not None:
                 self._imap.noop()
                 return
         except Exception:
@@ -199,112 +290,72 @@ class EmailChannel(Channel):
     # ─ Polling loop ─────────────────────
 
     async def _poll_loop(self) -> None:
-        """Repeatedly poll for new emails at configured interval."""
         while self._running:
             try:
                 await self._poll_once()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Email poll error: {e}", exc_info=True)
-            await asyncio.sleep(self.config.poll_interval)
+            except Exception as error:
+                logger.error("Email poll failed (%s)", type(error).__name__)
+            await asyncio.sleep(self.email_config.poll_interval)
 
     async def _poll_once(self) -> None:
-        """Fetch and process unseen emails."""
+        """Fetch what is unseen and hand each one to the runtime."""
         loop = asyncio.get_running_loop()
-        messages = await loop.run_in_executor(None, self._fetch_unseen)
-        for m in messages:
-            await self._process_email(m)
+        for message in await loop.run_in_executor(None, self._fetch_unseen):
+            await self._on_message(message)
 
     def _fetch_unseen(self) -> list[dict]:
-        """Fetch up to 20 UNSEEN emails from the IMAP server."""
+        """Read unseen mail. Blocking, so it runs on a worker thread.
+
+        Attachments are neither decoded nor written; see the module
+        docstring. What comes back is a text body and the headers a reply
+        needs, which is everything this layer can carry.
+        """
         self._reconnect_imap()
-        results = []
+        results: list[dict] = []
         try:
             status, data = self._imap.search(None, "UNSEEN")
             if status != "OK":
                 return []
-
-            for mid in data[0].split()[-20:]:  # Process at most 20 per cycle
-                status, msg_data = self._imap.fetch(mid, "(RFC822)")
-                if status != "OK" or not msg_data or not msg_data[0]:
+            for uid in data[0].split()[-MAX_MESSAGES_PER_POLL:]:
+                status, payload = self._imap.fetch(uid, "(RFC822)")
+                if status != "OK" or not payload or not payload[0]:
                     continue
-
-                msg = email_lib.message_from_bytes(msg_data[0][1])
-                from_name, from_addr = parseaddr(msg.get("From", ""))
-
-                body = self._extract_body(msg)
-                if len(body) > self.config.max_body_chars:
-                    body = body[: self.config.max_body_chars] + "\n[...截断]"
-
-                # Collect attachments
-                attachments: list[dict] = []
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        content_disp = part.get("Content-Disposition") or ""
-                        content_type = part.get_content_type() or ""
-                        is_attach = "attachment" in content_disp.lower()
-                        is_inline_img = (
-                            "inline" in content_disp.lower()
-                            and content_type.startswith("image/")
-                        )
-                        if is_attach or is_inline_img:
-                            filename = _decode_hdr(part.get_filename() or "attachment")
-                            payload = part.get_payload(decode=True)
-                            if payload:
-                                if len(payload) > _MAX_ATTACHMENT_BYTES:
-                                    attachments.append(
-                                        {
-                                            "annotation": (
-                                                f"[附件: {filename} "
-                                                f"(过大, {len(payload)} bytes)]"
-                                            )
-                                        }
-                                    )
-                                else:
-                                    tmp_path = Path(
-                                        f"/tmp/email_{mid.decode()}_{filename}"
-                                    )
-                                    tmp_path.write_bytes(payload)
-                                    lbl = "inline-image" if is_inline_img else "附件"
-                                    attachments.append(
-                                        {
-                                            "path": str(tmp_path),
-                                            "annotation": f"[{lbl}: {tmp_path.name}]",
-                                        }
-                                    )
-
-                if self.config.mark_seen:
-                    self._imap.store(mid, "+FLAGS", "\\Seen")
-
+                message = email_lib.message_from_bytes(payload[0][1])
+                _name, from_address = parseaddr(message.get("From", ""))
+                body = self._extract_body(message)
+                if len(body) > self.email_config.max_body_chars:
+                    body = body[: self.email_config.max_body_chars] + "\n[truncated]"
+                if self.email_config.mark_seen:
+                    self._imap.store(uid, "+FLAGS", "\\Seen")
                 results.append(
                     {
-                        "from_addr": from_addr,
-                        "from_name": _decode_hdr(from_name),
-                        "subject": _decode_hdr(msg.get("Subject", "")),
+                        "from_addr": from_address,
+                        "subject": decode_header_value(message.get("Subject", "")),
                         "body": body,
-                        "message_id": msg.get("Message-ID", ""),
-                        "date": msg.get("Date", ""),
-                        "references": msg.get("References", ""),
-                        "attachments": attachments,
+                        "message_id": message.get("Message-ID", ""),
+                        "references": message.get("References", ""),
                     }
                 )
-        except Exception as e:
-            logger.error(f"IMAP fetch error: {e}", exc_info=True)
+        except Exception as error:
+            logger.error("IMAP fetch failed (%s)", type(error).__name__)
         return results
 
-    def _extract_body(self, msg) -> str:
-        """Extract plain-text body from an email message."""
-        if msg.is_multipart():
-            for part in msg.walk():
+    def _extract_body(self, message) -> str:
+        """The plain text of a mail, preferring the part that already is text."""
+        if message.is_multipart():
+            for part in message.walk():
                 if part.get_content_type() == "text/plain":
                     return self._decode_payload(part)
-            for part in msg.walk():
+            for part in message.walk():
                 if part.get_content_type() == "text/html":
-                    return _strip_html(self._decode_payload(part))
-            return "[无文本正文]"
-        text = self._decode_payload(msg)
-        return _strip_html(text) if msg.get_content_type() == "text/html" else text
+                    return strip_html(self._decode_payload(part))
+            return ""
+        text = self._decode_payload(message)
+        return (
+            strip_html(text) if message.get_content_type() == "text/html" else text
+        )
 
     @staticmethod
     def _decode_payload(part) -> str:
@@ -314,188 +365,101 @@ class EmailChannel(Channel):
         charset = part.get_content_charset() or "utf-8"
         return payload.decode(charset, errors="replace")
 
-    # ─ Message processing ───────────────────
+    # ─ Inbound ───────────────────────
 
-    async def _process_email(self, m: dict) -> None:
-        """Send an email through the LLM pipeline."""
-        # Allowlist check
-        allowed = self.config.allowed_senders
-        if allowed and m["from_addr"] not in allowed:
-            logger.debug(f"Email ignored (not in allowlist): {m['from_addr']}")
+    def _reply_target(self, mail: dict) -> dict[str, Any]:
+        """Where a reply goes, and what makes a mail client thread it."""
+
+        return reply_target.build(
+            "email",
+            self._account_namespace,
+            mail["from_addr"],
+            subject=mail.get("subject") or None,
+            original_message_id=mail.get("message_id") or None,
+            references=mail.get("references") or None,
+        )
+
+    async def _on_message(self, mail: dict) -> None:
+        """Normalise one mail into the authoritative runtime.
+
+        Performs no model work and sends no reply: the answer is delivered by
+        the runtime's pump once the exchange has run.
+        """
+
+        if not self.ingress_active:
+            return
+        from_address = str(mail.get("from_addr") or "").strip()
+        message_id = str(mail.get("message_id") or "").strip()
+        if not from_address or not message_id:
             return
 
-        if not self.check_rate_limit(m["from_addr"]):
+        # A second, redundant allowlist check. ``SenderPolicy`` at ingress is
+        # the authority and applies to every adapter; this one stops the work
+        # earlier. Both deny by default, so the redundancy only tightens.
+        if from_address.lower() not in self._owner_subjects():
+            logger.warning("Ignored a mail from an address outside the allowlist")
             return
 
-        subject = m["subject"]
-        text = f"[邮件] 主题: {subject}\n\n{m['body']}" if subject else m["body"]
+        subject = str(mail.get("subject") or "")
+        body = str(mail.get("body") or "")
+        text = f"Subject: {subject}\n\n{body}" if subject else body
+        if not text.strip():
+            return
 
-        meta = {
-            "chat_id": m["from_addr"],
-            "subject": subject,
-            "original_message_id": m["message_id"],
-            "references": m["references"],
-            "backend": "email",
-        }
+        if self.seen_before(message_id):
+            return
 
-        logger.info(f"Email from {m['from_addr']}: {subject[:60]}")
-        asyncio.create_task(self._handle_llm(m["from_addr"], text, meta))
+        target = self._reply_target(mail)
+        if body.strip().startswith("/") and await self.answer_slash_command(
+            target, from_address, from_address, body.strip()
+        ):
+            return
 
-    async def _handle_llm(self, from_addr: str, content: str, metadata: dict) -> None:
-        """Process the email through LLM and reply."""
-        try:
-            reply = await self.process_message(
-                from_addr,
-                from_addr,
-                content,
-                platform="email",
-                metadata=metadata,
-            )
-            if reply:
-                await self.send(from_addr, reply, metadata=metadata)
-        except Exception as e:
-            logger.error(f"Email LLM error: {e}", exc_info=True)
+        if not self.check_rate_limit(from_address):
+            logger.warning("Email sender exceeded the configured rate limit")
+            return
 
-    # ─ Send ────────────────────────
+        # Length only: a mail body is the likeliest place in this repository
+        # for a subject identifier to appear, and a log is the most widely
+        # shared destination there is.
+        logger.info("Email accepted (%d chars)", len(text))
+        await self._submit_control_inbound(
+            from_address=from_address,
+            text=text,
+            message_id=message_id,
+            target=target,
+        )
 
-    async def _send_chunk(
+    async def _submit_control_inbound(
         self,
-        chat_id: str,
-        formatted_text: str,
-        raw_text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        """Send an email reply via SMTP (HTML + plain text dual-format)."""
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(
-                None,
-                self._smtp_send_html,
-                chat_id,
-                formatted_text,
-                raw_text,
-                metadata or {},
+        *,
+        from_address: str,
+        text: str,
+        message_id: str,
+        target: dict[str, Any],
+    ):
+        """Submit one normalised mail as one exchange."""
+
+        if self._control_runtime is None:
+            raise RuntimeError("Email ChannelRuntime is not bound")
+        inbound = self.inbound(
+            from_address,
+            from_address,
+            text,
+            # RFC 5322 makes Message-ID globally unique and it survives a
+            # redelivery, so it is the natural idempotency key.
+            source_request_id=message_id,
+            reply_target=target,
+            values={VALUE_CHAT_TYPE: "private", VALUE_MENTIONS: ()},
+        )
+        result = await self._control_runtime.submit(inbound)
+        if result.acceptance.status is TurnAcceptanceStatus.REJECTED:
+            # Refusals cannot answer through the pump, because no exchange was
+            # accepted. The local cache is deliberately NOT updated, so a
+            # redelivery of a transiently rejected mail can still land.
+            logger.warning(
+                "Email ingress rejected: %s", result.acceptance.code or "unspecified"
             )
-        except Exception as e:
-            err = str(e).lower()
-            if any(c in err for c in ("550", "553", "554", "auth", "rejected")):
-                raise
-            logger.warning(f"HTML email failed ({e}), falling back to plain text")
-            await loop.run_in_executor(
-                None, self._smtp_send_plain, chat_id, raw_text, metadata or {}
-            )
-
-    @contextlib.contextmanager
-    def _smtp_connect(self):
-        """Open an SMTP connection (STARTTLS or implicit SSL)."""
-        cfg = self.config
-        srv = None
-        try:
-            if cfg.smtp_starttls:
-                srv = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
-                srv.starttls()
-            else:
-                srv = smtplib.SMTP_SSL(
-                    cfg.smtp_host,
-                    cfg.smtp_port,
-                    context=ssl.create_default_context(),
-                    timeout=30,
-                )
-            srv.login(cfg.smtp_username, cfg.smtp_password)
-            yield srv
-        finally:
-            if srv is not None:
-                with contextlib.suppress(Exception):
-                    srv.quit()
-
-    def _build_subject(self, orig_subject: str) -> str:
-        cfg = self.config
-        if orig_subject and not orig_subject.lower().startswith("re:"):
-            return f"{cfg.subject_prefix}{orig_subject}"
-        return orig_subject or "OmicsClaw Reply"
-
-    def _set_reply_headers(self, msg, meta: dict) -> None:
-        orig_id = meta.get("original_message_id", "")
-        if orig_id:
-            msg["In-Reply-To"] = orig_id
-            msg["References"] = f"{meta.get('references', '')} {orig_id}".strip()
-
-    def _smtp_send_plain(self, to: str, content: str, meta: dict) -> None:
-        from email.message import EmailMessage
-
-        cfg = self.config
-        from_addr = cfg.from_address or cfg.smtp_username
-        msg = EmailMessage()
-        msg["Subject"] = self._build_subject(meta.get("subject", ""))
-        msg["From"] = from_addr
-        msg["To"] = to
-        self._set_reply_headers(msg, meta)
-        msg.set_content(content)
-        with self._smtp_connect() as srv:
-            srv.sendmail(from_addr, [to], msg.as_string())
-
-    def _smtp_send_html(
-        self, to: str, html_content: str, plain_content: str, meta: dict
-    ) -> None:
-        """Send HTML + plain text multipart email."""
-        cfg = self.config
-        from_addr = cfg.from_address or cfg.smtp_username
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = self._build_subject(meta.get("subject", ""))
-        msg["From"] = from_addr
-        msg["To"] = to
-        self._set_reply_headers(msg, meta)
-        msg.attach(MIMEText(plain_content, "plain", "utf-8"))
-        msg.attach(MIMEText(html_content, "html", "utf-8"))
-        with self._smtp_connect() as srv:
-            srv.sendmail(from_addr, [to], msg.as_string())
-
-    # ─ Media (attachment) ───────────────────
-
-    async def send_media(
-        self,
-        chat_id: str,
-        file_path: str,
-        caption: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Send a result file as an email attachment."""
-        try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                self._smtp_send_attachment,
-                chat_id,
-                file_path,
-                caption,
-                metadata or {},
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Email attachment send error: {e}")
-            return False
-
-    def _smtp_send_attachment(
-        self, to: str, file_path: str, caption: str, meta: dict
-    ) -> None:
-        cfg = self.config
-        from_addr = cfg.from_address or cfg.smtp_username
-        path = Path(file_path)
-
-        msg = MIMEMultipart()
-        msg["Subject"] = self._build_subject(meta.get("subject", ""))
-        msg["From"] = from_addr
-        msg["To"] = to
-        self._set_reply_headers(msg, meta)
-
-        if caption:
-            msg.attach(MIMEText(caption, "plain", "utf-8"))
-
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(path.read_bytes())
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", f"attachment; filename={path.name}")
-        msg.attach(part)
-
-        with self._smtp_connect() as srv:
-            srv.sendmail(from_addr, [to], msg.as_string())
+            return result
+        self.remember_message(message_id)
+        return result

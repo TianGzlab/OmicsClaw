@@ -20,18 +20,23 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import markers as sc_markers_utils
 from skills.singlecell._lib.adata_utils import (
@@ -431,8 +436,8 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Next steps:")
-    print(f"  - sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:         python skills/singlecell/scrna/sc-de/sc_de.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-enrichment: python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == '__main__':

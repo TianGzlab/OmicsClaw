@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-ambient-removal
 description: Load when removing ambient RNA contamination from droplet-based scRNA-seq using a simple
   subtraction path, CellBender, or SoupX. Skip when the contamination is multiplet barcodes (use sc-doublet-detection);
   before counts exist (use sc-count).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: S
+trigger: ambient RNA, ambient removal, cellbender, contamination, background RNA
 tags:
 - singlecell
 - scrna
@@ -16,15 +11,6 @@ tags:
 - cellbender
 - soupx
 - contamination
-requires:
-- anndata
-- cellbender
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- torch
 ---
 
 # sc-ambient-removal
@@ -41,8 +27,6 @@ Doublets are a different problem — use `sc-doublet-detection` for
 multiplet barcodes.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -84,24 +68,24 @@ multiplet barcodes.
 
 ## Gotchas
 
-- **Unavailable backend silently falls back to `simple`.** `sc_ambient.py:207-208` logs `"Requested method '%s' is unavailable (...). Falling back to simple subtraction."` when CellBender is not installed or SoupX cannot reach R/rpy2.  After every non-`simple` run, confirm `result.json["summary"]["method_used"]` matches what you passed via `--method` — the flag is a request, not a guarantee.
-- **`--contamination` is bounded to `[0, 1)` (left-inclusive).** `sc_ambient.py:133-134` checks `0 <= float(args.contamination) < 1` and raises `ValueError("--contamination must be between 0 and 1 (for example 0.05).")` otherwise.  `0` is allowed (degenerate no-op); `1` and `5.0` (the common typo for `0.05`) both fail loudly.
-- **`--expected-cells` must be a positive integer.** `sc_ambient.py:136` raises `ValueError`.  Zero or negative values fail loudly here rather than producing a degenerate run.
-- **SoupX without both `--raw-matrix-dir` and `--filtered-matrix-dir` silently falls back to `simple`.** `sc_ambient.py:851-857` logs `"SoupX requires --raw-matrix-dir and --filtered-matrix-dir. Falling back to simple subtraction."` and continues with the simple path.  `result.json` records the fallback in `summary["fallback_reason"]`; CellBender uses just the filtered matrix and the simple path uses neither.
+- **Unavailable backend silently falls back to `simple`.** `sc_ambient.py` logs `"Requested method '%s' is unavailable (...). Falling back to simple subtraction."` when CellBender is not installed or SoupX cannot reach R/rpy2.  After every non-`simple` run, confirm `result.json["summary"]["method_used"]` matches what you passed via `--method` — the flag is a request, not a guarantee.
+- **`--contamination` is bounded to `[0, 1)` (left-inclusive).** `sc_ambient.py` checks `0 <= float(args.contamination) < 1` and raises `ValueError("--contamination must be between 0 and 1 (for example 0.05).")` otherwise.  `0` is allowed (degenerate no-op); `1` and `5.0` (the common typo for `0.05`) both fail loudly.
+- **`--expected-cells` must be a positive integer.** `sc_ambient.py` raises `ValueError`.  Zero or negative values fail loudly here rather than producing a degenerate run.
+- **SoupX without both `--raw-matrix-dir` and `--filtered-matrix-dir` silently falls back to `simple`.** `sc_ambient.py` logs `"SoupX requires --raw-matrix-dir and --filtered-matrix-dir. Falling back to simple subtraction."` and continues with the simple path.  `result.json` records the fallback in `summary["fallback_reason"]`; CellBender uses just the filtered matrix and the simple path uses neither.
 
 ## Key CLI
 
 ```bash
 # Demo (simple subtraction)
-python omicsclaw.py run sc-ambient-removal --demo --output /tmp/sc_ambient_demo
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py --demo --output /tmp/sc_ambient_demo
 
 # CellBender on a 10X-filtered AnnData
-python omicsclaw.py run sc-ambient-removal \
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --input filtered.h5ad --output results/ \
   --method cellbender --expected-cells 8000 --contamination 0.05
 
 # SoupX with explicit raw + filtered matrices
-python omicsclaw.py run sc-ambient-removal \
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --input filtered.h5ad --output results/ \
   --method soupx \
   --raw-matrix-dir cellranger_out/raw_feature_bc_matrix \
@@ -114,3 +98,9 @@ python omicsclaw.py run sc-ambient-removal \
 - `references/methodology.md` — when each backend wins, ambient profile derivation, R/Python tradeoffs
 - `references/output_contract.md` — `layers["counts"]` (pre-correction) and `.X` (corrected) semantics, per-method `uns` diagnostics
 - Adjacent skills: `sc-doublet-detection` (parallel — multiplet barcodes, complementary contamination class), `sc-filter` (upstream — cell QC), `sc-preprocessing` (downstream — normalise/HVG/PCA on the cleaned counts)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `cellbender`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `torch`

@@ -120,14 +120,14 @@ Important note:
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input <sc-markers-output-dir> \
   --method ora \
   --engine auto \
   --gene-set-db go_bp \
   --output <dir>
 
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input <processed.h5ad> \
   --groupby leiden \
   --method gsea \
@@ -135,7 +135,7 @@ python omicsclaw.py run sc-enrichment \
   --gene-sets <local.gmt> \
   --output <dir>
 
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input <sc-de-output-dir> \
   --method ora \
   --gene-set-from-markers <sc-markers-output-dir> \
@@ -143,18 +143,18 @@ python omicsclaw.py run sc-enrichment \
   --marker-top-n 100 \
   --output <dir>
 
-python omicsclaw.py run sc-enrichment --demo --method ora --output <dir>
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --demo --method ora --output <dir>
 
 # gsea_r: clusterProfiler + fgsea via R bridge
-python omicsclaw.py run sc-enrichment --demo --method gsea_r --output /tmp/gsea_r_demo
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --demo --method gsea_r --output /tmp/gsea_r_demo
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input <sc-de-output-dir> \
   --method gsea_r \
   --output <dir>
 
 # gsva_r: GSVA group-level pathway activity scores via R bridge
-python omicsclaw.py run sc-enrichment --demo --method gsva_r --output /tmp/gsva_r_demo
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --demo --method gsva_r --output /tmp/gsva_r_demo
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input <processed.h5ad> \
   --method gsva_r \
   --groupby leiden \

@@ -18,6 +18,7 @@ import asyncio
 import dataclasses
 import json
 import pathlib
+import re
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -56,7 +57,13 @@ MOUNTED = (
     "plan_write",
     "memory_search",
     "memory_write",
+    "task",
 )
+
+MOUNTED_WITH_ENSEMBLE = (
+    *MOUNTED[:-1], "run_skill", "inspect_trials", "select_result", "optimize_params", "task",
+)
+"""The same list with the ensemble tools mounted: after the memory tools, before ``task``."""
 
 
 def _run(main: Coroutine[Any, Any, _T]) -> _T:
@@ -130,8 +137,11 @@ def test_a_caller_s_own_tools_are_gated_too(tmp_path, offline):
     """
     app = build_app(_config(tmp_path), tools=[_Custom()])
 
-    assert app.registry.names() == ("custom",)
+    # ``task`` is appended by the composition root whatever tool list it
+    # was given, and goes behind the same gate as the caller's own.
+    assert app.registry.names() == ("custom", "task")
     assert isinstance(app.registry.get("custom"), GatedTool)
+    assert isinstance(app.registry.get("task"), GatedTool)
     assert app.permission is not None
 
 
@@ -207,17 +217,131 @@ def test_the_registry_still_answers_both_optional_protocols(tmp_path, offline):
     assert isinstance(app.registry, ConcurrencyAwareExecutor)
 
 
+_POLICY_WORDS = (
+    "gate",
+    "gated",
+    "Gated",
+    "GatedTool",
+    "permission gate",
+    "permission mode",
+    "PermissionMode",
+    "auto-approve",
+    "auto_approve",
+    "approval_mode",
+    "prompts_for_itself",
+)
+"""Words that would mean the gate, a tool's policy or the session's posture reached the model."""
+
+
+def _policy_words_shown(app, *, tool: str | None = None) -> list[str]:
+    """The policy words, as whole words, in the definitions the model gets.
+
+    *tool* limits the search to that one tool's definition.
+    """
+    rendered = json.dumps(
+        [
+            dataclasses.asdict(d)
+            for d in app.tools_snapshot
+            if tool is None or d.name == tool
+        ],
+        ensure_ascii=False,
+    )
+    return [
+        word
+        for word in _POLICY_WORDS
+        if re.search(rf"\b{re.escape(word)}\b", rendered)
+    ]
+
+
 def test_the_gate_does_not_change_what_the_model_is_shown(tmp_path, offline):
-    """Policy never enters a prompt, and nor does the fact of being gated."""
+    """Policy never enters a prompt, and nor does the fact of being gated.
+
+    The words are matched whole (``\\bgate\\b``), not as substrings.
+    ``gate`` is a substring of ``delegate``, ``investigate``,
+    ``aggregate`` and ``navigate`` — ordinary words in a tool description —
+    so a substring check turned red twice on descriptions that leaked
+    nothing, and a check that fails on innocent prose teaches people to
+    delete it.
+    The inflected forms that did carry meaning (``gated``, the
+    ``GatedTool`` class name) are listed as words of their own.
+
+    Saying that the user may be asked to approve a call, and that whether
+    they are depends on the session's permission settings, is not a leak:
+    the sentence is the same in every mode and names no rule, so it tells
+    the model nothing about the posture it is running under. What this
+    guards is the mechanism (the gate, its wrapper, a policy field) and the
+    posture itself (a named mode). The bare word ``permission`` was on the
+    list once and turned red on exactly that sentence, so the list names
+    the phrases that carry posture instead.
+    """
     app = build_app(_config(tmp_path))
 
-    rendered = json.dumps(
-        [dataclasses.asdict(d) for d in app.tools_snapshot], ensure_ascii=False
-    )
-
     assert [d.name for d in app.tools_snapshot] == list(MOUNTED)
-    for token in ("gate", "Gated", "permission", "approval_mode", "prompts_for_itself"):
-        assert token not in rendered, token
+    assert _policy_words_shown(app) == []
+
+
+class _Described(_Custom):
+    """:class:`_Custom`, with a description chosen by the test."""
+
+    def __init__(self, description: str) -> None:
+        self._description = description
+
+    def definition(self):
+        from omicsclaw.schema import ToolDefinition
+
+        return ToolDefinition(name="custom", description=self._description)
+
+
+@pytest.mark.parametrize(
+    ("description", "found"),
+    [
+        (
+            "Delegate one step to a sub-agent to investigate, aggregate "
+            "and navigate the results.",
+            [],
+        ),
+        (
+            "Depending on the session's permission settings, the user may be "
+            "asked to approve a command before it runs.",
+            [],
+        ),
+        ("Every call passes the permission gate first.", ["gate", "permission gate"]),
+        ("This tool is gated by the rule file.", ["gated"]),
+        ("Wrapped in GatedTool(bash).", ["GatedTool"]),
+        (
+            '{"approval_mode": "ask", "prompts_for_itself": true}',
+            ["approval_mode", "prompts_for_itself"],
+        ),
+        (
+            "The permission mode is auto-approve, so nobody is asked.",
+            ["permission mode", "auto-approve"],
+        ),
+        ("Running under PermissionMode.AUTO_APPROVE.", ["PermissionMode"]),
+    ],
+    ids=[
+        "innocent-substrings",
+        "approval-is-conditional",
+        "gate",
+        "gated",
+        "class-name",
+        "policy-fields",
+        "named-mode",
+        "mode-enum",
+    ],
+)
+def test_the_policy_word_check_tells_a_leak_from_a_substring(
+    tmp_path, offline, description, found
+):
+    """The check above still catches what it is for, and only that.
+
+    Each description goes through the same gate and the same snapshot as a
+    real tool's. One that says the tool is gated, names the wrapper or
+    carries a policy field is caught; one that merely contains ``gate``
+    inside ``delegate`` or ``investigate`` is not.
+    """
+    app = build_app(_config(tmp_path), tools=[_Described(description)])
+
+    assert _policy_words_shown(app, tool="custom") == found
 
 
 # ---- the rule file reaches a real call ----------------------------------
@@ -422,3 +546,70 @@ def test_verdict_names_survive_a_round_trip():
     """``Verdict`` is what a rule file spells; the spelling is the contract."""
     for verdict in Verdict:
         assert Verdict(verdict.value) is verdict
+
+
+# ---- run_skill, when the ensemble is mounted ------------------------------
+
+
+def _with_ensemble(tmp_path: pathlib.Path, **overrides: object):
+    from omicsclaw.ensemble.resources import GpuDetection
+    from omicsclaw.entry.ensemble import build_ensemble
+    from omicsclaw.entry.sandbox import SandboxBinding
+
+    fake_skills = pathlib.Path(__file__).resolve().parents[1] / "ensemble" / "fake_skills"
+    config = _config(tmp_path, skills_dir=fake_skills, **overrides)
+    runner = build_ensemble(
+        config, assembly.build_skill_index(config), SandboxBinding(), gpus=GpuDetection((), "none")
+    )
+    return build_app(config, ensemble=runner)
+
+
+def test_run_skill_is_mounted_behind_the_gate(tmp_path, offline):
+    app = _with_ensemble(tmp_path)
+    try:
+        assert app.registry.names() == MOUNTED_WITH_ENSEMBLE
+        assert isinstance(app.registry.get("run_skill"), GatedTool)
+        assert app.registry.policy_for("run_skill").approval_mode is ApprovalMode.AUTO
+    finally:
+        if app.memory is not None:
+            app.memory.close()
+
+
+def test_a_read_only_app_refuses_run_skill(tmp_path, offline):
+    app = _with_ensemble(tmp_path, permission_mode=PermissionMode.READ_ONLY)
+
+    async def call():
+        with use_tool_context(approval=lambda r: ApprovalDecision(approved=True)):
+            return await app.registry.execute(ToolCall(id="1", name="run_skill", arguments=json.dumps(
+                {"skill": "fake-domains", "method": "split", "input": "missing.h5ad"}
+            )))
+
+    try:
+        refused = _run(call())
+        assert refused.is_error and "read_only" in refused.output
+    finally:
+        if app.memory is not None:
+            app.memory.close()
+
+
+def test_the_tuning_tools_are_gated_and_read_only_allows_only_inspection(tmp_path, offline):
+    app = _with_ensemble(tmp_path, permission_mode=PermissionMode.READ_ONLY)
+
+    async def call(name, arguments):
+        with use_tool_context(approval=lambda r: ApprovalDecision(approved=True)):
+            return await app.registry.execute(ToolCall(id="1", name=name, arguments=json.dumps(arguments)))
+
+    try:
+        for name in ("inspect_trials", "select_result", "optimize_params"):
+            assert isinstance(app.registry.get(name), GatedTool)
+            assert app.registry.policy_for(name).approval_mode is ApprovalMode.AUTO
+        optimize = _run(call("optimize_params", {"skill": "fake-domains", "input": "x.h5ad"}))
+        assert optimize.is_error and "read_only" in optimize.output
+        select = _run(call("select_result", {"run_id": "r", "k": 3, "final": {"method": "split", "trial": "t0001"},
+                                             "per_method": {}, "rationale": "x"}))
+        assert select.is_error and "read_only" in select.output
+        inspect = _run(call("inspect_trials", {"run_id": "nope", "trials": [{"method": "split", "trial": "t0001"}]}))
+        assert "read_only" not in inspect.output and "no run" in inspect.output
+    finally:
+        if app.memory is not None:
+            app.memory.close()

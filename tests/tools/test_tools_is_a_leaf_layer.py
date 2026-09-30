@@ -516,6 +516,10 @@ def test_the_public_surface_is_exactly_what_the_two_plans_delivered():
     :exc:`~omicsclaw.tools._workspace.PathRefused` is not exported either,
     and inventing an exception hierarchy on the package surface for one of
     the two boundaries would be the inconsistency.
+
+    ``ask_every_time`` (plan 0049) is here for the same reason
+    ``use_effective_policy`` is: it is the permission gate's half of a
+    channel whose other half, :func:`require_approval`, a tool calls.
     """
     import omicsclaw.tools as tools
 
@@ -546,6 +550,7 @@ def test_the_public_surface_is_exactly_what_the_two_plans_delivered():
         "WebFetchTool",
         "WebSearchTool",
         "WriteTool",
+        "ask_every_time",
         "context_value",
         "current_context",
         "effective_policy",

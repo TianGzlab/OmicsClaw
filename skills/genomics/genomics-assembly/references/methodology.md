@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-assembly --demo
-python omicsclaw.py run genomics-assembly --input <reads.fastq> --output <dir>
+python skills/genomics/genomics-assembly/genome_assembly.py --demo
+python skills/genomics/genomics-assembly/genome_assembly.py --input <reads.fastq> --output <dir>
 ```
 
 

@@ -104,32 +104,32 @@ CLI parameters still take precedence.
 
 ```bash
 # Standard usage
-oc run spatial-preprocessing --input <data.h5ad> --output <report_dir>
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --input <data.h5ad> --output <report_dir>
 
 # Tissue-aware QC
-oc run spatial-preprocessing \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input <data.h5ad> --output <report_dir> --tissue brain --species human
 
 # Explicit QC thresholds
-oc run spatial-preprocessing \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input <data.h5ad> --output <report_dir> \
   --min-genes 200 --max-mt-pct 15 --max-genes 5000
 
 # Graph tuning
-oc run spatial-preprocessing \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input <data.h5ad> --output <report_dir> \
   --n-top-hvg 3000 --n-pcs 30 --n-neighbors 15 --leiden-resolution 0.6
 
 # Multi-resolution Leiden exploration
-oc run spatial-preprocessing \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input <data.h5ad> --output <report_dir> --resolutions 0.4,0.6,0.8,1.0
 
 # Explicit platform hint
-oc run spatial-preprocessing \
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
   --input <xenium_sample.zarr> --output <report_dir> --data-type xenium
 
 # Demo
-oc run spatial-preprocessing --demo --output /tmp/spatial_preprocess_demo
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/spatial_preprocess_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-preprocess/spatial_preprocess.py \

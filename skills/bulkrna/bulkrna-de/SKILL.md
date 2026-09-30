@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: bulkrna-de
 description: Load when comparing gene expression between two conditions in bulk RNA-seq count data. Skip
   when the data is single-cell (use sc-de); spatial (use spatial-de); you need exon-level alternative
   splicing (use bulkrna-splicing).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🔬
+trigger: differential expression, DE analysis, DESeq2, volcano plot, fold change, DEGs, bulk DE
 tags:
 - bulkrna
 - differential-expression
@@ -16,11 +11,6 @@ tags:
 - volcano
 - MA-plot
 - fold-change
-requires:
-- matplotlib
-- numpy
-- pandas
-- scipy
 ---
 
 # bulkrna-de
@@ -33,8 +23,6 @@ etc.).  PyDESeq2 is preferred when ≥2 replicates per condition exist; Welch's
 t-test is the fallback for the single-replicate / no-PyDESeq2 case.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -78,10 +66,10 @@ t-test is the fallback for the single-replicate / no-PyDESeq2 case.
 
 ```bash
 # Demo run (synthetic 200-gene × 12-sample dataset)
-python omicsclaw.py run bulkrna-de --demo
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/bulkrna-de_demo
 
 # Realistic run with custom prefixes and stricter cutoffs
-python omicsclaw.py run bulkrna-de \
+python skills/bulkrna/bulkrna-de/bulkrna_de.py \
   --input counts.csv --output results/ \
   --control-prefix wt --treat-prefix ko \
   --padj-cutoff 0.01 --lfc-cutoff 1.5
@@ -93,3 +81,9 @@ python omicsclaw.py run bulkrna-de \
 - `references/methodology.md` — PyDESeq2 vs t-test, design validation, LFC shrinkage and transformation guidance
 - `references/output_contract.md` — exact output directory layout
 - Adjacent skills: `bulkrna-qc` (upstream count-matrix QC), `bulkrna-enrichment` (downstream pathway enrichment of DEG lists), `bulkrna-coexpression` (parallel WGCNA), `bulkrna-splicing` (exon-level alternative splicing)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`matplotlib`, `numpy`, `pandas`, `scipy`

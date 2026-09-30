@@ -23,11 +23,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+from skills._sdk.runtime_env import ensure_runtime_cache_dirs
 
 ensure_runtime_cache_dirs()
 
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 
@@ -578,16 +578,17 @@ def _run_cellchat_r(
     """Run CellChat via an R subprocess."""
     import pandas as pd
 
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     species = _validate_species("cellchat_r", species)
     validate_r_environment(
         required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"]
     )
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_cellchat_sp_") as tmpdir:

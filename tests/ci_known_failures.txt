@@ -1,0 +1,20 @@
+# Tests in the CI unit-test job's directories that already fail.
+#
+# Format: <node id> | <reason> [| env]
+# tests/conftest.py marks each one xfail(strict=True). A test that starts
+# passing then fails the run as XPASS: delete its line when you fix it.
+# "env" marks a test that fails only in some environments; it is
+# non-strict, since it passes where its dependencies are installed.
+#
+# Baseline: 2026-09-30, the unit-test job's directory list, run once in
+# the rapids_singlecell env and checked in a pip venv with the job's
+# packages. Cleaning up the old tests outside these directories is left
+# to a separate plan.
+
+tests/entry/test_assembly.py::test_this_layer_reads_no_provider_attribute_the_protocol_omits | cli/_configure.py:482 reads .upper on a provider attribute the protocol does not publish
+tests/entry/test_session.py::test_a_second_compaction_extends_the_first_instead_of_restarting | the second compaction's summarizer is never called
+tests/entry/test_turn.py::test_the_system_message_survives_a_successful_summarization | compaction lands on EMERGENCY where the test expects FULL
+tests/skillenv/test_ensemble_environment.py::test_a_real_trial_records_its_interpreter | reads tests/ensemble/omicsclaw/ensemble/_seed/sitecustomize.py, a path that does not exist
+tests/skillenv/test_install_wiring.py::test_with_run_skill_the_tool_comes_after_it | the ensemble now mounts optimize_params before run_skill
+tests/sdk/test_banksy_fallback.py::test_missing_banksy_and_missing_sub_env_raise_env_not_found | needs scanpy, which the CI job does not install | env
+tests/skillenv/test_overlay_real.py::test_the_overlay_sees_the_base_and_uses_the_base_pip | fails inside a virtualenv built over another environment's pip | env

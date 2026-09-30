@@ -45,19 +45,19 @@
 
 ```bash
 # Merge two sc-count outputs
-oc run sc-multi-count \
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py \
   --input sample1/processed.h5ad \
   --input sample2/processed.h5ad \
   --output merged/
 
 # With explicit sample IDs
-oc run sc-multi-count \
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py \
   --input s1/processed.h5ad --sample-id Patient_A \
   --input s2/processed.h5ad --sample-id Patient_B \
   --output merged/
 
 # Demo mode
-python omicsclaw.py run sc-multi-count --demo --output /tmp/sc_multi_count_demo
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py --demo --output /tmp/sc_multi_count_demo
 ```
 
 

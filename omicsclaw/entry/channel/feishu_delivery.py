@@ -10,8 +10,6 @@ three times internally on transport errors -- which is unsafe here: a retried
 send whose first attempt actually reached Feishu produces a duplicate reply
 that nothing upstream can see or account for.  Transport ambiguity must
 surface as ``ACCEPTANCE_UNKNOWN`` and let the pump decide.
-
-Ported for plan 0031 task D1 with the import block as the only change.
 """
 
 from __future__ import annotations
@@ -20,13 +18,16 @@ import asyncio
 from contextlib import suppress
 import json
 import math
+import re
 from typing import Any, Mapping
 
+from . import reply_target
 from .delivery import (
     DeliveryAdapterResult,
     DeliveryAttemptOutcome,
     DeliveryAttemptRequest,
 )
+from .reply_target import InvalidReplyTarget
 
 
 _MAX_MESSAGE_ID_CHARS = 128
@@ -57,8 +58,13 @@ _RETRYABLE_CODES = frozenset(
 )
 
 
-class _InvalidFeishuDelivery(ValueError):
-    pass
+class _InvalidFeishuDelivery(InvalidReplyTarget):
+    """A target that is well formed in general but not addressable on Feishu.
+
+    Feishu needs a ``destination_kind`` naming which identifier space the
+    destination belongs to, and bounds the idempotency key it will accept.
+    Neither is a common reply-target field, so both are checked here.
+    """
 
 
 def _bounded_message_id(value: object) -> str | None:
@@ -82,24 +88,36 @@ def _retry_after_ms(response: object) -> int | None:
     return None
 
 
+_WORD_JOINER = "\u2060"
+_AT_ELEMENT = re.compile(r"<(?=\s*at)", re.IGNORECASE)
+
+
+def _neutralise_at_elements(text: str) -> str:
+    """*text* with a word joiner after every ``<`` that opens an ``<at`` element.
+
+    Feishu reads ``<at user_id="…">`` in a ``text`` message as a mention, and
+    ``user_id="all"`` as one for the whole chat. The joiner (U+2060) is
+    invisible, so the text displays unchanged and names nobody. Matching
+    ignores case and whitespace between ``<`` and ``at``; a ``<`` already
+    followed by a joiner is left alone.
+
+    Args:
+        text: The text to send, as written.
+
+    Returns:
+        The text with each such ``<`` followed by U+2060.
+    """
+    return _AT_ELEMENT.sub("<" + _WORD_JOINER, text)
+
+
 def _create_message_arguments(request: DeliveryAttemptRequest) -> dict[str, Any]:
-    target = request.reply_target
-    if not isinstance(target, Mapping):
-        raise _InvalidFeishuDelivery("reply_target must be a mapping")
-    if target.get("kind", "channel") != "channel":
-        raise _InvalidFeishuDelivery("reply_target kind must be channel")
-    if target.get("adapter", "feishu") != "feishu":
-        raise _InvalidFeishuDelivery("reply_target adapter must be feishu")
-    destination_id = target.get("destination_id")
-    if not isinstance(destination_id, str) or not destination_id:
-        raise _InvalidFeishuDelivery("reply_target has no destination_id")
+    target = reply_target.read(request, adapter="feishu")
+    destination_id = target["destination_id"]
     # Absent `destination_kind` means the Reply Target predates the Feishu
     # cutover; defaulting to chat_id keeps the historical shape addressable.
     receive_id_type = target.get("destination_kind") or "chat_id"
     if receive_id_type not in _RECEIVE_ID_TYPES:
         raise _InvalidFeishuDelivery("reply_target destination_kind is unsupported")
-    if not isinstance(request.text, str) or not request.text:
-        raise _InvalidFeishuDelivery("Delivery Item text must be non-empty")
     item_id = request.item_id
     if not isinstance(item_id, str) or not item_id or len(item_id) > _MAX_UUID_CHARS:
         raise _InvalidFeishuDelivery("Delivery Item ID is unusable as a provider uuid")
@@ -107,7 +125,9 @@ def _create_message_arguments(request: DeliveryAttemptRequest) -> dict[str, Any]
         "receive_id_type": receive_id_type,
         "receive_id": destination_id,
         "msg_type": "text",
-        "content": json.dumps({"text": request.text}, ensure_ascii=False),
+        "content": json.dumps(
+            {"text": _neutralise_at_elements(request.text)}, ensure_ascii=False
+        ),
         # ADR 0060 requires the opaque Delivery Item ID be supplied as the
         # provider idempotency key wherever the provider supports one. Feishu
         # deduplicates by `uuid` within an hour, so a retry of the SAME Item --
@@ -141,7 +161,11 @@ def _build_create_request(arguments: Mapping[str, Any]) -> Any:
 
 
 class FeishuDeliveryAdapter:
-    """Perform exactly one Feishu text Delivery Attempt."""
+    """Perform exactly one Feishu text Delivery Attempt.
+
+    The text is sent with every ``<at`` element broken by a word joiner, so
+    Feishu displays it as written and notifies nobody it names.
+    """
 
     def __init__(self, client: Any, *, request_builder: Any = None) -> None:
         self._client = client
@@ -158,7 +182,7 @@ class FeishuDeliveryAdapter:
         try:
             arguments = _create_message_arguments(request)
             create_request = self._request_builder(arguments)
-        except _InvalidFeishuDelivery:
+        except InvalidReplyTarget:
             return DeliveryAdapterResult(
                 outcome=DeliveryAttemptOutcome.REJECTED_PERMANENT,
                 error_code="feishu_invalid_delivery",

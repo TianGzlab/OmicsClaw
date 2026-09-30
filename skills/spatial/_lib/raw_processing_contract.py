@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from omicsclaw.common.report import (
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
     write_repro_requirements,
@@ -540,7 +540,7 @@ def write_report(
             "- The Python gallery summarizes upstream attrition and raw-matrix structure; publication styling should consume `figure_data/` instead of recomputing the upstream run.",
             "",
             "## Recommended Next Step\n",
-            f"- Run `oc run {next_skill} --input {shlex.quote(str(output_dir / 'raw_counts.h5ad'))} --output <next_dir>` to perform QC, normalization, PCA, UMAP, and clustering.",
+            f"- Next, run the `{next_skill}` skill on {shlex.quote(str(output_dir / 'raw_counts.h5ad'))} to perform QC, normalization, PCA, UMAP, and clustering. Load it with `use_skill` for its script path and flags — there is no `oc run`.",
             "",
             "## Visualization Outputs\n",
             "- `figures/manifest.json`: standard raw-processing gallery manifest",

@@ -46,6 +46,8 @@ _LOWER_LAYERS = (
     "mcp",
     "memory",
     "sandbox",
+    "ensemble",
+    "skillenv",
 )
 
 _REPLACED_PACKAGES = (
@@ -206,7 +208,7 @@ from omicsclaw.provider import provider_from_env
 from omicsclaw.tools.builtin.bash import ENGINE_TIMEOUT_MARGIN
 
 with tempfile.TemporaryDirectory() as root:
-    (Path(root) / "SOUL.md").write_text("I am OmicsClaw", encoding="utf-8")
+    (Path(root) / "OMICSCLAW.md").write_text("I am OmicsClaw", encoding="utf-8")
 
     config = resolve_app_config(
         argv=["--workspace", root, "--model", "deepseek-chat"],

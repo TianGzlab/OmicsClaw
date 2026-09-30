@@ -15,11 +15,19 @@ timeout plugin is a test run that never finishes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import pathlib
+import signal
 import time
+from asyncio import base_subprocess
+
+import pytest
 
 from omicsclaw.entry.cli import PROMPT
-from omicsclaw.entry.cli._shell import CONTEXT_LIMIT, DISPLAY_LIMIT
+from omicsclaw.entry.cli import _shell
+from omicsclaw.entry.cli._shell import CONTEXT_LIMIT, DISPLAY_LIMIT, run_shell
+from omicsclaw.launch._surfaces import _interrupts
 from omicsclaw.schema import Message, Role
 from tests.entry.test_cli_repl import (  # type: ignore[import-not-found]
     WAIT_S,
@@ -272,3 +280,406 @@ def test_the_shell_runs_in_the_workspace(tmp_path):
         return buffer.getvalue()
 
     assert "only-here.txt" in asyncio.run(drive())
+
+
+# ---- Ctrl-C while a command runs ----------------------------------------
+
+needs_proc = pytest.mark.skipif(
+    not os.path.isdir("/proc"), reason="reads process groups from /proc"
+)
+
+
+def _group(pgid: int) -> dict[int, str]:
+    """The live members of process group *pgid*, pid to command name.
+
+    Read from ``/proc`` rather than asked with ``os.killpg(pgid, 0)``,
+    which a killed but not yet reaped member — a zombie — answers as
+    though it were alive.
+    """
+    members: dict[int, str] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", encoding="utf-8", errors="replace") as f:
+                stat = f.read()
+        except OSError:
+            continue
+        name = stat[stat.find("(") + 1 : stat.rfind(")")]
+        state, _parent, group = stat[stat.rfind(")") + 2 :].split()[:3]
+        if int(group) == pgid and state != "Z":
+            members[int(entry)] = name
+    return members
+
+
+async def _until(condition, what: str) -> None:
+    """Wait for *condition* to hold, and fail by name if it never does."""
+    deadline = time.monotonic() + WAIT_S
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(f"never happened: {what}")
+        await asyncio.sleep(0.02)
+
+
+def _leader(recorded: pathlib.Path) -> int | None:
+    """The pid the command wrote into *recorded*, once it has."""
+    try:
+        text = recorded.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return int(text) if text.isdigit() else None
+
+
+async def _emptied(pgid: int) -> bool:
+    """Whether the group empties within two seconds of a kill.
+
+    Awaited on the loop that ran the command, so that the loop also sees
+    the child exit and closes its transport before the test ends.
+    """
+    deadline = time.monotonic() + 2.0
+    while _group(pgid):
+        if time.monotonic() > deadline:
+            return False
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.1)
+    return True
+
+
+@needs_proc
+def test_ctrl_c_during_a_shell_command_stops_the_command_and_not_the_repl(
+    tmp_path,
+):
+    """``Ctrl-C`` while ``!sleep 20`` ran used to end ``oc cli`` with 130.
+
+    The terminal's SIGINT lands in the entry point's handler, which asks
+    :meth:`Repl.interrupt` whether there was anything to cancel and quits
+    the loop when there was not. Only an exchange used to count, so a
+    command a person typed was not "something running", and the key that
+    means "stop this" meant "stop everything" — while the command itself,
+    in a session of its own that the terminal's signal never reaches,
+    went on running after the REPL had gone.
+
+    Driven through that handler rather than through ``interrupt()``
+    alone, because the handler's reading of the answer is where the
+    process ended. Held here: the loop is not cancelled; the command's
+    whole group is killed; the screen and the model's record both say
+    it was interrupted; and the next line is read and answered.
+    """
+    recorded = tmp_path / "pgid"
+
+    async def drive():
+        provider = answering("noted")
+        app = build(tmp_path, provider)
+        repl, source, buffer = repl_over(
+            app,
+            [f"!echo $$ > {recorded}; sleep 20 | cat", "what was that?", "/exit"],
+        )
+        loop = asyncio.create_task(repl.run())
+        await _until(lambda: _leader(recorded) is not None, "the command started")
+        pgid = _leader(recorded)
+        await _until(lambda: "sleep" in _group(pgid).values(), "sleep started")
+        started = time.monotonic()
+        _interrupts(repl, loop)._fire()
+        await asyncio.wait({loop}, timeout=WAIT_S)
+        elapsed = time.monotonic() - started
+        ended_the_repl = loop.cancelled()
+        emptied = await _emptied(pgid)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return (
+            pgid,
+            ended_the_repl,
+            emptied,
+            elapsed,
+            source.prompts,
+            buffer.getvalue(),
+            provider.seen[0][-1].content if provider.seen else "",
+        )
+
+    pgid, ended_the_repl, emptied, elapsed, prompts, printed, sent = asyncio.run(
+        drive()
+    )
+
+    assert not ended_the_repl, "Ctrl-C during a ! command ended the REPL"
+    assert emptied, f"left running after Ctrl-C: {_group(pgid)}"
+    assert elapsed < 5.0, f"the command was not stopped ({elapsed:.1f}s)"
+    assert "✗ interrupted after" in printed
+    assert prompts == [PROMPT, PROMPT, PROMPT], "the loop went back to the prompt"
+    assert "noted" in printed, "the next line was answered"
+    assert f"$ echo $$ > {recorded}; sleep 20 | cat (interrupted after " in sent
+    assert sent.endswith("what was that?")
+
+
+@needs_proc
+def test_cancelling_the_repl_during_a_shell_command_still_cancels_it(tmp_path):
+    """An interrupted command is a cancelled *child*, not a cancelled REPL.
+
+    The two arrive as the same exception at the same ``await``. Treating
+    the REPL's own cancellation — shutdown, the second ``Ctrl-C`` at an
+    idle prompt, a supervisor — as "the command was interrupted" would
+    swallow it and go back to the prompt, so a REPL asked to stop would
+    keep reading lines. It must stop, and the command must die with it.
+    """
+    recorded = tmp_path / "pgid"
+
+    async def drive():
+        app = build(tmp_path, answering("unused"))
+        repl, source, buffer = repl_over(
+            app, [f"!echo $$ > {recorded}; sleep 20", "/exit"]
+        )
+        loop = asyncio.create_task(repl.run())
+        await _until(lambda: _leader(recorded) is not None, "the command started")
+        pgid = _leader(recorded)
+        await _until(lambda: "sleep" in _group(pgid).values(), "sleep started")
+        loop.cancel()
+        await asyncio.wait({loop}, timeout=WAIT_S)
+        emptied = await _emptied(pgid)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return pgid, loop.cancelled(), emptied, source.prompts, buffer.getvalue()
+
+    pgid, cancelled, emptied, prompts, printed = asyncio.run(drive())
+
+    assert cancelled, "the REPL's own cancellation was swallowed"
+    assert prompts == [PROMPT], "the loop asked for another line"
+    assert "interrupted" not in printed
+    assert emptied, f"left running after the REPL stopped: {_group(pgid)}"
+
+
+@needs_proc
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sleep 30 | cat",
+        # The shell exits at once and is reaped; the background job keeps
+        # the group — and the output pipe — alive without it.
+        "sleep 30 & echo started",
+    ],
+)
+def test_a_cancelled_command_takes_its_whole_process_group_with_it(
+    tmp_path, command
+):
+    """Cancelling :func:`run_shell` kills the group, not only ``bash``.
+
+    The command runs in a session of its own, so the terminal's SIGINT
+    never reaches it, and cancelling the Task that awaits it only closes
+    asyncio's transport — which kills ``bash`` and nothing else. Without
+    an explicit kill on that path, ``sleep 30 | cat`` outlives the
+    ``Ctrl-C`` that was meant to stop it.
+
+    The second command is the case where ``bash`` is already gone: the
+    group has to be addressed by the id it was created with, because
+    asking the reaped leader for its group finds nothing.
+    """
+    recorded = tmp_path / "pgid"
+
+    async def drive():
+        running = asyncio.create_task(
+            run_shell(f"echo $$ > {recorded}; {command}", cwd=tmp_path)
+        )
+        await _until(lambda: _leader(recorded) is not None, "the command started")
+        pgid = _leader(recorded)
+        await _until(lambda: "sleep" in _group(pgid).values(), "sleep started")
+        running.cancel()
+        await asyncio.wait({running}, timeout=WAIT_S)
+        return pgid, running.cancelled(), await _emptied(pgid)
+
+    pgid, cancelled, emptied = asyncio.run(drive())
+
+    assert cancelled, "the cancellation was not passed on to the caller"
+    assert emptied, f"outlived the cancellation: {_group(pgid)}"
+
+
+def _hold_the_transport(monkeypatch) -> asyncio.Event:
+    """Hold every subprocess transport before it connects, until released.
+
+    The child has been exec-ed by then and runs on; only
+    ``create_subprocess_exec`` is kept from returning.
+    """
+    release = asyncio.Event()
+    connect = base_subprocess.BaseSubprocessTransport._connect_pipes
+
+    async def held(self, waiter):
+        await release.wait()
+        return await connect(self, waiter)
+
+    monkeypatch.setattr(
+        base_subprocess.BaseSubprocessTransport, "_connect_pipes", held
+    )
+    return release
+
+
+@needs_proc
+def test_a_command_cancelled_while_its_shell_is_still_starting_loses_its_group(
+    tmp_path, monkeypatch
+):
+    """The test above, with the cancellation landing inside the spawn.
+
+    ``create_subprocess_exec`` returns only once the transport has
+    connected its pipe, and ``bash`` has been running since before that.
+    Cancelled in between, asyncio's own cleanup closes the transport, which
+    SIGKILLs ``bash`` alone, and ``run_shell``'s handler never sees the
+    exception, so ``sleep 30 | cat`` ran on — and, still holding the pipe,
+    kept asyncio's cleanup waiting, so the cancellation itself did not
+    return until ``sleep`` ended. This is what made the test above fail
+    under load, two runs out of two at twice CPU oversubscription; here the
+    transport is held so the window is certain.
+    """
+    release = _hold_the_transport(monkeypatch)
+    recorded = tmp_path / "pgid"
+    shell_left: list[bool] = []
+
+    async def command() -> None:
+        try:
+            await run_shell(f"echo $$ > {recorded}; sleep 30 | cat", cwd=tmp_path)
+        except asyncio.CancelledError:
+            shell_left.append(os.path.exists(f"/proc/{_leader(recorded)}"))
+            raise
+
+    async def drive():
+        running = asyncio.create_task(command())
+        await _until(lambda: _leader(recorded) is not None, "the command started")
+        pgid = _leader(recorded)
+        await _until(lambda: "sleep" in _group(pgid).values(), "sleep started")
+        running.cancel()
+        await asyncio.sleep(0)  # the cancellation lands while the transport is held
+        release.set()
+        await asyncio.wait({running}, timeout=WAIT_S)
+        return pgid, running.cancelled(), await _emptied(pgid)
+
+    try:
+        pgid, cancelled, emptied = asyncio.run(drive())
+
+        assert emptied, f"outlived a cancellation during the spawn: {_group(pgid)}"
+        assert cancelled, "the cancellation was not passed on to the caller"
+        assert shell_left == [False], "bash was not reaped first"
+    finally:
+        if (pgid := _leader(recorded)) is not None and _group(pgid):
+            with contextlib.suppress(OSError):
+                os.killpg(pgid, signal.SIGKILL)
+
+
+@needs_proc
+def test_a_timed_out_command_whose_shell_has_exited_is_still_killed(tmp_path):
+    """The timeout's kill reaches a group whose leader is already reaped.
+
+    ``bash -c 'sleep 30 & echo started'`` exits at once and the
+    background ``sleep`` keeps the output pipe open. Looking the group up
+    through the reaped shell's pid found nothing, so the kill fell back
+    to the shell alone, and collecting the output afterwards waited the
+    full thirty seconds for a process that was supposed to be dead: the
+    one bound this module promises did not hold.
+    """
+    recorded = tmp_path / "pgid"
+
+    async def drive():
+        started = time.monotonic()
+        result = await asyncio.wait_for(
+            run_shell(
+                f"echo $$ > {recorded}; sleep 30 & echo started",
+                cwd=tmp_path,
+                timeout_s=0.3,
+            ),
+            WAIT_S,
+        )
+        elapsed = time.monotonic() - started
+        return result, elapsed, await _emptied(_leader(recorded))
+
+    result, elapsed, emptied = asyncio.run(drive())
+
+    assert result.timed_out
+    assert elapsed < 3.0, f"the timeout did not bound the command ({elapsed:.1f}s)"
+    assert emptied, "the background job survived the timeout"
+
+
+def test_a_timed_out_command_keeps_what_it_printed_before_the_kill(tmp_path):
+    """A command killed at the deadline has usually printed the very lines
+    that say why it hung; a result with empty output after sixty seconds
+    of waiting leaves the person nothing to go on. The output used to be
+    collected by ``communicate()``, whose buffer the timeout cancelled and
+    dropped, so only bytes still in the pipe after the kill survived."""
+
+    async def drive():
+        return await asyncio.wait_for(
+            run_shell(
+                "echo before-the-deadline; sleep 30", cwd=tmp_path, timeout_s=0.5
+            ),
+            WAIT_S,
+        )
+
+    result = asyncio.run(drive())
+
+    assert result.timed_out and result.failed
+    assert result.output == "before-the-deadline\n"
+
+
+def test_what_was_still_in_the_pipe_at_the_kill_is_read_after_it(
+    tmp_path, monkeypatch
+):
+    """Bytes the reader had not reached when the deadline fired.
+
+    The loop stalls — a slow synchronous callback, a starved CPU — and
+    during the stall the command writes and the deadline passes. When the
+    loop resumes, the timeout cancels the reader before the new bytes have
+    been handed to it, so they are still waiting when the command is
+    killed, and only the drain after the kill reads them. Without it the
+    result is empty, and the line that says why the command hung is lost.
+
+    The stall is made by blocking the loop from this test, and only once
+    the reader is running, so the deadline cannot pass before the command
+    has written. The spy on ``_collect`` only records when reading began.
+    """
+    go = tmp_path / "go"
+    written = tmp_path / "written"
+    reading: list[float] = []
+    collect = _shell._collect
+
+    async def spy(process, into):
+        reading.append(time.monotonic())
+        return await collect(process, into)
+
+    monkeypatch.setattr(_shell, "_collect", spy)
+    timeout_s = 0.3
+
+    async def drive():
+        running = asyncio.create_task(
+            run_shell(
+                f"until [ -e {go} ]; do sleep 0.01; done; "
+                f"printf left-in-the-pipe; touch {written}; exec sleep 30",
+                cwd=tmp_path,
+                timeout_s=timeout_s,
+            )
+        )
+        await _until(lambda: bool(reading), "the output is being read")
+        go.touch()
+        give_up = time.monotonic() + WAIT_S
+        while not written.exists() or time.monotonic() < reading[0] + timeout_s + 0.1:
+            if time.monotonic() > give_up:
+                raise AssertionError("never happened: the command wrote")
+            time.sleep(0.01)  # blocks the loop: nothing reads the pipe meanwhile
+        return await asyncio.wait_for(running, WAIT_S)
+
+    result = asyncio.run(drive())
+
+    assert result.timed_out
+    assert result.output == "left-in-the-pipe"
+
+
+def test_the_screen_and_the_model_see_the_partial_output_of_a_killed_command(
+    tmp_path,
+):
+    async def drive():
+        provider = _two_answers()
+        app = build(tmp_path, provider)
+        repl, _source, buffer = repl_over(
+            app,
+            ["!echo partial-line; sleep 30", "what happened?", "/exit"],
+            shell_timeout_s=0.3,
+        )
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return provider.seen, buffer.getvalue()
+
+    seen, printed = asyncio.run(drive())
+
+    assert "partial-line" in printed and "killed after" in printed
+    question = seen[0][-1].content
+    assert "partial-line" in question and "timed out" in question

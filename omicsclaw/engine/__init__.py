@@ -22,6 +22,16 @@ is exported as the seam those tools will satisfy **structurally**,
 without importing this package, exactly as an adapter satisfies
 ``LLMProvider``.
 
+:class:`~omicsclaw.engine.prompt.PromptSource` and
+:class:`~omicsclaw.engine.conversation.Conversation` are the same idea
+applied to the two ends of one exchange: the loop asks a renderer for a
+system prompt and hands a trajectory to whoever keeps the conversation,
+and neither of them has to know this package exists.
+:class:`~omicsclaw.engine.prompt.RenderedPrompt` joins them because a
+render is passed through — to
+:attr:`~omicsclaw.engine.types.RunResult.prompt` — rather than reduced to
+a string on the way in.
+
 ``execute_tool_calls`` and ``observations`` are exported beside it
 because scheduling policy — concurrency, per-tool timeouts, the ordering
 of Observations — is the loop's business rather than any tool's, and a
@@ -43,6 +53,7 @@ importing the loop never requires an optional extra to be installed.
 from .augmentor import TurnAugmentor
 from .compactor import HistoryCompactor
 from .config import EngineConfig
+from .conversation import Conversation
 from .executor import (
     ConcurrencyAwareExecutor,
     DeadlineAwareExecutor,
@@ -52,17 +63,21 @@ from .executor import (
     observations,
 )
 from .loop import AgentEngine
+from .prompt import PromptSource, RenderedPrompt
 from .types import EngineError, EngineEvent, EngineEventType, RunResult, StopReason
 
 __all__ = [
     "AgentEngine",
     "ConcurrencyAwareExecutor",
+    "Conversation",
     "DeadlineAwareExecutor",
     "EngineConfig",
     "EngineError",
     "EngineEvent",
     "EngineEventType",
     "HistoryCompactor",
+    "PromptSource",
+    "RenderedPrompt",
     "RunResult",
     "StopReason",
     "TimeoutPause",

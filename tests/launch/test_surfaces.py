@@ -23,11 +23,14 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import pathlib
 import signal
+import subprocess
 import sys
 
 import pytest
 
+from omicsclaw.entry.channel import CHANNEL_REGISTRY
 from omicsclaw.entry.config import AppConfigError
 from omicsclaw.launch import DOTENV_FILE, _adopt_dotenv, _surfaces, main
 from omicsclaw.launch._surfaces import (
@@ -71,6 +74,145 @@ def test_a_desktop_flag_without_its_value_is_refused(flag):
 def test_an_unknown_desktop_flag_is_refused():
     with pytest.raises(AppConfigError, match="unknown surface option"):
         DesktopOptions.parse(["--tls"])
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["--abandon-grace", "600"], 600.0),
+        (["--abandon-grace=600"], 600.0),
+        (["--abandon-grace", "1"], 1.0),
+        (["--abandon-grace", "86400"], 86400.0),
+        (["--abandon-grace", "2.5"], 2.5),
+        ([], None),
+    ],
+)
+def test_the_abandon_grace_lands_in_seconds(argv, expected):
+    """``None`` when absent, so the registry's own default stays in force."""
+    assert DesktopOptions.parse(argv).abandon_grace_s == expected
+
+
+@pytest.mark.parametrize(
+    "raw", ["0", "-5", "0.5", "86401", "nan", "inf", "-inf", "ten", ""]
+)
+def test_an_abandon_grace_outside_one_second_to_one_day_is_refused(raw):
+    """``nan`` and ``inf`` parse as floats, so the range check is what
+    refuses them; ``0`` would cancel an exchange the instant its stream
+    dropped, which no reconnect could beat."""
+    with pytest.raises(AppConfigError, match="seconds"):
+        DesktopOptions.parse(["--abandon-grace", raw])
+
+
+def test_a_refused_abandon_grace_names_the_flag():
+    with pytest.raises(AppConfigError, match="--abandon-grace takes a number of seconds, not 'abc'"):
+        DesktopOptions.parse(["--abandon-grace", "abc"])
+    with pytest.raises(AppConfigError, match="--abandon-grace takes 1 to 86400 seconds"):
+        DesktopOptions.parse(["--abandon-grace", "0"])
+
+
+def test_an_abandon_grace_without_its_value_is_refused():
+    with pytest.raises(AppConfigError, match="needs a value"):
+        DesktopOptions.parse(["--abandon-grace"])
+
+
+def test_the_advertised_remote_start_parses_to_a_bigger_ring_and_grace(
+    monkeypatch, tmp_path
+):
+    """The start command ``oc desktop --help`` recommends for a server
+    reached over SSH, run through the real launcher: the
+    ``OMICSCLAW_SKILLS_DIR`` it sets lands in ``AppConfig.skills_dir``,
+    ``--delta-ring-size`` is a deployment flag and lands in ``AppConfig``,
+    ``--abandon-grace`` a surface flag and lands in ``DesktopOptions``."""
+    import shlex
+
+    lines = _surfaces.DESKTOP_USAGE.splitlines()
+    end = next(i for i, text in enumerate(lines) if "--delta-ring-size" in text)
+    start = end
+    while lines[start - 1].rstrip().endswith("\\"):
+        start -= 1
+    command = " ".join(text.strip().rstrip("\\") for text in lines[start : end + 1])
+    checkout = tmp_path / "checkout"
+    workspace = tmp_path / "project"
+    words = shlex.split(
+        command.replace("<checkout>", str(checkout)).replace("<dir>", str(workspace))
+    )
+    env = {}
+    while "=" in words[0]:
+        name, value = words.pop(0).split("=", 1)
+        env[name] = value
+    argv = words
+    assert env == {"OMICSCLAW_SKILLS_DIR": str(checkout / "skills")}
+    assert argv[:2] == ["oc", "desktop"]
+    seen: list = []
+
+    async def serve(config, options, token, uvicorn, settings=None):
+        seen.append((config, options))
+        return 0
+
+    monkeypatch.setattr(_surfaces, "_asgi_server_module", lambda: object())
+    monkeypatch.setattr(_surfaces, "_serve_desktop", serve)
+
+    assert main(argv[1:], env) == EXIT_OK
+    ((config, options),) = seen
+    assert config.skills_dir == checkout / "skills"
+    assert config.delta_ring_size == 65536
+    assert config.workspace == workspace.resolve()
+    assert options.abandon_grace_s == 600.0
+    assert (options.host, options.port) == ("127.0.0.1", 8765)
+
+
+class _DesktopUvicorn:
+    """The two names ``_serve_desktop`` takes from uvicorn, serving nothing."""
+
+    class Config:
+        def __init__(self, app, **_kwargs) -> None:
+            self.app = app
+
+    class Server:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        async def serve(self) -> None:
+            return None
+
+
+def _served_desktop_attach_calls(monkeypatch, argv) -> list[dict]:
+    app = _App()
+    calls: list[dict] = []
+
+    async def open_app(_config):
+        return app
+
+    def attach_sessions(given, **kwargs):
+        calls.append(kwargs)
+        return given
+
+    monkeypatch.setattr(_surfaces, "open_app", open_app)
+    monkeypatch.setattr(_surfaces, "attach_sessions", attach_sessions)
+    monkeypatch.setattr(_surfaces, "create_desktop_app", lambda given, **_k: given)
+    options = DesktopOptions.parse(argv)
+    code = asyncio.run(
+        _surfaces._serve_desktop(object(), options, "", _DesktopUvicorn)
+    )
+    assert code == EXIT_OK
+    assert app.closed == 1
+    return calls
+
+
+def test_the_desktop_server_hands_the_abandon_grace_to_the_registry(monkeypatch):
+    calls = _served_desktop_attach_calls(monkeypatch, ["--abandon-grace", "600"])
+
+    assert calls == [{"abandon_grace_s": 600.0}]
+
+
+def test_the_desktop_server_leaves_the_registry_default_when_no_grace_is_given(
+    monkeypatch,
+):
+    """Not passing it, rather than passing the default, keeps one owner of
+    the default: ``entry.session``."""
+    calls = _served_desktop_attach_calls(monkeypatch, [])
+
+    assert calls == [{}]
 
 
 @pytest.mark.parametrize("raw", ["0", "65536", "-1", "http", "80.5", ""])
@@ -141,7 +283,7 @@ def test_a_channel_list_tolerates_the_spaces_a_person_types():
     assert _as_channel_names(" telegram , feishu ") == ("telegram", "feishu")
 
 
-# ---- CLAUDE.md safety rule 1 ------------------------------------------
+# ---- SAFETY_RULES rule 1 ----------------------------------------------
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", ""])
@@ -169,14 +311,30 @@ def test_an_off_machine_bind_with_a_token_is_allowed(host):
     assert _refuse_an_open_unauthenticated_bind(host, "s3cret") is None
 
 
-def test_the_desktop_command_refuses_an_open_bind_before_it_needs_uvicorn(capsys):
+@pytest.fixture
+def no_web_server(monkeypatch):
+    """Make ``fastapi`` and ``uvicorn`` unimportable for one test.
+
+    A ``None`` entry in :data:`sys.modules` makes ``import`` raise
+    :exc:`ImportError`, so the command takes its missing-dependency branch
+    whether or not this interpreter has them. Without it, an interpreter
+    that does have them would get past the check and start a real server
+    on ``0.0.0.0:8765``, and the test would hang instead of failing.
+    """
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
+
+
+def test_the_desktop_command_refuses_an_open_bind_before_it_needs_uvicorn(
+    capsys, no_web_server
+):
     """The whole command, not the helper: ordering is the property.
 
-    ``uvicorn`` is not installed here, so a check placed after the
-    dependency probe would be unreachable on this machine and the
-    refusal a user actually got would be about a missing package. The
-    security refusal has to come first, and the only way to see that it
-    does is to run the command where both conditions hold.
+    With the web server missing, a check placed after the dependency probe
+    would be unreachable and the refusal a user actually got would be
+    about a missing package. The security refusal has to come first, and
+    the only way to see that it does is to run the command where both
+    conditions hold.
     """
     code = main(["desktop", "--", "--host", "0.0.0.0"], {})
     captured = capsys.readouterr()
@@ -186,7 +344,9 @@ def test_the_desktop_command_refuses_an_open_bind_before_it_needs_uvicorn(capsys
     assert "uvicorn" not in captured.err
 
 
-def test_the_token_comes_from_the_environment_the_shell_was_handed(capsys):
+def test_the_token_comes_from_the_environment_the_shell_was_handed(
+    capsys, no_web_server
+):
     """With the variable set, the same command reaches the dependency check.
 
     This is the other half of the test above and the reason it is not
@@ -203,6 +363,17 @@ def test_the_token_comes_from_the_environment_the_shell_was_handed(capsys):
     assert code == EXIT_REFUSED
     assert "uvicorn and fastapi" in captured.err
     assert "OMICSCLAW_REMOTE_AUTH_TOKEN" not in captured.err
+
+
+def test_the_desktop_command_accepts_skill_env_install(capsys, no_web_server):
+    """``install_skill_deps`` asks through an approval card, which the
+    desktop answers, so ``install`` reaches the dependency check."""
+    code = main(["desktop"], {"OMICSCLAW_SKILL_ENV": "install"})
+    captured = capsys.readouterr()
+
+    assert code == EXIT_REFUSED
+    assert "uvicorn and fastapi" in captured.err
+    assert "skill_env=install" not in captured.err
 
 
 # ---- plan 0037 §5.2: the deployment half is always read ---------------
@@ -245,11 +416,20 @@ def test_a_well_formed_help_request_is_still_answered(surface, capsys):
 
 
 def test_the_registry_listing_still_works_and_reads_the_gate(capsys):
+    """Every registered adapter can be started, and the listing says so.
+
+    The status is read off ``Channel.authoritative_ingress`` rather than
+    from a second list kept here, because that attribute is what
+    ``require_authoritative_ingress`` actually gates a start-up on — a
+    printed list that disagreed with the gate would be worse than none.
+    "Registered but unable to start" is a state that no longer exists.
+    """
     assert main(["channel", "--", "--list"], {}) == EXIT_OK
     printed = capsys.readouterr().out
 
     assert "telegram" in printed and "authoritative" in printed
-    assert "disabled pending cutover" in printed
+    assert "disabled pending cutover" not in printed
+    assert printed.count("[authoritative]") == len(CHANNEL_REGISTRY) == 7
 
 
 def test_a_channel_run_with_no_channels_says_which_flag_is_missing(capsys):
@@ -401,14 +581,122 @@ def test_telegram_is_built_from_either_half_of_its_gate(env):
 
 
 def test_an_adapter_with_no_launch_configuration_says_so():
+    """A registry name with no builder is refused, not guessed at.
+
+    Every name in the registry has a builder today, so nothing reaches this
+    branch in production. It is kept — and named — for the next adapter
+    added to the registry before its builder exists: the refusal has to say
+    "this deployment is not configured" rather than let the adapter fail at
+    start-up as an unanticipated error.
+    """
     with pytest.raises(AppConfigError, match="no launch configuration yet"):
-        _surfaces.build_channel("slack", {})
+        _surfaces.build_channel("a-platform-with-no-builder", {})
 
 
 @pytest.mark.parametrize("raw", ["x", "1.5", "seven"])
 def test_a_whole_number_variable_that_is_not_one_is_refused(raw):
     with pytest.raises(AppConfigError, match="not a whole number"):
         _surfaces._as_int({"TELEGRAM_CHAT_ID": raw}, "TELEGRAM_CHAT_ID", 0)
+
+
+# ---- the builders the cut-over added ----------------------------------
+
+
+CHANNEL_CREDENTIALS = {
+    "slack": {
+        "SLACK_BOT_TOKEN": "xoxb-t",
+        "SLACK_APP_TOKEN": "xapp-t",
+        "SLACK_ALLOWED_SENDERS": "U1",
+    },
+    "discord": {
+        "DISCORD_BOT_TOKEN": "t",
+        "DISCORD_ALLOWED_SENDERS": "1234",
+    },
+    "dingtalk": {
+        "DINGTALK_CLIENT_ID": "ding1",
+        "DINGTALK_CLIENT_SECRET": "s",
+        "DINGTALK_ALLOWED_SENDERS": "staff1",
+    },
+    "qq": {
+        "QQ_APP_ID": "102",
+        "QQ_APP_SECRET": "s",
+        "QQ_ALLOWED_SENDERS": "open1",
+    },
+    "email": {
+        "EMAIL_IMAP_HOST": "imap.example.org",
+        "EMAIL_IMAP_USERNAME": "bot@example.org",
+        "EMAIL_SMTP_HOST": "smtp.example.org",
+        "EMAIL_SMTP_USERNAME": "bot@example.org",
+        "EMAIL_ALLOWED_SENDERS": "owner@example.org",
+    },
+}
+"""The smallest environment each new adapter can be built from.
+
+Used in both directions: every variable is dropped in turn to check that
+its absence is refused, and the whole set is used to check that a complete
+one is accepted.
+"""
+
+
+@pytest.mark.parametrize("name", sorted(CHANNEL_CREDENTIALS))
+def test_each_new_channel_is_built_from_its_own_credentials(name):
+    """Constructing an adapter costs no platform SDK — none is installed."""
+    channel = _surfaces.build_channel(name, CHANNEL_CREDENTIALS[name])
+
+    assert channel.name == name
+    assert channel.authoritative_ingress is True
+    assert channel.config.allowed_senders
+
+
+@pytest.mark.parametrize(
+    "name, variable",
+    [
+        (name, variable)
+        for name, env in sorted(CHANNEL_CREDENTIALS.items())
+        for variable in sorted(env)
+    ],
+)
+def test_a_missing_credential_is_refused_by_name(name, variable):
+    """Before an agent is assembled, and naming the variable that is absent.
+
+    A missing credential is the commonest way this command fails. Reported
+    from inside the adapter it would arrive as an unanticipated failure
+    after an MCP start-up had already been paid for.
+    """
+    env = dict(CHANNEL_CREDENTIALS[name])
+    del env[variable]
+
+    with pytest.raises(AppConfigError, match=variable):
+        _surfaces.build_channel(name, env)
+
+
+def test_every_registered_adapter_has_a_builder_and_no_builder_is_orphaned():
+    """The registry and this table say the same thing, or a name is dead.
+
+    A registry entry with no builder is an adapter nobody can start; a
+    builder with no registry entry is a name ``--channels`` refuses before
+    it is ever reached. Neither fails loudly on its own.
+    """
+    assert set(_surfaces._CHANNEL_BUILDERS) == set(CHANNEL_REGISTRY)
+
+
+@pytest.mark.parametrize("raw", ["yes", "1", "TRUE", "on"])
+def test_a_yes_no_variable_reads_the_spellings_a_dotenv_uses(raw):
+    assert _surfaces._as_bool({"EMAIL_MARK_SEEN": raw}, "EMAIL_MARK_SEEN", False)
+
+
+@pytest.mark.parametrize("raw", ["no", "0", "FALSE", "off"])
+def test_a_yes_no_variable_reads_the_negative_spellings_too(raw):
+    assert not _surfaces._as_bool({"EMAIL_MARK_SEEN": raw}, "EMAIL_MARK_SEEN", True)
+
+
+def test_a_yes_no_variable_that_is_neither_is_refused():
+    """``STARTTLS=maybe`` silently becoming "no" downgrades a connection
+    that was meant to be encrypted."""
+    with pytest.raises(AppConfigError, match="not a yes/no value"):
+        _surfaces._as_bool(
+            {"EMAIL_SMTP_STARTTLS": "maybe"}, "EMAIL_SMTP_STARTTLS", True
+        )
 
 
 # ---- the log the CLI holds while it owns the terminal -----------------
@@ -455,6 +743,66 @@ def test_replaying_something_with_no_records_is_not_an_error(capsys):
     assert capsys.readouterr().err == ""
 
 
+def test_the_replayed_log_cannot_act_on_the_terminal(capsys):
+    """The log holds text the process did not write: a tool's name and an
+    exception's message are formatted into records with ``%s`` and
+    ``%r``, and either can come from a model or a server. Printed as it
+    was, ``\\x1b[8m`` hides the lines after it and OSC 52 writes the
+    user's clipboard, in the terminal the person is about to type into.
+    The rest of the surface already writes such text through
+    ``inert_prose``; this was the one print that did not."""
+    hostile = (
+        "WARNING tool '\x1b[8mhidden' failed\n"
+        "ERROR \x1b]52;c;cm0gLXJmIH4=\x07 raised\n"
+    )
+
+    _replay(io.StringIO(hostile))
+    shown = capsys.readouterr().err
+
+    assert "\x1b" not in shown and "\x07" not in shown
+    assert "\\u001b[8mhidden" in shown, "the escape is shown, not dropped"
+    assert shown.count("\n") == 2, "the log's own line breaks are kept"
+
+
+def test_the_replayed_tail_is_bounded_and_does_not_start_inside_an_escape(
+    capsys,
+):
+    """Cut first and escape second, and the bound is lost: an escaped
+    control character is six characters, so a tail of the log's last
+    4,000 characters could print as 24,000. Escape first and cut second,
+    and the cut can land inside an escape, printing ``01b`` where the
+    reader should have seen ``\\u001b``. The tail is therefore measured in
+    escaped characters but cut between characters of the log itself."""
+    limit = _surfaces._LOG_TAIL_CHARS
+    _replay(io.StringIO("A" + "\x1b" * limit))
+    shown = capsys.readouterr().err
+
+    assert "\x1b" not in shown
+    assert len(shown) <= limit
+    assert len(shown) > limit - len("\\u001b"), "as much tail as fits"
+    assert shown.startswith("\\u001b")
+
+
+class _HungUpStream:
+    """A standard error whose terminal is gone: every write fails."""
+
+    def write(self, _text: str) -> int:
+        raise OSError(5, "Input/output error")
+
+    def flush(self) -> None:
+        raise OSError(5, "Input/output error")
+
+
+def test_a_log_with_nowhere_to_go_is_dropped_rather_than_raised(monkeypatch):
+    """The replay runs after the release, from a ``finally``. Raised, a
+    write to a closed terminal would replace the exit code the release
+    earned with an unanticipated failure, and the interpreter's own
+    report of it would fail the same way."""
+    monkeypatch.setattr(sys, "stderr", _HungUpStream())
+
+    _replay(io.StringIO("the last thing that happened\n"))
+
+
 # ---- the CLI's two exits: end of input, and Ctrl-C --------------------
 
 
@@ -485,7 +833,7 @@ def _cli_doubles(monkeypatch, repl_class) -> tuple[_App, _Source]:
 
     monkeypatch.setattr(_surfaces, "open_app", open_app)
     monkeypatch.setattr(_surfaces, "attach_sessions", lambda given: given)
-    monkeypatch.setattr(_surfaces, "open_prompt_source", lambda _names: source)
+    monkeypatch.setattr(_surfaces, "open_prompt_source", lambda: source)
     monkeypatch.setattr(_surfaces, "Screen", lambda *a, **k: None)
     monkeypatch.setattr(_surfaces, "Repl", repl_class)
     return app, source
@@ -717,6 +1065,65 @@ def test_removing_a_handler_that_was_never_installed_is_a_no_op():
     guard.__exit__()  # no running loop, and nothing was installed
 
 
+def test_ctrl_c_still_reaches_the_repl_after_prompt_toolkit_has_prompted():
+    """The handler outlives the prompts that run while it is installed.
+
+    Every ``prompt_toolkit`` prompt adds a loop-level SIGINT handler of
+    its own and *removes* it when the prompt returns. A handler installed
+    with ``loop.add_signal_handler`` was deleted that way after the first
+    line the REPL read, so ``Ctrl-C`` during every later exchange did
+    nothing at all. Both kinds of prompt the REPL shows are run here — the
+    line prompt and the ``/resume`` picker — before the signal is sent.
+
+    An outer handler is installed first so that a regression fails this
+    test instead of raising ``KeyboardInterrupt`` into pytest, and the
+    same handler is what ``__exit__`` must put back.
+    """
+    pytest.importorskip("prompt_toolkit")
+    import os
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    choice_input = pytest.importorskip("prompt_toolkit.shortcuts.choice_input")
+    outer_calls: list[int] = []
+
+    def outer(number, _frame):
+        outer_calls.append(number)
+
+    repl = _Repl(interruptible=True)
+
+    async def scenario():
+        with _surfaces._interrupts(repl, None):  # type: ignore[arg-type]
+            with create_pipe_input() as keys, create_app_session(
+                input=keys, output=DummyOutput()
+            ):
+                keys.send_text("hello\r")
+                await PromptSession().prompt_async("> ")
+                keys.send_text("\r")
+                await choice_input.ChoiceInput(
+                    message="pick", options=[(0, "a"), (1, "b")]
+                ).prompt_async()
+            os.kill(os.getpid(), signal.SIGINT)
+            for _ in range(50):
+                if repl.interrupted:
+                    break
+                await asyncio.sleep(0.01)
+        return signal.getsignal(signal.SIGINT)
+
+    original = signal.signal(signal.SIGINT, outer)
+    try:
+        restored = asyncio.run(scenario())
+    finally:
+        signal.signal(signal.SIGINT, original)
+
+    assert repl.interrupted == 1
+    assert outer_calls == [], "the signal reached the outer handler instead"
+    assert restored is outer
+
+
 # ---- the signal guard, without a process ------------------------------
 
 
@@ -805,7 +1212,7 @@ def pristine_environment():
 def test_a_dotenv_file_reaches_the_surface(
     tmp_path, monkeypatch, capsys, pristine_environment
 ):
-    """``CLAUDE.md`` teaches ``.env``; until now nothing read it.
+    """``.env.example`` teaches ``.env``; until now nothing read it.
 
     ``entry/config.py`` records the job as this package's and
     ``launch/`` had zero hits for the name, so the documented way to
@@ -875,3 +1282,66 @@ def test_an_explicit_environment_means_the_file_is_not_read(tmp_path, monkeypatc
     import os
 
     assert "OC_PROBE_TWO" not in os.environ
+
+
+# ---- the registry on a machine with no platform SDK -------------------
+
+
+_LIST_PROBE = """
+import sys
+
+BLOCKED = (
+    "aiohttp",
+    "botpy",
+    "discord",
+    "httpx",
+    "lark_oapi",
+    "slack_sdk",
+    "telegram",
+    "websockets",
+)
+
+
+class Blocker:
+    def find_module(self, name, path=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ImportError(name)
+        return None
+
+
+sys.meta_path.insert(0, Blocker())
+
+from omicsclaw.launch import main
+
+code = main(["channel", "--", "--list"], {})
+leaked = sorted(m for m in sys.modules if m.split(".")[0] in BLOCKED)
+print("EXIT", code)
+print("LEAKED", leaked)
+"""
+
+
+def test_the_registry_lists_every_adapter_with_no_platform_sdk_installed():
+    """``--list`` imports seven adapter modules to read one class attribute.
+
+    An SDK imported at an adapter's module scope would make that listing
+    show the adapter as unavailable on a machine that installed a different
+    platform's extra — or, if the import raised rather than being caught,
+    make the whole command fail. Every adapter therefore imports its SDK
+    inside the method that first needs a client, and this asserts it over
+    all seven at once with every SDK made unimportable.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _LIST_PROBE],
+        capture_output=True,
+        text=True,
+        cwd=str(pathlib.Path(__file__).resolve().parents[2]),
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    adapters = [line for line in lines if "->" in line]
+    assert len(adapters) == len(CHANNEL_REGISTRY), result.stdout
+    assert sum("[authoritative]" in line for line in adapters) == 7, result.stdout
+    assert "EXIT 0" in lines
+    assert "LEAKED []" in lines
+    assert "unavailable" not in result.stdout

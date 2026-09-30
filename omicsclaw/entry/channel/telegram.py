@@ -27,7 +27,7 @@ changed, and nothing else:
 
 Group chats fail closed. A Telegram group message is admitted only when it
 @-mentions this bot, proved against the authenticated identity — the same
-rule ``CLAUDE.md`` states for Feishu, applied here because the reason for it
+rule Feishu's ingress enforces, applied here because the reason for it
 is the platform's, not Feishu's: without it, an owner mentioning a colleague
 in a shared group makes this agent answer.
 """
@@ -44,6 +44,7 @@ from omicsclaw.entry.ingress import (
     VALUE_MENTIONS,
 )
 
+from . import reply_target
 from .base import Channel
 from .binding import ChannelSurfaceBinding
 from .capabilities import TELEGRAM as TELEGRAM_CAPS
@@ -356,47 +357,6 @@ class TelegramChannel(Channel):
             "ChannelManager"
         )
 
-    # ─ Core send implementation ─────────────────
-
-    async def process_message(self, *args, **kwargs) -> str:
-        raise RuntimeError(
-            "Telegram messages must enter through the authoritative ChannelRuntime"
-        )
-
-    async def send(
-        self,
-        chat_id: str,
-        content: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        raise RuntimeError(
-            "Telegram replies must leave through the ChannelRuntime delivery pump, "
-            "which classifies whether they were accepted"
-        )
-
-    async def _send_chunk(
-        self,
-        chat_id: str,
-        formatted_text: str,
-        raw_text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        raise RuntimeError(
-            "Telegram text chunks must leave through the ChannelRuntime delivery "
-            "pump, which classifies whether they were accepted"
-        )
-
-    async def send_media(
-        self,
-        chat_id: str,
-        file_path: str,
-        caption: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        raise RuntimeError(
-            "Telegram media Delivery is disabled until durable artifact references land"
-        )
-
     # ─ Typing indicator ────────────────────
 
     async def _send_typing(self, chat_id: str) -> None:
@@ -516,16 +476,13 @@ class TelegramChannel(Channel):
         if message is None or user is None or chat is None:
             return None
         account_namespace = self.tg_config.account_namespace.strip()
-        reply_target: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "channel",
-            "adapter": "telegram",
-            "account_namespace": account_namespace,
-            "destination_id": str(chat.id),
-        }
         thread_id = getattr(message, "message_thread_id", None)
-        if thread_id is not None:
-            reply_target["thread_id"] = str(thread_id)
+        target = reply_target.build(
+            "telegram",
+            account_namespace,
+            str(chat.id),
+            thread_id=None if thread_id is None else str(thread_id),
+        )
         inbound = self.inbound(
             str(chat.id),
             str(user.id),
@@ -534,7 +491,7 @@ class TelegramChannel(Channel):
             # unique within this account, and short. The registry resolves a
             # repeat of it to the exchange it already started.
             source_request_id=f"{chat.id}:{message.message_id}",
-            reply_target=reply_target,
+            reply_target=target,
             values={
                 VALUE_CHAT_TYPE: str(getattr(chat, "type", "") or ""),
                 VALUE_MENTIONS: telegram_mentions(message),
@@ -591,25 +548,20 @@ class TelegramChannel(Channel):
         )
 
     def _command_context(self, update, text: str) -> SlashCommandContext:
-        """The request-scoped half of a slash command, assembled once.
+        """Read the chat and the speaker off a Telegram update, then share.
 
-        The deployment-scoped half — skills, tools, provider, workspace — is
-        the app the runtime holds, which is where those handlers used to read
-        module globals from.
+        Taking the two ids out of the update is the only Telegram-specific
+        part of building a command context; everything else is the same on
+        every platform and lives in :meth:`Channel.command_context`.
         """
 
         chat = update.effective_chat
         user = update.effective_user
-        app = self._control_runtime.app if self._control_runtime else None
         chat_id = str(getattr(chat, "id", "")) if chat is not None else ""
-        return SlashCommandContext(
-            chat_id=chat_id,
-            user_id=str(getattr(user, "id", "")) if user is not None else None,
-            platform=self.name,
-            user_text=text,
-            workspace=str(app.config.workspace) if app is not None else "",
-            app=app,
-            session_id=self.session_id(chat_id),
+        return self.command_context(
+            chat_id,
+            str(getattr(user, "id", "")) if user is not None else None,
+            text,
         )
 
     async def _run_command(self, update, text: str) -> None:

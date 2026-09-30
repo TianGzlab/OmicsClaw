@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-communication ...` first. The resulting output directory
+Run `python skills/spatial/spatial-communication/spatial_communication.py ...` first. The resulting output directory
 should contain:
 
 - `figure_data/lr_interactions.csv`

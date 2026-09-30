@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-annotate --demo
-python omicsclaw.py run met-annotate --input <features.csv> --output <dir>
+python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --demo
+python skills/metabolomics/metabolomics-annotation/metabolomics_annotation.py --input <features.csv> --output <dir>
 ```
 
 

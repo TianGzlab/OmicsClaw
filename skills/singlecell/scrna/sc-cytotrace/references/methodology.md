@@ -51,7 +51,7 @@ python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
   --input <preprocessed.h5ad> --output <dir> --n-neighbors 50
 
 # Demo mode
-python omicsclaw.py run sc-cytotrace --demo --output /tmp/cytotrace_demo
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --demo --output /tmp/cytotrace_demo
 ```
 
 

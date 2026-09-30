@@ -8,13 +8,17 @@ import json
 import sys
 from pathlib import Path
 
-for _candidate_root in Path(__file__).resolve().parents:
-    if (_candidate_root / "omicsclaw" / "__init__.py").is_file():
-        if str(_candidate_root) not in sys.path:
-            sys.path.insert(0, str(_candidate_root))
-        break
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.report import mark_result_status, write_result_json
+from skills._sdk.result import (
+    mark_result_status,
+    write_result_json,
+)
 
 
 SKILL_NAME = "bulkrna-cosinor-rhythm"
@@ -277,7 +281,7 @@ This skill was generated from a successful Autonomous Code Run.
         _write_text(skill_output_dir / "report.md", report)
     _write_text(
         skill_output_dir / "reproducibility" / "commands.sh",
-        f"oc run {SKILL_NAME} --output {skill_output_dir}\n",
+        f"python {Path(__file__).resolve().name} --output {skill_output_dir}\n",
     )
     write_result_json(
         skill_output_dir, skill=SKILL_NAME, version="0.1.0", summary=summary, data=data

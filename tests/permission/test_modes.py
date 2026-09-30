@@ -235,7 +235,7 @@ def test_read_only_denies_a_shell_outright():
 
 
 def test_read_only_denies_a_search_because_a_query_is_an_egress():
-    """``CLAUDE.md``'s first rule: genetic data never leaves this machine."""
+    """``SAFETY_RULES`` rule 1: genetic data never leaves this machine."""
     assert verdict(PermissionMode.READ_ONLY, searcher(), "BRCA1 cohort")[0] is (
         Verdict.DENY
     )

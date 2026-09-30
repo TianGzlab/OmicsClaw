@@ -214,18 +214,29 @@ def test_the_public_surface_is_exactly_what_the_plan_promised():
     optional per-run seam through which compaction reaches the loop, and
     ``TurnAugmentor`` in plan 0039 as its sibling — consulted after it,
     and able only to append to the call being made.
+
+    Three more joined in plan 0027 §12.5, and each has a file behind it:
+    ``PromptSource`` and ``RenderedPrompt`` (``engine/prompt.py``) are
+    the seam through which an exchange asks for its system prompt, and
+    ``Conversation`` (``engine/conversation.py``) is the one through
+    which it reads a history and hands the trajectory back. The list
+    grows only with a delivered seam — that is the whole job of asserting
+    it verbatim.
     """
     import omicsclaw.engine as engine
 
     assert engine.__all__ == [
         "AgentEngine",
         "ConcurrencyAwareExecutor",
+        "Conversation",
         "DeadlineAwareExecutor",
         "EngineConfig",
         "EngineError",
         "EngineEvent",
         "EngineEventType",
         "HistoryCompactor",
+        "PromptSource",
+        "RenderedPrompt",
         "RunResult",
         "StopReason",
         "TimeoutPause",

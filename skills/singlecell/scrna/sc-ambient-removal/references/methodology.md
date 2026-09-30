@@ -157,18 +157,18 @@ The `simple` subtraction path uses chunk-wise sparse arithmetic to handle large 
 
 ```bash
 # simple path (default)
-python omicsclaw.py run sc-ambient-removal \
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --input filtered.h5ad --output results/
 
 # CellBender path
-python omicsclaw.py run sc-ambient-removal \
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --method cellbender \
   --raw-h5 raw_feature_bc_matrix.h5 \
   --expected-cells 8000 \
   --output results/
 
 # SoupX path
-python omicsclaw.py run sc-ambient-removal \
+python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --method soupx \
   --raw-matrix-dir raw_feature_bc_matrix/ \
   --filtered-matrix-dir filtered_feature_bc_matrix/ \

@@ -215,7 +215,7 @@ def run_spatialde(
     integer-like counts as input (not already log-normalized values).
     Falls back to ``adata.X`` with a warning if no counts layer is available.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     # scipy compat shims for SpatialDE 1.x
     import scipy as _scipy
@@ -371,9 +371,10 @@ def run_sparkx(
     """
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     validate_r_environment(required_r_packages=["SPARK"])
 
@@ -417,7 +418,7 @@ def run_sparkx(
         num_cores,
     )
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_sparkx_") as tmpdir:

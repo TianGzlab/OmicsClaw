@@ -35,7 +35,7 @@ export, a downstream-skill handoff).
 The runtime pipeline as the script actually executes it.  Match the
 numbered list in `SKILL.md`'s `## Flow` but go one level deeper — what
 each step validates, what it can raise, what intermediate state it
-produces.  Anchor to `<script>.py:LINE` where it helps.
+produces.  Name the function a step lives in rather than a line number.
 -->
 
 1. **Load** — read the input (`<reader>`) and surface what is in `<X>` /
@@ -75,8 +75,8 @@ comparison table — caveats are usually too specific to fit a table cell.
 <!--
 The runtime requirements as the user will encounter them.  Split into
 required vs optional so the installation hint surfaced by the bot is
-precise.  `skill.yaml::deps.python` should agree with this list
-(finalize it with `python scripts/audit_skill_requires.py --write`).
+precise.  `SKILL.md`'s `## Dependencies` section should agree with this list
+(list them in SKILL.md's `## Dependencies` section).
 -->
 
 **Required**

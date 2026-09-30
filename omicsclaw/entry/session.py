@@ -160,6 +160,10 @@ class Session:
     ``turn_id`` left here by accident cannot shadow the running one.
     """
 
+    updated_at: float = field(default_factory=time.time)
+    """Wall clock of the last save. :class:`SessionRegistry` sets it just
+    before each save, and :meth:`SessionStore.list` orders by it."""
+
 
 class SessionStore(Protocol):
     """Where conversations are kept between exchanges.
@@ -183,7 +187,8 @@ class SessionStore(Protocol):
         """Persist *session* as it now stands."""
 
     async def list(self, limit: int = 50) -> Sequence[Session]:
-        """The most recently created sessions, newest first."""
+        """The most recently active sessions, by :attr:`Session.updated_at`,
+        latest first."""
 
 
 class InMemorySessionStore:
@@ -226,7 +231,12 @@ class InMemorySessionStore:
         await asyncio.sleep(0)
         if limit <= 0:
             return ()
-        return tuple(reversed(self._sessions.values()))[:limit]
+        latest_first = sorted(
+            self._sessions.values(),
+            key=lambda session: (session.updated_at, session.created_at),
+            reverse=True,
+        )
+        return tuple(latest_first[:limit])
 
 
 class SubmissionRefused(RuntimeError):
@@ -517,7 +527,7 @@ class SessionRegistry:
         return await self._store.load(session_id)
 
     async def list_sessions(self, limit: int = 10) -> Sequence[Session]:
-        """The most recently created conversations, newest first.
+        """The most recently active conversations, latest first.
 
         The scope is the store this registry was attached over, and the
         store's own scope is its backing file — see
@@ -537,6 +547,15 @@ class SessionRegistry:
         persistent until it is named here.
         """
         return not isinstance(self._store, InMemorySessionStore)
+
+    @property
+    def abandon_grace_s(self) -> float | None:
+        """Seconds an exchange keeps running after its last observer left.
+
+        The value this registry was built with; ``None`` when it never
+        cancels an unwatched exchange.
+        """
+        return self._grace_s
 
     def running(self) -> tuple[TurnHandle, ...]:
         """Handles of the exchanges executing right now."""
@@ -797,6 +816,7 @@ class SessionRegistry:
         # Cancelled and failed exchanges leave the history byte-identical
         # (trap 3): the engine's trajectory exists only on its DONE event,
         # so there is nothing partial to keep that would not be a guess.
+        session.updated_at = time.time()
         await self._store.save(session)
         handle._settle(terminal, error, outcome)
 

@@ -29,20 +29,26 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
-from omicsclaw.core.r_dependency_manager import check_r_tier, suggest_r_install
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+from skills._sdk.r_dependency_manager import check_r_tier, suggest_r_install
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import trajectory as sc_traj
 from skills.singlecell._lib.adata_utils import (
@@ -52,7 +58,7 @@ from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
 )
-from skills.singlecell._lib.dependency_manager import install_hint, is_available
+from skills._sdk.deps import install_hint, is_available
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_pseudotime
@@ -70,7 +76,7 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-pseudotime"
 SKILL_VERSION = "0.5.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py"
-R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+R_SCRIPTS_DIR = _SDK_R_SCRIPTS_DIR
 
 # R Enhanced renderers for this skill.
 # Key   = renderer name registered in viz/r/registry.R R_PLOT_REGISTRY
@@ -1393,8 +1399,8 @@ def main() -> None:
     # --- Next-step guidance ---
     print()
     print(">> Next steps:")
-    print(f"  - sc-velocity:      python omicsclaw.py run sc-velocity --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-gene-programs: python omicsclaw.py run sc-gene-programs --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-velocity:      python skills/singlecell/scrna/sc-velocity/sc_velocity.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-gene-programs: python skills/singlecell/scrna/sc-gene-programs/sc_gene_programs.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

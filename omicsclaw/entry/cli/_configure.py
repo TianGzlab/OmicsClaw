@@ -32,8 +32,8 @@ comment.
 
 **A secret is never echoed.** An existing value is shown as its last four
 characters and nothing else, no value reaches a log record, and no
-exception message carries one (``CLAUDE.md`` safety rule 1). At a
-terminal the answer itself is read without echo.
+exception message carries one (:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1).
+At a terminal the answer itself is read without echo.
 
 **``questionary`` is optional and is not installed here.** It appears in
 ``pyproject.toml`` only inside a comment, so the import lives inside
@@ -47,7 +47,9 @@ from __future__ import annotations
 
 import ast
 import getpass
+import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence, TextIO
@@ -198,7 +200,12 @@ def _rewritten(lines: Sequence[str], updates: dict[str, str | None]) -> list[str
     return output
 
 
-def write_dotenv(path: Path, updates: Mapping[str, str | None]) -> Path | None:
+def write_dotenv(
+    path: Path,
+    updates: Mapping[str, str | None],
+    *,
+    backup: bool = True,
+) -> Path | None:
     """Apply *updates* to *path*. Returns the backup file, if one was made.
 
     The write is a temporary neighbour plus :meth:`Path.replace`, which is
@@ -212,26 +219,60 @@ def write_dotenv(path: Path, updates: Mapping[str, str | None]) -> Path | None:
     ``0600``. This file holds API keys, and a default-permission ``.env``
     in a shared checkout is a credential handed to every account on the
     machine.
+
+    **Only a missing file counts as empty** (plan 0050 §3.3). A file that
+    exists and cannot be read —— no permission, not UTF-8 —— raises, and
+    nothing is written. The earlier ``except OSError: original = ""``
+    turned "I cannot read your credentials" into "replace them with one
+    line", because a rename needs only the *directory* to be writable.
+
+    **A symlink is followed, not replaced.** The link's target is what the
+    shell reads through it; renaming over the link itself would leave that
+    target stale and copy the credentials into a new plain file here.
+
+    **The temporary file is never readable by anybody else.** It is
+    created exclusively and ``0600`` by :func:`tempfile.mkstemp`, with a
+    name no other process can be using, and removed if anything fails ——
+    creating it under the umask and tightening it afterwards left a window
+    in which the whole file was world-readable.
+
+    ``backup=False`` is for a caller that changes one key and may do so
+    often —— the terminal's ``/auto`` —— where a backup per save scatters
+    copies of every key in the file across the directory.
     """
+    target = path.resolve() if path.is_symlink() else path
     try:
-        original = path.read_text(encoding="utf-8")
-    except OSError:
+        original = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
         original = ""
     lines = original.splitlines() if original else []
+    mode = _mode_of(target)
 
-    backup: Path | None = None
-    if original:
+    saved: Path | None = None
+    if original and backup:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = path.with_name(f"{path.name}.backup-{stamp}")
-        backup.write_text(original, encoding="utf-8")
-        backup.chmod(_mode_of(path))
+        saved = target.with_name(f"{target.name}.backup-{stamp}")
+        # Created with the original's mode rather than tightened after the
+        # fact: the backup holds every key the original does.
+        descriptor = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(original)
+        saved.chmod(mode)
 
     body = "\n".join(_rewritten(lines, dict(updates)))
-    temporary = path.with_name(f"{path.name}.partial")
-    temporary.write_text(f"{body}\n" if body else "", encoding="utf-8")
-    temporary.chmod(_mode_of(path))
-    temporary.replace(path)
-    return backup
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f"{target.name}.", suffix=".partial", dir=target.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"{body}\n" if body else "")
+        temporary.chmod(mode)
+        temporary.replace(target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return saved
 
 
 def _mode_of(path: Path) -> int:
@@ -428,6 +469,40 @@ def _target_key(
     return canonical
 
 
+PROVIDER_NAMES = ("OMICSCLAW_PROVIDER", "LLM_PROVIDER")
+"""The provider's spellings, in the order ``AppConfig`` reads them."""
+
+MODEL_NAMES = ("OMICSCLAW_MODEL", "LLM_MODEL")
+"""The model's spellings, in the order ``AppConfig`` reads them."""
+
+
+def base_url_names(provider: str) -> tuple[str, ...]:
+    """The endpoint's spellings for *provider*, in the order
+    ``resolve_config`` reads them."""
+    return (f"{provider.upper()}_BASE_URL", "LLM_BASE_URL", "OMICSCLAW_BASE_URL")
+
+
+def names_to_write(
+    existing: Mapping[str, str], canonical: str, *by_precedence: str
+) -> tuple[str, ...]:
+    """The variables a save of one setting writes, all with the same value.
+
+    The names in *by_precedence* that *existing* has, in that order, or
+    *canonical* alone when it has none of them.
+    """
+    present = tuple(name for name in by_precedence if name and name in existing)
+    return present or (canonical,)
+
+
+def _first_set(env: Mapping[str, str], names: Sequence[str]) -> str:
+    """The first non-empty value among *names* in *env*, stripped."""
+    for name in names:
+        value = str(env.get(name, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _ask_llm(
     ask: Prompter,
     existing: Mapping[str, str],
@@ -446,7 +521,11 @@ def _ask_llm(
     "use the preset's own".
     """
     sink.write("\n1. Which model backend\n")
-    current = detect_provider_from_env(env=existing) or DEFAULT_PROVIDER
+    current = (
+        _first_set(existing, PROVIDER_NAMES).lower()
+        or detect_provider_from_env(env=existing)
+        or DEFAULT_PROVIDER
+    )
     names = _provider_order()
     backend = ask.choose(
         "LLM provider",
@@ -456,7 +535,8 @@ def _ask_llm(
     preset = preset_for(backend)
     if preset is None:
         raise ValueError(f"{backend!r} is not a provider preset")
-    updates["LLM_PROVIDER"] = backend
+    for name in names_to_write(existing, "LLM_PROVIDER", *PROVIDER_NAMES):
+        updates[name] = backend
     unchanged = backend == current
 
     if backend not in KEYLESS_PROVIDERS:
@@ -464,7 +544,9 @@ def _ask_llm(
             existing, "LLM_API_KEY", preset.api_key_env, "LLM_API_KEY",
             "OMICSCLAW_API_KEY",
         )
-        held = existing.get(variable, "")
+        held = _first_set(
+            existing, (preset.api_key_env, "LLM_API_KEY", "OMICSCLAW_API_KEY")
+        )
         suffix = f" (stored {_mask(held)}, Enter to keep)" if held else ""
         answer = ask.secret(f"{preset.display_name or backend} API key{suffix}")
         if answer:
@@ -472,32 +554,27 @@ def _ask_llm(
         elif not held:
             sink.write("   No key set — `oc cli` will refuse to reach a model.\n")
 
-    model_variable = _target_key(
-        existing, "LLM_MODEL", "OMICSCLAW_MODEL", "LLM_MODEL"
-    )
-    held_model = existing.get(model_variable, "")
+    model_variables = names_to_write(existing, "LLM_MODEL", *MODEL_NAMES)
+    held_model = _first_set(existing, model_variables)
     model_default = (
         normalize_model_for_provider(backend, held_model)
         if unchanged and held_model
         else preset.default_model
     )
-    updates[model_variable] = ask.text("Model id", default=model_default)
+    model = ask.text("Model id", default=model_default)
+    for name in model_variables:
+        updates[name] = model
 
-    url_variable = _target_key(
-        existing,
-        "LLM_BASE_URL",
-        f"{backend.upper()}_BASE_URL",
-        "LLM_BASE_URL",
-        "OMICSCLAW_BASE_URL",
-    )
-    url_default = existing.get(url_variable, "") if unchanged else ""
+    url_variables = names_to_write(existing, "LLM_BASE_URL", *base_url_names(backend))
+    url_default = _first_set(existing, url_variables) if unchanged else ""
     hint = preset.base_url or "the SDK's own endpoint"
     while True:
         url = ask.text(f"Base URL (empty = {hint})", default=url_default)
         if url or backend != "custom":
             break
         sink.write("   A custom endpoint is only reachable by its URL.\n")
-    updates[url_variable] = url
+    for name in url_variables:
+        updates[name] = url
     return backend
 
 
@@ -533,7 +610,7 @@ def _ask_telegram(
     updates: dict[str, str | None],
     sink: TextIO,
 ) -> bool:
-    """``oc channel -- --channels telegram``, or nothing.
+    """``oc channel --channels telegram``, or nothing.
 
     The three variables are the ones ``_build_telegram`` refuses to start
     without: the token, and at least one of the two that say whom this
@@ -691,7 +768,10 @@ def _report(
     effect" — which a variable the file already set at a higher
     precedence can make the answer to differently from what was typed.
     """
-    resolved = resolve_config(env=read_dotenv(path))
+    env = read_dotenv(path)
+    resolved = resolve_config(
+        _first_set(env, PROVIDER_NAMES), _first_set(env, MODEL_NAMES), env=env
+    )
     sink.write("\nThis deployment now resolves to:\n")
     sink.write(f"  provider  {resolved.provider or '(none)'}\n")
     sink.write(f"  model     {resolved.model}\n")
@@ -700,7 +780,7 @@ def _report(
     sink.write("\nStart it with:\n  oc cli\n")
     started = [name for name, on in (("telegram", telegram), ("feishu", feishu)) if on]
     if started:
-        sink.write(f"  oc channel -- --channels {','.join(started)}\n")
+        sink.write(f"  oc channel --channels {','.join(started)}\n")
     if backend in KEYLESS_PROVIDERS:
         sink.write(f"Make sure the {backend} server is running.\n")
 
@@ -724,5 +804,5 @@ def missing_credential_hint(env: Mapping[str, str]) -> str:
         return ""
     return (
         "omicsclaw: no LLM API key is configured. Set one up with:\n"
-        "    oc cli -- --configure"
+        "    oc cli --configure"
     )

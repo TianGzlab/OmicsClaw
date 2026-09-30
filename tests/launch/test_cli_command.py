@@ -295,17 +295,30 @@ def test_an_empty_prompt_file_is_refused_rather_than_sent(tmp_path):
 # ---- the argv convention (plan 0031 Q8, plan 0037 §5.2) ---------------
 
 
-def test_a_surface_flag_before_the_terminator_is_refused(tmp_path):
-    """The rule that makes a typo loud.
+def test_a_surface_flag_before_the_terminator_is_claimed(tmp_path):
+    """Plan 0048: which side of ``--`` a flag was typed on says nothing.
 
-    ``resolve_app_config`` refuses an unknown flag rather than ignoring
-    it, and its message names the terminator —— so the fix is in the
-    error the user already has in front of them.
+    This test used to assert the opposite —— that ``oc cli --session
+    run-7`` is a usage error —— which is the rule 0048 replaces. The
+    deployment and surface flag families are disjoint, so the surface
+    can take its own flags out of the deployment half without
+    ``resolve_app_config`` losing one of its.
+
+    The value travels with the flag: a claim that took ``--session`` and
+    left ``run-7`` behind would leave a deployment half that is refused
+    for a token nobody typed as a flag.
     """
-    result = run_command(tmp_path, ["--session", "run-7"])
+    result = run_command(tmp_path, ["--session", "run-7"], stdin="")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_an_unknown_deployment_flag_survives_the_claim(tmp_path):
+    """Claiming must not swallow the refusal plan 0037 §5.2 asks for."""
+    result = run_command(tmp_path, ["--bogus", "--configure"])
 
     assert result.returncode == 2
-    assert "pass a surface's own flags after" in result.stderr
+    assert "--bogus" in result.stderr
 
 
 def test_an_unknown_surface_flag_is_refused_too(tmp_path):
@@ -323,11 +336,53 @@ def test_an_unknown_surface_flag_is_refused_too(tmp_path):
         (["--session", "run-7"], "session_id", "run-7"),
         (["--prompt", "hello"], "prompt", "hello"),
         (["--show-reasoning"], "show_reasoning", True),
+        (["--hide-reasoning"], "show_reasoning", False),
+        ([], "show_reasoning", None),
         (["--help"], "help", True),
     ],
 )
 def test_each_surface_flag_lands_where_it_says(arguments, attribute, expected):
     assert getattr(ReplOptions.parse(arguments), attribute) == expected
+
+
+@pytest.mark.parametrize(
+    "arguments, stdout_is_terminal, shown",
+    [
+        ([], True, True),
+        ([], False, True),
+        (["--prompt", "q"], True, True),
+        (["--prompt", "q"], False, False),
+        (["--prompt", "q", "--show-reasoning"], False, True),
+        (["--hide-reasoning"], True, False),
+    ],
+)
+def test_reasoning_is_shown_unless_it_would_land_in_a_redirected_answer(
+    arguments, stdout_is_terminal, shown
+):
+    """On by default (owner's ruling, 2026-09-23), with one promise kept.
+
+    ``oc cli --prompt … > answer.txt`` has always written only the answer
+    to that file, and a script reading it cannot tell thinking from
+    answer. So a one-exchange run into a pipe or a file stays quiet
+    unless ``--show-reasoning`` asks otherwise; the REPL is for a person
+    and shows it wherever its output goes.
+    """
+    options = ReplOptions.parse(arguments)
+
+    assert options.shows_reasoning(stdout_is_terminal=stdout_is_terminal) is shown
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--show-reasoning", "--hide-reasoning"],
+        ["--hide-reasoning", "--show-reasoning"],
+    ],
+)
+def test_asking_for_reasoning_both_ways_is_refused(arguments):
+    """Last-wins would silently pick one of two things the user asked for."""
+    with pytest.raises(AppConfigError, match="contradict"):
+        ReplOptions.parse(arguments)
 
 
 def test_a_surface_flag_without_its_value_is_refused():

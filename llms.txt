@@ -14,112 +14,182 @@ All processing happens locally. No genetic or spatial data leaves the machine.
 - **AnnData (`.h5ad`)**: The universal file format for passing data between skills.
 - **SpatialSession**: A JSON state tracker for multi-skill workflows (stored in `profiles/`).
 - **omicsclaw.py**: The central CLI runner that registers skills, filters flags, and dispatches subprocesses.
-- **Orchestrator**: `spatial-orchestrator` routes natural-language queries or file extensions to the right skill.
+- **Progressive disclosure**: the system prompt carries one line per skill; `use_skill` fetches one body on demand.
 - **README.md**: The repository's living memory for project context, milestones, and contributor-visible decisions.
 - **SPEC.md**: The repository maintenance and AI development contract for coding agents.
 
 ---
 
-## All 50+ Skills (5 Omics Domains)
+## All 94 Skills (7 Domains)
 
-### Spatial Transcriptomics (15 skills)
+Generated from the `SKILL.md` headers. There are no CLI aliases: a skill
+is named by its `name:` and invoked at the script path below.
 
-| CLI Alias | Skill Directory | Purpose |
-|-----------|-----------------|---------|
-| `spatial-preprocessing` | `skills/spatial/spatial-preprocess/` | QC, normalization, HVG, PCA, UMAP, clustering |
-| `spatial-domain-identification` | `skills/spatial/spatial-domains/` | Tissue region / niche identification |
-| `spatial-cell-annotation` | `skills/spatial/spatial-annotate/` | Cell type annotation |
-| `spatial-deconvolution` | `skills/spatial/spatial-deconv/` | Cell type proportion estimation |
-| `spatial-statistics` | `skills/spatial/spatial-statistics/` | Moran's I, Geary's C, Ripley's K, etc. |
-| `spatial-svg-detection` | `skills/spatial/spatial-genes/` | Spatially variable genes |
-| `spatial-de` | `skills/spatial/spatial-de/` | Differential expression |
-| `spatial-condition-comparison` | `skills/spatial/spatial-condition/` | Pseudobulk condition comparison |
-| `spatial-cell-communication` | `skills/spatial/spatial-communication/` | Ligand-receptor interactions |
-| `spatial-velocity` | `skills/spatial/spatial-velocity/` | RNA velocity / cellular dynamics |
-| `spatial-trajectory` | `skills/spatial/spatial-trajectory/` | Trajectory inference / pseudotime |
-| `spatial-enrichment` | `skills/spatial/spatial-enrichment/` | Pathway and gene set enrichment |
-| `spatial-cnv` | `skills/spatial/spatial-cnv/` | Copy number variation inference |
-| `spatial-integration` | `skills/spatial/spatial-integrate/` | Multi-sample integration (Harmony, BBKNN, Scanorama) |
-| `spatial-registration` | `skills/spatial/spatial-register/` | Spatial registration / slice alignment |
+### Single-Cell Omics (34 skills)
 
-### Other Domains
-- **Single-Cell Omics**: 9 skills (sc-preprocessing, sc-doublet-detection, sc-cell-annotation, etc.)
-- **Genomics**: 10 skills (genomics-vcf-operations, genomics-variant-calling, etc.)
-- **Proteomics**: 8 skills (proteomics-ms-qc, proteomics-identification, etc.)
-- **Metabolomics**: 8 skills (metabolomics-peak-detection, metabolomics-xcms-preprocessing, etc.)
-- **Orchestrator**: 1 skill (orchestrator)
+| Skill | Directory |
+|---|---|
+| `sc-ambient-removal` | `skills/singlecell/scrna/sc-ambient-removal/` |
+| `sc-batch-integration` | `skills/singlecell/scrna/sc-batch-integration/` |
+| `sc-cell-annotation` | `skills/singlecell/scrna/sc-cell-annotation/` |
+| `sc-cell-communication` | `skills/singlecell/scrna/sc-cell-communication/` |
+| `sc-clustering` | `skills/singlecell/scrna/sc-clustering/` |
+| `sc-consensus-clustering` | `skills/singlecell/scrna/sc-consensus-clustering/` |
+| `sc-consensus-integration` | `skills/singlecell/scrna/sc-consensus-integration/` |
+| `sc-consensus-pseudotime` | `skills/singlecell/scrna/sc-consensus-pseudotime/` |
+| `sc-count` | `skills/singlecell/scrna/sc-count/` |
+| `sc-cytotrace` | `skills/singlecell/scrna/sc-cytotrace/` |
+| `sc-de` | `skills/singlecell/scrna/sc-de/` |
+| `sc-differential-abundance` | `skills/singlecell/scrna/sc-differential-abundance/` |
+| `sc-doublet-detection` | `skills/singlecell/scrna/sc-doublet-detection/` |
+| `sc-drug-response` | `skills/singlecell/scrna/sc-drug-response/` |
+| `sc-enrichment` | `skills/singlecell/scrna/sc-enrichment/` |
+| `sc-fastq-qc` | `skills/singlecell/scrna/sc-fastq-qc/` |
+| `sc-filter` | `skills/singlecell/scrna/sc-filter/` |
+| `sc-gene-programs` | `skills/singlecell/scrna/sc-gene-programs/` |
+| `sc-grn` | `skills/singlecell/scrna/sc-grn/` |
+| `sc-in-silico-perturbation` | `skills/singlecell/scrna/sc-in-silico-perturbation/` |
+| `sc-integrate-cluster` | `skills/singlecell/scrna/sc-integrate-cluster/` |
+| `sc-markers` | `skills/singlecell/scrna/sc-markers/` |
+| `sc-metacell` | `skills/singlecell/scrna/sc-metacell/` |
+| `sc-multi-count` | `skills/singlecell/scrna/sc-multi-count/` |
+| `sc-pathway-scoring` | `skills/singlecell/scrna/sc-pathway-scoring/` |
+| `sc-perturb` | `skills/singlecell/scrna/sc-perturb/` |
+| `sc-perturb-prep` | `skills/singlecell/scrna/sc-perturb-prep/` |
+| `sc-preprocessing` | `skills/singlecell/scrna/sc-preprocessing/` |
+| `sc-pseudotime` | `skills/singlecell/scrna/sc-pseudotime/` |
+| `sc-qc` | `skills/singlecell/scrna/sc-qc/` |
+| `sc-standardize-input` | `skills/singlecell/scrna/sc-standardize-input/` |
+| `sc-velocity` | `skills/singlecell/scrna/sc-velocity/` |
+| `sc-velocity-prep` | `skills/singlecell/scrna/sc-velocity-prep/` |
+| `scatac-preprocessing` | `skills/singlecell/scatac/scatac-preprocessing/` |
+
+### Spatial Transcriptomics (19 skills)
+
+| Skill | Directory |
+|---|---|
+| `consensus-domains` | `skills/spatial/consensus-domains/` |
+| `consensus-interpret` | `skills/spatial/consensus-interpret/` |
+| `spatial-annotate` | `skills/spatial/spatial-annotate/` |
+| `spatial-cnv` | `skills/spatial/spatial-cnv/` |
+| `spatial-communication` | `skills/spatial/spatial-communication/` |
+| `spatial-condition` | `skills/spatial/spatial-condition/` |
+| `spatial-de` | `skills/spatial/spatial-de/` |
+| `spatial-deconv` | `skills/spatial/spatial-deconv/` |
+| `spatial-domains` | `skills/spatial/spatial-domains/` |
+| `spatial-enrichment` | `skills/spatial/spatial-enrichment/` |
+| `spatial-genes` | `skills/spatial/spatial-genes/` |
+| `spatial-integrate` | `skills/spatial/spatial-integrate/` |
+| `spatial-microenvironment-subset` | `skills/spatial/spatial-microenvironment-subset/` |
+| `spatial-preprocess` | `skills/spatial/spatial-preprocess/` |
+| `spatial-raw-processing` | `skills/spatial/spatial-raw-processing/` |
+| `spatial-register` | `skills/spatial/spatial-register/` |
+| `spatial-statistics` | `skills/spatial/spatial-statistics/` |
+| `spatial-trajectory` | `skills/spatial/spatial-trajectory/` |
+| `spatial-velocity` | `skills/spatial/spatial-velocity/` |
+
+### Bulk RNA-seq (14 skills)
+
+| Skill | Directory |
+|---|---|
+| `bulkrna-batch-correction` | `skills/bulkrna/bulkrna-batch-correction/` |
+| `bulkrna-coexpression` | `skills/bulkrna/bulkrna-coexpression/` |
+| `bulkrna-cosinor-rhythm` | `skills/bulkrna/run-derived/bulkrna-cosinor-rhythm/` |
+| `bulkrna-de` | `skills/bulkrna/bulkrna-de/` |
+| `bulkrna-deconvolution` | `skills/bulkrna/bulkrna-deconvolution/` |
+| `bulkrna-enrichment` | `skills/bulkrna/bulkrna-enrichment/` |
+| `bulkrna-geneid-mapping` | `skills/bulkrna/bulkrna-geneid-mapping/` |
+| `bulkrna-ppi-network` | `skills/bulkrna/bulkrna-ppi-network/` |
+| `bulkrna-qc` | `skills/bulkrna/bulkrna-qc/` |
+| `bulkrna-read-alignment` | `skills/bulkrna/bulkrna-read-alignment/` |
+| `bulkrna-read-qc` | `skills/bulkrna/bulkrna-read-qc/` |
+| `bulkrna-splicing` | `skills/bulkrna/bulkrna-splicing/` |
+| `bulkrna-survival` | `skills/bulkrna/bulkrna-survival/` |
+| `bulkrna-trajblend` | `skills/bulkrna/bulkrna-trajblend/` |
+
+### Genomics (10 skills)
+
+| Skill | Directory |
+|---|---|
+| `genomics-alignment` | `skills/genomics/genomics-alignment/` |
+| `genomics-assembly` | `skills/genomics/genomics-assembly/` |
+| `genomics-cnv-calling` | `skills/genomics/genomics-cnv-calling/` |
+| `genomics-epigenomics` | `skills/genomics/genomics-epigenomics/` |
+| `genomics-phasing` | `skills/genomics/genomics-phasing/` |
+| `genomics-qc` | `skills/genomics/genomics-qc/` |
+| `genomics-sv-detection` | `skills/genomics/genomics-sv-detection/` |
+| `genomics-variant-annotation` | `skills/genomics/genomics-variant-annotation/` |
+| `genomics-variant-calling` | `skills/genomics/genomics-variant-calling/` |
+| `genomics-vcf-operations` | `skills/genomics/genomics-vcf-operations/` |
+
+### Metabolomics (8 skills)
+
+| Skill | Directory |
+|---|---|
+| `metabolomics-annotation` | `skills/metabolomics/metabolomics-annotation/` |
+| `metabolomics-de` | `skills/metabolomics/metabolomics-de/` |
+| `metabolomics-normalization` | `skills/metabolomics/metabolomics-normalization/` |
+| `metabolomics-pathway-enrichment` | `skills/metabolomics/metabolomics-pathway-enrichment/` |
+| `metabolomics-peak-detection` | `skills/metabolomics/metabolomics-peak-detection/` |
+| `metabolomics-quantification` | `skills/metabolomics/metabolomics-quantification/` |
+| `metabolomics-statistics` | `skills/metabolomics/metabolomics-statistics/` |
+| `metabolomics-xcms-preprocessing` | `skills/metabolomics/metabolomics-xcms-preprocessing/` |
+
+### Proteomics (8 skills)
+
+| Skill | Directory |
+|---|---|
+| `proteomics-data-import` | `skills/proteomics/proteomics-data-import/` |
+| `proteomics-de` | `skills/proteomics/proteomics-de/` |
+| `proteomics-enrichment` | `skills/proteomics/proteomics-enrichment/` |
+| `proteomics-identification` | `skills/proteomics/proteomics-identification/` |
+| `proteomics-ms-qc` | `skills/proteomics/proteomics-ms-qc/` |
+| `proteomics-ptm` | `skills/proteomics/proteomics-ptm/` |
+| `proteomics-quantification` | `skills/proteomics/proteomics-quantification/` |
+| `proteomics-structural` | `skills/proteomics/proteomics-structural/` |
+
+### Literature (1 skills)
+
+| Skill | Directory |
+|---|---|
+| `literature` | `skills/literature/` |
 
 ---
 
 ## CLI Reference
 
+There is **no `oc run <skill>`** and no `omicsclaw.py list`. The skill
+runner and the 33 other subcommands were retired with the old CLI. A skill
+script is invoked directly:
+
 ```bash
-# List all skills
-python omicsclaw.py list
+# Every indexed skill, by domain
+make list
 
-# Run a skill with data
-python omicsclaw.py run <skill> --input <data.h5ad> --output <dir>
+# Run a skill with data — the path always has a domain level
+python skills/<domain>/<skill>/<script>.py --input <data.h5ad> --output <dir>
 
-# Run demo mode (no data needed)
-python omicsclaw.py run <skill> --demo --output <dir>
+# Demo mode (no data needed)
+python skills/<domain>/<skill>/<script>.py --demo --output <dir>
 
-# Multi-sample integration
-python omicsclaw.py run spatial-integration --input <data.h5ad> --batch-key <col> --output <dir>
-
-# Spatial registration
-python omicsclaw.py run spatial-registration --input <data.h5ad> --slice-key <col> --output <dir>
-
-# Orchestrator: route a natural language query
-python omicsclaw.py run orchestrator --query "show spatially variable genes" --output <dir>
-
-# Orchestrator: route by file
-python omicsclaw.py run orchestrator --input <data.h5ad> --output <dir>
-
-# Orchestrator: run a named pipeline
-python omicsclaw.py run orchestrator --pipeline standard --input <data.h5ad> --output <dir>
-python omicsclaw.py run orchestrator --pipeline full --input <data.h5ad> --output <dir>
-
-# Orchestrator: list all skills with descriptions
-python omicsclaw.py run orchestrator --list-skills --output <dir>
+# Worked examples
+python skills/spatial/spatial-preprocess/spatial_preprocess.py \
+  --demo --output /tmp/preprocess_demo
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/de_demo
 ```
 
----
+A skill's own `SKILL.md` documents its exact flags; `--help` works on every
+primary script. An agent reaches a body with the `use_skill` tool, which
+also returns the skill's directory.
 
-## Named Pipelines (Orchestrator)
-
-| Pipeline | Steps |
-|----------|-------|
-| `standard` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection → spatial-statistics |
-| `full` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection → spatial-statistics → spatial-cell-communication → spatial-enrichment |
-| `multisample` | spatial-integration → spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-svg-detection |
-| `velocity_trajectory` | spatial-preprocessing → spatial-velocity → spatial-trajectory |
-| `cancer` | spatial-preprocessing → spatial-domain-identification → spatial-de → spatial-cnv → spatial-enrichment |
+**Routing is not a skill.** The `orchestrator` and `omics-skill-builder`
+skills, their named pipelines and their keyword-routing table were deleted
+with the old skill system. Dispatching a query is what the skill index in
+the system prompt plus `use_skill` already do; scaffolding a new skill is
+`cp -r templates/skill skills/<domain>/<name>`.
 
 ---
 
-## Keyword Routing (Orchestrator)
-
-The orchestrator maps natural-language keywords to skills. Examples:
-
-| Query Fragment | Routes To |
-|---|---|
-| "qc", "quality control", "normalize" | `spatial-preprocessing` |
-| "spatial domain", "tissue region", "niche" | `spatial-domain-identification` |
-| "cell type", "marker gene", "annotate" | `spatial-cell-annotation` |
-| "deconvolution", "cell proportion" | `spatial-deconvolution` |
-| "moran", "autocorrelation", "spatial statistics" | `spatial-statistics` |
-| "spatially variable", "SVG", "spatial pattern" | `spatial-svg-detection` |
-| "differential expression", "DE genes" | `spatial-de` |
-| "condition", "pseudobulk", "DESeq2" | `spatial-condition-comparison` |
-| "communication", "ligand receptor", "LR" | `spatial-cell-communication` |
-| "velocity", "scvelo", "RNA velocity" | `spatial-velocity` |
-| "trajectory", "pseudotime", "cellrank" | `spatial-trajectory` |
-| "enrichment", "GSEA", "pathway" | `spatial-enrichment` |
-| "CNV", "copy number" | `spatial-cnv` |
-| "integrate", "batch correction", "harmony" | `spatial-integration` |
-| "register", "alignment", "multi-slice" | `spatial-registration` |
-
----
 
 ## Output Structure
 
@@ -178,12 +248,13 @@ All tests use `--demo` mode. Each skill has at minimum:
 | `omicsclaw.py` | CLI runner, SKILLS registry, security filter |
 | `README.md` | Project overview and living memory for major decisions |
 | `SPEC.md` | Repository maintenance and AI development contract |
-| `skills/catalog.json` | Machine-readable skill index (auto-generated) |
-| `CLAUDE.md` | AI agent routing instructions for Claude |
+| `skills/<domain>/INDEX.md` | Per-domain skill index, checked by `tests/skills/test_domain_index_is_current.py` |
+| `CLAUDE.md` | Claude Code entry: maintenance contract, issue tracker |
+| `OMICSCLAW.md` | Runtime contract of the analysis agent |
 | `AGENTS.md` | AI coding agent guide (Codex, Cursor, Devin, etc.) |
 | `docs/superpowers/README.md` | Workflow playbook index plus dated plans/specs |
 | `pyproject.toml` | Package metadata, dependency source of truth, scripts, optional extras |
 | `docs/architecture.md` | System architecture deep-dive |
 | `llms.txt` | This file — LLM-optimised summary |
 | `pytest.ini` | Test path registration |
-| `Makefile` | `make test`, `make demo`, `make list`, `make catalog` |
+| `Makefile` | `make test`, `make demo`, `make skill-index` |

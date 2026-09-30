@@ -69,8 +69,11 @@ from omicsclaw.entry.assembly import (
 )
 from omicsclaw.entry.config import AppConfig, SkillsIndex
 from omicsclaw.provider import Completion, LLMProvider, get_model_limits
+from omicsclaw.observability import Telemetry
+from omicsclaw.observability.provider import TracedProvider
 from omicsclaw.schema import Message, Role, ToolCall
 from omicsclaw.tools import ToolRegistry, use_tool_context
+from tests.observability._support import RecordingMeter, RecordingTracer
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _ENTRY_DIR = _REPO_ROOT / "omicsclaw" / "entry"
@@ -261,8 +264,14 @@ def test_build_app_hands_the_engine_the_registry_itself(tmp_path, monkeypatch):
     seen: dict[str, object] = {}
 
     class Recorder:
-        def __init__(self, provider, tools, config):
-            seen.update(provider=provider, tools=tools, config=config)
+        def __init__(self, provider, tools, config, *, prompt=None, conversation=None):
+            seen.update(
+                provider=provider,
+                tools=tools,
+                config=config,
+                prompt=prompt,
+                conversation=conversation,
+            )
 
     monkeypatch.setattr(assembly, "AgentEngine", Recorder)
     monkeypatch.setattr(
@@ -272,8 +281,13 @@ def test_build_app_hands_the_engine_the_registry_itself(tmp_path, monkeypatch):
     )
 
     config = _config(tmp_path)
-    build_app(config)
+    app = build_app(config)
 
+    # Plan 0027 §12.5: the assembler is the engine's default PromptSource,
+    # and the conversation is not bound at assembly — one engine serves
+    # every session, so a history may only arrive per call.
+    assert seen["prompt"] is app.prompt
+    assert seen["conversation"] is None
     assert isinstance(seen["tools"], ToolRegistry)
     assert isinstance(seen["tools"], DeadlineAwareExecutor)
     assert isinstance(seen["tools"], ConcurrencyAwareExecutor)
@@ -325,6 +339,32 @@ def test_build_app_asks_the_provider_layer_for_what_the_config_named(
     assert asked == [("deepseek", "deepseek-chat")]
 
 
+@pytest.mark.parametrize(
+    ("preset", "default_model"),
+    [("deepseek", "deepseek-v4-flash"), ("zhipu", "glm-5.1")],
+)
+def test_an_unnamed_model_is_budgeted_as_the_preset_default(
+    tmp_path, monkeypatch, preset, default_model
+):
+    """``LLM_PROVIDER`` alone runs the preset's default model, so the
+    window is that model's — not the fallback an empty name would get,
+    which is too small for DeepSeek and too large for GLM."""
+    for name in ("LLM_MODEL", "OMICSCLAW_MODEL", "SPATIALCLAW_MODEL", "LLM_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", preset)
+    monkeypatch.setattr(
+        assembly,
+        "provider_from_env",
+        lambda provider, model: _ScriptedProvider(),
+    )
+
+    app = build_app(_config(tmp_path, provider=preset))
+
+    expected = get_model_limits(default_model)
+    assert expected is not get_model_limits("")
+    assert app.budget.context_tokens == expected.context_tokens
+
+
 # ---- Q7: the two reserves ---------------------------------------------
 
 
@@ -373,10 +413,13 @@ def test_an_unnamed_model_budgets_against_limits_that_mean_unknown(tmp_path, cap
 # ---- Q9: the five sections --------------------------------------------
 
 
-def test_the_default_prompt_is_seven_sections_in_this_order(tmp_path):
+def test_the_default_prompt_is_contract_then_safety_then_guidance_in_this_order(
+    tmp_path,
+):
     """Planning sits between the tool guidance and the volatile blocks.
 
-    It was six until plan 0039 added ``planning``. The position is the
+    It was six until plan 0039 added ``planning``; plan 0063 folded the
+    persona and project sections into one ``contract``. The position is the
     assertion worth keeping: static guidance about how to work groups
     with the static guidance above it, and the two blocks that change —
     the sandbox's state and the skill catalogue — stay at the end, where
@@ -385,8 +428,7 @@ def test_the_default_prompt_is_seven_sections_in_this_order(tmp_path):
     keys = tuple(s.key for s in default_sections(_config(tmp_path)))
 
     assert keys == (
-        "persona",
-        "project",
+        "contract",
         "safety",
         "tools",
         "planning",
@@ -395,13 +437,12 @@ def test_the_default_prompt_is_seven_sections_in_this_order(tmp_path):
     )
 
 
-def test_the_catalogue_can_be_switched_off_and_then_it_is_six(tmp_path):
+def test_the_catalogue_can_be_switched_off_and_its_section_goes(tmp_path):
     config = _config(tmp_path, skills_index=SkillsIndex.OFF)
     keys = tuple(s.key for s in default_sections(config))
 
     assert keys == (
-        "persona",
-        "project",
+        "contract",
         "safety",
         "tools",
         "planning",
@@ -538,39 +579,39 @@ def test_the_safety_rules_reach_the_system_prompt(tmp_path):
     assert "Warn before overwriting" in system
 
 
-def test_the_disclaimer_is_byte_for_byte_the_one_claude_md_requires():
+def test_the_disclaimer_is_the_one_skill_reports_write():
     """The cost of holding the rules as a constant, charged here.
 
-    Scraping ``CLAUDE.md`` for its §Safety Rules heading at render time
-    would be more faithful and strictly worse: the day the heading is
-    renamed the scraper returns ``""``, an empty section disappears
-    whole, and the agent silently loses its safety rules. A constant
-    cannot vanish — it can only drift, and drift is what this assertion
-    catches.
+    A constant cannot vanish from the prompt the way a scraped heading
+    can — it can only drift, and drift is what this assertion catches.
+    Two texts must carry the same sentence: skill reports write
+    ``skills._sdk.report.DISCLAIMER``, and a report the agent writes
+    itself follows ``SAFETY_RULES``. Whether the framework's own
+    ``omicsclaw.common.report.DISCLAIMER`` matches the ``_sdk`` one is
+    ``tests/sdk/test_result_contract.py``'s check. The skill-SDK boundary
+    forbids ``omicsclaw/**`` production code from importing
+    ``skills._sdk``; a test is not bound by it.
     """
-    sentence = (
-        "OmicsClaw is a research and educational tool for multi-omics "
-        "analysis. It is not a medical device and does not provide "
-        "clinical diagnoses. Consult a domain expert before making "
-        "decisions based on these results."
-    )
-    claude_md = (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    from skills._sdk.report import DISCLAIMER
 
-    assert sentence in claude_md, "CLAUDE.md changed; SAFETY_RULES must follow"
-    assert sentence in SAFETY_RULES
+    assert DISCLAIMER in SAFETY_RULES
 
 
-def test_a_missing_persona_file_removes_its_section_rather_than_leaving_a_heading(
-    tmp_path,
-):
+def test_a_missing_contract_file_removes_its_section(tmp_path):
     """``text_from_file`` treats absence as a state, and so does this."""
     system = build_prompt(default_sections(_config(tmp_path))).render().system_prompt
 
-    assert "## Project contract" not in system
-    assert "## Safety rules" in system
+    assert "OmicsClaw" not in system.split("## Safety rules")[0]
+    assert system.startswith("## Safety rules")
 
 
-def test_prompt_files_replace_the_default_pair(tmp_path):
+def test_prompt_files_replace_the_contract(tmp_path):
+    """The configured prompt files are the whole front matter.
+
+    The workspace is the checkout here (no ``skills_dir``), so the
+    ``OMICSCLAW.md`` beside it is exactly the file the default would read.
+    """
+    (tmp_path / "OMICSCLAW.md").write_text("CONTRACT-SENTINEL", encoding="utf-8")
     first = tmp_path / "one.md"
     first.write_text("first file", encoding="utf-8")
     config = _config(tmp_path, system_prompt_files=(first,))
@@ -580,6 +621,7 @@ def test_prompt_files_replace_the_default_pair(tmp_path):
 
     assert tuple(s.key for s in sections)[0] == "prompt:one.md"
     assert "first file" in system
+    assert "CONTRACT-SENTINEL" not in system
     assert "## Safety rules" in system
 
 
@@ -619,16 +661,16 @@ def test_editing_a_prompt_file_changes_the_next_render(tmp_path):
 
     ``AgentApp.prompt`` is the **assembler**, and this is the assertion
     that notices if it stops being one: an assembled prompt has no
-    ``render`` at all, so a turn holding one would freeze the persona,
-    the project contract and the date at process start — and every other
+    ``render`` at all, so a turn holding one would freeze the contract
+    and the date at process start — and every other
     acceptance in plan 0031 §9 would still pass.
     """
-    persona = tmp_path / "SOUL.md"
-    persona.write_text("I am version one", encoding="utf-8")
+    contract = tmp_path / "OMICSCLAW.md"
+    contract.write_text("I am version one", encoding="utf-8")
     prompt = build_prompt(default_sections(_config(tmp_path)))
     first = prompt.render().system_prompt
 
-    persona.write_text("I am version two", encoding="utf-8")
+    contract.write_text("I am version two", encoding="utf-8")
     second = prompt.render().system_prompt
 
     assert "version one" in first
@@ -1029,16 +1071,16 @@ _FORBIDDEN_IN_A_LOG = frozenset(
 )
 """Names that carry what a log line must never carry.
 
-``CLAUDE.md``'s first safety rule — genetic data never leaves this
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 — genetic data never leaves this
 machine — is a rule a log statement can break: a ``bash`` command line, a
 ``write_file`` body and a ``web_fetch`` query string can each hold a
 subject identifier, and a log file is somewhere data leaves to.
 
-``content`` and ``text`` are on the list for the **ported IM adapters**,
-where the payload is not a tool's but a person's: "analyse P12345's
-Visium" is the ordinary shape of a request to this agent, and five
-adapters arrived from ``surfaces/channels/`` logging ``content[:80]`` at
-INFO. Q22 rule 1 names tool arguments and outputs; a chat body is the
+``content`` and ``text`` are on the list for the **IM adapters**, where
+the payload is not a tool's but a person's: "analyse P12345's Visium" is
+the ordinary shape of a request to this agent, and the adapters that were
+moved into ``omicsclaw/entry/channel/`` arrived logging ``content[:80]``
+at INFO. Q22 rule 1 names tool arguments and outputs; a chat body is the
 same category by the same reasoning.
 """
 
@@ -1106,3 +1148,54 @@ def test_no_log_call_in_this_layer_passes_a_tool_payload():
             offenders.append(f"{path.relative_to(_ENTRY_DIR)}:{line}")
 
     assert not offenders, f"{offenders} log a tool payload or a chat body"
+
+
+# ---- build_app(provider=) --------------------------------------------
+
+
+def _unwrapped_task_runner(app):
+    tool = app.registry.get("task")
+    while hasattr(tool, "inner"):
+        tool = tool.inner
+    return tool._delegate
+
+
+def test_a_provider_passed_to_build_app_reaches_every_consumer(tmp_path):
+    """The engine, the summarizer and the sub-agent runner all get it.
+
+    Replacing ``app.provider`` and ``app.engine`` afterwards with
+    :func:`dataclasses.replace` would leave the summarizer and the
+    sub-agent runner on the provider ``provider_from_env`` built, which
+    is why ``build_app`` takes the provider as a parameter.
+    """
+    scripted = _ScriptedProvider()
+    app = build_app(
+        _config(tmp_path, provider="anthropic", model="claude-sonnet-4-5"),
+        provider=scripted,
+        telemetry=Telemetry(),
+    )
+    try:
+        assert app.provider is scripted
+        assert app.engine._provider is scripted
+        assert app.summarizer.provider is scripted
+        assert _unwrapped_task_runner(app)._provider is scripted
+    finally:
+        asyncio.run(app.aclose())
+
+
+def test_an_active_telemetry_wraps_the_passed_provider(tmp_path):
+    scripted = _ScriptedProvider()
+    telemetry = Telemetry(tracer=RecordingTracer(), meter=RecordingMeter())
+    app = build_app(
+        _config(tmp_path, provider="anthropic", model="claude-sonnet-4-5"),
+        provider=scripted,
+        telemetry=telemetry,
+    )
+    try:
+        assert isinstance(app.provider, TracedProvider)
+        assert app.provider.inner is scripted
+        assert app.engine._provider is app.provider
+        assert app.summarizer.provider is app.provider
+        assert _unwrapped_task_runner(app)._provider is app.provider
+    finally:
+        asyncio.run(app.aclose())

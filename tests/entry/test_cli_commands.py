@@ -22,6 +22,8 @@ import io
 import json
 import pathlib
 
+import pytest
+
 from omicsclaw.context import ContextBudget
 from omicsclaw.engine import AgentEngine
 from omicsclaw.entry.cli import Repl, ScriptedSource, Screen
@@ -227,6 +229,288 @@ def test_bare_resume_lists_what_there_is_to_resume(tmp_path):
 
     assert "s-listed" in printed
     assert "/resume <id> or /resume <number>" in printed
+
+
+class Choosing(ScriptedSource):
+    """A scripted source that can also pick, the way the terminal source does.
+
+    *picks* are answered in order; an exception class or instance in it is
+    raised instead, which is how a picker that cannot be shown is played.
+    """
+
+    def __init__(self, lines, picks) -> None:
+        super().__init__(lines)
+        self.picks = list(picks)
+        self.asked: list[tuple[str, list[str], int]] = []
+
+    async def choose(self, message, options, *, default=0):
+        await asyncio.sleep(0)
+        self.asked.append((message, list(options), default))
+        pick = self.picks.pop(0)
+        if isinstance(pick, BaseException) or (
+            isinstance(pick, type) and issubclass(pick, BaseException)
+        ):
+            raise pick
+        return pick
+
+
+async def _two_conversations(tmp_path) -> None:
+    """``s-a`` then ``s-b``, each with one exchange, in the workspace store."""
+    first = build(tmp_path, answering("answer a"))
+    await drive_repl(first, ["question a", "/exit"], session_id="s-a")
+    await asyncio.wait_for(first.aclose(), WAIT_S)
+    second = build(tmp_path, answering("answer b"))
+    await drive_repl(second, ["question b", "/exit"], session_id="s-b")
+    await asyncio.wait_for(second.aclose(), WAIT_S)
+
+
+def _picking(tmp_path, lines, picks, *, session_id="s-b", provider=None):
+    """Drive a REPL whose source picks; return printed text, source, final id."""
+
+    async def drive():
+        await _two_conversations(tmp_path)
+        app = build(tmp_path, provider or answering("answer again"))
+        buffer = io.StringIO()
+        source = Choosing(lines, picks)
+        repl = Repl(
+            app, source=source, screen=Screen.into(buffer), session_id=session_id
+        )
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        final = repl.state.session_id
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return buffer.getvalue(), source, final
+
+    return asyncio.run(drive())
+
+
+def test_bare_resume_opens_the_picker_on_the_first_other_conversation(tmp_path):
+    """The current conversation is listed, so numbers match ``/sessions``,
+    but the cursor starts on the one a person most likely wants."""
+    printed, source, final = _picking(tmp_path, ["/resume", "/exit"], [None])
+
+    (message, options, default), = source.asked
+    assert "Esc" in message
+    assert options[0].startswith("s-b  (current)")
+    assert options[1].startswith("s-a  ")
+    assert "question a" in options[1]
+    assert default == 1
+    assert "Resume cancelled." in printed
+    assert final == "s-b"
+
+
+def test_picking_a_conversation_resumes_it_like_resume_by_id(tmp_path):
+    """Asserted against what reached SQLite, as the by-id test is."""
+
+    async def drive():
+        await _two_conversations(tmp_path)
+        app = build(tmp_path, answering("answer again"))
+        buffer = io.StringIO()
+        source = Choosing(["/resume", "follow-up", "/exit"], [1])
+        repl = Repl(app, source=source, screen=Screen.into(buffer), session_id="s-b")
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+
+        reader = build(tmp_path, answering("unused"))
+        stored = await asyncio.wait_for(reader.sessions.load_session("s-a"), WAIT_S)
+        await asyncio.wait_for(reader.aclose(), WAIT_S)
+        return buffer.getvalue(), [m.content for m in stored.history]
+
+    printed, history = asyncio.run(drive())
+
+    assert "Resumed s-a: 2 message(s)." in printed
+    assert "you: question a" in printed
+    assert "agent: answer a" in printed
+    assert history == ["question a", "answer a", "follow-up", "answer again"]
+
+
+def test_picking_the_current_conversation_changes_nothing(tmp_path):
+    printed, _source, final = _picking(tmp_path, ["/resume", "/exit"], [0])
+
+    assert "Already in s-b." in printed
+    assert "Resumed" not in printed
+    assert final == "s-b"
+
+
+def test_a_closed_picker_counts_as_declining_and_the_loop_goes_on(tmp_path):
+    printed, _source, final = _picking(
+        tmp_path, ["/resume", "/current", "/exit"], [EOFError]
+    )
+
+    assert "Resume cancelled." in printed
+    assert "Session s-b in" in printed
+    assert final == "s-b"
+
+
+@pytest.mark.parametrize(
+    "failure", [NotImplementedError, RuntimeError("the terminal went away")]
+)
+def test_a_picker_that_cannot_be_shown_falls_back_to_the_list(
+    tmp_path, failure, caplog
+):
+    """An old ``prompt_toolkit`` is expected, so it is not logged as an error;
+    anything else is. Either way the REPL lists and keeps going."""
+    with caplog.at_level("DEBUG", logger="omicsclaw.entry.cli._repl"):
+        printed, _source, final = _picking(
+            tmp_path, ["/resume", "/current", "/exit"], [failure]
+        )
+
+    assert "/resume <id> or /resume <number>" in printed
+    assert "s-a" in printed
+    assert "Session s-b in" in printed
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    if failure is NotImplementedError:
+        assert errors == []
+    else:
+        assert errors, "an unexpected picker failure was not logged"
+
+
+def test_the_picker_is_not_shown_when_there_is_nothing_else_to_resume(tmp_path):
+    async def drive():
+        empty = build(tmp_path / "empty", answering("unused"))
+        buffer = io.StringIO()
+        nothing = Choosing(["/resume", "/exit"], [])
+        repl = Repl(empty, source=nothing, screen=Screen.into(buffer))
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(empty.aclose(), WAIT_S)
+
+        alone = build(tmp_path / "alone", answering("unused"))
+        only = Choosing(["hello", "/resume", "/exit"], [])
+        repl = Repl(alone, source=only, screen=Screen.into(buffer), session_id="solo")
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(alone.aclose(), WAIT_S)
+        return buffer.getvalue(), nothing.asked, only.asked
+
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "alone").mkdir()
+    printed, asked_empty, asked_alone = asyncio.run(drive())
+
+    assert asked_empty == [] and asked_alone == []
+    assert "No saved conversations to resume." in printed
+    assert "No other conversation to resume." in printed
+
+
+def test_a_source_that_cannot_pick_never_reads_the_next_line_as_a_choice(
+    tmp_path,
+):
+    """``oc cli < script.txt``: the line after ``/resume`` is a question."""
+    provider = answering("answered")
+
+    async def drive():
+        await _two_conversations(tmp_path)
+        app = build(tmp_path, provider)
+        printed = await drive_repl(app, ["/resume", "hello", "/exit"])
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert provider.seen[-1][-1].content == "hello"
+    assert "/resume <id> or /resume <number>" in printed
+
+
+def test_sessions_lists_the_conversation_used_last_first(tmp_path):
+    """Created first, spoken in last: it leads the list, not the newest."""
+
+    async def drive():
+        await _two_conversations(tmp_path)
+        again = build(tmp_path, answering("answer a2"))
+        await drive_repl(again, ["question a2", "/exit"], session_id="s-a")
+        await asyncio.wait_for(again.aclose(), WAIT_S)
+        reader = build(tmp_path, answering("unused"))
+        printed = await drive_repl(reader, ["/sessions", "/exit"])
+        await asyncio.wait_for(reader.aclose(), WAIT_S)
+        return printed
+
+    printed = asyncio.run(drive())
+
+    assert "1. s-a" in printed
+    assert "2. s-b" in printed
+
+
+# ---- one conversation on one line -----------------------------------------
+
+
+def _session(*history, session_id="s-1"):
+    from omicsclaw.entry.session import Session
+
+    return Session(session_id=session_id, history=tuple(history), updated_at=0.0)
+
+
+def test_the_preview_skips_the_summary_a_compaction_left_first():
+    from omicsclaw.context import Anchors, build_compaction_message
+    from omicsclaw.entry.cli._repl import _session_summary
+
+    summary = build_compaction_message(Anchors(user_intent="ship it"), "long talk")
+    row = _session_summary(
+        _session(summary, Message.user("which clusters are immune?")),
+        current=False,
+        width=120,
+    )
+
+    assert "[Context Compaction]" not in row
+    assert row.endswith("which clusters are immune?")
+
+
+def test_the_preview_drops_shell_records_even_when_their_output_has_blank_lines():
+    from omicsclaw.entry.cli._repl import _session_summary
+    from omicsclaw.entry.cli._shell import shell_preamble
+
+    asked = shell_preamble(["$ ls\nline one\n\nline three"]) + "what now?"
+    row = _session_summary(_session(Message.user(asked)), current=False, width=120)
+
+    assert row.endswith("what now?")
+    assert "line" not in row
+
+
+def test_a_wide_preview_is_cut_by_terminal_cells_not_characters():
+    from rich.cells import cell_len
+
+    from omicsclaw.entry.cli._repl import _session_summary
+
+    question = "比较肿瘤与间质区域的差异表达基因" * 5
+    row = _session_summary(_session(Message.user(question)), current=False, width=60)
+
+    assert cell_len(row) <= 60
+    assert row.endswith("…")
+
+
+def test_a_narrow_terminal_cuts_the_preview_and_never_the_marker():
+    from omicsclaw.entry.cli._repl import _session_summary
+
+    row = _session_summary(
+        _session(Message.user("a long question " * 10)), current=True, width=30
+    )
+
+    assert row.startswith("s-1  (current)")
+    assert "question" not in row
+
+
+def test_a_conversation_with_nothing_said_says_so():
+    from omicsclaw.entry.cli._repl import _session_summary
+
+    assert _session_summary(_session(), current=False, width=120).endswith(
+        "(no messages)"
+    )
+
+
+def test_the_recap_is_the_last_exchange_and_its_text_is_not_markup():
+    from omicsclaw.entry.cli._repl import _recap
+
+    history = (
+        Message.user("first"),
+        Message(role=Role.ASSISTANT, content="early answer"),
+        Message.user("show [red]this[/red]"),
+        Message(role=Role.ASSISTANT, content="done:\n  [bold]x[/bold]"),
+    )
+    buffer = io.StringIO()
+    screen = Screen.into(buffer)
+    for line in _recap(history, width=80):
+        screen.print(line)
+    printed = buffer.getvalue()
+
+    assert "you: show [red]this[/red]" in printed
+    assert "agent: done: [bold]x[/bold]" in printed
+    assert "first" not in printed
 
 
 # ---- /compact ---------------------------------------------------------

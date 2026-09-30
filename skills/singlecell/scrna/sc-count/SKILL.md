@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-count
 description: Load when turning scRNA FASTQ (or existing CellRanger/STARsolo/SimpleAF/kb-python output)
   into a downstream-ready AnnData. Skip when reads are already counted into AnnData (use sc-standardize-input);
   raw quality assessment only (use sc-fastq-qc).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: Cell Ranger count, STARsolo count, fastq to adata, raw single-cell counting, generate count matrix
 tags:
 - singlecell
 - scrna
@@ -17,14 +12,6 @@ tags:
 - starsolo
 - simpleaf
 - kb-python
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-count
@@ -40,8 +27,6 @@ upstream (read QC) and `sc-multi-count` downstream (merging multiple
 samples).
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -95,29 +80,29 @@ samples).
 
 ## Gotchas
 
-- **Missing input path → hard fail.** `sc_count.py:356` raises `FileNotFoundError(f"Input path not found: {input_path}")`.  Common when the FASTQ dir is on a network mount that has not been resolved at run time.
-- **STARsolo requires explicit chemistry.** `sc_count.py:420` raises `ValueError("STARsolo runs require an explicit `--chemistry` value such as `10xv3`.")` when chemistry is left at the `auto` default.  STARsolo currently supports `10xv2`, `10xv3`, and `10xv4`; pass one of those.
-- **Backend prerequisites are validated up front.** `sc_count.py:401`, `:423`, `:451` raise `ValueError` for missing `--reference` (CellRanger/STARsolo/simpleaf), missing `--t2g` (kb-python), or unsupported `--chemistry` for STARsolo.  No silent fallback to a different backend — pick a feasible one before invoking.
+- **Missing input path → hard fail.** `sc_count.py` raises `FileNotFoundError(f"Input path not found: {input_path}")`.  Common when the FASTQ dir is on a network mount that has not been resolved at run time.
+- **STARsolo requires explicit chemistry.** `sc_count.py` raises `ValueError("STARsolo runs require an explicit `--chemistry` value such as `10xv3`.")` when chemistry is left at the `auto` default.  STARsolo currently supports `10xv2`, `10xv3`, and `10xv4`; pass one of those.
+- **Backend prerequisites are validated up front.** `sc_count.py` raises `ValueError` for missing `--reference` (CellRanger/STARsolo/simpleaf), missing `--t2g` (kb-python), or unsupported `--chemistry` for STARsolo.  No silent fallback to a different backend — pick a feasible one before invoking.
 - **Re-canonicalising-existing-output is detected by directory shape, not a flag.** If `--input` points at a CellRanger output dir (e.g. one with `outs/raw_feature_bc_matrix/`), the skill skips counting and just imports the matrix.  No flag separates the two paths; verify by inspecting `result.json["data"]["execution"]` (empty list = re-canonicalise; populated = backend invoked) or by reading `tables/backend_summary.csv` (lists the backend metrics only when the backend ran).
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic FASTQ + CellRanger-shaped output)
-python omicsclaw.py run sc-count --demo --output /tmp/sc_count_demo
+python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_count_demo
 
 # CellRanger over FASTQ
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastq_dir/ --output results/ \
   --reference cellranger_transcriptome --threads 16
 
 # STARsolo (requires explicit chemistry)
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastq_dir/ --output results/ \
   --reference star_genome_dir --chemistry 10xv3 --whitelist barcodes.tsv
 
 # Re-canonicalise an existing CellRanger output directory
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input cellranger_output_dir/ --output results/
 ```
 
@@ -127,3 +112,9 @@ python omicsclaw.py run sc-count \
 - `references/methodology.md` — backend selection guide, re-canonicalise vs re-run logic
 - `references/output_contract.md` — `processed.h5ad` schema + table layouts
 - Adjacent skills: `sc-fastq-qc` (upstream — read-quality check before counting), `sc-multi-count` (downstream — merge multiple sample outputs), `sc-standardize-input` (parallel — for AnnData from outside OmicsClaw)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

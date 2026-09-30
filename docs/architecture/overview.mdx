@@ -56,6 +56,10 @@ og:image: "/docs/images/og-cover.png"
 > disk capacity to every scientific executor path. Neither queue nor Lease is
 > durable execution authority.
 
+> **Desktop 现状（2026-09-27，plan 0064）**：上面的 baseline 与下文的 Desktop 描述早于框架重建。当前 Desktop 面是
+> `oc desktop --workspace <dir>`（`omicsclaw/entry/desktop/`），只提供聊天、审批、停止、工作区校验与 `/health`，只收文本；
+> 同一 `source_request_id` 的重投与 SSE 续读只在进程内存里成立，不经过任何 `control.db`。远程模式由后续计划重新对齐。
+
 ## 为什么是这个架构
 
 **独立 skill**：每个分析能力封装为一个 skill 单元，包含独立的 `SKILL.md` 契约、Python 脚本和可选测试。独立边界使单个 skill 可以独立测试、替换或升级，而不影响其他 skill。

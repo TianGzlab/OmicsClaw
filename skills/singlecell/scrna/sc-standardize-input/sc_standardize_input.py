@@ -17,14 +17,19 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
@@ -273,8 +278,8 @@ def main() -> None:
                 "  - directory (10X mtx output)\n"
                 "\n"
                 "Example:\n"
-                f"  python omicsclaw.py run sc-standardize-input --input your_data.h5ad --output {output_dir}\n"
-                "  python omicsclaw.py run sc-standardize-input --demo --output /tmp/demo"
+                f"  python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input your_data.h5ad --output {output_dir}\n"
+                "  python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --demo --output /tmp/demo"
             )
         adata = sc_io.smart_load(
             input_path,
@@ -310,7 +315,7 @@ def main() -> None:
         print("  How to fix:")
         print("    Option 1: Check that the input file is a valid single-cell dataset")
         print("    Option 2: If using a CSV, cells should be rows and genes should be columns")
-        print(f"    Option 3: Try the demo first: python omicsclaw.py run sc-standardize-input --demo --output {output_dir}")
+        print(f"    Option 3: Try the demo first: python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --demo --output {output_dir}")
         print()
 
     if adata.n_vars == 0:
@@ -336,7 +341,7 @@ def main() -> None:
         print("    Option 2: If your data is already normalized (log-transformed), you may need to provide")
         print("              the original raw count matrix separately")
         print("    Option 3: Check if your data was exported from a tool that stores counts in a non-standard location")
-        print(f"    Option 4: Try the demo: python omicsclaw.py run sc-standardize-input --demo --output {output_dir}")
+        print(f"    Option 4: Try the demo: python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --demo --output {output_dir}")
         print()
         raise
 
@@ -409,7 +414,7 @@ def main() -> None:
         print(f"  Issues: {len(diagnostics['issues'])} (see report.md for details)")
     print()
     print(">> Next step: Run sc-qc for quality assessment")
-    print(f"  python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-qc/sc_qc.py --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

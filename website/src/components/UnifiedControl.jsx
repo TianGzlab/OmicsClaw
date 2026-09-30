@@ -70,7 +70,7 @@ const UnifiedControl = () => {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
-              {['Telegram', 'Discord', 'Slack', 'Feishu', 'WeChat', 'DingTalk', 'QQ', 'Email', 'iMessage'].map((p) => (
+              {['Telegram', 'Discord', 'Slack', 'Feishu', 'DingTalk', 'QQ', 'Email', 'iMessage'].map((p) => (
                 <span key={p} className="bg-white/5 border border-white/10 py-1 px-3 rounded-full hover:bg-teal-500/10 hover:border-teal-500/30 transition-colors cursor-default">{p}</span>
               ))}
             </div>

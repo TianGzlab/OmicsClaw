@@ -1,28 +1,15 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-qc
 description: Load when computing per-cell QC metrics (n_genes, total counts, mt%, ribo%) on a single-cell
   AnnData before filtering. Skip when reads are still raw FASTQ (use sc-fastq-qc); you want to filter
   cells now (use sc-filter).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 📊
+trigger: scRNA QC, single-cell QC, quality control, mitochondrial percentage, ribosomal percentage, QC violin, QC scatter, n genes per cell
 tags:
 - singlecell
 - scrna
 - qc
 - mitochondrial
 - ribosomal
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-qc
@@ -36,8 +23,6 @@ percentage, ribosomal percentage — before any filtering.  This skill
 cells based on these metrics.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -79,20 +64,20 @@ cells based on these metrics.
 ## Gotchas
 
 - **No filtering happens here.** Despite the name, `sc-qc` does not remove cells or genes — it computes metrics and produces figures.  Run `sc-filter` next with thresholds chosen from the QC violins.  The `result.json` `summary` carries `n_cells` / `n_genes` *as observed*, not as filtered.
-- **Input file missing → hard fail.** `sc_qc.py:635` raises `FileNotFoundError` when `--input` does not resolve.  Pre-flight your path before the skill, especially in batch pipelines.
+- **Input file missing → hard fail.** `sc_qc.py` raises `FileNotFoundError` when `--input` does not resolve.  Pre-flight your path before the skill, especially in batch pipelines.
 - **`expression_source` records which matrix the run used.** `result.json["summary"]["expression_source"]` reads `layers.counts`, `adata.raw`, or `adata.X` depending on what the loader picked; QC fractions (mt%, ribo%) are only meaningful on a count-like source.  Verify after every run, especially if the input came from outside `sc-standardize-input`.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in PBMC3K)
-python omicsclaw.py run sc-qc --demo --output /tmp/sc_qc_demo
+python skills/singlecell/scrna/sc-qc/sc_qc.py --demo --output /tmp/sc_qc_demo
 
 # Real run
-python omicsclaw.py run sc-qc --input processed.h5ad --output results/
+python skills/singlecell/scrna/sc-qc/sc_qc.py --input processed.h5ad --output results/
 
 # With R Enhanced figures
-python omicsclaw.py run sc-qc --input processed.h5ad --output results/ --r-enhanced
+python skills/singlecell/scrna/sc-qc/sc_qc.py --input processed.h5ad --output results/ --r-enhanced
 ```
 
 ## See also
@@ -101,3 +86,9 @@ python omicsclaw.py run sc-qc --input processed.h5ad --output results/ --r-enhan
 - `references/methodology.md` — mt/ribo gene-pattern detection, scanpy QC parameters
 - `references/output_contract.md` — table column schemas + figure roles
 - Adjacent skills: `sc-standardize-input` (upstream — required if input is external), `sc-filter` (next step — actually removes cells), `sc-doublet-detection` (parallel — finds doublets)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

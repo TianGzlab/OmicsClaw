@@ -4,6 +4,6 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run peak-detect --demo
-python omicsclaw.py run peak-detect --input <data.csv> --output <dir>
+python skills/metabolomics/metabolomics-peak-detection/peak_detect.py --demo
+python skills/metabolomics/metabolomics-peak-detection/peak_detect.py --input <data.csv> --output <dir>
 ```

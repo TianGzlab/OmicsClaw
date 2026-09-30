@@ -1,15 +1,10 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-consensus-clustering
 description: Load when you want resolution-robust single-cell clusters on a preprocessed scRNA AnnData
   — fanning out leiden/louvain across a resolution sweep, scoring members by silhouette + cross-method
   NMI, and voting a typed consensus. Skip when one resolution suffices (use sc-clustering); spatial domains
   (use consensus-domains).
-version: 0.1.0
-author: OmicsClaw
-license: Apache-2.0
-emoji: 🧩
+trigger: consensus clustering, consensus celltype clustering, multi-resolution clustering, robust scrna clustering, resolution sweep consensus, single cell consensus clustering
 tags:
 - singlecell
 - consensus
@@ -20,14 +15,6 @@ tags:
 - kmode
 - lca
 - weighted
-requires:
-- anndata
-- numpy
-- pandas
-- PyYAML
-- scanpy
-- scikit-learn
-- scipy
 ---
 
 # sc-consensus-clustering
@@ -46,8 +33,6 @@ core** of the labels.
 It does NOT replace `sc-clustering`; it wraps it.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -94,14 +79,14 @@ It does NOT replace `sc-clustering`; it wraps it.
 
 ```bash
 # Default sweep (leiden at 5 resolutions)
-oc run sc-consensus-clustering --input preprocessed.h5ad --output out/
+python skills/singlecell/scrna/sc-consensus-clustering/sc_consensus_clustering.py --input preprocessed.h5ad --output out/
 
 # Both methods × 5 resolutions = 10 members; SACCELERATOR-style benchmark
-oc run sc-consensus-clustering --input preprocessed.h5ad --output out/ \
+python skills/singlecell/scrna/sc-consensus-clustering/sc_consensus_clustering.py --input preprocessed.h5ad --output out/ \
   --cluster-methods leiden,louvain --resolutions 0.5,0.8,1.0,1.4,2.0
 
 # Explicit
-oc run sc-consensus-clustering --input preprocessed.h5ad --output out/ \
+python skills/singlecell/scrna/sc-consensus-clustering/sc_consensus_clustering.py --input preprocessed.h5ad --output out/ \
   --members leiden:resolution=0.5,leiden:resolution=1.0,louvain:resolution=1.0
 ```
 
@@ -109,6 +94,11 @@ oc run sc-consensus-clustering --input preprocessed.h5ad --output out/ \
 
 - `references/methodology.md` — the resolution-sweep consensus rationale
 - `references/output_contract.md` — `consensus_labels.tsv` / `member_scores.csv` / `plan.json` schema
-- `references/parameters.md` — every CLI flag (generated from `skill.yaml`)
+- `references/parameters.md` — every CLI flag, per-method tunables
 - Adjacent skills: `sc-preprocessing` (upstream — produces the input), `sc-clustering` (the per-member method this wraps), `consensus-domains` (parallel — the spatial analogue), `sc-consensus-integration` (parallel — consensus over integration backends)
-- ADR 0010/0011/0016 — runtime layer, scoring protocol, workflow-runtime generalisation
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `numpy`, `pandas`, `PyYAML`, `scanpy`, `scikit-learn`, `scipy`

@@ -1,19 +1,24 @@
-"""One exchange: compose the prompt, fit it, run the loop.
+"""One exchange: assemble its collaborators, run the loop, keep the result.
 
-``AgentEngine.run`` takes a conversation that "arrives assembled" and
-says so in its own docstring. This module is where it arrives from. Each
-turn:
+``AgentEngine.exchange`` renders a prompt, puts a history in front of it
+and hands the finished trajectory back. This module is where all three of
+those come from. Each turn hands the engine:
 
-1. renders the prompt assembler, so an edited ``SOUL.md``, a rewritten
-   ``CLAUDE.md`` and today's date are all picked up;
-2. assembles ``[system, *history, user]``;
-3. hands it to the engine, blocking or streaming, together with a
-   :class:`~omicsclaw.context.ProgressiveCompactor` that measures and,
+1. the app's prompt assembler, so an edited ``OMICSCLAW.md`` and
+   today's date are both picked up — the engine renders
+   it once, at the start of the exchange;
+2. a :class:`_Carried`, this exchange's history and the place the engine
+   leaves the conversation to carry forward;
+3. a :class:`~omicsclaw.context.ProgressiveCompactor` that measures and,
    from the configured tier up, compacts the conversation before every
    model call of the run — and a
    :class:`~omicsclaw.planning.PlanInjector` that puts the session's
    outstanding plan back at the end of it afterwards, so that what
    compaction summarized away cannot take the plan with it.
+
+:func:`_assemble` builds all of that in one place for all three paths
+below (plan 0027 §12.4). The deadline stays out here: how long a
+deployment is willing to wait is its own policy, not the loop's.
 
 Each of the three paths below also wraps its exchange in
 :meth:`~omicsclaw.observability.Telemetry.run` and feeds it the engine's
@@ -34,7 +39,15 @@ import asyncio
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Iterator, Literal, Mapping, Sequence
+from typing import (
+    AsyncIterator,
+    Callable,
+    Iterator,
+    Literal,
+    Mapping,
+    Sequence,
+    cast,
+)
 
 from omicsclaw.context import (
     PRESSURE_ORDER,
@@ -46,7 +59,13 @@ from omicsclaw.context import (
     assemble,
     at_least,
 )
-from omicsclaw.engine import EngineError, EngineEvent, RunResult, StopReason
+from omicsclaw.engine import (
+    EngineError,
+    EngineEvent,
+    RunResult,
+    StopReason,
+    TurnAugmentor,
+)
 from omicsclaw.schema import Message, Role
 from omicsclaw.tools.context import (
     ApprovalDecision,
@@ -175,15 +194,141 @@ async def prepare(
     return messages, prompt, compactor.state, compactor.last_record
 
 
-def _outcome(
-    result: RunResult,
-    prompt: AssembledPrompt,
-    compactor: ProgressiveCompactor,
-) -> TurnOutcome:
+@dataclass(slots=True)
+class _Carried:
+    """One exchange's history, and where the engine leaves the next one.
+
+    Satisfies :class:`~omicsclaw.engine.Conversation` structurally — no
+    base class, no import in the other direction. The engine reads
+    :meth:`messages` once to compose its first call and calls
+    :meth:`commit` once with the finished trajectory, system message
+    already removed.
+
+    **In memory only.** Writing a session to disk is
+    :class:`~omicsclaw.entry.session.SessionRegistry`'s job, and it has
+    to store the compaction state in the same breath — a thing the
+    engine cannot see. One writer, holding both halves, rather than two
+    each holding one.
+    """
+
+    history: tuple[Message, ...] = ()
+    """What this exchange starts from, free of a system message (Q3)."""
+
+    committed: tuple[Message, ...] | None = None
+    """What the engine handed back, or ``None`` if it never got that far."""
+
+    def messages(self) -> tuple[Message, ...]:
+        return self.history
+
+    async def commit(self, messages: Sequence[Message]) -> None:
+        self.committed = tuple(messages)
+
+    @property
+    def carried(self) -> tuple[Message, ...]:
+        """The conversation to keep: the commit, or the input unchanged.
+
+        An exchange that raised or was abandoned never committed, and
+        the right history for it is the one it was given — cancelling an
+        exchange discards *it*, not the conversation (plan 0031 trap 3).
+        """
+        return self.history if self.committed is None else self.committed
+
+
+@dataclass(frozen=True, slots=True)
+class _Exchange:
+    """The collaborators one exchange hands the engine, built once.
+
+    Plan 0027 §12.4: this assembly used to be written out at each of the
+    three call sites below, and a step missed at any of them failed
+    silently — a compactor built without its listeners publishes no
+    frames, an injector never built means the plan quietly stops being
+    restated. One constructor, three callers, one place to get it wrong.
+    """
+
+    conversation: _Carried
+    compactor: ProgressiveCompactor
+    augmentor: TurnAugmentor | None
+
+
+def _assemble(
+    app: AgentApp,
+    history: Sequence[Message] = (),
+    *,
+    session_id: str = "",
+    state: CompactionState | None = None,
+    plan_block: bool = True,
+    on_measure: Callable[[BudgetReport], None] | None = None,
+    on_compact: Callable[[CompactionRecord], None] | None = None,
+) -> _Exchange:
+    """Everything one exchange needs before the engine is called.
+
+    *plan_block* is false for the compaction-only path, which never
+    calls a model: asking for the injector would restore the session's
+    plan from its archive for an exchange that has no turn to remind.
+    """
+    return _Exchange(
+        conversation=_Carried(tuple(history)),
+        compactor=build_compactor(
+            app,
+            session_id=session_id,
+            state=state,
+            on_measure=on_measure,
+            on_compact=on_compact,
+        ),
+        augmentor=build_injector(app, session_id=session_id) if plan_block else None,
+    )
+
+
+async def _run(app: AgentApp, exchange: _Exchange, user_text: str) -> RunResult:
+    """The blocking engine call, spelled once.
+
+    ``prompt=app.prompt`` is passed on every call rather than left to
+    whatever default the engine was built with. :func:`build_app` gives
+    its engine that same assembler, so this is usually the same object
+    twice — but an app assembled around an engine somebody else built
+    still renders *this* deployment's prompt, and a render is what
+    :func:`_outcome` requires.
+    """
+    return await app.engine.exchange(
+        user_text,
+        conversation=exchange.conversation,
+        prompt=app.prompt,
+        compactor=exchange.compactor,
+        augmentor=exchange.augmentor,
+    )
+
+
+def _stream(
+    app: AgentApp, exchange: _Exchange, user_text: str
+) -> AsyncIterator[EngineEvent]:
+    """The streaming engine call, spelled once. See :func:`_run`."""
+    return app.engine.exchange_stream(
+        user_text,
+        conversation=exchange.conversation,
+        prompt=app.prompt,
+        compactor=exchange.compactor,
+        augmentor=exchange.augmentor,
+    )
+
+
+def _outcome(result: RunResult, exchange: _Exchange) -> TurnOutcome:
+    """What the caller keeps, read off the run and its collaborators.
+
+    The render comes back on the :class:`~omicsclaw.engine.RunResult`
+    rather than from a second ``app.prompt.render()``: the engine did
+    the reading, and re-reading ``OMICSCLAW.md`` here would report a prompt
+    that may already differ from the one this exchange was sent. It is
+    an :class:`~omicsclaw.context.AssembledPrompt` because every caller
+    below hands the engine ``app.prompt`` for this call rather than
+    relying on whatever default that engine was built with — a test's
+    hand-built engine has none, and this layer's contract is that
+    :attr:`TurnOutcome.prompt` is always a render.
+    """
+    compactor = exchange.compactor
     return TurnOutcome(
         result=result,
-        history=tuple(result.messages[PINNED_SYSTEM_MESSAGES:]),
-        prompt=prompt,
+        history=exchange.conversation.carried,
+        prompt=cast(AssembledPrompt, result.prompt),
         state=compactor.state,
         compaction=compactor.last_record,
         compactions=compactor.records,
@@ -238,9 +383,7 @@ async def run_turn(
         are cancelled by :func:`asyncio.timeout` on the way out, and the
         exchange leaves no partial history behind.
     """
-    messages, prompt = compose(app, history, user_text)
-    compactor = build_compactor(app, session_id=session_id, state=state)
-    augmentor = build_injector(app, session_id=session_id)
+    exchange = _assemble(app, history, session_id=session_id, state=state)
 
     timeout = app.config.turn_timeout_s
     with _session_bound(session_id):
@@ -248,14 +391,10 @@ async def run_turn(
             session_id=session_id, prompt=user_text, turn_events=False
         ) as scope:
             if timeout is None:
-                result = await app.engine.run(
-                    messages, compactor=compactor, augmentor=augmentor
-                )
+                result = await _run(app, exchange, user_text)
             else:
                 async with asyncio.timeout(timeout):
-                    result = await app.engine.run(
-                        messages, compactor=compactor, augmentor=augmentor
-                    )
+                    result = await _run(app, exchange, user_text)
             # ``run`` drops the engine's events by design, so the one
             # event the interaction span needs is re-made from what it
             # returned. This is not a fabrication: ``DONE`` carrying this
@@ -265,7 +404,7 @@ async def run_turn(
             # three — see :mod:`omicsclaw.observability.scope`.
             scope.observe(EngineEvent.done(result))
 
-    return _outcome(result, prompt, compactor)
+    return _outcome(result, exchange)
 
 
 async def stream_turn(
@@ -287,16 +426,12 @@ async def stream_turn(
     :func:`run_turn`: an event stream reports what happened, not what to
     carry forward.
     """
-    messages, _prompt = compose(app, history, user_text)
-    compactor = build_compactor(app, session_id=session_id, state=state)
-    augmentor = build_injector(app, session_id=session_id)
+    exchange = _assemble(app, history, session_id=session_id, state=state)
     with _session_bound(session_id):
         async with app.telemetry.run(
             session_id=session_id, prompt=user_text
         ) as scope:
-            async for event in app.engine.run_stream(
-                messages, compactor=compactor, augmentor=augmentor
-            ):
+            async for event in _stream(app, exchange, user_text):
                 scope.observe(event)
                 yield event
 
@@ -512,28 +647,27 @@ class TurnRunner:
             return await self._sequence()
 
     async def _sequence(self) -> TurnOutcome:
-        """render → assemble → run_stream with a compactor → carry."""
+        """assemble → exchange_stream → carry, publishing every step."""
         app = self._app
         user_text = "" if self._force else self._user_text
-        messages, prompt = compose(app, self._history, user_text)
-        compactor = build_compactor(
+        exchange = _assemble(
             app,
+            self._history,
             session_id=self.session_id,
             state=self._compaction,
+            plan_block=not self._force,
             on_measure=self._on_measure,
             on_compact=self._on_compacted,
         )
         if self._force:
-            return await self._compact_only(compactor, messages, prompt)
+            messages, prompt = compose(app, self._history, user_text)
+            return await self._compact_only(exchange.compactor, messages, prompt)
 
         result: RunResult | None = None
-        augmentor = build_injector(app, session_id=self.session_id)
         async with app.telemetry.run(
             session_id=self.session_id, prompt=user_text
         ) as scope:
-            async for event in app.engine.run_stream(
-                messages, compactor=compactor, augmentor=augmentor
-            ):
+            async for event in _stream(app, exchange, user_text):
                 scope.observe(event)
                 if event.result is not None:
                     result = event.result
@@ -544,7 +678,7 @@ class TurnRunner:
                 )
         if result is None:  # pragma: no cover - the engine's own invariant
             raise EngineError("the engine's event stream ended without a result")
-        return _outcome(result, prompt, compactor)
+        return _outcome(result, exchange)
 
     async def _compact_only(
         self,

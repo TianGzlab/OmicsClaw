@@ -21,6 +21,6 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-read-qc --demo
-python omicsclaw.py run bulkrna-read-qc --input reads.fastq.gz --output results/
+python skills/bulkrna/bulkrna-read-qc/bulkrna_read_qc.py --demo
+python skills/bulkrna/bulkrna-read-qc/bulkrna_read_qc.py --input reads.fastq.gz --output results/
 ```

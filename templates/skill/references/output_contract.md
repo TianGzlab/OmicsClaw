@@ -2,9 +2,8 @@
 
 <!--
 Describe ONLY the files the script actually writes (`.to_csv` / `.savefig` /
-`.write_text` / `json.dump` literals).  `scripts/skill_lint.py::_check_output_
-contract_paths` fails when a path mentioned here does not appear in the
-script (or any imported `_lib/*.py`).
+`.write_text` / `json.dump` literals).  Nothing checks this mechanically, so
+it is a review item.
 
 Framework files (report.md, result.json, processed.h5ad, commands.sh,
 manifest.json, requirements.txt, checksums.sha256) are exempt from the
@@ -28,12 +27,8 @@ output_directory/
 - `report.md` — Markdown summary written by the common report helper.
 - `result.json` — standardised result envelope (`summary` + `data` keys).
   When the script finishes cleanly it tail-calls `mark_result_status(output_dir, "ok")`,
-  which adds a top-level `status: "ok"` field. The runner reads that
-  field and trusts it over any exit-code anomaly (e.g. a SIGKILL race
-  with the orphan reaper). If the script crashes before the
-  `mark_result_status` call, the field is absent and the runner falls
-  back to a `-9 + result.json exists → success` heuristic instead.
-  Valid values: `"ok"`, `"partial"`, `"failed"`.
+  which adds a top-level `status: "ok"` field; a run that crashed before
+  that call has no `status`. Valid values: `"ok"`, `"partial"`, `"failed"`.
 
 ## Notes
 
@@ -43,9 +38,8 @@ about edge cases, sentinel values, NaN handling, etc.)
 <!--
 ==============================================================================
 OPTIONAL outputs — add the blocks that match what your script actually
-writes.  REMOVE the ones that don't apply.  Every path you add here must
-appear as a substring in the script (or a sibling `_lib/*.py`) or the lint
-will fail.
+writes.  REMOVE the ones that don't apply.  Every path you add here should
+appear as a substring in the script (or a sibling `_lib/*.py`).
 
 ### When the skill writes a processed AnnData
 
@@ -56,7 +50,7 @@ output_directory/
 
 - `processed.h5ad` — written by `<script>.py`. Counts in
   `layers["counts"]`, log-normalized in `adata.X`, results stashed in `uns`.
-- Set `interface.outputs.anndata.saves_h5ad: true` in `skill.yaml`.
+- Say so in `SKILL.md`'s `## Inputs & Outputs` when the script writes a `.h5ad`.
 
 ### When the skill emits Python figures
 
@@ -79,22 +73,5 @@ output_directory/
 
 - `figure_data/<name>.csv` — figure-ready export consumed by the optional
   R post-renderer.  See `references/r_visualization.md`.
-
-### When the skill emits a reproducibility bundle
-
-```
-output_directory/
-└── reproducibility/
-    ├── replay.json
-    ├── environment.json
-    └── replay.sh
-```
-
-- `reproducibility/replay.json` — machine-readable Skill revision, input,
-  parameter, environment, result, and declared-artifact evidence.
-- `reproducibility/environment.json` — bounded producer-environment evidence;
-  it is not a complete cross-machine lockfile.
-- `reproducibility/replay.sh` — thin launcher for `oc replay`; replay creates a
-  fresh Run and never overwrites the original output.
 ==============================================================================
 -->

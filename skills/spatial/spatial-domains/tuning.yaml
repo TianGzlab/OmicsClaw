@@ -1,0 +1,110 @@
+# Search space of spatial-domains for run_skill and parameter tuning.
+# Checked against the script's argparse by tests/ensemble/test_tuning_matches_argparse.py.
+# No range here is derived from any dataset's ground truth. memory_gb values are
+# about three times the peak PSS measured on a 41,786-bead Slide-seqV2 section
+# (stagate and banksy were not measured and keep the defaults).
+# k_control says how a method's number of domains is set for fixed-K tuning:
+# exact methods take it as a parameter, calibrate methods reach it by searching
+# a parameter that moves the number of clusters monotonically. leiden and
+# louvain reserve 2 CPUs: they are essentially single-threaded.
+schema_version: 1
+skill: spatial-domains
+script: spatial_domains.py
+analysis: spatial_domains
+method_flag: --method
+
+output:
+  kind: labels
+  labels:
+    table: tables/domain_assignments.csv
+    id_column: observation
+    label_column: spatial_domain
+  h5ad: processed.h5ad
+
+reference:
+  coords_obsm: spatial
+  expression_obsm: X_pca
+
+defaults:
+  resources: {gpu: none, memory_gb: 32, cpus: 8, timeout_s: 1800}
+
+context:
+  data_type:
+    type: categorical
+    flag: --data-type
+    choices: [visium, xenium, slide_seq, merfish, seqfish, generic, stereo]
+    default: null
+    note: platform of the data; GraphST routes on it and infers it from metadata when absent
+
+methods:
+  leiden:
+    resources: {memory_gb: 8, cpus: 2}
+    k_control: {kind: calibrate, param: resolution}
+    params:
+      resolution: {type: float, flag: --resolution, low: 0.1, high: 2.0, log: true, default: 1.0, priority: 1}
+      spatial_weight: {type: float, flag: --spatial-weight, low: 0.0, high: 0.9, default: 0.3, priority: 2}
+
+  louvain:
+    resources: {memory_gb: 8, cpus: 2}
+    k_control: {kind: calibrate, param: resolution}
+    params:
+      resolution: {type: float, flag: --resolution, low: 0.1, high: 2.0, log: true, default: 1.0, priority: 1}
+      spatial_weight: {type: float, flag: --spatial-weight, low: 0.0, high: 0.9, default: 0.3, priority: 2}
+
+  spagcn:
+    resources: {memory_gb: 64}
+    k_control: {kind: exact, param: n_domains}
+    note: SpaGCN 1.2.x has no GPU code path
+    params:
+      spagcn_p: {type: float, flag: --spagcn-p, low: 0.1, high: 0.9, default: 0.5, priority: 1}
+      n_domains: {type: int, flag: --n-domains, low: 3, high: 20, default: 7, priority: 2,
+                  note: the script's own default when --n-domains is omitted}
+      epochs: {type: int, flag: --epochs, low: 50, high: 400, log: true, default: 100, priority: 3}
+
+  stagate:
+    resources: {gpu: preferred, memory_gb: 64}
+    k_control: {kind: exact, param: n_domains}
+    note: rad_cutoff is not searched; the script ignores it whenever k_nn > 0
+    params:
+      k_nn: {type: int, flag: --k-nn, low: 3, high: 15, default: 6, priority: 1}
+      n_domains: {type: int, flag: --n-domains, low: 3, high: 20, default: 7, priority: 2,
+                  note: the script's own default when --n-domains is omitted}
+      stagate_alpha: {type: float, flag: --stagate-alpha, low: 0.0, high: 1.0, default: 0.0, priority: 3}
+      pre_resolution: {type: float, flag: --pre-resolution, low: 0.05, high: 1.0, log: true, default: 0.2,
+                       priority: 4, active_when: {stagate_alpha: {gt: 0}},
+                       note: only used by the cell type-aware module}
+      epochs: {type: int, flag: --epochs, low: 50, high: 1000, log: true, default: 100, priority: 5}
+
+  graphst:
+    resources: {gpu: preferred, memory_gb: 16}
+    k_control: {kind: exact, param: n_domains}
+    params:
+      n_domains: {type: int, flag: --n-domains, low: 3, high: 20, default: 7, priority: 1,
+                  note: the script's own default when --n-domains is omitted}
+      epochs: {type: int, flag: --epochs, low: 50, high: 600, log: true, default: 100, priority: 2}
+      dim_output: {type: categorical, flag: --dim-output, choices: [32, 64, 128], default: 64, priority: 3}
+
+  banksy:
+    note: n_domains is not searched; BANKSY runs in Leiden mode here
+    k_control: {kind: calibrate, param: resolution}
+    params:
+      lambda_param: {type: float, flag: --lambda-param, low: 0.0, high: 1.0, default: 0.2, priority: 1}
+      num_neighbours: {type: int, flag: --num-neighbours, low: 6, high: 30, default: 15, priority: 2}
+      resolution: {type: float, flag: --resolution, low: 0.1, high: 2.0, log: true, default: 1.0, priority: 3}
+
+  cellcharter:
+    resources: {gpu: preferred, memory_gb: 16}
+    k_control: {kind: exact, param: n_domains, pin: {auto_k: false}}
+    params:
+      auto_k: {type: bool, flag: --auto-k, default: false, priority: 1}
+      n_domains: {type: int, flag: --n-domains, low: 3, high: 20, default: 7, priority: 2,
+                  active_when: {auto_k: {eq: false}},
+                  note: the script's own default when auto_k is off and --n-domains is omitted}
+      auto_k_min: {type: int, flag: --auto-k-min, low: 2, high: 10, default: 2, priority: 3,
+                   active_when: {auto_k: {eq: true}}}
+      auto_k_max: {type: int, flag: --auto-k-max, low: 4, high: 20, default: 10, priority: 4,
+                   active_when: {auto_k: {eq: true}},
+                   note: the script passes None and the library then uses auto_k_min + 8}
+      n_layers: {type: int, flag: --n-layers, low: 1, high: 5, default: 3, priority: 5}
+    constraints:
+      - {lhs: auto_k_min, op: lt, rhs: auto_k_max}

@@ -23,12 +23,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from omicsclaw.common.report import (
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
+from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
-    write_result_json,
 )
+from skills._sdk.result import write_result_json
 
 logger = logging.getLogger(__name__)
 

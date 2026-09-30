@@ -22,15 +22,19 @@ import pandas as pd
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
+from skills._sdk import REPO_ROOT as _PROJECT_ROOT  # noqa: E402
 
-from omicsclaw.common.report import (
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    write_result_json,
 )
+from skills._sdk.result import write_result_json
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -398,12 +402,13 @@ def _run_wgcna_r(counts: pd.DataFrame, *, min_module_size: int = 30) -> dict:
     """Run real WGCNA in R via subprocess."""
     import json
     import tempfile
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
     validate_r_environment(required_r_packages=["WGCNA"])
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     gene_col = counts.columns[0]

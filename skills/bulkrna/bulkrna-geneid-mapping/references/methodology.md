@@ -40,8 +40,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-geneid-mapping --demo
-python omicsclaw.py run bulkrna-geneid-mapping --input counts.csv --from ensembl --to symbol --output results/
+python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --demo
+python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --input counts.csv --from ensembl --to symbol --output results/
 python bulkrna_geneid_mapping.py --demo --output /tmp/geneid_demo
 ```
 

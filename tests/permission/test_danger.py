@@ -112,7 +112,7 @@ def test_device_and_filesystem_destruction_is_caught(command: str):
     ],
 )
 def test_data_leaving_this_machine_is_caught(command: str, expected: RiskLevel):
-    """None of these is in the reference, and ``CLAUDE.md``'s first rule is why.
+    """None of these is in the reference, and ``SAFETY_RULES`` rule 1 is why.
 
     A destination blocklist cannot enforce "genetic data never leaves this
     machine", so what is left is asking a person. These are the shell
@@ -168,7 +168,7 @@ def test_overwriting_a_file_under_etc_is_caught(command: str):
     ],
 )
 def test_an_ssh_channel_is_caught(command: str):
-    """``CLAUDE.md``'s first rule is that genetic data never leaves this machine.
+    """``SAFETY_RULES`` rule 1 is that genetic data never leaves this machine.
 
     The upload group had ``scp``, ``rsync``, ``curl``/``wget`` and ``nc`` and
     no ``ssh`` at all, which is the most ordinary way of both running a remote

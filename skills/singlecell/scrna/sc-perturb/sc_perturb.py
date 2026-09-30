@@ -16,18 +16,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import scanpy as sc
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
@@ -147,7 +152,7 @@ def _write_report(output_dir: Path, summary: dict, params: dict, input_path: str
             "### Cause 1: logfc-threshold too high",
             "The default threshold (0.25) may be too strict for subtle perturbations.",
             "```bash",
-            f"python omicsclaw.py run sc-perturb --input <data.h5ad> --output <dir> --logfc-threshold 0.1",
+            f"python skills/singlecell/scrna/sc-perturb/sc_perturb.py --input <data.h5ad> --output <dir> --logfc-threshold 0.1",
             "```",
             "",
             "### Cause 2: Perturbation labels are incorrect",
@@ -237,7 +242,7 @@ def main() -> int:
             "\n"
             "How to fix:\n"
             "  Option 1 - Prepare assignments upstream:\n"
-            "    python omicsclaw.py run sc-perturb-prep --input <expr.h5ad> --mapping-file <mapping.tsv> --output <dir>\n"
+            "    python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py --input <expr.h5ad> --mapping-file <mapping.tsv> --output <dir>\n"
             "  Option 2 - Specify a different column:\n"
             f"    --pert-key <column_name>  (available: {', '.join(adata.obs.columns[:10])})\n"
         )
@@ -326,9 +331,9 @@ def main() -> int:
         print()
         print("  How to fix:")
         print("    Option 1 - Lower the logfc threshold:")
-        print("      python omicsclaw.py run sc-perturb --input <data.h5ad> --output <dir> --logfc-threshold 0.1")
+        print("      python skills/singlecell/scrna/sc-perturb/sc_perturb.py --input <data.h5ad> --output <dir> --logfc-threshold 0.1")
         print("    Option 2 - Lower the pval cutoff:")
-        print("      python omicsclaw.py run sc-perturb --input <data.h5ad> --output <dir> --pval-cutoff 0.1")
+        print("      python skills/singlecell/scrna/sc-perturb/sc_perturb.py --input <data.h5ad> --output <dir> --pval-cutoff 0.1")
         print("    Option 3 - Verify perturbation labels match the actual experiment")
         print()
 
@@ -445,8 +450,8 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Next steps:")
-    print(f"  - sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:         python skills/singlecell/scrna/sc-de/sc_de.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-enrichment: python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

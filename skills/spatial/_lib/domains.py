@@ -247,7 +247,7 @@ def identify_domains_spagcn(
     Using ``init='kmeans'`` avoids the ``sc.tl.louvain`` segfault that
     occurs in Python 3.11+ with deprecated louvain C extensions.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     require("SpaGCN", feature="SpaGCN spatial domain detection")
 
@@ -385,7 +385,7 @@ def identify_domains_stagate(
     installed from GitHub. Fail fast with that command plus the pip-installable
     alternatives rather than letting a bare ``ImportError`` surface.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     try:
         require("STAGATE_pyG", feature="STAGATE spatial domain identification")
@@ -516,7 +516,7 @@ def identify_domains_graphst(
     refine_radius : int
         Neighbourhood size for refinement (default 50).
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
 
     require("GraphST", feature="GraphST spatial domain identification")
     require("torch", feature="GraphST (PyTorch backend)")
@@ -942,7 +942,7 @@ def identify_domains_banksy(
     # Fallback path: dedicated sub-env (back-compat for environments that set up
     # omicsclaw_banksy but don't have BANKSY_py in the main env).
     from pathlib import Path
-    from omicsclaw.core.external_env import (
+    from skills._sdk.external_env import (
         EnvNotFoundError,
         is_env_available,
         run_anndata_op_in_env,
@@ -1052,7 +1052,7 @@ def identify_domains_cellcharter(
         ``method``, ``n_domains``, ``n_domains_requested``, ``n_layers``,
         ``use_rep``, ``clustering``, ``device``, ``domain_counts``.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
     import gc
     import inspect
     from sklearn.metrics import adjusted_rand_score

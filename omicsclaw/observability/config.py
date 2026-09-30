@@ -164,8 +164,9 @@ class ObservabilityConfig:
     every tool's arguments and output into two more, so enabling OTLP
     export there ships the conversation to a third party. In a coding
     harness that is a reasonable default. Here it is not:
-    ``CLAUDE.md`` states *"Genetic data never leaves this machine — all
-    processing is local"*, and a prompt in this deployment routinely
+    :data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 states *"Genetic
+    data never leaves this machine — all processing is local"*, and a
+    prompt in this deployment routinely
     quotes a patient cohort, a file path under a sequencing run, or the
     output of a differential-expression call.
 

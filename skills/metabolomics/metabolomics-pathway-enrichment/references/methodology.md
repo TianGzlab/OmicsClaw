@@ -14,8 +14,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-pathway --demo
-python omicsclaw.py run met-pathway --input <metabolites.csv> --output <dir>
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py --demo
+python skills/metabolomics/metabolomics-pathway-enrichment/met_pathway.py --input <metabolites.csv> --output <dir>
 ```
 
 

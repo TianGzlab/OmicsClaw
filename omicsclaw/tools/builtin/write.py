@@ -197,8 +197,10 @@ _DESCRIPTION = (
     "backup, and the old contents are gone. Deciding whether to read the "
     "file first is up to you; this tool will not check. Send the WHOLE "
     "file in `content`, never a fragment or a diff. Paths are relative "
-    "to the workspace root, and nothing outside it can be written. This "
-    "tool asks the user for approval before writing anything."
+    "to the workspace root, and nothing outside it can be written. "
+    "Depending on the session's permission settings, the user may be asked "
+    "to approve the write first; a declined write returns an error and the "
+    "file is untouched."
 )
 
 WRITE_SCHEMA: dict[str, Any] = {

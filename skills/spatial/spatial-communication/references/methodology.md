@@ -63,24 +63,24 @@ The CLI only exposes `human` and `mouse`. Unsupported combinations fail fast.
 
 ```bash
 # Default OmicsClaw CLI alias
-oc run spatial-cell-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input <processed.h5ad> --output <report_dir>
 
 # LIANA with method-specific controls
-oc run spatial-cell-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input <processed.h5ad> --method liana \
   --cell-type-key cell_type --species mouse \
   --liana-resource auto --liana-expr-prop 0.1 --liana-min-cells 10 --liana-n-perms 1000 \
   --output <dir>
 
 # CellPhoneDB statistical method
-oc run spatial-cell-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input <processed.h5ad> --method cellphonedb \
   --cellphonedb-threshold 0.1 --cellphonedb-iterations 1000 \
   --output <dir>
 
 # FastCCC
-oc run spatial-cell-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input <processed.h5ad> --method fastccc \
   --fastccc-single-unit-summary Mean \
   --fastccc-complex-aggregation Minimum \
@@ -89,13 +89,13 @@ oc run spatial-cell-communication \
   --output <dir>
 
 # CellChat via R
-oc run spatial-cell-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input <processed.h5ad> --method cellchat_r \
   --species mouse --cellchat-prob-type triMean --cellchat-min-cells 10 \
   --output <dir>
 
 # Demo mode
-oc run spatial-cell-communication --demo --output /tmp/comm_demo
+python skills/spatial/spatial-communication/spatial_communication.py --demo --output /tmp/comm_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-communication/spatial_communication.py \

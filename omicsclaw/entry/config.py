@@ -4,7 +4,7 @@ Plan 0031 task A, decision Q8. Every layer below this one was built to
 know nothing about its environment: ``EngineConfig`` reads no variables
 on purpose (plan 0027: "a turn ceiling that moves with the shell makes
 two runs of one benchmark incomparable"), ``omicsclaw.context`` takes
-``SOUL.md`` and the model table as callables and integers, and
+the contract file and the model table as callables and integers, and
 ``omicsclaw.tools`` takes a :class:`~omicsclaw.tools._workspace.Workspace`
 rather than finding one. All of that knowledge arrives here.
 
@@ -44,7 +44,7 @@ point is the only place that can say so out loud.
 
 **What this module does not read.** No ``.env`` file, and that is no
 longer a gap. The reference harness loads ``cwd/.env``
-(``main.go:117``) and this repository's ``CLAUDE.md`` documents ``.env``
+(``main.go:117``) and this repository's ``.env.example`` documents ``.env``
 as the way channel credentials are supplied, but a resolver that returns
 a value cannot make ``provider_from_env`` see a variable without
 mutating the live environment behind its caller's back. Loading it
@@ -78,8 +78,11 @@ from omicsclaw.tools.builtin.bash import ENGINE_TIMEOUT_MARGIN
 __all__ = [
     "AppConfig",
     "AppConfigError",
+    "mem_total_gib",
     "SandboxMode",
+    "SkillEnvMode",
     "SkillsIndex",
+    "fields_set_by_argv",
     "resolve_app_config",
 ]
 
@@ -100,6 +103,24 @@ class SkillsIndex(StrEnum):
     """No skills section, and ``use_skill`` is not mounted either. One
     switch with one meaning: advertising a tool for a catalogue the model
     was never shown is worse than having neither."""
+
+
+class SkillEnvMode(StrEnum):
+    """What the deployment does about the Python packages a skill declares."""
+
+    OFF = "off"
+    """Nothing: ``use_skill`` returns the body and the directory, as before."""
+
+    PROBE = "probe"
+    """``use_skill`` appends a note saying which declared packages the
+    ``python`` that ``bash`` runs can import. The default. Changes the tool's
+    result only, never the system prompt or the tool definitions."""
+
+    INSTALL = "install"
+    """As ``probe``, and ``install_skill_deps`` is mounted while ``bash`` runs
+    on this machine: after approval it installs declared packages into an
+    overlay environment, from this machine's pip configuration. Refused by
+    ``oc desktop``, which has no approval channel."""
 
 
 class SandboxMode(StrEnum):
@@ -173,11 +194,11 @@ class AppConfig:
     system_prompt_files: tuple[Path, ...] = ()
     """Front-matter files of the system prompt, in order.
 
-    Empty means the default pair — ``SOUL.md`` then ``CLAUDE.md`` under
-    :attr:`workspace`. Non-empty **replaces** that pair; each file
-    becomes one section, still followed by the safety, tool-guidance and
-    environment sections, which are not files and cannot be switched
-    off. See :func:`~omicsclaw.entry.assembly.default_sections`.
+    Empty means the default: ``OMICSCLAW.md`` beside the skill tree
+    (:meth:`repo_root`). Non-empty **replaces** it; each file becomes one
+    section, still followed by the safety, tool-guidance and environment
+    sections, which are not files and cannot be switched off. See
+    :func:`~omicsclaw.entry.assembly.default_sections`.
 
     Named ``system`` in full because the surface half of the command line
     has a ``--prompt-file`` of its own carrying the **user's** message
@@ -252,6 +273,17 @@ class AppConfig:
     deployment that raises the turn ceiling a long way should raise this
     too."""
 
+    subagents: bool = True
+    """Whether the agent may delegate a sub-task to a sub-agent.
+
+    One switch with one meaning, following :attr:`planning`: it mounts or
+    unmounts the ``task`` tool, and with it the whole of delegation. The
+    built-in ``general-purpose`` sub-agent and any definition found under
+    :meth:`agents_root` are loaded only when it is on.
+
+    On by default. Off is a deployment that wants every tool call to
+    happen in the one conversation a person is watching."""
+
     memory: bool = True
     """Whether this deployment remembers anything across sessions.
 
@@ -267,6 +299,107 @@ class AppConfig:
     the process that served them and end with it. Not about container
     memory; that is :attr:`sandbox_memory`."""
 
+    skill_env: SkillEnvMode = SkillEnvMode.PROBE
+    """Whether ``use_skill`` reports the declared packages ``bash``'s ``python``
+    cannot import, and whether ``install_skill_deps`` is mounted. See
+    :class:`SkillEnvMode`; has no effect with ``skills_index=off``, and
+    read-only mode gets no note."""
+
+    skill_env_dir: Path | None = None
+    """Where overlays are kept; ``None`` is ``$XDG_CACHE_HOME/omicsclaw/envs``,
+    else ``~/.cache/omicsclaw/envs``. :func:`resolve_app_config` makes a
+    relative path absolute against the current directory."""
+
+    skill_env_install_timeout_s: float = 1800.0
+    """Upper bound on one ``install_skill_deps`` installation, the dry run
+    included. Must be positive."""
+
+    ensemble: bool | None = None
+    """Whether ``run_skill`` is mounted.
+
+    ``None`` (unset) mounts it when the execution environment passes the
+    start-up self-check and logs a warning otherwise; ``True`` makes a failed
+    self-check refuse start-up; ``False`` leaves it out, and then the system
+    prompt and every other tool definition are exactly those of a deployment
+    without it."""
+
+    ensemble_gpus: str = ""
+    """GPUs trials may use: ``""`` detects them with ``nvidia-smi`` (inside
+    the sandbox when it runs), ``none`` uses none, or a comma-separated list
+    of device ids as the execution environment numbers them."""
+
+    ensemble_slots_per_gpu: int = 1
+    """Trials that may share one GPU at a time."""
+
+    ensemble_memory_gb: float = 0.0
+    """Memory the trial pool may hand out; ``0`` means all that is left after
+    the tmpfs, shared memory and :attr:`ensemble_reserved_gb`. A larger value
+    is capped to that."""
+
+    ensemble_reserved_gb: float = 64.0
+    """Memory kept outside the trial pool for ``bash``, system processes and
+    the page cache."""
+
+    ensemble_cpus: int = 0
+    """CPUs the trial pool may hand out; ``0`` means this machine's count, or
+    the sandbox's ``--cpus`` when that is smaller."""
+
+    ensemble_memory_gb_cap: float = 0.0
+    """Upper bound on any one trial's memory limit; ``0`` keeps each method's."""
+
+    ensemble_max_trial_s: float = 7200.0
+    """Upper bound on any one trial's run time, scoring excluded."""
+
+    ensemble_max_queue_s: float = 7200.0
+    """How long a trial may wait for resources before it fails."""
+
+    ensemble_keep_all: bool = False
+    """Keep every trial's full output instead of labels, metrics and the best
+    trial's ``.h5ad``."""
+
+    ensemble_python: str = ""
+    """Interpreter for trials and scoring: empty means this process's own on
+    this machine and ``python`` in the sandbox."""
+
+    ensemble_tools: str = "all"
+    """Which ensemble tools are mounted when the ensemble is on: ``all``
+    (``run_skill``, ``inspect_trials``, ``select_result``,
+    ``optimize_params``), ``free`` (the first three) or ``tuning`` (only
+    ``optimize_params``)."""
+
+    ensemble_run_budget: str = ""
+    """New ``run_skill`` trials one session may start: empty for no limit, a
+    number for all methods together, or ``method:count,...`` per method.
+    ``optimize_params`` draws from the same account."""
+
+    ensemble_tuning_model: str = ""
+    """Model ``optimize_params`` asks; empty is the agent's own model."""
+
+    ensemble_tuning_provider: str = ""
+    """Provider of :attr:`ensemble_tuning_model`; empty is the agent's own."""
+
+    ensemble_tuning_tissue: bool = True
+    """``False`` makes ``optimize_params`` drop its ``tissue`` argument."""
+
+    ensemble_tuning_images: bool = False
+    """Partition images for the K decision. Not supported: ``True`` refuses
+    start-up with the ensemble on."""
+
+    ensemble_tuning_budget: int = 12
+    """New parameter sets ``optimize_params`` tries per method at the chosen K."""
+
+    ensemble_tuning_max_s: float = 43200.0
+    """Longest one ``optimize_params`` call may run, in seconds."""
+
+    ensemble_obs_allowlist: str = ""
+    """Comma-separated ``obs`` columns an ensemble input may have; empty
+    allows any. Inputs with other columns are refused by ``run_skill`` and
+    ``optimize_params``."""
+
+    ensemble_seed: int | None = 0
+    """Seed of every trial process (``random``, numpy, torch with deterministic
+    algorithms, ``PYTHONHASHSEED=0``); ``None`` (``none``) leaves trials unseeded."""
+
     launch_id: str = ""
     """Identifier a desktop launcher minted for *this* backend process.
 
@@ -280,7 +413,7 @@ class AppConfig:
     Here rather than read from the environment at the route, because plan
     0031 Q8 allows exactly one environment reader and it is
     :func:`resolve_app_config`. ``""`` is an unmanaged launch: a developer
-    running ``oc desktop-server`` by hand has no parent to match."""
+    running ``oc desktop`` by hand has no parent to match."""
 
     compact_at: Pressure = Pressure.WARN
     """Lowest pressure tier that triggers compaction before a model call.
@@ -332,8 +465,10 @@ class AppConfig:
     """Container network. ``none`` means commands cannot reach any network;
     any other value is passed to ``--network`` as given."""
 
-    sandbox_memory: str = ""
-    """``--memory`` for the container; empty means no cap."""
+    sandbox_memory: str = "auto"
+    """``--memory`` for the container. ``auto`` is 80% of this machine's
+    ``MemTotal``, leaving the rest to the host and its page cache; empty means
+    no cap. See :meth:`sandbox_memory_value`."""
 
     sandbox_cpus: str = ""
     """``--cpus`` for the container; empty means no cap."""
@@ -347,6 +482,23 @@ class AppConfig:
 
     sandbox_mounts: tuple[Path, ...] = ()
     """Extra host directories mounted read-only, at the same path."""
+
+    sandbox_tmpfs_size: str = "64g"
+    """Size of the container's ``/tmp`` tmpfs."""
+
+    sandbox_shm_size: str = "128g"
+    """``--shm-size`` for the container; empty keeps the runtime's 64 MiB."""
+
+    sandbox_pids_limit: int = 65536
+    """``--pids-limit`` for the container; threads count against it."""
+
+    sandbox_nofile: int = 65536
+    """``--ulimit nofile`` for the container; ``0`` keeps the image's."""
+
+    sandbox_code_in_image: bool = False
+    """The image already holds this repository's ``omicsclaw/`` and
+    ``skills/``, so they are not mounted from the host. See
+    :meth:`sandbox_config`."""
 
     sandbox_bootstrap: str = ""
     """Command run once in the workspace after the container starts."""
@@ -417,6 +569,16 @@ class AppConfig:
             return self.permission_rules
         return self.state_dir() / "settings.json"
 
+    def __post_init__(self) -> None:
+        """Refuse a value no deployment can mean, however the configuration was built.
+
+        :raises AppConfigError: :attr:`skill_env_install_timeout_s` is not positive.
+        """
+        if not self.skill_env_install_timeout_s > 0:
+            raise AppConfigError(
+                f"skill_env_install_timeout_s must be positive, not {self.skill_env_install_timeout_s!r}"
+            )
+
     def skills_root(self) -> Path:
         """The directory to scan for skills, with the default resolved.
 
@@ -440,27 +602,81 @@ class AppConfig:
         """
         return self.state_dir() / "plans"
 
+    def agents_root(self) -> Path:
+        """Where this deployment's sub-agent definition files are kept.
+
+        ``<workspace>/.omicsclaw/agents/``, beside the plans and the rest
+        of the per-session state. A missing directory means no sub-agents
+        beyond the built-in one; nothing is created here.
+        """
+        return self.state_dir() / "agents"
+
     def mcp_config_path(self) -> Path:
         """The MCP configuration file, with the default resolved."""
         if self.mcp_config is not None:
             return self.mcp_config
         return self.workspace / ".mcp.json"
 
+    def repo_root(self) -> Path:
+        """The directory holding the ``skills/`` tree, and ``omicsclaw/`` beside it."""
+        return self.skills_root().parent
+
+    def code_mounts(self) -> tuple[Path, ...]:
+        """``<repo>/omicsclaw`` and ``<repo>/skills``, when the sandbox must be given them.
+
+        Empty when :attr:`sandbox_code_in_image` is set, when either directory
+        is missing, or when the workspace already is or contains the
+        repository (its mount covers both).
+        """
+        if self.sandbox_code_in_image:
+            return ()
+        root = self.repo_root().resolve()
+        code = (root / "omicsclaw", root / "skills")
+        if not all(path.is_dir() for path in code):
+            return ()
+        workspace = self.workspace.resolve()
+        if root == workspace or workspace in root.parents:
+            return ()
+        return code
+
+    def sandbox_memory_value(self, meminfo: Path = Path("/proc/meminfo")) -> str:
+        """:attr:`sandbox_memory` with ``auto`` resolved to 80% of ``MemTotal``.
+
+        ``auto`` on a machine without a readable *meminfo* resolves to ``""``
+        (no cap).
+        """
+        if self.sandbox_memory.strip().lower() != "auto":
+            return self.sandbox_memory
+        total_gib = mem_total_gib(meminfo)
+        if total_gib is None:
+            return ""
+        return f"{int(total_gib * 0.8)}g"
+
     def sandbox_config(self) -> SandboxConfig | None:
         """The container settings, or ``None`` when :attr:`sandbox` is off.
+
+        The repository's ``omicsclaw/`` and ``skills/`` are added to the
+        read-only mounts (see :meth:`code_mounts`) whether or not
+        :attr:`ensemble` is on, so ``bash`` sees the same skill code either way.
 
         Raises :exc:`~omicsclaw.sandbox.SandboxConfigError` for an unusable
         setting, including a missing :attr:`sandbox_image`.
         """
         if self.sandbox is SandboxMode.OFF:
             return None
+        mounts = tuple(self.sandbox_mounts)
+        mounts += tuple(path for path in self.code_mounts() if path not in mounts)
         return SandboxConfig(
             image=self.sandbox_image,
             network=self.sandbox_network,
-            memory=self.sandbox_memory,
+            memory=self.sandbox_memory_value(),
             cpus=self.sandbox_cpus,
             gpus=self.sandbox_gpus,
-            read_only_mounts=self.sandbox_mounts,
+            read_only_mounts=mounts,
+            tmpfs_size=self.sandbox_tmpfs_size,
+            shm_size=self.sandbox_shm_size,
+            pids_limit=self.sandbox_pids_limit,
+            nofile=self.sandbox_nofile,
             bootstrap=self.sandbox_bootstrap,
             bootstrap_timeout_s=self.sandbox_bootstrap_timeout_s,
             runtime=self.sandbox_runtime,
@@ -489,6 +705,18 @@ class AppConfig:
         racing to the same instant.
         """
         return self.tool_timeout_s - ENGINE_TIMEOUT_MARGIN
+
+
+def mem_total_gib(meminfo: Path = Path("/proc/meminfo")) -> float | None:
+    """``MemTotal`` of *meminfo* in GiB, or ``None`` when it cannot be read."""
+    try:
+        with open(meminfo, encoding="ascii") as source:
+            for line in source:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1024**2
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
 
 
 def _as_path(raw: str) -> Path:
@@ -557,6 +785,47 @@ def _as_bool(raw: str) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise AppConfigError(f"{raw!r} is not a boolean (true/false)")
+
+
+def _as_skill_env(raw: str) -> SkillEnvMode:
+    try:
+        return SkillEnvMode(raw.strip().lower())
+    except ValueError as exc:
+        modes = ", ".join(mode.value for mode in SkillEnvMode)
+        raise AppConfigError(f"{raw!r} is not a skill_env mode ({modes})") from exc
+
+
+def _as_positive_float(raw: str) -> float:
+    value = _as_float(raw)
+    if not value > 0:
+        raise AppConfigError(f"{raw!r} is not a positive number")
+    return value
+
+
+def _as_ensemble_tools(raw: str) -> str:
+    value = raw.strip().lower()
+    if value not in ("all", "free", "tuning"):
+        raise AppConfigError(f"{raw!r} is not an ensemble tools mode (all, free, tuning)")
+    return value
+
+
+def _as_seed(raw: str) -> int | None:
+    if raw.strip().lower() in ("none", "off", ""):
+        return None
+    value = _as_int(raw)
+    if value < 0:
+        raise AppConfigError(f"{raw!r} is not a non-negative seed")
+    return value
+
+
+def _as_run_budget(raw: str) -> str:
+    from omicsclaw.ensemble.tuning.budget import parse_budget
+
+    try:
+        parse_budget(raw)
+    except ValueError as exc:
+        raise AppConfigError(f"{raw!r} is not a run budget: {exc}") from exc
+    return raw.strip()
 
 
 def _as_sandbox_mode(raw: str) -> SandboxMode:
@@ -689,6 +958,101 @@ _OPTIONS: tuple[_Option, ...] = (
         ("OMICSCLAW_PLANNING_GATE_TURNS",),
         _as_int,
     ),
+    _Option("subagents", "--subagents", ("OMICSCLAW_SUBAGENTS",), _as_bool),
+    _Option("skill_env", "--skill-env", ("OMICSCLAW_SKILL_ENV",), _as_skill_env),
+    _Option("skill_env_dir", "--skill-env-dir", ("OMICSCLAW_SKILL_ENV_DIR",), _as_optional_path),
+    _Option(
+        "skill_env_install_timeout_s",
+        "--skill-env-install-timeout",
+        ("OMICSCLAW_SKILL_ENV_INSTALL_TIMEOUT_S",),
+        _as_positive_float,
+    ),
+    _Option("ensemble", "--ensemble", ("OMICSCLAW_ENSEMBLE",), _as_bool),
+    _Option("ensemble_gpus", "--ensemble-gpus", ("OMICSCLAW_ENSEMBLE_GPUS",), _as_str),
+    _Option(
+        "ensemble_slots_per_gpu",
+        "--ensemble-slots-per-gpu",
+        ("OMICSCLAW_ENSEMBLE_SLOTS_PER_GPU",),
+        _as_int,
+    ),
+    _Option(
+        "ensemble_memory_gb",
+        "--ensemble-memory-gb",
+        ("OMICSCLAW_ENSEMBLE_MEMORY_GB",),
+        _as_float,
+    ),
+    _Option(
+        "ensemble_reserved_gb",
+        "--ensemble-reserved-gb",
+        ("OMICSCLAW_ENSEMBLE_RESERVED_GB",),
+        _as_float,
+    ),
+    _Option("ensemble_cpus", "--ensemble-cpus", ("OMICSCLAW_ENSEMBLE_CPUS",), _as_int),
+    _Option(
+        "ensemble_memory_gb_cap",
+        "--ensemble-memory-gb-cap",
+        ("OMICSCLAW_ENSEMBLE_MEMORY_GB_CAP",),
+        _as_float,
+    ),
+    _Option(
+        "ensemble_max_trial_s",
+        "--ensemble-max-trial",
+        ("OMICSCLAW_ENSEMBLE_MAX_TRIAL_S",),
+        _as_float,
+    ),
+    _Option(
+        "ensemble_max_queue_s",
+        "--ensemble-max-queue",
+        ("OMICSCLAW_ENSEMBLE_MAX_QUEUE_S",),
+        _as_float,
+    ),
+    _Option(
+        "ensemble_keep_all",
+        "--ensemble-keep-all",
+        ("OMICSCLAW_ENSEMBLE_KEEP_ALL",),
+        _as_bool,
+    ),
+    _Option("ensemble_python", "--ensemble-python", ("OMICSCLAW_ENSEMBLE_PYTHON",), _as_str),
+    _Option("ensemble_tools", "--ensemble-tools", ("OMICSCLAW_ENSEMBLE_TOOLS",), _as_ensemble_tools),
+    _Option("ensemble_run_budget", "--ensemble-run-budget", ("OMICSCLAW_ENSEMBLE_RUN_BUDGET",), _as_run_budget),
+    _Option("ensemble_tuning_model", "--ensemble-tuning-model", ("OMICSCLAW_ENSEMBLE_TUNING_MODEL",), _as_str),
+    _Option(
+        "ensemble_tuning_provider",
+        "--ensemble-tuning-provider",
+        ("OMICSCLAW_ENSEMBLE_TUNING_PROVIDER",),
+        _as_str,
+    ),
+    _Option(
+        "ensemble_tuning_tissue",
+        "--ensemble-tuning-tissue",
+        ("OMICSCLAW_ENSEMBLE_TUNING_TISSUE",),
+        _as_bool,
+    ),
+    _Option(
+        "ensemble_tuning_images",
+        "--ensemble-tuning-images",
+        ("OMICSCLAW_ENSEMBLE_TUNING_IMAGES",),
+        _as_bool,
+    ),
+    _Option(
+        "ensemble_tuning_budget",
+        "--ensemble-tuning-budget",
+        ("OMICSCLAW_ENSEMBLE_TUNING_BUDGET",),
+        _as_int,
+    ),
+    _Option(
+        "ensemble_tuning_max_s",
+        "--ensemble-tuning-max",
+        ("OMICSCLAW_ENSEMBLE_TUNING_MAX_S",),
+        _as_positive_float,
+    ),
+    _Option("ensemble_seed", "--ensemble-seed", ("OMICSCLAW_ENSEMBLE_SEED",), _as_seed),
+    _Option(
+        "ensemble_obs_allowlist",
+        "--ensemble-obs-allowlist",
+        ("OMICSCLAW_ENSEMBLE_OBS_ALLOWLIST",),
+        _as_str,
+    ),
     _Option("compact_at", "--compact-at", ("OMICSCLAW_COMPACT_AT",), _as_pressure),
     _Option(
         "max_queued_per_session",
@@ -743,6 +1107,36 @@ _OPTIONS: tuple[_Option, ...] = (
         ("OMICSCLAW_SANDBOX_MOUNTS",),
         _as_paths,
         repeatable=True,
+    ),
+    _Option(
+        "sandbox_tmpfs_size",
+        "--sandbox-tmpfs-size",
+        ("OMICSCLAW_SANDBOX_TMPFS_SIZE",),
+        _as_str,
+    ),
+    _Option(
+        "sandbox_shm_size",
+        "--sandbox-shm-size",
+        ("OMICSCLAW_SANDBOX_SHM_SIZE",),
+        _as_str,
+    ),
+    _Option(
+        "sandbox_pids_limit",
+        "--sandbox-pids-limit",
+        ("OMICSCLAW_SANDBOX_PIDS_LIMIT",),
+        _as_int,
+    ),
+    _Option(
+        "sandbox_nofile",
+        "--sandbox-nofile",
+        ("OMICSCLAW_SANDBOX_NOFILE",),
+        _as_int,
+    ),
+    _Option(
+        "sandbox_code_in_image",
+        "--sandbox-code-in-image",
+        ("OMICSCLAW_SANDBOX_CODE_IN_IMAGE",),
+        _as_bool,
     ),
     _Option(
         "sandbox_bootstrap",
@@ -871,6 +1265,20 @@ def _from_argv(argv: Sequence[str]) -> dict[str, object]:
     return resolved
 
 
+def fields_set_by_argv(argv: Sequence[str]) -> frozenset[str]:
+    """The :class:`AppConfig` fields a deployment command line sets.
+
+    For a surface that has to tell a person *why* a setting will not take
+    effect —— the CLI's ``/auto``, reporting that ``--permission-mode``
+    will outrank what it wrote —— without spelling a deployment flag
+    itself: the flag set is this module's, and a second list of it is plan
+    0031 Q8's second parse point. Raises :exc:`AppConfigError` when *argv*
+    itself would be refused; it reads no environment, so a bad variable is
+    :func:`resolve_app_config`'s to report.
+    """
+    return frozenset(_from_argv(argv))
+
+
 def resolve_app_config(
     argv: Sequence[str],
     env: Mapping[str, str],
@@ -922,5 +1330,8 @@ def resolve_app_config(
     chosen = values.get("workspace")
     workspace = chosen if isinstance(chosen, Path) else Path.cwd()
     values["workspace"] = workspace.expanduser().resolve()
+    overlays = values.get("skill_env_dir")
+    if isinstance(overlays, Path):
+        values["skill_env_dir"] = overlays.expanduser().resolve()
 
     return AppConfig(**values)  # type: ignore[arg-type]

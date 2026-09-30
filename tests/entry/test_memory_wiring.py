@@ -123,7 +123,7 @@ def offline(monkeypatch):
 
 
 def _config(workspace: pathlib.Path, **overrides: object) -> AppConfig:
-    (workspace / "SOUL.md").write_text("You are OmicsClaw.", encoding="utf-8")
+    (workspace / "OMICSCLAW.md").write_text("You are OmicsClaw.", encoding="utf-8")
     return AppConfig(workspace=workspace, **overrides)
 
 

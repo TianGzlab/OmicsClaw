@@ -12,7 +12,14 @@ import tempfile
 import sys
 from pathlib import Path
 
-from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs as _ensure_runtime_cache_dirs
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
+
+from skills._sdk.runtime_env import ensure_runtime_cache_dirs as _ensure_runtime_cache_dirs
 _ensure_runtime_cache_dirs()
 
 import matplotlib
@@ -22,18 +29,16 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     get_matrix_contract,
@@ -57,8 +62,9 @@ from skills.singlecell._lib.viz import (
     plot_embedding_comparison,
     plot_embedding_continuous,
 )
-from omicsclaw.core.dependency_manager import validate_r_environment
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills._sdk.deps import validate_r_environment
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -653,7 +659,7 @@ def annotate_singler(adata, reference: str = "HPCA"):
     """SingleR annotation via the shared R bridge."""
     validate_r_environment(required_r_packages=["SingleR", "celldex", "SingleCellExperiment", "zellkonverter"])
     export_adata, expression_source = sc_annotation_utils.build_celltypist_input_adata(adata)
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_singler_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -689,7 +695,7 @@ def annotate_scmap(adata, reference: str = "HPCA"):
     """scmap annotation via the shared R bridge."""
     validate_r_environment(required_r_packages=["scmap", "celldex", "SingleCellExperiment", "zellkonverter"])
     export_adata, expression_source = sc_annotation_utils.build_celltypist_input_adata(adata)
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_scmap_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -1732,8 +1738,8 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Next steps:")
-    print(f"  - sc-markers: python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-de:      python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-markers: python skills/singlecell/scrna/sc-markers/sc_markers.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:      python skills/singlecell/scrna/sc-de/sc_de.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-markers
 description: Load when ranking cluster-level marker genes from a clustered single-cell AnnData via Scanpy
   Wilcoxon / t-test / logreg or COSG specificity. Skip when comparing condition-vs-control with replicates
   (use sc-de); assigning cell-type labels (use sc-cell-annotation).
-version: 0.6.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -16,15 +11,6 @@ tags:
 - annotation
 - differential-expression
 - cosg
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scikit-learn
-- scipy
-- seaborn
 ---
 
 # sc-markers
@@ -41,8 +27,6 @@ methods: `wilcoxon` (default rank-sum), `t-test` (Welch), `logreg`
 DE with replicates use `sc-de`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -75,29 +59,29 @@ DE with replicates use `sc-de`.
 
 ## Gotchas
 
-- **`--groupby` auto-detection requires a recognised column.** `sc_markers.py:135` raises `ValueError("Grouping column '...' not found in adata.obs")` for an explicit-but-missing key; `:137` raises `ValueError('No cluster/cell-type grouping column available for marker discovery.')` when nothing among `leiden` / `louvain` / `cell_type` exists. Run `sc-clustering` first or pass `--groupby <real-obs-column>`.
-- **`cosg` returns no p-values.** `sc_markers.py:91-94` registers `cosg` as a cosine-similarity specificity scorer — `tables/markers_all.csv` will lack `pvals` / `pvals_adj` columns. Downstream filters that branch on adjusted p-value must handle the method == `cosg` case.
-- **`--mu` is `cosg`-only.** `sc_markers.py:373` sets `result.json["mu"] = args.mu if method == 'cosg' else None`. Passing `--mu` with another method silently records `None`.
+- **`--groupby` auto-detection requires a recognised column.** `sc_markers.py` raises `ValueError("Grouping column '...' not found in adata.obs")` for an explicit-but-missing key; raises `ValueError('No cluster/cell-type grouping column available for marker discovery.')` when nothing among `leiden` / `louvain` / `cell_type` exists. Run `sc-clustering` first or pass `--groupby <real-obs-column>`.
+- **`cosg` returns no p-values.** `sc_markers.py` registers `cosg` as a cosine-similarity specificity scorer — `tables/markers_all.csv` will lack `pvals` / `pvals_adj` columns. Downstream filters that branch on adjusted p-value must handle the method == `cosg` case.
+- **`--mu` is `cosg`-only.** `sc_markers.py` sets `result.json["mu"] = args.mu if method == 'cosg' else None`. Passing `--mu` with another method silently records `None`.
 - **`adata.X` is treated as normalised expression with no guard.** `sc_markers.py` sets `expression_source = 'adata.X'` without verifying `.X` is log-normalised. If `.X` still holds raw counts (e.g., the user skipped `sc-preprocessing`), the Wilcoxon / t-test runs on counts and the rankings are unreliable.
-- **`--input` is mandatory unless `--demo`.** `sc_markers.py:316` raises `ValueError('--input required when not using --demo')`.
+- **`--input` is mandatory unless `--demo`.** `sc_markers.py` raises `ValueError('--input required when not using --demo')`.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in PBMC3K with leiden labels)
-python omicsclaw.py run sc-markers --demo --output /tmp/sc_markers_demo
+python skills/singlecell/scrna/sc-markers/sc_markers.py --demo --output /tmp/sc_markers_demo
 
 # Default Wilcoxon on leiden clusters
-python omicsclaw.py run sc-markers \
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
   --input clustered.h5ad --output results/ --groupby leiden
 
 # COSG fast specificity ranking on a labelled AnnData
-python omicsclaw.py run sc-markers \
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
   --input annotated.h5ad --output results/ \
   --groupby cell_type --method cosg --mu 1.0
 
 # Strict marker filtering (high fold-change, low out-group fraction)
-python omicsclaw.py run sc-markers \
+python skills/singlecell/scrna/sc-markers/sc_markers.py \
   --input clustered.h5ad --output results/ \
   --min-fold-change 1.0 --max-out-group-fraction 0.2
 ```
@@ -108,3 +92,9 @@ python omicsclaw.py run sc-markers \
 - `references/methodology.md` — Wilcoxon vs t-test vs logreg vs COSG; when each wins
 - `references/output_contract.md` — `markers_all.csv` column schema; figures' figure_data CSVs
 - Adjacent skills: `sc-clustering` (upstream — produces the `leiden` / `louvain` column), `sc-cell-annotation` (downstream — uses these markers as evidence for label assignment), `sc-de` (parallel — replicate-aware condition contrasts, NOT cluster markers)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`

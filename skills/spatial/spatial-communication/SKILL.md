@@ -1,15 +1,10 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: spatial-communication
 description: Load when computing ligand-receptor cell-cell communication on a preprocessed spatial AnnData
   with `obs[cell_type_key]` (default `leiden`) via LIANA (default), CellPhoneDB, FastCCC, or CellChat
   (R). Skip when running scRNA-only L-R inference (use sc-cell-communication); no cell-type labels exist
   (use spatial-annotate).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
-emoji: 📡
+trigger: cell communication, cell-cell communication, ligand receptor, ligand-receptor, LIANA, CellPhoneDB, FastCCC, CellChat
 tags:
 - spatial
 - communication
@@ -18,17 +13,6 @@ tags:
 - cellphonedb
 - cellchat
 - fastccc
-requires:
-- anndata
-- cellphonedb
-- fastccc
-- liana
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # spatial-communication
@@ -53,8 +37,6 @@ L-R use `sc-cell-communication`; for pathway scoring use
 `spatial-enrichment`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -100,41 +82,41 @@ L-R use `sc-cell-communication`; for pathway scoring use
 
 ## Flow
 
-1. Load AnnData, validate `obs[cell_type_key]` exists with ≥ 2 categories (`_lib/communication.py:764-765`).
-2. Sync `obsm["spatial"]` ↔ `obsm["X_spatial"]` (`spatial_communication.py:79-81`); cast cell-type column to Categorical.
+1. Load AnnData, validate `obs[cell_type_key]` exists with ≥ 2 categories (`_lib/communication.py`).
+2. Sync `obsm["spatial"]` ↔ `obsm["X_spatial"]` (`spatial_communication.py`); cast cell-type column to Categorical.
 3. Dispatch to chosen backend (LIANA / CellPhoneDB / FastCCC / CellChat-R).
-4. Write canonical L-R results to `uns["ccc_results"]` + per-method `uns[METHOD_RESULT_KEYS[method]]` (`_lib/communication.py:735-739`).
+4. Write canonical L-R results to `uns["ccc_results"]` + per-method `uns[METHOD_RESULT_KEYS[method]]` (`_lib/communication.py`).
 5. Compute pathway-level summary, signaling roles, source-target summary.
 6. Save tables + `processed.h5ad` + report.
 
 ## Gotchas
 
-- **`obs[cell_type_key]` is REQUIRED — no auto-fallback.** `_lib/communication.py:764-765` raises `ValueError` when the column is missing. Run `spatial-annotate` or `spatial-domains` first.
-- **Default cell-type column is `leiden`, not `cell_type`.** `spatial_communication.py:1065` defaults `--cell-type-key` to `"leiden"`. If your AnnData uses `cell_type`, pass `--cell-type-key cell_type` explicitly.
+- **`obs[cell_type_key]` is REQUIRED — no auto-fallback.** `_lib/communication.py` raises `ValueError` when the column is missing. Run `spatial-annotate` or `spatial-domains` first.
+- **Default cell-type column is `leiden`, not `cell_type`.** `spatial_communication.py` defaults `--cell-type-key` to `"leiden"`. If your AnnData uses `cell_type`, pass `--cell-type-key cell_type` explicitly.
 - **CellChat backend needs an R install with CellChat.** `--method cellchat_r` invokes R via `rpy2`. Install CellChat in your R environment first; missing R / rpy2 / CellChat surfaces as a runtime error inside the dispatch step (not at `parser.error`), so the failure happens after argument parsing succeeds.
-- **FastCCC `--fastccc-min-percentile` must be in [0, 1].** `spatial_communication.py:985` rejects values outside that range with `parser.error`.
-- **Output `uns` keys are unconditionally written, even with 0 interactions.** `_lib/communication.py:735-739` writes empty `uns["ccc_results"]` / `uns["communication_summary"]` if no L-R pairs pass thresholds — distinguish "no signal" from "method failed" by inspecting `tables/communication_run_summary.csv`.
-- **Per-method copy uses `METHOD_RESULT_KEYS` mapping.** `_lib/communication.py:68-73` maps `liana → uns["liana_results"]`, `cellphonedb → uns["cellphonedb_results"]`, `fastccc → uns["fastccc_results"]`, `cellchat_r → uns["cellchat_results"]`. Downstream readers should prefer `uns["ccc_results"]` for portability.
+- **FastCCC `--fastccc-min-percentile` must be in [0, 1].** `spatial_communication.py` rejects values outside that range with `parser.error`.
+- **Output `uns` keys are unconditionally written, even with 0 interactions.** `_lib/communication.py` writes empty `uns["ccc_results"]` / `uns["communication_summary"]` if no L-R pairs pass thresholds — distinguish "no signal" from "method failed" by inspecting `tables/communication_run_summary.csv`.
+- **Per-method copy uses `METHOD_RESULT_KEYS` mapping.** `_lib/communication.py` maps `liana → uns["liana_results"]`, `cellphonedb → uns["cellphonedb_results"]`, `fastccc → uns["fastccc_results"]`, `cellchat_r → uns["cellchat_results"]`. Downstream readers should prefer `uns["ccc_results"]` for portability.
 
 ## Key CLI
 
 ```bash
 # Demo
-python omicsclaw.py run spatial-communication --demo --output /tmp/comm_demo
+python skills/spatial/spatial-communication/spatial_communication.py --demo --output /tmp/comm_demo
 
 # LIANA consensus (default)
-python omicsclaw.py run spatial-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input preprocessed.h5ad --output results/ \
   --method liana --species human --cell-type-key cell_type \
   --liana-expr-prop 0.1 --liana-min-cells 5 --liana-n-perms 1000
 
 # CellPhoneDB permutation test
-python omicsclaw.py run spatial-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input preprocessed.h5ad --output results/ \
   --method cellphonedb --cellphonedb-iterations 1000 --cellphonedb-threshold 0.1
 
 # CellChat (R via rpy2)
-python omicsclaw.py run spatial-communication \
+python skills/spatial/spatial-communication/spatial_communication.py \
   --input preprocessed.h5ad --output results/ \
   --method cellchat_r --species mouse \
   --cellchat-min-cells 10 --cellchat-prob-type triMean
@@ -146,3 +128,9 @@ python omicsclaw.py run spatial-communication \
 - `references/methodology.md` — when each backend wins
 - `references/output_contract.md` — `uns["ccc_results"]` schema + per-method copies
 - Adjacent skills: `spatial-annotate` (upstream — provides `obs[cell_type_key]`), `spatial-domains` (upstream alternative — Leiden domains), `sc-cell-communication` (parallel — non-spatial L-R), `spatial-condition` (parallel — DE between conditions), `spatial-enrichment` (parallel — pathway scoring)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `cellphonedb`, `fastccc`, `liana`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

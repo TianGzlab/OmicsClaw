@@ -240,7 +240,7 @@ def build_standardization_recommendation(
     input_arg = str(source_path) if source_path else "<input.h5ad>"
     return (
         f"{prefix} input that has not yet been canonicalized under the OmicsClaw scRNA contract. "
-        f"Compatible workflows will auto-prepare it when possible; run `oc run sc-standardize-input --input {input_arg} --output <dir>` only if you want to inspect or export the canonical object explicitly."
+        f"Compatible workflows will auto-prepare it when possible; run `python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input {input_arg} --output <dir>` only if you want to inspect or export the canonical object explicitly."
     )
 
 
@@ -446,7 +446,7 @@ def require_preprocessed(adata: AnnData) -> None:
     if "X_pca" not in adata.obsm:
         raise PreprocessingRequiredError(
             "PCA not found. Run sc-preprocess first:\n"
-            "  python omicsclaw.py run sc-preprocess --input data.h5ad --output results/"
+            "  python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py --input data.h5ad --output results/"
         )
 
 

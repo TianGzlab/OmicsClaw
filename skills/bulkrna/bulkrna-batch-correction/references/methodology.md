@@ -39,8 +39,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-batch-correction --demo
-python omicsclaw.py run bulkrna-batch-correction --input expr.csv --batch-info batches.csv --output results/
+python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py --demo
+python skills/bulkrna/bulkrna-batch-correction/bulkrna_batch_correction.py --input expr.csv --batch-info batches.csv --output results/
 python bulkrna_batch_correction.py --input expr.csv --batch-info batches.csv --output results/
 python bulkrna_batch_correction.py --demo --output /tmp/batch_demo
 ```

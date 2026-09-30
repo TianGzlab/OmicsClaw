@@ -139,16 +139,6 @@ SLACK = ChannelCapabilities(
     native_commands=True,
 )
 
-WECHAT = ChannelCapabilities(
-    format_type="markdown",
-    max_text_length=4096,
-    media_send=True,
-    media_receive=True,
-    groups=True,
-    mentions=True,
-    markdown=True,
-)
-
 QQ = ChannelCapabilities(
     format_type="plain",
     max_text_length=4096,
@@ -165,13 +155,4 @@ EMAIL = ChannelCapabilities(
     media_send=True,
     media_receive=True,
     html=True,
-)
-
-IMESSAGE = ChannelCapabilities(
-    format_type="plain",
-    max_text_length=4000,
-    media_send=True,
-    media_receive=True,
-    groups=True,
-    voice=True,
 )

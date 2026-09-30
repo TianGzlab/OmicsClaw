@@ -160,16 +160,17 @@ _DESCRIPTION = (
     "line you are not changing. `source_text` must appear EXACTLY ONCE in "
     "the file, so include enough surrounding lines to be unambiguous; if "
     "it matches more than once exactly, the edit is refused rather than "
-    "guessed. Whitespace-tolerant matching can still resolve an anchor "
-    "that is ambiguous in one form and unique in another, and the result "
-    "always names which form matched. "
-    "WARNING: if you took source_text from a read_file response, remove "
-    "the line-number prefix and the tab after it first — send the "
-    "original code only. Whitespace and line-ending differences are "
-    "tolerated, and the result tells you whether the match was exact or "
-    "fuzzy; after a fuzzy match, re-read the file to check the "
+    "guessed. With no exact match, the anchor is tried ignoring line "
+    "endings, then surrounding whitespace, then indentation, and is used "
+    "in the first of those forms where it is unique. Send source_text "
+    "without read_file's line-number prefix and the tab after it; a "
+    "pasted prefix is removed only when nothing matched with it. The "
+    "result says whether the match was exact or fuzzy (prefix removal "
+    "counts as fuzzy); after a fuzzy match, re-read the file to check the "
     "indentation. The file must already exist — use write_file to create "
-    "one. This tool asks the user for approval before writing anything."
+    "one. Depending on the session's permission settings, the user may be "
+    "asked to approve the edit first; a declined edit returns an error and "
+    "the file is untouched."
 )
 
 EDIT_SCHEMA: dict[str, Any] = {
@@ -305,6 +306,7 @@ class EditTool:
             arguments,
             policy=self.policy,
             reason=self._reason(resolved, outcome),
+            reason_shows_call=outcome.change.diff is not None,
         )
         await report_progress(
             f"editing {resolved} ({outcome.level_name})",

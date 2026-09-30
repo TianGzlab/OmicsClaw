@@ -44,7 +44,12 @@ from omicsclaw.schema import (
     ToolCall,
     ToolDefinition,
 )
-from omicsclaw.tools import ApprovalMode, ToolPolicy, require_approval
+from omicsclaw.tools import (
+    ApprovalMode,
+    ToolPolicy,
+    report_progress,
+    require_approval,
+)
 from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
     Scripted,
     calling,
@@ -136,6 +141,40 @@ class Slow:
         )
 
     async def execute(self, arguments: str) -> str:
+        await asyncio.sleep(self._delay_s)
+        return "finished eventually"
+
+
+class Announcing:
+    """A tool that reports what it is doing, then does it — like ``bash``.
+
+    ``report_progress`` before the first ``await`` is what puts a
+    ``PROGRESS`` frame on the stream ahead of the ``TOOL_START`` that
+    announces the same call; this double is that ordering, kept as a test
+    rather than as a paragraph.
+    """
+
+    policy = ToolPolicy(approval_mode=ApprovalMode.AUTO, concurrency_safe=True)
+
+    def __init__(self, name: str = "slowly", delay_s: float = 0.25) -> None:
+        self._name = name
+        self._delay_s = delay_s
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self._name,
+            description="Says what it is doing.",
+            input_schema={"type": "object", "properties": {}},
+        )
+
+    async def execute(self, arguments: str) -> str:
+        await report_progress(
+            "running in /tmp/ocdemo: sleep 20", tool_name=self._name
+        )
         await asyncio.sleep(self._delay_s)
         return "finished eventually"
 
@@ -383,6 +422,32 @@ def test_a_pipe_never_receives_an_escape_sequence():
     assert "still slowly" in written
 
 
+def test_a_dumb_terminal_is_not_asked_to_erase_a_line():
+    """``TERM=dumb`` is a tty and still cannot do ``\\x1b[2K``.
+
+    ``is_terminal`` alone would say yes to it — the two are separate
+    questions and rich answers both — and the visible cost of getting it
+    wrong is a column of ``[2K`` down the side of the session.
+    """
+    clock = Clock()
+    buffer = io.StringIO()
+    console = Console(
+        file=buffer, width=100, force_terminal=True, _environ={"TERM": "dumb"}
+    )
+    line = ActivityLine(Screen(console), clock=clock, heartbeat_s=10.0)
+    line.begin("slowly")
+
+    assert console.is_terminal and console.is_dumb_terminal
+    assert not line.animated
+
+    for _ in range(15):
+        clock.advance(1.0)
+        line.tick()
+
+    assert "\x1b" not in buffer.getvalue(), repr(buffer.getvalue())
+    assert "still slowly" in buffer.getvalue()
+
+
 def test_a_short_wait_adds_nothing_to_a_piped_transcript():
     """``oc cli --prompt ... > answer.txt`` keeps the output it had.
 
@@ -443,12 +508,40 @@ def test_a_new_detail_does_not_restart_the_elapsed_clock():
     assert "still going" in buffer.getvalue()
 
 
+def test_a_starting_tool_keeps_only_its_own_message():
+    """``started`` restarts the clock; whose message it keeps is the test.
+
+    Keeping unconditionally would put the last tool's command under the
+    next tool's name — a line that is confidently wrong, which is the
+    one thing worse than a line that says nothing.
+    """
+    clock = Clock()
+    screen, buffer = terminal_screen()
+    line = ActivityLine(screen, animated=True, clock=clock)
+
+    line.detail("running in /tmp: sleep 20", tool="bash")
+    clock.advance(7.0)
+    line.started("bash")
+    line.tick()
+    same = buffer.getvalue()
+
+    line.started("read_file")
+    line.tick()
+    other = buffer.getvalue()[len(same) :]
+
+    assert "bash(running in /tmp: sleep 20)" in same, repr(same)
+    assert "  0s" in same, "the clock did not restart with the call"
+    assert "read_file" in other
+    assert "sleep 20" not in other, f"inherited another tool's message: {other!r}"
+
+
 def test_a_tool_that_reports_a_newline_cannot_break_the_line():
     """A progress message is a string this module was handed.
 
     A newline in one would end the row the next ``\\r`` was going to
     rewind, and an escape sequence in one would set a colour nothing
-    resets — so both are removed before the line is composed.
+    resets — so the newline is drawn as a mark and the escape is written
+    out as text before the line is composed.
     """
     clock = Clock()
     screen, buffer = terminal_screen()
@@ -460,7 +553,28 @@ def test_a_tool_that_reports_a_newline_cannot_break_the_line():
     painted = buffer.getvalue()
     assert "\n" not in painted, repr(painted)
     assert "\x1b[31m" not in painted, repr(painted)
-    assert "line one line two" in painted
+    assert "line one ↵ line two\\u001b[31m" in painted
+
+
+def test_c1_controls_and_format_characters_never_reach_the_terminal():
+    """The animated path writes past rich, so nothing else filters it.
+
+    Replacing only C0 and DEL left the one-byte CSI ``\\x9b`` (a C1
+    control, the same as ``ESC [`` to a terminal honouring C1), the bidi
+    override U+202E and zero-width characters to be written as they were.
+    Every one is now an escape, by the same rule every surface uses.
+    """
+    clock = Clock()
+    screen, buffer = terminal_screen()
+    line = ActivityLine(screen, animated=True, clock=clock)
+
+    line.begin("bash\u200b", "\x9b2J\x85\u202etxt.exe\u2066\ufeff")
+    line.tick()
+
+    painted = buffer.getvalue()
+    assert not {"\x9b", "\x85", "\u202e", "\u2066", "\ufeff", "\u200b"} & set(painted)
+    assert "bash\\u200b(\\u009b2J\\u0085\\u202etxt.exe\\u2066\\ufeff)" in painted
+    assert _activity.sanitize("\x9b\u202e") == "\\u009b\\u202e"
 
 
 def test_a_closed_line_stays_closed():
@@ -687,6 +801,41 @@ def test_the_live_line_is_gone_before_the_next_prompt(tmp_path, monkeypatch):
     assert "\x1b" not in tail, f"residue after the last line: {tail!r}"
 
 
+def test_what_a_tool_says_survives_its_own_tool_start(tmp_path, monkeypatch):
+    """The ordering bug a real run found, as a test.
+
+    ``bash`` names its command and its directory through
+    ``report_progress`` before it awaits anything, so that frame reaches
+    the stream ahead of the ``TOOL_START`` for the same call. A
+    ``TOOL_START`` handler that started a clean activity therefore
+    deleted the one useful thing on the line and left ``bash`` alone —
+    which is what the first pty run of this feature actually showed.
+    """
+    monkeypatch.setattr(_activity, "TICK_S", 0.01)
+
+    async def drive():
+        app = build(
+            tmp_path,
+            Scripted(
+                calling("slowly"),
+                Message(role=Role.ASSISTANT, content="all done"),
+            ),
+            tools=(Announcing(delay_s=0.25),),
+        )
+        screen, buffer = terminal_screen()
+        repl = Repl(app, source=ScriptedSource(()), screen=screen, animated=True)
+        await asyncio.wait_for(repl.ask("take your time"), WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return buffer.getvalue()
+
+    painted = frames(asyncio.run(drive()))
+
+    assert painted, "nothing was ever painted"
+    assert any("slowly(running in /tmp/ocdemo: sleep 20)" in f for f in painted), (
+        f"the tool's own description was dropped: {painted}"
+    )
+
+
 def test_an_aborted_pump_still_erases_the_line(tmp_path, monkeypatch):
     """The erase has to be in ``finally``, not on the path to the end.
 
@@ -844,7 +993,7 @@ def test_a_tool_that_is_not_plan_write_prints_no_plan(tmp_path):
                         ToolCall(
                             id="c0",
                             name="read_file",
-                            arguments=json.dumps({"path": "SOUL.md"}),
+                            arguments=json.dumps({"path": "OMICSCLAW.md"}),
                         ),
                     ),
                 ),
@@ -862,7 +1011,7 @@ def test_a_tool_that_is_not_plan_write_prints_no_plan(tmp_path):
             screen=Screen.into(buffer),
             session_id="resumed",
         )
-        await asyncio.wait_for(repl.ask("what does SOUL.md say?"), WAIT_S)
+        await asyncio.wait_for(repl.ask("what does OMICSCLAW.md say?"), WAIT_S)
         await asyncio.wait_for(app.aclose(), WAIT_S)
         return buffer.getvalue()
 
@@ -899,4 +1048,40 @@ def test_a_new_conversation_forgets_what_it_had_shown(tmp_path):
 
     printed = asyncio.run(drive())
 
+    assert printed.count("load the Visium slide") == 2, repr(printed)
+
+
+def test_a_resumed_conversation_forgets_what_it_had_shown(tmp_path):
+    """``/resume`` resets the snapshot the same way ``/new`` does."""
+
+    async def drive():
+        earlier = build(tmp_path, Scripted(Message(role=Role.ASSISTANT, content="x")))
+        repl = Repl(
+            earlier,
+            source=ScriptedSource(["hello", "/exit"]),
+            screen=Screen.into(io.StringIO()),
+            session_id="s-other",
+        )
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(earlier.aclose(), WAIT_S)
+
+        app = build(
+            tmp_path,
+            Scripted(
+                planning_call(("load the Visium slide", "pending")),
+                Message(role=Role.ASSISTANT, content="first"),
+                planning_call(("load the Visium slide", "pending")),
+                Message(role=Role.ASSISTANT, content="second"),
+            ),
+        )
+        buffer = io.StringIO()
+        source = ScriptedSource(["one", "/resume s-other", "two", "/exit"])
+        repl = Repl(app, source=source, screen=Screen.into(buffer))
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return buffer.getvalue()
+
+    printed = asyncio.run(drive())
+
+    assert "Resumed s-other" in printed
     assert printed.count("load the Visium slide") == 2, repr(printed)

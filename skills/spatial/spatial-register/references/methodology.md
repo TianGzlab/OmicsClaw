@@ -52,29 +52,29 @@ Important:
 
 ```bash
 # Default alias used by OmicsClaw
-oc run spatial-registration \
+python skills/spatial/spatial-register/spatial_register.py \
   --input <multi_slice.h5ad> --output <dir>
 
 # PASTE with explicit reference and alpha
-oc run spatial-registration \
+python skills/spatial/spatial-register/spatial_register.py \
   --input <multi_slice.h5ad> --method paste \
   --slice-key slice --reference-slice slice_1 \
   --paste-alpha 0.1 --paste-dissimilarity kl --output <dir>
 
 # PASTE with GPU backend when available
-oc run spatial-registration \
+python skills/spatial/spatial-register/spatial_register.py \
   --input <multi_slice.h5ad> --method paste \
   --paste-use-gpu --output <dir>
 
 # STalign pairwise registration
-oc run spatial-registration \
+python skills/spatial/spatial-register/spatial_register.py \
   --input <two_slices.h5ad> --method stalign \
   --slice-key slice --reference-slice slice_1 \
   --stalign-niter 3000 --stalign-a 800 --stalign-image-size 600 \
   --use-expression --output <dir>
 
 # Demo mode
-oc run spatial-registration --demo --output /tmp/register_demo
+python skills/spatial/spatial-register/spatial_register.py --demo --output /tmp/register_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-register/spatial_register.py \

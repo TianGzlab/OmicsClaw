@@ -644,6 +644,16 @@ def test_temperature_is_dropped_when_extended_thinking_is_enabled(monkeypatch):
     assert sent_params(plain)["temperature"] == provider.config.temperature
 
 
+@pytest.mark.parametrize("model", ["claude-opus-4-7", "anthropic/claude-opus-4.7", "claude-sonnet-5"])
+def test_no_temperature_is_sent_to_a_model_that_removed_sampling_parameters(monkeypatch, model):
+    """Opus 4.7 and later answer any ``temperature`` with a 400, thinking or not."""
+    provider = make_provider(monkeypatch, FakeClient(response={"content": []}), model=model)
+
+    asyncio.run(provider.generate([Message.user("hi")]))
+
+    assert "temperature" not in sent_params(provider)
+
+
 # ---- which thinking shape a model accepts --------------------------------
 
 

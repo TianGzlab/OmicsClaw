@@ -35,9 +35,9 @@ INJECTION_HEADER = (
 
 **Translated, not ported, and that is the point.** The reference
 harness's header is Chinese (``plan.go:107``) because that project's
-prompt is; every section of *this* prompt is English — ``SOUL.md``,
-``CLAUDE.md``, :data:`~omicsclaw.entry.assembly.SAFETY_RULES`,
-:data:`~omicsclaw.entry.assembly.TOOL_GUIDANCE` — and ``SOUL.md``'s first
+prompt is; every section of *this* prompt is English — ``OMICSCLAW.md``,
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES`,
+:data:`~omicsclaw.entry.assembly.TOOL_GUIDANCE` — and ``OMICSCLAW.md``'s first
 operating rule is "reply in the user's language; default to English when
 unclear". A Chinese instruction arriving after an English prompt is a
 language switch nobody asked for, in the one message whose whole job is

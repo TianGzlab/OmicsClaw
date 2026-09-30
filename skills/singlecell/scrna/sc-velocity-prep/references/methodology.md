@@ -63,9 +63,9 @@ Beginner rule of thumb:
 ## CLI Reference
 
 ```bash
-oc run sc-velocity-prep --input sample_count/ --method velocyto --gtf genes.gtf --output results/
-oc run sc-velocity-prep --input starsolo_pbmc/ --method starsolo --base-h5ad processed.h5ad --output results/
-oc run sc-velocity-prep --input fastqs/ --method starsolo --reference /path/to/star_index --chemistry 10xv3 --whitelist /path/to/3M-february-2018.txt --output results/
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input sample_count/ --method velocyto --gtf genes.gtf --output results/
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input starsolo_pbmc/ --method starsolo --base-h5ad processed.h5ad --output results/
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input fastqs/ --method starsolo --reference /path/to/star_index --chemistry 10xv3 --whitelist /path/to/3M-february-2018.txt --output results/
 python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --demo --output /tmp/sc_velocity_prep_demo
 ```
 
@@ -166,21 +166,21 @@ Use `--base-h5ad` to merge the extracted `spliced`/`unspliced`/`ambiguous` layer
 
 ```bash
 # Cell Ranger BAM + velocyto
-python omicsclaw.py run sc-velocity-prep \
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py \
   --input sample_count/ \
   --method velocyto \
   --gtf genes.gtf \
   --output results/
 
 # STARsolo Velocyto output (import only)
-python omicsclaw.py run sc-velocity-prep \
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py \
   --input starsolo_pbmc/ \
   --method starsolo \
   --base-h5ad processed.h5ad \
   --output results/
 
 # STARsolo run from FASTQ
-python omicsclaw.py run sc-velocity-prep \
+python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py \
   --input fastqs/ --method starsolo \
   --reference /path/to/star_index \
   --chemistry 10xv3 \

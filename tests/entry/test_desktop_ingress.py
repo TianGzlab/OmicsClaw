@@ -18,6 +18,7 @@ import pathlib
 
 import pytest
 
+from omicsclaw.entry.desktop.interactions import DesktopInteractions
 from omicsclaw.entry.desktop.server import open_chat_stream
 from omicsclaw.entry.desktop.turn_submission import (
     DEFAULT_MAX_JSON_NESTING,
@@ -41,6 +42,7 @@ OTHER_KEY = "b" * 32
 
 def document(**overrides) -> dict:
     body = {
+        "ingress_schema_version": 3,
         "content": "分析这份 Visium 数据",
         "session_id": "s1",
         "source_request_id": KEY,
@@ -195,9 +197,64 @@ def test_an_empty_message_is_refused():
     assert caught.value.code == "content_required"
 
 
-def test_an_unknown_ingress_version_is_refused():
-    with pytest.raises(DesktopIngressError):
-        decode_chat_stream_request(document(ingress_schema_version=2))
+@pytest.mark.parametrize("version", [1, 2, 4, "3", True, None, 3.0])
+def test_an_ingress_version_other_than_three_is_refused(version: object):
+    """Contract v3 is the only one this backend speaks.
+
+    A v2 client (which sends ``2``) is refused on its first send rather
+    than having ``resume`` and the ``id:`` lines misread, and the mismatch
+    surfaces the same way in the other direction. ``"3"`` and ``3.0`` are
+    refused because a version is an integer, not something that compares
+    equal to one.
+    """
+    with pytest.raises(DesktopIngressError) as caught:
+        decode_chat_stream_request(document(ingress_schema_version=version))
+    assert caught.value.code == "unsupported_ingress_schema_version"
+    assert caught.value.status_code == 422
+
+
+def test_a_body_without_an_ingress_version_is_refused():
+    """v1 defaulted a missing version to 1. Defaulting it to 3 now would let
+    a client that never says which contract it speaks be served one."""
+    body = document()
+    del body["ingress_schema_version"]
+    with pytest.raises(DesktopIngressError) as caught:
+        decode_chat_stream_request(body)
+    assert caught.value.code == "unsupported_ingress_schema_version"
+
+
+def test_the_current_ingress_version_is_admitted():
+    assert decode_chat_stream_request(document()).content == "分析这份 Visium 数据"
+
+
+def test_a_message_is_not_a_resume_unless_it_says_so():
+    assert decode_chat_stream_request(document()).resume is False
+    assert decode_chat_stream_request(document(resume=False)).resume is False
+
+
+def test_a_resume_needs_no_content_and_drops_any_it_carries():
+    """A resume reattaches to an exchange that already has its message."""
+    body = document(resume=True)
+    del body["content"]
+    assert decode_chat_stream_request(body).resume is True
+    assert decode_chat_stream_request(body).content == ""
+
+    carried = decode_chat_stream_request(document(resume=True))
+    assert (carried.resume, carried.content) == (True, "")
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None, [], {}])
+def test_a_resume_that_is_not_a_boolean_is_refused(value: object):
+    with pytest.raises(DesktopIngressError) as caught:
+        decode_chat_stream_request(document(resume=value))
+    assert (caught.value.code, caught.value.status_code) == ("invalid_resume", 422)
+
+
+def test_a_resume_still_needs_its_identity():
+    """The exchange is found by session and request id, nothing else."""
+    with pytest.raises(DesktopIngressError) as caught:
+        decode_chat_stream_request(document(resume=True, source_request_id=""))
+    assert caught.value.code == "source_request_id_required"
 
 
 def test_fields_this_layer_does_not_model_are_accepted_and_ignored():
@@ -213,13 +270,29 @@ def test_fields_this_layer_does_not_model_are_accepted_and_ignored():
             effort="high",
             thinking={"budget": 1},
             context_1m=True,
-            permission_profile="full_access",
             thread_id="t",
             stage="analysis",
             output_style="terse",
         )
     )
     assert request.content == "分析这份 Visium 数据"
+
+
+def test_a_permission_profile_is_read_when_it_is_one_the_backend_knows():
+    """Absent means "keep the session's profile"; an unknown one is a 422
+    rather than a silent ``default``, which the client would read as
+    applied."""
+    assert decode_chat_stream_request(document()).permission_profile == ""
+    for profile in ("default", "full_access"):
+        request = decode_chat_stream_request(document(permission_profile=profile))
+        assert request.permission_profile == profile
+    for bad in ("bypass-all", "FULL_ACCESS"):
+        with pytest.raises(DesktopIngressError) as caught:
+            decode_chat_stream_request(document(permission_profile=bad))
+        assert caught.value.code == "invalid_permission_profile"
+    with pytest.raises(DesktopIngressError) as caught:
+        decode_chat_stream_request(document(permission_profile=True))
+    assert caught.value.code == "invalid_request_json"
 
 
 def test_the_owner_profile_is_pinned_by_the_backend():
@@ -257,11 +330,16 @@ def test_a_redelivered_request_resolves_to_the_same_exchange(
     app = attach_sessions(
         make_app(tmp_path, provider, tools=()), abandon_grace_s=None
     )
+    interactions = DesktopInteractions(app)
 
     async def scenario() -> tuple[str, str, bool, bool, int, int]:
-        first = await open_chat_stream(app, document(), keepalive_s=None)
+        first = await open_chat_stream(
+            app, document(), keepalive_s=None, interactions=interactions
+        )
         await asyncio.wait_for(finish(first), WAIT_S)
-        second = await open_chat_stream(app, document(), keepalive_s=None)
+        second = await open_chat_stream(
+            app, document(), keepalive_s=None, interactions=interactions
+        )
         await asyncio.wait_for(finish(second), WAIT_S)
         return (
             first.turn_id,

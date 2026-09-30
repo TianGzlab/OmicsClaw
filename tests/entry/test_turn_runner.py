@@ -215,8 +215,9 @@ def make_app(tmp_path: pathlib.Path, provider, *, tools=None, **overrides):
     ``AppConfig.bash_timeout()`` derives a negative construction argument
     from that.
     """
-    (tmp_path / "SOUL.md").write_text("You are OmicsClaw.", encoding="utf-8")
-    (tmp_path / "CLAUDE.md").write_text("Route to a skill.", encoding="utf-8")
+    (tmp_path / "OMICSCLAW.md").write_text(
+        "You are OmicsClaw.\n\nRoute to a skill.", encoding="utf-8"
+    )
     config = AppConfig(workspace=tmp_path, **overrides)
 
     real = assembly.provider_from_env

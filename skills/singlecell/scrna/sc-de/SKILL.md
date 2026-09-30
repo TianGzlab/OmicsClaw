@@ -1,30 +1,15 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-de
 description: Load when finding marker genes per cluster or comparing condition expression in single-cell
   RNA-seq. Skip when the data is bulk (use bulkrna-de); spatial (use spatial-de); cluster-only markers
   without conditions (use sc-markers).
-version: 0.6.0
-author: OmicsClaw
-license: MIT
-emoji: S
+trigger: differential expression, marker genes, de analysis, wilcoxon, pseudo-bulk
 tags:
 - singlecell
 - differential-expression
 - markers
 - wilcoxon
 - deseq2
-requires:
-- adjustText
-- anndata
-- matplotlib
-- numpy
-- pandas
-- pydeseq2
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-de
@@ -39,8 +24,6 @@ the matrix contract (normalized expression vs raw counts) per backend
 because mixing them is the most common silent-wrong-answer failure mode.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -90,22 +73,22 @@ because mixing them is the most common silent-wrong-answer failure mode.
 - **`deseq2_r` requires raw counts.** It looks for `layers["counts"]` first, then `adata.raw`, then `adata.X`, gated by a `matrix_looks_count_like` heuristic on each candidate.  After every pseudobulk run, check `result.json["summary"]["expression_source"]` — it should read `layers.counts` or `adata.raw`, not `adata.X`.  If the heuristic mis-classifies a normalized matrix as count-like, the run will fall through to `adata.X` silently.
 - **`--group1` and `--group2` are required for `deseq2_r`.** `sc_de.py` raises `ValueError` when either is missing on the pseudobulk path.  Other methods treat them as optional (cluster-vs-rest if absent).
 - **`mast` and `deseq2_r` need a working R stack.** `mast` needs `MAST` + `SingleCellExperiment` + `zellkonverter`; `deseq2_r` needs `DESeq2` + same companions.  The wrapper raises if the R bridge is unavailable — install via the project's R bootstrap, not pip.
-- **Pseudobulk bin filtering silently drops entire cell types.** Per `skills/singlecell/_lib/pseudobulk.py:103`, any sample × cell type bin with fewer than `--pseudobulk-min-cells` (default 10) cells is `continue`'d with no diagnostic written to `result.json`.  When DESeq2 reports "no DEGs in cell type X," sanity-check the per-sample cell counts manually before assuming biological null.
+- **Pseudobulk bin filtering silently drops entire cell types.** Per `skills/singlecell/_lib/pseudobulk.py`, any sample × cell type bin with fewer than `--pseudobulk-min-cells` (default 10) cells is `continue`'d with no diagnostic written to `result.json`.  When DESeq2 reports "no DEGs in cell type X," sanity-check the per-sample cell counts manually before assuming biological null.
 - **`sample_key` is statistical design, not a label.** DESeq2 fits a per-sample dispersion; using a non-replicate column (e.g. `cell_type` itself) gives nonsense.  The wrapper does not currently catch this — sanity-check the column has >=2 distinct values per condition.
 
 ## Key CLI
 
 ```bash
 # Demo: PBMC3k Wilcoxon cluster markers
-python omicsclaw.py run sc-de --demo
+python skills/singlecell/scrna/sc-de/sc_de.py --demo --output /tmp/sc-de_demo
 
 # Exploratory: cluster markers via Wilcoxon
-python omicsclaw.py run sc-de \
+python skills/singlecell/scrna/sc-de/sc_de.py \
   --input processed.h5ad --output results/ \
   --groupby leiden --method wilcoxon --n-top-genes 20
 
 # Replicate-aware: treated vs control via DESeq2 pseudobulk
-python omicsclaw.py run sc-de \
+python skills/singlecell/scrna/sc-de/sc_de.py \
   --input processed.h5ad --output results/ \
   --method deseq2_r --groupby condition \
   --group1 treated --group2 control \
@@ -120,3 +103,9 @@ python omicsclaw.py run sc-de \
 - `references/output_contract.md` — exact output directory layout + visualization contract
 - `references/r_visualization.md` — five R-enhanced renderers
 - Adjacent skills: `sc-clustering` (upstream cluster discovery), `sc-cell-annotation` (upstream cell type labels for `celltype_key`), `sc-markers` (lighter cluster-marker-only path), `sc-enrichment` (downstream pathway enrichment of DEG lists), `bulkrna-de` / `spatial-de` (sibling DE skills for the other two data modalities)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`adjustText`, `anndata`, `matplotlib`, `numpy`, `pandas`, `pydeseq2`, `scanpy`, `scipy`, `seaborn`

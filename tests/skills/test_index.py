@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import pathlib
 
 import pytest
@@ -206,3 +207,78 @@ def test_by_domain_keeps_index_order_within_each_group():
         ("alpha", (index.skills[0], index.skills[2])),
         ("beta", (index.skills[1],)),
     )
+
+
+# ---- search -------------------------------------------------------------
+
+
+def search_corpus() -> SkillIndex:
+    """Three skills whose names, domains, tags and triggers differ."""
+    return SkillIndex(
+        skills=(
+            dataclasses.replace(
+                make("spatial-de", "rank spatial markers", "spatial"),
+                trigger="differential expression, marker gene",
+                tags=("markers",),
+            ),
+            dataclasses.replace(
+                make("spatial-domains", "find tissue domains", "spatial"),
+                trigger="niche, tissue region",
+            ),
+            dataclasses.replace(
+                make("bulkrna-de", "rank bulk markers", "bulkrna"),
+                trigger="differential expression, DESeq2",
+            ),
+        )
+    )
+
+
+def test_a_blank_query_matches_every_skill():
+    index = search_corpus()
+
+    assert index.search("") == index.skills
+    assert index.search("   ") == index.skills
+
+
+def test_a_query_matches_a_name_substring():
+    assert [s.name for s in search_corpus().search("domains")] == ["spatial-domains"]
+
+
+def test_a_query_matches_a_domain():
+    assert [s.name for s in search_corpus().search("bulkrna")] == ["bulkrna-de"]
+
+
+def test_a_query_matches_a_trigger_keyword_no_name_carries():
+    """The point of the triggers: "niche" is in no name and no description."""
+    assert [s.name for s in search_corpus().search("niche")] == ["spatial-domains"]
+
+
+def test_a_query_matches_a_tag():
+    assert [s.name for s in search_corpus().search("markers")] == ["spatial-de"]
+
+
+def test_a_query_is_case_insensitive():
+    assert [s.name for s in search_corpus().search("DESeq2")] == ["bulkrna-de"]
+    assert [s.name for s in search_corpus().search("deseq2")] == ["bulkrna-de"]
+
+
+def test_a_skill_matching_on_two_fields_is_returned_once():
+    index = search_corpus()
+
+    assert [s.name for s in index.search("spatial")] == [
+        "spatial-de",
+        "spatial-domains",
+    ]
+
+
+def test_matches_keep_index_order():
+    index = search_corpus()
+
+    assert [s.name for s in index.search("differential expression")] == [
+        "spatial-de",
+        "bulkrna-de",
+    ]
+
+
+def test_a_query_nothing_matches_is_empty():
+    assert search_corpus().search("proteomics") == ()

@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run proteomics-ptm --demo
-python omicsclaw.py run proteomics-ptm --input <phospho_sites.txt> --output <dir>
+python skills/proteomics/proteomics-ptm/proteomics_ptm.py --demo
+python skills/proteomics/proteomics-ptm/proteomics_ptm.py --input <phospho_sites.txt> --output <dir>
 ```
 
 

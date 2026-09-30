@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: bulkrna-read-alignment
 description: Load when summarising STAR / HISAT2 / Salmon alignment-rate logs in bulk RNA-seq. Skip when
   data is raw FASTQ (use bulkrna-read-qc); already counted (use bulkrna-qc); genome-DNA alignment (use
   genomics-alignment).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: RNA-seq alignment, STAR, HISAT2, Salmon, mapping rate, read alignment, alignment QC
 tags:
 - bulkrna
 - alignment
@@ -17,10 +12,6 @@ tags:
 - Salmon
 - mapping-rate
 - strandedness
-requires:
-- matplotlib
-- numpy
-- pandas
 ---
 
 # bulkrna-read-alignment
@@ -34,8 +25,6 @@ gene-body coverage profile — the QC bridge between raw FASTQ and the
 count matrix.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -52,22 +41,22 @@ count matrix.
 
 ## Flow
 
-1. Auto-detect aligner from filename (`bulkrna_read_alignment.py:305-311`): `log.final.out` → STAR; `meta_info` → Salmon; otherwise → HISAT2.
+1. Auto-detect aligner from filename (`bulkrna_read_alignment.py`): `log.final.out` → STAR; `meta_info` → Salmon; otherwise → HISAT2.
 2. Parse the log into a numeric stats dict.
 3. Run quality assessment heuristics (high/medium/low mapping-rate buckets).
 4. Render figures and write `report.md` + `tables/alignment_stats.csv`.
 
 ## Gotchas
 
-- **Aligner detection is filename-based, not content-based.**  `bulkrna_read_alignment.py:305-311` dispatches by `input_path.name.lower()` — anything that is neither `log.final.out` nor `meta_info` (case-insensitive substring) is silently parsed as a HISAT2 log.  A renamed STAR log will produce nonsense.  Pass `--method star` explicitly if your STAR file isn't named conventionally.
+- **Aligner detection is filename-based, not content-based.**  `bulkrna_read_alignment.py` dispatches by `input_path.name.lower()` — anything that is neither `log.final.out` nor `meta_info` (case-insensitive substring) is silently parsed as a HISAT2 log.  A renamed STAR log will produce nonsense.  Pass `--method star` explicitly if your STAR file isn't named conventionally.
 - **The skill consumes the LOG, not the BAM.**  Feeding a `.bam` or `.sam` file as `--input` will not raise — the parser just finds zero matchable lines and reports an empty stats dict.  Sanity-check `result.json["summary"]["total_reads"]` is non-zero before trusting any downstream summary.
-- **Gene body coverage is synthetic in `--demo` mode** (`bulkrna_read_alignment.py:142-150`).  The 5'→3' bias profile in demo runs is a fixed reproducible curve, not derived from real input — useful for layout previews but not for assessing real RNA degradation.
+- **Gene body coverage is synthetic in `--demo` mode** (`bulkrna_read_alignment.py`).  The 5'→3' bias profile in demo runs is a fixed reproducible curve, not derived from real input — useful for layout previews but not for assessing real RNA degradation.
 
 ## Key CLI
 
 ```bash
-python omicsclaw.py run bulkrna-read-alignment --demo
-python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output results/
+python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --demo --output /tmp/bulkrna-read-alignment_demo
+python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --input Log.final.out --output results/
 ```
 
 ## See also
@@ -76,3 +65,9 @@ python omicsclaw.py run bulkrna-read-alignment --input Log.final.out --output re
 - `references/methodology.md` — STAR / HISAT2 / Salmon parsers, strandedness inference
 - `references/output_contract.md` — exact output directory layout
 - Adjacent skills: `bulkrna-read-qc` (upstream FASTQ QC), `bulkrna-qc` (downstream count-matrix QC), `genomics-alignment` (DNA-alignment sibling: BAM/SAM, not log files)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`matplotlib`, `numpy`, `pandas`

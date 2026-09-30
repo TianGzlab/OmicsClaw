@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-genes ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-genes/spatial_genes.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/svg_results.csv`

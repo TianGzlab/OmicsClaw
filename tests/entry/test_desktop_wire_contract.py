@@ -1,17 +1,14 @@
-"""The published contract, unchanged — and the proof that it is unchanged.
+"""The Desktop wire contract v3, as ``GET /health`` publishes it.
 
-Plan 0031 §9-14 and Q24. ``POST /chat/stream`` is an external project's
-contract: ``OmicsClaw-App`` (Electron + Next.js) calls it from
-``src/app/api/chat/route.ts``, which describes itself as a Transform Proxy.
-A backend-internal rebuild step is not where a version number that an
-external client already depends on gets changed, so the central assertion
-here compares this port against the **pre-port file on disk**, not against a
-value somebody retyped.
+The backend defines this contract and versions it; the desktop client
+implements the version it names and refuses any other. So the central
+assertions here are literals: a change to a version number or a descriptor
+field has to get past a test that states the value, which is the reminder
+that such a change is a coordinated release with the client.
 """
 
 from __future__ import annotations
 
-import ast
 import json
 import pathlib
 import subprocess
@@ -22,7 +19,6 @@ import pytest
 from omicsclaw.entry.desktop import _chat_sse, wire_contract
 from omicsclaw.entry.desktop._chat_sse import (
     CHAT_SSE_MAX_FRAME_BYTES,
-    CHAT_SSE_QUEUE_MAX_ITEMS,
     render_chat_sse_frame,
     utf8_size,
 )
@@ -31,160 +27,101 @@ from omicsclaw.entry.desktop.server import (
     unauthenticated_health_payload,
 )
 from omicsclaw.entry.config import resolve_app_config
+from omicsclaw.entry.session import attach_sessions
 from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
     Scripted,
     make_app,
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-ORIGINAL = REPO / "omicsclaw" / "surfaces" / "desktop" / "wire_contract.py"
-ORIGINAL_SSE = REPO / "omicsclaw" / "surfaces" / "desktop" / "_chat_sse.py"
 
-SCHEMA_VERSION_NAMES = (
-    "DESKTOP_CHAT_REQUEST_SCHEMA_VERSION",
-    "DESKTOP_CHAT_SSE_SCHEMA_VERSION",
-    "DESKTOP_CHAT_INTERRUPT_SCHEMA_VERSION",
-    "DESKTOP_TURN_SUBMISSION_SCHEMA_VERSION",
-    "DESKTOP_TURN_OBSERVATION_SCHEMA_VERSION",
-    "DESKTOP_RUN_REQUEST_SCHEMA_VERSION",
-    "DESKTOP_RUN_OBSERVATION_SCHEMA_VERSION",
-    "DESKTOP_RUN_INTEGRITY_INCIDENT_SCHEMA_VERSION",
-)
-"""The eight the plan forbids this step from touching."""
-
-FROZEN_CHAT_CONTRACT = {
-    "request_schema_version": 1,
-    "sse_schema_version": 1,
+CHAT_CONTRACT_V3 = {
+    "request_schema_version": 3,
+    "sse_schema_version": 3,
     "interrupt_schema_version": 1,
     "authoritative_ingress": True,
-    "durable_ingress_idempotency": True,
+    "durable_ingress_idempotency": False,
     "source_request_id_required": True,
     "attachments_supported": False,
     "max_sse_frame_bytes": 4 * 1024 * 1024,
-    "event_queue_capacity": 8,
-    "producer_backpressure": True,
     "oversize_event_projection": True,
     "terminal_error_type_preserved": True,
+    "gap_notice": True,
+    "abandon_grace_s": None,
 }
-"""A literal snapshot of ``desktop_chat_contract()`` as it stood before the
-port.
+"""The ``desktop_chat`` descriptor of contract v3, written out.
 
-Redundant with :func:`test_every_contract_descriptor_matches_the_pre_port_file`
-**today** and not tomorrow: plan 0031 §10 deletes
-``omicsclaw/surfaces/`` once the second and third families land, and the
-assertion that survives that deletion is this one. Two checks of one fact,
-with different lifetimes.
+``durable_ingress_idempotency`` is ``False`` because a redelivery resolves
+to the same exchange only while this process holds it. The v1 keys
+``event_queue_capacity`` and ``producer_backpressure`` are gone because
+nothing in this backend implements them; ``gap_notice`` says a cursor that
+falls behind the ring gets an ``event_omitted`` frame. ``abandon_grace_s``
+is the running registry's, ``None`` for an app without one.
 """
 
 
-def _pre_port_namespace() -> dict[str, object]:
-    """Execute the pre-port module with its two imports satisfied locally.
-
-    It cannot simply be imported. ``wire_contract.py`` reads four bounds from
-    ``desktop/run_wire.py``, which imports ``pydantic``, ``starlette``, the
-    deleted ``omicsclaw.control`` and the deleted ``omicsclaw.skill``
-    (singular — the name plan 0031 §9-17 forbids from ``sys.modules``).
-    **That makes the plan's "0 lines to change" for this file wrong**: the
-    coupling scan matched only ``^(from|import) omicsclaw\\.…`` and a
-    relative import is neither. So the import statements are dropped and
-    their six names are supplied, which is exactly the substitution the port
-    made, and everything else is executed verbatim from disk.
-    """
-    source = ORIGINAL.read_text(encoding="utf-8")
-    module = ast.parse(source)
-    module.body = [
-        node
-        for node in module.body
-        if not (isinstance(node, ast.ImportFrom) and node.level == 1)
-    ]
-    namespace: dict[str, object] = {
-        "CHAT_SSE_MAX_FRAME_BYTES": 4 * 1024 * 1024,
-        "CHAT_SSE_QUEUE_MAX_ITEMS": 8,
-        "DESKTOP_RUN_INCIDENT_MAX_PAGE_SIZE": 100,
-        "DESKTOP_RUN_MAX_JSON_NESTING": 64,
-        "DESKTOP_RUN_MAX_REQUEST_BYTES": 64 * 1024,
-        "DESKTOP_RUN_READ_TIMEOUT_SECONDS": 60,
-    }
-    exec(compile(module, str(ORIGINAL), "exec"), namespace)  # noqa: S102
-    return namespace
+def test_the_chat_contract_is_v3():
+    """Values and key order: the descriptor is serialised into ``/health``
+    and a client may be comparing the document, not the mapping."""
+    assert wire_contract.desktop_chat_contract() == CHAT_CONTRACT_V3
+    assert list(wire_contract.desktop_chat_contract()) == list(CHAT_CONTRACT_V3)
 
 
-@pytest.mark.skipif(not ORIGINAL.exists(), reason="the pre-port file is gone")
-def test_every_contract_descriptor_matches_the_pre_port_file():
-    """§9-14, against the source rather than against a memory of it.
+def test_the_three_schema_versions_are_stated_literally():
+    """Request and SSE moved to 3 together, for ``resume`` and the ``id:``
+    lines; the abort body did not change."""
+    assert wire_contract.DESKTOP_CHAT_REQUEST_SCHEMA_VERSION == 3
+    assert wire_contract.DESKTOP_CHAT_SSE_SCHEMA_VERSION == 3
+    assert wire_contract.DESKTOP_CHAT_INTERRUPT_SCHEMA_VERSION == 1
 
-    All four descriptors, not only the chat one: three of them describe
-    routes this package does not serve, and a port that quietly edited a
-    descriptor it was not implementing would be the easiest way to publish
-    a change nobody reviewed.
 
-    **Mutation**: flip any single value or version number in
-    ``entry/desktop/wire_contract.py`` ⇒ this fails and names the key.
-    """
-    before = _pre_port_namespace()
-    for name in (
-        "desktop_chat_contract",
-        "desktop_turn_submission_contract",
-        "desktop_turn_observation_contract",
+def test_descriptors_for_routes_nobody_serves_are_gone():
+    """v1 published ``/v1/turns`` and ``/v1/runs`` descriptors and eight
+    version constants for routes this backend never mounted; a descriptor
+    that over-promises is how a client ends up calling a 404."""
+    for gone in (
         "desktop_run_contract",
+        "desktop_turn_observation_contract",
+        "desktop_turn_submission_contract",
+        "DESKTOP_TURN_SUBMISSION_SCHEMA_VERSION",
+        "DESKTOP_TURN_OBSERVATION_SCHEMA_VERSION",
+        "DESKTOP_RUN_REQUEST_SCHEMA_VERSION",
+        "DESKTOP_RUN_OBSERVATION_SCHEMA_VERSION",
+        "DESKTOP_RUN_INTEGRITY_INCIDENT_SCHEMA_VERSION",
     ):
-        expected = before[name]()  # type: ignore[operator]
-        actual = getattr(wire_contract, name)()
-        assert actual == expected, name
-        # Key order too: these are serialised into ``/health`` and a client
-        # may be comparing the document, not the mapping.
-        assert list(actual) == list(expected), name
-
-
-@pytest.mark.skipif(not ORIGINAL.exists(), reason="the pre-port file is gone")
-def test_the_eight_schema_versions_are_the_pre_port_values():
-    before = _pre_port_namespace()
-    for name in SCHEMA_VERSION_NAMES:
-        assert getattr(wire_contract, name) == before[name], name
-
-
-def test_the_chat_contract_matches_its_frozen_snapshot():
-    """The half of §9-14 that outlives ``omicsclaw/surfaces/``."""
-    assert wire_contract.desktop_chat_contract() == FROZEN_CHAT_CONTRACT
-    assert list(wire_contract.desktop_chat_contract()) == list(FROZEN_CHAT_CONTRACT)
-
-
-def test_every_schema_version_is_one():
-    """A blunt restatement, and deliberately so.
-
-    The previous two tests both compare against something derived from the
-    same repository. This one states the number, so that a change which
-    somehow moved both sides together still has to get past a literal.
-    """
-    for name in SCHEMA_VERSION_NAMES:
-        assert getattr(wire_contract, name) == 1, name
+        assert not hasattr(wire_contract, gone), gone
 
 
 def test_the_contract_is_json_serialisable():
-    """``/health`` puts all four descriptors in one document."""
-    for name in (
-        "desktop_chat_contract",
-        "desktop_turn_submission_contract",
-        "desktop_turn_observation_contract",
-        "desktop_run_contract",
-    ):
-        json.dumps(getattr(wire_contract, name)(), allow_nan=False)
+    json.dumps(wire_contract.desktop_chat_contract(), allow_nan=False)
 
 
 def test_a_fresh_descriptor_is_returned_each_call():
-    """"Return a **fresh** … descriptor" is the source's own docstring.
-
-    A caller that mutated a shared dictionary would be editing what every
-    later ``/health`` reports.
-    """
+    """A caller that mutated a shared dictionary would be editing what every
+    later ``/health`` reports."""
     first = wire_contract.desktop_chat_contract()
     first["attachments_supported"] = True
     assert wire_contract.desktop_chat_contract()["attachments_supported"] is False
 
 
-def test_served_paths_names_only_what_is_mounted():
-    """Four descriptors, two routes — and the gap is stated, not implied."""
-    assert wire_contract.SERVED_PATHS == ("/chat/stream", "/health")
+def test_served_paths_names_the_routes_the_app_mounts():
+    assert wire_contract.SERVED_PATHS == (
+        "/chat/stream",
+        "/chat/permission",
+        "/chat/abort",
+        "/chat/session-permission-profile",
+        "/workspace",
+        "/env/doctor",
+        "/health",
+        "/skills",
+        "/skills/{domain}/{name}",
+        "/mcp/servers",
+        "/providers",
+        "/providers/test",
+        "/chat/title",
+        "/files/tree",
+        "/files/serve",
+    )
 
 
 # ---- ``/health`` against the client's own validator ---------------------
@@ -237,6 +174,28 @@ def test_health_answers_every_field_the_client_requires(tmp_path):
     assert payload["omicsclaw_dir"] == str(tmp_path)
 
 
+def test_health_publishes_only_the_chat_contract(tmp_path):
+    """The client gates on ``contracts.desktop_chat.sse_schema_version``."""
+    payload = health_payload(_app_for_health(tmp_path))
+
+    assert payload["contracts"] == {"desktop_chat": CHAT_CONTRACT_V3}
+    assert payload["served_paths"] == list(wire_contract.SERVED_PATHS)
+
+
+@pytest.mark.parametrize(
+    ("given", "published"),
+    [({}, 30.0), ({"abandon_grace_s": 600.0}, 600.0), ({"abandon_grace_s": None}, None)],
+)
+def test_health_publishes_the_grace_the_registry_runs_with(tmp_path, given, published):
+    """A client times its reconnect window from this, so it is the value
+    in force, ``None`` meaning an unwatched exchange is never cancelled."""
+    app = attach_sessions(_app_for_health(tmp_path), **given)
+
+    chat = health_payload(app)["contracts"]["desktop_chat"]
+    assert chat["abandon_grace_s"] == published
+    assert chat["abandon_grace_s"] == app.sessions.abandon_grace_s
+
+
 def test_a_managed_launch_can_tell_this_backend_from_a_leftover_one(tmp_path):
     """``:313``: the launcher compares ``launch_id`` and refuses a mismatch.
 
@@ -279,47 +238,6 @@ def test_the_launch_id_comes_from_the_one_deployment_reader(tmp_path):
 
 
 # ---- the bounded frame renderer -----------------------------------------
-
-
-@pytest.mark.skipif(not ORIGINAL_SSE.exists(), reason="the pre-port file is gone")
-def test_the_frame_renderer_is_byte_identical_to_the_pre_port_one():
-    """The port of ``_chat_sse.py`` changed one line's layout and no bytes.
-
-    Compares rendered output, which is the only definition of "unchanged"
-    that matters at a wire seam: the source's 100-column string literal was
-    wrapped to satisfy the repository's 88-column rule, and implicit
-    concatenation makes that a source-layout change rather than a payload
-    change. This test is what says so rather than asserting it in a
-    comment.
-    """
-    namespace: dict[str, object] = {}
-    exec(  # noqa: S102
-        compile(ORIGINAL_SSE.read_text(encoding="utf-8"), str(ORIGINAL_SSE), "exec"),
-        namespace,
-    )
-    before = namespace["render_chat_sse_frame"]
-    cases: list[tuple[str, object]] = [
-        ("text", "ok"),
-        ("done", ""),
-        ("error", "RuntimeError"),
-        ("tool_result", {"tool_use_id": "c0", "tool_name": "bash", "content": "hi"}),
-        (
-            "tool_result",
-            {
-                "tool_use_id": "c1",
-                "tool_name": "read",
-                "content": "x" * (CHAT_SSE_MAX_FRAME_BYTES + 1),
-                "is_error": True,
-            },
-        ),
-        ("tool_use", {"tool_use_id": "c2", "arguments": '{"b":1,"a":2}'}),
-        ("status", {"kind": "compaction", "tokens_after": 10}),
-        ("text", "中文与 emoji 🧬"),
-    ]
-    for event_type, data in cases:
-        assert render_chat_sse_frame(event_type, data) == before(  # type: ignore
-            event_type, data
-        ), event_type
 
 
 def test_a_frame_is_one_data_line_with_exactly_two_keys():
@@ -395,10 +313,9 @@ def test_utf8_size_counts_bytes_not_characters():
     assert utf8_size(value) == len(value) * 3
 
 
-def test_the_queue_capacity_in_the_contract_is_the_renderer_constant():
+def test_the_frame_bound_in_the_contract_is_the_renderer_constant():
     """The descriptor reports a real constant, not a retyped number."""
     contract = wire_contract.desktop_chat_contract()
-    assert contract["event_queue_capacity"] == CHAT_SSE_QUEUE_MAX_ITEMS
     assert contract["max_sse_frame_bytes"] == CHAT_SSE_MAX_FRAME_BYTES
 
 
@@ -415,7 +332,7 @@ leaked = sorted(
     in {"fastapi", "starlette", "pydantic", "textual", "prompt_toolkit", "multipart"}
 )
 assert not leaked, leaked
-assert desktop.desktop_chat_contract()["sse_schema_version"] == 1
+assert desktop.desktop_chat_contract()["sse_schema_version"] == 3
 done = desktop.render_chat_sse_frame("done", "")
 assert done == 'data: {"type": "done", "data": ""}\\n\\n', done
 print("ok")

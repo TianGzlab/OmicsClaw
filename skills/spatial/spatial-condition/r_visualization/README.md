@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-condition ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-condition/spatial_condition.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/pseudobulk_volcano_points.csv`

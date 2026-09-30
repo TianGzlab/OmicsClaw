@@ -25,6 +25,7 @@ class StoredSession:
     :param compaction: Summary and anchors carried between exchanges.
     :param created_at: Wall clock at creation.
     :param values: Session-level facts made available to tools.
+    :param updated_at: Wall clock of the last save; stores order by it.
     """
 
     session_id: str
@@ -32,3 +33,4 @@ class StoredSession:
     compaction: CompactionState = field(default_factory=CompactionState)
     created_at: float = field(default_factory=time.time)
     values: Mapping[str, object] = field(default_factory=lambda: _EMPTY_VALUES)
+    updated_at: float = field(default_factory=time.time)

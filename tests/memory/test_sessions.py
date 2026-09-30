@@ -152,15 +152,31 @@ def test_message_order_is_preserved() -> None:
     assert [m.content for m in got.history] == [f"m{i}" for i in range(30)]
 
 
-def test_list_is_newest_first() -> None:
-    """Ordered by creation, newest first, not by insertion order."""
+def test_list_is_most_recently_active_first() -> None:
+    """Ordered by ``updated_at``, not by creation and not by insertion.
+
+    The conversation created first but used last comes first: a resume
+    list ordered by creation pushes a long-running conversation off the
+    end while it is still the one being worked on.
+    """
     db, s = store()
-    run(s.save(StoredSession(session_id="old", created_at=100.0)))
-    run(s.save(StoredSession(session_id="new", created_at=300.0)))
-    run(s.save(StoredSession(session_id="mid", created_at=200.0)))
+    run(s.save(StoredSession(session_id="old", created_at=100.0, updated_at=900.0)))
+    run(s.save(StoredSession(session_id="new", created_at=300.0, updated_at=300.0)))
+    run(s.save(StoredSession(session_id="mid", created_at=200.0, updated_at=500.0)))
     got = run(s.list())
     db.close()
-    assert [x.session_id for x in got] == ["new", "mid", "old"]
+    assert [x.session_id for x in got] == ["old", "mid", "new"]
+
+
+def test_updated_at_is_stored_as_given_and_read_back() -> None:
+    """The store keeps the caller's clock rather than reading its own."""
+    db, s = store()
+    run(s.save(StoredSession(session_id="s1", created_at=1.0, updated_at=42.5)))
+    got = run(s.load("s1"))
+    listed = run(s.list())
+    db.close()
+    assert got.updated_at == 42.5
+    assert listed[0].updated_at == 42.5
 
 
 def test_list_isolates_nothing_and_the_file_is_the_whole_boundary() -> None:

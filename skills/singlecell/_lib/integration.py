@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from . import dependency_manager as dm
+from skills._sdk import deps as dm
 
 if TYPE_CHECKING:
     from anndata import AnnData

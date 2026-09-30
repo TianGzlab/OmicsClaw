@@ -1,13 +1,24 @@
 """
 Slack channel implementation for OmicsClaw.
 
-Uses the Slack SDK with Socket Mode — no public IP or webhook required.
-The bot connects via the app-level token and receives events in real-time.
+Uses the Slack SDK with Socket Mode — no public IP or webhook required. The
+bot connects with an app-level token and receives events over a WebSocket
+that ``slack_sdk`` drives on the running event loop, so nothing here crosses
+a thread boundary.
 
-Prerequisites:
-    pip install slack-sdk aiohttp
+Start-up is two-phase, as it is for every adapter in this package:
+:meth:`SlackChannel.prepare_control_binding` authenticates and describes the
+account, the runner composes one shared runtime over every channel's binding,
+and only then does :meth:`SlackChannel.start` open the socket.
 
-Configuration via environment variables:
+Group channels fail closed. A channel message is admitted only when this
+bot's own ``<@U…>`` handle appears among the identities the message
+@-mentioned — read out of the message text rather than inferred from the
+event name, so that an ``app_mention`` Slack delivered for some other reason
+still has to prove it was aimed here.
+
+Configuration via environment variables (read by ``omicsclaw/launch/``, never
+here):
     SLACK_BOT_TOKEN  — Bot User OAuth Token (xoxb-...)
     SLACK_APP_TOKEN  — App-Level Token (xapp-...) for Socket Mode
 
@@ -20,14 +31,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from omicsclaw.entry.ingress import (
+    SenderPolicy,
+    VALUE_CHAT_TYPE,
+    VALUE_MENTIONS,
+)
+
+from . import reply_target
 from .base import Channel
+from .binding import ChannelSurfaceBinding
 from .capabilities import SLACK as SLACK_CAPS
 from .config import BaseChannelConfig
+from .runtime import TurnAcceptanceStatus
+from .slack_delivery import SlackDeliveryAdapter
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("omicsclaw.channel.slack")
+
+_MENTION = re.compile(r"<@([A-Z0-9]+)>")
+
+AUTH_TIMEOUT_S = 15.0
+CONNECT_TIMEOUT_S = 30.0
 
 
 # ─ Config ─────────────────────────
@@ -42,285 +69,346 @@ class SlackConfig(BaseChannelConfig):
     text_chunk_limit: int = 4096
 
 
+def slack_mentions(text: str) -> tuple[str, ...]:
+    """Every identity *text* @-mentioned, in the spelling Slack writes.
+
+    Slack puts a mention in the message body as ``<@U123>`` and reports no
+    separate entity list, so the body is where the attribution lives.
+    Returns an empty tuple when nobody was mentioned, which in a channel is
+    what makes the message fail closed.
+    """
+    return tuple(f"<@{found}>" for found in _MENTION.findall(text or ""))
+
+
 # ─ Channel ────────────────────────
 
 
 class SlackChannel(Channel):
     """Slack channel using Socket Mode (no public endpoint needed).
 
-    Architecture:
-    1. Connect via Socket Mode using App-Level Token
-    2. Listen for message/app_mention events
-    3. Process through LLM core
-    4. Reply via Web API (chat.postMessage)
-
-    Lifecycle:
-        channel = SlackChannel(config)
-        await channel.start()   # authentication + socket connect
-        await channel.run()     # blocks on event loop
-        await channel.stop()    # disconnect
+    Owner text enters the authoritative
+    :class:`~omicsclaw.entry.channel.runtime.ChannelRuntime`; answers leave
+    only through its delivery pump, which is what classifies whether they
+    were accepted. Inbound files and outbound media are fail-closed.
     """
 
     name = "slack"
     capabilities = SLACK_CAPS
+    authoritative_ingress = True
 
     def __init__(self, config: SlackConfig):
         super().__init__(config)
+        self.slack_config = config
         self._socket_client = None
         self._web_client = None
-        self._bot_user_id: str | None = None
-        self._typing_msg_ts: dict[str, str] = {}  # chat_id → ts of "..." message
+        self._account_namespace = ""
+        self.bot_identity = ""
+        """This bot's own ``<@U…>`` handle, read back from Slack.
+
+        Empty until :meth:`prepare_control_binding` has authenticated, which
+        is exactly when a channel mention cannot be attributed and therefore
+        fails closed."""
+        self._typing_msg_ts: dict[str, str] = {}
 
     # ─ Lifecycle ──────────────────────
 
-    async def start(self) -> None:
-        self.require_authoritative_ingress()
-        cfg: SlackConfig = self.config
-        if not cfg.bot_token:
-            raise RuntimeError("SLACK_BOT_TOKEN not set")
-        if not cfg.app_token:
+    async def prepare_control_binding(self) -> ChannelSurfaceBinding:
+        """Authenticate far enough to describe this bot's control binding.
+
+        ``auth_test`` is what makes the account namespace and the bot handle
+        *authenticated* rather than configured: one process serving two Slack
+        apps cannot then deliver one app's reply through the other's token.
+        """
+
+        owners = self._owner_subjects()
+        if not owners:
             raise RuntimeError(
-                "SLACK_APP_TOKEN not set (must start with xapp- for Socket Mode)"
+                "Slack authoritative ingress requires SLACK_ALLOWED_SENDERS"
             )
+        if not self.slack_config.bot_token:
+            raise RuntimeError("SLACK_BOT_TOKEN is required")
+        if not self.slack_config.app_token:
+            raise RuntimeError(
+                "SLACK_APP_TOKEN is required (xapp-... for Socket Mode)"
+            )
+        if self._web_client is None:
+            self._web_client = self._build_web_client()
 
         try:
+            auth = await asyncio.wait_for(
+                self._web_client.auth_test(), timeout=AUTH_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                "Slack auth_test timed out; check the bot token and the network"
+            ) from None
+        team_id = str(auth["team_id"] or "").strip()
+        user_id = str(auth["user_id"] or "").strip()
+        if not team_id or not user_id:
+            raise RuntimeError("Slack identity is unavailable")
+        self._account_namespace = f"team-{team_id}"
+        self.bot_identity = f"<@{user_id}>"
+        logger.info("Slack bot authenticated for %s", self._account_namespace)
+
+        return ChannelSurfaceBinding(
+            adapter="slack",
+            account_namespace=self._account_namespace,
+            sender_policy=SenderPolicy(
+                allowed_senders=owners,
+                bot_identity=self.bot_identity,
+            ),
+            delivery_adapter=SlackDeliveryAdapter(self._web_client),
+            text_chunk_limit=(
+                self.config.text_chunk_limit or self.capabilities.max_text_length
+            ),
+            attachment_input_enabled=False,
+        )
+
+    def _build_web_client(self) -> Any:
+        try:
             from slack_sdk.web.async_client import AsyncWebClient
+        except ImportError:
+            raise RuntimeError(
+                "slack-sdk not installed. Run: pip install slack-sdk aiohttp"
+            ) from None
+        return AsyncWebClient(
+            token=self.slack_config.bot_token, proxy=self.config.proxy
+        )
+
+    async def start(self) -> None:
+        """Phase 2: open the socket once the shared runtime is bound."""
+
+        if self._control_runtime is None:
+            raise RuntimeError(
+                "Slack requires the shared ChannelRuntime to be bound before start()"
+            )
+        if self._web_client is None:  # pragma: no cover - prepare runs first
+            raise RuntimeError("Slack was not prepared")
+
+        try:
             from slack_sdk.socket_mode.aiohttp import SocketModeClient
-            from slack_sdk.socket_mode.request import SocketModeRequest
             from slack_sdk.socket_mode.response import SocketModeResponse
         except ImportError:
             raise RuntimeError(
                 "slack-sdk or aiohttp not installed. "
                 "Run: pip install slack-sdk aiohttp"
-            )
+            ) from None
 
-        proxy = self.config.proxy
-        self._web_client = AsyncWebClient(
-            token=cfg.bot_token,
-            proxy=proxy,
-        )
-
-        # Authenticate and get bot user id
-        try:
-            auth = await asyncio.wait_for(
-                self._web_client.auth_test(),
-                timeout=15,
-            )
-            self._bot_user_id = auth["user_id"]
-            logger.info(f"Slack bot authenticated: {auth.get('user', 'unknown')}")
-        except asyncio.TimeoutError:
-            raise RuntimeError("Slack auth_test timed out — check token and network")
-        except Exception as e:
-            raise RuntimeError(f"Slack auth failed: {e}")
-
-        # Set up Socket Mode client
         self._socket_client = SocketModeClient(
-            app_token=cfg.app_token,
+            app_token=self.slack_config.app_token,
             web_client=self._web_client,
         )
 
-        async def _event_handler(
-            client: SocketModeClient,
-            req: SocketModeRequest,
-        ) -> None:
-            # ACK immediately
-            resp = SocketModeResponse(envelope_id=req.envelope_id)
-            await client.send_socket_mode_response(resp)
-
-            if req.type == "events_api":
-                event = req.payload.get("event", {})
-                event_type = event.get("type", "")
-                if event_type == "message" and "subtype" not in event:
-                    is_dm = event.get("channel_type") == "im"
-                    await self._on_message(
-                        event, is_group=not is_dm, was_mentioned=is_dm
-                    )
-                elif event_type == "app_mention":
-                    await self._on_message(event, is_group=True, was_mentioned=True)
+        async def _event_handler(client, request) -> None:
+            # Acknowledge first: Slack resends anything it has not heard back
+            # about within three seconds, and an exchange takes longer than
+            # that. The idempotency key on the submission is what makes a
+            # resend we did not prevent resolve to the same exchange.
+            await client.send_socket_mode_response(
+                SocketModeResponse(envelope_id=request.envelope_id)
+            )
+            if request.type != "events_api":
+                return
+            event = request.payload.get("event", {})
+            kind = event.get("type", "")
+            if kind == "message" and "subtype" not in event:
+                await self._on_message(
+                    event, is_group=event.get("channel_type") != "im"
+                )
+            elif kind == "app_mention":
+                await self._on_message(event, is_group=True)
 
         self._socket_client.socket_mode_request_listeners.append(_event_handler)
 
         try:
-            await asyncio.wait_for(self._socket_client.connect(), timeout=30)
-        except asyncio.TimeoutError:
-            raise RuntimeError(
-                "Slack Socket Mode connection timed out — "
-                "check app token and Socket Mode settings"
+            await asyncio.wait_for(
+                self._socket_client.connect(), timeout=CONNECT_TIMEOUT_S
             )
+        except asyncio.TimeoutError:
+            await self.stop()
+            raise RuntimeError(
+                "Slack Socket Mode connection timed out; check the app token "
+                "and that Socket Mode is enabled"
+            ) from None
 
         self._running = True
         logger.info("Slack channel started (Socket Mode)")
 
     async def stop(self) -> None:
-        self._running = False
+        self.deactivate_ingress()
         if self._socket_client:
             try:
                 await self._socket_client.close()
-            except Exception:
-                pass
+            except Exception as error:
+                logger.warning(
+                    "Slack socket shutdown failed (%s)", type(error).__name__
+                )
             self._socket_client = None
         self._web_client = None
+        # The shared runtime is owned and closed by the runner, not by any one
+        # channel: several channels share one agent.
+        self._control_runtime = None
+        self._control_loop = None
+        self._running = False
         logger.info("Slack channel stopped")
+
+    def run_bot(self) -> None:
+        """Refuse the legacy standalone entry point.
+
+        The bot cannot own the agent it speaks for: every channel in the
+        process shares one
+        :class:`~omicsclaw.entry.channel.runtime.ChannelRuntime`, composed by
+        the runner from every channel's binding.
+        """
+
+        raise RuntimeError(
+            "SlackChannel.run_bot() is retired; start the bot through the "
+            "runner that owns the shared ChannelRuntime: compose one with "
+            "compose_channel_runtime(app, channels) and start them through "
+            "ChannelManager"
+        )
 
     # ─ Inbound ───────────────────────
 
-    async def _on_message(
-        self,
-        event: dict,
-        *,
-        is_group: bool = False,
-        was_mentioned: bool = True,
-    ) -> None:
-        """Handle incoming Slack event."""
-        user_id = event.get("user", "")
+    def _reply_target(self, channel_id: str, thread_ts: str) -> dict[str, Any]:
+        """Where a reply to this message goes — in its thread where there is one."""
 
-        # Skip own messages and bot messages
-        if user_id == self._bot_user_id:
+        return reply_target.build(
+            "slack",
+            self._account_namespace,
+            channel_id,
+            thread_ts=thread_ts or None,
+        )
+
+    async def _on_message(self, event: dict, *, is_group: bool) -> None:
+        """Normalise one Slack event into the authoritative runtime.
+
+        Performs no model work and sends no reply: the answer is delivered by
+        the runtime's pump once the exchange has run.
+        """
+
+        if not self.ingress_active:
             return
-        if event.get("bot_id"):
+        user_id = str(event.get("user", "") or "")
+        channel_id = str(event.get("channel", "") or "")
+        message_ts = str(event.get("ts", "") or "")
+        if not user_id or not channel_id or not message_ts:
+            return
+        if event.get("bot_id") or (
+            self.bot_identity and self.bot_identity == f"<@{user_id}>"
+        ):
             return
 
-        channel_id = event.get("channel", "")
-        text = event.get("text", "")
-        ts = event.get("ts", "")
-        thread_ts = event.get("thread_ts") or ts
+        raw_text = str(event.get("text", "") or "")
+        mentions = slack_mentions(raw_text)
+        addressed = bool(self.bot_identity) and self.bot_identity in mentions
+        if is_group and not addressed:
+            # The same rule SenderPolicy applies at ingress, applied here too
+            # so that channel chatter costs nothing. Ingress remains the
+            # authority; this only stops the work early.
+            return
 
-        # Strip @mention
-        if was_mentioned and self._bot_user_id:
-            text = text.replace(f"<@{self._bot_user_id}>", "").strip()
-
+        text = raw_text.replace(self.bot_identity, "").strip()
         if not text:
             return
 
-        # Skip group messages without mention
-        if is_group and not was_mentioned:
+        key = f"{channel_id}:{message_ts}"
+        if self.seen_before(key):
             return
 
-        # Dedup & rate limit
-        if self.is_duplicate(ts):
+        thread_ts = str(event.get("thread_ts") or message_ts)
+        if text.startswith("/") and await self.answer_slash_command(
+            self._reply_target(channel_id, thread_ts), channel_id, user_id, text
+        ):
             return
+
         if not self.check_rate_limit(user_id):
+            logger.warning("Slack sender exceeded the configured rate limit")
             return
 
-        # Length only — see ``dingtalk.py`` for why a chat body may not
-        # reach a log file.
+        # Length and chat kind only: a chat message is the likeliest place in
+        # this repository for a subject identifier to appear, and a log is the
+        # most widely shared destination there is.
         logger.info(
-            "Slack message from %s (%d characters)", user_id, len(text)
+            "Slack message accepted (group=%s, %d chars)", is_group, len(text)
         )
-        asyncio.create_task(self._handle_message(channel_id, user_id, text, thread_ts))
+        await self._submit_control_inbound(
+            channel_id=channel_id,
+            user_id=user_id,
+            text=text,
+            key=key,
+            thread_ts=thread_ts,
+            chat_type="group" if is_group else "private",
+            mentions=mentions,
+        )
 
-    async def _handle_message(
+    async def _submit_control_inbound(
         self,
+        *,
         channel_id: str,
         user_id: str,
-        content: str,
-        thread_ts: str,
-    ) -> None:
-        """Process message through core LLM and reply in thread."""
-        try:
-            await self.start_typing(channel_id)
-
-            reply = await self.process_message(
-                channel_id,
-                user_id,
-                content,
-                platform="slack",
-            )
-
-            await self.stop_typing(channel_id)
-
-            if reply:
-                # Reply in thread
-                await self._send_to_channel(channel_id, reply, thread_ts)
-        except Exception as e:
-            await self.stop_typing(channel_id)
-            logger.error(f"Slack process error: {e}", exc_info=True)
-            try:
-                await self._send_to_channel(
-                    channel_id,
-                    f"Sorry, an error occurred: {type(e).__name__}",
-                    thread_ts,
-                )
-            except Exception:
-                pass
-
-    async def _send_to_channel(
-        self,
-        channel_id: str,
         text: str,
-        thread_ts: str = "",
-    ) -> None:
-        """Send a message to a Slack channel, optionally in a thread."""
-        if not self._web_client:
-            return
-        kwargs: dict[str, Any] = {"channel": channel_id, "text": text}
-        if thread_ts:
-            kwargs["thread_ts"] = thread_ts
-        await self._web_client.chat_postMessage(**kwargs)
+        key: str,
+        thread_ts: str,
+        chat_type: str,
+        mentions: tuple[str, ...],
+    ):
+        """Submit one normalised Slack message as one exchange."""
 
-    # ─ Send (Channel ABC) ───────────────────
-
-    async def _send_chunk(
-        self,
-        chat_id: str,
-        formatted_text: str,
-        raw_text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        """Send a text chunk to a Slack channel."""
-        thread_ts = metadata.get("thread_ts", "")
-        await self._send_to_channel(chat_id, raw_text, thread_ts)
-
-    async def send_media(
-        self,
-        chat_id: str,
-        file_path: str,
-        caption: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Upload and send a file via Slack files_upload_v2."""
-        try:
-            if not self._web_client:
-                return False
-            await self._web_client.files_upload_v2(
-                channel=chat_id,
-                file=file_path,
-                initial_comment=caption or None,
+        if self._control_runtime is None:
+            raise RuntimeError("Slack ChannelRuntime is not bound")
+        inbound = self.inbound(
+            channel_id,
+            user_id,
+            text,
+            # Channel plus message timestamp: Slack's own identity for the
+            # message, stable across the resends an unacknowledged event
+            # causes, so a repeat resolves to the exchange already running.
+            source_request_id=key,
+            reply_target=self._reply_target(channel_id, thread_ts),
+            values={VALUE_CHAT_TYPE: chat_type, VALUE_MENTIONS: mentions},
+        )
+        result = await self._control_runtime.submit(inbound)
+        if result.acceptance.status is TurnAcceptanceStatus.REJECTED:
+            # Refusals cannot answer through the pump, because no exchange was
+            # accepted. The local cache is deliberately NOT updated, so a
+            # Slack resend of a transiently rejected message can still land.
+            logger.warning(
+                "Slack ingress rejected: %s", result.acceptance.code or "unspecified"
             )
-            return True
-        except Exception as e:
-            logger.error(f"Slack media send error: {e}")
-            return False
+            return result
+        self.remember_message(key)
+        return result
 
     # ─ Typing indicator ────────────────────
 
     async def _send_typing(self, chat_id: str) -> None:
-        """Approximate typing indicator by posting a "…" message."""
+        """Approximate a typing indicator by posting a "…" and deleting it.
+
+        A direct provider call that reports nothing. It is tolerable for a
+        hint — if it goes missing the person sees one fewer ellipsis — and it
+        is exactly why an answer may not travel this way.
+        """
         if not self._web_client:
             return
         try:
-            resp = await self._web_client.chat_postMessage(
-                channel=chat_id,
-                text="…",
+            response = await self._web_client.chat_postMessage(
+                channel=chat_id, text="…"
             )
-            ts = resp.get("ts")
+            ts = response.get("ts")
             if ts:
                 self._typing_msg_ts[chat_id] = ts
-        except Exception:
-            pass
+        except Exception as error:
+            logger.debug("Slack typing hint failed (%s)", type(error).__name__)
 
     async def stop_typing(self, chat_id: str) -> None:
-        """Delete the typing placeholder message."""
+        """Delete the typing placeholder, if one was posted."""
         ts = self._typing_msg_ts.pop(chat_id, None)
         if ts and self._web_client:
             try:
                 await self._web_client.chat_delete(channel=chat_id, ts=ts)
-            except Exception:
-                pass
+            except Exception as error:
+                logger.debug(
+                    "Slack typing cleanup failed (%s)", type(error).__name__
+                )
         await super().stop_typing(chat_id)
-
-    # ─ Backward-compatible entry point ───────────────
-
-    def run_bot(self) -> None:
-        """Blocking entry point for running Slack channel standalone."""
-        asyncio.run(self.run())

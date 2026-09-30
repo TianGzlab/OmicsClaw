@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run xcms-preprocess --demo
-python omicsclaw.py run xcms-preprocess --input <raw_data/> --output <dir>
+python skills/metabolomics/metabolomics-xcms-preprocessing/metabolomics_xcms_preprocessing.py --demo
+python skills/metabolomics/metabolomics-xcms-preprocessing/metabolomics_xcms_preprocessing.py --input <raw_data/> --output <dir>
 ```
 
 

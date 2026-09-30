@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-quantify --demo
-python omicsclaw.py run met-quantify --input <features.csv> --output <dir>
+python skills/metabolomics/metabolomics-quantification/met_quantify.py --demo
+python skills/metabolomics/metabolomics-quantification/met_quantify.py --input <features.csv> --output <dir>
 ```
 
 

@@ -40,15 +40,15 @@ import pandas as pd
 # Bootstrap sys.path so `omicsclaw`/`skills` resolve on direct invocation
 # (`python sc_integrate_cluster.py --help`) without an editable install. MUST run
 # before the OmicsClaw/skills imports below.
-_HERE = Path(__file__).resolve()
-for _candidate in _HERE.parents:
-    if (_candidate / "omicsclaw" / "__init__.py").exists():
-        if str(_candidate) not in sys.path:
-            sys.path.insert(0, str(_candidate))
-        break
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file  # noqa: E402
-from omicsclaw.common.report import write_result_json  # noqa: E402
+from skills._sdk.checksums import sha256_file  # noqa: E402
+from skills._sdk.result import write_result_json  # noqa: E402
 
 # Heavy Scanpy + integration `_lib` imports are deferred to `_load_runtime()`
 # (called after argparse) so the direct `--help` contract stays import-light

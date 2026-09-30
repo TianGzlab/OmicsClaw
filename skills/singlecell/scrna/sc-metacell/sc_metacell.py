@@ -15,17 +15,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    write_result_json,
-    write_replot_hint,
 )
+from skills._sdk.result import write_result_json
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -107,9 +110,9 @@ def _preflight(adata, *, use_rep: str, n_metacells: int, method: str, n_neighbor
         print()
         print("  How to fix:")
         print("    Option 1 -- Run preprocessing first:")
-        print("      python omicsclaw.py run sc-preprocessing --input data.h5ad --output preproc/")
+        print("      python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py --input data.h5ad --output preproc/")
         print("    Option 2 -- Specify a different embedding:")
-        print(f"      python omicsclaw.py run sc-metacell --input data.h5ad --output out/ --use-rep X_umap")
+        print(f"      python skills/singlecell/scrna/sc-metacell/sc_metacell.py --input data.h5ad --output out/ --use-rep X_umap")
         raise SystemExit(1)
 
     # 2. n_metacells sanity
@@ -119,7 +122,7 @@ def _preflight(adata, *, use_rep: str, n_metacells: int, method: str, n_neighbor
         print("  n_metacells must be smaller than the number of cells.")
         print()
         print("  How to fix:")
-        print(f"    python omicsclaw.py run sc-metacell --input data.h5ad --output out/ --n-metacells {max(5, adata.n_obs // 10)}")
+        print(f"    python skills/singlecell/scrna/sc-metacell/sc_metacell.py --input data.h5ad --output out/ --n-metacells {max(5, adata.n_obs // 10)}")
         raise SystemExit(1)
 
     if n_metacells < 2:
@@ -531,8 +534,8 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Next step: Use metacell AnnData for downstream analysis:")
-    print(f"  - sc-de:         python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-enrichment: python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-de:         python skills/singlecell/scrna/sc-de/sc_de.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-enrichment: python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

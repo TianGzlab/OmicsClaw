@@ -52,13 +52,13 @@ Run this skill explicitly when:
 
 ```bash
 # Basic usage (species auto-detected)
-python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir>
+python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input <data.h5ad> --output <dir>
 
 # Explicit species
-python omicsclaw.py run sc-standardize-input --input <data.h5ad> --output <dir> --species mouse
+python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input <data.h5ad> --output <dir> --species mouse
 
 # Demo mode
-python omicsclaw.py run sc-standardize-input --demo --output /tmp/demo
+python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --demo --output /tmp/demo
 ```
 
 

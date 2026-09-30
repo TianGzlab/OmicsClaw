@@ -11,8 +11,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run cnv-calling --demo
-python omicsclaw.py run cnv-calling --input <tumor.bam> --output <dir>
+python skills/genomics/genomics-cnv-calling/genomics_cnv_calling.py --demo
+python skills/genomics/genomics-cnv-calling/genomics_cnv_calling.py --input <tumor.bam> --output <dir>
 ```
 
 

@@ -17,7 +17,7 @@ import pandas as pd
 from scipy import sparse
 
 from .adata_utils import get_spatial_key, require_spatial_coords
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 

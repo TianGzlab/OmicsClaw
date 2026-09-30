@@ -88,8 +88,8 @@ def test_an_inbound_message_cannot_be_edited_after_submission():
 def test_a_policy_cannot_be_constructed_without_an_allowlist():
     """Omitting it is a :exc:`TypeError`, which is the whole design.
 
-    ``CLAUDE.md``: ``FEISHU_ALLOWED_SENDERS`` is required, "authoritative
-    Feishu ingress admits nobody else and refuses to start without it".
+    ``FEISHU_ALLOWED_SENDERS`` is required: authoritative Feishu ingress
+    admits nobody else and refuses to start without it.
     A keyword with a default is a keyword that gets omitted.
     """
     with pytest.raises(TypeError):
@@ -136,7 +136,7 @@ def _group(**values: object) -> InboundMessage:
 
 
 def test_a_group_message_is_refused_when_this_bot_has_no_identity():
-    """``CLAUDE.md``: "group chats fail closed without it".
+    """Group chats fail closed without ``FEISHU_BOT_OPEN_ID``.
 
     Without ``FEISHU_BOT_OPEN_ID`` there is no way to tell a mention of
     this agent from a mention of another participant, so an owner's
@@ -159,7 +159,7 @@ def test_a_bot_with_no_identity_refuses_every_group_message():
     mentions, which is what a platform sends when it could not attribute
     one and what an absent gate reads as "this bot was addressed". Every
     group spelling is covered because the gate is centralised here
-    precisely so that nine adapters are not nine chances to forget it.
+    precisely so that seven adapters are not seven chances to forget it.
     """
     policy = SenderPolicy(allowed_senders=frozenset({OWNER}), bot_identity="")
     mention_lists: tuple[object, ...] = ((), ("",), (OWNER,), ("", BOT), [BOT])

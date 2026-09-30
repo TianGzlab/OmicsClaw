@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: scatac-preprocessing
 description: Load when preprocessing a single-cell ATAC peak × cell AnnData via Signac-style TF-IDF +
   LSI + Leiden, producing a clustered UMAP-ready object. Skip when input is fragments; BAM (peak calling
   not implemented here); scRNA preprocessing (use sc-preprocessing).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: scATAC preprocessing, single-cell ATAC preprocessing, ATAC TF-IDF LSI, chromatin accessibility clustering, scATAC UMAP Leiden
 tags:
 - singlecell
 - scatac
@@ -18,16 +13,6 @@ tags:
 - lsi
 - clustering
 - leiden
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- phate
-- scanpy
-- scikit-learn
-- scipy
-- seaborn
 ---
 
 # scatac-preprocessing
@@ -42,8 +27,6 @@ fragment QC, no peak calling, no motif / gene-activity scoring, no
 multi-sample integration. For scRNA preprocessing use `sc-preprocessing`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -87,30 +70,30 @@ multi-sample integration. For scRNA preprocessing use `sc-preprocessing`.
 
 ## Gotchas
 
-- **Filtering can wipe everything.** `scatac_preprocessing.py:149` raises `RuntimeError("All cells were removed by `min_peaks`. Lower the threshold.")` and `:154` raises `RuntimeError("All peaks were removed by `min_cells`. Lower the threshold.")` — both are hard fails. Inspect `n_peaks_by_counts` distribution before tightening these thresholds; `--min-peaks 200` (default) assumes a typical 10x scATAC depth.
-- **LSI hard-fails on a degenerate matrix.** `scatac_preprocessing.py:228` raises `RuntimeError("Not enough cells or peaks remain to compute a stable LSI embedding.")` when the matrix is too sparse / small after filtering. Either lower QC thresholds or feed a richer dataset.
-- **Input must be non-negative count-like in `.X`.** `scatac_preprocessing.py:118` raises `ValueError("Input AnnData has no matrix in adata.X.")`; `:122` raises `ValueError("Input matrix is empty.")`; `:124` raises `ValueError("scATAC preprocessing requires a non-negative accessibility matrix.")`. Already-TF-IDF-transformed data will fail the non-negativity check.
-- **`processed.h5ad` keeps only retained peaks.** `scatac_preprocessing.py:176` does `adata = adata[:, keep].copy()` — `var` is filtered to the top `n_top_peaks` accessible. The original peak universe is **not** preserved in `X` (the deleted peaks are gone). Snapshot the input before running if you need the full peak space later.
-- **`--input` mandatory unless `--demo`.** `scatac_preprocessing.py:809` raises `ValueError("--input required when not using --demo")`.
-- **Single backend only.** `scatac_preprocessing.py:272` raises `ValueError(f"Unknown preprocessing method '{method}'")` for anything other than `tfidf_lsi`. The `--method` flag exists for forward compatibility; today it's effectively a no-op.
+- **Filtering can wipe everything.** `scatac_preprocessing.py` raises `RuntimeError("All cells were removed by `min_peaks`. Lower the threshold.")` and raises `RuntimeError("All peaks were removed by `min_cells`. Lower the threshold.")` — both are hard fails. Inspect `n_peaks_by_counts` distribution before tightening these thresholds; `--min-peaks 200` (default) assumes a typical 10x scATAC depth.
+- **LSI hard-fails on a degenerate matrix.** `scatac_preprocessing.py` raises `RuntimeError("Not enough cells or peaks remain to compute a stable LSI embedding.")` when the matrix is too sparse / small after filtering. Either lower QC thresholds or feed a richer dataset.
+- **Input must be non-negative count-like in `.X`.** `scatac_preprocessing.py` raises `ValueError("Input AnnData has no matrix in adata.X.")`; raises `ValueError("Input matrix is empty.")`; raises `ValueError("scATAC preprocessing requires a non-negative accessibility matrix.")`. Already-TF-IDF-transformed data will fail the non-negativity check.
+- **`processed.h5ad` keeps only retained peaks.** `scatac_preprocessing.py` does `adata = adata[:, keep].copy()` — `var` is filtered to the top `n_top_peaks` accessible. The original peak universe is **not** preserved in `X` (the deleted peaks are gone). Snapshot the input before running if you need the full peak space later.
+- **`--input` mandatory unless `--demo`.** `scatac_preprocessing.py` raises `ValueError("--input required when not using --demo")`.
+- **Single backend only.** `scatac_preprocessing.py` raises `ValueError(f"Unknown preprocessing method '{method}'")` for anything other than `tfidf_lsi`. The `--method` flag exists for forward compatibility; today it's effectively a no-op.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in synthetic scATAC)
-python omicsclaw.py run scatac-preprocessing --demo --output /tmp/scatac_demo
+python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py --demo --output /tmp/scatac_demo
 
 # Standard run on a 10x scATAC h5
-python omicsclaw.py run scatac-preprocessing \
+python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
   --input atac_peaks.h5 --output results/
 
 # Tune QC + feature budget
-python omicsclaw.py run scatac-preprocessing \
+python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
   --input atac_peaks.h5ad --output results/ \
   --min-peaks 300 --min-cells 10 --n-top-peaks 20000
 
 # Tune latent space + clustering
-python omicsclaw.py run scatac-preprocessing \
+python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
   --input atac_peaks.h5ad --output results/ \
   --n-lsi 40 --n-neighbors 20 --leiden-resolution 1.0
 ```
@@ -121,3 +104,9 @@ python omicsclaw.py run scatac-preprocessing \
 - `references/methodology.md` — TF-IDF + LSI math; Signac alignment
 - `references/output_contract.md` — `obsm`/`var` schema + table layouts
 - Adjacent skills: `sc-preprocessing` (parallel — scRNA, NOT scATAC), `sc-clustering` (downstream — re-cluster on `obsm["X_lsi"]` if you want a different resolution without re-running TF-IDF)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `phate`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`

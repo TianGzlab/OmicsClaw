@@ -33,19 +33,24 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.report import (
+from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
-    load_result_json,
     write_repro_requirements,
-    write_result_json,
-    write_replot_hint,
 )
-from omicsclaw.common.checksums import sha256_file
+from skills._sdk.result import (
+    load_result_json,
+    write_result_json,
+)
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+from skills._sdk.checksums import sha256_file
 from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
@@ -525,7 +530,7 @@ def write_velocity_report(
                 "This often happens with synthetic or very noisy data.\n",
                 "**Fix**: Use real spliced/unspliced data from `velocyto` or `STARsolo`:",
                 "```bash",
-                "oc run sc-velocity-prep --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>",
+                "python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>",
                 "```\n",
             ])
         if velocity_diagnostics.get("nan_fraction", 0) > 0.5:
@@ -535,7 +540,7 @@ def write_velocity_report(
                 "signal in the spliced/unspliced layers or too few cells.\n",
                 "**Fix**: Try the dynamical model which can sometimes recover more signal:",
                 "```bash",
-                "oc run sc-velocity --input <data.h5ad> --method scvelo_dynamical --output <dir>",
+                "python skills/singlecell/scrna/sc-velocity/sc_velocity.py --input <data.h5ad> --method scvelo_dynamical --output <dir>",
                 "```\n",
             ])
         if velocity_diagnostics.get("n_velocity_genes", 0) == 0:
@@ -544,8 +549,8 @@ def write_velocity_report(
                 "The spliced/unspliced signal may be too weak for velocity estimation.\n",
                 "**Fix**: Ensure proper upstream preprocessing:",
                 "```bash",
-                "oc run sc-preprocessing --input <data.h5ad> --output <dir>",
-                "oc run sc-velocity-prep --input <dir>/processed.h5ad --output <dir2>",
+                "python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py --input <data.h5ad> --output <dir>",
+                "python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <dir>/processed.h5ad --output <dir2>",
                 "```\n",
             ])
         body_lines.extend([
@@ -698,11 +703,11 @@ def main():
         print("="*70)
         print("\nPrepare a velocity-ready object first, then rerun this skill:")
         print("\n1. Cell Ranger output -> OmicsClaw velocity prep:")
-        print("   oc run sc-velocity-prep --input <cellranger_run_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
+        print("   python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <cellranger_run_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
         print("\n2. STARsolo Velocyto output -> OmicsClaw velocity prep:")
-        print("   oc run sc-velocity-prep --input <starsolo_run_dir> --method starsolo --output <dir>")
+        print("   python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <starsolo_run_dir> --method starsolo --output <dir>")
         print("\n3. Existing loom file -> OmicsClaw velocity prep:")
-        print("   oc run sc-velocity-prep --input <sample.loom> --method velocyto --output <dir>")
+        print("   python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <sample.loom> --method velocyto --output <dir>")
         print("\n4. For demo mode, use: --demo")
         print("="*70)
         sys.exit(1)
@@ -783,11 +788,11 @@ def main():
             print()
             print("  How to fix:")
             print("    Option 1 - Use real spliced/unspliced data from velocyto or STARsolo:")
-            print("      oc run sc-velocity-prep --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
+            print("      python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
             print("    Option 2 - Try the dynamical model which may recover more signal:")
-            print("      oc run sc-velocity --input <data.h5ad> --method scvelo_dynamical --output <dir>")
+            print("      python skills/singlecell/scrna/sc-velocity/sc_velocity.py --input <data.h5ad> --method scvelo_dynamical --output <dir>")
             print("    Option 3 - Check upstream preprocessing (normalize, HVG, PCA, neighbors):")
-            print("      oc run sc-preprocessing --input <data.h5ad> --output <dir>")
+            print("      python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py --input <data.h5ad> --output <dir>")
             print()
         else:
             velocity_diagnostics["degenerate"] = False
@@ -909,8 +914,8 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Further exploration:")
-    print(f"  - sc-pseudotime: python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-cytotrace:  python omicsclaw.py run sc-cytotrace --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-pseudotime: python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-cytotrace:  python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

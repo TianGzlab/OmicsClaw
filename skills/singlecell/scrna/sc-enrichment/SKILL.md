@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-enrichment
 description: Load when running bulk-style pathway enrichment (ORA / GSEA / GSEA-R / GSVA-R) on a per-group
   ranked DE / marker list against a gene-set library. Skip when computing per-cell pathway scores in-place
   (use sc-pathway-scoring); de-novo gene-program discovery (use sc-gene-programs).
-version: 0.4.0
-author: OmicsClaw
-license: MIT
-emoji: 🧭
+trigger: sc enrichment, single-cell enrichment, GO enrichment, KEGG enrichment, GSEA, ORA, pathway enrichment
 tags:
 - singlecell
 - scrna
@@ -18,16 +13,6 @@ tags:
 - gsva
 - decoupler
 - pathway-enrichment
-requires:
-- adjustText
-- anndata
-- matplotlib
-- networkx
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-enrichment
@@ -56,8 +41,6 @@ For per-cell scoring (no rankings, just gene sets) use
 `sc-gene-programs`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -112,39 +95,39 @@ For per-cell scoring (no rankings, just gene sets) use
 
 ## Gotchas
 
-- **`--input` is `ValueError`, not `parser.error` here.** `sc_enrichment.py:280` raises `ValueError("--input is required unless `--demo` is used.")` (more standard than sibling skills that use `parser.error` / `SystemExit`). Once `--input` is given, `:284` raises `FileNotFoundError(f"Input path not found: {path}")` for a missing path.
-- **One of `--gene-sets` / `--gene-set-db` / `--gene-set-from-markers` is required.** `sc_enrichment.py:407` raises `ValueError("Provide either `--gene-sets <local.gmt>` or `--gene-set-db <hallmark|kegg|...>`.")` when none of the three are supplied. Library aliases include `hallmark`, `kegg`, `reactome`, `go_bp`; arbitrary strings are passed through to the EnrichR library API.
-- **Marker-as-gene-set requires specific columns.** `sc_enrichment.py:367` raises `FileNotFoundError(f"...")` for a missing `--gene-set-from-markers` path; `:372` raises `ValueError("Marker gene-set source must contain `group` and `names` columns.")` when the file is malformed (e.g., didn't come from `sc-markers` / `sc-de`).
-- **`gsva_r` requires `--groupby`.** `sc_enrichment.py:1212` raises `ValueError("gsva_r needs a groupby column. Use --groupby <column>.")`. The other 3 methods can auto-resolve `--groupby` from `leiden` / `louvain` / `cell_type` if unset.
-- **R-engine paths need bundled R scripts present.** `sc_enrichment.py:620` raises `FileNotFoundError(f"R script not found: {r_script}")` for `gsea_r`; `:734` raises the same shape for `gsva_r`. These are bundled with the skill — only fails if the install is incomplete.
-- **Zero overlap between gene sets and the dataset is a hard fail.** `sc_enrichment.py:1313` raises `ValueError("No overlapping genes remained after aligning the selected gene sets to the dataset gene universe.")` after the gene-symbol mapping step. Run `sc-standardize-input` upstream if symbols don't match.
-- **`result.json["method_used"]` differs from `--method` when engine routes to R.** `sc_enrichment.py:578` / `:599` / `:698` set `method_used` to the *normalised* form (`ora` / `gsea` / `gsea_r`). With `--engine auto` and `--method gsea`, the run may execute `gsea_r` if the Python engine is unavailable — always inspect `method_used`, not `--method`.
+- **`--input` is `ValueError`, not `parser.error` here.** `sc_enrichment.py` raises `ValueError("--input is required unless `--demo` is used.")` (more standard than sibling skills that use `parser.error` / `SystemExit`). Once `--input` is given, `_load_input_context` raises `FileNotFoundError(f"Input path not found: {path}")` for a missing path.
+- **One of `--gene-sets` / `--gene-set-db` / `--gene-set-from-markers` is required.** `sc_enrichment.py` raises `ValueError("Provide either `--gene-sets <local.gmt>` or `--gene-set-db <hallmark|kegg|...>`.")` when none of the three are supplied. Library aliases include `hallmark`, `kegg`, `reactome`, `go_bp`; arbitrary strings are passed through to the EnrichR library API.
+- **Marker-as-gene-set requires specific columns.** `sc_enrichment.py` raises `FileNotFoundError(f"...")` for a missing `--gene-set-from-markers` path; raises `ValueError("Marker gene-set source must contain `group` and `names` columns.")` when the file is malformed (e.g., didn't come from `sc-markers` / `sc-de`).
+- **`gsva_r` requires `--groupby`.** `sc_enrichment.py` raises `ValueError("gsva_r needs a groupby column. Use --groupby <column>.")`. The other 3 methods can auto-resolve `--groupby` from `leiden` / `louvain` / `cell_type` if unset.
+- **R-engine paths need bundled R scripts present.** `sc_enrichment.py` raises `FileNotFoundError(f"R script not found: {r_script}")` for `gsea_r`; raises the same shape for `gsva_r`. These are bundled with the skill — only fails if the install is incomplete.
+- **Zero overlap between gene sets and the dataset is a hard fail.** `sc_enrichment.py` raises `ValueError("No overlapping genes remained after aligning the selected gene sets to the dataset gene universe.")` after the gene-symbol mapping step. Run `sc-standardize-input` upstream if symbols don't match.
+- **`result.json["method_used"]` differs from `--method` when engine routes to R.** `sc_enrichment.py` sets `method_used` to the *normalised* form (`ora` / `gsea` / `gsea_r`). With `--engine auto` and `--method gsea`, the run may execute `gsea_r` if the Python engine is unavailable — always inspect `method_used`, not `--method`.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in markers + Hallmark gene sets)
-python omicsclaw.py run sc-enrichment --demo --output /tmp/sc_enrich_demo
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --demo --output /tmp/sc_enrich_demo
 
 # ORA on Hallmark, auto group-by
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input clustered.h5ad --output results/ \
   --method ora --gene-set-db hallmark
 
 # GSEA pre-ranked from Wilcoxon scores
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input clustered.h5ad --output results/ \
   --method gsea --gene-set-db kegg \
   --groupby cell_type --gsea-ranking-metric scores
 
 # Use existing markers from sc-markers as gene-set library
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input clustered.h5ad --output results/ \
   --method ora --gene-set-from-markers prev_run/tables/markers_all.csv \
   --marker-group "T cell,B cell" --marker-top-n 50
 
 # GSVA-R (group-aware)
-python omicsclaw.py run sc-enrichment \
+python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py \
   --input clustered.h5ad --output results/ \
   --method gsva_r --groupby cell_type --gene-set-db hallmark
 ```
@@ -155,3 +138,9 @@ python omicsclaw.py run sc-enrichment \
 - `references/methodology.md` — ORA vs GSEA vs GSVA; ranking-metric guide
 - `references/output_contract.md` — `enrichment_results.csv` column schema; per-method differences
 - Adjacent skills: `sc-markers` / `sc-de` (upstream — produce the rankings consumed here; can also be re-used as gene sets via `--gene-set-from-markers`), `sc-pathway-scoring` (parallel — per-cell scoring against gene sets, NOT per-group enrichment), `sc-gene-programs` (parallel — de-novo factorisation, NOT supervised enrichment), `sc-cell-annotation` (upstream — produces meaningful biological labels for `--groupby`)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`adjustText`, `anndata`, `gseapy`, `matplotlib`, `networkx`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

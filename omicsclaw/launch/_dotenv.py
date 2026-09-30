@@ -2,7 +2,7 @@
 
 Two functions read this program's credential file and they must not
 disagree: :func:`omicsclaw.launch._adopt_dotenv` loads it at start-up,
-and ``oc cli -- --configure`` writes it. A wizard that configured one
+and ``oc cli --configure`` writes it. A wizard that configured one
 file while the shell loaded another would be a setup step that appears
 to succeed and changes nothing — the most expensive shape of bug a
 first-run experience can have, because the user's next move is to doubt
@@ -12,7 +12,7 @@ So the search is written here, once, and both callers take their answer
 from it. Neither computes a path of its own; that is the whole reason
 this module is separate from the two that use it.
 
-**Two locations, project root first.** ``CLAUDE.md`` documents the
+**Two locations, project root first.** ``.env.example`` documents the
 repository's own ``.env`` and the reference harness reads the one in the
 working directory, so both are searched —— and in that order, because
 :func:`omicsclaw.launch._adopt_dotenv` loads them with ``override=False``
@@ -31,14 +31,16 @@ directory pointing at a tree that happens to contain a real ``.env``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from types import MappingProxyType
 
-__all__ = ["DOTENV_FILE", "dotenv_candidates", "dotenv_target"]
+__all__ = ["DOTENV_FILE", "LaunchEnvironment", "dotenv_candidates", "dotenv_target"]
 
 DOTENV_FILE = ".env"
 """The credential file this shell adopts, and the name it is written under.
 
-``CLAUDE.md`` teaches ``.env`` at the project root as *the* way to supply
+``.env.example`` teaches ``.env`` at the project root as *the* way to supply
 ``LLM_API_KEY``, ``TELEGRAM_BOT_TOKEN`` and the Feishu pair, and the
 runner this shell replaces loaded it (``surfaces/channels/__main__.py``
 :44-45), as does the reference harness (``cmd/harness9/main.go:117``).
@@ -71,7 +73,7 @@ def dotenv_target(root: Path | None = None, cwd: Path | None = None) -> Path:
 
     The first candidate that exists, because that is the one whose value
     wins; the first candidate outright when none does, because a file
-    that has to be created should be created where ``CLAUDE.md`` says it
+    that has to be created should be created where ``.env.example`` says it
     lives rather than wherever the user happened to be standing.
     """
     candidates = dotenv_candidates(root, cwd)
@@ -79,3 +81,30 @@ def dotenv_target(root: Path | None = None, cwd: Path | None = None) -> Path:
         if candidate.is_file():
             return candidate
     return candidates[0]
+
+
+class LaunchEnvironment(Mapping[str, str]):
+    """The process environment as :func:`omicsclaw.launch.main` hands it down.
+
+    A read-only view of *live*, plus two facts fixed when it is built,
+    which is right after ``.env`` has been adopted:
+
+    * :attr:`exported_names` — the variables that were set before any
+      ``.env`` was read, passed in by the caller;
+    * :attr:`startup` — a copy of *live* at construction, the environment
+      this start actually used.
+    """
+
+    def __init__(self, live: Mapping[str, str], exported_names: frozenset[str]) -> None:
+        self._live = live
+        self.exported_names: frozenset[str] = frozenset(exported_names)
+        self.startup: Mapping[str, str] = MappingProxyType(dict(live))
+
+    def __getitem__(self, key: str) -> str:
+        return self._live[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._live)
+
+    def __len__(self) -> int:
+        return len(self._live)

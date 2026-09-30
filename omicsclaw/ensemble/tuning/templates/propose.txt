@@ -1,0 +1,38 @@
+You are tuning one clustering method of a skill on one spatial transcriptomics dataset. The number of domains is fixed at K=${k}; propose parameter settings that you expect to give a better partition at that K than the defaults.
+
+## The method
+
+${method_summary}
+
+Parameters held fixed: ${fixed}
+Parameters you may change: ${dimensions}
+${k_control}
+
+## What is already known
+
+The default setting at K=${k}:
+${default_result}
+
+These one-parameter settings are being run now; you will not see their results before you answer:
+${sweeps}
+${resolution_map}
+## Rules
+
+- Propose exactly 3 settings. Each must stay inside the ranges above and must differ from the default and from the settings being run.
+- A setting may change several parameters at once. Parameters you leave out keep their defaults; do not include the fixed ones, or give them their fixed values.
+- After your settings run, the system refines the best one found so far with small automatic steps, and in the end prefers the setting closest to the defaults among those whose score is within one standard error of the best.
+
+Reply with one JSON object and nothing else:
+{"proposals": [{"params": {"<name>": <value>}, "why": "<at most 300 characters>"}, ...]}
+
+## Skill documentation
+
+${skill_md}
+
+## Data
+
+${data}
+
+## Tissue
+
+${tissue}

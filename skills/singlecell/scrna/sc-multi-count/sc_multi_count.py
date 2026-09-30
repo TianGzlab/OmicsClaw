@@ -23,15 +23,20 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.report import (
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    load_result_json,
     write_repro_requirements,
+)
+from skills._sdk.result import (
+    load_result_json,
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
@@ -346,7 +351,7 @@ def main() -> None:
                 raise FileNotFoundError(
                     f"Input file not found: {path}\n"
                     "Each --input should point to a processed.h5ad from sc-count.\n"
-                    "Example: python omicsclaw.py run sc-multi-count "
+                    "Example: python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py "
                     "--input sample1/processed.h5ad --input sample2/processed.h5ad "
                     "--output merged/"
                 )
@@ -518,7 +523,7 @@ def main() -> None:
     print(f"  Standardized output: {output_h5ad}")
     print()
     print(">> Next step: Run sc-qc for quality assessment")
-    print(f"  python omicsclaw.py run sc-qc --input {output_h5ad} --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-qc/sc_qc.py --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

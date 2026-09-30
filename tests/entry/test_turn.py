@@ -80,8 +80,9 @@ def write_skill(root: pathlib.Path, domain: str, name: str, description: str) ->
 
 def make_app(tmp_path: pathlib.Path, provider: _Scripted, **overrides) -> object:
     """A real app over a fake backend, built by the real composition root."""
-    (tmp_path / "SOUL.md").write_text("You are OmicsClaw.", encoding="utf-8")
-    (tmp_path / "CLAUDE.md").write_text("Route to a skill, never guess.", "utf-8")
+    (tmp_path / "OMICSCLAW.md").write_text(
+        "You are OmicsClaw.\n\nRoute to a skill, never guess.", encoding="utf-8"
+    )
     config = AppConfig(workspace=tmp_path, **overrides)
 
     real = assembly.provider_from_env
@@ -131,7 +132,7 @@ def test_compose_puts_one_system_message_first_and_the_user_last(tmp_path):
 
 
 def test_the_composed_prompt_carries_all_three_tiers(tmp_path):
-    """Core identity, the workspace contract, and the skill catalogue."""
+    """Core identity, the contract, and the skill catalogue."""
     write_skill(tmp_path, "spatial", "spatial-de", "Load when running DE.")
     app = make_app(tmp_path, _Scripted())
 
@@ -147,7 +148,7 @@ def test_the_prompt_is_rendered_per_turn_not_frozen_at_start_up(tmp_path):
     app = make_app(tmp_path, _Scripted())
     assert "You are OmicsClaw." in compose(app, [], "hi")[0][0].content
 
-    (tmp_path / "SOUL.md").write_text("You are somebody else.", encoding="utf-8")
+    (tmp_path / "OMICSCLAW.md").write_text("You are somebody else.", encoding="utf-8")
 
     assert "You are somebody else." in compose(app, [], "hi")[0][0].content
 
@@ -314,14 +315,15 @@ def test_the_system_message_survives_a_successful_summarization(tmp_path):
     the persona and the safety rules go into the summary and out of the
     conversation — message zero comes back as a user turn.
 
-    ``memory=False`` because the tier is the subject and the tier moves
-    with the size of the tool table: ``measure`` reserves what the
-    declarations in ``tools_snapshot`` actually cost, so mounting the two
-    memory tools tips this history from ``full`` into ``emergency`` and
-    the test stops being about pinning.
+    ``memory=False`` and ``subagents=False`` because the tier is the
+    subject and the tier moves with the size of the tool table:
+    ``measure`` reserves what the declarations in ``tools_snapshot``
+    actually cost, so mounting the two memory tools or the ``task`` tool
+    tips this history from ``full`` into ``emergency`` and the test stops
+    being about pinning.
     """
     provider = _Scripted(Message(role=Role.ASSISTANT, content="done"))
-    app = make_app(tmp_path, provider, memory=False)
+    app = make_app(tmp_path, provider, memory=False, subagents=False)
     app = dataclasses.replace(
         app,
         summarizer=_Canned(),

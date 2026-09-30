@@ -18,6 +18,8 @@ a hang with no timeout plugin is a test run that never finishes.
 from __future__ import annotations
 
 import asyncio
+import io
+import queue
 import threading
 import time
 
@@ -186,9 +188,9 @@ def test_the_stream_source_serializes_two_concurrent_readers():
 class HeldStream:
     """A stream whose ``readline`` blocks on a real thread until released.
 
-    ``StreamSource`` reads through :func:`asyncio.to_thread`, so the
-    holding has to be a :class:`threading.Event` — an asyncio one would
-    never be set by a loop that is waiting for this thread.
+    ``StreamSource`` reads on a thread of its own, so the holding has to
+    be a :class:`threading.Event` — an asyncio one would never be set by a
+    loop that is waiting for this thread.
     """
 
     def __init__(self, line: str) -> None:
@@ -224,3 +226,216 @@ def test_the_stream_source_refuses_a_reader_queued_when_it_closes():
             await asyncio.wait_for(second, WAIT_S)
 
     asyncio.run(drive())
+
+
+class Typist:
+    """A stream whose lines arrive when the test types them, on a real thread.
+
+    Counts ``readline`` calls, because a second call started while the
+    first is still waiting is the collision the source exists to prevent.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.asked = threading.Event()
+        self._lines: "queue.Queue[str]" = queue.Queue()
+
+    def readline(self) -> str:
+        self.calls += 1
+        self.asked.set()
+        try:
+            return self._lines.get(timeout=WAIT_S)
+        except queue.Empty:
+            return ""
+
+    def type(self, line: str) -> None:
+        self._lines.put(line)
+
+
+def test_a_line_typed_for_a_cancelled_read_goes_to_the_next_one():
+    """A read is cancelled while its ``readline`` still waits: an approval
+    question outlived by its exchange, or the REPL's prompt when the
+    REPL is stopped. That ``readline`` cannot be taken back, and the
+    line it returns has to go somewhere. It goes to the next read, which
+    waits for it rather than starting a second ``readline`` on the same
+    stream — so no line is lost, and lines are handed out in the order
+    they were written. Through a worker per read, the late line was set
+    on a cancelled future and dropped without a word, and the next read
+    raced a second thread for the line after it."""
+
+    async def drive():
+        stream = Typist()
+        source = StreamSource(stream)
+        first = asyncio.ensure_future(source.read("q1"))
+        while not stream.asked.is_set():
+            await asyncio.sleep(0.01)
+        first.cancel()
+        await asyncio.wait({first})
+        stream.type("typed while the first read was waiting\n")
+        second = await asyncio.wait_for(source.read("q2"), WAIT_S)
+        return first.cancelled(), second, stream.calls
+
+    cancelled, second, calls = asyncio.run(drive())
+
+    assert cancelled
+    assert second == "typed while the first read was waiting"
+    assert calls == 1, "a second readline was started on the same stream"
+
+
+def test_a_read_left_waiting_does_not_hold_up_the_loops_shutdown():
+    """Standard input a pipe that never closes, and the REPL stopped while
+    it waits for a line. The ``readline`` it left behind used to run in the
+    loop's default executor, which ``asyncio.run`` waits for as it shuts
+    down: the process stayed up, after its release had finished, until
+    somebody closed its input."""
+    stream = Typist()
+
+    async def drive():
+        source = StreamSource(stream)
+        reading = asyncio.ensure_future(source.read("q"))
+        while not stream.asked.is_set():
+            await asyncio.sleep(0.01)
+        reading.cancel()
+        await asyncio.wait({reading})
+
+    started = time.monotonic()
+    try:
+        asyncio.run(drive())
+        elapsed = time.monotonic() - started
+    finally:
+        stream.type("")  # let the waiting thread finish
+
+    assert elapsed < 2.0, f"the loop's shutdown waited {elapsed:.1f}s"
+
+
+class Failing:
+    """A stream whose every ``readline`` raises, as a hung-up terminal's does."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def readline(self) -> str:
+        self.calls += 1
+        raise OSError(5, "Input/output error")
+
+
+def test_the_end_of_the_stream_and_its_errors_are_what_readline_says():
+    """End of input is :exc:`EOFError`, and stays so; an error from
+    ``readline`` is raised to the reader that asked, and the next read
+    asks again rather than being handed the same failure."""
+
+    async def drive():
+        ended = StreamSource(io.StringIO("last\r\n"))
+        assert await ended.read("q") == "last"
+        for _ in range(2):
+            with pytest.raises(EOFError):
+                await asyncio.wait_for(ended.read("q"), WAIT_S)
+
+        stream = Failing()
+        broken = StreamSource(stream)
+        for _ in range(2):
+            with pytest.raises(OSError, match="Input/output error"):
+                await asyncio.wait_for(broken.read("q"), WAIT_S)
+        return stream.calls
+
+    assert asyncio.run(drive()) == 2
+
+
+# ---- the /resume picker ----------------------------------------------------
+
+
+def _picker_source(keys):
+    """A terminal source over a real ``PromptSession`` reading *keys*' pipe."""
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.output import DummyOutput
+
+    return PromptToolkitSource(PromptSession(input=keys, output=DummyOutput()))
+
+
+def _pick(typed: str, *, default: int = 0):
+    """Run one ``choose`` over three options with *typed* as the keystrokes."""
+    pytest.importorskip("prompt_toolkit.shortcuts.choice_input")
+    from prompt_toolkit.input import create_pipe_input
+
+    async def drive():
+        with create_pipe_input() as keys:
+            source = _picker_source(keys)
+            keys.send_text(typed)
+            return await asyncio.wait_for(
+                source.choose("pick", ["a", "b", "c"], default=default), WAIT_S
+            )
+
+    return asyncio.run(drive())
+
+
+@pytest.mark.parametrize(
+    "typed, default, expected",
+    [
+        ("\x1b[B\r", 0, 1),  # Down, Enter
+        ("j\r", 0, 1),
+        ("\r", 2, 2),  # Enter takes the default
+        ("\x1b", 0, None),  # Esc declines
+        ("\x03", 0, None),  # Ctrl-C declines
+    ],
+    ids=["down-enter", "j-enter", "enter-default", "escape", "ctrl-c"],
+)
+def test_the_picker_answers_with_the_index_chosen_or_none(typed, default, expected):
+    """Driven by real keystrokes through ``prompt_toolkit``'s own input."""
+    assert _pick(typed, default=default) == expected
+
+
+def test_a_closed_source_refuses_to_pick():
+    pytest.importorskip("prompt_toolkit.shortcuts.choice_input")
+    from prompt_toolkit.input import create_pipe_input
+
+    async def drive():
+        with create_pipe_input() as keys:
+            source = _picker_source(keys)
+            source.close()
+            await source.choose("pick", ["a"])
+
+    with pytest.raises(EOFError):
+        asyncio.run(drive())
+
+
+def test_a_prompt_toolkit_without_a_picker_says_so(monkeypatch):
+    """``ChoiceInput`` arrived in 3.0.52; older installs must not crash."""
+    pytest.importorskip("prompt_toolkit")
+    import sys
+
+    from prompt_toolkit.input import create_pipe_input
+
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.shortcuts.choice_input", None)
+
+    async def drive():
+        with create_pipe_input() as keys:
+            await _picker_source(keys).choose("pick", ["a"])
+
+    with pytest.raises(NotImplementedError):
+        asyncio.run(drive())
+
+
+def test_keys_go_to_the_question_asked_first():
+    """The picker waits for a line prompt already on the terminal.
+
+    Two ``prompt_toolkit`` applications on one input do not raise; the one
+    attached last takes the keystrokes. Without the queue the picker, asked
+    second, would swallow the answer typed for the prompt asked first.
+    """
+    pytest.importorskip("prompt_toolkit.shortcuts.choice_input")
+    from prompt_toolkit.input import create_pipe_input
+
+    async def drive():
+        with create_pipe_input() as keys:
+            source = _picker_source(keys)
+            line = asyncio.create_task(source.read("> "))
+            await asyncio.sleep(0.05)
+            picked = asyncio.create_task(source.choose("pick", ["a", "b"]))
+            await asyncio.sleep(0.05)
+            keys.send_text("hello\r")
+            answer = await asyncio.wait_for(line, WAIT_S)
+            await asyncio.sleep(0.05)
+            keys.send_text("\x1b[B\r")
+            return answer, await asyncio.wait_for(picked, WAIT_S)
+
+    assert asyncio.run(drive()) == ("hello", 1)

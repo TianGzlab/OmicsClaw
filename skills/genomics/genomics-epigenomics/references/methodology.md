@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run epigenomics --demo
-python omicsclaw.py run epigenomics --input <data.bam> --output <dir>
+python skills/genomics/genomics-epigenomics/genomics_epigenomics.py --demo
+python skills/genomics/genomics-epigenomics/genomics_epigenomics.py --input <data.bam> --output <dir>
 ```
 
 

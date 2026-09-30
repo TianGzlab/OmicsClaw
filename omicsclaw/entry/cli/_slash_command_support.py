@@ -2,7 +2,8 @@
 
 **Ported** from ``omicsclaw/surfaces/cli/_slash_command_support.py`` (188
 lines), byte-identical except for this paragraph,
-:data:`REPL_SLASH_COMMAND_SPECS` and :data:`_REPL_DESCRIPTIONS`.
+:data:`REPL_SLASH_COMMAND_SPECS`, :data:`_REPL_DESCRIPTIONS` and the
+deletion noted below.
 
 Those additions are written in the shape the file already had:
 :data:`TUI_SLASH_COMMAND_SPECS` was already a named subset of the same
@@ -12,13 +13,17 @@ still a subset because the skill runner, the research pipeline and the
 memory commands are each a step of their own — every name below is
 backed by something the assembled
 :class:`~omicsclaw.entry.assembly.AgentApp` can actually answer today.
+
+Skills are not slash commands: the agent picks one from its index, so
+nothing here completes or dispatches a skill name. :func:`slash_token`
+tells a ``/name`` nobody claims apart from a pasted absolute path.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from ._constants import ADDED_SLASH_COMMANDS, SLASH_COMMANDS
 
@@ -97,7 +102,10 @@ TUI_SLASH_COMMAND_SPECS: tuple[SlashCommandSpec, ...] = tuple(
 
 _REPL_DESCRIPTIONS: dict[str, str] = {
     "/plan": "Show this conversation's execution plan",
-    "/resume": "Continue an earlier conversation: /resume [id|number]",
+    "/resume": (
+        "Continue an earlier conversation: pick from a list, "
+        "or /resume <id|number>"
+    ),
     "/tasks": "Show this conversation's tasks and their status",
 }
 """Help text for the names this surface reads more narrowly than the port.
@@ -129,6 +137,7 @@ REPL_SLASH_COMMAND_SPECS: tuple[SlashCommandSpec, ...] = tuple(
         "/tasks",
         "/usage",
         "/mcp",
+        "/auto",
         "/help",
         "/exit",
     }
@@ -184,18 +193,6 @@ def complete_slash_command_rows(
     ]
 
 
-def complete_run_skill_names(
-    text: str,
-    skill_names: Sequence[str],
-) -> list[str]:
-    if not text.startswith("/run "):
-        return []
-    skill_prefix = text[len("/run "):].lstrip()
-    if " " in skill_prefix:
-        return []
-    return [name for name in skill_names if name.startswith(skill_prefix)]
-
-
 def format_slash_command_help_text(
     specs: Iterable[SlashCommandSpec],
     *,
@@ -222,6 +219,22 @@ def format_tui_help_text(
     for name, description in slash_command_help_rows(specs):
         lines.append(f"  {name}  — {description}")
     return "\n".join(lines)
+
+
+def slash_token(text: str) -> str | None:
+    """The name a ``/...`` line names, or ``None`` if it names none.
+
+    Parsing only: the token may be a name no command claims. A first token
+    containing ``/`` or ``\\`` is a path, not a name, so
+    ``/data/run7/matrix.h5ad what is this?`` returns ``None``.
+    """
+    line = text.strip()
+    if not line.startswith("/"):
+        return None
+    token = line[1:].partition(" ")[0]
+    if not token or "/" in token or "\\" in token:
+        return None
+    return token
 
 
 def parse_slash_command(

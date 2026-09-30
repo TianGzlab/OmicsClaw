@@ -18,6 +18,7 @@ import pytest
 from omicsclaw.context import ContextBudget
 from omicsclaw.entry.events import TurnEventType
 from omicsclaw.entry.session import (
+    DEFAULT_ABANDON_GRACE_S,
     InMemorySessionStore,
     QueueFull,
     RegistryClosed,
@@ -558,13 +559,15 @@ def test_a_second_compaction_extends_the_first_instead_of_restarting(tmp_path):
     and loses whatever the first pass chose to keep.
     """
     canned = Canned()
-    # ``memory=False`` keeps the tier reachable: ``measure`` reserves what
-    # the tool declarations cost, so the two memory tools would tip this
-    # history into ``emergency``, where no summarizer is called at all.
+    # ``memory=False`` and ``subagents=False`` keep the tier reachable:
+    # ``measure`` reserves what the tool declarations cost, so the two
+    # memory tools or the ``task`` tool would tip this history into
+    # ``emergency``, where no summarizer is called at all.
     app = make_app(
         tmp_path,
         Scripted(Message(role=Role.ASSISTANT, content="done")),
         memory=False,
+        subagents=False,
     )
     app = dataclasses.replace(
         app,
@@ -670,6 +673,27 @@ def test_an_exchange_nobody_ever_watched_is_not_abandoned(tmp_path):
         return handle
 
     assert asyncio.run(drive()).terminal == "converged"
+
+
+@pytest.mark.parametrize("grace", [600.0, 0.02, None])
+def test_the_registry_reports_the_grace_it_was_built_with(tmp_path, grace):
+    """``/health`` publishes this, so it must be the value in force,
+    ``None`` included: that registry never cancels an unwatched exchange."""
+    _app, sessions = registry_for(
+        tmp_path,
+        Scripted(Message(role=Role.ASSISTANT, content="done")),
+        abandon_grace_s=grace,
+    )
+
+    assert sessions.abandon_grace_s == grace
+
+
+def test_the_registry_reports_the_default_grace_when_none_was_named(tmp_path):
+    _app, sessions = registry_for(
+        tmp_path, Scripted(Message(role=Role.ASSISTANT, content="done"))
+    )
+
+    assert sessions.abandon_grace_s == DEFAULT_ABANDON_GRACE_S
 
 
 def test_the_cancelled_task_is_reaped_rather_than_left_unretrieved(tmp_path):
@@ -1041,6 +1065,45 @@ def test_the_in_memory_store_round_trips_a_session():
 
     assert loaded is not None and len(loaded.history) == 1
     assert [session.session_id for session in listed] == ["s1"]
+
+
+def test_the_in_memory_store_lists_by_updated_at_not_by_save_order():
+    """The protocol's order is the field's, which the SQLite store also reads."""
+    store = InMemorySessionStore()
+
+    async def drive():
+        await store.save(Session(session_id="late", updated_at=900.0))
+        await store.save(Session(session_id="early", updated_at=100.0))
+        await store.save(Session(session_id="middle", updated_at=500.0))
+        return await store.list()
+
+    listed = asyncio.run(drive())
+
+    assert [s.session_id for s in listed] == ["late", "middle", "early"]
+
+
+def test_the_registry_stamps_each_save_so_the_last_conversation_used_leads(
+    tmp_path,
+):
+    """A conversation spoken in again moves back to the top of the list.
+
+    ``s1`` is created first, ``s2`` second, and then ``s1`` is used again:
+    ordered by creation the list would still put ``s2`` first.
+    """
+    _app, sessions = registry_for(tmp_path, Scripted(), store=InMemorySessionStore())
+
+    async def drive():
+        await drain(await sessions.submit("s1", "one"))
+        stamped = sessions.session("s1").updated_at
+        await drain(await sessions.submit("s2", "two"))
+        await drain(await sessions.submit("s1", "three"))
+        listed = await sessions.list_sessions()
+        return stamped, [s.session_id for s in listed], listed[0].updated_at
+
+    stamped, order, latest = asyncio.run(drive())
+
+    assert order == ["s1", "s2"]
+    assert latest > stamped
 
 
 def test_a_registry_takes_a_store_that_only_satisfies_the_protocol(tmp_path):

@@ -5,7 +5,7 @@ each complete and **none of them can be reached**: ``schema`` knows what
 a message looks like but not where one comes from, ``engine`` knows how
 to run a conversation to convergence but not where the conversation was
 stored, ``context`` knows how to assemble a prompt but not where
-``SOUL.md`` lives. This package is the answer to all five at once::
+``OMICSCLAW.md`` lives. This package is the answer to all five at once::
 
     from omicsclaw.entry import attach_sessions, open_app, resolve_app_config
 
@@ -64,8 +64,10 @@ from .config import (
     AppConfigError,
     SandboxMode,
     SkillsIndex,
+    fields_set_by_argv,
     resolve_app_config,
 )
+from .display import inert_prose
 from .events import Terminal, TurnEvent, TurnEventType
 from .ingress import Acceptance, DeliveryResult, InboundMessage, SenderPolicy
 from .memory import MemoryBinding, open_memory, prepare_memory, session_store
@@ -88,6 +90,7 @@ from .stream import (
     TurnObservation,
     TurnStream,
 )
+from .subagent import ChildRunner, build_subagent_registry
 from .turn import (
     TurnHandle,
     TurnOutcome,
@@ -105,6 +108,7 @@ __all__ = [
     "AppConfig",
     "AppConfigError",
     "ApprovalBroker",
+    "ChildRunner",
     "DeliveryResult",
     "EventObserverDetached",
     "InMemorySessionStore",
@@ -136,7 +140,10 @@ __all__ = [
     "build_injector",
     "build_plan_book",
     "build_skill_index",
+    "build_subagent_registry",
     "compose",
+    "fields_set_by_argv",
+    "inert_prose",
     "open_app",
     "open_memory",
     "open_sandbox",

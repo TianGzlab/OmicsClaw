@@ -250,7 +250,7 @@ def test_abandoning_with_nothing_outstanding_says_nothing():
 
 
 def test_no_tool_argument_ever_reaches_the_log(caplog):
-    """``CLAUDE.md``'s first safety rule is one a log statement can break.
+    """``SAFETY_RULES`` rule 1 is one a log statement can break.
 
     An :class:`ApprovalRequest` carries the raw argument payload of the
     call about to run — the ``bash`` command line, the ``write_file``

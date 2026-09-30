@@ -18,6 +18,15 @@ sends everything left of the terminator to
 :func:`~omicsclaw.entry.resolve_app_config` unparsed and everything
 right of it to that surface's own parser. Plan 0031 proved the rule on
 one surface; this file applies it to three.
+
+**The cut is not how a flag finds its owner** (plan 0048). A surface
+takes its own flags out of the deployment half itself —— in
+``_surfaces.py``, which is where the arities are written —— so ``oc cli
+--configure`` and ``oc cli -- --configure`` mean the same thing. The two
+flag families are disjoint, so that claim cannot take anything
+``resolve_app_config`` wanted, and nothing in this file changed to allow
+it. What the terminator still buys is a value that is spelled like a
+flag: ``oc cli -- --prompt --model``.
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ from ._surfaces import (
     CHANNEL_USAGE,
     CLI_USAGE,
     DESKTOP_USAGE,
+    flag_stride,
     start_channel,
     start_cli,
     start_desktop,
@@ -141,21 +151,25 @@ def split_command_line(tokens: Sequence[str]) -> tuple[list[str], list[str]]:
 def _help_in_flag_position(deployment: Sequence[str]) -> int | None:
     """Index of the first help flag that is a flag and not somebody's value.
 
-    Mirrors ``omicsclaw/entry/config.py``'s ``_from_argv`` stride: a
-    token containing ``=`` carries its own value and advances one, and
-    anything else takes the token after it. That coupling is real and is
-    the price of answering ``--help`` without a second parser; the day a
-    deployment flag takes no value, this stride and
-    ``resolve_app_config`` disagree, and
-    ``test_a_help_flag_that_is_a_value_is_not_hoisted`` is where it
-    shows.
+    The walk is :func:`~omicsclaw.launch._surfaces.flag_stride`, which
+    is also what claims a surface flag from this half, so the two cannot
+    disagree about which tokens are flags.
+
+    It used to be a line of its own here —— ``index += 1 if "=" in token
+    else 2`` —— and that line claimed in its docstring to mirror
+    ``_from_argv`` while not doing so: ``_from_argv`` treats ``=`` with
+    nothing after it as *no* inline value and goes on to eat the next
+    token. So ``oc cli --workspace= --help`` hoisted a ``--help`` that
+    ``resolve_app_config`` was reading as the workspace's name. One
+    walk, in one place, is the fix, and
+    ``test_an_empty_inline_value_is_not_a_value`` is where a second one
+    would show.
     """
     index = 0
     while index < len(deployment):
-        token = deployment[index]
-        if token in HELP_FLAGS:
+        if deployment[index] in HELP_FLAGS:
             return index
-        index += 1 if "=" in token else 2
+        index = flag_stride(deployment, index)
     return None
 
 
@@ -174,8 +188,9 @@ def usage() -> str:
         [
             "",
             "Deployment flags go before --, and are read by",
-            "omicsclaw.entry.resolve_app_config. A surface's own flags go",
-            "after it; run `oc <surface> --help` for that list.",
+            "omicsclaw.entry.resolve_app_config. A surface's own flags may",
+            "be written on either side of it; run `oc <surface> --help`",
+            "for that list.",
             "",
         ]
     )

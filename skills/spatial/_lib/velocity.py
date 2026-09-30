@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 

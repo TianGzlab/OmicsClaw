@@ -19,14 +19,14 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+from skills._sdk.runtime_env import ensure_runtime_cache_dirs
 
 ensure_runtime_cache_dirs("omicsclaw")
 
 import scanpy as sc
 
 from .adata_utils import get_spatial_key, require_spatial_coords
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 
@@ -470,9 +470,10 @@ def deconvolve_rctd(
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     validate_r_environment(required_r_packages=["spacexr"])
 
@@ -511,7 +512,7 @@ def deconvolve_rctd(
     spatial_key = require_spatial_coords(adata_sp)
     coords = adata_sp.obsm[spatial_key][:, :2]
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_rctd_") as tmpdir:
@@ -871,9 +872,10 @@ def deconvolve_spotlight(
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     validate_r_environment(required_r_packages=["SPOTlight", "SingleCellExperiment", "SpatialExperiment", "scran", "scuttle"])
 
@@ -894,7 +896,7 @@ def deconvolve_spotlight(
         raise ValueError("SPOTlight requires spatial coordinates (obsm['spatial']).")
     coords = adata.obsm[spatial_key][:, :2].astype(np.float64)
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_spotlight_") as tmpdir:
@@ -968,9 +970,10 @@ def deconvolve_card(
 ) -> tuple[pd.DataFrame, dict]:
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     validate_r_environment(required_r_packages=["CARD"])
 
@@ -996,7 +999,7 @@ def deconvolve_card(
     else:
         sc_meta["sampleInfo"] = "sample1"
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_card_") as tmpdir:

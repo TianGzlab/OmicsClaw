@@ -1,8 +1,8 @@
 """Spatial Integrate — multi-sample integration and batch correction.
 
 Usage:
-    oc run spatial-integration --input <merged.h5ad> --output <dir> --batch-key batch
-    oc run spatial-integration --demo --output <dir>
+    python skills/spatial/spatial-integrate/spatial_integrate.py --input <merged.h5ad> --output <dir> --batch-key batch
+    python skills/spatial/spatial-integrate/spatial_integrate.py --demo --output <dir>
 """
 
 from __future__ import annotations
@@ -22,18 +22,22 @@ import pandas as pd
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
+from skills._sdk import REPO_ROOT as _PROJECT_ROOT  # noqa: E402
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    write_result_json,
 )
+from skills._sdk.result import write_result_json
 from skills.spatial._lib.adata_utils import store_analysis_metadata
-from skills.spatial._lib.dependency_manager import is_available
+from skills._sdk.deps import is_available
 from skills.spatial._lib.integration import (
     METHOD_PARAM_DEFAULTS,
     SUPPORTED_METHODS,

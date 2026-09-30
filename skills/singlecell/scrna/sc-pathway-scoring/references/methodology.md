@@ -36,14 +36,14 @@ Matrix expectations:
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run sc-pathway-scoring \
+python skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py \
   --input data.h5ad --gene-set-db hallmark --groupby leiden --output out/
 
-python omicsclaw.py run sc-pathway-scoring \
+python skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py \
   --input data.h5ad --method aucell_r --gene-sets pathways.gmt \
   --aucell-auc-max-rank 250 --top-pathways 25 --output out/
 
-python omicsclaw.py run sc-pathway-scoring \
+python skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py \
   --input data.h5ad --method score_genes_py --gene-set-db kegg \
   --groupby cell_type --score-genes-ctrl-size 50 --score-genes-n-bins 25 --output out/
 ```

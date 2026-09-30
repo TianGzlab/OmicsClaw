@@ -1,27 +1,14 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-fastq-qc
 description: Load when checking raw single-cell FASTQ read quality (Phred / GC / adapter / length) before
   counting. Skip when reads are already counted (use sc-qc); bulk FASTQ (use bulkrna-read-qc).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧪
+trigger: scRNA FASTQ QC, FastQC single-cell, MultiQC single-cell, raw read quality, read-level QC
 tags:
 - singlecell
 - scrna
 - fastq
 - qc
 - read-quality
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-fastq-qc
@@ -35,8 +22,6 @@ those tools are installed; falls back to a stable Python-only summary
 otherwise so the skill always returns something useful.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -82,20 +67,20 @@ otherwise so the skill always returns something useful.
 
 - **`--max-reads 20000` (default) caps the Python-fallback path only.** When FastQC is available the full FASTQ is processed; when not, only the first 20K reads per file are sampled.  Sampling depth is recorded per file in `tables/fastq_per_file_summary.csv`; bump `--max-reads` if a FASTQ has high variance across the file.
 - **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only.  Pass freely, expect no R Enhanced output.
-- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`).  All four panels are emitted unconditionally (`sc_fastq_qc.py:430-433`), so absence of an entry typically means upstream tool failure rather than a configuration choice — inspect `summary.warnings` before assuming a panel was suppressed.
+- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`).  All four panels are emitted unconditionally (`sc_fastq_qc.py`), so absence of an entry typically means upstream tool failure rather than a configuration choice — inspect `summary.warnings` before assuming a panel was suppressed.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in synthetic FASTQ)
-python omicsclaw.py run sc-fastq-qc --demo --output /tmp/sc_fastq_qc_demo
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --demo --output /tmp/sc_fastq_qc_demo
 
 # Single-file with paired-end
-python omicsclaw.py run sc-fastq-qc \
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
   --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
 
 # Directory of samples, deeper sampling for the Python fallback
-python omicsclaw.py run sc-fastq-qc \
+python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
   --input fastq_dir/ --output results/ --max-reads 100000 --threads 8
 ```
 
@@ -105,3 +90,9 @@ python omicsclaw.py run sc-fastq-qc \
 - `references/methodology.md` — FastQC integration + Python fallback rationale
 - `references/output_contract.md` — table column schemas + figure roles
 - Adjacent skills: `sc-count` (next step — FASTQ → AnnData), `bulkrna-read-qc` (bulk RNA-seq variant), `sc-qc` (downstream count-matrix QC)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

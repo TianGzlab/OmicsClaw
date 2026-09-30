@@ -53,7 +53,11 @@ LLM_PROVIDER=openai
 
 
 def configure(
-    tmp_path: pathlib.Path, answers: list[str], arguments: list[str] | None = None
+    tmp_path: pathlib.Path,
+    answers: list[str],
+    arguments: list[str] | None = None,
+    *,
+    terminator: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """``python -m omicsclaw.launch cli -- --configure`` over a pipe.
 
@@ -61,9 +65,14 @@ def configure(
     candidates :func:`omicsclaw.launch.dotenv_candidates` produces
     collapse onto one file inside the sandbox. ``PYTHONPATH`` carries the
     checkout because the working directory can no longer do it.
+
+    *terminator* picks which of the two spellings to run. Both have to
+    reach the same wizard (plan 0048), and the tests that are about the
+    wizard rather than about the command line keep the explicit one.
     """
     return subprocess.run(
-        [sys.executable, "-m", "omicsclaw.launch", "cli", "--"]
+        [sys.executable, "-m", "omicsclaw.launch", "cli"]
+        + (["--"] if terminator else [])
         + (arguments if arguments is not None else ["--configure"]),
         input="".join(f"{line}\n" for line in answers),
         capture_output=True,
@@ -188,7 +197,7 @@ def test_the_target_is_the_file_that_exists_and_not_always_the_first(tmp_path):
 
 
 def test_with_no_file_anywhere_one_is_created_at_the_project_root(tmp_path):
-    """``CLAUDE.md`` documents the repository's ``.env``, so that is where
+    """``.env.example`` documents the repository's ``.env``, so that is where
     a first run puts one rather than wherever the user was standing."""
     root = tmp_path / "project"
     here = tmp_path / "elsewhere"
@@ -199,7 +208,7 @@ def test_with_no_file_anywhere_one_is_created_at_the_project_root(tmp_path):
 
 
 def test_the_terminal_never_shows_the_secret_that_was_typed(tmp_path):
-    """``CLAUDE.md`` safety rule 1, over a real terminal session.
+    """``SAFETY_RULES`` rule 1, over a real terminal session.
 
     Not the same assertion as the library's: this one covers the process
     as a whole, including anything the logging path or an unhandled
@@ -280,32 +289,36 @@ def test_the_repository_dotenv_is_never_touched(tmp_path):
     assert not list(_REPO_ROOT.glob("*.partial"))
 
 
-# ---- the flag is a surface flag, and belongs after the terminator -----
+# ---- the flag is a surface flag, on either side of the terminator ----
 
 
-def test_the_flag_goes_after_the_terminator_like_every_other_surface_flag(tmp_path):
-    """No hoist for this one. ``--help`` is hoisted because once the
-    command name is fixed there is only one thing it can be asking; a
-    setup wizard is not a question about the command line, it is a thing
-    the surface does. Every exception to the cut rule weakens it.
+def test_the_flag_needs_no_terminator(tmp_path):
+    """``oc cli --configure`` is the same command as ``oc cli -- --configure``.
+
+    It used to be a usage error —— refused by ``resolve_app_config`` as
+    an unknown *deployment* flag, and then answered with the surface
+    usage that lists ``--configure`` two lines further down. The reader
+    of that screen was told the flag does not exist and shown that it
+    does.
+
+    Plan 0048's fix is not an exception to the cut in
+    ``split_command_line`` (which is unchanged) but a statement about
+    ownership: ``start_cli`` claims its own flags from the deployment
+    half, and the two flag families are disjoint, so nothing that
+    ``resolve_app_config`` wanted can be taken.
     """
-    result = subprocess.run(
-        [sys.executable, "-m", "omicsclaw.launch", "cli", "--configure"],
-        capture_output=True,
-        text=True,
-        cwd=str(tmp_path),
-        env={
-            "PATH": "/usr/bin:/bin",
-            "PYTHONPATH": str(_REPO_ROOT),
-            "HOME": str(tmp_path),
-            "OMICSCLAW_DIR": str(tmp_path),
-        },
-        timeout=120,
-    )
+    result = configure(tmp_path, _ANSWERS, terminator=False)
 
-    assert result.returncode == 2
-    assert "--configure" in result.stderr
-    assert not (tmp_path / ".env").exists()
+    assert result.returncode == 0, result.stderr
+    assert _values(tmp_path / ".env")["LLM_API_KEY"] == "sk-secret-value-1234"
+
+
+def test_both_spellings_reach_the_same_wizard(tmp_path):
+    """The old spelling keeps working, to the byte."""
+    result = configure(tmp_path, _ANSWERS)
+
+    assert result.returncode == 0, result.stderr
+    assert _values(tmp_path / ".env")["LLM_API_KEY"] == "sk-secret-value-1234"
 
 
 def test_the_surface_usage_lists_it(tmp_path):
@@ -374,7 +387,7 @@ def _start_repl(
 
 
 def test_a_first_run_with_no_key_is_told_what_to_type(tmp_path):
-    """The compensation for keeping ``--configure`` behind ``--``.
+    """A first run cannot guess a flag it has never read about.
 
     A user who has never read the usage cannot guess the flag, and the
     deployment that most needs it is the one that has nothing configured
@@ -383,7 +396,7 @@ def test_a_first_run_with_no_key_is_told_what_to_type(tmp_path):
     """
     result = _start_repl(tmp_path, "# nothing configured\n")
 
-    assert "oc cli -- --configure" in result.stderr
+    assert "oc cli --configure" in result.stderr
 
 
 def test_a_configured_deployment_is_not_nagged(tmp_path):
@@ -401,7 +414,7 @@ def test_the_hint_is_one_line_on_stderr_or_nothing_at_all(capsys):
     absence of one.
     """
     assert _report_a_missing_credential({}) == 1
-    assert "oc cli -- --configure" in capsys.readouterr().err
+    assert "oc cli --configure" in capsys.readouterr().err
 
     assert _report_a_missing_credential({"LLM_API_KEY": "sk-x"}) == 0
     assert capsys.readouterr().err == ""

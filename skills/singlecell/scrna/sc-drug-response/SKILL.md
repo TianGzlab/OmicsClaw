@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-drug-response
 description: Load when scoring drug sensitivity per cluster on an annotated scRNA AnnData via simple-correlation
   against drug-target signatures or via CaDRReS-Sc pretrained models (GDSC / PRISM). Skip when the AnnData
   has no cluster labels yet (use sc-clustering); predicting genetic-perturbation effects (use sc-in-silico-perturbation).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -16,15 +11,6 @@ tags:
 - cadrres
 - gdsc
 - prism
-requires:
-- anndata
-- matplotlib
-- numpy
-- omicverse
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-drug-response
@@ -46,8 +32,6 @@ unperturbed data) use `sc-in-silico-perturbation`. For real Perturb-seq
 classification use `sc-perturb`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -82,31 +66,31 @@ classification use `sc-perturb`.
 
 ## Gotchas
 
-- **Gene-name nomenclature is enforced.** `sc_drug_response.py:193` raises `ValueError` when 0% of `_BUILTIN_DRUG_TARGETS` overlap with `var_names`. The error inspects sample gene names — if they look like `ENSG*` / `ENSMUSG*`, the message points to `bulkrna-geneid-mapping`; otherwise to `sc-standardize-input`. Below 20 % overlap is a warning (not a fail) — results may still be unreliable.
-- **`cadrres` needs both model files AND a CaDRReS-Sc script dir.** `sc_drug_response.py:146` raises `FileNotFoundError` listing missing model files in `--model-dir`; `sc_drug_response.py:385` raises a separate `FileNotFoundError("CaDRReS-Sc script directory not found.")` when the script dir isn't at `<model-dir>/../CaDRReS-Sc` or `~/CaDRReS-Sc`. Both error messages embed the full `CADRRES_DOWNLOAD_INSTRUCTIONS`.
-- **`cadrres` demo bypasses real model.** `sc_drug_response.py:761-764` auto-generates synthetic CaDRReS scores when `--method cadrres --demo` — reported drugs are random; only use for plumbing checks.
-- **Auto-cluster-key resolution falls through to "first categorical".** `sc_drug_response.py:729` searches `("leiden", "louvain", "cluster", "cell_type", "celltype")` in order; `:733-737` falls through to the first categorical-dtype obs column (with a warning); `:739-742` raises `ValueError("No cluster labels found in adata.obs. Run sc-preprocessing first, or specify --cluster-key.")` only when nothing is categorical. Using a stray categorical column (e.g., `sample_id` cast as Category) silently produces meaningless rankings — always pass `--cluster-key` explicitly on real data.
-- **Degenerate output is a soft fail.** When `simple_correlation` finds no overlapping drug targets or `cadrres` returns empty, lines 770+ print a multi-option fix message but the script returns 0. Always check `result.json["n_drugs_scored"]` (line 846) — `0` means the run was uninformative.
-- **`--input` mandatory unless `--demo`.** `sc_drug_response.py:722` raises `ValueError("--input required when not using --demo")`.
-- **Unknown `--method` rejected post-argparse.** `sc_drug_response.py:767` raises `ValueError(f"Unknown method: {method}")`. argparse `choices` should catch this first via METHOD_REGISTRY (`:697`); the manual raise is a safety net.
+- **Gene-name nomenclature is enforced.** `sc_drug_response.py` raises `ValueError` when 0% of `_BUILTIN_DRUG_TARGETS` overlap with `var_names`. The error inspects sample gene names — if they look like `ENSG*` / `ENSMUSG*`, the message points to `bulkrna-geneid-mapping`; otherwise to `sc-standardize-input`. Below 20 % overlap is a warning (not a fail) — results may still be unreliable.
+- **`cadrres` needs both model files AND a CaDRReS-Sc script dir.** `sc_drug_response.py` raises `FileNotFoundError` listing missing model files in `--model-dir`; raises a separate `FileNotFoundError("CaDRReS-Sc script directory not found.")` when the script dir isn't at `<model-dir>/../CaDRReS-Sc` or `~/CaDRReS-Sc`. Both error messages embed the full `CADRRES_DOWNLOAD_INSTRUCTIONS`.
+- **`cadrres` demo bypasses real model.** `sc_drug_response.py` auto-generates synthetic CaDRReS scores when `--method cadrres --demo` — reported drugs are random; only use for plumbing checks.
+- **Auto-cluster-key resolution falls through to "first categorical".** `sc_drug_response.py` searches `("leiden", "louvain", "cluster", "cell_type", "celltype")` in order; falls through to the first categorical-dtype obs column (with a warning); raises `ValueError("No cluster labels found in adata.obs. Run sc-preprocessing first, or specify --cluster-key.")` only when nothing is categorical. Using a stray categorical column (e.g., `sample_id` cast as Category) silently produces meaningless rankings — always pass `--cluster-key` explicitly on real data.
+- **Degenerate output is a soft fail.** When `simple_correlation` finds no overlapping drug targets or `cadrres` returns empty, `main` prints a multi-option fix message but the script returns 0. Always check `result.json["n_drugs_scored"]` — `0` means the run was uninformative.
+- **`--input` mandatory unless `--demo`.** `sc_drug_response.py` raises `ValueError("--input required when not using --demo")`.
+- **Unknown `--method` rejected post-argparse.** `sc_drug_response.py` raises `ValueError(f"Unknown method: {method}")`. argparse `choices` should catch this first via METHOD_REGISTRY; the manual raise is a safety net.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic scores, simple_correlation)
-python omicsclaw.py run sc-drug-response --demo --output /tmp/sc_drug_demo
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py --demo --output /tmp/sc_drug_demo
 
 # Default simple correlation against built-in drug targets
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input clustered.h5ad --output results/ --cluster-key leiden
 
 # CaDRReS with GDSC model
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input clustered.h5ad --output results/ \
   --method cadrres --drug-db gdsc --model-dir ~/.cache/omicsclaw/cadrres/gdsc/
 
 # CaDRReS with PRISM, top 50 drugs
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input clustered.h5ad --output results/ \
   --method cadrres --drug-db prism --n-drugs 50
 ```
@@ -117,3 +101,9 @@ python omicsclaw.py run sc-drug-response \
 - `references/methodology.md` — `simple_correlation` math vs CaDRReS; gene-symbol expectations
 - `references/output_contract.md` — `tables/drug_rankings.csv` column schema
 - Adjacent skills: `sc-clustering` (upstream — produces the cluster column), `sc-cell-annotation` (parallel — biological labels often work better than `leiden` for drug interpretability), `sc-in-silico-perturbation` (parallel — predicts genetic perturbation effects, NOT drug sensitivity), `bulkrna-geneid-mapping` / `sc-standardize-input` (upstream remediation — convert Ensembl IDs to HGNC symbols if the preflight fails)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `omicverse`, `pandas`, `scanpy`, `scipy`, `seaborn`

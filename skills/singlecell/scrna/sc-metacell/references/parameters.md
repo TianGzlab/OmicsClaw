@@ -1,5 +1,4 @@
-<!-- AUTO-GENERATED from skill.yaml — do not edit by hand. -->
-<!-- Regenerate: python scripts/generate_parameters_md.py <skill_dir> -->
+<!-- Hand-written. `skill.yaml` and its generators were deleted with the old skill system. -->
 
 
 # Parameters

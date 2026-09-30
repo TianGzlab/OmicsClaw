@@ -21,19 +21,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Bootstrap sys.path so `omicsclaw.common.report` resolves whether this script
-# is run from the template directory or after being copied into
-# `skills/<domain>/<skill>/`.  Walk up looking for the omicsclaw package.
-_HERE = Path(__file__).resolve()
-for _candidate in _HERE.parents:
-    if (_candidate / "omicsclaw" / "__init__.py").exists():
-        if str(_candidate) not in sys.path:
-            sys.path.insert(0, str(_candidate))
-        break
+# Put the checkout that provides skills/_sdk on sys.path, whether this file sits in
+# templates/skill/ or has been copied to skills/<domain>/<skill>/; with none, PYTHONPATH decides.
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.report import (  # noqa: E402
+from skills._sdk.report import (  # noqa: E402
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (  # noqa: E402
     mark_result_status,
     write_result_json,
 )
@@ -95,7 +96,7 @@ def write_outputs(
     `report.md`, `result.json`.
 
     Every path written here MUST also appear in `references/output_contract.md`
-    or `scripts/skill_lint.py::_check_output_contract_paths` will fail.
+    or `references/output_contract.md` will describe files nothing writes.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     tables_dir = output_dir / "tables"

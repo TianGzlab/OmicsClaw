@@ -48,7 +48,7 @@ That workflow covers:
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run sc-grn \
+python skills/singlecell/scrna/sc-grn/sc_grn.py \
   --input <processed.h5ad> \
   --tf-list <tfs.txt> \
   --db '<db_glob>' \
@@ -106,7 +106,7 @@ When `--tf-list`, `--db`, and `--motif` are all absent **and** `--allow-simplifi
 
 ```bash
 # Full pySCENIC run
-python omicsclaw.py run sc-grn \
+python skills/singlecell/scrna/sc-grn/sc_grn.py \
   --input processed.h5ad \
   --tf-list hs_hgnc_tfs.txt \
   --db 'databases/*.feather' \
@@ -114,7 +114,7 @@ python omicsclaw.py run sc-grn \
   --output results/
 
 # Simplified fallback (no external databases needed)
-python omicsclaw.py run sc-grn \
+python skills/singlecell/scrna/sc-grn/sc_grn.py \
   --input processed.h5ad \
   --allow-simplified-grn \
   --output results/

@@ -97,7 +97,6 @@ const CorePillars = () => {
                 <div className="flex gap-1 mt-1">
                   <span className="text-[8px] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full text-slate-400">Feishu</span>
                   <span className="text-[8px] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full text-slate-400">Telegram</span>
-                  <span className="text-[8px] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full text-slate-400">WeChat</span>
                 </div>
               </div>
             </div>

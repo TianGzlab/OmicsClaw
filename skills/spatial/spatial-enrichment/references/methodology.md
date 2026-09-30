@@ -77,11 +77,11 @@ methods, but the statistical role differs:
 
 ```bash
 # Default local-first ORA
-oc run spatial-enrichment \
+python skills/spatial/spatial-enrichment/spatial_enrichment.py \
   --input <processed.h5ad> --output <dir>
 
 # Enrichr-style ORA using an external library key when available
-oc run spatial-enrichment \
+python skills/spatial/spatial-enrichment/spatial_enrichment.py \
   --input <processed.h5ad> --method enrichr \
   --source GO_Biological_Process --species human \
   --de-method wilcoxon --de-corr-method benjamini-hochberg \
@@ -89,7 +89,7 @@ oc run spatial-enrichment \
   --enrichr-max-genes 200 --output <dir>
 
 # Preranked GSEA
-oc run spatial-enrichment \
+python skills/spatial/spatial-enrichment/spatial_enrichment.py \
   --input <processed.h5ad> --method gsea \
   --source MSigDB_Hallmark \
   --gsea-ranking-metric auto --gsea-min-size 15 --gsea-max-size 500 \
@@ -97,7 +97,7 @@ oc run spatial-enrichment \
   --output <dir>
 
 # ssGSEA with local gene-set file
-oc run spatial-enrichment \
+python skills/spatial/spatial-enrichment/spatial_enrichment.py \
   --input <processed.h5ad> --method ssgsea \
   --gene-set-file ./custom_sets.gmt \
   --ssgsea-sample-norm-method rank \
@@ -105,7 +105,7 @@ oc run spatial-enrichment \
   --output <dir>
 
 # Demo mode
-oc run spatial-enrichment --demo --output /tmp/enrich_demo
+python skills/spatial/spatial-enrichment/spatial_enrichment.py --demo --output /tmp/enrich_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-enrichment/spatial_enrichment.py \

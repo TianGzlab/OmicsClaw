@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-enrichment ...` first. The resulting output directory
+Run `python skills/spatial/spatial-enrichment/spatial_enrichment.py ...` first. The resulting output directory
 should contain:
 
 - `figure_data/enrichment_results.csv`

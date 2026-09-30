@@ -1,28 +1,15 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-multi-count
 description: Load when merging multiple single-sample scRNA-seq count matrices (one per sample-from-sc-count)
   into a single downstream-ready AnnData with sample labels. Skip when input is one already-merged AnnData
   (use sc-standardize-input); FASTQ→counts on each sample (use sc-count).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: merge count matrices, multi-sample count, aggregate samples, combine count outputs, cellranger aggr alternative
 tags:
 - singlecell
 - scrna
 - multi-sample
 - merge
 - aggregation
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 ---
 
 # sc-multi-count
@@ -36,8 +23,6 @@ Replaces `cellranger aggr` for the OmicsClaw pipeline — preserves the
 canonical AnnData contract instead of re-counting.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -81,9 +66,9 @@ canonical AnnData contract instead of re-counting.
 
 ## Gotchas
 
-- **`--input` is `action="append"` — repeat the flag, do not comma-split.** `sc_multi_count.py:315` declares `--input` with `action="append"`.  Pass `--input s1.h5ad --input s2.h5ad --input s3.h5ad`; a single comma-separated value (`--input s1.h5ad,s2.h5ad`) is treated as one literal path that does not exist and triggers `FileNotFoundError`.  No directory expansion.
-- **At least two `--input` paths are required.** `sc_multi_count.py:335` calls `parser.error("At least two --input paths required when not using --demo.")` if you pass zero or one.  For a single-sample run you don't need this skill — just use the upstream `sc-count` output directly.
-- **Missing input file → hard fail.** `sc_multi_count.py:346` raises `FileNotFoundError` when any individual `--input` path does not resolve.  In batch pipelines, a single mistyped sample name aborts the whole merge — pre-flight your file list.
+- **`--input` is `action="append"` — repeat the flag, do not comma-split.** `sc_multi_count.py` declares `--input` with `action="append"`.  Pass `--input s1.h5ad --input s2.h5ad --input s3.h5ad`; a single comma-separated value (`--input s1.h5ad,s2.h5ad`) is treated as one literal path that does not exist and triggers `FileNotFoundError`.  No directory expansion.
+- **At least two `--input` paths are required.** `sc_multi_count.py` calls `parser.error("At least two --input paths required when not using --demo.")` if you pass zero or one.  For a single-sample run you don't need this skill — just use the upstream `sc-count` output directly.
+- **Missing input file → hard fail.** `sc_multi_count.py` raises `FileNotFoundError` when any individual `--input` path does not resolve.  In batch pipelines, a single mistyped sample name aborts the whole merge — pre-flight your file list.
 - **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only; the flag exists for CLI consistency.
 - **No within-sample re-counting.** This is a stitching skill — it stacks already-canonical AnnData objects.  If a per-sample input has a non-canonical matrix layout, run `sc-standardize-input` on each before this; otherwise the merged contract may surface incoherent per-cell metrics downstream.
 
@@ -91,15 +76,15 @@ canonical AnnData contract instead of re-counting.
 
 ```bash
 # Demo (built-in two synthetic samples)
-python omicsclaw.py run sc-multi-count --demo --output /tmp/sc_multi_demo
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py --demo --output /tmp/sc_multi_demo
 
 # Three samples — repeat --input per file
-python omicsclaw.py run sc-multi-count \
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py \
   --input s1.h5ad --input s2.h5ad --input s3.h5ad \
   --output results/
 
 # With explicit per-sample labels (paired with --input order)
-python omicsclaw.py run sc-multi-count \
+python skills/singlecell/scrna/sc-multi-count/sc_multi_count.py \
   --input s1.h5ad --sample-id ctrl_a \
   --input s2.h5ad --sample-id ctrl_b \
   --input s3.h5ad --sample-id treat_a \
@@ -112,3 +97,9 @@ python omicsclaw.py run sc-multi-count \
 - `references/methodology.md` — sample-label derivation, contract harmonisation rules
 - `references/output_contract.md` — merged `obs` schema, table layout
 - Adjacent skills: `sc-count` (upstream — produces single-sample AnnData inputs), `sc-standardize-input` (per-sample contract canonicaliser, run before this when inputs are external), `sc-batch-integration` (downstream — corrects batch effects in the merged AnnData)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`

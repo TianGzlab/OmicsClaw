@@ -26,18 +26,23 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.report import (
+from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
-from omicsclaw.common.checksums import sha256_file
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+from skills._sdk.checksums import sha256_file
 from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, ensure_input_contract, store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
@@ -786,10 +791,10 @@ def main():
     print(f"\nNote: No cells were filtered. Use sc-filter or sc-preprocessing skill for filtering.")
     print()
     print(">> Next step: Run sc-filter to remove low-quality cells")
-    print(f"  python omicsclaw.py run sc-filter --input {output_h5ad} --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-filter/sc_filter.py --input {output_h5ad} --output <dir>")
     print()
     print("[i] Optional: Run sc-doublet-detection before filtering")
-    print(f"  python omicsclaw.py run sc-doublet-detection --input {output_h5ad} --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

@@ -156,8 +156,9 @@ def _description() -> str:
         f"{DEFAULT_RESULTS} results by default and at most {MAX_RESULTS}. "
         "THE QUERY TEXT IS SENT TO A THIRD-PARTY SEARCH ENGINE: never put "
         "data from the user's files, sequences, sample identifiers or "
-        "patient information into a query. This tool asks the user for "
-        "approval before searching."
+        "patient information into a query. Depending on the session's "
+        "permission settings, the user may be asked to approve the search "
+        "first; a declined search returns an error and nothing is sent."
     )
 
 
@@ -277,6 +278,7 @@ class WebSearchTool:
             arguments,
             policy=self.policy,
             reason=self._reason(query),
+            reason_shows_call=True,
         )
         await report_progress(f"searching for {query!r}", tool_name=self.name)
 

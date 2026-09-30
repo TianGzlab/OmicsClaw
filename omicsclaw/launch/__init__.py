@@ -33,10 +33,10 @@ something does.
 
 **The grammar is three commands, one per surface**::
 
-    oc cli                                    REPL
-    oc cli -- --prompt-file brief.md          one exchange, then exit
-    oc desktop -- --port 8765                 HTTP backend
-    oc channel -- --channels telegram,feishu  IM adapters
+    oc cli                                 REPL
+    oc cli --prompt-file brief.md          one exchange, then exit
+    oc desktop --port 8765                 HTTP backend
+    oc channel --channels telegram,feishu  IM adapters
 
 ``oc run <skill>`` is deliberately absent (owner ruling, 2026-09-20):
 deterministic skill execution is what the agent does in a session and
@@ -46,9 +46,10 @@ what an in-surface command asks for, not a fourth way into the program.
 converge —— or failed in a way nothing here anticipated —— ``2`` the
 command line or the deployment was refused, which includes an optional
 dependency that is not installed because nothing the user retypes fixes
-that either, ``130`` interrupted (``SIGINT``) and ``143`` terminated
-(``SIGTERM``). The last two are ``128 + signum``, the convention a
-supervisor already reads.
+that either, ``129`` hung up (``SIGHUP``, the terminal closed),
+``130`` interrupted (``SIGINT``) and ``143`` terminated (``SIGTERM``).
+The last three are ``128 + signum``, the convention a supervisor
+already reads.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ from typing import Mapping, Sequence
 
 from omicsclaw.entry import AppConfigError
 
-from ._dotenv import DOTENV_FILE, dotenv_candidates, dotenv_target
+from ._dotenv import DOTENV_FILE, LaunchEnvironment, dotenv_candidates, dotenv_target
 from ._grammar import COMMANDS, Command, split_command_line, usage
 from ._surfaces import (
     EXIT_FAILED,
@@ -116,12 +117,17 @@ def main(
     ``.env`` is not read and the process environment is not touched, so
     a test describes exactly what it means to describe. ``env=None``
     means this shell owns the process, and then :func:`_adopt_dotenv`
-    runs.
+    runs and the surface receives a
+    :class:`~omicsclaw.launch._dotenv.LaunchEnvironment`: the live
+    environment, the names that were set before ``.env`` was read, and a
+    snapshot taken right after.
     """
     arguments = list(sys.argv[1:] if argv is None else argv)
     if env is None:
-        _adopt_dotenv()
         environment: Mapping[str, str] = os.environ
+        exported = frozenset(environment)
+        _adopt_dotenv()
+        environment = LaunchEnvironment(environment, exported)
     else:
         environment = env
 
@@ -172,7 +178,7 @@ def _adopt_dotenv(
     declared exception and reads ``LLM_API_KEY`` from the process
     directly; a ``.env`` merged only into the mapping this function
     returns would configure the workspace and leave the agent without a
-    key —— which is the failure ``CLAUDE.md``'s setup instructions would
+    key —— which is the failure ``.env.example``'s instructions would
     produce. ``omicsclaw/entry/config.py`` says the same thing from the
     other side: a resolver that returns a value cannot make that
     function see a variable. Owning the process environment is what a
@@ -185,8 +191,8 @@ def _adopt_dotenv(
 
     Two locations, project root first —— which of them, and in which
     order, is :func:`omicsclaw.launch._dotenv.dotenv_candidates`'s answer
-    and not a second copy of the search: ``oc cli -- --configure`` writes
-    to the file this function reads, and the two agreeing by construction
+    and not a second copy of the search: ``oc cli --configure`` writes to
+    the file this function reads, and the two agreeing by construction
     is cheaper than the two agreeing by review. Both roots are arguments
     so that a test can name them; a missing file is not an error, because
     most deployments export variables the ordinary way.

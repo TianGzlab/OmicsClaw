@@ -1,75 +1,78 @@
-"""Stable V1 Desktop Adapter for authoritative Turn observation.
+"""The ``/chat/stream`` SSE body: turn events projected onto Desktop frames.
 
-This Module owns only HTTP/SSE projection. Durable truth and cursor recovery
-remain behind the turn kernel; internal Event class names never leak into the
-wire by reflection.
+Each frame is one ``data:`` line carrying a JSON object with exactly two
+keys, ``type`` and ``data``, followed by a blank line. ``data`` is a
+string: plain text for ``text``, ``thinking``, ``tool_output`` and the
+terminal frames, and a JSON-encoded object for the rest.
+:func:`~omicsclaw.entry.desktop._chat_sse.render_chat_sse_frame` keeps
+every frame under 4 MiB.
 
-Ported from ``omicsclaw/surfaces/desktop/turn_observation.py`` (plan 0031
-§5.2, task D2), and the port is much smaller than the plan's "3 lines to
-change" implies. What came across is
-:func:`_wire_json_value` — the credential-safe, cycle-safe,
-non-finite-safe JSON projector — and the close-safe iterator discipline of
-``DesktopTurnSSEBody``. What could not is everything in between: the source's
-seven ``pydantic`` wire models describe ``/v1/turns`` receipts
-(``revision``, ``transcript_ref``, ``content_sha256``) that this rebuild has
-no counterpart for, its event mapper switches over ten classes from the
-deleted ``omicsclaw.runtime.agent.events``, and its constructor takes a
-``ControlTurnObservation`` from the deleted ``omicsclaw.control``. Only one of
-the two names the plan expected to find here — ``EventObserverDetached`` — is
-in fact provided by :mod:`omicsclaw.entry.stream`; ``TurnEventFrame`` is not,
-because this layer's frame carries ``seq`` and a terminal *value* rather than
-``sequence``, ``emitted_at_ms`` and a terminal *flag*.
+A frame an event produced is preceded by an ``id:`` line holding that
+event's sequence number, which is a resume cursor: a client that has
+received ``id: N`` has every frame of the events numbered up to N, and a
+``/chat/stream`` request with ``after_seq: N`` continues after them. The
+frames that end the stream (a ``/compact`` exchange's reported
+``status``, ``result``, ``error``, ``done``), the ``error`` and ``done``
+a body adds when its observation ends early, and ``keep_alive`` carry no
+``id:`` line. A client holds the frames without one until ``done``
+arrives, and drops them if the connection breaks first, because a
+resumed stream sends them again.
 
-**The frame vocabulary is the external client's, not this layer's** (Q24).
-``OmicsClaw-App/src/app/api/chat/route.ts:87-101`` parses each frame as a
-JSON object with **exactly two keys**, ``type`` and ``data``, and that is
-*all* it recognises by type — ``done`` and ``error``, the two terminal
-ones. The switch over the rest is
-``OmicsClaw-App/src/hooks/useSSEStream.ts:143-431``, which has a ``case``
-for ``text``, ``tool_use``, ``tool_result``, ``tool_output``,
-``permission_request`` and ``status``, and drops anything else at
-``default:`` (``:430``) without a word.
-:data:`~omicsclaw.entry.render.DESKTOP_CHAT_FRAME_TYPE` holds the five-way
-part of that map.
+The frames of ``sse_schema_version`` 3:
 
-The two-key invariant is why nothing here adds an SSE ``id:`` line, however
-convenient that would have been for resuming — ``route.ts:87-90`` requires
-``lines.length === 1`` and slices ``"data: "`` off ``lines[0]``, so a frame
-with an ``id:`` line ahead of the data line stops being recognisable as
-terminal. Resumption is therefore addressed where the published contract does
-have a mechanism for it: a redelivered ``source_request_id``
-(``durable_ingress_idempotency``) resolves to the same exchange, and a new
-observation over it is opened at whatever cursor the caller names.
+* ``text`` / ``thinking`` — an answer delta / a reasoning delta.
+* ``tool_use`` — ``tool_use_id``, ``tool_name``, ``arguments`` (the call's
+  raw JSON string, byte for byte), ``turn``, and the identity keys.
+* ``tool_result`` — ``tool_use_id``, ``tool_name``, ``content``,
+  ``is_error``, ``elapsed_s`` (which includes any approval wait),
+  ``elapsed_includes_approval_wait``, ``turn``, and the identity keys.
+* ``tool_output`` — a tool's progress message.
+* ``status`` — a compaction: ``kind`` is ``"compaction"``, with the
+  before/after counts, ``degraded``, ``written_back`` and the identity
+  keys. A ``/compact`` exchange always sends one, including when nothing
+  was compacted (``written_back`` false).
+* ``permission_request`` — ``request_id``, ``tool_name``, ``arguments``,
+  ``reason``, ``reason_shows_call``, ``risk_level``, ``approval_mode``,
+  ``ask_every_time``, ``can_remember`` (whether "always allow" can take
+  effect for this call) and the identity keys. Sent only while the
+  request is outstanding; a request a session grant or ``full_access``
+  answers is allowed without a card.
+* ``event_omitted`` — frames were lost to this cursor, or one frame was
+  too large to send. Its ``id:`` is the sequence number just before the
+  first event still available, or the oversized event's own.
+* ``result`` — once, before ``done``, when the exchange converged:
+  ``usage`` (the key-wise sum of every model call's ``input_tokens``,
+  ``output_tokens``, ``cache_read_tokens`` and ``cache_write_tokens`` in
+  the exchange, as read by this body and any earlier one over the same
+  exchange, or ``null`` if none reported usage), ``usage_reported``
+  (every call reported usage and no call can have gone unread),
+  ``model_calls``, ``provider`` and ``model``.
+* ``keep_alive`` — after :data:`KEEPALIVE_INTERVAL_S` of silence.
+* ``error`` then ``done`` — the exchange was cancelled (``"cancelled"``) or
+  failed (the exception's type name only); ``done`` alone — it converged.
 
-A :class:`~omicsclaw.entry.events.TurnEventType` with **no** published name
-produces no frame at all. Minting one would publish a vocabulary to an
-external client unilaterally, which Q24 places outside a backend-internal
-rebuild step.
-
-**One frame this layer emits has no ``case`` on the client**, and it is
-recorded rather than defended: ``event_omitted``, which
-:func:`desktop_chat_frame` sends for a :attr:`~omicsclaw.entry.events.
-TurnEventType.GAP`. The *name* is not invented here — the ported
-``_chat_sse.py:151`` already emits it for an oversized frame, which is why
-it was reused instead of a second name meaning the same thing — but no
-version of this client has ever read it, so a GAP currently reaches
-``default:`` and disappears. That is strictly better than a silent jump in
-the sequence on the backend side and strictly worse than telling the user,
-and closing it is a frontend change this step cannot make alone. Whoever
-takes it up should add the ``case`` and then delete this paragraph.
+The identity keys are ``sequence``, ``turn_id`` and ``session_id``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from omicsclaw.entry.events import TurnEvent, TurnEventType
 from omicsclaw.entry.render import DESKTOP_CHAT_FRAME_TYPE, to_wire
 from omicsclaw.entry.stream import EventObserverDetached, TurnObservation
+from omicsclaw.tools.preview import REDACTED, is_credential_key
 
 from ._chat_sse import render_chat_sse_frame
+from .interactions import TurnUsage
+
+if TYPE_CHECKING:
+    from omicsclaw.entry.approval import ApprovalBroker
+    from omicsclaw.entry.turn import TurnHandle
+
+    from .interactions import DesktopInteractions
 
 __all__ = [
     "KEEPALIVE_INTERVAL_S",
@@ -81,34 +84,13 @@ __all__ = [
 KEEPALIVE_INTERVAL_S: Final = 25.0
 """Seconds of silence before an idle heartbeat frame.
 
-``server.py:2249``, unchanged. A ``keep_alive`` frame is what stops an
-intermediary from closing a connection during a ten-minute deconvolution;
-it carries no data and the client discards it.
+A ``keep_alive`` frame is what stops an intermediary from closing a
+connection during a ten-minute deconvolution; its data is ``""`` and the
+client discards it.
 """
 
-_REDACTED = "[redacted]"
-_SENSITIVE_WIRE_KEYS = frozenset(
-    {
-        "accesskey",
-        "accesskeyid",
-        "accesstoken",
-        "apikey",
-        "authorization",
-        "clientsecret",
-        "cookie",
-        "credential",
-        "credentials",
-        "password",
-        "passwd",
-        "privatekey",
-        "refreshtoken",
-        "secret",
-        "secretaccesskey",
-        "secretkey",
-        "setcookie",
-        "token",
-    }
-)
+COMPACTION_OUTCOME_WAIT_S: Final = 10.0
+"""How long a ``/compact`` body waits for the outcome it reports."""
 
 
 def _wire_json_value(
@@ -124,11 +106,10 @@ def _wire_json_value(
     Infinity values. Arbitrary objects and non-string mapping keys fail closed;
     their ``str`` methods are never invoked on the observation wire.
 
-    Ported unchanged from ``surfaces/desktop/turn_observation.py:59-125``.
-    Note that a *string* passes through untouched, which is what keeps
-    ``ToolCall.arguments`` byte-exact across this seam (plan 0031 §3.2 task
-    C): only mapping **keys** are inspected, so redaction can never rewrite
-    the bytes a prompt cache and a replay are matched on.
+    A *string* passes through untouched, which is what keeps
+    ``ToolCall.arguments`` byte-exact across this seam: only mapping
+    **keys** are inspected, so redaction can never rewrite the bytes a
+    prompt cache and a replay are matched on.
     """
 
     if depth > 32:
@@ -156,13 +137,9 @@ def _wire_json_value(
                         raise TypeError(
                             f"Turn Event mapping key must be a string at {path}"
                         )
-                    normalized_key = "".join(ch for ch in key.lower() if ch.isalnum())
                     projected[key] = (
-                        _REDACTED
-                        if any(
-                            normalized_key == family or normalized_key.endswith(family)
-                            for family in _SENSITIVE_WIRE_KEYS
-                        )
+                        REDACTED
+                        if is_credential_key(key)
                         else _wire_json_value(
                             child,
                             path=f"{path}.{key}",
@@ -202,23 +179,31 @@ def _identity(event: TurnEvent) -> dict[str, Any]:
     }
 
 
-def desktop_chat_frame(event: TurnEvent) -> tuple[str, Any] | None:
+def desktop_chat_frame(
+    event: TurnEvent, *, can_remember: bool = False
+) -> tuple[str, Any] | None:
     """One frame as ``(type, data)``, or ``None`` when it has no wire name.
 
-    ``data`` is a plain string for the frame kinds the client reads as text
-    (``text``, ``tool_output``) and an object for the kinds it parses
-    (``tool_use``, ``tool_result``, ``permission_request``, ``status``,
-    ``event_omitted``); ``_chat_sse.render_chat_sse_frame`` serialises the
-    object and keeps the whole frame under 4 MiB.
+    ``data`` is a plain string for ``text``, ``thinking`` and
+    ``tool_output``, and an object for ``tool_use``, ``tool_result``,
+    ``permission_request``, ``status`` and ``event_omitted``;
+    ``_chat_sse.render_chat_sse_frame`` serialises the object and keeps the
+    whole frame under 4 MiB.
 
-    ``EXCHANGE_END`` returns ``None`` here on purpose: it is one or two
-    frames depending on how the exchange ended, which is a branch rather
-    than a lookup, and :func:`desktop_terminal_frames` owns it.
+    ``TURN_END`` and ``EXCHANGE_END`` return ``None``: model-call usage is
+    summed into the ``result`` frame and the ending is one or two frames,
+    both of which :class:`DesktopChatSSEBody` and
+    :func:`desktop_terminal_frames` own. ``permission_request`` is returned
+    for every ``APPROVAL_REQUIRED``; whether a card is sent is the body's
+    decision. *can_remember* is the card's ``can_remember``.
     """
     kind = event.type
     if kind is TurnEventType.TEXT_DELTA:
         delta = event.engine.delta if event.engine is not None else ""
         return ("text", delta) if delta else None
+    if kind is TurnEventType.REASONING_DELTA:
+        delta = event.engine.delta if event.engine is not None else ""
+        return ("thinking", delta) if delta else None
     if kind is TurnEventType.PROGRESS:
         update = event.progress
         if update is None:
@@ -234,14 +219,16 @@ def desktop_chat_frame(event: TurnEvent) -> tuple[str, Any] | None:
         payload = to_wire(event)
         payload.pop("schema_version", None)
         payload.pop("type", None)
+        request = event.approval
+        payload["reason_shows_call"] = (
+            request.reason_shows_call if request is not None else False
+        )
+        payload["ask_every_time"] = (
+            request.ask_every_time if request is not None else False
+        )
+        payload["can_remember"] = can_remember
         return (DESKTOP_CHAT_FRAME_TYPE[kind], _wire_json_value(payload))
     if kind is TurnEventType.COMPACTION:
-        # ``_compaction_event_bridge.py:52-56`` is the precedent: a
-        # compaction is reported to this client as a ``status`` frame whose
-        # data is the compaction payload. The bridge's own
-        # ``build_compaction_status_payload`` belonged to the deleted
-        # ``runtime.context`` package; ``render.to_wire`` produces the same
-        # counts from ``CompactionRecord``.
         payload = to_wire(event)
         payload["kind"] = "compaction"
         payload.pop("schema_version", None)
@@ -249,10 +236,6 @@ def desktop_chat_frame(event: TurnEvent) -> tuple[str, Any] | None:
         return ("status", _wire_json_value(payload))
     if kind is TurnEventType.GAP:
         oldest, latest = event.gap or (0, 0)
-        # ``event_omitted`` is a name ``_chat_sse.py:151`` already emits
-        # when it cannot fit a frame, so it is reused rather than joined by
-        # a second name meaning the same thing. It is **not** a name this
-        # client reads: see the module docstring's last paragraph.
         return (
             "event_omitted",
             {
@@ -269,17 +252,16 @@ def desktop_chat_frame(event: TurnEvent) -> tuple[str, Any] | None:
 def desktop_terminal_frames(event: TurnEvent) -> tuple[tuple[str, Any], ...]:
     """The one or two frames that close a stream.
 
-    ``done`` is always last and always has ``data == ""``, because that pair
-    is literally how ``route.ts:98`` recognises a clean ending. A failed or
-    cancelled exchange is preceded by an ``error`` frame, which is what the
-    old handler did on a disconnect (``server.py:3276-3277``) and what keeps
-    "the stream ended" from meaning three different things (Q5b).
+    ``done`` is always last and always has ``data == ""``. A cancelled
+    exchange is preceded by ``("error", "cancelled")`` and a failed one by
+    an ``error`` frame, so "the stream ended" never means three different
+    things.
 
     The ``error`` payload is the exception's **type name only**
     (``terminal_error_type_preserved``). Its text is withheld deliberately:
     a ``web_fetch`` failure's message can contain the URL it was given,
-    query string and all (Q22 rule 1), and this frame is the one that
-    crosses a process boundary.
+    query string and all, and this frame is the one that crosses a process
+    boundary.
     """
     if event.terminal == "converged":
         return (("done", ""),)
@@ -288,6 +270,14 @@ def desktop_terminal_frames(event: TurnEvent) -> tuple[tuple[str, Any], ...]:
     error = event.error
     named = type(error).__name__ if error is not None else "unknown"
     return (("error", named), ("done", ""))
+
+
+def _count_usage(ledger: TurnUsage, event: TurnEvent) -> None:
+    """Record the model call a ``TURN_END`` closes in *ledger*."""
+    wire = to_wire(event)
+    usage = wire.get("usage")
+    reported = bool(wire.get("usage_reported")) and isinstance(usage, dict)
+    ledger.record_call(event.seq, usage if reported else None)
 
 
 class DesktopChatSSEBody:
@@ -305,14 +295,26 @@ class DesktopChatSSEBody:
     back to zero never arms its abandonment timer. So this is an async
     context manager and :meth:`aclose` is idempotent.
 
-    Detaching is **not** cancelling (plan 0031 trap 9, Q14). A browser
-    refresh detaches one observer of an exchange that may have been running
-    for eight minutes; whether the exchange should then stop is the
-    registry's decision, taken when the *last* observer has been gone for
-    the grace period.
+    Detaching is **not** cancelling. A browser refresh detaches one
+    observer of an exchange that may have been running for eight minutes;
+    whether the exchange should then stop is the registry's decision,
+    taken when the *last* observer has been gone for the grace period.
     """
 
-    __slots__ = ("_closed", "_keepalive_s", "_observation", "_pending", "last_seq")
+    __slots__ = (
+        "_approvals",
+        "_closed",
+        "_compaction",
+        "_compaction_seen",
+        "_interactions",
+        "_keepalive_s",
+        "_ledger",
+        "_model",
+        "_observation",
+        "_pending",
+        "_provider",
+        "last_seq",
+    )
 
     def __init__(
         self,
@@ -320,6 +322,11 @@ class DesktopChatSSEBody:
         *,
         keepalive_s: float | None = KEEPALIVE_INTERVAL_S,
         after_seq: int = 0,
+        approvals: ApprovalBroker | None = None,
+        interactions: DesktopInteractions | None = None,
+        provider: str = "",
+        model: str = "",
+        compaction: TurnHandle | None = None,
     ) -> None:
         """*after_seq* is remembered, not applied.
 
@@ -328,11 +335,37 @@ class DesktopChatSSEBody:
         point even before the first frame arrives — a client that
         reconnects and immediately disconnects again must not be told to
         resume from zero.
+
+        *approvals* is the observed exchange's broker. With it, a
+        ``permission_request`` card is sent only while its request is
+        outstanding, and with *interactions* as well a session grant
+        allows a request without a card (see
+        :meth:`~omicsclaw.entry.desktop.interactions.DesktopInteractions.admit_approval`).
+        Without it every ``APPROVAL_REQUIRED`` becomes a card.
+
+        *provider* and *model* are reported in the ``result`` frame.
+        With *interactions*, its usage comes from the exchange's shared
+        :class:`~omicsclaw.entry.desktop.interactions.TurnUsage`, so a
+        resumed body reports the calls an earlier body read; without it,
+        from the calls this body read.
+
+        *compaction* is the handle of the observed exchange when it is a
+        ``/compact``. A compaction that changed nothing publishes no
+        ``COMPACTION`` event, so when the exchange converged without one
+        this body sends a ``status`` frame built from the outcome's
+        record, and ``/compact`` never ends silently.
         """
         self._observation = observation
         self._keepalive_s = keepalive_s
+        self._approvals = approvals
+        self._interactions = interactions
+        self._provider = provider
+        self._model = model
         self._pending: list[str] = []
         self._closed = False
+        self._ledger: TurnUsage | None = None
+        self._compaction = compaction
+        self._compaction_seen = False
         self.last_seq = after_seq
 
     async def __aenter__(self) -> DesktopChatSSEBody:
@@ -362,15 +395,106 @@ class DesktopChatSSEBody:
                 if self._pending or self._closed:
                     continue
                 return render_chat_sse_frame("keep_alive", "")
+            ledger = self._mark_read(event)
             self.last_seq = max(self.last_seq, event.seq)
             if event.type is TurnEventType.EXCHANGE_END:
+                if event.terminal == "converged":
+                    report = await self._compaction_report(event)
+                    if report is not None:
+                        self._queue((report,))
+                    self._queue((("result", self.result()),))
                 self._queue(desktop_terminal_frames(event))
                 await self.aclose()
                 continue
-            frame = desktop_chat_frame(event)
+            if event.type is TurnEventType.TURN_END:
+                _count_usage(ledger, event)
+                continue
+            if event.type is TurnEventType.COMPACTION:
+                self._compaction_seen = True
+            if event.type is TurnEventType.APPROVAL_REQUIRED:
+                if not self._shows_card(event):
+                    continue
+                frame = desktop_chat_frame(
+                    event, can_remember=self._can_remember(event)
+                )
+            else:
+                frame = desktop_chat_frame(event)
             if frame is None:
                 continue
-            return render_chat_sse_frame(*frame)
+            return render_chat_sse_frame(*frame, event_id=event.seq)
+
+    def result(self) -> dict[str, Any]:
+        """The ``result`` frame's data, for an exchange whose last event
+        is :attr:`last_seq`."""
+        ledger = self._ledger if self._ledger is not None else TurnUsage()
+        return {
+            **ledger.result(self.last_seq),
+            "provider": self._provider,
+            "model": self._model,
+        }
+
+    def _mark_read(self, event: TurnEvent) -> TurnUsage:
+        """Record *event* as read in the exchange's usage ledger, and
+        return the ledger.
+
+        A ``GAP`` that opens a body stands for events the ring no longer
+        holds, so they stay unread. A later ``GAP`` stands for deltas this
+        observer's buffer discarded; no ``TURN_END`` is ever discarded
+        that way, so those count as read.
+        """
+        ledger = self._ledger
+        first = ledger is None
+        if ledger is None:
+            ledger = (
+                self._interactions.usage_for(event.turn_id)
+                if self._interactions is not None
+                else TurnUsage()
+            )
+            self._ledger = ledger
+        if event.type is TurnEventType.GAP:
+            if not first:
+                ledger.cover(self.last_seq + 1, event.seq)
+        else:
+            ledger.cover(event.seq, event.seq)
+        return ledger
+
+    def _can_remember(self, event: TurnEvent) -> bool:
+        if self._interactions is None:
+            return False
+        return self._interactions.can_remember(event.approval)
+
+    async def _compaction_report(self, end: TurnEvent) -> tuple[str, Any] | None:
+        """The ``status`` frame a ``/compact`` that published none is owed.
+
+        The exchange's last event is published before its outcome is
+        recorded, so this waits (briefly) for the outcome.
+        """
+        handle = self._compaction
+        if handle is None or self._compaction_seen:
+            return None
+        try:
+            async with asyncio.timeout(COMPACTION_OUTCOME_WAIT_S):
+                outcome = await handle.wait()
+        except TimeoutError:
+            return None
+        record = outcome.compaction if outcome is not None else None
+        if record is None:
+            return None
+        return desktop_chat_frame(
+            TurnEvent.compacted(
+                record,
+                seq=end.seq,
+                session_id=end.session_id,
+                turn_id=end.turn_id,
+            )
+        )
+
+    def _shows_card(self, event: TurnEvent) -> bool:
+        if self._approvals is None:
+            return True
+        if self._interactions is None:
+            return event.request_id in self._approvals.pending()
+        return self._interactions.admit_approval(event, self._approvals)
 
     async def _next_event(self) -> TurnEvent | None:
         """The next frame, or ``None`` for "nothing to report right now".

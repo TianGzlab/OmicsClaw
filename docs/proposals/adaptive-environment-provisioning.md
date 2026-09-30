@@ -1,5 +1,7 @@
 # Adaptive Per-Skill Environment Provisioning for OmicsClaw
 
+> **Current status (2026-09-24):** the implementation described below was removed together with the skill runner; runtime environment provisioning is now planned in [plan 0061](../plans/0061-adaptive-env-provisioning.md). This document is kept as history.
+
 > **Status:** ACCEPTED + IMPLEMENTED (Phases 0–3), each phase Codex-verified.
 > **Author:** OmicsClaw agent (Claude). **Date:** 2026-06-29.
 >

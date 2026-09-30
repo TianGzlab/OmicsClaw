@@ -1,26 +1,43 @@
-# OmicsClaw v2 Skill Template
+# OmicsClaw Skill Template
 
 This directory is a **human-copy starter** for new OmicsClaw skills. It is not
-read by codegen — see [`docs/adr/0033-skill-template-is-human-copy-only.md`](../../docs/adr/0033-skill-template-is-human-copy-only.md).
+read by codegen.
 
 The goal: `cp -r` this directory into the right `skills/<domain>/` location,
 rename the placeholders, and you should be ~80% of the way to a gold-standard
 skill like `skills/singlecell/scrna/sc-de` or `skills/spatial/spatial-de`.
 
-## The v2 layout (ADR 0037)
+## The layout
 
-A v2 skill is defined by ONE machine contract, `skill.yaml`, validated by
-`omicsclaw.skill.schema`. Everything else is generated one-way from it:
+A skill is an independent subdirectory holding a `SKILL.md` and whatever it
+needs beside it. That is the whole contract:
 
-- **`skill.yaml`** — the single source of truth (identity, `summary`,
-  `interface`, `runtime`, `deps`). Hand-edit THIS file.
-- **`SKILL.md`** — a narrative methodology card whose frontmatter header and
-  `## Inputs & Outputs` block are GENERATED from `skill.yaml`
-  (`scripts/generate_skill_md.py`); only the narrative sections are hand-written.
-- **`references/parameters.md`** — GENERATED from `skill.yaml.interface.parameters`
-  (`scripts/generate_parameters_md.py`).
+```
+skills/<domain>/<skill>/
+├── SKILL.md        the only metadata there is — hand-written, end to end
+├── <skill>.py      the script, run directly with python
+├── references/     detail the body links to, read on demand
+└── tests/
+```
 
-There is no `parameters.yaml` sidecar in v2 — its fields moved into `skill.yaml`.
+**`SKILL.md` is the single source of truth.** Its frontmatter is what the
+agent is indexed by and its body is what `use_skill` returns. Nothing in it
+is generated: the `skill.yaml` machine contract, its schema, and the
+generators that wrote headers, `## Inputs & Outputs` blocks and
+`references/parameters.md` from it all belonged to the retired skill system
+and were deleted with it.
+
+Four frontmatter keys are read, and only four:
+
+| Key | Required | Read by |
+|---|---|---|
+| `name` | yes | the prompt index, `use_skill` |
+| `description` | yes | the prompt index — the one line the model routes on |
+| `trigger` | no | `/skills <query>` search only; never auto-fires a skill |
+| `tags` | no | `/skills <query>` search only |
+
+A header missing `name` or `description` is skipped and never indexed.
+Anything else in the header is inert.
 
 ## Bootstrap steps
 
@@ -32,41 +49,40 @@ mv replace_me.py <my_new_skill>.py
 mv tests/test_replace_me.py tests/test_<my_new_skill>.py
 
 # 2. Edit the placeholders
-#    - skill.yaml          resolve every `# TODO` (id/name/domain, summary,
-#                          interface, runtime.entry, deps.python) — the machine
-#                          contract and single source of truth
+#    - SKILL.md            frontmatter (name / description / trigger / tags)
+#                          AND the whole body. This is the only metadata.
 #    - <my_new_skill>.py   replace the synthetic-CSV demo with real I/O
-#    - SKILL.md            write the narrative body sections (the frontmatter
-#                          header + Inputs & Outputs block are generated)
-#    - references/*.md     fill in methodology / output contract
+#    - references/*.md     fill in methodology / output contract / parameters
 
-# 3. Regenerate the derived artifacts from skill.yaml
-python scripts/generate_skill_md.py       skills/<domain>/<my-new-skill>
-python scripts/generate_parameters_md.py  skills/<domain>/<my-new-skill>
-python scripts/audit_skill_requires.py --write   # finalize deps.python
+# 3. Verify it is indexed, with nothing skipped
+python -c "from omicsclaw.skills import load_skills; \
+  i = load_skills('skills'); print(len(i), i.skipped)"
 
-# 4. Verify
-python scripts/skill_lint.py skills/<domain>/<my-new-skill>
+# 4. Refresh the domain index and run the suites
+OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test_domain_index_is_current.py
 python <my_new_skill>.py --demo --output /tmp/<my-new-skill>_demo
 pytest tests/
 ```
 
-## What the lint enforces
+Then add the routing-table row in `OMICSCLAW.md` by hand, and the skill's
+`tests/` path to `pyproject.toml`'s `testpaths` if it should run in the
+default suite.
 
-`scripts/skill_lint.py` is the structural contract every v2 skill must pass.
-The full rule set lives in the script; the high-leverage rules are:
+## Conventions the lint used to enforce
 
-| Surface | Rule |
+`scripts/skill_lint.py` was deleted with the rest of the retired toolchain,
+so none of the following is checked mechanically any more. They are still
+what every gold skill does, and they are still the bar for review:
+
+| Surface | Convention |
 |---|---|
-| `skill.yaml` | Must validate against `omicsclaw.skill.schema` (`schema_version: 2`, known `domain`, `id`/`name`/`version`, `summary`, `runtime.entry`) |
-| `skill.yaml` `summary.skip_when` | Must declare ≥ 1 rule (parity with the v1 "Skip when" description contract) |
-| `skill.yaml` `runtime.entry` | Must resolve to a real file in the skill dir (unless `lifecycle.status: draft`) |
-| `skill.yaml` `interface.parameters.allowed_extra_flags` | Must exactly match the `--flag` literals declared via `add_argument(...)` in the script (excluding the runner-blocked trio `--input`/`--output`/`--demo`); kebab-case only |
-| `SKILL.md` body | ≤ 200 lines; must contain `## When to use`, `## Flow`, `## Gotchas`, `## Key CLI`, `## See also` (the `## Inputs & Outputs` block is generated) |
-| `SKILL.md` Gotchas | Each non-empty bullet must anchor to a real code path (`<script>.py:LINE`), `result.json["key"]`, or a `tables/`/`figures/` filename that the script actually writes |
-| `references/` | Must contain `methodology.md`, `output_contract.md`, `parameters.md` |
-| `references/output_contract.md` | Every `tables/X.csv` / `figures/X.png` / etc. it mentions must appear as a substring in the script (or any sibling `_lib/*.py` it imports) |
-| `references/parameters.md` | Must match the output of `scripts/generate_parameters_md.py` — regenerate after every `skill.yaml` edit |
+| `description` | Says when to LOAD and when to SKIP, naming the skill to use instead. The skip half is what prevents a wrong choice, and it is the half a one-line parser used to drop. |
+| `name` | Unique across all skills. A duplicate is skipped by the loader, not merged — check with the `load_skills` one-liner above. |
+| `SKILL.md` body | ≤ 200 lines; contains `## When to use`, `## Inputs & Outputs`, `## Flow`, `## Gotchas`, `## Key CLI`, `## Dependencies`, `## See also` |
+| `SKILL.md` Gotchas | Each non-empty bullet anchors to a function/constant name or quoted error message in the script, a `result.json["key"]`, or a `tables/`/`figures/` filename the script actually writes — not a line number |
+| `SKILL.md` Key CLI | Spells the real `python skills/<domain>/<skill>/<script>.py` invocation. There is no `oc run`, and the body is the only place anyone learns this skill's CLI. |
+| `references/` | Contains `methodology.md`, `output_contract.md`, `parameters.md` |
+| `references/output_contract.md` | Every `tables/X.csv` / `figures/X.png` it mentions appears as a substring in the script (or a sibling `_lib/*.py` it imports) |
 
 ## Soft conventions (not lint-enforced, but every gold skill does this)
 
@@ -92,8 +108,9 @@ under `<skill>/data/` and load it from `--demo`. See
 ### Optional R Enhanced visualisation layer
 
 OmicsClaw has a three-tier visualisation flow: Python standard figures → R
-Enhanced figures (`omicsclaw.py replot`) → parameter tuning. The R layer is
-opt-in. If your skill exports `figure_data/*.csv` payloads and you want a
+Enhanced figures → parameter tuning. The R layer is opt-in. **Re-rendering
+is currently unavailable**: the `replot` command lived in the retired CLI, so
+today the only way to refresh a figure is to re-run the skill. If your skill exports `figure_data/*.csv` payloads and you want a
 publication-quality R renderer, add:
 
 ```

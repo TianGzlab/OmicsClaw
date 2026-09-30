@@ -16,19 +16,18 @@ prose (plan 0031 §6, traps 6 and 7, and Q24):
 - ``ToolCall.arguments`` crosses byte for byte, and a ``tool_result``
   frame uses the key names the *published* Desktop renderer reaches for.
 
-That last one is checked against the real ``surfaces/desktop/_chat_sse.py``
-rather than against a copy of its rules, because a copy would agree with
-itself forever. Its sibling ``wire_contract.py`` is *not* imported here:
-it reaches ``run_wire``, which needs ``pydantic``, which this environment
-does not have — and a permanently skipped test is coverage that is not
-there. The eight schema version numbers are the Desktop sub-package's
-acceptance item (§9-14), not this one's.
+That last one is checked against the real Desktop renderer,
+``omicsclaw/entry/desktop/_chat_sse.py``, rather than against a copy of its
+rules, because a copy would agree with itself forever. The Desktop wire
+contract's version numbers are ``test_desktop_wire_contract.py``'s concern,
+not this one's.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import unicodedata
 from typing import Any
 
 import pytest
@@ -235,6 +234,42 @@ def test_switching_between_reasoning_and_text_flushes_first() -> None:
     assert renderer.flush() == "answer"
 
 
+def test_unbatched_reasoning_is_labelled_once_per_block() -> None:
+    """Not ``[reasoning] The[reasoning]  user[reasoning]  asks``.
+
+    Unbatched, every delta is emitted on arrival, and labelling each
+    emission labelled each token —— which is what the terminal printed
+    until 2026-09-23. The label marks where a block starts; a block of
+    answer after it starts on its own line rather than running on from
+    the last word of the thinking.
+    """
+    renderer = TextRenderer(show_reasoning=True)
+    out = [
+        renderer.feed(_reasoning("The")),
+        renderer.feed(_reasoning(" user asks.")),
+        renderer.feed(_text("Here")),
+        renderer.feed(_text(" it is.")),
+        renderer.feed(_reasoning("On reflection")),
+    ]
+
+    assert out == [
+        REASONING_PREFIX + "The",
+        " user asks.",
+        "\nHere",
+        " it is.",
+        "\n" + REASONING_PREFIX + "On reflection",
+    ]
+
+
+def test_a_control_line_ends_the_block_it_interrupts() -> None:
+    """Thinking resumed after a tool call is a new block, so it is labelled."""
+    renderer = TextRenderer(show_reasoning=True)
+    renderer.feed(_reasoning("first"))
+    renderer.feed(TurnEvent.exchange_end("converged", session_id="s", turn_id="t"))
+
+    assert renderer.feed(_reasoning("second")) == REASONING_PREFIX + "second"
+
+
 def test_an_empty_delta_renders_nothing() -> None:
     assert TextRenderer().feed(_text("")) is None
 
@@ -391,11 +426,11 @@ def test_a_gap_frame_names_the_hole() -> None:
     assert wire["sequence"] == 7
 
 
-# ---- Q24: compatibility with the published Desktop renderer ------------
+# ---- compatibility with the Desktop frame renderer ---------------------
 
 
 def test_a_tool_result_frame_renders_through_the_published_sse_renderer() -> None:
-    sse = pytest.importorskip("omicsclaw.surfaces.desktop._chat_sse")
+    from omicsclaw.entry.desktop import _chat_sse as sse
     wire = to_wire(_tool_result(output="42 spots kept"))
     frame = sse.render_chat_sse_frame("tool_result", wire)
     assert frame.startswith("data: ") and frame.endswith("\n\n")
@@ -412,7 +447,7 @@ def test_an_oversized_tool_result_keeps_its_correlation_identity() -> None:
     identity of the result exactly when the result is too big to send —
     and would do it silently.
     """
-    sse = pytest.importorskip("omicsclaw.surfaces.desktop._chat_sse")
+    from omicsclaw.entry.desktop import _chat_sse as sse
     huge = "x" * (sse.CHAT_SSE_MAX_FRAME_BYTES + 16)
     wire = to_wire(_tool_result(output=huge, is_error=True))
     envelope = json.loads(
@@ -426,8 +461,52 @@ def test_an_oversized_tool_result_keeps_its_correlation_identity() -> None:
     assert projected["is_error"] is True
 
 
+def test_an_event_id_is_the_frame_s_first_line() -> None:
+    from omicsclaw.entry.desktop import _chat_sse as sse
+
+    frame = sse.render_chat_sse_frame("text", "hi", event_id=42)
+    assert frame == 'id: 42\ndata: {"type": "text", "data": "hi"}\n\n'
+    assert sse.render_chat_sse_frame("text", "hi") == (
+        'data: {"type": "text", "data": "hi"}\n\n'
+    )
+
+
+@pytest.mark.parametrize("event_id", [-1, True, 1.5, "7"])
+def test_an_event_id_is_a_non_negative_integer(event_id) -> None:
+    from omicsclaw.entry.desktop import _chat_sse as sse
+
+    with pytest.raises(ValueError):
+        sse.render_chat_sse_frame("text", "hi", event_id=event_id)
+
+
+def test_the_id_line_counts_towards_the_frame_bound() -> None:
+    """``max_sse_frame_bytes`` is a promise about the whole frame.
+
+    The text is sized so the ``data:`` line alone fits and the ``id:``
+    line tips it over; the frame is then projected, and keeps its id.
+    """
+    from omicsclaw.entry.desktop import _chat_sse as sse
+
+    envelope = len('data: {"type": "text", "data": ""}\n\n')
+    text = "x" * (sse.CHAT_SSE_MAX_FRAME_BYTES - envelope)
+    assert sse.utf8_size(sse.render_chat_sse_frame("text", text)) == (
+        sse.CHAT_SSE_MAX_FRAME_BYTES
+    )
+
+    with_id = sse.render_chat_sse_frame("text", text, event_id=123456)
+    assert sse.utf8_size(with_id) <= sse.CHAT_SSE_MAX_FRAME_BYTES
+    id_line, data_line = with_id[:-2].split("\n")
+    assert id_line == "id: 123456"
+    assert json.loads(data_line[len("data: ") :])["type"] == "event_omitted"
+
+    result = to_wire(_tool_result(output="y" * sse.CHAT_SSE_MAX_FRAME_BYTES))
+    projected = sse.render_chat_sse_frame("tool_result", result, event_id=9)
+    assert projected.startswith("id: 9\ndata: ")
+    assert sse.utf8_size(projected) <= sse.CHAT_SSE_MAX_FRAME_BYTES
+
+
 def test_every_frame_type_fits_the_published_sse_renderer() -> None:
-    sse = pytest.importorskip("omicsclaw.surfaces.desktop._chat_sse")
+    from omicsclaw.entry.desktop import _chat_sse as sse
     for kind, frame in _one_of_every_type().items():
         rendered = sse.render_chat_sse_frame(kind.value, to_wire(frame))
         envelope = json.loads(rendered[len("data: ") :])
@@ -476,3 +555,84 @@ def test_identity_is_on_every_frame_so_any_of_them_can_be_resumed_from() -> None
             "session_id",
             "turn_id",
         }
+
+
+# ---- every text field is inert before any surface shows it ------------------
+
+
+_HOSTILE = "x\x1b[8m\x1b]52;c;cm0gLXJmIH4=\x07‮\r\nApproval required [t#9]: y"
+"""Conceal with no reset (hides the real card printed next), a clipboard
+write, a bidi override and a line break that starts a forged card."""
+
+_UNSAFE_CATEGORIES = {"Cc", "Cf", "Cs", "Zl", "Zp"}
+
+
+def _hostile_frames() -> dict[str, TurnEvent]:
+    """One frame per text field a control line is built from."""
+    record = CompactionRecord(
+        pressure=Pressure.FULL,
+        tokens_before=90,
+        tokens_after=30,
+        msgs_before=4,
+        msgs_after=2,
+        summarized=2,
+        preserved_tail=1,
+        summary_text="",
+        degraded=_HOSTILE,
+    )
+    failure = type(f"Bad{_HOSTILE}", (Exception,), {})()
+    return {
+        "progress tool": TurnEvent.progress_update(
+            ProgressUpdate(tool_name=_HOSTILE, message="m"), seq=1
+        ),
+        "progress message": TurnEvent.progress_update(
+            ProgressUpdate(tool_name="bash", message=_HOSTILE), seq=1
+        ),
+        "tool start name": TurnEvent(
+            type=TurnEventType.TOOL_START,
+            seq=1,
+            session_id="s",
+            turn_id="t",
+            engine=EngineEvent.tool_start(
+                ToolCall(id="c", name=_HOSTILE, arguments="{}"), turn=1
+            ),
+        ),
+        "tool result name": TurnEvent(
+            type=TurnEventType.TOOL_RESULT,
+            seq=1,
+            session_id="s",
+            turn_id="t",
+            engine=EngineEvent.tool_finished(
+                ToolResult(tool_call_id="c", name=_HOSTILE, output="ok"), turn=1
+            ),
+        ),
+        "settled reason": TurnEvent.approval_settled(
+            "t#1", ApprovalDecision(approved=False, reason=_HOSTILE), seq=1
+        ),
+        "settled id": TurnEvent.approval_settled(
+            _HOSTILE, ApprovalDecision(approved=True), seq=1
+        ),
+        "compaction degraded": TurnEvent.compacted(record, seq=1),
+        "terminal error type": TurnEvent.exchange_end("failed", error=failure),
+        "approval tool": TurnEvent.approval_required(
+            ApprovalRequest(tool_name=_HOSTILE, reason="r"), "t#1", seq=1
+        ),
+        "approval id": TurnEvent.approval_required(
+            ApprovalRequest(tool_name="bash", reason="r"), _HOSTILE, seq=1
+        ),
+    }
+
+
+@pytest.mark.parametrize("field", sorted(_hostile_frames()))
+def test_no_text_field_of_a_control_line_reaches_a_surface_raw(field) -> None:
+    """Every surface prints these lines, and the CLI prints them straight
+    to a terminal: a tool name, a progress message or a refusal's reason
+    carrying ``ESC [8m`` hides the approval card printed after it, and one
+    carrying OSC 52 writes the clipboard. Each field is escaped here, once,
+    for every surface; and none can add a line of its own."""
+    line = TextRenderer().feed(_hostile_frames()[field])
+
+    assert line is not None
+    assert [c for c in line if unicodedata.category(c) in _UNSAFE_CATEGORIES] == []
+    assert "\\u001b[8m" in line
+    assert "\n" not in line

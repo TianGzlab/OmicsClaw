@@ -165,8 +165,10 @@ resources/
 .worktrees/
 e2e_test
 
-# Claude Code local state (settings, scheduled task locks)
-.claude/
+# Claude Code local state (settings, scheduled task locks). Project skills
+# under .claude/skills/ are shared and committed.
+.claude/*
+!.claude/skills/
 
 # Humanize RLCR loop artifacts (codex skill-call scratch, bitlesson, goal-tracker,
 # round summaries) — local-only loop bookkeeping, never committed.

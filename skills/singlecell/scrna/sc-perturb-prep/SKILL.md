@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-perturb-prep
 description: Load when attaching cell-barcode → sgRNA assignments from a mapping TSV/CSV onto a Perturb-seq
   expression AnnData, producing standardised perturbation / sgRNA / target-gene obs columns. Skip when
   the AnnData already has perturbation labels (use sc-perturb); raw guide-calling from FASTQ (use upstream
   demuxlet / cellranger guide pipelines).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -16,15 +11,6 @@ tags:
 - perturb-seq
 - crispr
 - sgrna-assignment
-requires:
-- anndata
-- matplotlib
-- numpy
-- packaging
-- pandas
-- pertpy
-- scanpy
-- scipy
 ---
 
 # sc-perturb-prep
@@ -47,8 +33,6 @@ classification. This skill does NOT infer guide identities from FASTQ
 — bring an upstream assignment table.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -83,26 +67,26 @@ classification. This skill does NOT infer guide identities from FASTQ
 
 ## Gotchas
 
-- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb_prep.py:205` raises `SystemExit("Provide --input or use --demo")`; `:207` raises `SystemExit("Perturbation preparation requires --mapping-file for real inputs. Generate barcode-to-guide assignments upstream first.")` when `--mapping-file` is missing on a real (non-demo) run. Wrappers expecting standard `ValueError` need to catch `SystemExit`.
-- **`multi_guide` cells are DROPPED by default.** Step 4 in the flow filters them out unless `--keep-multi-guide` is passed. `result.json["n_cells_multi_guide_dropped"]` (line 267 / 362) records the count. If your screen has high MOI on purpose (combinatorial perturbations), `--keep-multi-guide` is mandatory.
+- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb_prep.py` raises `SystemExit("Provide --input or use --demo")`; raises `SystemExit("Perturbation preparation requires --mapping-file for real inputs. Generate barcode-to-guide assignments upstream first.")` when `--mapping-file` is missing on a real (non-demo) run. Wrappers expecting standard `ValueError` need to catch `SystemExit`.
+- **`multi_guide` cells are DROPPED by default.** Step 4 in the flow filters them out unless `--keep-multi-guide` is passed. `result.json["n_cells_multi_guide_dropped"]` records the count. If your screen has high MOI on purpose (combinatorial perturbations), `--keep-multi-guide` is mandatory.
 - **Target gene is *inferred* by default, not read from mapping.** Without `--target-column`, the script splits the sgRNA ID by `--delimiter` (default `_`) and takes token at `--gene-position` (default `0`). For sgRNA IDs like `EGFR_sg1` this gives `EGFR`; for non-standard formats (`sg-EGFR-1`, `EGFR.sg1`) you must pass `--delimiter` accordingly or supply `--target-column`.
 - **Control matching is pattern-based, not exact.** `--control-patterns` (default from `DEFAULT_CONTROL_PATTERNS`) is a comma-separated list — any sgRNA whose ID **contains** one of the patterns is rewritten to `--control-label` (default `NT`). False positives are possible if a real guide's ID contains a control-pattern substring; review `tables/perturbation_assignments.csv` after the run.
-- **Non-gene features in `var` are silently removed only when `var["feature_types"]` exists.** `sc_perturb_prep.py:222` calls `keep_gene_expression_features(adata)`; the helper early-returns the unchanged AnnData if `feature_types` isn't a `var` column (typical for user-loaded h5ads). When it IS present (e.g., 10x cellranger output), antibody-capture / guide-capture rows are stripped silently and `result.json["n_non_gene_features_removed"]` records the count. A `0` value means either the column was absent or there were no non-gene rows to remove.
+- **Non-gene features in `var` are silently removed only when `var["feature_types"]` exists.** `sc_perturb_prep.py` calls `keep_gene_expression_features(adata)`; the helper early-returns the unchanged AnnData if `feature_types` isn't a `var` column (typical for user-loaded h5ads). When it IS present (e.g., 10x cellranger output), antibody-capture / guide-capture rows are stripped silently and `result.json["n_non_gene_features_removed"]` records the count. A `0` value means either the column was absent or there were no non-gene rows to remove.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic expression + mapping)
-python omicsclaw.py run sc-perturb-prep --demo --output /tmp/sc_perturb_prep_demo
+python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py --demo --output /tmp/sc_perturb_prep_demo
 
 # Real run with auto-detected mapping columns + delimiter
-python omicsclaw.py run sc-perturb-prep \
+python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
   --input cellranger/raw_feature_bc_matrix.h5 \
   --mapping-file guide_assignments.tsv \
   --output results/
 
 # Custom column names + non-default delimiter
-python omicsclaw.py run sc-perturb-prep \
+python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
   --input expression.h5ad \
   --mapping-file mapping.csv \
   --barcode-column cell_id --sgrna-column guide_id --target-column gene \
@@ -110,7 +94,7 @@ python omicsclaw.py run sc-perturb-prep \
   --output results/
 
 # Keep combinatorial multi-guide cells (high-MOI screens)
-python omicsclaw.py run sc-perturb-prep \
+python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
   --input expression.h5ad --mapping-file mapping.tsv \
   --keep-multi-guide --output results/
 ```
@@ -121,3 +105,9 @@ python omicsclaw.py run sc-perturb-prep \
 - `references/methodology.md` — assignment status semantics; control-pattern matching
 - `references/output_contract.md` — `obs["perturbation"]` / `obs["sgRNA"]` / `obs["target_gene"]` / `obs["assignment_status"]` schema
 - Adjacent skills: `sc-count` / `sc-multi-count` (upstream — produces the expression matrix; the mapping comes from cellranger / demuxlet output), `sc-perturb` (downstream — Mixscape classification on the standardised AnnData), `sc-de` (alternative downstream — direct DE between perturbed and control without Mixscape)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `packaging`, `pandas`, `pertpy`, `scanpy`, `scipy`

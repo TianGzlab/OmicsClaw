@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import RScriptRunner
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_pathway_scoring.py"
 R_SCRIPTS_DIR = SKILL_SCRIPT.parent / "rscripts"

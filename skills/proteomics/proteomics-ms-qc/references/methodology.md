@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run proteomics-ms-qc --demo
-python omicsclaw.py run proteomics-ms-qc --input <data.csv> --output <dir>
+python skills/proteomics/proteomics-ms-qc/proteomics_ms_qc.py --demo
+python skills/proteomics/proteomics-ms-qc/proteomics_ms_qc.py --input <data.csv> --output <dir>
 ```
 
 

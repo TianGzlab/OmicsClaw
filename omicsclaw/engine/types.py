@@ -41,6 +41,8 @@ from enum import StrEnum
 
 from omicsclaw.schema import Message, ToolCall, ToolResult, Usage
 
+from .prompt import RenderedPrompt
+
 
 class StopReason(StrEnum):
     """Why a run stopped — and there are exactly three ways.
@@ -97,6 +99,12 @@ class EngineEventType(StrEnum):
     iteration point, which is what a Python caller already expects.
     Inventing an error event would make every consumer hand-write a
     branch the language gives away for free.
+
+    No approval event either. A tool waits for a person's answer inside
+    the generator's ``__anext__``, so the generator cannot yield while the
+    question is open; the entry layer reports it instead, as
+    ``TurnEventType.APPROVAL_REQUIRED`` and ``APPROVAL_SETTLED`` in
+    :mod:`omicsclaw.entry.events`.
     """
 
     TEXT_DELTA = "text_delta"
@@ -157,6 +165,21 @@ class RunResult:
 
     turns: int = 0
     """How many model calls this run made."""
+
+    prompt: RenderedPrompt | None = None
+    """The render this run opened with, or ``None`` when nothing rendered
+    one — a bare :meth:`~omicsclaw.engine.loop.AgentEngine.run`, or an
+    :meth:`~omicsclaw.engine.loop.AgentEngine.exchange` with no
+    :class:`~omicsclaw.engine.prompt.PromptSource`.
+
+    The one field here that is not a record of what the run *did*: it
+    says how the run's input was assembled. It is carried anyway because
+    the alternative is worse — a caller that wants the render's section
+    statistics would have to render a second time, paying for the file
+    reads again and getting a *different* answer whenever a prompt file
+    changed in between. Reporting the bytes this run actually opened with
+    is the only version of that fact worth having.
+    """
 
     @property
     def final_message(self) -> Message | None:

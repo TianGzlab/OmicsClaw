@@ -23,10 +23,10 @@
 
 ```bash
 # Proportion test (R, no external deps)
-python omicsclaw.py run sc-differential-abundance --demo --method proportion_test_r --output /tmp/prop_test_demo
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py --demo --method proportion_test_r --output /tmp/prop_test_demo
 
 # Milo (replicate-aware)
-python omicsclaw.py run sc-differential-abundance --demo --method milo --output /tmp/milo_demo
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py --demo --method milo --output /tmp/milo_demo
 ```
 
 

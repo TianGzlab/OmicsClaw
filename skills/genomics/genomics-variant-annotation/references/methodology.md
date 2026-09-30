@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-variant-annotation --demo
-python omicsclaw.py run genomics-variant-annotation --input <data.vcf> --output <dir>
+python skills/genomics/genomics-variant-annotation/variant_annotation.py --demo
+python skills/genomics/genomics-variant-annotation/variant_annotation.py --input <data.vcf> --output <dir>
 ```
 
 

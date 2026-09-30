@@ -19,18 +19,23 @@ import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import ambient as sc_ambient_utils
 from skills.singlecell._lib.adata_utils import (
@@ -47,8 +52,9 @@ from skills.singlecell._lib.method_config import (
     check_method_available,
 )
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_ambient_removal
-from omicsclaw.core.dependency_manager import validate_r_environment
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills._sdk.deps import validate_r_environment
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -125,7 +131,7 @@ def _get_count_like_matrix(adata):
         raise ValueError(
             "Ambient RNA removal requires a raw count-like matrix. "
             "Provide `adata.layers['counts']`, aligned `adata.raw`, or count-like `adata.X`. "
-            "If the file provenance is unclear, run `oc run sc-standardize-input --input <file> --output <dir>` first."
+            "If the file provenance is unclear, run `python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input <file> --output <dir>` first."
         ) from exc
 
 
@@ -295,7 +301,7 @@ def _select_runtime_input(
 
 def run_soupx(raw_matrix_dir: str, filtered_matrix_dir: str):
     validate_r_environment(required_r_packages=["Seurat", "SoupX"])
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_soupx_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -1035,7 +1041,7 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Next step: Run sc-qc with the cleaned counts")
-    print(f"  python omicsclaw.py run sc-qc --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-qc/sc_qc.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

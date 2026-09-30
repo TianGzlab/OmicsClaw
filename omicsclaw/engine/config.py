@@ -16,7 +16,7 @@ incomparable, and the resulting failure — a task that stalls on one
 machine and completes on another — looks like a model regression rather
 than like configuration.
 
-The reference harness spells this as thirteen ``With…`` functional
+The reference harness spells this as sixteen ``With…`` functional
 options mutating the engine in place. A frozen record plus
 :meth:`EngineConfig.with_overrides` says the same thing without letting a
 live engine's budget be edited underneath a running loop.

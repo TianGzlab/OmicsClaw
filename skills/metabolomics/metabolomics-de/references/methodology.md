@@ -15,8 +15,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-diff --demo
-python omicsclaw.py run met-diff --input <feature_table.csv> --output <dir>
+python skills/metabolomics/metabolomics-de/met_diff.py --demo
+python skills/metabolomics/metabolomics-de/met_diff.py --input <feature_table.csv> --output <dir>
 ```
 
 

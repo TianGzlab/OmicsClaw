@@ -200,6 +200,22 @@ class ApprovalRequest:
     human can make, where the tool's name alone is not."""
     risk_level: RiskLevel = RiskLevel.HIGH
     approval_mode: ApprovalMode = ApprovalMode.ASK
+    ask_every_time: bool = False
+    """This question was raised by something more specific than the tool's
+    own default —— a dangerous-command pattern, an explicit ``ask`` rule, a
+    change to a file that decides what is asked about, a tool declared
+    ``DENY_UNLESS_TRUSTED`` —— so no standing "stop asking me" grant may
+    answer it.
+
+    Set by :func:`require_approval` from :func:`ask_every_time`, which the
+    permission gate binds; a tool never sets it. A surface that offers
+    such a grant (the CLI's ``s``) must ask anyway when this is true."""
+    reason_shows_call: bool = False
+    """Whether :attr:`reason` already shows everything the call will do.
+
+    Set by whoever wrote the reason, through :func:`require_approval`. A
+    surface shows :attr:`arguments` beside a reason that does not, so the
+    default, ``False``, shows them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +423,36 @@ def use_effective_policy(
         _EFFECTIVE_POLICY.reset(token)
 
 
+_ASK_EVERY_TIME: ContextVar[bool] = ContextVar(
+    "omicsclaw.tools.ask_every_time", default=False
+)
+"""Whether approvals raised in this scope must never be answered by a grant.
+
+Bound by the permission gate around the one call it decided to ask
+about, on **both** of the paths that ask: when the gate puts the
+question itself, and when it hands the question down to a tool that
+prompts for itself. The second is why this is a context variable rather
+than an argument: a tool's own :func:`require_approval` call is written
+by the tool's author, who knows nothing of rules or danger patterns, and
+the handed-down prompt is the one worth keeping —— it carries the whole
+command, the diff, the URL."""
+
+
+@contextmanager
+def ask_every_time(active: bool = True) -> Iterator[bool]:
+    """Mark approvals raised in the block as always-asked, then restore.
+
+    Takes the value rather than only setting ``True``, so that a caller
+    binds the answer for *this* call explicitly and a nested call cannot
+    inherit the outer one's.
+    """
+    token = _ASK_EVERY_TIME.set(bool(active))
+    try:
+        yield bool(active)
+    finally:
+        _ASK_EVERY_TIME.reset(token)
+
+
 TimeoutPause: TypeAlias = Callable[[], AbstractContextManager[None]]
 """A scheduler's way of not charging a block to the per-tool timeout.
 
@@ -534,6 +580,7 @@ async def require_approval(
     *,
     policy: ToolPolicy | None = None,
     reason: str = "",
+    reason_shows_call: bool = False,
 ) -> ApprovalDecision:
     """Ask for consent, and refuse to proceed without it.
 
@@ -543,6 +590,11 @@ async def require_approval(
     check the return value still does not run — the failure mode of a
     boolean return is a tool that asks politely and then ignores the
     answer.
+
+    ``reason`` is what the person is told, and ``reason_shows_call`` says
+    whether it already shows everything the call will do; both are carried
+    on the :class:`ApprovalRequest`, and a surface shows the arguments
+    beside a reason that does not.
 
     **The authoritative policy is the one the dispatching registry
     resolved, not the one the tool asks with.** ``policy`` is the caller's
@@ -610,6 +662,8 @@ async def require_approval(
                 reason=reason,
                 risk_level=effective.risk_level,
                 approval_mode=effective.approval_mode,
+                ask_every_time=_ASK_EVERY_TIME.get(),
+                reason_shows_call=reason_shows_call,
             )
         )
         if inspect.isawaitable(outcome):
@@ -664,6 +718,49 @@ def _as_decision(outcome: Any) -> ApprovalDecision:
     )
 
 
+UsageSink: TypeAlias = Callable[[Any], Any]
+"""Receives the token usage of model calls made on a caller's behalf. May be async."""
+
+
+_USAGE_SINK: ContextVar[UsageSink | None] = ContextVar("omicsclaw.tools.usage_sink", default=None)
+"""Where :func:`report_usage` delivers, or ``None``.
+
+A variable of its own rather than a field on :class:`ToolContext`: it is
+bound by whoever needs to count a whole run's model usage (a benchmark
+driver), around that run, and must reach tools that start model calls of
+their own — a sub-agent above all — without every surface having to
+forward it.
+"""
+
+
+@contextmanager
+def use_usage_sink(sink: UsageSink | None) -> Iterator[None]:
+    """Deliver :func:`report_usage` calls made in the block to *sink*, then restore."""
+    token = _USAGE_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _USAGE_SINK.reset(token)
+
+
+async def report_usage(usage: Any) -> bool:
+    """Hand the usage of one model call to the bound sink.
+
+    Returns whether a sink received it. A sink that raises is treated as
+    absent, as :func:`report_progress` treats a broken progress sink.
+    """
+    sink = _USAGE_SINK.get()
+    if sink is None:
+        return False
+    try:
+        outcome = sink(usage)
+        if inspect.isawaitable(outcome):
+            await outcome
+    except Exception:
+        return False
+    return True
+
+
 __all__ = [
     "ApprovalChannel",
     "ApprovalDecision",
@@ -674,15 +771,18 @@ __all__ = [
     "ProgressUpdate",
     "TimeoutPause",
     "ToolContext",
+    "UsageSink",
     "context_value",
     "current_context",
     "effective_policy",
     "pause_tool_timeout",
     "report_progress",
+    "report_usage",
     "require_approval",
     "reset_tool_context",
     "set_tool_context",
     "use_effective_policy",
     "use_timeout_pause",
     "use_tool_context",
+    "use_usage_sink",
 ]

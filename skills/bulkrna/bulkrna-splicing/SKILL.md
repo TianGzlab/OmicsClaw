@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: bulkrna-splicing
 description: Load when summarising rMATS / SUPPA2 alternative-splicing output and identifying significant
   differential splicing events. Skip when you only have count-level DE (use bulkrna-de); splicing in single-cell;
   spatial data (currently unsupported).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: alternative splicing, splicing analysis, PSI, rMATS, SUPPA2, exon skipping, differential splicing
 tags:
 - bulkrna
 - splicing
@@ -16,11 +11,6 @@ tags:
 - PSI
 - rMATS
 - SUPPA2
-requires:
-- matplotlib
-- numpy
-- pandas
-- scipy
 ---
 
 # bulkrna-splicing
@@ -34,8 +24,6 @@ skill consumes that output (not raw alignments).  Computes per-event
 MXE / RI).
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -53,8 +41,8 @@ MXE / RI).
 
 ## Flow
 
-1. Load splicing event table.  Hard-fail at `bulkrna_splicing.py:365,368` on missing or invalid `--input`.
-2. Validate the fixed input schema: must contain columns `event_type, gene, delta_psi, padj` (`bulkrna_splicing.py:153-155`).  No format detection — caller must pre-flatten rMATS / SUPPA2 output to this schema.
+1. Load splicing event table.  Hard-fail at `bulkrna_splicing.py` on missing or invalid `--input`.
+2. Validate the fixed input schema: must contain columns `event_type, gene, delta_psi, padj` (`bulkrna_splicing.py`).  No format detection — caller must pre-flatten rMATS / SUPPA2 output to this schema.
 3. Filter by `--dpsi-cutoff` AND `--padj-cutoff`.
 4. Group by event type; render distribution + volcano + bar plots.
 5. Emit `tables/splicing_events.csv` (full) + `tables/significant_events.csv` (filtered) + report.
@@ -69,10 +57,10 @@ MXE / RI).
 ## Key CLI
 
 ```bash
-python omicsclaw.py run bulkrna-splicing --demo
-python omicsclaw.py run bulkrna-splicing \
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --demo --output /tmp/bulkrna-splicing_demo
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py \
   --input rmats_se.csv --output results/
-python omicsclaw.py run bulkrna-splicing \
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py \
   --input suppa2_events.csv --output results/ \
   --dpsi-cutoff 0.2 --padj-cutoff 0.01
 ```
@@ -83,3 +71,9 @@ python omicsclaw.py run bulkrna-splicing \
 - `references/methodology.md` — rMATS vs SUPPA2 format conventions, event-type taxonomy
 - `references/output_contract.md` — exact output directory layout
 - Adjacent skills: `bulkrna-de` (parallel: gene-level DE, complements exon-level splicing), `bulkrna-enrichment` (downstream: pathway view of splicing-affected genes via gene-symbol mapping)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`matplotlib`, `numpy`, `pandas`, `scipy`

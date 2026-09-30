@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 
 from .adata_utils import require_spatial_coords
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 

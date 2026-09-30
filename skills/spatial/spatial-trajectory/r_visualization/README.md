@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-trajectory ...` first. The resulting output directory
+Run `python skills/spatial/spatial-trajectory/spatial_trajectory.py ...` first. The resulting output directory
 should contain:
 
 - `figure_data/trajectory_summary.csv`

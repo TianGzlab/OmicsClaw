@@ -1,0 +1,42 @@
+Tune the skill ${skill} on the input ${input} and choose the result yourself.
+
+1. Choose the number of spatial domains, K, from the grid K = ${grid_text}, using the evidence below: the skill's documentation, the data, the tissue (when known), stability curves over the grid, and marker genes of candidate partitions. A probe has already run: every method's default-parameter trials and a resolution scan are in run ${probe_run_id} (see the resolution-to-K table below). These trials cost nothing.
+2. For each method below, find good parameters at your K with run_skill (skill ${skill}, input ${input}, run_id ${run_id}). A method whose number of domains is set by a parameter takes K directly; for the others, adjust the listed resolution parameter until the trial has K clusters. Each method has its own budget of new runs, listed below; a call past the budget is refused.
+3. Compare trials with inspect_trials. A trial's fixed_k_score is comparable only with trials that have the same number of clusters.
+4. Finish by calling select_result with run_id ${run_id}, your K, for every method the trial you judge best at K, and a final trial.
+
+## Methods and budgets
+
+${methods}
+
+## Skill documentation
+
+${skill_md}
+
+## Data
+
+${data}
+
+## Tissue
+
+${tissue}
+
+## Stability curves
+
+${curves}
+
+## Resolution-to-K table of the probe (default parameters)
+
+${resolution_map}
+
+## Markers of one representative partition per K (top 3 genes per domain)
+
+${compact_markers}
+
+## Full marker blocks for the stable peaks
+
+${full_markers}
+
+## How the partitions of consecutive K above nest
+
+${nesting}

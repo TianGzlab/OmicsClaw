@@ -68,8 +68,8 @@ Rule of thumb: no more than 1 gene per 10 events in the dataset.
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-survival --demo
-python omicsclaw.py run bulkrna-survival --input expr.csv --clinical clinical.csv --genes TP53,BRCA1 --output results/
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py --demo
+python skills/bulkrna/bulkrna-survival/bulkrna_survival.py --input expr.csv --clinical clinical.csv --genes TP53,BRCA1 --output results/
 python bulkrna_survival.py --demo --output /tmp/survival_demo
 ```
 

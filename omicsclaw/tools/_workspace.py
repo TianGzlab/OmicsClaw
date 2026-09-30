@@ -91,7 +91,7 @@ home" branch unreachable rather than dangerous.
 *The list is re-derived for this project.* ``~/.kube`` stays because it
 costs nothing, and ``.env`` is added because it is where **this**
 repository keeps ``LLM_API_KEY``, ``TELEGRAM_BOT_TOKEN`` and
-``FEISHU_APP_SECRET`` (``CLAUDE.md``, "Channel Surface"). An omics agent
+``FEISHU_APP_SECRET`` (see ``.env.example``). An omics agent
 that can read one ``.env`` can impersonate the bot it is running as.
 
 **Compared against** ``omicsclaw/services/path_validation.py``, which does

@@ -668,9 +668,11 @@ class AnthropicProvider:
         # Extended thinking and a sampling temperature are mutually
         # exclusive — the API rejects any temperature but 1 while thinking
         # is enabled — so the request carries one or the other, never both.
+        # Models that accept only adaptive thinking reject ``temperature``
+        # outright, so they get neither.
         if thinking:
             params.update(thinking)
-        else:
+        elif thinking_support_for_model(config.model) is not ThinkingSupport.ADAPTIVE_ONLY:
             params["temperature"] = config.temperature
 
         # Last, and therefore winning, exactly as the OpenAI adapter

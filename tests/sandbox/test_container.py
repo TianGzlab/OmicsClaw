@@ -45,7 +45,7 @@ def test_the_container_is_hardened(tmp_path):
 
     assert ("--cap-drop", "ALL") in pairs
     assert ("--security-opt", "no-new-privileges:true") in pairs
-    assert ("--pids-limit", "4096") in pairs
+    assert ("--pids-limit", "65536") in pairs
     assert "--init" in args
     assert "--cap-add" not in args
     assert "--privileged" not in args
@@ -100,6 +100,47 @@ def test_limits_appear_only_when_configured(tmp_path):
 
     assert not {"--memory", "--cpus", "--gpus"} & set(bare)
     assert {("--memory", "32g"), ("--cpus", "8"), ("--gpus", "all")} <= capped
+
+
+def test_resource_defaults_suit_concurrent_analyses(tmp_path):
+    """Several trials share one container: threads count against the pids
+    cgroup, PyTorch and joblib need more than Docker's 64 MiB ``/dev/shm``,
+    concurrent h5ad readers need file descriptors, and libraries that still
+    write to ``/tmp`` need room there."""
+    args = _args(tmp_path)
+    pairs = _pairs(args)
+
+    assert ("--pids-limit", "65536") in pairs
+    assert ("--shm-size", "128g") in pairs
+    assert ("--ulimit", "nofile=65536:65536") in pairs
+    assert ("--tmpfs", "/tmp:rw,nosuid,nodev,size=64g") in pairs
+
+
+def test_shm_and_nofile_can_be_left_to_the_runtime(tmp_path):
+    args = _args(tmp_path, shm_size="", nofile=0)
+    assert "--shm-size" not in args and "--ulimit" not in args
+
+
+def test_credentials_in_the_workspace_are_masked(tmp_path):
+    """The workspace may be a checkout holding ``.env`` (API keys) and
+    ``.omicsclaw/`` (permission rules, memory). The container sees an empty
+    file and an empty directory; the exchange directory the sandbox itself
+    needs is mounted back inside the mask."""
+    ws = tmp_path / "ws"
+    (ws / ".omicsclaw" / "sandbox").mkdir(parents=True)
+    (ws / ".env").write_text("LLM_API_KEY=sk-secret\n")
+    pairs = _pairs(_args(tmp_path))
+
+    assert ("--volume", f"/dev/null:{ws / '.env'}:ro") in pairs
+    assert ("--tmpfs", f"{ws / '.omicsclaw'}:rw,nosuid,nodev,size=1m") in pairs
+    exchange = ws / ".omicsclaw" / "sandbox"
+    assert ("--volume", f"{exchange}:{exchange}") in pairs
+
+
+def test_nothing_is_masked_when_there_is_nothing_to_hide(tmp_path):
+    (tmp_path / "ws").mkdir()
+    args = _args(tmp_path)
+    assert not any(".env" in arg or ".omicsclaw" in arg for arg in args)
 
 
 def test_labels_name_the_owner_and_the_image_runs_sleep(tmp_path):

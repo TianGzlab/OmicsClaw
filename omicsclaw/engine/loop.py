@@ -14,6 +14,21 @@ moving until the model stops asking to act::
     async for event in engine.run_stream(messages):   # streaming
         ...
 
+Plan 0027 §12.4.4 adds a second pair of entry points over that same
+kernel, for the caller who has a system prompt and a history rather than
+a finished list of messages::
+
+    engine = AgentEngine(provider, tools, prompt=assembler)
+
+    result = await engine.exchange("分析这份 Visium 数据", conversation=chat)
+    async for event in engine.exchange_stream("…", conversation=chat):
+        ...
+
+``exchange`` and ``exchange_stream`` are **shells**, not a second loop:
+they render, splice, delegate to ``run`` / ``run_stream``, and hand the
+finished trajectory back to the conversation. Everything about turns,
+tools and stopping stays in the one kernel below.
+
 **One kernel, two mouths.** :meth:`AgentEngine.run` and
 :meth:`AgentEngine.run_stream` share a single copy of the turn / tool /
 Observation logic, because a second copy is how a blocking path and a
@@ -32,8 +47,11 @@ one :func:`~omicsclaw.engine.executor.execute_tool_calls` already uses
 for its results.
 
 **What this layer is not.** No prompt assembly, no session persistence,
-no tool implementations. The conversation arrives assembled and leaves
-as a trajectory; history belongs to the caller. Compaction is not
+no tool implementations. Nothing here renders a prompt or writes a
+conversation down: a :class:`~omicsclaw.engine.prompt.PromptSource` is
+*asked* for a render it made elsewhere, and a
+:class:`~omicsclaw.engine.conversation.Conversation` is *handed* the
+trajectory to do as it likes with. Compaction is not
 decided here either: a :class:`~omicsclaw.engine.compactor.
 HistoryCompactor` handed to :meth:`AgentEngine.run` is consulted before
 every model call and may rewrite what is sent, or the history itself.
@@ -55,6 +73,7 @@ from dataclasses import dataclass, replace
 from omicsclaw.provider import Completion, LLMProvider, ProviderError
 from omicsclaw.schema import (
     Message,
+    Role,
     StreamChunkType,
     ToolCall,
     ToolDefinition,
@@ -65,7 +84,9 @@ from omicsclaw.schema import (
 from .augmentor import TurnAugmentor
 from .compactor import HistoryCompactor
 from .config import EngineConfig
+from .conversation import Conversation
 from .executor import ToolExecutor, execute_tool_calls, observations
+from .prompt import PromptSource, RenderedPrompt
 from .retry import generate_with_retry
 from .types import EngineError, EngineEvent, RunResult, StopReason
 
@@ -140,6 +161,12 @@ class AgentEngine:
     :class:`~omicsclaw.engine.types.RunResult`, so two runs of the same
     engine cannot contaminate each other and nothing needs resetting
     between them.
+
+    *prompt* and *conversation* are **defaults, not bindings**. One
+    engine serves many conversations — a registry hands the same
+    instance every session it runs — so both are overridable on each
+    :meth:`exchange`, and the constructor values are what a caller that
+    drives a single conversation writes once instead of every call.
     """
 
     def __init__(
@@ -147,10 +174,15 @@ class AgentEngine:
         provider: LLMProvider,
         tools: ToolExecutor,
         config: EngineConfig | None = None,
+        *,
+        prompt: PromptSource | None = None,
+        conversation: Conversation | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
         self._config = config if config is not None else EngineConfig()
+        self._prompt = prompt
+        self._conversation = conversation
 
     # ---- the two entry points -------------------------------------------
 
@@ -216,6 +248,113 @@ class AgentEngine:
         branch the language gives away (plan 0027 §4 Q3).
         """
         return self._kernel(messages, self._streaming_turn, compactor, augmentor)
+
+    # ---- the two lifecycle shells ----------------------------------------
+
+    async def exchange(
+        self,
+        user_text: str,
+        *,
+        conversation: Conversation | None = None,
+        prompt: PromptSource | None = None,
+        compactor: HistoryCompactor | None = None,
+        augmentor: TurnAugmentor | None = None,
+    ) -> RunResult:
+        """One exchange: render, splice, :meth:`run`, hand the trajectory back.
+
+        Four steps, in this order, and no fifth::
+
+            prompt.render()          -> the system message, if there is one
+            conversation.messages()  -> the history in front of it
+            + Message.user(user_text)
+            -> run(…)                -> the kernel, unchanged
+            -> conversation.commit(the trajectory, system message removed)
+
+        Every collaborator is optional and every one of them overrides
+        the engine's default for this call alone. With none of them, this
+        is ``run([Message.user(user_text)])`` and nothing more.
+
+        The returned :class:`~omicsclaw.engine.types.RunResult` is the
+        kernel's, carrying
+        :attr:`~omicsclaw.engine.types.RunResult.prompt`.
+
+        **What does not happen here is as load-bearing as what does.**
+        No deadline: how long a deployment is willing to wait is its
+        policy, and a caller's :func:`asyncio.timeout` around this call
+        expresses it without the loop having to hold an opinion. No
+        commit on a failure either — an exception leaves the
+        conversation exactly as it was, because a run that raised
+        produced no trajectory worth continuing from.
+        """
+        talk = self._conversation if conversation is None else conversation
+        source = self._prompt if prompt is None else prompt
+        rendered = source.render() if source is not None else None
+        result = await self.run(
+            _opening(rendered, talk, user_text),
+            compactor=compactor,
+            augmentor=augmentor,
+        )
+        return await _settle(result, rendered, talk)
+
+    async def exchange_stream(
+        self,
+        user_text: str,
+        *,
+        conversation: Conversation | None = None,
+        prompt: PromptSource | None = None,
+        compactor: HistoryCompactor | None = None,
+        augmentor: TurnAugmentor | None = None,
+    ) -> AsyncIterator[EngineEvent]:
+        """:meth:`exchange`, yielding each increment as it happens.
+
+        The same four steps over :meth:`run_stream`, and the same
+        events — with one ordering rule of its own: **``DONE`` is
+        forwarded after the commit, not before it.** A consumer that
+        stops reading the moment it has its answer is ordinary, and an
+        ``async for`` that breaks throws ``GeneratorExit`` into this
+        coroutine at the yield it is suspended on, so anything written
+        after the last yield is code that may simply never run.
+        Committing first makes "the conversation is recorded" a fact by
+        the time anybody learns the run is finished.
+
+        The ``DONE`` event carries the same
+        :class:`~omicsclaw.engine.types.RunResult` :meth:`exchange`
+        would have returned, ``prompt`` included.
+
+        Abandoning the stream *before* ``DONE`` commits nothing, and
+        that is the intended reading of a cancelled exchange: the
+        conversation stays byte-for-byte as it was rather than gaining
+        half a turn nobody finished.
+
+        An async generator, where :meth:`run_stream` is a plain function
+        returning one — there is work on both sides of the iteration
+        here, and a caller writes the same ``async for`` either way.
+        """
+        talk = self._conversation if conversation is None else conversation
+        source = self._prompt if prompt is None else prompt
+        rendered = source.render() if source is not None else None
+        done: EngineEvent | None = None
+        async with aclosing(
+            self.run_stream(
+                _opening(rendered, talk, user_text),
+                compactor=compactor,
+                augmentor=augmentor,
+            )
+        ) as events:
+            async for event in events:
+                # DONE is the only event carrying a result, and it is
+                # last — the kernel's own invariant, read here the same
+                # way ``run`` reads it.
+                if event.result is None:
+                    yield event
+                else:
+                    done = event
+        if done is None or done.result is None:
+            raise EngineError(
+                "the loop kernel ended without a DONE event — the engine's own "
+                "invariant, not the provider's"
+            )
+        yield replace(done, result=await _settle(done.result, rendered, talk))
 
     # ---- the kernel ------------------------------------------------------
 
@@ -501,6 +640,61 @@ class AgentEngine:
 
 
 # ---- internals -----------------------------------------------------------
+
+
+def _opening(
+    rendered: RenderedPrompt | None,
+    conversation: Conversation | None,
+    user_text: str,
+) -> tuple[Message, ...]:
+    """``[system?, *history, user?]`` — what an exchange starts from.
+
+    Exactly one system message, at index 0, and only when something
+    rendered one. A second would put a stale persona beside the current
+    one, and both would be read.
+
+    An empty *user_text* appends **nothing**. A conversation that
+    already ends on the user's turn is the ordinary case for a caller
+    re-running after a compaction, and a blank message on top of it is
+    one more thing for the model to interpret.
+    """
+    messages: list[Message] = []
+    if rendered is not None:
+        messages.append(Message.system(rendered.system_prompt))
+    if conversation is not None:
+        messages.extend(conversation.messages())
+    if user_text:
+        messages.append(Message.user(user_text))
+    return tuple(messages)
+
+
+async def _settle(
+    result: RunResult,
+    rendered: RenderedPrompt | None,
+    conversation: Conversation | None,
+) -> RunResult:
+    """Stamp the render onto *result* and commit the trajectory.
+
+    The commit is the **whole** trajectory rather than what this
+    exchange added, and the system message is taken back out of it
+    first — see :mod:`omicsclaw.engine.conversation` for why both are
+    forced rather than chosen.
+
+    System messages are removed **by role**, not by dropping the one
+    index the opening put one at. A compactor rewrites the conversation
+    between turns and hands back whatever it likes; counting on a
+    position that survived that is how a run starts handing back a
+    trajectory one message short. Nothing is removed at all when nothing
+    was added, so a caller driving the loop with a conversation that
+    keeps its own system message is left alone.
+    """
+    settled = replace(result, prompt=rendered)
+    if conversation is not None:
+        carried = settled.messages
+        if rendered is not None:
+            carried = tuple(m for m in carried if m.role is not Role.SYSTEM)
+        await conversation.commit(carried)
+    return settled
 
 
 def _stop_reason_for(completion: Completion) -> StopReason | None:

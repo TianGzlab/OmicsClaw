@@ -13,7 +13,7 @@ whether it still fits, and shrinks it when it does not::
 
     prompt = (
         PromptAssembler()
-        .with_section(Section("persona", "", text_from_file("SOUL.md")))
+        .with_section(Section("contract", "", text_from_file("OMICSCLAW.md")))
         .with_section(Section("project", "## Project", text_from_file("AGENTS.md")))
         .with_section(Section("skills", "## Skills", render_skill_index))
         .render()
@@ -34,7 +34,7 @@ whether it still fits, and shrinks it when it does not::
     # one. See :func:`~omicsclaw.context.prompt.assemble`.
     conversation = assemble(prompt, smaller[1:], "下一步")
 
-Note where the knowledge lives in that sketch: ``SOUL.md``, the skill
+Note where the knowledge lives in that sketch: ``OMICSCLAW.md``, the skill
 index, the model table and the summarizing model are all the composition
 root's, reaching this package through a callable or a plain ``int``.
 

@@ -1,14 +1,29 @@
 """
 DingTalk (钉钉) channel implementation for OmicsClaw.
 
-Uses the DingTalk Stream (WebSocket) protocol — no public IP required.
-The bot connects via ``dingtalk-stream`` SDK or raw WebSocket to receive
-messages and sends replies via the DingTalk Robot REST API.
+Uses the DingTalk Stream (WebSocket) protocol — no public IP required. The
+socket is driven by ``websockets`` on the running event loop, so nothing
+here crosses a thread boundary. Replies leave through the Robot REST API.
 
-Prerequisites:
-    pip install httpx websockets
+**Attribution here is weaker than on Telegram or Feishu, and the difference
+is worth stating.** DingTalk does not report a list of mentioned identities
+that this bot's own id could be looked up in. What it reports is a boolean,
+``isInAtList``, which is the platform asserting "this message @-mentioned
+you". This adapter translates that assertion into the vocabulary
+:class:`~omicsclaw.entry.ingress.SenderPolicy` reads — it puts the
+configured robot identity into the mention list **only when the boolean is
+true**. So what is verified is *DingTalk says this was aimed at us*, not *we
+found ourselves in the mention list*. Putting the identity there
+unconditionally would make the group gate always open, which is the same as
+having no gate.
 
-Configuration via environment variables:
+**Replies are one-to-one even for a group message.** ``oToMessages/batchSend``
+addresses people, not conversations, so an answer to something said in a
+group arrives in the sender's direct chat. That is what this API does and
+what the reply target therefore names.
+
+Configuration via environment variables (read by ``omicsclaw/launch/``, never
+here):
     DINGTALK_CLIENT_ID       — Robot App Key
     DINGTALK_CLIENT_SECRET   — Robot App Secret
 
@@ -24,23 +39,34 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
+from omicsclaw.entry.ingress import (
+    SenderPolicy,
+    VALUE_CHAT_TYPE,
+    VALUE_MENTIONS,
+)
+
+from . import reply_target
 from .base import Channel
+from .binding import ChannelSurfaceBinding
 from .capabilities import DINGTALK as DINGTALK_CAPS
 from .config import BaseChannelConfig
+from .dingtalk_delivery import DingTalkDeliveryAdapter
+from .runtime import TurnAcceptanceStatus
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("omicsclaw.channel.dingtalk")
 
 # ─ DingTalk API endpoints ───────────────────
 
 GATEWAY_URL = "https://api.dingtalk.com/v1.0/gateway/connections/open"
 TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
-SEND_URL = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
-MEDIA_UPLOAD_URL = "https://oapi.dingtalk.com/media/upload"
-FILE_DOWNLOAD_URL = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
+
+GROUP_CONVERSATION_TYPE = "2"
+"""``conversationType`` for a group chat; ``"1"`` is one-to-one."""
+
+RECONNECT_DELAY_S = 5.0
 
 
 # ─ Config ─────────────────────────
@@ -61,159 +87,245 @@ class DingTalkConfig(BaseChannelConfig):
 class DingTalkChannel(Channel):
     """DingTalk channel using Stream Mode (WebSocket).
 
-    Architecture:
-    1. Authenticate via OAuth to get access_token
-    2. Open WebSocket gateway for inbound messages
-    3. ACK each message, parse content, process through LLM
-    4. Send replies via Robot oToMessages/batchSend REST API
-
-    Lifecycle:
-        channel = DingTalkChannel(config)
-        await channel.start()   # auth + ws connect
-        await channel.run()     # blocks on message loop
-        await channel.stop()    # cleanup
+    Owner text enters the authoritative
+    :class:`~omicsclaw.entry.channel.runtime.ChannelRuntime`; answers leave
+    only through its delivery pump, which is what classifies whether they
+    were accepted. Inbound attachments and outbound media are fail-closed.
     """
 
     name = "dingtalk"
     capabilities = DINGTALK_CAPS
-
-    _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+    authoritative_ingress = True
 
     def __init__(self, config: DingTalkConfig):
         super().__init__(config)
+        self.dingtalk_config = config
         self._http_client = None
         self._access_token: str | None = None
-        self._token_expires: float = 0
+        self._token_expires: float = 0.0
         self._ws = None
-        self._ws_task: asyncio.Task | None = None
+        self._ws_task: asyncio.Task[None] | None = None
+        self._account_namespace = ""
+        self.bot_identity = ""
+        """The robot's App Key, which is what a proven mention resolves to.
+
+        Empty until :meth:`prepare_control_binding` has run, which is exactly
+        when a group message cannot be attributed and therefore fails closed.
+        """
 
     # ─ Lifecycle ──────────────────────
 
-    async def start(self) -> None:
-        self.require_authoritative_ingress()
+    async def prepare_control_binding(self) -> ChannelSurfaceBinding:
+        """Authenticate far enough to describe this robot's control binding."""
+
+        owners = self._owner_subjects()
+        if not owners:
+            raise RuntimeError(
+                "DingTalk authoritative ingress requires DINGTALK_ALLOWED_SENDERS"
+            )
+        client_id = self.dingtalk_config.client_id.strip()
+        if not client_id or not self.dingtalk_config.client_secret.strip():
+            raise RuntimeError(
+                "DINGTALK_CLIENT_ID and DINGTALK_CLIENT_SECRET are required"
+            )
+        if self._http_client is None:
+            self._http_client = self._build_http_client()
+        await self._refresh_token()
+
+        self._account_namespace = f"robot-{client_id}"
+        self.bot_identity = client_id
+
+        return ChannelSurfaceBinding(
+            adapter="dingtalk",
+            account_namespace=self._account_namespace,
+            sender_policy=SenderPolicy(
+                allowed_senders=owners,
+                bot_identity=self.bot_identity,
+            ),
+            delivery_adapter=DingTalkDeliveryAdapter(
+                self._http_client, self._ensure_token
+            ),
+            text_chunk_limit=(
+                self.config.text_chunk_limit or self.capabilities.max_text_length
+            ),
+            attachment_input_enabled=False,
+        )
+
+    def _build_http_client(self) -> Any:
         try:
             import httpx
         except ImportError:
-            raise RuntimeError("httpx not installed. Run: pip install httpx")
+            raise RuntimeError("httpx not installed. Run: pip install httpx") from None
+        return httpx.AsyncClient(timeout=15)
 
-        cfg: DingTalkConfig = self.config
-        if not cfg.client_id or not cfg.client_secret:
-            raise RuntimeError("DINGTALK_CLIENT_ID and DINGTALK_CLIENT_SECRET required")
+    async def start(self) -> None:
+        """Phase 2: open the stream once the shared runtime is bound."""
 
-        self._http_client = httpx.AsyncClient(timeout=15)
-        await self._refresh_token()
+        if self._control_runtime is None:
+            raise RuntimeError(
+                "DingTalk requires the shared ChannelRuntime to be bound "
+                "before start()"
+            )
+        if self._http_client is None:  # pragma: no cover - prepare runs first
+            raise RuntimeError("DingTalk was not prepared")
         self._running = True
-        self._ws_task = asyncio.create_task(self._ws_loop())
+        self._ws_task = asyncio.create_task(
+            self._ws_loop(), name="omicsclaw-dingtalk"
+        )
         logger.info("DingTalk channel started (Stream Mode)")
 
     async def stop(self) -> None:
+        self.deactivate_ingress()
         self._running = False
-        if self._ws_task and not self._ws_task.done():
-            self._ws_task.cancel()
-            try:
-                await self._ws_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._ws_task = None
-        if self._ws:
+        task = self._ws_task
+        self._ws_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if self._ws is not None:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as error:
+                logger.warning(
+                    "DingTalk socket shutdown failed (%s)", type(error).__name__
+                )
             self._ws = None
-        if self._http_client:
-            await self._http_client.aclose()
+        if self._http_client is not None:
+            try:
+                await self._http_client.aclose()
+            except Exception as error:
+                logger.warning(
+                    "DingTalk HTTP shutdown failed (%s)", type(error).__name__
+                )
             self._http_client = None
         self._access_token = None
+        # The shared runtime is owned and closed by the runner, not by any one
+        # channel: several channels share one agent.
+        self._control_runtime = None
+        self._control_loop = None
         logger.info("DingTalk channel stopped")
+
+    def run_stream(self) -> None:
+        """Refuse the legacy standalone entry point.
+
+        The robot cannot own the agent it speaks for: every channel in the
+        process shares one
+        :class:`~omicsclaw.entry.channel.runtime.ChannelRuntime`, composed by
+        the runner from every channel's binding.
+        """
+
+        raise RuntimeError(
+            "DingTalkChannel.run_stream() is retired; start the robot through "
+            "the runner that owns the shared ChannelRuntime: compose one with "
+            "compose_channel_runtime(app, channels) and start them through "
+            "ChannelManager"
+        )
 
     # ─ Token management ────────────────────
 
     async def _refresh_token(self) -> None:
-        """Fetch access_token from DingTalk OAuth2."""
-        cfg: DingTalkConfig = self.config
-        resp = await self._http_client.post(
+        """Fetch an access token from DingTalk OAuth2."""
+        response = await self._http_client.post(
             TOKEN_URL,
-            json={"appKey": cfg.client_id, "appSecret": cfg.client_secret},
+            json={
+                "appKey": self.dingtalk_config.client_id,
+                "appSecret": self.dingtalk_config.client_secret,
+            },
         )
-        data = resp.json()
+        data = response.json()
         token = data.get("accessToken")
         if not token:
-            raise RuntimeError(f"DingTalk auth failed: {data}")
+            raise RuntimeError(
+                f"DingTalk auth failed (code {data.get('code', 'unknown')})"
+            )
         self._access_token = token
         expires_in = int(data.get("expireIn", 7200))
-        self._token_expires = time.monotonic() + expires_in - 300  # 5min early refresh
-        logger.debug(f"DingTalk token refreshed, expires in {expires_in}s")
+        # Five minutes early, so a token never expires between the check and
+        # the call it was fetched for.
+        self._token_expires = time.monotonic() + expires_in - 300
 
     async def _ensure_token(self) -> str:
-        """Ensure the access token is valid, refreshing if expired."""
+        """A token that is valid now, refreshing it if it is not."""
         if not self._access_token or time.monotonic() >= self._token_expires:
             await self._refresh_token()
-        return self._access_token
+        return self._access_token or ""
 
     # ─ WebSocket stream ────────────────────
 
     async def _get_ws_url(self) -> str:
-        """Get WebSocket URL from DingTalk gateway."""
-        cfg: DingTalkConfig = self.config
-        resp = await self._http_client.post(
+        """Open a gateway connection and return the socket URL it names."""
+        response = await self._http_client.post(
             GATEWAY_URL,
             json={
-                "clientId": cfg.client_id,
-                "clientSecret": cfg.client_secret,
+                "clientId": self.dingtalk_config.client_id,
+                "clientSecret": self.dingtalk_config.client_secret,
                 "subscriptions": [
                     {"type": "CALLBACK", "topic": "/v1.0/im/bot/messages/get"}
                 ],
                 "ua": "omicsclaw-dingtalk/0.1",
             },
         )
-        data = resp.json()
+        data = response.json()
         endpoint, ticket = data.get("endpoint"), data.get("ticket")
         if not endpoint or not ticket:
-            raise RuntimeError(f"DingTalk gateway failed: {data}")
+            raise RuntimeError("DingTalk gateway returned no endpoint")
         return f"{endpoint}?ticket={quote_plus(ticket)}"
 
     async def _ws_loop(self) -> None:
-        """WebSocket message loop with automatic reconnection."""
+        """Receive events until stopped, reconnecting when the socket drops."""
         try:
             import websockets
         except ImportError:
-            raise RuntimeError("websockets not installed. Run: pip install websockets")
+            raise RuntimeError(
+                "websockets not installed. Run: pip install websockets"
+            ) from None
 
         while self._running:
             try:
-                ws_url = await self._get_ws_url()
-                async with websockets.connect(ws_url) as ws:
-                    self._ws = ws
+                async with websockets.connect(await self._get_ws_url()) as socket:
+                    self._ws = socket
                     logger.info("DingTalk WebSocket connected")
-                    async for raw in ws:
-                        try:
-                            data = json.loads(raw) if isinstance(raw, str) else raw
-                            await self._on_ws_message(data)
-                        except json.JSONDecodeError:
-                            logger.warning(f"DingTalk: non-JSON message: {raw[:100]}")
-                        except Exception as e:
-                            logger.error(f"DingTalk ws process error: {e}")
+                    async for raw in socket:
+                        await self._on_raw(raw)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.warning(f"DingTalk WS disconnected: {e}, reconnecting in 5s...")
-                await asyncio.sleep(5)
+            except Exception as error:
+                logger.warning(
+                    "DingTalk socket dropped (%s); reconnecting",
+                    type(error).__name__,
+                )
+                await asyncio.sleep(RECONNECT_DELAY_S)
+
+    async def _on_raw(self, raw: Any) -> None:
+        """Decode one frame, never letting a bad one end the loop."""
+        try:
+            data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+        except json.JSONDecodeError:
+            logger.warning("DingTalk sent a frame that is not JSON")
+            return
+        try:
+            await self._on_ws_message(data)
+        except Exception as error:
+            # Type only, and no traceback: a provider exception can embed the
+            # payload, which on this path is what somebody wrote.
+            logger.error("DingTalk event handler error (%s)", type(error).__name__)
 
     async def _ws_send_json(self, data: dict) -> None:
-        """Send a JSON payload over the WebSocket."""
-        if self._ws:
+        if self._ws is not None:
             await self._ws.send(json.dumps(data))
 
-    async def _on_ws_message(self, data: dict) -> None:
-        """Handle a single WebSocket message from DingTalk Stream."""
+    async def _on_ws_message(self, data: Any) -> None:
+        """Normalise one Stream frame into the authoritative runtime.
+
+        Performs no model work and sends no reply: the answer is delivered by
+        the runtime's pump once the exchange has run.
+        """
+
         if not isinstance(data, dict):
             return
+        headers = data.get("headers", {}) or {}
+        message_id = str(headers.get("messageId", "") or "")
 
-        headers = data.get("headers", {})
-        msg_id = headers.get("messageId", "")
-
-        # System ping — respond immediately
         if data.get("type") == "SYSTEM" and headers.get("topic") == "ping":
             await self._ws_send_json(
                 {
@@ -225,171 +337,147 @@ class DingTalkChannel(Channel):
             )
             return
 
-        # ACK the message
+        # Acknowledge first. DingTalk resends anything it has not heard back
+        # about, and an exchange takes far longer than it waits; the
+        # idempotency key on the submission is what makes a resend we did not
+        # prevent resolve to the same exchange.
         await self._ws_send_json(
             {
                 "code": 200,
-                "headers": {"contentType": "application/json", "messageId": msg_id},
+                "headers": {
+                    "contentType": "application/json",
+                    "messageId": message_id,
+                },
                 "message": "OK",
                 "data": "{}",
             }
         )
 
-        if data.get("type") != "CALLBACK":
+        if data.get("type") != "CALLBACK" or not self.ingress_active:
             return
 
-        # Parse payload
         payload = data.get("data", "{}")
-        if isinstance(payload, str):
+        if isinstance(payload, (str, bytes)):
             payload = json.loads(payload)
+        if not isinstance(payload, dict):
+            return
+        await self._on_payload(message_id, payload)
 
-        text_obj = payload.get("text", {})
+    async def _on_payload(self, message_id: str, payload: dict) -> None:
+        """Handle one decoded callback payload."""
+
+        text_field = payload.get("text", {})
         content = (
-            text_obj.get("content", "") if isinstance(text_obj, dict) else str(text_obj)
+            text_field.get("content", "")
+            if isinstance(text_field, dict)
+            else str(text_field)
         ).strip()
         if not content:
-            content = str(payload.get("content", "")).strip()
+            content = str(payload.get("content", "") or "").strip()
         if not content:
             return
 
-        sender_id = payload.get("senderStaffId") or payload.get("senderId", "")
-        is_group = payload.get("conversationType") == "2"
-        chat_id = sender_id  # oToMessages API uses userIds (staffId)
-
-        # Mention gating
-        was_mentioned = not is_group
-        if is_group and payload.get("isInAtList"):
-            was_mentioned = True
-
-        # Dedup & rate limit
-        if self.is_duplicate(msg_id):
+        sender_id = str(
+            payload.get("senderStaffId") or payload.get("senderId") or ""
+        )
+        if not sender_id or not message_id:
             return
+
+        is_group = payload.get("conversationType") == GROUP_CONVERSATION_TYPE
+        mentions = self._proven_mentions(payload, is_group=is_group)
+        if is_group and not mentions:
+            # The same rule SenderPolicy applies at ingress, applied here too
+            # so that group chatter costs nothing. Ingress remains the
+            # authority; this only stops the work early.
+            return
+
+        if self.seen_before(message_id):
+            return
+
+        if content.startswith("/") and await self.answer_slash_command(
+            self._reply_target(sender_id), sender_id, sender_id, content
+        ):
+            return
+
         if not self._is_admin(sender_id) and not self.check_rate_limit(sender_id):
-            logger.info(f"DingTalk: rate limited {sender_id}")
+            logger.warning("DingTalk sender exceeded the configured rate limit")
             return
 
-        if not was_mentioned and is_group:
-            return  # Skip group messages without @bot
-
-        # Process through LLM. The length, never the text: a chat message
-        # is the most likely place in this repository for a subject
-        # identifier to appear ("analyse P12345's Visium"), and Q22 rule 1
-        # plus CLAUDE.md's first safety rule are both breakable by one log
-        # line. ``telegram.py``'s error handler already holds this line.
+        # Length and chat kind only: a chat message is the likeliest place in
+        # this repository for a subject identifier to appear, and a log is the
+        # most widely shared destination there is.
         logger.info(
-            "DingTalk message from %s (%d characters)", sender_id, len(content)
+            "DingTalk message accepted (group=%s, %d chars)", is_group, len(content)
         )
-        asyncio.create_task(self._handle_message(chat_id, sender_id, content))
+        await self._submit_control_inbound(
+            sender_id=sender_id,
+            text=content,
+            message_id=message_id,
+            chat_type="group" if is_group else "private",
+            mentions=mentions,
+        )
 
-    async def _handle_message(self, chat_id: str, sender_id: str, content: str) -> None:
-        """Process message through core LLM and send reply."""
-        try:
-            reply = await self.process_message(
-                chat_id,
-                sender_id,
-                content,
-                platform="dingtalk",
+    def _proven_mentions(self, payload: dict, *, is_group: bool) -> tuple[str, ...]:
+        """This robot's identity, but only when DingTalk says it was mentioned.
+
+        The boolean is the whole of the attribution DingTalk offers, so it is
+        translated rather than trusted blindly: an unconditional identity
+        here would make :meth:`~omicsclaw.entry.ingress.SenderPolicy.admits`
+        return true for every group message, which is a gate that is always
+        open.
+        """
+        if not is_group:
+            return ()
+        if not self.bot_identity or not payload.get("isInAtList"):
+            return ()
+        return (self.bot_identity,)
+
+    def _reply_target(self, staff_id: str) -> dict[str, Any]:
+        """Where a reply goes: to a person, because that is what this API does.
+
+        ``robot_code`` travels with it because ``batchSend`` names the robot
+        that speaks, and the delivery adapter has no other way to know it.
+        """
+
+        return reply_target.build(
+            "dingtalk",
+            self._account_namespace,
+            staff_id,
+            robot_code=self.dingtalk_config.client_id.strip(),
+        )
+
+    async def _submit_control_inbound(
+        self,
+        *,
+        sender_id: str,
+        text: str,
+        message_id: str,
+        chat_type: str,
+        mentions: tuple[str, ...],
+    ):
+        """Submit one normalised DingTalk message as one exchange."""
+
+        if self._control_runtime is None:
+            raise RuntimeError("DingTalk ChannelRuntime is not bound")
+        inbound = self.inbound(
+            sender_id,
+            sender_id,
+            text,
+            # The Stream header's messageId is stable across DingTalk's own
+            # redelivery, so it is the natural idempotency key.
+            source_request_id=message_id,
+            reply_target=self._reply_target(sender_id),
+            values={VALUE_CHAT_TYPE: chat_type, VALUE_MENTIONS: mentions},
+        )
+        result = await self._control_runtime.submit(inbound)
+        if result.acceptance.status is TurnAcceptanceStatus.REJECTED:
+            # Refusals cannot answer through the pump, because no exchange was
+            # accepted. The local cache is deliberately NOT updated, so a
+            # DingTalk resend of a transiently rejected message can still land.
+            logger.warning(
+                "DingTalk ingress rejected: %s",
+                result.acceptance.code or "unspecified",
             )
-            if reply:
-                await self.send(chat_id, reply)
-        except Exception as e:
-            logger.error(f"DingTalk process error: {e}", exc_info=True)
-            try:
-                await self.send(
-                    chat_id, f"Sorry, an error occurred: {type(e).__name__}"
-                )
-            except Exception:
-                pass
-
-    # ─ Send ────────────────────────
-
-    async def _send_chunk(
-        self,
-        chat_id: str,
-        formatted_text: str,
-        raw_text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        """Send a single text chunk via DingTalk Robot API (Markdown)."""
-        token = await self._ensure_token()
-        cfg: DingTalkConfig = self.config
-        await self._http_client.post(
-            SEND_URL,
-            json={
-                "robotCode": cfg.client_id,
-                "userIds": [chat_id],
-                "msgKey": "sampleMarkdown",
-                "msgParam": json.dumps(
-                    {
-                        "text": raw_text,
-                        "title": "OmicsClaw",
-                    }
-                ),
-            },
-            headers={"x-acs-dingtalk-access-token": token},
-        )
-
-    async def send_media(
-        self,
-        chat_id: str,
-        file_path: str,
-        caption: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Send a media file via DingTalk (images as native, files as markdown link)."""
-        try:
-            token = await self._ensure_token()
-            cfg: DingTalkConfig = self.config
-            ext = Path(file_path).suffix.lower()
-
-            if ext in self._IMAGE_EXTS:
-                media_id = await self._upload_media(token, file_path, "image")
-                if media_id:
-                    await self._http_client.post(
-                        SEND_URL,
-                        json={
-                            "robotCode": cfg.client_id,
-                            "userIds": [chat_id],
-                            "msgKey": "sampleImageMsg",
-                            "msgParam": json.dumps({"photoURL": media_id}),
-                        },
-                        headers={"x-acs-dingtalk-access-token": token},
-                    )
-                else:
-                    # Fallback to markdown
-                    text = f"![image]({file_path})"
-                    await self.send(chat_id, text)
-            else:
-                name = Path(file_path).name
-                text = f"[文件] {name}" + (f"\n{caption}" if caption else "")
-                await self.send(chat_id, text)
-
-            return True
-        except Exception as e:
-            logger.error(f"DingTalk media send error: {e}")
-            return False
-
-    async def _upload_media(
-        self,
-        token: str,
-        file_path: str,
-        media_type: str = "image",
-    ) -> str | None:
-        """Upload a file to DingTalk and return media_id."""
-        try:
-            url = f"{MEDIA_UPLOAD_URL}?access_token={token}&type={media_type}"
-            with open(file_path, "rb") as f:
-                resp = await self._http_client.post(
-                    url,
-                    files={"media": (Path(file_path).name, f)},
-                )
-            return resp.json().get("media_id")
-        except Exception as e:
-            logger.warning(f"DingTalk media upload failed: {e}")
-            return None
-
-    # ─ Backward-compatible entry point ───────────────
-
-    def run_stream(self) -> None:
-        """Blocking entry point for running the DingTalk channel standalone."""
-        asyncio.run(self.run())
+            return result
+        self.remember_message(message_id)
+        return result

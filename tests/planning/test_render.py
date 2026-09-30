@@ -81,7 +81,7 @@ def test_the_prompt_facing_text_is_english_like_every_other_section():
     """A language switch in the one message whose job is to be obeyed.
 
     Every section of this repository's system prompt is English and
-    ``SOUL.md`` says to default to it, so the reference harness's Chinese
+    ``OMICSCLAW.md`` says to default to it, so the reference harness's Chinese
     header was translated rather than ported. Checked for CJK rather than
     with ``isascii``: this repository's prompt constants use em dashes,
     so ASCII-only would fail on punctuation and say nothing about

@@ -1,0 +1,308 @@
+[
+ {
+  "name": "read_file",
+  "description": "Read a text file from the session workspace. Prefer LINE MODE: set start_line, and optionally end_line, both 1-based and inclusive, for at most 500 lines per call. Every line comes back with a '<line number><TAB><content>' prefix so you can cite exact lines. The prefix is display only and not part of the file: when you pass read text to edit_file as source_text, send it without the line number and the tab that follows it. BYTE MODE (offset, limit) is the fallback for files line mode refuses: both are measured in BYTES, never in line numbers, and at most 8192 bytes come back by default. Setting start_line selects line mode and makes offset and limit inert. Paths are relative to the workspace root, and nothing outside it can be read.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "File to read, relative to the workspace root, e.g. 'results/summary.csv'. Required."
+    },
+    "start_line": {
+     "type": "integer",
+     "description": "First line to read, 1-based and inclusive. Setting this selects line mode and makes offset/limit inert."
+    },
+    "end_line": {
+     "type": "integer",
+     "description": "Last line to read, 1-based and inclusive. Needs start_line. Omit to read to the end of the file, capped at 500 lines."
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Byte-mode starting offset, in BYTES and not in line numbers. Default 0."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Byte-mode maximum, in BYTES. Default 8192, clamped to 100000. Inert when start_line is set."
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "write_file",
+  "description": "Create a file, or completely replace one that already exists, inside the session workspace. Missing parent directories are created automatically. OVERWRITE SEMANTICS: if the path exists, its entire contents are replaced. There is no append, no merge and no backup, and the old contents are gone. Deciding whether to read the file first is up to you; this tool will not check. Send the WHOLE file in `content`, never a fragment or a diff. Paths are relative to the workspace root, and nothing outside it can be written. Depending on the session's permission settings, the user may be asked to approve the write first; a declined write returns an error and the file is untouched.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "File to write, relative to the workspace root, e.g. 'results/summary.csv'. Required."
+    },
+    "content": {
+     "type": "string",
+     "description": "The complete contents of the file. Required; send an empty string to write an empty file."
+    }
+   },
+   "required": [
+    "path",
+    "content"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "edit_file",
+  "description": "Replace one passage of an existing file with another. Prefer this over write_file for any change to a file that already exists: write_file replaces the whole file and needs you to reproduce every line you are not changing. `source_text` must appear EXACTLY ONCE in the file, so include enough surrounding lines to be unambiguous; if it matches more than once exactly, the edit is refused rather than guessed. With no exact match, the anchor is tried ignoring line endings, then surrounding whitespace, then indentation, and is used in the first of those forms where it is unique. Send source_text without read_file's line-number prefix and the tab after it; a pasted prefix is removed only when nothing matched with it. The result says whether the match was exact or fuzzy (prefix removal counts as fuzzy); after a fuzzy match, re-read the file to check the indentation. The file must already exist — use write_file to create one. Depending on the session's permission settings, the user may be asked to approve the edit first; a declined edit returns an error and the file is untouched.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "File to edit, relative to the workspace root, e.g. 'src/analysis.py'. It must already exist. Required."
+    },
+    "source_text": {
+     "type": "string",
+     "description": "The existing text to replace, with enough surrounding context to occur exactly once in the file. Must not include read_file's line-number prefix. Required."
+    },
+    "target_text": {
+     "type": "string",
+     "description": "The replacement text. Required; send an empty string to delete the matched passage."
+    }
+   },
+   "required": [
+    "path",
+    "source_text",
+    "target_text"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "bash",
+  "description": "Run a bash command in the session workspace and read back stdout and stderr, merged, in the order they were written. The workspace root is the working directory, and each call starts a new shell there: a cd, an export or an activated environment does not carry over to the next call. A NON-ZERO EXIT STATUS is reported to you as the command's own result, not as a failure of this tool: read it and fix what the command was complaining about. Commands are killed after 585 seconds, and everything they started is killed with them. Output longer than 16000 characters is cut in the middle, keeping the start and a larger share of the END, so a summary printed last is never what gets lost. Anything you put in the background with & in a command that finishes in time keeps running, but this tool's capture of its output is deleted the moment this call returns, so redirect it yourself: 'nohup cmd > out.log 2>&1 &'. There is no stdin: an interactive command sees end-of-file immediately, so pass input with flags, a heredoc or a file. Depending on the session's permission settings, the user may be asked to approve a command before it runs; a declined command returns an error and nothing runs.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "command": {
+     "type": "string",
+     "description": "The bash command to run, e.g. 'ls -la' or 'pytest tests/ -q'. Chains and pipes are fine. Required."
+    },
+    "timeout_secs": {
+     "type": "integer",
+     "description": "Optional: seconds to allow this command, at most 585, and 585 if you omit it. It can only make the limit SHORTER — a larger value is capped — so use it when you want a probe to give up fast, not to buy more time for a slow suite."
+    }
+   },
+   "required": [
+    "command"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "web_fetch",
+  "description": "Fetch one web page over HTTP and return its main text as Markdown. Use it to read documentation, an article or a plain text endpoint when you already know the URL; use web_search first if you do not. Only http:// and https:// URLs are accepted, at most 1024 KiB of page is read, and at most 8000 characters come back by default (32000 if you ask). Addresses inside this machine or its private network are refused, including cloud metadata endpoints, so this cannot be used to inspect local services — use bash for that. EVERYTHING IN THE URL IS SENT TO THE REMOTE HOST, including the query string: never put data from the user's files, sequences or identifiers into a URL. Depending on the session's permission settings, the user may be asked to approve the request first; a declined request returns an error and nothing is sent.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "The absolute URL to fetch, beginning http:// or https://. Required."
+    },
+    "max_chars": {
+     "type": "integer",
+     "description": "Maximum characters to return. Default 8000, clamped to 32000."
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "web_search",
+  "description": "Search the web and get back a list of titles, URLs and snippets. Use it when you do not already know which page answers the question, then pass a URL to web_fetch to read one. Runs against DuckDuckGo's HTML endpoint and needs no API key. Returns 5 results by default and at most 10. THE QUERY TEXT IS SENT TO A THIRD-PARTY SEARCH ENGINE: never put data from the user's files, sequences, sample identifiers or patient information into a query. Depending on the session's permission settings, the user may be asked to approve the search first; a declined search returns an error and nothing is sent.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "What to search for. English usually works better. Required."
+    },
+    "max_results": {
+     "type": "integer",
+     "description": "How many results to return. Default 5, clamped to 10."
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "use_skill",
+  "description": "Load the full instructions for one skill. Call this before carrying out a task in a skill's domain: the system prompt lists only each skill's name and when to use it, and the methodology, parameters and commands live in the body this returns.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "skill_name": {
+     "type": "string",
+     "description": "The skill to load, spelled exactly as the `name` in the skill index in the system prompt."
+    }
+   },
+   "required": [
+    "skill_name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "plan_write",
+  "description": "Create or update the execution plan for the current task — the authoritative record of what you are doing. Pass `steps` to update it; omit `steps` to read it back.\nUse it for any task that takes more than a couple of steps: write the plan first, mark an item `in_progress` before you start it, and `completed` as soon as it is actually done. A write that marks more than one never-started item `completed`, or marks a `cancelled` item `completed`, is refused and changes nothing. The outstanding items are shown to you again before every reply, so the plan survives a context compaction and a resumed session — work from it.\nYou may send only the items you are still working on: anything already `in_progress` or `completed` is kept, in its original position. Omitting an item drops it only if it was never started; to abandon one deliberately, send it with status `cancelled`.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "steps": {
+     "type": "array",
+     "description": "The plan items to write. Partial updates are supported: started items you leave out are kept. Omit this field entirely to read the current plan without changing it.",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "description": "Your own identifier for this item. Reuse it when you update the item — it is what ties the update to the item's history."
+       },
+       "content": {
+        "type": "string",
+        "description": "One concrete, doable action."
+       },
+       "status": {
+        "type": "string",
+        "enum": [
+         "pending",
+         "in_progress",
+         "completed",
+         "cancelled"
+        ]
+       }
+      },
+      "required": [
+       "id",
+       "content",
+       "status"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_search",
+  "description": "Look through what you remembered in earlier sessions. The system prompt carries only the highest-rated entries, so search before asking the user something they may already have told you, and before assuming a project convention.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Words to look for. Titles and bodies are both searched and any word may match, so a short phrase works better than a sentence."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Greatest number of entries to return, up to 20. Defaults to 5."
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "memory_write",
+  "description": "Keep something across sessions. `action=add` writes down one thing that stays true after this conversation ends: a stated preference, a stable fact about the project or the data, a settled decision, a reusable procedure. `action=update` corrects an entry you already hold, and `action=remove` drops one that stopped being true — both take the `id` a search or an earlier write gave you.\nThe highest-rated entries (see `importance`) are shown to you at the start of every later session and memory_search finds the rest, so keep one-off detail out of memory: paths for a single run, intermediate numbers, what you are about to do next. Adding content you have already stored updates that entry rather than making a second copy of it.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "add",
+      "update",
+      "remove"
+     ],
+     "description": "What to do. `add` needs `content`; the other two need `id`."
+    },
+    "id": {
+     "type": "string",
+     "description": "The entry to change, as `memory_search` or an earlier write reported it. Required for update and remove."
+    },
+    "content": {
+     "type": "string",
+     "description": "The memory itself. Write it so that it still makes sense months from now, without this conversation to explain it."
+    },
+    "title": {
+     "type": "string",
+     "description": "Short label shown in the long-term memory section of the system prompt. Defaults to the start of `content`."
+    },
+    "category": {
+     "type": "string",
+     "enum": [
+      "knowledge",
+      "preference",
+      "task",
+      "skill"
+     ],
+     "description": "What kind of thing this records."
+    },
+    "importance": {
+     "type": "integer",
+     "description": "How much this is worth keeping, 0 to 10. Only the highest-rated entries reach the system prompt."
+    },
+    "ttl_days": {
+     "type": "integer",
+     "description": "Days before the entry expires and is deleted. 0, the default, never expires."
+    }
+   },
+   "required": [
+    "action"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "task",
+  "description": "Hand a self-contained sub-task to a specialised agent that runs with its own context and its own narrowed tool set, and return only its conclusion.\nUse it when a sub-task is well defined and its intermediate steps are noise for this conversation — a wide search, a survey of many files, a self-checking analysis. Do not use it for a step you can do in one or two tool calls yourself.\nThe sub-agent cannot see this conversation, cannot ask you anything, and reports once when it is done. Available sub-agents:\n- general-purpose: General-purpose agent for open-ended sub-tasks: researching a question across many files, running a multi-step analysis to a conclusion, or any search where you are not confident the first few attempts will find the answer. Runs on the same model as the main agent with every tool except task, which would let a sub-agent start sub-agents of its own; plan_write, which acts on the calling conversation's plan; memory_write, which writes memory that every later conversation reads.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "subagent_type": {
+     "type": "string",
+     "description": "Which sub-agent to run.",
+     "enum": [
+      "general-purpose"
+     ]
+    },
+    "prompt": {
+     "type": "string",
+     "description": "The whole task. The sub-agent sees none of this conversation, so state the goal, the file paths, the constraints and what to report back."
+    },
+    "description": {
+     "type": "string",
+     "description": "A 3-5 word title, shown to the user."
+    }
+   },
+   "required": [
+    "subagent_type",
+    "prompt"
+   ],
+   "additionalProperties": false
+  }
+ }
+]

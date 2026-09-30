@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: spatial-raw-processing
 description: Load when converting spatial transcriptomics raw FASTQ pairs through ST-Pipeline into a `raw_counts.h5ad`
   ready for spatial-preprocess. Skip when input is already a count-matrix AnnData (use spatial-preprocess);
   non-spatial bulk / scRNA FASTQ (use bulkrna-read-qc).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: spatial raw processing, raw spatial fastq, spatial fastq, st_pipeline, st pipeline, barcode coordinates, ids file, visium raw fastq, slide-seq fastq, slideseq fastq, upstream spatial processing
 tags:
 - spatial
 - raw-processing
@@ -16,14 +11,6 @@ tags:
 - st-pipeline
 - visium
 - slideseq
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- PyYAML
-- scipy
-- seaborn
 ---
 
 # spatial-raw-processing
@@ -41,8 +28,6 @@ For non-spatial scRNA FASTQ use `sc-fastq-qc`. For bulk RNA-seq read
 QC use `bulkrna-read-qc`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -91,21 +76,21 @@ QC use `bulkrna-read-qc`.
 
 ## Gotchas
 
-- **All input failures raise typed exceptions wrapped in `SystemExit(1)`.** `spatial_raw_processing.py:353` catches `DataError` / `DependencyError` / `ParameterError` / `ProcessingError` and re-raises as `SystemExit(1)`. The originating raises live in `_validate_real_run_bundle` — `:125` raises `ParameterError(f"Missing required parameter: {key}")` for missing `read1`/`read2`/`ids`; `:128` raises `DataError(...)` for non-existent files; `:131` raises `DataError("Resolved read1/read2 inputs must be FASTQ files.")` for non-FASTQ extensions; `:134` raises `ParameterError` for read1==read2; `:138-141` raises `DataError` for missing / wrong-type STAR index dir; `:145-146` raises `DataError` only when `--ref-annotation` was *provided* but the path is missing or not a file (the param itself is optional — omitting it doesn't raise).
+- **All input failures raise typed exceptions wrapped in `SystemExit(1)`.** `spatial_raw_processing.py` catches `DataError` / `DependencyError` / `ParameterError` / `ProcessingError` and re-raises as `SystemExit(1)`. The originating raises live in `_validate_real_run_bundle` — it raises `ParameterError(f"Missing required parameter: {key}")` for missing `read1`/`read2`/`ids`; raises `DataError(...)` for non-existent files; raises `DataError("Resolved read1/read2 inputs must be FASTQ files.")` for non-FASTQ extensions; raises `ParameterError` for read1==read2; raises `DataError` for missing / wrong-type STAR index dir; raises `DataError` only when `--ref-annotation` was *provided* but the path is missing or not a file (the param itself is optional — omitting it doesn't raise).
 - **`--read1` / `--read2` / `--ids` / `--ref-map` are all required for real runs** (not enforced by argparse `required=True`, validated later). Missing any → `ParameterError`. Demo mode skips this validation entirely.
-- **The output filename is always `raw_counts.h5ad`** (`spatial_raw_processing.py:286`). It's not configurable — the contract is consumed by `spatial-preprocess`. Multiple runs to the same `--output` will overwrite.
+- **The output filename is always `raw_counts.h5ad`** (`spatial_raw_processing.py`). It's not configurable — the contract is consumed by `spatial-preprocess`. Multiple runs to the same `--output` will overwrite.
 - **No tables / figures are written.** This skill is a wrapper around an external pipeline; it produces only the AnnData + the upstream tool's logs. `result.json` records the run params, not analysis stats.
-- **Demo mode skips ST-Pipeline entirely.** `spatial_raw_processing.py:235` calls `create_demo_upstream_outputs(...)` to fabricate a synthetic `raw_counts.h5ad`. Useful for plumbing checks; does NOT exercise the FASTQ → matrix code path.
-- **`--platform` is a metadata label only.** `:201` documents it as "Label recorded in outputs"; ST-Pipeline doesn't branch on it. Common values: `visium`, `visium_hd`, `slideseq`, custom strings.
+- **Demo mode skips ST-Pipeline entirely.** `spatial_raw_processing.py` calls `create_demo_upstream_outputs(...)` to fabricate a synthetic `raw_counts.h5ad`. Useful for plumbing checks; does NOT exercise the FASTQ → matrix code path.
+- **`--platform` is a metadata label only.** `_build_parser` documents it as "Label recorded in outputs"; ST-Pipeline doesn't branch on it. Common values: `visium`, `visium_hd`, `slideseq`, custom strings.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic raw_counts.h5ad — does NOT run ST-Pipeline)
-python omicsclaw.py run spatial-raw-processing --demo --output /tmp/spatial_raw_demo
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py --demo --output /tmp/spatial_raw_demo
 
 # Real run with explicit args
-python omicsclaw.py run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --read1 sample_R1.fastq.gz --read2 sample_R2.fastq.gz \
   --ids barcodes.tsv \
   --ref-map /refs/star_index_human \
@@ -115,11 +100,11 @@ python omicsclaw.py run spatial-raw-processing \
   --output results/
 
 # Real run from bundle JSON
-python omicsclaw.py run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --input run_bundle.json --output results/
 
 # Slide-seq with custom UMI range
-python omicsclaw.py run spatial-raw-processing \
+python skills/spatial/spatial-raw-processing/spatial_raw_processing.py \
   --read1 R1.fq.gz --read2 R2.fq.gz --ids barcodes.tsv \
   --ref-map /refs/star_index --platform slideseq \
   --umi-start-position 1 --umi-end-position 8 \
@@ -132,3 +117,9 @@ python omicsclaw.py run spatial-raw-processing \
 - `references/methodology.md` — when ST-Pipeline wins vs Space Ranger; barcode-ID format
 - `references/output_contract.md` — `raw_counts.h5ad` schema
 - Adjacent skills: `spatial-preprocess` (downstream — required next step; consumes `raw_counts.h5ad`), `bulkrna-read-qc` / `sc-fastq-qc` (parallel — non-spatial FASTQ paths)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `PyYAML`, `scipy`, `seaborn`

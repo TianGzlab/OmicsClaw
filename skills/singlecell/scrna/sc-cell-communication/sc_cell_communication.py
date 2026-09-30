@@ -17,18 +17,23 @@ import numpy as np
 import pandas as pd
 from pandas.errors import EmptyDataError
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -38,12 +43,13 @@ from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
 )
-from skills.singlecell._lib import dependency_manager as sc_dep_manager
+from skills._sdk import deps as sc_dep_manager
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_cell_communication
-from omicsclaw.core.dependency_manager import validate_r_environment
-from omicsclaw.core.r_dependency_manager import check_r_tier, suggest_r_install
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills._sdk.deps import validate_r_environment
+from skills._sdk.r_dependency_manager import check_r_tier, suggest_r_install
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
 from skills.singlecell._lib.viz import (
     plot_cellchat_count_weight_heatmaps,
@@ -325,7 +331,7 @@ def run_cellchat(
             + suggest_r_install([pkg for pkg in ("CellChat", "SingleCellExperiment", "zellkonverter") if pkg in missing])
         )
     validate_r_environment(required_r_packages=["CellChat", "SingleCellExperiment", "zellkonverter"])
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=7200)
     export, source = _build_cellchat_input_adata(adata)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_cellchat_") as tmpdir:
@@ -407,7 +413,7 @@ def run_nichenet(
             + suggest_r_install([pkg for pkg in ("nichenetr", "Seurat", "SingleCellExperiment", "zellkonverter") if pkg in missing])
         )
     validate_r_environment(required_r_packages=["nichenetr", "Seurat", "SingleCellExperiment", "zellkonverter"])
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=7200)
     export, source = _build_nichenet_input_adata(adata)
     with tempfile.TemporaryDirectory(prefix="omicsclaw_nichenet_") as tmpdir:
@@ -1081,14 +1087,14 @@ def write_report(output_dir: Path, summary: dict, input_file: str | None, params
             "The ligand-receptor database expects HGNC symbols (e.g., TGFB1, CXCL12) for human data.",
             "If your data uses Ensembl IDs, convert first:",
             "```",
-            "python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --from ensembl --to symbol --output mapped/",
+            "python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --input data.h5ad --from ensembl --to symbol --output mapped/",
             "```",
             "",
             "### Cause 2: Cell type labels are missing or numeric",
             f"Column `{summary['cell_type_key']}` may contain numeric cluster IDs instead of meaningful cell type names.",
             "Run annotation first:",
             "```",
-            "python omicsclaw.py run sc-cell-annotation --input data.h5ad --output anno_out/",
+            "python skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py --input data.h5ad --output anno_out/",
             "```",
             "",
             "### Cause 3: Too few cells per group",
@@ -1391,11 +1397,11 @@ def main():
         print()
         print("  How to fix:")
         print(f"    Option 1 - Check that '--cell-type-key {args.cell_type_key}' has meaningful labels (not numeric IDs).")
-        print("      Example: python omicsclaw.py run sc-cell-annotation --input data.h5ad --output anno_out/")
+        print("      Example: python skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py --input data.h5ad --output anno_out/")
         print("    Option 2 - Use a richer method that queries a larger LR database:")
-        print("      Example: python omicsclaw.py run sc-cell-communication --method liana --input data.h5ad --output out/")
+        print("      Example: python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py --method liana --input data.h5ad --output out/")
         print("    Option 3 - Verify gene names are HGNC symbols (human) or standard gene symbols (mouse).")
-        print("      If Ensembl IDs, convert first: python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --from ensembl --to symbol --output mapped/")
+        print("      If Ensembl IDs, convert first: python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --input data.h5ad --from ensembl --to symbol --output mapped/")
         print()
 
     params = {
@@ -1554,7 +1560,7 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Further exploration:")
-    print(f"  - sc-grn: python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-grn: python skills/singlecell/scrna/sc-grn/sc_grn.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

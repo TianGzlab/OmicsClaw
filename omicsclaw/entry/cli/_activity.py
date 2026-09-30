@@ -92,6 +92,8 @@ from typing import Callable
 
 from rich.text import Text
 
+from omicsclaw.entry.display import inert_line
+
 from ._screen import Screen
 
 __all__ = [
@@ -101,6 +103,7 @@ __all__ = [
     "VERBS",
     "ActivityLine",
     "drive_ticks",
+    "sanitize",
 ]
 
 TICK_S = 0.12
@@ -164,18 +167,15 @@ _HINT = "  ·  ctrl-c to interrupt"
 the prompt (:meth:`~omicsclaw.entry.cli._repl.Repl.interrupt`)."""
 
 
-def _sanitize(value: str) -> str:
-    """*value* with the control characters a one-line display cannot hold.
+def sanitize(value: str) -> str:
+    """*value* as one line that cannot act on the terminal.
 
-    Tool names and progress messages are strings this module was handed.
-    A newline in one would end the line the ``\\r`` was going to rewind,
-    and an escape sequence would set a colour nobody resets. Written for
-    the animated path, which bypasses rich and therefore has no
-    :class:`~rich.text.Text` doing it already, and applied on the plain
-    path too so both show the same string.
+    :func:`~omicsclaw.entry.display.inert_line`: a line break is drawn as
+    a mark and every control or format character is escaped. Applied to
+    what the animated path writes past rich, and to the plain path too so
+    both show the same string.
     """
-    return "".join(" " if character < " " or character == "\x7f" else character
-                   for character in value)
+    return inert_line(value)
 
 
 class ActivityLine:
@@ -196,9 +196,9 @@ class ActivityLine:
         "_console",
         "_detail",
         "_heartbeat_s",
+        "_closed",
         "_held",
         "_last_note",
-        "_closed",
         "_painted",
         "_screen",
         "_since",
@@ -219,8 +219,15 @@ class ActivityLine:
             # ``getattr`` rather than an attribute: a console that cannot
             # say whether it is a terminal is not one, and guessing "yes"
             # is the guess that writes escape codes into a file.
-            animated = bool(getattr(self._console, "is_terminal", False)) and not (
-                getattr(self._console, "legacy_windows", False)
+            #
+            # ``is_dumb_terminal`` is a separate question from
+            # ``is_terminal`` and rich answers both: ``TERM=dumb`` is a
+            # tty that cannot be asked to erase a line, so it gets the
+            # appended form rather than a row of ``[2K``.
+            animated = (
+                bool(getattr(self._console, "is_terminal", False))
+                and not getattr(self._console, "is_dumb_terminal", False)
+                and not getattr(self._console, "legacy_windows", False)
             )
         self._animated = animated
         self._clock = clock
@@ -252,10 +259,26 @@ class ActivityLine:
         between every tool result and the next tool call.
         """
         self.clear()
-        self._tool = _sanitize(tool)
-        self._detail = _sanitize(detail)
+        self._tool = sanitize(tool)
+        self._detail = sanitize(detail)
         self._since = self._clock()
         self._last_note = self._since
+
+    def started(self, tool: str) -> None:
+        """A tool call began: restart the clock, keep what it already said.
+
+        ``TOOL_START`` is not reliably the first frame of a tool call. The
+        engine yields it through the loop's generator while
+        :func:`~omicsclaw.tools.report_progress` publishes straight onto
+        the stream, so a tool that reports before its first ``await``
+        — ``bash`` does, naming the command and the directory — overtakes
+        the frame announcing it. A plain :meth:`begin` here therefore
+        threw away the only description of the work and left the line
+        reading ``bash`` with nothing after it. Observed on a real run,
+        not reasoned about.
+        """
+        keep = self._detail if self._tool == sanitize(tool) else ""
+        self.begin(tool, keep)
 
     def detail(self, detail: str, *, tool: str = "") -> None:
         """Replace the current activity's detail without restarting it.
@@ -264,9 +287,9 @@ class ActivityLine:
         things to say, not two activities: restarting the clock here
         would reset the elapsed figure that answers "is it stuck?".
         """
-        self._detail = _sanitize(detail)
+        self._detail = sanitize(detail)
         if tool:
-            self._tool = _sanitize(tool)
+            self._tool = sanitize(tool)
 
     # ---- who owns the cursor --------------------------------------------
 

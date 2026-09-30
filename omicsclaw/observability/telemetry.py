@@ -197,12 +197,10 @@ def build_telemetry(config: ObservabilityConfig | None = None) -> Telemetry:
     pass one to build a deployment that does not read the environment,
     which is what every test in ``tests/observability/`` does.
 
-    **Every failure degrades to the no-op and says so once.** The
-    reference treats a failed ``Setup`` as fatal, which is right for a
-    harness whose whole job is the run; here the run may be a six-hour
-    alignment and the telemetry is a nice-to-have, so a missing SDK, an
-    unset endpoint or an exporter that will not construct costs one
-    warning and nothing else.
+    **Every failure degrades to the no-op and says so once.** A missing
+    SDK, an unset endpoint or an exporter that will not construct costs
+    one warning and nothing else: the run may be a six-hour alignment,
+    and losing its telemetry is better than losing the run.
     """
     resolved = ObservabilityConfig.from_env() if config is None else config
     if not resolved.records:

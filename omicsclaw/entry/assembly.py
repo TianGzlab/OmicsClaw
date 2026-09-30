@@ -2,7 +2,7 @@
 
 Plan 0031 task A. Every layer below this one names a hole in its own
 docstring — ``engine/loop.py:34-38`` "the conversation arrives
-assembled", ``context/__init__.py`` "``SOUL.md``, the model table and the
+assembled", ``context/__init__.py`` "``OMICSCLAW.md``, the model table and the
 summarizing model are all the composition root's",
 ``tools/builtin/__init__.py`` "mounting a foundation tool is always a
 decision about *which* workspace, and that decision belongs to whoever is
@@ -45,7 +45,7 @@ unconfigured process gets the root logger's default and warnings and
 above are what reach a terminal. Two rules that are not style:
 **no tool argument and no tool output is ever logged** — a ``bash``
 command line, a ``write_file`` body and a ``web_fetch`` query string can
-each carry a subject identifier, and ``CLAUDE.md``'s first safety rule is
+each carry a subject identifier, and :data:`SAFETY_RULES` rule 1 is
 a rule a log statement can break — and no third-party logging library is
 introduced.
 
@@ -104,7 +104,13 @@ from omicsclaw.mcp import (
     load_mcp_config,
 )
 from omicsclaw.observability import Telemetry, build_telemetry
-from omicsclaw.permission import GatedTool, PermissionGate, RuleStore, gate_tools
+from omicsclaw.permission import (
+    GatedTool,
+    PermissionGate,
+    PermissionMode,
+    RuleStore,
+    gate_tools,
+)
 from omicsclaw.planning import (
     PLAN_WRITE_TOOL_NAME,
     PLANNING_GUIDANCE,
@@ -112,10 +118,16 @@ from omicsclaw.planning import (
     PlanBook,
     plan_write_tool,
 )
-from omicsclaw.provider import LLMProvider, get_model_limits, provider_from_env
+from omicsclaw.provider import (
+    LLMProvider,
+    get_model_limits,
+    provider_from_env,
+    resolve_config,
+)
 from omicsclaw.sandbox import ChangeListener
 from omicsclaw.schema import Message, Role, ToolDefinition
 from omicsclaw.skills import SkillIndex, load_skills, use_skill_tool
+from omicsclaw.subagent import TaskTool
 from omicsclaw.tools import (
     ApprovalRequest,
     BashTool,
@@ -130,7 +142,8 @@ from omicsclaw.tools import (
 )
 from omicsclaw.tools.builtin.bash import BashEnvironment
 
-from .config import AppConfig, SkillsIndex
+from .config import AppConfig, AppConfigError, SkillsIndex
+from .ensemble import open_ensemble
 from .memory import (
     MemoryBinding,
     memory_section,
@@ -146,14 +159,18 @@ from .sandbox import (
     sandbox_section,
     unstarted_sandbox,
 )
+from .skill_env import SkillEnvBinding, build_skill_env, log_skill_env
+from .subagent import ChildRunner, build_subagent_registry
 
 if TYPE_CHECKING:  # pragma: no cover - session.py imports this module
+    from omicsclaw.ensemble.runner import EnsembleRunner
+    from omicsclaw.ensemble.tuning.llm import LLMSettings
+
     from .session import SessionRegistry
 
 __all__ = [
     "AgentApp",
-    "DEFAULT_CONTRACT_FILE",
-    "DEFAULT_PERSONA_FILE",
+    "CONTRACT_FILE",
     "LOGGER_NAME",
     "SAFETY_RULES",
     "SHUTDOWN_GRACE_S",
@@ -188,15 +205,12 @@ mean this package overrides an operator who already configured logging.
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_PERSONA_FILE = "SOUL.md"
-"""Persona, read from the workspace on every render. The harness's
-equivalent is the base prompt plus ``AGENTS.md`` (``builder.go``); this
-repository already keeps its agent persona in ``SOUL.md`` and its
-surfaces already say so."""
-
-DEFAULT_CONTRACT_FILE = "CLAUDE.md"
-"""Project contract. ``CLAUDE.md`` is this repository's instruction file
-and is what the running agent is held to."""
+CONTRACT_FILE = "OMICSCLAW.md"
+"""The runtime contract: the agent's identity, operating rules and how it
+uses skills. Read from beside the skill tree
+(:meth:`~omicsclaw.entry.config.AppConfig.repo_root`) on every render and
+placed first in the system prompt; when the file is absent the prompt has
+no contract section."""
 
 SHUTDOWN_GRACE_S = 5.0
 """Seconds a running exchange gets after shutdown is asked for.
@@ -220,20 +234,11 @@ domain expert before making decisions based on these results."
 3. Use SKILL.md methodology only — never invent bioinformatics \
 parameters, thresholds, or gene associations.
 4. Warn before overwriting existing reports in an output directory."""
-"""``CLAUDE.md`` §Safety Rules, and **this section is not optional**.
+"""The agent's safety rules, and the only copy of them.
 
-Held as a constant rather than scraped out of ``CLAUDE.md`` at render
-time on purpose. A scraper keyed on a heading returns ``""`` the day
-somebody renames the heading, and an empty section *disappears whole*
-(``PromptAssembler.render``) — so the agent would silently lose its
-safety rules and every other test would stay green. The cost of a
-constant is drift, and drift is what
-``test_assembly.py``'s disclaimer check is for: it reads ``CLAUDE.md``
-and asserts the sentence above is still the sentence there.
-
-Plan 0031 Q9 calls losing this section "the easiest mistake this plan
-can make and the hardest to notice". Deleting the section from
-:func:`default_sections` must turn a test red.
+:data:`CONTRACT_FILE` does not repeat these rules. They are a constant
+rather than text read from a file, so their section is always in the
+prompt: a renamed heading or a missing file cannot drop it.
 """
 
 TOOL_GUIDANCE = """\
@@ -286,6 +291,9 @@ def foundation_tools(
     bash_environment: BashEnvironment | None = None,
     plans: PlanBook | None = None,
     memory: MemoryBinding | None = None,
+    ensemble: "EnsembleRunner | None" = None,
+    skill_env: SkillEnvBinding | None = None,
+    tuning_model: "tuple[object, LLMSettings] | None" = None,
 ) -> tuple[Tool, ...]:
     """The six foundation tools, sharing one workspace, plus ``use_skill``.
 
@@ -325,6 +333,19 @@ def foundation_tools(
     ``plan_write`` for the same byte-stability reason: a pair appended at
     the end costs a cached prefix nothing, a pair inserted in the middle
     moves every tool after it.
+
+    *ensemble* mounts the ensemble tools over one runner, after the memory
+    tools, in the order and selection :attr:`AppConfig.ensemble_tools`
+    names (``run_skill``, ``inspect_trials``, ``select_result``,
+    ``optimize_params``); ``None`` leaves them out and the list is exactly
+    what it was without them. *tuning_model* is the model
+    ``optimize_params`` asks and what is recorded about it; without it
+    ``optimize_params`` needs an explicit ``k``.
+
+    *skill_env* gives ``use_skill`` its environment-check callback, which
+    changes what that tool returns and not which tools there are; when it
+    carries ``install_skill_deps`` (``skill_env=install`` with ``bash`` on this
+    machine), that tool is appended last, after ``run_skill``.
     """
     workspace = Workspace(config.workspace)
     tools: tuple[Tool, ...] = (
@@ -341,12 +362,84 @@ def foundation_tools(
     )
     if config.skills_index is not SkillsIndex.OFF:
         index = build_skill_index(config) if skills is None else skills
-        tools = (*tools, use_skill_tool(index))
+        annotate = skill_env.annotate if skill_env is not None else None
+        tools = (*tools, use_skill_tool(index, annotate=annotate))
     if plans is not None:
         tools = (*tools, plan_write_tool(plans))
     if memory is not None:
         tools = (*tools, *memory_tools(memory))
+    if ensemble is not None:
+        tools = (*tools, *_ensemble_tools(config, ensemble, workspace, skills, tuning_model))
+    if skill_env is not None and skill_env.tool is not None:
+        tools = (*tools, skill_env.tool)
     return tools
+
+
+def _ensemble_tools(
+    config: AppConfig,
+    ensemble: "EnsembleRunner",
+    workspace: Workspace,
+    skills: SkillIndex | None,
+    tuning_model: "tuple[object, LLMSettings] | None",
+) -> tuple[Tool, ...]:
+    """The ensemble tools of :attr:`AppConfig.ensemble_tools`, sharing one run budget."""
+    from omicsclaw.ensemble.tool import run_skill_tool
+    from omicsclaw.ensemble.tuning.budget import RunBudget
+    from omicsclaw.ensemble.tuning.pipeline import TuningSettings
+    from omicsclaw.ensemble.tuning.tools import TuningToolkit
+
+    budget = RunBudget.from_text(config.ensemble_run_budget) if config.ensemble_run_budget else None
+    allowlist = tuple(
+        column.strip() for column in config.ensemble_obs_allowlist.split(",") if column.strip()
+    )
+    model, settings = tuning_model if tuning_model is not None else (None, None)
+    toolkit = TuningToolkit(
+        runner=ensemble,
+        workspace=workspace,
+        skills=skills if skills is not None else build_skill_index(config),
+        model=model,
+        settings=TuningSettings(groups=config.ensemble_tuning_budget, max_s=config.ensemble_tuning_max_s),
+        budget=budget,
+        tissue_enabled=config.ensemble_tuning_tissue,
+        images_enabled=False,
+        obs_allowlist=allowlist or None,
+        **({"llm_settings": settings} if settings is not None else {}),
+    )
+    run_skill = None
+    if config.ensemble_tools != "tuning":
+        run_skill = run_skill_tool(ensemble, workspace, budget=budget, input_check=toolkit.input_check)
+    return toolkit.tools(config.ensemble_tools, run_skill=run_skill)
+
+
+def build_tuning_model(config: AppConfig, provider: LLMProvider) -> "tuple[object, LLMSettings]":
+    """The model ``optimize_params`` asks, and what is recorded about it.
+
+    The agent's own provider unless :attr:`AppConfig.ensemble_tuning_model`
+    or :attr:`AppConfig.ensemble_tuning_provider` names another.
+
+    :raises AppConfigError: :attr:`AppConfig.ensemble_tuning_images` is on;
+        images cannot be sent on this path.
+    """
+    from omicsclaw.ensemble.tuning.llm import LLMSettings
+
+    if config.ensemble_tuning_images:
+        raise AppConfigError(
+            "ensemble_tuning_images is not supported: the tuning model is called with text only"
+        )
+    if config.ensemble_tuning_model or config.ensemble_tuning_provider:
+        name = config.ensemble_tuning_provider or config.provider
+        resolved = resolve_config(name, config.ensemble_tuning_model)
+        model: object = provider_from_env(name, config.ensemble_tuning_model)
+    else:
+        resolved = resolve_config(config.provider, config.model)
+        model = provider
+    return model, LLMSettings(
+        model=resolved.model,
+        provider=resolved.provider,
+        temperature=resolved.temperature,
+        max_tokens=resolved.max_tokens or None,
+        thinking_budget=resolved.thinking_budget_tokens or None,
+    )
 
 
 def build_permission_gate(config: AppConfig) -> PermissionGate:
@@ -469,23 +562,17 @@ def _environment_source(config: AppConfig) -> Section:
 
 
 def _front_matter(config: AppConfig) -> tuple[Section, ...]:
-    """Persona and project contract, or whatever replaced them."""
+    """The contract beside the skill tree, or the configured prompt files instead.
+
+    A missing file contributes no section.
+    """
     if config.system_prompt_files:
         return tuple(
             Section(f"prompt:{path.name}", "", text_from_file(path))
             for path in config.system_prompt_files
         )
     return (
-        Section(
-            "persona",
-            "",
-            text_from_file(config.workspace / DEFAULT_PERSONA_FILE),
-        ),
-        Section(
-            "project",
-            "## Project contract",
-            text_from_file(config.workspace / DEFAULT_CONTRACT_FILE),
-        ),
+        Section("contract", "", text_from_file(config.repo_root() / CONTRACT_FILE)),
     )
 
 
@@ -516,7 +603,7 @@ def default_sections(
 ) -> tuple[Section, ...]:
     """The sections of the default system prompt, in render order.
 
-    persona → project contract → **safety rules** → tool guidance →
+    contract → **safety rules** → tool guidance →
     [planning] → [execution sandbox] → [skills] → environment →
     [long-term memory].
     ``omicsclaw.context`` has no ``order`` field by ruling (plan 0030),
@@ -537,7 +624,7 @@ def default_sections(
     a tool that is not there costs turns on a capability the deployment
     does not have.
 
-    **Six by default, five with ``skills_index=off``.** Plan 0031 Q10 and
+    **The catalogue section is absent with ``skills_index=off``.** Plan 0031 Q10 and
     §12-1 ruled the catalogue out of this step because this repository's
     skills were being redesigned; ``docs/plans/0032-skill-loader.md``
     landed after that and put it back. The reasoning behind the original
@@ -561,8 +648,8 @@ def default_sections(
     a cached prefix.
 
     A missing file yields ``""`` and takes its whole section with it
-    (``text_from_file``), so a workspace with no ``SOUL.md`` gets a
-    prompt without a persona rather than a prompt with an empty heading.
+    (``text_from_file``), so a deployment with no ``OMICSCLAW.md`` beside
+    its skill tree gets a prompt with no contract section.
     An empty skill index does the same. The safety, guidance and
     environment sections are not files and cannot vanish that way.
     """
@@ -609,8 +696,8 @@ def build_prompt(sections: Sequence[Section]) -> PromptAssembler:
     the difference between a prompt that is rebuilt every turn and one
     that was frozen at process start: only the assembler has
     :meth:`~omicsclaw.context.PromptAssembler.render`, and only calling
-    it again picks up an edited ``SOUL.md``, a rewritten ``CLAUDE.md``,
-    or tomorrow's date. Holding an
+    it again picks up an edited ``OMICSCLAW.md`` or tomorrow's date.
+    Holding an
     :class:`~omicsclaw.context.AssembledPrompt` on
     :class:`AgentApp` instead would compile, run, and silently stop doing
     any of that.
@@ -733,13 +820,14 @@ class AgentApp:
     per-turn state — history, compaction state, the queue — belongs to
     :class:`~omicsclaw.entry.session.SessionRegistry`, which is the one
     field here that owns anything mutable — besides :attr:`mcp`, whose
-    connections :meth:`aclose` closes.
+    connections :meth:`aclose` closes, and :attr:`permission`, whose mode
+    an operator can switch with :meth:`set_permission_mode`. That makes
+    :attr:`config`'s ``permission_mode`` the *start-up* value: read the
+    live one from ``permission.mode``.
 
-    A test that needs a scripted provider builds one of these with
-    :func:`dataclasses.replace` over a real app, or constructs it
-    directly; :func:`build_app` takes no ``provider=`` parameter because
-    plan 0031 §3.2 froze its signature before that need was named. See
-    :func:`build_app`.
+    A test that needs a scripted provider passes it to
+    :func:`build_app` as ``provider=``, which puts it under every
+    consumer at once. See :func:`build_app`.
     """
 
     provider: LLMProvider
@@ -768,7 +856,7 @@ class AgentApp:
     """The **assembler**. ``render()`` is on it;
     :class:`~omicsclaw.context.AssembledPrompt` has only properties. A
     turn calls ``app.prompt.render()`` every time, which is what makes an
-    edited ``SOUL.md`` and a new day visible."""
+    edited ``OMICSCLAW.md`` and a new day visible."""
 
     tools_snapshot: tuple[ToolDefinition, ...]
     """``registry.available_tools()``, taken once.
@@ -865,6 +953,16 @@ class AgentApp:
     resumes conversations from — one database behind all four. Its
     connection is closed by :meth:`aclose`."""
 
+    ensemble: "EnsembleRunner | None" = None
+    """The trial runner behind ``run_skill``, or ``None`` when it is not mounted.
+
+    Shared by every session of this deployment, so all of them draw on one
+    resource pool."""
+
+    skill_env: SkillEnvBinding | None = None
+    """The environment check behind ``use_skill``'s note, or ``None`` when it is
+    off, when ``skills_index`` is off, or when the caller supplied its own tools."""
+
     telemetry: Telemetry = field(default_factory=Telemetry)
     """This deployment's recorder. **Never ``None``.**
 
@@ -892,6 +990,41 @@ class AgentApp:
     passed in, because a deployment that adds a tool of its own is the case
     where losing the gate would be least visible."""
 
+    def set_permission_mode(self, mode: PermissionMode) -> PermissionMode | None:
+        """Switch the gate between ``default`` and ``auto-approve``.
+
+        Returns the previous mode, or ``None`` when this app has no gate.
+        Raises :exc:`ValueError` for any other transition: ``read-only`` is
+        a promise a deployment made ("read this cohort, change nothing") and
+        ``bypass-all`` one for an environment with nobody attached, and a
+        command typed mid-session must neither make nor break either. The
+        rule lives here rather than in a surface because every surface
+        shares this object —— a Channel's many chats share one app.
+
+        Logged at ``WARNING`` every time: the audit log records calls, not
+        the posture they ran under, and afterwards the question "was this
+        one asked about?" needs this line to answer.
+        """
+        if self.permission is None:
+            return None
+        target = PermissionMode(mode)
+        current = self.permission.mode
+        switchable = {PermissionMode.DEFAULT, PermissionMode.AUTO_APPROVE}
+        if current not in switchable or target not in switchable:
+            raise ValueError(
+                f"the permission mode can only move between default and "
+                f"auto-approve in a running session, not {current.value} -> "
+                f"{target.value}; restart with --permission-mode instead"
+            )
+        previous = self.permission.set_mode(target)
+        if previous is not target:
+            _log.warning(
+                "permission mode switched by the operator: %s -> %s",
+                previous.value,
+                target.value,
+            )
+        return previous
+
     def remember_approval(self, request: ApprovalRequest) -> str | None:
         """Persist an ``allow`` rule for exactly the call *request* describes.
 
@@ -913,6 +1046,26 @@ class AgentApp:
         return self.permission.remember(
             request.tool_name,
             request.arguments,
+            schema=tool.definition().input_schema,
+        )
+
+    def can_remember_approval(self, request: ApprovalRequest) -> bool:
+        """Whether "always allow" could ever take effect for *request*.
+
+        ``False`` for a call that changes a protected file —— the rule file,
+        ``.omicsclaw/``, a ``.env`` —— which the gate decides before it
+        reads any rule. Writing an ``allow`` rule for one would be reported
+        as remembered and never consulted, and the next identical call
+        would be asked about anyway; a surface uses this to not offer it.
+        """
+        if self.permission is None:
+            return True
+        tool = self.registry.get(request.tool_name)
+        if tool is None:
+            return True
+        return not self.permission.protects(
+            request.arguments,
+            policy=self.registry.policy_for(request.tool_name),
             schema=tool.definition().input_schema,
         )
 
@@ -973,6 +1126,9 @@ def build_app(
     mcp: MCPManager | None = None,
     sandbox: SandboxBinding | None = None,
     telemetry: Telemetry | None = None,
+    skills: SkillIndex | None = None,
+    ensemble: "EnsembleRunner | None" = None,
+    provider: LLMProvider | None = None,
 ) -> AgentApp:
     """Wire one deployment. The only function that knows the order.
 
@@ -1015,18 +1171,20 @@ def build_app(
     ``sessions=None`` below with a constructor — that is the mistake the
     circular reference is there to prevent.
 
-    **There is no ``provider=`` parameter**, and one is genuinely needed:
-    plan 0031 §8.3 asks for an end-to-end turn driven by a scripted
-    provider, and §3.2 froze this signature before that was written down.
-    Until the contract is reopened, substitute afterwards::
+    *provider* is the backend to use instead of
+    :func:`~omicsclaw.provider.provider_from_env`. ``None`` builds one
+    from the configuration and the environment. A provider passed here
+    takes that one's place, so every consumer gets it: the telemetry
+    wrapper, the summarizer, the sub-agent runner, the tuning model and
+    the engine. The model name used for the context budget still comes
+    from :func:`~omicsclaw.provider.resolve_config` over
+    ``config.provider`` and ``config.model``, whatever *provider* is.
+    This is how a test or an eval drives a whole deployment with a
+    scripted backend.
 
-        app = dataclasses.replace(real, provider=fake)
-        app = dataclasses.replace(
-            app, engine=AgentEngine(fake, app.registry, cfg.engine_config())
-        )
-
-    ``AgentApp`` is a frozen ``slots`` dataclass, so
-    :func:`dataclasses.replace` works and mutation does not.
+    *skills* is the skill index to use instead of scanning again; *ensemble*
+    is a runner from :func:`~omicsclaw.entry.ensemble.open_ensemble`, mounted
+    as ``run_skill`` among the foundation tools. ``None`` mounts nothing.
 
     **Starts no sandbox either.** *sandbox* is a binding from
     :func:`~omicsclaw.entry.sandbox.open_sandbox`; ``bash`` is built over
@@ -1051,14 +1209,24 @@ def build_app(
     # credentials; an inactive one wraps nothing and the object graph
     # below is unchanged.
     observing = build_telemetry() if telemetry is None else telemetry
-    provider = observing.trace_provider(
-        provider_from_env(config.provider, config.model), model=config.model
+    # The model the provider will actually call, not the one the config
+    # named: ``LLM_PROVIDER=deepseek`` alone leaves ``config.model`` empty
+    # and runs the preset's default, and budgeting against ``""`` would
+    # be the fallback window instead of that model's.
+    model = resolve_config(config.provider, config.model).model
+    backend = (
+        provider_from_env(config.provider, config.model)
+        if provider is None
+        else provider
     )
+    provider = observing.trace_provider(backend, model=model)
     # One scan, two consumers: the prompt advertises exactly what the
     # tool can load. Two scans would drift the moment a skill is written
     # between them.
-    skills = build_skill_index(config)
+    if skills is None:
+        skills = build_skill_index(config)
     plans = build_plan_book(config)
+    checking = build_skill_env(config, skills, binding) if tools is None else None
     # One database, four consumers: the two tools, the prompt section,
     # the extractor — and, once attach_sessions runs, the conversations.
     # A second open would be a second connection to the same file, and
@@ -1072,6 +1240,11 @@ def build_app(
                 bash_environment=binding.environment,
                 plans=plans,
                 memory=remembering,
+                ensemble=ensemble,
+                skill_env=checking,
+                tuning_model=(
+                    build_tuning_model(config, provider) if ensemble is not None else None
+                ),
             )
         else:
             mounted = tools
@@ -1096,10 +1269,8 @@ def build_app(
         # rewrites a payload is not re-judged, because the gate already
         # decided. With no hooks configured this wraps nothing and the
         # object graph is unchanged.
-        mounted = hook_tools(
-            mounted,
-            build_hooks(config, observing) if hooks is None else hooks,
-        )
+        chain = build_hooks(config, observing) if hooks is None else hooks
+        mounted = hook_tools(mounted, chain)
         # Every tool, including a caller's own and every MCP tool, goes
         # behind the gate before the registry ever sees one. Gating here
         # rather than inside build_registry keeps that function the seam its
@@ -1111,6 +1282,25 @@ def build_app(
         registry = build_registry(config, mounted)
         if tools is None:
             _apply_bash_policy(registry, mounted, binding, config)
+        # ``task`` is mounted after everything else, including MCP, and
+        # appended rather than inserted: it narrows the very registry it
+        # is registered into, so it cannot be built before that registry
+        # exists, and a tool added anywhere but the end would move every
+        # tool after it inside the byte-stable list a cached prompt prefix
+        # depends on. It goes through the same hook chain and the same
+        # gate as every other tool.
+        subagents = build_subagent_registry(config)
+        if subagents is not None:
+            runner = ChildRunner(
+                provider=provider,
+                parent=registry,
+                config=config,
+                sandbox=binding,
+                skills=skills,
+            )
+            registry.register(
+                gate_tools(hook_tools((TaskTool(subagents, runner),), chain), gate)[0]
+            )
         snapshot = registry.available_tools()
         chosen = (
             default_sections(
@@ -1125,11 +1315,21 @@ def build_app(
         )
 
         app_prompt = build_prompt(chosen)
-        budget = build_budget(config.model, snapshot)
+        budget = build_budget(model, snapshot)
         summarizer = build_summarizer(provider, config)
         # The registry goes in as itself — see build_registry on why nothing
         # may wrap it without forwarding both optional Protocols.
-        engine = AgentEngine(provider, registry, config.engine_config())
+        #
+        # The assembler goes in as the engine's default PromptSource, which
+        # it satisfies structurally: ``render()`` returning an object with a
+        # ``system_prompt``, no adapter, nothing dropped. It is a default and
+        # not a binding — one engine serves every session this process runs,
+        # and ``entry/turn.py`` passes the same assembler per call — but a
+        # caller reaching for ``app.engine.exchange`` directly gets this
+        # deployment's prompt rather than none.
+        engine = AgentEngine(
+            provider, registry, config.engine_config(), prompt=app_prompt
+        )
     except BaseException:
         if remembering is not None:
             remembering.close()
@@ -1137,12 +1337,14 @@ def build_app(
 
     _log.info(
         "assembled: provider=%s tools=%d skills=%d planning=%s memory=%s "
-        "window=%d workspace=%s sandbox=%s permission=%s rules=%d",
+        "subagents=%d ensemble=%s window=%d workspace=%s sandbox=%s permission=%s rules=%d",
         provider.name,
         len(snapshot),
         len(skills),
         "on" if plans is not None else "off",
         "on" if remembering is not None else "off",
+        len(subagents) if subagents is not None else 0,
+        "on" if ensemble is not None and tools is None else "off",
         budget.context_tokens,
         config.workspace,
         _sandbox_state(binding),
@@ -1166,6 +1368,8 @@ def build_app(
         sandbox=binding,
         permission=gate,
         memory=remembering,
+        ensemble=ensemble if tools is None else None,
+        skill_env=checking,
         telemetry=observing,
     )
 
@@ -1254,6 +1458,14 @@ async def open_app(
     ``sandbox_required`` is set. *on_sandbox_change* receives every
     sandbox state change.
 
+    Then the ensemble layer is opened where the sandbox put ``bash``: GPUs
+    are detected and the execution environment self-checked, and
+    ``run_skill`` is mounted if it passes — see
+    :func:`~omicsclaw.entry.ensemble.open_ensemble`, which may raise
+    :exc:`~omicsclaw.entry.config.AppConfigError` when
+    :attr:`AppConfig.ensemble` is explicitly on. With *tools* given, no
+    runner is opened.
+
     The memory database :func:`build_app` opened is then swept: expired
     entries are deleted and ``MEMORY.md`` is rebuilt from what survives,
     so the first prompt of the process carries the memories that are
@@ -1270,6 +1482,10 @@ async def open_app(
     servers = load_mcp_config(config.mcp_config_path())
     sandbox = await open_sandbox(config, on_change=on_sandbox_change)
     try:
+        skills = build_skill_index(config)
+        ensemble = (
+            await open_ensemble(config, skills, sandbox) if tools is None else None
+        )
         if servers.is_empty:
             return await _swept(
                 build_app(
@@ -1279,6 +1495,8 @@ async def open_app(
                     sections=sections,
                     sandbox=sandbox,
                     telemetry=telemetry,
+                    skills=skills,
+                    ensemble=ensemble,
                 )
             )
 
@@ -1301,6 +1519,8 @@ async def open_app(
                     mcp=manager,
                     sandbox=sandbox,
                     telemetry=telemetry,
+                    skills=skills,
+                    ensemble=ensemble,
                 )
             )
         except BaseException:
@@ -1312,7 +1532,7 @@ async def open_app(
 
 
 async def _swept(app: AgentApp) -> AgentApp:
-    """Run *app*'s start-up memory maintenance and hand it back.
+    """Run *app*'s start-up memory maintenance, log its skill environment, and hand it back.
 
     :param app: Freshly built deployment.
     :returns: The same app.
@@ -1322,6 +1542,11 @@ async def _swept(app: AgentApp) -> AgentApp:
     """
     try:
         await prepare_memory(app.memory)
+        await log_skill_env(
+            app.skill_env,
+            app.config,
+            ensemble_python=app.ensemble.executor.python if app.ensemble is not None else None,
+        )
     except BaseException:
         if app.memory is not None:
             app.memory.close()

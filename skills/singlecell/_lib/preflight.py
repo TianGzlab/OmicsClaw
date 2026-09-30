@@ -7,8 +7,11 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from omicsclaw.common.user_guidance import emit_user_guidance, emit_user_guidance_payload
-from omicsclaw.core.r_dependency_manager import check_r_tier, suggest_r_install
+from skills._sdk.user_guidance import (
+    emit_user_guidance,
+    emit_user_guidance_payload,
+)
+from skills._sdk.r_dependency_manager import check_r_tier, suggest_r_install
 
 from .adata_utils import (
     build_standardization_recommendation,
@@ -22,7 +25,7 @@ from .adata_utils import (
     x_matrix_kind,
 )
 from . import annotation as sc_annotation_utils
-from . import dependency_manager as sc_dep_manager
+from skills._sdk import deps as sc_dep_manager
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -619,7 +622,7 @@ def preflight_sc_cell_communication(
 ) -> PreflightDecision:
     from pathlib import Path
 
-    from skills.singlecell._lib import dependency_manager as sc_dep_manager
+    from skills._sdk import deps as sc_dep_manager
 
     decision = PreflightDecision("sc-cell-communication")
     _add_standardization_guidance(decision, adata, source_path=source_path)
@@ -1752,7 +1755,7 @@ def preflight_sc_enrichment(
     r_missing: list[str] = []
     if engine in {"auto", "r"}:
         try:
-            from omicsclaw.core.r_dependency_manager import check_r_tier
+            from skills._sdk.r_dependency_manager import check_r_tier
 
             _, r_missing = check_r_tier("singlecell-enrichment")
         except Exception:

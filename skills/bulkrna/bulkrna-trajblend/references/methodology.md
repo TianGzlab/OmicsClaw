@@ -38,7 +38,7 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-trajblend --demo
-python omicsclaw.py run bulkrna-trajblend --input bulk_counts.csv \
+python skills/bulkrna/bulkrna-trajblend/bulkrna_trajblend.py --demo
+python skills/bulkrna/bulkrna-trajblend/bulkrna_trajblend.py --input bulk_counts.csv \
   --reference scref.h5ad --output results/
 ```

@@ -14,8 +14,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-de --demo
-python omicsclaw.py run bulkrna-de --input <counts.csv> --output <dir>
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo
+python skills/bulkrna/bulkrna-de/bulkrna_de.py --input <counts.csv> --output <dir>
 python bulkrna_de.py --input counts.csv --output results/
 python bulkrna_de.py --demo --output /tmp/de_demo
 python bulkrna_de.py --input counts.csv --output results/ --method ttest --ctrl-prefix ctrl --treat-prefix treat

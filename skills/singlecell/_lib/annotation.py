@@ -220,7 +220,7 @@ def annotate_with_celltypist(
     """Annotate cells using CellTypist pre-trained models.
 
     Requires the ``celltypist`` package. Uses
-    :func:`dependency_manager.require` to provide a clear install message
+    :func:`skills._sdk.deps.require` to provide a clear install message
     if the package is missing.
 
     Parameters
@@ -241,7 +241,7 @@ def annotate_with_celltypist(
     AnnData with ``adata.obs[annotation_key]`` and optionally
     ``adata.obs[annotation_key + '_majority_voting']`` populated.
     """
-    from . import dependency_manager as dm
+    from skills._sdk import deps as dm
 
     ct = dm.require("celltypist", feature="CellTypist cell type annotation")
 

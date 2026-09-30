@@ -119,7 +119,7 @@ python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
   --output <dir>
 
 # Demo
-oc run scatac-preprocessing --demo --output /tmp/scatac_preprocess_demo
+python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py --demo --output /tmp/scatac_preprocess_demo
 ```
 
 

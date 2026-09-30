@@ -244,9 +244,22 @@ def parse_anchors_and_summary(text: str) -> tuple[Anchors, str]:
         parsed[current_field] = "\n".join(current_lines).strip()
 
     anchors = Anchors(
-        **{field: parsed.get(field) or _MISSING for field, _ in _ANCHOR_HEADERS}
+        **{field: _anchor_value(parsed.get(field)) for field, _ in _ANCHOR_HEADERS}
     )
     return anchors, "\n".join(summary_lines).strip()
+
+
+def _anchor_value(text: str | None) -> str:
+    """*text*, or :data:`_MISSING` when it is empty or says only N/A.
+
+    Models write the empty marker as ``N/A``, ``- N/A`` or ``* N/A``.
+    All of them must read as "nothing to say here", or
+    :meth:`Anchors.merge` lets them overwrite what an earlier compaction
+    knew.
+    """
+    if not text or text.lstrip("-*• ").strip().upper() == _MISSING:
+        return _MISSING
+    return text
 
 
 def build_compaction_message(

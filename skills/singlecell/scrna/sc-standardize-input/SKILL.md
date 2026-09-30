@@ -1,27 +1,15 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-standardize-input
 description: Load when an external single-cell h5ad/h5/loom/mtx needs to be canonicalised onto the OmicsClaw
   AnnData contract before downstream scRNA skills run. Skip when data already came from sc-count (already
   canonical); bulk RNA-seq (use bulkrna-qc); spatial (use spatial-preprocess).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
-emoji: 🧱
+trigger: standardize AnnData, fix scRNA input, canonicalize single-cell input, prepare AnnData, input contract
 tags:
 - singlecell
 - scrna
 - input
 - standardization
 - anndata
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
 ---
 
 # sc-standardize-input
@@ -36,8 +24,6 @@ AnnData contract every downstream scRNA skill assumes: raw counts in
 `sc-qc` / `sc-preprocessing` / etc.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -58,14 +44,14 @@ AnnData contract every downstream scRNA skill assumes: raw counts in
 
 1. Load via the shared multi-format single-cell loader.
 2. Pre-flight: validate non-empty input; auto-detect species from gene name case (UPPER → human, Title → mouse).
-3. Pick the best count-like matrix among `layers["counts"]`, `adata.raw`, and `adata.X` (orchestrated by `canonicalize_singlecell_adata` in `skills/singlecell/_lib/adata_utils.py:389`, which calls the `matrix_looks_count_like` heuristic at `_lib/adata_utils.py:255`).
+3. Pick the best count-like matrix among `layers["counts"]`, `adata.raw`, and `adata.X` (orchestrated by `canonicalize_singlecell_adata` in `skills/singlecell/_lib/adata_utils.py`, which calls the `matrix_looks_count_like` heuristic at `_lib/adata_utils.py`).
 4. Harmonise feature names (Ensembl ↔ symbol, deduplicate).
 5. Persist `uns["omicsclaw_input_contract"]` + `uns["omicsclaw_matrix_contract"]`.
 6. Save `processed.h5ad`; emit `report.md` + `result.json`.
 
 ## Gotchas
 
-- **`--r-enhanced` is accepted but produces no R plots.** `sc_standardize_input.py:250` declares the flag for CLI consistency; this skill is input canonicalisation, not visualisation.  Pass it freely, but expect no R Enhanced figures.
+- **`--r-enhanced` is accepted but produces no R plots.** `sc_standardize_input.py` declares the flag for CLI consistency; this skill is input canonicalisation, not visualisation.  Pass it freely, but expect no R Enhanced figures.
 - **Count-source selection is heuristic, not declarative.** The skill scans `layers["counts"]` → `adata.raw` → `adata.X` and picks the first that passes a `matrix_looks_count_like` check.  If the input is already log-normalised everywhere, the heuristic can mis-classify and fall through to `adata.X`; verify `result.json["summary"]["warnings"]` after every run.
 - **Species auto-detect is gene-case-based.** UPPER-case symbols → human, Title-case → mouse.  Non-standard gene-name conventions (Ensembl IDs only, lowercase) silently fall through to the `auto` default.  Pass `--species human` or `--species mouse` explicitly when working with non-symbol matrices.
 - **No filtering, no normalisation, no clustering.** Even if `result.json` looks complete, the output is still raw counts in canonical form — run `sc-qc` and `sc-preprocessing` next.
@@ -74,10 +60,10 @@ AnnData contract every downstream scRNA skill assumes: raw counts in
 
 ```bash
 # Demo (built-in PBMC3K)
-python omicsclaw.py run sc-standardize-input --demo --output /tmp/sc_std_demo
+python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --demo --output /tmp/sc_std_demo
 
 # Real run with species hint
-python omicsclaw.py run sc-standardize-input \
+python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py \
   --input external.h5ad --output results/ --species mouse
 ```
 
@@ -87,3 +73,9 @@ python omicsclaw.py run sc-standardize-input \
 - `references/methodology.md` — count-source heuristic, species detection logic
 - `references/output_contract.md` — exact `processed.h5ad` + `result.json` shape
 - Adjacent skills: `sc-count` (FASTQ → AnnData; skip standardisation when used), `sc-qc` (next step), `sc-preprocessing` (full normalise+cluster pipeline)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`

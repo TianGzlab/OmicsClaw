@@ -1,0 +1,728 @@
+{
+ "version": "1",
+ "pip_version": "26.0.1",
+ "install": [
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/pertpy/0.6.0/pertpy-0.6.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=90f1a6999182b5f1ea20373b80082a2bf42b3e4f4d98764b5027acc9050ed5b6",
+     "hashes": {
+      "sha256": "90f1a6999182b5f1ea20373b80082a2bf42b3e4f4d98764b5027acc9050ed5b6"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": true,
+   "metadata": {
+    "name": "pertpy",
+    "version": "0.6.0",
+    "requires_dist": [
+     "adjusttext",
+     "anndata",
+     "arviz",
+     "decoupler",
+     "ipywidgets",
+     "muon",
+     "numba",
+     "numpyro",
+     "openpyxl",
+     "ott-jax",
+     "plotnine",
+     "requests",
+     "rich",
+     "scanpy[leiden]",
+     "scikit-misc",
+     "scipy",
+     "scvi-tools",
+     "sparsecca",
+     "toytree",
+     "ete3; extra == 'coda'",
+     "pyqt5; extra == 'coda'",
+     "pre-commit; extra == 'dev'",
+     "docutils!=0.18.*,!=0.19.*,>=0.8; extra == 'doc'",
+     "furo; extra == 'doc'",
+     "ipykernel; extra == 'doc'",
+     "ipython; extra == 'doc'",
+     "myst-nb; extra == 'doc'",
+     "myst-parser; extra == 'doc'",
+     "nbsphinx; extra == 'doc'",
+     "nbsphinx-link; extra == 'doc'",
+     "pyenchant; extra == 'doc'",
+     "pygments; extra == 'doc'",
+     "sphinx-autodoc-typehints; extra == 'doc'",
+     "sphinx-automodapi; extra == 'doc'",
+     "sphinx-copybutton; extra == 'doc'",
+     "sphinx-design; extra == 'doc'",
+     "sphinx-gallery; extra == 'doc'",
+     "sphinx-last-updated-by-git; extra == 'doc'",
+     "sphinx-remove-toctrees; extra == 'doc'",
+     "sphinx>=4; extra == 'doc'",
+     "sphinxcontrib-bibtex>=1.0.0; extra == 'doc'",
+     "sphinxext-opengraph; extra == 'doc'",
+     "pytest; extra == 'test'",
+     "pytest-cov; extra == 'test'"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/arviz/0.23.4/arviz-0.23.4-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=c46c7faf8a06abadc9b5b64000584062ecbc20c2298e2bd6dfba04bb01a684ca",
+     "hashes": {
+      "sha256": "c46c7faf8a06abadc9b5b64000584062ecbc20c2298e2bd6dfba04bb01a684ca"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "arviz",
+    "version": "0.23.4",
+    "requires_dist": [
+     "setuptools>=60.0.0",
+     "matplotlib>=3.8",
+     "numpy>=1.26.0",
+     "scipy>=1.11.0",
+     "packaging",
+     "pandas>=2.1.0",
+     "xarray>=2023.7.0",
+     "h5netcdf>=1.0.2",
+     "h5py",
+     "typing_extensions>=4.1.0",
+     "xarray-einstats>=0.3",
+     "platformdirs",
+     "numba; extra == \"all\"",
+     "netcdf4; extra == \"all\"",
+     "bokeh>=3; extra == \"all\"",
+     "contourpy; extra == \"all\"",
+     "ujson; extra == \"all\"",
+     "dask[distributed]; extra == \"all\"",
+     "zarr<3,>=2.5.0; extra == \"all\"",
+     "xarray>=2024.11.0; extra == \"all\"",
+     "dm-tree>=0.1.8; extra == \"all\"",
+     "arviz-base[h5netcdf]; extra == \"preview\"",
+     "arviz-stats[xarray]; extra == \"preview\"",
+     "arviz-plots; extra == \"preview\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/xarray-einstats/0.9.1/xarray_einstats-0.9.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=777339524e85d066f2ef9ed1e3a3fb63aead4c1065fd1406f30dfa4de58ce063",
+     "hashes": {
+      "sha256": "777339524e85d066f2ef9ed1e3a3fb63aead4c1065fd1406f30dfa4de58ce063"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "xarray-einstats",
+    "version": "0.9.1",
+    "requires_dist": [
+     "numpy>=1.25",
+     "scipy>=1.11",
+     "xarray>=2023.06.0",
+     "furo ; extra == \"doc\"",
+     "myst-parser[linkify] ; extra == \"doc\"",
+     "myst-nb ; extra == \"doc\"",
+     "sphinx-copybutton ; extra == \"doc\"",
+     "numpydoc ; extra == \"doc\"",
+     "sphinx>=5 ; extra == \"doc\"",
+     "jupyter-sphinx ; extra == \"doc\"",
+     "sphinx-design ; extra == \"doc\"",
+     "watermark ; extra == \"doc\"",
+     "matplotlib ; extra == \"doc\"",
+     "sphinx-togglebutton ; extra == \"doc\"",
+     "einops ; extra == \"einops\"",
+     "numba>=0.55 ; extra == \"numba\"",
+     "hypothesis ; extra == \"test\"",
+     "pytest ; extra == \"test\"",
+     "pytest-cov ; extra == \"test\"",
+     "packaging ; extra == \"test\"",
+     "scipy>=1.15 ; extra == \"test\"",
+     "preliz>=0.19 ; extra == \"test\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/llvmlite/0.43.0/llvmlite-0.43.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "archive_info": {
+     "hash": "sha256=977525a1e5f4059316b183fb4fd34fa858c9eade31f165427a3977c95e3ee749",
+     "hashes": {
+      "sha256": "977525a1e5f4059316b183fb4fd34fa858c9eade31f165427a3977c95e3ee749"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "llvmlite",
+    "version": "0.43.0"
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/numpyro/0.22.0/numpyro-0.22.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=0bbcd8e5319876306eaea595bc78c09201cbcde89bd5856f2867ab65e1dab0a5",
+     "hashes": {
+      "sha256": "0bbcd8e5319876306eaea595bc78c09201cbcde89bd5856f2867ab65e1dab0a5"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "numpyro",
+    "version": "0.22.0",
+    "requires_dist": [
+     "jax>=0.7.0",
+     "jaxlib>=0.7.0",
+     "multipledispatch",
+     "numpy",
+     "tqdm",
+     "jax[cpu]>=0.7.0; extra == \"cpu\"",
+     "jax[cuda12]>=0.7.0; extra == \"cuda12\"",
+     "jax[cuda13]>=0.7.0; extra == \"cuda13\"",
+     "jax[tpu]>=0.7.0; extra == \"tpu\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/ott-jax/0.6.0/ott_jax-0.6.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=89d7ee73ae105a56385b66a43e9acd5ae070e66d991efc56047ab47cc756f3e6",
+     "hashes": {
+      "sha256": "89d7ee73ae105a56385b66a43e9acd5ae070e66d991efc56047ab47cc756f3e6"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "ott-jax",
+    "version": "0.6.0",
+    "requires_dist": [
+     "jax>=0.4.0",
+     "jaxopt>=0.8",
+     "lineax>=0.0.7",
+     "numpy>=1.20.0",
+     "typing_extensions; python_version <= \"3.9\"",
+     "optax>=0.2.4",
+     "flax>=0.6.6; extra == \"neural\"",
+     "optax>=0.2.4; extra == \"neural\"",
+     "diffrax>=0.4.1; extra == \"neural\"",
+     "pre-commit>=2.16.0; extra == \"dev\"",
+     "tox>=4; extra == \"dev\"",
+     "pytest; extra == \"test\"",
+     "pytest-xdist; extra == \"test\"",
+     "pytest-cov; extra == \"test\"",
+     "pytest-memray; extra == \"test\"",
+     "coverage[toml]; extra == \"test\"",
+     "chex; extra == \"test\"",
+     "networkx>=2.5; extra == \"test\"",
+     "scikit-learn>=1.0; extra == \"test\"",
+     "tqdm; extra == \"test\"",
+     "tslearn>=0.5; python_version < \"3.13\" and extra == \"test\"",
+     "matplotlib; extra == \"test\"",
+     "matplotlib; extra == \"docs\"",
+     "sphinx>=4.0; extra == \"docs\"",
+     "sphinx-book-theme>=1.0.1; extra == \"docs\"",
+     "sphinx_autodoc_typehints>=1.12.0; extra == \"docs\"",
+     "sphinx-copybutton>=0.5.1; extra == \"docs\"",
+     "sphinxcontrib-bibtex>=2.5.0; extra == \"docs\"",
+     "sphinxcontrib-spelling>=7.7.0; extra == \"docs\"",
+     "myst-nb>=0.17.1; extra == \"docs\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/lineax/0.1.1/lineax-0.1.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=2e399f1674773ab2ba54d76175a618977a554f47abd0a345198d53d92c07beb2",
+     "hashes": {
+      "sha256": "2e399f1674773ab2ba54d76175a618977a554f47abd0a345198d53d92c07beb2"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "lineax",
+    "version": "0.1.1",
+    "requires_dist": [
+     "equinox>=0.11.10",
+     "jax>=0.10.0",
+     "jaxtyping>=0.2.24",
+     "typing-extensions>=4.5.0"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/equinox/0.13.8/equinox-0.13.8-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=ca004348533cc30a63ebe8823d7dd4bb626dce17743d40bbddb89b402ef2a240",
+     "hashes": {
+      "sha256": "ca004348533cc30a63ebe8823d7dd4bb626dce17743d40bbddb89b402ef2a240"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "equinox",
+    "version": "0.13.8",
+    "requires_dist": [
+     "jax!=0.7.0,!=0.7.1,>=0.4.38",
+     "jaxtyping>=0.2.20",
+     "typing-extensions>=4.5.0",
+     "wadler-lindig>=0.1.0"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/jax/0.10.2/jax-0.10.2-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=724d73c4678d8b06f6a6ab4db1b8a2fea8cd4f1e2c2564f99601634ec7b8d1c6",
+     "hashes": {
+      "sha256": "724d73c4678d8b06f6a6ab4db1b8a2fea8cd4f1e2c2564f99601634ec7b8d1c6"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "jax",
+    "version": "0.10.2",
+    "requires_dist": [
+     "jaxlib<=0.10.2,>=0.10.1",
+     "ml_dtypes>=0.5.0",
+     "numpy>=2.0",
+     "opt_einsum",
+     "scipy>=1.14",
+     "jaxlib==0.10.1; extra == \"minimum-jaxlib\"",
+     "jaxlib==0.10.1; extra == \"ci\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"tpu\"",
+     "libtpu==0.0.42.*; extra == \"tpu\"",
+     "requests; extra == \"tpu\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"cuda\"",
+     "jax-cuda12-plugin[with-cuda]<=0.10.2,>=0.10.2; extra == \"cuda\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"cuda12\"",
+     "jax-cuda12-plugin[with-cuda]<=0.10.2,>=0.10.2; extra == \"cuda12\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"cuda13\"",
+     "jax-cuda13-plugin[with-cuda]<=0.10.2,>=0.10.2; extra == \"cuda13\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"cuda12-local\"",
+     "jax-cuda12-plugin<=0.10.2,>=0.10.2; extra == \"cuda12-local\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"cuda13-local\"",
+     "jax-cuda13-plugin<=0.10.2,>=0.10.2; extra == \"cuda13-local\"",
+     "jaxlib<=0.10.2,>=0.10.2; extra == \"rocm7-local\"",
+     "jax-rocm7-plugin==0.10.2.*; extra == \"rocm7-local\"",
+     "kubernetes; extra == \"k8s\"",
+     "xprof; extra == \"xprof\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/jaxlib/0.10.2/jaxlib-0.10.2-cp311-cp311-manylinux_2_27_x86_64.whl",
+    "archive_info": {
+     "hash": "sha256=1faca3c5d4662cb4a6130a68105d68bb520764817e165d6eebfd6786c0d1f30f",
+     "hashes": {
+      "sha256": "1faca3c5d4662cb4a6130a68105d68bb520764817e165d6eebfd6786c0d1f30f"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "jaxlib",
+    "version": "0.10.2",
+    "requires_dist": [
+     "scipy>=1.14",
+     "numpy>=2.0",
+     "ml_dtypes>=0.5.0"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/jaxtyping/0.3.11/jaxtyping-0.3.11-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=8a4bedc4e3f963fa82df41bd13c7ebc2bad925601eb48614c65798f21329d4e3",
+     "hashes": {
+      "sha256": "8a4bedc4e3f963fa82df41bd13c7ebc2bad925601eb48614c65798f21329d4e3"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "jaxtyping",
+    "version": "0.3.11",
+    "requires_dist": [
+     "wadler-lindig>=0.1.3"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/optax/0.2.8/optax-0.2.8-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=e3ca2d36c99daab1800ae9dbc0545034382d6bc780b24d969e1b0df65fa31cb4",
+     "hashes": {
+      "sha256": "e3ca2d36c99daab1800ae9dbc0545034382d6bc780b24d969e1b0df65fa31cb4"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "optax",
+    "version": "0.2.8",
+    "requires_dist": [
+     "absl-py>=0.7.1",
+     "jax>=0.5.3",
+     "jaxlib>=0.5.3",
+     "numpy>=1.18.0",
+     "sphinx>=6.0.0 ; extra == \"docs\"",
+     "sphinx-book-theme>=1.0.1 ; extra == \"docs\"",
+     "sphinxcontrib-katex ; extra == \"docs\"",
+     "sphinx-autodoc-typehints ; extra == \"docs\"",
+     "ipython>=8.8.0 ; extra == \"docs\"",
+     "myst-nb>=1.0.0 ; extra == \"docs\"",
+     "matplotlib>=3.5.0 ; extra == \"docs\"",
+     "sphinx-gallery>=0.14.0 ; extra == \"docs\"",
+     "sphinx-collections>=0.0.1 ; extra == \"docs\"",
+     "flax ; extra == \"docs\"",
+     "sphinx_contributors ; extra == \"docs\"",
+     "setuptools ; extra == \"docs\"",
+     "flax>=0.5.3 ; extra == \"test\"",
+     "scipy>=1.7.1 ; extra == \"test\"",
+     "scikit-learn ; extra == \"test\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/wadler-lindig/0.1.7/wadler_lindig-0.1.7-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=e3ec83835570fd0a9509f969162aeb9c65618f998b1f42918cfc8d45122fe953",
+     "hashes": {
+      "sha256": "e3ec83835570fd0a9509f969162aeb9c65618f998b1f42918cfc8d45122fe953"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "wadler_lindig",
+    "version": "0.1.7",
+    "requires_dist": [
+     "numpy; extra == 'dev'",
+     "pre-commit; extra == 'dev'",
+     "pytest; extra == 'dev'",
+     "hippogriffe==0.1.0; extra == 'docs'",
+     "mkdocs-include-exclude-files==0.1.0; extra == 'docs'",
+     "mkdocs-ipynb==0.1.0; extra == 'docs'",
+     "mkdocs-material==9.6.7; extra == 'docs'",
+     "mkdocs==1.6.1; extra == 'docs'",
+     "mkdocstrings[python]==0.28.3; extra == 'docs'",
+     "pymdown-extensions==10.14.3; extra == 'docs'"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/scikit-misc/0.5.2/scikit_misc-0.5.2-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+    "archive_info": {
+     "hash": "sha256=2981c3207f02308327845baf8a7d06b829cc632cf605af517cc46bb146915aa9",
+     "hashes": {
+      "sha256": "2981c3207f02308327845baf8a7d06b829cc632cf605af517cc46bb146915aa9"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "scikit-misc",
+    "version": "0.5.2",
+    "requires_dist": [
+     "numpy>=1.26.4",
+     "scikit-misc[doc]; extra == \"all\"",
+     "scikit-misc[build]; extra == \"all\"",
+     "scikit-misc[lint]; extra == \"all\"",
+     "scikit-misc[test]; extra == \"all\"",
+     "scikit-misc[dev]; extra == \"all\"",
+     "numpydoc; extra == \"doc\"",
+     "sphinx; extra == \"doc\"",
+     "cython; extra == \"build\"",
+     "build; extra == \"build\"",
+     "spin; extra == \"build\"",
+     "meson; extra == \"build\"",
+     "meson-python; extra == \"build\"",
+     "ninja; extra == \"build\"",
+     "ruff; extra == \"lint\"",
+     "pytest-cov; extra == \"test\"",
+     "wheel; extra == \"dev\"",
+     "twine; extra == \"dev\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/mpmath/1.3.0/mpmath-1.3.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+     "hashes": {
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "mpmath",
+    "version": "1.3.0",
+    "requires_dist": [
+     "pytest (>=4.6) ; extra == 'develop'",
+     "pycodestyle ; extra == 'develop'",
+     "pytest-cov ; extra == 'develop'",
+     "codecov ; extra == 'develop'",
+     "wheel ; extra == 'develop'",
+     "sphinx ; extra == 'docs'",
+     "gmpy2 (>=2.1.0a4) ; (platform_python_implementation != \"PyPy\") and extra == 'gmpy'",
+     "pytest (>=4.6) ; extra == 'tests'"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/sparsecca/0.3.1/sparsecca-0.3.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=223cce1a1ce181ec6e84a0e6a2f4ca406c2b023144955678abf104fae7927c5d",
+     "hashes": {
+      "sha256": "223cce1a1ce181ec6e84a0e6a2f4ca406c2b023144955678abf104fae7927c5d"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "sparsecca",
+    "version": "0.3.1",
+    "requires_dist": [
+     "pandas",
+     "numpy",
+     "statsmodels",
+     "pyomo",
+     "bump2version ; extra == \"dev\"",
+     "pre-commit ; extra == \"dev\"",
+     "twine>=4.0.2 ; extra == \"dev\"",
+     "sphinx>=4 ; extra == \"doc\"",
+     "sphinx-book-theme>=0.3.3 ; extra == \"doc\"",
+     "myst-nb ; extra == \"doc\"",
+     "sphinxcontrib-bibtex>=1.0.0 ; extra == \"doc\"",
+     "sphinx-autodoc-typehints ; extra == \"doc\"",
+     "ipykernel ; extra == \"doc\"",
+     "ipython ; extra == \"doc\"",
+     "sphinx-copybutton ; extra == \"doc\"",
+     "pytest ; extra == \"test\"",
+     "pytest-cov ; extra == \"test\"",
+     "codecov ; extra == \"test\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/pyomo/6.10.1/pyomo-6.10.1-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+    "archive_info": {
+     "hash": "sha256=4e6c54a9a8b9325db5bb0c2b4cafa02738d592e3673d20c80f28d73738f38316",
+     "hashes": {
+      "sha256": "4e6c54a9a8b9325db5bb0c2b4cafa02738d592e3673d20c80f28d73738f38316"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "pyomo",
+    "version": "6.10.1",
+    "requires_dist": [
+     "coverage; extra == \"tests\"",
+     "parameterized; extra == \"tests\"",
+     "pybind11; extra == \"tests\"",
+     "pytest!=9.0.0; extra == \"tests\"",
+     "pytest-parallel; extra == \"tests\"",
+     "Sphinx!=8.2.0,!=9.0.*,!=9.1.0,>4; extra == \"docs\"",
+     "sphinx-copybutton; extra == \"docs\"",
+     "sphinx_rtd_theme>0.5; extra == \"docs\"",
+     "sphinxcontrib-jsmath; extra == \"docs\"",
+     "sphinxcontrib-napoleon; extra == \"docs\"",
+     "numpy; extra == \"docs\"",
+     "scipy; extra == \"docs\"",
+     "dill; extra == \"optional\"",
+     "ipython; extra == \"optional\"",
+     "linear-tree; python_version < \"3.14\" and extra == \"optional\"",
+     "scikit-learn<1.7.0; (implementation_name != \"pypy\" and python_version < \"3.14\") and extra == \"optional\"",
+     "scikit-learn; (implementation_name != \"pypy\" and python_version >= \"3.14\") and extra == \"optional\"",
+     "matplotlib!=3.6.1,>=3.6.0; extra == \"optional\"",
+     "networkx; extra == \"optional\"",
+     "numpy; extra == \"optional\"",
+     "openpyxl; extra == \"optional\"",
+     "packaging; extra == \"optional\"",
+     "pint; implementation_name != \"pypy\" and extra == \"optional\"",
+     "plotly; extra == \"optional\"",
+     "python-louvain; extra == \"optional\"",
+     "pyyaml; extra == \"optional\"",
+     "qtconsole; extra == \"optional\"",
+     "scipy; extra == \"optional\"",
+     "sympy; extra == \"optional\"",
+     "xlrd; extra == \"optional\"",
+     "z3-solver; extra == \"optional\"",
+     "pywin32; platform_system == \"Windows\" and extra == \"optional\"",
+     "casadi; implementation_name != \"pypy\" and extra == \"optional\"",
+     "numdifftools; implementation_name != \"pypy\" and extra == \"optional\"",
+     "pandas; implementation_name != \"pypy\" and extra == \"optional\"",
+     "seaborn; implementation_name != \"pypy\" and extra == \"optional\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/toytree/3.0.11/toytree-3.0.11-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=bc9857aedc54d7ed51bb0086330324815cfc8cb35c8c151cde720a6fc62410b3",
+     "hashes": {
+      "sha256": "bc9857aedc54d7ed51bb0086330324815cfc8cb35c8c151cde720a6fc62410b3"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "toytree",
+    "version": "3.0.11",
+    "requires_dist": [
+     "numpy",
+     "scipy",
+     "pandas",
+     "loguru",
+     "requests",
+     "toyplot",
+     "black==22.1.0; extra == \"dev\"",
+     "flake8==4.0.1; extra == \"dev\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/toyplot/2.1.0/toyplot-2.1.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=39c8c6e55add6b6f51acd1a5bcd964b3e6819137379fc3b8a9932ad365f641d5",
+     "hashes": {
+      "sha256": "39c8c6e55add6b6f51acd1a5bcd964b3e6819137379fc3b8a9932ad365f641d5"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "toyplot",
+    "version": "2.1.0",
+    "requires_dist": [
+     "arrow>=1.0",
+     "custom_inherit",
+     "multipledispatch",
+     "numpy>=2.0.0",
+     "packaging",
+     "pypng",
+     "reportlab",
+     "behave ; extra == \"all\"",
+     "coverage ; extra == \"all\"",
+     "ipykernel ; extra == \"all\"",
+     "nbsphinx ; extra == \"all\"",
+     "pandas ; extra == \"all\"",
+     "scikit-image ; extra == \"all\"",
+     "sphinx >= 3.5 ; extra == \"all\"",
+     "sphinx_rtd_theme ; extra == \"all\"",
+     "ipykernel ; extra == \"doc\"",
+     "nbsphinx ; extra == \"doc\"",
+     "pandas ; extra == \"doc\"",
+     "scikit-image ; extra == \"doc\"",
+     "sphinx >= 3.5 ; extra == \"doc\"",
+     "sphinx_rtd_theme ; extra == \"doc\""
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/custom-inherit/2.4.1/custom_inherit-2.4.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=313f9594d98e79a7fbf58d9ad368fd29adc97572d886975dbd8c7032b14abc6a",
+     "hashes": {
+      "sha256": "313f9594d98e79a7fbf58d9ad368fd29adc97572d886975dbd8c7032b14abc6a"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "custom-inherit",
+    "version": "2.4.1"
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/pypng/0.20220715.0/pypng-0.20220715.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=4a43e969b8f5aaafb2a415536c1a8ec7e341cd6a3f957fd5b5f32a4cfeed902c",
+     "hashes": {
+      "sha256": "4a43e969b8f5aaafb2a415536c1a8ec7e341cd6a3f957fd5b5f32a4cfeed902c"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "pypng",
+    "version": "0.20220715.0"
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/reportlab/5.0.1/reportlab-5.0.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=1c36e6bb0e71780c72331eba60da7f602e8d4389a8723825af71342e49d791e8",
+     "hashes": {
+      "sha256": "1c36e6bb0e71780c72331eba60da7f602e8d4389a8723825af71342e49d791e8"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "reportlab",
+    "version": "5.0.1",
+    "requires_dist": [
+     "pillow>=9.0.0",
+     "charset-normalizer",
+     "rl_accel<1.1,>=0.9.0; extra == \"accel\"",
+     "rlPyCairo<1,>=0.2.0; extra == \"pycairo\"",
+     "freetype-py<2.4,>=2.3.0; extra == \"pycairo\"",
+     "rlbidi; extra == \"bidi\"",
+     "uharfbuzz; extra == \"shaping\""
+    ]
+   }
+  }
+ ]
+}

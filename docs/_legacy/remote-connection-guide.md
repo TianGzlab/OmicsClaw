@@ -1,5 +1,12 @@
 # OmicsClaw-App 远程连接配置指南
 
+> **历史文档（2026-09-30 标注）**：本文描述的是已删除的旧后端（`oc desktop-server`
+> 加 `omicsclaw/remote/`），其中的 `/connections/test`、`/datasets`、`/jobs`、
+> `/artifacts`、`/sessions` 等路由以及上传、作业面板在重建后的 `oc desktop` 里
+> 都不存在（`OMICSCLAW_WORKSPACE` 仍然有效，等同 `--workspace`）。当前的远程模式（plan 0066）见
+> [`docs/engineering/remote-execution.mdx`](../engineering/remote-execution.mdx)。
+> 下面保留原文，只作历史参考。
+
 本文档说明如何在 OmicsClaw-App 中把**数据处理 / 作业执行**放在远端
 Linux 服务器上，App 本身留在本地负责 UI、聊天、结果浏览。
 

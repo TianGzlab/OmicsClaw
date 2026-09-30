@@ -73,13 +73,13 @@ After identifying perturbed genes, consider:
 python -c "import scanpy as sc; a = sc.read_h5ad('data.h5ad'); print(list(a.var_names[:10]))"
 
 # Then run with the correct gene name
-python omicsclaw.py run sc-in-silico-perturbation \
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
   --input data.h5ad \
   --ko-gene TP53 \
   --output results/
 
 # R-backed method (requires R + scTenifoldKnk)
-python omicsclaw.py run sc-in-silico-perturbation \
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
   --input data.h5ad \
   --method sctenifoldknk \
   --ko-gene TP53 \

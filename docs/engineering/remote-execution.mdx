@@ -1,149 +1,196 @@
 ---
-title: "远程执行模式 - 把分析放到远端服务器"
-description: "OmicsClaw-App 支持 UI 留本地、计算放远端 Linux 服务器的分离架构，通过 SSH bootstrap 完成首次部署。"
-keywords: ["远程执行", "remote", "SSH", "OmicsClaw-App", "分离部署"]
+title: "远程模式 - App 在笔记本上，后端在服务器上"
+description: "OmicsClaw-App 经 SSH 隧道连接服务器上的 oc desktop：启动方式、token、断线重连、只读文件查看、已接受的风险与排错。"
+keywords: ["远程模式", "remote", "SSH", "OmicsClaw-App", "oc desktop"]
 og:image: "/docs/images/og-cover.png"
 ---
 
-## 为什么需要远程执行
+本页是远程模式的唯一指南，对应 [plan 0066](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/plans/0066-desktop-remote-mode.md)。旧后端（`oc desktop-server` 加 `omicsclaw/remote/`）的远程文档留在 [`docs/_legacy/remote-connection-guide.md`](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/_legacy/remote-connection-guide.md)，只作历史参考。
 
-本地笔记本或台式机的 GPU 和内存往往不足以运行 scVI、Cell2Location 等计算密集型 skill；与此同时，原始数据（`.h5ad` / `.csv`）通常已经落在实验室 Linux 服务器上，重新上传既浪费带宽又存在安全风险。远程执行模式让 OmicsClaw-App 的 UI 和聊天界面留在本地，所有数据处理与作业执行都在远端服务器上完成，团队还可共享同一台 GPU 机器而无需各自部署一套完整环境。
-
-## 启用前 / 启用后架构对比
-
-**本地全栈（Bundled / Local-Python Runtime）：**
+## 拓扑
 
 ```text
-┌─────────────────────────────────┐
-│  OmicsClaw-App                  │
-│   Next.js UI · Electron         │
-│   + Python skills               │
-│   + 本地 dataset / workspace    │
-└─────────────────────────────────┘
+笔记本                                              服务器
+┌──────────────────────────────┐   App 自带的     ┌──────────────────────────────┐
+│ OmicsClaw-App（Electron）     │ ── ssh2 隧道 ──▶ │ oc desktop 127.0.0.1:8765     │
+│ Next 路由转发聊天与文件请求    │                  │ 一个进程服务一个工作区          │
+└──────────────────────────────┘                  └──────────────────────────────┘
 ```
 
-**远程分离（Remote-SSH Runtime）：**
+- App 在笔记本上用自带的 ssh2 客户端开隧道，把本机一个随机端口转发到服务器的 `127.0.0.1:<远端端口>`。服务器不需要对外开放端口。
+- `oc desktop` 只绑定 `127.0.0.1`。bearer token 可选，建议设置（见"token"一节）。
+- 也可以不开隧道，直接填 URL 连接绑定在非回环地址上的后端，走的是同一套代码。这时后端必须设 token（没有 token 的非回环绑定会被拒绝启动）；没有 TLS 时，token 以明文经过网络。
+- 远程模式只在 Electron App 里有，`npm run dev` 打开的浏览器页面没有进入远程模式的入口。
+- 不支持在浏览器里访问部署在服务器上的 App，也不支持多个用户共用一个后端。
+
+远程模式下能做的：对话、审批卡片、停止；新建会话，直接落在服务器的工作区；浏览并只读预览工作区里的文件和图片；断线后自动重连；刷新或关掉页面后重新打开会话，接回仍在运行的回复。
+
+做不到的：上传或下载文件；在 App 里修改服务器上的文件（写入、改名、删除、新建目录与 git 操作都返回 409 `remote_unsupported`）；在 App 里更换工作区；在 App 里改模型配置（Providers 页只读）；完成通知（远程模式下的聊天不建本地任务，所以没有系统通知）。
+
+## 在服务器上启动后端
+
+推荐在服务器上手动启动，用 tmux、nohup 或 systemd 让它常驻：
+
+```bash
+OMICSCLAW_SKILLS_DIR=<检出目录>/skills \
+oc desktop --workspace <服务器上的项目目录> --delta-ring-size 65536 -- --host 127.0.0.1 --port 8765 --abandon-grace 600
+```
+
+| 参数 | 作用 |
+|---|---|
+| `--workspace <dir>` | 这个进程服务的工作区。一个进程只服务一个工作区；要换目录，就在服务器上用新的 `--workspace` 重启 `oc desktop` |
+| `--delta-ring-size 65536` | 部署 flag，必须写在 `--` 之前：每个回复保留多少个事件供续流，缺省 2048。长回复每秒产生几百个事件，断线几秒续流点就可能被挤出 2048 个事件的环。内存按回复实际产生的事件占用，65536 只是上限 |
+| `--host 127.0.0.1 --port 8765` | 界面 flag，写在 `--` 之前或之后都可以 |
+| `--abandon-grace 600` | 界面 flag：服务器发现没人在看某个回复之后，还让它继续跑多少秒（1 到 86400，缺省 30）。App 在这段时间内重连上，回复就从断开的地方接着流。600 秒能覆盖换 Wi-Fi、VPN 重连或合上笔记本几分钟 |
+| `OMICSCLAW_SKILLS_DIR` | 工作区不是检出目录时要设，否则后端找不到技能，`/health` 的 `skills_count` 为 0 |
+
+`oc desktop --help` 也给出这条启动命令，连同 `OMICSCLAW_SKILLS_DIR` 前缀和它的用途。
+
+启动后在服务器上检查：
+
+```bash
+curl -s http://127.0.0.1:8765/health
+# 设了 token 时，不带认证头只回 {"status": "ok", "version": …, "launch_id": …, "auth_required": true}
+curl -s -H "Authorization: Bearer $OMICSCLAW_REMOTE_AUTH_TOKEN" http://127.0.0.1:8765/health
+# 完整载荷：contracts.desktop_chat 里 request_schema_version 与 sse_schema_version 为 3，abandon_grace_s 为 600
+```
+
+模型的 provider 与密钥来自后端启动时读取的 `.env`（查找顺序见"token"一节），改动后要重启后端才生效。
+
+### sshd 的 keepalive
+
+建议在服务器的 `/etc/ssh/sshd_config` 里设置下面两项，然后重新加载 sshd：
 
 ```text
-┌──────────────────────┐            ┌──────────────────────────────┐
-│  OmicsClaw-App       │            │  远程 Linux 服务器               │
-│  (control plane)     │            │  (execution plane)               │
-│  Next.js UI          │ ─SSH隧道─▶ │  oc desktop-server 127.0.0.1:8765│
-│  Electron            │            │  + Python skills                 │
-│  TunnelManager       │            │  + dataset / workspace           │
-└──────────────────────┘            └──────────────────────────────────┘
+ClientAliveInterval 30
+ClientAliveCountMax 3
 ```
 
-App 通过 TunnelManager 将本地动态端口前向到远端 `oc desktop-server`，所有通信走 SSH 加密隧道，无需对外开放任何端口。Desktop Surface 同时承载 OmicsClaw-App 自身的桌面后端 API 与 `omicsclaw.remote.*` 控制面路由（`/connections/test`、`/env/doctor`、`/datasets`、`/jobs`、`/artifacts`、`/sessions`），因此一个进程即可同时服务本地 App 与远程 SSH 接入，参见 [ADR 0005](https://github.com/zhou-1314/OmicsClaw/blob/main/docs/adr/0005-surfaces-umbrella-for-ingress.md)。
+笔记本断网或休眠时，连接两端通常都收不到关闭信号。设了这两项，sshd 大约 90 秒后判定连接已死并关闭转发，后端观察这个回复的连接随之断开，`--abandon-grace` 才开始计时。不设的话要等 TCP 自己超时，可能要几十分钟以上；这期间服务器一直当作有人在看这个回复，不会取消它，同一会话里新发的消息也要排在它后面，待回答的审批卡片会让会话一直卡着。
 
-## 配置步骤
+## token
 
-**Step 1 — 在远端启动 `oc desktop-server`**
+token 可选。不设时，服务器上的其他系统用户也能连到 `127.0.0.1:8765`（见"已接受的风险"），所以建议设置。
 
-SSH 登录到远端服务器后执行：
+- 后端从环境变量 `OMICSCLAW_REMOTE_AUTH_TOKEN` 读 token，没有对应的命令行 flag。
+- 它可以写在 `oc desktop` 启动时读取的 `.env` 里：先读检出目录下的 `.env`（设了 `OMICSCLAW_DIR` 时是那个目录；用 pip 安装、没有检出目录时是 `~/.omicsclaw/.env`），再读启动时所在目录下的 `.env`。同一个变量以先读到的文件为准，已经导出到环境里的变量又优先于这两个文件。别忘了 `chmod 600 .env`。用 systemd 时也可以写进 `EnvironmentFile`。这样启动命令里不出现密钥。
+- 生成一个：`python -c 'import secrets; print(secrets.token_hex(32))'`。
+- 设了 token 以后，不带认证头的 `/health` 只回上面的精简载荷，token 错误回 401，其余路由都要带 `Authorization: Bearer <token>`（FastAPI 自带的 `/docs`、`/redoc`、`/openapi.json` 除外，见"已接受的风险"）。
+
+App 这一侧把 token 填在连接配置的"Bearer Token（可选）"里。它以明文存在笔记本上 App 的 SQLite 里（`~/.omicsclaw/omicsclaw.db`）。也可以填 `env:变量名`：App 每次请求时从自己进程的环境变量里读真值，数据库里就不存 token。页面上显示时，不超过 16 个字符的 token 显示为 `***`，更长的只露出末 4 位。
+
+token 对不上时，状态灯显示"认证失败"，Ping 会说明是服务器拒绝了这个 token，还是服务器要求 token 而连接配置里没有填。
+
+## 让 App 启动后端（可选）
+
+连接配置里的"自动启动命令"（`remote_bootstrap_command`）在激活时生效：远端端口没有进程监听时，App 经 SSH 在服务器上执行这条命令，然后最多等 15 秒端口开始监听。例如：
 
 ```bash
-# 安装 desktop 额外依赖（首次部署时）
-pip install -e ".[desktop]"
-
-# 激活 Python 环境
-source .venv/bin/activate        # 或 conda activate omicsclaw
-
-# 设置 workspace 根目录（jobs、artifacts、datasets 都落在这里）
-export OMICSCLAW_WORKSPACE=/data/omicsclaw-workspace
-mkdir -p "$OMICSCLAW_WORKSPACE"
-
-# 设置 256-bit Bearer token（SSH 之外的第二层鉴权）
-export OMICSCLAW_REMOTE_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_hex(32))')"
-
-# 可选：启用远程 Skill Validation Review。当前 App profile 只有一个
-# bearer 字段，因此显式将同值另行授予 dedicated authority。
-export OMICSCLAW_SKILL_EVOLUTION_TOKEN="$OMICSCLAW_REMOTE_AUTH_TOKEN"
-
-# 启动 desktop-server（仅绑 127.0.0.1，勿暴露公网）
-oc desktop-server --host 127.0.0.1 --port 8765
+bash -lc 'cd ~/my-project && OMICSCLAW_SKILLS_DIR=~/OmicsClaw/skills nohup oc desktop --workspace ~/my-project --delta-ring-size 65536 -- --host 127.0.0.1 --port 8765 --abandon-grace 600 > oc-desktop.log 2>&1 &'
 ```
 
-> 旧版命令 `oc app-server` 已于 ADR 0005 改名为 `oc desktop-server`，没有兼容别名，请同步更新自动化脚本。
+- 命令在 SSH 的登录 shell 里运行，`oc` 要能在那里找到；找不到时写成解释器的完整路径：`<python> -m omicsclaw desktop …`。
+- 这条命令以明文存在 App 的 SQLite 里。把 `OMICSCLAW_REMOTE_AUTH_TOKEN=…` 写进命令，token 也就明文存在那里，并且在 `bash -lc` 进程存活的那一小段时间里出现在服务器的进程列表中。推荐把 token 放在服务器的 `.env`，连接配置里填同一个值（或 `env:变量名`）。
+- 服务器冷启动较慢时 15 秒可能不够，这时先手动启动一次。
+- 填了"远程代理（可选）"时，App 在这条命令前注入 `HTTPS_PROXY`（SOCKS5 地址用 `ALL_PROXY`），让后端的模型调用走这个代理。
 
-自检：
+## 在 App 里配置
 
-```bash
-# 公开最小探活（配置 token 后只返回 status/version/launch_id/auth_required）
-curl http://127.0.0.1:8765/health
+1. 打开"运行环境"（Runtimes）页，点"新建运行环境"，按 SSH 方式填写：
+   - SSH 别名：`~/.ssh/config` 里的 `Host` 条目，HostName、Port、User、IdentityFile 都从配置读取；也可以手动填 SSH 主机、端口和用户名。
+   - 私钥路径：一个未加密的私钥文件。带密码短语的私钥要先用 `ssh-add` 加入 ssh-agent，App 经 `SSH_AUTH_SOCK` 让 agent 签名。App 不支持 SSH 密码登录，也不会提示输入密码短语。
+   - 远端 backend 端口：`oc desktop` 的 `--port`，缺省 8765。
+   - Bearer Token：见上一节。
+   - 自动启动命令：可选，见上一节。
+2. 保存后点"运行 Ping"（Run Ping）。第一次连接时会问是否信任服务器的主机密钥，点"信任并连接"。
+3. 点"设为当前"（Make Active）。状态灯变成"后端已连接"（Backend Connected）就可以用了。
 
-# 完整健康详情及其余 Desktop API（配置 token 后均需 Bearer token）
-curl http://127.0.0.1:8765/health \
-  -H "Authorization: Bearer $OMICSCLAW_REMOTE_AUTH_TOKEN"
-curl -X POST http://127.0.0.1:8765/connections/test \
-  -H "Authorization: Bearer $OMICSCLAW_REMOTE_AUTH_TOKEN"
-curl http://127.0.0.1:8765/env/doctor \
-  -H "Authorization: Bearer $OMICSCLAW_REMOTE_AUTH_TOKEN"
-```
+隧道每 15 秒发一次 SSH keepalive，连续 3 次没有回应就算断开。传输断开后，状态灯显示"正在重连"，隧道按 3、6、12、24 秒、之后每 30 秒的间隔重开，最长 15 分钟；有聊天还在重连时，隧道会一直试到它放弃为止。认证失败、主机密钥不符、私钥读不到这类错误不会自动重试，状态灯旁出现"重新连接"按钮，改好配置后点它。
 
-`/skill-evolution/*` 使用独立治理凭据边界，且**不会**回退到 ordinary
-remote token。需要远程 Skill Validation Review 时，远端 Backend 必须显式
-配置 64 位小写十六进制 `OMICSCLAW_SKILL_EVOLUTION_TOKEN`；缺失时这些
-路由返回 `503`。当前 App profile 只有一个 bearer 字段，因此若需由同一
-profile 同时访问普通与治理路由，必须在远端分别把同一个 64 位值显式
-赋给 `OMICSCLAW_REMOTE_AUTH_TOKEN` 和
-`OMICSCLAW_SKILL_EVOLUTION_TOKEN`；这不是隐式 fallback。前置门会在
-路由和请求体解析前选择对应 authority，未知或编码含糊路径也不会绕过。
+## 使用
 
-**Step 2 — 在 Runtimes 页面新建 Remote Runtime**
+### 工作区
 
-打开 App → **Runtimes** 页面 → **New Runtime** → 填写以下字段：
+工作区就是服务器上 `--workspace` 指定的目录，App 从后端的 `GET /workspace` 读取。新会话页、侧栏的"新建会话"、项目行上的"+"都直接在这个目录里建会话，不弹目录选择器；设置页和向导只读显示它。属于别的目录的旧会话仍能打开阅读，发消息时 App 会说明：远程模式下工作区由服务器决定，要继续这个会话，就在服务器上用 `oc desktop --workspace <那个目录>` 重启后端，或者连接一个服务该目录的后端。
 
-| 字段 | 存库键 | 示例 |
-|---|---|---|
-| Name | `name` | Lab GPU Server |
-| URL | `url` | `https://host.example:8765` |
-| SSH Alias | `ssh_alias` | lab-gpu |
-| SSH Host | `ssh_host` | 192.168.1.100 |
-| SSH Port | `ssh_port` | 22 |
-| SSH User | `ssh_user` | zhouwg |
-| SSH Key Path | `ssh_key_path` | `~/.ssh/id_ed25519` |
-| Remote Port | `remote_port` | 8765 |
-| Auth Token | `auth_token` | your-secret-token-here |
-| Auto-start Command | `remote_bootstrap_command` | `bash -lc 'cd ~/omicsclaw && nohup oc desktop-server --host 127.0.0.1 --port 8765 > desktop-server.log 2>&1 &'` |
+### 文件
 
-`remote_bootstrap_command` 为可选字段：填写后，App 激活该 runtime 时若远端端口未监听，会通过 SSH exec 自动执行该命令并轮询直到端口可用。留空则需手动完成 Step 1。命令中可继续沿用 App 内 Runtimes 页面预留的 `OMICSCLAW_WORKSPACE`、`OMICSCLAW_REMOTE_AUTH_TOKEN` 两个环境变量字段——它们会随启动命令一并 export。
+文件树、CSV/TSV 表格、Markdown、JSON、图片和 PDF 的预览，以及聊天里 agent 写出的文件卡片上的"打开预览"，内容都来自后端的两条只读路由：
 
-URL 只接受根 origin（例如 `https://host.example:8765`），不接受凭据、
-base path、query 或 fragment。目标优先级固定为 SSH Alias、SSH Host、direct
-URL；只有前两个字段都为空时 URL 才是执行目标。
+- `GET /files/tree?path=&depth=`：`path` 缺省为工作区，`depth` 1 到 10、缺省 3；一次最多列 10,000 个节点。
+- `GET /files/serve?path=`：返回文件本身。一个响应最多 64 MiB，更大的文件只能用 `Range` 分段读取，不带 `Range` 时回 413 `file_too_large`。
+- `path` 可以是绝对路径，也可以是相对工作区的路径。它按跟随符号链接之后的真实路径限定在工作区内，之外的回 403 `path_outside_workspace`，树里也不列出指向外面的链接。
+- 工作区之下任何以 `.` 开头的路径段都隐藏：树里不列，读取回 403 `hidden_path`。所以 `.env`、`.omicsclaw/`（后端存会话记忆与计划的地方），以及工作区是家目录时的 `~/.ssh`，在 App 里都看不到。
+- HTML、JavaScript 和 SVG 以外的 XML 以 `text/plain` 返回，并带 `X-Content-Type-Options: nosniff`，浏览器只显示、不执行。
 
-**Step 3 — 验证连接**
+### 模型配置与通知
 
-保存 → 选中该条目 → 点 **Run Ping**。所有路径都会严格验证 `/health`。
-direct URL 与已有活动 tunnel 的 HTTP 目标可能再 best-effort 请求
-`/env/doctor` 以识别明确的 Bearer `401`；未保存或未激活 SSH 的一次性探测
-只请求 `/health`。需要完整环境诊断时，请先激活 profile，再单独运行
-Environment diagnostics。
+Providers 页在远程模式下只读。模型密钥写在服务器的 `.env` 里，改完在服务器上重启后端。远程模式下没有完成通知。
 
-**Step 4 — 导入数据**
+## 断线、重连与刷新
 
-- **大文件**：先用 `scp` / `rsync` 将文件传到远端 `$OMICSCLAW_WORKSPACE`，再在 **Datasets** 面板点 **Register Remote Path** 登记绝对路径。
-- **小文件**：在 **Datasets** 面板直接 **Upload**，App 通过 HTTP multipart 上传（超过约 1 GiB 建议改用 `scp`）。
+### 断开与续流
 
-**Step 5 — 提交分析任务**
+App 的 Next 路由发现它与后端的连接断了（读取出错、流没有 `done` 就结束，或者一次读取 60 秒没有返回），就用同一个会话和请求 id 重新请求 `POST /chat/stream`，带上 `resume: true` 和最后收到的事件序号 `after_seq`。后端只接回已有的那个回复，从不因此把消息再执行一遍。聊天上方出现横幅"与服务器的连接中断，正在重连（第 n 次）。"；重新接上时横幅消失，回复继续往下流时提示"已重新连接，回复继续。"。
 
-在聊天窗口发起请求，或在 **Jobs** 面板手动提交（选择 Skill + Dataset + 参数 → Submit）。实时日志通过 SSE 流式显示，可随时 Cancel 或 Retry。
+重试的间隔是 1、2、4、8 秒，之后每 10 秒一次，一直试到 `abandon_grace_s − 5` 秒（宽限期不超过 10 秒时取它的一半；后端从不取消回复时是 30 分钟；最长 30 分钟）。宽限期 600 秒时约 10 分钟。
 
-**Step 6 — 查看产物**
+### 半开连接
 
-Job 完成后进入 **Artifacts** 面板，按 job 分组浏览：`report.md` / `figures/*.png` / `result.json` / 处理后的 `.h5ad`。断线或 App 重启后，运行中的 job 与会话可从远端状态恢复。
+关 Wi-Fi、休眠、换网络时，两端都收不到关闭信号。App 这边靠 60 秒的读取看门狗和隧道的 keepalive 发现，服务器那边要靠 sshd 的 `ClientAlive*` 发现，发现之后宽限期才开始。所以 App 放弃的时刻和服务器取消的时刻可能相差很多。
 
-## 故障排查
+### 重连期间的停止与审批
 
-| 症状 | 原因 | 解决 |
-|---|---|---|
-| Run Ping `/health` 失败 | SSH 无法连通或远端 `oc desktop-server` 未启动 | 先确认 `ssh -i <key> <user>@<host>` 可登录；再确认 `remote_port` 与远端监听端口一致；用 `ps -ef \| grep desktop-server` 检查进程 |
-| `/health` 通过但后续受保护请求返回 401 | Bearer token 不匹配 | 核对远端 `OMICSCLAW_REMOTE_AUTH_TOKEN` 与 profile `auth_token`（GET 返回遮罩值 `***<后8位>`）；激活 profile 后单独运行 Environment diagnostics |
-| workspace 未配置 / 目录不存在 | 远端未 export `OMICSCLAW_WORKSPACE` 或目录不存在 | 远端执行 `mkdir -p $OMICSCLAW_WORKSPACE` 并重新启动 `oc desktop-server` |
-| 沿用 `oc app-server` 报错 `unknown command` | ADR 0005 已把命令更名为 `oc desktop-server`，未保留别名 | 更新启动脚本 / `remote_bootstrap_command` 改为 `oc desktop-server` |
-| Job 很快失败 | 环境或数据问题 | 查看 job 的 `stdout.log` 和 `diagnostics/env_doctor.json` |
-| SSE 日志不显示 | SSH 隧道断开 | 检查隧道是否存活，或在 Runtimes 页面重新 **Make Active** |
+重连期间点停止，App 提示"连接恢复后会发送停止。"，连上后先发停止，再接着读。重连期间回答审批卡片会失败，卡片提示"与后端的连接中断了，连接恢复后再回答这张卡片。"并留在原处，连上之后再点一次。
+
+### 回复的几种结局
+
+| 情形 | App 显示并记录的文字 |
+|---|---|
+| 在上面的时限内没有连上 | "未能在 N 分钟内重新连上服务器，这次回复在服务器上可能已被取消。" |
+| 后端重启过，或已经不保留这次回复 | "服务器已重启或不再保留这次回复，回复已丢失。"，之后不再重试 |
+| 连上了，但服务器在断线期间已经取消了回复 | "连接已恢复，但服务器在断线期间已经取消了这次回复。" |
+| 断线期间的一段事件已被挤出续流环 | 在断开处插入"断线期间有一段输出没能接回，服务器上的完整回复已经记入对话历史。"，其余照常 |
+| 重连期间连接配置被删除或修改，或者 App 切回了本机模式 | "重连期间连接已改到别的后端，这次回复没有接回来。" |
+| 后端拒绝接回：要求 token 或 token 不对 | "OmicsClaw 后端在运行，但拒绝了这个连接：它要求 bearer token。请在 设置 → 连接 里把这个连接配置的 token 设为后端的 OMICSCLAW_REMOTE_AUTH_TOKEN。" |
+| 后端拒绝接回：契约版本不同 | "OmicsClaw 后端使用的 Desktop 契约版本与这个 App 不同（App 需要 desktop chat SSE v3）。请同时升级 OmicsClaw 和 App。" |
+| 后端以其他理由拒绝接回 | "后端拒绝接回这次回复：" 加上后端给出的 `detail` |
+
+最后四种情形都立即结束，不再重试。
+
+出现"未能在 N 分钟内重新连上"之后，App 还会在后台每 15 秒试一次，最长 30 分钟：服务器后来把回复跑完了，就用完整的回复替换刚才记录的那条消息；同一会话开始新的回合时停止。后端重启后，进行中的回复都不再保留。
+
+### 刷新与重新打开
+
+只在远程模式下有。浏览器断开后，App 的 Next 进程继续读后端，回复结束时照常记录。刷新页面或在新标签页打开同一会话时，页面接回仍在运行的回复：已生成的内容、待回答的审批卡片和停止按钮都会回来。App 为每个在途回复缓存最多 8 MiB 已转发的内容，超出后改由后端重放。本机模式不变，关掉页面就停止读取。
+
+### 退出 App
+
+正在运行的远程回复不会被中止。服务器发现连接断开、宽限期到期之后才取消它；在这之前，同一会话里新发的消息要排在它后面：宽限期 600 秒时要等约 10 分钟，再加上 sshd 发现断线的约 90 秒；服务器没设 sshd keepalive 时更久。想立即结束的话，退出前先点停止。
+
+## 已接受的风险
+
+- 共享服务器上不设 token 时，服务器上的其他系统用户能连到 `127.0.0.1:8765`，驱动 agent、自己回答审批卡片，也就能以运行后端的用户身份执行命令。文件路由没有在此之上增加暴露。设 token 只要一行配置。
+- token 以明文存放在 App 的 SQLite（连接配置的 token 与自动启动命令）和服务器的 `.env` 或 `EnvironmentFile` 里；写在启动命令里时，还会短暂出现在服务器的进程列表里。
+- 后端没有 TLS、CORS 与 Host 白名单，远程访问请走 SSH 隧道。DNS 重绑定是已接受的风险。
+- FastAPI 自带的 `/docs`、`/redoc`、`/openapi.json` 不要认证。它们只暴露路由结构，源码本来就公开。
+- 文件路由的限定只约束这两条路由。agent 自己的工具（bash、读文件，需要审批）和服务器上以同一用户运行的其他进程，照样能读工作区之外的文件。
+
+## 排错
+
+| 症状 | 检查 |
+|---|---|
+| Ping 失败，状态灯"后端离线" | 本机 `ssh <别名>` 能否登录；服务器上 `curl -s http://127.0.0.1:8765/health` 有没有回应；连接配置的远端端口与 `--port` 是否一致 |
+| 状态灯"认证失败" | 连接配置的 token 与服务器的 `OMICSCLAW_REMOTE_AUTH_TOKEN` 不一致，或者配置里没填 token |
+| 提示后端的 Desktop 契约版本与 App 不同 | App 与 OmicsClaw 要一起升级（聊天契约 v3） |
+| `/health` 的 `skills_count` 为 0 | 启动时带上 `OMICSCLAW_SKILLS_DIR=<检出目录>/skills` |
+| 发消息时提示工作区由服务器决定 | 这个会话属于别的目录：在服务器上用那个目录重启 `oc desktop`，或者在当前工作区里新建会话 |
+| 回复里常出现"断线期间有一段输出没能接回" | 调大 `--delta-ring-size` |
+| 断线后很久 App 才放弃，或新消息等很久才开始 | 服务器的 sshd 没设 `ClientAliveInterval` 与 `ClientAliveCountMax`；再看 `--abandon-grace` 是否设得过长 |
+| 隧道停在断开状态，状态灯旁有"重新连接"按钮 | 认证类错误不自动重试：检查私钥、ssh-agent 或主机密钥，改好后点"重新连接" |
+| 自动启动后 15 秒内没连上 | 看服务器上的 `oc-desktop.log`；确认 `oc` 在登录 shell 的 PATH 里；先手动启动一次 |
+| 预览提示文件被隐藏，或只能查看工作区里的文件 | 以 `.` 开头的路径和工作区之外的路径不能在 App 里查看 |
+| 预览提示文件超过 64 MiB | 远程模式下不预览这么大的文件 |
 
 ## 下一步阅读
 

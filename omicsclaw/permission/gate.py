@@ -28,12 +28,24 @@ tool claims otherwise:
 Either way a call is put to a human **at most once**: after the gate asks, it
 runs the tool with consent already recorded, so the tool's own
 ``require_approval`` returns immediately.
+
+**Which questions a standing grant may answer.** A surface can offer "stop
+asking me about this tool" (the CLI's ``s``). That is only safe for questions
+the tool's *own default* raised. On both paths above —— the gate asking, and
+the gate handing the question down —— the gate binds
+:func:`~omicsclaw.tools.ask_every_time` to say whether anything more specific
+than that raised this one: a rule, a dangerous-command pattern, a protected
+path. It has to be both paths, because a rule outranks a danger pattern: an
+``ask: ["bash"]`` rule turns ``rm -rf /`` into a *rule* question, which is
+handed down to ``bash`` like any other (plan 0049 §3).
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -43,6 +55,7 @@ from omicsclaw.schema import ToolDefinition
 from omicsclaw.tools.base import ApprovalMode, RiskLevel, Tool, ToolPolicy
 from omicsclaw.tools.context import (
     ApprovalDenied,
+    ask_every_time,
     effective_policy,
     require_approval,
     use_effective_policy,
@@ -60,6 +73,64 @@ from .rules import (
 )
 
 _log = logging.getLogger(__name__)
+
+PROTECTED_DIRNAME = ".omicsclaw"
+"""The workspace directory holding the rule file, conversations and plans.
+
+A tool that can write there can write an ``allow`` rule, and a rule outranks
+every check after it —— so one unsupervised write would silence the gate for
+this session and every later one. Changing anything there is therefore always
+put to a person (plan 0049 §4). Reading it is not: a call whose tool declares
+``read_only`` is never stopped by this.
+"""
+
+DOTENV_NAME = re.compile(r"(?<![\w.])\.env(?![\w-])", re.IGNORECASE)
+"""A ``.env`` file named in a command line or a path: ``.env``, ``./.env``,
+``/srv/app/.env``, ``.env.local`` —— and not a Python ``.environ``
+attribute, ``.envrc`` or ``.venv``.
+
+Protected for the same reason as the rule file, found by review after plan
+0049 shipped protecting only that: ``.env`` sets
+``OMICSCLAW_PERMISSION_MODE``, and ``bypass-all`` is decided before every
+other check. One unsupervised ``echo … >> .env`` would switch the gate off
+from the next start, and ``LLM_BASE_URL`` in the same file decides where
+the API key is sent. The line drawn is *files that decide what OmicsClaw
+asks about*: host-wide persistence (``.git/hooks``, ``~/.bashrc``) is not
+enumerable, and only the sandbox answers it.
+
+Matched by name rather than by path, because the program reads ``.env``
+from two places (``omicsclaw.launch.dotenv_candidates``) and a shell
+command names a file however it likes. Matched **without regard to case**,
+because the default filesystems of macOS and Windows do not regard it
+either: there ``.ENV`` *is* ``.env``. The cost is a question for a command
+that merely mentions ``.env.example``.
+"""
+
+_WRITING_KEYS = frozenset(
+    {
+        COMMAND_ARGUMENT,
+        "path",
+        "file_path",
+        "filepath",
+        "filename",
+        "file",
+        "destination",
+        "dest",
+        "target",
+    }
+)
+"""Principal arguments that say where something will be written or run.
+
+The protected check reads only these. ``web_search``'s query,
+``web_fetch``'s URL and ``plan_write``'s steps can mention ``.env``
+without changing it, and a card that says "this changes a file" about a
+search is a question the person cannot answer truthfully —— on a Channel
+it is also a timeout that becomes a refusal. What this gives up is a tool
+whose principal argument is something else and that writes anyway (an MCP
+``move_file(source, destination)`` is read by its ``source``): the gate
+reads one argument per call, and that limit is recorded where the
+dangerous-command patterns record theirs.
+"""
 
 
 class PermissionDenied(ApprovalDenied):
@@ -84,6 +155,11 @@ class DecisionSource(StrEnum):
     DANGER = "danger"
     """A built-in dangerous-command pattern matched."""
 
+    PROTECTED = "protected"
+    """The call would change a file that decides what OmicsClaw asks about:
+    the directory :data:`PROTECTED_DIRNAME` names, the rule file, or a
+    ``.env`` (:data:`DOTENV_NAME`)."""
+
     POLICY = "policy"
     """Nothing above matched, so the tool's own
     :class:`~omicsclaw.tools.ToolPolicy` answered."""
@@ -107,6 +183,9 @@ class Resolution:
     risk_level: RiskLevel
     """The blast radius to show in a prompt. The tool's own level, unless a
     dangerous-command pattern raised it."""
+    reason_shows_call: bool = False
+    """Whether :attr:`reason` quotes everything the call holds, so a prompt
+    carrying it need not show the arguments beside it."""
 
 
 class PermissionGate:
@@ -139,8 +218,23 @@ class PermissionGate:
 
     @property
     def mode(self) -> PermissionMode:
-        """The session's posture. Set once; there is no setter."""
+        """The session's posture, as :meth:`resolve` will read it next."""
         return self._mode
+
+    def set_mode(self, mode: PermissionMode) -> PermissionMode:
+        """Change the posture from the next call on. Returns the old one.
+
+        A mechanism and nothing more: *which* changes are allowed is the
+        composition root's rule
+        (:meth:`~omicsclaw.entry.AgentApp.set_permission_mode`), not this
+        object's. :meth:`resolve` reads the mode on every call and caches no
+        decision, so switching here is exactly equivalent to having started
+        in the new mode —— a call already being asked about keeps the answer
+        it was resolved to, which is the only thing a switch cannot reach.
+        """
+        previous = self._mode
+        self._mode = PermissionMode(mode)
+        return previous
 
     @property
     def store(self) -> RuleStore | None:
@@ -177,6 +271,11 @@ class PermissionGate:
         1. ``bypass-all`` allows — before the rule file, so the one mode
            whose meaning is "no checks" genuinely has none.
         2. ``read-only`` denies anything not declaring ``read_only=True``.
+        2½. a call that could change :data:`PROTECTED_DIRNAME`, the rule
+           file or a ``.env`` asks — **before** the rule file, because the
+           thing being protected *is* the rule file: an ``allow`` rule that
+           let a tool rewrite it would let the tool write the next ``allow``
+           rule. ``.env`` is here because it can set ``bypass-all``.
         3. the rule file, ``deny`` before ``allow`` before ``ask``.
         4. the dangerous-command patterns, for a tool whose principal
            argument its own schema calls ``command``.
@@ -206,6 +305,18 @@ class PermissionGate:
 
         key = principal_key(schema)
         argument_text = principal_argument(arguments, schema)
+
+        if self._protected(key, argument_text, policy):
+            return Resolution(
+                Verdict.ASK,
+                DecisionSource.PROTECTED,
+                "this changes a file that decides what OmicsClaw asks about "
+                f"({PROTECTED_DIRNAME}/, the rule file or .env). What is "
+                "written there can switch these questions off from now on:"
+                f"\n{argument_text}",
+                RiskLevel.HIGH,
+                reason_shows_call=_is_the_whole_call(arguments, key, argument_text),
+            )
 
         rule = self.rules.evaluate(tool_name, argument_text)
         if rule is not None:
@@ -242,6 +353,78 @@ class PermissionGate:
             f"tool policy approval_mode={policy.approval_mode.value}",
             policy.risk_level,
         )
+
+    def protects(
+        self,
+        arguments: str,
+        *,
+        policy: ToolPolicy,
+        schema: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Whether this call is decided at stage 2½ of :meth:`resolve`.
+
+        Such a call is asked about every time, and **no rule reaches it** ——
+        including the ``allow`` rule "always" would write, because stage 2½
+        comes before the rule file. A surface asks this before offering
+        "always" on a card, so that it does not offer a grant that will be
+        written, reported as remembered, and never consulted.
+        """
+        if self._mode is PermissionMode.BYPASS_ALL:
+            return False
+        return self._protected(
+            principal_key(schema), principal_argument(arguments, schema), policy
+        )
+
+    def _protected(
+        self, key: str | None, argument_text: str, policy: ToolPolicy
+    ) -> bool:
+        return (
+            not policy.read_only
+            and key in _WRITING_KEYS
+            and self.touches_protected(argument_text)
+        )
+
+    def touches_protected(self, argument_text: str) -> bool:
+        """Whether *argument_text* names a protected directory or file.
+
+        A text test, deliberately: it reads a ``bash`` command line and a
+        file path with the same rule, so ``cd .omicsclaw && …`` and
+        ``./.omicsclaw/settings.json`` are both caught, in any letter case.
+
+        **What it cannot see**, stated so nobody reads more into it: a name
+        built at run time (``d=.en; echo >> ${d}v``), a shell glob that
+        expands to one (``>> .en?``, ``.omics*/settings.json``), and any
+        argument but the one the gate reads per call. Those are the limits
+        of every dangerous-command pattern too. The protected files are
+        guarded against a *careless* or *coaxed* model; against a
+        determined one with an unsupervised shell, only the sandbox is.
+
+        A rule file kept outside :data:`PROTECTED_DIRNAME` is recognised by
+        its full path and by its file name, since a relative ``perm.json``
+        or ``./perm.json`` names it as surely as the absolute path does.
+        The default one, ``.omicsclaw/settings.json``, is recognised by its
+        directory instead: matching every ``settings.json`` a project has
+        would ask about an editor's configuration.
+        """
+        if not argument_text:
+            return False
+        folded = argument_text.casefold()
+        if PROTECTED_DIRNAME in folded:
+            return True
+        if DOTENV_NAME.search(argument_text):
+            return True
+        store = self.store
+        if store is None:
+            return False
+        rule_file = store.path
+        if str(rule_file).casefold() in folded:
+            return True
+        if PROTECTED_DIRNAME in (part.casefold() for part in rule_file.parts):
+            return False
+        named = re.compile(
+            rf"(?<![\w.-]){re.escape(rule_file.name)}(?![\w.-])", re.IGNORECASE
+        )
+        return named.search(argument_text) is not None
 
     def remember(
         self,
@@ -344,21 +527,41 @@ class GatedTool:
             )
             return await self._run_settled(arguments, policy)
 
+        always = self._always_asked(policy, resolution)
         if self._tool_asks_better(policy, resolution):
-            return await self._inner.execute(arguments)
+            with ask_every_time(always):
+                return await self._inner.execute(arguments)
 
         escalated = dataclasses.replace(
             policy,
             approval_mode=ApprovalMode.ASK,
             risk_level=resolution.risk_level,
         )
-        with use_effective_policy(escalated):
+        with use_effective_policy(escalated), ask_every_time(always):
             await require_approval(
-                self.name, arguments, reason=resolution.reason
+                self.name,
+                arguments,
+                reason=resolution.reason,
+                reason_shows_call=resolution.reason_shows_call,
             )
         return await self._run_settled(arguments, policy)
 
     # ---- internals ------------------------------------------------------
+
+    @staticmethod
+    def _always_asked(policy: ToolPolicy, resolution: Resolution) -> bool:
+        """Whether a standing "stop asking" grant must not answer this one.
+
+        Everything but the tool's own ``ASK`` default: a rule, a danger
+        pattern and a protected path are each more specific than "this tool
+        usually asks", and a grant given for the general case must not
+        silence the specific one. ``DENY_UNLESS_TRUSTED`` is included
+        because its whole meaning is that consent is per call.
+        """
+        return (
+            resolution.source is not DecisionSource.POLICY
+            or policy.approval_mode is ApprovalMode.DENY_UNLESS_TRUSTED
+        )
 
     @staticmethod
     def _tool_asks_better(policy: ToolPolicy, resolution: Resolution) -> bool:
@@ -374,13 +577,18 @@ class GatedTool:
            escalated to ``ask`` self-approves, so deferring to it would make
            the rule have no effect.
         3. the reason is one the tool already knows. A dangerous-command match
-           is not, so it is put to the person here rather than replaced by the
-           tool's generic prompt.
+           is not, and nor is a protected path, so both are put to the person
+           here rather than replaced by the tool's generic prompt.
+
+        A handed-down question still carries whether it may be answered by a
+        standing grant —— see :meth:`_always_asked` and the module docstring
+        for why a *rule* question, which is handed down, needs that.
         """
         return (
             policy.prompts_for_itself
             and policy.approval_mode is not ApprovalMode.AUTO
-            and resolution.source is not DecisionSource.DANGER
+            and resolution.source
+            not in (DecisionSource.DANGER, DecisionSource.PROTECTED)
         )
 
     async def _run_settled(self, arguments: str, policy: ToolPolicy) -> str:
@@ -433,6 +641,21 @@ class GatedTool:
             _log.debug("no schema readable for %s", self.name, exc_info=True)
             return None
         return schema if isinstance(schema, Mapping) else None
+
+
+def _is_the_whole_call(arguments: str, key: str | None, argument_text: str) -> bool:
+    """Whether *argument_text* is everything the call's *arguments* hold.
+
+    True when it is the raw payload itself, and when the payload is a JSON
+    object whose one key is *key*.
+    """
+    if argument_text == arguments:
+        return True
+    try:
+        decoded = json.loads(arguments)
+    except (ValueError, RecursionError):
+        return False
+    return isinstance(decoded, dict) and list(decoded) == [key]
 
 
 def gate_tools(tools: Iterable[Tool], gate: PermissionGate) -> tuple[Tool, ...]:

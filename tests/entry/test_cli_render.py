@@ -23,6 +23,7 @@ import pytest
 
 from omicsclaw.engine import EngineEvent
 from omicsclaw.entry.cli import MarkdownStreamFormatter, Repl, ScriptedSource, Screen
+from omicsclaw.entry.cli._reasoning import REASONING_HEADER
 from omicsclaw.entry.events import TurnEvent
 from omicsclaw.entry.render import (
     ELAPSED_INCLUDES_APPROVAL_WAIT,
@@ -41,7 +42,7 @@ from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
 WAIT_S = 10.0
 
 
-def pump_over(tmp_path, frames) -> str:
+def pump_over(tmp_path, frames, *, show_reasoning: bool = False) -> str:
     """Publish *frames*, run the pump over them, return what was printed.
 
     The terminal frame is appended here rather than by each caller: a
@@ -54,7 +55,12 @@ def pump_over(tmp_path, frames) -> str:
             make_app(tmp_path, Scripted(Message(role=Role.ASSISTANT, content="x")))
         )
         buffer = io.StringIO()
-        repl = Repl(app, source=ScriptedSource(()), screen=Screen.into(buffer))
+        repl = Repl(
+            app,
+            source=ScriptedSource(()),
+            screen=Screen.into(buffer),
+            show_reasoning=show_reasoning,
+        )
         handle = TurnHandle(session_id="s1", turn_id="t1")
         for frame in frames:
             handle.stream.publish(frame)
@@ -271,11 +277,13 @@ def test_the_tail_is_printed_even_though_it_never_ended(tmp_path):
 
 
 def test_reasoning_is_off_unless_it_was_asked_for(tmp_path):
-    """``show_reasoning`` is the CLI's switch over the shared renderer.
+    """``Repl`` shows reasoning only when told to; the *product* decides.
 
-    Reasoning is a separate stream from the answer and printing it by
-    default would put a model's working above its conclusion on every
-    turn.
+    Since 2026-09-23 ``oc cli`` tells it to by default —— the owner's
+    ruling, resolved in ``ReplOptions.shows_reasoning`` in the process
+    shell, where a pipe can be told from a person. The library default
+    stays off so that an embedding caller gets the answer alone unless it
+    asks for more.
     """
     frames = [engine_frame(EngineEvent.reasoning("because Moran's I is a ratio"))]
 
@@ -309,17 +317,29 @@ def test_reasoning_appears_when_the_switch_is_on(tmp_path):
     assert "because Moran's I is a ratio" in asyncio.run(drive())
 
 
-def test_a_tool_call_is_announced_by_name_and_not_by_argument(tmp_path):
-    """Q22 rule 1 applies to the screen as well as to the log.
+def test_a_tool_call_is_announced_with_the_argument_it_was_given(tmp_path):
+    """Q22 rule 1 no longer covers the screen. Owner's ruling, recorded here.
 
-    A terminal is a log with a scrollback buffer, and ``write_file``'s
-    content or ``bash``'s command can carry a subject identifier.
+    It used to: a terminal is a log with a scrollback buffer, and
+    ``write_file``'s content or ``bash``'s command can carry a subject
+    identifier, so the transcript said ``-> bash`` and nothing else. The
+    cost was a transcript nobody could read — ``-> bash`` does not say
+    *which* command, and after the fact that is the only question worth
+    asking. The owner weighed the two and chose legibility for this
+    surface.
+
+    **The log half of the rule is untouched and is now tested on its
+    own** (``test_cli_logging.py``): a record can be shipped somewhere
+    this scrollback never goes, so the two stopped being one rule. A
+    deployment that needs the old behaviour back passes
+    ``ToolTranscript(detail=False)``.
     """
     call = ToolCall(id="c0", name="bash", arguments='{"command": "cat PATIENT-7.vcf"}')
     printed = pump_over(tmp_path, [engine_frame(EngineEvent.tool_start(call))])
 
     assert "-> bash" in printed
-    assert "PATIENT-7" not in printed
+    assert 'command="cat PATIENT-7.vcf"' in printed
+    assert "(1)" in printed, "the number its result will pair back to"
 
 
 def test_a_message_the_user_typed_is_never_read_as_markup(tmp_path):
@@ -347,3 +367,47 @@ def test_a_message_the_user_typed_is_never_read_as_markup(tmp_path):
         return buffer.getvalue()
 
     assert "[dim]text[/dim]" in asyncio.run(drive())
+
+
+def test_reasoning_reads_as_one_block_set_apart_from_the_answer(tmp_path):
+    """What the owner saw was ``[reasoning] The[reasoning]  user``, and an
+    answer glued to the last word of the thinking (``look.I'll``).
+
+    One header, a gutter, one blank line, then the answer.
+    """
+    frames = [
+        engine_frame(EngineEvent.reasoning(delta))
+        for delta in ("The", " user", " asks.", "\n\n", "Let", " me", " look.")
+    ] + [
+        engine_frame(EngineEvent.text(delta))
+        for delta in ("I'll", " explore", " first.\n")
+    ]
+
+    out = pump_over(tmp_path, frames, show_reasoning=True)
+
+    assert "[reasoning]" not in out
+    assert out.count(REASONING_HEADER) == 1
+    assert (
+        f"{REASONING_HEADER}\n"
+        "│ The user asks.\n"
+        "│\n"
+        "│ Let me look.\n"
+        "\n"
+        "I'll explore first.\n"
+    ) in out
+
+
+def test_thinking_resumed_after_a_tool_line_starts_after_a_gap(tmp_path):
+    """Without it the second block's header sits on the tool line's heels."""
+    frames = [
+        engine_frame(
+            EngineEvent.tool_start(
+                ToolCall(id="c1", name="bash", arguments='{"command": "ls"}')
+            )
+        ),
+        engine_frame(EngineEvent.reasoning("The README is huge.")),
+    ]
+
+    out = pump_over(tmp_path, frames, show_reasoning=True)
+
+    assert f'-> bash  command="ls"\n\n{REASONING_HEADER}\n' in out

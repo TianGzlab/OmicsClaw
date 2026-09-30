@@ -21,4 +21,4 @@ output_directory/
 
 - `extracted_metadata.json` is at the output_dir ROOT, NOT under `tables/`. This skill does not follow the analysis-skill convention.
 - GEO download requires internet access (the downloader hits GEO FTP / NCBI APIs). Use `--no-download` for air-gapped runs.
-- PDF parsing requires `pypdf` (a lazy optional import; not in `skill.yaml` `deps.python`).
+- PDF parsing requires `pypdf` (a lazy optional import; not in `SKILL.md`'s `## Dependencies`).

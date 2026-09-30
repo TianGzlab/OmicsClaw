@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-perturb
 description: Load when classifying perturbed vs non-perturbed cells in a Perturb-seq / CRISPR-screen scRNA
   AnnData via the pertpy Mixscape workflow. Skip when guide labels are not yet attached to the expression
   object (use sc-perturb-prep); in-silico KO predictions on unperturbed data (use sc-in-silico-perturbation).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -16,15 +11,6 @@ tags:
 - crispr
 - mixscape
 - pertpy
-requires:
-- anndata
-- matplotlib
-- numpy
-- packaging
-- pandas
-- pertpy
-- scanpy
-- scipy
 ---
 
 # sc-perturb
@@ -48,8 +34,6 @@ predicting perturbation effects on **unperturbed** data, use
 `sc-in-silico-perturbation`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -84,29 +68,29 @@ predicting perturbation effects on **unperturbed** data, use
 
 ## Gotchas
 
-- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb.py:228` raises `SystemExit("Provide --input or use --demo")`; `:235` raises `SystemExit("Perturbation column '<key>' not found in adata.obs. ...")` with multi-option fix hints; `:246` raises `SystemExit("Control label '<label>' not found in adata.obs['<key>']. Available labels: <list>")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
-- **`--split-by` missing is a soft warning, not a fail.** When `--split-by` (default `replicate`) doesn't exist in `obs`, `sc_perturb.py:255-261` logs a warning and silently disables the split. The Mixscape run continues without replicate awareness — `result.json["params"]["split_by"]` will reflect the disablement.
-- **PCA is computed automatically when missing.** `sc_perturb.py:264-266` calls `sc.pp.pca(adata)` if `obsm["X_pca"]` is absent — no upstream `sc-preprocessing` strictly required, but the implicit PCA uses defaults (no batch correction, no HVG). For real screens prefer running `sc-preprocessing` first so the PCA reflects HVG-selected normalised data.
-- **Degenerate output (everything `NP`) is a soft fail.** `sc_perturb.py:85` defines `_detect_degenerate_output` which records diagnostics and writes troubleshooting hints to `report.md` (see `sc_perturb.py:141`+); the script does NOT raise. Always inspect `result.json["n_classes"]` (`:382`) — if it's 1, Mixscape didn't separate populations and the run is uninformative.
-- **`--method mixscape` is the only choice.** `sc_perturb.py:72` argparse `choices=["mixscape"]`. `--method` exists for forward-compatibility; today any other value is rejected by argparse before the script runs.
+- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb.py` raises `SystemExit("Provide --input or use --demo")`; raises `SystemExit("Perturbation column '<key>' not found in adata.obs. ...")` with multi-option fix hints; raises `SystemExit("Control label '<label>' not found in adata.obs['<key>']. Available labels: <list>")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
+- **`--split-by` missing is a soft warning, not a fail.** When `--split-by` (default `replicate`) doesn't exist in `obs`, `sc_perturb.py` logs a warning and silently disables the split. The Mixscape run continues without replicate awareness — `result.json["params"]["split_by"]` will reflect the disablement.
+- **PCA is computed automatically when missing.** `sc_perturb.py` calls `sc.pp.pca(adata)` if `obsm["X_pca"]` is absent — no upstream `sc-preprocessing` strictly required, but the implicit PCA uses defaults (no batch correction, no HVG). For real screens prefer running `sc-preprocessing` first so the PCA reflects HVG-selected normalised data.
+- **Degenerate output (everything `NP`) is a soft fail.** `sc_perturb.py` defines `_detect_degenerate_output` which records diagnostics and writes troubleshooting hints to `report.md`; the script does NOT raise. Always inspect `result.json["n_classes"]` — if it's 1, Mixscape didn't separate populations and the run is uninformative.
+- **`--method mixscape` is the only choice.** `sc_perturb.py` argparse `choices=["mixscape"]`. `--method` exists for forward-compatibility; today any other value is rejected by argparse before the script runs.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic Perturb-seq)
-python omicsclaw.py run sc-perturb --demo --output /tmp/sc_perturb_demo
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py --demo --output /tmp/sc_perturb_demo
 
 # Default: input has standard column names (perturbation / NT)
-python omicsclaw.py run sc-perturb \
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
   --input perturb_prep_output/processed.h5ad --output results/
 
 # Custom column / control names
-python omicsclaw.py run sc-perturb \
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
   --input data.h5ad --output results/ \
   --pert-key guide_target --control non-targeting --split-by donor
 
 # Tune Mixscape DE thresholds
-python omicsclaw.py run sc-perturb \
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
   --input data.h5ad --output results/ \
   --logfc-threshold 0.5 --pval-cutoff 0.01 --n-neighbors 30
 ```
@@ -117,3 +101,9 @@ python omicsclaw.py run sc-perturb \
 - `references/methodology.md` — Mixscape signature subtraction; KO/NT/NP semantics
 - `references/output_contract.md` — `obs["mixscape_class"]` / `obs["mixscape_class_global"]` schema + table layouts
 - Adjacent skills: `sc-perturb-prep` (upstream — attaches guide labels to the expression object), `sc-de` (downstream — DE between perturbed and control), `sc-in-silico-perturbation` (parallel — predicts perturbation effects WITHOUT a real screen), `sc-preprocessing` (upstream — produces an HVG-aware PCA preferable to the auto-PCA inside this skill)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `packaging`, `pandas`, `pertpy`, `scanpy`, `scipy`

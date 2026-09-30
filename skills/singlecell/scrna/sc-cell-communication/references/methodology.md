@@ -49,20 +49,20 @@ The wrapper assumes you already have biologically meaningful labels in `obs`.
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run sc-cell-communication \
+python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py \
   --input data.h5ad --cell-type-key cell_type --output out/
 
-python omicsclaw.py run sc-cell-communication \
+python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py \
   --method liana --input data.h5ad --cell-type-key cell_type --output out/
 
-python omicsclaw.py run sc-cell-communication \
+python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py \
   --method cellphonedb --input data.h5ad --cell-type-key cell_type \
   --cellphonedb-threshold 0.1 --cellphonedb-iterations 1000 --output out/
 
-python omicsclaw.py run sc-cell-communication \
+python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py \
   --method cellchat_r --input data.h5ad --cell-type-key cell_type --output out/
 
-python omicsclaw.py run sc-cell-communication \
+python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py \
   --method nichenet_r --input data.h5ad --cell-type-key cell_type \
   --condition-key condition --condition-oi stim --condition-ref ctrl \
   --receiver Monocyte --senders T_cell,B_cell --nichenet-lfc-cutoff 0.25 --output out/

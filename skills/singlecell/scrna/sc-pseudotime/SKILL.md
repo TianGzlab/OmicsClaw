@@ -1,13 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-pseudotime
 description: Load when ordering cells along a developmental trajectory in a normalised scRNA AnnData via
   DPT, Palantir, VIA, CellRank, Slingshot (R), or Monocle3 (R). Skip when ranking marker genes per cluster
   (use sc-markers); RNA velocity vector fields (use sc-velocity).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
+trigger: pseudotime, trajectory, lineage, diffusion pseudotime, palantir, via, cellrank, monocle3, slingshot
 tags:
 - singlecell
 - scrna
@@ -19,18 +15,6 @@ tags:
 - cellrank
 - slingshot
 - monocle3
-requires:
-- anndata
-- cellrank
-- matplotlib
-- numpy
-- palantir
-- pandas
-- pyVIA
-- scanpy
-- scipy
-- scvelo
-- seaborn
 ---
 
 # sc-pseudotime
@@ -54,8 +38,6 @@ etc.). For per-cluster marker ranking use `sc-markers`; for velocity
 vector fields (kinetics, not ordering) use `sc-velocity`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -103,38 +85,38 @@ vector fields (kinetics, not ordering) use `sc-velocity`.
 
 ## Gotchas
 
-- **Hard-fails when `.X` isn't normalised.** `sc_pseudotime.py:1122` raises `ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")` based on the matrix-contract metadata. If you skipped `sc-preprocessing`, the contract check rejects the run before any pseudotime work happens.
-- **No suitable representation → hard fail.** `sc_pseudotime.py:283` raises `ValueError("Embedding `<rep>` was not found in adata.obsm.")` for an explicit-but-missing `--use-rep`; `:287` raises `ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")` when no embedding key resolves.
-- **`cluster_key` validated twice.** `sc_pseudotime.py:1118` raises `ValueError("`<key>` was not found in adata.obs.")` for the top-level `--cluster-key`. Default is `leiden`; pass `--cluster-key louvain` (or whatever you have) explicitly.
-- **`--root-cell` accepts obs_name OR integer index.** `sc_pseudotime.py:308` raises `ValueError("`--root-cell <x>` was not found. Provide a valid obs_name or integer cell index.")` if neither resolves. The integer path lets you avoid copy-pasting a long barcode.
-- **R-backed methods need a working R env.** `sc_pseudotime.py:746` raises `ImportError("Slingshot R dependencies are missing: <list>")` (slingshot / SingleCellExperiment / zellkonverter); `:824` raises the same shape for Monocle3 (monocle3 / SingleCellExperiment / zellkonverter). Both messages append the full `suggest_r_install(...)` install hint.
-- **`result.json["backend"]` records the actually-used backend.** `sc_pseudotime.py:604` (dpt) / `:646` (palantir) / `:681` (via) / `:721` (cellrank) / `:800` (slingshot_r) / `:890` (monocle3_r) write the literal backend label. Useful when `--method` was an alias or fell through any future fallback.
-- **`--input` is `parser.error`, not a Python `ValueError`.** `sc_pseudotime.py:1092` calls `parser.error("--input is required unless --demo is used")` which exits with code 2 — caller wrappers expecting `SystemExit(1)` or `ValueError` need to handle code 2 separately. Once `--input` is given, `:1095` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
+- **Hard-fails when `.X` isn't normalised.** `sc_pseudotime.py` raises `ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")` based on the matrix-contract metadata. If you skipped `sc-preprocessing`, the contract check rejects the run before any pseudotime work happens.
+- **No suitable representation → hard fail.** `sc_pseudotime.py` raises `ValueError("Embedding `<rep>` was not found in adata.obsm.")` for an explicit-but-missing `--use-rep`; raises `ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")` when no embedding key resolves.
+- **`cluster_key` validated twice.** `sc_pseudotime.py` raises `ValueError("`<key>` was not found in adata.obs.")` for the top-level `--cluster-key`. Default is `leiden`; pass `--cluster-key louvain` (or whatever you have) explicitly.
+- **`--root-cell` accepts obs_name OR integer index.** `sc_pseudotime.py` raises `ValueError("`--root-cell <x>` was not found. Provide a valid obs_name or integer cell index.")` if neither resolves. The integer path lets you avoid copy-pasting a long barcode.
+- **R-backed methods need a working R env.** `sc_pseudotime.py` raises `ImportError("Slingshot R dependencies are missing: <list>")` (slingshot / SingleCellExperiment / zellkonverter); raises the same shape for Monocle3 (monocle3 / SingleCellExperiment / zellkonverter). Both messages append the full `suggest_r_install(...)` install hint.
+- **`result.json["backend"]` records the actually-used backend.** `sc_pseudotime.py` (dpt) / `_run_palantir` (palantir) / `_run_via` (via) / `_run_cellrank` (cellrank) / `_run_slingshot_r` (slingshot_r) / `_run_monocle3_r` (monocle3_r) write the literal backend label. Useful when `--method` was an alias or fell through any future fallback.
+- **`--input` is `parser.error`, not a Python `ValueError`.** `sc_pseudotime.py` calls `parser.error("--input is required unless --demo is used")` which exits with code 2 — caller wrappers expecting `SystemExit(1)` or `ValueError` need to handle code 2 separately. Once `--input` is given, `main` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
 
 ## Key CLI
 
 ```bash
 # Demo (auto-chooses largest cluster as root)
-python omicsclaw.py run sc-pseudotime --demo --output /tmp/sc_pt_demo
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --demo --output /tmp/sc_pt_demo
 
 # DPT with explicit root cluster
-python omicsclaw.py run sc-pseudotime \
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
   --input clustered.h5ad --output results/ \
   --cluster-key leiden --root-cluster "0" --use-rep X_pca
 
 # Palantir with custom waypoints + seed
-python omicsclaw.py run sc-pseudotime \
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
   --input clustered.h5ad --output results/ \
   --method palantir --root-cell ATCACG-1 \
   --palantir-num-waypoints 1500 --palantir-seed 42
 
 # CellRank coupled with velocity (requires layers from sc-velocity)
-python omicsclaw.py run sc-pseudotime \
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
   --input velocity.h5ad --output results/ \
   --method cellrank --cellrank-use-velocity --cellrank-n-states 5
 
 # Slingshot R lineage curves
-python omicsclaw.py run sc-pseudotime \
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
   --input clustered.h5ad --output results/ \
   --method slingshot_r --cluster-key leiden --root-cluster "0"
 ```
@@ -145,3 +127,9 @@ python omicsclaw.py run sc-pseudotime \
 - `references/methodology.md` — method selection guide; root-cell heuristics
 - `references/output_contract.md` — `obs["pseudotime"]` / `obsm["trajectory_fate_probabilities"]` schema
 - Adjacent skills: `sc-clustering` (upstream — produces `obs["leiden"]` + `obsm["X_*"]`), `sc-preprocessing` (upstream — required for normalised `.X`), `sc-velocity` (parallel — kinetics-based ordering, can feed CellRank), `sc-markers` (parallel — cluster-level marker ranking, NOT trajectory)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `cellrank`, `matplotlib`, `numpy`, `palantir`, `pandas`, `pyVIA`, `scanpy`, `scipy`, `scvelo`, `seaborn`

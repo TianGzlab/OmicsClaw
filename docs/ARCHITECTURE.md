@@ -9,6 +9,14 @@
 > implementation candidate whose final gates and mandatory independent review
 > remain pending; it is not a `SHIP` claim. Known uncertainties are called out
 > rather than filled with assumptions.
+>
+> **Desktop status (2026-09-27, plan 0064).** The Desktop claims below —
+> `POST /v1/runs`, multipart images, durable ingress bindings, the
+> Desktop-hosted Remote compatibility boundary, Bench — describe the deleted
+> `omicsclaw/surfaces/desktop/` and `omicsclaw/remote/` backend. The current
+> Desktop surface is `oc desktop` (`omicsclaw/entry/desktop/`): `/chat/stream`,
+> `/chat/permission`, `/chat/abort`, `GET`/`PUT /workspace` and `/health`,
+> text only, with its interaction state in process memory.
 
 ## Purpose and document hierarchy
 
@@ -194,8 +202,7 @@ media completion.
 - **Desktop Surface** — FastAPI/SSE backend used by the desktop application;
   Bench is a page within this Surface, not a fourth Surface.
 - **Channel Surface** — lifecycle and per-platform Channel Adapters for
-  Telegram, Feishu, Slack, Discord, WeChat, WeCom, DingTalk, iMessage, Email,
-  and QQ.
+  Telegram, Feishu, Slack, Discord, DingTalk, Email, and QQ.
 
 The prompt-toolkit/single-shot CLI conversational paths, Desktop
 text/multipart-image paths, Telegram text/single-photo and Feishu text-only now submit

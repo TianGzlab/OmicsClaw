@@ -401,7 +401,7 @@ def smart_load(
             '  Convert("converted.h5seurat", dest = "h5ad")\n'
             "\n"
             "Then run:\n"
-            "  python omicsclaw.py run sc-standardize-input --input converted.h5ad --output <dir>\n"
+            "  python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input converted.h5ad --output <dir>\n"
             "\n"
             "Alternative (sceasy, one line):\n"
             f'  sceasy::convertFormat("{path.name}", from = "seurat", to = "anndata",\n'
@@ -417,7 +417,7 @@ def smart_load(
             '  df.to_csv("counts.csv")\n'
             "\n"
             "Then run:\n"
-            "  python omicsclaw.py run sc-standardize-input --input counts.csv --output <dir>\n"
+            "  python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input counts.csv --output <dir>\n"
             "\n"
             f"Supported formats: .h5ad, .h5, .loom, .csv, .tsv, 10X mtx directory"
         )
@@ -439,7 +439,7 @@ def smart_load(
                 "  dir/    — 10X CellRanger output (matrix.mtx + barcodes + features)\n"
                 "\n"
                 "If your data is in Seurat (.rds) or Excel (.xlsx), convert it first.\n"
-                "See: python omicsclaw.py run sc-standardize-input --help"
+                "See: python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --help"
             ) from None
 
     ensure_input_contract(adata, source_path=str(path))

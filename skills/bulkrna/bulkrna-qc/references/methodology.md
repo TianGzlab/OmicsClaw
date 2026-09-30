@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-qc --demo
-python omicsclaw.py run bulkrna-qc --input <counts.csv> --output <dir>
+python skills/bulkrna/bulkrna-qc/bulkrna_qc.py --demo
+python skills/bulkrna/bulkrna-qc/bulkrna_qc.py --input <counts.csv> --output <dir>
 python bulkrna_qc.py --input counts.csv --output results/
 python bulkrna_qc.py --demo --output /tmp/qc_demo
 ```

@@ -13,12 +13,12 @@ from pathlib import Path
 
 # Bootstrap sys.path so `omicsclaw` resolves on direct invocation
 # (`python sc_consensus_clustering.py --help`) without an editable install.
-_HERE = Path(__file__).resolve()
-for _candidate in _HERE.parents:
-    if (_candidate / "omicsclaw" / "__init__.py").exists():
-        if str(_candidate) not in sys.path:
-            sys.path.insert(0, str(_candidate))
-        break
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
 from omicsclaw.runtime.consensus.run import main as _run_main  # noqa: E402
 

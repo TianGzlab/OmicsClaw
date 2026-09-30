@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-differential-abundance
 description: Load when testing whether cell-type / cluster proportions or neighbourhood densities differ
   between conditions in a multi-sample scRNA AnnData via Milo, scCODA, simple proportion screen, or R
   Monte-Carlo permutation. Skip when ranking marker genes (use sc-markers); per-cell DE (use sc-de).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -16,17 +11,6 @@ tags:
 - milo
 - sccoda
 - proportion-test
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- pertpy
-- scanpy
-- sccoda
-- scipy
-- seaborn
-- statsmodels
 ---
 
 # sc-differential-abundance
@@ -48,8 +32,6 @@ For per-cell **expression** changes between conditions, use `sc-de`.
 For ranking *what* defines a cluster, use `sc-markers`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -94,33 +76,33 @@ For ranking *what* defines a cluster, use `sc-markers`.
 
 ## Gotchas
 
-- **Preflight failure raises `SystemExit(1)`, not `ValueError`.** `sc_differential_abundance.py:601` prints the missing-column / under-replication problems and exits the process. Common cases: `condition` / `sample` / `cell_type` columns missing, or `<2` samples per condition for `milo` / `sccoda`. Pass the actual obs column names (`--sample-key donor`, `--cell-type-key annotation`).
-- **`--input` missing without `--demo` raises `SystemExit`, not `ValueError`.** `sc_differential_abundance.py:580` does `raise SystemExit("Provide --input or use --demo")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
+- **Preflight failure raises `SystemExit(1)`, not `ValueError`.** `sc_differential_abundance.py` prints the missing-column / under-replication problems and exits the process. Common cases: `condition` / `sample` / `cell_type` columns missing, or `<2` samples per condition for `milo` / `sccoda`. Pass the actual obs column names (`--sample-key donor`, `--cell-type-key annotation`).
+- **`--input` missing without `--demo` raises `SystemExit`, not `ValueError`.** `sc_differential_abundance.py` does `raise SystemExit("Provide --input or use --demo")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
 - **`milo` / `sccoda` need pertpy installed.** Both methods route through `run_milo_da` / `run_sccoda_da` in `skills/singlecell/_lib/differential_abundance.py`; the pertpy import is lazy and surfaces as `ImportError` at call time when pertpy is absent. `simple` and `proportion_test_r` run without pertpy.
-- **`proportion_test_r` requires a working R install but no pertpy.** `sc_differential_abundance.py:383` raises `FileNotFoundError(f"R script not found: {r_script}")` if the bundled R helper is missing from the install — typically when the package was installed without the R extra.
-- **`result.json` count keys are *additive* per method, not exclusive.** All four methods write `result.json["n_cell_types"]` (set at the universal summary initialiser, `sc_differential_abundance.py:636`); `milo` additionally writes `n_nhoods` (`:695`), `sccoda` additionally writes `n_effect_rows` (`:754`), `proportion_test_r` overwrites `n_cell_types` from its `clusters` column (`:429`). Downstream tools that just need "how many things were tested" can read `n_cell_types` universally.
+- **`proportion_test_r` requires a working R install but no pertpy.** `sc_differential_abundance.py` raises `FileNotFoundError(f"R script not found: {r_script}")` if the bundled R helper is missing from the install — typically when the package was installed without the R extra.
+- **`result.json` count keys are *additive* per method, not exclusive.** All four methods write `result.json["n_cell_types"]` (set at the universal summary initialiser, `sc_differential_abundance.py`); `milo` additionally writes `n_nhoods`, `sccoda` additionally writes `n_effect_rows`, `proportion_test_r` overwrites `n_cell_types` from its `clusters` column. Downstream tools that just need "how many things were tested" can read `n_cell_types` universally.
 - **`--reference-cell-type` is `sccoda`-only.** Other methods ignore the value silently. Default `"automatic"` lets scCODA pick.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in synthetic 2-condition × 4-sample data)
-python omicsclaw.py run sc-differential-abundance --demo \
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py --demo \
   --method milo --output /tmp/sc_da_demo
 
 # Milo (replicate-aware neighbourhood DA)
-python omicsclaw.py run sc-differential-abundance \
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py \
   --input integrated.h5ad --output results/ \
   --method milo --condition-key treatment --sample-key donor
 
 # scCODA Bayesian compositional analysis
-python omicsclaw.py run sc-differential-abundance \
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py \
   --input integrated.h5ad --output results/ \
   --method sccoda --reference-cell-type "B cell" \
   --condition-key treatment --sample-key donor --cell-type-key cell_type
 
 # Lightweight proportion screen (no pertpy)
-python omicsclaw.py run sc-differential-abundance \
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py \
   --input integrated.h5ad --output results/ --method simple
 ```
 
@@ -130,3 +112,9 @@ python omicsclaw.py run sc-differential-abundance \
 - `references/methodology.md` — when each method wins; pertpy install notes
 - `references/output_contract.md` — `result.json` keys per method, table column schemas
 - Adjacent skills: `sc-cell-annotation` / `sc-clustering` (upstream — produce the cell-type column), `sc-de` (parallel — per-cell expression DE between conditions, NOT abundance), `sc-markers` (parallel — within-sample cluster marker ranking, NOT cross-condition)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `pertpy`, `scanpy`, `sccoda`, `scipy`, `seaborn`, `statsmodels`

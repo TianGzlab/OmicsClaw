@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: spatial-statistics
 description: Load when running spatial autocorrelation / hotspot / co-occurrence / neighbourhood-enrichment
   / Ripley K stats on a clustered spatial AnnData via squidpy. Skip when ranking spatially variable genes
   (use spatial-genes); tissue domain detection (use spatial-domains).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
-emoji: 📊
+trigger: spatial statistics, Moran, Geary, Ripley, co-occurrence, Getis-Ord, local Moran, centrality
 tags:
 - spatial
 - statistics
@@ -18,18 +13,6 @@ tags:
 - co-occurrence
 - nhood-enrichment
 - getis-ord
-- squidpy
-requires:
-- anndata
-- esda
-- libpysal
-- matplotlib
-- networkx
-- numpy
-- pandas
-- scanpy
-- scipy
-- seaborn
 - squidpy
 ---
 
@@ -56,8 +39,6 @@ For per-gene SVG ranking use `spatial-genes`; for tissue-domain
 detection use `spatial-domains`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -113,20 +94,20 @@ detection use `spatial-domains`.
 
 ## Flow
 
-1. Load AnnData (`--input`) or chain through `spatial-preprocess --demo` via subprocess (`spatial_statistics.py:1499-1515`).
-2. `parser.error` validates `--analysis-type` ∈ `VALID_ANALYSIS_TYPES`; per-analysis numeric ranges (lines `:1558-1601`).
-3. Auto-resolve `--cluster-key` if unset; auto-leiden if no cluster column exists (with size guard at `:1546`).
+1. Load AnnData (`--input`) or chain through `spatial-preprocess --demo` via subprocess (`spatial_statistics.py`).
+2. `parser.error` validates `--analysis-type` ∈ `VALID_ANALYSIS_TYPES`; per-analysis numeric ranges.
+3. Auto-resolve `--cluster-key` if unset; auto-leiden if no cluster column exists (with size guard).
 4. Dispatch to analysis-type runner; squidpy graph build uses `--stats-n-neighs` / `--stats-n-rings` / `--stats-n-perms`.
 5. Build standardised result tables; collect per-spot metrics.
 6. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
 
 ## Gotchas
 
-- **All input + parameter validation goes through `parser.error` (exit code 2).** `spatial_statistics.py:1530` for missing `--input`; `:1546` for too-small dataset to auto-leiden; `:1558` for invalid `--analysis-type`; `:1560-1601` for numeric / multi-value flag validation. Wrappers expecting `ValueError` need to catch exit-2.
-- **`bivariate_moran` requires exactly TWO genes.** `spatial_statistics.py:1601` raises `parser.error("--analysis-type bivariate_moran requires exactly two genes via --genes geneA,geneB")`. Pass them comma-separated, no spaces.
-- **Demo chains through `spatial-preprocess` via subprocess.** `spatial_statistics.py:1499` raises `FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")` if the sibling skill is missing; `:1510` raises `RuntimeError("spatial-preprocess --demo failed (exit ...)")` on chained failure; `:1515` raises `FileNotFoundError(f"Expected {processed}")` when the demo output isn't where expected.
-- **`--cluster-key` auto-leiden has a size guard.** `spatial_statistics.py:1546` raises `parser.error("Dataset is too small to auto-compute `leiden` clusters.")` when the auto-fallback can't run. Pass `--cluster-key <existing-column>` for small datasets.
-- **`local_moran` writes `n_significant_spots`; `getis_ord` writes `n_hotspots`.** `spatial_statistics.py:555` documents the value-column divergence. Downstream tools reading "spatially significant cell count" need to branch on `--analysis-type`.
+- **All input + parameter validation goes through `parser.error` (exit code 2).** `spatial_statistics.py` for missing `--input`; for too-small dataset to auto-leiden; for invalid `--analysis-type`; for numeric / multi-value flag validation. Wrappers expecting `ValueError` need to catch exit-2.
+- **`bivariate_moran` requires exactly TWO genes.** `spatial_statistics.py` raises `parser.error("--analysis-type bivariate_moran requires exactly two genes via --genes geneA,geneB")`. Pass them comma-separated, no spaces.
+- **Demo chains through `spatial-preprocess` via subprocess.** `spatial_statistics.py` raises `FileNotFoundError(f"spatial-preprocess not found at {preprocess_script}")` if the sibling skill is missing; raises `RuntimeError("spatial-preprocess --demo failed (exit ...)")` on chained failure; raises `FileNotFoundError(f"Expected {processed}")` when the demo output isn't where expected.
+- **`--cluster-key` auto-leiden has a size guard.** `spatial_statistics.py` raises `parser.error("Dataset is too small to auto-compute `leiden` clusters.")` when the auto-fallback can't run. Pass `--cluster-key <existing-column>` for small datasets.
+- **`local_moran` writes `n_significant_spots`; `getis_ord` writes `n_hotspots`.** `spatial_statistics.py` documents the value-column divergence. Downstream tools reading "spatially significant cell count" need to branch on `--analysis-type`.
 - **`neighborhood_enrichment` consumes `<cluster_key>_nhood_enrichment` from `uns`.** Computed lazily within squidpy; if you re-run with a different `--cluster-key`, the previous `uns` key remains and won't be reused for the new cluster column. Clean `adata.uns` between runs or expect stale keys.
 - **`spatial_centrality` is graph-only.** It produces per-spot centrality without any cluster-key dependency — useful when `--cluster-key` is unavailable.
 
@@ -134,35 +115,35 @@ detection use `spatial-domains`.
 
 ```bash
 # Demo (chained from spatial-preprocess --demo)
-python omicsclaw.py run spatial-statistics --demo --analysis-type moran --output /tmp/spatial_stats_demo
+python skills/spatial/spatial-statistics/spatial_statistics.py --demo --analysis-type moran --output /tmp/spatial_stats_demo
 
 # Global Moran's I on a clustered AnnData
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type moran --cluster-key spatial_domain --stats-n-perms 100
 
 # Local Moran with GeoDa quadrants
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type local_moran --local-moran-geoda-quads --n-top-genes 20
 
 # Neighbourhood enrichment between clusters
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type neighborhood_enrichment --cluster-key spatial_domain
 
 # Ripley K on a labelled object
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type ripley --ripley-mode K --ripley-n-simulations 100 --ripley-n-steps 50
 
 # Co-occurrence at increasing distance bins
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type co_occurrence --cluster-key cell_type --coocc-interval 30 --coocc-n-splits 5
 
 # Bivariate Moran between two genes
-python omicsclaw.py run spatial-statistics \
+python skills/spatial/spatial-statistics/spatial_statistics.py \
   --input clustered.h5ad --output results/ \
   --analysis-type bivariate_moran --genes EGFR,BRCA1
 ```
@@ -173,3 +154,9 @@ python omicsclaw.py run spatial-statistics \
 - `references/methodology.md` — when each analysis-type wins; squidpy mapping
 - `references/output_contract.md` — per-analysis table / `obs` / `uns` schema
 - Adjacent skills: `spatial-preprocess` (upstream — produces `obsm["spatial"]` + cluster column), `spatial-domains` / `spatial-annotate` (upstream — produce `obs["spatial_domain"]` / cell-type labels for `--cluster-key`), `spatial-genes` (parallel — per-gene SVG ranking, NOT statistics on labels), `spatial-de` (downstream — DE between clusters identified by neighbourhood-enrichment hotspots)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `esda`, `libpysal`, `matplotlib`, `networkx`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`, `squidpy`

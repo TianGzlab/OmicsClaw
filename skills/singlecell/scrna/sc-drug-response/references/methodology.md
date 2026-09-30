@@ -96,31 +96,31 @@ After drug response prediction:
 
 | Goal | Skill | Command |
 |---|---|---|
-| Identify markers for sensitive clusters | `sc-markers` | `python omicsclaw.py run sc-markers --input processed.h5ad --output markers/` |
-| Pathway analysis of sensitive clusters | `sc-enrichment` | `python omicsclaw.py run sc-enrichment --input processed.h5ad --output enrichment/` |
-| DE between sensitive vs resistant clusters | `sc-de` | `python omicsclaw.py run sc-de --input processed.h5ad --output de/` |
-| Cell-cell communication in tumor | `sc-cell-communication` | `python omicsclaw.py run sc-cell-communication --input processed.h5ad --output comm/` |
+| Identify markers for sensitive clusters | `sc-markers` | `python skills/singlecell/scrna/sc-markers/sc_markers.py --input processed.h5ad --output markers/` |
+| Pathway analysis of sensitive clusters | `sc-enrichment` | `python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --input processed.h5ad --output enrichment/` |
+| DE between sensitive vs resistant clusters | `sc-de` | `python skills/singlecell/scrna/sc-de/sc_de.py --input processed.h5ad --output de/` |
+| Cell-cell communication in tumor | `sc-cell-communication` | `python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py --input processed.h5ad --output comm/` |
 
 
 ## Example Commands
 
 ```bash
 # Demo mode (no data needed)
-python omicsclaw.py run sc-drug-response --demo --output /tmp/drug_demo
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py --demo --output /tmp/drug_demo
 
 # Simple correlation (no model needed)
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input preprocessed.h5ad --output results/ \
   --method simple_correlation --n-drugs 15
 
 # CaDRReS with GDSC
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input preprocessed.h5ad --output results/ \
   --method cadrres --drug-db gdsc \
   --model-dir ~/.cache/omicsclaw/drug_response/
 
 # Custom cluster key
-python omicsclaw.py run sc-drug-response \
+python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \
   --input preprocessed.h5ad --output results/ \
   --method simple_correlation --cluster-key cell_type
 ```

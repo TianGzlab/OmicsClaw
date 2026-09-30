@@ -1,27 +1,12 @@
 from __future__ import annotations
 
 import ast
-import io
 from collections.abc import Iterator
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRNA_DIR = ROOT / "skills" / "singlecell" / "scrna"
-
-
-def _load_omicsclaw_script():
-    """Return the CLI body module.
-
-    Was a by-path load of the repo-root ``omicsclaw.py``. The body now ships
-    inside the package as ``omicsclaw.surfaces.cli._main`` so the console
-    scripts work from an installed distribution, and that root file is a thin
-    shim — see the history note in ``omicsclaw/surfaces/cli/launcher.py``. A
-    plain import is therefore correct and sufficient.
-    """
-    import omicsclaw.surfaces.cli._main as cli_main
-
-    return cli_main
 
 
 def _iter_string_fragments(node: ast.AST) -> Iterator[str]:
@@ -64,19 +49,8 @@ def test_scrna_print_statements_use_ascii_only_text():
     )
 
 
-def test_cli_stdio_reconfigure_escapes_nonencodable_output():
-    oc = _load_omicsclaw_script()
-    stdout_bytes = io.BytesIO()
-    stderr_bytes = io.BytesIO()
-    stdout_stream = io.TextIOWrapper(stdout_bytes, encoding="gbk", errors="strict")
-    stderr_stream = io.TextIOWrapper(stderr_bytes, encoding="gbk", errors="strict")
-
-    oc._configure_stdio_error_handling(stdout_stream, stderr_stream)
-
-    stdout_stream.write("bullet=•")
-    stderr_stream.write("bullet_err=•")
-    stdout_stream.flush()
-    stderr_stream.flush()
-
-    assert stdout_bytes.getvalue().decode("ascii") == r"bullet=\u2022"
-    assert stderr_bytes.getvalue().decode("ascii") == r"bullet_err=\u2022"
+# ``test_cli_stdio_reconfigure_escapes_nonencodable_output`` was removed with
+# ``omicsclaw/surfaces/cli/``: it drove that CLI body's
+# ``_configure_stdio_error_handling``, and the rebuilt shell has no such hook.
+# The ASCII-only rule above is the half that was never about the CLI — it reads
+# the skill scripts themselves — so it stays.

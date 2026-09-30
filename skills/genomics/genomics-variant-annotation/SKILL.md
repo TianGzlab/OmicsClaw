@@ -1,15 +1,10 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: genomics-variant-annotation
 description: Load when summarising functional impact of an annotated variant CSV — per-IMPACT counts (HIGH
   / MODERATE / LOW / MODIFIER), top consequences, gene-affected count. Skip when input is a raw VCF (convert
   with `bcftools +split-vep` first); calling raw variants (use genomics-variant-calling); filtering VCFs
   (use genomics-vcf-operations).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
-emoji: 📝
+trigger: variant annotation, VEP, snpEff, ANNOVAR, functional effect
 tags:
 - genomics
 - annotation
@@ -18,9 +13,6 @@ tags:
 - annovar
 - consequence
 - impact
-requires:
-- numpy
-- pandas
 ---
 
 # genomics-variant-annotation
@@ -42,8 +34,6 @@ parse a raw VCF — it only reads CSV. For raw calling use
 
 ## Inputs & Outputs
 
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
-
 **Inputs**
 
 - File types: `.csv`
@@ -59,28 +49,28 @@ parse a raw VCF — it only reads CSV. For raw calling use
 
 ## Flow
 
-1. Load CSV (`--input <annotated.csv>`) or generate a demo annotated CSV at `output_dir/demo_annotated_variants.csv` with `--n-variants` records (`variant_annotation.py:227`).
-2. Read columns directly via `pd.read_csv` (`variant_annotation.py:356`) — no VCF / VEP / snpEff parser exists in this skill.
-3. Aggregate per-IMPACT counts (`variant_annotation.py:240`); pick top-N consequences (`:241`); count distinct genes touched (`:252`).
-4. Write `tables/annotated_variants.csv` (`variant_annotation.py:366`) + `tables/impact_distribution.csv` (`:377`) + `report.md` + `result.json` (`:383`).
+1. Load CSV (`--input <annotated.csv>`) or generate a demo annotated CSV at `output_dir/demo_annotated_variants.csv` with `--n-variants` records (`variant_annotation.py`).
+2. Read columns directly via `pd.read_csv` (`variant_annotation.py`) — no VCF / VEP / snpEff parser exists in this skill.
+3. Aggregate per-IMPACT counts (`variant_annotation.py`); pick top-N consequences; count distinct genes touched.
+4. Write `tables/annotated_variants.csv` (`variant_annotation.py`) + `tables/impact_distribution.csv` + `report.md` + `result.json`.
 
 ## Gotchas
 
-- **CSV-only — no VCF parser exists.** `variant_annotation.py:356` is `pd.read_csv(input_path)`; passing a `.vcf` raises `ValueError("Could not parse input file: ...")` at `variant_annotation.py:358`. Convert VCFs to CSV first with `bcftools +split-vep -d -f '%CHROM,%POS,%REF,%ALT,%CSQ\n'` and post-process to the required column names.
-- **Required CSV columns are LOWERCASE.** Code reads `df["impact"]` (`:240`), `df["consequence"]` (`:241`), `df["gene"]` (`:252`), and optionally `df["cadd_phred"]` (`:271`). A CSV with `IMPACT` / `Consequence` / `Gene` raises `KeyError`.
-- **`--input` REQUIRED unless `--demo`.** `variant_annotation.py:348` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError` at `:351`.
+- **CSV-only — no VCF parser exists.** `variant_annotation.py` is `pd.read_csv(input_path)`; passing a `.vcf` raises `ValueError("Could not parse input file: ...")`. Convert VCFs to CSV first with `bcftools +split-vep -d -f '%CHROM,%POS,%REF,%ALT,%CSQ\n'` and post-process to the required column names.
+- **Required CSV columns are LOWERCASE.** Code reads `df["impact"]`, `df["consequence"]`, `df["gene"]`, and optionally `df["cadd_phred"]`. A CSV with `IMPACT` / `Consequence` / `Gene` raises `KeyError`.
+- **`--input` REQUIRED unless `--demo`.** `variant_annotation.py` raises `ValueError("--input required when not using --demo")`; non-existent paths raise `FileNotFoundError`.
 - **No annotator is invoked.** This skill consumes an already-annotated CSV — it does NOT run VEP / snpEff / ANNOVAR. Run an annotator upstream and convert its output to CSV.
 - **CADD scoring is optional.** When `cadd_phred` is absent the report omits the CADD section; do NOT add a placeholder NaN column or the value-counts will mis-render.
-- **Demo CSV uses fixed IMPACT proportions (~10% HIGH, 30% MODERATE, 50% LOW, 10% MODIFIER).** Useful for orchestrator smoke tests; not biologically meaningful.
+- **Demo CSV uses fixed IMPACT proportions (~10% HIGH, 30% MODERATE, 50% LOW, 10% MODIFIER).** Useful for smoke tests; not biologically meaningful.
 
 ## Key CLI
 
 ```bash
 # Demo
-python omicsclaw.py run genomics-variant-annotation --demo --output /tmp/anno_demo
+python skills/genomics/genomics-variant-annotation/variant_annotation.py --demo --output /tmp/anno_demo
 
 # Real annotated CSV (lowercase columns)
-python omicsclaw.py run genomics-variant-annotation \
+python skills/genomics/genomics-variant-annotation/variant_annotation.py \
   --input my_annotations.csv --output results/
 ```
 
@@ -90,3 +80,9 @@ python omicsclaw.py run genomics-variant-annotation \
 - `references/methodology.md` — VEP / snpEff / ANNOVAR field semantics, IMPACT taxonomy
 - `references/output_contract.md` — `tables/annotated_variants.csv` + impact distribution
 - Adjacent skills: `genomics-variant-calling` (upstream — produces raw VCF), `genomics-vcf-operations` (upstream — filtering / normalisation before annotation), `genomics-sv-detection` (parallel — structural variants), `genomics-phasing` (parallel — phasing analysis)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`numpy`, `pandas`

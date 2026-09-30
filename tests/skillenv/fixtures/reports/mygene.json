@@ -1,0 +1,58 @@
+{
+ "version": "1",
+ "pip_version": "26.0.1",
+ "install": [
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/mygene/3.2.2/mygene-3.2.2-py2.py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=18d85d1b28ecee2be31d844607fb0c5f7d7c58573278432df819ee2a5e88fe46",
+     "hashes": {
+      "sha256": "18d85d1b28ecee2be31d844607fb0c5f7d7c58573278432df819ee2a5e88fe46"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": true,
+   "metadata": {
+    "name": "mygene",
+    "version": "3.2.2",
+    "requires_dist": [
+     "biothings-client (>=0.2.6)"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://10.20.16.126:8081/repository/pypi-proxy/packages/biothings-client/0.5.1/biothings_client-0.5.1-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=8ca9e23887016eabda10054c3fcd1a2482271afac2e58e8399c5a6f841f1735d",
+     "hashes": {
+      "sha256": "8ca9e23887016eabda10054c3fcd1a2482271afac2e58e8399c5a6f841f1735d"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": false,
+   "metadata": {
+    "name": "biothings_client",
+    "version": "0.5.1",
+    "requires_dist": [
+     "httpx<1.0,>=0.25.0; python_version >= \"3.8\"",
+     "httpx<1.0,>=0.24.0; python_version == \"3.7\"",
+     "importlib-metadata; python_version <= \"3.7\"",
+     "typing-extensions; python_version <= \"3.7\"",
+     "anysqlite; python_version >= \"3.8\" and extra == \"caching\"",
+     "hishel[httpx]==1.1.8; python_version == \"3.9\" and extra == \"caching\"",
+     "hishel[httpx]<2,>=1.1.9; python_version > \"3.9\" and extra == \"caching\"",
+     "pandas>=1.2.0; extra == \"dataframe\"",
+     "PyLD>=0.7.2; extra == \"jsonld\"",
+     "pytest>=8.3.3; python_version >= \"3.8\" and extra == \"tests\"",
+     "pytest>=7.4.4; python_version == \"3.7\" and extra == \"tests\"",
+     "pytest-asyncio>=0.23.8; python_version >= \"3.8\" and extra == \"tests\"",
+     "pytest-asyncio>=0.21.2; python_version == \"3.7\" and extra == \"tests\""
+    ]
+   }
+  }
+ ]
+}

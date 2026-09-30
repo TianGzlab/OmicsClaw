@@ -67,11 +67,11 @@ Download guidance:
 ## CLI Reference
 
 ```bash
-oc run sc-count --input fastqs/ --method cellranger --reference /path/to/refdata-gex-GRCh38-2020-A --output results/
-oc run sc-count --input fastqs/ --method starsolo --reference /path/to/star_index --chemistry 10xv3 --whitelist /path/to/3M-february-2018.txt --output results/
-oc run sc-count --input fastqs/ --method simpleaf --reference /path/to/simpleaf_index --chemistry 10xv3 --output results/
-oc run sc-count --input fastqs/ --method kb_python --reference /path/to/kallisto.idx --t2g /path/to/t2g.txt --chemistry 10xv3 --output results/
-oc run sc-count --input sample_count/ --method cellranger --output results/
+python skills/singlecell/scrna/sc-count/sc_count.py --input fastqs/ --method cellranger --reference /path/to/refdata-gex-GRCh38-2020-A --output results/
+python skills/singlecell/scrna/sc-count/sc_count.py --input fastqs/ --method starsolo --reference /path/to/star_index --chemistry 10xv3 --whitelist /path/to/3M-february-2018.txt --output results/
+python skills/singlecell/scrna/sc-count/sc_count.py --input fastqs/ --method simpleaf --reference /path/to/simpleaf_index --chemistry 10xv3 --output results/
+python skills/singlecell/scrna/sc-count/sc_count.py --input fastqs/ --method kb_python --reference /path/to/kallisto.idx --t2g /path/to/t2g.txt --chemistry 10xv3 --output results/
+python skills/singlecell/scrna/sc-count/sc_count.py --input sample_count/ --method cellranger --output results/
 python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_count_demo
 ```
 
@@ -190,13 +190,13 @@ If a Cell Ranger or STARsolo run has already completed, pass the existing output
 
 ```bash
 # Cell Ranger — run from FASTQ
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastqs/ --method cellranger \
   --reference /path/to/refdata-gex-GRCh38-2020-A \
   --output results/
 
 # STARsolo — run from FASTQ
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastqs/ --method starsolo \
   --reference /path/to/star_index \
   --chemistry 10xv3 \
@@ -204,7 +204,7 @@ python omicsclaw.py run sc-count \
   --output results/
 
 # kb-python — run from FASTQ
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastqs/ --method kb_python \
   --reference /path/to/kallisto.idx \
   --t2g /path/to/t2g.txt \
@@ -212,7 +212,7 @@ python omicsclaw.py run sc-count \
   --output results/
 
 # Import existing Cell Ranger output
-python omicsclaw.py run sc-count \
+python skills/singlecell/scrna/sc-count/sc_count.py \
   --input sample_count/ --method cellranger \
   --output results/
 ```

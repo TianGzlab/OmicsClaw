@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 
@@ -264,9 +264,10 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
     import anndata as ad
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
-    from omicsclaw.core.r_utils import read_r_result_csv
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+    from skills._sdk.r_utils import read_r_result_csv
 
     validate_r_environment(required_r_packages=["numbat", "SingleCellExperiment", "zellkonverter"])
 
@@ -302,7 +303,7 @@ def run_numbat(adata, *, reference_key: str | None = None, reference_cat: list[s
     )
     logger.info("Numbat: prepared lightweight AnnData (dropped heavy uns/obsp arrays) for R export")
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_numbat_") as tmpdir:

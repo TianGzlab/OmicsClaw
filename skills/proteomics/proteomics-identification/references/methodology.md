@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run peptide-id --demo
-python omicsclaw.py run peptide-id --input <spectra.mzml> --output <dir>
+python skills/proteomics/proteomics-identification/proteomics_identification.py --demo
+python skills/proteomics/proteomics-identification/proteomics_identification.py --input <spectra.mzml> --output <dir>
 ```
 
 

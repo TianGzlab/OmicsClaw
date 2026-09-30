@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills.literature.core.parser import parse_input
 from skills.literature.core.extractor import DOMAIN_ENTRY, extract_metadata, infer_domain

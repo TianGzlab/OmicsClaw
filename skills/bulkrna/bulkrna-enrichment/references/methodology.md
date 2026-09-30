@@ -18,7 +18,7 @@ python bulkrna_enrichment.py --input <de_results.csv> --output <dir> --method or
 python bulkrna_enrichment.py --input <de_results.csv> --output <dir> --method gsea
 python bulkrna_enrichment.py --demo --output /tmp/bulkrna_enrichment_demo
 python bulkrna_enrichment.py --input <de.csv> --output <dir> --gene-set-file custom_sets.json
-python omicsclaw.py run bulkrna-enrichment --demo
+python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --demo
 ```
 
 

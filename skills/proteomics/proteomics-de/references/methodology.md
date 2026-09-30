@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run differential-abundance --demo
-python omicsclaw.py run differential-abundance --input <protein_matrix.csv> --output <dir>
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py --demo
+python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py --input <protein_matrix.csv> --output <dir>
 ```
 
 

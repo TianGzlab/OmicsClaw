@@ -26,17 +26,20 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    write_result_json,
-    write_replot_hint,
 )
+from skills._sdk.result import write_result_json
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -157,7 +160,7 @@ def _preflight(adata, *, ko_gene: str, method: str) -> list[str]:
         print("    Option 1 -- Specify a gene that exists in your data:")
         sample_genes = list(adata.var_names[:5])
         print(f"      Available genes (first 5): {sample_genes}")
-        print(f"      python omicsclaw.py run sc-in-silico-perturbation --input data.h5ad --output out/ --ko-gene {sample_genes[0]}")
+        print(f"      python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --input data.h5ad --output out/ --ko-gene {sample_genes[0]}")
         print("    Option 2 -- Check gene name casing (human=UPPER, mouse=Title-case)")
         raise SystemExit(1)
 
@@ -191,7 +194,7 @@ def _preflight(adata, *, ko_gene: str, method: str) -> list[str]:
             print()
             print("  How to fix:")
             print("    Option 1 -- Use the Python method instead (no R required):")
-            print(f"      python omicsclaw.py run sc-in-silico-perturbation --input data.h5ad --output out/ --method grn_ko --ko-gene {ko_gene}")
+            print(f"      python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --input data.h5ad --output out/ --method grn_ko --ko-gene {ko_gene}")
             print("    Option 2 -- Install R and scTenifoldKnk:")
             print("      install.packages('scTenifoldKnk')  # in R console")
             raise SystemExit(1)
@@ -709,7 +712,7 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Next step: Run sc-enrichment to enrich perturbed genes")
-    print(f"  python omicsclaw.py run sc-enrichment --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-enrichment/sc_enrichment.py --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

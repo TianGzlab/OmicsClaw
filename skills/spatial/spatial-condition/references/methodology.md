@@ -78,12 +78,12 @@ If `layers["counts"]` is missing, OmicsClaw falls back to `adata.raw` or
 
 ```bash
 # PyDESeq2 default run
-oc run spatial-condition \
+python skills/spatial/spatial-condition/spatial_condition.py \
   --input <data.h5ad> --output <dir> \
   --condition-key condition --sample-key sample_id
 
 # PyDESeq2 with explicit cluster labels and tuning
-oc run spatial-condition \
+python skills/spatial/spatial-condition/spatial_condition.py \
   --input <data.h5ad> --method pydeseq2 \
   --condition-key condition --sample-key sample_id --cluster-key leiden \
   --reference-condition control \
@@ -94,7 +94,7 @@ oc run spatial-condition \
   --output <dir>
 
 # Wilcoxon fallback mode
-oc run spatial-condition \
+python skills/spatial/spatial-condition/spatial_condition.py \
   --input <data.h5ad> --method wilcoxon \
   --condition-key condition --sample-key sample_id \
   --reference-condition control \
@@ -102,7 +102,7 @@ oc run spatial-condition \
   --output <dir>
 
 # Demo mode
-oc run spatial-condition --demo --output /tmp/cond_demo
+python skills/spatial/spatial-condition/spatial_condition.py --demo --output /tmp/cond_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-condition/spatial_condition.py \

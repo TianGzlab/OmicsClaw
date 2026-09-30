@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-clustering
 description: Load when building the neighbour graph, embedding (UMAP/t-SNE/diffmap/PHATE), and clustering
   (Leiden/Louvain) on a normalised single-cell AnnData. Skip when QC/normalisation/HVG/PCA have not run
   yet (use sc-preprocessing); marker ranking after clustering (use sc-markers).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -17,16 +12,6 @@ tags:
 - umap
 - tsne
 - phate
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- phate
-- scanpy
-- scikit-learn
-- scipy
-- seaborn
 ---
 
 # sc-clustering
@@ -42,8 +27,6 @@ explicit resolution or auto-resolution search.  Designed to read from
 `obsm["X_pca"]` / `obsm["X_harmony"]` / etc. via `--use-rep`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -87,29 +70,29 @@ explicit resolution or auto-resolution search.  Designed to read from
 
 ## Gotchas
 
-- **No embedding source → hard fail.** `sc_cluster.py:336` raises `ValueError("No embedding available for clustering.")` when neither `obsm["X_pca"]` is present nor `--use-rep` is set to a valid `obsm` key.  Run `sc-preprocessing` (or `sc-batch-integration` for a multi-sample dataset) before this skill, or pass `--use-rep X_pca` explicitly when the input has a non-default embedding name.
-- **`--input` is required without `--demo`.** `sc_cluster.py:851` raises `ValueError("--input required when not using --demo")`.  Common when running in a pipeline where the upstream step didn't write a valid path.
-- **`--resolution` is either a single float or the literal `auto`.** `sc_cluster.py:856-857` parses `args.resolution`: if `lower() == "auto"` it triggers the auto-resolution search; otherwise it calls `float(args.resolution)`.  Comma-separated values (`"0.3,0.6,1.0"`) raise `ValueError` from `float()` — there is no built-in multi-value sweep mode beyond `auto`.
+- **No embedding source → hard fail.** `sc_cluster.py` raises `ValueError("No embedding available for clustering.")` when neither `obsm["X_pca"]` is present nor `--use-rep` is set to a valid `obsm` key.  Run `sc-preprocessing` (or `sc-batch-integration` for a multi-sample dataset) before this skill, or pass `--use-rep X_pca` explicitly when the input has a non-default embedding name.
+- **`--input` is required without `--demo`.** `sc_cluster.py` raises `ValueError("--input required when not using --demo")`.  Common when running in a pipeline where the upstream step didn't write a valid path.
+- **`--resolution` is either a single float or the literal `auto`.** `sc_cluster.py` parses `args.resolution`: if `lower() == "auto"` it triggers the auto-resolution search; otherwise it calls `float(args.resolution)`.  Comma-separated values (`"0.3,0.6,1.0"`) raise `ValueError` from `float()` — there is no built-in multi-value sweep mode beyond `auto`.
 - **The skill writes the chosen `--cluster-method` column verbatim into `obs`.** `obs["leiden"]` (or `obs["louvain"]`) overwrites any pre-existing column with that name.  Save the input separately if you need to compare the new clustering against a prior one.
 
 ## Key CLI
 
 ```bash
 # Demo (built-in PBMC3K, Leiden + UMAP)
-python omicsclaw.py run sc-clustering --demo --output /tmp/sc_cluster_demo
+python skills/singlecell/scrna/sc-clustering/sc_cluster.py --demo --output /tmp/sc_cluster_demo
 
 # Default Leiden on integrated embedding
-python omicsclaw.py run sc-clustering \
+python skills/singlecell/scrna/sc-clustering/sc_cluster.py \
   --input integrated.h5ad --output results/ \
   --use-rep X_harmony --resolution 1.0
 
 # Auto-resolution search with t-SNE embedding
-python omicsclaw.py run sc-clustering \
+python skills/singlecell/scrna/sc-clustering/sc_cluster.py \
   --input preprocessed.h5ad --output results/ \
   --embedding-method tsne --resolution auto
 
 # PHATE embedding + Louvain
-python omicsclaw.py run sc-clustering \
+python skills/singlecell/scrna/sc-clustering/sc_cluster.py \
   --input preprocessed.h5ad --output results/ \
   --embedding-method phate --cluster-method louvain --n-neighbors 30
 ```
@@ -120,3 +103,9 @@ python omicsclaw.py run sc-clustering \
 - `references/methodology.md` — embedding choice guide, auto-resolution heuristic
 - `references/output_contract.md` — `obs` / `obsm` keys + table schemas
 - Adjacent skills: `sc-preprocessing` (upstream — normalise/HVG/PCA before this), `sc-batch-integration` (parallel — produces the integrated embedding `--use-rep` reads from), `sc-markers` (downstream — rank cluster markers from `obs["leiden"]`)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `louvain`, `matplotlib`, `numpy`, `pandas`, `phate`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`

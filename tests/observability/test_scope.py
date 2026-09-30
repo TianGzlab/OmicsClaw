@@ -547,8 +547,8 @@ def test_not_one_payload_byte_reaches_a_span_with_capture_off():
     """The security invariant, asserted over *every* attribute rather than
     over the two keys that are known to carry payloads.
 
-    ``CLAUDE.md``'s first safety rule is that genetic data never leaves
-    this machine, and this layer's default posture is what enforces it. A
+    :data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 is that genetic data
+    never leaves this machine, and this layer's default posture is what enforces it. A
     test that named the keys would keep passing the day a third one is
     added; this one reads whatever was actually written.
     """

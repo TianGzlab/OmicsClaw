@@ -15,6 +15,15 @@ claim.
 
 The negative case matters as much: every tool that does **not** claim it must
 not ask, or the claim carries no information.
+
+**One exception to "nothing before the question", and why.**
+``install_skill_deps`` (plan 0061 P2) must know what it would install before
+it can say so on the card, so before asking it runs one local subprocess: an
+inventory of the ``python`` that ``bash`` runs (which modules import, which
+distributions the base holds). It only reads; nothing is downloaded or
+written until the person approves. Here that inventory is injected as a fake
+reporting one missing package, so this probe still reaches no subprocess, and
+the overlay builder is one that fails the test if it is ever reached.
 """
 
 from __future__ import annotations
@@ -26,7 +35,8 @@ from typing import Any, TypeVar
 
 import pytest
 
-from omicsclaw.skills import SkillIndex, use_skill_tool
+from omicsclaw.skillenv.tool import install_skill_deps_tool
+from omicsclaw.skills import SkillIndex, load_skills, use_skill_tool
 from omicsclaw.tools import (
     BashTool,
     EditTool,
@@ -53,6 +63,49 @@ def _run(main: Coroutine[Any, Any, _T]) -> _T:
     return asyncio.run(guarded())
 
 
+class _Inventory:
+    """The pre-approval inventory of ``install_skill_deps``, reporting ``oc_leaf`` missing."""
+
+    location = "local"
+
+    async def run(self, command, *, cwd, timeout, env=None):
+        return 0, json.dumps({
+            "executable": "/base/bin/python", "real_executable": "/base/bin/python3.11", "version": "3.11.15",
+            "prefix": "/base", "base_prefix": "/base", "mtime_ns": 1, "platform": "linux", "machine": "x86_64",
+            "pip_version": "25.3", "missing": ["oc_leaf"], "records": [], "top_level": {},
+        })
+
+
+class _NeverBuilds:
+    """An overlay builder that must not be reached while the person has not said yes."""
+
+    def python(self, key):
+        from pathlib import Path
+
+        return Path("/nonexistent") / key / ".venv" / "bin" / "python"
+
+    def finished(self, key):
+        return False
+
+    async def build(self, *args, **kwargs):
+        raise AssertionError("install_skill_deps started installing before approval")
+
+
+def _install_tool(root) -> Tool:
+    skill = root / "skills" / "demo" / "oc-skill"
+    skill.mkdir(parents=True, exist_ok=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: oc-skill\ndescription: fixture\n---\n\n## Dependencies\n\n`oc-leaf`\n"
+    )
+    return install_skill_deps_tool(
+        load_skills(root / "skills"),
+        registry={},
+        probe_runner=_Inventory(),
+        workspace=str(root),
+        builder=_NeverBuilds(),
+    )
+
+
 def foundation(workspace: Workspace) -> list[tuple[Tool, dict]]:
     """Every foundation tool, with arguments its schema accepts.
 
@@ -77,6 +130,7 @@ def foundation(workspace: Workspace) -> list[tuple[Tool, dict]]:
         (WebFetchTool(), {"url": "https://example.com/doc"}),
         (WebSearchTool(), {"query": "spatial transcriptomics"}),
         (use_skill_tool(SkillIndex()), {"skill_name": "anything"}),
+        (_install_tool(workspace.root), {"skill": "oc-skill", "packages": ["oc-leaf"]}),
     ]
 
 
@@ -118,6 +172,7 @@ def test_the_probe_covers_every_foundation_tool(tmp_path):
         "web_fetch",
         "web_search",
         "use_skill",
+        "install_skill_deps",
     }
 
 
@@ -130,7 +185,7 @@ def test_at_least_one_tool_claims_and_one_does_not(tmp_path):
     ]
 
     assert claims, "nothing claims the exemption, so the claim means nothing"
-    assert len(claims) < 7, "nothing is left to check the negative case with"
+    assert len(claims) < len(foundation(Workspace(tmp_path))), "nothing is left to check the negative case with"
 
 
 def test_every_tool_claiming_to_prompt_really_does(tmp_path):
@@ -194,9 +249,9 @@ def test_no_tool_that_declines_the_claim_asks_anyway(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name", ["bash", "write_file", "edit_file", "web_fetch", "web_search"]
+    "name", ["bash", "write_file", "edit_file", "web_fetch", "web_search", "install_skill_deps"]
 )
-def test_the_five_asking_tools_are_named_as_well_as_covered(name: str, tmp_path):
+def test_the_asking_tools_are_named_as_well_as_covered(name: str, tmp_path):
     """Named so that a tool quietly dropping its claim is visible in a diff."""
     by_name = {tool.name: tool for tool, _ in foundation(Workspace(tmp_path))}
 

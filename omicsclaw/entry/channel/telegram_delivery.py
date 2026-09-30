@@ -4,11 +4,10 @@ The pump owns ordering and retry policy.  This Adapter performs one
 ``send_message`` call and classifies only the outcome of that call; it never
 dispatches conversational work, sleeps, retries, chunks text, or sends media.
 
-Ported for plan 0031 task D1 with the import block as the only change: the
-three names it needs moved from the deleted control plane into
-:mod:`omicsclaw.entry.channel.delivery`, member for member. Line 161 below is
-why plan 0031 §5.3 says this file is ported rather than rebuilt — the
-three-state acceptance the plan set out to design was already here.
+The classification is the whole of the file. A timeout or a network error may
+have crossed the provider's acceptance seam, so it is reported as unknown and
+never as a retryable refusal: only ``RetryAfter``, which carries a number, is
+evidence that the message was refused and may safely be sent again.
 """
 
 from __future__ import annotations
@@ -18,19 +17,26 @@ from functools import lru_cache
 import math
 from typing import Any, Mapping
 
+from . import reply_target
 from .delivery import (
     DeliveryAdapterResult,
     DeliveryAttemptOutcome,
     DeliveryAttemptRequest,
 )
+from .reply_target import InvalidReplyTarget
 
 
 _MAX_MESSAGE_ID_CHARS = 128
 _MAX_RETRY_AFTER_MS = 7 * 24 * 60 * 60 * 1_000
 
 
-class _InvalidTelegramDelivery(ValueError):
-    pass
+class _InvalidTelegramDelivery(InvalidReplyTarget):
+    """A target that is well formed in general but not addressable on Telegram.
+
+    Telegram identifies a chat and a forum thread by integer; a target whose
+    ids cannot be read as integers names no chat, so it is a subclass of the
+    shared error and is handled by the same branch.
+    """
 
 
 @lru_cache(maxsize=1)
@@ -80,21 +86,10 @@ def _telegram_integer(value: object, field_name: str) -> int:
 
 
 def _send_message_arguments(request: DeliveryAttemptRequest) -> dict[str, Any]:
-    target = request.reply_target
-    if not isinstance(target, Mapping):
-        raise _InvalidTelegramDelivery("reply_target must be a mapping")
-    if target.get("kind", "channel") != "channel":
-        raise _InvalidTelegramDelivery("reply_target kind must be channel")
-    if target.get("adapter", "telegram") != "telegram":
-        raise _InvalidTelegramDelivery("reply_target adapter must be telegram")
-    destination_id = target.get("destination_id")
-    if destination_id is None:
-        raise _InvalidTelegramDelivery("reply_target has no destination_id")
-    if not isinstance(request.text, str) or not request.text:
-        raise _InvalidTelegramDelivery("Delivery Item text must be non-empty")
+    target = reply_target.read(request, adapter="telegram")
 
     arguments: dict[str, Any] = {
-        "chat_id": _telegram_integer(destination_id, "destination_id"),
+        "chat_id": _telegram_integer(target["destination_id"], "destination_id"),
         "text": request.text,
     }
     thread_id = target.get("thread_id")
@@ -131,7 +126,7 @@ class TelegramDeliveryAdapter:
     ) -> DeliveryAdapterResult:
         try:
             arguments = _send_message_arguments(request)
-        except _InvalidTelegramDelivery:
+        except InvalidReplyTarget:
             return DeliveryAdapterResult(
                 outcome=DeliveryAttemptOutcome.REJECTED_PERMANENT,
                 error_code="telegram_invalid_delivery",

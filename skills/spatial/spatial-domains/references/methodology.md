@@ -85,42 +85,39 @@ automatically selects the correct data layer for each method:
 
 ```bash
 # Standard usage (Leiden, default)
-oc run spatial-domains --input <preprocessed.h5ad> --output <report_dir>
+python skills/spatial/spatial-domains/spatial_domains.py --input <preprocessed.h5ad> --output <report_dir>
 
 # Specify method and parameters
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method leiden --resolution 0.8 --spatial-weight 0.3 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method louvain --resolution 1.0 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method spagcn --n-domains 7 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method stagate --n-domains 7 --k-nn 6 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method graphst --n-domains 7 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method banksy --lambda-param 0.8 --resolution 1.0 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method cellcharter --n-domains 7 --n-layers 3 --output <dir>
 
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method cellcharter --auto-k --auto-k-min 4 --auto-k-max 12 --output <dir>
 
 # Apply spatial refinement
-oc run spatial-domains \
+python skills/spatial/spatial-domains/spatial_domains.py \
   --input <preprocessed.h5ad> --method leiden --refine --output <dir>
 
 # Demo mode
-oc run spatial-domains --demo --output /tmp/domains_demo
-
-# Note: 'oc run' is an alias for 'python omicsclaw.py run'
-python omicsclaw.py run spatial-domains --demo
+python skills/spatial/spatial-domains/spatial_domains.py --demo --output /tmp/domains_demo
 ```
 
 Every successful runner-mediated standard run also adds a

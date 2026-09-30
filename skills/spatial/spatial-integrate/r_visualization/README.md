@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-integrate ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-integrate/spatial_integrate.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/umap_before_points.csv`

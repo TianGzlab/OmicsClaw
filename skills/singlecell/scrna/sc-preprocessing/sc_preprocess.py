@@ -17,20 +17,26 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
-from omicsclaw.core.dependency_manager import validate_r_environment
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+from skills._sdk.deps import validate_r_environment
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills.singlecell._lib.adata_utils import (
     canonicalize_singlecell_adata,
     infer_qc_species,
@@ -346,7 +352,7 @@ def run_seurat_preprocessing(
     export_adata = _build_export_adata(adata)
     logger.info("Running R-backed %s preprocessing on %d cells x %d genes", workflow, export_adata.n_obs, export_adata.n_vars)
 
-    scripts_dir = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_sc_preprocess_") as tmpdir:
@@ -1159,9 +1165,9 @@ def main():
     print()
     print(">> Next step:")
     print("  - Multiple batches? -> sc-batch-integration")
-    print(f"    python omicsclaw.py run sc-batch-integration --input {output_h5ad} --output <dir>")
+    print(f"    python skills/singlecell/scrna/sc-batch-integration/sc_integrate.py --input {output_h5ad} --output <dir>")
     print("  - Single batch? -> sc-clustering")
-    print(f"    python omicsclaw.py run sc-clustering --input {output_h5ad} --output <dir>")
+    print(f"    python skills/singlecell/scrna/sc-clustering/sc_cluster.py --input {output_h5ad} --output <dir>")
 
 
 if __name__ == "__main__":

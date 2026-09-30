@@ -38,11 +38,8 @@ the process half of it is in the command test.
 ``test_a_model_the_vendor_retired_is_replaced``.
 
 ``test_run_onboard_switches_wechat_backend_and_clears_conflicting_env``
-is **not ported**, and deliberately: WeChat has no
-launch configuration in the rebuilt stack (``_CHANNEL_BUILDERS`` has two
-entries) and ``.env.example`` lists its variables under "no longer read".
-A test for a section the wizard must not have would be asserting the
-opposite of the scope ruling.
+is **not ported**, and deliberately: the rebuilt stack has no WeChat
+channel, so the wizard has no WeChat section to test.
 """
 
 from __future__ import annotations
@@ -51,6 +48,8 @@ import io
 import pathlib
 
 import pytest
+
+from omicsclaw.provider import PRESETS
 
 from omicsclaw.entry.cli import missing_credential_hint, run_configuration_wizard
 from omicsclaw.entry.cli._configure import (
@@ -363,7 +362,7 @@ def test_a_stored_secret_is_shown_as_four_characters_at_most(secret, shown):
 
 
 def test_no_secret_is_echoed_anywhere_the_wizard_prints(tmp_path):
-    """``CLAUDE.md`` safety rule 1, asserted over the whole transcript.
+    """``SAFETY_RULES`` rule 1, asserted over the whole transcript.
 
     Both halves: the key typed in this run, and the one already stored in
     the file —— the second is the one a "show the current value" default
@@ -475,6 +474,137 @@ def test_changing_the_backend_does_not_carry_the_old_endpoint_over(tmp_path):
     assert read_dotenv(path)["LLM_BASE_URL"] == ""
 
 
+def _next_start(env: dict[str, str]):
+    """Provider settings the next start resolves from *env*: ``AppConfig``
+    names the provider and model, ``resolve_config`` fills in the rest."""
+    from omicsclaw.entry.config import resolve_app_config
+    from omicsclaw.provider import resolve_config
+
+    config = resolve_app_config([], env)
+    return resolve_config(config.provider, config.model, env=env)
+
+
+@pytest.mark.parametrize(
+    "initial",
+    [
+        "LLM_PROVIDER=openai\n",
+        "OMICSCLAW_PROVIDER=openai\n",
+        "OMICSCLAW_PROVIDER=openai\nLLM_PROVIDER=openai\n",
+    ],
+    ids=["llm-only", "omicsclaw-only", "both"],
+)
+def test_a_new_backend_is_the_one_the_next_start_runs(tmp_path, initial):
+    """Every provider spelling the file has is rewritten, so neither
+    ``AppConfig`` (``OMICSCLAW_PROVIDER`` first) nor ``resolve_config``
+    (``LLM_PROVIDER`` first) is left reading the old vendor. The generic
+    key applies only when ``resolve_config`` agrees on the provider, so
+    the key checks that agreement."""
+    path = tmp_path / ".env"
+    path.write_text(initial + "LLM_MODEL=gpt-5.5\n", encoding="utf-8")
+    ask, _ = _drive(["deepseek", "sk-k", "", "", "/tmp/ws", "n", "n", "n", "y"])
+
+    run_configuration_wizard(path, prompter=ask, sink=io.StringIO())
+    saved = read_dotenv(path)
+
+    for name in ("OMICSCLAW_PROVIDER", "LLM_PROVIDER"):
+        if name in initial:
+            assert saved[name] == "deepseek", name
+    resolved = _next_start(saved)
+    assert resolved.provider == "deepseek"
+    assert resolved.model == PRESETS["deepseek"].default_model
+    assert resolved.base_url == PRESETS["deepseek"].base_url
+    assert resolved.api_key == "sk-k"
+
+
+def test_the_backend_offered_first_is_the_one_the_file_names(tmp_path):
+    """The picker's default follows ``AppConfig``'s order, so pressing
+    Enter keeps a backend named only by ``OMICSCLAW_PROVIDER`` and its
+    model, rather than the one another vendor's key would suggest."""
+    path = tmp_path / ".env"
+    path.write_text(
+        "OMICSCLAW_PROVIDER=zhipu\nDEEPSEEK_API_KEY=sk-deepseek-old\nLLM_MODEL=glm-x\n",
+        encoding="utf-8",
+    )
+    ask, _ = _drive(["", "", "", "", "/tmp/ws", "n", "n", "n", "y"])
+
+    run_configuration_wizard(path, prompter=ask, sink=io.StringIO())
+    saved = read_dotenv(path)
+
+    assert saved["OMICSCLAW_PROVIDER"] == "zhipu"
+    assert "LLM_PROVIDER" not in saved
+    assert saved["LLM_MODEL"] == "glm-x"
+
+
+def test_a_stale_endpoint_under_a_lower_spelling_is_cleared_too(tmp_path):
+    """``LLM_BASE_URL`` beats ``OMICSCLAW_BASE_URL`` only when it is
+    non-empty, so clearing the higher one alone would let the old
+    vendor's endpoint through the lower one."""
+    path = tmp_path / ".env"
+    path.write_text(
+        "LLM_PROVIDER=openai\nLLM_BASE_URL=https://old.example/v1\n"
+        "OMICSCLAW_BASE_URL=https://old.example/v1\n",
+        encoding="utf-8",
+    )
+    ask, _ = _drive(["deepseek", "sk-k", "", "", "/tmp/ws", "n", "n", "n", "y"])
+
+    run_configuration_wizard(path, prompter=ask, sink=io.StringIO())
+    saved = read_dotenv(path)
+
+    assert saved["LLM_BASE_URL"] == saved["OMICSCLAW_BASE_URL"] == ""
+    assert _next_start(saved).base_url == PRESETS["deepseek"].base_url
+
+
+def test_the_spelling_that_takes_effect_is_the_one_offered(tmp_path):
+    """Readers skip an empty variable, so the offer on an unchanged backend
+    is the first non-empty spelling, and Enter keeps it in effect."""
+    path = tmp_path / ".env"
+    path.write_text(
+        "LLM_PROVIDER=deepseek\nDEEPSEEK_API_KEY=sk-kept-000\n"
+        "DEEPSEEK_BASE_URL=\nLLM_BASE_URL=https://proxy.example/v1\n"
+        "OMICSCLAW_MODEL=\nLLM_MODEL=my-model\n",
+        encoding="utf-8",
+    )
+    ask, _ = _drive(["deepseek", "", "", "", "/tmp/ws", "n", "n", "n", "y"])
+
+    run_configuration_wizard(path, prompter=ask, sink=io.StringIO())
+    saved = read_dotenv(path)
+
+    assert saved["DEEPSEEK_BASE_URL"] == saved["LLM_BASE_URL"] == "https://proxy.example/v1"
+    assert saved["OMICSCLAW_MODEL"] == saved["LLM_MODEL"] == "my-model"
+    resolved = _next_start(saved)
+    assert (resolved.base_url, resolved.model) == ("https://proxy.example/v1", "my-model")
+
+
+def test_an_empty_model_does_not_let_a_lower_spelling_through(tmp_path):
+    """``custom`` has no default model; an empty answer is written to every
+    spelling, so the old vendor's model under ``LLM_MODEL`` is not used."""
+    path = tmp_path / ".env"
+    path.write_text(
+        "LLM_PROVIDER=openai\nOMICSCLAW_MODEL=gpt-new\nLLM_MODEL=gpt-old\n",
+        encoding="utf-8",
+    )
+    ask, _ = _drive(
+        ["custom", "sk-k", "", "http://h/v1", "/tmp/ws", "n", "n", "n", "y"]
+    )
+
+    run_configuration_wizard(path, prompter=ask, sink=io.StringIO())
+    saved = read_dotenv(path)
+
+    assert saved["OMICSCLAW_MODEL"] == saved["LLM_MODEL"] == ""
+    assert _next_start(saved).model not in {"gpt-new", "gpt-old"}
+
+
+def test_the_report_names_the_backend_the_next_start_runs(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("OMICSCLAW_PROVIDER=openai\n", encoding="utf-8")
+    ask, _ = _drive(["zhipu", "sk-k", "", "", "/tmp/ws", "n", "n", "n", "y"])
+    sink = io.StringIO()
+
+    run_configuration_wizard(path, prompter=ask, sink=sink)
+
+    assert "provider  zhipu" in sink.getvalue()
+
+
 # ---- the prompter -----------------------------------------------------
 
 
@@ -531,7 +661,7 @@ def test_the_end_of_input_is_reported_as_eof():
 def test_a_deployment_with_no_key_is_told_the_whole_command():
     hint = missing_credential_hint({})
 
-    assert "oc cli -- --configure" in hint
+    assert "oc cli --configure" in hint
 
 
 def test_a_configured_deployment_is_told_nothing():
@@ -543,3 +673,87 @@ def test_a_backend_that_needs_no_key_is_not_nagged():
     """An Ollama deployment will never have a key; a hint it cannot act on
     is how people learn to stop reading hints."""
     assert missing_credential_hint({"LLM_PROVIDER": "ollama"}) == ""
+
+
+# ---- write_dotenv never destroys what it cannot read (plan 0050 §3.3) --
+
+
+def test_an_unreadable_file_is_not_replaced(tmp_path, monkeypatch):
+    """The old ``except OSError: original = ""`` made "cannot read your
+    credentials" mean "replace them with one line": a rename needs only the
+    directory to be writable. Simulated, because this suite runs as root
+    and a mode of 000 would not stop it."""
+    path = tmp_path / ".env"
+    path.write_text("LLM_API_KEY=sk-keep-me\n", encoding="utf-8")
+    real = pathlib.Path.read_text
+
+    def refuse(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError("denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", refuse)
+
+    with pytest.raises(PermissionError):
+        write_dotenv(path, {"OMICSCLAW_CLI_PERMISSION_MODE": "auto-approve"})
+
+    monkeypatch.undo()
+    assert path.read_text(encoding="utf-8") == "LLM_API_KEY=sk-keep-me\n"
+
+
+def test_a_file_that_is_not_utf8_is_not_replaced(tmp_path):
+    path = tmp_path / ".env"
+    path.write_bytes(b"LLM_API_KEY=\xff\xfe\n")
+
+    with pytest.raises(UnicodeDecodeError):
+        write_dotenv(path, {"A": "b"})
+
+    assert path.read_bytes() == b"LLM_API_KEY=\xff\xfe\n"
+
+
+def test_a_symlink_is_followed_and_kept(tmp_path):
+    real = tmp_path / "shared.env"
+    real.write_text("LLM_API_KEY=sk-x\n", encoding="utf-8")
+    link = tmp_path / ".env"
+    link.symlink_to(real)
+
+    write_dotenv(link, {"A": "b"}, backup=False)
+
+    assert link.is_symlink()
+    assert "A=b" in real.read_text(encoding="utf-8")
+
+
+def test_a_new_file_is_private_and_a_failed_save_leaves_nothing(tmp_path, monkeypatch):
+    path = tmp_path / ".env"
+    write_dotenv(path, {"A": "b"})
+    assert path.stat().st_mode & 0o777 == 0o600
+
+    def fail(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "replace", fail)
+    with pytest.raises(OSError):
+        write_dotenv(path, {"A": "c"}, backup=False)
+
+    assert not list(tmp_path.glob("*.partial"))
+    monkeypatch.undo()
+    assert "A=b" in path.read_text(encoding="utf-8")
+
+
+def test_backup_false_writes_no_backup(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("A=1\n", encoding="utf-8")
+
+    assert write_dotenv(path, {"A": "2"}, backup=False) is None
+    assert not list(tmp_path.glob(".env.backup-*"))
+
+
+def test_a_backup_is_as_private_as_the_file_it_copies(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("LLM_API_KEY=sk-x\n", encoding="utf-8")
+    path.chmod(0o600)
+
+    backup = write_dotenv(path, {"A": "b"})
+
+    assert backup is not None
+    assert backup.stat().st_mode & 0o777 == 0o600

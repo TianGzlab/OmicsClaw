@@ -148,10 +148,12 @@ it, while :class:`str` makes the whole class of defect unspellable. See
 **Trap 5 — cancellation passes through.** No ``except Exception`` and no
 ``except BaseException`` anywhere below. The engine's per-tool deadline
 arrives as :exc:`asyncio.CancelledError`, and reported to the model as a
-tool failure it would send the model to fix a command that was fine. The
-one place it is *named* is where a running subprocess would otherwise be
-orphaned by the abandoned turn: the process is killed and the exception is
-re-raised untouched, which is passing it through rather than handling it.
+tool failure it would send the model to fix a command that was fine. It
+is *named* only where a subprocess would otherwise be orphaned by the
+abandoned turn, while the shell runs and while it is still being started:
+the command's process group is killed, the shell is reaped, and the
+exception is re-raised untouched, which is passing it through rather than
+handling it.
 
 **Q11 — the injection seam, and it is live.** ``environment=None`` means
 this machine. Anything else has :meth:`BashEnvironment.run_bash` awaited
@@ -179,11 +181,13 @@ it means reading bounded windows from each end of the file, which forces
 the elision count into bytes while everything else here counts characters
 — a reconciliation worth designing once, not improvising here.
 
-*Killing on timeout kills the direct child, not the process group.*
-``bash -c 'sleep 30; echo'`` leaves ``sleep`` orphaned, exactly as
-``exec.CommandContext`` does. It is the same choice and the same trade:
-the alternative, a process-group kill, would also reap the backgrounded
-processes that Q5 goes to such trouble to keep alive.
+*A process can leave the group it is killed through.* The shell runs in a
+session of its own, and a deadline or a cancellation kills that whole
+process group, so a pipeline, a backgrounded job or a script the shell is
+waiting on goes with it. A process that moves itself out of the group,
+with ``setsid`` or as a job started after ``set -m``, is not reached. A
+command that finishes in time is not killed at all, so what it
+backgrounded keeps running.
 
 **Leaf-adjacent.** ``omicsclaw.schema``, ``omicsclaw.tools._workspace``,
 ``omicsclaw.tools.base``, ``omicsclaw.tools.context``,
@@ -196,7 +200,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import os
+import signal
 import tempfile
+from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -209,16 +215,32 @@ from ..context import report_progress, require_approval
 from ..function_tool import ToolArgumentError, decode_arguments, validate_arguments
 from .read import resolve_workspace
 
-TOOL_NAME = "bash"
-"""The reference's name, and this time there is no legacy collision.
+CONTROL_CREDENTIAL_NAMES: frozenset[str] = frozenset({"OMICSCLAW_REMOTE_AUTH_TOKEN"})
+"""Framework control-plane credentials no child process started here may inherit.
 
-``builtin/read.py`` and ``builtin/write.py`` had to explain why they are
-not called ``file_read``/``file_write``; nothing in
-``runtime/tools/builders/engineering.py`` is called ``bash``, because that
-layer has no shell tool at all. Plan 0029 §6 records the consequence for
-whoever migrates: ``glob_files`` and ``grep_files`` exist there and have
-no counterpart here, and whether this tool replaces them is an open
-question rather than an omission.
+Stored upper-case; :func:`without_control_credentials` compares names
+case-insensitively.
+"""
+
+
+def without_control_credentials(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """A copy of *source* without the names in :data:`CONTROL_CREDENTIAL_NAMES`.
+
+    :param source: The environment to copy; defaults to ``os.environ`` as it is now.
+    :returns: A new dict; names are matched case-insensitively.
+    """
+    source = os.environ if source is None else source
+    return {
+        name: value for name, value in source.items()
+        if name.upper() not in CONTROL_CREDENTIAL_NAMES
+    }
+
+
+TOOL_NAME = "bash"
+"""Name the model calls this tool by.
+
+File search has no dedicated tool: globbing and content search go through
+this one (``find``, ``grep``, ``rg``).
 """
 
 MAX_OUTPUT_CHARS = 16_000
@@ -405,7 +427,7 @@ class BashEnvironment(Protocol):
         ...
 
 
-def _description(limit: float) -> str:
+def _description(limit: float, *, local: bool) -> str:
     """What the model is told, with the real numbers in it.
 
     Built per instance rather than fixed, because every number in it is a
@@ -413,23 +435,36 @@ def _description(limit: float) -> str:
     ``timeout`` and left the sentence at 45 would be lying to the model in
     a way nothing else would catch. ``bash.go:101`` formats its own limits
     into the schema for the same reason.
+
+    :param limit: Seconds a command may run.
+    :param local: Whether commands run on this machine, where a kill takes
+        the command's whole process group, rather than in an injected
+        :class:`BashEnvironment`, which may kill less.
     """
+    if local:
+        killed = "and everything they started is killed with them"
+    else:
+        killed = "but what they started may keep running"
     return (
         "Run a bash command in the session workspace and read back stdout "
         "and stderr, merged, in the order they were written. The "
-        "workspace root is the working directory. A NON-ZERO EXIT STATUS "
+        "workspace root is the working directory, and each call starts a "
+        "new shell there: a cd, an export or an activated environment does "
+        "not carry over to the next call. A NON-ZERO EXIT STATUS "
         "is reported to you as the command's own result, not as a failure "
         "of this tool: read it and fix what the command was complaining "
-        f"about. Commands are killed after {limit:g} seconds. Output "
-        f"longer than {MAX_OUTPUT_CHARS} characters is cut in the middle, "
+        f"about. Commands are killed after {limit:g} seconds, {killed}. "
+        f"Output longer than {MAX_OUTPUT_CHARS} characters is cut in the middle, "
         "keeping the start and a larger share of the END, so a summary "
         "printed last is never what gets lost. Anything you put in the "
-        "background with & keeps running, but this tool's capture of its "
-        "output is deleted the moment this call returns, so redirect it "
-        "yourself: 'nohup cmd > out.log 2>&1 &'. There is no stdin: an "
+        "background with & in a command that finishes in time keeps "
+        "running, but this tool's capture of its output is deleted the "
+        "moment this call returns, so redirect it yourself: "
+        "'nohup cmd > out.log 2>&1 &'. There is no stdin: an "
         "interactive command sees end-of-file immediately, so pass input "
-        "with flags, a heredoc or a file. This tool asks the user for "
-        "approval before running anything."
+        "with flags, a heredoc or a file. Depending on the session's "
+        "permission settings, the user may be asked to approve a command "
+        "before it runs; a declined command returns an error and nothing runs."
     )
 
 
@@ -571,7 +606,7 @@ class BashTool:
         )
         self._definition = ToolDefinition(
             name=TOOL_NAME,
-            description=_description(self.timeout),
+            description=_description(self.timeout, local=environment is None),
             input_schema=schema,
         )
 
@@ -625,6 +660,7 @@ class BashTool:
             arguments,
             policy=self.policy,
             reason=self._reason(command, timeout, cwd),
+            reason_shows_call=True,
         )
         await report_progress(
             f"running in {cwd}: {_one_line(command)}",
@@ -788,6 +824,14 @@ async def _locally(
     user's terminal**, so an inherited fd is a subprocess competing with
     the human for their own keystrokes.
 
+    A command that ends by itself leaves whatever it backgrounded running.
+    Every other exit kills the shell's whole process group (see
+    :func:`_start`): the deadline and a cancellation through :func:`_kill`,
+    which also reaps the shell, and any other exception through the
+    ``finally``. A cancellation that arrives while the shell is still being
+    started is handled by :func:`spawn_group_leader` in the same way. A
+    cancellation is re-raised unchanged once the group has been killed.
+
     The temporary file is removed on every exit path, cancellation
     included, which is also what makes the note in :func:`_description`
     true: a backgrounded process still holding the fd is writing to an
@@ -796,7 +840,7 @@ async def _locally(
     handle, capture = tempfile.mkstemp(prefix="omicsclaw-bash-", suffix=".log")
     try:
         with os.fdopen(handle, "wb") as sink:
-            process = await _start(command, cwd, sink)
+            process = await spawn_group_leader(_start(command, cwd, sink))
             timed_out = False
             try:
                 async with asyncio.timeout(timeout):
@@ -805,11 +849,13 @@ async def _locally(
                 timed_out = True
                 code = await _kill(process)
             except asyncio.CancelledError:
-                # Named, not handled: the turn was abandoned and the child
-                # would outlive it. Killed, then the exception continues on
-                # its way untouched (plan 0029 trap 5).
-                _signal(process)
+                # Named, not handled: the group is killed and the shell
+                # reaped, then the exception continues on its way untouched.
+                await _kill(process)
                 raise
+            finally:
+                if process.returncode is None:
+                    _signal(process)
         output = _read_back(capture)
     finally:
         os.unlink(capture)
@@ -828,6 +874,11 @@ async def _start(command: str, cwd: Path, sink: Any) -> asyncio.subprocess.Proce
     ``dash``, which has no ``[[ ]]``, no arrays and no ``pipefail``, and a
     tool named ``bash`` whose description promises bash has to be bash.
 
+    The shell starts in a new session, which has no controlling terminal.
+    It leads a process group of its own, whose id is its pid and which
+    every process it starts inherits, so :func:`_signal` reaches all of
+    them at once.
+
     The two ways this fails are both deployment faults rather than
     anything the model chose, so neither is dressed up as a correctable
     argument: no ``bash`` on ``PATH``, or a workspace root that is not
@@ -839,9 +890,11 @@ async def _start(command: str, cwd: Path, sink: Any) -> asyncio.subprocess.Proce
             "-c",
             command,
             cwd=str(cwd),
+            env=without_control_credentials(),
             stdout=sink,
             stderr=sink,
             stdin=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
         )
     except OSError as exc:
         raise RuntimeError(
@@ -850,29 +903,109 @@ async def _start(command: str, cwd: Path, sink: Any) -> asyncio.subprocess.Proce
         ) from exc
 
 
-def _signal(process: asyncio.subprocess.Process) -> None:
-    """SIGKILL the child, tolerating one that has already gone.
+_REAP_GRACE = 2.0
+"""Seconds :func:`_kill` waits for a killed shell to exit, and
+:func:`spawn_group_leader` for a spawn to finish."""
 
-    :meth:`~asyncio.subprocess.Process.kill` raises
-    :exc:`ProcessLookupError` on a process that exited between the
-    deadline firing and this call, which is a race with no consequence:
-    the thing being asked for has happened.
+
+def _signal(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL the command's whole process group.
+
+    The group's id is the shell's pid, because :func:`_start` gives the
+    shell a session of its own. It stays addressable after the shell has
+    exited, for as long as anything the shell started is still in it.
+
+    Never raises for the two answers that leave nothing more to do:
+    :exc:`ProcessLookupError` when the group has no members left, and
+    :exc:`PermissionError` when none of its members may be signalled by
+    this process, such as a setuid program the shell exec-ed into.
     """
     try:
-        process.kill()
-    except ProcessLookupError:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
         pass
 
 
 async def _kill(process: asyncio.subprocess.Process) -> int:
-    """Stop a process that ran past its deadline, and reap it.
+    """SIGKILL the command's process group and reap the shell.
 
-    Reaping matters as much as killing. Without the second ``wait`` the
-    child is a zombie for as long as the event loop lives, and a long
-    session would accumulate one per timed-out command.
+    Waits at most :data:`_REAP_GRACE` seconds for the shell to exit. A
+    shell still running by then, one the signal could not reach, is left
+    to asyncio's child watcher.
+
+    :returns: the shell's return code as :mod:`asyncio.subprocess` reports
+        it, or ``-SIGKILL`` when it had not exited within the grace period.
+    :raises asyncio.CancelledError: when the wait is cancelled; the group
+        has already been signalled by then.
     """
     _signal(process)
-    return await process.wait()
+    try:
+        return await asyncio.wait_for(process.wait(), _REAP_GRACE)
+    except TimeoutError:
+        return -signal.SIGKILL
+
+
+_ABANDONED_SPAWNS: set[asyncio.Future[Any]] = set()
+"""Spawns whose caller was cancelled, held until they finish."""
+
+
+async def spawn_group_leader(
+    spawn: Coroutine[Any, Any, asyncio.subprocess.Process],
+) -> asyncio.subprocess.Process:
+    """Await *spawn*; if the caller is cancelled first, kill what it starts.
+
+    *spawn* runs as a Task of its own, so cancelling the caller does not
+    interrupt it. When the caller is cancelled before *spawn* has
+    finished, the started process's whole group is SIGKILLed as soon as
+    *spawn* returns it. This waits up to :data:`_REAP_GRACE` seconds for
+    that, then up to as long again for the process to exit, and re-raises
+    the cancellation. A spawn still running after the first wait is killed
+    when it finishes. A spawn that fails after the caller was cancelled
+    has started nothing, and its exception is discarded.
+
+    A spawn that is itself cancelled, as when its loop shuts down, is
+    cleaned up by asyncio, which kills the process it started and nothing
+    else.
+
+    :param spawn: A coroutine that starts a process leading a process group
+        of its own and returns it, such as
+        :func:`asyncio.create_subprocess_exec` with
+        ``start_new_session=True``.
+    :returns: The started process.
+    :raises asyncio.CancelledError: When the awaiting Task is cancelled.
+    :raises Exception: Whatever *spawn* raises, when the caller was not
+        cancelled.
+    """
+    starting = asyncio.ensure_future(spawn)
+    try:
+        return await asyncio.shield(starting)
+    except asyncio.CancelledError:
+        _ABANDONED_SPAWNS.add(starting)
+        starting.add_done_callback(_kill_when_started)
+        await asyncio.wait({starting}, timeout=_REAP_GRACE)
+        process = _started(starting)
+        if process is not None:
+            await _kill(process)
+        raise
+
+
+def _started(
+    starting: asyncio.Future[asyncio.subprocess.Process],
+) -> asyncio.subprocess.Process | None:
+    """The process *starting* produced, or ``None`` if it has not produced one."""
+    if not starting.done() or starting.cancelled():
+        return None
+    if starting.exception() is not None:
+        return None
+    return starting.result()
+
+
+def _kill_when_started(starting: asyncio.Future[asyncio.subprocess.Process]) -> None:
+    """Done callback: :func:`_signal` the process *starting* produced, if any."""
+    _ABANDONED_SPAWNS.discard(starting)
+    process = _started(starting)
+    if process is not None:
+        _signal(process)
 
 
 def _read_back(capture: str) -> str:
@@ -996,6 +1129,7 @@ __all__ = [
     "BASH_SCHEMA",
     "BashEnvironment",
     "BashTool",
+    "CONTROL_CREDENTIAL_NAMES",
     "CommandOutcome",
     "DEFAULT_TIMEOUT",
     "ENGINE_TIMEOUT_MARGIN",
@@ -1003,4 +1137,6 @@ __all__ = [
     "MAX_OUTPUT_CHARS",
     "TAIL_CHARS",
     "TOOL_NAME",
+    "spawn_group_leader",
+    "without_control_credentials",
 ]

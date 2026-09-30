@@ -37,14 +37,14 @@ import logging
 
 import numpy as np
 
-from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+from skills._sdk.runtime_env import ensure_runtime_cache_dirs
 
 ensure_runtime_cache_dirs()
 
 import scanpy as sc
 
 from .adata_utils import ensure_neighbors, ensure_pca
-from .dependency_manager import require
+from skills._sdk.deps import require
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +360,7 @@ def run_integration(
     if "X_pca" not in adata.obsm:
         raise ValueError(
             "X_pca not found. Run spatial-preprocess before integration:\n"
-            "  oc run spatial-preprocess --input data.h5ad --output results/"
+            "  python skills/spatial/spatial-preprocess/spatial_preprocess.py --input data.h5ad --output results/"
         )
     if "X_umap" not in adata.obsm:
         ensure_neighbors(adata)

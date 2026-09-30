@@ -22,8 +22,10 @@ def test_the_defaults_are_recalibrated_for_omics_rather_than_ported():
     assert config.network == NETWORK_NONE
     assert config.isolates_network
     assert config.memory == "" and config.cpus == "" and config.gpus == ""
-    assert config.pids_limit == 4096
-    assert config.tmpfs_size == "1g"
+    assert config.pids_limit == 65536
+    assert config.tmpfs_size == "64g"
+    assert config.shm_size == "128g"
+    assert config.nofile == 65536
     assert config.runtime == "docker"
     assert config.bootstrap == ""
     assert config.bootstrap_timeout_s == 600.0

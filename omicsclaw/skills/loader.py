@@ -168,6 +168,6 @@ def _load_one(
         description=description,
         path=path,
         root=root,
-        trigger=header.text("trigger").strip(),
+        trigger=", ".join(item.strip() for item in header.items("trigger")),
         tags=header.items("tags"),
     )

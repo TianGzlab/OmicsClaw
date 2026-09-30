@@ -25,14 +25,19 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
@@ -126,13 +131,13 @@ CADRRES_DOWNLOAD_INSTRUCTIONS = """\
       GDSC_exp.tsv.gz
 
   Then run:
-    python omicsclaw.py run sc-drug-response \\
+    python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \\
       --input <preprocessed.h5ad> --output <dir> \\
       --method cadrres --model-dir ~/.cache/omicsclaw/drug_response/ \\
       --drug-db gdsc
 
   Alternative (no model needed):
-    python omicsclaw.py run sc-drug-response \\
+    python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \\
       --input <preprocessed.h5ad> --output <dir> \\
       --method simple_correlation
 """
@@ -183,7 +188,7 @@ def preflight_data(adata: anndata.AnnData, cluster_key: str) -> None:
         if looks_ensembl:
             msg += (
                 "  Your data uses Ensembl IDs. Convert first:\n"
-                "    python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --output mapped/ --from ensembl --to symbol\n"
+                "    python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --input data.h5ad --output mapped/ --from ensembl --to symbol\n"
             )
         else:
             msg += (
@@ -632,7 +637,7 @@ def write_report(
             "",
             "### Alternative: Use CaDRReS for model-based prediction",
             "  ```bash",
-            "  python omicsclaw.py run sc-drug-response \\",
+            "  python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \\",
             "    --input data.h5ad --output results/ \\",
             "    --method cadrres --model-dir ~/.cache/omicsclaw/drug_response/",
             "  ```",
@@ -775,9 +780,9 @@ def main() -> None:
         print()
         print("  How to fix:")
         print("    Option 1 - Check gene names (Ensembl vs symbols):")
-        print("      python omicsclaw.py run bulkrna-geneid-mapping --input data.h5ad --output mapped/")
+        print("      python skills/bulkrna/bulkrna-geneid-mapping/bulkrna_geneid_mapping.py --input data.h5ad --output mapped/")
         print("    Option 2 - Use CaDRReS model-based prediction:")
-        print(f"      python omicsclaw.py run sc-drug-response --input <data.h5ad> --output <dir> \\")
+        print(f"      python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py --input <data.h5ad> --output <dir> \\")
         print(f"        --method cadrres --model-dir ~/.cache/omicsclaw/drug_response/")
         print("    Option 3 - Provide custom drug-target gene mapping (future feature)")
         print()

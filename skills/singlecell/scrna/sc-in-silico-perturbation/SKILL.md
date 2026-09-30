@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-in-silico-perturbation
 description: Load when predicting in-silico gene knockout effects on a normalised scRNA AnnData via GRN-based
   propagation (Python) or scTenifoldKnk (R). Skip when you have a real Perturb-seq / CRISPR screen (use
   sc-perturb); predicting drug sensitivity (use sc-drug-response).
-version: 0.2.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -15,14 +10,6 @@ tags:
 - knockout
 - grn
 - sctenifoldknk
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- statsmodels
 ---
 
 # sc-in-silico-perturbation
@@ -44,8 +31,6 @@ classification) and upstream `sc-perturb-prep`. For drug-target /
 sensitivity prediction use `sc-drug-response`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -81,30 +66,30 @@ sensitivity prediction use `sc-drug-response`.
 
 ## Gotchas
 
-- **All preflight failures `raise SystemExit(1)`, not `ValueError`.** `sc_in_silico_perturbation.py:162` raises `SystemExit(1)` when `--ko-gene` is not in `var_names` (after printing a multi-option fix message including the first 5 sample genes); `:197` raises `SystemExit(1)` when `sctenifoldknk` is selected but `Rscript` isn't on PATH; `:545` raises `SystemExit("Provide --input or use --demo")` when neither is given. Wrappers expecting `ValueError` need to catch `SystemExit`.
-- **`grn_ko` is forgiving on data quality — only warnings.** When `layers["counts"]` is absent / `n_obs < 50` / `n_vars < 20`, the script logs warnings and continues (`sc_in_silico_perturbation.py:166-186`). The GRN built from `.X` (instead of raw counts) is still scored, but the result is a "best-effort" — check `result.json["preflight_warnings"]` before quoting it.
-- **`--ko-gene` default is `G10`.** `sc_in_silico_perturbation.py:93` defaults to a synthetic gene name. On real data without specifying `--ko-gene`, the preflight at `:162` will reject the run unless the data happens to contain `G10`.
-- **Degenerate output is a soft fail.** When the GRN finds no significantly regulated genes, `sc_in_silico_perturbation.py:389-390` records `diagnostics["n_significant"] = 0` and the report's degenerate-block fix-suggestion list starts at `sc_in_silico_perturbation.py:499` — but the script returns 0. Always check `result.json["n_significant"]` before consuming the regulated-gene table.
+- **All preflight failures `raise SystemExit(1)`, not `ValueError`.** `sc_in_silico_perturbation.py` raises `SystemExit(1)` when `--ko-gene` is not in `var_names` (after printing a multi-option fix message including the first 5 sample genes); raises `SystemExit(1)` when `sctenifoldknk` is selected but `Rscript` isn't on PATH; raises `SystemExit("Provide --input or use --demo")` when neither is given. Wrappers expecting `ValueError` need to catch `SystemExit`.
+- **`grn_ko` is forgiving on data quality — only warnings.** When `layers["counts"]` is absent / `n_obs < 50` / `n_vars < 20`, the script logs warnings and continues (`sc_in_silico_perturbation.py`). The GRN built from `.X` (instead of raw counts) is still scored, but the result is a "best-effort" — check `result.json["preflight_warnings"]` before quoting it.
+- **`--ko-gene` default is `G10`.** `sc_in_silico_perturbation.py` defaults to a synthetic gene name. On real data without specifying `--ko-gene`, the preflight will reject the run unless the data happens to contain `G10`.
+- **Degenerate output is a soft fail.** When the GRN finds no significantly regulated genes, `sc_in_silico_perturbation.py` records `diagnostics["n_significant"] = 0` and the report's degenerate-block fix-suggestion list is written by `_write_report` — but the script returns 0. Always check `result.json["n_significant"]` before consuming the regulated-gene table.
 - **`sctenifoldknk` does its own validation.** Once `Rscript` is found, the R-side script runs and may fail with R-specific errors not captured by the Python preflight. Check the stderr of the run and `tables/tenifold_diff_regulation.csv` existence after.
-- **`--input` mandatory unless `--demo`.** `sc_in_silico_perturbation.py:545` raises `SystemExit("Provide --input or use --demo")`.
+- **`--input` mandatory unless `--demo`.** `sc_in_silico_perturbation.py` raises `SystemExit("Provide --input or use --demo")`.
 
 ## Key CLI
 
 ```bash
 # Demo (synthetic GRN with G10 as KO target)
-python omicsclaw.py run sc-in-silico-perturbation --demo --output /tmp/sc_iko_demo
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --demo --output /tmp/sc_iko_demo
 
 # Default GRN-based KO on real data (must specify --ko-gene)
-python omicsclaw.py run sc-in-silico-perturbation \
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
   --input clustered.h5ad --output results/ --ko-gene EGFR
 
 # Tighter GRN (more stringent correlation threshold)
-python omicsclaw.py run sc-in-silico-perturbation \
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
   --input clustered.h5ad --output results/ \
   --ko-gene EGFR --corr-threshold 0.1 --n-top-genes 3000
 
 # scTenifoldKnk (R-backed)
-python omicsclaw.py run sc-in-silico-perturbation \
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
   --input clustered.h5ad --output results/ \
   --method sctenifoldknk --ko-gene EGFR --n-cores 4
 ```
@@ -115,3 +100,9 @@ python omicsclaw.py run sc-in-silico-perturbation \
 - `references/methodology.md` — `grn_ko` correlation-GRN math vs scTenifoldKnk manifold alignment
 - `references/output_contract.md` — `tables/diff_regulation.csv` column schema
 - Adjacent skills: `sc-perturb` / `sc-perturb-prep` (parallel — REAL Perturb-seq data, NOT in-silico), `sc-drug-response` (parallel — drug-target sensitivity prediction, NOT genetic KO), `sc-grn` (parallel — explicit GRN construction; this skill builds one internally for `grn_ko`), `sc-clustering` / `sc-cell-annotation` (upstream — produces the labelled AnnData; KO predictions are more interpretable per-cluster)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `statsmodels`

@@ -8,10 +8,9 @@ that a polite refusal came back. A bot that answers "you are not allowed"
 has already told an unknown sender that it exists, that their identity was
 checked, and that somebody is listening.
 
-``CLAUDE.md`` is the source, word for word: ``FEISHU_ALLOWED_SENDERS`` is
-*required*, "authoritative Feishu ingress admits nobody else and refuses to
-start without it", and without ``FEISHU_BOT_OPEN_ID`` "group chats fail
-closed".
+The rules: ``FEISHU_ALLOWED_SENDERS`` is *required*, authoritative Feishu
+ingress admits nobody else and refuses to start without it, and without
+``FEISHU_BOT_OPEN_ID`` group chats fail closed.
 """
 
 from __future__ import annotations
@@ -157,7 +156,7 @@ async def runtime_for(app, binding, **kwargs) -> ChannelRuntime:
 
 
 def test_a_binding_without_a_sender_policy_cannot_be_built():
-    """Plan 0031 §9-9 (a), and ``CLAUDE.md``'s "refuses to start".
+    """Plan 0031 §9-9 (a): ingress refuses to start without an allowlist.
 
     The allowlist is a **positional** field with no default, so omitting it
     is a :exc:`TypeError` before any message exists. A keyword with a

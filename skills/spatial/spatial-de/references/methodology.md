@@ -89,11 +89,11 @@ If `layers["counts"]` is missing, OmicsClaw falls back to `adata.raw` or
 
 ```bash
 # Default exploratory marker discovery
-oc run spatial-de \
+python skills/spatial/spatial-de/spatial_de.py \
   --input <processed.h5ad> --output <dir>
 
 # Wilcoxon with richer Scanpy controls
-oc run spatial-de \
+python skills/spatial/spatial-de/spatial_de.py \
   --input <processed.h5ad> --method wilcoxon \
   --groupby leiden --scanpy-corr-method benjamini-hochberg \
   --scanpy-pts --filter-markers \
@@ -101,13 +101,13 @@ oc run spatial-de \
   --max-out-group-fraction 0.5 --output <dir>
 
 # Pairwise Scanpy comparison
-oc run spatial-de \
+python skills/spatial/spatial-de/spatial_de.py \
   --input <processed.h5ad> --method t-test \
   --groupby leiden --group1 0 --group2 1 \
   --n-top-genes 20 --output <dir>
 
 # Sample-aware pseudobulk DE with PyDESeq2
-oc run spatial-de \
+python skills/spatial/spatial-de/spatial_de.py \
   --input <processed.h5ad> --method pydeseq2 \
   --groupby leiden --group1 0 --group2 1 \
   --sample-key sample_id \
@@ -118,7 +118,7 @@ oc run spatial-de \
   --output <dir>
 
 # Demo mode
-oc run spatial-de --demo --output /tmp/de_demo
+python skills/spatial/spatial-de/spatial_de.py --demo --output /tmp/de_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-de/spatial_de.py \

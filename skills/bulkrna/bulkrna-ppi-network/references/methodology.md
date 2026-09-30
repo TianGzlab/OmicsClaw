@@ -39,8 +39,8 @@ When STRING is unavailable (no internet), builds a network from gene-gene Pearso
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-ppi-network --demo
-python omicsclaw.py run bulkrna-ppi-network --input de_results.csv --output results/
+python skills/bulkrna/bulkrna-ppi-network/bulkrna_ppi_network.py --demo
+python skills/bulkrna/bulkrna-ppi-network/bulkrna_ppi_network.py --input de_results.csv --output results/
 python bulkrna_ppi_network.py --input de_results.csv --output results/ --species 9606
 ```
 

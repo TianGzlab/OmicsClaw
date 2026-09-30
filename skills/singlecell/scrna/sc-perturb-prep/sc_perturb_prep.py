@@ -14,14 +14,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
@@ -413,7 +418,7 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Next step: Run sc-perturb for perturbation analysis")
-    print(f"  python omicsclaw.py run sc-perturb --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-perturb/sc_perturb.py --input {output_dir}/processed.h5ad --output <dir>")
 
     return 0
 

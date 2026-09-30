@@ -11,10 +11,11 @@ Registry names are ``mcp__{server}__{tool}``, minted by
 ``name.split("__", 2)`` always recovers the server and the tool.
 
 Imports ``omicsclaw.schema``, ``omicsclaw.tools.base``,
-``omicsclaw.tools.context``, ``omicsclaw.tools.function_tool`` and the
-standard library. The MCP client is *not* imported: an :class:`MCPTool` is
-built from plain values and a callable, and the transport stays the
-caller's business (``omicsclaw.mcp`` supplies one).
+``omicsclaw.tools.context``, ``omicsclaw.tools.function_tool``,
+``omicsclaw.tools.preview`` and the standard library. The MCP client is
+*not* imported: an :class:`MCPTool` is built from plain values and a
+callable, and the transport stays the caller's business (``omicsclaw.mcp``
+supplies one).
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import hashlib
 import inspect
 import json
 import re
+import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -31,6 +33,7 @@ from omicsclaw.schema import ToolDefinition
 from .base import ApprovalMode, RiskLevel, ToolPolicy
 from .context import require_approval
 from .function_tool import ToolArgumentError, as_text
+from .preview import MAX_PREVIEW_CHARS, preview_arguments
 
 MCPCaller = Callable[[str], Any]
 """How this process reaches the tool: raw JSON in, text out.
@@ -224,7 +227,7 @@ class MCPTool:
         self._caller = caller
         self._definition = ToolDefinition(
             name=self._name,
-            description=_describe(server, description),
+            description=_describe(server, description, error),
             input_schema=schema,
         )
         self.policy = policy if policy is not None else _default_policy(server)
@@ -251,7 +254,8 @@ class MCPTool:
         when *arguments* is not a JSON object (an empty string counts as
         ``{}``), before any human is asked. Approval goes through
         :func:`~omicsclaw.tools.context.require_approval` with the full
-        argument string and the tool's :attr:`origin`: the default policy
+        argument string, and a reason naming the tool's :attr:`origin` and
+        previewing the arguments (see :meth:`_reason`): the default policy
         is ``ASK``, so with no approval channel bound the call is refused
         and the server is never contacted.
 
@@ -267,17 +271,39 @@ class MCPTool:
         "unknown tool" are different problems with different fixes.
         """
         _require_object(arguments)
-        where = f" via {self.origin}" if self.origin else ""
+        reason, shows_call = self._reason(arguments)
         await require_approval(
             self.name,
             arguments,
             policy=self.policy,
-            reason=f"MCP server {self.server!r}{where}, tool {self.tool!r}",
+            reason=reason,
+            reason_shows_call=shows_call,
         )
         outcome = self._caller(arguments)
         if inspect.isawaitable(outcome):
             outcome = await outcome
         return as_text(outcome)
+
+    def _reason(self, arguments: str) -> tuple[str, bool]:
+        """The text a human is shown when asked to approve this call.
+
+        Names the server, where calls to it go and the tool, then the
+        arguments as :func:`~omicsclaw.tools.preview.preview_arguments`
+        renders them, on a line of their own.
+
+        Returns:
+            The text, and whether it shows the whole call: ``False`` when
+            the preview was cut at
+            :data:`~omicsclaw.tools.preview.MAX_PREVIEW_CHARS`.
+        """
+        where = f" via {self.origin}" if self.origin else ""
+        head = f"MCP server {self.server!r}{where}, tool {self.tool!r}"
+        whole = preview_arguments(arguments, limit=sys.maxsize)
+        if not whole:
+            return f"{head}, with no arguments", True
+        if len(whole) <= MAX_PREVIEW_CHARS:
+            return f"{head}, with arguments:\n{whole}", True
+        return f"{head}, with arguments:\n{preview_arguments(arguments)}", False
 
 
 # ---- internals ----------------------------------------------------------
@@ -321,10 +347,17 @@ def _default_policy(server: str) -> ToolPolicy:
     )
 
 
-def _describe(server: str, description: str) -> str:
-    """The server's description, tagged with where it came from."""
+def _describe(server: str, description: str, schema_error: str = "") -> str:
+    """The server's description, tagged with where it came from, plus a note
+    when the server's argument schema could not be used."""
     text = description.strip()
-    return f"[MCP:{server}] {text}" if text else f"[MCP:{server}]"
+    tagged = f"[MCP:{server}] {text}" if text else f"[MCP:{server}]"
+    if schema_error:
+        tagged += (
+            f" (This tool's argument schema could not be read — {schema_error} — "
+            "so its parameters are unknown; the server validates what you send.)"
+        )
+    return tagged
 
 
 def _parse_input_schema(raw: Any) -> tuple[dict[str, Any], str]:

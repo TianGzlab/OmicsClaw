@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-sv-detection --demo
-python omicsclaw.py run genomics-sv-detection --input <data.bam> --output <dir>
+python skills/genomics/genomics-sv-detection/sv_detection.py --demo
+python skills/genomics/genomics-sv-detection/sv_detection.py --input <data.bam> --output <dir>
 ```
 
 

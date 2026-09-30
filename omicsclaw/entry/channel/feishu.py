@@ -20,8 +20,8 @@ The file imported one symbol from the deleted control plane
   allowlist gate is applied once more at ingress — by the object that owns
   it — and not only here.
 
-**The two fail-closed rules ``CLAUDE.md`` states are unchanged and are the
-reason this file was worth porting.** ``FEISHU_ALLOWED_SENDERS`` is required
+**The two fail-closed rules are unchanged and are the reason this file was
+worth porting.** ``FEISHU_ALLOWED_SENDERS`` is required
 and admits nobody else (``_handle_event``, and again in ``SenderPolicy``);
 ``FEISHU_BOT_OPEN_ID`` is what proves a group @-mention targets this bot, and
 without it group chats fail closed (:meth:`FeishuChannel
@@ -46,6 +46,7 @@ from omicsclaw.entry.ingress import (
     VALUE_MENTIONS,
 )
 
+from . import reply_target
 from .base import Channel
 from .binding import ChannelSurfaceBinding
 from .capabilities import FEISHU as FEISHU_CAPS
@@ -194,7 +195,7 @@ class FeishuChannel(Channel):
         return ChannelSurfaceBinding(
             adapter="feishu",
             account_namespace=account_namespace,
-            # Both halves of the CLAUDE.md rule in one object: the owner
+            # Both halves of the ingress rule in one object: the owner
             # allowlist, and the Bot open_id that proves a group @-mention
             # was aimed here.  `_require_authoritative_identity` has already
             # refused to start without either.
@@ -365,15 +366,6 @@ class FeishuChannel(Channel):
                 f"({type(error).__name__})"
             ) from None
 
-    def _owner_subjects(self) -> frozenset[str]:
-        """Configured Feishu Owner open_id values."""
-
-        return frozenset(
-            str(value).strip()
-            for value in (self.config.allowed_senders or set())
-            if str(value).strip()
-        )
-
     async def stop(self) -> None:
         self.deactivate_ingress()
         failures: list[str] = []
@@ -476,48 +468,6 @@ class FeishuChannel(Channel):
             "runner that owns the shared ChannelRuntime: compose one with "
             "compose_channel_runtime(app, channels) and start them through "
             "ChannelManager"
-        )
-
-    # ─ Core send implementation ─────────────────
-
-    async def process_message(self, *args, **kwargs) -> str:
-        raise RuntimeError(
-            "Feishu messages must enter through the authoritative ChannelRuntime"
-        )
-
-    async def send(
-        self,
-        chat_id: str,
-        content: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        raise RuntimeError(
-            "Feishu replies must leave through the ChannelRuntime delivery "
-            "pump, which classifies whether they were accepted"
-        )
-
-    async def _send_chunk(
-        self,
-        chat_id: str,
-        formatted_text: str,
-        raw_text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        raise RuntimeError(
-            "Feishu text chunks must leave through the ChannelRuntime "
-            "delivery pump, which classifies whether they were accepted"
-        )
-
-    async def send_media(
-        self,
-        chat_id: str,
-        file_path: str,
-        caption: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        raise RuntimeError(
-            "Feishu outbound media is disabled: this layer has no content "
-            "parts to carry it (plan 0031 §5.3)"
         )
 
     # ─ Dedup ────────────────────────
@@ -677,6 +627,15 @@ class FeishuChannel(Channel):
             if not text.strip():
                 return
 
+            # A built-in command is answered here and never becomes an
+            # exchange. Without this the twelve registered commands reach the
+            # model as ordinary text, and somebody typing `/clear` gets an
+            # explanation of the word instead of an empty conversation.
+            if text.startswith("/") and self._run_async(
+                self._answer_command(chat_id, sender_id, text)
+            ):
+                return
+
             # Consume rate-limit budget only for a message that is actually
             # about to become a Turn. Charging it before the type and mention
             # gates would let images, or group chatter that never mentions this
@@ -772,6 +731,34 @@ class FeishuChannel(Channel):
                 found.append(open_id)
         return tuple(found)
 
+    def _reply_target(self, chat_id: str) -> dict[str, Any]:
+        """Where a reply to *chat_id* goes, in the shape Feishu addresses.
+
+        ``destination_kind`` says which of Feishu's five identifier spaces
+        the destination belongs to; a bare id is not self-describing and the
+        delivery adapter refuses to guess.
+        """
+
+        return reply_target.build(
+            "feishu",
+            self.feishu_config.app_id.strip(),
+            chat_id,
+            destination_kind="chat_id",
+        )
+
+    async def _answer_command(
+        self, chat_id: str, sender_open_id: str, text: str
+    ) -> bool:
+        """Answer a slash command, on the runtime's loop.
+
+        The caller is on the lark WebSocket thread and reached here through
+        :meth:`_run_async`, which is the only safe way into this loop.
+        """
+
+        return await self.answer_slash_command(
+            self._reply_target(chat_id), chat_id, sender_open_id, text
+        )
+
     async def _submit_control_inbound(
         self,
         *,
@@ -793,7 +780,6 @@ class FeishuChannel(Channel):
 
         if self._control_runtime is None:
             raise RuntimeError("Feishu ChannelRuntime is not bound")
-        account_namespace = self.feishu_config.app_id.strip()
         inbound = self.inbound(
             chat_id,
             sender_open_id,
@@ -801,14 +787,7 @@ class FeishuChannel(Channel):
             # The Feishu message_id is globally unique and stable across
             # event redelivery, so it is the natural idempotency key.
             source_request_id=message_id,
-            reply_target={
-                "schema_version": 1,
-                "kind": "channel",
-                "adapter": "feishu",
-                "account_namespace": account_namespace,
-                "destination_id": chat_id,
-                "destination_kind": "chat_id",
-            },
+            reply_target=self._reply_target(chat_id),
             values={
                 VALUE_CHAT_TYPE: chat_type,
                 VALUE_MENTIONS: mentions,

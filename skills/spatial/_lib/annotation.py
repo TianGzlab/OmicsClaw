@@ -261,7 +261,7 @@ def annotate_tangram(
     Robust to device availability (CUDA/CPU), and rigorously intersects
     overlapping training genes to avoid crashes.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
     require("tangram", feature="Tangram cell type annotation")
     import tangram as tg
     import torch
@@ -363,7 +363,7 @@ def annotate_scanvi(
     log-normalized values as "counts" will produce silently wrong results.
     Falls back to ``adata.X`` with a warning if no counts layer is available.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
     require("scvi", feature="scANVI cell type annotation")
     import scvi
 
@@ -517,7 +517,7 @@ def annotate_cellassign(
     Feeding log-normalized data will produce completely wrong assignments.
     Size factors are computed from the same raw-count matrix.
     """
-    from .dependency_manager import require
+    from skills._sdk.deps import require
     require("scvi", feature="CellAssign cell type annotation")
     from scvi.external import CellAssign
 

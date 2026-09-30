@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run proteomics-data-import --demo
-python omicsclaw.py run proteomics-data-import --input <proteinGroups.txt> --output <dir>
+python skills/proteomics/proteomics-data-import/proteomics_data_import.py --demo
+python skills/proteomics/proteomics-data-import/proteomics_data_import.py --input <proteinGroups.txt> --output <dir>
 ```
 
 

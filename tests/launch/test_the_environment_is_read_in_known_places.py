@@ -44,6 +44,7 @@ REBUILT_PACKAGES = (
     "permission",
     "provider",
     "schema",
+    "skillenv",
     "skills",
     "tools",
 )
@@ -92,6 +93,19 @@ ENVIRONMENT_READERS = {
         "UNDECLARED, and the only *writer* besides the shell: it activates "
         "cache directories for the scientific stack and parses .env files. "
         "launch/__init__.py calls load_env_file() from here."
+    ),
+    "skillenv/probe.py": (
+        "Not a read by this process: the fixed probe and inventory programs "
+        "embedded as source strings read their own sys.argv[1] in another "
+        "interpreter, where bash runs. The agent environment that pip and the "
+        "overlay's interpreters start from is handed to skillenv by the entry "
+        "layer (plan 0061 §4.10)."
+    ),
+    "tools/builtin/bash.py": (
+        "The local shell is started with a copy of the process environment "
+        "minus the framework's control-plane credentials: "
+        "without_control_credentials() drops CONTROL_CREDENTIAL_NAMES, and "
+        "that has to happen where the environment is read."
     ),
 }
 """Every file in the rebuilt stack that names a process global, and why.

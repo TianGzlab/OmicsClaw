@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-doublet-detection
 description: Load when annotating putative doublets in single-cell RNA-seq using Scrublet, DoubletDetection,
   DoubletFinder, scDblFinder, or scds. Skip when ambient RNA is the contamination problem (use sc-ambient-removal);
   before counts exist (use sc-fastq-qc).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -15,17 +10,6 @@ tags:
 - scrublet
 - doubletfinder
 - scdblfinder
-requires:
-- anndata
-- doubletdetection
-- h5py
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
-- scrublet
-- seaborn
 ---
 
 # sc-doublet-detection
@@ -40,8 +24,6 @@ scores + binary calls land in `obs`; this skill annotates, it does not
 remove cells (filter downstream with `obs["predicted_doublet"]`).
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -83,25 +65,25 @@ remove cells (filter downstream with `obs["predicted_doublet"]`).
 
 ## Gotchas
 
-- **R backends silently fall back.** `sc_doublet.py:304` logs `"DoubletFinder runtime failed (...). Falling back to scDblFinder."` and continues; `sc_doublet.py:359` does the same for `scds → cxds`.  After every R-method run, confirm `result.json["summary"]["method_used"]` matches what you asked for — the `--method doubletfinder` flag does not guarantee DoubletFinder ran.
-- **Explicit `--scds-mode` (e.g. `bcds` or `hybrid`) silently falls back to the `cxds` default on failure.** `sc_doublet.py:359` swaps modes when the requested one raises; the requested mode is not surfaced as an error, only logged.  Inspect the warning log when the report claims `scds` ran with the default.
+- **R backends silently fall back.** `sc_doublet.py` logs `"DoubletFinder runtime failed (...). Falling back to scDblFinder."` and continues; does the same for `scds → cxds`.  After every R-method run, confirm `result.json["summary"]["method_used"]` matches what you asked for — the `--method doubletfinder` flag does not guarantee DoubletFinder ran.
+- **Explicit `--scds-mode` (e.g. `bcds` or `hybrid`) silently falls back to the `cxds` default on failure.** `sc_doublet.py` swaps modes when the requested one raises; the requested mode is not surfaced as an error, only logged.  Inspect the warning log when the report claims `scds` ran with the default.
 - **No cells are removed.** This skill annotates barcodes; downstream filtering on `obs["predicted_doublet"]` is the user's responsibility.  If `sc-filter` was already run, doublets re-introduce themselves to the cluster graph if not filtered after this step.
 - **Group summary is conditional.** `tables/group_summary.csv` is only written when `--batch-key` is set; absence does not mean failure.
-- **Embedding pre-flight is non-fatal.** `sc_doublet.py:429` logs `"Preview embedding computation failed"` and continues; the score-distribution figure still renders without the embedding overlay.  When the figure looks sparse vs documented examples, check the warning log before assuming a bug.
-- **Unsupported method → hard fail.** `sc_doublet.py:801` raises `ValueError("Unsupported method: ...")` for typos like `--method scrubblet`.
+- **Embedding pre-flight is non-fatal.** `sc_doublet.py` logs `"Preview embedding computation failed"` and continues; the score-distribution figure still renders without the embedding overlay.  When the figure looks sparse vs documented examples, check the warning log before assuming a bug.
+- **Unsupported method → hard fail.** `sc_doublet.py` raises `ValueError("Unsupported method: ...")` for typos like `--method scrubblet`.
 
 ## Key CLI
 
 ```bash
 # Demo (Scrublet)
-python omicsclaw.py run sc-doublet-detection --demo --output /tmp/sc_doublet_demo
+python skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py --demo --output /tmp/sc_doublet_demo
 
 # Default Scrublet, with batch-aware grouping
-python omicsclaw.py run sc-doublet-detection \
+python skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py \
   --input filtered.h5ad --output results/ --batch-key sample_id
 
 # scDblFinder with custom expected rate + threshold
-python omicsclaw.py run sc-doublet-detection \
+python skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py \
   --input filtered.h5ad --output results/ \
   --method scdblfinder --expected-doublet-rate 0.1 --threshold 0.4
 ```
@@ -112,3 +94,9 @@ python omicsclaw.py run sc-doublet-detection \
 - `references/methodology.md` — when each backend wins, R vs Python tradeoffs
 - `references/output_contract.md` — `obs` keys added + table schemas
 - Adjacent skills: `sc-ambient-removal` (parallel — fixes ambient RNA, complementary to doublet removal), `sc-filter` (upstream — typically run before this), `sc-clustering` (downstream — filter doublets out before clustering)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `doubletdetection`, `h5py`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `scrublet`, `seaborn`

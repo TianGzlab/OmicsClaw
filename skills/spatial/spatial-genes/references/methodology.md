@@ -57,32 +57,32 @@ If `layers["counts"]` is missing, the skill will fall back to `adata.raw` (if av
 
 ```bash
 # Standard usage (Moran's I, default)
-oc run spatial-genes \
+python skills/spatial/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --output <report_dir>
 
 # Moran's I tuning
-oc run spatial-genes \
+python skills/spatial/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method morans \
   --morans-coord-type auto --morans-n-neighs 8 --morans-n-perms 500 \
   --morans-corr-method fdr_bh --n-top-genes 30 --fdr-threshold 0.01 --output <dir>
 
 # SpatialDE + AEH pattern grouping
-oc run spatial-genes \
+python skills/spatial/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method spatialde \
   --spatialde-min-counts 5 --spatialde-aeh-patterns 6 --output <dir>
 
 # SPARK-X method (requires R + SPARK package)
-oc run spatial-genes \
+python skills/spatial/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method sparkx \
   --sparkx-option mixture --sparkx-num-cores 4 --sparkx-max-genes 3000 --output <dir>
 
 # FlashS method (fast on large data)
-oc run spatial-genes \
+python skills/spatial/spatial-genes/spatial_genes.py \
   --input <processed.h5ad> --method flashs \
   --flashs-n-rand-features 1000 --flashs-bandwidth 50.0 --output <dir>
 
 # Demo mode
-oc run spatial-genes --demo --output /tmp/svg_demo
+python skills/spatial/spatial-genes/spatial_genes.py --demo --output /tmp/svg_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-genes/spatial_genes.py \

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 
 from omicsclaw.context import CompactionState
+from omicsclaw.entry.channel.base import Channel
 from omicsclaw.entry.channel.commands import (
     SlashCommandContext,
     dispatch,
@@ -272,3 +273,63 @@ def test_version_counts_the_deployment_rather_than_asserting_a_number(tmp_path):
 
     assert f"Tools: {len(app.tools_snapshot)}" in reply
     assert f"Skills: {len(app.skills)}" in reply
+
+
+# ---- the context every adapter assembles the same way ------------------
+
+
+def test_the_shared_context_carries_the_session_the_two_stateful_commands_act_on(
+    tmp_path,
+):
+    """``/clear`` and ``/compact`` act on a conversation, or on nothing.
+
+    ``SlashCommandContext.session_id`` defaults to the empty string, which
+    those two handlers read as "there is no conversation" and report as
+    success. An adapter that assembled its own context and forgot the field
+    would therefore answer ``/clear`` cheerfully, with the history intact —
+    which is why the assembly is shared rather than copied per platform.
+    """
+
+    async def scenario():
+        app, _spy = deployment(tmp_path)
+        channel = _StubChannel()
+        runtime = ChannelRuntime(app, [binding_for(Transport(), adapter="stub")])
+        await runtime.start()
+        channel.bind_control_runtime(runtime)
+        ctx = channel.command_context("c1", OWNER, "/clear")
+        await runtime.close(0.0)
+        return app, ctx
+
+    app, ctx = run(scenario())
+
+    assert ctx.session_id == "stub:c1"
+    assert ctx.platform == "stub"
+    assert ctx.chat_id == "c1"
+    assert ctx.user_id == OWNER
+    assert ctx.app is app
+    assert ctx.workspace == str(app.config.workspace)
+
+
+def test_an_unbound_channel_still_assembles_a_context():
+    """So the static commands answer before a runtime exists.
+
+    A handler that needs the deployment says so in its reply; raising here
+    instead would surface inside a provider callback, where nobody sees it.
+    """
+    ctx = _StubChannel().command_context("c1", None, "/help")
+
+    assert ctx.app is None
+    assert ctx.workspace == ""
+    assert ctx.session_id == "stub:c1"
+
+
+class _StubChannel(Channel):
+    """A real ``Channel`` with no platform, for the base-class behaviour."""
+
+    name = "stub"
+
+    async def start(self) -> None:  # pragma: no cover - never started
+        self._running = True
+
+    async def stop(self) -> None:  # pragma: no cover - never started
+        self._running = False

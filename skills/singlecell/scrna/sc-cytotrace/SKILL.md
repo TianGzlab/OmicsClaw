@@ -1,13 +1,8 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-cytotrace
 description: Load when computing per-cell differentiation potency / stemness scores from gene-expression
   complexity on a scRNA AnnData via the CytoTRACE-simple method. Skip when ordering cells along a trajectory
   (use sc-pseudotime); marker-based cell-type labelling (use sc-cell-annotation).
-version: 0.3.0
-author: OmicsClaw
-license: MIT
 tags:
 - singlecell
 - scrna
@@ -15,13 +10,6 @@ tags:
 - potency
 - stemness
 - differentiation
-requires:
-- anndata
-- matplotlib
-- numpy
-- pandas
-- scanpy
-- scipy
 ---
 
 # sc-cytotrace
@@ -41,8 +29,6 @@ Output goes into `obs["cytotrace_score"]`, `obs["cytotrace_potency"]`,
 `sc-pseudotime`; for cell-type labels use `sc-cell-annotation`.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -80,28 +66,28 @@ Output goes into `obs["cytotrace_score"]`, `obs["cytotrace_potency"]`,
 
 ## Gotchas
 
-- **Single backend only.** `sc_cytotrace.py:549` argparse `choices=["cytotrace_simple"]` — there is no full CytoTRACE 2 / R-backed path here. `:580` raises `ValueError(f"Unknown method: {args.method}")` if the registry diverges.
-- **Score is a *proxy* via gene complexity, not the original CytoTRACE algorithm.** `sc_cytotrace.py:193-199` documents the simplified pipeline (gene_count → rank → smooth → minmax → 6 bins). Don't quote scores as identical to published CytoTRACE — they're correlated but not numerically equivalent.
-- **Degenerate output is a soft fail.** When all cells land in 1 potency bin (e.g., uniformly low complexity), `sc_cytotrace.py:253-271` records `result.json["n_potency_categories"] ≤ 1`, sets `degenerate=True`, and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_potency_categories"]` before interpreting the score.
-- **`--input` mandatory unless `--demo`.** `sc_cytotrace.py:562` raises `ValueError("--input required when not using --demo")`.
-- **The skill OVERWRITES existing `obs["cytotrace_*"]` columns.** `sc_cytotrace.py:245-247` directly assigns into `obs`. Save the input AnnData first if you need to compare two CytoTRACE runs (e.g., before/after filtering).
+- **Single backend only.** `sc_cytotrace.py` argparse `choices=["cytotrace_simple"]` — there is no full CytoTRACE 2 / R-backed path here. `main` raises `ValueError(f"Unknown method: {args.method}")` if the registry diverges.
+- **Score is a *proxy* via gene complexity, not the original CytoTRACE algorithm.** `sc_cytotrace.py` documents the simplified pipeline (gene_count → rank → smooth → minmax → 6 bins). Don't quote scores as identical to published CytoTRACE — they're correlated but not numerically equivalent.
+- **Degenerate output is a soft fail.** When all cells land in 1 potency bin (e.g., uniformly low complexity), `sc_cytotrace.py` records `result.json["n_potency_categories"] ≤ 1`, sets `degenerate=True`, and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_potency_categories"]` before interpreting the score.
+- **`--input` mandatory unless `--demo`.** `sc_cytotrace.py` raises `ValueError("--input required when not using --demo")`.
+- **The skill OVERWRITES existing `obs["cytotrace_*"]` columns.** `sc_cytotrace.py` directly assigns into `obs`. Save the input AnnData first if you need to compare two CytoTRACE runs (e.g., before/after filtering).
 
 ## Key CLI
 
 ```bash
 # Demo
-python omicsclaw.py run sc-cytotrace --demo --output /tmp/sc_cytotrace_demo
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --demo --output /tmp/sc_cytotrace_demo
 
 # Default on a normalised AnnData
-python omicsclaw.py run sc-cytotrace \
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
   --input clustered.h5ad --output results/
 
 # Tighter KNN smoothing for sparse data
-python omicsclaw.py run sc-cytotrace \
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
   --input clustered.h5ad --output results/ --n-neighbors 50
 
 # With R-enhanced ggplot figures
-python omicsclaw.py run sc-cytotrace \
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
   --input clustered.h5ad --output results/ --r-enhanced
 ```
 
@@ -111,3 +97,9 @@ python omicsclaw.py run sc-cytotrace \
 - `references/methodology.md` — gene-count proxy vs original CytoTRACE; bin thresholds
 - `references/output_contract.md` — `obs["cytotrace_score"]` / `cytotrace_potency` schema
 - Adjacent skills: `sc-pseudotime` (parallel — graph-based trajectory ordering, complementary to potency), `sc-clustering` (upstream — provides UMAP for the potency-on-UMAP plot), `sc-cell-annotation` (parallel — predicts discrete cell-type labels rather than continuous potency)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`

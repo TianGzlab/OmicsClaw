@@ -20,7 +20,7 @@ import numpy as np
 if TYPE_CHECKING:
     from anndata import AnnData
 
-from . import dependency_manager as dm
+from skills._sdk import deps as dm
 
 logger = logging.getLogger(__name__)
 

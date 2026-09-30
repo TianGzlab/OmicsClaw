@@ -63,6 +63,12 @@ def run_arguments(
     :attr:`~SandboxConfig.read_only_mounts` entry read-only, each at the
     same path as on the host. The main process is ``sleep infinity``
     under ``--init``; commands arrive later through ``exec``.
+
+    Credentials in the workspace are hidden from the container: an existing
+    ``<workspace>/.env`` is covered by ``/dev/null``, and an existing
+    ``<workspace>/.omicsclaw`` by an empty tmpfs, inside which the sandbox
+    exchange directory (:data:`EXCHANGE_DIR`) is mounted again so commands can
+    still record their pid and output.
     """
     args = [
         "run",
@@ -96,9 +102,22 @@ def run_arguments(
         args += ["--cpus", config.cpus]
     if config.gpus:
         args += ["--gpus", config.gpus]
+    if config.shm_size:
+        args += ["--shm-size", config.shm_size]
+    if config.nofile:
+        args += ["--ulimit", f"nofile={config.nofile}:{config.nofile}"]
     args += ["--volume", f"{workspace}:{workspace}"]
     for mount in config.read_only_mounts:
         args += ["--volume", f"{mount}:{mount}:ro"]
+    dotenv = workspace / ".env"
+    if dotenv.is_file():
+        args += ["--volume", f"/dev/null:{dotenv}:ro"]
+    state = workspace / EXCHANGE_DIR.parts[0]
+    if state.is_dir():
+        exchange = workspace / EXCHANGE_DIR
+        args += ["--tmpfs", f"{state}:rw,nosuid,nodev,size=1m"]
+        if exchange.is_dir():
+            args += ["--volume", f"{exchange}:{exchange}"]
     args += ["--workdir", str(workspace), config.image, "sleep", "infinity"]
     return args
 

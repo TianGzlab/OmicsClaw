@@ -48,7 +48,8 @@ from _run_reader import load_typed_run
 
 logger = logging.getLogger("consensus-interpret")
 
-# Keep in sync with skill.yaml `version` (SSOT, ADR 0037). Required leaf-skill
+# Skill version. `skill.yaml` was its source until the old skill system was
+# deleted; this is now the only place it is declared. Required leaf-skill
 # module constants (omicsclaw.skill.protocol.validate_skill_module).
 SKILL_NAME = "consensus-interpret"
 SKILL_VERSION = "0.1.0"

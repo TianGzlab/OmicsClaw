@@ -2,9 +2,9 @@
 
 Rule 1 — *no tool argument and no tool output is ever logged.* A
 ``write_file``'s content, a ``bash`` command and a ``web_fetch`` URL can
-each carry a subject identifier, and ``CLAUDE.md``'s first safety rule
-("genetic data never leaves this machine") is one a log file on that
-machine can still break.
+each carry a subject identifier, and
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 ("genetic data never
+leaves this machine") is one a log file on that machine can still break.
 
 Rule 2 — *a REPL owning the terminal reroutes logging, and puts it back.*
 The harness redirects its log sink before starting its UI and restores it
@@ -135,8 +135,16 @@ def test_a_tool_argument_never_reaches_a_log_record(tmp_path: pathlib.Path):
 
     assert "looked it up" in printed, "the turn must actually have run"
     assert SUBJECT not in logged
-    # Nor on the screen: a terminal is a log with a scrollback buffer.
-    assert SUBJECT not in printed
+    # And on the screen it *is* shown, which is the point of asserting
+    # both halves in one test. The two used to be one rule ("a terminal
+    # is a log with a scrollback buffer"); the owner split them, because
+    # a log record can be shipped somewhere this scrollback never goes
+    # while the scrollback is the only place the operator can see what
+    # the agent actually ran. Asserting the screen half here means this
+    # test fails if they are ever silently re-merged in either
+    # direction — including by a change that makes the log verbose
+    # because "the terminal already shows it".
+    assert SUBJECT in printed, "the transcript shows the call it made"
 
 
 # ---- rule 2 -----------------------------------------------------------

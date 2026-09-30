@@ -1,10 +1,6 @@
-<!-- AUTO-GENERATED from skill.yaml — do not edit by hand. -->
-<!-- Regenerate: python scripts/generate_parameters_md.py <skill_dir> -->
-
-
 # Parameters
 
-## Allowed extra CLI flags
+## CLI flags
 
 - `--method`
 

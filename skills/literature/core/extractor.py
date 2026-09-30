@@ -118,7 +118,7 @@ def extract_technology(text: str) -> str:
 
 
 # Candidate methodology parameters extract_methodology() recognizes, keyed by the
-# canonical param name used downstream (skill.yaml hints). Aliases are matched
+# canonical param name used downstream. Aliases are matched
 # case-insensitively, longest-first within each param, against a "KEY (op) NUMBER"
 # pattern (e.g. "resolution=0.8", "FDR < 0.1") — see extract_methodology below.
 _PARAM_ALIASES: Dict[str, List[str]] = {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OmicsClaw environment setup
 #
-# Strategy (4 tiers):
+# Strategy (5 tiers):
 #   1. mamba/conda env create from environment.yml — Tier 0 toolchain +
 #      Tier 1-3 R/CLI packages + Tier 4 heavy Python science stack.
 #   2. uv pip install -e ".[full,singlecell-upstream]" for the thin pip
@@ -11,6 +11,8 @@
 #      build).
 #   3. inline Rscript -e 'devtools::install_github(...)' (GitHub R packages)
 #   4. symlink vendored tools/ binaries into $CONDA_PREFIX/bin (stub for now)
+#   5. optional sub-environments (omicsclaw_<tool>), only with --with-banksy
+#      or OMICSCLAW_WITH_BANKSY=1
 #
 # Usage:
 #     bash 0_setup_env.sh              # creates env named "OmicsClaw"
@@ -552,7 +554,7 @@ echo "[setup_env] ✔ Tier 4 complete (no tools vendored)"
 # ----- Tier 5: optional sub-environments (Layer 4) -----------------
 # Tools whose dependency pins conflict with the main env live in dedicated
 # sub-envs named `omicsclaw_<tool>`, invoked at runtime via subprocess
-# bridge (see omicsclaw/core/external_env.py).
+# bridge (see skills/_sdk/external_env.py).
 #
 # Bootstrap is opt-in: pass `--with-banksy` (or set OMICSCLAW_WITH_BANKSY=1)
 # to install. Default skips to keep base-install fast.

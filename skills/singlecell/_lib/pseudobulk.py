@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from . import dependency_manager as dm
+from skills._sdk import deps as dm
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -237,12 +237,13 @@ def _run_deseq2_rpy2(
     """Run DESeq2 via R subprocess."""
     import tempfile
     from pathlib import Path
-    from omicsclaw.core.dependency_manager import validate_r_environment
-    from omicsclaw.core.r_script_runner import RScriptRunner
+    from skills._sdk.deps import validate_r_environment
+    from skills._sdk.r_script_runner import RScriptRunner
+    from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
     validate_r_environment(required_r_packages=["DESeq2"])
 
-    scripts_dir = Path(__file__).resolve().parents[3] / "omicsclaw" / "r_scripts"
+    scripts_dir = _SDK_R_SCRIPTS_DIR
     runner = RScriptRunner(scripts_dir=scripts_dir)
 
     with tempfile.TemporaryDirectory(prefix="omicsclaw_deseq2_pb_") as tmpdir:

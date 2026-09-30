@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-vcf-operations --demo
-python omicsclaw.py run genomics-vcf-operations --input <data.vcf> --output <dir>
+python skills/genomics/genomics-vcf-operations/genomics_vcf_operations.py --demo
+python skills/genomics/genomics-vcf-operations/genomics_vcf_operations.py --input <data.vcf> --output <dir>
 ```
 
 

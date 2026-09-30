@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-statistics ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-statistics/spatial_statistics.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/analysis_summary.csv`

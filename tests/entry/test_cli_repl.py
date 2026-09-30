@@ -27,7 +27,12 @@ import types
 import pytest
 
 from omicsclaw.entry.cli import PROMPT, Repl, ScriptedSource, Screen, run_once
-from omicsclaw.entry.cli._slash_command_support import REPL_SLASH_COMMAND_SPECS
+from omicsclaw.entry.cli._constants import LOGO_LINES
+from omicsclaw.entry.cli._slash_command_support import (
+    CLI_SLASH_COMMAND_SPECS,
+    REPL_SLASH_COMMAND_SPECS,
+    slash_token,
+)
 from omicsclaw.entry.session import attach_sessions
 from omicsclaw.schema import Message, Role
 from tests.entry.test_turn_runner import (  # type: ignore[import-not-found]
@@ -155,7 +160,7 @@ def test_the_commands_plan_0037_called_half_done_are_refused(tmp_path, command):
     The generic case is
     :func:`test_help_lists_what_this_build_runs_and_a_blocked_command_says_so`;
     these four are named because they are the ones a reader of plan 0037
-    and ``CLAUDE.md`` will type first.
+    and ``AGENTS.md`` will type first.
     """
 
     async def drive():
@@ -194,6 +199,162 @@ def test_the_skills_command_reports_the_index_the_prompt_advertised(tmp_path):
         return buffer.getvalue()
 
     assert "spatial-preprocess" in asyncio.run(drive())
+
+
+# ---- a slash that names no command --------------------------------------
+
+
+def write_skills(tmp_path: pathlib.Path) -> None:
+    """Two skills under a domain, as the real corpus is laid out."""
+    for name, description, body in (
+        ("spatial-de", "rank spatial markers", "Use Wilcoxon, then filter."),
+        ("spatial-domains", "find tissue domains", "Build the graph first."),
+    ):
+        directory = tmp_path / "skills" / "spatial" / name
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n"
+            f"trigger: niche, marker gene\n---\n\n{body}\n",
+            encoding="utf-8",
+        )
+
+
+def drive_lines(tmp_path: pathlib.Path, provider, lines) -> str:
+    """Run a REPL over *lines* against a real app and return what it printed."""
+
+    async def drive():
+        app = build(tmp_path, provider)
+        repl, _source, buffer = repl_over(app, lines)
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return buffer.getvalue()
+
+    return asyncio.run(drive())
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["/spatial-de compare tumour and stroma", "/spatial-de", "/SPATIAL-DE"],
+)
+def test_a_skill_name_is_not_a_command_and_the_reply_says_how_to_ask(
+    tmp_path, line
+):
+    """Skills are picked by the agent; a slash no longer runs one.
+
+    Neither the skill's body nor the line reaches the model, and the
+    person is told to describe the task instead of being left to guess
+    why a name that used to work does nothing.
+    """
+    write_skills(tmp_path)
+    provider = answering("unused")
+
+    printed = drive_lines(tmp_path, provider, [line, "/exit"])
+
+    assert provider.calls == 0
+    token = line.split()[0]
+    assert f"No command named {token}." in printed
+    assert "describe the task" in printed
+    assert "Use Wilcoxon" not in printed
+
+
+def test_a_command_name_is_not_taken_by_a_skill(tmp_path):
+    """A skill called ``help`` changes nothing about ``/help``."""
+    directory = tmp_path / "skills" / "help"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(
+        "---\nname: help\ndescription: not the menu\n---\n\nSkill body.\n",
+        encoding="utf-8",
+    )
+    provider = answering("unused")
+
+    printed = drive_lines(tmp_path, provider, ["/help", "/exit"])
+
+    assert provider.calls == 0, "/help was answered by the skill, not the menu"
+    assert "Skill body." not in printed
+    assert "/skills" in printed
+
+
+def test_an_unknown_name_is_reported_instead_of_asked(tmp_path):
+    """Sending a typo to the model buys a prose answer and no correction."""
+    write_skills(tmp_path)
+    provider = answering("no such thing")
+
+    printed = drive_lines(tmp_path, provider, ["/spatial-dx", "/exit"])
+
+    assert provider.calls == 0, "an unknown /name was sent to the model"
+    assert "No command named /spatial-dx." in printed
+    assert "/help lists the commands." in printed
+    assert "describe the task" not in printed, "spatial-dx is not a skill"
+
+
+def test_a_pasted_path_is_a_question_and_not_a_mistyped_name(tmp_path):
+    """An omics workspace's lines start with ``/`` for a second reason."""
+    write_skills(tmp_path)
+    provider = answering("that is an AnnData file")
+
+    printed = drive_lines(tmp_path, provider, ["/data/run7/matrix.h5ad", "/exit"])
+
+    assert provider.calls == 1
+    assert provider.seen[0][-1].content == "/data/run7/matrix.h5ad"
+    assert "No command named" not in printed
+
+
+def test_a_catalogue_command_this_build_lacks_keeps_its_own_answer(tmp_path):
+    """``/research`` is known and unimplemented, not unknown."""
+    write_skills(tmp_path)
+    provider = answering("unused")
+
+    printed = drive_lines(tmp_path, provider, ["/research", "/exit"])
+
+    assert provider.calls == 0
+    assert "/research is not available in this build." in printed
+    assert "No command named" not in printed
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("/spatial-de", "spatial-de"),
+        ("/spatial-de rank the markers", "spatial-de"),
+        ("   /spatial-de   ", "spatial-de"),
+        ("/not-a-command", "not-a-command"),
+        ("/UPPER", "UPPER"),
+    ],
+)
+def test_a_slash_line_names_its_first_token(line, expected):
+    """Parsing only: the name need not be one anything claims."""
+    assert slash_token(line) == expected
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "spatial-de",
+        "",
+        "   ",
+        "/",
+        "/ spatial-de",
+        "//spatial-de",
+        "/data/run7/matrix.h5ad",
+        "/home/user/counts.csv what is this?",
+        "/tmp\\windows\\path",
+    ],
+)
+def test_a_line_that_names_nothing_has_no_token(line):
+    """A pasted path is a question, not a name somebody got wrong."""
+    assert slash_token(line) is None
+
+
+def test_the_skills_command_finds_a_skill_by_its_trigger(tmp_path):
+    """``/skills`` searches the triggers, which no name or description holds."""
+    write_skills(tmp_path)
+
+    printed = drive_lines(tmp_path, answering("unused"), ["/skills niche", "/exit"])
+
+    assert "  spatial-de" in printed
+    assert "spatial" in printed
+    assert "/spatial-de" not in printed, "a skill is not offered as a command"
+    assert "describe the task" in printed
 
 
 # ---- Ctrl-C -----------------------------------------------------------
@@ -571,6 +732,280 @@ def test_an_approval_nobody_answered_does_not_outlive_its_exchange(tmp_path):
     assert not repl._asking
 
 
+class InterruptedAtTheCard(ScriptedSource):
+    """A person who presses Ctrl-C at every approval card.
+
+    ``prompt_toolkit`` reads with the terminal in raw mode, where Ctrl-C
+    is a key rather than a signal: ``prompt_async`` raises
+    :exc:`KeyboardInterrupt` in whichever Task is reading, and the SIGINT
+    handler the entry point installs never runs. Raising it from
+    :meth:`read` is that key press, without a terminal.
+    """
+
+    async def read(self, prompt: str) -> str:
+        if prompt.startswith("approve"):
+            await asyncio.sleep(0)
+            self.prompts.append(prompt)
+            raise KeyboardInterrupt
+        return await super().read(prompt)
+
+
+class Recording(Repl):
+    """A REPL that keeps the handle of every exchange it ran."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.handles = []
+
+    async def ask(self, text):
+        handle = await super().ask(text)
+        self.handles.append(handle)
+        return handle
+
+
+def test_ctrl_c_at_an_approval_card_cancels_the_exchange_not_the_repl(tmp_path):
+    """Ctrl-C at a card does what Ctrl-C while the exchange works does.
+
+    The key press and the signal are two paths. Every other Ctrl-C test
+    calls :meth:`Repl.interrupt`, which is where the signal handler lands,
+    and they stayed green while the key press — a
+    :exc:`KeyboardInterrupt` raised inside the Task answering the card —
+    went past every ``except`` there, out of :func:`asyncio.run`, and
+    ended ``oc cli`` with exit code 130 in the middle of a conversation.
+
+    Three things are held here: the exchange ends ``cancelled``; the card
+    is settled as a denial before that, so the tool is refused on the
+    record rather than merely torn down with the exchange; and the loop
+    goes back to the prompt and answers the next line. The history check
+    is the cancellation contract every other Ctrl-C path keeps: the
+    cancelled exchange leaves nothing behind.
+    """
+
+    async def drive():
+        app = build(
+            tmp_path,
+            Scripted(calling("ask_a"), Message(role=Role.ASSISTANT, content="second")),
+            tools=(Asking("ask_a"),),
+        )
+        buffer = io.StringIO()
+        source = InterruptedAtTheCard(["do it", "and now?", "/exit"])
+        repl = Recording(app, source=source, screen=Screen.into(buffer))
+        await asyncio.wait_for(repl.run(), WAIT_S)
+        session = app.sessions.session(repl.state.session_id)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return repl, source.prompts, session.history, buffer.getvalue()
+
+    try:
+        repl, prompts, history, printed = asyncio.run(drive())
+    except KeyboardInterrupt:
+        pytest.fail("Ctrl-C at the approval card escaped the REPL")
+
+    interrupted, answered = repl.handles
+    assert interrupted.terminal == "cancelled"
+    assert "Approval denied [" in printed
+    assert "interrupted at the terminal" in printed
+    assert "Cancelled." in printed
+    assert answered.terminal == "converged"
+    assert prompts == [PROMPT, "approve ask_a [#1]? [y/N/a=always] ", PROMPT, PROMPT]
+    assert [message.content for message in history] == ["and now?", "second"]
+    assert not repl._asking
+
+
+class OneCard(ScriptedSource):
+    """A source whose card read raises *outcome*, or never returns."""
+
+    def __init__(self, outcome: BaseException | None) -> None:
+        super().__init__(())
+        self._outcome = outcome
+
+    async def read(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        if self._outcome is None:
+            await asyncio.Event().wait()
+        raise self._outcome
+
+
+class Interrupts(Repl):
+    """A REPL that counts the times it cancelled the running exchange."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.interrupts = 0
+
+    def interrupt(self) -> bool:
+        self.interrupts += 1
+        return super().interrupt()
+
+
+def _card_reader(tmp_path, source):
+    """A REPL over *source*, a record of how its card was settled, and the
+    buffer it printed into."""
+    buffer = io.StringIO()
+    app = build(tmp_path, answering("unused"))
+    repl = Interrupts(app, source=source, screen=Screen.into(buffer))
+    settled: list[str] = []
+
+    async def refuse(reason: str) -> None:
+        settled.append(reason)
+
+    return app, repl, settled, refuse, buffer
+
+
+@pytest.mark.parametrize(
+    ("raised", "reason", "interrupts"),
+    [
+        (KeyboardInterrupt(), "interrupted at the terminal", 1),
+        (EOFError(), "no operator at the terminal", 0),
+        (RuntimeError("no tty"), "the terminal could not ask: no tty", 0),
+    ],
+    ids=["ctrl-c", "eof", "failure"],
+)
+def test_a_card_read_without_an_answer_is_settled_exactly_once(
+    tmp_path, raised, reason, interrupts
+):
+    """Every way of not getting an answer settles the card, in one place.
+
+    A terminal deployment sets no deadline on a card, so a path that
+    returns without settling it is an exchange that never ends. The paths
+    used to be split between the card reader (Ctrl-C) and the approval
+    code (the input ending, the Task being cancelled, the source failing),
+    so a second kind of card would have had to repeat the latter three and
+    could forget one. Held at the reader itself, where a new card inherits
+    it: each path settles once, with its own reason; only Ctrl-C cancels
+    the exchange; a failure is shown as well as logged.
+    """
+
+    async def drive():
+        app, repl, settled, refuse, buffer = _card_reader(tmp_path, OneCard(raised))
+        answer = await asyncio.wait_for(
+            repl._read_card(
+                "card> ", subject="the thing", settled_as="Denied", refuse=refuse
+            ),
+            WAIT_S,
+        )
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return answer, settled, repl.interrupts, buffer.getvalue()
+
+    try:
+        answer, settled, counted, printed = asyncio.run(drive())
+    except KeyboardInterrupt:
+        pytest.fail("Ctrl-C at the card escaped the card reader")
+
+    assert answer is None
+    assert settled == [reason]
+    assert counted == interrupts
+    if isinstance(raised, RuntimeError):
+        assert "Could not ask about the thing: no tty. Denied." in printed
+
+
+def test_a_cancelled_card_read_is_settled_and_not_left_open(tmp_path):
+    """The Task reading a card is cancelled when its exchange ends first.
+
+    The card is still settled — as nobody at the terminal — and the
+    cancellation stops there: the reader returns rather than raising, so
+    the Task answering the card finishes instead of failing.
+    """
+
+    async def drive():
+        source = OneCard(None)
+        app, repl, settled, refuse, _buffer = _card_reader(tmp_path, source)
+        reading = asyncio.create_task(
+            repl._read_card(
+                "card> ", subject="the thing", settled_as="Denied", refuse=refuse
+            )
+        )
+        while not source.prompts:
+            await asyncio.sleep(0)
+        reading.cancel()
+        await asyncio.wait({reading}, timeout=WAIT_S)
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return reading, settled, repl.interrupts
+
+    reading, settled, interrupts = asyncio.run(drive())
+
+    assert not reading.cancelled()
+    assert reading.result() is None
+    assert settled == ["no operator at the terminal"]
+    assert interrupts == 0
+
+
+def test_an_answered_card_is_not_settled_by_the_reader(tmp_path):
+    """The line goes back to the caller, which is the one to act on it."""
+
+    async def drive():
+        app, repl, settled, refuse, _buffer = _card_reader(
+            tmp_path, ScriptedSource(["y"])
+        )
+        answer = await asyncio.wait_for(
+            repl._read_card(
+                "card> ", subject="the thing", settled_as="Denied", refuse=refuse
+            ),
+            WAIT_S,
+        )
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return answer, settled
+
+    assert asyncio.run(drive()) == ("y", [])
+
+
+def test_ctrl_c_at_a_card_cancels_the_exchange_even_if_settling_fails(tmp_path):
+    """The exchange is cancelled whatever settling the card did.
+
+    A Ctrl-C that left the exchange running because the settlement raised
+    would be a key press that did nothing visible.
+    """
+
+    async def drive():
+        app, repl, _settled, _refuse, _buffer = _card_reader(
+            tmp_path, OneCard(KeyboardInterrupt())
+        )
+
+        async def refuse(reason: str) -> None:
+            raise RuntimeError("could not settle it")
+
+        with pytest.raises(RuntimeError, match="could not settle it"):
+            await asyncio.wait_for(
+                repl._read_card(
+                    "card> ", subject="the thing", settled_as="Denied", refuse=refuse
+                ),
+                WAIT_S,
+            )
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return repl.interrupts
+
+    assert asyncio.run(drive()) == 1
+
+
+def test_an_approval_card_that_meets_the_end_of_input_is_denied_as_unattended(
+    tmp_path,
+):
+    """The approval card's end-of-input verdict, reason and all.
+
+    ``run_once`` reads from a source with no lines, so the card meets the
+    end of input at once. The reason is what the model is told about the
+    refusal, and it has to say nobody was there rather than that somebody
+    said no.
+    """
+
+    async def drive():
+        app = build(
+            tmp_path,
+            Scripted(calling("ask_a"), Message(role=Role.ASSISTANT, content="ok")),
+            tools=(Asking("ask_a"),),
+        )
+        buffer = io.StringIO()
+        handle = await asyncio.wait_for(
+            run_once(app, "do it", screen=Screen.into(buffer)), WAIT_S
+        )
+        await asyncio.wait_for(app.aclose(), WAIT_S)
+        return handle, buffer.getvalue()
+
+    handle, printed = asyncio.run(drive())
+
+    assert handle is not None and handle.terminal == "converged"
+    assert "no operator at the terminal" in printed
+
+
 # ---- session commands -------------------------------------------------
 
 
@@ -613,3 +1048,41 @@ def test_a_repl_needs_a_registry(tmp_path):
 
     with pytest.raises(ValueError, match="attach_sessions"):
         Repl(app, source=ScriptedSource(()))
+
+
+# ---- invariants the catalogue holds on its own -----------------------
+#
+# These two outlived ``test_cli_port_fidelity.py``, which compared this
+# package against ``omicsclaw/surfaces/cli/`` until that tree was deleted.
+# The five comparison tests went with the tree because a comparison needs
+# both sides. These two never compared anything: they are properties of
+# the data this package ships, and they were the reason the deletion did
+# not silently drop coverage.
+
+
+def test_the_repl_offers_a_subset_of_the_catalogue_and_nothing_else():
+    """Every implemented name must also be a catalogue name.
+
+    A name offered by the menu but absent from the catalogue would never
+    reach :func:`parse_slash_command`'s lookup, so it would be advertised
+    and then answered as an unknown command. The strict ``<`` also pins
+    the other half: the catalogue is deliberately the larger set, because
+    the names this build refuses are refused **by name** rather than
+    falling through to the model.
+    """
+    catalogue = {spec.name for spec in CLI_SLASH_COMMAND_SPECS}
+    offered = {spec.name for spec in REPL_SLASH_COMMAND_SPECS}
+
+    assert offered < catalogue
+    assert offered  # a filter that matched nothing would pass vacuously
+
+
+def test_the_logo_rows_are_all_the_same_width():
+    """Each row is 74 characters of box drawing, and must stay that way.
+
+    The rows are written as adjacent string literals split across source
+    lines, so a row is easy to break while editing and the damage shows up
+    as a ragged banner rather than as an error. Three bytes per character
+    means one row is ~200 bytes on one line, which is why it is split.
+    """
+    assert {len(row) for row in LOGO_LINES} == {74}

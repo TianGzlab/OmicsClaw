@@ -495,7 +495,7 @@ def test_the_definition_is_stable_and_not_shared_between_instances():
 
 
 def test_the_description_warns_that_the_url_is_transmitted():
-    """``CLAUDE.md``'s first rule made visible where the model decides."""
+    """``SAFETY_RULES`` rule 1 made visible where the model decides."""
     description = WebFetchTool().definition().description
 
     assert "EVERYTHING IN THE URL IS SENT" in description

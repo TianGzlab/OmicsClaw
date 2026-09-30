@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-phasing --demo
-python omicsclaw.py run genomics-phasing --input <data.vcf> --output <dir>
+python skills/genomics/genomics-phasing/genomics_phasing.py --demo
+python skills/genomics/genomics-phasing/genomics_phasing.py --input <data.vcf> --output <dir>
 ```
 
 

@@ -13,8 +13,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-variant-calling --demo
-python omicsclaw.py run genomics-variant-calling --input <data.bam> --output <dir>
+python skills/genomics/genomics-variant-calling/genomics_variant_calling.py --demo
+python skills/genomics/genomics-variant-calling/genomics_variant_calling.py --input <data.bam> --output <dir>
 ```
 
 

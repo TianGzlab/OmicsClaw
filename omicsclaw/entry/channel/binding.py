@@ -13,8 +13,8 @@ frozenset[str]]``, was a durable identity-scope table keyed
 table in this rebuild, and the question that table was answering — *may this
 person drive the agent* — is :class:`~omicsclaw.entry.ingress.SenderPolicy`'s.
 So the field becomes one, and it has **no default**: a binding is the act of
-naming the owners, and ``CLAUDE.md`` is explicit that authoritative ingress
-"admits nobody else and refuses to start without it".
+naming the owners, and authoritative ingress admits nobody else and refuses
+to start without it.
 
 **The fifth is refused rather than translated.** ``attachment_input_enabled``
 declared that a platform's inbound photos had somewhere to go. They do not:
@@ -91,6 +91,12 @@ class ChannelSurfaceBinding:
     platform's limit (``ChannelCapabilities.max_text_length``). The old
     control plane did not need it: it chunked nowhere and its adapters were
     handed pre-chunked items by a durable outbox this step does not have.
+
+    Must exceed 20. That is not a sanity bound but the width of the code
+    fence :func:`~omicsclaw.entry.channel.base.chunk_text` reserves: at or
+    below it the per-chunk budget goes non-positive and the chunker never
+    advances. An adapter whose platform declares "no practical limit" — the
+    email capability profile says ``0`` — must name a real number here.
     """
 
     attachment_input_enabled: bool = False
@@ -121,6 +127,12 @@ class ChannelSurfaceBinding:
             )
         if not callable(self.delivery_adapter):
             raise TypeError("delivery_adapter must be callable")
+        if not isinstance(self.text_chunk_limit, int) or self.text_chunk_limit <= 20:
+            raise ValueError(
+                "text_chunk_limit must exceed the 20 characters chunk_text() "
+                "reserves for code fences; at or below it the chunker loops "
+                "forever, synchronously, and stops the whole process"
+            )
         if self.attachment_input_enabled:
             raise ValueError(
                 "attachment_input_enabled must be False: this layer has no "

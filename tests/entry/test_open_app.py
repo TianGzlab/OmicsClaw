@@ -22,11 +22,16 @@ import pytest
 
 from omicsclaw.engine import AgentEngine
 from omicsclaw.entry import assembly, attach_sessions, open_app, resolve_app_config
+from omicsclaw.entry.approval import ApprovalBroker
 from omicsclaw.entry.config import AppConfig, SkillsIndex
-from omicsclaw.entry.turn import run_turn
+from omicsclaw.entry.display import CONTINUATION_PREFIX
+from omicsclaw.entry.events import TurnEventType
+from omicsclaw.entry.render import TextRenderer
+from omicsclaw.entry.stream import TurnStream
+from omicsclaw.entry.turn import TurnRunner, run_turn
 from omicsclaw.mcp import MCPConfigError, ServerState
 from omicsclaw.schema import Message, Role, ToolCall
-from omicsclaw.tools import ToolAlreadyRegistered, use_tool_context
+from omicsclaw.tools import ApprovalDecision, ToolAlreadyRegistered, use_tool_context
 from tests.entry.test_turn import _Scripted  # type: ignore[import-not-found]
 from tests.mcp._support import FAKE_SERVER, pid_alive
 
@@ -126,8 +131,13 @@ def test_mcp_tools_are_in_the_snapshot_and_the_budget_from_the_start(tmp_path: P
     plain, app = _run(main())
 
     names = [tool.name for tool in app.tools_snapshot]
-    assert names[-2:] == ["mcp__fake__echo", "mcp__fake__fail"]
-    assert names[:-2] == [tool.name for tool in plain.tools_snapshot]
+    plain_names = [tool.name for tool in plain.tools_snapshot]
+    # The MCP tools go on after the foundation tools and before ``task``,
+    # which the composition root appends last of all because it narrows
+    # the very registry it is mounted into.
+    assert names[-3:-1] == ["mcp__fake__echo", "mcp__fake__fail"]
+    assert names[-1] == plain_names[-1] == "task"
+    assert names[:-3] == plain_names[:-1]
     assert app.budget.reserve_tool_tokens > plain.budget.reserve_tool_tokens
     assert [tool.name for tool in app.registry.available_tools()] == names
 
@@ -259,3 +269,93 @@ def test_the_react_loop_calls_an_mcp_tool_like_any_other(tmp_path: Path):
     assert not observation.is_error
     assert "mcp__fake__echo" in provider.offered[0]
     assert provider.offered[0] == provider.offered[1]
+
+
+def test_each_mcp_approval_card_shows_the_arguments_of_its_own_call(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    """The reported defect, end to end through the production assembly.
+
+    Two calls to one MCP tool differ only in their arguments. Before, both
+    cards read ``MCP server 'fake' via …, tool 'echo'`` and a person could
+    not tell the ``harmless`` call from the ``rm-everything`` one. The
+    arguments are now on the card: through the permission gate, which hands
+    the question to the tool, through the approval broker, and through
+    :class:`~omicsclaw.entry.render.TextRenderer`, whose approval line the
+    Channel posts and the CLI prints.
+
+    The same run checks the other half of the ruling: the arguments are on
+    the card and nowhere else — not in any log record at DEBUG, and not in
+    the audit trail, which records a digest.
+    """
+    _write_config(tmp_path, {"fake": _fake()})
+    audit = tmp_path / "audit.jsonl"
+    secret = "sk-live-7f3a"
+    provider = _RecordingProvider(
+        Message(
+            role=Role.ASSISTANT,
+            tool_calls=(
+                ToolCall(
+                    id="c1", name="mcp__fake__echo", arguments='{"text": "harmless"}'
+                ),
+                ToolCall(
+                    id="c2",
+                    name="mcp__fake__echo",
+                    arguments=json.dumps({"text": "rm-everything", "api_key": secret}),
+                ),
+            ),
+        ),
+        Message(role=Role.ASSISTANT, content="done"),
+    )
+
+    async def main():
+        app = await _open(_config(tmp_path, audit_log=audit), provider)
+        stream = TurnStream("s1", "t1")
+        broker = ApprovalBroker(stream)
+        runner = TurnRunner(
+            app, stream, session_id="s1", turn_id="t1", user_text="go",
+            approval=broker,
+        )
+        channel, terminal = TextRenderer(batched=True), TextRenderer()
+        cards: list[tuple[str, str]] = []
+
+        async def answer():
+            async with stream.observe() as observation:
+                async for frame in observation:
+                    if frame.type is TurnEventType.APPROVAL_REQUIRED:
+                        cards.append((channel.feed(frame), terminal.feed(frame)))
+                        broker.settle(frame.request_id, ApprovalDecision(True))
+
+        try:
+            consumer = asyncio.create_task(answer())
+            outcome = await runner.run()
+            await consumer
+        finally:
+            await app.aclose()
+        return outcome, cards
+
+    with caplog.at_level(logging.DEBUG):
+        outcome, cards = _run(main())
+
+    assert len(cards) == 2
+    assert all(on_channel == on_terminal for on_channel, on_terminal in cards)
+    harmless, dangerous = sorted((card for card, _ in cards), key=len)
+    assert harmless != dangerous
+    assert harmless.endswith(
+        f'with arguments:\n{CONTINUATION_PREFIX}{{"text": "harmless"}}'
+    )
+    assert dangerous.endswith(
+        f"with arguments:\n{CONTINUATION_PREFIX}"
+        '{"api_key": "[redacted]", "text": "rm-everything"}'
+    )
+    assert secret not in dangerous
+    observations = [m for m in outcome.result.messages if m.role is Role.TOOL]
+    assert [m.is_error for m in observations] == [False, False]
+
+    logged = [record.getMessage() for record in caplog.records]
+    assert sum("approval requested: tool=mcp__fake__echo" in m for m in logged) == 2
+    trail = audit.read_text(encoding="utf-8")
+    assert len(trail.splitlines()) == 2
+    for value in ("harmless", "rm-everything", secret):
+        assert not [m for m in logged if value in m], value
+        assert value not in trail, value

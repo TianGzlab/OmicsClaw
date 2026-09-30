@@ -162,6 +162,19 @@ def test_an_empty_newer_anchor_is_a_gap_and_not_a_retraction_either():
     assert Anchors(user_intent="").merge(Anchors(user_intent="")).user_intent == "N/A"
 
 
+def test_a_bulleted_na_is_a_gap_too():
+    """The template shows its anchors as bullets, so models write ``- N/A``."""
+    parsed, _ = parse_anchors_and_summary(
+        "### User Intent\n- N/A\n\n### Next Steps\n* n/a\n\n## Summary\nx"
+    )
+
+    assert parsed.user_intent == "N/A"
+    assert parsed.next_steps == "N/A"
+    older = Anchors(user_intent="find the file", next_steps="- read it")
+    assert older.merge(parsed).user_intent == "find the file"
+    assert older.merge(parsed).next_steps == "- read it"
+
+
 def test_merging_onto_nothing_keeps_the_newer_values():
     merged = Anchors().merge(Anchors(key_decisions="- use leiden"))
 

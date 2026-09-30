@@ -1,15 +1,7 @@
-"""OmicsClaw's instant-messaging surface: nine platforms, one agent.
+"""OmicsClaw's instant-messaging surface: seven platforms, one agent.
 
-Plan 0031 task D1, and the first real consumer of :mod:`omicsclaw.entry` — a
-contract that only a reference consumer has exercised has not been exercised.
-
-**This package is a port.** ``omicsclaw/surfaces/channels/`` is its input, not
-its predecessor: 7,059 lines that were measured as coupled to the deleted
-packages at thirteen lines, all of them in the two production adapters and all
-of them one missing symbol
-(:class:`~omicsclaw.entry.channel.binding.ChannelSurfaceBinding`). What is new
-here is :mod:`.binding`, :mod:`.delivery` and :mod:`.runtime`, which are that
-symbol and the two things it names.
+The first real consumer of :mod:`omicsclaw.entry` — a contract that only a
+reference consumer has exercised has not been exercised.
 
 **The shape of a deployment**::
 
@@ -31,22 +23,34 @@ start-up would otherwise reach a runtime that cannot run it.
 
 *Nobody gets in without an allowlist.*
 :class:`~omicsclaw.entry.ingress.SenderPolicy` has no default and a binding
-cannot be built without one. ``CLAUDE.md``: authoritative ingress "admits
-nobody else and refuses to start without it", and group chats "fail closed"
-without a bot identity to attribute an @-mention to.
+cannot be built without one. Authoritative ingress admits nobody else and
+refuses to start without it, and group chats fail closed without a bot
+identity to attribute an @-mention to.
 
-**What is verified and what is only moved.** Plan 0031 §5.3 accepts Telegram
-and Feishu; the other seven adapters (WeChat/WeCom, Email, iMessage, DingTalk,
-QQ, Slack, Discord) were moved with no changes beyond line lengths, are not
-tested here, and **are not claimed to work** — they are also gated at start-up
-by :meth:`~omicsclaw.entry.channel.base.Channel.require_authoritative_ingress`,
-which refuses any adapter that has not declared the cutover.
+*One way in and one way out.* A message becomes an exchange through
+:meth:`~omicsclaw.entry.channel.base.Channel.inbound` and
+:meth:`~omicsclaw.entry.channel.runtime.ChannelRuntime.submit`; the answer
+leaves through that runtime's delivery pump, which is the only thing that
+classifies whether a send was accepted. No adapter has a ``send`` of its own
+and no base class offers one.
 
-**No optional dependency is imported here.** ``python-telegram-bot`` and
-``lark-oapi`` are imported inside the factory that needs them, in plainly
-visible syntax, so importing this package costs neither (plan 0031 trap 13).
+**What holds seven similar adapters together is a test, not a base class.**
+``tests/entry/test_channel_cutover_conformance.py`` walks this registry and
+holds every adapter declaring ``authoritative_ingress`` to the same eight
+rules — the places where similar implementations diverge *silently*: a reply
+target whose two halves disagree, a timeout classified as retryable, a group
+gate that is always open, a slash command that reaches the model, a Markdown
+asterisk in a client that renders none. Only three things are shared as
+**code**: :mod:`.reply_target`, the chunk-limit guard on
+:class:`~omicsclaw.entry.channel.binding.ChannelSurfaceBinding`, and
+:meth:`~omicsclaw.entry.channel.base.Channel.command_context`.
+
+**No optional dependency is imported here.** Every platform SDK is imported
+inside the method that first needs a client, in plainly visible syntax, so
+importing this package costs none of them and ``oc channel -- --list`` can
+read a class attribute off all seven without installing anything.
 :func:`get_channel_class` keeps the adapter modules themselves lazy for the
-same reason the ported registry did.
+same reason.
 """
 
 from .base import Channel, DedupCache, RateLimiter, TypingManager, chunk_text
@@ -68,7 +72,6 @@ from .runtime import (
     TurnAcceptanceResult,
     TurnAcceptanceStatus,
     VALUE_REPLY_TARGET,
-    collect_reply,
     compose_channel_runtime,
 )
 
@@ -78,15 +81,14 @@ CHANNEL_REGISTRY: dict[str, tuple[str, str]] = {
     "dingtalk": ("omicsclaw.entry.channel.dingtalk", "DingTalkChannel"),
     "discord": ("omicsclaw.entry.channel.discord", "DiscordChannel"),
     "slack": ("omicsclaw.entry.channel.slack", "SlackChannel"),
-    "wechat": ("omicsclaw.entry.channel.wechat", "WeChatChannel"),
     "qq": ("omicsclaw.entry.channel.qq", "QQChannel"),
     "email": ("omicsclaw.entry.channel.email", "EmailChannel"),
-    "imessage": ("omicsclaw.entry.channel.imessage", "IMessageChannel"),
 }
 """Channel name to ``(module, class)``.
 
-Nine names for ten platforms: WeChat and WeCom share one adapter and one
-file. Only the first two are verified by plan 0031 task D1.
+Every name in this table can be started —
+"registered but unable to start" is a state that no longer exists here, and
+``Channel.require_authoritative_ingress`` is the gate that says so.
 """
 
 
@@ -94,7 +96,7 @@ def get_channel_class(name: str) -> type:
     """Import and return a Channel subclass by name.
 
     Lazy on purpose, and the reason survives the port: a platform SDK is an
-    optional dependency, and resolving all nine names eagerly would make
+    optional dependency, and resolving all seven names eagerly would make
     ``pip install lark-oapi`` a requirement for running a Telegram bot.
 
     Raises:
@@ -136,7 +138,6 @@ __all__ = [
     "TypingManager",
     "VALUE_REPLY_TARGET",
     "chunk_text",
-    "collect_reply",
     "compose_channel_runtime",
     "deliver",
     "dispatch",

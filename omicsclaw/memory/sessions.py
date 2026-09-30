@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from typing import Any, Sequence
 
 from omicsclaw.context import CompactionState
@@ -97,7 +96,7 @@ class SqliteSessionStore:
         await self._db.arun(lambda c: self._save(c, session))
 
     async def list(self, limit: int = 50) -> Sequence[StoredSession]:
-        """Every session in this database file, newest first.
+        """Every session in this database file, most recently active first.
 
         **The scope is the database file itself; this method isolates
         nothing.** The query carries no ``WHERE`` and the ``sessions``
@@ -109,7 +108,7 @@ class SqliteSessionStore:
         here will stop it.
 
         :param limit: Greatest number of sessions to return.
-        :returns: Sessions ordered by creation time, newest first.
+        :returns: Sessions ordered by ``updated_at``, latest first.
         """
         return await self._db.arun(lambda c: self._list(c, limit))
 
@@ -155,6 +154,7 @@ class SqliteSessionStore:
             ),
             created_at=row["created_at"],
             values=values,
+            updated_at=row["updated_at"],
         )
 
     @staticmethod
@@ -172,7 +172,7 @@ class SqliteSessionStore:
             (
                 session.session_id,
                 session.created_at,
-                time.time(),
+                session.updated_at,
                 session.compaction.summary,
                 _dump_anchors(session.compaction.anchors),
                 json.dumps(dict(session.values), ensure_ascii=False)
@@ -208,7 +208,8 @@ class SqliteSessionStore:
     @classmethod
     def _list(cls, conn: sqlite3.Connection, limit: int) -> list[StoredSession]:
         rows = conn.execute(
-            "SELECT session_id FROM sessions ORDER BY created_at DESC LIMIT ?",
+            "SELECT session_id FROM sessions "
+            "ORDER BY updated_at DESC, created_at DESC LIMIT ?",
             (max(limit, 0),),
         ).fetchall()
         loaded = [cls._load(conn, r["session_id"]) for r in rows]

@@ -1,0 +1,43 @@
+{
+ "version": "1",
+ "pip_version": "26.0.1",
+ "install": [
+  {
+   "download_info": {
+    "url": "file:///tmp/exp0061v6/wh2/oc_evil-1.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=48a7913e7cd075db8899f0d01c664abfa143113d4a9a9a19037437b37e5a9d73",
+     "hashes": {
+      "sha256": "48a7913e7cd075db8899f0d01c664abfa143113d4a9a9a19037437b37e5a9d73"
+     }
+    }
+   },
+   "is_direct": false,
+   "requested": true,
+   "metadata": {
+    "name": "oc-evil",
+    "version": "1.0",
+    "requires_dist": [
+     "oc-far @ http://127.0.0.1:18766/oc_far-1.0-py3-none-any.whl"
+    ]
+   }
+  },
+  {
+   "download_info": {
+    "url": "http://127.0.0.1:18766/oc_far-1.0-py3-none-any.whl",
+    "archive_info": {
+     "hash": "sha256=edfa5c5406b97f63b2dd1a871001389b4c3bcffcc5dfa2ac4527a5f47e01be73",
+     "hashes": {
+      "sha256": "edfa5c5406b97f63b2dd1a871001389b4c3bcffcc5dfa2ac4527a5f47e01be73"
+     }
+    }
+   },
+   "is_direct": true,
+   "requested": false,
+   "metadata": {
+    "name": "oc-far",
+    "version": "1.0"
+   }
+  }
+ ]
+}

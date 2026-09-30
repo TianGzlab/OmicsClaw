@@ -22,7 +22,7 @@ import logging
 
 import numpy as np
 
-from omicsclaw.common.runtime_env import ensure_runtime_cache_dirs
+from skills._sdk.runtime_env import ensure_runtime_cache_dirs
 
 ensure_runtime_cache_dirs()
 

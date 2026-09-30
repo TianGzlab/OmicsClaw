@@ -81,7 +81,7 @@ python skills/singlecell/scrna/sc-qc/sc_qc.py \
   --demo --output /tmp/sc_qc_demo
 
 # Via OmicsClaw
-oc run sc-qc --input <data.h5ad> --output <dir>
+python skills/singlecell/scrna/sc-qc/sc_qc.py --input <data.h5ad> --output <dir>
 ```
 
 

@@ -52,17 +52,17 @@ Important:
 
 ```bash
 # Default alias used by OmicsClaw
-oc run spatial-trajectory \
+python skills/spatial/spatial-trajectory/spatial_trajectory.py \
   --input <processed.h5ad> --output <dir>
 
 # DPT with explicit root selection
-oc run spatial-trajectory \
+python skills/spatial/spatial-trajectory/spatial_trajectory.py \
   --input <processed.h5ad> --method dpt \
   --cluster-key leiden --root-cell-type progenitor \
   --dpt-n-dcs 10 --output <dir>
 
 # CellRank with method-specific controls
-oc run spatial-trajectory \
+python skills/spatial/spatial-trajectory/spatial_trajectory.py \
   --input <processed.h5ad> --method cellrank \
   --cluster-key leiden --root-cell AAAC... \
   --cellrank-n-states 4 \
@@ -72,7 +72,7 @@ oc run spatial-trajectory \
   --output <dir>
 
 # Palantir
-oc run spatial-trajectory \
+python skills/spatial/spatial-trajectory/spatial_trajectory.py \
   --input <processed.h5ad> --method palantir \
   --cluster-key leiden --root-cell-type progenitor \
   --palantir-n-components 10 \
@@ -82,7 +82,7 @@ oc run spatial-trajectory \
   --output <dir>
 
 # Demo mode
-oc run spatial-trajectory --demo --output /tmp/traj_demo
+python skills/spatial/spatial-trajectory/spatial_trajectory.py --demo --output /tmp/traj_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-trajectory/spatial_trajectory.py \

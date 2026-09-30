@@ -298,11 +298,11 @@ print("omicsclaw.launch" in sys.modules)
 """Import *every* module of the layer below, then ask the question once.
 
 The four-target parametrisation above imports the package and its three
-subpackages, which between them reach none of the nine adapters and
-neither delivery module: eleven files that the reverse-layering probe
-could never have caught a lazy ``import omicsclaw.launch`` in. One
-subprocess covers all of them; eleven more subprocesses would cost a
-minute and say the same thing.
+subpackages, which between them reach none of the channel adapters or
+their delivery modules: files that the reverse-layering probe could never
+have caught a lazy ``import omicsclaw.launch`` in. One subprocess covers
+all of them; a subprocess per file would cost a minute and say the same
+thing.
 """
 
 
@@ -370,6 +370,8 @@ SHELL_FLAGS = frozenset(
         "--",
         "-h",
         "--help",
+        "--abandon-grace",
+        "--hide-reasoning",
         "--channels",
         "--configure",
         "--health-port",
@@ -593,18 +595,40 @@ def test_every_launch_module_imports_with_no_vendor_sdk_installed(
 # ---- the desktop surface's honest failure -----------------------------
 
 
-def test_the_desktop_command_names_its_missing_dependency_and_stops():
-    """``fastapi`` is not installed here, so this is the reachable half.
+_WITHOUT_A_WEB_SERVER = """
+import runpy
+import sys
 
-    Plan 0037 §8-4 wants ``oc desktop`` up and ``GET /health`` answered;
-    that cannot run on this machine and is reported as unverified rather
-    than faked with a double. What **is** verifiable as a real process
-    is the other branch, and it is the one a user without the extra will
-    hit: the command must name the remedy and return the shell's refusal
-    code rather than a traceback.
+sys.modules["fastapi"] = None
+sys.modules["uvicorn"] = None
+sys.argv = ["omicsclaw.launch", *sys.argv[1:]]
+runpy.run_module("omicsclaw.launch", run_name="__main__", alter_sys=True)
+"""
+"""Run ``python -m omicsclaw.launch`` with ``fastapi`` and ``uvicorn``
+unimportable: a ``None`` entry in :data:`sys.modules` makes ``import``
+raise :exc:`ImportError` whether or not the interpreter has them."""
+
+
+def test_the_desktop_command_names_its_missing_dependency_and_stops(tmp_path):
+    """The branch a user without the web server hits, as a real process.
+
+    The command must name the remedy and return the shell's refusal code
+    rather than a traceback. The two packages are made unimportable in
+    the child, so the test takes this branch in every interpreter: where
+    they are installed, the unguarded command would start serving on
+    ``127.0.0.1:8765`` and this test would wait out its timeout instead.
+    ``--workspace`` points at a temporary directory so that nothing, even
+    on a regression that got further, is written into the checkout.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "omicsclaw.launch", "desktop"],
+        [
+            sys.executable,
+            "-c",
+            _WITHOUT_A_WEB_SERVER,
+            "desktop",
+            "--workspace",
+            str(tmp_path),
+        ],
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
@@ -613,6 +637,8 @@ def test_the_desktop_command_names_its_missing_dependency_and_stops():
 
     assert result.returncode == 2, result.stderr
     assert "uvicorn and fastapi" in result.stderr
+    assert "conda" in result.stderr
+    assert "pip install" not in result.stderr
     assert "Traceback" not in result.stderr
 
 

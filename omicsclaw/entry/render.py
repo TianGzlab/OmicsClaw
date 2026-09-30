@@ -13,6 +13,14 @@ rather than two classes with one shared bug.
 
 :func:`to_wire` is **pure**, and is what crosses a process boundary.
 
+Every text field a control line is built from — a tool name, a progress
+message, a request id, a refusal's reason, a compaction's failure, an
+error's type name, an approval card's reason and arguments — is made
+inert by ``omicsclaw/entry/display.py`` before it is put in the line, so
+no surface receives a control character from one. Text and reasoning
+deltas are returned as they arrived; a surface that prints them makes
+them inert itself.
+
 Three things this module is careful about, each with a named trap in plan
 0031 §6:
 
@@ -34,13 +42,18 @@ from the blocking path and means "free **or** unreported", because
 (``engine/types.py:204-215``). They render as
 :data:`USAGE_UNREPORTED` and :data:`USAGE_ZERO`, never as the same string.
 
-*Tool arguments and tool output are not rendered as text* (Q22 rule 1).
-Argument payloads and tool output can carry subject identifiers, and this
-layer feeds a CLI, an IM transport and an HTTP stream from one place, so
-:class:`TextRenderer` never puts either on a screen or in a chat; a
-Surface that has decided it may show them reads them off
+*Tool arguments and tool output are not rendered as text* (Q22 rule 1),
+approval lines excepted. Argument payloads and tool output can carry
+subject identifiers, and this layer feeds a CLI, an IM transport and an
+HTTP stream from one place, so :class:`TextRenderer` never puts a raw
+payload or any output on a screen or in a chat; a Surface that has decided
+it may show them reads them off
 :attr:`~omicsclaw.entry.events.TurnEvent.engine` itself, having made that
-decision explicitly.
+decision explicitly. An approval line carries the request's reason and,
+unless :attr:`~omicsclaw.tools.ApprovalRequest.reason_shows_call`, the
+call's arguments with credential-named values hidden; both are made inert
+by ``omicsclaw/entry/display.py``, shown to the person deciding, and never
+logged.
 
 :func:`to_wire` is the other case and the opposite rule: it **must**
 carry both, because ``ToolCall.arguments`` crossing byte for byte is a
@@ -81,6 +94,7 @@ from __future__ import annotations
 import math
 from typing import Any, Final
 
+from omicsclaw.entry.display import approval_body, inert_line
 from omicsclaw.entry.events import TurnEvent, TurnEventType
 
 ELAPSED_INCLUDES_APPROVAL_WAIT: Final = "s elapsed (includes any approval wait)"
@@ -100,7 +114,14 @@ two apart, so neither does this string (trap 7)."""
 
 REASONING_PREFIX: Final = "[reasoning] "
 """Marks the Reasoning half of ReAct so a reader can tell it from the
-answer without the renderer having to interleave two streams."""
+answer without the renderer having to interleave two streams.
+
+Once per *block*, not once per emission. Unbatched, every delta is
+emitted as it arrives, and a prefix on each of them turned a paragraph
+of thought into ``[reasoning] The[reasoning]  user[reasoning]  asks``.
+Batched, each emission is a separate message and so is labelled again.
+The terminal no longer uses this at all —— see
+``omicsclaw/entry/cli/_reasoning.py`` —— but the contract is shared."""
 
 BATCH_CHARS: Final = 2000
 """Characters buffered before a batched renderer emits.
@@ -162,7 +183,14 @@ class TextRenderer:
     last answer, which is why ``EXCHANGE_END`` also drains the buffer.
     """
 
-    __slots__ = ("_batch_chars", "_batched", "_buf", "_kind", "_show_reasoning")
+    __slots__ = (
+        "_batch_chars",
+        "_batched",
+        "_buf",
+        "_kind",
+        "_open",
+        "_show_reasoning",
+    )
 
     def __init__(
         self,
@@ -179,12 +207,14 @@ class TextRenderer:
         self._show_reasoning = show_reasoning
         self._buf: list[str] = []
         self._kind = ""
+        self._open = ""
 
     def feed(self, event: TurnEvent) -> str | None:
         """Render one frame, or ``None`` when it produces nothing yet."""
         if event.type in (TurnEventType.TEXT_DELTA, TurnEventType.REASONING_DELTA):
             return self._feed_delta(event)
         prefix = self._drain()
+        self._open = ""
         line = self._control_line(event)
         if line is None:
             return prefix or None
@@ -213,13 +243,28 @@ class TextRenderer:
         return f"{carried}\n{emitted}" if carried else emitted
 
     def _drain(self) -> str:
+        """Emit the buffer, labelled and separated by the block it is in.
+
+        ``_open`` is the kind of the block the reader is currently in,
+        and outlives the buffer: unbatched, the buffer is one delta long,
+        so it is the only thing that knows a delta continues a block
+        rather than starting one. A new block after a different one
+        starts on a new line —— batched output already does, by joining
+        with ``\n`` in :meth:`_feed_delta` —— so an answer never runs on
+        from the last word of the thinking that led to it.
+        """
         if not self._buf:
             return ""
         text = "".join(self._buf)
         kind = self._kind
         self._buf.clear()
         self._kind = ""
-        return f"{REASONING_PREFIX}{text}" if kind == "reasoning" else text
+        opens = kind != self._open
+        separator = "\n" if opens and self._open and not self._batched else ""
+        self._open = kind
+        if kind == "reasoning" and (opens or self._batched):
+            text = f"{REASONING_PREFIX}{text}"
+        return f"{separator}{text}"
 
     def _control_line(self, event: TurnEvent) -> str | None:
         kind = event.type
@@ -237,7 +282,7 @@ class TextRenderer:
             return _progress_line(event)
         if kind is TurnEventType.TOOL_START:
             call = event.engine.tool_call if event.engine is not None else None
-            return f"-> {call.name if call is not None else '?'}"
+            return f"-> {inert_line(call.name) if call is not None else '?'}"
         if kind is TurnEventType.TOOL_RESULT:
             return _tool_result_line(event)
         if kind is TurnEventType.APPROVAL_REQUIRED:
@@ -294,7 +339,7 @@ def _compaction_line(event: TurnEvent) -> str:
     if details:
         line += f"; {', '.join(details)}"
     if record.degraded:
-        line += f" (degraded: {record.degraded})"
+        line += f" (degraded: {inert_line(record.degraded)})"
     return line
 
 
@@ -302,8 +347,8 @@ def _progress_line(event: TurnEvent) -> str:
     update = event.progress
     if update is None:
         return "..."
-    head = f"... {update.tool_name}" if update.tool_name else "..."
-    body = f": {update.message}" if update.message else ""
+    head = f"... {inert_line(update.tool_name)}" if update.tool_name else "..."
+    body = f": {inert_line(update.message)}" if update.message else ""
     share = ""
     if update.fraction is not None and math.isfinite(update.fraction):
         share = f" [{update.fraction * 100:.0f}%]"
@@ -313,7 +358,7 @@ def _progress_line(event: TurnEvent) -> str:
 def _tool_result_line(event: TurnEvent) -> str:
     engine = event.engine
     result = engine.tool_result if engine is not None else None
-    name = result.name if result is not None and result.name else "?"
+    name = inert_line(result.name) if result is not None and result.name else "?"
     status = "error" if result is not None and result.is_error else "ok"
     line = f"<- {name} {status}"
     elapsed = engine.duration_s if engine is not None else None
@@ -323,26 +368,33 @@ def _tool_result_line(event: TurnEvent) -> str:
 
 
 def _approval_line(event: TurnEvent) -> str:
+    """The card for an approval: a header, then the request's body.
+
+    The header is ``Approval required [<id>]: <tool> (risk <level>)``; the
+    body, :func:`~omicsclaw.entry.display.approval_body` with its default
+    bounds, follows it after `` - `` when there is one.
+    """
+    request_id = inert_line(event.request_id)
     request = event.approval
     if request is None:
-        return f"Approval required [{event.request_id}]"
-    line = (
-        f"Approval required [{event.request_id}]: {request.tool_name} "
+        return f"Approval required [{request_id}]"
+    header = (
+        f"Approval required [{request_id}]: {inert_line(request.tool_name)} "
         f"(risk {request.risk_level.value})"
     )
-    if request.reason:
-        line += f" - {request.reason}"
-    return line
+    body, _cut = approval_body(request)
+    return f"{header} - {body}" if body else header
 
 
 def _settled_line(event: TurnEvent) -> str:
+    request_id = inert_line(event.request_id)
     decision = event.decision
     if decision is None:
-        return f"Approval settled [{event.request_id}]"
+        return f"Approval settled [{request_id}]"
     verdict = "granted" if decision.approved else "denied"
-    line = f"Approval {verdict} [{event.request_id}]"
+    line = f"Approval {verdict} [{request_id}]"
     if decision.reason:
-        line += f": {decision.reason}"
+        line += f": {inert_line(decision.reason)}"
     return line
 
 
@@ -367,7 +419,7 @@ def _terminal_line(event: TurnEvent) -> str:
     if terminal == "cancelled":
         return "Cancelled."
     error = event.error
-    named = type(error).__name__ if error is not None else "unknown"
+    named = inert_line(type(error).__name__) if error is not None else "unknown"
     return f"Failed: {named}"
 
 

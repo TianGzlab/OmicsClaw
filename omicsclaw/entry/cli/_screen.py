@@ -21,8 +21,9 @@ thing the user is reading, and the record is not lost — it goes to
 module cannot enforce that for other files, but it is the file that
 decides where log records go, so it is where the rule is written down:
 ``write_file``'s content, ``bash``'s command and ``web_fetch``'s full URL
-can each carry a subject identifier, and ``CLAUDE.md``'s first safety rule
-("genetic data never leaves this machine") is a rule a log file can break.
+can each carry a subject identifier, and
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 ("genetic data never
+leaves this machine") is a rule a log file can break.
 Nothing in :mod:`omicsclaw.entry.cli` passes either to a logger, and
 ``tests/entry/test_cli_logging.py`` drives a real tool call and asserts
 the arguments never reach a record.

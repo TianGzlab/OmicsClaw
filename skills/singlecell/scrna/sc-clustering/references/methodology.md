@@ -19,7 +19,7 @@ The search results (resolution vs silhouette score) are saved as
 
 **Example:**
 ```bash
-python omicsclaw.py run sc-clustering --demo --resolution auto --output /tmp/clustering_auto
+python skills/singlecell/scrna/sc-clustering/sc_cluster.py --demo --resolution auto --output /tmp/clustering_auto
 ```
 
 Method-specific parameters:

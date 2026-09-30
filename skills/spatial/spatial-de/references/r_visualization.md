@@ -11,7 +11,7 @@ list.  The current entrypoint is
 
 ## Input contract
 
-After `oc run spatial-de ...` finishes, the output directory contains:
+After `python skills/spatial/spatial-de/spatial_de.py ...` finishes, the output directory contains:
 
 - `figure_data/de_plot_points.csv` — per-gene volcano coordinates
 - `figure_data/top_de_hits.csv` — top markers per group

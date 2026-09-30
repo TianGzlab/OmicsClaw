@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-register ...` or `oc run spatial-registration ...` first.
+Run `python skills/spatial/spatial-register/spatial_register.py ...` or `python skills/spatial/spatial-register/spatial_register.py ...` first.
 The resulting output directory should contain:
 
 - `figure_data/registration_points.csv`

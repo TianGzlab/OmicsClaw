@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-raw-processing ...` first. The output directory should
+Run `python skills/spatial/spatial-raw-processing/spatial_raw_processing.py ...` first. The output directory should
 contain at least:
 
 - `figure_data/raw_processing_run_summary.csv`

@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-cnv ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-cnv/spatial_cnv.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/cnv_scores.csv`

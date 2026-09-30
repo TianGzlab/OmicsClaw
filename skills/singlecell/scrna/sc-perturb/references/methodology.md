@@ -59,14 +59,14 @@ If these labels are absent, run `sc-perturb-prep` first to merge a barcode-to-gu
 
 ```bash
 # Typical real-data run
-python omicsclaw.py run sc-perturb \
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
   --input perturb_prep_output/processed.h5ad \
   --pert-key perturbation \
   --control NT \
   --output results/
 
 # If the column names differ from defaults
-python omicsclaw.py run sc-perturb \
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
   --input data.h5ad \
   --pert-key guide_target \
   --control non-targeting \

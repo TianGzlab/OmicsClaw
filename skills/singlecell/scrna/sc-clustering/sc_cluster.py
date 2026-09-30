@@ -17,18 +17,23 @@ import pandas as pd
 import scanpy as sc
 from sklearn.metrics import silhouette_score
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
     get_matrix_contract,
@@ -41,7 +46,7 @@ from skills.singlecell._lib import dimred as sc_dimred_utils
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.preflight import apply_preflight, PreflightDecision, _obs_candidates, _format_candidates
-from skills.singlecell._lib import dependency_manager as sc_dep_manager
+from skills._sdk import deps as sc_dep_manager
 from skills.singlecell._lib.viz import (
     plot_cluster_qc_heatmap,
     plot_cluster_size_summary,
@@ -1013,9 +1018,9 @@ def main():
     # --- Next-step guidance ---
     print()
     print(">> Next steps:")
-    print(f"  - sc-cell-annotation: python omicsclaw.py run sc-cell-annotation --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-markers:         python omicsclaw.py run sc-markers --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-pseudotime:      python omicsclaw.py run sc-pseudotime --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-cell-annotation: python skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-markers:         python skills/singlecell/scrna/sc-markers/sc_markers.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-pseudotime:      python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

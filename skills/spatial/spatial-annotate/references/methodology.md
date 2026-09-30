@@ -54,29 +54,29 @@ If `layers["counts"]` is missing, count-based methods try `adata.raw` first and 
 
 ```bash
 # Marker-based baseline (default)
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --output <dir>
 
 # Marker-based tuning with Scanpy overlap scoring
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method marker_based \
   --cluster-key leiden --marker-rank-method wilcoxon \
   --marker-n-genes 50 --marker-overlap-method overlap_count \
   --marker-overlap-normalize reference --output <dir>
 
 # Marker-based p-adjusted marker selection (no fixed top-N)
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method marker_based \
   --marker-n-genes 0 --marker-padj-cutoff 0.01 --output <dir>
 
 # Tangram transfer
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method tangram \
   --reference <reference_sc.h5ad> --cell-type-key cell_type \
   --tangram-num-epochs 500 --tangram-train-genes 2000 --output <dir>
 
 # scANVI transfer
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method scanvi \
   --reference <reference_sc.h5ad> --cell-type-key cell_type \
   --layer counts --batch-key sample_id \
@@ -84,17 +84,17 @@ oc run spatial-annotate \
   --output <dir>
 
 # CellAssign with built-in marker panel
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method cellassign \
   --species human --layer counts --cellassign-max-epochs 400 --output <dir>
 
 # CellAssign with a custom marker-panel JSON
-oc run spatial-annotate \
+python skills/spatial/spatial-annotate/spatial_annotate.py \
   --input <preprocessed.h5ad> --method cellassign \
   --model <marker_panel.json> --layer counts --output <dir>
 
 # Demo mode (marker-based baseline)
-oc run spatial-annotate --demo --output /tmp/annotate_demo
+python skills/spatial/spatial-annotate/spatial_annotate.py --demo --output /tmp/annotate_demo
 
 # Direct script entrypoint
 python skills/spatial/spatial-annotate/spatial_annotate.py \

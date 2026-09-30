@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-annotate ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-annotate/spatial_annotate.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/annotation_spatial_points.csv`

@@ -21,20 +21,26 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
+)
+from skills._sdk.result import (
     load_result_json,
     write_result_json,
-    write_replot_hint,
 )
-from omicsclaw.core.dependency_manager import validate_r_environment
-from omicsclaw.core.r_script_runner import RScriptRunner
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
+from skills._sdk.deps import validate_r_environment
+from skills._sdk.r_script_runner import RScriptRunner
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
@@ -123,7 +129,7 @@ def _render_r_enhanced(
             r_figure_paths.append(str(out_path))
     return r_figure_paths
 R_SCRIPTS_DIR = Path(__file__).resolve().parent / "rscripts"  # local R scripts for engine=r
-R_SCRIPTS_PROJECT_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"  # project-level R bridge scripts
+R_SCRIPTS_PROJECT_DIR = _SDK_R_SCRIPTS_DIR  # project-level R bridge scripts
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "ora": MethodConfig(
@@ -613,7 +619,7 @@ def _run_gsea_r(adata, ranking_df: pd.DataFrame, output_dir: Path, params: dict)
     """Run clusterProfiler GSEA via R bridge. Returns (enrichment_df, summary_dict)."""
     import warnings
 
-    from omicsclaw.core.r_script_runner import RScriptError, RScriptRunner
+    from skills._sdk.r_script_runner import RScriptError, RScriptRunner
 
     r_script = R_SCRIPTS_PROJECT_DIR / "sc_gsea_r.R"
     if not r_script.exists():
@@ -727,7 +733,7 @@ def _run_gsva_r(adata, groupby: str, output_dir: Path, params: dict) -> tuple[pd
     """Run GSVA group-level pathway scoring via R bridge. Returns (scores_df_long, summary_dict)."""
     import warnings
 
-    from omicsclaw.core.r_script_runner import RScriptError, RScriptRunner
+    from skills._sdk.r_script_runner import RScriptError, RScriptRunner
 
     r_script = R_SCRIPTS_PROJECT_DIR / "sc_gsva_r.R"
     if not r_script.exists():
@@ -1515,8 +1521,8 @@ def main() -> None:
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Further exploration:")
-    print(f"  - sc-cell-communication: python omicsclaw.py run sc-cell-communication --input {output_dir}/processed.h5ad --output <dir>")
-    print(f"  - sc-grn:                python omicsclaw.py run sc-grn --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-cell-communication: python skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  - sc-grn:                python skills/singlecell/scrna/sc-grn/sc_grn.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
 if __name__ == "__main__":

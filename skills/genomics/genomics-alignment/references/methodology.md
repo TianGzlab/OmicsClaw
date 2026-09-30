@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run genomics-alignment --demo
-python omicsclaw.py run genomics-alignment --input <reads.fastq> --output <dir>
+python skills/genomics/genomics-alignment/genomics_alignment.py --demo
+python skills/genomics/genomics-alignment/genomics_alignment.py --input <reads.fastq> --output <dir>
 ```
 
 

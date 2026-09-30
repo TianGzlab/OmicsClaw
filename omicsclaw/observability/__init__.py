@@ -65,7 +65,8 @@ instrumentation will not nest inside these spans.
 **Payloads do not leave the machine unless somebody says so.** The
 reference always serializes the conversation, the tool arguments and the
 tool output into span attributes, which is reasonable for a coding
-harness and is not reasonable here: ``CLAUDE.md`` states *"Genetic data
+harness and is not reasonable here:
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 states *"Genetic data
 never leaves this machine"*, and an OmicsClaw prompt routinely names a
 cohort, a sequencing run or a patient sample. So
 :attr:`~omicsclaw.observability.config.ObservabilityConfig.capture_content`

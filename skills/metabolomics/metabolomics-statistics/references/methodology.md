@@ -4,7 +4,7 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run met-stat --demo
+python skills/metabolomics/metabolomics-statistics/metabolomics_statistics.py --demo
 ```
 
 

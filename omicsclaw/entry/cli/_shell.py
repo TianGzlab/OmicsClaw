@@ -43,8 +43,8 @@ Two more things the child does not get. Its standard input is
 ``/dev/null``, so it cannot race the REPL for the keyboard — the
 reference harness gets this from Go's default and this module has to ask
 for it. And it runs in a session of its own, so killing it after the
-timeout kills whatever it started rather than orphaning a subtree that
-holds the pipe open.
+timeout or on an interrupt kills whatever it started rather than
+orphaning a subtree that holds the pipe open.
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ from pathlib import Path
 from typing import Sequence
 
 from omicsclaw.memory import truncate_utf8
+from omicsclaw.tools.builtin.bash import spawn_group_leader
 
 __all__ = [
     "CONTEXT_LIMIT",
@@ -136,6 +137,13 @@ module's docstring.
 """
 
 _TIMED_OUT = "timed out"
+_INTERRUPTED = "interrupted"
+
+_READ_BYTES = 65536
+"""Bytes asked of the output pipe per read."""
+
+_DRAIN_S = 1.0
+"""Seconds spent collecting what a killed command left in its pipe."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +153,8 @@ class ShellResult:
     command: str
     output: str
     """stdout and stderr, interleaved as the terminal would have shown
-    them, decoded with replacement so a binary byte cannot raise."""
+    them, decoded with replacement so a binary byte cannot raise. For a
+    command killed at the timeout, what it wrote before it was killed."""
 
     failed: bool
     """True on a non-zero exit **and** on a kill, as the reference
@@ -154,6 +163,9 @@ class ShellResult:
 
     duration_s: float
     timed_out: bool
+    interrupted: bool = False
+    """True when the command was killed because the person interrupted
+    it; its output is then empty."""
 
 
 def wants_a_terminal(command: str) -> bool:
@@ -181,24 +193,30 @@ async def run_shell(
     Never raises for the command's own sake: a non-zero exit, a kill and
     a shell that could not even be started all come back as a
     :class:`ShellResult` with ``failed`` set, because the caller's job is
-    to put the answer on a screen and a traceback is not one.
+    to put the answer on a screen and a traceback is not one. A command
+    killed at the timeout comes back with the output it wrote before the
+    kill, and whatever was still in the pipe after it.
 
     :param command: Shell text, exactly as typed after the ``!``.
     :param cwd: Directory to run in.
     :param timeout_s: Seconds before the command and everything it
         started are killed.
+    :raises asyncio.CancelledError: when the awaiting Task is cancelled,
+        after the command and everything it started have been killed.
     """
     started = time.monotonic()
     try:
-        process = await asyncio.create_subprocess_exec(
-            "bash",
-            "-c",
-            command,
-            cwd=str(cwd),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
+        process = await spawn_group_leader(
+            asyncio.create_subprocess_exec(
+                "bash",
+                "-c",
+                command,
+                cwd=str(cwd),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
         )
     except OSError as error:
         return ShellResult(
@@ -209,21 +227,25 @@ async def run_shell(
             timed_out=False,
         )
 
+    output = bytearray()
     try:
-        raw, _ = await asyncio.wait_for(process.communicate(), timeout_s)
+        await asyncio.wait_for(_collect(process, output), timeout_s)
     except TimeoutError:
         _kill_the_group(process)
-        raw = await _drain(process)
+        await _drain(process, output)
         return ShellResult(
             command=command,
-            output=_decode(raw),
+            output=_decode(bytes(output)),
             failed=True,
             duration_s=time.monotonic() - started,
             timed_out=True,
         )
+    except asyncio.CancelledError:
+        _kill_the_group(process)
+        raise
     return ShellResult(
         command=command,
-        output=_decode(raw),
+        output=_decode(bytes(output)),
         failed=process.returncode != 0,
         duration_s=time.monotonic() - started,
         timed_out=False,
@@ -243,7 +265,11 @@ def for_model(result: ShellResult) -> str:
     million of and needs no explaining.
     """
     body = truncate_utf8(result.output, CONTEXT_LIMIT)
-    note = f" ({_TIMED_OUT} after {result.duration_s:.0f}s)" if result.timed_out else ""
+    note = ""
+    if result.timed_out:
+        note = f" ({_TIMED_OUT} after {result.duration_s:.0f}s)"
+    elif result.interrupted:
+        note = f" ({_INTERRUPTED} after {result.duration_s:.0f}s)"
     return f"$ {result.command}{note}\n{body}"
 
 
@@ -266,28 +292,46 @@ def _kill_the_group(process: "asyncio.subprocess.Process") -> None:
     The process group and not the process: ``bash -c 'sleep 60 | cat'``
     leaves two children, and killing only the shell leaves the pipe held
     open by a process nobody is waiting for.
+
+    The group is addressed by the shell's pid, which is its id because
+    the shell was started in a session of its own. It stays addressable
+    after the shell itself has exited and been reaped, as long as
+    anything it started is still in the group.
     """
     with contextlib.suppress(OSError):
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        os.killpg(process.pid, signal.SIGKILL)
         return
     with contextlib.suppress(OSError):
         process.kill()
 
 
-async def _drain(process: "asyncio.subprocess.Process") -> bytes:
-    """Whatever a killed command had already written, or nothing.
+async def _collect(process: "asyncio.subprocess.Process", into: bytearray) -> None:
+    """Append the command's output to *into* until the pipe closes, then
+    wait for the command to exit.
 
-    The first :meth:`communicate` was cancelled by the timeout, so the
-    pipe may still hold bytes; a second call collects them now that the
-    writer is gone. It is allowed to fail — this runs on the path where
-    something has already gone wrong, and losing the tail of a killed
-    command's output is not worth a second failure.
+    Appended as it arrives, so a caller that stops waiting keeps what was
+    read up to that moment.
+    """
+    stdout = process.stdout
+    if stdout is not None:
+        while chunk := await stdout.read(_READ_BYTES):
+            into.extend(chunk)
+    await process.wait()
+
+
+async def _drain(process: "asyncio.subprocess.Process", into: bytearray) -> None:
+    """Append to *into* what a killed command left in its pipe.
+
+    Reads for at most :data:`_DRAIN_S` seconds, and ignores any failure:
+    the command is already being reported as killed, and a process that
+    escaped the group could otherwise hold the pipe open indefinitely.
+
+    :raises asyncio.CancelledError: the awaiting Task was cancelled.
     """
     try:
-        raw, _ = await process.communicate()
+        await asyncio.wait_for(_collect(process, into), _DRAIN_S)
     except Exception:  # noqa: BLE001 - see the docstring
-        return b""
-    return raw or b""
+        pass
 
 
 def _decode(raw: bytes | None) -> str:

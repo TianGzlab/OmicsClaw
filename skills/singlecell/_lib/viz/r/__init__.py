@@ -9,7 +9,7 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 
-from omicsclaw.core.r_script_runner import (
+from skills._sdk.r_script_runner import (
     RScriptError,
     RScriptRunner,
     RScriptTimeoutError,

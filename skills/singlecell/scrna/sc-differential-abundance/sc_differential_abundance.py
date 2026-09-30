@@ -30,24 +30,30 @@ try:
 except Exception:
     pass
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
-from omicsclaw.common.checksums import sha256_file
-from omicsclaw.common.report import (
+from skills._sdk.checksums import sha256_file
+from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
-    load_result_json,
     write_repro_requirements,
-    write_result_json,
-    write_replot_hint,
 )
+from skills._sdk.result import (
+    load_result_json,
+    write_result_json,
+)
+from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
 )
+from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
 from skills.singlecell._lib.differential_abundance import (
     build_composition_summary,
@@ -64,7 +70,7 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-differential-abundance"
 SKILL_VERSION = "0.2.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py"
-R_SCRIPTS_DIR = _PROJECT_ROOT / "omicsclaw" / "r_scripts"
+R_SCRIPTS_DIR = _SDK_R_SCRIPTS_DIR
 
 # R Enhanced renderers for this skill.
 # Key   = renderer name registered in viz/r/registry.R R_PLOT_REGISTRY
@@ -376,7 +382,7 @@ def _write_reproducibility(output_dir: Path, params: dict, input_file: str | Non
 def _run_proportion_test_r(adata, condition_key: str, cell_type_key: str, output_dir: Path, params: dict) -> dict:
     """Run base-R Monte Carlo permutation test via RScriptRunner."""
     import warnings
-    from omicsclaw.core.r_script_runner import RScriptRunner, RScriptError
+    from skills._sdk.r_script_runner import RScriptRunner, RScriptError
 
     r_script = R_SCRIPTS_DIR / "sc_proportion_test_r.R"
     if not r_script.exists():
@@ -874,7 +880,7 @@ def main() -> int:
     # --- Next-step guidance ---
     print()
     print(">> Analysis complete. Consider sc-de for gene-level differences:")
-    print(f"  python omicsclaw.py run sc-de --input {output_dir}/processed.h5ad --output <dir>")
+    print(f"  python skills/singlecell/scrna/sc-de/sc_de.py --input {output_dir}/processed.h5ad --output <dir>")
 
     logger.info("Done: %s", output_dir)
     return 0

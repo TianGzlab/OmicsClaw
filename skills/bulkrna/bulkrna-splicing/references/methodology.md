@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-splicing --demo
-python omicsclaw.py run bulkrna-splicing --input <splicing_events.csv> --output <dir>
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --demo
+python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --input <splicing_events.csv> --output <dir>
 python bulkrna_splicing.py --input events.csv --output results/ --dpsi-cutoff 0.1 --padj-cutoff 0.05
 python bulkrna_splicing.py --demo --output /tmp/splicing_demo
 ```

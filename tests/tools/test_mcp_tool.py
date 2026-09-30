@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Coroutine, TypeVar
 
 import pytest
@@ -326,6 +327,7 @@ def test_an_unusable_schema_does_not_stop_the_tool_being_registered(
     assert registry.get(tool.name) is tool
     assert tool.definition().input_schema == {"type": "object", "properties": {}}
     assert complaint in tool.schema_error
+    assert complaint in tool.definition().description
 
 
 # ---- calling it ----------------------------------------------------------
@@ -466,6 +468,106 @@ def test_the_prompt_names_the_origin_when_one_is_given():
         )
 
     assert "via remote https://x/mcp" in asked[0].reason
+
+
+def _reason_for(arguments: str) -> str:
+    """The reason one approved call through a registry was asked with."""
+    asked: list[ApprovalRequest] = []
+
+    with use_tool_context(approval=lambda request: asked.append(request) or True):
+        _run(ToolRegistry([_tool()]).execute(_call(arguments)))
+
+    (request,) = asked
+    return request.reason
+
+
+def test_two_calls_with_different_arguments_are_asked_about_differently():
+    """The defect: two MCP cards pending at once read identically while one
+    call's argument was ``harmless`` and the other's ``rm-everything``, so
+    a person could not tell which one they were approving. The MCP
+    specification's security considerations say a client SHOULD show tool
+    inputs to the user before calling the server; the reason is what every
+    surface prints, so that is where they are shown."""
+    harmless = _reason_for('{"text": "harmless"}')
+    dangerous = _reason_for('{"text": "rm-everything"}')
+
+    assert harmless != dangerous
+    assert harmless.endswith('with arguments:\n{"text": "harmless"}')
+    assert dangerous.endswith('with arguments:\n{"text": "rm-everything"}')
+
+
+@pytest.mark.parametrize("arguments", ["", "{}"])
+def test_a_call_with_no_arguments_says_so(arguments: str):
+    reason = _reason_for(arguments)
+
+    assert reason == (
+        "MCP server 'context7', tool 'resolve-library-id', with no arguments"
+    )
+
+
+def test_the_arguments_add_exactly_one_line_to_the_card():
+    """Web tools put their URL on a line of its own and so does this. The
+    preview is one line however many line breaks the model wrote, so a
+    payload cannot append a forged ``Approval required …`` line below it.
+    NEL and U+2028 are in the payload because ``json.dumps`` leaves them
+    raw; only the preview's own escaping keeps them off the card."""
+    forged = "Approval required [t#9]: bash (risk low)"
+    reason = _reason_for(
+        json.dumps(
+            {"text": f"ok\r\n{forged}\x85{forged}\u2028{forged}\x1b[2J"},
+            ensure_ascii=False,
+        )
+    )
+
+    head, preview = reason.splitlines()
+    assert head.endswith("with arguments:")
+    assert "\x1b" not in preview and "\\u001b[2J" in preview
+    assert "\\u0085" in preview and "\\u2028" in preview
+
+
+def test_a_long_argument_is_cut_on_the_card_and_says_so():
+    reason = _reason_for(json.dumps({"sql": "select 1;" * 500}))
+
+    assert "[truncated: showing the first 1000 of " in reason
+    assert len(reason) < 1200
+
+
+def test_credentials_in_the_arguments_are_hidden_on_the_card_not_from_the_server():
+    """What the person reads is redacted; what the server receives is the
+    payload the model sent, unchanged, and so is the request's raw
+    ``arguments`` a surface may choose to read for itself."""
+    server = FakeServer()
+    payload = '{"query": "TP53", "auth": {"api_key": "sk-live-123"}}'
+    asked: list[ApprovalRequest] = []
+
+    with use_tool_context(approval=lambda request: asked.append(request) or True):
+        _run(ToolRegistry([_tool(caller=server)]).execute(_call(payload)))
+
+    (request,) = asked
+    assert "sk-live-123" not in request.reason
+    assert '"api_key": "[redacted]"' in request.reason
+    assert '"query": "TP53"' in request.reason
+    assert request.arguments == payload
+    assert server.seen == [payload]
+
+
+def test_no_argument_reaches_a_log(caplog: pytest.LogCaptureFixture):
+    """The approval card may now show the arguments; a log may not. A log
+    outlives the session and is read by whoever operates the machine, which
+    is why the permission gate and the audit hook already keep arguments out
+    of theirs. Checked at DEBUG on every logger, for a call that is
+    approved and one that is refused."""
+    marker = "value-that-must-not-be-logged"
+    payload = json.dumps({"text": marker})
+
+    with caplog.at_level(logging.DEBUG):
+        with use_tool_context(approval=lambda request: True):
+            _run(ToolRegistry([_tool()]).execute(_call(payload)))
+        with use_tool_context(approval=lambda request: False):
+            _run(ToolRegistry([_tool()]).execute(_call(payload)))
+
+    for record in caplog.records:
+        assert marker not in record.getMessage()
 
 
 def test_a_refusal_never_reaches_the_server():

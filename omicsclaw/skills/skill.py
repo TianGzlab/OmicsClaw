@@ -35,10 +35,27 @@ class Skill:
     """The directory that was scanned to find this skill."""
 
     trigger: str = ""
-    """From ``trigger:``; empty when the header does not declare one."""
+    """From ``trigger:``, as one display string; empty when undeclared.
+
+    A header may spell it as a comma-separated scalar or as a block
+    sequence; the loader joins a sequence with ``", "`` so this attribute
+    reads the same either way. :attr:`triggers` is the parsed form.
+    """
 
     tags: tuple[str, ...] = ()
     """From ``tags:``. Carried as metadata; nothing here filters on it."""
+
+    @property
+    def triggers(self) -> tuple[str, ...]:
+        """:attr:`trigger` split on commas, trimmed, empties dropped.
+
+        These are discovery keywords, not an automatic dispatch rule:
+        nothing in this package fires a skill because a turn contained
+        one. They widen :meth:`~omicsclaw.skills.index.SkillIndex.search`
+        so that a user hunting for "DE" finds ``spatial-de`` under a name
+        that does not contain the word.
+        """
+        return tuple(part.strip() for part in self.trigger.split(",") if part.strip())
 
     @property
     def directory(self) -> Path:

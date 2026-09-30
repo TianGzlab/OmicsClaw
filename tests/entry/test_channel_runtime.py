@@ -36,7 +36,6 @@ from omicsclaw.entry.channel.runtime import (
     DEFAULT_DELIVERED_TYPES,
     VALUE_REPLY_TARGET,
     ChannelRuntime,
-    collect_reply,
 )
 from omicsclaw.entry.channel.delivery import DeliveryAttemptOutcome
 from omicsclaw.entry.events import TurnEventType
@@ -277,8 +276,6 @@ def test_the_pump_opens_its_observation_with_a_context_manager(tmp_path):
     from omicsclaw.entry.channel import runtime as module
 
     body = inspect.getsource(module.ChannelRuntime._pump_reply)
-    assert "async with handle.observe()" in body
-    body = inspect.getsource(module.collect_reply)
     assert "async with handle.observe()" in body
 
 
@@ -758,50 +755,49 @@ def test_two_approvals_on_two_conversations_do_not_cross(tmp_path):
     assert second.terminal == "converged"
 
 
-# ---- collect_reply, the path the eight unverified adapters take --------
+# ---- there is exactly one way in and one way out -----------------------
 
 
-def test_collect_reply_returns_the_answer_and_routes_progress(tmp_path):
-    """``Channel.process_message``'s shape, without a reply pump behind it.
+def test_a_channel_runtime_offers_no_way_to_run_an_exchange_without_a_reply():
+    """Criterion 1, enumerated.
 
-    Those adapters send what they are given through their own ``send``, so
-    a pump would deliver the same answer twice.
+    ``submit(deliver_reply=False)`` was the whole of the second outbound
+    path: it ran the exchange with no pump, and the adapter sent the answer
+    itself through a call that classified nothing. Both halves are gone, and
+    the way to keep them gone is to name them here — an argument that comes
+    back would otherwise look like a convenience.
     """
+    import inspect
 
-    async def scenario():
-        transport = Transport()
-        app = deployment(tmp_path)
-        runtime = await started(app, transport)
-        result = await runtime.submit(message(), deliver_reply=False)
-        assert result.handle is not None
-        text = await asyncio.wait_for(collect_reply(result.handle), WAIT_S)
-        await runtime.close(WAIT_S)
-        return text, transport, result.handle
+    from omicsclaw.entry.channel import runtime as module
 
-    text, transport, handle = run(scenario())
-
-    assert text == "ok"
-    assert transport.sent == [], "deliver_reply=False means no pump"
-    assert handle.stream.observer_count() == 0
+    assert not hasattr(module, "collect_reply")
+    for name in ("submit", "submit_and_wait"):
+        signature = inspect.signature(getattr(module.ChannelRuntime, name))
+        assert "deliver_reply" not in signature.parameters, name
 
 
-def test_collect_reply_reraises_the_original_failure(tmp_path):
-    """The traceback survives, which is what ``TurnEvent.error`` is for."""
+def test_a_channel_has_no_outbound_path_of_its_own():
+    """The other half of criterion 1, on the base class.
 
-    async def scenario():
-        class Exploding(Scripted):
-            async def generate(self, messages, tools=None):
-                raise RuntimeError("the backend fell over")
+    "There is no such method" is a stronger guarantee than "there is one
+    and it raises", because the second still reads as a thing to call.
+    ``send_command_output`` survives and is the exception this names: one
+    direct provider call per chunk for a listing somebody just asked for,
+    carrying no answer and classifying nothing.
+    """
+    from omicsclaw.entry.channel.base import Channel
 
-        app = deployment(tmp_path, Exploding())
-        runtime = await started(app, Transport())
-        result = await runtime.submit(message(), deliver_reply=False)
-        assert result.handle is not None
-        with pytest.raises(RuntimeError, match="fell over"):
-            await asyncio.wait_for(collect_reply(result.handle), WAIT_S)
-        await runtime.close(WAIT_S)
-
-    run(scenario())
+    for name in (
+        "send",
+        "_send_chunk",
+        "send_media",
+        "_format_chunk",
+        "process_message",
+    ):
+        assert not hasattr(Channel, name), name
+    assert hasattr(Channel, "send_command_output")
+    assert hasattr(Channel, "inbound")
 
 
 # ---- shutdown ----------------------------------------------------------
@@ -879,11 +875,11 @@ def test_importing_and_constructing_a_channel_costs_no_vendor_sdk():
     factories import them inside the function that builds a client, in
     plainly visible syntax, which is what makes the boundary checkable.
 
-    The same probe asks the §9-18 question, which is the one a port fails:
-    moving 6,000 lines of adapter across and bringing one of its imports
-    with it. ``omicsclaw.skill`` (singular) is in the list because
-    ``imessage.py`` did import it — the plan's table lists that file as
-    strictly clean and it is not.
+    The same probe asks the question a port fails: moving six thousand
+    lines of adapter across and bringing one of its imports with it. The
+    deleted packages are named in the list below for that reason, and the
+    check is over ``sys.modules`` rather than over the source, so an import
+    two levels down is caught as readily as one at the top of a file.
     """
     result = subprocess.run(
         [sys.executable, "-c", _PROBE],

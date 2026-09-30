@@ -1,14 +1,9 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: metabolomics-xcms-preprocessing
 description: Load when running an XCMS-style preprocessing summary on LC-MS metabolomics raw / vendor-converted
   files — emits a peak table with m/z, retention time, and per-sample intensities. Skip when working with
   an already-built peak table (use metabolomics-peak-detection); only annotation is needed (use metabolomics-annotation).
-version: 0.5.0
-author: OmicsClaw
-license: MIT
-emoji: 🧪
+trigger: xcms, metabolomics preprocessing, LC-MS, peak detection, RT alignment
 tags:
 - metabolomics
 - xcms
@@ -17,9 +12,6 @@ tags:
 - lc-ms
 - gc-ms
 - centwave
-requires:
-- numpy
-- pandas
 ---
 
 # metabolomics-xcms-preprocessing
@@ -39,8 +31,6 @@ For per-sample peak picking from a single intensity matrix use
 
 ## Inputs & Outputs
 
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
-
 **Inputs**
 
 - Modalities: lc-ms
@@ -56,13 +46,13 @@ For per-sample peak picking from a single intensity matrix use
 
 1. Load files (`--input <files>`) or generate a demo peak table (`--demo`).
 2. Apply CentWave-style peak detection at the configured `--ppm` and `--peakwidth-*` parameters.
-3. Write `tables/peak_table.csv` (`metabolomics_xcms_preprocessing.py:211`) + `report.md` + `result.json`.
+3. Write `tables/peak_table.csv` (`metabolomics_xcms_preprocessing.py`) + `report.md` + `result.json`.
 
 ## Gotchas
 
 - **Pure Python — NO real XCMS / CAMERA invocation.** The script does not call R / `rcpp` / `xcms` / `CAMERA`. Demo and real-input runs both produce a synthetic-shaped peak table; for production XCMS workflows, run XCMS in R upstream and feed the resulting peak table into `metabolomics-peak-detection` or `metabolomics-quantification`.
-- **`--input` accepts MULTIPLE files via `nargs="+"`.** `metabolomics_xcms_preprocessing.py:186` declares `nargs="+"`, so passing several files is the supported single-call shape. Demo ignores `--input`.
-- **`--input` REQUIRED unless `--demo`.** `metabolomics_xcms_preprocessing.py:203` raises `ValueError("--input required when not using --demo")`.
+- **`--input` accepts MULTIPLE files via `nargs="+"`.** `metabolomics_xcms_preprocessing.py` declares `nargs="+"`, so passing several files is the supported single-call shape. Demo ignores `--input`.
+- **`--input` REQUIRED unless `--demo`.** `metabolomics_xcms_preprocessing.py` raises `ValueError("--input required when not using --demo")`.
 - **Peak-width units are SECONDS (chromatographic).** `--peakwidth-min 10.0 --peakwidth-max 60.0` defaults assume LC-MS scan timing. For UPLC narrow peaks consider `--peakwidth-min 5 --peakwidth-max 20`.
 - **`--ppm 25.0` default is broad.** Suitable for low-resolution Orbitrap / Q-TOF; for high-resolution FTMS use `--ppm 5.0`. Wrong value silently yields false positive merges.
 
@@ -70,10 +60,10 @@ For per-sample peak picking from a single intensity matrix use
 
 ```bash
 # Demo (synthetic peak table)
-python omicsclaw.py run metabolomics-xcms-preprocessing --demo --output /tmp/xcms_demo
+python skills/metabolomics/metabolomics-xcms-preprocessing/metabolomics_xcms_preprocessing.py --demo --output /tmp/xcms_demo
 
 # Real LC-MS files
-python omicsclaw.py run metabolomics-xcms-preprocessing \
+python skills/metabolomics/metabolomics-xcms-preprocessing/metabolomics_xcms_preprocessing.py \
   --input sample1.mzML sample2.mzML sample3.mzML --output results/ \
   --ppm 5.0 --peakwidth-min 5 --peakwidth-max 30
 ```
@@ -84,3 +74,9 @@ python omicsclaw.py run metabolomics-xcms-preprocessing \
 - `references/methodology.md` — CentWave / Obiwarp conventions, ppm + peakwidth tuning
 - `references/output_contract.md` — `tables/peak_table.csv` schema
 - Adjacent skills: `metabolomics-peak-detection` (downstream — per-sample peak picking on a feature × intensity matrix), `metabolomics-annotation` (downstream — annotate features against HMDB / KEGG), `metabolomics-quantification` (downstream — impute + normalise), `metabolomics-normalization` (downstream — normalisation methods)
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`numpy`, `pandas`

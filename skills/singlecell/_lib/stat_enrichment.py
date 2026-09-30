@@ -12,7 +12,7 @@ import pandas as pd
 import scanpy as sc
 from scipy import stats as scipy_stats
 
-from .dependency_manager import get as get_dependency
+from skills._sdk.deps import get as get_dependency
 
 logger = logging.getLogger(__name__)
 

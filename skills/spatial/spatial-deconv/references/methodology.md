@@ -72,47 +72,47 @@ Different deconvolution methods assume different matrix representations:
 
 ```bash
 # Default alias used by OmicsClaw
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --output <dir>
 
 # FlashDeconv
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method flashdeconv \
   --flashdeconv-lambda-spatial auto --flashdeconv-sketch-dim 1024 --output <dir>
 
 # Cell2location
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method cell2location \
   --cell2location-n-cells-per-spot 30 --cell2location-detection-alpha 20 --output <dir>
 
 # RCTD
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method rctd \
   --rctd-mode doublet --output <dir>
 
 # DestVI
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method destvi \
   --destvi-condscvi-epochs 300 --destvi-n-epochs 2500 --destvi-n-latent 8 --output <dir>
 
 # Stereoscope
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method stereoscope \
   --stereoscope-rna-epochs 400 --stereoscope-spatial-epochs 400 \
   --stereoscope-learning-rate 0.01 --output <dir>
 
 # Tangram
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method tangram \
   --tangram-mode clusters --tangram-n-epochs 1000 --output <dir>
 
 # SPOTlight
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method spotlight \
   --spotlight-weight-id weight --spotlight-n-top 50 --spotlight-model ns --output <dir>
 
 # CARD with imputation
-oc run spatial-deconvolution \
+python skills/spatial/spatial-deconv/spatial_deconv.py \
   --input <spatial.h5ad> --reference <ref.h5ad> --method card \
   --card-imputation --card-num-grids 2000 --card-ineibor 10 --output <dir>
 

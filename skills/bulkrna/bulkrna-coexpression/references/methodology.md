@@ -4,8 +4,8 @@
 ## CLI Reference
 
 ```bash
-python omicsclaw.py run bulkrna-coexpression --demo
-python omicsclaw.py run bulkrna-coexpression --input <counts.csv> --output <dir>
+python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py --demo
+python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py --input <counts.csv> --output <dir>
 python bulkrna_coexpression.py --input counts.csv --output results/
 python bulkrna_coexpression.py --demo --output /tmp/coexpression_demo
 python bulkrna_coexpression.py --input counts.csv --output results/ --power 6 --min-module-size 15

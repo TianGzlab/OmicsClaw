@@ -7,24 +7,31 @@ stand-in — which is the whole point: the gates being asserted are in the
 adapter, not in the SDK, and an adapter whose refusals only worked when
 Telegram was reachable would be no gate at all.
 
-The rules under test are ``CLAUDE.md``'s, word for word:
-``FEISHU_ALLOWED_SENDERS`` is *required* and "authoritative Feishu ingress
-admits nobody else and refuses to start without it"; without
-``FEISHU_BOT_OPEN_ID`` "group chats fail closed". Telegram gets the same
-group rule here, because the reason for it is the platform's rather than
-Feishu's: an owner @-mentioning a colleague in a shared group must not make
-this agent answer.
+The rules under test: ``FEISHU_ALLOWED_SENDERS`` is *required* and
+authoritative Feishu ingress admits nobody else and refuses to start
+without it; without ``FEISHU_BOT_OPEN_ID`` group chats fail closed.
+Telegram gets the same group rule here, because the reason for it is the
+platform's rather than Feishu's: an owner @-mentioning a colleague in a
+shared group must not make this agent answer.
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from omicsclaw.entry.channel import reply_target
+from omicsclaw.entry.channel.commands import registered_commands
+from omicsclaw.entry.channel.delivery import (
+    DeliveryAttemptOutcome,
+    DeliveryAttemptRequest,
+)
 from omicsclaw.entry.channel.feishu import FeishuChannel, FeishuConfig
+from omicsclaw.entry.channel.feishu_delivery import FeishuDeliveryAdapter
 from omicsclaw.entry.channel.runtime import (
     CODE_OWNER_DENIED,
     VALUE_REPLY_TARGET,
@@ -38,10 +45,22 @@ from omicsclaw.entry.channel.telegram import (
     telegram_bot_identity,
     telegram_mentions,
 )
+from omicsclaw.entry.channel.telegram_delivery import TelegramDeliveryAdapter
 from omicsclaw.entry.ingress import (
     VALUE_CHAT_TYPE,
     VALUE_MENTIONS,
     SenderPolicy,
+)
+from tests.entry.channel_conformance import (  # type: ignore[import-not-found]
+    MENTION_PROBE,
+    ChannelFixture,
+    DeliveryCase,
+    MentionGuard,
+    SentCall,
+    register,
+)
+from tests.entry.test_channel_delivery import (  # type: ignore[import-not-found]
+    RetryAfter,
 )
 from tests.entry.test_channel_ingress import (  # type: ignore[import-not-found]
     OWNER,
@@ -397,7 +416,7 @@ def test_the_telegram_binding_carries_both_halves_of_the_gate():
 
 
 def test_the_telegram_binding_refuses_to_start_with_no_owners():
-    """``CLAUDE.md``'s "refuses to start without it", on this adapter."""
+    """Refuses to start without an allowlist, on this adapter."""
 
     async def scenario():
         channel = TelegramChannel(TelegramConfig(bot_token="t"))
@@ -677,7 +696,7 @@ def test_the_feishu_binding_carries_both_halves_of_the_gate():
 
 
 def test_the_feishu_binding_refuses_to_start_without_an_allowlist():
-    """The sentence ``CLAUDE.md`` uses, enforced where starting happens."""
+    """Refuses to start without an allowlist, enforced where starting happens."""
 
     async def scenario():
         channel = FeishuChannel(
@@ -759,3 +778,389 @@ def test_a_channel_that_cannot_authenticate_fails_the_whole_composition(tmp_path
 
     assert telegram._control_runtime is None
     assert telegram._running is False
+
+
+# ---- the conformance fixtures for these two adapters -------------------
+#
+# The nine shared rules live in ``test_channel_cutover_conformance.py``;
+# what each platform contributes is a way to drive it with no SDK and no
+# network. Everything above this line is what is *particular* to Telegram
+# and Feishu and has no counterpart on the other adapters.
+
+
+class RecordingTelegramBot:
+    """``bot.send_message``, keeping the body it was handed."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.texts: list[str] = []
+
+    async def send_message(self, **kwargs):
+        if self.error is not None:
+            raise self.error
+        self.texts.append(kwargs["text"])
+        return SimpleNamespace(message_id=17)
+
+
+class RecordingFeishuResponse:
+    """A Feishu response whose ``code`` decides what it means."""
+
+    def __init__(self, code: int = 0) -> None:
+        self.code = code
+        self.data = SimpleNamespace(message_id="om_sent")
+
+    def success(self) -> bool:
+        return self.code == 0
+
+
+class RecordingFeishuClient:
+    """``client.im.v1.message.create`` and nothing else, plus a failure mode."""
+
+    def __init__(self, *, code: int = 0, error: Exception | None = None) -> None:
+        self.code = code
+        self.error = error
+        self.texts: list[str] = []
+        self.im = SimpleNamespace(
+            v1=SimpleNamespace(message=SimpleNamespace(create=self._create))
+        )
+
+    def _create(self, request):
+        if self.error is not None:
+            raise self.error
+        self.texts.append(json.loads(request["content"])["text"])
+        return RecordingFeishuResponse(self.code)
+
+
+_TELEGRAM_MESSAGE_IDS = itertools.count(1000)
+_FEISHU_MESSAGE_IDS = itertools.count(1000)
+
+
+def _conformance_telegram_channel() -> TelegramChannel:
+    channel = TelegramChannel(
+        TelegramConfig(bot_token="123:secret", allowed_senders={OWNER})
+    )
+    channel._app = FakeTelegramApp()
+    channel._conformance_update = None
+    return channel
+
+
+async def _conformance_telegram_submit(
+    channel: TelegramChannel,
+    *,
+    text: str,
+    sender: str = OWNER,
+    group: bool = False,
+    mentions_bot: bool = False,
+) -> None:
+    """Route one message the way python-telegram-bot's handlers would.
+
+    A verb Telegram was told about goes to its ``CommandHandler``; anything
+    else is text. That routing is the adapter's real one and is why an
+    unregistered ``/verb`` reaches nothing here.
+    """
+    body = text
+    entities: tuple = ()
+    if group and mentions_bot:
+        body = f"{BOT_USERNAME} {text}"
+        entities = (mention(0, len(BOT_USERNAME)),)
+    update = telegram_update(
+        text=body,
+        user_id=sender,
+        chat_type="supergroup" if group else "private",
+        entities=entities,
+    )
+    update.message.message_id = next(_TELEGRAM_MESSAGE_IDS)
+    channel._conformance_update = update
+    if text.strip().lower() in registered_commands():
+        if not channel._owner_update_allowed(update):
+            return
+        await channel._run_command(update, text)
+        return
+    await channel._submit_control_inbound(update, body)
+
+
+def _conformance_telegram_direct_replies(channel, _transport) -> list[str]:
+    update = channel._conformance_update
+    return list(update.message.replies) if update is not None else []
+
+
+def _conformance_telegram_delivery_cases() -> tuple[DeliveryCase, ...]:
+    return (
+        DeliveryCase(
+            "timeout",
+            TelegramDeliveryAdapter(RecordingTelegramBot(asyncio.TimeoutError())),
+            DeliveryAttemptOutcome.ACCEPTANCE_UNKNOWN,
+        ),
+        DeliveryCase(
+            "unknown",
+            TelegramDeliveryAdapter(RecordingTelegramBot(RuntimeError("?"))),
+            DeliveryAttemptOutcome.ACCEPTANCE_UNKNOWN,
+        ),
+        DeliveryCase(
+            "rate_limited",
+            TelegramDeliveryAdapter(RecordingTelegramBot(RetryAfter(4))),
+            DeliveryAttemptOutcome.NOT_ACCEPTED_RETRYABLE,
+        ),
+    )
+
+
+def _conformance_telegram_accepting_delivery():
+    bot = RecordingTelegramBot()
+    return TelegramDeliveryAdapter(bot), bot.texts
+
+
+register(
+    ChannelFixture(
+        name="telegram",
+        new_channel=_conformance_telegram_channel,
+        reply_target=lambda channel: reply_target.build("telegram", "bot-1", "42"),
+        accepting_delivery=_conformance_telegram_accepting_delivery,
+        delivery_cases=_conformance_telegram_delivery_cases,
+        submit=_conformance_telegram_submit,
+        direct_replies=_conformance_telegram_direct_replies,
+        has_groups=True,
+        strips_markdown=False,
+        # Telegram routes the verbs registered with it and drops the rest,
+        # so an unregistered one never reaches a handler at all.
+        unregistered_commands_reach_the_agent=False,
+    )
+)
+
+
+def _conformance_feishu_channel() -> FeishuChannel:
+    channel = FeishuChannel(
+        FeishuConfig(
+            app_id="cli_app",
+            app_secret="secret",
+            bot_open_id=BOT_OPEN_ID,
+            allowed_senders={OWNER},
+        )
+    )
+    channel._lark_client = RecordingFeishuClient()
+    return channel
+
+
+async def _conformance_feishu_submit(
+    channel: FeishuChannel,
+    *,
+    text: str,
+    sender: str = OWNER,
+    group: bool = False,
+    mentions_bot: bool = False,
+) -> None:
+    """Hand one event to the adapter on a thread, as ``lark-oapi`` does."""
+    if not group:
+        mentions: tuple[str, ...] = ()
+    else:
+        mentions = (BOT_OPEN_ID,) if mentions_bot else ("ou_colleague",)
+    event = feishu_event(
+        text=text,
+        sender=sender,
+        chat_type="group" if group else "p2p",
+        mentions=mentions,
+        message_id=f"om_{next(_FEISHU_MESSAGE_IDS)}",
+    )
+    await asyncio.to_thread(channel._handle_event, event)
+
+
+def _conformance_feishu_delivery_cases() -> tuple[DeliveryCase, ...]:
+    def builder(arguments):
+        return arguments
+
+    def adapter(**kwargs):
+        return FeishuDeliveryAdapter(
+            RecordingFeishuClient(**kwargs), request_builder=builder
+        )
+
+    return (
+        DeliveryCase(
+            "timeout",
+            adapter(error=asyncio.TimeoutError()),
+            DeliveryAttemptOutcome.ACCEPTANCE_UNKNOWN,
+        ),
+        DeliveryCase(
+            "unknown",
+            adapter(error=RuntimeError("?")),
+            DeliveryAttemptOutcome.ACCEPTANCE_UNKNOWN,
+        ),
+        DeliveryCase(
+            "rate_limited",
+            adapter(code=230020),
+            DeliveryAttemptOutcome.NOT_ACCEPTED_RETRYABLE,
+        ),
+    )
+
+
+def _conformance_feishu_accepting_delivery():
+    client = RecordingFeishuClient()
+    return (
+        FeishuDeliveryAdapter(client, request_builder=lambda arguments: arguments),
+        client.texts,
+    )
+
+
+class _MentionRecordingFeishuClient(RecordingFeishuClient):
+    """Records each ``message.create`` as a :class:`SentCall`."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent_calls: list[SentCall] = []
+
+    def _create(self, request):
+        # A Feishu ``text`` message has no switch that turns mentions off, so
+        # every call is one whose text must itself be inert.
+        text = json.loads(request["content"])["text"]
+        self.sent_calls.append(SentCall(text=text, notifies=True))
+        return super()._create(request)
+
+
+def _conformance_feishu_mention_delivery():
+    client = _MentionRecordingFeishuClient()
+    return (
+        FeishuDeliveryAdapter(client, request_builder=lambda arguments: arguments),
+        client.sent_calls,
+    )
+
+
+register(
+    ChannelFixture(
+        name="feishu",
+        new_channel=_conformance_feishu_channel,
+        reply_target=lambda channel: reply_target.build(
+            "feishu", "cli_app", "oc_1", destination_kind="chat_id"
+        ),
+        accepting_delivery=_conformance_feishu_accepting_delivery,
+        delivery_cases=_conformance_feishu_delivery_cases,
+        submit=_conformance_feishu_submit,
+        direct_replies=lambda _channel, transport: list(transport.sent),
+        has_groups=True,
+        strips_markdown=False,
+        unregistered_commands_reach_the_agent=True,
+        mention_guard=MentionGuard(
+            live_spellings=("<at",),
+            accepting_delivery=_conformance_feishu_mention_delivery,
+        ),
+    )
+)
+
+
+# ---- Feishu: an <at> element in outbound text --------------------------
+
+WORD_JOINER = "\u2060"
+
+
+def feishu_arguments(text: str, *, code: int = 0) -> dict:
+    """The ``message.create`` arguments the Feishu adapter builds for *text*."""
+    captured: list[dict] = []
+
+    def builder(arguments):
+        captured.append(dict(arguments))
+        return arguments
+
+    result = run(
+        FeishuDeliveryAdapter(
+            RecordingFeishuClient(code=code), request_builder=builder
+        ).attempt(
+            DeliveryAttemptRequest(
+                item_id="t1-0",
+                text=text,
+                reply_target=reply_target.build(
+                    "feishu", "cli_app", "oc_1", destination_kind="chat_id"
+                ),
+            )
+        )
+    )
+    assert result.outcome is DeliveryAttemptOutcome.ACCEPTED, result.error_code
+    (arguments,) = captured
+    return arguments
+
+
+def test_feishu_is_handed_text_in_which_no_at_element_survives():
+    """``<at user_id="all"></at>`` in a ``text`` message notifies the whole chat.
+
+    A word joiner between ``<`` and ``at`` stops Feishu reading an element
+    there and is invisible on screen, so the person sees what the model wrote
+    and nobody is notified. Nothing else about the text changes, and the
+    joiner goes into the text before the adapter wraps it in the JSON
+    envelope Feishu expects.
+    """
+    arguments = feishu_arguments(MENTION_PROBE)
+
+    assert arguments["msg_type"] == "text"
+    text = json.loads(arguments["content"])["text"]
+    assert text == MENTION_PROBE.replace("<at", f"<{WORD_JOINER}at")
+    assert "<at" not in text
+    assert text.replace(WORD_JOINER, "") == MENTION_PROBE
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        '<AT user_id="all"></AT>',
+        '<At user_id="ou_colleague">Colleague</At>',
+        '< at user_id="all"></at>',
+        '<\tat user_id="all"></at>',
+    ],
+)
+def test_an_at_element_is_neutralised_in_any_case_and_spacing(written):
+    """The guard does not depend on Feishu's parser being strict.
+
+    Whether Feishu accepts ``<AT`` or ``< at`` is not documented, and an
+    element it did accept would notify somebody, so each is treated as one.
+    """
+    text = json.loads(feishu_arguments(written)["content"])["text"]
+
+    assert text.startswith(f"<{WORD_JOINER}")
+    assert text.replace(WORD_JOINER, "") == written
+
+
+def test_feishu_text_that_is_already_neutralised_is_left_as_it_is():
+    """A joiner already after ``<`` is not followed by a second one.
+
+    Command output and a retried send both reach the adapter as the text
+    it was given; neither may come out with a joiner per pass.
+    """
+    once = f'<{WORD_JOINER}at user_id="all"></at>'
+
+    text = json.loads(feishu_arguments(once)["content"])["text"]
+
+    assert text == once
+
+
+class FlakyFeishuClient(RecordingFeishuClient):
+    """Refuses the first ``message.create`` as rate-limited, then accepts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempted: list[str] = []
+
+    def _create(self, request):
+        self.attempted.append(json.loads(request["content"])["text"])
+        self.code = 230020 if len(self.attempted) == 1 else 0
+        return super()._create(request)
+
+
+def test_a_retried_feishu_send_carries_one_joiner_not_one_per_attempt():
+    """Each attempt neutralises the pump's original text, never the last payload."""
+    from omicsclaw.entry.channel.delivery import deliver
+    from omicsclaw.entry.ingress import Acceptance
+
+    client = FlakyFeishuClient()
+
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    result = run(
+        deliver(
+            FeishuDeliveryAdapter(client, request_builder=lambda arguments: arguments),
+            ['<at user_id="all"></at> ready'],
+            item_prefix="t1",
+            reply_target=reply_target.build(
+                "feishu", "cli_app", "oc_1", destination_kind="chat_id"
+            ),
+            sleep=no_wait,
+        )
+    )
+
+    assert result.acceptance is Acceptance.ACCEPTED
+    assert client.attempted == [f'<{WORD_JOINER}at user_id="all"></at> ready'] * 2

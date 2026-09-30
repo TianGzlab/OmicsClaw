@@ -424,7 +424,7 @@ def test_a_dotenv_file_is_refused_because_this_projects_keys_live_in_one(
 ):
     """Plan 0029 §4 Q8's project-specific addition.
 
-    ``CLAUDE.md`` puts ``LLM_API_KEY``, ``TELEGRAM_BOT_TOKEN`` and
+    ``.env.example`` puts ``LLM_API_KEY``, ``TELEGRAM_BOT_TOKEN`` and
     ``FEISHU_APP_SECRET`` in ``.env`` at the project root, so for this
     repository ``.env`` is more valuable than ``~/.kube`` and far more
     likely to be sitting in a workspace.

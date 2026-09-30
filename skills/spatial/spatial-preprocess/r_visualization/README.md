@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-preprocess ...` or `oc run spatial-preprocessing ...`
+Run `python skills/spatial/spatial-preprocess/spatial_preprocess.py ...` or `python skills/spatial/spatial-preprocess/spatial_preprocess.py ...`
 first. The resulting output directory should contain:
 
 - `figure_data/preprocess_spatial_points.csv` when spatial coordinates exist

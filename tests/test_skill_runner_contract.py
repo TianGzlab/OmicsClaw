@@ -2766,14 +2766,13 @@ def test_run_skill_cancellation_with_partial_result_json_is_not_reported_as_succ
 
 
 # ---------------------------------------------------------------------------
-# Skill-subprocess interpreter + environment isolation (desktop-server
-# "missing deps" regression — see project memory
-# project_desktop_server_wrong_interpreter_usersite).
+# Skill-subprocess interpreter + environment isolation ("missing deps"
+# regression, first seen under an HTTP backend started in a lighter env).
 #
 # Two failure modes, both exercised at the ``_prepare_skill_run`` seam where
 # the subprocess argv + env are actually built:
 #   1. ``OMICSCLAW_RUN_PYTHON`` was ignored on the main run path (runner.py
-#      hardcoded ``sys.executable``), so an app server running in a lighter
+#      hardcoded ``sys.executable``), so a backend running in a lighter
 #      env could not redirect skills to the analysis env.
 #   2. Skill subprocesses inherited ``~/.local`` user-site, letting a broken
 #      package there shadow the analysis env's deps.

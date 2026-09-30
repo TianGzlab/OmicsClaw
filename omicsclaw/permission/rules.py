@@ -364,15 +364,33 @@ class RuleStore:
 
     @property
     def current(self) -> Rules:
-        """The rules as the file has them now."""
+        """The rules as the file has them now.
+
+        Warns when ``allow`` rules appear that this process did not write.
+        An operator editing the file mid-session is legitimate, so this does
+        not refuse them —— but so is the thing it exists to make visible: a
+        tool that was allowed to run unsupervised writing its own next
+        ``allow`` rule (plan 0049 §4). A warning is the most this layer can
+        do without making the operator's edit a restart.
+        """
         try:
-            self._last = load_rules(self._path)
+            loaded = load_rules(self._path)
         except PermissionConfigError as exc:
             _log.warning(
                 "permission rules unreadable, keeping the %d previously loaded: %s",
                 len(self._last),
                 exc,
             )
+            return self._last
+        appeared = _allow_patterns(loaded) - _allow_patterns(self._last)
+        if appeared:
+            _log.warning(
+                "permission rules changed outside this process: new allow %s "
+                "in %s",
+                sorted(appeared),
+                self._path,
+            )
+        self._last = loaded
         return self._last
 
     def remember(self, pattern: str) -> Rules:
@@ -387,6 +405,12 @@ class RuleStore:
         self._last = updated
         _log.info("permission rule remembered: allow %s", pattern)
         return updated
+
+
+def _allow_patterns(rules: Rules) -> frozenset[str]:
+    return frozenset(
+        rule.pattern for rule in rules if rule.verdict is Verdict.ALLOW
+    )
 
 
 def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) -> str:

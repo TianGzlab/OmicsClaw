@@ -12,7 +12,7 @@ Design intent:
 
 ## Input Contract
 
-Run `oc run spatial-deconv ...` first. The resulting output directory should
+Run `python skills/spatial/spatial-deconv/spatial_deconv.py ...` first. The resulting output directory should
 contain:
 
 - `figure_data/proportions.csv`

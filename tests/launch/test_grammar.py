@@ -142,6 +142,24 @@ def test_the_inline_spelling_advances_one_token_not_two(flag):
     assert surface == [flag]
 
 
+@pytest.mark.parametrize("flag", sorted(HELP_FLAGS))
+def test_an_empty_inline_value_is_not_a_value(flag):
+    """``--workspace=`` goes on to eat the next token, so this is not a hoist.
+
+    The case the test above cannot see. ``config.py``'s ``_from_argv``
+    reads an inline value only when there is one after the ``=``; the
+    hoist used to ask whether the token *contained* an ``=``, and the two
+    then disagreed about exactly this line —— the shell printing a help
+    screen for a deployment ``resolve_app_config`` was reading as a
+    workspace named ``--help``. Both now walk
+    ``_surfaces.flag_stride``.
+    """
+    deployment, surface = split_command_line(["--workspace=", flag])
+
+    assert deployment == ["--workspace=", flag]
+    assert surface == []
+
+
 def test_only_the_first_terminator_cuts():
     """A surface is allowed to have a ``--`` of its own inside its half."""
     deployment, surface = split_command_line(["--", "--prompt", "--", "x"])
@@ -208,8 +226,8 @@ def test_the_environment_handed_to_main_reaches_the_surface(env, expected, capsy
     Three mappings, three different refusals: a shell that dropped the
     argument and read the process environment instead —— or passed an
     empty dict —— would give the same first answer to all three. The
-    Feishu builder is the probe because ``CLAUDE.md`` makes its
-    allowlist and bot identity mandatory, so each missing variable has
+    Feishu builder is the probe because its allowlist and bot identity
+    are mandatory, so each missing variable has
     its own message and no platform SDK or network is needed to reach
     any of them.
     """
@@ -231,6 +249,33 @@ MODULE_GUARDS = {
         "has been unimportable since omicsclaw/skill/ was deleted. Both "
         "guards land on the same main(); neither is a second parse point."
     ),
+    "ensemble/_supervise.py": (
+        "the trial supervisor, run by file path inside the execution "
+        "environment (host or sandbox); plan 0056 §3.3. Parses only its "
+        "own limits, never a deployment."
+    ),
+    "ensemble/metrics/score.py": (
+        "python -m omicsclaw.ensemble.metrics.score, the scoring "
+        "subprocess of one trial; plan 0056 §3.3. Parses only the trial "
+        "it scores, never a deployment."
+    ),
+    "ensemble/tuning/subsample.py": (
+        "python -m omicsclaw.ensemble.tuning.subsample, writes the "
+        "subsampled inputs of a tuning probe in the execution environment. "
+        "Parses only its own input and seeds, never a deployment."
+    ),
+    "ensemble/tuning/stability.py": (
+        "python -m omicsclaw.ensemble.tuning.stability, computes the "
+        "stability curves of a tuning probe. Parses only its spec file."
+    ),
+    "ensemble/tuning/markers.py": (
+        "python -m omicsclaw.ensemble.tuning.markers, marker genes of the "
+        "probe's candidate partitions. Parses only its spec file."
+    ),
+    "ensemble/tuning/inspect.py": (
+        "python -m omicsclaw.ensemble.tuning.inspect, what inspect_trials "
+        "computes. Parses only its spec file."
+    ),
 }
 """Every ``__main__`` guard outside the legacy trees, with its reason.
 
@@ -240,7 +285,7 @@ make this test a measure of how far that deletion has got rather than of
 how many ways in the rebuilt stack has.
 """
 
-LEGACY_TREES = ("surfaces", "runtime", "autoagent")
+LEGACY_TREES = ("surfaces", "runtime")
 
 
 def _guarded_modules() -> set[str]:

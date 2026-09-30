@@ -18,9 +18,8 @@ code points, so the literal translation is not the same function::
     len(s.encode()) == 55      # bytes — what the harness counts
     55 // 4 == 13   vs   23 // 4 == 5
 
-A naive port under-counts Chinese two to three fold, and this
-repository's prompts (``SOUL.md``, ``CLAUDE.md``, every ``SKILL.md``)
-are Chinese. Under-counting is the dangerous direction: it means
+A naive port under-counts Chinese text two to three fold.
+Under-counting is the dangerous direction: it means
 believing there is room, sending the request, and being truncated or
 refused by the API. So the harness's *intent* — roughly four ASCII
 characters to a token — is re-derived here rather than transliterated::
@@ -72,10 +71,11 @@ an addition::
 **Known blind spot: images cost zero.** ``Message.content`` is a
 ``str`` — ADR 0077 deliberately left multimodal content parts out — so
 an image reaching this layer has no representation to count and is
-billed nothing. ``CLAUDE.md`` has the Channel Surface routing photos
-into tissue-section analysis, so this is reachable, and until the schema
-carries image parts the budget is optimistic by roughly a thousand
-tokens per picture. **Do not paper over it with a heuristic**: "looks
+billed nothing. No image reaches this layer today: the channel adapters
+refuse or drop inbound photos and attachments, and an MCP image result
+arrives as a one-line text placeholder. Once the schema carries image
+parts, the budget will be optimistic by roughly a thousand tokens per
+picture. **Do not paper over it with a heuristic**: "looks
 like base64, add 1300" misfires on ordinary text, which is a worse
 failure than the one it treats. Plan 0030 §11.B-11.
 """

@@ -1,0 +1,14 @@
+corneto 1.0.0b7 requires cvxpy-base, which is not installed.
+multiqc 1.34 requires boto3, which is not installed.
+multiqc 1.34 requires polars-lts-cpu, which is not installed.
+fcsparser 0.2.8 has requirement numpy<2,>=1, but you have numpy 2.0.2.
+pygam 0.12.0 has requirement scipy<1.17,>=1.11.1, but you have scipy 1.17.1.
+cutadapt 5.2 has requirement dnaio>=1.2.3, but you have dnaio 1.2.2.
+xopen 2.0.2 has requirement isal>=1.6.1; platform_machine == "x86_64" or platform_machine == "AMD64" or platform_machine == "aarch64", but you have isal 0.0.0.
+xopen 2.0.2 has requirement zlib-ng>=0.4.1; platform_machine == "x86_64" or platform_machine == "AMD64" or platform_machine == "aarch64", but you have zlib-ng 0.0.0.
+numba 0.60.0 has requirement llvmlite<0.44,>=0.43.0dev0, but you have llvmlite 0.47.0.
+pygpcca 1.0.4 has requirement jinja2==3.0.3, but you have jinja2 3.1.6.
+esda 2.7.1 has requirement shapely>=2.1, but you have shapely 2.0.7.
+fastccc 0.1.3 has requirement psutil<7.0.0,>=6.1.1, but you have psutil 7.2.2.
+sympy 1.14.0 has requirement mpmath<1.4,>=1.1.0, but you have mpmath 1.4.1.
+spopt 0.7.0 has requirement shapely>=2.1.0, but you have shapely 2.0.7.

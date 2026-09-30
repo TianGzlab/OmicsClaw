@@ -1,29 +1,16 @@
 ---
-# AUTO-GENERATED header from skill.yaml — do not edit by hand.
-# Edit skill.yaml, then run: python scripts/generate_skill_md.py <skill_dir>
 name: sc-consensus-integration
 description: Load when you want a multi-sample single-cell (scRNA) clustering robust to the choice of
   integration method — fanning out Harmony/Scanorama/scVI + an unintegrated baseline, scoring each by
   a batch-mixing intrinsic panel, and voting a consensus. Skip when single-batch (use sc-consensus-clustering);
   one integration method is fixed.
-version: 0.1.0
-author: OmicsClaw
-license: MIT
-emoji: 🧬
+trigger: consensus integration, batch correction consensus, integration method consensus, robust scrna integration clustering, which clusters survive integration
 tags:
 - singlecell
 - scrna
 - consensus
 - integration
 - batch-correction
-requires:
-- anndata
-- numpy
-- pandas
-- PyYAML
-- scanpy
-- scikit-learn
-- scipy
 ---
 
 # sc-consensus-integration
@@ -42,11 +29,9 @@ of one integration method**, with per-cell confidence and batch-artifact flags.
 It mirrors `consensus-domains`: members fan out `sc-integrate-cluster --method <m>`
 — each a self-contained *integrate + cluster* unit — at a **fixed** resolution
 (so member cluster counts stay comparable for the operator), scored by the
-integration intrinsic panel (ADR 0029) before voting a consensus.
+integration intrinsic panel before voting a consensus.
 
 ## Inputs & Outputs
-
-<!-- AUTO-GENERATED from skill.yaml (interface) — do not edit by hand. Regenerate: python scripts/generate_skill_md.py <skill_dir> -->
 
 **Inputs**
 
@@ -71,8 +56,8 @@ integration intrinsic panel (ADR 0029) before voting a consensus.
    + scanorama by default; `scvi` via `--include-scvi`).
 2. **Fan out** — run `sc-integrate-cluster --method <m>` per member at the fixed
    `--resolution` (member cluster counts stay comparable for the operator).
-3. **Score** — the driver computes the **batch-mixing intrinsic panel** (ADR 0029,
-   recalibrated on panc8) on each member's embedding + batch key. The single
+3. **Score** — the driver computes the **batch-mixing intrinsic panel** on each
+   member's embedding + batch key. The single
    scored axis is `ilisi_norm` (iLISI diversity, `log(iLISI)/log(n_batches)`) —
    the one metric validated to track ground-truth cell-type recovery.
    `knn_preservation_norm` (within-batch `X_pca` retention), `batch_asw_norm` and
@@ -88,7 +73,7 @@ integration intrinsic panel (ADR 0029) before voting a consensus.
   — it is a reference control that exposes batch-artifact clusters by comparison
   (it is scored, paneled and reported, with `selection_reason = "baseline …"`),
   but voting it as an equal drags the consensus toward un-integrated structure
-  (ADR 0029 B2). Pass `--vote-baseline` to include it in the vote.
+  Pass `--vote-baseline` to include it in the vote.
 - **scVI is GPU/stochastic and slow** — reproducible within tolerance, not
   bit-identical; add it with `--include-scvi` (which raises the per-member
   `--timeout` to 1800s, since scVI is ~10-15 min on ~15k cells) and serialise GPU
@@ -97,7 +82,7 @@ integration intrinsic panel (ADR 0029) before voting a consensus.
   timeout — `pip install scvi-tools`.)
 - **The intrinsic panel is unsupervised batch-mixing-vs-structure** — it is NOT
   validated against curated cell types; treat the score as a relative ranking and
-  the panel weights in `plan.json` as experimental (ADR 0029), not calibrated.
+  the panel weights in `plan.json` as experimental, not calibrated.
 - **Fixed `--resolution` is intentional** — members must produce comparable
   cluster counts for the operator; do not sweep resolution here (use
   `sc-consensus-clustering` for the resolution-robustness question).
@@ -106,16 +91,16 @@ integration intrinsic panel (ADR 0029) before voting a consensus.
 
 ```bash
 # default members: unintegrated (X_pca baseline) + harmony + scanorama
-python omicsclaw.py run sc-consensus-integration \
+python skills/singlecell/scrna/sc-consensus-integration/sc_consensus_integration.py \
   --input <preprocessed.h5ad> --output <dir> \
   --batch-key batch --resolution 1.0 --operator kmode --seed 0 --non-interactive
 
 # add the GPU/stochastic scVI member (serialise GPU members)
-python omicsclaw.py run sc-consensus-integration --input <h5ad> --output <dir> \
+python skills/singlecell/scrna/sc-consensus-integration/sc_consensus_integration.py --input <h5ad> --output <dir> \
   --include-scvi --max-parallel 1 --non-interactive
 
 # explicit method set
-python omicsclaw.py run sc-consensus-integration --input <h5ad> --output <dir> \
+python skills/singlecell/scrna/sc-consensus-integration/sc_consensus_integration.py --input <h5ad> --output <dir> \
   --integration-methods harmony,scanorama,scvi --non-interactive
 ```
 
@@ -123,6 +108,11 @@ python omicsclaw.py run sc-consensus-integration --input <h5ad> --output <dir> \
 
 - `references/methodology.md` — integration-consensus + intrinsic-panel rationale
 - `references/output_contract.md` — `consensus_labels.tsv` / `member_scores.csv` / `plan.json` schema
-- `references/parameters.md` — every CLI flag (generated from `skill.yaml`)
+- `references/parameters.md` — every CLI flag, per-method tunables
 - Adjacent skills: `sc-preprocessing` (upstream), `sc-integrate-cluster` (the per-member integrate+cluster unit this wraps), `sc-consensus-clustering` (parallel — resolution-robustness instead of integration-robustness), `consensus-domains` (parallel — the spatial analogue)
-- ADR 0011/0016/0029 — scoring protocol, workflow runtime, integration intrinsic panel
+
+## Dependencies
+
+Python packages this skill's script needs. They are not installed for you — check before a long run.
+
+`anndata`, `numpy`, `pandas`, `PyYAML`, `scanpy`, `scikit-learn`, `scipy`

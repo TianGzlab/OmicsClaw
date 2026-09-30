@@ -46,7 +46,7 @@ OmicsClaw/
 │   ├── routing/             # 自然语言意图路由（关键词 + LLM 兜底）
 │   ├── providers/           # LLM provider 注册（OpenAI 兼容 + 模型补丁）
 │   ├── remote/              # 远端 Linux 服务器 SSH 桥接
-│   ├── autoagent/           # 实验/优化循环（独立子系统，非主 chat 路径）
+│   ├── autoagent/           # 实验/优化循环（独立子系统，非主 chat 路径；已删除，运行时调参见 omicsclaw/ensemble/tuning/）
 │   ├── agents/              # ★ EvoScientist 风格多 agent 研究流水线（5481 行）
 │   ├── core/                # 配置、路径、project_registry、skill_runtime
 │   ├── services/            # 计费/usage 累加
@@ -124,7 +124,7 @@ OmicsClaw/
 
 > **不在本图中的两个独立子系统**（各自有独立调用入口，不走 L4 单 chat turn 路径）：
 >
-> - `autoagent/`：实验循环 / patch engine / metrics — 用于自动化研究和优化任务。
+> - `autoagent/`：实验循环 / patch engine / metrics — 用于自动化研究和优化任务。**已删除**；运行时调参见 `omicsclaw/ensemble/tuning/`。
 > - `agents/`：**EvoScientist 风格的多 agent 研究流水线**（5481 行，基于 LangChain / deepagents / langgraph）。把"一个 idea"端到端跑成完整研究产出。详见 §7.10。
 >
 > **半独立 L5 子系统**（位于 L5 但有独立编排逻辑，复用 L5 其他模块但不与 L4 query_engine 交互）：
