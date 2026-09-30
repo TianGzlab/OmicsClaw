@@ -1,66 +1,65 @@
 ---
 title: "OmicsClaw-App 桌面端 - 本地 GUI 与聊天面板"
-description: "OmicsClaw-App 是基于 Next.js / Electron 的本地桌面应用，提供聊天界面、结果浏览与可选的远程执行，与 CLI / Bot 共享同一套 skill 系统。"
+description: "OmicsClaw-App 是基于 Next.js / Electron 的本地桌面应用，通过 `oc desktop` 连接后端，与 CLI / Bot 共享同一套 agent 与 skill 系统。"
 keywords: ["OmicsClaw-App", "桌面端", "GUI", "Electron", "Next.js"]
 og:image: "/docs/images/og-cover.png"
 ---
 
 ## 为什么有桌面端
 
-**CLI 适合开发者，Bot 适合协作**：桌面端面向"科研日常工作流"场景——打开 App，点击发送消息，无需记忆任何 CLI 参数，也无需配置 Telegram / 飞书 token，即可调用全部 88 个 skill。
+> 现状（plan 0064 至 0066）：重建后的后端 `oc desktop` 提供聊天流、审批卡片、停止、工作区校验、`/env/doctor` 与 `/health`，
+> App 管理页用的技能、MCP、providers 与会话标题路由（[plan 0065](https://github.com/TianGzlab/OmicsClaw/blob/main/docs/plans/0065-desktop-management-pages-and-retirement.md)），
+> 以及只读的文件路由（[plan 0066](https://github.com/TianGzlab/OmicsClaw/blob/main/docs/plans/0066-desktop-remote-mode.md)）。
+> App 的记忆页与 notebook、outputs 等旧页面已经退役，原来的结果浏览面板也在其中，图片与报告改在文件树和预览里查看。
+> App 经 SSH 隧道连接服务器上的 `oc desktop` 的用法见[远程模式](/docs/engineering/remote-execution)。
 
-**结果浏览（图、表、报告）GUI 比终端友好**：运行完 `spatial-domains` 或 `bulkrna-de` 后，App 内置结果浏览面板可直接渲染 UMAP、火山图、热图，无需在文件管理器和终端之间来回切换。聊天面板同时展示对话历史与分析产物，上下文不丢失。
+CLI 适合开发者，Bot 适合协作，桌面端面向日常的科研分析：在 App 里输入并发送消息就能调用 94 个 skill，不用记 CLI 参数，也不用配置 Telegram 或飞书的 token。
 
-**三种入口共用同一套 skill 系统**：CLI、Bot 与 App 调用的是完全相同的 88 个 skill，输出格式与结果目录结构一致。用户可以在 App 里启动任务，再通过 CLI 补跑后处理，或反之——产物完全可互换。
+分析跑完后，图片和报告可以在 App 的文件树和预览里打开，不用在文件管理器和终端之间来回切换。
+
+CLI、Bot 与 App 调用的是同一套 94 个 skill，输出格式和结果目录结构一致，所以可以在 App 里启动分析，再用 CLI 补跑后处理，反过来也行。
 
 ## 启用前 / 启用后
 
 | 维度 | CLI 用户 | App 用户 |
 |---|---|---|
-| Onboarding | 学命令与参数 | 装 App 即用，GUI 引导 |
-| 结果浏览 | 终端 + 文件管理器 | 内置结果浏览面板 |
+| Onboarding | 学命令与参数 | 装 App，指定 conda 环境里的解释器 |
+| 结果浏览 | 终端 + 文件管理器 | App 里的文件树和预览 |
 | 远程接入 | 自己 SSH + 端口转发 | App 内置 Remote-SSH Runtime |
 
 ## 部署形态
 
-OmicsClaw-App 基于 **Next.js + Electron** 构建，是与本仓库并列的独立桌面应用，维护在独立代码库（`OmicsClaw-App/`）中，不包含在本仓库的 `frontend/` 目录内（后者是 Vite/React 内存浏览仪表盘，用途不同）。
+OmicsClaw-App 基于 Next.js + Electron 构建，是与本仓库并列的独立桌面应用，代码在独立的代码库（`OmicsClaw-App/`）里，本仓库只有它连接的后端。
 
-App 当前发布版本为 **v0.1.3+**，支持四种 Runtime：
-
-| RuntimeKind | 说明 | 典型场景 |
-|---|---|---|
-| `bundled` | App 自带便携 Python，零配置 | 开箱即用（Linux / macOS / Windows）|
-| `local-python` | 指向用户本机解释器 | 已有 conda / venv 环境 |
-| `remote-ssh` | SSH 隧道前向到远端 `oc desktop-server` | GPU 服务器 / 实验室集群 |
-| `remote-url` | 直连已有后端 URL | 有 VPN / 公网 URL |
-
-**本地全栈启动**（bundled runtime，安装 App 后直接双击即可，无需额外命令）。
-
-**远端分离部署**，在服务器端执行：
+App 连接的后端是 `oc desktop`（代码在 `omicsclaw/entry/desktop/`）。安装包不含 Python：在 App 里指向一个装好 OmicsClaw 的解释器，通常是 `bash 0_setup_env.sh` 建出的 conda 环境；`fastapi` 与 `uvicorn` 由 `environment.yml` 提供，没有 `[desktop]` pip extra。
 
 ```bash
-# 首次部署需安装 desktop 额外依赖
-pip install -e ".[desktop]"
+# App 要求填写的解释器路径
+conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
 
-# 激活 Python 环境
-source .venv/bin/activate   # 或 conda activate omicsclaw
-
-# 启动 desktop-server（监听本机 8765，App 通过 SSH 隧道接入）
-oc desktop-server --host 127.0.0.1 --port 8765
+# App 启动的命令；配合 `npm run dev` 时由你自己运行
+oc desktop --workspace <项目目录> -- --host 127.0.0.1 --port 8765
 ```
 
-> ADR 0005 已把命令更名为 `oc desktop-server`（原 `oc app-server`），并将后端代码集中到 `omicsclaw/surfaces/desktop/`，没有保留兼容别名。完整配置步骤见 [远程执行模式](/docs/engineering/remote-execution)。
+- 一个进程服务一个工作区，即 App 里选中的项目；切换项目等于重启后端。
+- 路由：`POST /chat/stream`、`POST /chat/permission`（审批卡片）、`POST /chat/abort`（停止）、`POST /chat/session-permission-profile`、`GET`/`PUT /workspace`、`GET /env/doctor`、`GET`/`HEAD /health`；管理路由 `GET /skills`、`GET /skills/{domain}/{name}`、`GET /mcp/servers`、`GET`/`PUT /providers`、`POST /providers/test`、`POST /chat/title`；只读文件路由 `GET /files/tree`、`GET /files/serve`（限定在工作区内，以 `.` 开头的路径隐藏）。聊天契约是 v3。
+- provider 与模型以后端的 `.env` 为准，App 不按会话切换。
+- 绑定非回环地址必须设置 `OMICSCLAW_REMOTE_AUTH_TOKEN`，客户端以 bearer token 发送。
+- App 的 Runtimes 页面里，本机用的是指向本机解释器的 `local-python`（`bundled` 的后端打包链已删除）；`remote-ssh`（App 开 SSH 隧道）与 `remote-url`（直连 URL）连接服务器上的 `oc desktop`，见[远程模式](/docs/engineering/remote-execution)。
 
 ## 故障排查
 
 | 症状 | 可能原因 | 解决 |
 |---|---|---|
 | App 不启动 / 白屏 | 依赖缺失或 Electron 版本冲突 | 查看 App 内置日志（Help → Show Logs）；重装 App |
-| 后端连接失败（红点） | `oc desktop-server` 未运行或端口被占 | 服务器端 `ps -ef \| grep desktop-server` 确认进程存活；检查 8765 端口；旧版脚本若仍调用 `oc app-server` 请改名 |
-| 远程 session 断开 | SSH 连接超时或 ssh-agent 失效 | 重新 `ssh-add`；在 Runtimes 页面点 Reconnect |
+| App 显示后端离线（红点） | 选定的解释器里没有可用的 OmicsClaw | 执行 `<选定的 python> -c "import omicsclaw; print(omicsclaw.__version__)"`，修好这个环境后在 App 里重新激活；旧的 `oc desktop-server` / `oc app-server` 命令已删除，一律改用 `oc desktop` |
+| 端口 8765 已被占用 | 之前的 `oc desktop` 或别的进程还占着这个端口 | 用 `lsof -i:8765` 查看占用端口的进程，确认是旧的 `oc desktop` 再结束它；或者用 `-- --port <其他端口>` 启动后端 |
+| `oc desktop` 提示需要 uvicorn 和 fastapi | 这两个包由 conda 管理，没有对应的 pip extra | `mamba env update -f environment.yml`，或用 `mamba install -c conda-forge fastapi uvicorn` 装进该环境 |
+| 聊天失败，报 `workspace_does_not_match_backend_runtime` | 这个会话属于另一个项目，不是后端启动时的工作区 | 切换到那个项目，或以 `oc desktop --workspace <那个目录>` 启动后端 |
+| `/health` 返回 `skills_count: 0` | 后端从 `<工作区>/skills` 读技能，工作区不是仓库检出目录时那里通常没有技能 | 用仓库检出目录作 `--workspace`，或设置 `OMICSCLAW_SKILLS_DIR=<检出目录>/skills` |
 
 ## 下一步阅读
 
 - [聊天机器人](/docs/ecosystem/chat-bot)
-- [远程执行模式](/docs/engineering/remote-execution)
+- [远程模式](/docs/engineering/remote-execution)
 - [整体架构](/docs/architecture/overview)

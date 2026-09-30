@@ -32,111 +32,55 @@ mkdir -p skills/<domain>/<skill-name>/tests
 
 Subdomain nesting is also supported (e.g., `singlecell/scrna/sc-qc/sc_qc.py`).
 
-### Step 2: Write skill.yaml (SKILL.md is generated)
+### Step 2: Write SKILL.md
 
-Copy and customize the template:
+`SKILL.md` is the **single source of truth** and is hand-written end to end.
+There is no `skill.yaml` machine contract and no generator: both belonged to
+the retired skill system and were deleted with it.
 
-```bash
-cp -r templates/skill skills/<domain>/<skill-name>     # then rename + fill placeholders
+**The frontmatter.** `omicsclaw/skills/` reads exactly four keys; anything
+else you put there is inert.
+
+```markdown
+---
+name: my-new-skill
+description: Load when <the one situation this skill is for>. Skip when <the
+  case that belongs elsewhere> (use <other-skill>); <another> (use <other>).
+trigger: keyword one, keyword two, keyword three
+tags:
+- domain
+- method
+---
 ```
 
-Under **ADR 0037**, a skill is defined by a single machine contract,
-`skill.yaml`, and a narrative card, `SKILL.md` — which is **generated** from
-`skill.yaml`, not hand-written field by field. You edit `skill.yaml` and
-regenerate. `skill.yaml` is validated by `omicsclaw/skill/schema.py:SkillManifest`
-(pydantic).
+| Key | Required | What reads it |
+|---|---|---|
+| `name` | **yes** | The prompt index and the `use_skill` tool. Must be unique across every skill — a duplicate is **skipped**, not merged. |
+| `description` | **yes** | The prompt index. This single line is the only thing about your skill the model sees before it decides, so it is the highest-leverage text in the file. |
+| `trigger` | no | `/skills <query>` search only. It does **not** auto-fire the skill. Comma-separated, or a YAML block sequence. |
+| `tags` | no | `/skills <query>` search only. |
 
-**`skill.yaml` (the single source of truth):**
+**Write the description as a load/skip pair.** "Load when …" tells the model
+when to reach for it; "Skip when … (use `<other-skill>`)" is what stops a
+wrong choice, and it is the more valuable half. Name the neighbour you are
+deferring to — an unqualified "skip when this is not relevant" helps nobody.
+Folded continuation lines are fine; the parser keeps them whole.
 
-```yaml
-schema_version: 2                  # required — v2 contract marker
-id: your-skill-name                # kebab-case, matches folder name
-name: your-skill-name              # usually == id
-domain: spatial                    # one of the 8 domain keys (matches skills/<domain>/)
-type: leaf                         # leaf (default) | consensus | workflow
-version: 0.1.0
-author: OmicsClaw
-license: MIT
-emoji: "🔬"
-summary:                           # applicability — drives routing + the generated description
-  load_when: <the one situation this skill is for>
-  skip_when:                       # >=1 rule (lint requires at least one)
-  - condition: a sibling skill already covers the request
-    use: neighbouring-skill
-  trigger_keywords: [preprocess, QC]
-  tags: [domain, analysis-type, method]
-  aliases: []                      # legacy skill names this answers to
-interface:
-  inputs:
-    modalities: [visium]
-    file_types: [h5ad]             # extensions WITHOUT the dot
-    preconditions:
-      data_shape: {requires_preprocessed: false}   # needs preprocessed AnnData input?
-  parameters:
-    allowed_extra_flags:           # flags beyond --input/--output/--demo (must match argparse)
-    - --method
-    - --species
-    hints: {}                      # per-method tuning hints (optional)
-  outputs:
-    files: [report.md, result.json]
-    anndata: {saves_h5ad: false}   # does the script write processed.h5ad?
-runtime:
-  language: python                 # python | r | bash
-  entry: your_skill_name.py        # runtime entrypoint (folder name with _)
-deps:
-  python: [pyyaml]                 # third-party imports as PyPI names
-```
+**The body** is what `use_skill` returns. Keep it under ~200 lines and give
+it these sections:
 
-`schema.py:SkillManifest` also carries the top-level `compatibility`,
-`resources`, `lifecycle`, `validation`, `provenance`, `security`, and `mcp`
-sections — see `templates/skill/skill.yaml` for the full annotated template and
-`skills/singlecell/scrna/sc-qc/skill.yaml` for a filled-in example.
+| Section | What goes in it |
+|---|---|
+| `## When to use` | 3-6 lines mirroring the load/skip split, naming the closest adjacent skill |
+| `## Inputs & Outputs` | What the script reads, and every file it writes, by path |
+| `## Flow` | 3-7 numbered present-tense steps, anchored to `<script>.py:LINE` where it helps |
+| `## Gotchas` | The highest-leverage section. Each bullet states the trap, anchors to a real code path or output filename, and says **why** it exists. Skip anything a competent reader would get right anyway. |
+| `## Key CLI` | The real `python skills/<domain>/<skill>/<script>.py …` invocation. There is no `oc run`, and this is the only place anyone learns your flags. |
+| `## Dependencies` | The Python packages your script needs. Nothing installs them; this is so an agent can check before a long run. |
+| `## See also` | The `references/*.md` files and the adjacent skills |
 
-`resources.compute` is optional until a reservation has been measured on a
-representative run. When present, declare all five fields: `cpu_cores`,
-`memory_mib`, `gpu_devices`, `threads`, and `temporary_disk_mib`; `threads`
-must not exceed `cpu_cores`. These values are Candidate-plan admission
-reservations, not OS-enforced limits or guessed defaults. An uncalibrated skill
-is deliberately resource-unready for whole-plan execution.
+Start from `templates/skill/SKILL.md`, which carries this checklist inline.
 
-`lifecycle.status: deprecated` must name one different canonical
-`superseded_by` Skill whose current lifecycle is `mvp` or `stable` and whose
-earned validation is `demo-validated` or higher.
-Non-deprecated Skills must omit `superseded_by`. For maintained repositories,
-submit evidence and the replacement through Backend Skill evolution governance
-instead of hand-editing the transition: approval reruns the replacement demo,
-refreshes registry/catalog/DAG projections, removes the old Skill from
-automatic/LLM routing, and makes the shared runner return the replacement hint.
-
-`interface.outputs.files` is the exhaustive inventory of possible native
-outputs, not a promise that every branch writes every file. Put only
-always-produced non-AnnData handoffs in `outputs.artifacts`; put
-method-dependent guarantees in `outputs.method_scopes`. After a subprocess
-returns zero, the shared runner validates the standard `result.json` envelope,
-`result_json.required_keys`, unconditional artifacts, and the scope matching
-the method that actually ran before it reports success.
-
-Omit `security` until you have deliberately reviewed the implementation's
-data-egress, network, and filesystem-write behavior. Once reviewed, all three
-fields are required. The block is an auditable declaration, not an OS sandbox
-or proof that the process stayed within those capabilities.
-
-`SKILL.md` is **generated** from `skill.yaml` by `scripts/generate_skill_md.py`:
-its frontmatter header and the `## Inputs & Outputs` summary are auto-populated
-(do **not** hand-edit them), while the narrative sections you author —
-`## When to use`, `## Flow`, `## Gotchas`, `## Key CLI`, `## See also` — are
-preserved verbatim. Regenerate after every `skill.yaml` edit:
-
-```bash
-python scripts/generate_skill_md.py       skills/<domain>/<skill-name>
-python scripts/generate_parameters_md.py  skills/<domain>/<skill-name>
-```
-
-**Required SKILL.md sections (lint-enforced at scripts/skill_lint.py):**
-`## When to use`, `## Inputs & Outputs`, `## Flow`, `## Gotchas`,
-`## Key CLI`, `## See also`. Body capped at 200 lines.
-`scripts/validate_skill_yaml.py` and `scripts/skill_lint.py` gate both the
-manifest and the generated card.
 
 ### Step 3: Implement the script
 
@@ -152,20 +96,21 @@ import argparse
 import sys
 from pathlib import Path
 
-# Project root on sys.path for imports
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+# Put the checkout that provides skills/_sdk on sys.path (the same block in every
+# skill script; with no such checkout above the file, PYTHONPATH decides)
+_SDK_ANCHOR = next(
+    (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
+    None,
+)
+if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
+    sys.path.insert(0, str(_SDK_ANCHOR))
 
 # Import core analysis functions from _lib (recommended for complex skills)
 from skills.<domain>._lib.<module> import core_function
 
-# Import report utilities
-from omicsclaw.common.report import (
-    generate_report_header,
-    generate_report_footer,
-    write_result_json,
-)
+# Import report utilities — skill code imports skills._sdk, never omicsclaw
+from skills._sdk.report import generate_report_footer, generate_report_header
+from skills._sdk.result import write_result_json
 
 
 def generate_figures(output_dir: Path, summary: dict) -> list[str]:
@@ -213,8 +158,8 @@ if __name__ == "__main__":
 ```
 
 **Standard output files** (in `--output` directory; describe yours
-exhaustively in `references/output_contract.md` — `scripts/skill_lint.py`
-verifies every claimed path appears in the script):
+exhaustively in `references/output_contract.md`; nothing verifies this
+mechanically any more, so it is a review item):
 
 | File | Purpose | Optional? |
 |------|---------|---|
@@ -223,9 +168,9 @@ verifies every claimed path appears in the script):
 | `tables/<name>.csv` | CSV data tables | per skill |
 | `figures/<name>.png` | PNG/SVG visualizations | only if your script uses matplotlib |
 | `reproducibility/{commands.sh,requirements.txt,checksums.sha256}` | Replay artifacts | written by common report helper when applicable |
-| `processed.h5ad` | Output AnnData | only if `interface.outputs.anndata.saves_h5ad: true` in `skill.yaml` |
+| `processed.h5ad` | Output AnnData | only if your script writes one; say so in `## Inputs & Outputs` |
 
-Use `omicsclaw.common.report.write_result_json` instead of constructing an
+Use `skills._sdk.result.write_result_json` instead of constructing an
 ad-hoc payload. A zero-exit process with a missing, malformed, scaffold, or
 contract-incomplete `result.json` is reported as `contract_failure`; its raw
 output directory is retained for diagnosis, but runner-owned success guides
@@ -274,23 +219,28 @@ def test_demo_mode(tmp_path):
 ### Step 6: Verify integration
 
 ```bash
-# 1. Registry discovers your skill
-python omicsclaw.py list | grep <skill-name>
+# 1. The loader indexes it, and refuses nothing
+python -c "from omicsclaw.skills import load_skills; \
+  i = load_skills('skills'); print(len(i), i.skipped)"
+make list | grep <skill-name>
 
-# 2. Demo mode works
-python omicsclaw.py run <skill-name> --demo --output /tmp/test_output
+# 2. Demo mode works, run the way the agent will run it
+python skills/<domain>/<skill-name>/<skill_name>.py --demo --output /tmp/test_output
 
 # 3. Tests pass
 python -m pytest skills/<domain>/<skill-name>/tests/ -v
 
-# 4. A resource-ready exact demo uses the canonical Agent path
-oc interactive -p "run <skill-name> demo"
+# 4. The domain index picks it up
+OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test_domain_index_is_current.py
+
+# 5. The agent can reach it end to end
+oc cli --prompt '<a request your skill should answer, naming it>'
 ```
 
-The same explicit named-demo request in Desktop text chat must receive a fresh
-canonical Run ID and Replay Capsule with zero LLM discovery tokens. The Desktop
-authoritative adapter passes the process-local `RunRuntime` through
-`ControlRuntimePorts`; do not introduce a Desktop-only legacy-runner fallback.
+Step 1 is the one that catches a malformed header: a `SKILL.md` missing
+`name` or `description` is **skipped silently** by design, so a skill that
+never appears is far more likely to be a frontmatter typo than a wiring
+problem. `i.skipped` names the file and the reason.
 
 ### Step 7: Submit
 
@@ -306,20 +256,26 @@ git push -u origin add-<skill-name>
 
 ## How Auto-Discovery Works
 
-You don't need to register your skill anywhere. The system discovers it automatically:
+You don't need to register your skill anywhere. `omicsclaw/skills/` walks
+the tree at startup and indexes every `SKILL.md` it can parse:
 
 ```
 You create files                          System does the rest
 ─────────────────                         ────────────────────
-skills/<domain>/<name>/                 → registry.load_all() discovers the directory
-    SKILL.md (with frontmatter)         → LazySkillMetadata parses trigger_keywords, domain, flags
-    <name>.py (with main())             → registry.skills[alias] = {script, domain, description, ...}
+skills/<domain>/<name>/                 → load_skills() walks the tree recursively
+    SKILL.md (frontmatter)              → header parsed; body left on disk
+    <name>.py                           → nothing to register; the body names the path
                                           │
-                                          ├→ CLI: `omicsclaw.py run <name>` works
-                                          ├→ Bot: NLP routing via trigger_keywords
-                                          ├→ skill_search(): AST extracts functions for coding-agent
-                                          └→ load_skill(): dynamic import in notebook kernel
+                                          ├→ System prompt: one `- name: description` line
+                                          ├→ use_skill: the model fetches the body on demand,
+                                          │             and gets the skill's directory with it
+                                          └→ /skills <query>: matched on name, domain, tags, trigger
 ```
+
+**Progressive disclosure is why the description matters so much.** The
+bodies are ~124k tokens over 94 skills; the index is ~8.4k. Only the index
+is in the prompt, so your `description:` is the entire basis on which the
+model decides whether to open your skill at all.
 
 ---
 
@@ -341,11 +297,27 @@ skills/<domain>/<name>/                 → registry.load_all() discovers the di
 - Tests with pytest
 - Follow existing skill patterns (read 2-3 skills in the same domain before starting)
 
+### Test markers and CI
+
+Plain `pytest` skips tests marked `slow`, `demo` and `eval`, and runs
+the ones marked `scripted_eval`. Those are the scripted agent evals in
+`tests/evals/dataset/`: the model's replies are written into each case,
+so they need no API key and no network and finish in seconds. `eval` is
+for tests that call a real model. They need a key, run by hand or
+nightly, and never gate a PR.
+
+The `Eval CI` workflow (`.github/workflows/eval.yml`) runs the framework
+unit tests, then the scripted evals. A PR is green only when every hard
+eval assertion passes; the step summary shows the pass rate and warnings
+per category. Tests that already fail are listed in
+`tests/ci_known_failures.txt` and run as strict xfail, so a fixed test
+fails the run until you delete its entry.
+
 ## Supported Domains
 
-For an always-current count, see the auto-generated sections in
-[`CLAUDE.md`](CLAUDE.md) (between `<!-- ROUTING-TABLE-START -->` markers)
-and [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md).
+For an always-current count, run `make list` — it reports what
+`omicsclaw/skills/` actually indexed, and how many files it found and
+refused. The routing table in [`OMICSCLAW.md`](OMICSCLAW.md) is maintained by hand.
 
 | Domain | Directory |
 |--------|-----------|
@@ -355,92 +327,83 @@ and [`skills/orchestrator/SKILL.md`](skills/orchestrator/SKILL.md).
 | Proteomics | `skills/proteomics/` |
 | Metabolomics | `skills/metabolomics/` |
 | Bulk RNA-seq | `skills/bulkrna/` |
+| Literature | `skills/literature/` |
 
 ### Keeping skill-derived docs in sync
 
-After adding, renaming, or removing a skill (or editing SKILL.md frontmatter
-that appears in routing tables), regenerate the derived docs so humans and
-LLMs see consistent numbers:
+`SKILL.md` is the single source of truth. The generators that used to
+write headers, catalogues and routing tables from a `skill.yaml` machine
+contract were deleted with the old skill system, along with `skill.yaml`
+itself — a generator nobody runs is how the domain indexes silently
+rotted, so the one derived document left is guarded by a test instead:
 
 ```bash
-python scripts/sync_skill_docs.py --apply     # regenerate all four
-python scripts/sync_skill_docs.py --check     # CI-style drift check
+# Check nothing drifted, and that the tree loads with nothing skipped
+pytest tests/skills
+
+# Regenerate skills/<domain>/INDEX.md after adding or editing a skill
+OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test_domain_index_is_current.py
+# or: make skill-index
 ```
 
-This wraps four generators:
-- `generate_routing_table.py` → `CLAUDE.md` routing table (compact 7-domain briefing)
-- `generate_orchestrator_counts.py` → `skills/orchestrator/SKILL.md`
-- `generate_catalog.py` → `skills/catalog.json`
-- `generate_domain_index.py` → `skills/<domain>/INDEX.md` (lazy-load detail)
+The routing table in `OMICSCLAW.md` is updated by hand; verify a count with
+`find skills/<domain> -name SKILL.md | wc -l`.
 
-The `docs-consistency` CI job runs `--check` on every PR and will fail
-if any of these files are stale.
+### Keeping `## Dependencies` complete
 
-### Keeping skill `requires:` complete
+A skill's `## Dependencies` section should list every Python package its
+script needs — including optional backends reached transitively through
+`_lib` (e.g. `cellrank` / `palantir` for `spatial-trajectory`).
 
-A skill's `requires:` frontmatter must list every Python package its script
-needs — including optional backends reached transitively through `_lib`
-(e.g. `cellrank`/`palantir` for `spatial-trajectory`). These drift easily,
-so they are **generated and checked**, not hand-maintained:
-
-```bash
-python scripts/audit_skill_requires.py            # report gaps
-python scripts/audit_skill_requires.py --write    # regenerate frontmatter in place
-make audit-requires FIX=1                          # same, via Make
-```
-
-The auditor statically analyses each script + the `_lib` modules it imports,
-resolves the shared `_lib/viz` re-export **by imported symbol** (so a skill is
-not charged for backends it never drives), and canonicalises optional-backend
-names against each domain's `_lib/dependency_manager.py` `DEPENDENCY_REGISTRY`
-(the single source of truth — see AGENTS.md). `--write` is **union-only**: it
-adds missing deps but never drops a declared one (skills that delegate to
-`omicsclaw.*` runtime hide their surface behind the package boundary).
+These used to be a `requires:` frontmatter key, generated and checked by
+`scripts/audit_skill_requires.py`. That script, the key and the `skill.yaml`
+it read were deleted with the old skill system, so **the list is now
+hand-maintained and nothing verifies it**. It is documentation for an agent
+about to run your script, not an install manifest — nothing installs from
+it, and a gap costs a confusing `ImportError` rather than a failed build.
 
 **When you add an algorithm/backend to a skill:**
-1. Register it in the domain's `DEPENDENCY_REGISTRY` with an `install_cmd`.
+1. Register it in `DEPENDENCIES` in `skills/_sdk/deps.py`, keyed by its PyPI
+   name as spelled in `## Dependencies`, with a pure-literal value:
+   `module` (import name, or R package name), `kind` (`"pip"`, `"git"` or
+   `"r"`), `install` (for `pip`, exactly `pip install <key> [<also>…]`) and
+   `description`, plus optional `also` (extra PyPI names installed together)
+   and `alt_env` (a conda env that also counts as available). It is the
+   single source of truth for backend name mapping and is read by AST, so no
+   calls or lambdas; see AGENTS.md.
 2. Add it to the right `pyproject.toml` extra or `environment.yml` Tier 4.
-3. Run `python scripts/audit_skill_requires.py --write` to refresh frontmatter.
+3. Add it to your `SKILL.md`'s `## Dependencies` line.
 
-CI runs `audit_skill_requires.py --check` (also wired into `skill_lint.py`) and
-**fails on any skill missing a real dependency**.
+### Keeping the prompt index small
 
-### Routing-context token budget
+Only `name` and `description` reach the system prompt, once per skill, on
+every turn — about 8.4k tokens over 94 skills against ~124k for the bodies.
+That ratio is the whole point of the design, and a description that grows
+into a paragraph spends context on every conversation whether or not your
+skill is used.
 
-The bot's LLM-facing tool registry ships with every turn. To prevent slow
-growth, the repo pins a ceiling per-metric:
+Keep it to one load/skip sentence pair. `make list` shows the compact
+per-domain rendering; `python -c "from omicsclaw.skills import load_skills;
+print(len(load_skills('skills').summary()))"` gives the index's exact size
+if you want to see what an edit cost.
 
-```bash
-python scripts/measure_routing_tokens.py                 # report sizes
-python scripts/measure_routing_tokens.py --save X.json   # snapshot
-python scripts/check_routing_budget.py                   # fail if over ceiling
-```
+The old `measure_routing_tokens.py` / `check_routing_budget.py` pair that
+pinned a ceiling here was deleted: it measured the retired bot tool registry
+and its own helper module was already missing.
 
-CI runs `check_routing_budget.py`. If you add a new bot tool or expand an
-existing tool's description, the check may fail — in that case:
-
-1. Run `measure_routing_tokens.py` locally and eyeball the diff vs
-   `build/routing-baselines/after_stage4.json`.
-2. If the new cost is justified, raise the relevant ceiling in
-   `build/routing-baselines/ceiling.json` and explain why in the PR.
-3. If the growth is accidental (forgot to trim a description), fix it.
-
-See `docs/` and the Stage 2-4 refactor comments in `omicsclaw/runtime/`
-for the 3-layer routing architecture (domain briefing → per-domain index →
-chosen-skill prefetch) that keeps this budget achievable.
 
 ## For AI Agents Contributing Skills
 
 AI coding agents should follow the same workflow, plus:
 
-1. Read [`README.md`](README.md) first for project context on complex repository tasks
+1. For complex repository tasks, read [`README.md`](README.md) for project context and [`CHANGELOG.md`](CHANGELOG.md) for recent decisions
 2. Read [`SPEC.md`](SPEC.md) for the repository maintenance and AI development contract
 3. Read [`AGENTS.md`](AGENTS.md) for project structure and conventions
 4. Read the target skill's `SKILL.md` before modifying code
 5. Use a concise plan, root-cause debugging, focused tests, and verification evidence for non-trivial repository changes.
-6. Use `python omicsclaw.py list` to verify skills load correctly
+6. Use `make list` to verify skills load correctly, and check `i.skipped` is empty
 7. Run `python -m pytest -v` to confirm all tests pass
-8. Update `README.md` if the work introduces an important decision, milestone, or lasting contributor workflow change
+8. Add an entry at the top of [`CHANGELOG.md`](CHANGELOG.md) if the work introduces an important decision, milestone, or lasting contributor workflow change; change `README.md` only when a user-facing entry point, install step or headline feature changes, and keep its What's New to at most five items of one sentence each
 
 ## Skill Ideas We Need
 

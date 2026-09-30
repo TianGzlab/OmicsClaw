@@ -1,7 +1,7 @@
 # OmicsClaw Python deps live here.
 # R packages, bioinformatics CLIs (samtools/STAR/fastqc/...), and the build
 # toolchain are declared in environment.yml and installed by 0_setup_env.sh.
-# See docs/superpowers/specs/2026-04-30-conda-env-management-design.md.
+# The header of environment.yml says which file owns which package.
 
 [build-system]
 requires = ["setuptools>=64,<82", "wheel"]
@@ -12,7 +12,7 @@ name = "omicsclaw"
 version = "0.1.2"
 description = "OmicsClaw: Multi-omics analysis platform with skills across spatial, single-cell, genomics, proteomics, metabolomics, and bulk RNA-seq domains"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "OmicsClaw Team"}
 ]
@@ -41,26 +41,30 @@ classifiers = [
 requires-python = ">=3.11,<3.14"
 
 # --------------------------------------------------------------------------- #
-# Tier 1: Core — always installed via `pip install -e .`                      #
-# After the mamba-first migration, the core deps shrank from ~25 to a         #
-# handful of pip-only / pip-managed leaves. The bulk (scanpy, anndata,        #
-# squidpy, numpy, pandas, scipy, scikit-learn, igraph, leidenalg, umap-learn, #
-# matplotlib, seaborn, Pillow, scikit-misc, pydantic, nbformat,               #
-# jupyter_client, ipykernel, greenlet, rich, etc.) lives in environment.yml   #
-# Tier 4 and is installed by mamba.                                            #
+# Tier 1: Core — installed by `pip install .` and `pip install -e .`          #
+# Enough for `oc cli` to start and call a model. The science stack (scanpy,   #
+# anndata, squidpy, numpy, pandas, scipy, scikit-learn, igraph, leidenalg,    #
+# umap-learn, matplotlib, seaborn, torch, ...) and the desktop server         #
+# (fastapi, uvicorn) live in environment.yml Tier 4 and are installed by      #
+# mamba.                                                                      #
 # --------------------------------------------------------------------------- #
 dependencies = [
+    # ========== what `oc` imports to start and to call a model ==========
+    "rich>=13.0",                     # `oc cli` terminal rendering
+    "openai>=1.26",                   # OpenAI-compatible providers; 1.26 added stream_options
+    "anthropic>=0.78",                # Anthropic provider; output_config and adaptive thinking
+
     # ========== pkg_resources fallback for older packages ==========
     "setuptools>=64,<82",
 
     # ========== SOCKS proxy bridge — not on conda-forge under this name ==========
     "socksio>=1.0.0",
 
-    # ========== v2 skill contract parser (ADR 0037) — core skill-loading path ==========
-    # lazy_metadata imports omicsclaw.skill.schema when a skill.yaml is present, so
-    # pydantic must be in the pip core (not only environment.yml) before v2 skills
-    # land in the live tree — otherwise a lightweight `pip install -e .` env silently
-    # falls back to v1 / degrades v2-only skills to minimal entries.
+    # ========== pydantic (ADR 0037) ==========
+    # Declared for the v2 skill contract parser in omicsclaw.skill.schema. That
+    # module was deleted with the old stack and nothing in omicsclaw/ or
+    # skills/_sdk/ imports pydantic now; tests/test_pyproject_thin_pip_layer.py
+    # still pins it here.
     "pydantic>=2.1,<3",
 ]
 
@@ -74,9 +78,9 @@ spatial-domains = [
     "SpaGCN>=1.2.5,<2.0",
     # torch moved to environment.yml Tier 4
     # STAGATE's *dependency* only. STAGATE_pyG itself is NOT on PyPI — do not add
-    # it here; `pip install STAGATE-pyG` cannot resolve. It is classified `vcs` in
-    # omicsclaw/skill/execution/dep_spec.py and installed manually from
-    # git+https://github.com/RucDongLab/STAGATE_pyG.git
+    # it here; `pip install STAGATE-pyG` cannot resolve. It is git-only
+    # (`kind="git"`), see DEPENDENCIES in skills/_sdk/deps.py, and installed
+    # manually from git+https://github.com/RucDongLab/STAGATE_pyG.git
     "torch_geometric",                # STAGATE dependency
     "GraphST>=1.1.0",                 # GraphST method
     # POT moved to environment.yml Tier 4
@@ -213,29 +217,6 @@ singlecell-full = [
 # Legacy rpy2 bridge — no longer required. R methods use subprocess.
 singlecell-r-bridge = []
 
-# --------------------------------------------------------------------------- #
-# oauth — ccproxy-backed OAuth login for Claude Pro/Max and OpenAI Codex      #
-# subscriptions. Lets users route anthropic/openai calls through a local      #
-# ccproxy server instead of supplying an API key. Triggered by CLI            #
-# `omicsclaw auth login claude|openai` and runtime flag `--auth-mode oauth`.  #
-#                                                                             #
-# KNOWN BENIGN PIP WARNING:                                                   #
-#   Installing this extra alongside the `spatial-trajectory` /                #
-#   `singlecell-pseudotime` extras (which depend on cellrank → pygpcca) may   #
-#   print:                                                                    #
-#     ERROR: pygpcca 1.0.4 requires jinja2==3.0.3, but you have jinja2 3.1.x. #
-#   Root cause: ccproxy-api pulls fastapi[standard] which requires            #
-#   jinja2>=3.1.5, while pygpcca 1.0.4 over-pins jinja2==3.0.3. pygpcca 1.0.4 #
-#   is the latest release on PyPI (no upstream fix available) and still       #
-#   functions correctly with jinja2 3.1.x in practice. The warning is pip     #
-#   metadata noise — the install succeeds and both OAuth and trajectory       #
-#   analysis continue to work. Safe to ignore.                                #
-# --------------------------------------------------------------------------- #
-oauth = [
-    "ccproxy-api>=0.2.7,<0.3",
-    # httpx moved to environment.yml Tier 4
-]
-
 # These three extras are placeholders for future domain-specific Python
 # packages. Currently empty — domain skills run via the core stack
 # (scanpy/anndata/scipy/etc., installed by environment.yml Tier 4).
@@ -331,30 +312,21 @@ banksy = [
 ]
 
 # --------------------------------------------------------------------------- #
-# Tier 4: memory — persistent bot conversation context (optional)             #
-# aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests, openai,    #
-# python-dotenv moved to environment.yml Tier 4.                              #
-# --------------------------------------------------------------------------- #
-memory = [
-    # All 8 packages (aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography,
-    # requests, openai, python-dotenv) moved to environment.yml Tier 4.
-    # Extra preserved for backward compatibility — no-op on pip install.
-]
-
-# --------------------------------------------------------------------------- #
-# channels — authoritative Telegram and Feishu Channel SDKs                   #
+# channels — the Telegram and Feishu SDKs, which is what most deployments run #
+# Each adapter imports its own SDK inside the method that first needs a       #
+# client, so `oc channel -- --list` works with none of them installed and a   #
+# deployment installs only the platform it actually serves:                   #
+#   slack     pip install slack-sdk aiohttp                                   #
+#   discord   pip install discord.py                                          #
+#   dingtalk  pip install httpx websockets                                    #
+#   qq        pip install qq-botpy                                            #
+#   email     stdlib only (imaplib + smtplib)                                 #
 # --------------------------------------------------------------------------- #
 channels = [
     "python-telegram-bot>=21.0",
     "lark-oapi>=1.3.0",
 ]
 
-# --------------------------------------------------------------------------- #
-# desktop — OmicsClaw-App / web frontend backend dependencies                 #
-# aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests, openai,    #
-# python-dotenv, pyyaml, nbformat, jupyter_client, ipykernel moved to         #
-# environment.yml Tier 4.                                                      #
-# --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
 # OpenTelemetry export — optional, and deliberately so.                       #
 # `omicsclaw/observability/` declares its own Span/Tracer/Meter contract in   #
@@ -370,73 +342,9 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.24",
 ]
 
-desktop = [
-    # python-multipart is required by FastAPI's File / Form parsing.
-    # The /notebook/files/upload endpoint in omicsclaw.surfaces.desktop.notebook.router
-    # uses `File(...)`, so without this import omicsclaw.surfaces.desktop.server
-    # crashes at MODULE LOAD TIME (not first request time). Caught by
-    # the bundled-runtime smoke test: `python -m omicsclaw.surfaces.desktop.server
-    # --help` imports the module, which imports the notebook router,
-    # which decorates /files/upload, which eagerly validates that
-    # multipart is installed. See OmicsClaw-App/scripts/build-backend-
-    # runtime.py for the smoke test that caught this.
-    "python-multipart>=0.0.9",
-    # aiosqlite, sqlalchemy, fastapi, uvicorn, cryptography, requests,
-    # openai, python-dotenv, pyyaml, nbformat, jupyter_client, ipykernel
-    # all moved to environment.yml Tier 4.
-]
-
 # --------------------------------------------------------------------------- #
 # Tier 5: dev — development and testing tools                                 #
 # --------------------------------------------------------------------------- #
-# --------------------------------------------------------------------------- #
-# interactive — CLI/TUI interactive mode dependencies                         #
-# prompt-toolkit, rich, questionary, pyyaml, aiosqlite, requests, openai      #
-# moved to environment.yml Tier 4.                                            #
-# --------------------------------------------------------------------------- #
-interactive = [
-    # prompt-toolkit, rich, questionary, pyyaml, aiosqlite, requests, openai
-    # all moved to environment.yml Tier 4.
-]
-
-# --------------------------------------------------------------------------- #
-# tui — Full-screen Textual TUI (optional, heavier)                           #
-# --------------------------------------------------------------------------- #
-tui = [
-    "omicsclaw[interactive]",
-    "textual>=0.80",
-]
-
-# --------------------------------------------------------------------------- #
-# autonomous — controlled web-guided notebook fallback for main chat          #
-# nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4.        #
-# --------------------------------------------------------------------------- #
-autonomous = [
-    "tavily-python>=0.7",
-    # httpx moved to environment.yml Tier 4
-    "markdownify>=0.14",
-    # nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4
-]
-
-# --------------------------------------------------------------------------- #
-# research — Multi-agent research pipeline (deepagents + LangGraph)           #
-# nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4.        #
-# --------------------------------------------------------------------------- #
-research = [
-    "deepagents>=0.4.11",
-    "langchain>=1.2.12",
-    "langchain-openai>=1.1",
-    "langchain-anthropic>=1.4.0",
-    "langgraph-checkpoint-sqlite>=3.0.0",
-    "tavily-python>=0.7",
-    # httpx moved to environment.yml Tier 4
-    "markdownify>=0.14",
-    "pypdf>=3.0",
-    "opendataloader-pdf>=0.5",             # High-quality PDF→Markdown (requires Java 11+)
-    # Notebook execution engine (CellVoyager-inspired)
-    # nbformat, jupyter_client, ipykernel moved to environment.yml Tier 4
-]
-
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -488,7 +396,6 @@ testpaths = [
     "skills/spatial/spatial-register/tests",
     "skills/spatial/spatial-microenvironment-subset/tests",
     "skills/spatial/spatial-raw-processing/tests",
-    "skills/bulkrna/bulkrna-alignment/tests",
     "skills/bulkrna/bulkrna-de/tests",
     "skills/bulkrna/bulkrna-splicing/tests",
     "skills/bulkrna/bulkrna-enrichment/tests",
@@ -503,7 +410,8 @@ markers = [
     "requires_torch: tests requiring PyTorch (SpaGCN, Cell2Location, scVI)",
     "requires_r: tests requiring R (Rscript on PATH)",
     "demo: Skill demo-mode integration tests (excluded by default; Skill-local demo tests are classified during collection)",
-    "eval: real-LLM behavioral parity tests; run manually or via nightly cron (excluded by default)",
+    "eval: real-LLM evals (network and API key required); manual or nightly, never gates a PR (excluded by default)",
+    "scripted_eval: deterministic scripted agent evals (hermetic, no network); run on every PR by the eval job",
 ]
 filterwarnings = [
     "ignore::FutureWarning",
@@ -560,15 +468,13 @@ exclude = [
 
 [tool.setuptools.package-data]
 omicsclaw = ["py.typed"]
-# Ship the skill definitions themselves. Without these, an installed OmicsClaw
-# has a working CLI but an empty skill registry — `oc list` raises
-# "skills inventory is empty" — because the definitions are data files under
-# non-package directories. Roughly 6 MB / 855 files.
+# Ship the skill definitions. SKILL.md files, runner scripts and references sit
+# in hyphenated directories, which setuptools treats as data, so without these
+# globs the wheel carries no skills. About 5.5 MB / 680 files. `oc` reads
+# skills from <workspace>/skills or from OMICSCLAW_SKILLS_DIR, which can point
+# at this installed copy.
 #
-# Deliberately NOT globbed: `**/*.h5ad` and other demo datasets. One file
-# (`skills/singlecell/scrna/sc-de/data/pbmc3k_processed.h5ad`) is 23.5 MB on its
-# own — four times the entire rest of the tree. Demo data is fetched on demand,
-# not shipped.
+# Deliberately NOT globbed: `**/*.h5ad` and other demo datasets.
 skills = [
     # The skill runner scripts live in hyphenated directories, so they are data
     # from setuptools' point of view even though they are Python.
@@ -592,13 +498,3 @@ skills = [
     "**/tests/**/*",
     "**/__pycache__/*",
 ]
-
-# ADR 2026-05-11: Negative routing eval extracted at write-time and frozen
-# as a snapshot.  The model used to extract Skip-when cases is pinned here
-# so that bumping the model (which can re-extract differently) requires a
-# PR with a snapshot diff humans review.  See scripts/extract_skip_when_cases.py
-# and tests/test_routing_skip_when.py.
-[tool.omicsclaw.eval]
-skip_when_extractor_model = "claude-haiku-4-5-20251001"
-skip_when_extractor_temperature = 0.0
-skip_when_snapshot_schema_version = 1

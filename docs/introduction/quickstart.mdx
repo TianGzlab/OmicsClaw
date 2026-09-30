@@ -1,83 +1,76 @@
 ---
-title: "五分钟上手 OmicsClaw"
-description: "从克隆仓库到跑通第一个 demo 分析，五分钟完成 OmicsClaw 安装与首次调用。"
-keywords: ["OmicsClaw 安装", "quickstart", "demo", "conda 环境"]
+title: "快速上手 OmicsClaw"
+description: "建好 conda 环境，用 oc cli --configure 配置模型，在终端里和 agent 对话，再直接跑一个技能 demo。"
+keywords: ["OmicsClaw 安装", "quickstart", "oc cli", "conda 环境", "demo"]
 og:image: "/docs/images/og-cover.png"
 ---
 
-## 这一页能让你做什么
+下面的命令都在仓库根目录执行，适用于 Linux 和 macOS。
 
-跑通 OmicsClaw 的第一个 demo 分析（无需准备数据）。读完后你会拥有：
-
-- 一个可用的 conda 环境
-- 一份 spatial-preprocess demo 的输出报告
-- 对 `omicsclaw.py run` CLI 的基本认知
-
-## 安装：四步
-
-### 1. 克隆仓库
+## 1. 安装
 
 ```bash
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
-```
-
-### 2. 创建 conda 环境（mamba-first）
-
-```bash
 bash 0_setup_env.sh
-```
-
-脚本优先使用 `mamba`，无 `mamba` 时回退到 `conda`。它会从 `environment.yml` 创建名为 **OmicsClaw** 的 conda 环境，并依次完成 R 包、生信命令行工具和全部 Python 可选扩展的安装。预计耗时 10–30 分钟（取决于网络和镜像速度）。
-
-### 3. 构建 vendor 工具（如适用）
-
-```bash
 conda activate OmicsClaw
-bash 0_build_vendored_tools.sh
 ```
 
-当前该脚本为存根（stub），尚未编译任何工具，执行后立即返回。待后续在 `tools/` 下添加上游工具时，重新运行此步骤以完成编译和链接。
+`0_setup_env.sh` 优先用 `mamba`，找不到时回退到 `conda`。它按 `environment.yml` 建一个名为 `OmicsClaw` 的环境，装入 R 4.3 与 R/Bioconductor 包、samtools、STAR、fastqc 等命令行工具和 Python 科学计算栈，再以可编辑模式安装 OmicsClaw 及其 `full`、`singlecell-upstream` extra，`oc` 命令随之可用。整个过程通常要 10 到 30 分钟，取决于网络和镜像速度。想用别的环境名，运行 `bash 0_setup_env.sh <环境名>`。
 
-环境激活会持续整个 shell 会话；下面的步骤无需再次激活。
-
-### 4. 验证安装
+确认技能已就位：
 
 ```bash
-python omicsclaw.py list
+make list
 ```
 
-命令执行后应看到按领域分组的技能列表（空间转录组、单细胞、基因组等 7 个领域），确认环境已就绪。
+第一行应为 `94 skill(s), 0 skipped`，下面按领域列出 7 个领域的技能名。
 
-## 第一次调用：跑 demo
-
-`--demo` 模式使用内置的合成数据集（无需提供任何输入文件），适合快速验证安装是否正常。下面的命令运行空间转录组预处理技能：
+## 2. 配置模型
 
 ```bash
-python omicsclaw.py run spatial-preprocess --demo --output /tmp/quickstart_demo
+oc cli --configure
 ```
 
-终端输出示例：
+向导先让你选 provider（13 个预设，默认 `deepseek`），再依次询问 API key、模型 id、base URL 和工作区目录。base URL 留空就用预设的地址；本地的 `ollama` 不问 API key。之后可以选择配置 Telegram、飞书和桌面端的 bearer token，不用的直接跳过。结果写入仓库根目录的 `.env`，已有的 `.env` 会先另存为 `.env.backup-<时间戳>`。`--configure` 只写配置，不启动 agent。
 
+不用向导也可以：把 `.env.example` 复制为 `.env`，手工填写 `LLM_PROVIDER`、`LLM_API_KEY`、`LLM_MODEL` 和 `LLM_BASE_URL`。
+
+工作区是 agent 可以读写的目录，向导默认填当前目录。agent 从 `<工作区>/skills` 读取技能，所以工作区不是仓库检出目录时，要在 `.env` 里设置 `OMICSCLAW_SKILLS_DIR=<检出目录>/skills`，否则 agent 看不到任何技能。
+
+## 3. 和 agent 对话
+
+```bash
+oc cli
 ```
-Running Spatial Transcriptomics skill: spatial-preprocess (demo mode)
-Output: /tmp/quickstart_demo
 
-INFO: Demo file not found, generating synthetic data
-INFO: Saved processed data: /tmp/quickstart_demo/processed.h5ad
-Preprocessing complete: 180 cells, 3 clusters
+这会打开终端里的 REPL。输入 `/` 查看可用命令，`/help` 列出全部命令。
+
+只问一次、拿到回答就退出：
+
+```bash
+oc cli --prompt "用 demo 数据跑一次 spatial-preprocess，并总结结果"
 ```
 
-输出目录下包含各步骤的 HTML 报告和图像文件。
+较长的问题可以写进文件，用 `oc cli --prompt-file brief.md` 传入。`oc cli --help` 列出全部参数。
 
-## 它不是什么
+没有配置 API key 时 `oc cli` 照样能启动，启动时会在 stderr 提示运行 `oc cli --configure`，但对模型的调用都不会成功。
 
-- **不是 GUI 安装包**：本页假设你使用命令行；OmicsClaw-App 桌面客户端是独立的安装流程，参见 ecosystem/omicsclaw-app
-- **不是云部署指南**：所有命令面向本地 Linux/macOS；远端执行请参考 engineering/remote-execution 页
-- **不覆盖 R 依赖问题排查**：R 包安装常见问题请查阅 [docs/_legacy/R-DEPENDENCIES.md](https://github.com/TianGzlab/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md)
+## 4. 直接运行技能 demo
 
-## 下一步阅读
+技能是普通的 Python 脚本，不经过 agent 也能运行。大多数技能支持 `--demo`，用内置或现场生成的演示数据，不需要准备输入文件：
 
-- [整体架构](/docs/architecture/overview) — 理解 skill 与 orchestrator
-- [空间转录组域](/docs/domains/spatial) — 第一个完整领域示例
-- [Memory 系统](/docs/engineering/memory) — 让 OmicsClaw 记住你的偏好
+```bash
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/quickstart_demo
+```
+
+结束时终端打印 `Preprocessing complete: 200 cells, 3 clusters`。输出目录里有 `report.md`、`result.json`、`processed.h5ad`，以及 `figures/`、`tables/` 等子目录。
+
+其他技能的脚本在各自的技能目录里，形如 `skills/<领域>/<技能>/<脚本>.py`（单细胞技能多一层 `scrna/` 或 `scatac/`），参数写在同一目录的 `SKILL.md` 里。`make demo-all` 依次跑 15 个空间转录组技能的 demo。
+
+## 下一步
+
+- [OmicsClaw-App 桌面端](/docs/ecosystem/omicsclaw-app)：图形界面，通过 `oc desktop` 连接这个环境，使用同一个 `.env` 里的模型配置。
+- [远程模式](/docs/engineering/remote-execution)：App 在笔记本上，`oc desktop` 在服务器上，经 SSH 隧道连接。
+- [聊天机器人](/docs/ecosystem/chat-bot)：`oc channel` 把同一个 agent 接到 Telegram、飞书等平台。平台 SDK 要另外安装，Telegram 与飞书的用 `pip install -e ".[channels]"`；`oc channel --list` 列出全部适配器，各平台的变量见 `.env.example` 第 11 节。`oc channel` 还要求 `.env` 里的 `OMICSCLAW_APPROVAL_TIMEOUT_S` 设了秒数，否则启动失败。
+- R 包安装出问题时，参考 [docs/_legacy/R-DEPENDENCIES.md](https://github.com/TianGzlab/OmicsClaw/blob/main/docs/_legacy/R-DEPENDENCIES.md)。

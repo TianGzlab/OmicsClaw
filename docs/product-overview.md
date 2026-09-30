@@ -6,6 +6,13 @@
 > [`docs/CONTEXT.md`](CONTEXT.md)、已接受 ADR 及
 > [`omicsclaw/surfaces/channels/README.md`](../omicsclaw/surfaces/channels/README.md)
 > 为准。本文中 2026-07-16 的控制面补充是后续勘误，不表示其余章节已整体刷新。
+>
+> 2026-09-27 补注：文中 Desktop 与远程相关内容（`oc desktop-server`、`omicsclaw/surfaces/`、`omicsclaw/remote/`，
+> 以及 `/skills*`、`/notebook/*`、`/mcp/*`、`/jobs` 等路由）描述的后端已删除，上面指向 `omicsclaw/surfaces/` 的链接也已失效。
+> 当前 Desktop 面是 `oc desktop --workspace <dir>`（`omicsclaw/entry/desktop/`），提供聊天、审批、停止、工作区校验与
+> `/health`，另有管理路由（[plan 0065](plans/0065-desktop-management-pages-and-retirement.md)）与只读文件路由。
+> 2026-09-30 补注：App 经 SSH 隧道连接服务器上 `oc desktop` 的远程模式已重新对齐（[plan 0066](plans/0066-desktop-remote-mode.md)），
+> 用法见 [`docs/engineering/remote-execution.mdx`](engineering/remote-execution.mdx)。
 
 > **文档说明**
 >
@@ -90,7 +97,7 @@ OmicsClaw 做的事：
 - **图记忆（Graph Memory）**：基于 SQLite/Postgres 的图数据库记录数据集、分析、洞见、偏好的血缘，按 Namespace 隔离不同用户和工作区
 - **多 Surface（多端）共享同一运行时**：prompt-toolkit CLI、Desktop text 与 Owner-only Telegram text 通过 `ControlRuntime` 进入同一 Agent runtime；Textual TUI 和其他 Channel Adapter 仍待迁移
 - **远程模式（Remote）**：桌面/网页 UI 在本地，分析作业通过 SSH 隧道交给远程 Linux 节点的 `oc desktop-server` 执行
-- **可演化（Self-Evolution）**：`omicsclaw/autoagent/` 用 LLM 元代理在受控 edit surface 内对参数和源代码做实验、评估、回滚——既能优化 Skill 参数，也能演化框架自身
+- **可演化（Self-Evolution）**：原 `omicsclaw/autoagent/`（LLM 元代理在受控 edit surface 内对参数和源代码做实验、评估、回滚）已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划
 
 ### 定位一句话版本
 
@@ -101,7 +108,7 @@ OmicsClaw 做的事：
 OmicsClaw 是**单仓库 + 多 Surface** 的产品，所有形态共享同一份 Python 代码：
 
 - **本地全栈安装（推荐）**：`bash 0_setup_env.sh` 走 conda + R + 生信 CLI 一站式，跑真实分析
-- **轻量虚拟环境**：`pip install -e ".[interactive]"`，只装聊天、路由、Python-only Skill；适合开发、纯对话、CI
+- **轻量虚拟环境**：`pip install -e .`，只装聊天、路由、Python-only Skill；适合开发、纯对话、CI
 - **桌面 App / Web 前端**：`oc desktop-server` 跑 FastAPI 后端（默认 `127.0.0.1:8765`），前端是独立仓库 OmicsClaw-App 或浏览器
 - **远程执行**：在远端 Linux 节点上跑 `oc desktop-server`，绑定 localhost，桌面 App 通过 SSH 隧道 + `OMICSCLAW_REMOTE_AUTH_TOKEN` 接入
 - **Memory API（可选）**：`oc memory-server` 暴露图记忆 REST 接口（默认 `127.0.0.1:8766`），供桌面 Review & Audit 面板使用
@@ -153,9 +160,9 @@ OmicsClaw 的架构、Skill 设计和 local-first 理念受 [ClawBio](https://gi
 | **Preflight 预飞行检查** | 在 Skill 执行**之前**对输入契约做校验；校验失败时不启动科学执行 | `omicsclaw/skill/preconditions.py`、`omicsclaw/runtime/tools/` |
 | **ControlRuntime 控制面运行时** | 持有权威接纳、opaque Turn、per-Conversation FIFO、canonical Transcript 和 Surface Adapter 到 Agent runtime 的内部 seam | `omicsclaw/control/runtime.py`、`omicsclaw/runtime/agent/` |
 | **User-facing entry 用户面入口** | 真人输入文字并读到回应的 Surface。当前 prompt-toolkit CLI、Desktop text、Telegram text 已切到 `ControlRuntime`；Textual TUI 和其他 Channel Adapter 显式待迁移 | `omicsclaw/surfaces/cli/`、`omicsclaw/surfaces/desktop/`、`omicsclaw/surfaces/channels/` |
-| **Task-locked entry 任务锁定入口** | 跑固定非对话任务、用自有 micro-prompt 的入口；目前只有 `omicsclaw/autoagent/`（参数优化 + 框架自演化）。**故意**不共享用户面 builder | `omicsclaw/autoagent/` |
+| **Task-locked entry 任务锁定入口** | 跑固定非对话任务、用自有 micro-prompt、**故意**不共享用户面 builder 的入口。原先只有 `omicsclaw/autoagent/`（参数优化 + 框架自演化），已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划 | —（已删除） |
 | **Research Pipeline 研究流水线** | `omicsclaw/agents/`——受 EvoScientist 启发的多 Agent 工作流（intake → plan → research → execute → analyze → write → review）。使用 `build_system_prompt(surface=pipeline)`，自定义 base persona，关闭 KH 注入 | `omicsclaw/agents/pipeline.py` |
-| **Self-Evolution 自演化** | `omicsclaw/autoagent/`——元系统，要么 (a) 通过 directive loop 调参，要么 (b) 在受控 edit surface 内改源码。**作用于** OmicsClaw 而非**通过** OmicsClaw | `omicsclaw/autoagent/optimization_loop.py`、`omicsclaw/autoagent/harness_loop.py` |
+| **Self-Evolution 自演化** | 原 `omicsclaw/autoagent/`——元系统，要么 (a) 通过 directive loop 调参，要么 (b) 在受控 edit surface 内改源码。已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划 | `omicsclaw/ensemble/tuning/`（运行时调参） |
 | **Memory URI** | 一个 `domain://path` 字符串，给记忆一个逻辑地址，独立于行 id。例如 `dataset://pbmc.h5ad`、`core://agent` | `omicsclaw/memory/` |
 | **Memory Domain 记忆域** | Memory URI 的顶层段——`core`、`dataset`、`analysis`、`insight`、`preference`、`project`、`session` 之一。**注意**：这是记忆系统内部的 7 个域，与 Skill 的 8 个组学 Domain 是两个完全独立的命名空间 | `omicsclaw/memory/engine.py` |
 | **Namespace 命名空间** | 记忆隔离维度，存为 `paths`、`search_documents`、`glossary_keywords` 三张表的列。各 Surface 注入不同的值：CLI/TUI = workspace 绝对路径；Desktop = `app/<launch_id>`；Bot = `<platform>/<user_id>`；系统 = `__shared__`。**避免**：tenant、scope | `omicsclaw/memory/namespace_policy.py` |
@@ -251,7 +258,7 @@ deps:
 | **桌面 App 用户** | UI 的 Skills 面板浏览 + 一键执行；也可对话触发 | `omicsclaw/surfaces/desktop/server.py` 的 `/skills*` |
 | **远程 Job** | 桌面 App 通过 SSH 把 Skill 作业派给远端 `oc desktop-server` | `omicsclaw/remote/routers/jobs.py` |
 | **Research Pipeline** | execute 阶段的子 agent 在 plan 阶段挑出 Skill，按顺序执行 | `omicsclaw/agents/pipeline.py` |
-| **AutoAgent** | 在 metrics-driven 优化循环里把 Skill 当成可调参的对象，反复跑、评估、回滚 | `omicsclaw/autoagent/optimization_loop.py` |
+| **AutoAgent** | 在 metrics-driven 优化循环里把 Skill 当成可调参的对象，反复跑、评估、回滚。已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划 | `omicsclaw/ensemble/tuning/`（运行时调参） |
 
 无论谁触发，最终都走**同一个 Skill Runner 契约**：参数白名单校验 → 工作目录隔离 → 执行 → 标准化 README + Skill Replay Capsule + 产物清单。这是 OmicsClaw 跨 Surface 一致性的关键。
 
@@ -981,55 +988,10 @@ intake → plan → research → execute → analyze → write → review
 
 ### 3.11 Self-Evolution 自演化（AutoAgent）
 
-> **角色**：让 OmicsClaw 自己优化自己——既能调 Skill 参数，也能改源码。
-
-#### 两种工作模式
-
-| 模式 | 干什么 | 调用方 |
-|---|---|---|
-| **Optimization Loop** | 通过 directive loop 自动搜参，在多次 Run 上比较 metric | `omicsclaw/autoagent/optimization_loop.py` |
-| **Harness Loop** | 在受控 edit surface（一组允许改的文件路径）里改源码，跑测试，评估，回滚或合并 | `omicsclaw/autoagent/harness_loop.py` |
-
-两种模式都跑在 **JSON-only micro-prompt** 上——元 agent 每轮只做一个决定：下一组参数是什么 / 下一个 patch 怎么打 / 接受还是回滚。它**不复用** `build_system_prompt`，因为对话型 system prompt 不适合 JSON 任务。
-
-#### 关键模块
-
-- `search_space.py` — 参数搜索空间描述
-- `directive.py` — 元 agent 的指令格式
-- `harness_directive.py` — Harness 模式专用指令
-- `edit_surface.py` — 允许 patch 的文件路径白名单
-- `patch_engine.py` — diff 生成 + apply + 回滚
-- `evaluator.py` / `metrics_compute.py` / `metrics_registry.py` — Metric 评估
-- `judge.py` — 把多个 metric 综合成接受/拒绝决策
-- `experiment_ledger.py` — 每次实验的记录
-- `failure_memory.py` — 失败实验的记忆，避免重复踩坑
-- `hard_gates.py` — 不可破坏的硬约束（测试必须通过、metric 不能倒退）
-- `llm_client.py` — 元 agent 专用 LLM 客户端（独立配置）
-- `reproduce.py` — 复现一次历史实验
-- `result_contract.py` — 结果格式
-- `runner.py` — 模式调度
-- `trace.py` — 实验链路追踪
-
-#### CLI 入口
-
-```bash
-oc optimize <skill> --input <file> --search-space <yaml> --max-rounds 10 --output <dir>
-```
-
-#### 安全边界
-
-- **Edit surface 白名单**：harness 模式不能写白名单外的文件
-- **Metric 硬阈值**：任何 patch 不能让既有 metric 跌破基线
-- **测试必须通过**：每个 patch 都跑 `pytest`，失败立即回滚
-- **审计**：每个实验都写 `experiment_ledger`，可追溯
-
-#### 为什么这个是独立 Surface
-
-`build_system_prompt(surface='bot' or 'pipeline')` 假设的是"对话 + 工具调用"形态。AutoAgent 的每轮只输出 JSON（如 `{"action":"apply_patch","patch":"..."}`），多走一段 KH 注入和能力简报是浪费 token、还容易让模型搞混"我应该回答用户还是输出 JSON"。所以**故意**让 AutoAgent 独立。
-
-#### 对应代码
-
-- `omicsclaw/autoagent/`（整目录）
+> **已删除**。原 `omicsclaw/autoagent/` 用 JSON-only 的 LLM 元代理做两件事：通过 directive loop 调 Skill 参数（Optimization Loop），以及在受控 edit surface 内改源码、跑测试、回滚或合并（Harness Loop）；入口是 `oc optimize`。整个包连同测试已删除。
+>
+> - **运行时调参**（测试时自适应，不改 skill）：见 `omicsclaw/ensemble/tuning/`——LLM 看稳定性证据选定 K，再在固定 K 下按参数维度做确定性调参。
+> - **离线的 skill 进化**（修改 skill 的默认值、提示或代码）：见 0059 之后的独立计划。
 
 ---
 
@@ -1530,7 +1492,7 @@ OmicsClaw 在物理形态上是**一个 Python 包 + 一份共享数据存储 + 
               ┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
               │ 96 Skills       │         │ Remote Jobs      │         │ AutoAgent       │
               │ skills/         │         │ omicsclaw/       │         │ omicsclaw/      │
-              │  spatial/...    │         │  remote/         │         │  autoagent/     │
+              │  spatial/...    │         │  remote/         │         │  (deleted)      │
               │  singlecell/... │         │  routers/jobs.py │         │  optimization   │
               │  bulkrna/...    │         │  → SSH 隧道 →    │         │  harness loop   │
               │  ...            │         │  远端 oc app-svr │         │  experiment     │
@@ -1606,7 +1568,7 @@ Bot 渠道按平台特性把 SSE 流降级为段落消息（每 N 个 delta 合�
 - CLI/TUI 的 REPL → 调 `llm_tool_loop`
 - 9 个 Bot 渠道 → 调 `llm_tool_loop`
 - Research Pipeline 的 stage agent → 用 deepagents（独立的 LLM 调用）
-- AutoAgent → 用 `omicsclaw/autoagent/llm_client.py`（独立配置）
+- AutoAgent → 曾用 `omicsclaw/autoagent/llm_client.py`（独立配置）；已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划
 
 **Research Pipeline 和 AutoAgent 故意不共享 `llm_tool_loop`**——它们的对话形态完全不同，强行复用会让 system prompt 变得难以理解。
 
@@ -1631,7 +1593,7 @@ OmicsClaw 当前**没有常驻后台 worker**——所有作业都是同步触�
 | MCP 配置 | YAML | `~/.config/omicsclaw/mcp.yaml` |
 | Bot 审计 | JSONL | `bot/logs/audit.jsonl` |
 | OAuth token | OS keychain / file | 视 provider |
-| AutoAgent ledger | SQLite | `omicsclaw/autoagent/experiment_ledger` 状态 |
+| AutoAgent ledger | SQLite | 原 `omicsclaw/autoagent/experiment_ledger` 状态；已删除，运行时调参台账见 `omicsclaw/ensemble/tuning/` |
 | Knowledge index | 文件系统 | `omicsclaw/knowledge/` 缓存 |
 
 ---
@@ -1991,31 +1953,7 @@ OmicsClaw **明确不做** SaaS 云版：
 
 ### 7.8 Self-Evolution (AutoAgent)
 
-| 模块 | 职责 |
-|---|---|
-| `omicsclaw/autoagent/api.py` | 对外 API |
-| `omicsclaw/autoagent/constants.py` | 常量 |
-| `omicsclaw/autoagent/runner.py` | 模式调度 |
-| `omicsclaw/autoagent/optimization_loop.py` | 参数优化主循环 |
-| `omicsclaw/autoagent/harness_loop.py` | 源码 patch 主循环 |
-| `omicsclaw/autoagent/harness_directive.py` | Harness 指令 |
-| `omicsclaw/autoagent/harness_workspace.py` | Harness 工作目录 |
-| `omicsclaw/autoagent/directive.py` | 通用指令格式 |
-| `omicsclaw/autoagent/edit_surface.py` | 可改文件白名单 |
-| `omicsclaw/autoagent/patch_engine.py` | diff 生成 + apply + 回滚 |
-| `omicsclaw/autoagent/evaluator.py` | 评估器 |
-| `omicsclaw/autoagent/metrics_compute.py` | Metric 计算 |
-| `omicsclaw/autoagent/metrics_registry.py` | Metric 注册 |
-| `omicsclaw/autoagent/judge.py` | 决策（accept/reject） |
-| `omicsclaw/autoagent/hard_gates.py` | 不可破坏的硬约束 |
-| `omicsclaw/autoagent/search_space.py` | 参数搜索空间 |
-| `omicsclaw/autoagent/experiment_ledger.py` | 实验账本 |
-| `omicsclaw/autoagent/failure_memory.py` | 失败记忆 |
-| `omicsclaw/autoagent/reproduce.py` | 复现历史实验 |
-| `omicsclaw/autoagent/result_contract.py` | 结果格式 |
-| `omicsclaw/autoagent/errors.py` | 异常 |
-| `omicsclaw/autoagent/llm_client.py` | 独立 LLM 客户端 |
-| `omicsclaw/autoagent/trace.py` | 实验链路追踪 |
+原 `omicsclaw/autoagent/` 整个包已删除；运行时调参见 `omicsclaw/ensemble/tuning/`；离线的 skill 进化见 0059 之后的独立计划。
 
 ### 7.9 Interactive (CLI/TUI)
 

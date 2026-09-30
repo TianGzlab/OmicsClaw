@@ -12,7 +12,8 @@
 # packages with no conda recipe (SpaGCN, GraphST, cellcharter, paste-bio,
 # flashdeconv, fastccc, pyVIA, tangram-sc, ...). 0_setup_env.sh Tier 2
 # installs that residue with `uv pip install` after this file's mamba env
-# create completes.
+# create completes. pydantic, rich, openai and anthropic are declared in
+# both files, so a plain `pip install .` can also start `oc cli`.
 #
 # Channel order: conda-forge first (broad scientific), bioconda second
 # (genomics specific). This file is designed for strict channel priority —
@@ -276,7 +277,7 @@ dependencies:
   - ipykernel>=6.0
   - rich>=13.0.0
   - greenlet>=3.0.0
-  - prompt-toolkit>=3.0
+  - prompt-toolkit>=3.0.52
   - questionary>=2.0
   - pyyaml>=6.0
   # Web / API stack (used by bot, app-server, memory)
@@ -286,9 +287,11 @@ dependencies:
   - uvicorn>=0.23.0
   - cryptography>=41.0.0
   - requests>=2.31.0
-  - openai>=1.0.0
+  - openai>=1.26                # same floor as pyproject core
+  - anthropic>=0.78             # same floor as pyproject core
   - python-dotenv>=1.0.0
   - httpx>=0.27
+  - pypdf>=3.0                  # skills/literature reads PDF input with it
   # Nbconvert / Jinja2 chain — pulled by kb-python; pinning here breaks the
   # pygpcca/jinja2/fastapi backtracking storm in the pip layer.
   - jinja2>=3.1.5

@@ -6,8 +6,9 @@ response is reduced to Markdown, and which asks a human first because the
 request itself is the risk.
 
 **The approval is about the request, not the response**, which is what
-makes ``ASK`` right for a tool that only reads. ``CLAUDE.md``'s first rule
-is that genetic data never leaves this machine, and a URL is an outbound
+makes ``ASK`` right for a tool that only reads.
+:data:`~omicsclaw.entry.assembly.SAFETY_RULES` rule 1 is that genetic data
+never leaves this machine, and a URL is an outbound
 channel: everything in the path and query string is transmitted, and a
 model asked to "look this identifier up" will put the identifier in the
 URL. The gate in ``omicsclaw/tools/_websafety.py`` cannot see that — to
@@ -41,9 +42,10 @@ Three things it does better, recorded rather than discovered later:
   and the reference's 32,000 won by default rather than by argument.
 * it converts HTML with ``markdownify``, a real converter with tables,
   emphasis and nesting, where :mod:`omicsclaw.tools._html` is a fixed tag
-  list. That library is **already a dependency of this repository**, so
-  the honest statement of the gap is not only "the standard library has
-  no readability" but "this layer may not import what the old one uses".
+  list. When this was written the library was a dependency of this
+  repository (through extras deleted since), so the honest statement of
+  the gap was not only "the standard library has no readability" but
+  "this layer may not import what the old one uses".
 * it sends a browser ``User-Agent``. ``OmicsClaw/1.0`` is the honest one
   and is what ships, but documentation sites behind a WAF answer 403 to
   non-browser agents, so some pages the old tool reads this one will not.
@@ -130,8 +132,9 @@ def _description() -> str:
         "endpoints, so this cannot be used to inspect local services — "
         "use bash for that. EVERYTHING IN THE URL IS SENT TO THE REMOTE "
         "HOST, including the query string: never put data from the user's "
-        "files, sequences or identifiers into a URL. This tool asks the "
-        "user for approval before making the request."
+        "files, sequences or identifiers into a URL. Depending on the "
+        "session's permission settings, the user may be asked to approve the "
+        "request first; a declined request returns an error and nothing is sent."
     )
 
 
@@ -257,6 +260,7 @@ class WebFetchTool:
             arguments,
             policy=self.policy,
             reason=self._reason(shape),
+            reason_shows_call=True,
         )
         await report_progress(f"fetching {shape.url}", tool_name=self.name)
 

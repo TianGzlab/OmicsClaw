@@ -64,16 +64,27 @@ def test_cellrank_no_longer_in_pyproject_pip_layer():
             )
 
 
-def test_full_extra_excludes_oauth_to_avoid_trajectory_ccproxy_resolver_conflict():
+def test_full_extra_is_one_self_reference_that_includes_trajectory_backends():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     full_requirements = [
         Requirement(dependency)
         for dependency in pyproject["project"]["optional-dependencies"]["full"]
     ]
 
-    assert "oauth" in pyproject["project"]["optional-dependencies"]
     assert len(full_requirements) == 1
     assert full_requirements[0].name == "omicsclaw"
     assert "spatial-trajectory" in full_requirements[0].extras
     assert "singlecell-pseudotime" in full_requirements[0].extras
-    assert "oauth" not in full_requirements[0].extras
+
+
+def test_self_referencing_extras_name_only_extras_that_exist():
+    extras = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["optional-dependencies"]
+    for extra_name, dependencies in extras.items():
+        for dependency in dependencies:
+            requirement = Requirement(dependency)
+            if requirement.name != "omicsclaw":
+                continue
+            missing = requirement.extras - set(extras)
+            assert not missing, f"[{extra_name}] names undefined extras {sorted(missing)}"

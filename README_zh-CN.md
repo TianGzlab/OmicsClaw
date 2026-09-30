@@ -3,27 +3,22 @@
 <div align="center">
 
 <a href="https://github.com/TianGzlab/OmicsClaw">
-  <img src="docs/images/OmicsClaw_banner.jpeg" alt="OmicsClaw — 面向多组学工作流的本地优先 AI" width="100%"/>
+  <img src="docs/images/OmicsClaw_banner.jpeg" alt="OmicsClaw banner" width="100%"/>
 </a>
 
 <h3>面向多组学分析的本地优先 AI 研究助手</h3>
 
-<p>用对话驱动工作流 · 运行可复现技能 · 数据留在本地 · 用记忆延续上下文</p>
-
 <p>
-  <a href="README.md"><b>English</b></a> ·
+  <a href="README.md">English</a> ·
   <b>简体中文</b> ·
-  <a href="#-最新动态"><b>最新动态</b></a> ·
-  <a href="#-快速开始"><b>快速开始</b></a> ·
-  <a href="#npm-desktop"><b>npm + 桌面 App</b></a> ·
-  <a href="#-领域"><b>领域</b></a> ·
-  <a href="https://TianGzlab.github.io/OmicsClaw/"><b>文档站</b></a>
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#桌面-app">桌面 App</a> ·
+  <a href="#领域">领域</a> ·
+  <a href="https://TianGzlab.github.io/OmicsClaw/">文档站</a>
 </p>
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![CI](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml/badge.svg)](https://github.com/TianGzlab/OmicsClaw/actions/workflows/pr-ci.yml)
 [![Website](https://img.shields.io/badge/Website-Live-brightgreen.svg)](https://TianGzlab.github.io/OmicsClaw/)
 [![Desktop App](https://img.shields.io/github/v/tag/TianGzlab/OmicsClaw?sort=semver&filter=v*&label=desktop%20app&color=blue&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases/latest)
 [![Installer Downloads](https://img.shields.io/github/downloads/TianGzlab/OmicsClaw/total?label=installer%20downloads&color=brightgreen&cacheSeconds=600)](https://github.com/TianGzlab/OmicsClaw/releases)
@@ -31,310 +26,156 @@
 
 </div>
 
-> **OmicsClaw 把本地多组学工具变成 AI 可调用的技能。** LLM 负责规划与编排；Python、R、CLI 工具在你的本地或远程运行时里实际处理数据 —— 原始矩阵永不离开你的机器。一个 agent loop 同时驱动终端 CLI、桌面 App、Telegram 文本/单图与飞书纯文本通道，并由图记忆托底，让分析得以续接而非重来。
+OmicsClaw 是一个做多组学分析的 AI agent。你用自然语言说明要做的分析，模型挑选合适的
+skill，读它的说明，再在你自己的环境里（本机或服务器）运行其中的 Python、R 或命令行工具。
+仓库自带 7 个领域共 94 个 skill；终端、桌面 App 和聊天平台背后是同一个 agent。
 
-## 📢 最新动态
+## 最新动态
 
-- **🟢 Golden Agent Run + Replay 切片** — CLI REPL、single-shot 与 Desktop 文本对话中明确命名的 demo 请求会直接进入 Backend-owned `RunRuntime`，并以已验证的 Receipt、全新 Run ID、输出目录、README 和 Skill Replay Capsule 结束 Agent Turn。该路径绕过 LLM 工具发现且不回退 legacy runner。标准 Skill Run 不再自动拼装源码 notebook；`oc replay <输出目录>/reproducibility/replay.json` 会创建一次新 Run，并比较 Skill 修订、输入/参数证据、环境身份、结果语义与声明的科学产物，原 Run 保持不可变。
-- **🟢 Golden Skill 生命周期切片** — `create_omics_skill` 现在先发布不可路由的 `draft/smoke-only` 候选，再对已发布的精确版本运行声明式 demo Evaluation Protocol，并只生成待审批的 `skill_activation` 提案。Agent 无权审批；人工审核后的治理 CAS 才会原子切换为 `mvp/demo-validated`，复评激活后的新 manifest revision，刷新路由，随后由 Agent 通过 canonical `RunRuntime` 执行。评测失败时候选继续保持 draft。
-- **🤝 共识运行时** — 多方法共识现在是一个声明式工作流运行时。并行 fan-out N 个空间聚类或单细胞方法，再用经过验证的类型化算子或探索性 LLM 综合来合并。由 `consensus-domains` 与 `sc-consensus-clustering` 两个技能触发。
-- **🧠 自主分析路径** — Analysis Router 可以基于你的数据为精确匹配的技能补全参数，或运行生成式代码分析，并对工作区写入做审批门控、对 LLM 修复做有界约束。
-- **⚡ Prompt 前缀缓存** — 跨轮自动命中 provider 缓存，降低延迟与 token 开销。
-- **🖥️ 桌面端升级** — 带规划引导的实时待办列表、交互式 `ask_user` 选择工具，以及 LLM 生成的会话标题。
+- agent 框架已经重写，入口改为 `oc cli`、`oc desktop` 和 `oc channel` 三个，`oc interactive`、`oc tui`、`oc onboard`、`oc run` 等旧命令已移除（[重写进展](docs/FRAMEWORK-REBUILD.md)）。
+- 桌面 App 已能连接重写后的后端，支持经 SSH 的远程模式，也能在 App 里配置模型（[0064](docs/plans/0064-desktop-app-alignment.md)、[0065](docs/plans/0065-desktop-management-pages-and-retirement.md)、[0066](docs/plans/0066-desktop-remote-mode.md)）。
+- agent 会告诉你当前环境缺哪些 skill 需要的包；设置 `OMICSCLAW_SKILL_ENV=install` 后，它可以在你批准后把这些包装进独立的 overlay 环境，基础环境保持不变（[0061](docs/plans/0061-adaptive-env-provisioning.md)）。
+- `run_skill` 把一个 skill 的多种方法作为并行、带打分的试验来运行，并针对每个数据集调参，目前支持的是 `spatial-domains`（[0056](docs/plans/0056-ensemble-foundation.md)、[0057](docs/plans/0057-ensemble-tuning.md)）。
+- `oc channel` 支持 Telegram、飞书、Slack、Discord、钉钉、QQ 和 Email；WeChat/WeCom 适配器因为不校验收到的消息，已经下线。
 
-<details>
-<summary><b>更早的更新</b></summary>
+更早的记录见 [CHANGELOG.md](CHANGELOG.md)（英文）。
 
-- **Provider** — 实时发现 Ollama 模型并标注工具能力，新增 DashScope 上的 `qwen3.7-max`。
-- **Surfaces 雨伞** — CLI、Desktop、Channels 统一到同一 dispatch + 类型化事件流。
-- **循环健康** — ping-pong / 重复失败的 pathology 检测 + 软自纠。
-
-</details>
-
-## 🖥️ App 工作区
-
-<p align="center">
-  <img src="docs/images/omicsclaw-app-overview.png" alt="OmicsClaw App：连接后端、AutoAgent、数据集、技能、记忆、远程桥与多组学分析卡片" width="94%"/>
-</p>
-
-<p align="center">
-  <b>一个工作区统一对话、数据集、技能、执行、记忆与分析产出。</b>
-</p>
-
-<p align="center">
-  <a href="https://github.com/TianGzlab/OmicsClaw/releases/latest"><b>📥 下载 OmicsClaw 桌面应用</b></a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/TianGzlab/OmicsClaw/releases"><b>所有版本</b></a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/TianGzlab/OmicsClaw/releases/latest/download/SHA256SUMS.txt"><b>SHA256SUMS</b></a>
-</p>
-
-**[Releases](https://github.com/TianGzlab/OmicsClaw/releases)** 页提供预编译的桌面安装包——内置与 CLI 同源的 `oc desktop-server`，外层是开箱即用的 Electron 对话界面。按平台直接下载：
-
-| 平台 | 安装包 |
-|---|---|
-| **macOS — Apple Silicon** (M1 / M2 / M3 / M4) | [`OmicsClaw-<ver>-arm64.dmg`](https://github.com/TianGzlab/OmicsClaw/releases/latest) |
-| **macOS — Intel** | [`OmicsClaw-<ver>-x64.dmg`](https://github.com/TianGzlab/OmicsClaw/releases/latest) |
-| **Windows — x64 / ARM64** | [`OmicsClaw.Setup.<ver>-x64.exe`](https://github.com/TianGzlab/OmicsClaw/releases/latest) · [`OmicsClaw.Setup.<ver>-arm64.exe`](https://github.com/TianGzlab/OmicsClaw/releases/latest) |
-| **Linux — x64** | [`.AppImage`](https://github.com/TianGzlab/OmicsClaw/releases/latest) · [`.deb`](https://github.com/TianGzlab/OmicsClaw/releases/latest) · [`.rpm`](https://github.com/TianGzlab/OmicsClaw/releases/latest) |
-| **Linux — ARM64** | [`.AppImage`](https://github.com/TianGzlab/OmicsClaw/releases/latest) |
-
-> 下载后用同 release 里的 `SHA256SUMS.txt` 校验完整性。桌面端与 CLI 共用同一后端，分析、记忆、远程运行时在两端之间无缝迁移。
-
-## 💡 为什么选择 OmicsClaw？
-
-| 常见痛点 | OmicsClaw 的回应 |
-|---|---|
-| 分析每次都从零开始 | 持久化的工作区、会话与图记忆 |
-| Python、R、CLI 工具散落各处 | 统一的技能运行器 + 自然语言路由 |
-| 大数据放在服务器上 | 本地 UI + 通过 SSH 远程在 Linux 上执行 |
-| 报告、产物、参数互相漂移 | 标准化技能输出契约 + 可复现 demo |
-
-## ✨ 能力
-
-| | | | |
-|---|---|---|---|
-| 🧠 **记忆**<br/>会话、偏好、血缘 | 🔒 **本地优先**<br/>原始数据留在你的运行时 | 🧰 **96 个分析技能**<br/>自动生成目录 + demo | 🧭 **智能路由**<br/>自然语言映射到工具 |
-| 💬 **CLI Surface**<br/>`oc interactive`、`oc tui` | 🌐 **Desktop Surface**<br/>给桌面/Web 前端用的 FastAPI | 📨 **Channel Surface**<br/>Telegram 文本 + 单图、飞书纯文本；其余适配器关闭待迁移 | 📡 **远程模式**<br/>SSH 隧道到 Linux 服务器 |
-| 🤝 **共识**<br/>多方法合并 | 🤖 **自主路径**<br/>Router + 参数辅助 | 🔌 **任意 LLM**<br/>OpenAI 兼容 provider | 📊 **可复现**<br/>图 + 数据 + 报告 |
-
-Skill 生命周期现已具备真实生产证据：一个转录组 No-Skill 请求生成了 Autonomous
-Run `7787182985b2435997433fa94a7b7096`，Backend 仅凭不透明 `run_id` 完成提升，
-经 shared runner 两次评测和 Desktop 人工治理审批后，由 Agent 通过 canonical
-RunRuntime 重新执行为 `bulkrna-cosinor-rhythm`。其 Experience View 当前为
-`demo-validated/current`，并具有非空 stability 证据。
-当前发布 revision 又经 Desktop Agent canonical Run
-`f86b027da8a229aa00225a59a15d7435` 与 fresh Replay Run
-`4cba549f6a4b846903aa5d11f7bb0898` 复核；两个 Receipt 均成功，语义摘要与来源
-Run 及当前两次 shared-runner 评测（`38d5863c9eec41d68bdee07b7d9229c2`）完全一致。
-
-<details>
-<summary><b>自主分析路径 —— 路由模式怎么工作</b></summary>
-
-OmicsClaw 优先使用匹配的内置技能，但为其余情况内置了一等的自主路径。行为由 `OMICSCLAW_ANALYSIS_ROUTER_MODE=off|assist|auto` 控制（缺省 `assist`）：
-
-- **`assist`** —— 精确匹配的技能获得**数据驱动的参数辅助**：技能选择保持确定性，由外层 LLM 在该技能*内部*推荐方法与参数 —— 以匹配技能的 `SKILL.md` 方法菜单和 `inspect_data` schema 为依据 —— 仅在关键歧义处问一个聚焦问题。
-- **`auto`** —— **照写即跑**的字面路径：把 exact / no / partial 分析路由提交进既有的工具策略、审批、transcript 与完成结果流水线（无外层 LLM），并尊重请求中显式指定的方法。
-- **`off`** —— 完全关闭 router。
-
-旧的 `OMICSCLAW_ANALYSIS_ROUTER_ENABLED=true` 仍被当作 `auto` 接受。生成式代码分析由唯一的 autonomous 引擎 —— **Autonomous Code Mini-Agent**（`omicsclaw/autonomous/`）执行：一个分层隔离的常驻 Jupyter kernel 战术 agent，经受控 `oc` 句柄调用 vetted skill，并以 replay 重放作为验收闸门。
-
-</details>
-
-## ⚡ 快速开始
+## 快速开始
 
 ```bash
 git clone https://github.com/TianGzlab/OmicsClaw.git
 cd OmicsClaw
-bash 0_setup_env.sh
+bash 0_setup_env.sh        # 创建名为 OmicsClaw 的 conda 环境
 conda activate OmicsClaw
-oc list
-oc run spatial-preprocess --demo --output /tmp/omicsclaw_demo
+oc cli --configure         # 选择模型服务商并填入 API key
+oc cli                     # 在终端里开始对话
 ```
 
-配置对话与运行时：
+`oc cli --configure` 会把答案写进 `.env` 文件。它依次询问服务商（共 13 个预设，包括
+DeepSeek、OpenAI、Anthropic、Gemini、DashScope 上的 Qwen、Ollama 以及任意 OpenAI
+兼容接口）、API key、模型、可选的 base URL，以及允许 agent 读写的工作目录。agent 从
+`<workspace>/skills` 读取 skill，所以工作目录不是仓库检出目录时，还要在 `.env` 里设置
+`OMICSCLAW_SKILLS_DIR=<检出目录>/skills`。`oc cli --prompt "..."` 只回答一个问题就退出。
+如果 `oc` 不在 `PATH` 里，用 `python omicsclaw.py cli`。
+
+skill 本身就是普通脚本，也可以不经过 agent 直接运行：
 
 ```bash
-oc onboard
-oc interactive
+make list    # 按领域列出全部 skill
+python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/omicsclaw_demo
 ```
 
-如果 `oc` 不在 `PATH` 中，用 `python omicsclaw.py <command>` 替代。
+## 使用方式
+
+| 场景 | 启动方式 | 用途 |
+|---|---|---|
+| 终端 | `oc cli` | 和 agent 对话。`/resume` 打开之前的对话，`/skills` 列出 skill，`/help` 列出其他命令 |
+| 桌面 App | 由 App 启动 `oc desktop` | 在桌面窗口里对话、处理审批、查看文件（见[下文](#桌面-app)） |
+| 远程服务器 | 在服务器上运行 `oc desktop` | App 通过自己的 SSH 隧道连过去，数据留在服务器上（[远程模式](docs/engineering/remote-execution.mdx)） |
+| 聊天平台 | `oc channel --channels telegram` | 仅限 owner 的文本对话，支持 Telegram、飞书、Slack、Discord、钉钉、QQ、Email。`oc channel --list` 列出这些平台。需要先在 `.env` 里设置 `OMICSCLAW_APPROVAL_TIMEOUT_S`，否则无法启动 |
+| 直接跑 skill 脚本 | `python <skill 目录>/<script>.py` | 不经过 agent 跑一次分析。每个 skill 的 `SKILL.md` 写明了参数 |
+
+对话记录和 agent 的长期笔记存在 `<workspace>/.omicsclaw/memory.db`。`<workspace>/.mcp.json`
+里列出的 MCP 服务器会在启动时连接，它们的工具也会交给 agent 使用。
+
+agent 在运行 shell 命令、写入或修改文件、访问网络、调用 MCP 工具之前会先问你。在终端里可以只允许这一次、
+在本次对话里允许这个工具，或者永远允许这条完全相同的调用；`/auto` 会停止对普通操作的询问。
+危险命令以及对 `.omicsclaw/`、`.env` 的改动仍然每次都问。危险命令检查靠的是一份模式清单，
+刻意构造的命令可以绕过它。所以如果让 agent 无人值守地工作，请设置 `OMICSCLAW_SANDBOX=docker`
+和 `OMICSCLAW_SANDBOX_IMAGE`，让它的命令在没有网络的容器里运行（见 [`.env.example`](.env.example)）。
+
+## 桌面 App
 
 <p align="center">
-  <img src="docs/images/OmicsClaw_configure_fast.png" alt="OmicsClaw 配置向导" width="82%"/>
+  <img src="docs/images/omicsclaw-app-overview.png" alt="OmicsClaw 桌面 App：左侧是项目和对话列表，中间是对话输入框" width="94%"/>
 </p>
 
-## 🧭 接入方式
+安装包在 [Releases](https://github.com/TianGzlab/OmicsClaw/releases/latest) 页面。下载后请用同一页发布的
+[`SHA256SUMS.txt`](https://github.com/TianGzlab/OmicsClaw/releases/latest/download/SHA256SUMS.txt)
+核对校验和。
 
-选择适合你工作流的入口 —— 它们最终都到达同一后端。
-
-| Surface | 命令 | 用途 |
-|---|---|---|
-| 💬 **CLI Surface** | `oc interactive` / `oc tui` | 终端里的自然语言工作流（REPL + 全屏 TUI） |
-| 🌐 **Desktop Surface** | `oc desktop-server` | 给 OmicsClaw-App 与浏览器前端用的 FastAPI 后端 |
-| 📨 **Channel Surface** | `python -m omicsclaw.surfaces.channels --channels telegram`<br/>`python -m omicsclaw.surfaces.channels --channels feishu` | 仅 Owner 可用的 Telegram 文本 + 单图/caption 与飞书纯文本；其他媒体及适配器显式关闭 |
-| 🧪 技能运行器（非 Surface） | `oc run <skill> --demo` | 一次性可复现分析 |
-| ♻️ 技能回放（非 Surface） | `oc replay <replay.json>` | 创建新 Run，并与冻结证据比较验证 |
-| 🔌 MCP（非 Surface） | `oc mcp add ...` | 外部工具接入 |
-| 📡 远程模式 | SSH 上跑 `oc desktop-server` | 服务端数据与任务 |
-
-远程模式使用 `127.0.0.1` + SSH 隧道 + `OMICSCLAW_REMOTE_AUTH_TOKEN`。详见 [remote execution](docs/engineering/remote-execution.mdx) 与 [legacy remote guide](docs/_legacy/remote-connection-guide.md)。
-
-生产 Channel 范围由 shared runner 与 `ControlRuntime` 共同约束：仅 Owner 的 Telegram
-文本和单张普通图片（可带说明），以及仅 Owner 的飞书纯文本。
-`FEISHU_ALLOWED_SENDERS` 与 `FEISHU_BOT_OPEN_ID` 必须同时配置；后者用于证明群消息确实
-@ 了当前 Bot。其他 Channel Adapter 保持 gated；出站媒体仍未完成并 fail-closed。
-这不代表 ADR 已完整完成。
-
-## 📦 安装
-
-| 路径 | 适用 | 命令 |
-|---|---|---|
-| 🥇 **完整 conda** | 用 Python + R + 生信 CLI 的真实分析 | `bash 0_setup_env.sh` |
-| 🪶 **轻量 venv** | 对话、路由、开发、纯 Python 技能 | `pip install -e ".[interactive]"` |
-| 📨 **Telegram + 飞书 Channel** | 生产 Owner-only Channel 输入 | `pip install -e ".[channels]"` |
-| 🖥️ **桌面/Web 后端** | OmicsClaw-App 或浏览器前端 | `oc desktop-server --host 127.0.0.1 --port 8765` |
-| 🧠 **记忆 API** | 通过 HTTP 检视图记忆 | `pip install -e ".[memory]"` 然后 `oc memory-server` |
-
-📖 详细见 [安装指南](docs/_legacy/INSTALLATION.md) 与 [快速上手](docs/introduction/quickstart.mdx)。依赖分别由 [`pyproject.toml`](pyproject.toml)、[`environment.yml`](environment.yml)、[`0_setup_env.sh`](0_setup_env.sh) 管理。
-
-<a id="npm-desktop"></a>
-
-## 🚀 npm 安装 & 桌面 App 配对
-
-一条 `npm install -g omicsclaw` 同时装好 CLI **和**一个自包含的 CPython 运行时 —— 不需要 conda、venv 或系统 Python。这个运行时也正是 [桌面 App](https://github.com/TianGzlab/OmicsClaw/releases/latest) 可以指向的解释器，装一次同时服务终端与 App。
-
-> **状态** —— wrapper 与四个平台运行时由 [`npm-release.yml`](.github/workflows/npm-release.yml) 构建；发布是手动、需 reviewer 审批的 dispatch，目前尚未执行，因此 `npm install -g omicsclaw` 在 registry 上仍是 404。在正式发布之前，请用上表的 conda 或 pip 路径安装后端。
-
-```bash
-npm install -g omicsclaw   # CLI + 与你平台匹配的那一个运行时
-omicsclaw --version        # `oc` 是同一个命令的短别名
-oc list                    # 按领域列出 96 个技能
-```
-
-唯一前置条件是 Node.js 18+。wrapper 本身不含运行时：它在 `optionalDependencies` 里为每个平台声明一个 `@omicsclaw/runtime-<platform>`，npm 的 `os` / `cpu` 过滤保证磁盘上只落地一个 —— 与 esbuild、biome 同一套模式。postinstall 会把该解释器记录到 `~/.omicsclaw/runtime.json`，并把此前用 pip 安装的 `omicsclaw` / `oc` shim 重命名为 `<name>-legacy`，让 npm 命令在 `PATH` 上胜出，同时不删除旧的。
-
-| 平台 | 运行时 |
+| 平台 | 安装包 |
 |---|---|
-| Linux x64 · Linux arm64 · macOS Apple Silicon · Windows x64 | ✅ 预编译，随包提供 |
-| macOS Intel · Windows arm64 | ❌ 无 `llvmlite` wheel / 无 CI runner —— 请克隆仓库执行 `0_setup_env.sh` |
+| macOS，Apple Silicon | `OmicsClaw-<ver>-arm64.dmg` |
+| macOS，Intel | `OmicsClaw-<ver>-x64.dmg` |
+| Windows，x64 或 ARM64 | `OmicsClaw.Setup.<ver>-x64.exe`、`OmicsClaw.Setup.<ver>-arm64.exe` |
+| Linux，x64 | `.AppImage`、`.deb`、`.rpm` |
+| Linux，ARM64 | `.AppImage` |
 
-该运行时只带 agent 与 desktop server，**不含**科学计算栈（`scanpy`、`torch`、R、bioconda CLI，约 1.5 GiB）。需要它们的技能会提示往同一个解释器里装什么；要完整受支持的分析栈，请走 Linux conda 路径。
-
-### 与 OmicsClaw-App 配对
-
-桌面安装包不含 Python，也不会下载、创建、修复或自动选择解释器。解释器由你显式指定；App 只有在前置验证、临时启动、严格 `/health` 检查全部通过后才提交，任一环节失败都会恢复之前可用的运行时。
-
-| 模式 | 后端所在 | 在 App 里怎么做 |
-|---|---|---|
-| **本地** | 当前这台机器 | **运行环境 → 本地 Python**（或首次设置向导）。**检测已有环境** 会列出 npm 运行时（读 `~/.omicsclaw/runtime.json`）以及 conda 环境；点 **使用 …**，或点 **选择 Python** 自己选解释器。检测只在点击后执行，且从不替你选择。 |
-| **远程** | 一台 Linux 服务器 | 在服务器上跑 `oc desktop-server --host 127.0.0.1 --port 8765`，然后 **运行环境 → 新建运行环境**，填直连 URL 或 SSH 别名（后端要求认证时再填 bearer token），先 **运行 Ping**，再 **设为当前**。桌面这台机器完全不需要 Python。 |
-
-App 让你填解释器路径时，用这两条命令打印准确路径：
+安装包里不带 Python。App 会让你指定一个装好了 OmicsClaw 的解释器，一般就是快速开始里建的
+conda 环境：
 
 ```bash
-# npm 运行时
-python -c "import json, os; print(json.load(open(os.path.expanduser('~/.omicsclaw/runtime.json')))['pythonPath'])"
-# conda 环境
 conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
 ```
 
-后端绑定 `127.0.0.1:8765`（可用 `OMICSCLAW_APP_HOST` / `OMICSCLAW_APP_PORT` 覆盖）；远程连接档案用 `OMICSCLAW_REMOTE_AUTH_TOKEN` 认证。LLM 服务商可以在 App 的设置向导里配，也可以写在后端的 `.env` 里。由对话触发的分析写入 `<项目目录>/output`，也就是 App 结果看板读取的位置。
+之后 App 会为你打开的项目启动 `oc desktop`，一个后端对应一个项目。模型配置来自后端的 `.env`，
+可以在 App 的 Providers 页面修改，后端重启后生效。排障见 [App 指南](docs/ecosystem/omicsclaw-app.mdx)，
+HTTP 接口约定见 [`docs/core-features/surfaces.md`](docs/core-features/surfaces.md) 第 8 节。
 
-<details>
-<summary><b>排错与升级</b></summary>
+## 安装
 
-| 现象 | 处理 |
-|---|---|
-| `command not found: omicsclaw` | npm 全局 bin 不在 `PATH` 上：`export PATH="$(npm prefix -g)/bin:$PATH"` |
-| 安装报 `EACCES` | 不要用 `sudo`。`npm config set prefix ~/.npm-global`，把 `~/.npm-global/bin` 加进 `PATH` 后重装 |
-| 平台运行时没装上 | 需要 npm ≥ 7，且不能带 `--no-optional` |
-| 8765 端口被占用 | `lsof -ti:8765 \| xargs kill -9`（macOS / Linux） |
-| App 显示后端离线 | 执行 `<选定的 python> -c "import omicsclaw; print(omicsclaw.__version__)"`，修好该环境后在 App 里重试激活 |
-| 升级 | `npm install -g omicsclaw@latest` —— 解释器路径保持不变，重启 App 即可继续使用 |
+| 方式 | 命令 | 覆盖范围 |
+|---|---|---|
+| conda（推荐） | `bash 0_setup_env.sh` | skill 需要的 Python、R 和命令行工具，以及桌面后端 |
+| pip | `pip install -e .` | 只够终端对话。多数 skill 需要的包由 conda 环境提供，桌面后端依赖的 FastAPI 和 uvicorn 也来自 conda |
 
-</details>
+聊天平台各自需要 SDK：Telegram 和飞书用 `pip install -e ".[channels]"`，Slack 用
+`pip install slack-sdk aiohttp`，Discord 用 `pip install discord.py`，钉钉用
+`pip install httpx websockets`，QQ 用 `pip install qq-botpy`；Email 只用标准库。依赖清单见
+[`environment.yml`](environment.yml) 和 [`pyproject.toml`](pyproject.toml)。
 
-📖 分发机制细节 —— wrapper 结构、平台子包、`~/.omicsclaw/runtime.json` 契约 —— 见 [`npm/AGENTS.md`](npm/AGENTS.md) 与 [`npm/omicsclaw/README.md`](npm/omicsclaw/README.md)。
+## 领域
 
-## 🧬 领域
+7 个领域共 94 个 skill，`make list` 可以打印当前索引。
 
-`oc list` 与 `skills/catalog.json` 是全部 96 个技能的机器可读注册表，分布在 **8 个领域**。
-
-| 领域 | 技能数 | 示例技能 | 文档 |
+| 领域 | skill 数 | 示例 | 指南 |
 |---|---|---|---|
-| 🧫 空间转录组 | 19 | QC、domain、注释、解卷积、CNV、轨迹 | [spatial](docs/domains/spatial.mdx) |
-| 🔬 单细胞组学 | 34 | QC、聚类、注释、doublet、velocity、GRN | [singlecell](docs/domains/singlecell.mdx) |
-| 🧬 基因组学 | 10 | QC、比对、变异、CNV、组装、表观 | [genomics](docs/domains/genomics.mdx) |
-| 🧪 蛋白组学 | 8 | DIA/DDA、PTM、网络、biomarker | [proteomics](docs/domains/proteomics.mdx) |
-| ⚗️ 代谢组学 | 8 | 峰、归一化、注释、通路 | [metabolomics](docs/domains/metabolomics.mdx) |
-| 📈 Bulk RNA-seq | 14 | DE、富集、共表达、解卷积、生存、cosinor 节律 | [bulkrna](docs/domains/bulkrna.mdx) |
-| 🧠 编排 | 2 | 路由、规划、文献支持 | [orchestrator](docs/domains/orchestrator.mdx) |
-| 📚 文献 | 1 | PDF/DOI/PubMed/GEO 解析与数据集交接 | — |
+| 空间转录组 | 19 | QC、空间域、注释、解卷积、CNV、轨迹 | [spatial](docs/domains/spatial.mdx) |
+| 单细胞组学 | 34 | QC、聚类、注释、双细胞、RNA velocity、GRN | [singlecell](docs/domains/singlecell.mdx) |
+| 基因组学 | 10 | QC、比对、变异、CNV、组装、表观基因组 | [genomics](docs/domains/genomics.mdx) |
+| 蛋白质组学 | 8 | DIA/DDA、PTM、网络、生物标志物 | [proteomics](docs/domains/proteomics.mdx) |
+| 代谢组学 | 8 | 峰检测、标准化、注释、通路 | [metabolomics](docs/domains/metabolomics.mdx) |
+| Bulk RNA-seq | 14 | 差异表达、富集、共表达、解卷积、生存分析、cosinor 节律 | [bulkrna](docs/domains/bulkrna.mdx) |
+| 文献 | 1 | 解析 PDF、DOI、PubMed、GEO，并交接数据集 | |
 
-完整 CLI 技能列表运行 `oc list` 查看。
-
-## 🧠 记忆
-
-`omicsclaw/memory/` 下的图记忆把会话、数据集、分析、偏好、洞察跨运行串起来 —— 重开任意入口都能找回对话历史与血缘。每个入口相互隔离，状态不会在用户或工作区之间泄漏。
-
-| 入口 | 记忆作用域 |
-|---|---|
-| CLI / TUI | 按工作区路径 |
-| 桌面 App | 按启动（或登录用户） |
-| Telegram / 飞书 Bot | 按平台用户 |
-
-保留的 `__shared__` 池（核心 agent 身份、术语表）是所有入口都会自动回读的部分。完整术语与架构详见 [`docs/CONTEXT.md`](docs/CONTEXT.md)。
-
-## 📚 文档
+## 文档
 
 | 主题 | 位置 |
 |---|---|
-| 🚀 快速上手与配置 | [introduction/quickstart](docs/introduction/quickstart.mdx) |
-| 🏗️ 架构 | [`docs/architecture/`](docs/architecture/) |
-| 🧬 领域指南 | [spatial](docs/domains/spatial.mdx) · [singlecell](docs/domains/singlecell.mdx) · [genomics](docs/domains/genomics.mdx) · [proteomics](docs/domains/proteomics.mdx) · [metabolomics](docs/domains/metabolomics.mdx) · [bulkrna](docs/domains/bulkrna.mdx) |
-| 🧠 领域语言与记忆 | [`docs/CONTEXT.md`](docs/CONTEXT.md) |
-| 📡 远程执行 | [engineering/remote-execution](docs/engineering/remote-execution.mdx) |
-| 🔒 安全与数据隐私 | [数据隐私](docs/safety/data-privacy.mdx) · [规则与免责声明](docs/safety/rules-and-disclaimer.mdx) |
-| 🛠️ 构建技能 | [CONTRIBUTING.md](CONTRIBUTING.md) · [`templates/skill/`](templates/skill/) |
-| 🤖 仓库 / agent 契约 | [AGENTS.md](AGENTS.md) |
+| 快速上手 | [introduction/quickstart](docs/introduction/quickstart.mdx) |
+| 桌面 App | [ecosystem/omicsclaw-app](docs/ecosystem/omicsclaw-app.mdx) |
+| 远程模式 | [engineering/remote-execution](docs/engineering/remote-execution.mdx) |
+| 领域指南 | [spatial](docs/domains/spatial.mdx) · [singlecell](docs/domains/singlecell.mdx) · [genomics](docs/domains/genomics.mdx) · [proteomics](docs/domains/proteomics.mdx) · [metabolomics](docs/domains/metabolomics.mdx) · [bulkrna](docs/domains/bulkrna.mdx) |
+| 安全与数据隐私 | [数据隐私](docs/safety/data-privacy.mdx) · [规则与免责声明](docs/safety/rules-and-disclaimer.mdx) |
+| 编写 skill | [CONTRIBUTING.md](CONTRIBUTING.md) · [`templates/skill/`](templates/skill/) |
+| 框架设计 | [`docs/FRAMEWORK-REBUILD.md`](docs/FRAMEWORK-REBUILD.md)（英文） |
+| 更新记录 | [CHANGELOG.md](CHANGELOG.md)（英文） |
 
-托管文档站：**<https://TianGzlab.github.io/OmicsClaw/>**
+在线文档站：<https://TianGzlab.github.io/OmicsClaw/>
 
-## ❓ FAQ
+## 安全与数据
 
-<details>
-<summary><b>OmicsClaw 会上传我的原始数据吗？</b></summary>
+skill 在你自己的运行环境里（本地或远程）读取和处理数据，模型收到的是对话内容和工具返回的结果。
+OmicsClaw 是科研工具，不是医疗器械，不提供临床诊断；依据结果做决定前，请让领域专家核实。
+在服务器上运行时，让 `oc desktop` 只监听 localhost，通过 SSH 访问；绑定到非回环地址时必须设置
+`OMICSCLAW_REMOTE_AUTH_TOKEN`。详见[数据隐私](docs/safety/data-privacy.mdx)和[规则与免责声明](docs/safety/rules-and-disclaimer.mdx)。
 
-不会。技能在你配置的本地或远程运行时里执行；LLM 调用收到的是上下文和工具结果，不包含原始组学矩阵。
-
-</details>
-
-<details>
-<summary><b>我应该选哪种安装方式？</b></summary>
-
-真实分析用 `bash 0_setup_env.sh`。轻量 venv 仅用于对话、路由、开发、纯 Python 技能。
-
-</details>
-
-<details>
-<summary><b>桌面 App 能在服务器上跑任务吗？</b></summary>
-
-可以。在远程 Linux 上运行 `oc desktop-server`，绑定 `127.0.0.1`，再通过 App 的 SSH 隧道运行时连接过来。
-
-</details>
-
-## ⚠️ 安全
-
-| 规则 | 含义 |
-|---|---|
-| 🔒 本地优先 | 原始数据处理发生在你的本地或远程运行时 |
-| 🧪 仅供研究 | 不是医疗器械，不提供临床诊断 |
-| 👩‍🔬 专家复核 | 在做决策前由领域专家验证科学产出 |
-| 🔐 远程谨慎 | 使用 localhost 绑定、SSH 隧道与 token |
-
-> OmicsClaw 是一个用于多组学分析的研究与教育工具。它不是医疗器械，也不提供临床诊断。在基于这些结果做决策前，请咨询领域专家。
-
-详见 [数据隐私](docs/safety/data-privacy.mdx) 与 [使用规则与免责声明](docs/safety/rules-and-disclaimer.mdx)。
-
-## 👥 社区
+## 社区
 
 维护者：Luyi Tian（首席研究员）、Weige Zhou（主导开发）、Liying Chen（开发）、Pengfei Yin（开发）。
 
-🐛 [Issues](https://github.com/TianGzlab/OmicsClaw/issues) · 💬 [Discussions](https://github.com/TianGzlab/OmicsClaw/discussions) · 📖 [文档站](https://TianGzlab.github.io/OmicsClaw/)
+[Issues](https://github.com/TianGzlab/OmicsClaw/issues) · [Discussions](https://github.com/TianGzlab/OmicsClaw/discussions) · [文档站](https://TianGzlab.github.io/OmicsClaw/)
 
 <table>
   <tr>
     <td align="center" width="30%">
-      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw 微信交流群" width="180"/>
+      <img src="docs/images/IMG_3729.JPG" alt="OmicsClaw 微信交流群二维码" width="180"/>
       <br/>
-      <b>微信交流群</b>
-      <br/>
-      <sub>扫码加入</sub>
+      微信交流群
     </td>
     <td valign="middle" width="70%">
-      欢迎扫码加入微信群，分享分析经验、反馈问题、与社区交流多组学 AI 工作流。
+      扫码加入微信群，交流分析经验，遇到问题也可以在群里求助。
     </td>
   </tr>
 </table>
@@ -343,20 +184,22 @@ conda run -n OmicsClaw python -c "import sys; print(sys.executable)"
   <img src="https://contrib.rocks/image?repo=TianGzlab/OmicsClaw" alt="OmicsClaw 贡献者"/>
 </a>
 
-## 🙏 致谢
+## 致谢
 
-OmicsClaw 的架构、技能设计和本地优先理念深受 **[ClawBio](https://github.com/ClawBio/ClawBio)**（生物信息学场景下较早的原生 AI agent 技能库）启发。记忆与会话续接模式参考了 [Nocturne Memory](https://github.com/Dataojitori/nocturne_memory)。
+OmicsClaw 的架构、skill 设计和本地优先的思路受到 [ClawBio](https://github.com/ClawBio/ClawBio)
+的启发，它是较早面向生物信息学的 AI agent skill 库。记忆与会话延续的做法参考了
+[Nocturne Memory](https://github.com/Dataojitori/nocturne_memory)。
 
-## 🛠️ 贡献
+## 贡献
 
-- **新增技能**：参考 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [`templates/skill/`](templates/skill/) 的 v2 脚手架。
-- **仓库 / agent 开发**：参考 [AGENTS.md](AGENTS.md) —— 包含 contract 测试、provider 契约、技能运行器、架构文档索引。
+新增 skill 请看 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [`templates/skill/`](templates/skill/) 下的脚手架。
+参与框架本身的开发，从 [AGENTS.md](AGENTS.md) 开始。
 
-## 📜 许可证
+## 许可证
 
 Apache-2.0，详见 [LICENSE](LICENSE)。
 
-## 📝 引用
+## 引用
 
 ```bibtex
 @software{omicsclaw2026,
@@ -367,4 +210,4 @@ Apache-2.0，详见 [LICENSE](LICENSE)。
 }
 ```
 
-[⬆ 返回顶部](#top)
+[返回顶部](#top)

@@ -70,7 +70,8 @@ omicsclaw/
 ├── sandbox/    ✅ step 6.7 — Docker isolation for `bash`, stdlib-only leaf (plan 0036)
 ├── permission/ ✅ step 6.8 — HITL permission control: rules, modes, danger patterns (plan 0038)
 ├── hooks/      ✅ step 6.10 — tool-call interception seam + the audit hook (plan 0042)
-└── observability/ ✅ step 6.11 — spans, metrics, optional OTEL (plan 0043)
+├── observability/ ✅ step 6.11 — spans, metrics, optional OTEL (plan 0043)
+└── subagent/   ✅ step 6.12 — delegating a bounded sub-task to a second agent (plan 0046)
 ```
 
 `observability/` is the one layer here that is **not** a leaf and says so:
@@ -1221,10 +1222,15 @@ calls inline, handing several Tasks one shared `Context`) unnamed.
   not help. Note also that the current `TimeoutPause` type cannot express
   it: it takes no arguments, so "give me 600 seconds" needs a wider seam
   rather than a use of this one.
-- **Approval has no representation in `EngineEventType`.** Six members,
-  no `approval_required`, so a Surface cannot learn from the event stream
-  that a human is being asked — which is the structural reason the
-  consumer contract above has to be written in prose.
+- ✅ **Resolved — approval has no representation in `EngineEventType`.**
+  Six members, no `approval_required`, so a Surface could not learn from
+  the engine's event stream that a human is being asked. It is
+  represented one layer up, by the entry layer's
+  `TurnEventType.APPROVAL_REQUIRED` / `APPROVAL_SETTLED`
+  (`omicsclaw/entry/events.py`), and the engine leaves it out on
+  purpose: a tool waits for approval inside the engine async generator's
+  `__anext__`, and a generator blocked there cannot yield the event that
+  would report the question.
 
 ### Step 6.9 — `omicsclaw/planning/` (plan 0039)
 
@@ -1629,6 +1635,159 @@ carrying forward:
 Plan 0038 §7–§8 records all of it, including the reviews' two
 non-adopted findings and why.
 
+### Step 6.12 — `omicsclaw/subagent/` (plan 0046)
+
+Seven modules plus `entry/subagent.py`. `tests/subagent/` = **123
+passed, 2 skipped**, `tests/entry/test_subagent_wiring.py` = **44
+passed**, both re-measured 2026-09-23 after the fixes that withheld
+`memory_write` and made a turn ceiling an error; the whole rebuilt
+stack was **4,982 passed, 12 skipped** when the step landed on
+2026-09-21. The shape comes from harness9's `internal/subagent/`.
+
+```python
+from omicsclaw.subagent import SubAgentRegistry, TaskTool
+
+agents = SubAgentRegistry([definition])
+registry.register(TaskTool(agents, ChildRunner(...)))     # once, per app
+```
+
+**A sub-agent is not a new abstraction.** It is one more `AgentEngine`
+running one `exchange`, opened with its own prompt, given a narrowed set
+of the parent's tools, and handed no conversation — which is also the
+whole of its context isolation: there is no path by which the parent's
+history could reach it, so nothing has to filter one.
+
+Decisions worth not re-litigating:
+
+- **The child's tools are the parent's own objects, re-registered with
+  the parent's own policies.** The reference rebuilds its child registry
+  from unwrapped tools and re-applies the hook chain by hand, which is
+  two chains kept in step by discipline — and it has already drifted
+  there (the child's calls miss the OTEL hook). Picking already-gated
+  objects out of the parent registry makes "the child is never wider
+  than the parent" structural. Half of it, though: `GatedTool` reads the
+  policy the *executing* registry publishes, so the policies have to be
+  carried across explicitly. Without that second argument a deployment's
+  `register(policy=)` tightening is silently lost in every sub-agent, and
+  there is a mutation test that proves it.
+- **A delegation holds the engine's timeout pause for its whole length.**
+  `tool_timeout` is sized for one tool call and a delegation is many
+  model calls; the reference derives a second context to escape its own
+  60 s budget. Here `task` enters `pause_tool_timeout()` and the
+  cancellation semantics are untouched. What bounds a runaway delegation
+  is `turn_timeout_s`, which is the right layer — and a deployment that
+  leaves it `None` has no automatic bound at all.
+- **Approval needed no pipe.** `contextvars` copy into each new Task, so
+  a sub-agent's `bash` reaches the parent turn's `ApprovalBroker` through
+  two Task boundaries with nothing built for it. Plan 0027 §12.6
+  predicted this before either side existed; this step is where it was
+  measured with a real broker rather than a stub.
+- **Rebinding the tool context at the delegation has to spread what is
+  already there.** `use_tool_context` replaces rather than merges, on
+  purpose, so adding one key by writing `values={"subagent": name}` would
+  unbind `workspace` and make every file tool inside a sub-agent raise.
+- **What no sub-agent is given is one mapping, tool name to reason.**
+  `_WITHHELD_FROM_SUB_AGENTS` in `entry/subagent.py` holds `plan_write`
+  ("acts on the calling conversation's plan": the child runs under the
+  parent's `session_id`, so it would write the parent's plan) and
+  `memory_write` ("writes memory that every later conversation reads").
+  `ChildRunner._child_registry` drops every key whatever an agent file's
+  `tools:` asks for, and a file that names one is loaded with a warning
+  quoting the reason. `task` is withheld too, by
+  `SubAgentDefinition.resolve_tools`, with its reason kept beside the
+  mapping. The `general-purpose` description is rendered from the same
+  reasons, and `test_the_general_purpose_description_is_rendered_from_the_withheld_tools`
+  pins the two together — a hand-kept list is how the reference's
+  description drifted from what its children actually get.
+- **A sub-agent that stops at its turn ceiling fails the call rather
+  than returning its last message.** That message is a tool Observation,
+  and handing it back would pass a file's raw contents off as the
+  sub-agent's conclusion. `ChildRunner.delegate` raises
+  `DelegationIncomplete`, which the parent model sees as an `is_error`
+  Observation naming the sub-agent and the limit and quoting the last
+  text the sub-agent itself wrote, if any; no tool output is quoted. A
+  run cut off at the output limit before writing anything raises it
+  too; one cut off after writing returns that partial text behind a line
+  saying it is incomplete.
+- **`task` is appended to the tool table, last of all**, after the
+  foundation tools and after MCP's. It cannot be built earlier — it
+  narrows the very registry it is mounted into — and appending is what
+  keeps every earlier tool at the byte offset a cached prompt prefix
+  depends on. Mounting it does invalidate that prefix once.
+- **Front-only.** Background delegation, a task tracker and `@agent`
+  wait for 0047: the result of a detached run has to be injected ahead of
+  the next exchange's prompt, and `SessionRegistry.submit` has no seam
+  for that. Foreground is a strict subset — background changes only how
+  the result comes back.
+
+Three known costs, named rather than hidden: a delegation is a scheduling
+barrier with no engine-side bound, so the rest of the turn's tools wait
+behind it; a sub-agent's token usage is a second `RunResult` that is
+not merged into the parent's, so `/usage` under-reports; and
+`--permission-mode read-only` disables delegation outright, because
+`task` cannot declare `read_only=True` without lying about what a
+sub-agent may do and the gate's read-only branch therefore refuses it.
+The last one fails closed, which is the right direction, but it is a
+user-visible behaviour rather than an internal detail.
+
+### Step 7 — `omicsclaw/ensemble/` (plan 0056)
+
+The first of five plans (0056–0060) behind the paper's three claims —
+LLM parameter selection, multi-method consensus, a SWE-bench-style
+benchmark. This one is the foundation: a skill's search space as data
+(`tuning.yaml`, loaded by `space.py`), a GPU/memory/CPU pool with atomic
+grants and head-preserving backfill (`resources.py`, GPUs auto-detected
+with `nvidia-smi` on the host or inside the sandbox), a stdlib-only
+supervisor that enforces time and PSS memory limits on a process group
+and observes real GPU use (`_supervise.py`), local and sandbox executors
+(`execution.py`), the `ensemble_runs/` layout and retention (`store.py`),
+the trial runner (`runner.py`: admission → run → collect → score, every
+failure a result), the chance-corrected `spatial_domains/2` panel
+(`metrics/`: SpatialPCA CHAOS and PAS per the published definitions,
+spatial-Leiden AMI adapted from NicheCompass MLAMI, all with raw /
+expected / adjusted values), ground-truth metrics kept off the run path
+(`evaluation.py`), and the `run_skill` tool (`tool.py`), mounted after
+`memory_write` and before MCP tools and `task`.
+
+`entry/ensemble.py` opens it after the sandbox: GPU detection, a
+self-check of the execution environment (interpreter ≥ 3.11 importing the
+scoring stack, `_supervise.py` and every catalogued script visible),
+then the pool. `--ensemble false` leaves the prompt and every other tool
+definition byte-identical to the golden files written before the layer
+existed (`tests/entry/golden/`). The old `autoagent/` has since been
+deleted by 0057 (runtime tuning lives in `omicsclaw/ensemble/tuning/`);
+`runtime/consensus/` and `runtime/workflow/` are still on disk, and 0058
+migrates what it needs and deletes them.
+
+Two things 0057 must not skip: the synthetic bias study of the panel
+(`tests/ensemble/test_panel_bias.py`, full report under `-m slow`) has to
+be reviewed by the owner first, and the sandbox path has only been
+exercised against fake `BashEnvironment`s — no container runtime exists
+on the development machine, so the `.env` / `.omicsclaw/` masking and the
+mount order are verified as arguments, not in a real container.
+
+### Step 7.1 — `omicsclaw/skillenv/` (plan 0061)
+
+What replaced the old runner's adaptive environment provisioning, without
+bringing back a runner. `skillenv` reads a skill's `## Dependencies` line and
+`skills/_sdk/deps.py` as files and runs fixed probe programs where `bash`
+runs. P1: `use_skill` appends which declared packages that `python` imports
+(`skill_env=probe`, the default; the prompt and every tool definition stay
+byte-identical). P2: `skill_env=install` mounts `install_skill_deps`, after
+`run_skill` and before MCP tools and `task`, only while `bash` runs on this
+machine; after approval it builds an overlay venv over that `python`
+(`overlay.py`: fill-only, wheels only, pinned, installed files compared with
+the plan, `pip check` before/after difference, `RECORD` and top-level-name
+checks, a credential-free verification, a lock that is never deleted,
+rollback on failure or cancellation) from this machine's pip configuration,
+unchecked (owner ruling D8), refusing any pip setting that would install
+outside the overlay. `oc desktop` refuses `install`; lifting that refusal is
+plan 0064 P1 (B1-6).
+P3: every non-frozen `run_skill` trial records its interpreter and declared
+package versions in `provenance.environment`, through a callback the entry
+layer injects, so `ensemble` still imports no `skillenv`. Frozen runs are
+plan 0059's (§4.12 of 0061 lists what its environment section must answer).
+
 ## Debts carried forward
 
 None of these are defects in what shipped. They are known work the next
@@ -1640,9 +1799,9 @@ steps inherit, and two of them are **schema** changes, not provider fixes:
 | `Message` cannot hold an Anthropic thinking-block signature | The Thought is readable in history but **cannot be replayed** to the model that produced it — an unsigned `thinking` block is a 400 on the next turn, so the adapter drops it outbound. Also a schema change. |
 | ~~`StreamChunkType.ERROR` is dead~~ **RESOLVED, step 3** | Raising won. The member stays, and the loop *converts* one into a raised `ProviderError` — reachable by contract for a third-party adapter, tested with a fake that yields one. |
 | `cache_control` breakpoints reached the OpenAI adapter only | Native Anthropic — the one backend that caches **nothing** without an explicit breakpoint — is the worst-affected. |
-| `anthropic` is declared in no manifest | Arrives only transitively. `pyproject.toml` declares `langchain-anthropic`; `environment.yml` declares `openai` but not `anthropic`. |
+| ~~`anthropic` is declared in no manifest~~ **RESOLVED, 2026-09-30** | `pyproject.toml`'s core dependencies and `environment.yml` both declare `anthropic>=0.78`. |
 | Nothing has run against a live endpoint | The client-construction tests build a fake SDK module shaped after the adapter, so they verify plumbing, not vendor compatibility. This is the one place the suite asserts against its own assumptions. **Step 3's evaluation showed the cost is not hypothetical**: the retry classifier was written against Go error strings and matched nothing real, and its six tests passed because they invented the same strings. |
-| `LLM_MAX_RETRIES` name collision | `autoagent/constants.py` has a module constant of the same name with a different default (3 vs 5) and different semantics. They do not interfere, but the two subsystems disagree on "how many retries". |
+| ~~`LLM_MAX_RETRIES` name collision~~ **RESOLVED, plan 0057** | `autoagent/constants.py` had a module constant of the same name with a different default (3 vs 5) and different semantics. `autoagent/` has been deleted, so only the provider's remains. |
 | Output-token ceilings are mostly unknown | `_model_limits.py` entries ported from the repo catalog carry the conservative default 8192, which means "not known", not "known to be 8192". |
 
 Step 6 adds four of its own. Plan 0031 §11 carries the full nine-row
@@ -1651,8 +1810,8 @@ discover by hitting them:
 
 | Debt | Impact |
 |---|---|
-| Desktop did not port `/chat/abort` or `/chat/permission` | **A tool that needs approval hangs until timeout on the Desktop surface.** Recorded in `entry/desktop/`'s docstring |
-| The frontend has no `case` for the `event_omitted` frame | `useSSEStream.ts` drops it through `default:`, so the GAP notice never reaches the UI. Needs a frontend change; the handover steps are in `desktop/turn_observation.py`'s module docstring |
+| ~~Desktop did not port `/chat/abort` or `/chat/permission`~~ **RESOLVED, plan 0064 P0** | Both routes exist, plus `GET`/`PUT /workspace`. The backend now owns and versions the Desktop wire contract (v2: `request_schema_version` and `sse_schema_version` are 2; `/health` publishes only `desktop_chat`). Two defects were found and fixed on the way: every route answered 422 over real HTTP (postponed annotations hid the `Request` type from FastAPI, and the HTTP tests were skipped where FastAPI was absent), and the write routes now accept `application/json` only. A live `oc desktop` answered an approval card and stopped a running `sleep 120` over real HTTP |
+| The frontend has no `case` for the `event_omitted` frame | `useSSEStream.ts` drops it through `default:`, so the GAP notice never reaches the UI. The frame is part of contract v2 (`gap_notice: true`); the frontend case is plan 0064 A1-1 (P1) |
 | The TUI was not ported at all | A faithful port drags in the whole `RunRuntime` and memory families (12 blocked modules imported at module scope), and keeping only the Textual skeleton would be a rewrite, not a port. `textual` is not installed here either. Plan 0031 §1.3, §5.1 |
 | None of the three surfaces has spoken to a real provider, a real HTTP client, or a real IM platform | The same debt as the provider layer's, one layer further out. Plan 0031 §11-4 |
 
@@ -1731,8 +1890,9 @@ DeepSeek half of `patches.py`, then collapse the two packages.
 | Step 6 plan + outcome | `docs/plans/0031-entry-layer.md` (Q1–Q24, §6 the 14 traps, §9 acceptance, §11 the 9 debts, appendix B the outcome, appendix C the pre-implementation review) |
 | Its entry layer | `harness9/cmd/harness9/` — `main.go`, `cli.go`, `stream.go`, `tui.go` |
 | Launch / entry-point redesign (exploration, not yet a plan) | `docs/plans/0037-launch-and-entry-points.md` |
-| Desktop frontend (external client; it owns the contract) | `/workspace/algorithm/zhouwg_project/OmicsClaw-App/` |
+| Desktop frontend (external client; implements the backend-owned contract, plan 0064) | `/workspace/algorithm/zhouwg_project/OmicsClaw-App/` |
 | Repo agent contract | `AGENTS.md`, `CLAUDE.md` |
+| Runtime contract of the analysis agent | `OMICSCLAW.md`, read from beside `skills/` (plan 0063) |
 
 ⚠️ The owner also referenced a tutorial at
 `/workspace/algorithm/zhouwg_project/Agent Harness搭建教程/`. **That path's
@@ -1757,13 +1917,22 @@ cleanup, because each removal drops the capability: `agents/` (the
 multi-agent research pipeline), `knowledge/` (the `knowledge_base/` FTS5
 index), `extensions/`, `analysis_router/`, `research/`.
 
-**Kept and importable**: `common/` and `core/` — the science layer 96 skill
-scripts depend on, never legacy despite being old (`omicsclaw.common.report`
-alone has 91 call sites) — plus `remote/` and `attachments/`.
+**Kept and importable**: `common/` — once the science layer the skill
+scripts depended on (`omicsclaw.common.report` had 91 call sites); since
+plan 0062 stage two the skills import a copy of the part they need from
+`skills/_sdk/` and `common/` keeps the framework-side readers — plus
+`remote/` and `attachments/`. `core/` and
+`r_scripts/` are no longer in the package: plan 0062 stage one moved them to
+`skills/_sdk/` (`dependency_manager.py` became `skills/_sdk/deps.py`), and
+the credential scrubbing they imported from the deleted `omicsclaw.skill`
+now happens where the framework starts a process (`bash`'s local shell and
+the ensemble `LocalExecutor`).
 
 **Kept and *not* importable**, read-only reference for later work:
-`autoagent/`, `runtime/{consensus,workflow}`, `routing/`, `surfaces/`,
+`runtime/{consensus,workflow}`, `routing/`, `surfaces/`,
 `diagnostics.py`. Each reaches `omicsclaw.skill` or `omicsclaw.providers`.
+(`autoagent/` was on this list until plan 0057 deleted it; runtime tuning
+lives in `omicsclaw/ensemble/tuning/`.)
 Never cite one as working prior art without importing it first.
 
 ### The skill runner was not re-homed
@@ -1790,9 +1959,9 @@ routing block that hid a deprecated skill. Nothing enforces any of them.
 
 | Open | Detail |
 |---|---|
-| 22 skills write a dead `replot` hint | `common/report.py:write_replot_hint` patches `result.json` with a block pointing at `python omicsclaw.py replot`. That command is gone. This is a false string in **product output**, not in a document. |
+| 22 skills write a dead `replot` hint | `skills/singlecell/_lib/viz/r/replot_hint.py:write_replot_hint` (moved out of `common/report.py` by plan 0062) patches `result.json` with a block pointing at `python omicsclaw.py replot`. That command is gone. This is a false string in **product output**, not in a document. |
 | `scripts/` is 18/29 broken | Including `generate_skill_md.py` and `generate_routing_table.py`, both on `omicsclaw.skill`. SKILL.md files cannot be regenerated; edit by hand. |
-| Ten Makefile targets call dead entry points | `demo`, `demo-all`, `demo-bulkrna`, `demo-orchestrator`, `list`, `catalog`, `bot-telegram`, `bot-multi`, `bot-list`, `memory-server`. |
+| ~~Ten Makefile targets call dead entry points~~ closed | `demo`, `demo-all` and `demo-bulkrna` call the skill scripts, `list` calls `omicsclaw.skills.load_skills`, and the `bot-*` targets call `oc channel`. `demo-orchestrator`, `catalog` and `memory-server` were deleted. |
 | 96 SKILL.md still document `oc run` | Their own flags are only written there, so this is the highest-value documentation left. |
 | `README.md`, `README_zh-CN.md`, `docs/product-overview.md` | 36 / 32 / 137 stale references. `AGENTS.md` and `CLAUDE.md` were repaired in `4b4fe681`; these were left for a later round. |
 | `docs/adr/` no longer exists | All 76 ADRs were deleted. Documents under `docs/plans/`, `docs/reviews/` and `docs/architecture/` still cite them and were **deliberately not rewritten** — they are dated records of what was true when written. |

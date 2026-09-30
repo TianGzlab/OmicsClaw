@@ -1,13 +1,14 @@
 .PHONY: setup-env setup-env-name \
-        demo test test-serial test-slow test-all list demo-all catalog audit-requires demo-orchestrator demo-bulkrna \
-        install install-spatial-domains install-full install-dev \
-        install-oc oc-link \
-        bot-telegram bot-multi bot-list \
-        memory-server
+        install install-dev \
+        demo demo-all demo-bulkrna \
+        test test-serial test-slow test-all \
+        list skill-index \
+        bot-telegram bot-multi bot-list
 
 ## ── Conda environment (recommended, full functionality) ──────────────
-## Single-command install of R 4.3, ~30 R packages, ~15 bioconda CLIs,
-## OmicsClaw (editable), and all Python optional extras.
+## Single-command install of R 4.3, ~130 R/Bioconductor packages, ~15
+## bioconda CLIs, and OmicsClaw (editable) with its `full` and
+## `singlecell-upstream` extras.
 ## Requires mamba (recommended) or conda — install Miniforge:
 ##   https://github.com/conda-forge/miniforge
 
@@ -19,56 +20,20 @@ NAME ?= OmicsClaw
 setup-env-name:
 	bash 0_setup_env.sh "$(NAME)"
 
-## ── Legacy lightweight venv path (Python-only skills) ────────────────────────
-## NOTE: this path does NOT install R, samtools, STAR, fastqc, etc.
-## For full functionality use:  make setup-env  (or: bash 0_setup_env.sh)
-
-venv:
-	python3 -m venv .venv
-	@echo "Activate with: source .venv/bin/activate"
+## ── pip install into the active environment ─────────────────────────────────
+## Python only: R, samtools, STAR, fastqc and the science stack come from
+## environment.yml (make setup-env).
 
 install:
 	pip install -e .
 
-install-spatial-domains:
-	pip install -e ".[spatial-domains]"
-
-install-full:
-	pip install -e ".[full]"
-
 install-dev:
 	pip install -e ".[dev]"
-
-# Install the package and register the `oc` short alias
-# After this, both `omicsclaw` and `oc` commands are available system-wide.
-install-oc:
-	pip install -e .
-	@echo ""
-	@echo "✓ 'oc' command installed. Try: oc list"
-	@echo "  oc interactive   → start interactive CLI"
-	@echo "  oc tui           → start full-screen TUI"
-
-# Quick symlink alternative (no pip needed, works for current user only)
-# Creates ~/.local/bin/oc → project's omicsclaw.py
-oc-link:
-	@mkdir -p "$(HOME)/.local/bin"
-	@printf '#!/usr/bin/env sh\nexec python "$(CURDIR)/omicsclaw.py" "$$@"\n' > "$(HOME)/.local/bin/oc"
-	@chmod +x "$(HOME)/.local/bin/oc"
-	@echo "✓ Symlink created: ~/.local/bin/oc → $(CURDIR)/omicsclaw.py"
-	@echo "  Make sure ~/.local/bin is in your PATH."
-
-# Convenience: create venv + core install in one step
-setup: venv
-	.venv/bin/pip install -e .
-
-# Create venv + full install in one step
-setup-full: venv
-	.venv/bin/pip install -e ".[full]"
 
 ## ── Demo & test targets ──────────────────────────────────────────────────────
 
 demo:
-	python omicsclaw.py run preprocess --demo --output /tmp/omicsclaw_demo
+	python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/omicsclaw_demo
 
 # Deterministic fast suite. Skill demo executions, optional scientific stacks,
 # and real-LLM evaluations are separate because they have different dependency,
@@ -92,82 +57,65 @@ test-slow:
 test-all:
 	python -m pytest -q -n $(SCIENTIFIC_TEST_WORKERS) -m "not eval"
 
+# What the agent is actually shown: the skills the loader indexed, and
+# anything it found and refused. `python omicsclaw.py list` was the retired
+# CLI's registry dump and no longer runs.
 list:
-	python omicsclaw.py list
+	@python -c "from omicsclaw.skills import load_skills; \
+	  i = load_skills('skills'); \
+	  print(f'{len(i)} skill(s), {len(i.skipped)} skipped'); \
+	  print(i.domain_summary(), end='')"
 
-catalog:
-	python scripts/generate_catalog.py
-
-# Reconcile each skill's `requires:` frontmatter with its real (transitively
-# detected) Python-package surface.  CI calls `--check` (blocking on missing
-# deps); local dev runs `make audit-requires FIX=1` to regenerate in place.
-audit-requires:
-	python scripts/audit_skill_requires.py $(if $(FIX),--write,--check)
-
-# ADR 2026-05-11 (#1): verify every routing surface (catalog.json, every
-# domain INDEX.md, CLAUDE.md routing table) stays in sync with SKILL.md
-# descriptions.  Exits 1 on drift.  CI MUST call without --fix so drift is
-# blocking; local dev can use `make check-drift FIX=1` for one-step repair.
-check-drift:
-	python scripts/check_description_drift.py $(if $(FIX),--fix,) $(if $(VERBOSE),-v,)
-
-# ADR 2026-05-11: regenerate the Skip-when negative-routing eval snapshot.
-# Default domain = spatial (the POC scope).  Set DOMAIN=<other> to extend.
-# Set STUB=1 to emit a schema-only snapshot without calling the LLM.
-DOMAIN ?= spatial
-EVAL_OUT ?= tests/eval/skip_when_cases.json
-eval-snapshot:
-	python scripts/extract_skip_when_cases.py \
-		--domain $(DOMAIN) \
-		--output $(EVAL_OUT) \
-		$(if $(STUB),--stub,)
-	@echo
-	@echo "Snapshot written.  Review the diff before commit:"
-	@echo "  git diff -- $(EVAL_OUT)"
-
-demo-orchestrator:
-	python omicsclaw.py run orchestrator --demo --output /tmp/omicsclaw_orchestrator_demo
+# The skill catalogue, the `requires:` audit, the routing-surface drift
+# check and the Skip-when eval snapshot were targets over
+# scripts/generate_catalog.py, audit_skill_requires.py,
+# check_description_drift.py and extract_skip_when_cases.py. All four
+# belonged to the retired skill system and were deleted with it.
+#
+# What replaced them: a SKILL.md header is the only metadata there is, and
+# the derived documents are checked by tests rather than regenerated by
+# scripts.
+skill-index:
+	OMICSCLAW_WRITE_SKILL_INDEX=1 python -m pytest -q \
+		tests/skills/test_domain_index_is_current.py
 
 demo-all:
-	python omicsclaw.py run preprocess --demo --output /tmp/sc_preprocess
-	python omicsclaw.py run domains --demo --output /tmp/sc_domains
-	python omicsclaw.py run de --demo --output /tmp/sc_de
-	python omicsclaw.py run genes --demo --output /tmp/sc_genes
-	python omicsclaw.py run statistics --demo --output /tmp/sc_statistics
-	python omicsclaw.py run annotate --demo --output /tmp/sc_annotate
-	python omicsclaw.py run deconv --demo --output /tmp/sc_deconv
-	python omicsclaw.py run communication --demo --output /tmp/sc_communication
-	python omicsclaw.py run condition --demo --output /tmp/sc_condition
-	python omicsclaw.py run velocity --demo --output /tmp/sc_velocity
-	python omicsclaw.py run trajectory --demo --output /tmp/sc_trajectory
-	python omicsclaw.py run enrichment --demo --output /tmp/sc_enrichment
-	python omicsclaw.py run cnv --demo --output /tmp/sc_cnv
-	python omicsclaw.py run integrate --demo --output /tmp/sc_integrate
-	python omicsclaw.py run register --demo --output /tmp/sc_register
-	python omicsclaw.py run orchestrator --demo --output /tmp/sc_orchestrator
+	python skills/spatial/spatial-preprocess/spatial_preprocess.py --demo --output /tmp/sc_preprocess
+	python skills/spatial/spatial-domains/spatial_domains.py --demo --output /tmp/sc_domains
+	python skills/spatial/spatial-de/spatial_de.py --demo --output /tmp/sc_de
+	python skills/spatial/spatial-genes/spatial_genes.py --demo --output /tmp/sc_genes
+	python skills/spatial/spatial-statistics/spatial_statistics.py --demo --output /tmp/sc_statistics
+	python skills/spatial/spatial-annotate/spatial_annotate.py --demo --output /tmp/sc_annotate
+	python skills/spatial/spatial-deconv/spatial_deconv.py --demo --output /tmp/sc_deconv
+	python skills/spatial/spatial-communication/spatial_communication.py --demo --output /tmp/sc_communication
+	python skills/spatial/spatial-condition/spatial_condition.py --demo --output /tmp/sc_condition
+	python skills/spatial/spatial-velocity/spatial_velocity.py --demo --output /tmp/sc_velocity
+	python skills/spatial/spatial-trajectory/spatial_trajectory.py --demo --output /tmp/sc_trajectory
+	python skills/spatial/spatial-enrichment/spatial_enrichment.py --demo --output /tmp/sc_enrichment
+	python skills/spatial/spatial-cnv/spatial_cnv.py --demo --output /tmp/sc_cnv
+	python skills/spatial/spatial-integrate/spatial_integrate.py --demo --output /tmp/sc_integrate
+	python skills/spatial/spatial-register/spatial_register.py --demo --output /tmp/sc_register
 
 demo-bulkrna:
-	python omicsclaw.py run bulkrna-alignment --demo --output /tmp/bulkrna_alignment
-	python omicsclaw.py run bulkrna-de --demo --output /tmp/bulkrna_de
-	python omicsclaw.py run bulkrna-splicing --demo --output /tmp/bulkrna_splicing
-	python omicsclaw.py run bulkrna-enrichment --demo --output /tmp/bulkrna_enrichment
-	python omicsclaw.py run bulkrna-deconvolution --demo --output /tmp/bulkrna_deconv
-	python omicsclaw.py run bulkrna-coexpression --demo --output /tmp/bulkrna_coexpr
+	python skills/bulkrna/bulkrna-read-alignment/bulkrna_read_alignment.py --demo --output /tmp/bulkrna_alignment
+	python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/bulkrna_de
+	python skills/bulkrna/bulkrna-splicing/bulkrna_splicing.py --demo --output /tmp/bulkrna_splicing
+	python skills/bulkrna/bulkrna-enrichment/bulkrna_enrichment.py --demo --output /tmp/bulkrna_enrichment
+	python skills/bulkrna/bulkrna-deconvolution/bulkrna_deconvolution.py --demo --output /tmp/bulkrna_deconv
+	python skills/bulkrna/bulkrna-coexpression/bulkrna_coexpression.py --demo --output /tmp/bulkrna_coexpr
 
 ## ── Bot targets ─────────────────────────────────────────────────────────────
+## bot-telegram and bot-multi exit 1 unless OMICSCLAW_APPROVAL_TIMEOUT_S is set
+## (commented out in .env.example); bot-multi also needs CHANNELS=a,b.
 
 bot-telegram:
-	python -m omicsclaw.surfaces.channels --channels telegram
+	oc channel --channels telegram
 
-# Legacy convenience target. The production runner intentionally rejects any
-# Adapter other than Telegram until its ControlRuntime + Delivery cutover lands.
+# Several adapters in one process share one session registry. Prefer one
+# platform per process unless you actually want that, because `start_all`
+# is all-or-nothing: one mistyped credential stops every channel named here.
 bot-multi:
-	python -m omicsclaw.surfaces.channels --channels $(CHANNELS)
+	oc channel --channels $(CHANNELS)
 
 bot-list:
-	python -m omicsclaw.surfaces.channels --list
-
-## ── Memory server ───────────────────────────────────────────────────────────
-
-memory-server:
-	python omicsclaw.py memory-server
+	oc channel --list
