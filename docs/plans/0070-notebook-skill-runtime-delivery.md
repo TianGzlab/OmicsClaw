@@ -2,7 +2,7 @@
 
 日期：2026-10-01。规格：`docs/plans/0070-notebook-skill-runtime.md` 第 3 版（定稿，D1 至 D18、O1 至 O6 照此实现）。本记录不改动计划正文。
 范围：N-A、N-B1、N-B2、N-C、N-D、N-E 六期，以及 §5 的端到端验收和 9 项变异检查。
-状态：六期都已实施并验收，每期一个提交，只在本地分支 `plan-0070-notebook-runtime` 上，没有推送。端到端第 1 至 6 条通过，第 7 条（sandbox）本机没有 docker，待 owner 机器验证。变异检查 9 项都能被对应测试发现。之后按独立评估意见和 owner 裁定 O7 又做了一个修复提交，见 §12。
+状态：六期都已实施并验收，每期一个提交，只在本地分支 `plan-0070-notebook-runtime` 上，没有推送。端到端第 1 至 6 条通过，第 7 条（sandbox）本机没有 docker，待 owner 机器验证。变异检查 9 项都能被对应测试发现。之后按独立评估意见和 owner 裁定 O7 又做了一个修复提交，见 §12；第二轮复核和裁定 O8 带来第二个修复提交，见 §13。
 开工状态：`80925742`，工作树只有未跟踪的计划文件。
 
 ## 1. 结论
@@ -16,7 +16,8 @@
 | N-C 单细胞试点 | `b59d357d` | 通过 | 10 个 parity 基线全部逐值一致（CLI 与 API 两条路）；5 个示例步骤都跑通；help probe 11 passed |
 | N-D 框架与契约 | `b4640b89` | 通过 | 712 passed、2 skipped、1 xfailed、1 xpassed；golden 只改了 2 个文件 |
 | N-E eval | `78a6bdee` | 通过 | `tests/evals` 181 passed；用例集连跑 3 次都是 29 passed；job2 同款 venv 29 passed，13.8 秒 |
-| 评估后的修复 | 修复提交（§12） | 通过 | N-B1 191 passed、1 skipped；`tests/sdk/notebook` 163 passed；skillenv 与 permission 734 passed；`tests/evals` 186 passed；用例集 29 passed；变异 6、7 重做后仍被发现 |
+| 评估后的修复 | `3a72bb63`（§12） | 通过 | N-B1 191 passed、1 skipped；`tests/sdk/notebook` 163 passed；skillenv 与 permission 734 passed；`tests/evals` 186 passed；用例集 29 passed；变异 6、7 重做后仍被发现 |
+| 第二轮修复 | 第二个修复提交（§13） | 通过 | permission 313 passed；skillenv 425 passed、1 skipped、1 xpassed；`tests/sdk/notebook` 166 passed；`tests/evals` 186 passed；用例集 29 passed |
 
 N-E 的提交同时带上本记录和端到端发现的一处修复（§8 第 1 条）。
 
@@ -308,7 +309,7 @@ token（各次 `outcome.result.usage` 相加）：输入 8,547,490，其中缓�
 8. 函数库的运行诊断经 `adata.uns` 里的 JSON 字符串和 `run_info` 读回，CLI 取走后再保存。§3.13.2 只说"修改 AnnData 的函数原地修改并返回同一个对象"；`calculate_qc`、`preprocess` 实际返回新对象（标准化和过滤本来就会生成新对象），docstring 写明了。
 9. parity 的函数库比较放在子进程里跑（`tests/parity/api_runs.py`），并去掉 `NUMBA_DISABLE_JIT`。理由见 §5.3。
 10. `run.py` 先去掉自身目录再执行统一引导块；冻结模块的 `run`、`replay` 以退出码 2 结束（§3.2.3 的退出码表没有列这种情况）；对已验收的模块再 `accept` 返回 0，对未验收的模块 `revise` 返回 2。
-11. 已被 O7 第 1 条取代。原来的做法：`install_skill_deps` 改成数组参数后没有字符串主参数，"总是允许"记下整次调用的原始 JSON（这组 skill 加这组包）。现在记的是排好序的 skill 组合，例如 `install_skill_deps(sc-de, sc-qc)`，与包、参数顺序和 JSON 空格无关（§12 O7-1）。
+11. 已被 O7 第 1 条取代。原来的做法：`install_skill_deps` 改成数组参数后没有字符串主参数，"总是允许"记下整次调用的原始 JSON（这组 skill 加这组包）。现在记的是排好序的 skill 组合，例如 `install_skill_deps(sc-de, sc-qc)`，与包、参数顺序和 JSON 空格无关。实现方式见偏差 20（§13 O8-1 定稿）。
 12. 模板的 `replace_me.py` 按所在目录名加载自己的函数库，试点 CLI 用的是 `load_skill(SKILL_NAME)`。模板目录名是 `skill`，与 frontmatter 的名字不同，按名字找不到。
 13. `SkillRun` 除了计划写的 `function`、`source`，还多一个 `args`，live eval 用它判断关键字参数。
 14. live eval 也带着 `skill_stubs`，按 §3.15.1 的规则 Runner 同样会给它建桩目录：步骤里的 `run_cli` 由录好的结果回答，`load_skill` 仍加载真实函数库（§3.15.4 说 live eval 不设桩目录，两处规定在这一点上冲突，取了 §3.15.1）。
@@ -317,12 +318,14 @@ token（各次 `outcome.result.usage` 相加）：输入 8,547,490，其中缓�
 17. `README_zh-CN.md` 也加了同一句并删掉最旧的一条，保持与 `README.md` 对应。
 18. job3 用工作流里的一步把 demo 数据下载进 `OMICSCLAW_DEMO_DIR` 再缓存，没有依赖 `load_demo` 自己下载（它下载到 XDG 缓存目录，不在缓存的路径里）。
 19. `new` 拒绝已经以两位编号开头的 slug（端到端发现，§8）。
-20. O7 第 1 条落在通用规则上：`principal_key` 在 schema 没有必填 string 属性时，取第一个必填的字符串数组，主参数是去重、排序后用 `, ` 连接的值。内置工具里只有 `install_skill_deps` 走到这一步；MCP 工具如果也只有必填的字符串数组，规则改为对这串值匹配，依赖 JSON 写法的 deny 模式（例如带引号和方括号的 glob）会失效。以前为 `install_skill_deps` 记下的原始 JSON 规则不再命中，会再问一次。
+20. O7 第 1 条的最终做法（O8 第 1 条）：主参数由工具在 `ToolPolicy.rule_argument` 里自己声明，声明的参数是字符串列表时取去重、排序后用 `, ` 连接的值；只有 `install_skill_deps` 声明了 `skills`。没有声明的工具，包括所有 MCP 工具，仍按 schema 里第一个必填 string 属性匹配，找不到时回落到原始 JSON，与 `main` 完全一致。第一轮曾把"取第一个必填字符串数组"做成通用规则，复核发现它让依赖 JSON 写法的 deny 规则失效，也让对一个路径的"总是允许"放行带额外参数的调用，已撤回（§13）。以前为 `install_skill_deps` 记下的原始 JSON 规则不再命中，会再问一次。
 21. `run_cli` 的 `--output` 必须是四个输出目录之一下面的子目录，`results/<NN>/tables` 这样的顶层目录本身也拒绝：执行器按输出目录补记每个文件，顶层目录会把别的步骤写的文件记成这次的输出。
 22. 魔法行检查只看 Python 报语法错误的那一行。同一个 cell 里在魔法行之前另有语法错误时，这次不报魔法行，kernel 先报那个语法错误。
 23. 审查存档选的是移进 `reviews/archive/<id>/`，`<id>` 用 run_id 的格式（UTC 时间加 4 位十六进制），每次 replay 一个目录，文件名不变。`accept --review` 指向存档里的文件时，提示"was archived by a later replay"；条件本身没变，存档的审查本来就比新的重放旧。
 24. 看门狗退出前不重建 manifest。`status`、`accept`、下一次 `run` 都从记账重新计算，磁盘上的 manifest 要到下一次 `run`、`replay` 或 `accept` 才更新。
-25. live eval 仍批准 `python -m skills._sdk.notebook ...`，条件是 workspace 里没有名为 `skills` 或 `skills.py` 的东西，否则那里的代码会代替真正的执行器被导入。
+25. live eval 只批准路径形式的执行器调用（Environment 段给的就是路径形式），`python -m skills._sdk.notebook ...` 不批准（§13）。第一轮曾在 workspace 里没有 `skills` 时批准它。
+26. 看门狗除了比较父进程，还检查进程组原来的组长是否已经退出（O8 第 2 条只要求在入口记录父进程）。只在入口记录父进程，`nohup … &` 后 shell 立即退出时仍会漏掉：Python 走到入口之前 shell 已经退出，记下的父进程已是收养者。本机实测，去掉组长检查时这种运行会一直跑下去。`bash` 工具让 shell 自成进程组，所以组长就是那个 shell。剩下的漏洞：执行器自己换了会话或进程组（`setsid`、`set -m` 之后的作业）并且 shell 在入口之前就退出；组长不在当前 PID 命名空间里（`getpgrp()` 不大于 1）时不做组长检查。
+27. 执行器在开始任何步骤之前就发现自己被遗弃时（例如 `nohup … &` 之后 shell 立即退出），直接退出，不写记账，因为没有步骤运行过；stderr 写 `run.py: parent exited; stopped while no step was running`。
 
 ## 11. 遗留问题
 
@@ -396,3 +399,43 @@ O7-3 父进程看门狗。
 |---|---|---|
 | 6 | 过期判定忽略输入哈希（`_manifest.step_state` 的哈希比较改成 `if False and ...`） | 被发现：用例集 `upstream_change_marks_downstream_stale` 失败；`test_executor.py` 4 条失败（同一次运行里读者重跑、上游变化标记下游过期，以及 §12 b 新加的两条） |
 | 7 | `run_cli` 不补记输出（删掉 `_record_outputs(ctx, output_dir)`） | 被发现：用例集 `cli_skill_from_a_step` 失败；`test_replay.py::test_run_cli_outputs_are_not_orphans`、`test_skills.py` 的两条补记测试失败 |
+
+## 13. 第二轮修复
+
+第二轮独立复核确认第一轮的修复和 O7 都已到位，又提了两个问题，owner 为此作出裁定 O8（已写进计划 §7.0），另有三处小问题。全部放在第二个修复提交里，仍只在本地分支上。新测试都在旧代码上跑过，确认会失败。
+
+### 13.1 O8-1：主参数由工具自己声明
+
+- 改动：`omicsclaw/permission/rules.py` 退回 `main` 的匹配规则，去掉"取第一个必填字符串数组"。`ToolPolicy` 新增权限类字段 `rule_argument`（默认 `None`），工具用它声明规则匹配的参数，声明的参数是字符串列表时取去重、排序后用 `, ` 连接的值。`PermissionGate.resolve`、`protects`、`remember` 都读这个字段，`remember` 新增 `policy` 参数，`AgentApp.remember_approval` 传入注册表解析出的策略。只有 `INSTALL_SKILL_DEPS_POLICY` 设了 `rule_argument="skills"`。其余工具都没有声明，匹配与 `main` 一致。`docs/core-features/mcp.md` 退回原文，`human-in-the-loop.md` 和 `tool-calling.md` 的 `ToolPolicy` 表写明新字段。
+- 新测试：`tests/permission/test_gate.py` 加 3 条。auto-approve 模式下，deny 规则 `mcp__fs__clean(*"mode": "purge"*)` 仍然拒绝只有列表参数的调用；对 `{"paths": ["/tmp/x"]}` 点过"总是允许"后，带 `recursive: true` 的调用不放行；声明了 `rule_argument` 的工具，记下的规则是 `t(a, b)`，同一组值换顺序、改别的参数都命中，少一个值不命中。`test_rules.py` 的 4 条改为测声明的参数，并测没有声明时列表参数不当主参数。`test_install_permissions.py` 的两条改为经 `policy` 记规则，并用 `resolve` 断言同一组 skill 换顺序、换包时放行，多一个或少一个 skill 时不放行。`tests/tools/test_base.py` 的字段清单加上 `rule_argument`，另加一条测试把它归为权限类字段。
+- 验证：把第一轮的 `rules.py` 换回来跑，gate 的前两条测试失败，正是复核用探针复现的两种放宽。
+
+### 13.2 O8-2：执行器只允许前台运行
+
+- 改动：`run.py` 在标准库导入之后、加载其他模块之前读下 `os.getppid()` 和 `os.getpgrp()`（`STARTED_UNDER`），交给 `_watchdog.watch_parent`。看门狗启动时先查一次，之后每秒查一次：父进程变了，或者进程组原来的组长已经退出（偏差 26），就停下。停下时的动作同第一轮，另外删掉这个步骤上一次留下的 notebook（见 13.3）。
+- 契约：`OMICSCLAW.md` 的 "Running steps" 在命令表之后加一段："Run it in the foreground and wait for it to return: the runner stops itself once the shell that started it exits, so a run put in the background is cut short. When a module needs more time than one `bash` call allows, run its steps one at a time with `run <step file>`." 措辞先按 writing-for-agents 写，先写要做的事，再写硬约束，然后过 humanizer。`tests/entry/golden/ensemble_off_prompt.txt` 不含 `OMICSCLAW.md` 正文，`test_ensemble_golden.py` 不改就通过，所以没有重录。`test_runtime_contract.py`、`test_assembly.py` 以及读 `OMICSCLAW.md` 的 `tests/sdk/test_replot_hint.py`、`tests/planning/test_render.py` 都通过。
+- 计划：§1.3 加推迟项"后台运行和 `--detach`"。§3.4.3 和 R2 写明前台运行、组长检查，以及单次运行的上限约等于 `tool_timeout_s` 减 15 s（`ENGINE_TIMEOUT_MARGIN`，部署默认 600 s，约 585 s）。`agent-skills.md` §9 同步。
+- 新测试（`test_kernel.py`）：
+  - `test_a_runner_put_in_the_background_stops_when_its_shell_exits`：shell 自成进程组（与 `bash` 工具一样），执行器放到后台，步骤开始后 shell 退出。断言执行器和 kernel 都退出、锁已释放、记账是失败的 `run_end`（reason 为 parent exited）、旧 notebook 已删。
+  - `test_a_runner_started_with_nohup_stops_although_its_shell_exited_at_once`：`nohup … &` 之后 shell 立即退出。去掉组长检查时这条测试失败，执行器一直在跑。
+  - 原来杀掉外层 shell 的测试改用同一组断言。
+
+### 13.3 小问题
+
+1. 修订记录里的审查路径。replay 存档审查时，`revisions[].accepted.review` 原先还指向 `reviews/` 下的旧路径。现在 `review_history` 的每一项多记一个 `original`（`MANIFEST_SCHEMA` 的 `review_history_keys` 同步），`_manifest.relink_reviews` 在存档时把指向被移走文件的引用改成存档后的路径。新测试：`test_acceptance.py::test_a_revision_follows_its_accepted_review_into_the_archive`，先用审查验收，再 `revise`、`replay`，断言修订记录指向存档里的文件，且文件存在。
+2. 看门狗中止时的旧 notebook。`Current` 记下这个步骤的 notebook 路径，看门狗停下时删掉它，与 PercentError 的处理一致。主线程写 notebook、日志和 `run_end` 时持有同一把锁，看门狗拿到锁之后，主线程不会再把 notebook 写回来。上面三条 kernel 测试都断言旧 notebook 已删；去掉删除时，前两条失败。
+3. live eval 只批准路径形式的执行器调用，`python -m skills._sdk.notebook ...` 不再批准（偏差 25）。`test_live.py` 的参数表把这一条改为拒绝，`docs/core-features/eval.md` 同步。
+
+### 13.4 重跑的验收
+
+| 范围 | 命令 | 结果 |
+|---|---|---|
+| permission | `PYTEST tests/permission` | 313 passed |
+| skillenv | `PYTEST tests/skillenv` | 425 passed、1 skipped、1 xpassed |
+| entry 里与权限匹配相关的测试 | `PYTEST tests/entry/test_approval.py tests/entry/test_approval_card.py tests/entry/test_cli_approval_scope.py tests/entry/test_permission_wiring.py tests/entry/test_cli_inert_output.py tests/entry/test_desktop_interactions.py tests/entry/test_desktop_stream.py` | 193 passed |
+| 契约、golden、装配 | `PYTEST tests/entry/test_runtime_contract.py tests/entry/test_ensemble_golden.py tests/entry/test_assembly.py` | 74 passed、1 skipped（只在 `OMICSCLAW_WRITE_GOLDEN=1` 时重录）、1 xfailed（已知的 `cli/_configure.py:482`） |
+| 执行器 | `PYTEST tests/sdk/notebook` | 166 passed、5 deselected |
+| eval | `PYTEST tests/evals` | 186 passed、26 deselected |
+| 用例集 | `PYTEST tests/evals/dataset -m scripted_eval` | 29 passed |
+
+另外跑过：`PYTEST tests/tools --deselect tests/tools/test_workspace.py`，828 passed（`ToolPolicy` 加了字段）；`tests/sdk/test_public_surface.py`、`test_boundary.py`、`test_bootstrap.py`，24 passed、1 skipped。没有跑全量测试。

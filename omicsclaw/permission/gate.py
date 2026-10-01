@@ -303,8 +303,8 @@ class PermissionGate:
                 policy.risk_level,
             )
 
-        key = principal_key(schema)
-        argument_text = principal_argument(arguments, schema)
+        key = policy.rule_argument or principal_key(schema)
+        argument_text = principal_argument(arguments, schema, declared=policy.rule_argument)
 
         if self._protected(key, argument_text, policy):
             return Resolution(
@@ -372,7 +372,9 @@ class PermissionGate:
         if self._mode is PermissionMode.BYPASS_ALL:
             return False
         return self._protected(
-            principal_key(schema), principal_argument(arguments, schema), policy
+            policy.rule_argument or principal_key(schema),
+            principal_argument(arguments, schema, declared=policy.rule_argument),
+            policy,
         )
 
     def _protected(
@@ -432,8 +434,13 @@ class PermissionGate:
         arguments: str,
         *,
         schema: Mapping[str, Any] | None = None,
+        policy: ToolPolicy | None = None,
     ) -> str | None:
         """Persist "always allow" for exactly this call. Returns the pattern.
+
+        The pattern is written against the argument :meth:`resolve` reads,
+        so *policy* has to be the one the call is judged with: its
+        ``rule_argument``, when set, replaces the schema's choice.
 
         ``None`` when there is no rule file to write to, which a surface
         should report to the person as "this run cannot remember that"
@@ -444,8 +451,9 @@ class PermissionGate:
         if store is None:
             _log.info("cannot remember %s: no rule file is configured", tool_name)
             return None
+        declared = policy.rule_argument if policy is not None else None
         pattern = literal_pattern(
-            tool_name, principal_argument(arguments, schema)
+            tool_name, principal_argument(arguments, schema, declared=declared)
         )
         store.remember(pattern)
         return pattern

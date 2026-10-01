@@ -160,39 +160,94 @@ def test_a_closed_pipe_does_not_stop_the_run(project):
     assert (root / "results/01_k/notebooks/M01_k.ipynb").is_file()
 
 
-def test_the_runner_stops_when_its_parent_shell_is_killed(project):
+SLEEP_STEP = (
+    "# %%\nimport os, pathlib, time\n"
+    "pathlib.Path('pids.txt').write_text(f'{os.getppid()} {os.getpid()}')\n"
+    "time.sleep(120)\n"
+)
+
+
+def _wait_for(predicate, seconds):
+    deadline = time.monotonic() + seconds
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return predicate()
+
+
+def _assert_the_runner_stopped(root, *, started_a_step=True):
+    """The runner and its kernel are gone, the lock is free and the step's run ended as failed."""
     from skills._sdk.notebook import _ledger
     from skills._sdk.notebook._lock import LockBusy, hold
 
-    root, _home, env, _runner = project
-    _step(root, "01_sleep.py",
-          "# %%\nimport os, pathlib, time\n"
-          "pathlib.Path('pids.txt').write_text(f'{os.getppid()} {os.getpid()}')\n"
-          "time.sleep(120)\n")
-    shell = subprocess.Popen(
-        ["bash", "-c", f'"{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1; echo done'],
-        cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    log = root / "runner.log"
+    assert _wait_for(lambda: log.exists() and "parent exited" in log.read_text(), 15), (
+        log.read_text() if log.exists() else "no runner.log"
     )
     pids = root / "pids.txt"
-    deadline = time.monotonic() + 60
-    while not (pids.exists() and pids.read_text()) and time.monotonic() < deadline:
-        time.sleep(0.2)
-    runner_pid, kernel = (int(value) for value in pids.read_text().split())
-    shell.kill()
-    shell.wait()
-    deadline = time.monotonic() + 10
-    while (_alive(runner_pid) or _alive(kernel)) and time.monotonic() < deadline:
-        time.sleep(0.2)
-    left = [pid for pid in (runner_pid, kernel) if _alive(pid)]
-    for pid in left:
-        os.kill(pid, signal.SIGKILL)
-    assert left == [], "the runner or its kernel outlived the parent shell by more than 10 s"
+    if pids.exists() and pids.read_text():
+        alive = [pid for pid in (int(v) for v in pids.read_text().split())
+                 if _wait_for(lambda pid=pid: not _alive(pid), 10) is False]
+        for pid in alive:
+            os.kill(pid, signal.SIGKILL)
+        assert alive == [], "the runner or its kernel is still running"
     try:
         with hold(root / "results/01_k/provenance/.lock", command="test"):
             pass
     except LockBusy:
         pytest.fail("the module lock is still held")
-    run = _ledger.runs_of(root / "results/01_k/provenance/runs", "01_sleep")[-1]
-    assert run.status == "failed"
-    assert run.end["error"]["evalue"] == "parent exited" and run.end["reason"] == "parent exited"
-    assert "parent exited; stopped 01_k/01_sleep.py" in (root / "runner.log").read_text()
+    runs = _ledger.runs_of(root / "results/01_k/provenance/runs", "01_sleep")
+    assert all(run.status == "failed" for run in runs)
+    if started_a_step:
+        assert runs and runs[-1].end["reason"] == "parent exited"
+        assert runs[-1].end["error"]["evalue"] == "parent exited"
+        assert "parent exited; stopped 01_k/01_sleep.py" in log.read_text()
+    assert not (root / "results/01_k/notebooks/01_sleep.ipynb").exists()
+
+
+def _old_notebook(root):
+    """A notebook left by an earlier run of the step, which a stopped run must not leave behind."""
+    path = root / "results/01_k/notebooks/01_sleep.ipynb"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}')
+
+
+def test_the_runner_stops_when_its_parent_shell_is_killed(project):
+    root, _home, env, _runner = project
+    _step(root, "01_sleep.py", SLEEP_STEP)
+    _old_notebook(root)
+    shell = subprocess.Popen(
+        ["bash", "-c", f'"{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1; echo done'],
+        cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    assert _wait_for(lambda: (root / "pids.txt").exists() and (root / "pids.txt").read_text(), 60)
+    shell.kill()
+    shell.wait()
+    _assert_the_runner_stopped(root)
+
+
+def test_a_runner_put_in_the_background_stops_when_its_shell_exits(project):
+    """The shell is a group leader, as ``bash`` makes it; it exits once the step has started."""
+    root, _home, env, _runner = project
+    _step(root, "01_sleep.py", SLEEP_STEP)
+    _old_notebook(root)
+    shell = subprocess.run(
+        ["bash", "-c", f'"{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1 & '
+                       "while [ ! -s pids.txt ]; do sleep 0.1; done"],
+        cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True, timeout=120,
+    )
+    assert shell.returncode == 0
+    _assert_the_runner_stopped(root)
+
+
+def test_a_runner_started_with_nohup_stops_although_its_shell_exited_at_once(project):
+    """The shell may be gone before the runner reads its parent; the group leader tells it so."""
+    root, _home, env, _runner = project
+    _step(root, "01_sleep.py", SLEEP_STEP)
+    shell = subprocess.run(
+        ["bash", "-c", f'nohup "{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1 &'],
+        cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True, timeout=30,
+    )
+    assert shell.returncode == 0
+    _assert_the_runner_stopped(root, started_a_step=False)

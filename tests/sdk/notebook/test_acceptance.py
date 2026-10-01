@@ -189,6 +189,21 @@ def test_revise_snapshots_and_unfreezes(project, monkeypatch):
     assert "01_m  DRAFT (revising)" in project.status()
 
 
+def test_a_revision_follows_its_accepted_review_into_the_archive(project):
+    module = _replayed(project)
+    _report(project, module)
+    review = _review(project, module)
+    assert project.accept(f"analysis/{module}", review=review) == 0, project.text
+    project.revise(f"analysis/{module}")
+    assert project.manifest(module)["revisions"][0]["accepted"]["review"] == "reviews/2026-10-01_review.md"
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    manifest = project.manifest(module)
+    moved = manifest["revisions"][0]["accepted"]["review"]
+    assert moved.startswith("reviews/archive/") and moved.endswith("/2026-10-01_review.md")
+    assert (project.root / "results" / module / moved).is_file()
+    assert manifest["review_history"][0]["original"] == "reviews/2026-10-01_review.md"
+
+
 def test_a_second_revise_on_the_same_day_gets_its_own_baseline(project):
     module = _replayed(project)
     _report(project, module)

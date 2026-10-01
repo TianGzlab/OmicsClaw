@@ -6,8 +6,8 @@ and bypass-all do not, read-only refuses. That is exactly why the tool is not
 mounted unless a deployment sets ``skill_env=install`` (Q7). An explicit
 ``ask`` rule makes every call ask and the question may not be answered by a
 standing session grant; "always allow" writes ``install_skill_deps(<skills>)``,
-the sorted skill names, because ``skills`` is the schema's first required
-array of strings and it has no required string. A rule about
+the sorted skill names, because the tool's policy declares
+``rule_argument="skills"``. A rule about
 ``bash(pip install*)`` says nothing about this tool — rules match tool names —
 which is documented in AGENTS.md and pinned here so nobody reads it the
 other way.
@@ -25,7 +25,7 @@ import pytest
 
 from omicsclaw.entry import assembly
 from omicsclaw.entry.config import AppConfig, SkillEnvMode
-from omicsclaw.permission import CONFIG_KEY, GatedTool, PermissionGate, PermissionMode, Rules, RuleStore, gate_tools
+from omicsclaw.permission import CONFIG_KEY, GatedTool, PermissionGate, PermissionMode, Rules, RuleStore, Verdict, gate_tools
 from omicsclaw.schema import ToolCall
 from omicsclaw.skillenv.registry import read_registry
 from omicsclaw.skillenv.tool import install_skill_deps_tool
@@ -110,7 +110,9 @@ def test_always_allow_writes_a_rule_for_that_combination_of_skills(tmp_path):
     tool, builder = _tool(tmp_path, missing=("oc_leaf", "oc_near"))
     store = RuleStore(tmp_path / ".omicsclaw" / "settings.json")
     gate = PermissionGate(mode=PermissionMode.DEFAULT, rules=store)
-    pattern = gate.remember("install_skill_deps", ARGS, schema=tool.definition().input_schema)
+    pattern = gate.remember(
+        "install_skill_deps", ARGS, schema=tool.definition().input_schema, policy=tool.policy
+    )
     assert pattern == f"install_skill_deps({SKILL})"
     other_packages = '{"packages":["oc-near"],"skills":["oc-skill","oc-skill"]}'
     result, asked = _run(tool, gate, arguments=other_packages)
@@ -118,18 +120,19 @@ def test_always_allow_writes_a_rule_for_that_combination_of_skills(tmp_path):
 
 
 def test_the_remembered_rule_does_not_cover_another_combination_of_skills(tmp_path):
-    from omicsclaw.permission import principal_argument
-
     tool, _builder = _tool(tmp_path)
-    schema = tool.definition().input_schema
+    schema, policy = tool.definition().input_schema, tool.policy
     gate = PermissionGate(mode=PermissionMode.DEFAULT, rules=RuleStore(tmp_path / ".omicsclaw" / "settings.json"))
-    gate.remember("install_skill_deps", json.dumps({"skills": ["sc-qc", "sc-de"], "packages": ["x"]}), schema=schema)
-    same = json.dumps({"skills": ["sc-de", "sc-qc"], "packages": ["y", "z"]})
-    wider = json.dumps({"skills": ["sc-de", "sc-qc", "sc-clustering"], "packages": ["x"]})
-    narrower = json.dumps({"skills": ["sc-de"], "packages": ["x"]})
-    assert gate.rules.evaluate("install_skill_deps", principal_argument(same, schema)) is not None
-    assert gate.rules.evaluate("install_skill_deps", principal_argument(wider, schema)) is None
-    assert gate.rules.evaluate("install_skill_deps", principal_argument(narrower, schema)) is None
+    remembered = json.dumps({"skills": ["sc-qc", "sc-de"], "packages": ["x"]})
+    gate.remember("install_skill_deps", remembered, schema=schema, policy=policy)
+
+    def verdict(skills, packages):
+        arguments = json.dumps({"skills": skills, "packages": packages})
+        return gate.resolve("install_skill_deps", arguments, policy=policy, schema=schema).verdict
+
+    assert verdict(["sc-de", "sc-qc"], ["z", "y"]) is Verdict.ALLOW
+    assert verdict(["sc-de", "sc-qc", "sc-clustering"], ["x"]) is not Verdict.ALLOW
+    assert verdict(["sc-de"], ["x"]) is not Verdict.ALLOW
 
 
 def test_a_bash_pip_install_rule_does_not_reach_this_tool(tmp_path):

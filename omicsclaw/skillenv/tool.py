@@ -87,9 +87,14 @@ INSTALL_SKILL_DEPS_POLICY = ToolPolicy(
     touches_network=True,
     prompts_for_itself=True,
     allowed_in_background=False,
+    rule_argument="skills",
     tags=frozenset({"skills", "environment", "network"}),
 )
-"""Declared rather than defaulted: the tool asks for itself, with a card describing the installation."""
+"""Declared rather than defaulted: the tool asks for itself, with a card describing the installation.
+
+``rule_argument="skills"`` makes "always allow" remember the sorted set of
+skills and not the packages: the packages are already limited to what those
+skills declare and go into an isolated overlay."""
 
 _MINIMUM_PIP = (22, 2)
 _REGISTRY_FILE = "skills/_sdk/deps.py"

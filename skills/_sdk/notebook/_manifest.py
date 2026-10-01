@@ -15,7 +15,8 @@ revisions. Its ``status`` is derived, never set by hand:
 A replay moves the reviews already in ``reviews/`` to
 ``reviews/archive/<id>/``, one folder per replay, and appends each one's
 verdict and sha256 to ``review_history``, so a second review written the
-same day cannot overwrite the first.
+same day cannot overwrite the first. A revision that recorded one of those
+reviews as the accepted one is pointed at its new path.
 """
 
 from __future__ import annotations
@@ -233,11 +234,24 @@ def archive_reviews(module: Module, tag: str) -> list[dict]:
         os.replace(path, target)
         entries.append({
             "file": target.relative_to(module.results_dir).as_posix(),
+            "original": path.relative_to(module.results_dir).as_posix(),
             "verdict": verdict,
             "sha256": sha,
             "archived_at": moved_at,
         })
     return entries
+
+
+def relink_reviews(revisions: list[dict], archived: list[dict]) -> list[dict]:
+    """*revisions* with every accepted review that *archived* moved pointed at its new path."""
+    moved = {entry["original"]: entry["file"] for entry in archived}
+    relinked = []
+    for revision in revisions:
+        accepted = revision.get("accepted")
+        if isinstance(accepted, dict) and accepted.get("review") in moved:
+            revision = {**revision, "accepted": {**accepted, "review": moved[accepted["review"]]}}
+        relinked.append(revision)
+    return relinked
 
 
 def approving_review_after(module: Module, moment: float | None) -> Path | None:

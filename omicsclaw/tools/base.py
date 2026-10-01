@@ -234,6 +234,20 @@ class ToolPolicy:
     allowed_in_background: bool = False
     """May run in a detached turn with nobody watching. Permission."""
 
+    rule_argument: str | None = None
+    """The argument permission rules match this tool's calls against, in
+    place of the first required ``string`` of its schema. Permission.
+
+    A list of strings is matched as its distinct values, sorted and joined
+    with ``", "``, so an "always allow" for that list covers the same set
+    in any order, whatever the other arguments are. That widens what one
+    remembered rule allows, so ``None``, which keeps the schema-derived
+    argument, is the guarded default. Set it only on a tool whose own
+    checks bound what the other arguments can do: ``install_skill_deps``
+    names ``skills``, because its packages are limited to what those
+    skills declare and go into an isolated overlay. Read by
+    :class:`omicsclaw.permission.PermissionGate`, nothing in this package."""
+
     tags: frozenset[str] = frozenset()
     """Free-form labels for the assembly layer to filter on.
 

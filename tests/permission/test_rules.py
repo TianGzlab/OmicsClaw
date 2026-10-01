@@ -241,27 +241,29 @@ SET_SCHEMA = {
 }
 
 
-def test_a_required_string_array_is_the_principal_only_when_no_string_is():
-    assert principal_key(SET_SCHEMA) == "skills"
-    mixed = {
-        "properties": {"tags": {"type": "array", "items": {"type": "string"}}, "path": {"type": "string"}},
-        "required": ["tags", "path"],
-    }
-    assert principal_key(mixed) == "path"
-    numbers = {"properties": {"ids": {"type": "array", "items": {"type": "integer"}}}, "required": ["ids"]}
-    assert principal_key(numbers) is None
+def test_a_required_string_array_is_not_a_principal_unless_the_tool_declares_it():
+    """Without a declaration a tool with only list arguments is matched on its raw JSON."""
+    payload = json.dumps({"skills": ["sc-qc"], "packages": ["a"]})
+    assert principal_key(SET_SCHEMA) is None
+    assert principal_argument(payload, SET_SCHEMA) == payload
 
 
-def test_a_string_array_principal_is_its_distinct_values_sorted():
+def test_a_declared_string_array_is_its_distinct_values_sorted():
     one = json.dumps({"skills": ["sc-qc", "sc-de", "sc-qc"], "packages": ["a"]})
     two = '{"packages":["b","c"],"skills":["sc-de","sc-qc"]}'
-    assert principal_argument(one, SET_SCHEMA) == "sc-de, sc-qc"
-    assert principal_argument(two, SET_SCHEMA) == "sc-de, sc-qc"
+    assert principal_argument(one, SET_SCHEMA, declared="skills") == "sc-de, sc-qc"
+    assert principal_argument(two, SET_SCHEMA, declared="skills") == "sc-de, sc-qc"
+
+
+def test_a_declared_argument_replaces_the_schemas_choice():
+    payload = json.dumps({"command": "ls", "cwd": "/tmp"})
+    schema = {**BASH_SCHEMA, "properties": {**BASH_SCHEMA["properties"], "cwd": {"type": "string"}}}
+    assert principal_argument(payload, schema, declared="cwd") == "/tmp"
 
 
 @pytest.mark.parametrize("payload", ['{"skills": []}', '{"skills": ["a", 3]}', '{"skills": ["", "a"]}'])
-def test_an_unusable_string_array_falls_back_to_the_raw_text(payload):
-    assert principal_argument(payload, SET_SCHEMA) == payload
+def test_an_unusable_declared_array_falls_back_to_the_raw_text(payload):
+    assert principal_argument(payload, SET_SCHEMA, declared="skills") == payload
 
 
 @pytest.mark.parametrize(

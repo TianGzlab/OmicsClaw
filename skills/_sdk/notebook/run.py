@@ -11,15 +11,20 @@ Call it from the project root (the folder holding ``analysis/`` and
 
 Locks are ``fcntl.flock`` files inside ``results/``; they do not exclude
 reliably across network filesystems or Docker Desktop's macOS file sharing.
-``run`` and ``replay`` stop, killing the running kernel and releasing the
-lock, when the process that started them exits.
+``run`` and ``replay`` run in the foreground only: they stop, killing the
+running kernel and releasing the lock, once the process that started them
+exits, including a shell that put them in the background.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+STARTED_UNDER = (os.getppid(), os.getpgrp())
+"""Parent process and process group at start-up, read before anything slow, for the watchdog."""
 
 if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
     sys.path.pop(0)
@@ -120,12 +125,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "new":
         return _executor.new_module(Path.cwd(), args.slug)
     if args.command == "run":
-        _watchdog.watch_parent()
+        _watchdog.watch_parent(*STARTED_UNDER)
         return _executor.run_targets(_root(args.targets[0]), args.targets, force=args.force, wait=args.wait)
     if args.command == "status":
         return _executor.status(_root(args.target), args.target)
     if args.command == "replay":
-        _watchdog.watch_parent()
+        _watchdog.watch_parent(*STARTED_UNDER)
         return _executor.replay(_root(args.target), args.target, new_interpreter=args.new_interpreter, wait=args.wait)
     if args.command == "accept":
         return _acceptance.accept(_root(args.target), args.target, review=args.review,

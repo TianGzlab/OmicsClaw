@@ -23,11 +23,9 @@ finer grain than a tool name. A rule file looks like this::
 **What a pattern is matched against** is one string, not the whole argument
 payload: the value of the tool's first *required* ``string`` property, taken
 from the tool's own JSON Schema — ``command`` for ``bash``, ``path`` for the
-file tools, ``url`` for ``web_fetch``, ``query`` for ``web_search``. A tool
-with no such property but a required array of strings is matched against
-that array's distinct values, sorted and joined with ``", "`` —
-``install_skill_deps``'s ``skills``. See :func:`principal_argument`,
-including what happens when a tool has neither. Writing a pattern against the wrong thing is the easy mistake here:
+file tools, ``url`` for ``web_fetch``, ``query`` for ``web_search``. See
+:func:`principal_argument`, including what happens when a tool has no such
+property. Writing a pattern against the wrong thing is the easy mistake here:
 ``write_file(*/tmp/*)`` is a statement about the destination path and says
 nothing about the content being written.
 
@@ -415,28 +413,35 @@ def _allow_patterns(rules: Rules) -> frozenset[str]:
     )
 
 
-def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) -> str:
+def principal_argument(
+    arguments: str,
+    schema: Mapping[str, Any] | None = None,
+    *,
+    declared: str | None = None,
+) -> str:
     """The one string a pattern is matched against.
 
-    The value of the property :func:`principal_key` names, read out of the
-    raw payload. That is the tool's own declaration of what the call is
-    *about*: ``bash``'s ``command``, the file tools' ``path``,
+    The value of the tool's first *required* property of type ``string``,
+    read out of the raw payload. That is the tool's own declaration of what
+    the call is *about*: ``bash``'s ``command``, the file tools' ``path``,
     ``web_fetch``'s ``url``, ``web_search``'s ``query``, ``use_skill``'s
-    ``skill_name``. An array of strings gives its distinct values, sorted
-    and joined with ``", "``, so ``install_skill_deps`` called for
-    ``["sc-qc", "sc-de"]`` reads ``sc-de, sc-qc`` whatever the order, the
-    packages or the JSON spacing.
+    ``skill_name``.
 
     **Falls back to the raw JSON payload** when there is no schema, no
-    such property, or no usable value for it in the payload. A pattern then
+    required string property, or no such key in the payload. A pattern then
     has to be written against the JSON text, which is the safe direction for a
     ``deny`` — the values are still in there — and the loose direction for an
     ``allow``.
 
+    *declared* is the property a tool names in its policy's
+    ``rule_argument``, and replaces the schema's choice. Only a declared
+    property may hold a list: a non-empty list of non-empty strings reads
+    as its distinct values, sorted and joined with ``", "``.
+
     Never raises: a payload the model truncated still has to be evaluated,
     since the rules are how a truncated call gets stopped.
     """
-    key = principal_key(schema)
+    key = declared or principal_key(schema)
     if key is None:
         return arguments
     try:
@@ -448,22 +453,19 @@ def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) 
     value = decoded.get(key)
     if isinstance(value, str) and value:
         return value
-    if isinstance(value, list) and value and all(isinstance(item, str) and item for item in value):
+    if declared and isinstance(value, list) and value and all(isinstance(item, str) and item for item in value):
         return ", ".join(sorted(set(value)))
     return arguments
 
 
 def principal_key(schema: Mapping[str, Any] | None) -> str | None:
-    """The first required property typed ``string``; failing that, the first
-    required array of strings; otherwise ``None``.
+    """The first required property typed ``string``, or ``None``.
 
     Order comes from the schema's own ``required`` list, which is why
     ``write_file`` resolves to ``path`` and not ``content``: its
     ``required`` is ``["path", "content"]``, and the destination is what a
     rule is about. That ordering is a property of the tool, so a tool whose
-    principal argument is not first says so by listing it first. An array
-    is considered only when no string qualifies, so a tool with a required
-    string keeps it as its principal.
+    principal argument is not first says so by listing it first.
     """
     if not isinstance(schema, Mapping):
         return None
@@ -473,19 +475,11 @@ def principal_key(schema: Mapping[str, Any] | None) -> str | None:
         return None
     if not isinstance(properties, Mapping):
         return None
-    names = [name for name in required if isinstance(name, str)]
-    for name in names:
+    for name in required:
+        if not isinstance(name, str):
+            continue
         declared = properties.get(name)
         if isinstance(declared, Mapping) and declared.get("type") == "string":
-            return name
-    for name in names:
-        declared = properties.get(name)
-        if (
-            isinstance(declared, Mapping)
-            and declared.get("type") == "array"
-            and isinstance(declared.get("items"), Mapping)
-            and declared["items"].get("type") == "string"
-        ):
             return name
     return None
 

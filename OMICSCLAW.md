@@ -130,6 +130,8 @@ Call the step runner (its command is in the Environment section) with `bash` fro
 | `accept analysis/<NN_slug> --review <file>` | records the user's acceptance and freezes the module |
 | `revise analysis/<NN_slug>` | snapshots an accepted module so it can change |
 
+Run it in the foreground and wait for it to return: the runner stops itself once the shell that started it exits, so a run put in the background is cut short. When a module needs more time than one `bash` call allows, run its steps one at a time with `run <step file>`.
+
 A step is **stale** when its file changed, or a file it read changed, since its last successful run. After rerunning a module that later modules read from, run `status` and rerun the modules it lists as stale. Read the runner's output after every run: it lists each step's status, the skill functions it called and its notebook; a failed step shows the cell, the error and the traceback. When a module needs packages the base environment lacks, run the step runner with the interpreter `install_skill_deps` returned, and keep using that interpreter for the module; the runner warns when the interpreter changes, and `replay` asks you to confirm the change with `--new-interpreter "<reason>"`.
 
 ### Finishing a module

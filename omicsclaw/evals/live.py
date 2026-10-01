@@ -388,13 +388,12 @@ def _same_file(token: str, target: Path, workspace: Path) -> bool:
 def is_step_runner(command: str, runner: Path, workspace: Path) -> bool:
     """Whether *command* is one plain call of the step runner at *runner*.
 
-    ``python <runner> <subcommand> ...``, where the script resolves to
-    *runner* itself, or ``python -m skills._sdk.notebook <subcommand> ...``
-    while *workspace* holds nothing named ``skills`` that would be imported
-    in its place. The interpreter is ``python``, ``python3`` or the running
-    one, there is no shell metacharacter, and the subcommand is ``new``,
-    ``run``, ``status`` or ``replay``: ``accept`` and ``revise`` record the
-    user's decision, so they are not approved here.
+    ``python <runner> <subcommand> ...``, the form the Environment section
+    gives, where the script resolves to *runner* itself (a relative path
+    against *workspace*). The interpreter is ``python``, ``python3`` or the
+    running one, there is no shell metacharacter, and the subcommand is
+    ``new``, ``run``, ``status`` or ``replay``: ``accept`` and ``revise``
+    record the user's decision, so they are not approved here.
     """
     if any(mark in command for mark in _META_CHARACTERS):
         return False
@@ -404,15 +403,9 @@ def is_step_runner(command: str, runner: Path, workspace: Path) -> bool:
         return False
     if len(tokens) < 3 or tokens[0] not in _interpreters():
         return False
-    if tokens[1] == "-m" and tokens[2] == "skills._sdk.notebook":
-        if (workspace / "skills").exists() or (workspace / "skills.py").exists():
-            return False
-        rest = tokens[3:]
-    elif _same_file(tokens[1], runner, workspace):
-        rest = tokens[2:]
-    else:
+    if not _same_file(tokens[1], runner, workspace):
         return False
-    return bool(rest) and rest[0] in _RUNNER_SUBCOMMANDS
+    return tokens[2] in _RUNNER_SUBCOMMANDS
 
 
 def _names_a_skill_directory(command: str, index: SkillIndex) -> bool:

@@ -1,12 +1,19 @@
 """Stop the runner once the process that started it has gone.
 
-An agent often starts the runner through a shell, for example
-``cd proj && python run.py run analysis/01_qc | tail``. A tool timeout may
-kill only that shell; the runner is then adopted by another process and
-would keep its kernel running and the module lock held. :func:`watch_parent`
-starts a daemon thread that polls ``os.getppid()``. When the parent changes,
-the thread kills the running kernel, ends the current step's ledger with a
-failed ``run_end`` and exits the process, which releases the lock.
+The runner runs in the foreground only. An agent often starts it through a
+shell, for example ``cd proj && python run.py run analysis/01_qc | tail``.
+A tool timeout may kill only that shell, and a shell that put the runner in
+the background may simply exit; either way the runner is adopted by another
+process and would keep its kernel running and the module lock held.
+
+``run.py`` reads its parent process and process group before anything
+else. :func:`watch_parent` checks them once and then from a daemon thread
+every second. The runner counts as abandoned when its parent is no longer
+the one it started under, or when its process group had another leader
+(the shell) and that leader has exited. Then the runner kills the running
+kernel, ends the current step's ledger with a failed ``run_end``, deletes
+that step's notebook from an earlier run, and exits, which releases the
+lock.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 PARENT_EXITED = "parent exited"
@@ -30,14 +38,16 @@ class Current:
     label: str
     started: float
     kill: Callable[[], None] | None
+    notebook: Path | None = None
 
 
 class Activity:
     """What the runner is doing, shared by the main thread and the watchdog.
 
-    Hold ``lock`` while appending ``run_start`` or ``run_end`` and while
-    changing ``current``; the watchdog takes it and never gives it back, so
-    no other ``run_end`` follows its own.
+    Hold ``lock`` while appending ``run_start``, while writing a step's
+    notebook, log and ``run_end``, and while changing ``current``. The
+    watchdog takes it and never gives it back, so nothing the main thread
+    writes for a step follows the watchdog's own ``run_end``.
     """
 
     def __init__(self) -> None:
@@ -65,6 +75,11 @@ def stop(reason: str = PARENT_EXITED) -> None:
                 current.kill()
             except Exception:  # the process is about to exit either way
                 pass
+        if current.notebook is not None:
+            try:
+                current.notebook.unlink(missing_ok=True)
+            except OSError:
+                pass
         try:
             current.ledger.append(
                 "run_end",
@@ -79,18 +94,45 @@ def stop(reason: str = PARENT_EXITED) -> None:
             pass
         _say(f"run.py: {reason}; stopped {current.label}, killed its kernel and released the module lock")
     else:
-        _say(f"run.py: {reason}; stopped and released the module lock")
+        _say(f"run.py: {reason}; stopped while no step was running")
     os._exit(EXIT_CODE)
 
 
-def watch_parent(*, interval: float = 1.0) -> threading.Thread:
-    """Start the daemon thread that calls :func:`stop` once ``os.getppid()`` changes."""
-    parent = os.getppid()
+def _leader_gone(group: int) -> bool:
+    """Whether *group*'s leader, another process than this one, has exited."""
+    if group <= 1 or group == os.getpid():
+        return False
+    try:
+        os.kill(group, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    try:
+        with open(f"/proc/{group}/stat", encoding="ascii", errors="replace") as handle:
+            return handle.read().rsplit(")", 1)[-1].split()[0] == "Z"
+    except (OSError, IndexError):
+        return False
+
+
+def abandoned(parent: int, group: int) -> bool:
+    """Whether the runner has lost the process that started it (see the module docstring)."""
+    return os.getppid() != parent or _leader_gone(group)
+
+
+def watch_parent(parent: int, group: int, *, interval: float = 1.0) -> threading.Thread:
+    """Stop now if the runner is already abandoned, else start a daemon thread that stops it when it is.
+
+    :param parent: ``os.getppid()`` read at the runner's entry point.
+    :param group: ``os.getpgrp()`` read at the same time.
+    """
+    if abandoned(parent, group):
+        stop(PARENT_EXITED)
 
     def poll() -> None:
         while True:
             time.sleep(interval)
-            if os.getppid() != parent:
+            if abandoned(parent, group):
                 stop(PARENT_EXITED)
 
     thread = threading.Thread(target=poll, name="omicsclaw-parent-watch", daemon=True)

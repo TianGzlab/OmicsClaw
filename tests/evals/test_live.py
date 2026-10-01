@@ -372,7 +372,7 @@ RUNNER_SCRIPT = REPO_ROOT / "skills" / "_sdk" / "notebook" / "run.py"
         (f"python {RUNNER_SCRIPT} new clustering", True),
         (f"{sys.executable} {RUNNER_SCRIPT} run analysis/01_clustering", True),
         (f"python {RUNNER_SCRIPT} replay analysis/01_clustering", True),
-        ("python -m skills._sdk.notebook status", True),
+        ("python -m skills._sdk.notebook status", False),
         (f"python {RUNNER_SCRIPT} run analysis/01_x && pip install foo", False),
         (f"python {RUNNER_SCRIPT} api skills/x --write", False),
         (f"python {RUNNER_SCRIPT} accept analysis/01_x --skip-review ok", False),
@@ -390,8 +390,6 @@ def test_only_the_real_step_runner_is_approved(tmp_path):
     lookalike.write_text("print('not the runner')\n")
     assert _bash(tmp_path, f"python {lookalike} run analysis/01_x")[0] is False
     assert _bash(tmp_path, "python x/_sdk/notebook/run.py run analysis/01_x")[0] is False
-    (tmp_path / "skills" / "_sdk" / "notebook").mkdir(parents=True)
-    assert _bash(tmp_path, "python -m skills._sdk.notebook run analysis/01_x")[0] is False
 
 
 def test_a_step_ledger_names_the_executed_skill_and_its_keyword_arguments(tmp_path):

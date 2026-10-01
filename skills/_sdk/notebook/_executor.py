@@ -159,6 +159,8 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
     ledger_path = module.runs_dir / step.stem / f"{run_id}.jsonl"
     ledger = _ledger.Ledger(ledger_path)
     step_sha = _hashing.sha256_file(step)
+    notebook_rel = f"notebooks/{step.stem}.ipynb"
+    log_rel = f"logs/{step.stem}.log"
     started = time.perf_counter()
     with _watchdog.ACTIVITY.lock:
         ledger.append(
@@ -174,9 +176,8 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
         )
         _watchdog.ACTIVITY.current = _watchdog.Current(
             ledger=ledger, label=f"{module.name}/{step.name}", started=started, kill=getattr(runner, "kill", None),
+            notebook=module.results_dir / notebook_rel,
         )
-    notebook_rel = f"notebooks/{step.stem}.ipynb"
-    log_rel = f"logs/{step.stem}.log"
     try:
         text = step.read_text(encoding="utf-8")
         notebook = to_notebook(text, step={"file": step.name, "sha256": step_sha, "run_id": run_id})
@@ -191,18 +192,18 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
                               error={"cell": None, "ename": "PercentError", "evalue": str(exc), "traceback": ""})
     else:
         outcome = runner.run(notebook, env=_step_env(module, step, ledger_path), cwd=module.root)
-    if outcome.notebook is not None:
-        _write_notebook(module.results_dir / notebook_rel, outcome.notebook)
-    else:
-        # The notebook of an earlier run would otherwise pass for this one's.
-        (module.results_dir / notebook_rel).unlink(missing_ok=True)
-    log_path = module.results_dir / log_rel
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(outcome.stream, encoding="utf-8")
     error = None
     if outcome.error:
         error = {key: outcome.error.get(key) for key in ("cell", "ename", "evalue")}
     with _watchdog.ACTIVITY.lock:
+        if outcome.notebook is not None:
+            _write_notebook(module.results_dir / notebook_rel, outcome.notebook)
+        else:
+            # The notebook of an earlier run would otherwise pass for this one's.
+            (module.results_dir / notebook_rel).unlink(missing_ok=True)
+        log_path = module.results_dir / log_rel
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(outcome.stream, encoding="utf-8")
         ledger.append(
             "run_end",
             status=outcome.status,
@@ -542,7 +543,8 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
     archived = _manifest.archive_reviews(module, _ledger.new_run_id())
     if archived:
         history = list(previous.get("review_history") or []) + archived
-        _manifest.rebuild(module, review_history=history, review=None)
+        revisions = _manifest.relink_reviews(list(previous.get("revisions") or []), archived)
+        _manifest.rebuild(module, review_history=history, review=None, revisions=revisions)
         folder = Path(archived[0]["file"]).parent.as_posix()
         out(f"[{module.name}] moved {len(archived)} earlier review(s) to results/{module.name}/{folder}/; "
             "review the replayed module again")

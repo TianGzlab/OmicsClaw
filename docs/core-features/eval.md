@@ -346,7 +346,7 @@ provider 与模型：读仓库根的 `.env` 合并 `os.environ`，经 `resolve_c
 - `permission="ask"`，`skill_env=probe`，`max_turns=6`，sub-agent 开着，`network=True`，`PYTHONPATH` 清空。
 - 7 个有 fixture 的 skill 用 fixture 回答，其余 skill 由兜底桩回答（1.5）。
 - 审批由 `routing_policy` 回答：
-  - `bash`：严格形式的 `python <skill 脚本> --help`（或 `-h`，解释器限 `python`、`python3` 与当前解释器，没有环境变量前缀，没有 shell 元字符）批准；被识别为 skill 脚本运行的批准，由打桩层接住，整条命令不会执行；单条、不带 shell 元字符的步骤执行器调用批准：脚本路径必须解析到 skill index 根目录下真正的 `_sdk/notebook/run.py`，`python -m skills._sdk.notebook ...` 只在 workspace 里没有名为 `skills` 的文件或目录时批准，子命令限 `new`、`run`、`status`、`replay`（`accept`、`revise` 记录的是用户的决定，不自动批准），步骤里的真实 skill 会读到 0 字节输入，很快失败；只读命令批准，要求每个 `|` 分段的首词都在 `ls cat head tail wc find grep pwd file stat tree du` 里，不含其他元字符，`find` 不带 `-exec` 一类动作，`tree` 不带 `-o`，命令里不直接写出 `.env`；写了 skill 目录却没被识别为运行的，拒绝并记 `unmatched_skill_command`；其余一律拒绝。
+  - `bash`：严格形式的 `python <skill 脚本> --help`（或 `-h`，解释器限 `python`、`python3` 与当前解释器，没有环境变量前缀，没有 shell 元字符）批准；被识别为 skill 脚本运行的批准，由打桩层接住，整条命令不会执行；单条、不带 shell 元字符的步骤执行器调用批准：只认 Environment 段给出的路径形式，脚本路径必须解析到 skill index 根目录下真正的 `_sdk/notebook/run.py`（`python -m skills._sdk.notebook ...` 不批准），子命令限 `new`、`run`、`status`、`replay`（`accept`、`revise` 记录的是用户的决定，不自动批准），步骤里的真实 skill 会读到 0 字节输入，很快失败；只读命令批准，要求每个 `|` 分段的首词都在 `ls cat head tail wc find grep pwd file stat tree du` 里，不含其他元字符，`find` 不带 `-exec` 一类动作，`tree` 不带 `-o`，命令里不直接写出 `.env`；写了 skill 目录却没被识别为运行的，拒绝并记 `unmatched_skill_command`；其余一律拒绝。
   - `web_fetch`、`web_search` 拒绝；`write_file`、`edit_file` 只在工作区内批准；其他工具批准。
 
 审批策略挡的是模型在本机 conda 环境里执行 `pip install`、`curl` 之类会改环境或外发数据的命令。剩下的缺口：严格 `--help` 仍会 import skill 脚本；只读命令能读到工作区外的文件，`.env` 规则只挡直接写出文件名的命令（`cat .en?` 就能绕过）。每种已知旁路在 `tests/evals/test_live.py` 里有一条测试。

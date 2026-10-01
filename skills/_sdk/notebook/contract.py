@@ -72,5 +72,5 @@ MANIFEST_SCHEMA = {
     "interpreter_keys": ["path", "prefix", "version", "overlay"],
     "replay_keys": ["at", "status", "interpreter", "new_interpreter_reason", "step_sha256",
                     "changed_outputs", "orphan_outputs"],
-    "review_history_keys": ["file", "verdict", "sha256", "archived_at"],
+    "review_history_keys": ["file", "original", "verdict", "sha256", "archived_at"],
 }

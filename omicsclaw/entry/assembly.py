@@ -1055,6 +1055,7 @@ class AgentApp:
             request.tool_name,
             request.arguments,
             schema=tool.definition().input_schema,
+            policy=self.registry.policy_for(request.tool_name),
         )
 
     def can_remember_approval(self, request: ApprovalRequest) -> bool:

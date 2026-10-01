@@ -388,8 +388,10 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   内置的只读子代理 `module-reviewer` 给出 `VERDICT: APPROVE` 或 `REVISE`；用户确认后 `accept` 冻结模块。冻结的模块要先 `revise`
   （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
   sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。
-- `run`、`replay` 在启动它们的进程退出后（`os.getppid()` 变了）自行停止：杀掉正在跑的 kernel，给当前步骤记一条失败的
-  `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。输出的读取方提前关闭（`run ... | head`）时，执行器丢弃余下输出，照常跑完。
+- 执行器只在前台运行。`run`、`replay` 在启动它们的进程退出后自行停止（父进程变了，或进程组原来的组长已经退出，后者覆盖
+  `nohup … &` 这类 shell 立即退出的写法）：杀掉正在跑的 kernel，删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的
+  `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。单次运行的上限约等于 `tool_timeout_s` 减 15 s，
+  模块一次跑不完时按步骤逐个 `run <step file>`。输出的读取方提前关闭（`run ... | head`）时，执行器丢弃余下输出，照常跑完。
 
 ### 9.2 有函数库的 skill 与只有 CLI 的 skill
 
