@@ -38,6 +38,7 @@ CONDA_OWNED = {
     "louvain",
     "umap-learn",
     "nbformat",
+    "nbclient",
     "jupyter-client",
     "ipykernel",
     "greenlet",

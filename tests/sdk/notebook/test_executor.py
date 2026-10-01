@@ -1,0 +1,259 @@
+"""The step runner's ``new``, ``run`` and ``status``, driven with an in-process runner."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from skills._sdk.notebook import _executor, _ledger, _manifest
+from skills._sdk.notebook._layout import module_from_name
+from skills._sdk.notebook._lock import hold
+
+REPO = Path(__file__).resolve().parents[3]
+RUN = REPO / "skills" / "_sdk" / "notebook" / "run.py"
+
+WRITE_A = '''
+# %% [markdown]
+# Writes a table.
+
+# %%
+from skills._sdk.notebook import write_output
+write_output({"value": VALUE}, "intermediate/a.json")
+'''
+
+READ_A = '''
+# %%
+from skills._sdk.notebook import read_input, write_output
+a = read_input("results/01_first/intermediate/a.json")
+write_output({"double": a["value"] * 2}, "tables/b.json")
+'''
+
+
+def _two_steps(project, value=1):
+    module = project.new("first")
+    project.step(module, "01_write.py", WRITE_A.replace("VALUE", str(value)))
+    project.step(module, "02_read.py", READ_A)
+    return module
+
+
+def _runs(project, module, stem):
+    """Ledger files of one step, oldest run first."""
+    return [r.path for r in _ledger.runs_of(project.root / "results" / module / "provenance" / "runs", stem)]
+
+
+def test_run_executes_never_run_steps_in_order(project):
+    module = _two_steps(project)
+    assert project.run(f"analysis/{module}") == 0
+    assert "[01_first] 01_write.py  ok" in project.text
+    assert "why:      never run" in project.text
+    assert json.loads((project.root / "results/01_first/tables/b.json").read_text()) == {"double": 2}
+    manifest = json.loads((project.root / "results/01_first/provenance/manifest.json").read_text())
+    assert [s["state"] for s in manifest["steps"]] == ["ok", "ok"]
+    assert manifest["steps"][1]["inputs"][0]["path"] == "results/01_first/intermediate/a.json"
+
+
+def test_an_up_to_date_step_is_skipped(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    assert project.run(f"analysis/{module}") == 0
+    assert "01_write.py  up to date" in project.text
+    assert len(_runs(project, module, "01_write")) == 1
+
+
+def test_force_runs_an_up_to_date_step(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    assert project.run(f"analysis/{module}/01_write.py", force=True) == 0
+    assert "why:      forced" in project.text
+    assert len(_runs(project, module, "01_write")) == 2
+
+
+def test_a_step_file_target_runs_only_that_step(project):
+    module = _two_steps(project)
+    assert project.run(f"analysis/{module}/01_write.py") == 0
+    assert "02_read.py" not in project.text
+    assert _runs(project, module, "02_read") == []
+
+
+def test_a_changed_step_is_stale_with_reason(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    project.step(module, "02_read.py", READ_A + "\nprint('changed')\n")
+    assert "02_read.py  stale: step changed" in project.status()
+    project.run(f"analysis/{module}")
+    assert "why:      step changed" in project.text
+
+
+def test_a_changed_input_makes_the_reader_rerun_in_the_same_run(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    project.step(module, "01_write.py", WRITE_A.replace("VALUE", "5"))
+    project.run(f"analysis/{module}")
+    assert "02_read.py  ok" in project.text
+    assert "why:      input changed: results/01_first/intermediate/a.json" in project.text
+    assert json.loads((project.root / "results/01_first/tables/b.json").read_text()) == {"double": 10}
+
+
+def test_a_missing_input_is_a_reason(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    (project.root / "results/01_first/intermediate/a.json").unlink()
+    assert "02_read.py  stale: input missing: results/01_first/intermediate/a.json" in project.status()
+
+
+def test_a_failed_step_stops_the_run_and_stays_failed(project):
+    module = project.new("first")
+    project.step(module, "01_boom.py", "# %%\nraise ValueError('nope')\n")
+    project.step(module, "02_after.py", "# %%\nx = 1\n")
+    assert project.run(f"analysis/{module}") == 1
+    assert "error:    cell 1: ValueError: nope" in project.text
+    assert "stopped; not run: 02_after.py" in project.text
+    assert "01_boom.py  failed: last run failed" in project.status()
+
+
+def test_upstream_change_marks_the_downstream_module_stale(project):
+    first = _two_steps(project)
+    project.run(f"analysis/{first}")
+    second = project.new("second")
+    project.step(second, "01_use.py", READ_A)
+    project.run(f"analysis/{second}")
+    project.step(first, "01_write.py", WRITE_A.replace("VALUE", "7"))
+    project.run(f"analysis/{first}")
+    status = project.status()
+    assert "02_second  DRAFT" in status
+    assert "01_use.py  stale: input changed: results/01_first/intermediate/a.json" in status
+
+
+def test_the_manifest_is_written_atomically_and_lists_skills(project, skills_tree):
+    module = project.new("first")
+    project.step(module, "01_cluster.py", '''
+        # %%
+        from skills._sdk.notebook import load_skill, write_output
+        clustering = load_skill("sc-clustering")
+        data = clustering.cluster({"cells": [1, 2, 3]}, resolution=0.5)
+        write_output(clustering.cluster_summary(data), "tables/counts.json")
+    ''')
+    assert project.run(f"analysis/{module}") == 0, project.text
+    assert "skills:   sc-clustering.cluster(data=dict, resolution=0.5)" in project.text
+    provenance = project.root / "results/01_first/provenance"
+    assert [p.name for p in provenance.iterdir() if p.name.endswith(".tmp")] == []
+    manifest = json.loads((provenance / "manifest.json").read_text())
+    entry = manifest["steps"][0]["skills"][0]
+    assert entry["skill"] == "sc-clustering"
+    assert entry["functions"] == ["cluster", "cluster_summary"]
+    assert "sc-clustering.cluster, sc-clustering.cluster_summary" in project.status()
+
+
+def test_an_interpreter_change_warns_and_is_recorded(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    manifest_path = project.root / "results/01_first/provenance/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["interpreter"] = {"path": "/elsewhere/bin/python", "prefix": "/elsewhere", "version": "3.0", "overlay": None}
+    manifest_path.write_text(json.dumps(manifest))
+    project.run(f"analysis/{module}/01_write.py", force=True)
+    assert "warning: module 01_first was run with /elsewhere/bin/python" in project.text
+    latest = _runs(project, module, "01_write")[-1]
+    start = json.loads(latest.read_text().splitlines()[0])
+    assert start["interpreter_changed_from"] == "/elsewhere/bin/python"
+    assert json.loads(manifest_path.read_text())["interpreter"]["path"] == sys.executable
+
+
+def test_an_r_file_in_the_module_is_refused(project):
+    module = _two_steps(project)
+    (project.root / "analysis" / module / "03_plot.R").write_text("x <- 1\n")
+    assert project.run(f"analysis/{module}") == 2
+    assert "R steps are not supported yet" in project.text
+
+
+def test_a_busy_module_lock_exits_3(project):
+    module = _two_steps(project)
+    lock = project.root / "results" / module / "provenance" / ".lock"
+    code = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(REPO)!r})\n"
+        "from skills._sdk.notebook._lock import hold\n"
+        f"with hold({str(lock)!r}, command='run'):\n"
+        "    print('held', flush=True)\n"
+        "    time.sleep(30)\n"
+    )
+    holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        assert project.run(f"analysis/{module}") == 3
+        assert "is busy" in project.text and "command run" in project.text
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_new_numbers_modules_and_the_project_lock_keeps_numbers_unique(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1"}
+    procs = [
+        subprocess.Popen([sys.executable, str(RUN), "new", f"m{i}"], cwd=root, env=env,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for i in range(4)
+    ]
+    outputs = [p.communicate(timeout=120)[0] for p in procs]
+    assert all(p.returncode == 0 for p in procs), outputs
+    numbers = sorted(p.name[:2] for p in (root / "analysis").iterdir())
+    assert numbers == ["01", "02", "03", "04"]
+
+
+def test_new_rejects_a_bad_slug(project):
+    assert _executor.new_module(project.root, "Bad-Name", out=project.out) == 2
+
+
+def test_status_without_modules(project):
+    assert "No modules yet" in project.status()
+
+
+def test_run_writes_step_and_module_notebooks(project):
+    import nbformat
+
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    notebooks = project.root / "results/01_first/notebooks"
+    step_nb = nbformat.read(str(notebooks / "01_write.ipynb"), as_version=4)
+    assert step_nb.metadata["omicsclaw"]["step"]["file"] == "01_write.py"
+    combined = nbformat.read(str(notebooks / "M01_first.ipynb"), as_version=4)
+    headers = [c.source for c in combined.cells if c.source.startswith("## Step")]
+    assert [h.splitlines()[0] for h in headers] == ["## Step 01_write.py", "## Step 02_read.py"]
+
+
+def test_overwriting_an_input_does_not_leave_the_step_stale_forever(project):
+    module = project.new("first")
+    project.step(module, "01_write.py", WRITE_A.replace("VALUE", "1"))
+    project.step(module, "02_rewrite.py", '''
+        # %%
+        from skills._sdk.notebook import read_input, write_output
+        a = read_input("results/01_first/intermediate/a.json")
+        write_output({"value": a["value"] + 1}, "intermediate/a.json")
+    ''')
+    project.run(f"analysis/{module}")
+    assert "overwrote a file it read" in project.text
+    project.run(f"analysis/{module}")
+    assert "02_rewrite.py  up to date" in project.text
+
+
+def test_frozen_module_refuses_run(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    mod = module_from_name(project.root, module)
+    manifest = _manifest.load(mod)
+    manifest["frozen"] = True
+    _manifest.save(mod, manifest)
+    assert project.run(f"analysis/{module}") == 2
+    assert "accepted and frozen" in project.text
+
+
+def test_the_lock_records_its_holder(tmp_path):
+    lock = tmp_path / "x.lock"
+    with hold(lock, command="replay"):
+        holder = json.loads(lock.read_text())
+        assert holder["command"] == "replay" and holder["pid"] == os.getpid()

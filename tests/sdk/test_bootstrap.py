@@ -84,12 +84,15 @@ def bootstrap_problem(path: Path) -> str | None:
 
 
 def test_there_are_90_main_scripts():
-    """94 skill scripts, less the four consensus shells whose ``SKILL.md`` is renamed ``SKILL.md.disabled``."""
+    """One main script per indexed skill."""
     assert len(main_scripts()) == 90
 
 
 def test_every_script_and_the_template_use_the_canonical_block():
-    targets = main_scripts() + [REPO_ROOT / "templates" / "skill" / "replace_me.py"]
+    targets = main_scripts() + [
+        REPO_ROOT / "templates" / "skill" / "replace_me.py",
+        REPO_ROOT / "skills" / "_sdk" / "notebook" / "run.py",
+    ]
     problems = {rel(p): why for p in targets if (why := bootstrap_problem(p))}
     assert problems == {}
 

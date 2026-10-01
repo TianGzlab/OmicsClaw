@@ -39,6 +39,13 @@ output/
 outputs/
 sessions/
 
+# A project opened in the checkout itself (skills/_sdk/notebook/run.py new)
+/analysis/
+/results/
+/manifests/
+/work/
+/docs/analysis_strategy/
+
 # Unverified model-authored skill promotions (local audit/retry only)
 skills/.quarantine/
 
