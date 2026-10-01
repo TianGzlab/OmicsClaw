@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from omicsclaw.entry.config import SkillEnvMode
+from omicsclaw.entry.project import STEP_RUNNER
 from omicsclaw.permission.gate import DOTENV_NAME
 from omicsclaw.provider import Completion, LLMProvider, ProviderError
 from omicsclaw.schema import (
@@ -374,15 +375,26 @@ def is_read_only(command: str) -> bool:
     return True
 
 
-_RUNNER_SUBCOMMANDS = frozenset({"new", "run", "status", "replay", "accept", "revise"})
+_RUNNER_SUBCOMMANDS = frozenset({"new", "run", "status", "replay"})
 
 
-def is_step_runner(command: str) -> bool:
-    """Whether *command* is one plain call of the step runner.
+def _same_file(token: str, target: Path, workspace: Path) -> bool:
+    path = Path(token)
+    if not path.is_absolute():
+        path = workspace / path
+    return os.path.realpath(path) == os.path.realpath(target)
 
-    ``python <skills>/_sdk/notebook/run.py <subcommand> ...`` or
-    ``python -m skills._sdk.notebook <subcommand> ...``, with the interpreter
-    ``python``, ``python3`` or the running one, and no shell metacharacter.
+
+def is_step_runner(command: str, runner: Path, workspace: Path) -> bool:
+    """Whether *command* is one plain call of the step runner at *runner*.
+
+    ``python <runner> <subcommand> ...``, where the script resolves to
+    *runner* itself, or ``python -m skills._sdk.notebook <subcommand> ...``
+    while *workspace* holds nothing named ``skills`` that would be imported
+    in its place. The interpreter is ``python``, ``python3`` or the running
+    one, there is no shell metacharacter, and the subcommand is ``new``,
+    ``run``, ``status`` or ``replay``: ``accept`` and ``revise`` record the
+    user's decision, so they are not approved here.
     """
     if any(mark in command for mark in _META_CHARACTERS):
         return False
@@ -393,8 +405,10 @@ def is_step_runner(command: str) -> bool:
     if len(tokens) < 3 or tokens[0] not in _interpreters():
         return False
     if tokens[1] == "-m" and tokens[2] == "skills._sdk.notebook":
+        if (workspace / "skills").exists() or (workspace / "skills.py").exists():
+            return False
         rest = tokens[3:]
-    elif Path(tokens[1]).as_posix().endswith("_sdk/notebook/run.py"):
+    elif _same_file(tokens[1], runner, workspace):
         rest = tokens[2:]
     else:
         return False
@@ -427,8 +441,9 @@ def routing_policy(
 
     ``bash`` is approved for a strict ``--help`` of a skill script, for a
     run of a skill script (the stub layer answers it, so nothing runs),
-    for a call of the step runner (:func:`is_step_runner`; the step's
-    inputs are empty files, so a real skill fails fast on them), and for a
+    for a call of the step runner under *index*'s root
+    (:func:`is_step_runner`; the step's inputs are empty files, so a real
+    skill fails fast on them), and for a
     read-only command (:func:`is_read_only`); a command that
     names a skill directory without being a recognised run is refused as
     ``unmatched_skill_command``, and everything else is refused.
@@ -447,6 +462,8 @@ def routing_policy(
         denials.append(Denial(tool, kind, detail))
         return ApprovalDecision(approved=False, reason="not permitted in the routing eval")
 
+    runner = Path(index.root).joinpath(*STEP_RUNNER)
+
     def decide(request: ApprovalRequest) -> ApprovalDecision:
         tool = request.tool_name
         arguments = _arguments(request)
@@ -459,7 +476,7 @@ def routing_policy(
                 return ApprovalDecision(approved=True)
             if run is not None:
                 return deny(tool, "help_not_strict", command)
-            if is_step_runner(command):
+            if is_step_runner(command, runner, workspace):
                 return ApprovalDecision(approved=True)
             if is_read_only(command):
                 return ApprovalDecision(approved=True)

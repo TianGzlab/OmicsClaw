@@ -11,6 +11,8 @@ Call it from the project root (the folder holding ``analysis/`` and
 
 Locks are ``fcntl.flock`` files inside ``results/``; they do not exclude
 reliably across network filesystems or Docker Desktop's macOS file sharing.
+``run`` and ``replay`` stop, killing the running kernel and releasing the
+lock, when the process that started them exits.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ _SDK_ANCHOR = next(
 if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
-from skills._sdk.notebook import _acceptance, _executor, _layout  # noqa: E402
+from skills._sdk.notebook import _acceptance, _executor, _layout, _watchdog  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,10 +120,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "new":
         return _executor.new_module(Path.cwd(), args.slug)
     if args.command == "run":
+        _watchdog.watch_parent()
         return _executor.run_targets(_root(args.targets[0]), args.targets, force=args.force, wait=args.wait)
     if args.command == "status":
         return _executor.status(_root(args.target), args.target)
     if args.command == "replay":
+        _watchdog.watch_parent()
         return _executor.replay(_root(args.target), args.target, new_interpreter=args.new_interpreter, wait=args.wait)
     if args.command == "accept":
         return _acceptance.accept(_root(args.target), args.target, review=args.review,

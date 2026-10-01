@@ -231,6 +231,39 @@ def test_a_bash_command_is_matched_unescaped():
     assert '\\"' in payload
 
 
+SET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "skills": {"type": "array", "items": {"type": "string"}},
+        "packages": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["skills", "packages"],
+}
+
+
+def test_a_required_string_array_is_the_principal_only_when_no_string_is():
+    assert principal_key(SET_SCHEMA) == "skills"
+    mixed = {
+        "properties": {"tags": {"type": "array", "items": {"type": "string"}}, "path": {"type": "string"}},
+        "required": ["tags", "path"],
+    }
+    assert principal_key(mixed) == "path"
+    numbers = {"properties": {"ids": {"type": "array", "items": {"type": "integer"}}}, "required": ["ids"]}
+    assert principal_key(numbers) is None
+
+
+def test_a_string_array_principal_is_its_distinct_values_sorted():
+    one = json.dumps({"skills": ["sc-qc", "sc-de", "sc-qc"], "packages": ["a"]})
+    two = '{"packages":["b","c"],"skills":["sc-de","sc-qc"]}'
+    assert principal_argument(one, SET_SCHEMA) == "sc-de, sc-qc"
+    assert principal_argument(two, SET_SCHEMA) == "sc-de, sc-qc"
+
+
+@pytest.mark.parametrize("payload", ['{"skills": []}', '{"skills": ["a", 3]}', '{"skills": ["", "a"]}'])
+def test_an_unusable_string_array_falls_back_to_the_raw_text(payload):
+    assert principal_argument(payload, SET_SCHEMA) == payload
+
+
 @pytest.mark.parametrize(
     "payload", ["{", "[]", '"text"', "{}", '{"command": ""}', '{"command": 7}']
 )

@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import re
+import signal
 import sys
 import tempfile
 import time
@@ -107,6 +108,20 @@ class PythonKernelRunner:
     def __init__(self, python: str | None = None, *, startup_timeout: int = 120) -> None:
         self.python = python or sys.executable
         self.startup_timeout = int(startup_timeout)
+        self._manager: Any = None
+
+    def kill(self) -> None:
+        """Kill the running kernel and its process group at once; callable from another thread."""
+        provisioner = getattr(self._manager, "provisioner", None)
+        pid = getattr(provisioner, "pid", None)
+        pgid = getattr(provisioner, "pgid", None)
+        try:
+            if pgid and pgid != os.getpgrp():
+                os.killpg(pgid, signal.SIGKILL)
+            elif pid:
+                os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
     def _attempt(self, notebook: Any, env: Mapping[str, str], cwd: Path, scratch: Path) -> StepOutcome:
         from jupyter_client.kernelspec import KernelSpecManager
@@ -149,6 +164,7 @@ class PythonKernelRunner:
             resources={"metadata": {"path": str(cwd)}},
         )
         started = time.perf_counter()
+        self._manager = manager
         with _environ(isolated):
             try:
                 client.execute(cwd=str(cwd), env=kernel_env, cleanup_kc=True)
@@ -161,6 +177,7 @@ class PythonKernelRunner:
                     "cell": None, "ename": "DeadKernelError", "evalue": str(exc), "traceback": "",
                 }
             finally:
+                self._manager = None
                 if manager.has_kernel:
                     manager.shutdown_kernel(now=True)
         seconds = time.perf_counter() - started

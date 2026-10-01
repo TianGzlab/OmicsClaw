@@ -11,6 +11,11 @@ revisions. Its ``status`` is derived, never set by hand:
 * ``reviewed`` when it is replayed and ``reviews/`` holds a review newer
   than that replay whose first line is ``VERDICT: APPROVE``;
 * ``accepted`` once ``accept`` has run and the module is frozen.
+
+A replay moves the reviews already in ``reviews/`` to
+``reviews/archive/<id>/``, one folder per replay, and appends each one's
+verdict and sha256 to ``review_history``, so a second review written the
+same day cannot overwrite the first.
 """
 
 from __future__ import annotations
@@ -111,25 +116,31 @@ def step_state(module: Module, step: Path) -> StepState:
         return StepState(step, sha, "failed", reason, runs)
     if latest.step_sha256 != sha:
         return StepState(step, sha, "stale", "step changed", runs)
-    own_outputs = {f"results/{module.name}/{out.get('path')}" for out in latest.outputs}
+    written = _written_hashes(module, latest)
     seen: set[str] = set()
     for record in latest.inputs:
         recorded = str(record.get("path"))
-        if recorded in seen or recorded in own_outputs:
+        if recorded in seen:
             continue
         seen.add(recorded)
         target = _input_target(module.root, recorded)
         if not target.exists():
             return StepState(step, sha, "stale", f"input missing: {recorded}", runs)
-        if _hashing.sha256_path(target) != record.get("sha256"):
+        # An input the run then overwrote is expected to hold what the run wrote last.
+        expected = written.get(recorded, record.get("sha256"))
+        if _hashing.sha256_path(target) != expected:
             return StepState(step, sha, "stale", f"input changed: {recorded}", runs)
     return StepState(step, sha, "ok", None, runs)
 
 
+def _written_hashes(module: Module, run: _ledger.RunRecord) -> dict[str, str | None]:
+    """The sha256 *run* last wrote to each output, keyed by project-relative path."""
+    return {f"results/{module.name}/{out.get('path')}": out.get("sha256") for out in run.outputs}
+
+
 def overwritten_inputs(module: Module, run: _ledger.RunRecord) -> list[str]:
-    """Inputs of *run* that the same run then overwrote, so they cannot mark it stale."""
-    own_outputs = {f"results/{module.name}/{out.get('path')}" for out in run.outputs}
-    return sorted({str(r.get("path")) for r in run.inputs} & own_outputs)
+    """Inputs of *run* that the same run then overwrote."""
+    return sorted({str(r.get("path")) for r in run.inputs} & set(_written_hashes(module, run)))
 
 
 def skills_of(run: _ledger.RunRecord) -> list[dict]:
@@ -207,6 +218,28 @@ def reviews(module: Module) -> list[tuple[Path, str | None, float]]:
     return sorted(found, key=lambda item: item[2])
 
 
+def archive_reviews(module: Module, tag: str) -> list[dict]:
+    """Move the reviews in ``reviews/`` to ``reviews/archive/<tag>/`` and describe each one moved."""
+    found = reviews(module)
+    if not found:
+        return []
+    folder = module.results_dir / "reviews" / "archive" / tag
+    folder.mkdir(parents=True, exist_ok=True)
+    moved_at = _ledger.iso(_ledger.utc_now())
+    entries = []
+    for path, verdict, _mtime in found:
+        sha = _hashing.sha256_file(path)
+        target = folder / path.name
+        os.replace(path, target)
+        entries.append({
+            "file": target.relative_to(module.results_dir).as_posix(),
+            "verdict": verdict,
+            "sha256": sha,
+            "archived_at": moved_at,
+        })
+    return entries
+
+
 def approving_review_after(module: Module, moment: float | None) -> Path | None:
     """The newest review approving the module that is newer than *moment*."""
     if moment is None:
@@ -258,6 +291,7 @@ def build(module: Module, previous: dict | None = None, **updates: Any) -> dict:
             {"file": newest[0].relative_to(module.results_dir).as_posix(), "verdict": newest[1]}
             if newest else base.get("review")
         ),
+        "review_history": list(base.get("review_history") or []),
         "accepted": base.get("accepted"),
         "revisions": list(base.get("revisions", [])),
         "report": module.report_name,

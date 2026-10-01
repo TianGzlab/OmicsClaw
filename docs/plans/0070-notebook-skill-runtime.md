@@ -1,6 +1,6 @@
 # 计划 0070：notebook 运行层与单细胞试点（`skills/_sdk/notebook/`、课题布局、契约、eval）
 
-**状态**：定稿（第 3 版，2026-10-01）。已按独立审核意见和 owner 的裁定 O1 至 O6（§7.0）修订，§7.2 的 6 个问题已由 O6 全部裁定。owner 已同意派发实现：在本地分支 `plan-0070-notebook-runtime` 上每个阶段一个提交，不推送。
+**状态**：定稿（第 3 版，2026-10-01）。已按独立审核意见和 owner 的裁定 O1 至 O6（§7.0）修订，§7.2 的 6 个问题已由 O6 全部裁定。owner 已同意派发实现：在本地分支 `plan-0070-notebook-runtime` 上每个阶段一个提交，不推送。实现完成后的独立评估和 owner 裁定 O7（§7.0）又带来一个修复提交，看门狗因此从 §1.3 移回本计划。
 
 ### 修订说明
 
@@ -92,7 +92,6 @@
 | R 步骤（`NN_xxx.R` 的执行与渲染，D10） | `LAYOUT` 的步骤文件只认 `.py`；模块里出现 `.R` 文件时，执行器报 "R steps are not supported yet" 并以退出码 2 结束 | 迁移调用 R 的单细胞 skill 时（其余 skill 里有 11 个） |
 | `archive` 子命令 | 课题骨架照样建 `results/_archive/`；契约让 agent 在用户同意后直接用 `tar` 打包（附录 A） | 有需要时 |
 | 哈希缓存 | 每次 `status` 都重新计算输入的 sha256 | 大文件让 `status` 明显变慢时 |
-| 执行器的父进程看门狗 | sandbox 超时后的残留进程写进 R2，作为已知局限 | 出现实际残留时 |
 | 原 G7（桩模式横幅、`accept` 拒绝含桩运行的模块） | 记账里照样记 `stub: true`；只有 eval Runner 会设 `OMICSCLAW_SKILL_STUBS`，漏进真实会话的可能很小 | 有需要时 |
 | `/recent` 用旧的 `output/` 运行补足 | `/recent` 只列模块；没有模块时回答 "No recent analyses found." | 不做，删 CLI 时一并处理 `/outputs` |
 | `load_demo` 登记 `examples/` 下的 bulk CSV | 只登记 `pbmc3k_raw`、`pbmc3k_processed`、`pbmc68k_reduced` | 迁移 bulkrna 时 |
@@ -434,7 +433,7 @@ agent: bash "python <skills>/_sdk/notebook/run.py run analysis/03_clustering"
 #### 3.4.3 进程清理与环境隔离
 
 - 本机超时：`bash` 杀整个进程组，执行器随之退出。kernel 由 jupyter_client 以 `start_new_session=True` 启动（`jupyter_client/launcher.py:151`），不在这个进程组里；但 jupyter_client 同时设了 `JPY_PARENT_PID`（`:153`），ipykernel 的 `ParentPollerUnix`（`ipykernel/kernelapp.py:219-223`）发现父进程不在后会自行退出。
-- sandbox 超时：`run_bash` 只杀 `WRAPPER` 记下的那个 pid（`environment.py:31`）。执行器的命令是单条简单命令时，bash 通常直接 exec 成 python，被杀的就是执行器，kernel 再随父进程轮询退出；命令写成复合形式（例如 `cd x && python …`）时，执行器是 bash 的子进程，可能残留到容器停止。看门狗推迟（§1.3），契约要求用单条命令调用执行器，残留风险记为 R2。
+- sandbox 超时：`run_bash` 只杀 `WRAPPER` 记下的那个 pid（`environment.py:31`）。执行器的命令是单条简单命令时，bash 通常直接 exec 成 python，被杀的就是执行器，kernel 再随父进程轮询退出；命令写成复合形式（例如 `cd x && python …`）时，执行器是 bash 的子进程，bash 被杀后它会被别的进程收养。为此 `run` 和 `replay` 带一个看门狗线程（O7）：每秒查一次 `os.getppid()`，一旦变了，就杀掉正在跑的 kernel（连同它的进程组），给当前步骤记一条失败的 `run_end`（`reason: "parent exited"`），然后退出，模块锁随进程退出释放。
 - kernel 的 `IPYTHONDIR`、`JUPYTER_RUNTIME_DIR`、`JUPYTER_DATA_DIR` 指向本次运行的临时目录（系统临时目录下，运行结束删除）。这样有两个好处：用户 `~/.ipython/profile_default/startup/` 里的脚本不会混进 kernel，影响可复现性；kernel 也不会往 `$HOME` 写 history 和连接文件，否则 eval 的 `NoWriteOutside()` 会失败（§2.2 eval 侧）。
 
 ### 3.5 记账与 manifest
@@ -1065,7 +1064,7 @@ PYTEST tests/evals/dataset -m scripted_eval      # 连跑 3 次，结果一致
 | 编号 | 风险 | 处理 |
 |---|---|---|
 | R1 | kernel 启动在 CI 上慢或不稳，用例超时 | skill 用例超时设为 90 s；`test_kernel.py` 单独测启动；kernel 启动失败时执行器重试一次，并在输出里写明 |
-| R2 | 超时后执行器或 kernel 残留：sandbox 只杀记下的 pid；kernel 在独立 session 里 | 本机靠进程组与 ipykernel 的父进程轮询；sandbox 里契约要求用单条命令调用执行器，复合命令时的残留是已知局限，看门狗推迟（§1.3）；`test_kernel.py` 覆盖"杀掉执行器后 kernel 退出" |
+| R2 | 超时后执行器或 kernel 残留：sandbox 只杀记下的 pid；kernel 在独立 session 里 | 本机靠进程组与 ipykernel 的父进程轮询；执行器的看门狗（O7）在父进程变了时杀掉 kernel、记失败的 `run_end` 并退出，覆盖复合命令被杀掉外层 shell 的情况；`test_kernel.py` 覆盖"杀掉执行器后 kernel 退出"和"杀掉外层 shell 后执行器与 kernel 都退出、锁已释放" |
 | R3 | `flock` 在网络文件系统或 Docker Desktop for macOS 的文件共享上不保证互斥 | 在 `sandbox.md` 和执行器的 `--help` 里写明；单人本机部署下影响很小 |
 | R4 | parity 依赖环境：rapids 环境缺 leidenalg 和 igraph，`sc.tl.leiden` 抛 `ImportError`（`dimred.py:684`）；换了环境，Leiden 结果也可能不同 | 基线只在 `OmicsClaw` 环境里录，测试也只用 `OCPYTEST` 在同一环境里比；基线不提交、不进 CI；用例固定 `random_state` |
 | R5 | 长步骤超过 `bash` 的工具超时（默认 585 s） | 契约提醒把长计算拆成多个步骤；执行器输出每步耗时；需要时由 operator 调高 `tool_timeout_s`。后台运行不在本期 |
@@ -1097,6 +1096,11 @@ PYTEST tests/evals/dataset -m scripted_eval      # 连跑 3 次，结果一致
   - Environment 段仍然只加执行器路径一行，不加课题指针或模块状态，免得这一段变得频繁变化。
 
 - O6（第 3 版之后）：§7.2 的 Q1 至 Q6 全部按推荐裁定：Q1 选 a（步骤里用 `run_cli`）；Q2 选 a（5 个 skill，`_api.py` 覆盖全部方法，R 方法不录 parity 基线）；Q3 选 a（job3 一开始就是门禁）；Q4 选 a（只警告，并补 `.gitignore`）；Q5 选 a（只删 `common/notebook_export.py`）；Q6 选 a（不满足就拒绝，解释器不一致时 `run` 警告、`replay` 要求 `--new-interpreter`）。另外定了三件实施上的事：在本地分支 `plan-0070-notebook-runtime` 上开发，每个阶段一个提交，不推送，推送和开 PR 由 owner 决定；§5 的端到端验收用 `.env` 里的真实模型跑，实施者扮演用户确认 `accept`；本机没有 docker，§5 第 7 条记为"待 owner 机器验证"。
+
+- O7（实现完成、独立评估之后，2026-10-01）：
+  1. `install_skill_deps` 的"总是允许"只记排好序的 skill 组合，不记包，取代实施记录的偏差 11。理由：包已经限定在所列 skill 的 `## Dependencies` 之内，并且装进隔离的 overlay；`bash` 一旦在会话里被允许，`pip install` 是更宽的旁路；规则太细，"总是允许"就形同虚设。
+  2. 同一天的第二次审查会覆盖第一次，这件事在执行器里解决，不改提示词：`replay` 时如果 `reviews/` 里已有审查文件，先存档（加 run_id 或序号后缀改名，或者移进 `reviews/archive/`，二选一并写明），每份审查的 verdict 和 sha256 记进 manifest 的审查历史。`accept --review` 的条件不变。
+  3. 执行器加父进程看门狗（从 O1 推迟的清单里提前）：`run` 和 `replay` 期间，一个守护线程轮询 `os.getppid()`；父进程变了（被收养）时，终止正在运行的 kernel，释放模块锁，写一条失败的 `run_end`（原因 "parent exited"），然后退出。场景：agent 跑 `cd … && python run.py … | tail`，sandbox 超时只杀外层 wrapper 的 pid，执行器和 kernel 留下来占着锁。本机测试：一个父 shell 启动执行器，杀掉父 shell，断言执行器几秒内退出、锁已释放、kernel 已退出。看门狗从 §1.3 的推迟表里删除，R2 的处理相应更新。
 
 ### 7.1 第 1 版问题的处置与新旧编号
 

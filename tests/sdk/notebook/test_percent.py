@@ -46,6 +46,21 @@ def test_magic_and_shell_lines_are_errors(line):
         parse_cells(f"# %%\n{line}\n")
 
 
+@pytest.mark.parametrize("body", [
+    "keep = (counts\n        != 0)\n",
+    "rest = (total\n        % 7)\n",
+    "flag = a \\\n    != b\n",
+])
+def test_an_expression_continued_on_a_line_starting_with_an_operator_is_not_a_magic_line(body):
+    cells = parse_cells(f"# %%\n{body}")
+    assert cells[0].source == body.rstrip("\n")
+
+
+def test_a_magic_line_after_valid_code_is_reported_at_its_own_line():
+    with pytest.raises(PercentError, match="line 5"):
+        parse_cells("# %%\nimport os\nfor i in range(3):\n    print(i)\n%time os.getcwd()\n")
+
+
 def test_percent_inside_a_string_is_not_a_magic_line():
     cells = parse_cells('# %%\nquery = """\n%s rows\n!important\n"""\n')
     assert "%s rows" in cells[0].source

@@ -127,6 +127,16 @@ def test_a_review_older_than_the_replay_is_refused(project):
     assert "older than the latest replay" in project.text
 
 
+def test_an_archived_review_is_refused(project):
+    module = _replayed(project)
+    _report(project, module)
+    _review(project, module)
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    [archived] = project.manifest(module)["review_history"]
+    assert project.accept(f"analysis/{module}", review=f"results/{module}/{archived['file']}") == 4
+    assert "archived by a later replay" in project.text
+
+
 def test_a_review_outside_reviews_is_refused(project):
     module = _replayed(project)
     _report(project, module)

@@ -78,9 +78,11 @@ def _review_problem(module: Module, review: str, replay_at: float | None) -> tup
     if path is None:
         return f"review file {review} does not exist", None
     try:
-        path.resolve().relative_to((module.results_dir / "reviews").resolve())
+        inside = path.resolve().relative_to((module.results_dir / "reviews").resolve())
     except ValueError:
         return f"the review must be saved in results/{module.name}/reviews/", None
+    if inside.parts[0] == "archive":
+        return f"{path.name} was archived by a later replay: review the replayed module again", None
     found = {p: (verdict, mtime) for p, verdict, mtime in _manifest.reviews(module)}
     verdict, mtime = found.get(path, (None, path.stat().st_mtime))
     if verdict != "APPROVE":

@@ -5,8 +5,9 @@ the tool's own card, since it declares ``prompts_for_itself``), auto-approve
 and bypass-all do not, read-only refuses. That is exactly why the tool is not
 mounted unless a deployment sets ``skill_env=install`` (Q7). An explicit
 ``ask`` rule makes every call ask and the question may not be answered by a
-standing session grant; "always allow" writes ``install_skill_deps(<skill>)``,
-because ``skill`` is the schema's first required string. A rule about
+standing session grant; "always allow" writes ``install_skill_deps(<skills>)``,
+the sorted skill names, because ``skills`` is the schema's first required
+array of strings and it has no required string. A rule about
 ``bash(pip install*)`` says nothing about this tool — rules match tool names —
 which is documented in AGENTS.md and pinned here so nobody reads it the
 other way.
@@ -39,20 +40,20 @@ from .test_install_tool import _Builder, _Inventory
 ARGS = json.dumps({"skills": [SKILL], "packages": ["oc-leaf"]})
 
 
-def _tool(tmp_path):
+def _tool(tmp_path, missing=("oc_leaf",)):
     skills = make_skills(tmp_path / "skills")
     builder = _Builder(tmp_path)
     tool = install_skill_deps_tool(
         skills,
         registry=read_registry(tmp_path / "skills" / "_sdk" / "deps.py"),
-        probe_runner=_Inventory(missing=("oc_leaf",)),
+        probe_runner=_Inventory(missing=missing),
         workspace=str(tmp_path),
         builder=builder,
     )
     return tool, builder
 
 
-def _run(tool, gate, *, approve=True):
+def _run(tool, gate, *, approve=True, arguments=ARGS):
     asked = []
 
     def channel(request):
@@ -62,7 +63,7 @@ def _run(tool, gate, *, approve=True):
     async def main():
         registry = ToolRegistry(gate_tools([tool], gate))
         with use_tool_context(approval=channel):
-            return await registry.execute(ToolCall(id="1", name=tool.name, arguments=ARGS))
+            return await registry.execute(ToolCall(id="1", name=tool.name, arguments=arguments))
 
     return asyncio.run(main()), asked
 
@@ -100,21 +101,35 @@ def test_an_ask_rule_asks_even_under_auto_approve_and_no_standing_grant_answers_
     assert len(builder.builds) == 1
 
 
-def test_always_allow_writes_a_rule_for_exactly_that_installation(tmp_path):
-    """``skills`` is a list, so the tool has no string principal argument.
+def test_always_allow_writes_a_rule_for_that_combination_of_skills(tmp_path):
+    """``skills`` is the principal, so "always" remembers the skills and not the packages.
 
-    "Always" then remembers the whole call: these skills and these packages.
+    The packages are limited to what those skills declare and go into an
+    isolated overlay, so a narrower rule would only make "always" ask again.
     """
-    from omicsclaw.permission import literal_pattern
-
-    tool, builder = _tool(tmp_path)
+    tool, builder = _tool(tmp_path, missing=("oc_leaf", "oc_near"))
     store = RuleStore(tmp_path / ".omicsclaw" / "settings.json")
     gate = PermissionGate(mode=PermissionMode.DEFAULT, rules=store)
     pattern = gate.remember("install_skill_deps", ARGS, schema=tool.definition().input_schema)
-    assert pattern == literal_pattern("install_skill_deps", ARGS)
-    assert SKILL in pattern and "oc-leaf" in pattern
-    result, asked = _run(tool, gate)
-    assert asked == [] and len(builder.builds) == 1
+    assert pattern == f"install_skill_deps({SKILL})"
+    other_packages = '{"packages":["oc-near"],"skills":["oc-skill","oc-skill"]}'
+    result, asked = _run(tool, gate, arguments=other_packages)
+    assert not result.is_error and asked == [] and len(builder.builds) == 1
+
+
+def test_the_remembered_rule_does_not_cover_another_combination_of_skills(tmp_path):
+    from omicsclaw.permission import principal_argument
+
+    tool, _builder = _tool(tmp_path)
+    schema = tool.definition().input_schema
+    gate = PermissionGate(mode=PermissionMode.DEFAULT, rules=RuleStore(tmp_path / ".omicsclaw" / "settings.json"))
+    gate.remember("install_skill_deps", json.dumps({"skills": ["sc-qc", "sc-de"], "packages": ["x"]}), schema=schema)
+    same = json.dumps({"skills": ["sc-de", "sc-qc"], "packages": ["y", "z"]})
+    wider = json.dumps({"skills": ["sc-de", "sc-qc", "sc-clustering"], "packages": ["x"]})
+    narrower = json.dumps({"skills": ["sc-de"], "packages": ["x"]})
+    assert gate.rules.evaluate("install_skill_deps", principal_argument(same, schema)) is not None
+    assert gate.rules.evaluate("install_skill_deps", principal_argument(wider, schema)) is None
+    assert gate.rules.evaluate("install_skill_deps", principal_argument(narrower, schema)) is None
 
 
 def test_a_bash_pip_install_rule_does_not_reach_this_tool(tmp_path):

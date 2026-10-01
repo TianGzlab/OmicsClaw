@@ -137,3 +137,62 @@ def test_no_kernel_is_left_running_after_a_step(project):
         time.sleep(0.1)
     assert not _alive(kernel)
     assert "Parent appears to have exited" not in proc.stderr
+
+
+def _lines_step(index):
+    return f"# %%\nfor i in range(30):\n    print('step {index} line', i)\n"
+
+
+def test_a_closed_pipe_does_not_stop_the_run(project):
+    root, _home, env, _runner = project
+    for index in (1, 2, 3):
+        _step(root, f"0{index}_lines.py", _lines_step(index))
+    proc = subprocess.run(
+        ["bash", "-c", f'"{sys.executable}" "{RUN}" run analysis/01_k | head -5; echo "exit=${{PIPESTATUS[0]}}"'],
+        cwd=root, env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert proc.stdout.splitlines()[-1] == "exit=0", proc.stdout + proc.stderr
+    assert "BrokenPipeError" not in proc.stderr
+    manifest = json.loads((root / "results/01_k/provenance/manifest.json").read_text())
+    assert [(s["file"], s["state"]) for s in manifest["steps"]] == [
+        ("01_lines.py", "ok"), ("02_lines.py", "ok"), ("03_lines.py", "ok"),
+    ]
+    assert (root / "results/01_k/notebooks/M01_k.ipynb").is_file()
+
+
+def test_the_runner_stops_when_its_parent_shell_is_killed(project):
+    from skills._sdk.notebook import _ledger
+    from skills._sdk.notebook._lock import LockBusy, hold
+
+    root, _home, env, _runner = project
+    _step(root, "01_sleep.py",
+          "# %%\nimport os, pathlib, time\n"
+          "pathlib.Path('pids.txt').write_text(f'{os.getppid()} {os.getpid()}')\n"
+          "time.sleep(120)\n")
+    shell = subprocess.Popen(
+        ["bash", "-c", f'"{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1; echo done'],
+        cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    pids = root / "pids.txt"
+    deadline = time.monotonic() + 60
+    while not (pids.exists() and pids.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    runner_pid, kernel = (int(value) for value in pids.read_text().split())
+    shell.kill()
+    shell.wait()
+    deadline = time.monotonic() + 10
+    while (_alive(runner_pid) or _alive(kernel)) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    left = [pid for pid in (runner_pid, kernel) if _alive(pid)]
+    for pid in left:
+        os.kill(pid, signal.SIGKILL)
+    assert left == [], "the runner or its kernel outlived the parent shell by more than 10 s"
+    try:
+        with hold(root / "results/01_k/provenance/.lock", command="test"):
+            pass
+    except LockBusy:
+        pytest.fail("the module lock is still held")
+    run = _ledger.runs_of(root / "results/01_k/provenance/runs", "01_sleep")[-1]
+    assert run.status == "failed"
+    assert run.end["error"]["evalue"] == "parent exited" and run.end["reason"] == "parent exited"
+    assert "parent exited; stopped 01_k/01_sleep.py" in (root / "runner.log").read_text()

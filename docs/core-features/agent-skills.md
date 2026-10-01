@@ -382,18 +382,22 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   执行器在一次性的 IPython kernel 里逐 cell 运行步骤（kernel 用执行器自己的解释器），每次运行写一份 JSON-lines 记账
   （`results/<NN>/provenance/runs/<step>/<run_id>.jsonl`）：读了哪些文件及其 sha256、调用了哪些 skill 函数和参数、写了哪些输出。
   manifest 从记账重建，各步骤的 notebook 拼成 `notebooks/M<NN>_<slug>.ipynb`。
-- 一个步骤过期只看两样：步骤文件变了，或者它经 `read_input` 读过的文件变了。`status` 列出每个过期步骤的原因，
-  上游模块重跑后下游模块会显示 `input changed: results/...`。
+- 一个步骤过期只看两样：步骤文件变了，或者它经 `read_input` 读过的文件变了。步骤读了又原名写回的文件，按它自己最后写入的
+  sha256 比较。`status` 列出每个过期步骤的原因，上游模块重跑后下游模块会显示 `input changed: results/...`。
 - 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`。验收分三步：`replay` 在新 kernel 里重跑全部步骤；
   内置的只读子代理 `module-reviewer` 给出 `VERDICT: APPROVE` 或 `REVISE`；用户确认后 `accept` 冻结模块。冻结的模块要先 `revise`
-  （快照进 `baseline/`）才能再改。
+  （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
+  sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。
+- `run`、`replay` 在启动它们的进程退出后（`os.getppid()` 变了）自行停止：杀掉正在跑的 kernel，给当前步骤记一条失败的
+  `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。输出的读取方提前关闭（`run ... | head`）时，执行器丢弃余下输出，照常跑完。
 
 ### 9.2 有函数库的 skill 与只有 CLI 的 skill
 
 - 有 `## API` 段的 skill：`library = load_skill("sc-clustering")`，再调用 `library.cluster(adata, ...)`。只有 `__all__` 里的名字可用，
   每次调用都进记账。
 - 只有 CLI 的 skill：`run_cli("bulkrna-de", "--input", "data/counts.csv", inputs=["data/counts.csv"])`。输出默认落在
-  `results/<NN>/intermediate/<skill>/`，跑完后按输出目录逐个文件补记，所以重放时不会被当成孤儿文件。脚本约定照旧：
+  `results/<NN>/intermediate/<skill>/`；给 `--output` 时，它必须是本模块 `figures/`、`tables/`、`intermediate/`、`logs/`
+  之一下面的子目录。跑完后按输出目录逐个文件补记，所以重放时不会被当成孤儿文件。脚本约定照旧：
   路径以 `use_skill` 返回的目录为准，主脚本都支持 `--help`，绝大多数支持 `--demo`。
 - 过渡期 CLI 仍可在课题外直接用 `bash` 运行，输出结构见下。试点 skill 的 CLI 已是 `_api.py` 的薄壳，
   `tests/parity/` 保证它们的输出与改造前逐值一致。

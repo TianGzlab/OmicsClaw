@@ -16,7 +16,8 @@ version, 1), ``event`` and ``at`` (UTC, ISO 8601).
 
 ``MANIFEST_SCHEMA`` describes ``provenance/manifest.json``: its required
 keys and their types, the keys that may be ``null``, the module status
-values and the keys and states of each step entry.
+values, the keys and states of each step entry, and the keys of the replay
+record and of each ``review_history`` entry.
 """
 
 from __future__ import annotations
@@ -60,7 +61,8 @@ MANIFEST_SCHEMA = {
     "required": {
         "schema": "int", "module": "str", "number": "int", "slug": "str", "status": "str",
         "frozen": "bool", "interpreter": "dict", "steps": "list", "validate_step": "str",
-        "replay": "dict", "review": "dict", "accepted": "dict", "revisions": "list", "report": "str",
+        "replay": "dict", "review": "dict", "review_history": "list", "accepted": "dict", "revisions": "list",
+        "report": "str",
     },
     "nullable": ["interpreter", "validate_step", "replay", "review", "accepted"],
     "status_values": ["draft", "replayed", "reviewed", "accepted"],
@@ -70,4 +72,5 @@ MANIFEST_SCHEMA = {
     "interpreter_keys": ["path", "prefix", "version", "overlay"],
     "replay_keys": ["at", "status", "interpreter", "new_interpreter_reason", "step_sha256",
                     "changed_outputs", "orphan_outputs"],
+    "review_history_keys": ["file", "verdict", "sha256", "archived_at"],
 }

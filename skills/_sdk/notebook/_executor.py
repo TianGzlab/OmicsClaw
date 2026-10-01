@@ -5,6 +5,9 @@ manifest, and runs each stale step in a fresh kernel (validate step last),
 re-checking later steps after each one because an earlier step may have
 rewritten what they read. Every run gets a ledger file; afterwards the
 manifest is rebuilt from the ledgers and the module notebook re-stitched.
+
+Output goes to stdout. When its reader goes away (``run ... | head``), the
+rest of the output is dropped and the run carries on to the end.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from skills._sdk.notebook import _hashing, _layout, _ledger, _manifest
+from skills._sdk.notebook import _hashing, _layout, _ledger, _manifest, _watchdog
 from skills._sdk.notebook._layout import LayoutError, Module
 from skills._sdk.notebook._lock import LockBusy, hold
 from skills._sdk.notebook._percent import PercentError, to_notebook
@@ -36,7 +39,21 @@ Out = Callable[[str], None]
 
 
 def _print(text: str) -> None:
-    print(text, flush=True)
+    """Print *text*; once stdout's reader has gone, send the rest of the output to the null device."""
+    try:
+        print(text, flush=True)
+    except BrokenPipeError:
+        _drop_stdout()
+
+
+def _drop_stdout() -> None:
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError, AttributeError):
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - lives as long as the process
+    finally:
+        os.close(devnull)
 
 
 @dataclass
@@ -87,7 +104,7 @@ def format_step(module: Module, result: StepResult) -> str:
     if overwritten:
         lines.append(
             "  warning:  the step overwrote a file it read (" + _join(overwritten, 200)
-            + "); write to a new name so a later change to that input can be seen"
+            + "); a rerun of this step alone reads its own output, so write to a new name"
         )
     notebook = module.results_dir / "notebooks" / f"{result.step.stem}.ipynb"
     rel_notebook = notebook.relative_to(module.root).as_posix()
@@ -105,7 +122,10 @@ def format_step(module: Module, result: StepResult) -> str:
         if traceback:
             lines.append("  traceback (last 40 lines):")
             lines.extend("  " + line for line in traceback)
-        lines.append(f"  notebook: {rel_notebook} (partial)")
+        if outcome.notebook is None:
+            lines.append("  notebook: none (no cell ran)")
+        else:
+            lines.append(f"  notebook: {rel_notebook} (partial)")
     text = "\n".join(lines)
     if len(text) > SEGMENT_LIMIT:
         keep = SEGMENT_LIMIT - 60
@@ -139,23 +159,33 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
     ledger_path = module.runs_dir / step.stem / f"{run_id}.jsonl"
     ledger = _ledger.Ledger(ledger_path)
     step_sha = _hashing.sha256_file(step)
-    ledger.append(
-        "run_start",
-        step=step.name,
-        kind="python",
-        mode=mode,
-        step_sha256=step_sha,
-        previous_sha256=previous[-1].step_sha256 if previous else None,
-        interpreter=interpreter,
-        interpreter_changed_from=changed_from,
-        stub_dir=os.environ.get(ENVIRONMENT["skill_stubs"]) or None,
-    )
+    started = time.perf_counter()
+    with _watchdog.ACTIVITY.lock:
+        ledger.append(
+            "run_start",
+            step=step.name,
+            kind="python",
+            mode=mode,
+            step_sha256=step_sha,
+            previous_sha256=previous[-1].step_sha256 if previous else None,
+            interpreter=interpreter,
+            interpreter_changed_from=changed_from,
+            stub_dir=os.environ.get(ENVIRONMENT["skill_stubs"]) or None,
+        )
+        _watchdog.ACTIVITY.current = _watchdog.Current(
+            ledger=ledger, label=f"{module.name}/{step.name}", started=started, kill=getattr(runner, "kill", None),
+        )
     notebook_rel = f"notebooks/{step.stem}.ipynb"
     log_rel = f"logs/{step.stem}.log"
-    started = time.perf_counter()
     try:
-        notebook = to_notebook(step.read_text(encoding="utf-8"),
-                               step={"file": step.name, "sha256": step_sha, "run_id": run_id})
+        text = step.read_text(encoding="utf-8")
+        notebook = to_notebook(text, step={"file": step.name, "sha256": step_sha, "run_id": run_id})
+    except UnicodeDecodeError as exc:
+        outcome = StepOutcome(status="failed", notebook=None, seconds=time.perf_counter() - started, error={
+            "cell": None, "ename": "UnicodeDecodeError",
+            "evalue": f"{step.name} is not UTF-8 text (byte {exc.start}: {exc.reason}); save it as UTF-8",
+            "traceback": "",
+        })
     except PercentError as exc:
         outcome = StepOutcome(status="failed", notebook=None, seconds=time.perf_counter() - started,
                               error={"cell": None, "ename": "PercentError", "evalue": str(exc), "traceback": ""})
@@ -163,20 +193,25 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
         outcome = runner.run(notebook, env=_step_env(module, step, ledger_path), cwd=module.root)
     if outcome.notebook is not None:
         _write_notebook(module.results_dir / notebook_rel, outcome.notebook)
+    else:
+        # The notebook of an earlier run would otherwise pass for this one's.
+        (module.results_dir / notebook_rel).unlink(missing_ok=True)
     log_path = module.results_dir / log_rel
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(outcome.stream, encoding="utf-8")
     error = None
     if outcome.error:
         error = {key: outcome.error.get(key) for key in ("cell", "ename", "evalue")}
-    ledger.append(
-        "run_end",
-        status=outcome.status,
-        seconds=round(outcome.seconds, 3),
-        error=error,
-        notebook=notebook_rel if outcome.notebook is not None else None,
-        log=log_rel,
-    )
+    with _watchdog.ACTIVITY.lock:
+        ledger.append(
+            "run_end",
+            status=outcome.status,
+            seconds=round(outcome.seconds, 3),
+            error=error,
+            notebook=notebook_rel if outcome.notebook is not None else None,
+            log=log_rel,
+        )
+        _watchdog.ACTIVITY.current = None
     return StepResult(step=step, run=_ledger.read_run(ledger_path), outcome=outcome, reason=reason)
 
 
@@ -207,8 +242,13 @@ def stitch(module: Module, manifest: dict) -> Path:
             header.append("skill functions: " + ", ".join(dict.fromkeys(functions)))
         combined.cells.append(v4.new_markdown_cell("\n".join(header)))
         path = module.results_dir / "notebooks" / f"{stem}.ipynb"
-        if latest is None or not path.is_file():
+        if latest is None:
             combined.cells.append(v4.new_markdown_cell("This step has not run yet."))
+            continue
+        if not path.is_file():
+            combined.cells.append(v4.new_markdown_cell(
+                f"No notebook: the latest run ({status}) stopped before any cell ran."
+            ))
             continue
         try:
             step_notebook = nbformat.read(str(path), as_version=4)
@@ -232,6 +272,10 @@ def _check_runnable(module: Module, out: Out) -> int | None:
     if r_files:
         out("R steps are not supported yet: " + ", ".join(p.relative_to(module.root).as_posix() for p in r_files))
         return EXIT_USAGE
+    return _frozen(module, out)
+
+
+def _frozen(module: Module, out: Out) -> int | None:
     manifest = _manifest.load(module)
     if manifest and manifest.get("frozen"):
         out(f"module {module.name} is accepted and frozen; run `revise analysis/{module.name}` before changing it")
@@ -304,14 +348,22 @@ def run_module(module: Module, steps: list[Path] | None, *, force: bool, runner:
         return _locked(module, busy, out)
 
 
+def _interpreter_warning(module: Module, recorded: str | None, current: str) -> str:
+    return f"warning: module {module.name} was run with {recorded}; this run uses {current}"
+
+
 def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner: StepRunner, out: Out) -> int:
+    # Checked again under the lock: an `accept` this run waited for may have frozen the module.
+    problem = _frozen(module, out)
+    if problem is not None:
+        return problem
     previous = _manifest.load(module)
     interpreter = _manifest.interpreter_info()
     recorded = (previous or {}).get("interpreter")
     changed_from = None
     if recorded and not _manifest.same_interpreter(recorded, interpreter):
         changed_from = recorded.get("path")
-        out(f"warning: module {module.name} was run with {recorded.get('path')}; this run uses {interpreter['path']}")
+        out(_interpreter_warning(module, changed_from, interpreter["path"]))
     for ignored in module.ignored_files():
         out(f"ignored: {ignored.name} (not a step name: <k>_<name>.py)")
     order = steps if steps is not None else module.steps()
@@ -340,6 +392,8 @@ def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner
     if ran:
         notebook = stitch(module, manifest)
         out(f"[{module.name}] module notebook: {notebook.relative_to(module.root).as_posix()}")
+    if changed_from:
+        out(_interpreter_warning(module, changed_from, interpreter["path"]))
     return code
 
 
@@ -468,6 +522,9 @@ def replay(root: Path, target: str, *, new_interpreter: str | None = None, runne
 
 
 def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunner, out: Out) -> int:
+    problem = _frozen(module, out)
+    if problem is not None:
+        return problem
     previous = _manifest.load(module) or {}
     interpreter = _manifest.interpreter_info()
     recorded = previous.get("interpreter")
@@ -482,6 +539,13 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
             return EXIT_USAGE
         changed_from = recorded.get("path")
         out(f"note: replaying {module.name} with {interpreter['path']} instead of {changed_from}: {new_interpreter}")
+    archived = _manifest.archive_reviews(module, _ledger.new_run_id())
+    if archived:
+        history = list(previous.get("review_history") or []) + archived
+        _manifest.rebuild(module, review_history=history, review=None)
+        folder = Path(archived[0]["file"]).parent.as_posix()
+        out(f"[{module.name}] moved {len(archived)} earlier review(s) to results/{module.name}/{folder}/; "
+            "review the replayed module again")
     before = _output_files(module)
     steps = module.steps()
     hashes = {step.name: _hashing.sha256_file(step) for step in steps}
@@ -520,5 +584,7 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
         out("  changed outputs: " + _join(changed))
     if orphans:
         out("  orphan outputs (not written by this replay; the report must not rely on them): " + _join(orphans))
+    if changed_from:
+        out(f"  interpreter: {interpreter['path']} (was {changed_from}; reason: {new_interpreter})")
     out(f"  status: {manifest['status'].upper()}")
     return EXIT_OK

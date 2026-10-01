@@ -192,6 +192,17 @@ def test_run_cli_takes_an_output_inside_the_module_and_refuses_one_outside(step)
         run_cli("sc-clustering", "--output", "results/02_x/intermediate/custom")
 
 
+@pytest.mark.parametrize("output", [
+    "results/01_de", "results/01_de/provenance/cli", "results/01_de/intermediate", "results/01_de/notebooks/x",
+])
+def test_run_cli_refuses_an_output_outside_the_four_output_folders(step, output):
+    root, ledger = step
+    with pytest.raises(ValueError, match="figures/, tables/, intermediate/, logs/"):
+        run_cli("sc-clustering", "--output", output)
+    assert not ledger.exists() or _events(ledger, "output") == []
+    assert not (root / "results/01_de/provenance/cli").exists()
+
+
 def test_run_cli_raises_on_a_failing_script(step):
     _, ledger = step
     with pytest.raises(RuntimeError, match="status 3"):

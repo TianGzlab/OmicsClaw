@@ -91,7 +91,7 @@ def resolve_tools(self, all_names: Iterable[str]) -> tuple[str, ...]:
 
 `entry/subagent.py` 的 `MODULE_REVIEWER` 是第二个内置子代理（计划 0070），负责在模块重放之后、用户验收之前审查一个分析模块。它的 `tools` 只有 `read_file` 和 `use_skill`：审查者若能改它正在审的模块，审查结论就会失效。代价是它不能列目录、不能 grep，所以 system prompt 让它从 `results/<NN_slug>/provenance/manifest.json` 读起，那里列着每个步骤读写过的文件、调用过的 skill 函数和最近一次重放。
 
-它逐项核对：步骤的输入来自 `data/` 或上游模块的 `intermediate/`、`tables/`，skill 没给定的取值都写了理由，步骤第一个 cell 声称调用的 skill 函数与 manifest 记录的一致；validate 步骤检查了 REPORT 依赖的输出；REPORT 里的数字能在表格或日志里找到、引用的图存在且不在 `orphan_outputs` 里、带免责声明；重放成功并覆盖当前的步骤文件。回复第一行必须是 `VERDICT: APPROVE` 或 `VERDICT: REVISE`，主 agent 把回复原文存进 `results/<NN_slug>/reviews/<日期>_review.md`，`accept --review` 解析的就是这一行。
+它逐项核对：步骤的输入来自 `data/` 或上游模块的 `intermediate/`、`tables/`，skill 没给定的取值都写了理由，步骤第一个 cell 声称调用的 skill 函数与 manifest 记录的一致；validate 步骤检查了 REPORT 依赖的输出；REPORT 里的数字能在表格或日志里找到、引用的图存在且不在 `orphan_outputs` 里、带免责声明；重放成功并覆盖当前的步骤文件。回复第一行必须是 `VERDICT: APPROVE` 或 `VERDICT: REVISE`，主 agent 把回复原文存进 `results/<NN_slug>/reviews/<日期>_review.md`，`accept --review` 解析的就是这一行。下一次 `replay` 会把这份审查移进 `reviews/archive/<id>/`，verdict 和 sha256 记进 manifest 的 `review_history`。
 
 两个内置子代理都可以被 `.omicsclaw/agents/` 下同名的文件原位替换（§2.5）。
 

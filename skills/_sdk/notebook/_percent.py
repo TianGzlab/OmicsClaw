@@ -11,13 +11,16 @@ The subset understood here:
 * Any other bracketed tag is an error naming its line.
 * Blank lines at the start and end of a cell are dropped; code is
   otherwise kept as written.
-* A code line starting with ``%`` or ``!`` outside a string literal is an
-  error: magics and shell lines stop the file from running as
-  ``python <file>``.
+* A notebook magic or shell line is an error: a code line that starts
+  with ``%`` or ``!`` outside a string literal where Python reports the
+  cell's syntax error. Such lines stop the file from running as
+  ``python <file>``. A continuation line such as ``!= b)`` inside an
+  expression is plain Python and passes.
 """
 
 from __future__ import annotations
 
+import ast
 import io
 import re
 import tokenize
@@ -73,15 +76,21 @@ def _string_lines(source: str) -> set[int]:
 
 def _check_code(cell: Cell, first_line: int) -> None:
     source = "\n".join(cell.lines)
-    in_strings = _string_lines(source)
-    for offset, line in enumerate(cell.lines, start=1):
-        stripped = line.lstrip()
-        if stripped[:1] in {"%", "!"} and offset not in in_strings:
-            number = first_line + offset - 1
-            raise PercentError(
-                f"line {number}: {stripped[:40]!r} is a notebook magic or shell line; "
-                "write plain Python so the step also runs as `python <file>`"
-            )
+    try:
+        ast.parse(source)
+    except SyntaxError as exc:
+        offset = exc.lineno
+    else:
+        return
+    if offset is None or not 1 <= offset <= len(cell.lines) or offset in _string_lines(source):
+        return
+    stripped = cell.lines[offset - 1].lstrip()
+    if stripped[:1] in {"%", "!"}:
+        number = first_line + offset - 1
+        raise PercentError(
+            f"line {number}: {stripped[:40]!r} is a notebook magic or shell line; "
+            "write plain Python so the step also runs as `python <file>`"
+        )
 
 
 def parse_cells(text: str) -> list[Cell]:

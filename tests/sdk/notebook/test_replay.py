@@ -124,3 +124,37 @@ def test_editing_a_step_after_replay_returns_the_module_to_draft(project):
 def test_replay_takes_a_module_not_a_step(project):
     module = _module(project)
     assert project.replay(f"analysis/{module}/01_write.py") == 2
+
+
+def test_replay_archives_earlier_reviews_and_records_them(project):
+    import hashlib
+
+    module = _module(project)
+    reviews = project.root / "results/01_m/reviews"
+    first = "VERDICT: REVISE\n\nThe threshold has no reason.\n"
+    (reviews / "2026-10-01_review.md").write_text(first)
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    assert "moved 1 earlier review(s) to results/01_m/reviews/archive/" in project.text
+    assert list(reviews.glob("*.md")) == []
+    manifest = project.manifest(module)
+    [entry] = manifest["review_history"]
+    assert entry["verdict"] == "REVISE"
+    assert entry["sha256"] == hashlib.sha256(first.encode()).hexdigest()
+    assert (project.root / "results/01_m" / entry["file"]).read_text() == first
+    assert manifest["review"] is None
+
+    second = "VERDICT: APPROVE\n\nNo findings.\n"
+    (reviews / "2026-10-01_review.md").write_text(second)
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    history = project.manifest(module)["review_history"]
+    assert [h["verdict"] for h in history] == ["REVISE", "APPROVE"]
+    assert history[0]["file"] != history[1]["file"]
+    assert [(project.root / "results/01_m" / h["file"]).read_text() for h in history] == [first, second]
+
+
+def test_replay_without_reviews_archives_nothing(project):
+    module = _module(project)
+    assert project.replay(f"analysis/{module}") == 0
+    assert "earlier review" not in project.text
+    assert project.manifest(module)["review_history"] == []
+    assert not (project.root / "results/01_m/reviews/archive").exists()

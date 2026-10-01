@@ -30,7 +30,7 @@ from typing import Any
 
 from skills._sdk.notebook import _hashing, _ledger
 from skills._sdk.notebook._io import StepContext, record_input, step_context
-from skills._sdk.notebook.contract import ENVIRONMENT
+from skills._sdk.notebook.contract import ENVIRONMENT, LAYOUT
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 """The skills tree that holds this ``_sdk``."""
@@ -349,11 +349,12 @@ def run_cli(skill: str, *args: str, inputs: Sequence[str] = (),
     """Run a skill's command-line script for the current step and return its output directory.
 
     The output directory is results/<NN_slug>/intermediate/<skill>/ unless args
-    carry --output inside the module's results. `inputs` lists project-relative
-    files the run reads, so they count towards staleness.
+    carry --output naming a folder inside the module's figures/, tables/,
+    intermediate/ or logs/. `inputs` lists project-relative files the run
+    reads, so they count towards staleness.
 
     :raises LookupError: no such skill, or it does not have exactly one script.
-    :raises ValueError: ``--output`` points outside the module's results.
+    :raises ValueError: ``--output`` is not a folder inside one of those four.
     :raises RuntimeError: the script exits non-zero.
     """
     ctx = step_context()
@@ -369,12 +370,18 @@ def run_cli(skill: str, *args: str, inputs: Sequence[str] = (),
         given = Path(found[1])
         output_dir = Path(os.path.abspath(given if given.is_absolute() else ctx.root / given))
         try:
-            output_dir.relative_to(module.results_dir)
+            parts = output_dir.relative_to(module.results_dir).parts
         except ValueError:
             raise ValueError(
                 f"--output {found[1]} is outside results/{module.name}/; "
                 f"leave --output out to use results/{module.name}/intermediate/{skill}/"
             ) from None
+        if len(parts) < 2 or parts[0] not in LAYOUT["output_dirs"]:
+            folders = ", ".join(f"{name}/" for name in LAYOUT["output_dirs"])
+            raise ValueError(
+                f"--output {found[1]} must be a folder inside one of {folders} under results/{module.name}/, "
+                f"for example results/{module.name}/intermediate/{skill}/"
+            )
     for item in inputs:
         target = Path(item) if Path(item).is_absolute() else ctx.root / item
         if not target.exists():

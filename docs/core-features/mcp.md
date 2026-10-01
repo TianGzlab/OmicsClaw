@@ -312,7 +312,7 @@ MCPTool.execute(arguments)
 ### 6.5 放宽与收紧
 
 - **`.mcp.json` 不提供放宽开关**，因为它在工作区里，可以被仓库内容控制。
-- 放宽途径一：规则文件 `<workspace>/.omicsclaw/settings.json` 的 `allow`，**按完整注册名精确匹配**，例如 `"allow": ["mcp__context7__resolve_library_id"]`；带括号的模式匹配的是该工具 schema 里第一个必填 string 参数。
+- 放宽途径一：规则文件 `<workspace>/.omicsclaw/settings.json` 的 `allow`，**按完整注册名精确匹配**，例如 `"allow": ["mcp__context7__resolve_library_id"]`；带括号的模式匹配的是该工具 schema 里第一个必填 string 参数（没有时取第一个必填的字符串数组，去重排序后用 `, ` 连接）。
 - 放宽途径二：部署代码用 `registry.register(tool, policy)` 重新注册（例如给可信工具设 `concurrency_safe=True`）。
 - 收紧：`deny` / `ask` 规则，或 `--permission-mode read-only`。MCP 工具没有声明 `read_only`，所以在 read-only 模式下**全部被拒绝**。
 
@@ -396,7 +396,7 @@ Desktop 与 Channel 同样经由 `open_app` 连接 `.mcp.json` 里的 server，�
 - **server 的 `instructions` 只记录在 `ServerStatus.info` 中，没有注入 system prompt。**
 - **MCP 工具串行执行**，同一 turn 里多个 MCP 调用会排队。
 - **每次 MCP 调用都要审批**（默认 `ASK`）。想减少提示，只能写 `allow` 规则、开 `auto-approve`，或者在部署代码里重新注册策略。
-- **权限 gate 每次调用只读一个"主参数"**（schema 里第一个必填 string 属性）。例如 MCP 的 `move_file(source, destination)` 按 `source` 判断，受保护路径检查看不到 `destination`（`permission/gate.py`）。
+- **权限 gate 每次调用只读一个"主参数"**（schema 里第一个必填 string 属性，没有时取第一个必填的字符串数组）。例如 MCP 的 `move_file(source, destination)` 按 `source` 判断，受保护路径检查看不到 `destination`（`permission/gate.py`）。
 - **`/help` 中 `/mcp` 的说明文字过时**（第 8 节）。
 - **本层还没有和真实的第三方 MCP server 通信过。** 测试用的是 `tests/mcp/fake_server.py` 起的真实子进程和本机回环 HTTP server，覆盖了 JSON 与 SSE 两种答复，但 npx 包、远端服务的兼容性没有实测。
 

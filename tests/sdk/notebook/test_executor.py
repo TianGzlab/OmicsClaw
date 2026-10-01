@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from skills._sdk.notebook import _executor, _ledger, _manifest
@@ -247,6 +249,41 @@ def test_overwriting_an_input_does_not_leave_the_step_stale_forever(project):
     assert "02_rewrite.py  up to date" in project.text
 
 
+REWRITE_A = '''
+# %%
+from skills._sdk.notebook import read_input, write_output
+a = read_input("results/01_first/intermediate/a.json")
+write_output({"value": a["value"] + 1}, "intermediate/a.json")
+'''
+
+
+def test_a_step_that_overwrote_its_input_reruns_when_an_earlier_step_rewrites_it(project):
+    module = project.new("first")
+    first = project.step(module, "01_write.py", WRITE_A.replace("VALUE", "1"))
+    project.step(module, "02_rewrite.py", REWRITE_A)
+    project.run(f"analysis/{module}")
+    a_json = project.root / "results/01_first/intermediate/a.json"
+    assert json.loads(a_json.read_text()) == {"value": 2}
+    first.write_text(first.read_text().replace('{"value": 1}', '{"value": 5}'))
+    assert project.run(f"analysis/{module}") == 0
+    assert "02_rewrite.py  up to date" not in project.text
+    assert "why:      input changed: results/01_first/intermediate/a.json" in project.text
+    assert json.loads(a_json.read_text()) == {"value": 6}
+    project.run(f"analysis/{module}")
+    assert "01_write.py  up to date" in project.text and "02_rewrite.py  up to date" in project.text
+
+
+def test_a_step_that_overwrote_its_input_is_stale_when_the_file_is_changed_by_hand(project):
+    module = project.new("first")
+    project.step(module, "01_write.py", WRITE_A.replace("VALUE", "1"))
+    project.step(module, "02_rewrite.py", REWRITE_A)
+    project.run(f"analysis/{module}")
+    (project.root / "results/01_first/intermediate/a.json").write_text('{"value": 40}')
+    states = {s["file"]: s for s in project.manifest(module)["steps"]}
+    assert states["02_rewrite.py"]["state"] == "ok"
+    assert "02_rewrite.py  stale: input changed: results/01_first/intermediate/a.json" in project.status()
+
+
 def test_frozen_module_refuses_run(project):
     module = _two_steps(project)
     project.run(f"analysis/{module}")
@@ -256,6 +293,92 @@ def test_frozen_module_refuses_run(project):
     _manifest.save(mod, manifest)
     assert project.run(f"analysis/{module}") == 2
     assert "accepted and frozen" in project.text
+
+
+def _freeze_while_holding_the_lock(project, module, command="accept"):
+    """Hold the module lock in a thread, freeze the module, then let go."""
+    mod = module_from_name(project.root, module)
+    held = threading.Event()
+
+    def holder():
+        with hold(mod.lock_path, command=command):
+            held.set()
+            manifest = _manifest.load(mod)
+            manifest["frozen"] = True
+            _manifest.save(mod, manifest)
+            time.sleep(0.5)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    held.wait(5)
+    return thread
+
+
+def test_a_run_that_waited_for_the_lock_refuses_a_module_frozen_meanwhile(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    project.step(module, "02_read.py", READ_A + "\nprint('changed')\n")
+    before = len(_runs(project, module, "02_read"))
+    thread = _freeze_while_holding_the_lock(project, module)
+    project.lines.clear()
+    code = _executor.run_targets(project.root, [f"analysis/{module}"], runner=project.runner, wait=10,
+                                 out=project.out)
+    thread.join()
+    assert code == 2 and "accepted and frozen" in project.text
+    assert len(_runs(project, module, "02_read")) == before
+
+
+def test_a_replay_that_waited_for_the_lock_refuses_a_module_frozen_meanwhile(project):
+    module = _two_steps(project)
+    project.step(module, "03_validate.py", "# %%\nx = 1\n")
+    project.run(f"analysis/{module}")
+    before = len(_runs(project, module, "01_write"))
+    thread = _freeze_while_holding_the_lock(project, module)
+    project.lines.clear()
+    code = _executor.replay(project.root, f"analysis/{module}", runner=project.runner, wait=10, out=project.out)
+    thread.join()
+    assert code == 2 and "accepted and frozen" in project.text
+    assert len(_runs(project, module, "01_write")) == before
+
+
+def test_a_step_that_cannot_be_parsed_leaves_no_old_notebook_behind(project):
+    import nbformat
+
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    notebook = project.root / "results/01_first/notebooks/02_read.ipynb"
+    assert notebook.is_file()
+    project.step(module, "02_read.py", READ_A + "\n%time print(a)\n")
+    assert project.run(f"analysis/{module}") == 1
+    assert "PercentError" in project.text
+    assert "notebook: none (no cell ran)" in project.text and "(partial)" not in project.text
+    assert not notebook.exists()
+    combined = nbformat.read(str(project.root / "results/01_first/notebooks/M01_first.ipynb"), as_version=4)
+    sources = "\n".join(cell.source for cell in combined.cells)
+    assert "stopped before any cell ran" in sources
+    assert 'read_input("results/01_first/intermediate/a.json")' not in sources
+
+
+def test_a_step_that_is_not_utf8_fails_with_a_clear_error_and_a_finished_ledger(project):
+    module = project.new("first")
+    (project.root / "analysis" / module / "01_latin.py").write_bytes(b"# %%\nname = 'Andr\xe9'\n")
+    assert project.run(f"analysis/{module}") == 1
+    assert "UnicodeDecodeError: 01_latin.py is not UTF-8 text" in project.text
+    run = _ledger.runs_of(project.root / "results/01_first/provenance/runs", "01_latin")[-1]
+    assert run.status == "failed" and run.end["error"]["ename"] == "UnicodeDecodeError"
+    assert project.manifest(module)["steps"][0]["state"] == "failed"
+
+
+def test_an_interpreter_change_is_repeated_at_the_end_of_the_output(project):
+    module = _two_steps(project)
+    project.run(f"analysis/{module}")
+    mod = module_from_name(project.root, module)
+    manifest = _manifest.load(mod)
+    manifest["interpreter"] = {"path": "/other/bin/python", "prefix": "/other", "version": "3.0", "overlay": None}
+    _manifest.save(mod, manifest)
+    assert project.run(f"analysis/{module}", force=True) == 0
+    warning = f"warning: module {module} was run with /other/bin/python; this run uses {sys.executable}"
+    assert project.lines[0] == warning and project.lines[-1] == warning
 
 
 def test_the_lock_records_its_holder(tmp_path):
