@@ -94,10 +94,7 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 5. If the user has no input file, offer `--demo`.
 
 Some domains have shared helpers under `skills/<domain>/_lib/`. A directory
-whose name starts with `_` is never a skill. Neither is one whose `SKILL.md`
-has been renamed `SKILL.md.disabled`: `sc-consensus-clustering`,
-`sc-consensus-integration`, `sc-consensus-pseudotime` and `consensus-domains`
-are kept on disk that way because their scripts cannot start. Do not run them.
+whose name starts with `_` is never a skill.
 
 ### Dependencies
 

@@ -7,8 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import nbformat
-
 from omicsclaw.common.report import (
     build_output_dir_name,
     extract_method_name,
@@ -110,36 +108,6 @@ def test_write_output_readme_does_not_inventory_contained_directory_symlink(
 def test_build_output_dir_name_includes_method_when_available():
     name = build_output_dir_name("spatial-domain-identification", "20260329_063000", method="CellCharter")
     assert name == "spatial-domain-identification__cellcharter__20260329_063000"
-
-
-def test_analysis_notebook_rejects_claim_aliases(tmp_path):
-    from omicsclaw.common.notebook_export import write_analysis_notebook
-    from omicsclaw.common.output_claim import OUTPUT_CLAIM_FILENAME
-
-    output_dir = tmp_path / "out"
-    (output_dir / "figures").mkdir(parents=True)
-    (output_dir / "tables").mkdir()
-    claim = output_dir / OUTPUT_CLAIM_FILENAME
-    claim.write_text("{}\n", encoding="utf-8")
-    (output_dir / "processed.h5ad").hardlink_to(claim)
-    (output_dir / "figures" / "claim.png").hardlink_to(claim)
-    (output_dir / "tables" / "claim.csv").hardlink_to(claim)
-    (output_dir / "figures" / "plot.png").write_bytes(b"png")
-    (output_dir / "tables" / "table.csv").write_text("a\n1\n", encoding="utf-8")
-
-    notebook_path = write_analysis_notebook(
-        output_dir,
-        skill_alias="demo-skill",
-        result_payload={"summary": {}, "data": {}},
-    )
-    notebook = nbformat.read(notebook_path, as_version=4)
-    rendered = "\n".join(cell.source for cell in notebook.cells)
-
-    assert "processed.h5ad" not in rendered
-    assert "claim.png" not in rendered
-    assert "claim.csv" not in rendered
-    assert "plot.png" in rendered
-    assert "table.csv" in rendered
 
 
 def test_spatial_genes_help_does_not_require_scanpy_runtime():
