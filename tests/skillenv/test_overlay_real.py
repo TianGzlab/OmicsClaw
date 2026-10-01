@@ -69,7 +69,7 @@ def test_a_base_without_pip_gets_an_overlay_with_its_own_pip(tmp_path):
 
     runner.after["venv"] = inspect
     builder = OverlayBuilder(tmp_path / "envs", environment=lambda: environment, runner=runner)
-    request = OverlayRequest(skill="oc-skill", names=("oc-leaf",), specs=("oc-leaf",), required_imports=("oc_leaf",))
+    request = OverlayRequest(skills=("oc-skill",), names=("oc-leaf",), specs=("oc-leaf",), required_imports=("oc_leaf",))
     result = asyncio.run(builder.build(request, inventory, base, overlay_key(inventory, base, ("oc-leaf",))))
     assert result.status == "installed", result.reason
     assert "--without-pip" not in runner.calls[0].argv

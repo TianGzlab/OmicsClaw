@@ -248,20 +248,51 @@ def test_files_lists_what_is_in_the_data_directory(tmp_path):
     assert "MB" in reply
 
 
-def test_recent_reads_the_headline_out_of_each_report(tmp_path):
+def _module(root, name, *, status=None, report=None, modified=None):
+    import json
+    import os
+
+    results = root / "results" / name
+    (results / "provenance").mkdir(parents=True)
+    if status is not None:
+        (results / "provenance" / "manifest.json").write_text(json.dumps({"status": status}), encoding="utf-8")
+    if report is not None:
+        nn, slug = name.split("_", 1)
+        (results / f"M{nn}_{slug}_REPORT.md").write_text(report, encoding="utf-8")
+    if modified is not None:
+        target = results / "provenance" / "manifest.json" if status is not None else results
+        os.utime(target, (modified, modified))
+
+
+def test_recent_lists_the_newest_modules_with_status_and_report_headline(tmp_path):
+    _module(tmp_path, "01_qc", status="accepted", report="# QC of PBMC3k\nbody\n", modified=1_000)
+    _module(tmp_path, "02_preprocess", status="replayed", report="intro\n# Preprocessing\n", modified=2_000)
+    _module(tmp_path, "03_clustering", status="draft", modified=3_000)
+    _module(tmp_path, "04_annotation", modified=4_000)
+    (tmp_path / "results" / "_archive").mkdir()
+
     async def scenario():
-        run_dir = tmp_path / "output" / "run-1"
-        run_dir.mkdir(parents=True)
-        (run_dir / "report.md").write_text(
-            "intro\n# Spatial domains identified\nbody\n", encoding="utf-8"
-        )
         app = deployment(tmp_path)[0]
         return await dispatch(context(app, text="/recent"))
 
     reply = run(scenario())
 
-    assert "run-1" in reply
-    assert "Spatial domains identified" in reply
+    assert reply.startswith("Last 3 analyses:")
+    assert reply.index("04_annotation") < reply.index("03_clustering") < reply.index("02_preprocess")
+    assert "01_qc" not in reply and "_archive" not in reply
+    assert "02_preprocess [REPLAYED]" in reply and "Preprocessing" in reply
+    assert "03_clustering [DRAFT]" in reply and "No report yet" in reply
+
+
+def test_recent_ignores_old_output_runs(tmp_path):
+    async def scenario():
+        run_dir = tmp_path / "output" / "run-1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "report.md").write_text("# Spatial domains identified\n", encoding="utf-8")
+        app = deployment(tmp_path)[0]
+        return await dispatch(context(app, text="/recent"))
+
+    assert run(scenario()) == "No recent analyses found."
 
 
 def test_version_counts_the_deployment_rather_than_asserting_a_number(tmp_path):

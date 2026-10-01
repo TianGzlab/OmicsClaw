@@ -45,28 +45,35 @@ __all__ = [
 INSTALL_SKILL_DEPS_TOOL_NAME = "install_skill_deps"
 
 _DESCRIPTION = (
-    "Install Python packages a skill needs into an isolated overlay environment built on the `python` "
-    "bash runs, and return the overlay's interpreter. The base environment is never changed. Name only "
-    "the packages the method you are about to run needs, as the environment check that use_skill "
-    "appends listed them; every name must be under that skill's \"## Dependencies\". Git-only and R "
+    "Install Python packages that the skills of one analysis module need into an isolated overlay "
+    "environment built on the `python` bash runs, and return the overlay's interpreter. The base "
+    "environment is never changed. List every skill the module's steps use, and name only the packages "
+    "the methods you are about to run need, as the environment check that use_skill appends listed "
+    "them; every name must be under the \"## Dependencies\" of at least one listed skill. Git-only and R "
     "packages are not installed. Depending on the session's permission settings, the person may be asked "
     "to approve the installation; nothing is downloaded before that decision. Afterwards, run the "
-    "skill's script with the interpreter the result gives."
+    "module's steps with the step runner under the interpreter the result gives, and keep using it for "
+    "that module."
 )
 
 INSTALL_SKILL_DEPS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "skill": {"type": "string", "description": "skill name exactly as in the skill index"},
+        "skills": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "the skills the module uses, names exactly as in the skill index",
+        },
         "packages": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 1,
-            "description": "the packages the method you are about to run needs, by the names the "
+            "description": "the packages the methods you are about to run need, by the names the "
             "environment check listed",
         },
     },
-    "required": ["skill", "packages"],
+    "required": ["skills", "packages"],
     "additionalProperties": False,
 }
 
@@ -90,20 +97,22 @@ _CANNOT_RUN = "the method that needs it cannot run here; report this rather than
 
 
 def install_skill_deps_tool(
-    skills: SkillIndex,
+    skills_index: SkillIndex,
     *,
     registry: Mapping[str, Mapping[str, Any]],
     probe_runner: ProbeRunner,
     workspace: str,
     builder: OverlayBuilder,
     pyproject: Path | None = None,
+    step_runner: str | None = None,
 ) -> FunctionTool:
-    """Build ``install_skill_deps`` over *skills* and *registry*.
+    """Build ``install_skill_deps`` over *skills_index* and *registry*.
 
     :param probe_runner: Runs the inventory of the ``python`` ``bash`` uses, before approval.
     :param workspace: Working directory of that inventory.
     :param builder: Builds overlays after approval.
     :param pyproject: ``pyproject.toml`` whose optional dependencies give version constraints.
+    :param step_runner: The step runner's path, named in the usage lines of the result.
 
     Invalid arguments raise :exc:`ToolArgumentError`. Everything else —
     nothing to install, a refusal, a failed installation — is an ordinary
@@ -112,16 +121,19 @@ def install_skill_deps_tool(
     """
     constraints = pyproject_constraints(pyproject)
 
-    async def run(skill: str, packages: list[str]) -> str:
-        entry, declared = _declared(skills, skill)
-        names = _requested(entry, declared, packages)
+    async def run(skills: list[str], packages: list[str]) -> str:
+        entries = _declared(skills_index, skills)
+        declared = tuple(dict.fromkeys(name for _entry, names in entries for name in names))
+        names = _requested(entries, packages)
+        usage = _Usage([entry for entry, _names in entries], step_runner)
         resolved = [resolve(name, registry) for name in names]
         installable = [r for r in resolved if r.kind == "pip"]
         hints = [r for r in resolved if r.kind != "pip"]
         if not installable:
-            return _nothing(entry, [], hints)
+            return _nothing([], hints)
+        first = entries[0][0]
         try:
-            specs_of = {r.name: _specs(r, constraints, entry) for r in installable}
+            specs_of = {r.name: _specs(r, constraints, _owner(entries, r.name)) for r in installable}
         except RequirementError as exc:
             return f"install_skill_deps cannot install this: {exc}.\nNothing was run or downloaded."
 
@@ -129,7 +141,7 @@ def install_skill_deps_tool(
             inventory = await run_inventory(
                 probe_runner,
                 [r.module for r in installable],
-                str(entry.directory),
+                str(first.directory),
                 cwd=workspace,
                 env={"PYTHONNOUSERSITE": "1"},
             )
@@ -142,25 +154,25 @@ def install_skill_deps_tool(
         wanted = [r for r in installable if r.module in missing]
         present = [r for r in installable if r.module not in missing]
         if not wanted:
-            return _nothing(entry, present, hints)
+            return _nothing(present, hints)
         specs = tuple(dict.fromkeys(spec for r in wanted for spec in specs_of[r.name]))
         base = base_distributions(inventory.records)
         key = overlay_key(inventory, base, specs)
         python = builder.python(key)
         if builder.finished(key):
-            return _reused(entry, python, inventory, present, hints)
+            return _reused(usage, python, inventory, present, hints)
 
         await require_approval(
             INSTALL_SKILL_DEPS_TOOL_NAME,
-            json.dumps({"skill": entry.name, "packages": list(packages)}),
+            json.dumps({"skills": [entry.name for entry, _names in entries], "packages": list(packages)}),
             policy=INSTALL_SKILL_DEPS_POLICY,
-            reason=_card(entry, specs, python, inventory),
+            reason=_card(usage, specs, python, inventory),
             reason_shows_call=False,
         )
         plan = probe_plan(declared, registry)
         required = tuple(r.module for r in wanted)
         request = OverlayRequest(
-            skill=entry.name,
+            skills=tuple(entry.name for entry, _names in entries),
             names=tuple(r.name for r in wanted),
             specs=specs,
             required_imports=required,
@@ -169,9 +181,9 @@ def install_skill_deps_tool(
         with pause_tool_timeout():
             result = await builder.build(request, inventory, base, key, progress=_progress)
         if result.status == "reused":
-            return _reused(entry, python, inventory, present, hints)
+            return _reused(usage, python, inventory, present, hints)
         if result.status == "installed":
-            return _installed(entry, result, inventory, present, hints, required)
+            return _installed(usage, result, inventory, present, hints, required)
         return _failed(result, hints)
 
     return FunctionTool(
@@ -187,28 +199,41 @@ async def _progress(message: str) -> None:
     await report_progress(message, tool_name=INSTALL_SKILL_DEPS_TOOL_NAME)
 
 
-def _declared(skills: SkillIndex, name: str) -> tuple[Skill, tuple[str, ...]]:
-    entry = skills.get(name.strip())
-    if entry is None:
-        raise ToolArgumentError(f"skill {name!r} is not in the skill index; use the `name` the index lists")
-    try:
-        declared = parse_dependencies(skills.get_full_content(entry.name), source=entry.path)
-    except DependencyFormatError as exc:
-        raise ToolArgumentError(str(exc)) from None
-    return entry, declared
+def _declared(skills: SkillIndex, names: Sequence[str]) -> list[tuple[Skill, tuple[str, ...]]]:
+    """Each named skill with the packages its ``## Dependencies`` declares, in the order given."""
+    if not names:
+        raise ToolArgumentError("skills must name at least one skill")
+    found: list[tuple[Skill, tuple[str, ...]]] = []
+    for name in dict.fromkeys(str(n).strip() for n in names):
+        entry = skills.get(name)
+        if entry is None:
+            raise ToolArgumentError(f"skill {name!r} is not in the skill index; use the `name` the index lists")
+        try:
+            declared = parse_dependencies(skills.get_full_content(entry.name), source=entry.path)
+        except DependencyFormatError as exc:
+            raise ToolArgumentError(str(exc)) from None
+        found.append((entry, declared))
+    return found
 
 
-def _requested(entry: Skill, declared: Sequence[str], packages: Sequence[str]) -> list[str]:
+def _requested(entries: Sequence[tuple[Skill, Sequence[str]]], packages: Sequence[str]) -> list[str]:
     if not packages:
         raise ToolArgumentError("packages must name at least one package")
-    by_normalised = {normalise(name): name for name in declared}
+    by_normalised = {normalise(name): name for _entry, declared in entries for name in declared}
     unknown = [p for p in packages if normalise(str(p)) not in by_normalised]
     if unknown:
+        declared_lines = "; ".join(f"{entry.name} declares: {', '.join(declared)}" for entry, declared in entries)
         raise ToolArgumentError(
-            f"{', '.join(map(str, unknown))} not under {entry.name}'s \"## Dependencies\"; "
-            f"it declares: {', '.join(declared)}"
+            f"{', '.join(map(str, unknown))} not under the \"## Dependencies\" of "
+            f"{', '.join(entry.name for entry, _d in entries)}; {declared_lines}"
         )
     return list(dict.fromkeys(by_normalised[normalise(str(p))] for p in packages))
+
+
+def _owner(entries: Sequence[tuple[Skill, Sequence[str]]], name: str) -> Skill:
+    """The first listed skill that declares *name*."""
+    wanted = normalise(name)
+    return next(entry for entry, declared in entries if any(normalise(d) == wanted for d in declared))
 
 
 def _specs(resolution: Resolution, constraints: Mapping[str, tuple[str, str]], entry: Skill) -> tuple[str, ...]:
@@ -245,13 +270,40 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _card(entry: Skill, specs: Sequence[str], python: Path, inventory: BaseInventory) -> str:
+class _Usage:
+    """Who an overlay is for, and the commands that use it."""
+
+    def __init__(self, entries: Sequence[Skill], step_runner: str | None) -> None:
+        self.entries = list(entries)
+        self.step_runner = step_runner
+
+    @property
+    def names(self) -> str:
+        return ", ".join(entry.name for entry in self.entries)
+
+    def lines(self, python: Path) -> list[str]:
+        lines = []
+        if self.step_runner:
+            lines += [
+                "Run the module's steps with this interpreter:",
+                f"  PYTHONNOUSERSITE=1 {python} {self.step_runner} run analysis/<NN_slug>",
+            ]
+        script = _script(self.entries[0])
+        lines += [
+            "or run a skill's CLI with it:" if self.step_runner else "Run the skill with the overlay's interpreter:",
+            f"  PYTHONNOUSERSITE=1 {python} {script} …",
+        ]
+        return lines
+
+
+def _card(usage: _Usage, specs: Sequence[str], python: Path, inventory: BaseInventory) -> str:
     overlay = python.parent.parent
+    plural = "skills" if len(usage.entries) > 1 else "skill"
     return "\n".join(
         [
             "install into an isolated overlay environment (the base environment is not changed):",
             *(f"  {spec}" for spec in specs),
-            f"for skill {entry.name}, wheels only, plus whatever missing dependencies it needs;",
+            f"for {plural} {usage.names}, wheels only, plus whatever missing dependencies it needs;",
             "packages the base environment already has are kept as they are.",
             "packages come from this machine's pip configuration, the same as running `pip install` yourself;",
             "OmicsClaw does not check where that points (index, proxy, certificates).",
@@ -269,10 +321,6 @@ def _script(entry: Skill) -> str:
     return str(guess) if guess.is_file() else f"{entry.directory}{os.sep}<script>.py"
 
 
-def _command(entry: Skill, python: Path) -> str:
-    return f"  PYTHONNOUSERSITE=1 {python} {_script(entry)} …"
-
-
 def _hint_lines(present: Sequence[Resolution], hints: Sequence[Resolution]) -> list[str]:
     lines = []
     if present:
@@ -286,12 +334,12 @@ def _hint_lines(present: Sequence[Resolution], hints: Sequence[Resolution]) -> l
     return lines
 
 
-def _nothing(entry: Skill, present: Sequence[Resolution], hints: Sequence[Resolution]) -> str:
+def _nothing(present: Sequence[Resolution], hints: Sequence[Resolution]) -> str:
     return "\n".join(["Nothing to install into an overlay.", *_hint_lines(present, hints)])
 
 
 def _reused(
-    entry: Skill,
+    usage: _Usage,
     python: Path,
     inventory: BaseInventory,
     present: Sequence[Resolution],
@@ -302,8 +350,7 @@ def _reused(
             f"An overlay with these packages already exists for this base ({inventory.executable} "
             f"{inventory.version}): {python}. Nothing was installed or downloaded.",
             *_hint_lines(present, hints),
-            "Run the skill with the overlay's interpreter:",
-            _command(entry, python),
+            *usage.lines(python),
         ]
     )
 
@@ -314,7 +361,7 @@ def _wheel_line(artifact: Any) -> str:
 
 
 def _installed(
-    entry: Skill,
+    usage: _Usage,
     result: OverlayResult,
     inventory: BaseInventory,
     present: Sequence[Resolution],
@@ -346,7 +393,7 @@ def _installed(
     if others:
         lines.append("Other modules of the skill that do not import here (not requested): " + ", ".join(others))
     lines += _hint_lines(present, hints)
-    lines += ["Run the skill with the overlay's interpreter:", _command(entry, result.python)]
+    lines += usage.lines(result.python)
     return "\n".join(lines)
 
 

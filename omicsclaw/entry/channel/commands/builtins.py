@@ -38,6 +38,7 @@ from pathlib import Path
 
 from omicsclaw.context import CompactionRecord, CompactionState
 
+from ...project import recent_modules
 from ...session import SubmissionRefused
 from ._registry import SlashCommandContext, register, registered_commands
 
@@ -195,15 +196,17 @@ async def _cmd_outputs(ctx: SlashCommandContext) -> str:
 
 @register("/recent")
 async def _cmd_recent(ctx: SlashCommandContext) -> str:
-    """Show the last 3 analyses with their ``report.md`` headlines."""
-    try:
-        runs = _recent_runs(ctx, limit=3)
-    except OSError:
-        runs = ()
-    items = [f"{run.name}\n   {_stamp(run)} - {_headline(run)}" for run in runs]
+    """Show the 3 most recently changed analysis modules: status and report headline."""
+    modules = recent_modules(Path(ctx.workspace or "."), limit=3)
+    items = [
+        f"{module.name} [{(module.status or 'draft').upper()}]\n"
+        f"   {datetime.fromtimestamp(module.modified).strftime('%Y-%m-%d %H:%M')} - "
+        f"{module.headline or 'No report yet'}"
+        for module in modules
+    ]
     if not items:
         return "No recent analyses found."
-    return "Last 3 analyses:\n\n" + "\n\n".join(items)
+    return f"Last {len(items)} analyses:\n\n" + "\n\n".join(items)
 
 
 def _recent_runs(ctx: SlashCommandContext, *, limit: int) -> tuple[Path, ...]:
@@ -219,24 +222,6 @@ def _recent_runs(ctx: SlashCommandContext, *, limit: int) -> tuple[Path, ...]:
 
 def _stamp(run: Path) -> str:
     return datetime.fromtimestamp(run.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-
-
-def _headline(run: Path) -> str:
-    """The report's first heading, or a short stand-in.
-
-    Reads the whole file, as the original did, and only because a report is a
-    page of text. A caller that finds this expensive has a directory of
-    reports large enough that the listing is the wrong feature.
-    """
-    report = run / "report.md"
-    try:
-        lines = report.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return "No report"
-    for line in lines:
-        if line.startswith("# "):
-            return line.strip("# ").strip()
-    return "Analysis complete"
 
 
 # ---- catalogue and status --------------------------------------------

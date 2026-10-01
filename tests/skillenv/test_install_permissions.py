@@ -36,7 +36,7 @@ from .conftest import FIXTURE_SKILLS
 from .installing import SKILL, make_skills
 from .test_install_tool import _Builder, _Inventory
 
-ARGS = json.dumps({"skill": SKILL, "packages": ["oc-leaf"]})
+ARGS = json.dumps({"skills": [SKILL], "packages": ["oc-leaf"]})
 
 
 def _tool(tmp_path):
@@ -100,12 +100,19 @@ def test_an_ask_rule_asks_even_under_auto_approve_and_no_standing_grant_answers_
     assert len(builder.builds) == 1
 
 
-def test_always_allow_writes_a_rule_for_the_skill(tmp_path):
+def test_always_allow_writes_a_rule_for_exactly_that_installation(tmp_path):
+    """``skills`` is a list, so the tool has no string principal argument.
+
+    "Always" then remembers the whole call: these skills and these packages.
+    """
+    from omicsclaw.permission import literal_pattern
+
     tool, builder = _tool(tmp_path)
     store = RuleStore(tmp_path / ".omicsclaw" / "settings.json")
     gate = PermissionGate(mode=PermissionMode.DEFAULT, rules=store)
     pattern = gate.remember("install_skill_deps", ARGS, schema=tool.definition().input_schema)
-    assert pattern == f"install_skill_deps({SKILL})"
+    assert pattern == literal_pattern("install_skill_deps", ARGS)
+    assert SKILL in pattern and "oc-leaf" in pattern
     result, asked = _run(tool, gate)
     assert asked == [] and len(builder.builds) == 1
 

@@ -187,7 +187,7 @@ class Harness:
 
         async def main() -> str:
             with use_tool_context(approval=channel):
-                return await self.tool.execute(json.dumps({"skill": skill, "packages": list(packages)}))
+                return await self.tool.execute(json.dumps({"skills": [skill], "packages": list(packages)}))
 
         return asyncio.run(asyncio.wait_for(main(), 300))
 

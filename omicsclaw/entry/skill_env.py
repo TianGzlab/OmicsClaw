@@ -47,6 +47,7 @@ from omicsclaw.tools.base import Tool
 from omicsclaw.tools.builtin.bash import without_control_credentials
 
 from .config import AppConfig, AppConfigError, SkillEnvMode, SkillsIndex
+from .project import STEP_RUNNER
 from .sandbox import SandboxBinding
 
 if TYPE_CHECKING:
@@ -137,6 +138,7 @@ def build_skill_env(
                 limits=InstallLimits(total_s=config.skill_env_install_timeout_s),
             ),
             pyproject=config.repo_root() / "pyproject.toml",
+            step_runner=_step_runner(config),
         )
     made = SkillEnvBinding(
         mode=config.skill_env,
@@ -153,6 +155,12 @@ def build_skill_env(
     if config.permission_mode is PermissionMode.READ_ONLY:
         return made
     return dataclasses.replace(made, annotate=_annotator(made))
+
+
+def _step_runner(config: AppConfig) -> str | None:
+    """The step runner's path in this deployment's skill tree, if it has one."""
+    runner = config.skills_root().joinpath(*STEP_RUNNER)
+    return str(runner) if runner.is_file() else None
 
 
 def _annotator(binding: SkillEnvBinding) -> Annotator:

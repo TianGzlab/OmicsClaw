@@ -278,7 +278,7 @@
  },
  {
   "name": "task",
-  "description": "Hand a self-contained sub-task to a specialised agent that runs with its own context and its own narrowed tool set, and return only its conclusion.\nUse it when a sub-task is well defined and its intermediate steps are noise for this conversation — a wide search, a survey of many files, a self-checking analysis. Do not use it for a step you can do in one or two tool calls yourself.\nThe sub-agent cannot see this conversation, cannot ask you anything, and reports once when it is done. Available sub-agents:\n- general-purpose: General-purpose agent for open-ended sub-tasks: researching a question across many files, running a multi-step analysis to a conclusion, or any search where you are not confident the first few attempts will find the answer. Runs on the same model as the main agent with every tool except task, which would let a sub-agent start sub-agents of its own; plan_write, which acts on the calling conversation's plan; memory_write, which writes memory that every later conversation reads.",
+  "description": "Hand a self-contained sub-task to a specialised agent that runs with its own context and its own narrowed tool set, and return only its conclusion.\nUse it when a sub-task is well defined and its intermediate steps are noise for this conversation — a wide search, a survey of many files, a self-checking analysis. Do not use it for a step you can do in one or two tool calls yourself.\nThe sub-agent cannot see this conversation, cannot ask you anything, and reports once when it is done. Available sub-agents:\n- general-purpose: General-purpose agent for open-ended sub-tasks: researching a question across many files, running a multi-step analysis to a conclusion, or any search where you are not confident the first few attempts will find the answer. Runs on the same model as the main agent with every tool except task, which would let a sub-agent start sub-agents of its own; plan_write, which acts on the calling conversation's plan; memory_write, which writes memory that every later conversation reads.\n- module-reviewer: Reviews one analysis module after it has been replayed and before the user accepts it: reads its step files, outputs, manifest and report, and returns VERDICT: APPROVE or VERDICT: REVISE with findings. Read-only.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -286,7 +286,8 @@
      "type": "string",
      "description": "Which sub-agent to run.",
      "enum": [
-      "general-purpose"
+      "general-purpose",
+      "module-reviewer"
      ]
     },
     "prompt": {

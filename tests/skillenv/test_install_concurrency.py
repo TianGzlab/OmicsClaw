@@ -42,7 +42,7 @@ def test_two_coroutines_install_once(tmp_path):
 
     async def main():
         with use_tool_context(approval=lambda request: ApprovalDecision(approved=True)):
-            payload = json.dumps({"skill": SKILL, "packages": ["oc-leaf"]})
+            payload = json.dumps({"skills": [SKILL], "packages": ["oc-leaf"]})
             return await asyncio.gather(h.tool.execute(payload), h.tool.execute(payload))
 
     outputs = asyncio.run(asyncio.wait_for(main(), 300))
@@ -65,7 +65,7 @@ own = Path(sys.argv[1])
 h = harness(own, pip_conf(own / "pip.conf", find_links=[{wheels!r}]), root=Path({root!r}))
 async def main():
     with use_tool_context(approval=lambda request: ApprovalDecision(approved=True)):
-        return await h.tool.execute(json.dumps({{"skill": "oc-skill", "packages": ["oc-leaf"]}}))
+        return await h.tool.execute(json.dumps({{"skills": ["oc-skill"], "packages": ["oc-leaf"]}}))
 output = asyncio.run(main())
 print(json.dumps({{"first": output.splitlines()[0], "installs": h.runner.stages().count("install")}}))
 """

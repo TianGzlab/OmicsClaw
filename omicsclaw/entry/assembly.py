@@ -152,6 +152,7 @@ from .memory import (
     prepare_memory,
 )
 from .planning import build_plan_book
+from .project import step_runner_line
 from .sandbox import (
     SandboxBinding,
     bash_policy,
@@ -227,13 +228,16 @@ should replace this with what those two actually get.
 
 SAFETY_RULES = """\
 1. Genetic data never leaves this machine — all processing is local.
-2. Every report includes this disclaimer verbatim: "OmicsClaw is a \
+2. Every report, meaning each module's REPORT file and any summary of \
+results you give, includes this disclaimer verbatim: "OmicsClaw is a \
 research and educational tool for multi-omics analysis. It is not a \
 medical device and does not provide clinical diagnoses. Consult a \
 domain expert before making decisions based on these results."
-3. Use SKILL.md methodology only — never invent bioinformatics \
-parameters, thresholds, or gene associations.
-4. Warn before overwriting existing reports in an output directory."""
+3. When a skill does not give a parameter, threshold or cutoff, write \
+the value you chose and the reason for it in the step. Never invent \
+gene associations.
+4. Warn before overwriting existing results, and tell the user before \
+revising an accepted module."""
 """The agent's safety rules, and the only copy of them.
 
 :data:`CONTRACT_FILE` does not repeat these rules. They are a constant
@@ -546,17 +550,21 @@ def _environment_source(config: AppConfig) -> Section:
     reason is why the field is here at all.
 
     Rendered fresh each turn, like every other section: a process that
-    runs past midnight tells the model the new date.
+    runs past midnight tells the model the new date. When the skill tree
+    has a step runner, the section ends with the command that calls it;
+    the contract refers to that line instead of naming a path.
     """
 
     def read() -> str:
-        return "\n".join(
-            (
-                f"- Workspace: {config.workspace}",
-                f"- Platform: {platform.system()} ({sys.platform})",
-                f"- Today: {date.today().isoformat()}",
-            )
-        )
+        lines = [
+            f"- Workspace: {config.workspace}",
+            f"- Platform: {platform.system()} ({sys.platform})",
+            f"- Today: {date.today().isoformat()}",
+        ]
+        runner = step_runner_line(config)
+        if runner is not None:
+            lines.append(runner)
+        return "\n".join(lines)
 
     return Section("environment", "## Environment", read)
 

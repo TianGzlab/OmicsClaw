@@ -32,11 +32,11 @@ skill，读它的说明，再在你自己的环境里（本机或服务器）运
 
 ## 最新动态
 
+- agent 现在在课题模块里做分析：它写调用 skill 函数库的步骤文件，步骤执行器在新的 kernel 里运行这些步骤，记下每个输入、输出和 skill 调用；一个模块要经过重放、只读审查和你的确认才算验收。目前有 5 个单细胞 skill 带函数库（[0070](docs/plans/0070-notebook-skill-runtime.md)）。
 - agent 框架已经重写，入口改为 `oc cli`、`oc desktop` 和 `oc channel` 三个，`oc interactive`、`oc tui`、`oc onboard`、`oc run` 等旧命令已移除（[重写进展](docs/FRAMEWORK-REBUILD.md)）。
 - 桌面 App 已能连接重写后的后端，支持经 SSH 的远程模式，也能在 App 里配置模型（[0064](docs/plans/0064-desktop-app-alignment.md)、[0065](docs/plans/0065-desktop-management-pages-and-retirement.md)、[0066](docs/plans/0066-desktop-remote-mode.md)）。
 - agent 会告诉你当前环境缺哪些 skill 需要的包；设置 `OMICSCLAW_SKILL_ENV=install` 后，它可以在你批准后把这些包装进独立的 overlay 环境，基础环境保持不变（[0061](docs/plans/0061-adaptive-env-provisioning.md)）。
 - `run_skill` 把一个 skill 的多种方法作为并行、带打分的试验来运行，并针对每个数据集调参，目前支持的是 `spatial-domains`（[0056](docs/plans/0056-ensemble-foundation.md)、[0057](docs/plans/0057-ensemble-tuning.md)）。
-- `oc channel` 支持 Telegram、飞书、Slack、Discord、钉钉、QQ 和 Email；WeChat/WeCom 适配器因为不校验收到的消息，已经下线。
 
 更早的记录见 [CHANGELOG.md](CHANGELOG.md)（英文）。
 

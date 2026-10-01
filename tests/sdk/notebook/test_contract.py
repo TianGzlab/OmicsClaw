@@ -46,3 +46,47 @@ def test_every_event_carries_the_common_fields_and_its_own():
         assert len(fields) == len(set(fields)), event
         assert not {"v", "event", "at"} & set(fields), event
     assert _ledger.VERSION == 1
+
+
+def test_the_framework_reads_the_layout_the_runner_writes():
+    """``omicsclaw/entry/project.py`` spells the layout as literals; they must equal the runner's."""
+    from omicsclaw.entry import project
+
+    assert project.MODULE_DIR_PATTERN == contract.LAYOUT["module_dir"]
+    assert project.MANIFEST_FILE == contract.LAYOUT["manifest"]
+    assert project.REPORT_FILE == contract.LAYOUT["report"]
+    assert project.RESULTS_DIR + "/" == contract.LAYOUT["archive_dir"].split("_archive")[0]
+    assert project.MANIFEST_STATUS_KEY in contract.MANIFEST_SCHEMA["required"]
+    assert set(contract.MANIFEST_SCHEMA["status_values"]) == {"draft", "replayed", "reviewed", "accepted"}
+    assert REPO.joinpath("skills", *project.STEP_RUNNER).is_file()
+
+
+def _runner_commands_and_flags() -> tuple[set[str], set[str]]:
+    import argparse
+
+    from skills._sdk.notebook import run
+
+    parser = run.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    flags = {
+        option
+        for subparser in sub.choices.values()
+        for action in subparser._actions
+        for option in action.option_strings
+    }
+    return set(sub.choices), flags
+
+
+def test_every_runner_command_the_contract_names_exists():
+    import re
+
+    text = (REPO / "OMICSCLAW.md").read_text(encoding="utf-8")
+    section = text[text.index("## Projects, modules and steps"):text.index("## Skills")]
+    table = section[section.index("### Running steps"):section.index("### Finishing a module")]
+    named = {re.match(r"\| `(\w+)", line).group(1) for line in table.splitlines() if line.startswith("| `")}
+    runner_text = section[section.index("### Running steps"):]
+    flags = set(re.findall(r"(--[a-z][a-z-]*)", runner_text))
+    commands, known_flags = _runner_commands_and_flags()
+    assert named, "the contract's command table is empty"
+    assert named <= commands, named - commands
+    assert flags <= known_flags, flags - known_flags

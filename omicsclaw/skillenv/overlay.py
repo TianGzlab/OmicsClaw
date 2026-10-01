@@ -497,7 +497,8 @@ class InstallLimits:
 class OverlayRequest:
     """What one overlay is built for."""
 
-    skill: str
+    skills: tuple[str, ...]
+    """The skills whose ``## Dependencies`` the names come from."""
     names: tuple[str, ...]
     """The declared names asked for."""
     specs: tuple[str, ...]
@@ -889,7 +890,7 @@ class OverlayBuilder:
 
         meta = {
             "key": key,
-            "skill": request.skill,
+            "skills": list(request.skills),
             "packages": list(request.names),
             "requested_specs": list(request.specs),
             "installed": [artifact.as_record() for artifact in installed],
