@@ -182,7 +182,7 @@ def step_entry(module: Module, state: StepState) -> dict:
     }
 
 
-def _parse_time(value: str | None) -> float | None:
+def parse_time(value: str | None) -> float | None:
     if not value:
         return None
     try:
@@ -231,7 +231,7 @@ def derive_status(module: Module, manifest: dict, states: list[StepState]) -> st
     )
     if not replayed:
         return "draft"
-    if approving_review_after(module, _parse_time(replay.get("at"))) is not None:
+    if approving_review_after(module, parse_time(replay.get("at"))) is not None:
         return "reviewed"
     return "replayed"
 

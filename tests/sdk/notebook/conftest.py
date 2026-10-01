@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from skills._sdk.notebook import _executor, _skills
+from skills._sdk.notebook import _acceptance, _executor, _skills
 from skills._sdk.notebook._runners import StepOutcome
 
 
@@ -96,6 +96,23 @@ class Project:
     def run(self, *targets: str, force: bool = False) -> int:
         self.lines.clear()
         return _executor.run_targets(self.root, list(targets), force=force, runner=self.runner, out=self.out)
+
+    def replay(self, target: str, *, new_interpreter: str | None = None) -> int:
+        self.lines.clear()
+        return _executor.replay(self.root, target, new_interpreter=new_interpreter, runner=self.runner, out=self.out)
+
+    def accept(self, target: str, *, review: str | None = None, skip_review: str | None = None) -> int:
+        self.lines.clear()
+        return _acceptance.accept(self.root, target, review=review, skip_review=skip_review, out=self.out)
+
+    def revise(self, target: str) -> int:
+        self.lines.clear()
+        return _acceptance.revise(self.root, target, out=self.out)
+
+    def manifest(self, module: str) -> dict:
+        import json
+
+        return json.loads((self.root / "results" / module / "provenance" / "manifest.json").read_text())
 
     def status(self, target: str | None = None) -> str:
         self.lines.clear()

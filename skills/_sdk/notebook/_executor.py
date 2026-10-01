@@ -416,3 +416,105 @@ def new_module(root: Path, slug: str, *, out: Out = _print) -> int:
             "<checkout>/skills."
         )
     return EXIT_OK
+
+
+def _output_files(module: Module) -> dict[str, str]:
+    """``figures/``, ``tables/`` and ``intermediate/`` files with their sha256, relative to the results."""
+    found: dict[str, str] = {}
+    for folder in ("figures", "tables", "intermediate"):
+        base = module.results_dir / folder
+        if not base.is_dir():
+            continue
+        for file in _hashing.directory_files(base):
+            if file.name.startswith(".tmp-"):
+                continue
+            found[file.relative_to(module.results_dir).as_posix()] = _hashing.sha256_file(file)
+    return found
+
+
+def replay(root: Path, target: str, *, new_interpreter: str | None = None, runner: StepRunner | None = None,
+           wait: float = 0.0, out: Out = _print) -> int:
+    """``replay``: rerun every step of a module in fresh kernels, validate last, and record the result."""
+    try:
+        module, step = _layout.resolve_target(root, target)
+    except LayoutError as exc:
+        out(str(exc))
+        return EXIT_USAGE
+    if step is not None:
+        out("replay takes a module, not a step file: replay analysis/" + module.name)
+        return EXIT_USAGE
+    problem = _check_runnable(module, out)
+    if problem is not None:
+        return problem
+    validate = module.validate_steps()
+    if len(validate) != 1:
+        out(
+            f"module {module.name} needs exactly one validate step (<k>_validate.py) before replay; "
+            f"found {len(validate)}"
+        )
+        return EXIT_USAGE
+    problem = _kernel_check(runner, out)
+    if problem is not None:
+        return problem
+    try:
+        with hold(module.lock_path, command="replay", wait=wait):
+            return _replay_locked(module, new_interpreter, runner or PythonKernelRunner(), out)
+    except LockBusy as busy:
+        return _locked(module, busy, out)
+
+
+def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunner, out: Out) -> int:
+    previous = _manifest.load(module) or {}
+    interpreter = _manifest.interpreter_info()
+    recorded = previous.get("interpreter")
+    changed_from = None
+    if recorded and not _manifest.same_interpreter(recorded, interpreter):
+        if not new_interpreter:
+            out(
+                f"module {module.name} was run with {recorded.get('path')}; this replay would use "
+                f"{interpreter['path']}. Replay with the recorded interpreter, or confirm the change with "
+                '--new-interpreter "<reason>".'
+            )
+            return EXIT_USAGE
+        changed_from = recorded.get("path")
+        out(f"note: replaying {module.name} with {interpreter['path']} instead of {changed_from}: {new_interpreter}")
+    before = _output_files(module)
+    steps = module.steps()
+    hashes = {step.name: _hashing.sha256_file(step) for step in steps}
+    written: set[str] = set()
+    status_value = "ok"
+    for index, step in enumerate(steps):
+        result = execute_step(module, step, mode="replay", runner=runner, interpreter=interpreter,
+                              changed_from=changed_from, reason="replay")
+        out(format_step(module, result))
+        written.update(str(o.get("path")) for o in result.run.outputs)
+        if result.outcome.status != "ok":
+            status_value = "failed"
+            rest = [p.name for p in steps[index + 1:]]
+            if rest:
+                out(f"[{module.name}] replay stopped; not run: {', '.join(rest)}")
+            break
+    after = _output_files(module)
+    changed = sorted(path for path in written if path in after and before.get(path) != after[path])
+    orphans = sorted(path for path in after if path not in written) if status_value == "ok" else []
+    record = {
+        "at": _ledger.iso(_ledger.utc_now()),
+        "status": status_value,
+        "interpreter": interpreter["path"],
+        "new_interpreter_reason": new_interpreter if changed_from else None,
+        "step_sha256": hashes,
+        "changed_outputs": changed,
+        "orphan_outputs": orphans,
+    }
+    manifest = _manifest.rebuild(module, interpreter=interpreter, replay=record)
+    stitch(module, manifest)
+    if status_value != "ok":
+        out(f"[{module.name}] replay failed; status: {manifest['status'].upper()}")
+        return EXIT_FAILED
+    out(f"[{module.name}] replay ok: {len(steps)} steps, validate last")
+    if changed:
+        out("  changed outputs: " + _join(changed))
+    if orphans:
+        out("  orphan outputs (not written by this replay; the report must not rely on them): " + _join(orphans))
+    out(f"  status: {manifest['status'].upper()}")
+    return EXIT_OK

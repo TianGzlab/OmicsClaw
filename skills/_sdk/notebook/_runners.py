@@ -144,13 +144,14 @@ class PythonKernelRunner:
             timeout=None,
             startup_timeout=self.startup_timeout,
             allow_errors=False,
+            shutdown_kernel="immediate",
             record_timing=True,
             resources={"metadata": {"path": str(cwd)}},
         )
         started = time.perf_counter()
         with _environ(isolated):
             try:
-                client.execute(cwd=str(cwd), env=kernel_env)
+                client.execute(cwd=str(cwd), env=kernel_env, cleanup_kc=True)
                 status, error = "ok", None
             except CellExecutionError:
                 status, error = "failed", first_error(notebook)
@@ -159,6 +160,9 @@ class PythonKernelRunner:
                 error = first_error(notebook) or {
                     "cell": None, "ename": "DeadKernelError", "evalue": str(exc), "traceback": "",
                 }
+            finally:
+                if manager.has_kernel:
+                    manager.shutdown_kernel(now=True)
         seconds = time.perf_counter() - started
         if status == "failed" and error is None:
             error = {"cell": None, "ename": "RuntimeError", "evalue": "the step failed", "traceback": ""}

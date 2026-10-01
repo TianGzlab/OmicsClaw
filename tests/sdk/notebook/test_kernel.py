@@ -124,3 +124,16 @@ def test_the_kernel_exits_after_the_runner_is_killed(project):
     if alive:
         os.kill(kernel, signal.SIGKILL)
     assert not alive, "the kernel outlived the runner by more than 10 s"
+
+
+def test_no_kernel_is_left_running_after_a_step(project):
+    root, _home, _env, runner = project
+    _step(root, "01_pid.py", "# %%\nimport os, pathlib\npathlib.Path('kernel.pid').write_text(str(os.getpid()))\n")
+    proc = runner("run", "analysis/01_k")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    kernel = int((root / "kernel.pid").read_text())
+    deadline = time.monotonic() + 5
+    while _alive(kernel) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not _alive(kernel)
+    assert "Parent appears to have exited" not in proc.stderr

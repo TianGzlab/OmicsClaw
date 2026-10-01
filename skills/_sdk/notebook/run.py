@@ -6,6 +6,8 @@ Call it from the project root (the folder holding ``analysis/`` and
     python <skills>/_sdk/notebook/run.py new clustering
     python <skills>/_sdk/notebook/run.py run analysis/03_clustering
     python <skills>/_sdk/notebook/run.py status
+    python <skills>/_sdk/notebook/run.py replay analysis/03_clustering
+    python <skills>/_sdk/notebook/run.py accept analysis/03_clustering --review results/03_clustering/reviews/2026-10-01_review.md
 
 Locks are ``fcntl.flock`` files inside ``results/``; they do not exclude
 reliably across network filesystems or Docker Desktop's macOS file sharing.
@@ -27,7 +29,7 @@ _SDK_ANCHOR = next(
 if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
-from skills._sdk.notebook import _executor, _layout  # noqa: E402
+from skills._sdk.notebook import _acceptance, _executor, _layout  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +52,56 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = commands.add_parser("status", help="show every module's status and stale steps")
     status.add_argument("target", nargs="?", help="one module; default: all of them")
+
+    replay = commands.add_parser("replay", help="rerun every step of a module from scratch, validate last")
+    replay.add_argument("target", metavar="module", help="analysis/<NN_slug>")
+    replay.add_argument("--new-interpreter", metavar="REASON",
+                        help="replay with this interpreter although the module was run with another")
+    replay.add_argument("--wait", type=float, default=0.0, metavar="SECONDS", help="wait this long for a busy module")
+
+    accept = commands.add_parser("accept", help="record the user's acceptance and freeze the module")
+    accept.add_argument("target", metavar="module", help="analysis/<NN_slug>")
+    how = accept.add_mutually_exclusive_group(required=True)
+    how.add_argument("--review", metavar="FILE", help="the approving review in results/<NN_slug>/reviews/")
+    how.add_argument("--skip-review", metavar="WORDS", help="the user's words asking to skip the review")
+    accept.add_argument("--wait", type=float, default=0.0, metavar="SECONDS", help="wait this long for a busy module")
+
+    revise = commands.add_parser("revise", help="snapshot an accepted module into baseline/ so it can change")
+    revise.add_argument("target", metavar="module", help="analysis/<NN_slug>")
+    revise.add_argument("--wait", type=float, default=0.0, metavar="SECONDS", help="wait this long for a busy module")
+
+    api = commands.add_parser("api", help="check or rewrite the generated ## API section of a skill's SKILL.md")
+    api.add_argument("skill_dir", metavar="skill-dir", help="the skill's directory, or its name")
+    mode = api.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true", help="exit 1 when the section does not match _api.py")
+    mode.add_argument("--write", action="store_true", help="regenerate the section from _api.py")
     return parser
+
+
+def _api(skill: str, *, write: bool) -> int:
+    from skills._sdk.notebook import _apidoc, _skills
+
+    path = Path(skill)
+    if not path.is_dir():
+        try:
+            path = _skills.skill_dir(skill)
+        except LookupError as exc:
+            print(exc)
+            return 2
+    try:
+        if write:
+            changed = _apidoc.write(path)
+            print(f"{path / 'SKILL.md'}: API section {'rewritten' if changed else 'already current'}")
+            return 0
+        problems = _apidoc.check(path)
+    except _apidoc.ApiError as exc:
+        print(exc)
+        return 1
+    for problem in problems:
+        print(f"{path.name}: {problem}")
+    if not problems:
+        print(f"{path.name}: API section matches _api.py")
+    return 1 if problems else 0
 
 
 def _root(target: str | None) -> Path:
@@ -70,6 +121,15 @@ def main(argv: list[str] | None = None) -> int:
         return _executor.run_targets(_root(args.targets[0]), args.targets, force=args.force, wait=args.wait)
     if args.command == "status":
         return _executor.status(_root(args.target), args.target)
+    if args.command == "replay":
+        return _executor.replay(_root(args.target), args.target, new_interpreter=args.new_interpreter, wait=args.wait)
+    if args.command == "accept":
+        return _acceptance.accept(_root(args.target), args.target, review=args.review,
+                                  skip_review=args.skip_review, wait=args.wait)
+    if args.command == "revise":
+        return _acceptance.revise(_root(args.target), args.target, wait=args.wait)
+    if args.command == "api":
+        return _api(args.skill_dir, write=args.write)
     raise AssertionError(args.command)
 
 
