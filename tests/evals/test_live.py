@@ -359,3 +359,40 @@ def test_the_command_line_runs_as_a_module(tmp_path):
     assert done.stdout.startswith("overall: 100% -> 100%")
     assert "RuntimeWarning" not in done.stderr
     assert Path(tmp_path / "a.json").is_file()
+
+
+# ---- the step runner ---------------------------------------------------------------------------
+
+RUNNER_SCRIPT = REPO_ROOT / "skills" / "_sdk" / "notebook" / "run.py"
+
+
+@pytest.mark.parametrize(
+    ("command", "approved"),
+    [
+        (f"python {RUNNER_SCRIPT} new clustering", True),
+        (f"{sys.executable} {RUNNER_SCRIPT} run analysis/01_clustering", True),
+        ("python -m skills._sdk.notebook status", True),
+        (f"python {RUNNER_SCRIPT} run analysis/01_x && pip install foo", False),
+        (f"python {RUNNER_SCRIPT} api skills/x --write", False),
+    ],
+)
+def test_the_step_runner_is_approved_as_one_plain_command(tmp_path, command, approved):
+    assert _bash(tmp_path, command)[0] is approved
+
+
+def test_a_step_ledger_names_the_executed_skill_and_its_keyword_arguments(tmp_path):
+    ledger = tmp_path / "results" / "01_annotation" / "provenance" / "runs" / "01_annotate" / "r.jsonl"
+    ledger.parent.mkdir(parents=True)
+    events = [
+        {"v": 1, "event": "skill_load", "at": "2026-10-01T00:00:00.000Z", "skill": "sc-cell-annotation", "stub": False},
+        {"v": 1, "event": "skill_call", "at": "2026-10-01T00:00:01.000Z", "skill": "sc-cell-annotation",
+         "function": "annotate", "args": {"adata": "AnnData(10, 5)", "method": "celltypist"}, "stub": False},
+    ]
+    ledger.write_text("".join(json.dumps(e) + "\n" for e in events))
+    seed = Seed("singlecell__cell_annotation", "singlecell", "q", ("sc-cell-annotation",), "route",
+                inputs=("data/pbmc.h5ad",), expected_args=(("--method", "celltypist"),))
+    runs = (SkillRun("sc-cell-annotation", "singlecell", "sc-cell-annotation.annotate({...})", stubbed=False,
+                     function="annotate", source="ledger", args=events[1]["args"]),)
+    verdict = judge(make_result(workspace=tmp_path, skill_runs=runs), seed, [_reply("sc-cell-annotation")], [])
+    assert verdict.executed_skill == "sc-cell-annotation" and verdict.outcome == "correct"
+    assert verdict.args_ok is True

@@ -47,6 +47,7 @@ from omicsclaw.tools import ApprovalDecision
 from .assertions import Failure
 from .case import ApprovalRecord, Case, FsChange, Headroom, Result, SkillRun
 from .hermetic import hermetic_env
+from .ledger import SKILL_STUBS_ENV, read_ledgers
 from .stubs import REPO_ROOT, stubbed_skill_runs
 
 __all__ = [
@@ -68,6 +69,8 @@ EVAL_MODEL = "claude-sonnet-4-5"
 
 SESSION_ID = "eval"
 CASE_TIMEOUT_S = 30.0
+STUBS_DIR = "stubs"
+"""The folder under the case's temporary directory that holds its skill stubs."""
 OUTPUT_RESERVE = 1024
 """The output reserve of the window a compaction case is given."""
 
@@ -225,6 +228,19 @@ def _check_trigger(
     )
 
 
+def _write_stubs(case: Case, tmp_path: Path) -> Path | None:
+    """Put the case's stub modules and stub results where a step run finds them."""
+    if not case.skill_modules and not case.skill_stubs:
+        return None
+    folder = tmp_path / STUBS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    for skill, module in case.skill_modules.items():
+        (folder / f"{skill}.py").write_bytes(Path(module).read_bytes())
+    for skill, stub in case.skill_stubs.items():
+        stub.dump(folder / f"{skill}.json")
+    return folder
+
+
 def _decision(answer: bool | ApprovalDecision) -> ApprovalDecision:
     if isinstance(answer, ApprovalDecision):
         return answer
@@ -243,7 +259,16 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
     headroom (``headroom_infeasible``), a compaction written back before
     the headroom's trigger call (``headroom_missed``), a run longer than *timeout_s*
     (``case_timeout``) and a stubbed skill script that is missing or
-    called without ``--output`` (``stub_target_missing``).
+    called without ``--output``, or a step's stub that names a function
+    the real skill lacks (``stub_target_missing``).
+
+    Every case runs with ``PYTHONDONTWRITEBYTECODE=1``. A case with skill
+    stubs gets them written under ``<tmp_path>/stubs`` and named in
+    ``OMICSCLAW_SKILL_STUBS``. After the run the step ledgers in the
+    workspace are read: each recorded skill call or CLI run joins
+    :attr:`~omicsclaw.evals.case.Result.skill_runs`, and a skill a step
+    loaded without a stub while stubs were set is a soft
+    ``skill_ran_unstubbed``.
 
     :param case: The case.
     :param tmp_path: An empty directory the run may use.
@@ -259,6 +284,10 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
         directory.mkdir(parents=True, exist_ok=True)
     _write(workspace, case.files)
     _write(outside, case.outside_files)
+    stubs = _write_stubs(case, tmp_path)
+    env = {"PYTHONDONTWRITEBYTECODE": "1", **case.env}
+    if stubs is not None:
+        env[SKILL_STUBS_ENV] = str(stubs)
 
     provider = case.provider()
     if provider.turn_index != 0 or provider.side_calls:
@@ -282,7 +311,7 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
     queue = [] if policy is not None else list(case.approvals)
 
     started = time.monotonic()
-    with hermetic_env(home, case.env, block_network=not case.network):
+    with hermetic_env(home, env, block_network=not case.network):
         before = _snapshot(tmp_path)
         config = eval_config(case, workspace)
         app = build_app(
@@ -421,6 +450,15 @@ async def arun_case(case: Case, tmp_path: Path, *, timeout_s: float = CASE_TIMEO
         if not run.stubbed:
             warnings.append(
                 Failure("skill_ran_unstubbed", f"{run.skill}: {run.command}", is_soft=True)
+            )
+    ledgers = read_ledgers(workspace, app.skills)
+    skill_runs.extend(ledgers.runs)
+    for line in ledgers.missing:
+        failures.append(Failure("stub_target_missing", line))
+    if stubs is not None:
+        for skill in ledgers.unstubbed:
+            warnings.append(
+                Failure("skill_ran_unstubbed", f"{skill}: a step loaded the real library", is_soft=True)
             )
 
     draft = Result(

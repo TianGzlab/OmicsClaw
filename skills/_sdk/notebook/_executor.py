@@ -391,6 +391,10 @@ def new_module(root: Path, slug: str, *, out: Out = _print) -> int:
     if not _layout.SLUG_RE.match(slug):
         out(f"{slug!r} is not a module slug: use lowercase letters, digits and underscores")
         return EXIT_USAGE
+    if _layout.NUMBERED_SLUG_RE.match(slug):
+        out(f"{slug!r} starts with a module number; give the slug alone (for example `new {slug[3:]}`), "
+            "and `new` assigns the number")
+        return EXIT_USAGE
     had_results = (root / "results").is_dir()
     try:
         with hold(root / "results" / ".project.lock", command="new", wait=10.0):

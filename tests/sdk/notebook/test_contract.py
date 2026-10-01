@@ -90,3 +90,27 @@ def test_every_runner_command_the_contract_names_exists():
     assert named, "the contract's command table is empty"
     assert named <= commands, named - commands
     assert flags <= known_flags, flags - known_flags
+
+
+def test_the_eval_reads_the_ledger_the_runner_writes():
+    from omicsclaw.evals import ledger
+
+    assert ledger.SKILL_STUBS_ENV == contract.ENVIRONMENT["skill_stubs"]
+    assert ledger.LEDGER_GLOB == f"results/*/{contract.LAYOUT['runs']}/*/*.jsonl"
+    for event, fields in ledger.EVENT_FIELDS.items():
+        assert set(fields) <= set(contract.LEDGER_EVENTS[event]), event
+
+
+def test_a_cli_stub_result_is_the_json_run_cli_reads(tmp_path):
+    """``run_cli`` in stub mode reads ``omicsclaw.evals.StubResult.dump``'s keys."""
+    import json
+
+    from omicsclaw.evals import StubResult
+
+    StubResult(stdout="x\n", exit_code=0, files={"a.txt": "b"}, binary_files=("c.png",)).dump(tmp_path / "s.json")
+    written = set(json.loads((tmp_path / "s.json").read_text()))
+    read = {"stdout", "exit_code", "files", "binary_files"}
+    assert read <= written
+    source = (REPO / "skills" / "_sdk" / "notebook" / "_skills.py").read_text(encoding="utf-8")
+    for key in read:
+        assert f'"{key}"' in source, key

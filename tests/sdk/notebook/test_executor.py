@@ -209,6 +209,12 @@ def test_new_rejects_a_bad_slug(project):
     assert _executor.new_module(project.root, "Bad-Name", out=project.out) == 2
 
 
+def test_new_rejects_a_slug_that_already_has_a_number(project):
+    assert _executor.new_module(project.root, "01_qc", out=project.out) == 2
+    assert "`new qc`" in project.text
+    assert not (project.root / "analysis").exists()
+
+
 def test_status_without_modules(project):
     assert "No modules yet" in project.status()
 

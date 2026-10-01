@@ -96,7 +96,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e . pytest
+      # nbclient and ipykernel: the skill_routing cases run the step runner for real.
+      - run: pip install -e . pytest nbclient ipykernel
       - name: Run the eval dataset
         run: pytest tests/evals/dataset -m scripted_eval -p no:cacheprovider
         env:

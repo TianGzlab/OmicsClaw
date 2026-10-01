@@ -19,6 +19,8 @@ MODULE_RE = re.compile(LAYOUT["module_dir"])
 STEP_RE = re.compile(LAYOUT["step_file"])
 VALIDATE_RE = re.compile(LAYOUT["validate_step"])
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+NUMBERED_SLUG_RE = re.compile(r"^\d{2}_")
+"""A slug that already carries a module number, which ``new`` would double (``01_01_qc``)."""
 
 PROJECT_DIRS = (
     "analysis",

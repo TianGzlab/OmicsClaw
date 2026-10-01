@@ -239,17 +239,20 @@ class MaxToolCalls:
 
 @dataclass(frozen=True)
 class SkillInvoked:
-    """A script of *skill* was run through ``bash``, stubbed or not.
+    """*skill* was used, stubbed or not: ``bash`` ran its script, or a step ledger recorded a call or CLI run.
 
-    With *domain*, the skill's domain in the index must match too.
+    With *domain*, the skill's domain in the index must match too. With
+    *function*, a recorded call of that function must be among the uses.
     """
 
     skill: str
     domain: str | None = None
+    function: str | None = None
 
     @property
     def name(self) -> str:
-        return f"SkillInvoked({self.skill})"
+        suffix = f".{self.function}" if self.function else ""
+        return f"SkillInvoked({self.skill}{suffix})"
 
     def check(self, result: Result) -> Failure | None:
         runs = [run for run in result.skill_runs if run.skill == self.skill]
@@ -261,6 +264,9 @@ class SkillInvoked:
                 self.name,
                 f"expected domain {self.domain!r}, got {sorted({r.domain for r in runs})}",
             )
+        if self.function is not None and not any(run.function == self.function for run in runs):
+            called = sorted({run.function for run in runs if run.function})
+            return Failure(self.name, f"no call of {self.function}; calls seen: {called}")
         return None
 
 
