@@ -42,8 +42,47 @@ jobs:
           tests/observability tests/schema tests/skills tests/subagent
           tests/sandbox tests/skillenv tests/mcp tests/sdk tests/evals
           tests/launch tests/attachments tests/test_*.py
-          -m "not slow and not demo and not eval and not scripted_eval"
+          -m "not slow and not demo and not eval and not scripted_eval and not skill_example"
           -p no:cacheprovider
+
+  skill-examples:
+    name: Skill examples (gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMICSCLAW_DEMO_DIR: ${{ github.workspace }}/.demo-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      # The unit-test job's packages plus what the pilot skills compute with.
+      - run: pip install -e . pytest numpy "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel "scanpy[leiden]" umap-learn
+      # load_demo looks in OMICSCLAW_DEMO_DIR first; fill it once and keep it between runs.
+      - uses: actions/cache@v4
+        with:
+          path: .demo-data
+          key: demo-data-pbmc3k-v1
+      - name: Fetch the demo datasets
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import scanpy as sc
+          folder = Path(os.environ["OMICSCLAW_DEMO_DIR"])
+          folder.mkdir(parents=True, exist_ok=True)
+          sc.settings.datasetdir = folder
+          for name, loader in (("pbmc3k_raw", sc.datasets.pbmc3k), ("pbmc3k_processed", sc.datasets.pbmc3k_processed)):
+              if not (folder / f"{name}.h5ad").is_file():
+                  adata = loader()
+                  if not (folder / f"{name}.h5ad").is_file():
+                      adata.write_h5ad(folder / f"{name}.h5ad")
+          PY
+      - name: Run each skill's example step through the step runner
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m skill_example -p no:cacheprovider
 
   eval:
     name: Scripted eval suite (gate)

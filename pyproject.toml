@@ -376,7 +376,7 @@ minversion = "7.0"
 pythonpath = ["."]
 python_files = "test_*.py"
 python_functions = "test_*"
-addopts = "-v --import-mode=importlib -m 'not slow and not demo and not eval'"
+addopts = "-v --import-mode=importlib -m 'not slow and not demo and not eval and not skill_example'"
 testpaths = [
     "tests",
     "skills/spatial/spatial-preprocess/tests",
@@ -412,6 +412,7 @@ markers = [
     "demo: Skill demo-mode integration tests (excluded by default; Skill-local demo tests are classified during collection)",
     "eval: real-LLM evals (network and API key required); manual or nightly, never gates a PR (excluded by default)",
     "scripted_eval: deterministic scripted agent evals (hermetic, no network); run on every PR by the eval job",
+    "skill_example: runs a pilot skill's examples/example_step.py through the step runner on demo data (excluded by default; CI job skill-examples)",
 ]
 filterwarnings = [
     "ignore::FutureWarning",

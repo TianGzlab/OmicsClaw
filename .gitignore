@@ -34,6 +34,9 @@ ENV/
 credentials.json
 token.json
 
+# Parity snapshots of the pilot skills' CLIs (machine-specific, plan 0070)
+tests/parity/golden/
+
 # OmicsClaw outputs (large, generated)
 output/
 outputs/

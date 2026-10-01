@@ -45,12 +45,12 @@ CONTRACTS = {
 
 STEP_API = {
     ("skills._sdk.notebook", "read_input"),
-    ("skills._sdk.notebook", "write_output"),
-    ("skills._sdk.notebook", "load_skill"),
-    ("skills._sdk.notebook", "load_demo"),
     ("skills._sdk.notebook", "run_cli"),
 }
-"""Called by the step files the agent writes in a project, outside this tree; exempt from the has-a-user rule."""
+"""Called by the step files the agent writes in a project, outside this tree; exempt from the has-a-user rule.
+
+The other three step functions are used by the skills' examples, CLI scripts and the template.
+"""
 
 R_SCRIPTS = {
     "bulkrna_combat.R", "bulkrna_deseq2.R", "bulkrna_enrichment.R", "bulkrna_survival.R",
