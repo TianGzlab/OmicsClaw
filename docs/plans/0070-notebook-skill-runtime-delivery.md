@@ -449,3 +449,11 @@ O7-3 父进程看门狗。
 - 改动：`skills/_sdk/notebook/_watchdog.py` 新增 `_terminal_foreground()`，打开 `/dev/tty`，用 `os.tcgetpgrp` 判断本进程组是不是终端的前台组。`abandoned()` 只在组长已退出、而且本进程组不是终端前台组时才判为被遗弃，父进程的检查不变。`bash` 工具用 `start_new_session=True` 起 shell，sandbox 的 `docker exec` 不分配终端，这两条路径都打不开 `/dev/tty`，组长检查照旧生效，后台运行仍然会被停下。
 - 新测试：`test_kernel.py::test_a_runner_late_in_a_terminal_pipeline_runs_to_the_end`。用 `pty.spawn` 起一个带控制终端的交互式 bash，rcfile 先 `set -m`，再执行 `echo x | python run.py run analysis/01_k`，步骤里先 sleep 3 s 再写文件。断言退出码是 0、日志里没有 parent exited、输出文件存在。把 `_watchdog.py` 换回 `daf420cd` 的版本时，这条测试失败，报错正是上面那句。
 - 验证：`PYTEST tests/sdk/notebook/test_kernel.py` 12 passed，原有的三条后台与遗弃测试都在其中；`PYTEST tests/sdk/notebook` 167 passed。没有跑全量测试。
+
+## 15. 首次在 GitHub Actions 上运行
+
+分支推送后开了 draft PR #40，Eval CI 在 GitHub 上第一次运行（run 36963903755）。新加的 job3 `skill-examples` 通过，用时 1 分 47 秒，pbmc3k 的下载和缓存都正常。job1 跑了 7052 条测试，只有 1 条失败：`tests/test_output_ownership_contract.py::test_skill_scripts_do_not_write_to_runner_owned_paths`。job2 依赖 job1，因此被跳过。
+
+这条守卫是给旧 CLI skill 定的规矩：输出目录里的 `README.md` 归 runner 所有，skill 脚本不能直接写。`skills/_sdk/notebook/_layout.py` 新建模块时会写 `analysis/<NN_slug>/README.md`，守卫按文件名把它认成了违规。可是这个 README 是模块模板，写它的步骤执行器本身就是 runner。修法是在这条守卫里跳过 `skills/_sdk/notebook/`，其余 skill 文件的检查照旧，`_layout.py` 的写法没改。
+
+各期验收只跑了与本期相关的测试，顶层的 `tests/test_*.py` 不在其中，这条失败所以一直没被发现。修好后本机跑过 `PYTEST tests/test_*.py`：228 passed、4 skipped、1 xpassed。
