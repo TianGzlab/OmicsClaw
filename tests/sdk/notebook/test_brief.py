@@ -196,7 +196,7 @@ def test_the_validate_step_lists_the_checks_it_calls_and_what_each_asserts(proje
 def test_a_validate_step_without_checks_says_so(project, skills_tree):
     module = _module(project, skills_tree)
     project.replay(f"analysis/{module}")
-    assert "Checks called: none from skills._sdk.notebook.checks" in _brief_text(project, module)
+    assert "Checks called: none recognised from skills._sdk.notebook.checks; read the step for any others" in _brief_text(project, module)
 
 
 def test_a_table_nested_too_deeply_does_not_stop_the_brief(project, skills_tree):

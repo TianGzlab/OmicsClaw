@@ -167,7 +167,7 @@ def _check_lines(step: Path) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return []
     if not names:
-        return ["Checks called: none from skills._sdk.notebook.checks"]
+        return ["Checks called: none recognised from skills._sdk.notebook.checks; read the step for any others"]
     lines = ["Checks called (skills._sdk.notebook.checks), with what each asserts:"]
     for name in names:
         summary = (inspect.getdoc(getattr(checks, name)) or "").splitlines()
