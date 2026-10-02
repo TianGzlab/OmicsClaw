@@ -8,7 +8,7 @@
 
 **Domain key:** `spatial`
 
-**Skill count:** 18
+**Skill count:** 17
 
 **Primary data types:** h5ad, h5, zarr, loom
 
@@ -16,8 +16,6 @@ Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, domain detectio
 
 ## Skills
 
-- `consensus-interpret` — Load when biologically interpreting a finished verified consensus run (consensus-domains / sc-consensus-clustering) — inline DE, marker-DB lookup and a structural-only report by default; LLM cell-type naming (--llm) is not available in this version and exits 6. Skip when the consensus run failed (fix it first); no consensus has been run yet (use consensus-domains or sc-consensus-clustering).
-  triggers: consensus interpret, interpret consensus, explain consensus, annotate consensus, consensus cell type, name clusters, biological interpretation, next step after consensus, interpreted consensus, consensus biology
 - `spatial-annotate` — Load when assigning per-spot cell-type labels on a spatial AnnData via marker-gene scoring or scRNA-reference mapping (Tangram / scANVI / CellAssign). Skip when computing spot-level cell-type proportions for multi-cell-per-spot platforms (use spatial-deconv); tissue-domain detection (use spatial-domains).
   triggers: cell type annotation, annotate cell types, Tangram, scANVI, CellAssign, marker genes, label transfer, spatial annotation
 - `spatial-cnv` — Load when inferring copy-number variation per spot on a preprocessed spatial AnnData with chromosome-annotated genes via infercnvpy (default — log-ratio sliding-window) or Numbat (R, allele-aware clone deconvolution). Skip when `var["chromosome"]` / `var["start"]` / `var["end"]` gene-coord metadata is missing; no normal-reference subset can be defined.

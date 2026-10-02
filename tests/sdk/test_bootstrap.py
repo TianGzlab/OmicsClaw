@@ -83,9 +83,9 @@ def bootstrap_problem(path: Path) -> str | None:
     return f"no canonical bootstrap before line {body[first].lineno}"
 
 
-def test_there_are_90_main_scripts():
+def test_there_are_89_main_scripts():
     """One main script per indexed skill."""
-    assert len(main_scripts()) == 90
+    assert len(main_scripts()) == 89
 
 
 def test_every_script_and_the_template_use_the_canonical_block():

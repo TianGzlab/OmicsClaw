@@ -29,7 +29,7 @@
 OmicsClaw is an AI agent for multi-omics analysis. You describe the analysis
 you want; the model picks a skill, reads its instructions and runs its Python,
 R or command-line tools in your own environment, on your machine or on a
-server. It ships 90 skills in seven domains, and the same agent answers in the
+server. It ships 89 skills in seven domains, and the same agent answers in the
 terminal, in the desktop app and on chat platforms.
 
 ## What's new
@@ -142,7 +142,7 @@ library. The dependency lists are [`environment.yml`](environment.yml) and
 
 ## Domains
 
-90 skills in seven domains. `make list` prints the current index.
+89 skills in seven domains. `make list` prints the current index.
 
 | Domain | Skills | Examples | Guide |
 |---|---|---|---|

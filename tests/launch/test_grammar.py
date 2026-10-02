@@ -291,15 +291,7 @@ MODULE_GUARDS = {
         "skill, the script arguments and the fixture path."
     ),
 }
-"""Every ``__main__`` guard outside the legacy trees, with its reason.
-
-The legacy trees —— :data:`LEGACY_TREES` —— are excluded because they
-are scheduled for deletion whole and counting their entry points would
-make this test a measure of how far that deletion has got rather than of
-how many ways in the rebuilt stack has.
-"""
-
-LEGACY_TREES = ("surfaces", "runtime")
+"""Every ``__main__`` guard under ``omicsclaw/``, with its reason."""
 
 
 def _guarded_modules() -> set[str]:
@@ -312,9 +304,7 @@ def _guarded_modules() -> set[str]:
     found: set[str] = set()
     for path in sorted(_PACKAGE.rglob("*.py")):
         relative = path.relative_to(_PACKAGE)
-        if relative.parts[0] in LEGACY_TREES:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree =ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
