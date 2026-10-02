@@ -99,6 +99,24 @@ def test_every_runner_command_the_contract_names_exists():
     assert flags <= known_flags, flags - known_flags
 
 
+def test_every_runner_command_the_contract_points_at_exists():
+    """Commands named as "the step runner's `<command>`" outside the command table, such as `reference`."""
+    import re
+
+    text = (REPO / "OMICSCLAW.md").read_text(encoding="utf-8")
+    named = set(re.findall(r"the step runner's `(\w+)", text))
+    commands, _flags = _runner_commands_and_flags()
+    assert "reference" in named
+    assert named <= commands, named - commands
+
+
+def test_the_contract_names_the_checks_module_the_runner_ships():
+    from skills._sdk.notebook import checks
+
+    text = (REPO / "OMICSCLAW.md").read_text(encoding="utf-8")
+    assert f"`{checks.__name__}`" in text
+
+
 def test_the_eval_reads_the_ledger_the_runner_writes():
     from omicsclaw.evals import ledger
 
