@@ -10,7 +10,8 @@ process and would keep its kernel running and the module lock held.
 else. :func:`watch_parent` checks them once and then from a daemon thread
 every second. The runner counts as abandoned when its parent is no longer
 the one it started under, or when its process group had another leader
-(the shell) and that leader has exited. Then the runner kills the running
+(the shell) and that leader has exited, unless the group is the
+foreground job of a terminal. Then the runner kills the running
 kernel, ends the current step's ledger with a failed ``run_end``, deletes
 that step's notebook from an earlier run, and exits, which releases the
 lock.
@@ -115,9 +116,28 @@ def _leader_gone(group: int) -> bool:
         return False
 
 
+def _terminal_foreground() -> bool:
+    """Whether this process group is the foreground job of the controlling terminal.
+
+    An interactive shell gives each pipeline its own group, led by the
+    pipeline's first command, so in ``echo x | python run.py ...`` the
+    leader exits at once while the shell is still waiting for the runner.
+    """
+    try:
+        tty = os.open("/dev/tty", os.O_RDONLY | os.O_NOCTTY)
+    except OSError:
+        return False
+    try:
+        return os.tcgetpgrp(tty) == os.getpgrp()
+    except OSError:
+        return False
+    finally:
+        os.close(tty)
+
+
 def abandoned(parent: int, group: int) -> bool:
     """Whether the runner has lost the process that started it (see the module docstring)."""
-    return os.getppid() != parent or _leader_gone(group)
+    return os.getppid() != parent or (_leader_gone(group) and not _terminal_foreground())
 
 
 def watch_parent(parent: int, group: int, *, interval: float = 1.0) -> threading.Thread:

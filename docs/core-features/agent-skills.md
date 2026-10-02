@@ -389,7 +389,7 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
   sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。
 - 执行器只在前台运行。`run`、`replay` 在启动它们的进程退出后自行停止（父进程变了，或进程组原来的组长已经退出，后者覆盖
-  `nohup … &` 这类 shell 立即退出的写法）：杀掉正在跑的 kernel，删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的
+  `nohup … &` 这类 shell 立即退出的写法；进程组是终端前台组时不查组长，所以在交互式终端里写成 `echo x | python run.py …` 也能跑完）：杀掉正在跑的 kernel，删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的
   `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。单次运行的上限约等于 `tool_timeout_s` 减 15 s，
   模块一次跑不完时按步骤逐个 `run <step file>`。输出的读取方提前关闭（`run ... | head`）时，执行器丢弃余下输出，照常跑完。
 

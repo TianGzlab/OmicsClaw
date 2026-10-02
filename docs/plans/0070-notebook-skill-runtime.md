@@ -434,7 +434,7 @@ agent: bash "python <skills>/_sdk/notebook/run.py run analysis/03_clustering"
 #### 3.4.3 进程清理与环境隔离
 
 - 本机超时：`bash` 杀整个进程组，执行器随之退出。kernel 由 jupyter_client 以 `start_new_session=True` 启动（`jupyter_client/launcher.py:151`），不在这个进程组里；但 jupyter_client 同时设了 `JPY_PARENT_PID`（`:153`），ipykernel 的 `ParentPollerUnix`（`ipykernel/kernelapp.py:219-223`）发现父进程不在后会自行退出。
-- sandbox 超时：`run_bash` 只杀 `WRAPPER` 记下的那个 pid（`environment.py:31`）。执行器的命令是单条简单命令时，bash 通常直接 exec 成 python，被杀的就是执行器，kernel 再随父进程轮询退出；命令写成复合形式（例如 `cd x && python …`）时，执行器是 bash 的子进程，bash 被杀后它会被别的进程收养。为此 `run` 和 `replay` 带一个看门狗（O7、O8）：`run.py` 在入口最先读下父进程和进程组；启动时查一次，之后守护线程每秒查一次，父进程变了，或者进程组原来的组长（启动它的 shell）已经退出，就杀掉正在跑的 kernel（连同它的进程组），删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的 `run_end`（`reason: "parent exited"`），然后退出，模块锁随进程退出释放。查组长是为了 `nohup … &` 这类 shell 立即退出的写法：Python 还没走到入口，shell 可能已经退出，父进程已经换成收养者，只看父进程就发现不了。执行器因此只在前台运行，放到后台、shell 随后退出的运行一定会停下（O8）；单次运行的上限约等于 `tool_timeout_s` 减 15 s（部署默认 600 s）。
+- sandbox 超时：`run_bash` 只杀 `WRAPPER` 记下的那个 pid（`environment.py:31`）。执行器的命令是单条简单命令时，bash 通常直接 exec 成 python，被杀的就是执行器，kernel 再随父进程轮询退出；命令写成复合形式（例如 `cd x && python …`）时，执行器是 bash 的子进程，bash 被杀后它会被别的进程收养。为此 `run` 和 `replay` 带一个看门狗（O7、O8）：`run.py` 在入口最先读下父进程和进程组；启动时查一次，之后守护线程每秒查一次，父进程变了，或者进程组原来的组长（启动它的 shell）已经退出，就杀掉正在跑的 kernel（连同它的进程组），删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的 `run_end`（`reason: "parent exited"`），然后退出，模块锁随进程退出释放。查组长是为了 `nohup … &` 这类 shell 立即退出的写法：Python 还没走到入口，shell 可能已经退出，父进程已经换成收养者，只看父进程就发现不了。进程组是控制终端的前台组时不查组长：交互式 shell 开着 job control，会让每条管道自成一组，组长是管道里的第一个命令，像 `echo x | python run.py …` 里的 `echo`，它比执行器先退出，但执行器并没有被遗弃。`bash` 工具和 sandbox 的命令都没有控制终端，不受这条例外影响。执行器因此只在前台运行，放到后台、shell 随后退出的运行一定会停下（O8）；单次运行的上限约等于 `tool_timeout_s` 减 15 s（部署默认 600 s）。
 - kernel 的 `IPYTHONDIR`、`JUPYTER_RUNTIME_DIR`、`JUPYTER_DATA_DIR` 指向本次运行的临时目录（系统临时目录下，运行结束删除）。这样有两个好处：用户 `~/.ipython/profile_default/startup/` 里的脚本不会混进 kernel，影响可复现性；kernel 也不会往 `$HOME` 写 history 和连接文件，否则 eval 的 `NoWriteOutside()` 会失败（§2.2 eval 侧）。
 
 ### 3.5 记账与 manifest
@@ -1065,7 +1065,7 @@ PYTEST tests/evals/dataset -m scripted_eval      # 连跑 3 次，结果一致
 | 编号 | 风险 | 处理 |
 |---|---|---|
 | R1 | kernel 启动在 CI 上慢或不稳，用例超时 | skill 用例超时设为 90 s；`test_kernel.py` 单独测启动；kernel 启动失败时执行器重试一次，并在输出里写明 |
-| R2 | 超时后执行器或 kernel 残留：sandbox 只杀记下的 pid；kernel 在独立 session 里 | 本机靠进程组与 ipykernel 的父进程轮询；执行器的看门狗（O7、O8）在父进程变了或进程组的组长退出时杀掉 kernel、记失败的 `run_end` 并退出，覆盖复合命令被杀掉外层 shell 和放到后台后 shell 退出两种情况；契约要求在前台运行，单次运行的上限约等于 `tool_timeout_s` 减 15 s（部署默认 600 s），超过时按步骤逐个 `run`；`test_kernel.py` 覆盖"杀掉执行器后 kernel 退出""杀掉外层 shell""`… &` 后 shell 退出""`nohup … &` 后 shell 立即退出"四种情况 |
+| R2 | 超时后执行器或 kernel 残留：sandbox 只杀记下的 pid；kernel 在独立 session 里 | 本机靠进程组与 ipykernel 的父进程轮询；执行器的看门狗（O7、O8）在父进程变了或进程组的组长退出时杀掉 kernel、记失败的 `run_end` 并退出，覆盖复合命令被杀掉外层 shell 和放到后台后 shell 退出两种情况；契约要求在前台运行，单次运行的上限约等于 `tool_timeout_s` 减 15 s（部署默认 600 s），超过时按步骤逐个 `run`；`test_kernel.py` 覆盖"杀掉执行器后 kernel 退出""杀掉外层 shell""`… &` 后 shell 退出""`nohup … &` 后 shell 立即退出"四种情况，另有一条测试确认交互式终端里位于管道后段的执行器不会被误停 |
 | R3 | `flock` 在网络文件系统或 Docker Desktop for macOS 的文件共享上不保证互斥 | 在 `sandbox.md` 和执行器的 `--help` 里写明；单人本机部署下影响很小 |
 | R4 | parity 依赖环境：rapids 环境缺 leidenalg 和 igraph，`sc.tl.leiden` 抛 `ImportError`（`dimred.py:684`）；换了环境，Leiden 结果也可能不同 | 基线只在 `OmicsClaw` 环境里录，测试也只用 `OCPYTEST` 在同一环境里比；基线不提交、不进 CI；用例固定 `random_state` |
 | R5 | 长步骤超过 `bash` 的工具超时（默认 585 s） | 契约提醒把长计算拆成多个步骤；执行器输出每步耗时；需要时由 operator 调高 `tool_timeout_s`。后台运行不在本期 |

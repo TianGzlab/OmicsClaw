@@ -2,7 +2,7 @@
 
 日期：2026-10-01。规格：`docs/plans/0070-notebook-skill-runtime.md` 第 3 版（定稿，D1 至 D18、O1 至 O6 照此实现）。本记录不改动计划正文。
 范围：N-A、N-B1、N-B2、N-C、N-D、N-E 六期，以及 §5 的端到端验收和 9 项变异检查。
-状态：六期都已实施并验收，每期一个提交，只在本地分支 `plan-0070-notebook-runtime` 上，没有推送。端到端第 1 至 6 条通过，第 7 条（sandbox）本机没有 docker，待 owner 机器验证。变异检查 9 项都能被对应测试发现。之后按独立评估意见和 owner 裁定 O7 又做了一个修复提交，见 §12；第二轮复核和裁定 O8 带来第二个修复提交，见 §13。
+状态：六期都已实施并验收，每期一个提交，只在本地分支 `plan-0070-notebook-runtime` 上，没有推送。端到端第 1 至 6 条通过，第 7 条（sandbox）本机没有 docker，待 owner 机器验证。变异检查 9 项都能被对应测试发现。之后按独立评估意见和 owner 裁定 O7 又做了一个修复提交，见 §12；第二轮复核和裁定 O8 带来第二个修复提交，见 §13。最终复核结论为可以交付；随后按它唯一的非阻塞建议做了第三个修复提交，见 §14。sandbox 验收需要换一台有 docker 的服务器，owner 已决定暂缓。
 开工状态：`80925742`，工作树只有未跟踪的计划文件。
 
 ## 1. 结论
@@ -17,7 +17,8 @@
 | N-D 框架与契约 | `b4640b89` | 通过 | 712 passed、2 skipped、1 xfailed、1 xpassed；golden 只改了 2 个文件 |
 | N-E eval | `78a6bdee` | 通过 | `tests/evals` 181 passed；用例集连跑 3 次都是 29 passed；job2 同款 venv 29 passed，13.8 秒 |
 | 评估后的修复 | `3a72bb63`（§12） | 通过 | N-B1 191 passed、1 skipped；`tests/sdk/notebook` 163 passed；skillenv 与 permission 734 passed；`tests/evals` 186 passed；用例集 29 passed；变异 6、7 重做后仍被发现 |
-| 第二轮修复 | 第二个修复提交（§13） | 通过 | permission 313 passed；skillenv 425 passed、1 skipped、1 xpassed；`tests/sdk/notebook` 166 passed；`tests/evals` 186 passed；用例集 29 passed |
+| 第二轮修复 | `daf420cd`（§13） | 通过 | permission 313 passed；skillenv 425 passed、1 skipped、1 xpassed；`tests/sdk/notebook` 166 passed；`tests/evals` 186 passed；用例集 29 passed |
+| 交付前的小修 | 分支上的最后一个提交（§14） | 通过 | `test_kernel.py` 12 passed；`tests/sdk/notebook` 167 passed |
 
 N-E 的提交同时带上本记录和端到端发现的一处修复（§8 第 1 条）。
 
@@ -324,7 +325,7 @@ token（各次 `outcome.result.usage` 相加）：输入 8,547,490，其中缓�
 23. 审查存档选的是移进 `reviews/archive/<id>/`，`<id>` 用 run_id 的格式（UTC 时间加 4 位十六进制），每次 replay 一个目录，文件名不变。`accept --review` 指向存档里的文件时，提示"was archived by a later replay"；条件本身没变，存档的审查本来就比新的重放旧。
 24. 看门狗退出前不重建 manifest。`status`、`accept`、下一次 `run` 都从记账重新计算，磁盘上的 manifest 要到下一次 `run`、`replay` 或 `accept` 才更新。
 25. live eval 只批准路径形式的执行器调用（Environment 段给的就是路径形式），`python -m skills._sdk.notebook ...` 不批准（§13）。第一轮曾在 workspace 里没有 `skills` 时批准它。
-26. 看门狗除了比较父进程，还检查进程组原来的组长是否已经退出（O8 第 2 条只要求在入口记录父进程）。只在入口记录父进程，`nohup … &` 后 shell 立即退出时仍会漏掉：Python 走到入口之前 shell 已经退出，记下的父进程已是收养者。本机实测，去掉组长检查时这种运行会一直跑下去。`bash` 工具让 shell 自成进程组，所以组长就是那个 shell。剩下的漏洞：执行器自己换了会话或进程组（`setsid`、`set -m` 之后的作业）并且 shell 在入口之前就退出；组长不在当前 PID 命名空间里（`getpgrp()` 不大于 1）时不做组长检查。
+26. 看门狗除了比较父进程，还检查进程组原来的组长是否已经退出（O8 第 2 条只要求在入口记录父进程）。只在入口记录父进程，`nohup … &` 后 shell 立即退出时仍会漏掉：Python 走到入口之前 shell 已经退出，记下的父进程已是收养者。本机实测，去掉组长检查时这种运行会一直跑下去。`bash` 工具让 shell 自成进程组，所以组长就是那个 shell。剩下的漏洞：执行器自己换了会话或进程组（`setsid`、`set -m` 之后的作业）并且 shell 在入口之前就退出；组长不在当前 PID 命名空间里（`getpgrp()` 不大于 1）时不做组长检查。后来又加了一条例外（§14）：进程组是控制终端的前台组时不查组长。
 27. 执行器在开始任何步骤之前就发现自己被遗弃时（例如 `nohup … &` 之后 shell 立即退出），直接退出，不写记账，因为没有步骤运行过；stderr 写 `run.py: parent exited; stopped while no step was running`。
 
 ## 11. 遗留问题
@@ -439,3 +440,12 @@ O7-3 父进程看门狗。
 | 用例集 | `PYTEST tests/evals/dataset -m scripted_eval` | 29 passed |
 
 另外跑过：`PYTEST tests/tools --deselect tests/tools/test_workspace.py`，828 passed（`ToolPolicy` 加了字段）；`tests/sdk/test_public_surface.py`、`test_boundary.py`、`test_bootstrap.py`，24 passed、1 skipped。没有跑全量测试。
+
+## 14. 交付前的小修
+
+最终复核结论为可以交付，另提了一条不阻塞的建议：看门狗在交互式终端里会误停执行器。修复单独做一个提交。
+
+- 问题：交互式 shell 开着 job control，会让每条管道自成一个进程组，组长是管道里的第一个命令。在 `echo x | python run.py run …` 里，组长 `echo` 立刻就退出了，看门狗的组长检查于是认定执行器已被遗弃，在第一个步骤开始前就停了下来，输出 `run.py: parent exited; stopped while no step was running`，退出码 1。复现的条件是 bash 有控制终端，并且 job control 已经生效。bash 读启动文件时 job control 还没有开启，所以复现用的 rcfile 里先写了 `set -m`。
+- 改动：`skills/_sdk/notebook/_watchdog.py` 新增 `_terminal_foreground()`，打开 `/dev/tty`，用 `os.tcgetpgrp` 判断本进程组是不是终端的前台组。`abandoned()` 只在组长已退出、而且本进程组不是终端前台组时才判为被遗弃，父进程的检查不变。`bash` 工具用 `start_new_session=True` 起 shell，sandbox 的 `docker exec` 不分配终端，这两条路径都打不开 `/dev/tty`，组长检查照旧生效，后台运行仍然会被停下。
+- 新测试：`test_kernel.py::test_a_runner_late_in_a_terminal_pipeline_runs_to_the_end`。用 `pty.spawn` 起一个带控制终端的交互式 bash，rcfile 先 `set -m`，再执行 `echo x | python run.py run analysis/01_k`，步骤里先 sleep 3 s 再写文件。断言退出码是 0、日志里没有 parent exited、输出文件存在。把 `_watchdog.py` 换回 `daf420cd` 的版本时，这条测试失败，报错正是上面那句。
+- 验证：`PYTEST tests/sdk/notebook/test_kernel.py` 12 passed，原有的三条后台与遗弃测试都在其中；`PYTEST tests/sdk/notebook` 167 passed。没有跑全量测试。

@@ -251,3 +251,29 @@ def test_a_runner_started_with_nohup_stops_although_its_shell_exited_at_once(pro
     )
     assert shell.returncode == 0
     _assert_the_runner_stopped(root, started_a_step=False)
+
+
+def test_a_runner_late_in_a_terminal_pipeline_runs_to_the_end(project, tmp_path):
+    """With job control a pipeline is its own group, led by its first command, which exits first."""
+    root, _home, env, _runner = project
+    _step(root, "01_wait.py",
+          "# %%\nimport time\nfrom skills._sdk.notebook import write_output\n"
+          "time.sleep(3)\nwrite_output({'ok': True}, 'tables/done.json')\n")
+    rc = tmp_path / "rc"
+    rc.write_text(
+        "set -m\n"
+        f'echo x | "{sys.executable}" "{RUN}" run analysis/01_k > runner.log 2>&1\n'
+        'echo "exit=$?" > done.txt\n'
+        "exit\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [sys.executable, "-c", "import pty, sys; pty.spawn(sys.argv[1:])",
+         "bash", "--noprofile", "--rcfile", str(rc), "-i"],
+        cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, timeout=180,
+    )
+    log = (root / "runner.log").read_text()
+    assert (root / "done.txt").read_text().strip() == "exit=0", log
+    assert "parent exited" not in log
+    assert (root / "results/01_k/tables/done.json").is_file()
