@@ -334,8 +334,7 @@ Channel 界面要求审批期限：加 `--approval-timeout <秒>` 或 `OMICSCLAW
 
 1. 纯 `pip install -e .` 不含 `fastapi`/`uvicorn`，`oc desktop` 需要 conda 环境或自行补装。
 2. `examples/demo_visium.h5ad` 不存在。
-3. 部分 skill 当前无法运行：`consensus-domains`、`sc-consensus-*` 依赖不可导入的 `omicsclaw.runtime.consensus`。
-4. Channel 还不能回答审批；Desktop 通过 App 的卡片回答（见 surfaces.md §8.2、§10）。
+3. Channel 还不能回答审批；Desktop 通过 App 的卡片回答（见 surfaces.md §8.2、§10）。
 
 ---
 

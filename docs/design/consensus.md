@@ -1,5 +1,10 @@
 # Consensus Subsystem — Design & Usage
 
+> Removed. Plan 0070 deleted the consensus skills, and `omicsclaw/runtime/`
+> and `consensus-interpret` were deleted on 2026-10-02. The tag
+> `archive/ensemble-before-removal` keeps the code; this page describes it
+> as it was.
+>
 > Status: reflects the post-**ADR 0016** structure (2026-05-30).
 > Vocabulary: [`omicsclaw/runtime/CONTEXT.md`](../../omicsclaw/runtime/CONTEXT.md).
 > Decisions: ADR [0010](../adr/0010-consensus-runtime-layer.md) ·

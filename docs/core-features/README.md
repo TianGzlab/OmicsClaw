@@ -49,5 +49,5 @@
 
 ## 阅读约定
 
-- `omicsclaw/runtime/` 仍在磁盘上，只有部分模块能导入，框架里没有代码 import 它，只作历史参考；文档不把它描述为当前行为。依赖它的 4 个 consensus skill（`sc-consensus-clustering`、`sc-consensus-integration`、`sc-consensus-pseudotime`、`consensus-domains`）已移出 index：`SKILL.md` 改名为 `SKILL.md.disabled`，代码留着，改回原名即恢复。`routing/` 已删除（plan 0068 PQ3）。`surfaces/` 与 `remote/` 已删除（plan 0064 P3）。`autoagent/` 已删除，运行时调参见 `omicsclaw/ensemble/tuning/`。
+- `omicsclaw/runtime/`、`omicsclaw/ensemble/`、`examples/consensus_benchmark/` 和 `consensus-interpret` skill 已于 2026-10-02 删除，删除前的代码在 tag `archive/ensemble-before-removal`。依赖 `omicsclaw/runtime/` 的 4 个 consensus skill 已在 plan 0070 删除。`routing/` 已删除（plan 0068 PQ3）。`surfaces/` 与 `remote/` 已删除（plan 0064 P3）。`autoagent/` 已删除。
 - 文档引用文件与符号，不引用行号。代码变更后，以代码为准并同步修订对应文档。

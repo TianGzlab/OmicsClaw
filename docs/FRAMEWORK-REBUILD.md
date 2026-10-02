@@ -1732,6 +1732,10 @@ user-visible behaviour rather than an internal detail.
 
 ### Step 7 — `omicsclaw/ensemble/` (plan 0056)
 
+> Removed on 2026-10-02, together with `omicsclaw/runtime/`. The tag
+> `archive/ensemble-before-removal` keeps the code. This section records
+> what the step built.
+
 The first of five plans (0056–0060) behind the paper's three claims —
 LLM parameter selection, multi-method consensus, a SWE-bench-style
 benchmark. This one is the foundation: a skill's search space as data
@@ -1925,14 +1929,13 @@ plan 0062 stage two the skills import a copy of the part they need from
 `r_scripts/` are no longer in the package: plan 0062 stage one moved them to
 `skills/_sdk/` (`dependency_manager.py` became `skills/_sdk/deps.py`), and
 the credential scrubbing they imported from the deleted `omicsclaw.skill`
-now happens where the framework starts a process (`bash`'s local shell and
-the ensemble `LocalExecutor`).
+now happens where the framework starts a process (`bash`'s local shell).
 
 **Kept and *not* importable**, read-only reference for later work:
-`runtime/{consensus,workflow}`, `routing/`, `surfaces/`,
+`routing/`, `surfaces/`,
 `diagnostics.py`. Each reaches `omicsclaw.skill` or `omicsclaw.providers`.
-(`autoagent/` was on this list until plan 0057 deleted it; runtime tuning
-lives in `omicsclaw/ensemble/tuning/`.)
+(`autoagent/` was on this list until plan 0057 deleted it, and
+`runtime/{consensus,workflow}` until it was deleted on 2026-10-02.)
 Never cite one as working prior art without importing it first.
 
 ### The skill runner was not re-homed
