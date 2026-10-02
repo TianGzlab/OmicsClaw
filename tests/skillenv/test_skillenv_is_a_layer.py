@@ -3,7 +3,7 @@
 It may import the standard library, ``schema``, ``tools`` and ``skills``
 (the loader). It must not import ``entry``, ``engine``, ``provider``,
 ``sandbox`` (a sandbox reaches it as a structural ``BashEnvironment``),
-``permission``, ``ensemble`` or ``common`` — nor the top-level ``skills``
+``permission`` or ``common`` — nor the top-level ``skills``
 package or anything under it: the dependency registry is read as a file,
 because skills and the framework share no code (plan 0062 D3, guard B4).
 ``omicsclaw.skills`` in turn does not import ``skillenv``; the entry layer
@@ -85,5 +85,5 @@ def test_importing_every_module_loads_no_forbidden_package():
     assert proc.returncode == 0, proc.stderr
     loaded = json.loads(proc.stdout.strip().splitlines()[-1])
     forbidden = ("omicsclaw.entry", "omicsclaw.engine", "omicsclaw.provider", "omicsclaw.sandbox",
-                 "omicsclaw.permission", "omicsclaw.ensemble", "omicsclaw.common")
+                 "omicsclaw.permission", "omicsclaw.common")
     assert [m for m in loaded if m.startswith(forbidden) or m == "skills" or m.startswith("skills.")] == []

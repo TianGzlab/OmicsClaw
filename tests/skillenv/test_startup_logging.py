@@ -31,7 +31,7 @@ from omicsclaw.entry.skill_env import build_skill_env, log_skill_env
 from omicsclaw.permission import PermissionMode
 from omicsclaw.skillenv.probe import LocalProbeRunner
 from omicsclaw.tools.builtin.bash import CommandOutcome
-from tests.entry.test_ensemble_golden import _Offline
+from tests.entry.test_golden_deployment import _Offline
 
 from .conftest import FIXTURE_SKILLS
 
@@ -44,7 +44,7 @@ def offline(monkeypatch):
 
 
 def _config(tmp_path, **overrides) -> AppConfig:
-    return AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS, ensemble=False, **overrides)
+    return AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS, **overrides)
 
 
 def test_open_app_writes_the_startup_line(tmp_path, offline, caplog):
@@ -73,7 +73,7 @@ def test_read_only_in_a_sandbox_runs_no_probe(tmp_path, caplog):
     binding = build_skill_env(config, assembly.build_skill_index(config), SandboxBinding(environment=environment))
     assert binding.location == "sandbox"
     with caplog.at_level(logging.INFO, logger=LOGGER):
-        asyncio.run(log_skill_env(binding, config, ensemble_python=None))
+        asyncio.run(log_skill_env(binding, config))
     assert environment.calls == []
     assert [r.getMessage() for r in caplog.records if r.name == LOGGER] == [
         "skill_env=probe location=sandbox python=unchecked"

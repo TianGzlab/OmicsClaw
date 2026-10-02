@@ -92,18 +92,6 @@ def test_the_schema_is_a_literal_equal_to_the_import():
     assert literal == sdk_result.RESULT_SCHEMA
 
 
-def test_the_ensemble_reads_the_device_an_sdk_envelope_reports(tmp_path):
-    from omicsclaw.ensemble.runner import TrialResult
-    from tests.ensemble.test_runner import _runner
-
-    out = tmp_path / "out"
-    envelope = sdk_result.write_result_json(out, "s", "1", {"device": "cuda"}, {})
-    result = TrialResult(status="ok", stage="run", run_id="r1", method="m", trial="t0001",
-                         output_dir=str(out), params={}, lease_gpu="2")
-    _runner(tmp_path)._device(result, {"gpu_probe": "unattributable"}, envelope)
-    assert (result.device, result.device_source) == ("cuda:2", "skill")
-
-
 def test_guidance_lines_written_by_the_sdk_are_parsed_by_the_framework(caplog):
     assert sdk_guidance.USER_GUIDANCE_PREFIX == framework_guidance.USER_GUIDANCE_PREFIX
     assert sdk_guidance.USER_GUIDANCE_JSON_PREFIX == framework_guidance.USER_GUIDANCE_JSON_PREFIX

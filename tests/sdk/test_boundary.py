@@ -1,7 +1,7 @@
 """Guards for the code boundary between ``skills/**`` and ``omicsclaw/**``.
 
 Plan 0062 §3.8. Skills and the framework meet only through file contracts
-(``SKILL.md``, ``tuning.yaml``, the result.json schema in ``skills/_sdk``);
+(``SKILL.md``, the result.json schema in ``skills/_sdk``);
 the mechanical helpers every skill needs live in ``skills/_sdk/``. These
 tests pin that down statically, with known-item tables that must match the
 violations *exactly* — a violation that appears or disappears both turn the

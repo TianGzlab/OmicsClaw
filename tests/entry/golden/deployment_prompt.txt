@@ -26,7 +26,7 @@ For a task with several steps — a multi-stage analysis, work that has to be ex
 
 Load a skill's full instructions with the `use_skill` tool when you need them.
 
-- fake-domains: Test fixture for the ensemble runner. Load never; it labels observations by a coordinate split and can be told to fail, sleep or allocate memory.
+- fake-domains: Test fixture for the golden deployment in tests/entry. Load never; it has no script.
 
 
 ## Environment

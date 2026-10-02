@@ -11,7 +11,7 @@ provides ``_sdk``.
 The three situations the plan argues through each get a check:
 
 * 23a local — run from an unrelated directory with no ``PYTHONPATH``;
-* 23b ensemble — trial directory as cwd, absolute script path,
+* 23b another directory — another directory as cwd, absolute script path,
   ``PYTHONPATH=<repo>``; and a copy outside the repository, which must use
   ``PYTHONPATH`` and fail plainly without it;
 * 23c sandbox — the real container path needs ``OMICSCLAW_TEST_SANDBOX=1`` and
@@ -117,10 +117,10 @@ def test_23a_local_run_from_an_unrelated_directory(script, tmp_path):
     assert proc.returncode == 0, proc.stderr[-2000:]
 
 
-def test_23b_ensemble_trial_with_pythonpath(tmp_path):
-    trial = tmp_path / "trial"
-    trial.mkdir()
-    proc = _help(LIGHT_SCRIPTS[0], trial, _env(PYTHONPATH=str(REPO_ROOT)))
+def test_23b_another_directory_with_pythonpath(tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    proc = _help(LIGHT_SCRIPTS[0], elsewhere, _env(PYTHONPATH=str(REPO_ROOT)))
     assert proc.returncode == 0, proc.stderr[-2000:]
 
 
@@ -143,19 +143,19 @@ def _probe_copy(script: Path, destination: Path) -> Path:
 
 def test_23b_a_copy_outside_the_repository_uses_pythonpath(tmp_path):
     probe = _probe_copy(LIGHT_SCRIPTS[0], tmp_path / "outside")
-    trial = tmp_path / "trial"
-    trial.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
 
-    with_path = _help(probe, trial, _env(PYTHONPATH=str(REPO_ROOT)))
+    with_path = _help(probe, elsewhere, _env(PYTHONPATH=str(REPO_ROOT)))
     assert with_path.returncode == 0, with_path.stderr[-2000:]
     assert f"PROBE_ROOT={REPO_ROOT}" in with_path.stdout
 
     installed = subprocess.run(
-        [sys.executable, "-c", "import skills"], cwd=trial, env=_env(), capture_output=True
+        [sys.executable, "-c", "import skills"], cwd=elsewhere, env=_env(), capture_output=True
     )
     if installed.returncode == 0:
         pytest.skip("this interpreter has OmicsClaw installed, so skills imports without PYTHONPATH")
-    without = _help(probe, trial, _env())
+    without = _help(probe, elsewhere, _env())
     assert without.returncode != 0
     assert "No module named 'skills'" in without.stderr
 
@@ -163,7 +163,7 @@ def test_23b_a_copy_outside_the_repository_uses_pythonpath(tmp_path):
 def test_23c_real_sandbox():
     if os.environ.get("OMICSCLAW_TEST_SANDBOX") != "1" or not (shutil.which("docker") or shutil.which("podman")):
         pytest.skip("OMICSCLAW_TEST_SANDBOX=1 and a container runtime are needed for the real sandbox run")
-    pytest.skip("real SandboxExecutor run not automated here; the read-only stand-in below covers the block")
+    pytest.skip("real sandbox run not automated here; the read-only stand-in below covers the block")
 
 
 def _make_writable(root: Path) -> None:

@@ -46,7 +46,6 @@ _LOWER_LAYERS = (
     "mcp",
     "memory",
     "sandbox",
-    "ensemble",
     "skillenv",
 )
 

@@ -249,33 +249,6 @@ MODULE_GUARDS = {
         "has been unimportable since omicsclaw/skill/ was deleted. Both "
         "guards land on the same main(); neither is a second parse point."
     ),
-    "ensemble/_supervise.py": (
-        "the trial supervisor, run by file path inside the execution "
-        "environment (host or sandbox); plan 0056 §3.3. Parses only its "
-        "own limits, never a deployment."
-    ),
-    "ensemble/metrics/score.py": (
-        "python -m omicsclaw.ensemble.metrics.score, the scoring "
-        "subprocess of one trial; plan 0056 §3.3. Parses only the trial "
-        "it scores, never a deployment."
-    ),
-    "ensemble/tuning/subsample.py": (
-        "python -m omicsclaw.ensemble.tuning.subsample, writes the "
-        "subsampled inputs of a tuning probe in the execution environment. "
-        "Parses only its own input and seeds, never a deployment."
-    ),
-    "ensemble/tuning/stability.py": (
-        "python -m omicsclaw.ensemble.tuning.stability, computes the "
-        "stability curves of a tuning probe. Parses only its spec file."
-    ),
-    "ensemble/tuning/markers.py": (
-        "python -m omicsclaw.ensemble.tuning.markers, marker genes of the "
-        "probe's candidate partitions. Parses only its spec file."
-    ),
-    "ensemble/tuning/inspect.py": (
-        "python -m omicsclaw.ensemble.tuning.inspect, what inspect_trials "
-        "computes. Parses only its spec file."
-    ),
     "evals/report.py": (
         "python -m omicsclaw.evals.report, prints the Markdown summary of "
         "an eval report for the CI step summary. Parses only its report "

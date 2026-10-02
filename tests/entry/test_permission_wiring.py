@@ -60,12 +60,6 @@ MOUNTED = (
     "task",
 )
 
-MOUNTED_WITH_ENSEMBLE = (
-    *MOUNTED[:-1], "run_skill", "inspect_trials", "select_result", "optimize_params", "task",
-)
-"""The same list with the ensemble tools mounted: after the memory tools, before ``task``."""
-
-
 def _run(main: Coroutine[Any, Any, _T]) -> _T:
     async def guarded() -> _T:
         return await asyncio.wait_for(main, _DEADLINE)
@@ -546,70 +540,3 @@ def test_verdict_names_survive_a_round_trip():
     """``Verdict`` is what a rule file spells; the spelling is the contract."""
     for verdict in Verdict:
         assert Verdict(verdict.value) is verdict
-
-
-# ---- run_skill, when the ensemble is mounted ------------------------------
-
-
-def _with_ensemble(tmp_path: pathlib.Path, **overrides: object):
-    from omicsclaw.ensemble.resources import GpuDetection
-    from omicsclaw.entry.ensemble import build_ensemble
-    from omicsclaw.entry.sandbox import SandboxBinding
-
-    fake_skills = pathlib.Path(__file__).resolve().parents[1] / "ensemble" / "fake_skills"
-    config = _config(tmp_path, skills_dir=fake_skills, **overrides)
-    runner = build_ensemble(
-        config, assembly.build_skill_index(config), SandboxBinding(), gpus=GpuDetection((), "none")
-    )
-    return build_app(config, ensemble=runner)
-
-
-def test_run_skill_is_mounted_behind_the_gate(tmp_path, offline):
-    app = _with_ensemble(tmp_path)
-    try:
-        assert app.registry.names() == MOUNTED_WITH_ENSEMBLE
-        assert isinstance(app.registry.get("run_skill"), GatedTool)
-        assert app.registry.policy_for("run_skill").approval_mode is ApprovalMode.AUTO
-    finally:
-        if app.memory is not None:
-            app.memory.close()
-
-
-def test_a_read_only_app_refuses_run_skill(tmp_path, offline):
-    app = _with_ensemble(tmp_path, permission_mode=PermissionMode.READ_ONLY)
-
-    async def call():
-        with use_tool_context(approval=lambda r: ApprovalDecision(approved=True)):
-            return await app.registry.execute(ToolCall(id="1", name="run_skill", arguments=json.dumps(
-                {"skill": "fake-domains", "method": "split", "input": "missing.h5ad"}
-            )))
-
-    try:
-        refused = _run(call())
-        assert refused.is_error and "read_only" in refused.output
-    finally:
-        if app.memory is not None:
-            app.memory.close()
-
-
-def test_the_tuning_tools_are_gated_and_read_only_allows_only_inspection(tmp_path, offline):
-    app = _with_ensemble(tmp_path, permission_mode=PermissionMode.READ_ONLY)
-
-    async def call(name, arguments):
-        with use_tool_context(approval=lambda r: ApprovalDecision(approved=True)):
-            return await app.registry.execute(ToolCall(id="1", name=name, arguments=json.dumps(arguments)))
-
-    try:
-        for name in ("inspect_trials", "select_result", "optimize_params"):
-            assert isinstance(app.registry.get(name), GatedTool)
-            assert app.registry.policy_for(name).approval_mode is ApprovalMode.AUTO
-        optimize = _run(call("optimize_params", {"skill": "fake-domains", "input": "x.h5ad"}))
-        assert optimize.is_error and "read_only" in optimize.output
-        select = _run(call("select_result", {"run_id": "r", "k": 3, "final": {"method": "split", "trial": "t0001"},
-                                             "per_method": {}, "rationale": "x"}))
-        assert select.is_error and "read_only" in select.output
-        inspect = _run(call("inspect_trials", {"run_id": "nope", "trials": [{"method": "split", "trial": "t0001"}]}))
-        assert "read_only" not in inspect.output and "no run" in inspect.output
-    finally:
-        if app.memory is not None:
-            app.memory.close()
