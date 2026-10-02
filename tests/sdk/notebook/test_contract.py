@@ -55,10 +55,17 @@ def test_the_framework_reads_the_layout_the_runner_writes():
     assert project.MODULE_DIR_PATTERN == contract.LAYOUT["module_dir"]
     assert project.MANIFEST_FILE == contract.LAYOUT["manifest"]
     assert project.REPORT_FILE == contract.LAYOUT["report"]
+    assert project.REVIEW_BRIEF_FILE == contract.LAYOUT["review_brief"]
     assert project.RESULTS_DIR + "/" == contract.LAYOUT["archive_dir"].split("_archive")[0]
     assert project.MANIFEST_STATUS_KEY in contract.MANIFEST_SCHEMA["required"]
     assert set(contract.MANIFEST_SCHEMA["status_values"]) == {"draft", "replayed", "reviewed", "accepted"}
     assert REPO.joinpath("skills", *project.STEP_RUNNER).is_file()
+
+
+def test_the_module_reviewer_is_pointed_at_the_brief_the_replay_writes():
+    from omicsclaw.entry.subagent import MODULE_REVIEWER_PROMPT
+
+    assert f"results/<NN_slug>/{contract.LAYOUT['review_brief']}" in MODULE_REVIEWER_PROMPT
 
 
 def _runner_commands_and_flags() -> tuple[set[str], set[str]]:

@@ -22,6 +22,7 @@ __all__ = [
     "MODULE_DIR_PATTERN",
     "REPORT_FILE",
     "RESULTS_DIR",
+    "REVIEW_BRIEF_FILE",
     "STEP_RUNNER",
     "ModuleSummary",
     "recent_modules",
@@ -36,6 +37,8 @@ MODULE_DIR_PATTERN = r"^(\d{2})_([a-z0-9][a-z0-9_]*)$"
 MANIFEST_FILE = "provenance/manifest.json"
 """A module's manifest, relative to ``results/<NN_slug>/``."""
 MANIFEST_STATUS_KEY = "status"
+REVIEW_BRIEF_FILE = "provenance/review_brief.md"
+"""The brief a successful replay writes for the module reviewer, relative to ``results/<NN_slug>/``."""
 REPORT_FILE = "M{nn}_{slug}_REPORT.md"
 
 _MODULE = re.compile(MODULE_DIR_PATTERN)

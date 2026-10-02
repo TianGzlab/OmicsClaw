@@ -19,7 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from skills._sdk.notebook import _hashing, _layout, _ledger, _manifest, _watchdog
+from skills._sdk.notebook import _brief, _hashing, _layout, _ledger, _manifest, _watchdog
 from skills._sdk.notebook._layout import LayoutError, Module
 from skills._sdk.notebook._lock import LockBusy, hold
 from skills._sdk.notebook._percent import PercentError, to_notebook
@@ -493,7 +493,10 @@ def _output_files(module: Module) -> dict[str, str]:
 
 def replay(root: Path, target: str, *, new_interpreter: str | None = None, runner: StepRunner | None = None,
            wait: float = 0.0, out: Out = _print) -> int:
-    """``replay``: rerun every step of a module in fresh kernels, validate last, and record the result."""
+    """``replay``: rerun every step of a module in fresh kernels, validate last, and record the result.
+
+    A successful replay also writes the review brief (``provenance/review_brief.md``).
+    """
     try:
         module, step = _layout.resolve_target(root, target)
     except LayoutError as exc:
@@ -548,14 +551,17 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
         folder = Path(archived[0]["file"]).parent.as_posix()
         out(f"[{module.name}] moved {len(archived)} earlier review(s) to results/{module.name}/{folder}/; "
             "review the replayed module again")
+    _brief.remove(module)
     before = _output_files(module)
     steps = module.steps()
     hashes = {step.name: _hashing.sha256_file(step) for step in steps}
     written: set[str] = set()
     status_value = "ok"
+    runs: list[tuple[Path, _ledger.RunRecord]] = []
     for index, step in enumerate(steps):
         result = execute_step(module, step, mode="replay", runner=runner, interpreter=interpreter,
                               changed_from=changed_from, reason="replay")
+        runs.append((step, result.run))
         out(format_step(module, result))
         written.update(str(o.get("path")) for o in result.run.outputs)
         if result.outcome.status != "ok":
@@ -582,6 +588,11 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
         out(f"[{module.name}] replay failed; status: {manifest['status'].upper()}")
         return EXIT_FAILED
     out(f"[{module.name}] replay ok: {len(steps)} steps, validate last")
+    try:
+        brief = _brief.write(module, runs, manifest)
+        out(f"  review brief: {brief.relative_to(module.root).as_posix()}")
+    except (OSError, ValueError, UnicodeDecodeError) as exc:  # the brief only helps the review; the replay stands
+        out(f"  warning: could not write the review brief: {exc}")
     if changed:
         out("  changed outputs: " + _join(changed))
     if orphans:
