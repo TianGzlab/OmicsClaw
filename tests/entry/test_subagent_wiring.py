@@ -613,6 +613,29 @@ def test_the_child_inherits_the_rest_of_the_parent_s_table_in_order(
     )
 
 
+REVIEW_CHECKS = (
+    "1. Each step file: inputs come from data/ or an earlier module's intermediate/ or tables/; every value "
+    "the skill does not give has a stated reason; the skill functions the step's first cell names match the "
+    "ones the manifest recorded; where a skill function covers the work and the step does not use it, the "
+    "step says why.",
+    "2. The validate step checks the outputs the REPORT relies on.",
+    "3. The REPORT (M<NN>_<slug>_REPORT.md): every number matches a table or log in results/<NN_slug>/; every "
+    "figure it cites exists and is not listed under orphan_outputs; claims stay within what the steps "
+    "computed; it carries the disclaimer.",
+    "4. The replay in the manifest succeeded and covers the current step files.",
+    "Your first line is the verdict, exactly `VERDICT: APPROVE` or `VERDICT: REVISE`. Then list the findings, "
+    "most serious first. Choose REVISE when any finding would change a number, a figure or a conclusion.",
+)
+"""The reviewer's checklist and verdict rule, word for word: a change to how it reads must leave these."""
+
+
+def test_the_module_reviewer_keeps_its_four_checks_and_its_verdict_rule():
+    from omicsclaw.entry.subagent import MODULE_REVIEWER_PROMPT
+
+    for item in REVIEW_CHECKS:
+        assert item in MODULE_REVIEWER_PROMPT, item
+
+
 def test_the_module_reviewer_is_given_only_read_file_and_use_skill(tmp_path, offline):
     """The reviewer reads the module it reviews and cannot change it.
 

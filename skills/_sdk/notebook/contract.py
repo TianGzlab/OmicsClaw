@@ -6,7 +6,7 @@ Every name here is a literal that code outside this package reads with
 
 ``LAYOUT`` fixes the project layout: the module, step, validate-step and
 report names, the output folders a step may write, and where the runner
-keeps its state inside a module's results.
+keeps its state inside a module's results, the review brief included.
 
 ``ENVIRONMENT`` names the variables the runner sets for a step's kernel.
 
@@ -33,6 +33,7 @@ LAYOUT = {
     "runner_dirs": ["notebooks", "provenance", "reviews", "baseline"],
     "manifest": "provenance/manifest.json",
     "runs": "provenance/runs",
+    "review_brief": "provenance/review_brief.md",
     "strategy_file": "docs/analysis_strategy/STRATEGY.md",
     "archive_dir": "results/_archive",
 }

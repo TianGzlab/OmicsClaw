@@ -382,12 +382,20 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
   执行器在一次性的 IPython kernel 里逐 cell 运行步骤（kernel 用执行器自己的解释器），每次运行写一份 JSON-lines 记账
   （`results/<NN>/provenance/runs/<step>/<run_id>.jsonl`）：读了哪些文件及其 sha256、调用了哪些 skill 函数和参数、写了哪些输出。
   manifest 从记账重建，各步骤的 notebook 拼成 `notebooks/M<NN>_<slug>.ipynb`。
+- validate 步骤另有 `skills._sdk.notebook.checks` 的 7 个检查函数：`check_columns`、`check_rows`、`check_between`、
+  `check_same_labels`、`check_counts`、`check_files`，以及 `as_labels`。标签一律先转成字符串再比较，`0`、`0.0`、`"0"`
+  算同一个标签，所以从 CSV 读回成整数的 cluster 列能和 `obs` 里的字符串标签对上。`check_files` 检查 REPORT 引用的图
+  存在且不为空，并把它们记成 validate 步骤的输入。检查失败抛 `AssertionError`，`python -O` 下也一样。
+- `python <skills>/_sdk/notebook/run.py reference [<function>]` 打印这 5 个步骤函数和 7 个检查函数的签名与说明：路径规则、
+  默认的读写格式、`load_demo` 的查找顺序、`run_cli` 的输出位置与报错。内容直接取自 docstring，契约要求 agent 在写第一个
+  步骤之前看一遍。
 - 一个步骤过期只看两样：步骤文件变了，或者它经 `read_input` 读过的文件变了。步骤读了又原名写回的文件，按它自己最后写入的
   sha256 比较。`status` 列出每个过期步骤的原因，上游模块重跑后下游模块会显示 `input changed: results/...`。
-- 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`。验收分三步：`replay` 在新 kernel 里重跑全部步骤；
+- 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`、`reference`。验收分三步：`replay` 在新 kernel 里重跑全部步骤；
   内置的只读子代理 `module-reviewer` 给出 `VERDICT: APPROVE` 或 `REVISE`；用户确认后 `accept` 冻结模块。冻结的模块要先 `revise`
   （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
-  sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。
+  sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。重放成功时执行器还写
+  `results/<NN>/provenance/review_brief.md`，供审查子代理先读（见 `sub-agent.md` §2.3.1）。重放失败时不留摘要，重放之后 `run` 又跑了步骤时也删掉它，所以磁盘上的摘要总是对应最近一次成功的重放。
 - 执行器只在前台运行。`run`、`replay` 在启动它们的进程退出后自行停止（父进程变了，或进程组原来的组长已经退出，后者覆盖
   `nohup … &` 这类 shell 立即退出的写法；进程组是终端前台组时不查组长，所以在交互式终端里写成 `echo x | python run.py …` 也能跑完）：杀掉正在跑的 kernel，删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的
   `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。单次运行的上限约等于 `tool_timeout_s` 减 15 s，

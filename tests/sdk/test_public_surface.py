@@ -31,6 +31,10 @@ PUBLIC_SURFACE: dict[str, set[str]] = {
     "skills._sdk.external_env": {"EnvNotFoundError", "is_env_available", "run_anndata_op_in_env"},
     "skills._sdk.notebook": {"read_input", "write_output", "load_skill", "load_demo", "run_cli"},
     "skills._sdk.notebook.contract": {"LAYOUT", "MANIFEST_SCHEMA", "LEDGER_EVENTS", "ENVIRONMENT"},
+    "skills._sdk.notebook.checks": {
+        "as_labels", "check_columns", "check_rows", "check_between", "check_same_labels", "check_counts",
+        "check_files",
+    },
 }
 
 CONTRACTS = {
@@ -46,10 +50,11 @@ CONTRACTS = {
 STEP_API = {
     ("skills._sdk.notebook", "read_input"),
     ("skills._sdk.notebook", "run_cli"),
-}
+} | {("skills._sdk.notebook.checks", name) for name in PUBLIC_SURFACE["skills._sdk.notebook.checks"]}
 """Called by the step files the agent writes in a project, outside this tree; exempt from the has-a-user rule.
 
-The other three step functions are used by the skills' examples, CLI scripts and the template.
+The validate checks are for the validate steps of a project's modules. The other three step
+functions are used by the skills' examples, CLI scripts and the template.
 """
 
 R_SCRIPTS = {
@@ -64,10 +69,10 @@ R_SCRIPTS = {
 
 
 def _sdk_modules() -> set[str]:
-    """``_sdk``, its top-level modules, and the step-code facade and contract of ``_sdk/notebook``."""
+    """``_sdk``, its top-level modules, and the step-code facade, contract and checks of ``_sdk/notebook``."""
     base = REPO_ROOT / "skills" / "_sdk"
     top = {f"skills._sdk.{p.stem}" for p in base.glob("*.py") if p.stem != "__init__"}
-    return {"skills._sdk", "skills._sdk.notebook", "skills._sdk.notebook.contract"} | top
+    return {"skills._sdk", "skills._sdk.notebook", "skills._sdk.notebook.contract", "skills._sdk.notebook.checks"} | top
 
 
 def _uses() -> list[tuple[str, str, str]]:

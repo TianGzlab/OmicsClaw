@@ -86,7 +86,7 @@ A **module** is one analysis stage whose figures and tables can be reported on t
 
 ### Writing a step
 
-A **step** is one file in `analysis/<NN_slug>/` named `<k>_<name>.py`, for example `02_cluster.py`. A letter after the number marks a variant (`02b_cluster_louvain.py`). Steps run in name order. Every module has one `<k>_validate.py` step, which runs last and asserts what the report relies on: tables are non-empty, expected columns exist, counts are in range.
+A **step** is one file in `analysis/<NN_slug>/` named `<k>_<name>.py`, for example `02_cluster.py`. A letter after the number marks a variant (`02b_cluster_louvain.py`). Steps run in name order. Every module has one `<k>_validate.py` step, which runs last and asserts what the report relies on with the checks in `skills._sdk.notebook.checks`: expected columns exist, tables are non-empty, counts are in range, a counts table agrees with the labels it counts, and the figures the report cites exist.
 
 A step is a plain Python file split into cells by `# %%` lines. `# %% [markdown]` starts a prose cell whose lines begin with `# `. Open each step with a markdown cell that says what it does, what it reads and which skill functions it calls.
 
@@ -115,6 +115,7 @@ write_output(clustering.cluster_summary(adata), "tables/cluster_summary.csv")
 - Every value the skill does not give you, such as a threshold, a resolution or a cutoff, appears in the step with its reason.
 - Keep steps plain Python, with no `%` or `!` lines, so each file also runs as `python <file>` from the project root. Fix random seeds (`random_state`) so reruns give the same numbers.
 - `load_demo(name)` loads a demo dataset inside a step when the user has no data.
+- Before your first step in a session, and whenever you need a detail of these functions, run the step runner's `reference` (or `reference <function>`): it prints, for each step function and validate check, what it accepts, the paths it takes, its default readers and writers, where `load_demo` looks and where `run_cli` puts its output.
 
 ### Running steps
 

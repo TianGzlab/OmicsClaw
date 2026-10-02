@@ -155,9 +155,18 @@ def _default_reader(path: Path) -> Any:
 def read_input(path: str | os.PathLike, *, reader: Callable[[Path], Any] | None = None) -> Any:
     """Load a file or directory the step reads, and record its path and sha256.
 
-    The path is relative to the project root. Without a reader the loader is
-    chosen by suffix (.h5ad, .csv, .tsv, .json, .parquet, .txt, .md); any other
-    suffix, and a directory, returns the Path itself.
+    The path is relative to the project root. A step reads data/,
+    manifests/, an earlier module's results/<NN_slug>/intermediate/ and
+    tables/, and its own module's results; another path is read too, with a
+    warning on stderr, and recorded as outside the contract.
+
+    Without a reader the loader follows the suffix: .h5ad anndata.read_h5ad,
+    .csv and .tsv pandas.read_csv, .parquet pandas.read_parquet, .json the
+    parsed JSON, .txt and .md the text. A directory, or any other suffix,
+    returns the Path itself. pandas reads a column of digit-only labels,
+    such as cluster ids, as integers: compare it through as_labels from
+    skills._sdk.notebook.checks, or pass
+    reader=lambda p: pd.read_csv(p, dtype={"leiden": str}).
 
     :raises FileNotFoundError: nothing exists at the path.
     """
@@ -237,9 +246,18 @@ def write_output(obj: Any, path: str | os.PathLike, *,
                  writer: Callable[[Any, Path], None] | None = None) -> Path:
     """Write one output of the current module atomically and record its sha256.
 
-    The path is relative to results/<NN_slug>/ and starts with figures/, tables/,
-    intermediate/ or logs/. Without a writer the format follows the suffix and the
-    object's type. Returns the absolute path written.
+    The path is relative to results/<NN_slug>/ and starts with figures/,
+    tables/, intermediate/ or logs/; subfolders are allowed, ".." and
+    absolute paths are not. Give an output a new name rather than
+    overwriting a file the same step read.
+
+    Without a writer the format follows the suffix and the object's type:
+    .h5ad an object with write_h5ad; .csv and .tsv an object with to_csv,
+    written without its index when that is a RangeIndex; .parquet an object
+    with to_parquet; .png, .pdf and .svg an object with savefig, at dpi 150
+    with bbox_inches="tight"; .json a dict or list, indented, with numpy
+    values as plain numbers and lists; .md and .txt a str. Anything else
+    needs writer=lambda obj, path: .... Returns the absolute path written.
 
     :raises ValueError: the path is outside the module's output folders, or
         no default writer fits the object and suffix.
@@ -311,7 +329,12 @@ def _download_demo(name: str) -> Path:
 
 
 def load_demo(name: str) -> Any:
-    """Load a registered demo dataset and record it as an input of the step.
+    """Load a registered demo dataset as AnnData and record it as an input of the step.
+
+    The file is looked for, in order: <name>.h5ad in $OMICSCLAW_DEMO_DIR;
+    the checkout's data/ and examples/; <name>.h5ad in
+    $XDG_CACHE_HOME/omicsclaw/demo/ (~/.cache/omicsclaw/demo/ when unset).
+    When none has it, scanpy downloads it into that cache.
 
     :raises LookupError: *name* is not a registered demo dataset.
     :raises RuntimeError: the file is in none of the places looked at and
