@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from skills._sdk.notebook import _brief
+import os
+from pathlib import Path
+
+from skills._sdk.notebook import _brief, checks
 
 STEP = '''
 # %% [markdown]
@@ -123,11 +126,90 @@ def test_a_big_module_is_shortened_to_fit(project, skills_tree):
     assert "### tables/t59.csv  30 rows x 2 columns" in text
 
 
-def test_the_brief_is_written_through_a_temporary_file(project, skills_tree):
+def test_the_brief_is_written_through_a_temporary_file_and_renamed(project, skills_tree, monkeypatch):
+    module = _module(project, skills_tree)
+    brief = project.root / "results" / module / "provenance" / "review_brief.md"
+    renames = []
+    real_replace = os.replace
+
+    def spy(source, target, *args, **kwargs):
+        if Path(target) == brief:
+            renames.append((Path(source), Path(source).read_text()))
+        return real_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(_brief.os, "replace", spy)
+    assert project.replay(f"analysis/{module}") == 0
+    assert len(renames) == 1
+    source, text = renames[0]
+    assert source.parent == brief.parent and source.name.startswith(".review_brief.md.")
+    assert text == brief.read_text()
+    assert list(brief.parent.glob(".review_brief.md.*")) == []
+
+
+def test_running_a_step_after_the_replay_drops_the_brief(project, skills_tree):
+    module = _module(project, skills_tree)
+    assert project.replay(f"analysis/{module}") == 0
+    brief = project.root / "results" / module / "provenance" / "review_brief.md"
+    assert brief.exists()
+    step = project.root / "analysis" / module / "01_cluster.py"
+    step.write_text(step.read_text().replace("resolution=0.5", "resolution=0.6"))
+    assert project.run(f"analysis/{module}") == 0
+    assert not brief.exists()
+    assert project.manifest(module)["status"] == "draft"
+
+
+def test_a_run_with_nothing_to_do_keeps_the_brief(project, skills_tree):
     module = _module(project, skills_tree)
     project.replay(f"analysis/{module}")
-    leftovers = list((project.root / "results" / module / "provenance").glob(".review_brief.md.*"))
-    assert leftovers == []
+    assert project.run(f"analysis/{module}") == 0
+    assert (project.root / "results" / module / "provenance" / "review_brief.md").exists()
+
+
+CHECKED_VALIDATE = '''
+# %%
+from skills._sdk.notebook import read_input
+from skills._sdk.notebook import checks as c
+from skills._sdk.notebook.checks import check_files, check_rows as rows, as_labels
+
+summary = read_input("results/01_clu/tables/summary.csv")
+rows(summary, exactly=2)
+c.check_columns(summary, ["cluster", "n_cells"])
+check_files("figures/plot.png")
+rows(summary, at_least=1)
+'''
+
+
+def test_the_validate_step_lists_the_checks_it_calls_and_what_each_asserts(project, skills_tree):
+    module = _module(project, skills_tree)
+    project.step(module, "02_validate.py", CHECKED_VALIDATE)
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    text = _brief_text(project, module)
+    section = text[text.index("### 02_validate.py"):text.index("## Tables")]
+    listed = [line.split(":")[0].strip() for line in section.splitlines() if line.startswith("  check_")]
+    assert listed == ["check_rows", "check_columns", "check_files"]  # as_labels is imported, never called
+    first_line = checks.check_rows.__doc__.strip().splitlines()[0]
+    assert f"  check_rows: {first_line}" in section
+    cluster = text[text.index("### 01_cluster.py"):text.index("### 02_validate.py")]
+    assert "Checks called" not in cluster
+
+
+def test_a_validate_step_without_checks_says_so(project, skills_tree):
+    module = _module(project, skills_tree)
+    project.replay(f"analysis/{module}")
+    assert "Checks called: none from skills._sdk.notebook.checks" in _brief_text(project, module)
+
+
+def test_a_table_nested_too_deeply_does_not_stop_the_brief(project, skills_tree):
+    module = _module(project, skills_tree)
+    project.step(module, "01b_deep.py", (
+        "# %%\nfrom skills._sdk.notebook import write_output\n"
+        "write_output('[' * 200000 + ']' * 200000, 'tables/deep.json', "
+        "writer=lambda text, path: path.write_text(text))\n"
+    ))
+    assert project.replay(f"analysis/{module}") == 0, project.text
+    text = _brief_text(project, module)
+    assert "### tables/deep.json  JSON" in text and "nested too deeply to parse" in text
+    assert "### tables/summary.csv" in text
 
 
 def test_a_brief_that_cannot_be_written_does_not_fail_the_replay(project, skills_tree, monkeypatch):
@@ -138,5 +220,19 @@ def test_a_brief_that_cannot_be_written_does_not_fail_the_replay(project, skills
 
     monkeypatch.setattr(_brief, "write", broken)
     assert project.replay(f"analysis/{module}") == 0
-    assert "  warning: could not write the review brief: disk full" in project.lines
+    assert "  warning: could not write the review brief: OSError: disk full" in project.lines
+    assert project.manifest(module)["status"] == "replayed"
+
+
+def test_any_error_while_writing_the_brief_leaves_the_replay_standing(project, skills_tree, monkeypatch):
+    module = _module(project, skills_tree)
+
+    def deep(*args, **kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(_brief, "write", deep)
+    assert project.replay(f"analysis/{module}") == 0
+    assert any(line.startswith("  warning: could not write the review brief: RecursionError")
+               for line in project.lines)
+    assert "status: REPLAYED" in project.text
     assert project.manifest(module)["status"] == "replayed"

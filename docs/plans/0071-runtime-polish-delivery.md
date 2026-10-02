@@ -1,8 +1,8 @@
 # 计划 0071 交付记录：运行层打磨
 
-日期：2026-10-02。规格：`docs/plans/0071-runtime-polish.md` 第 1 版（定稿，owner 裁定 Q1 至 Q5 全按推荐，见计划 §7.0）。本记录不改动计划正文。
+日期：2026-10-02。规格：`docs/plans/0071-runtime-polish.md` 第 1 版（定稿，owner 裁定 Q1 至 Q5 全按推荐，见计划 §7.0）。计划正文只按 owner 的要求改过两处：§7.0 补记评估后的裁定，L4 的上限改为 12,000 字符（§9）。
 范围：P1 至 P4 四期，P4 包括 A/B 审查和 3 个模块的缩短端到端。
-状态：四期都已实施，每期一个提交，只在本地分支 `plan-0071-runtime-polish` 上，没有推送。计划 §5.2 的通过标准：第 1 条（硬条件）两轮都通过；第 2 条里耗时减半达到了，读取字符降到四分之一没有达到；第 4 条达到，见 §6。
+状态：四期都已实施，每期一个提交，只在本地分支 `plan-0071-runtime-polish` 上，没有推送。计划 §5.2 的通过标准：第 1 条（硬条件）两轮都通过；第 2 条里耗时减半达到了，读取字符降到四分之一没有达到；第 4 条达到，见 §6。独立评估结论为"通过"，按评估意见做了一个修复提交，见 §9；owner 接受读取字符没有达标的现状，改用输入 token 衡量审查代价（§9.3）。
 开工状态：`main` 的 `4c2fc4d9`，工作树只有未跟踪的计划文件。
 
 ## 1. 结论
@@ -151,7 +151,7 @@ B 第 2 轮中位数：耗时 116.3 s、读取 27 次、70,276 字符、12 轮�
 ### 5.4 对照通过标准
 
 1. 预设缺陷（硬条件）：通过。B 两轮都判 REVISE，4 处缺陷都有对应的 finding；摘要的 Word match 一行直接报出了第 (1) 处。
-2. 干净模块：耗时中位数第 1 轮 133.9 对 272.7 s（0.49），达到"不超过一半"；返回字符中位数第 1 轮 0.71、第 2 轮 0.60，没达到"不超过四分之一"。按计划如实记录，连同 Q4 带回 owner，见 §8 第 1 条。字符数不是好的代价指标：A 有大量读取失败，失败的读取返回 0 字符，却照样各花一轮模型调用。每次审查的输入 token 更接近真实代价，中位数从 A 的 1,278,528 降到 B 第 1 轮的 685,334（0.54）、第 2 轮的 300,191（0.23）。
+2. 干净模块：耗时中位数第 1 轮 133.9 对 272.7 s（0.49），达到"不超过一半"；返回字符中位数第 1 轮 0.71、第 2 轮 0.60，没达到"不超过四分之一"。目标没有达成。原因：01_qc 的第 3 项检查要复核 REPORT 里按阈值数出的细胞数，两组都整份读了 148 KB 的 `qc_metrics_per_cell.csv`，Q4 的 b 和摘要里的数值汇总都省不掉这部分。owner 接受现状，审查代价改用输入 token 衡量（§9.3）。字符数不是好的代价指标：A 有大量读取失败，失败的读取返回 0 字符，却照样各花一轮模型调用。每次审查的输入 token 更接近真实代价，中位数从 A 的 1,278,528 降到 B 第 1 轮的 685,334（0.54）、第 2 轮的 300,191（0.23）。
 3. A 判 REVISE 而 B 判 APPROVE 的模块：没有，干净模块两组都是 APPROVE。另外，A 在 04_annotate 的第一行写成了 `## VERDICT: APPROVE`，`accept --review` 会拒收；B 两轮共 12 次审查，第一行都合格。
 
 ## 6. P4 之二：3 个模块的缩短端到端
@@ -204,11 +204,51 @@ B 第 2 轮中位数：耗时 116.3 s、读取 27 次、70,276 字符、12 轮�
 
 ## 8. 遗留问题
 
-1. 读取字符没有降到四分之一（§5.4 第 2 条）。剩下的大头有三类：为核对 REPORT 里按阈值数出来的数字而分页读整张大表（01_qc 每次约 15 万字符），读上游模块的文件，以及主线 agent 的委派提示本身要求逐项追查。可选的下一步：按 Q4 的 b 给审查提示加一句，限定清单以外的核对；或者在摘要里给大表的数值列加 min、中位数、max。两者都会改变审查行为，要 owner 定，定了以后要重跑预设缺陷。
-2. agent 两次没先 `replay` 就委派审查，审查者找不到摘要，从 manifest 读起，花 206 s 和 117 s 才判 REVISE。可以让审查提示把"没有摘要"直接当作"没有重放"，一开始就判 REVISE；这会改变审查行为，没做，留给 owner。
-3. 消息 2 只说"把 QC 模块做完"，agent 就运行了 `accept 01_qc`。这是 0070 G3 已知的局限：用户确认只靠契约，执行器无法核实。
+1. 读取字符没有降到四分之一（§5.4 第 2 条），owner 已接受，审查代价改用输入 token 衡量（§9.3）。读取的大头有三类：为复核 REPORT 里按阈值数出的数字而整份读大表（01_qc 每次约 15 万字符），读上游模块的文件，以及主线 agent 的委派提示要求逐项追查。
+2. agent 两次没先 `replay` 就委派审查，审查者找不到摘要，从 manifest 读起，花 206 s 和 117 s 才判 REVISE。owner 裁定不改提示（不做"没有摘要就直接判 REVISE"）：`accept` 的条件（G3）已经机械地挡住未重放的模块。
+3. 消息 2 只说"把 QC 模块做完"，agent 就运行了 `accept 01_qc`。这是 0070 G3 已知的局限：用户确认只靠契约，执行器无法核实。owner 裁定不改提示（不做"答复不明确时先问再 accept"），误验收可以用 `revise` 撤回。建议：以后的端到端驱动把这条消息写成明确的说法，例如 "Option A is fine: … Please apply these thresholds and finish the QC module; I will tell you when I accept it."
 4. 审查通过后 agent 又重放了一次 02_preprocess，重放把审查存档（O7 的设计），只好复审，多花 114 s。
-5. `reference` 的输出 7,823 字符，离测试上限 8,000 只差 177 字符；以后再加函数要先精简 docstring，或者调整上限。
+5. `reference` 的输出现在 7,948 字符，测试上限已放宽到 12,000（§9.1 d）。以后再超出时，不带参数的 `reference` 只打印每个函数的签名和 docstring 首行，全文留给 `reference <function>`。
 6. sandbox 验收仍待有 docker 的机器（0070 §11 第 1 条，未变）。
 
 临时文件：A/B 的副本、脚本和记录在 `/tmp/oc0071-ab/`，端到端的驱动、日志和课题在 `/tmp/oc0071-e2e/`，没有提交。
+
+## 9. 评估后的修复
+
+独立评估结论为"通过"，另提了 6 处问题（a 至 f），评估人都复现过。全部修在一个提交里，仍只在本地分支上，没有推送。每条新测试都在把修复去掉的代码上跑过，确认会失败（6 项变异都被发现，见 §9.2）。
+
+### 9.1 修复
+
+a. 摘要过期。`_run_locked` 跑完步骤后不删旧摘要：重放之后改一个步骤再 `run`，`status` 显示 DRAFT，摘要却还写着 REPLAYED。现在 `run` 只要实际运行了步骤就删掉摘要；没有步骤要跑时摘要保留。新测试：`test_running_a_step_after_the_replay_drops_the_brief`、`test_a_run_with_nothing_to_do_keeps_the_brief`。
+
+b. 审查者看不到检查函数断言了什么。端到端里审查者两次去 `read_file skills/_sdk/notebook/checks.py`，都因为路径在 workspace 之外被拒。现在摘要的 validate 步骤段落列出它调用的检查函数，每个附 docstring 首行。函数由 `_brief.checks_called` 用 AST 从步骤源码里找，不 import 步骤；认得 `from skills._sdk.notebook.checks import …`（含 `as` 别名）和 `from skills._sdk.notebook import checks as c` 之后的 `c.check_x(…)` 两种写法，只列真正调用了的（端到端的 01_qc 导入了 `as_labels`、`check_counts` 却没用，摘要不列它们）。最多多出 8 行，450 行的上限照旧由收缩逻辑保证。新测试：`test_the_validate_step_lists_the_checks_it_calls_and_what_each_asserts`、`test_a_validate_step_without_checks_says_so`。用新代码给端到端的 3 个模块重新生成摘要，分别是 119、327、71 行，validate 段落各列出 5、3、4 个函数。
+
+c. 写摘要的异常。原先只捕获 `OSError`、`ValueError`、`UnicodeDecodeError`；表里有一份嵌套 20 万层的 JSON 时抛 `RecursionError`，`replay` 以退出码 1 结束，manifest 却已经记成 replayed。现在 `replay` 捕获 `Exception`，只打警告（带异常类名），重放结果不变；`_brief.write` 失败时删掉自己的临时文件。另外在摘要内部，读不了的单张表（包括 `RecursionError`）只在该表的位置写明原因，其余部分照常写出，嵌套过深的 JSON 写成 "nested too deeply to parse"。新测试：`test_any_error_while_writing_the_brief_leaves_the_replay_standing`（monkeypatch `_brief.write` 抛 `RecursionError`）、`test_a_table_nested_too_deeply_does_not_stop_the_brief`（真的写一份 40 万字符的嵌套 JSON）。
+
+d. `reference` 的上限。`test_reference.py` 的上限从 8,000 放宽到 12,000 字符（`bash` 在 16,000 处截断）。计划 §3.2、L4 和本记录写明：以后再超出时，不带参数的 `reference` 只打印每个函数的签名和 docstring 首行。现在的输出是 7,948 字符（`as_labels` 的 docstring 多了一句）。
+
+e. 原子写的测试。原来的测试只检查目录里没有残留的临时文件，把实现改成直接写照样通过。新测试 `test_the_brief_is_written_through_a_temporary_file_and_renamed` 包一层 `os.replace`，断言摘要恰好经一次改名得到，改名的源是同目录下的 `.review_brief.md.*` 临时文件，内容与最终文件相同。
+
+f. `as_labels` 与 numpy 单精度浮点。`as_labels(np.float32(0.1))` 原来得到 `'0.10000000149011612'`，与从 CSV 读回的 `0.1` 对不上。修法：numpy 浮点数先用 numpy 自己的 `str`（按它自身精度给出能唯一确定该值的最短十进制），再转成 Python float 取 `repr`；pandas 的列先取 `to_numpy()` 再遍历，因为 pandas 逐个取值时会把 float32 装箱成 Python float，精度信息就丢了。不会误合并：最短十进制能唯一确定原来的单精度值，两个不同的 float32 仍得到不同的标签（测试用 `np.nextafter` 取 0.1 的相邻值验证）。代价是一个 float32 值和它被放宽成 float64 后的值（`0.10000000149011612`）不再相等，这种比较在 validate 步骤里不会出现。docstring 写明了这条规则。新测试：`test_as_labels_reads_a_numpy_float_at_its_own_precision`，包括 float32 列与从 CSV 读回的列经 `check_same_labels` 比较相等。
+
+文档：`_brief.py` 的模块说明、`_executor.replay` 的 docstring、`docs/core-features/agent-skills.md` §9.1（`run` 跑了步骤后删摘要）、`sub-agent.md` §2.3.1（摘要列出 validate 调用的检查函数）同步。
+
+### 9.2 变异检查与验收
+
+把每项修复单独撤回，跑对应的新测试，结果都是失败：a（去掉 `run` 里的删除）1 条失败；b（不写检查函数行）2 条失败；c（只捕获 `OSError`、`ValueError`）1 条失败；c 的摘要内部处理（去掉 `RecursionError` 分支）1 条失败；e（改成直接写）1 条失败；f（去掉 numpy 精度分支）1 条失败。撤回后都已还原。
+
+```
+PYTEST tests/sdk/notebook                                214 passed, 5 deselected
+PYTEST tests/sdk/test_public_surface.py tests/entry/test_subagent_wiring.py    53 passed
+PYTEST tests/test_*.py                                   228 passed, 4 skipped, 1 deselected, 1 xpassed
+PYTEST tests/evals/dataset -m scripted_eval              29 passed
+```
+
+没有跑全量测试。修复没有引入新的偏差。
+
+### 9.3 owner 裁定（2026-10-02）
+
+已写进计划 §7.0：
+1. 审查读取的字符数只降到 A 组的 71%，没有达到四分之一。owner 接受现状，审查代价改用审查者的输入 token 衡量：B 组第 1 轮是 A 组的 0.54，第 2 轮是 0.23。目标没有达成的原因见 §5.4 第 2 条：01_qc 的第 3 项检查为复核阈值计数整份读了 148 KB 的 `qc_metrics_per_cell.csv`，Q4 的 b 和数值汇总都省不掉这部分。
+2. "没有摘要就判 REVISE"和"答复不明确时先问再 accept"两处提示改动都不做，记在 §8 第 2、3 条。端到端驱动里的那句消息怎么改，写在 §8 第 3 条的建议里；`/tmp` 下的脚本不提交。
+3. 修复做完后先由评估子 agent 复核，再由 owner 推送、开 PR，CI 全绿后合并。

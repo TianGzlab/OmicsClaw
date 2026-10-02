@@ -2,20 +2,24 @@
 
 ``provenance/review_brief.md`` gives, for each step, its first markdown cell
 beside the skill calls the replay recorded, what the step read and wrote with
-sizes, and the end of its log; then each text table's shape with its first
+sizes, and the end of its log, and for the validate step the checks it calls
+with what each asserts; then each text table's shape with its first
 rows, or the whole table when it is small; every output file with its size;
 and the replay record with its changed and orphan outputs. It stays within
 :data:`MAX_LINES` lines, so one line-mode read takes it in; when the module is
 too big for that, table rows go first, then log lines, and the brief says
 where it was shortened.
 
-A replay removes the old brief before it runs any step, so a brief on disk
-always describes the latest replay, and only a successful one.
+A replay removes the old brief before it runs any step, and ``run`` removes
+it once it runs a step, so a brief on disk always describes the latest
+replay, a successful one, of the step files as they are.
 """
 
 from __future__ import annotations
 
+import ast
 import csv
+import inspect
 import io
 import json
 import os
@@ -25,8 +29,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from skills._sdk.notebook import _hashing, _ledger, _skills
-from skills._sdk.notebook._layout import Module
+from skills._sdk.notebook import _hashing, _ledger, _skills, checks
+from skills._sdk.notebook._layout import VALIDATE_RE, Module
 from skills._sdk.notebook._percent import PercentError, parse_cells
 from skills._sdk.notebook.contract import LAYOUT
 
@@ -76,8 +80,11 @@ def write(module: Module, runs: Sequence[tuple[Path, _ledger.RunRecord]], manife
     text = render(module, runs, manifest)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{secrets.token_hex(4)}.tmp"
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return path
 
 
@@ -120,6 +127,52 @@ def _library_names(run: _ledger.RunRecord) -> dict[str, list[str]]:
         except (LookupError, OSError, SyntaxError, ValueError):
             names[load["skill"]] = []
     return names
+
+
+def checks_called(source: str) -> list[str]:
+    """The validate checks a step's code calls, in the order of their first call, read with ast."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    direct: dict[str, str] = {}
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == checks.__name__:
+            direct.update({alias.asname or alias.name: alias.name for alias in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module == "skills._sdk.notebook":
+            modules.update(alias.asname or alias.name for alias in node.names if alias.name == "checks")
+        elif isinstance(node, ast.Import):
+            modules.update(alias.asname for alias in node.names if alias.name == checks.__name__ and alias.asname)
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if isinstance(function, ast.Name) and function.id in direct:
+            name = direct[function.id]
+        elif isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name) \
+                and function.value.id in modules:
+            name = function.attr
+        else:
+            continue
+        if name in checks.__all__:
+            found.append((node.lineno, node.col_offset, name))
+    return list(dict.fromkeys(name for _line, _column, name in sorted(found)))
+
+
+def _check_lines(step: Path) -> list[str]:
+    try:
+        names = checks_called(step.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return []
+    if not names:
+        return ["Checks called: none from skills._sdk.notebook.checks"]
+    lines = ["Checks called (skills._sdk.notebook.checks), with what each asserts:"]
+    for name in names:
+        summary = (inspect.getdoc(getattr(checks, name)) or "").splitlines()
+        lines.append(_clip(f"  {name}: {summary[0] if summary else ''}"))
+    return lines
 
 
 def _call_text(call: dict) -> str:
@@ -169,6 +222,8 @@ def _step_lines(module: Module, step: Path, run: _ledger.RunRecord, detail: Deta
     writes = [f"{o.get('path')} ({_size(int(o.get('bytes') or 0))})"
               for o in {str(o.get("path")): o for o in run.outputs}.values()]
     lines.append("Wrote: " + ("; ".join(writes) if writes else "nothing recorded"))
+    if VALIDATE_RE.match(step.name):
+        lines += _check_lines(step)
     if detail.log_lines:
         log = module.results_dir / "logs" / f"{step.stem}.log"
         try:
@@ -217,6 +272,8 @@ def _table_lines(module: Module, path: Path, detail: Detail) -> list[str]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
             return [f"### {relative}  JSON, {_size(size)}, not valid JSON"]
+        except RecursionError:
+            return [f"### {relative}  JSON, {_size(size)}, nested too deeply to parse"]
         shape = (f"keys: {', '.join(map(str, list(data)[:30]))}" if isinstance(data, dict)
                  else f"a list of {len(data)} items" if isinstance(data, list) else type(data).__name__)
         return [f"### {relative}  JSON, {_size(size)}; {_clip(shape, 400)}"]
@@ -295,8 +352,9 @@ def _compose(module: Module, runs: Sequence[tuple[Path, _ledger.RunRecord]], man
     for table in tables:
         try:
             lines += _table_lines(module, table, detail)
-        except (OSError, csv.Error, UnicodeDecodeError) as exc:
-            lines.append(f"### {table.relative_to(module.results_dir).as_posix()}  could not be read: {exc}")
+        except (OSError, csv.Error, UnicodeDecodeError, ValueError, RecursionError) as exc:
+            reason = _clip(f"{type(exc).__name__}: {exc}", 160)
+            lines.append(f"### {table.relative_to(module.results_dir).as_posix()}  could not be read: {reason}")
         lines.append("")
     lines += ["## Output files", "", *_inventory(module, replay, detail)]
     return lines

@@ -7,8 +7,8 @@ from skills._sdk.notebook import __all__ as STEP_FUNCTIONS
 from skills._sdk.notebook._io import DEMOS
 from skills._sdk.notebook.contract import LAYOUT
 
-LIMIT = 8000
-"""Most characters the whole reference may take: well inside what one bash call shows (16,000)."""
+LIMIT = 12000
+"""Most characters the whole reference may take: inside what one bash call shows (16,000)."""
 
 
 def test_the_reference_covers_every_step_function_and_check():

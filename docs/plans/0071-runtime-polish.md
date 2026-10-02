@@ -150,7 +150,7 @@ Your first line is the verdict, exactly `VERDICT: APPROVE` or `VERDICT: REVISE`.
 
 - 不带参数时依次打印：一段路径规则（`read_input` 的路径相对课题根；`write_output` 与 `check_files` 的路径相对 `results/<NN_slug>/`，第一段是 4 个输出目录之一），然后是门面 `__all__` 的 5 个函数和 `checks.__all__` 的 7 个函数，每个函数一行签名（`inspect.signature`）加上 `inspect.getdoc` 的原文。`load_demo` 之后附上 `DEMOS` 注册表的名字和说明，从字面量生成，登记新数据集时自动跟上。
 - 带函数名时只打印这一个。名字不存在时退出码 2，列出全部名字。
-- 门面和 `checks` 在模块顶层只导入标准库，所以这个子命令不起 kernel，也不需要 nbclient。整段输出不超过 8,000 字符（`bash` 在 16,000 字符处截断），由测试钉住。
+- 门面和 `checks` 在模块顶层只导入标准库，所以这个子命令不起 kernel，也不需要 nbclient。整段输出不超过 12,000 字符（`bash` 在 16,000 字符处截断），由测试钉住；以后超出时，不带参数的 `reference` 只打印每个函数的签名和 docstring 首行，全文留给 `reference <function>`。
 
 #### docstring 补什么
 
@@ -250,7 +250,7 @@ def check_files(*paths) -> list[Path]:
 | L1 | 摘要不超过 450 行 | 摘要本身变成一次大读取，审查又慢回去 | 审查者照样能读原文件 | 值。代价是截断逻辑和一条测试 |
 | L2 | 审查提示里的读法（先摘要、二进制与 notebook 不读、大文件分段） | 审查者通读大文件和二进制，耗时变长 | 没有强制，审查者想读什么都能读 | 值，零成本。不做强制：给审查者换一个会拒读二进制的专用读取工具要改框架、加工具，还可能挡住某项检查确实需要的读取，先看 §5.2 的数据 |
 | L3 | `check_files` 只认本模块 4 个输出目录下的路径 | validate 去检查别的模块的文件，检查对本模块失去意义 | `os.path.exists`、`read_input` | 值。复用 `write_output` 的路径检查，报错信息还能告诉 agent 正确的写法 |
-| L4 | `reference` 的输出不超过 8,000 字符（测试） | 以后加函数让输出超过 `bash` 的 16,000 字符被截断，agent 只看到一半 | 没有 | 值。只是一条测试 |
+| L4 | `reference` 的输出不超过 12,000 字符（测试；评估后由 8,000 放宽）。超出时，不带参数的 `reference` 改为只打印每个函数的签名和 docstring 首行，全文留给 `reference <function>` | 以后加函数让输出超过 `bash` 的 16,000 字符被截断，agent 只看到一半 | 没有 | 值。只是一条测试 |
 
 不加的：`accept` 不要求有摘要，`replay` 也不因摘要写失败而失败，这两项会把一个辅助文件变成闸门，却挡不住什么真实的错误；审查子 agent 不加 `bash`，那违反 D13 的只读裁定（G5）。
 
@@ -278,7 +278,7 @@ P1 与 P2 互不依赖；P3 依赖 P1（契约里要写 `reference` 和 `checks`
 
 | 阶段 | 新测试要点 | 验收命令 |
 |---|---|---|
-| P1 | `test_checks.py`：复现 0070 的两次失败（`iterrows` 后的 `0.0`、CSV 读回的整数索引），改用 `check_counts` 与 `as_labels` 后通过；多一个、少一个标签和计数不符时消息正确；NaN 与 None 报缺失；`python -O` 下照样抛错；`check_files` 记 `input`、拒绝 4 个目录以外的路径、空文件失败；AST 扫描确认 `checks.py` 顶层只导入标准库。`test_reference.py`：输出含两个 `__all__` 的全部名字、`DEMOS` 的全部名字、`LAYOUT["output_dirs"]` 的 4 个目录；总长不超过 8,000 字符；`reference write_output` 只打印一个；未知名字退出码 2 | `PYTEST tests/sdk/notebook/test_checks.py tests/sdk/notebook/test_reference.py tests/sdk/notebook/test_contract.py tests/sdk/test_public_surface.py tests/sdk/test_boundary.py tests/sdk/test_bootstrap.py tests/test_*.py` |
+| P1 | `test_checks.py`：复现 0070 的两次失败（`iterrows` 后的 `0.0`、CSV 读回的整数索引），改用 `check_counts` 与 `as_labels` 后通过；多一个、少一个标签和计数不符时消息正确；NaN 与 None 报缺失；`python -O` 下照样抛错；`check_files` 记 `input`、拒绝 4 个目录以外的路径、空文件失败；AST 扫描确认 `checks.py` 顶层只导入标准库。`test_reference.py`：输出含两个 `__all__` 的全部名字、`DEMOS` 的全部名字、`LAYOUT["output_dirs"]` 的 4 个目录；总长不超过 12,000 字符；`reference write_output` 只打印一个；未知名字退出码 2 | `PYTEST tests/sdk/notebook/test_checks.py tests/sdk/notebook/test_reference.py tests/sdk/notebook/test_contract.py tests/sdk/test_public_surface.py tests/sdk/test_boundary.py tests/sdk/test_bootstrap.py tests/test_*.py` |
 | P2 | `test_brief.py`（假 runner）：重放成功后摘要存在，失败后旧摘要被删；步骤段含第一个 cell 原文与记账调用，"Word match" 两个方向都能报出不一致；小表全文、大表只给前 5 行和形状；二进制不预览；孤儿文件有标记；60 张表的模块不超过 450 行并写明截断；原子写。`test_contract.py`：`LAYOUT["review_brief"] == project.REVIEW_BRIEF_FILE`，审查提示含这个路径。`test_subagent_wiring.py`：审查子 agent 的工具仍只有两项 | `PYTEST tests/sdk/notebook tests/entry/test_subagent_wiring.py tests/entry/test_ensemble_golden.py tests/test_*.py`；`PYTEST tests/evals/dataset -m scripted_eval`（29 条，用例 6、7 走重放和审查）；`OCPYTEST -m skill_example tests/sdk/notebook/test_skill_examples.py` |
 | P3 | 契约里 "the step runner's `<命令>`" 都存在 | `PYTEST tests/entry/test_runtime_contract.py tests/entry/test_assembly.py tests/sdk/notebook/test_contract.py tests/sdk/test_replot_hint.py tests/planning/test_render.py tests/entry/test_ensemble_golden.py` |
 
@@ -345,6 +345,12 @@ P1 与 P2 互不依赖；P3 依赖 P1（契约里要写 `reference` 和 `checks`
 ### 7.0 owner 裁定（2026-10-02）
 
 Q1 至 Q5 全部按推荐：Q1 选 a，Q2 选 b，Q3 选 a，Q4 选 a，Q5 选 a。下面保留各题的选项与理由备查。
+
+实现与独立评估之后（2026-10-02），owner 又裁定三件事：
+
+1. 审查读取的字符数只降到 A 组的 71%，没有达到 §5.2 的四分之一。owner 接受现状，审查代价改用审查者的输入 token 衡量（B 组第 1 轮是 A 组的 0.54，第 2 轮是 0.23）。实施记录要写明目标没有达成和原因：01_qc 的第 3 项检查为复核按阈值数出的细胞数，整份读了 148 KB 的 `qc_metrics_per_cell.csv`，Q4 的 b 和数值汇总都省不掉这部分。
+2. "没有摘要就判 REVISE"和"答复不明确时先问再 accept"两处提示改动都不做，列进实施记录的遗留问题。理由：G3 已经机械地挡住未重放的验收，误验收可以用 `revise` 撤回。端到端驱动里的 "Please finish the QC module" 以后改成明确的说法，写进实施记录的建议。
+3. 评估提出的修复做完后，先由评估子 agent 复核，再由 owner 推送、开 PR，CI 全绿后合并。
 
 ### Q1 审查摘要由谁、在什么时候写
 

@@ -50,7 +50,12 @@ def _label(value: Any, position: int) -> str:
         number = float(value)
         if math.isnan(number):
             raise _missing(position, value)
-        return str(int(number)) if number.is_integer() else repr(number)
+        if number.is_integer():
+            return str(int(number))
+        if getattr(getattr(value, "dtype", None), "kind", None) == "f":
+            # numpy prints the shortest decimal that identifies the value at its own precision.
+            return repr(float(str(value)))
+        return repr(number)
     try:
         if value != value:  # NaN-like values that are not floats
             raise _missing(position, value)
@@ -64,6 +69,8 @@ def as_labels(values: Iterable[Any]) -> list[str]:
 
     Integer-valued numbers lose their decimal part, other numbers keep their
     shortest repr, booleans become "True" or "False", strings pass unchanged.
+    A numpy float is read at its own precision, so numpy.float32(0.1) becomes
+    "0.1", as a 0.1 read back from a CSV does.
     Use it to look labels up across tables, for example
     ``dict(zip(as_labels(table["leiden"]), table["cell_type"]))``.
 
@@ -72,7 +79,9 @@ def as_labels(values: Iterable[Any]) -> list[str]:
     """
     if isinstance(values, (str, bytes)):
         raise TypeError("as_labels takes a column or a sequence of labels, not one string")
-    return [_label(value, position) for position, value in enumerate(values)]
+    # A pandas column hands out plain Python floats; its numpy array keeps each value's own precision.
+    items = values.to_numpy() if hasattr(values, "to_numpy") else values
+    return [_label(value, position) for position, value in enumerate(items)]
 
 
 def _column_names(table: Any) -> list[str]:

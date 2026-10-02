@@ -391,6 +391,8 @@ def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner
     updates = {"interpreter": interpreter} if ran else {}
     manifest = _manifest.rebuild(module, **updates)
     if ran:
+        # The brief describes the latest replay; a step run since then leaves it out of date.
+        _brief.remove(module)
         notebook = stitch(module, manifest)
         out(f"[{module.name}] module notebook: {notebook.relative_to(module.root).as_posix()}")
     if changed_from:
@@ -495,7 +497,8 @@ def replay(root: Path, target: str, *, new_interpreter: str | None = None, runne
            wait: float = 0.0, out: Out = _print) -> int:
     """``replay``: rerun every step of a module in fresh kernels, validate last, and record the result.
 
-    A successful replay also writes the review brief (``provenance/review_brief.md``).
+    A successful replay also writes the review brief (``provenance/review_brief.md``);
+    ``run`` removes it again once it runs a step.
     """
     try:
         module, step = _layout.resolve_target(root, target)
@@ -591,8 +594,8 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
     try:
         brief = _brief.write(module, runs, manifest)
         out(f"  review brief: {brief.relative_to(module.root).as_posix()}")
-    except (OSError, ValueError, UnicodeDecodeError) as exc:  # the brief only helps the review; the replay stands
-        out(f"  warning: could not write the review brief: {exc}")
+    except Exception as exc:  # the brief only helps the review; whatever stops it, the replay stands
+        out(f"  warning: could not write the review brief: {type(exc).__name__}: {exc}")
     if changed:
         out("  changed outputs: " + _join(changed))
     if orphans:

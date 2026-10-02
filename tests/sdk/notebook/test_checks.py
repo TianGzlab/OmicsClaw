@@ -63,6 +63,17 @@ def test_as_labels_turns_equal_labels_into_one_string():
     assert as_labels(np.array([1, 2])) == ["1", "2"]
 
 
+def test_as_labels_reads_a_numpy_float_at_its_own_precision():
+    assert as_labels([np.float32(0.1), np.float16(0.1), np.float64(0.1), 0.1]) == ["0.1"] * 4
+    assert as_labels([np.float32(0.25), np.float32(1e-8)]) == ["0.25", "1e-08"]
+    neighbour = np.nextafter(np.float32(0.1), np.float32(1))
+    first, second = as_labels([np.float32(0.1), neighbour])
+    assert first != second
+    float32_column = pd.Series([0.1, 0.25], dtype="float32")
+    from_csv = pd.read_csv(io.StringIO("x\n0.1\n0.25\n"))["x"]
+    check_same_labels(float32_column, from_csv)
+
+
 @pytest.mark.parametrize("missing", [None, float("nan"), np.nan, pd.NA])
 def test_as_labels_reports_a_missing_value_and_where(missing):
     with pytest.raises(AssertionError, match="label 1 is missing"):
