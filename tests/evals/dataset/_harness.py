@@ -29,9 +29,12 @@ def seed(case_id: str, prompt: str, provider: Any, *assertions: Assertion, **fie
     )
 
 
-def check(case: Case, tmp_path: Path, results: list[Result]) -> Result:
-    """Run *case*, hand its result to the report, and fail on any hard failure."""
-    result = run_case(case, tmp_path)
+def check(case: Case, tmp_path: Path, results: list[Result], *, timeout_s: float | None = None) -> Result:
+    """Run *case*, hand its result to the report, and fail on any hard failure.
+
+    :param timeout_s: The case's time limit; ``None`` keeps the Runner's default.
+    """
+    result = run_case(case, tmp_path) if timeout_s is None else run_case(case, tmp_path, timeout_s=timeout_s)
     results.append(result)
     if not result.passed:
         pytest.fail(

@@ -115,11 +115,11 @@ def test_a_leaf_and_its_dependency_install_verify_and_are_reused(tmp_path):
     # case 14: the metadata
     meta = json.loads((key_dir / META).read_text())
     assert (key_dir / ".venv" / FINGERPRINT).read_text().strip() == key_dir.name == meta["key"]
-    for field in ("skill", "packages", "requested_specs", "installed", "kept_from_base", "package_sources",
+    for field in ("skills", "packages", "requested_specs", "installed", "kept_from_base", "package_sources",
                   "base_executable", "base_version", "base_prefix", "base_mtime_ns", "base_dists_sha256",
                   "pip_version", "created"):
         assert field in meta, field
-    assert meta["skill"] == SKILL and meta["packages"] == ["oc-leaf"] and meta["requested_specs"] == ["oc-leaf"]
+    assert meta["skills"] == [SKILL] and meta["packages"] == ["oc-leaf"] and meta["requested_specs"] == ["oc-leaf"]
     assert meta["package_sources"] == PACKAGE_SOURCES
     assert sorted((i["name"], i["wheel"], i["source"], i["transport"]) for i in meta["installed"]) == [
         ("oc-dep", "oc_dep-1.0-py3-none-any.whl", f"file:{wheels}", "file"),

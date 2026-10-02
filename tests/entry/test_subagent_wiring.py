@@ -231,7 +231,7 @@ def test_delegation_is_on_by_default(tmp_path, offline):
     app = build_app(_config(tmp_path))
 
     assert TASK_TOOL_NAME in app.registry.names()
-    assert build_subagent_registry(app.config).names() == ("general-purpose",)
+    assert build_subagent_registry(app.config).names() == ("general-purpose", "module-reviewer")
 
 
 def test_turning_delegation_off_removes_the_tool_and_the_registry(tmp_path, offline):
@@ -265,6 +265,7 @@ def test_a_file_under_the_agents_root_joins_the_enum(tmp_path, offline):
 
     assert schema["properties"]["subagent_type"]["enum"] == [
         "general-purpose",
+        "module-reviewer",
         "surveyor",
     ]
 
@@ -278,7 +279,7 @@ def test_an_unreadable_agent_file_costs_only_itself(tmp_path, offline, caplog):
     with caplog.at_level("WARNING", logger="omicsclaw.entry"):
         registry = build_subagent_registry(_config(tmp_path))
 
-    assert registry.names() == ("general-purpose",)
+    assert registry.names() == ("general-purpose", "module-reviewer")
     assert "broken.md" in caplog.text
 
 
@@ -610,6 +611,24 @@ def test_the_child_inherits_the_rest_of_the_parent_s_table_in_order(
         if name
         not in {TASK_TOOL_NAME, PLAN_WRITE_TOOL_NAME, MEMORY_WRITE_TOOL_NAME}
     )
+
+
+def test_the_module_reviewer_is_given_only_read_file_and_use_skill(tmp_path, offline):
+    """The reviewer reads the module it reviews and cannot change it.
+
+    Mutation: give ``MODULE_REVIEWER`` an empty ``tools`` (inherit every
+    parent tool) and this goes red.
+    """
+    provider = offline(_ScriptedProvider([_says("VERDICT: APPROVE")]))
+    app = build_app(_config(tmp_path))
+
+    result = asyncio.run(app.registry.execute(_task_call("Review module 01_qc", agent="module-reviewer")))
+
+    offered = tuple(definition.name for definition in provider.seen_tools[0])
+    assert not result.is_error, result.output
+    assert offered == tuple(name for name in app.registry.names() if name in {"read_file", "use_skill"})
+    assert set(offered) <= {"read_file", "use_skill"}
+    assert "read_file" in offered
 
 
 def test_a_sub_agent_cannot_see_or_change_the_parent_s_plan(tmp_path, offline):

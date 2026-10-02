@@ -626,6 +626,57 @@ def test_remembering_takes_effect_on_the_next_call(tmp_path):
     assert second.count == 0
 
 
+LIST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "paths": {"type": "array", "items": {"type": "string"}},
+        "mode": {"type": "string"},
+        "recursive": {"type": "boolean"},
+    },
+    "required": ["paths"],
+}
+"""A tool, such as an MCP one, whose only required argument is a list of strings."""
+
+
+def test_a_deny_rule_on_the_raw_payload_reaches_a_tool_with_only_list_arguments():
+    gate = PermissionGate(
+        mode=PermissionMode.AUTO_APPROVE,
+        rules=rules(deny=['mcp__fs__clean(*"mode": "purge"*)']),
+    )
+    payload = json.dumps({"paths": ["/tmp/x"], "mode": "purge"})
+
+    resolution = gate.resolve("mcp__fs__clean", payload, policy=ToolPolicy(), schema=LIST_SCHEMA)
+
+    assert resolution.verdict is Verdict.DENY
+
+
+def test_always_allow_for_a_list_argument_does_not_cover_a_call_with_more_arguments(tmp_path):
+    gate = PermissionGate(rules=RuleStore(tmp_path / "settings.json"))
+    gate.remember("mcp__fs__clean", json.dumps({"paths": ["/tmp/x"]}), schema=LIST_SCHEMA, policy=ToolPolicy())
+
+    later = gate.resolve(
+        "mcp__fs__clean",
+        json.dumps({"paths": ["/tmp/x"], "recursive": True}),
+        policy=ToolPolicy(),
+        schema=LIST_SCHEMA,
+    )
+
+    assert later.verdict is not Verdict.ALLOW
+
+
+def test_a_declared_rule_argument_is_what_always_allow_remembers(tmp_path):
+    policy = ToolPolicy(rule_argument="paths")
+    gate = PermissionGate(rules=RuleStore(tmp_path / "settings.json"))
+
+    pattern = gate.remember("t", json.dumps({"paths": ["b", "a"], "mode": "x"}), schema=LIST_SCHEMA, policy=policy)
+
+    assert pattern == "t(a, b)"
+    same = gate.resolve("t", '{"mode":"y","paths":["a","b","a"]}', policy=policy, schema=LIST_SCHEMA)
+    assert same.verdict is Verdict.ALLOW and same.source is DecisionSource.RULE
+    fewer = gate.resolve("t", json.dumps({"paths": ["a"]}), policy=policy, schema=LIST_SCHEMA)
+    assert fewer.verdict is not Verdict.ALLOW
+
+
 # ---- the wrapper --------------------------------------------------------
 
 

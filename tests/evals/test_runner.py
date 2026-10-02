@@ -297,3 +297,112 @@ def test_a_skill_fallback_answers_skills_without_a_fixture(tmp_path):
     real = run_case(base, tmp_path / "b")
     assert [(r.skill, r.stubbed) for r in real.skill_runs] == [("bulkrna-de", False)]
     assert [w.assertion for w in real.warnings] == ["skill_ran_unstubbed"]
+
+
+# ---- step ledgers ------------------------------------------------------------------------------
+
+import json  # noqa: E402
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from omicsclaw.evals import StubResult  # noqa: E402
+
+_REPO = Path(__file__).resolve().parents[2]
+_RUNNER = _REPO / "skills" / "_sdk" / "notebook" / "run.py"
+_LEDGER = "results/01_m/provenance/runs/01_s/20261001T000000Z-0000.jsonl"
+
+
+def _ledger_case(case_id, events, **fields):
+    lines = "".join(json.dumps({"v": 1, "at": f"2026-10-01T00:00:0{i}.000Z", **e}) + "\n" for i, e in enumerate(events))
+    return Case(
+        id=f"skill_routing/{case_id}",
+        category="skill_routing",
+        prompt="look",
+        provider=lambda: ScriptedProvider(ScriptedTurn(text="done")),
+        assertions=(),
+        files={_LEDGER: lines},
+        **fields,
+    )
+
+
+def test_ledger_calls_become_skill_runs_with_their_function(tmp_path):
+    case = _ledger_case("ledger_calls", [
+        {"event": "skill_load", "skill": "sc-clustering", "stub": True},
+        {"event": "skill_call", "skill": "sc-clustering", "function": "cluster", "args": {"resolution": 0.5}, "stub": True},
+        {"event": "skill_cli", "skill": "bulkrna-de", "script": "bulkrna_de.py", "argv": ["--input", "x.csv"], "exit_code": 0, "stub": True},
+    ])
+    result = run_case(case, tmp_path)
+    assert result.passed, result.failures
+    calls = [(r.skill, r.domain, r.function, r.source) for r in result.skill_runs]
+    assert calls == [("sc-clustering", "singlecell", "cluster", "ledger"), ("bulkrna-de", "bulkrna", None, "ledger")]
+    assert result.skill_runs[0].args == {"resolution": 0.5}
+    assert result.warnings == ()
+
+
+def test_a_stub_target_missing_event_is_a_hard_failure(tmp_path):
+    case = _ledger_case("ledger_missing", [
+        {"event": "stub_target_missing", "skill": "sc-clustering", "names": ["cluster_report"], "reason": "not in the real _api.py's __all__"},
+    ])
+    result = run_case(case, tmp_path)
+    assert "stub_target_missing" in _names(result) and not result.passed
+
+
+def test_a_real_library_loaded_while_stubs_are_set_is_a_soft_warning(tmp_path):
+    events = [{"event": "skill_load", "skill": "sc-qc", "stub": False}]
+    stubbed = _ledger_case("ledger_unstubbed", events, skill_stubs={"bulkrna-de": StubResult(stdout="ok\n")})
+    result = run_case(stubbed, tmp_path / "a")
+    assert result.passed
+    assert [w.assertion for w in result.warnings] == ["skill_ran_unstubbed"]
+    plain = run_case(_ledger_case("ledger_unstubbed_plain", events), tmp_path / "b")
+    assert plain.warnings == ()
+
+
+import importlib.util  # noqa: E402
+
+needs_kernel = pytest.mark.skipif(
+    importlib.util.find_spec("nbclient") is None or importlib.util.find_spec("ipykernel") is None,
+    reason="the step runner needs nbclient and ipykernel",
+)
+
+
+def _step_case(case_id, stub_source, tmp_path):
+    stub = tmp_path / "given" / "sc-clustering.py"
+    stub.parent.mkdir(parents=True)
+    stub.write_text(stub_source, encoding="utf-8")
+    step = (
+        "# %%\n"
+        "from skills._sdk.notebook import load_skill, read_input, write_output\n"
+        'clustering = load_skill("sc-clustering")\n'
+        'write_output(clustering.cluster(read_input("data/cells.json")), "tables/c.json")\n'
+    )
+    return Case(
+        id=f"skill_routing/{case_id}",
+        category="skill_routing",
+        prompt="cluster",
+        provider=lambda: ScriptedProvider(
+            ScriptedTurn(tool_calls=(tool_call("bash", {"command": f"{sys.executable} {_RUNNER} new m"}),)),
+            ScriptedTurn(tool_calls=(tool_call("write_file", {"path": "analysis/01_m/01_s.py", "content": step}),)),
+            ScriptedTurn(tool_calls=(tool_call("bash", {"command": f"{sys.executable} {_RUNNER} run analysis/01_m"}),)),
+            ScriptedTurn(text="done"),
+        ),
+        assertions=(NoWriteOutside(),),
+        files={"data/cells.json": json.dumps({"cells": ["a", "b"]})},
+        skill_modules={"sc-clustering": stub},
+    )
+
+
+@needs_kernel
+def test_a_stub_naming_a_function_the_library_lacks_fails_the_case(tmp_path):
+    source = "def cluster(adata, **_):\n    return {'x': 1}\n\ndef cluster_report(adata):\n    return {}\n"
+    result = run_case(_step_case("stub_extra_function", source, tmp_path), tmp_path / "run", timeout_s=90)
+    assert "stub_target_missing" in _names(result)
+    assert any("cluster_report" in f.message for f in result.failures if f.assertion == "stub_target_missing")
+
+
+@needs_kernel
+def test_a_stub_module_leaves_no_bytecode_beside_it(tmp_path):
+    source = "def cluster(adata, **_):\n    return {'labels': ['0'] * len(adata['cells'])}\n"
+    result = run_case(_step_case("stub_no_bytecode", source, tmp_path), tmp_path / "run", timeout_s=90)
+    assert result.passed, result.failures
+    assert [r.function for r in result.skill_runs] == ["cluster"] and result.skill_runs[0].stubbed
+    assert not (tmp_path / "run" / "stubs" / "__pycache__").exists()

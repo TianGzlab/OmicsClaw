@@ -154,6 +154,7 @@ def test_a_blank_policy_grants_nothing():
     assert blank.writes_config is False
     assert blank.touches_network is False
     assert blank.prompts_for_itself is False
+    assert blank.rule_argument is None
     assert blank.tags == frozenset()
 
 
@@ -172,6 +173,16 @@ def test_the_prompts_for_itself_default_is_the_one_that_costs():
     """
     assert ToolPolicy().prompts_for_itself is False
     assert ToolPolicy(approval_mode=ApprovalMode.ASK).prompts_for_itself is False
+
+
+def test_the_rule_argument_default_is_the_narrow_one():
+    """``rule_argument``, classified: a **permission**.
+
+    Naming an argument, a list one above all, widens what one remembered
+    "always allow" covers, so ``None``, which keeps the schema-derived
+    argument, is the guarded value.
+    """
+    assert ToolPolicy().rule_argument is None
 
 
 def test_the_policy_fields_are_exactly_the_ones_classified_above():
@@ -196,6 +207,7 @@ def test_the_policy_fields_are_exactly_the_ones_classified_above():
         "touches_network",
         "prompts_for_itself",
         "allowed_in_background",
+        "rule_argument",
         "tags",
     ]
 

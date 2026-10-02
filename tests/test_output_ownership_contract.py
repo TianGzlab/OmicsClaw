@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = ROOT / "skills"
+STEP_RUNNER_DIR = SKILLS_DIR / "_sdk" / "notebook"
+"""The step runner, which writes the ``analysis/<NN_slug>/README.md`` of each module it creates."""
 
 RUNNER_OWNED_HELPERS = {
     "write_standard_run_artifacts",
@@ -77,6 +79,8 @@ def test_skill_scripts_do_not_write_to_runner_owned_paths():
 
     violations: list[str] = []
     for path in _python_skill_files():
+        if STEP_RUNNER_DIR in path.parents:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from omicsclaw.entry.config import SkillEnvMode
+from omicsclaw.entry.project import STEP_RUNNER
 from omicsclaw.permission.gate import DOTENV_NAME
 from omicsclaw.provider import Completion, LLMProvider, ProviderError
 from omicsclaw.schema import (
@@ -46,6 +47,7 @@ from omicsclaw.tools import ApprovalDecision, ApprovalRequest
 
 from .case import Case, Result
 from .provider import RecordedCall
+from .ledger import read_ledgers
 from .stubs import REPO_ROOT, StubResult, _git_commit, find_skill_run
 
 __all__ = [
@@ -373,6 +375,39 @@ def is_read_only(command: str) -> bool:
     return True
 
 
+_RUNNER_SUBCOMMANDS = frozenset({"new", "run", "status", "replay"})
+
+
+def _same_file(token: str, target: Path, workspace: Path) -> bool:
+    path = Path(token)
+    if not path.is_absolute():
+        path = workspace / path
+    return os.path.realpath(path) == os.path.realpath(target)
+
+
+def is_step_runner(command: str, runner: Path, workspace: Path) -> bool:
+    """Whether *command* is one plain call of the step runner at *runner*.
+
+    ``python <runner> <subcommand> ...``, the form the Environment section
+    gives, where the script resolves to *runner* itself (a relative path
+    against *workspace*). The interpreter is ``python``, ``python3`` or the
+    running one, there is no shell metacharacter, and the subcommand is
+    ``new``, ``run``, ``status`` or ``replay``: ``accept`` and ``revise``
+    record the user's decision, so they are not approved here.
+    """
+    if any(mark in command for mark in _META_CHARACTERS):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    if len(tokens) < 3 or tokens[0] not in _interpreters():
+        return False
+    if not _same_file(tokens[1], runner, workspace):
+        return False
+    return tokens[2] in _RUNNER_SUBCOMMANDS
+
+
 def _names_a_skill_directory(command: str, index: SkillIndex) -> bool:
     for skill in index.skills:
         directory = skill.directory
@@ -399,7 +434,10 @@ def routing_policy(
 
     ``bash`` is approved for a strict ``--help`` of a skill script, for a
     run of a skill script (the stub layer answers it, so nothing runs),
-    and for a read-only command (:func:`is_read_only`); a command that
+    for a call of the step runner under *index*'s root
+    (:func:`is_step_runner`; the step's inputs are empty files, so a real
+    skill fails fast on them), and for a
+    read-only command (:func:`is_read_only`); a command that
     names a skill directory without being a recognised run is refused as
     ``unmatched_skill_command``, and everything else is refused.
     ``web_fetch`` and ``web_search`` are refused. ``write_file`` and
@@ -417,6 +455,8 @@ def routing_policy(
         denials.append(Denial(tool, kind, detail))
         return ApprovalDecision(approved=False, reason="not permitted in the routing eval")
 
+    runner = Path(index.root).joinpath(*STEP_RUNNER)
+
     def decide(request: ApprovalRequest) -> ApprovalDecision:
         tool = request.tool_name
         arguments = _arguments(request)
@@ -429,6 +469,8 @@ def routing_policy(
                 return ApprovalDecision(approved=True)
             if run is not None:
                 return deny(tool, "help_not_strict", command)
+            if is_step_runner(command, runner, workspace):
+                return ApprovalDecision(approved=True)
             if is_read_only(command):
                 return ApprovalDecision(approved=True)
             if _names_a_skill_directory(command, index):
@@ -522,11 +564,13 @@ class Verdict:
     :param parallel_use_skill: The ``use_skill`` names in the first reply
         that loaded any.
     :param executed_skill: The first skill whose script ran (``--help``
-        does not count).
+        does not count) or, without one, the first skill a step loaded or
+        ran through ``run_cli``, by the step ledgers.
     :param chosen: *executed_skill* when set, else *first_use_skill*.
     :param args_ok: Whether the executed command carries the seed's
-        expected arguments, its input and ``--output``; ``None`` when the
-        seed has no expected arguments or nothing was executed.
+        expected arguments, its input and ``--output``, or, for a function
+        a step called, whether its recorded keyword arguments match; ``None``
+        when the seed has no expected arguments or nothing was executed.
     :param harness_failures: The Runner's hard failures, as text.
     """
 
@@ -575,6 +619,13 @@ def _args_ok(command: str, seed: Seed) -> bool:
     return all(value_of(flag) == value for flag, value in seed.expected_args)
 
 
+def _kwargs_ok(args: Mapping[str, Any], seed: Seed) -> bool:
+    """Whether a recorded function call carries each expected flag as a keyword (``--method`` as ``method``)."""
+    return all(
+        str(args.get(flag.lstrip("-").replace("-", "_"))) == value for flag, value in seed.expected_args
+    )
+
+
 def judge(
     result: Result,
     seed: Seed,
@@ -602,15 +653,24 @@ def judge(
             first = names[0]
             parallel = tuple(names)
             break
-    executed_run = result.skill_runs[0] if result.skill_runs else None
+    bash_runs = [run for run in result.skill_runs if run.source == "bash"]
+    executed_run = bash_runs[0] if bash_runs else None
     executed = executed_run.skill if executed_run is not None else None
+    if executed is None and result.workspace is not None:
+        executed = read_ledgers(result.workspace).first_skill
+        executed_run = next(
+            (run for run in result.skill_runs if run.source == "ledger" and run.skill == executed), None
+        )
     chosen = executed or first
     failures = tuple(str(failure) for failure in result.failures)
     timed_out = any(failure.assertion == "case_timeout" for failure in result.failures)
 
     args_ok: bool | None = None
     if seed.expected_args and executed_run is not None:
-        args_ok = _args_ok(executed_run.command, seed)
+        if executed_run.function is not None:
+            args_ok = _kwargs_ok(executed_run.args, seed)
+        else:
+            args_ok = _args_ok(executed_run.command, seed)
 
     detail = ""
     if isinstance(result.run_error, ProviderError) or timed_out:

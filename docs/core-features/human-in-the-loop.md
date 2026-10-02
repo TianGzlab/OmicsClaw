@@ -170,7 +170,7 @@ registry = build_registry(config, mounted)
 | `toolName()` | 同上，空括号等于不限参数 |
 | `toolName(pattern)` | *pattern* 匹配该调用的**主参数**时命中 |
 
-**主参数**（`principal_argument`）是工具 JSON Schema 里第一个 `required` 且类型为 `string` 的属性值：`bash` 是 `command`，文件工具是 `path`，`web_fetch` 是 `url`，`web_search` 是 `query`，`use_skill` 是 `skill_name`。`write_file` 的 `required` 是 `["path", "content"]`，所以规则针对的是写入目的地，与写入内容无关。找不到这样的属性时回落到原始 JSON 文本。
+**主参数**（`principal_argument`）是工具 JSON Schema 里第一个 `required` 且类型为 `string` 的属性值：`bash` 是 `command`，文件工具是 `path`，`web_fetch` 是 `url`，`web_search` 是 `query`，`use_skill` 是 `skill_name`。`write_file` 的 `required` 是 `["path", "content"]`，所以规则针对的是写入目的地，与写入内容无关。找不到这样的属性时回落到原始 JSON 文本。工具也可以在 `ToolPolicy.rule_argument` 里自己声明主参数；声明的参数是字符串列表时，取去重、排序后用 `, ` 连接的值。目前只有 `install_skill_deps` 声明了 `skills`，所以它的"总是允许"记下的是 `install_skill_deps(sc-de, sc-qc)` 这样的 skill 组合，与包和参数顺序无关。
 
 **匹配规则**（`_match_argument`）：
 

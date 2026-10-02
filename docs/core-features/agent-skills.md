@@ -100,6 +100,20 @@ skills/spatial/spatial-preprocess/
 └── tests/
 ```
 
+计划 0070 起，单细胞试点的 5 个 skill（`sc-qc`、`sc-preprocessing`、`sc-clustering`、`sc-cell-annotation`、`sc-de`）多了函数库，形状是：
+
+```
+skills/singlecell/scrna/sc-clustering/
+├── SKILL.md                  手写正文 + 由 _api.py 生成的 ## API 段（有一致性测试）
+├── _api.py                   函数库：步骤里 load_skill("sc-clustering") 拿到的就是它
+├── sc_cluster.py             CLI 薄壳：argparse、报告、画廊图、result.json，计算都调 _api.py
+├── examples/example_step.py  可执行示例步骤，数据来自 load_demo，CI 的 skill-examples job 真跑
+├── references/
+└── tests/
+```
+
+`_api.py` 以 `_` 开头，不算主脚本。其余 85 个 skill 还只有 CLI，步骤里用 `run_cli` 调用（§9.2）。
+
 ### 3.2 三种深度
 
 扫描是递归的，skill 可以处在任意深度。当前语料里有三种（`find skills -name SKILL.md` 按深度统计）：
@@ -341,31 +355,54 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
 
 ---
 
-## 9. 执行通道：读 `SKILL.md`，用 `bash` 跑脚本
+## 9. 执行通道：在模块里写步骤，用步骤执行器运行
 
 旧的确定性执行入口（`oc run <skill>`、`omicsclaw/skill/` 里的 runner、`python omicsclaw.py replot`）已全部删除，
-且按 owner 裁定**不恢复**（FRAMEWORK-REBUILD "The skill runner was not re-homed"）。现在执行一个 skill 就是 agent 在会话里做的一件事：
+且按 owner 裁定**不恢复**。计划 0070 之后，非平凡的分析都在课题的模块里做：workspace 就是课题根，`analysis/<NN_slug>/`
+放一个模块的代码（README 和编号的步骤文件），`results/<NN_slug>/` 放它的输出。agent 写步骤文件，再用 `bash` 调步骤执行器
+`skills/_sdk/notebook/run.py`（Environment 段里有它的完整命令）运行：
 
 ```
-用户: 用这份 Visium 数据跑一下预处理和空间域
+用户: 对 pbmc3k 做聚类
   │
-  ├─ use_skill{"skill_name": "spatial-preprocess"}      ← 读方法学、Key CLI、依赖、输出契约
-  ├─ bash: python skills/spatial/spatial-preprocess/spatial_preprocess.py --help   ← 确认 flag（可选）
-  ├─ bash: python skills/spatial/spatial-preprocess/spatial_preprocess.py \
-  │          --input data/visium.h5ad --output runs/pp --data-type visium --species human
-  ├─ read_file: runs/pp/report.md                       ← 解读结果
-  └─ use_skill{"skill_name": "spatial-domains"} → bash: ... --input runs/pp/processed.h5ad ...
+  ├─ bash: python <skills>/_sdk/notebook/run.py status        ← 开工前先看课题状态，再读 STRATEGY.md
+  ├─ use_skill{"skill_name": "sc-clustering"}                  ← 读方法学、## API、参数来源
+  ├─ bash: python <skills>/_sdk/notebook/run.py new clustering ← 建 analysis/03_clustering/ 与 results/03_clustering/
+  ├─ write_file: analysis/03_clustering/01_cluster.py           ← load_skill + read_input + write_output
+  ├─ write_file: analysis/03_clustering/02_validate.py
+  ├─ bash: python <skills>/_sdk/notebook/run.py run analysis/03_clustering
+  ├─ bash: ... replay analysis/03_clustering → write_file REPORT → task(module-reviewer) → 用户确认 → accept
 ```
 
-### 9.1 脚本约定
+### 9.1 步骤与执行器
 
-- 路径永远是 `skills/<domain>/<skill>/<script>.py`（单细胞多一层 `scrna/` / `scatac/`），以 `use_skill` 返回的目录为准，不要按名字猜。
-- 所有主脚本支持 `--help`；绝大多数支持 `--demo`（自己合成数据），并要求 `--output <dir>`。例如
-  `spatial_preprocess.py` 的参数是 `--input/--output/--demo/--data-type/--species/--min-genes/...`，
-  `bulkrna_de.py` 是 `--input/--output/--demo/--method {deseq2,ttest}/--control-prefix/--treat-prefix/...`。
-- 旁路：`skills/<domain>/_lib/` 是同领域共享代码，脚本自行导入。
+- 步骤是 percent 格式的普通 Python 文件（`# %%` 分 cell，`# %% [markdown]` 写说明），名字形如 `02_cluster.py`，字母后缀表示变体，
+  每个模块恰好一个 `<k>_validate.py`，总是最后运行。不允许 `%`、`!` 开头的魔法行，所以每个步骤也能用 `python <file>` 单独运行。
+- 步骤代码只用 `skills._sdk.notebook` 的 5 个函数：`read_input`、`write_output`、`load_skill`、`load_demo`、`run_cli`。
+  执行器在一次性的 IPython kernel 里逐 cell 运行步骤（kernel 用执行器自己的解释器），每次运行写一份 JSON-lines 记账
+  （`results/<NN>/provenance/runs/<step>/<run_id>.jsonl`）：读了哪些文件及其 sha256、调用了哪些 skill 函数和参数、写了哪些输出。
+  manifest 从记账重建，各步骤的 notebook 拼成 `notebooks/M<NN>_<slug>.ipynb`。
+- 一个步骤过期只看两样：步骤文件变了，或者它经 `read_input` 读过的文件变了。步骤读了又原名写回的文件，按它自己最后写入的
+  sha256 比较。`status` 列出每个过期步骤的原因，上游模块重跑后下游模块会显示 `input changed: results/...`。
+- 子命令：`new`、`run`、`status`、`replay`、`accept`、`revise`、`api`。验收分三步：`replay` 在新 kernel 里重跑全部步骤；
+  内置的只读子代理 `module-reviewer` 给出 `VERDICT: APPROVE` 或 `REVISE`；用户确认后 `accept` 冻结模块。冻结的模块要先 `revise`
+  （快照进 `baseline/`）才能再改。`replay` 开始前把 `reviews/` 里已有的审查移进 `reviews/archive/<id>/`，每份的 verdict 和
+  sha256 记进 manifest 的 `review_history`，所以同一天的复审不会覆盖第一次的审查。
+- 执行器只在前台运行。`run`、`replay` 在启动它们的进程退出后自行停止（父进程变了，或进程组原来的组长已经退出，后者覆盖
+  `nohup … &` 这类 shell 立即退出的写法；进程组是终端前台组时不查组长，所以在交互式终端里写成 `echo x | python run.py …` 也能跑完）：杀掉正在跑的 kernel，删掉这个步骤上一次留下的 notebook，给当前步骤记一条失败的
+  `run_end`（`reason: "parent exited"`），然后退出并释放模块锁。单次运行的上限约等于 `tool_timeout_s` 减 15 s，
+  模块一次跑不完时按步骤逐个 `run <step file>`。输出的读取方提前关闭（`run ... | head`）时，执行器丢弃余下输出，照常跑完。
 
-### 9.2 输出目录
+### 9.2 有函数库的 skill 与只有 CLI 的 skill
+
+- 有 `## API` 段的 skill：`library = load_skill("sc-clustering")`，再调用 `library.cluster(adata, ...)`。只有 `__all__` 里的名字可用，
+  每次调用都进记账。
+- 只有 CLI 的 skill：`run_cli("bulkrna-de", "--input", "data/counts.csv", inputs=["data/counts.csv"])`。输出默认落在
+  `results/<NN>/intermediate/<skill>/`；给 `--output` 时，它必须是本模块 `figures/`、`tables/`、`intermediate/`、`logs/`
+  之一下面的子目录。跑完后按输出目录逐个文件补记，所以重放时不会被当成孤儿文件。脚本约定照旧：
+  路径以 `use_skill` 返回的目录为准，主脚本都支持 `--help`，绝大多数支持 `--demo`。
+- 过渡期 CLI 仍可在课题外直接用 `bash` 运行，输出结构见下。试点 skill 的 CLI 已是 `_api.py` 的薄壳，
+  `tests/parity/` 保证它们的输出与改造前逐值一致。
 
 以 `python skills/bulkrna/bulkrna-de/bulkrna_de.py --demo --output /tmp/de_demo` 实测：
 
@@ -377,8 +414,6 @@ sections = default_sections(config, skills=skills, ...)  # ... tools → [planni
 ├── tables/                       de_results.csv, de_significant.csv
 └── reproducibility/commands.sh   复现命令
 ```
-
-空间/单细胞 skill 还会写 `processed.h5ad` 供下游使用。
 
 ### 9.3 科学层：`omicsclaw/common/` 与 `skills/_sdk/`
 
@@ -397,29 +432,32 @@ skill 脚本依赖的"科学层"。计划 0062 起它全部在 `skills/_sdk/`，
 
 - **超时**：`bash` 的上限由 `AppConfig.tool_timeout_s`（默认 600 s）派生，`bash_timeout() = tool_timeout_s - 15`。
   反卷积、比对这类分钟到小时级的运行需要调大 `--tool-timeout` / `OMICSCLAW_TOOL_TIMEOUT_S`，**只改这一个数**。
-- **审批**：`bash` 的策略是 `ASK`。在 `default` 权限模式下，每次跑脚本都会出审批卡片（CLI 可答 `s` 对本会话放行 `bash`，
-  或 `/auto`）；`use_skill` 本身不需要审批。
+- **审批**：`bash` 的策略是 `ASK`。在 `default` 权限模式下，每次调执行器都会出审批卡片（CLI 可答 `s` 对本会话放行 `bash`，
+  或 `/auto`）；`use_skill` 本身不需要审批。放行之后 `accept` 也不再出卡，所以"用户确认后才验收"只靠契约约束。
 - **大输出**：脚本的 stdout 进入对话上下文；上下文压力达到 `compact_at`（默认 `warn`）后，
   `ProgressiveCompactor` 会先把大的工具结果 offload 到 `<workspace>/.omicsclaw/tool_results/`，再做摘要。
 - **沙箱**：开启 `--sandbox docker` 时脚本在容器里运行，工作区以相同路径挂载。
-- **安全规则**：system prompt 的 safety 段（`SAFETY_RULES`）要求"只使用 SKILL.md 方法学，不编造参数、阈值或基因关联"，
-  并在每份报告附免责声明——与 skill 报告实际写入的 `skills/_sdk/report.py` 的 `DISCLAIMER` 是同一句话，由 `test_assembly.py` 校验。
+- **安全规则**：system prompt 的 safety 段（`SAFETY_RULES`）第 3 条要求"skill 没给定的参数、阈值或截断值，在步骤里写明取值和理由；不编造基因关联"，
+  第 2 条要求每个模块的 REPORT 和给用户的结果摘要都附免责声明——与 skill 报告实际写入的 `skills/_sdk/report.py` 的 `DISCLAIMER` 是同一句话，
+  由 `test_assembly.py` 校验，`accept` 也会检查 REPORT 里有它。
 
 ---
 
 ## 10. 链式调用
 
-多数领域有一个必须先跑的**基础步**，它写出后续所有步骤读取的 `.h5ad`：
+一个模块对应一个分析阶段（QC、预处理、聚类、注释、差异表达……），按创建顺序编号。下游模块只读上游模块的
+`results/<NN>/intermediate/` 和 `tables/`，例如聚类模块的步骤 `read_input("results/02_preprocess/intermediate/adata.h5ad")`。
+上游重跑改写了这些文件，`status` 会把下游的步骤标为过期；要不要重跑下游由 agent 决定，执行器不自动级联。
+
+多数领域仍有一个必须先跑的**基础步**：
 
 | 领域 | 基础步 | 产物 | 典型下游 |
 |---|---|---|---|
 | spatial | `spatial-preprocess`（上游可选 `spatial-raw-processing`） | `processed.h5ad`（`obsm["X_pca"]`、`obs["leiden"]`） | `spatial-domains`、`spatial-de`、`spatial-genes`、`spatial-deconv` |
-| singlecell | `sc-preprocessing`（`sc_preprocess.py`；上游 `sc-count` / `sc-qc` / `sc-filter` 等） | 预处理后的 `.h5ad` | `sc-cell-annotation`、`sc-de`、`sc-batch-integration`、`sc-pseudotime` |
+| singlecell | `sc-preprocessing`（上游 `sc-qc` / `sc-filter` 等） | 预处理后的 AnnData | `sc-clustering`、`sc-cell-annotation`、`sc-de`、`sc-batch-integration` |
 
-做法：跑基础步 → 把它输出目录里的处理后文件作为下一步的 `--input`。每个领域的链条写在
-`skills/<domain>/INDEX.md` 的手写部分和各 `SKILL.md` 的 "See also / Adjacent skills" 里；description 里的
-"Skip when … (use X)" 也在引导模型走对链条。框架层面**没有**任何流水线编排器：链条完全由模型按 SKILL.md 推进，
-配合 `plan_write` 记录步骤。
+每个领域的链条写在 `skills/<domain>/INDEX.md` 的手写部分和各 `SKILL.md` 的 "See also / Adjacent skills" 里。课题级的计划与跨模块的
+决定写在 `docs/analysis_strategy/STRATEGY.md`，由 agent 与用户一起维护，不注入系统提示；契约要求开工前先跑 `status` 再读它。
 
 ---
 
@@ -487,10 +525,8 @@ make skill-index      # = OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test
    FRAMEWORK-REBUILD.md "Open after the migration" 记录的"96 个 SKILL.md 仍写 oc run"是迁移当时的状态。
 3. **生成器已不存在**。`scripts/generate_skill_md.py`、`generate_routing_table.py`、`generate_domain_index.py` 等随旧 skill 系统删除；
    `SKILL.md` 只能手写，`OMICSCLAW.md` 的路由表手工维护，只有 `INDEX.md` 有测试兜底。
-4. **部分 skill 脚本仍依赖不可导入的旧包**。`consensus-domains`、`sc-consensus-clustering`、`sc-consensus-integration`、
-   `sc-consensus-pseudotime` 的主脚本在模块顶层 `from omicsclaw.runtime.consensus.run import main`，
-   而 `omicsclaw/runtime/` 已不可导入（实测 `consensus_domains.py --help` 以 `ModuleNotFoundError: No module named 'omicsclaw.skill'` 失败）；
-   `consensus-interpret/_llm.py` 惰性导入已删除的 `omicsclaw.providers`。这些 skill 仍在索引里，模型可以选中它们。
+4. **`consensus-interpret` 的 LLM 路径不可用**。它的 `_llm.py` 惰性导入已删除的 `omicsclaw.providers`，默认走结构化路径（`--no-llm`）；
+   它读的是已删除的 4 个 consensus 外壳的产物，随 ensemble 计划处理（计划 0070 删除了这 4 个外壳）。
 5. **没有执行信封校验**。旧 runner 负责的 `result.json` 信封检查、run receipt、`reproducibility/replay.json`、
    `environment.json`、`replay.sh`、输出目录占用声明、废弃 skill 的路由屏蔽，现在都**没有任何东西强制**——
    是否写、写得对不对取决于各脚本自己。
@@ -498,6 +534,8 @@ make skill-index      # = OMICSCLAW_WRITE_SKILL_INDEX=1 pytest tests/skills/test
 7. **索引是启动时快照**。运行中新增的 skill 需重启（或自定义重扫闭包）才进索引。
 8. **`examples/demo_visium.h5ad` 不存在**：当前工作树的 `examples/` 下只有 CSV 与 `consensus_benchmark/`，
    空间 skill 的 demo 请用各脚本的 `--demo`。
+9. **记账只看得到经 `read_input` / `write_output` 的读写**。步骤里直接用 `pd.read_csv` 读的文件不进记账，过期判定也看不到它；
+   契约、审查子代理和 validate 步骤负责把这种写法挡在外面。
 
 ---
 

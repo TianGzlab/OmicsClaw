@@ -29,10 +29,28 @@ PUBLIC_SURFACE: dict[str, set[str]] = {
     "skills._sdk.r_utils": {"read_r_result_csv"},
     "skills._sdk.r_dependency_manager": {"check_r_tier", "suggest_r_install"},
     "skills._sdk.external_env": {"EnvNotFoundError", "is_env_available", "run_anndata_op_in_env"},
+    "skills._sdk.notebook": {"read_input", "write_output", "load_skill", "load_demo", "run_cli"},
+    "skills._sdk.notebook.contract": {"LAYOUT", "MANIFEST_SCHEMA", "LEDGER_EVENTS", "ENVIRONMENT"},
 }
 
-CONTRACTS = {("skills._sdk.result", "RESULT_SCHEMA"), ("skills._sdk.deps", "DEPENDENCIES")}
+CONTRACTS = {
+    ("skills._sdk.result", "RESULT_SCHEMA"),
+    ("skills._sdk.deps", "DEPENDENCIES"),
+    ("skills._sdk.notebook.contract", "LAYOUT"),
+    ("skills._sdk.notebook.contract", "MANIFEST_SCHEMA"),
+    ("skills._sdk.notebook.contract", "LEDGER_EVENTS"),
+    ("skills._sdk.notebook.contract", "ENVIRONMENT"),
+}
 """Read by AST from outside, not imported by skills; exempt from the has-a-user rule."""
+
+STEP_API = {
+    ("skills._sdk.notebook", "read_input"),
+    ("skills._sdk.notebook", "run_cli"),
+}
+"""Called by the step files the agent writes in a project, outside this tree; exempt from the has-a-user rule.
+
+The other three step functions are used by the skills' examples, CLI scripts and the template.
+"""
 
 R_SCRIPTS = {
     "bulkrna_combat.R", "bulkrna_deseq2.R", "bulkrna_enrichment.R", "bulkrna_survival.R",
@@ -46,8 +64,10 @@ R_SCRIPTS = {
 
 
 def _sdk_modules() -> set[str]:
+    """``_sdk``, its top-level modules, and the step-code facade and contract of ``_sdk/notebook``."""
     base = REPO_ROOT / "skills" / "_sdk"
-    return {"skills._sdk"} | {f"skills._sdk.{p.stem}" for p in base.glob("*.py") if p.stem != "__init__"}
+    top = {f"skills._sdk.{p.stem}" for p in base.glob("*.py") if p.stem != "__init__"}
+    return {"skills._sdk", "skills._sdk.notebook", "skills._sdk.notebook.contract"} | top
 
 
 def _uses() -> list[tuple[str, str, str]]:
@@ -101,7 +121,7 @@ def test_every_frozen_name_has_a_user():
         f"{module}.{name}"
         for module, names in PUBLIC_SURFACE.items()
         for name in names
-        if (module, name) not in used and (module, name) not in CONTRACTS
+        if (module, name) not in used and (module, name) not in CONTRACTS | STEP_API
     )
     assert unused == []
 

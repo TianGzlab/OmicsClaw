@@ -34,9 +34,6 @@ is named by its `name:` and invoked at the script path below.
 | `sc-cell-annotation` | `skills/singlecell/scrna/sc-cell-annotation/` |
 | `sc-cell-communication` | `skills/singlecell/scrna/sc-cell-communication/` |
 | `sc-clustering` | `skills/singlecell/scrna/sc-clustering/` |
-| `sc-consensus-clustering` | `skills/singlecell/scrna/sc-consensus-clustering/` |
-| `sc-consensus-integration` | `skills/singlecell/scrna/sc-consensus-integration/` |
-| `sc-consensus-pseudotime` | `skills/singlecell/scrna/sc-consensus-pseudotime/` |
 | `sc-count` | `skills/singlecell/scrna/sc-count/` |
 | `sc-cytotrace` | `skills/singlecell/scrna/sc-cytotrace/` |
 | `sc-de` | `skills/singlecell/scrna/sc-de/` |
@@ -68,7 +65,6 @@ is named by its `name:` and invoked at the script path below.
 
 | Skill | Directory |
 |---|---|
-| `consensus-domains` | `skills/spatial/consensus-domains/` |
 | `consensus-interpret` | `skills/spatial/consensus-interpret/` |
 | `spatial-annotate` | `skills/spatial/spatial-annotate/` |
 | `spatial-cnv` | `skills/spatial/spatial-cnv/` |

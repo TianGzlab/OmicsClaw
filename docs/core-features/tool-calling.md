@@ -99,6 +99,7 @@ class Tool(Protocol):
 | `approval_mode` | 权限 | `ApprovalMode.ASK` | `AUTO` / `ASK` / `DENY_UNLESS_TRUSTED` |
 | `concurrency_safe` | 权限 | `False` | 引擎调度时读取；`False` 使调用成为屏障 |
 | `allowed_in_background` | 权限 | `False` | 可否在无人值守的回合运行 |
+| `rule_argument` | 权限 | `None` | 权限规则匹配的参数名，取代 schema 里第一个必填 string；字符串列表按去重排序后的值匹配。只有 `install_skill_deps` 设为 `"skills"` |
 | `read_only` | 声明 | `False` | 权限门据此跳过对 `.omicsclaw/` 的保护检查 |
 | `writes_workspace` / `writes_config` / `touches_network` | 声明 | `False` | 仅为建议性声明；门控不得依据一个没人写过的 `False` 放行 |
 | `prompts_for_itself` | 声明 | `False` | 声明工具会在自己的 `execute` 里调用 `require_approval`，由 `omicsclaw.permission.GatedTool` 读取，以便把询问交给带 diff/完整命令的工具自身 |

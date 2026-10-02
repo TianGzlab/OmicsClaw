@@ -12,12 +12,14 @@ Authoring checklist (delete this comment block before committing):
 
   1. Copy: `cp -r templates/skill skills/<domain>/<my-new-skill>`, then
      `mv replace_me.py <my_new_skill>.py` and rename the tests/ file.
+     The folder name must equal the frontmatter `name`: `load_skill` finds
+     skills by folder name.
   2. Write the frontmatter above by hand. It is the ONLY metadata the agent
      sees, and `omicsclaw/skills/` reads exactly four keys:
 
        name         required, unique across all skills. A duplicate is
-                    skipped, not merged. This is what `use_skill` is
-                    called with; skills are not slash commands.
+                    skipped, not merged. This is what `use_skill` and
+                    `load_skill` are called with.
        description  required. The one line the model routes on, and the
                     only thing about this skill in the system prompt. Say
                     when to LOAD it and when to SKIP it, naming the skill
@@ -28,17 +30,19 @@ Authoring checklist (delete this comment block before committing):
        tags         optional. Also only `/skills <query>`.
 
      Anything else is inert: it is neither read nor validated.
-  3. Write the narrative sections below (When to use / Inputs & Outputs /
-     Flow / Gotchas / Key CLI / Dependencies / See also) and the
-     `references/*.md` stubs. Nothing here is generated — there is no
-     generator, and the body is the whole of what `use_skill` returns.
-  4. Implement: replace the synthetic-CSV demo in the script with real I/O.
-  5. Verify it is indexed, then refresh the domain index:
+  3. Put the computations in `_api.py` (rules in `templates/skill/README.md`),
+     then regenerate the `## API` section:
+       python skills/_sdk/notebook/run.py api skills/<domain>/<my-new-skill> --write
+     A test compares it with `_api.py` on every run.
+  4. Write the other sections and the `references/*.md` stubs by hand.
+  5. Make `examples/example_step.py` load a registered demo dataset with
+     `load_demo`, call the library and assert on the result.
+  6. Verify it is indexed, then refresh the domain index:
        python -c "from omicsclaw.skills import load_skills; \
          i = load_skills('skills'); print(len(i), i.skipped)"
        OMICSCLAW_WRITE_SKILL_INDEX=1 pytest \
          tests/skills/test_domain_index_is_current.py
-       pytest tests/
+       pytest tests/sdk/notebook/test_skill_api_sections.py
 
 Full usage notes and soft conventions live in `templates/skill/README.md`.
 -->
@@ -57,71 +61,65 @@ The user has `<input shape>` and wants `<output shape>`.  Pick this skill
 when `<distinguishing condition>`.  For `<adjacent capability>` use
 `<sibling-skill>` instead.
 
-## Inputs & Outputs
+## Use from a step
+
+```python
+library = load_skill("REPLACE_SKILL_NAME")
+frame = read_input("data/<input>.csv")
+write_output(library.run_method(frame, method="default"), "tables/replace_me.csv")
+```
+
+A complete step that runs on demo data: `examples/example_step.py`.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `run_method(frame: pd.DataFrame, *, method: str='default') -> pd.DataFrame`
+
+Placeholder computation: return a copy of the table with a ``method`` column.
+
+:param frame: The input table.
+:param method: The backend to run. Default ``"default"``, the only one so far;
+    say here where each default comes from and when to change it.
+:returns: A new DataFrame: *frame* plus a ``method`` column.
+:raises ValueError: *method* is not one of ``METHODS``.
+
+<!-- api:end -->
+
+## Methods and parameters
 
 <!--
-Hand-written. List the files the script reads and every file it writes,
-by the path it writes them to — an agent reporting results to a user
-reads this to know what to open.
+Which method when. For every default: its value and where it comes from
+(the method's paper, the library's default, a lab convention). Which values
+the user should decide, and how to ask.
 -->
 
-**Inputs**
-
-- `--input <data.ext>` — `<what it must contain>`
-- `--demo` — synthesizes its own input instead
-
-**Outputs**
-
-- `tables/replace_me.csv`
-- `report.md`
-- `result.json`
-
-## Flow
-
-<!--
-3-7 numbered steps, present-tense. Name the function or output file a step
-lives in, never a line number: line numbers go stale on the next edit.
-Don't recapitulate idiomatic Python.
--->
-
-1. Load input (`--input <file>`) or generate a demo (`--demo`).
-2. Validate required columns / `obs[X]` keys; raise `ValueError(...)` early.
-3. Run the chosen `--method` backend.
-4. Write `tables/<name>.csv` + `report.md` + `result.json`.
+- `method="default"`: the only backend so far.
 
 ## Gotchas
 
 <!--
-Empirically the highest-leverage section.  Each bullet should:
-  * State the trap in the lead sentence.
-  * Anchor to something grep-able: a function or constant name, the quoted
-    error message, a `result.json` key, or an output filename.
-  * Explain WHY (the reason the trap exists), not just WHAT.
-
-Skip obvious things — Python-101 advice or framework-standard behaviour.
-The bar is "would the agent get this wrong without this instruction?".
+The failure modes an agent hits, each with the fix. Anchor each to something
+grep-able: a function name, a quoted error message, a column or key.
 -->
 
 - _None yet — append as failure modes are reported._
 
-## Key CLI
+## Inputs and outputs
 
 <!--
-There is no `oc run`. A skill script is invoked directly, by a person or
-by the agent through `bash`. Spell the real path — the agent learns this
-skill's CLI from nowhere else.
+What each function reads (columns, obs/obsm/layers keys) and what it writes
+or returns.
 -->
 
-```bash
-# Demo
-python skills/<domain>/REPLACE_SKILL_NAME/replace_me.py \
-  --demo --output /tmp/REPLACE_SKILL_NAME_demo
+- `run_method` reads a table and returns a new one with a `method` column.
 
-# Real input
-python skills/<domain>/REPLACE_SKILL_NAME/replace_me.py \
-  --input <data.ext> --output results/ \
-  --method <method-name>
-```
+## CLI
+
+`replace_me.py` runs the same functions outside a project and writes
+`tables/replace_me.csv`, `report.md` and `result.json`:
+`python <skill directory>/replace_me.py --help`. `--demo` synthesises its input.
 
 ## Dependencies
 

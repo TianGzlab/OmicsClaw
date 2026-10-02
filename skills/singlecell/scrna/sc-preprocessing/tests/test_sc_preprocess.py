@@ -82,21 +82,24 @@ def test_demo_result_json(tmp_output):
     assert "--method scanpy" in command_text
 
 
-def test_seurat_backend_function_is_defined():
-    """R-backed Seurat method should be wired in the Python entrypoint."""
-    spec = importlib.util.spec_from_file_location("sc_preprocess", SKILL_SCRIPT)
+def _load_api(name: str):
+    spec = importlib.util.spec_from_file_location(name, SKILL_SCRIPT.parent / "_api.py")
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
-    assert hasattr(module, "run_seurat_preprocessing")
+    return module
+
+
+def test_seurat_backend_is_wired_into_the_library():
+    """The R-backed Seurat workflows are reachable through ``preprocess``."""
+    module = _load_api("sc_preprocess_api")
+    assert {"seurat", "sctransform"} <= set(module.METHODS)
+    assert hasattr(module, "_run_seurat_preprocessing")
 
 
 def test_seurat_backend_preflight_requires_rhdf5(monkeypatch):
     """The Python preflight must catch zellkonverter's H5AD dependency."""
-    spec = importlib.util.spec_from_file_location("sc_preprocess_r_preflight", SKILL_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _load_api("sc_preprocess_api_r_preflight")
 
     observed: list[str] = []
 
@@ -106,7 +109,7 @@ def test_seurat_backend_preflight_requires_rhdf5(monkeypatch):
 
     monkeypatch.setattr(module, "validate_r_environment", stop_after_preflight)
     with pytest.raises(RuntimeError, match="stop after dependency preflight"):
-        module.run_seurat_preprocessing(object(), workflow="seurat")
+        module._run_seurat_preprocessing(object(), workflow="seurat")
 
     assert "rhdf5" in observed
 
@@ -116,10 +119,7 @@ def test_prepare_input_can_preserve_original_feature_axis():
     import numpy as np
     import pandas as pd
 
-    spec = importlib.util.spec_from_file_location("sc_preprocess_preserve", SKILL_SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = _load_api("sc_preprocess_api_preserve")
 
     adata = ad.AnnData(
         X=np.array([[3, 1], [2, 1], [1, 0]], dtype=np.int32),
@@ -129,11 +129,10 @@ def test_prepare_input_can_preserve_original_feature_axis():
             index=pd.Index(["ENSG1", "ENSG2"], name="gene"),
         ),
     )
-    prepared, _summary, _params, contract = module.prepare_preprocessing_input(
+    prepared, _summary, _params, contract = module._prepare_input(
         adata,
-        method="scanpy",
         effective_params={
-            **module.METHOD_PARAM_DEFAULTS["scanpy"],
+            "method": "scanpy",
             "min_genes": 0,
             "min_cells": 0,
             "max_mt_pct": 100.0,

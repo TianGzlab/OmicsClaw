@@ -273,6 +273,7 @@ dependencies:
   # Server / notebook runtime
   - pydantic>=2.1,<3.0
   - nbformat>=5.9
+  - nbclient>=0.10              # the step runner executes step notebooks with it
   - jupyter_client>=8.0
   - ipykernel>=6.0
   - rich>=13.0.0

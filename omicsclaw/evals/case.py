@@ -115,6 +115,11 @@ class Case:
         returns instead of running (see
         :func:`~omicsclaw.evals.stubs.stubbed_skill_runs`). ``None`` runs
         those scripts for real.
+    :param skill_modules: Skill name to a stub module file that a step's
+        ``load_skill`` returns instead of the skill's ``_api.py``. With it,
+        or with *skill_stubs*, the Runner writes the stubs into a folder and
+        names it in ``OMICSCLAW_SKILL_STUBS``, so ``run_cli`` in a step is
+        answered from *skill_stubs* too.
     :param compaction: Whether compaction is expected. When false, any
         compaction fails the case.
     :param headroom: Required when *compaction* is true.
@@ -143,6 +148,7 @@ class Case:
     approvals: tuple[bool | ApprovalDecision, ...] | ApprovalPolicy = ()
     skill_stubs: Mapping[str, StubResult] = field(default_factory=dict)
     skill_fallback: StubResult | None = None
+    skill_modules: Mapping[str, Path] = field(default_factory=dict)
     compaction: bool = False
     headroom: Headroom | None = None
     files: Mapping[str, str | bytes] = field(default_factory=dict)
@@ -166,18 +172,26 @@ class Case:
 
 @dataclass(frozen=True)
 class SkillRun:
-    """One ``bash`` command that ran a skill's script.
+    """One use of a skill: a ``bash`` command running its script, or a call a step ledger recorded.
 
     :param skill: The skill name.
     :param domain: The skill's domain in the index.
-    :param command: The command as sent.
-    :param stubbed: Whether the stub answered instead of a real run.
+    :param command: The command as sent; for a ledger call,
+        ``skill.function({args})``; for a ledger CLI run, the script and its arguments.
+    :param stubbed: Whether a stub answered instead of the real skill.
+    :param function: For a ledger call, the function called; else ``None``.
+    :param source: ``"bash"`` for a script ``bash`` ran, ``"ledger"`` for a
+        step runner's record.
+    :param args: For a ledger call, the recorded argument summary.
     """
 
     skill: str
     domain: str
     command: str
     stubbed: bool
+    function: str | None = None
+    source: str = "bash"
+    args: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

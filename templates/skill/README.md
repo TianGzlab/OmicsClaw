@@ -14,18 +14,60 @@ needs beside it. That is the whole contract:
 
 ```
 skills/<domain>/<skill>/
-├── SKILL.md        the only metadata there is — hand-written, end to end
-├── <skill>.py      the script, run directly with python
-├── references/     detail the body links to, read on demand
+├── SKILL.md                  the only metadata there is; hand-written except the ## API section
+├── _api.py                   the function library steps load with load_skill("<skill>")
+├── <skill>.py                the CLI: a thin shell over _api.py, run directly with python
+├── examples/example_step.py  a runnable step on demo data
+├── references/               detail the body links to, read on demand
 └── tests/
 ```
 
 **`SKILL.md` is the single source of truth.** Its frontmatter is what the
-agent is indexed by and its body is what `use_skill` returns. Nothing in it
-is generated: the `skill.yaml` machine contract, its schema, and the
-generators that wrote headers, `## Inputs & Outputs` blocks and
-`references/parameters.md` from it all belonged to the retired skill system
-and were deleted with it.
+agent is indexed by and its body is what `use_skill` returns. One part is
+generated: the `## API` section between the `api:begin` and `api:end`
+markers, rendered from `_api.py`'s signatures and docstrings with
+
+```bash
+python skills/_sdk/notebook/run.py api skills/<domain>/<skill> --write   # --check to verify
+```
+
+`tests/sdk/notebook/test_skill_api_sections.py` fails when the section and
+`_api.py` disagree, so edit the docstring and regenerate rather than editing
+the section.
+
+## The function library, `_api.py`
+
+The agent writes analysis steps in a project and calls the skill from them:
+`library = load_skill("<skill>")`, then `library.<function>(...)`. Only the
+names in `__all__` are reachable, and every call is recorded in the step's
+ledger. The leading underscore keeps the file out of the guards that count
+main scripts. The rules:
+
+- Compute only. No file reads or writes, no logging configuration, no global
+  state: steps read with `read_input` and write with `write_output`, and the
+  CLI does its own I/O. A method that needs temporary files for R makes them
+  with `tempfile` inside the function.
+- The first parameter is the data object (`adata` for single-cell); every
+  other parameter is keyword-only, with the CLI's default. A function that
+  modifies an AnnData does it in place and returns the same object (say so
+  when it returns a new one). Tables are `DataFrame`s, figures matplotlib
+  `Figure`s. Random processes take an explicit `random_state`.
+- Diagnostics a run produces (what was filtered, which matrix was used, a
+  fallback) go into `adata.uns` as a JSON string, read back by a public
+  `run_info(adata, *, keep=True)`; the CLI calls it with `keep=False` so
+  `processed.h5ad` is unchanged.
+- `__all__` lists every public function. Each has a docstring: a first line
+  saying what it does; `:param name:` for each parameter with its meaning,
+  where the default comes from and when to change it; `:returns:` and
+  `:raises:`.
+- Import the domain `_lib` and `skills._sdk` only: never `omicsclaw`, never
+  another skill.
+- The CLI script loads its own library with `load_skill(SKILL_NAME)` inside
+  `main()` and keeps argparse, the report, the figure gallery and
+  `result.json`. The template's `replace_me.py` finds its library by folder
+  name instead, so it also runs from `templates/skill/`.
+- When a CLI becomes a thin shell, record its outputs first and compare after
+  (`tests/parity/snapshot.py`), so the move changes no result.
 
 Four frontmatter keys are read, and only four:
 
@@ -50,8 +92,11 @@ mv tests/test_replace_me.py tests/test_<my_new_skill>.py
 
 # 2. Edit the placeholders
 #    - SKILL.md            frontmatter (name / description / trigger / tags)
-#                          AND the whole body. This is the only metadata.
+#                          AND the body. This is the only metadata.
+#    - _api.py             the computations, then regenerate ## API:
+#                          python <checkout>/skills/_sdk/notebook/run.py api . --write
 #    - <my_new_skill>.py   replace the synthetic-CSV demo with real I/O
+#    - examples/example_step.py   a step on a load_demo dataset
 #    - references/*.md     fill in methodology / output contract / parameters
 
 # 3. Verify it is indexed, with nothing skipped
@@ -78,9 +123,9 @@ what every gold skill does, and they are still the bar for review:
 |---|---|
 | `description` | Says when to LOAD and when to SKIP, naming the skill to use instead. The skip half is what prevents a wrong choice, and it is the half a one-line parser used to drop. |
 | `name` | Unique across all skills. A duplicate is skipped by the loader, not merged — check with the `load_skills` one-liner above. |
-| `SKILL.md` body | ≤ 200 lines; contains `## When to use`, `## Inputs & Outputs`, `## Flow`, `## Gotchas`, `## Key CLI`, `## Dependencies`, `## See also` |
+| `SKILL.md` body | ≤ 200 lines; a skill with `_api.py` contains `## When to use`, `## Use from a step`, `## API`, `## Methods and parameters`, `## Gotchas`, `## Inputs and outputs`, `## CLI`, `## See also`, `## Dependencies`; a CLI-only skill keeps `## Inputs & Outputs`, `## Flow` and `## Key CLI` in place of the step, API and CLI sections |
 | `SKILL.md` Gotchas | Each non-empty bullet anchors to a function/constant name or quoted error message in the script, a `result.json["key"]`, or a `tables/`/`figures/` filename the script actually writes — not a line number |
-| `SKILL.md` Key CLI | Spells the real `python skills/<domain>/<skill>/<script>.py` invocation. There is no `oc run`, and the body is the only place anyone learns this skill's CLI. |
+| `SKILL.md` Key CLI | For a CLI-only skill, spells the real `python skills/<domain>/<skill>/<script>.py` invocation. There is no `oc run`; steps call such a skill with `run_cli("<skill>", ...)`. |
 | `references/` | Contains `methodology.md`, `output_contract.md`, `parameters.md` |
 | `references/output_contract.md` | Every `tables/X.csv` / `figures/X.png` it mentions appears as a substring in the script (or a sibling `_lib/*.py` it imports) |
 

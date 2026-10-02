@@ -43,7 +43,8 @@ from skills._sdk.result import (
 )
 from skills.singlecell._lib.viz.r.replot_hint import write_replot_hint
 from skills._sdk.checksums import sha256_file
-from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, ensure_input_contract, store_analysis_metadata
+from skills._sdk.notebook import load_skill
+from skills.singlecell._lib.adata_utils import ensure_input_contract, store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib import io as sc_io
@@ -72,79 +73,27 @@ METHOD_PARAM_DEFAULTS = {
 PUBLIC_PARAM_KEYS = ("species",)
 
 
-def generate_qc_summary_table(adata) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
-    """Build QC metric summaries for report, tables, and figure_data."""
-    metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
-    if "pct_counts_ribo" in adata.obs.columns:
-        metrics.append("pct_counts_ribo")
-    metrics = [metric for metric in metrics if metric in adata.obs.columns]
-
-    summary_data = []
-    summary_stats = {}
-
-    for metric in metrics:
-        if metric not in adata.obs.columns:
-            continue
-
-        values = adata.obs[metric]
-        stats = {
-            "metric": metric,
-            "min": float(values.min()),
-            "max": float(values.max()),
-            "mean": float(values.mean()),
-            "median": float(values.median()),
-            "std": float(values.std()),
-            "q25": float(values.quantile(0.25)),
-            "q75": float(values.quantile(0.75)),
-        }
-        summary_data.append(stats)
-        summary_stats[metric] = {
-            "median": stats["median"],
-            "mean": stats["mean"],
-            "min": stats["min"],
-            "max": stats["max"],
-        }
-    summary_df = pd.DataFrame(summary_data)
-    qc_obs = adata.obs.loc[:, metrics].copy()
-    qc_obs.insert(0, "cell_id", adata.obs_names.astype(str))
-    return summary_stats, summary_df, qc_obs.reset_index(drop=True)
+def _summary_stats(summary_df: pd.DataFrame) -> dict:
+    """``{metric: {median, mean, min, max}}`` for the report and result.json."""
+    return {
+        row["metric"]: {"median": row["median"], "mean": row["mean"], "min": row["min"], "max": row["max"]}
+        for row in summary_df.to_dict("records")
+    }
 
 
-def _build_highest_expr_genes_table(adata, n_top: int = 20) -> pd.DataFrame:
-    matrix = adata.X
-    mean_expression = np.asarray(matrix.mean(axis=0)).ravel()
-    df = pd.DataFrame({"gene": adata.var_names.astype(str), "mean_expression": mean_expression})
-    return df.sort_values("mean_expression", ascending=False).head(n_top).reset_index(drop=True)
-
-
-def _build_barcode_rank_table(adata) -> pd.DataFrame:
-    counts = np.sort(np.asarray(adata.obs["total_counts"], dtype=float))[::-1]
-    return pd.DataFrame({
-        "rank": np.arange(1, len(counts) + 1),
-        "total_counts": counts,
-        "log10_rank": np.log10(np.arange(1, len(counts) + 1)),
-        "log10_total_counts": np.log10(counts + 1),
-    })
-
-
-def _build_qc_correlation_table(adata, metrics: list[str]) -> pd.DataFrame:
-    corr = adata.obs.loc[:, metrics].corr(numeric_only=True)
-    corr.index.name = "metric"
-    return corr.reset_index()
-
-
-def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path) -> dict:
-    summary_stats, summary_df, qc_metrics_df = generate_qc_summary_table(adata)
-    summary["qc_metrics"] = summary_stats
+def _prepare_qc_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path, api) -> dict:
+    summary_df = api.qc_summary(adata)
+    qc_metrics_df = api.qc_metrics_table(adata)
+    summary["qc_metrics"] = _summary_stats(summary_df)
     qc_metric_columns = [column for column in qc_metrics_df.columns if column != "cell_id"]
     return {
         "output_dir": Path(output_dir),
         "qc_metric_columns": qc_metric_columns,
         "qc_summary_df": summary_df,
         "qc_metrics_df": qc_metrics_df,
-        "highest_expr_df": _build_highest_expr_genes_table(adata),
-        "barcode_rank_df": _build_barcode_rank_table(adata),
-        "qc_correlation_df": _build_qc_correlation_table(adata, qc_metric_columns),
+        "highest_expr_df": api.highest_expressed_genes(adata, n_top=20),
+        "barcode_rank_df": api.barcode_rank_table(adata),
+        "qc_correlation_df": api.qc_correlation_table(adata, metrics=qc_metric_columns),
         "qc_run_summary_df": pd.DataFrame(
             [
                 {"metric": "method", "value": "qc_metrics"},
@@ -660,39 +609,17 @@ def main():
         logger,
     )
 
-    logger.info("Canonicalizing input into the OmicsClaw scRNA contract...")
-    processed_adata, prepared_input, input_contract = canonicalize_singlecell_adata(
+    api = load_skill(SKILL_NAME)
+    logger.info("Canonicalizing input and calculating QC metrics...")
+    processed_adata = api.calculate_qc(
         adata,
         species=effective_params["species"],
-        standardizer_skill=SKILL_NAME,
-    )
-    matrix_contract = {
-        "X": "raw_counts",
-        "raw": "raw_counts_snapshot",
-        "layers": {"counts": "raw_counts"},
-        "producer_skill": SKILL_NAME,
-    }
-    processed_adata.uns["omicsclaw_matrix_contract"] = matrix_contract
-
-    logger.info("Calculating QC metrics...")
-    processed_adata = sc_qc_utils.calculate_qc_metrics(
-        processed_adata,
-        species=effective_params["species"],
         calculate_ribo=effective_params["calculate_ribo"],
-        inplace=True,
     )
-    qc_obs_columns = [
-        column
-        for column in (
-            "n_genes_by_counts",
-            "total_counts",
-            "pct_counts_mt",
-            "pct_counts_ribo",
-            "log10_total_counts",
-            "log10_n_genes_by_counts",
-        )
-        if column in processed_adata.obs.columns
-    ]
+    run = api.run_info(processed_adata, keep=False)
+    input_contract = run["input_contract"]
+    matrix_contract = run["matrix_contract"]
+    qc_obs_columns = run["qc_obs_columns"]
 
     summary = {
         "method": QC_METHOD,
@@ -700,13 +627,13 @@ def main():
         "n_genes": int(processed_adata.n_vars),
         "median_genes": float(processed_adata.obs["n_genes_by_counts"].median()),
         "median_counts": float(processed_adata.obs["total_counts"].median()),
-        "expression_source": prepared_input.expression_source,
-        "gene_name_source": prepared_input.gene_name_source,
-        "input_warnings": prepared_input.warnings,
+        "expression_source": run["expression_source"],
+        "gene_name_source": run["gene_name_source"],
+        "input_warnings": run["warnings"],
         "qc_obs_columns": qc_obs_columns,
     }
 
-    gallery_context = _prepare_qc_gallery_context(processed_adata, summary, effective_params, output_dir)
+    gallery_context = _prepare_qc_gallery_context(processed_adata, summary, effective_params, output_dir, api)
 
     logger.info("Generating QC figures...")
     generate_qc_figures(processed_adata, output_dir, summary, gallery_context=gallery_context)
@@ -730,9 +657,9 @@ def main():
         "params": public_params,
         "effective_params": effective_params,
         "input_preparation": {
-            "expression_source": prepared_input.expression_source,
-            "gene_name_source": prepared_input.gene_name_source,
-            "warnings": prepared_input.warnings,
+            "expression_source": run["expression_source"],
+            "gene_name_source": run["gene_name_source"],
+            "warnings": run["warnings"],
             "qc_obs_columns": qc_obs_columns,
         },
         "input_contract": input_contract,

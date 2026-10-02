@@ -1,8 +1,8 @@
 """Which sub-agents a deployment offers, and how one is actually run.
 
 :func:`build_subagent_registry` joins :mod:`omicsclaw.subagent` to this
-deployment: the built-in ``general-purpose`` agent plus whatever is
-written under :meth:`~omicsclaw.entry.config.AppConfig.agents_root`, with
+deployment: the built-in ``general-purpose`` and ``module-reviewer`` agents
+plus whatever is written under :meth:`~omicsclaw.entry.config.AppConfig.agents_root`, with
 unreadable files reported here because that package may not log.
 
 :class:`ChildRunner` is the other half — the
@@ -46,6 +46,7 @@ from .sandbox import SandboxBinding, sandbox_section
 
 __all__ = [
     "GENERAL_PURPOSE",
+    "MODULE_REVIEWER",
     "ChildRunner",
     "DelegationIncomplete",
     "build_subagent_registry",
@@ -142,6 +143,51 @@ description is rendered from that mapping.
 """
 
 
+MODULE_REVIEWER_PROMPT = """\
+You review one analysis module of an OmicsClaw project. You can read files \
+and load skills; you cannot change anything, and nobody will answer questions.
+
+Start from results/<NN_slug>/provenance/manifest.json. It lists the module's \
+steps, what each read and wrote, the skill functions each called and the \
+latest replay.
+
+Check every item below and note each finding with its file and line:
+1. Each step file: inputs come from data/ or an earlier module's \
+intermediate/ or tables/; every value the skill does not give has a stated \
+reason; the skill functions the step's first cell names match the ones the \
+manifest recorded; where a skill function covers the work and the step does \
+not use it, the step says why.
+2. The validate step checks the outputs the REPORT relies on.
+3. The REPORT (M<NN>_<slug>_REPORT.md): every number matches a table or log \
+in results/<NN_slug>/; every figure it cites exists and is not listed under \
+orphan_outputs; claims stay within what the steps computed; it carries the \
+disclaimer.
+4. The replay in the manifest succeeded and covers the current step files.
+
+Your first line is the verdict, exactly `VERDICT: APPROVE` or \
+`VERDICT: REVISE`. Then list the findings, most serious first. Choose REVISE \
+when any finding would change a number, a figure or a conclusion."""
+"""The ``module-reviewer`` sub-agent's instructions."""
+
+MODULE_REVIEWER = SubAgentDefinition(
+    name="module-reviewer",
+    description=(
+        "Reviews one analysis module after it has been replayed and before the user "
+        "accepts it: reads its step files, outputs, manifest and report, and returns "
+        "VERDICT: APPROVE or VERDICT: REVISE with findings. Read-only."
+    ),
+    system_prompt=MODULE_REVIEWER_PROMPT,
+    tools=("read_file", "use_skill"),
+    source="builtin",
+)
+"""The read-only reviewer of a finished module.
+
+Only ``read_file`` and ``use_skill``: a reviewer that could edit the module
+could make its own verdict untrue. The manifest names every file to read,
+which stands in for listing directories.
+"""
+
+
 class DelegationIncomplete(RuntimeError):
     """A sub-agent's run ended without it writing a conclusion.
 
@@ -159,8 +205,9 @@ def build_subagent_registry(config: AppConfig) -> SubAgentRegistry | None:
     model.
 
     Files under :meth:`~omicsclaw.entry.config.AppConfig.agents_root`
-    are loaded after the built-ins, so one named ``general-purpose.md``
-    replaces the built-in of that name in place. A file that cannot be
+    are loaded after the built-ins (``general-purpose``, then
+    ``module-reviewer``), so a file of the same name replaces that
+    built-in in place. A file that cannot be
     read or parsed is logged and skipped. A file whose ``tools:`` names a
     tool no sub-agent is given — ``task``, or one in
     :data:`_WITHHELD_FROM_SUB_AGENTS` — is registered, and a warning names
@@ -168,7 +215,7 @@ def build_subagent_registry(config: AppConfig) -> SubAgentRegistry | None:
     """
     if not config.subagents:
         return None
-    registry = SubAgentRegistry([GENERAL_PURPOSE])
+    registry = SubAgentRegistry([GENERAL_PURPOSE, MODULE_REVIEWER])
     for definition in load_agents(config.agents_root(), on_error=_report):
         try:
             registry.register(definition)

@@ -130,7 +130,7 @@ def foundation(workspace: Workspace) -> list[tuple[Tool, dict]]:
         (WebFetchTool(), {"url": "https://example.com/doc"}),
         (WebSearchTool(), {"query": "spatial transcriptomics"}),
         (use_skill_tool(SkillIndex()), {"skill_name": "anything"}),
-        (_install_tool(workspace.root), {"skill": "oc-skill", "packages": ["oc-leaf"]}),
+        (_install_tool(workspace.root), {"skills": ["oc-skill"], "packages": ["oc-leaf"]}),
     ]
 
 

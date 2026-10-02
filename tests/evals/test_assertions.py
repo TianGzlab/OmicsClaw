@@ -81,6 +81,18 @@ def test_skill_invoked_with_and_without_domain():
     assert not _passes(SkillInvoked("sc-de"), skill_runs=runs)
 
 
+def test_skill_invoked_counts_ledger_records_and_can_name_a_function():
+    runs = (
+        SkillRun("sc-clustering", "singlecell", "sc-clustering.cluster({})", stubbed=True,
+                 function="cluster", source="ledger"),
+        SkillRun("bulkrna-de", "bulkrna", "bulkrna_de.py --input x.csv", stubbed=True, source="ledger"),
+    )
+    assert _passes(SkillInvoked("sc-clustering", domain="singlecell", function="cluster"), skill_runs=runs)
+    assert not _passes(SkillInvoked("sc-clustering", function="cluster_summary"), skill_runs=runs)
+    assert _passes(SkillInvoked("bulkrna-de", domain="bulkrna"), skill_runs=runs)
+    assert SkillInvoked("sc-clustering", function="cluster").name == "SkillInvoked(sc-clustering.cluster)"
+
+
 def test_tool_args_matches_a_json_subset():
     calls = (
         tool_call("edit_file", {"path": "params.yaml", "old": "0.5", "new": "1.0"}),

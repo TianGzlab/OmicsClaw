@@ -94,9 +94,21 @@ class _Builder:
         return self.result or OverlayResult("installed", key, self.python(key))
 
 
-def _tool(tmp_path, *, inventory=None, builder=None, declared=None, registry=None, pyproject=None):
+def _tool(tmp_path, *, inventory=None, builder=None, declared=None, registry=None, pyproject=None,
+          second=None, step_runner=None):
     kwargs = {} if declared is None else {"declared": declared}
     skills = make_skills(tmp_path / "skills", registry=registry, **kwargs)
+    if second is not None:
+        name, packages = second
+        folder = tmp_path / "skills" / "demo" / name
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: A second fixture skill.\n---\n\n# {name}\n\n## Dependencies\n\n"
+            + ", ".join(f"`{p}`" for p in packages) + "\n"
+        )
+        from omicsclaw.skills import load_skills
+
+        skills = load_skills(tmp_path / "skills")
     inventory = inventory or _Inventory(missing=("oc_leaf", "oc_multi"))
     builder = builder or _Builder(tmp_path)
     tool = install_skill_deps_tool(
@@ -106,8 +118,13 @@ def _tool(tmp_path, *, inventory=None, builder=None, declared=None, registry=Non
         workspace=str(tmp_path),
         builder=builder,
         pyproject=pyproject,
+        step_runner=step_runner,
     )
     return tool, inventory, builder
+
+
+def _names(skill):
+    return [skill] if isinstance(skill, str) else list(skill)
 
 
 def _call(tool, packages, *, approve=True, skill=SKILL, pause=None):
@@ -120,9 +137,9 @@ def _call(tool, packages, *, approve=True, skill=SKILL, pause=None):
     async def main():
         with use_tool_context(approval=channel):
             if pause is None:
-                return await tool.execute(json.dumps({"skill": skill, "packages": packages}))
+                return await tool.execute(json.dumps({"skills": _names(skill), "packages": packages}))
             with use_timeout_pause(pause):
-                return await tool.execute(json.dumps({"skill": skill, "packages": packages}))
+                return await tool.execute(json.dumps({"skills": _names(skill), "packages": packages}))
 
     return asyncio.run(main()), asked
 
@@ -130,8 +147,10 @@ def _call(tool, packages, *, approve=True, skill=SKILL, pause=None):
 # ---- schema and policy ----------------------------------------------------------------------
 
 
-def test_the_schema_requires_skill_first_and_at_least_one_package():
-    assert INSTALL_SKILL_DEPS_SCHEMA["required"] == ["skill", "packages"]
+def test_the_schema_requires_skills_first_and_at_least_one_of_each():
+    assert INSTALL_SKILL_DEPS_SCHEMA["required"] == ["skills", "packages"]
+    assert INSTALL_SKILL_DEPS_SCHEMA["properties"]["skills"]["type"] == "array"
+    assert INSTALL_SKILL_DEPS_SCHEMA["properties"]["skills"]["minItems"] == 1
     assert INSTALL_SKILL_DEPS_SCHEMA["properties"]["packages"]["minItems"] == 1
     assert INSTALL_SKILL_DEPS_SCHEMA["additionalProperties"] is False
 
@@ -169,7 +188,7 @@ def test_an_empty_package_list_is_an_argument_error(tmp_path):
 
 def test_a_package_not_under_dependencies_is_refused(tmp_path):
     tool, inventory, builder = _tool(tmp_path)
-    with pytest.raises(ToolArgumentError, match="torch not under oc-skill"):
+    with pytest.raises(ToolArgumentError, match='torch not under the "## Dependencies" of oc-skill'):
         _call(tool, ["oc-leaf", "torch"])
     assert inventory.calls == [] and builder.builds == []
 
@@ -244,6 +263,38 @@ def test_a_direct_url_in_the_registry_fails_before_anything_runs(tmp_path):
     assert "Nothing was run" in output
 
 
+def test_a_package_may_come_from_any_listed_skill(tmp_path):
+    tool, _, builder = _tool(tmp_path, second=("oc-other", ["oc-multi"]))
+    _call(tool, ["oc-leaf", "oc-multi"], skill=[SKILL, "oc-other"])
+    request = builder.builds[0][0]
+    assert request.skills == (SKILL, "oc-other")
+    assert set(request.names) == {"oc-leaf", "oc-multi"}
+
+
+def test_a_package_under_none_of_the_skills_names_what_each_declares(tmp_path):
+    tool, inventory, _ = _tool(tmp_path, declared=["oc-leaf"], second=("oc-other", ["oc-multi"]))
+    with pytest.raises(ToolArgumentError) as caught:
+        _call(tool, ["torch"], skill=[SKILL, "oc-other"])
+    message = str(caught.value)
+    assert f"{SKILL} declares: oc-leaf" in message and "oc-other declares: oc-multi" in message
+    assert inventory.calls == []
+
+
+def test_the_card_names_every_skill(tmp_path):
+    tool, _, _ = _tool(tmp_path, second=("oc-other", ["oc-multi"]))
+    _, asked = _call(tool, ["oc-leaf"], skill=[SKILL, "oc-other"])
+    assert f"for skills {SKILL}, oc-other, wheels only" in asked[0].reason
+
+
+def test_the_result_says_how_to_run_a_module_with_the_overlay(tmp_path):
+    runner = str(tmp_path / "skills" / "_sdk" / "notebook" / "run.py")
+    tool, _, builder = _tool(tmp_path, step_runner=runner)
+    output, _ = _call(tool, ["oc-leaf"])
+    python = builder.python(builder.builds[0][1])
+    assert f"PYTHONNOUSERSITE=1 {python} {runner} run analysis/<NN_slug>" in output
+    assert "or run a skill's CLI with it:" in output
+
+
 # ---- the card ----------------------------------------------------------------------------------
 
 
@@ -253,7 +304,7 @@ def test_the_card_text(tmp_path):
     (request,) = asked
     card = request.reason
     assert request.tool_name == "install_skill_deps" and not request.reason_shows_call
-    assert json.loads(request.arguments) == {"skill": SKILL, "packages": ["oc-leaf"]}
+    assert json.loads(request.arguments) == {"skills": [SKILL], "packages": ["oc-leaf"]}
     assert card.startswith("install into an isolated overlay environment (the base environment is not changed):")
     assert "  oc-leaf\n" in card and f"for skill {SKILL}, wheels only" in card
     assert "packages come from this machine's pip configuration" in card

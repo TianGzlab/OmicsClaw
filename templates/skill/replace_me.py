@@ -34,6 +34,7 @@ from skills._sdk.report import (  # noqa: E402
     generate_report_footer,
     generate_report_header,
 )
+from skills._sdk.notebook import load_skill  # noqa: E402
 from skills._sdk.result import (  # noqa: E402
     mark_result_status,
     write_result_json,
@@ -44,6 +45,7 @@ SKILL_VERSION = "0.1.0"
 
 DEFAULT_METHOD = "default"
 ALLOWED_METHODS = ("default",)
+"""The ``--method`` choices; keep them equal to ``METHODS`` in ``_api.py``."""
 
 logger = logging.getLogger(SKILL_NAME)
 
@@ -74,15 +76,14 @@ def load_input(input_path: Path) -> pd.DataFrame:
     )
 
 
-def run_method(frame: pd.DataFrame, method: str) -> pd.DataFrame:
-    """Placeholder transformation — replace with the real algorithm."""
-    if method not in ALLOWED_METHODS:
-        raise ValueError(
-            f"--method {method!r} not in allowed list {ALLOWED_METHODS}"
-        )
-    out = frame.copy()
-    out["method"] = method
-    return out
+def library():
+    """This skill's ``_api.py``, found by the name of the folder this script is in.
+
+    A skill folder is named after the skill, so this works in place and once
+    the template is copied to ``skills/<domain>/<skill>/``.
+    """
+    here = Path(__file__).resolve().parent
+    return load_skill(here.name, root=here.parent)
 
 
 def write_outputs(
@@ -184,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         input_path = args.input.resolve()
         frame = load_input(input_path)
 
-    result = run_method(frame, args.method)
+    result = library().run_method(frame, method=args.method)
     write_outputs(
         args.output,
         frame=result,

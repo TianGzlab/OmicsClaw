@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 MODULE_TEXT = (Path(__file__).resolve().parent.parent / "sc_annotate.py").read_text(encoding="utf-8")
+API_TEXT = (Path(__file__).resolve().parent.parent / "_api.py").read_text(encoding="utf-8")
 
 
 def test_method_registry_includes_popv():
@@ -23,12 +24,12 @@ def test_method_registry_includes_knnpredict():
 
 
 def test_dispatch_includes_popv():
-    assert '"popv": lambda adata, args: annotate_popv' in MODULE_TEXT
+    assert 'if method == "popv":\n        return annotate_popv(' in API_TEXT
 
 
 def test_dispatch_includes_manual():
-    assert '"manual": lambda adata, args: annotate_manual' in MODULE_TEXT
+    assert 'if method == "manual":\n        return annotate_manual(' in API_TEXT
 
 
 def test_dispatch_includes_knnpredict():
-    assert '"knnpredict": lambda adata, args: annotate_knnpredict' in MODULE_TEXT
+    assert 'if method == "knnpredict":\n        return annotate_knnpredict(' in API_TEXT

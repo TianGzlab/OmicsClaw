@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import tempfile
 import sys
 from pathlib import Path
 
@@ -25,6 +24,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_header,
     generate_report_footer,
@@ -48,14 +48,10 @@ from skills.singlecell._lib.adata_utils import (
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_de
 from skills.singlecell._lib.pseudobulk import (
-    aggregate_to_pseudobulk,
     plot_ma,
     plot_volcano,
-    run_deseq2_analysis,
 )
 from skills._sdk.deps import validate_r_environment
-from skills._sdk.r_script_runner import RScriptRunner
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
 from skills.singlecell._lib.viz import (
     plot_de_effect_summary,
@@ -155,176 +151,6 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-
-
-def run_de_scanpy(
-    adata,
-    groupby="leiden",
-    method="wilcoxon",
-    group1=None,
-    group2=None,
-    *,
-    logreg_solver: str = "lbfgs",
-):
-    resolved_groupby = groupby
-    if resolved_groupby not in adata.obs.columns:
-        if resolved_groupby == "leiden" and "louvain" in adata.obs.columns:
-            logger.warning("Column 'leiden' not found; falling back to legacy 'louvain' for DE demo compatibility")
-            resolved_groupby = "louvain"
-        else:
-            raise ValueError(f"Column '{groupby}' not found in adata.obs")
-
-    effective_method = method
-    method_kwargs: dict[str, object] = {"pts": True, "use_raw": False}
-    if method == "logreg":
-        method_kwargs["solver"] = logreg_solver
-
-    if group1 and group2:
-        sc.tl.rank_genes_groups(
-            adata,
-            groupby=resolved_groupby,
-            groups=[group1],
-            reference=group2,
-            method=effective_method,
-            **method_kwargs,
-        )
-    else:
-        sc.tl.rank_genes_groups(
-            adata,
-            groupby=resolved_groupby,
-            method=effective_method,
-            **method_kwargs,
-        )
-
-    result_df = sc.get.rank_genes_groups_df(adata, group=None)
-    n_groups = len(result_df["group"].unique()) if "group" in result_df.columns else 0
-    return result_df, {
-        "method": method,
-        "groupby": resolved_groupby,
-        "n_groups": n_groups,
-        "n_genes_tested": int(adata.n_vars),
-        "expression_source": "adata.X",
-    }
-
-
-def _build_count_like_adata(adata) -> tuple[sc.AnnData, str]:
-    if "counts" in adata.layers and matrix_looks_count_like(adata.layers["counts"]):
-        prepared = adata.copy()
-        prepared.X = adata.layers["counts"].copy()
-        return prepared, "layers.counts"
-
-    if adata.raw is not None and adata.raw.shape == adata.shape and matrix_looks_count_like(adata.raw.X):
-        prepared = sc.AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
-        prepared.obs_names = adata.obs_names.copy()
-        prepared.var_names = adata.raw.var_names.copy()
-        return prepared, "adata.raw"
-
-    matrix_contract = get_matrix_contract(adata)
-    if matrix_contract.get("X") == "raw_counts" or matrix_looks_count_like(adata.X):
-        return adata.copy(), "adata.X"
-
-    raise ValueError(
-        "deseq2_r requires raw counts in `layers['counts']`, aligned raw counts in `adata.raw`, or an unnormalized count-like `adata.X` matrix."
-    )
-
-
-def run_de_deseq2_r_method(
-    adata,
-    *,
-    condition_key: str,
-    group1: str,
-    group2: str,
-    sample_key: str,
-    celltype_key: str,
-    pseudobulk_min_cells: int = 10,
-    pseudobulk_min_counts: int = 1000,
-):
-    if not group1 or not group2:
-        raise ValueError("R pseudobulk DESeq2 requires both --group1 and --group2")
-    if sample_key not in adata.obs.columns:
-        raise ValueError(f"sample_key '{sample_key}' not found in adata.obs")
-    if celltype_key not in adata.obs.columns:
-        raise ValueError(f"celltype_key '{celltype_key}' not found in adata.obs")
-
-    pb_adata, expression_source = _build_count_like_adata(adata)
-    pb = aggregate_to_pseudobulk(
-        pb_adata,
-        sample_key=sample_key,
-        celltype_key=celltype_key,
-        min_cells=pseudobulk_min_cells,
-        min_counts=pseudobulk_min_counts,
-        layer=None,
-    )
-    if pb["counts"].empty:
-        raise RuntimeError("Pseudobulk aggregation returned no sample-celltype combinations")
-
-    sample_meta = adata.obs[[sample_key, condition_key]].drop_duplicates().rename(columns={sample_key: "sample"})
-    de_results = run_deseq2_analysis(
-        pb,
-        sample_meta,
-        formula="~ condition",
-        contrast=["condition", group1, group2],
-        celltype_key="celltype",
-        use_rpy2=True,
-    )
-    if not de_results:
-        raise RuntimeError("R pseudobulk DESeq2 returned no results")
-
-    frames = []
-    for cell_type, df in de_results.items():
-        tmp = df.copy()
-        tmp["cell_type"] = cell_type
-        frames.append(tmp)
-    full_df = pd.concat(frames, ignore_index=True)
-    n_groups = full_df["cell_type"].nunique() if "cell_type" in full_df.columns else 0
-    return full_df, {
-        "method": "deseq2_r",
-        "n_groups": int(n_groups),
-        "n_genes_tested": int(full_df["gene"].nunique()) if "gene" in full_df.columns else 0,
-        "expression_source": expression_source,
-    }
-
-
-def run_de_mast_method(adata, *, groupby: str, group1: str | None, group2: str | None):
-    resolved_groupby = groupby
-    if resolved_groupby not in adata.obs.columns:
-        if resolved_groupby == "leiden" and "louvain" in adata.obs.columns:
-            logger.warning("Column 'leiden' not found; falling back to legacy 'louvain' for MAST demo compatibility")
-            resolved_groupby = "louvain"
-        else:
-            raise ValueError(f"Column '{groupby}' not found in adata.obs")
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
-    export = sc.AnnData(X=adata.X.copy(), obs=adata.obs.copy(), var=adata.var.copy())
-    export.obs_names = adata.obs_names.copy()
-    export.var_names = adata.var_names.copy()
-    expression_source = "adata.X"
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_mast_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
-        output_dir = tmpdir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        export.write_h5ad(input_h5ad)
-        args = [str(input_h5ad), str(output_dir), resolved_groupby]
-        if group1:
-            args.append(group1)
-        if group2:
-            args.append(group2)
-        runner.run_script(
-            "sc_mast_de.R",
-            args=args,
-            expected_outputs=["mast_results.csv"],
-            output_dir=output_dir,
-        )
-        full_df = pd.read_csv(output_dir / "mast_results.csv")
-    n_groups = full_df["group"].nunique() if "group" in full_df.columns else 0
-    return full_df, {
-        "method": "mast",
-        "groupby": resolved_groupby,
-        "n_groups": int(n_groups),
-        "n_genes_tested": int(full_df["gene"].nunique()) if "gene" in full_df.columns else 0,
-        "expression_source": expression_source,
-    }
 
 
 def _build_gene_expression_csv(
@@ -801,17 +627,19 @@ def main():
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
 
+    api = load_skill(SKILL_NAME)
     if method == "deseq2_r":
-        full_df, summary = run_de_deseq2_r_method(
+        full_df = api.pseudobulk_de(
             adata,
             condition_key=args.groupby,
             group1=args.group1,
             group2=args.group2,
             sample_key=args.sample_key or "sample_id",
             celltype_key=args.celltype_key,
-            pseudobulk_min_cells=args.pseudobulk_min_cells,
-            pseudobulk_min_counts=args.pseudobulk_min_counts,
+            min_cells=args.pseudobulk_min_cells,
+            min_counts=args.pseudobulk_min_counts,
         )
+        summary = api.run_info(adata, keep=False)["summary"]
         full_df.to_csv(tables_dir / "de_full.csv", index=False)
         sig_df = full_df.sort_values("padj", na_position="last")
         sig_df.to_csv(tables_dir / "markers_top.csv", index=False)
@@ -822,21 +650,23 @@ def main():
             log2fc_threshold=args.log2fc_threshold,
         )
     elif method == "mast":
-        full_df, summary = run_de_mast_method(adata, groupby=args.groupby, group1=args.group1, group2=args.group2)
-        top_df = full_df.sort_values(["padj", "pvalue"], na_position="last").groupby("group", observed=False).head(args.n_top_genes)
+        full_df = api.rank_genes(adata, groupby=args.groupby, method="mast", group1=args.group1, group2=args.group2)
+        summary = api.run_info(adata, keep=False)["summary"]
+        top_df = api.top_genes(full_df, n_top=args.n_top_genes)
         full_df.to_csv(tables_dir / "de_full.csv", index=False)
         top_df.to_csv(tables_dir / "markers_top.csv", index=False)
         generate_tabular_de_figures(full_df, top_df, output_dir, group_col="group", gene_col="gene", adata=adata)
     else:
-        full_df, summary = run_de_scanpy(
+        full_df = api.rank_genes(
             adata,
-            args.groupby,
-            method,
-            args.group1,
-            args.group2,
+            groupby=args.groupby,
+            method=method,
+            group1=args.group1,
+            group2=args.group2,
             logreg_solver=args.logreg_solver,
         )
-        top_df = full_df.groupby("group", observed=False).head(args.n_top_genes)
+        summary = api.run_info(adata, keep=False)["summary"]
+        top_df = api.top_genes(full_df, n_top=args.n_top_genes)
         full_df.to_csv(tables_dir / "de_full.csv", index=False)
         top_df.to_csv(tables_dir / "markers_top.csv", index=False)
         generate_scanpy_figures(adata, full_df, top_df, output_dir, min(5, args.n_top_genes))

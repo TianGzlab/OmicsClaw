@@ -34,10 +34,20 @@ ENV/
 credentials.json
 token.json
 
+# Parity snapshots of the pilot skills' CLIs (machine-specific, plan 0070)
+tests/parity/golden/
+
 # OmicsClaw outputs (large, generated)
 output/
 outputs/
 sessions/
+
+# A project opened in the checkout itself (skills/_sdk/notebook/run.py new)
+/analysis/
+/results/
+/manifests/
+/work/
+/docs/analysis_strategy/
 
 # Unverified model-authored skill promotions (local audit/retry only)
 skills/.quarantine/

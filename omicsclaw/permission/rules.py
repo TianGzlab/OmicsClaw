@@ -413,7 +413,12 @@ def _allow_patterns(rules: Rules) -> frozenset[str]:
     )
 
 
-def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) -> str:
+def principal_argument(
+    arguments: str,
+    schema: Mapping[str, Any] | None = None,
+    *,
+    declared: str | None = None,
+) -> str:
     """The one string a pattern is matched against.
 
     The value of the tool's first *required* property of type ``string``,
@@ -428,10 +433,15 @@ def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) 
     ``deny`` — the values are still in there — and the loose direction for an
     ``allow``.
 
+    *declared* is the property a tool names in its policy's
+    ``rule_argument``, and replaces the schema's choice. Only a declared
+    property may hold a list: a non-empty list of non-empty strings reads
+    as its distinct values, sorted and joined with ``", "``.
+
     Never raises: a payload the model truncated still has to be evaluated,
     since the rules are how a truncated call gets stopped.
     """
-    key = principal_key(schema)
+    key = declared or principal_key(schema)
     if key is None:
         return arguments
     try:
@@ -443,6 +453,8 @@ def principal_argument(arguments: str, schema: Mapping[str, Any] | None = None) 
     value = decoded.get(key)
     if isinstance(value, str) and value:
         return value
+    if declared and isinstance(value, list) and value and all(isinstance(item, str) and item for item in value):
+        return ", ".join(sorted(set(value)))
     return arguments
 
 

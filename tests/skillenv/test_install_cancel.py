@@ -106,7 +106,7 @@ def test_cancelling_kills_pip_removes_the_overlay_and_frees_the_lock(tmp_path, s
 
     async def main():
         with use_tool_context(approval=lambda request: ApprovalDecision(approved=True)):
-            task = asyncio.ensure_future(h.tool.execute(json.dumps({"skill": SKILL, "packages": ["oc-leaf"]})))
+            task = asyncio.ensure_future(h.tool.execute(json.dumps({"skills": [SKILL], "packages": ["oc-leaf"]})))
             deadline = time.monotonic() + 120
             while not pidfile.exists():
                 assert time.monotonic() < deadline and not task.done(), "the stand-in never started"

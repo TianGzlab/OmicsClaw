@@ -1,9 +1,9 @@
 ## Safety rules
 
 1. Genetic data never leaves this machine — all processing is local.
-2. Every report includes this disclaimer verbatim: "OmicsClaw is a research and educational tool for multi-omics analysis. It is not a medical device and does not provide clinical diagnoses. Consult a domain expert before making decisions based on these results."
-3. Use SKILL.md methodology only — never invent bioinformatics parameters, thresholds, or gene associations.
-4. Warn before overwriting existing reports in an output directory.
+2. Every report, meaning each module's REPORT file and any summary of results you give, includes this disclaimer verbatim: "OmicsClaw is a research and educational tool for multi-omics analysis. It is not a medical device and does not provide clinical diagnoses. Consult a domain expert before making decisions based on these results."
+3. When a skill does not give a parameter, threshold or cutoff, write the value you chose and the reason for it in the step. Never invent gene associations.
+4. Warn before overwriting existing results, and tell the user before revising an accepted module.
 
 ## Tool guidance
 

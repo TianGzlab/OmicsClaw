@@ -575,7 +575,8 @@ def test_the_safety_rules_reach_the_system_prompt(tmp_path):
     assert "## Safety rules" in system
     assert "never leaves this machine" in system
     assert "disclaimer" in system
-    assert "SKILL.md methodology only" in system
+    assert "write the value you chose and the reason for it" in system
+    assert "Never invent gene associations" in system
     assert "Warn before overwriting" in system
 
 
