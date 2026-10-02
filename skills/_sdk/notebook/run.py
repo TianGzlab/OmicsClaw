@@ -8,6 +8,7 @@ Call it from the project root (the folder holding ``analysis/`` and
     python <skills>/_sdk/notebook/run.py status
     python <skills>/_sdk/notebook/run.py replay analysis/03_clustering
     python <skills>/_sdk/notebook/run.py accept analysis/03_clustering --review results/03_clustering/reviews/2026-10-01_review.md
+    python <skills>/_sdk/notebook/run.py reference write_output
 
 Locks are ``fcntl.flock`` files inside ``results/``; they do not exclude
 reliably across network filesystems or Docker Desktop's macOS file sharing.
@@ -82,7 +83,21 @@ def build_parser() -> argparse.ArgumentParser:
     mode = api.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="exit 1 when the section does not match _api.py")
     mode.add_argument("--write", action="store_true", help="regenerate the section from _api.py")
+
+    reference = commands.add_parser("reference", help="print what the step functions and validate checks accept and do")
+    reference.add_argument("function", nargs="?", help="one step function or check; default: all of them")
     return parser
+
+
+def _reference(function: str | None) -> int:
+    from skills._sdk.notebook import _reference
+
+    try:
+        print(_reference.render(function))
+    except LookupError as exc:
+        print(exc)
+        return 2
+    return 0
 
 
 def _api(skill: str, *, write: bool) -> int:
@@ -139,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
         return _acceptance.revise(_root(args.target), args.target, wait=args.wait)
     if args.command == "api":
         return _api(args.skill_dir, write=args.write)
+    if args.command == "reference":
+        return _reference(args.function)
     raise AssertionError(args.command)
 
 

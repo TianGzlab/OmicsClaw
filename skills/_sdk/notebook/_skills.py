@@ -264,11 +264,16 @@ def _missing(ctx: StepContext, name: str, names: list[str], reason: str) -> Look
 def load_skill(name: str, *, root: str | os.PathLike | None = None) -> types.ModuleType:
     """Return skill `name`'s function library.
 
-    Inside a step run every call to a public function is recorded. `root` is a
-    skills tree; None is the tree that contains this _sdk.
+    The skill is the directory named `name` that holds a SKILL.md; its
+    library is the _api.py beside it. The returned module exposes the names
+    in the library's __all__, which the ## API section of the SKILL.md
+    lists; another name raises AttributeError naming them. Inside a step
+    run every call is recorded with its arguments. `root` is a skills tree;
+    None is the tree that contains this _sdk.
 
-    :raises LookupError: no such skill, the skill has no function library
-        yet, or a stub does not match the real library.
+    :raises LookupError: no such skill; the skill has no function library
+        yet (run its CLI with run_cli); or a stub does not match the real
+        library.
     """
     ctx = step_context(notice=False)
     base = _resolve_root(root)
@@ -348,14 +353,21 @@ def run_cli(skill: str, *args: str, inputs: Sequence[str] = (),
             timeout: float | None = None) -> Path:
     """Run a skill's command-line script for the current step and return its output directory.
 
-    The output directory is results/<NN_slug>/intermediate/<skill>/ unless args
-    carry --output naming a folder inside the module's figures/, tables/,
-    intermediate/ or logs/. `inputs` lists project-relative files the run
-    reads, so they count towards staleness.
+    The script is the one *.py file in the skill's directory whose name does
+    not start with _, run with this interpreter from the project root.
+    Without --output in args the output goes to
+    results/<NN_slug>/intermediate/<skill>/; a given --output must name a
+    folder inside this module's figures/, tables/, intermediate/ or logs/.
+    `inputs` lists the project-relative files the run reads, so they count
+    towards staleness. The script's output is printed and saved to
+    results/<NN_slug>/logs/<step>__<skill>.log; every file in the output
+    directory is recorded as an output of the step. `timeout` is in seconds.
 
     :raises LookupError: no such skill, or it does not have exactly one script.
-    :raises ValueError: ``--output`` is not a folder inside one of those four.
-    :raises RuntimeError: the script exits non-zero.
+    :raises ValueError: --output is not a folder inside one of those four.
+    :raises FileNotFoundError: an entry of `inputs` does not exist.
+    :raises RuntimeError: the script exits non-zero; the message ends with
+        the end of its log.
     """
     ctx = step_context()
     module = ctx.require_module("run a skill's CLI")
