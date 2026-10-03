@@ -32,8 +32,8 @@ jobs:
       # nbclient and ipykernel let tests/sdk/notebook start real kernels.
       - run: pip install -e . pytest numpy "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel fastapi httpx uvicorn
       # The framework layers, the launch shell, attachments and the
-      # top-level tests. tests/ensemble is not included yet. Tests known
-      # to fail are listed in tests/ci_known_failures.txt and run as xfail.
+      # top-level tests. Tests known to fail are listed in
+      # tests/ci_known_failures.txt and run as xfail.
       - name: Run unit tests
         run: >-
           pytest

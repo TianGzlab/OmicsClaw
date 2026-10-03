@@ -314,92 +314,6 @@ class AppConfig:
     """Upper bound on one ``install_skill_deps`` installation, the dry run
     included. Must be positive."""
 
-    ensemble: bool | None = None
-    """Whether ``run_skill`` is mounted.
-
-    ``None`` (unset) mounts it when the execution environment passes the
-    start-up self-check and logs a warning otherwise; ``True`` makes a failed
-    self-check refuse start-up; ``False`` leaves it out, and then the system
-    prompt and every other tool definition are exactly those of a deployment
-    without it."""
-
-    ensemble_gpus: str = ""
-    """GPUs trials may use: ``""`` detects them with ``nvidia-smi`` (inside
-    the sandbox when it runs), ``none`` uses none, or a comma-separated list
-    of device ids as the execution environment numbers them."""
-
-    ensemble_slots_per_gpu: int = 1
-    """Trials that may share one GPU at a time."""
-
-    ensemble_memory_gb: float = 0.0
-    """Memory the trial pool may hand out; ``0`` means all that is left after
-    the tmpfs, shared memory and :attr:`ensemble_reserved_gb`. A larger value
-    is capped to that."""
-
-    ensemble_reserved_gb: float = 64.0
-    """Memory kept outside the trial pool for ``bash``, system processes and
-    the page cache."""
-
-    ensemble_cpus: int = 0
-    """CPUs the trial pool may hand out; ``0`` means this machine's count, or
-    the sandbox's ``--cpus`` when that is smaller."""
-
-    ensemble_memory_gb_cap: float = 0.0
-    """Upper bound on any one trial's memory limit; ``0`` keeps each method's."""
-
-    ensemble_max_trial_s: float = 7200.0
-    """Upper bound on any one trial's run time, scoring excluded."""
-
-    ensemble_max_queue_s: float = 7200.0
-    """How long a trial may wait for resources before it fails."""
-
-    ensemble_keep_all: bool = False
-    """Keep every trial's full output instead of labels, metrics and the best
-    trial's ``.h5ad``."""
-
-    ensemble_python: str = ""
-    """Interpreter for trials and scoring: empty means this process's own on
-    this machine and ``python`` in the sandbox."""
-
-    ensemble_tools: str = "all"
-    """Which ensemble tools are mounted when the ensemble is on: ``all``
-    (``run_skill``, ``inspect_trials``, ``select_result``,
-    ``optimize_params``), ``free`` (the first three) or ``tuning`` (only
-    ``optimize_params``)."""
-
-    ensemble_run_budget: str = ""
-    """New ``run_skill`` trials one session may start: empty for no limit, a
-    number for all methods together, or ``method:count,...`` per method.
-    ``optimize_params`` draws from the same account."""
-
-    ensemble_tuning_model: str = ""
-    """Model ``optimize_params`` asks; empty is the agent's own model."""
-
-    ensemble_tuning_provider: str = ""
-    """Provider of :attr:`ensemble_tuning_model`; empty is the agent's own."""
-
-    ensemble_tuning_tissue: bool = True
-    """``False`` makes ``optimize_params`` drop its ``tissue`` argument."""
-
-    ensemble_tuning_images: bool = False
-    """Partition images for the K decision. Not supported: ``True`` refuses
-    start-up with the ensemble on."""
-
-    ensemble_tuning_budget: int = 12
-    """New parameter sets ``optimize_params`` tries per method at the chosen K."""
-
-    ensemble_tuning_max_s: float = 43200.0
-    """Longest one ``optimize_params`` call may run, in seconds."""
-
-    ensemble_obs_allowlist: str = ""
-    """Comma-separated ``obs`` columns an ensemble input may have; empty
-    allows any. Inputs with other columns are refused by ``run_skill`` and
-    ``optimize_params``."""
-
-    ensemble_seed: int | None = 0
-    """Seed of every trial process (``random``, numpy, torch with deterministic
-    algorithms, ``PYTHONHASHSEED=0``); ``None`` (``none``) leaves trials unseeded."""
-
     launch_id: str = ""
     """Identifier a desktop launcher minted for *this* backend process.
 
@@ -656,8 +570,8 @@ class AppConfig:
         """The container settings, or ``None`` when :attr:`sandbox` is off.
 
         The repository's ``omicsclaw/`` and ``skills/`` are added to the
-        read-only mounts (see :meth:`code_mounts`) whether or not
-        :attr:`ensemble` is on, so ``bash`` sees the same skill code either way.
+        read-only mounts (see :meth:`code_mounts`), so ``bash`` sees the
+        skill code of the repository this process runs from.
 
         Raises :exc:`~omicsclaw.sandbox.SandboxConfigError` for an unusable
         setting, including a missing :attr:`sandbox_image`.
@@ -802,32 +716,6 @@ def _as_positive_float(raw: str) -> float:
     return value
 
 
-def _as_ensemble_tools(raw: str) -> str:
-    value = raw.strip().lower()
-    if value not in ("all", "free", "tuning"):
-        raise AppConfigError(f"{raw!r} is not an ensemble tools mode (all, free, tuning)")
-    return value
-
-
-def _as_seed(raw: str) -> int | None:
-    if raw.strip().lower() in ("none", "off", ""):
-        return None
-    value = _as_int(raw)
-    if value < 0:
-        raise AppConfigError(f"{raw!r} is not a non-negative seed")
-    return value
-
-
-def _as_run_budget(raw: str) -> str:
-    from omicsclaw.ensemble.tuning.budget import parse_budget
-
-    try:
-        parse_budget(raw)
-    except ValueError as exc:
-        raise AppConfigError(f"{raw!r} is not a run budget: {exc}") from exc
-    return raw.strip()
-
-
 def _as_sandbox_mode(raw: str) -> SandboxMode:
     try:
         return SandboxMode(raw.strip().lower())
@@ -966,92 +854,6 @@ _OPTIONS: tuple[_Option, ...] = (
         "--skill-env-install-timeout",
         ("OMICSCLAW_SKILL_ENV_INSTALL_TIMEOUT_S",),
         _as_positive_float,
-    ),
-    _Option("ensemble", "--ensemble", ("OMICSCLAW_ENSEMBLE",), _as_bool),
-    _Option("ensemble_gpus", "--ensemble-gpus", ("OMICSCLAW_ENSEMBLE_GPUS",), _as_str),
-    _Option(
-        "ensemble_slots_per_gpu",
-        "--ensemble-slots-per-gpu",
-        ("OMICSCLAW_ENSEMBLE_SLOTS_PER_GPU",),
-        _as_int,
-    ),
-    _Option(
-        "ensemble_memory_gb",
-        "--ensemble-memory-gb",
-        ("OMICSCLAW_ENSEMBLE_MEMORY_GB",),
-        _as_float,
-    ),
-    _Option(
-        "ensemble_reserved_gb",
-        "--ensemble-reserved-gb",
-        ("OMICSCLAW_ENSEMBLE_RESERVED_GB",),
-        _as_float,
-    ),
-    _Option("ensemble_cpus", "--ensemble-cpus", ("OMICSCLAW_ENSEMBLE_CPUS",), _as_int),
-    _Option(
-        "ensemble_memory_gb_cap",
-        "--ensemble-memory-gb-cap",
-        ("OMICSCLAW_ENSEMBLE_MEMORY_GB_CAP",),
-        _as_float,
-    ),
-    _Option(
-        "ensemble_max_trial_s",
-        "--ensemble-max-trial",
-        ("OMICSCLAW_ENSEMBLE_MAX_TRIAL_S",),
-        _as_float,
-    ),
-    _Option(
-        "ensemble_max_queue_s",
-        "--ensemble-max-queue",
-        ("OMICSCLAW_ENSEMBLE_MAX_QUEUE_S",),
-        _as_float,
-    ),
-    _Option(
-        "ensemble_keep_all",
-        "--ensemble-keep-all",
-        ("OMICSCLAW_ENSEMBLE_KEEP_ALL",),
-        _as_bool,
-    ),
-    _Option("ensemble_python", "--ensemble-python", ("OMICSCLAW_ENSEMBLE_PYTHON",), _as_str),
-    _Option("ensemble_tools", "--ensemble-tools", ("OMICSCLAW_ENSEMBLE_TOOLS",), _as_ensemble_tools),
-    _Option("ensemble_run_budget", "--ensemble-run-budget", ("OMICSCLAW_ENSEMBLE_RUN_BUDGET",), _as_run_budget),
-    _Option("ensemble_tuning_model", "--ensemble-tuning-model", ("OMICSCLAW_ENSEMBLE_TUNING_MODEL",), _as_str),
-    _Option(
-        "ensemble_tuning_provider",
-        "--ensemble-tuning-provider",
-        ("OMICSCLAW_ENSEMBLE_TUNING_PROVIDER",),
-        _as_str,
-    ),
-    _Option(
-        "ensemble_tuning_tissue",
-        "--ensemble-tuning-tissue",
-        ("OMICSCLAW_ENSEMBLE_TUNING_TISSUE",),
-        _as_bool,
-    ),
-    _Option(
-        "ensemble_tuning_images",
-        "--ensemble-tuning-images",
-        ("OMICSCLAW_ENSEMBLE_TUNING_IMAGES",),
-        _as_bool,
-    ),
-    _Option(
-        "ensemble_tuning_budget",
-        "--ensemble-tuning-budget",
-        ("OMICSCLAW_ENSEMBLE_TUNING_BUDGET",),
-        _as_int,
-    ),
-    _Option(
-        "ensemble_tuning_max_s",
-        "--ensemble-tuning-max",
-        ("OMICSCLAW_ENSEMBLE_TUNING_MAX_S",),
-        _as_positive_float,
-    ),
-    _Option("ensemble_seed", "--ensemble-seed", ("OMICSCLAW_ENSEMBLE_SEED",), _as_seed),
-    _Option(
-        "ensemble_obs_allowlist",
-        "--ensemble-obs-allowlist",
-        ("OMICSCLAW_ENSEMBLE_OBS_ALLOWLIST",),
-        _as_str,
     ),
     _Option("compact_at", "--compact-at", ("OMICSCLAW_COMPACT_AT",), _as_pressure),
     _Option(

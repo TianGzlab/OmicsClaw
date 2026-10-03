@@ -5,9 +5,9 @@ the deployment. It mounts the tool when ``bash`` runs on this machine —
 the sandbox off, or requested but degraded (Q4 iii, "mount and treat as
 local") — and never while a sandbox runs, with or without a network (Q4 i,
 ii): an overlay on the host is not usable in the container. The tool is
-appended after the last foundation tool, so it comes after ``run_skill`` when
-that is mounted and before every MCP tool and ``task``; the system prompt
-and every other definition stay byte-identical to the ablation golden files.
+appended after the last foundation tool, before every MCP tool and ``task``;
+the system prompt and every other definition stay byte-identical to the
+golden files of the fixed deployment.
 
 Since version 7.2 (D8) no package-source setting exists: ``install`` starts
 with none. One refusal remains: an unreadable dependency registry (Q23 —
@@ -37,11 +37,9 @@ from omicsclaw.entry.skill_env import build_skill_env
 from omicsclaw.skillenv.overlay import FINGERPRINT, META, base_distributions
 from omicsclaw.skillenv.probe import LocalProbeRunner, run_inventory
 from omicsclaw.tools.builtin.bash import CommandOutcome
-from tests.entry.test_ensemble_golden import (
+from tests.entry.test_golden_deployment import (
     PROMPT_FILE,
     TOOLS_FILE,
-    _FakeMCP,
-    _runner,
     dump_tools,
     golden_config,
     normalised_prompt,
@@ -53,7 +51,7 @@ from .conftest import FIXTURE_SKILLS
 
 @pytest.fixture
 def offline(monkeypatch):
-    from tests.entry.test_ensemble_golden import _Offline
+    from tests.entry.test_golden_deployment import _Offline
 
     monkeypatch.setattr(assembly, "provider_from_env", lambda provider, model: _Offline())
 
@@ -113,11 +111,23 @@ def _names(app):
     return [definition.name for definition in app.registry.available_tools()]
 
 
+class _FakeMCP:
+    """Stands in for a started MCP manager with one tool."""
+
+    def tools(self):
+        from omicsclaw.tools.function_tool import FunctionTool
+
+        return (FunctionTool("mcp__demo__echo", "echo", lambda text="": text),)
+
+    async def aclose(self):
+        return None
+
+
 def _golden_install(tmp_path, **overrides):
     """The golden deployment on a copy of its skills tree that also has a registry, with ``install`` on."""
     import shutil
 
-    from tests.entry.test_ensemble_golden import FAKE_SKILLS
+    from tests.entry.test_golden_deployment import FAKE_SKILLS
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -130,7 +140,7 @@ def _golden_install(tmp_path, **overrides):
 
 
 def test_install_inserts_the_tool_before_task_and_changes_nothing_else(tmp_path, offline):
-    workspace, config = _golden_install(tmp_path, ensemble=False)
+    workspace, config = _golden_install(tmp_path)
     app = assembly.build_app(config)
     try:
         assert normalised_prompt(app, workspace) == PROMPT_FILE.read_text(encoding="utf-8")
@@ -144,20 +154,8 @@ def test_install_inserts_the_tool_before_task_and_changes_nothing_else(tmp_path,
         _close(app)
 
 
-def test_with_run_skill_the_tool_comes_after_it(tmp_path, offline):
-    _, config = _golden_install(tmp_path, ensemble=True)
-    app = assembly.build_app(config, ensemble=_runner(config))
-    try:
-        names = _names(app)
-        # The ensemble mounts run_skill, then its other tools (optimize_params last).
-        assert names.index("run_skill") < names.index("install_skill_deps")
-        assert names[-3:] == ["optimize_params", "install_skill_deps", "task"]
-    finally:
-        _close(app)
-
-
 def test_the_tool_comes_before_every_mcp_tool(tmp_path, offline):
-    _, config = _golden_install(tmp_path, ensemble=False)
+    _, config = _golden_install(tmp_path)
     app = assembly.build_app(config, mcp=_FakeMCP())
     try:
         assert _names(app)[-4:] == ["memory_write", "install_skill_deps", "mcp__demo__echo", "task"]
@@ -179,7 +177,7 @@ def _skills(config):
 
 
 def _install_config(tmp_path, **overrides):
-    values = {"workspace": tmp_path, "skills_dir": FIXTURE_SKILLS, "ensemble": False,
+    values = {"workspace": tmp_path, "skills_dir": FIXTURE_SKILLS,
               "skill_env": SkillEnvMode.INSTALL, "skill_env_dir": tmp_path / "envs", **overrides}
     return AppConfig(**values)
 

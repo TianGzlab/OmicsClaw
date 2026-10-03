@@ -1,10 +1,8 @@
 """Every skill main script answers ``--help`` (plan 0062 case 24).
 
 Slow; uses the interpreter named by ``OMICSCLAW_TEST_BASE_PYTHON`` (see
-``test_sc_scripts_help.py``). The four consensus shells, which import the
-unimportable ``omicsclaw.runtime.consensus``, are out of the index (their
-``SKILL.md`` is renamed ``SKILL.md.disabled``), so :func:`main_scripts` no
-longer finds them and every script it finds must answer.
+``test_sc_scripts_help.py``). Every script :func:`main_scripts` finds must
+answer.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ pytestmark = pytest.mark.slow
 def test_every_skill_script_answers_help(tmp_path):
     python = base_python()
     scripts = main_scripts()
-    assert len(scripts) == 90
+    assert len(scripts) == 89
 
     def probe(script):
         return rel(script), run_help(python, script, tmp_path).returncode

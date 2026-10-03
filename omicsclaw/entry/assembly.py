@@ -142,8 +142,7 @@ from omicsclaw.tools import (
 )
 from omicsclaw.tools.builtin.bash import BashEnvironment
 
-from .config import AppConfig, AppConfigError, SkillsIndex
-from .ensemble import open_ensemble
+from .config import AppConfig, SkillsIndex
 from .memory import (
     MemoryBinding,
     memory_section,
@@ -164,9 +163,6 @@ from .skill_env import SkillEnvBinding, build_skill_env, log_skill_env
 from .subagent import ChildRunner, build_subagent_registry
 
 if TYPE_CHECKING:  # pragma: no cover - session.py imports this module
-    from omicsclaw.ensemble.runner import EnsembleRunner
-    from omicsclaw.ensemble.tuning.llm import LLMSettings
-
     from .session import SessionRegistry
 
 __all__ = [
@@ -295,9 +291,7 @@ def foundation_tools(
     bash_environment: BashEnvironment | None = None,
     plans: PlanBook | None = None,
     memory: MemoryBinding | None = None,
-    ensemble: "EnsembleRunner | None" = None,
     skill_env: SkillEnvBinding | None = None,
-    tuning_model: "tuple[object, LLMSettings] | None" = None,
 ) -> tuple[Tool, ...]:
     """The six foundation tools, sharing one workspace, plus ``use_skill``.
 
@@ -338,18 +332,10 @@ def foundation_tools(
     the end costs a cached prefix nothing, a pair inserted in the middle
     moves every tool after it.
 
-    *ensemble* mounts the ensemble tools over one runner, after the memory
-    tools, in the order and selection :attr:`AppConfig.ensemble_tools`
-    names (``run_skill``, ``inspect_trials``, ``select_result``,
-    ``optimize_params``); ``None`` leaves them out and the list is exactly
-    what it was without them. *tuning_model* is the model
-    ``optimize_params`` asks and what is recorded about it; without it
-    ``optimize_params`` needs an explicit ``k``.
-
     *skill_env* gives ``use_skill`` its environment-check callback, which
     changes what that tool returns and not which tools there are; when it
     carries ``install_skill_deps`` (``skill_env=install`` with ``bash`` on this
-    machine), that tool is appended last, after ``run_skill``.
+    machine), that tool is appended last.
     """
     workspace = Workspace(config.workspace)
     tools: tuple[Tool, ...] = (
@@ -372,78 +358,9 @@ def foundation_tools(
         tools = (*tools, plan_write_tool(plans))
     if memory is not None:
         tools = (*tools, *memory_tools(memory))
-    if ensemble is not None:
-        tools = (*tools, *_ensemble_tools(config, ensemble, workspace, skills, tuning_model))
     if skill_env is not None and skill_env.tool is not None:
         tools = (*tools, skill_env.tool)
     return tools
-
-
-def _ensemble_tools(
-    config: AppConfig,
-    ensemble: "EnsembleRunner",
-    workspace: Workspace,
-    skills: SkillIndex | None,
-    tuning_model: "tuple[object, LLMSettings] | None",
-) -> tuple[Tool, ...]:
-    """The ensemble tools of :attr:`AppConfig.ensemble_tools`, sharing one run budget."""
-    from omicsclaw.ensemble.tool import run_skill_tool
-    from omicsclaw.ensemble.tuning.budget import RunBudget
-    from omicsclaw.ensemble.tuning.pipeline import TuningSettings
-    from omicsclaw.ensemble.tuning.tools import TuningToolkit
-
-    budget = RunBudget.from_text(config.ensemble_run_budget) if config.ensemble_run_budget else None
-    allowlist = tuple(
-        column.strip() for column in config.ensemble_obs_allowlist.split(",") if column.strip()
-    )
-    model, settings = tuning_model if tuning_model is not None else (None, None)
-    toolkit = TuningToolkit(
-        runner=ensemble,
-        workspace=workspace,
-        skills=skills if skills is not None else build_skill_index(config),
-        model=model,
-        settings=TuningSettings(groups=config.ensemble_tuning_budget, max_s=config.ensemble_tuning_max_s),
-        budget=budget,
-        tissue_enabled=config.ensemble_tuning_tissue,
-        images_enabled=False,
-        obs_allowlist=allowlist or None,
-        **({"llm_settings": settings} if settings is not None else {}),
-    )
-    run_skill = None
-    if config.ensemble_tools != "tuning":
-        run_skill = run_skill_tool(ensemble, workspace, budget=budget, input_check=toolkit.input_check)
-    return toolkit.tools(config.ensemble_tools, run_skill=run_skill)
-
-
-def build_tuning_model(config: AppConfig, provider: LLMProvider) -> "tuple[object, LLMSettings]":
-    """The model ``optimize_params`` asks, and what is recorded about it.
-
-    The agent's own provider unless :attr:`AppConfig.ensemble_tuning_model`
-    or :attr:`AppConfig.ensemble_tuning_provider` names another.
-
-    :raises AppConfigError: :attr:`AppConfig.ensemble_tuning_images` is on;
-        images cannot be sent on this path.
-    """
-    from omicsclaw.ensemble.tuning.llm import LLMSettings
-
-    if config.ensemble_tuning_images:
-        raise AppConfigError(
-            "ensemble_tuning_images is not supported: the tuning model is called with text only"
-        )
-    if config.ensemble_tuning_model or config.ensemble_tuning_provider:
-        name = config.ensemble_tuning_provider or config.provider
-        resolved = resolve_config(name, config.ensemble_tuning_model)
-        model: object = provider_from_env(name, config.ensemble_tuning_model)
-    else:
-        resolved = resolve_config(config.provider, config.model)
-        model = provider
-    return model, LLMSettings(
-        model=resolved.model,
-        provider=resolved.provider,
-        temperature=resolved.temperature,
-        max_tokens=resolved.max_tokens or None,
-        thinking_budget=resolved.thinking_budget_tokens or None,
-    )
 
 
 def build_permission_gate(config: AppConfig) -> PermissionGate:
@@ -961,12 +878,6 @@ class AgentApp:
     resumes conversations from — one database behind all four. Its
     connection is closed by :meth:`aclose`."""
 
-    ensemble: "EnsembleRunner | None" = None
-    """The trial runner behind ``run_skill``, or ``None`` when it is not mounted.
-
-    Shared by every session of this deployment, so all of them draw on one
-    resource pool."""
-
     skill_env: SkillEnvBinding | None = None
     """The environment check behind ``use_skill``'s note, or ``None`` when it is
     off, when ``skills_index`` is off, or when the caller supplied its own tools."""
@@ -1136,7 +1047,6 @@ def build_app(
     sandbox: SandboxBinding | None = None,
     telemetry: Telemetry | None = None,
     skills: SkillIndex | None = None,
-    ensemble: "EnsembleRunner | None" = None,
     provider: LLMProvider | None = None,
 ) -> AgentApp:
     """Wire one deployment. The only function that knows the order.
@@ -1184,16 +1094,13 @@ def build_app(
     :func:`~omicsclaw.provider.provider_from_env`. ``None`` builds one
     from the configuration and the environment. A provider passed here
     takes that one's place, so every consumer gets it: the telemetry
-    wrapper, the summarizer, the sub-agent runner, the tuning model and
-    the engine. The model name used for the context budget still comes
+    wrapper, the summarizer, the sub-agent runner and the engine. The model name used for the context budget still comes
     from :func:`~omicsclaw.provider.resolve_config` over
     ``config.provider`` and ``config.model``, whatever *provider* is.
     This is how a test or an eval drives a whole deployment with a
     scripted backend.
 
-    *skills* is the skill index to use instead of scanning again; *ensemble*
-    is a runner from :func:`~omicsclaw.entry.ensemble.open_ensemble`, mounted
-    as ``run_skill`` among the foundation tools. ``None`` mounts nothing.
+    *skills* is the skill index to use instead of scanning again.
 
     **Starts no sandbox either.** *sandbox* is a binding from
     :func:`~omicsclaw.entry.sandbox.open_sandbox`; ``bash`` is built over
@@ -1249,11 +1156,7 @@ def build_app(
                 bash_environment=binding.environment,
                 plans=plans,
                 memory=remembering,
-                ensemble=ensemble,
                 skill_env=checking,
-                tuning_model=(
-                    build_tuning_model(config, provider) if ensemble is not None else None
-                ),
             )
         else:
             mounted = tools
@@ -1346,14 +1249,13 @@ def build_app(
 
     _log.info(
         "assembled: provider=%s tools=%d skills=%d planning=%s memory=%s "
-        "subagents=%d ensemble=%s window=%d workspace=%s sandbox=%s permission=%s rules=%d",
+        "subagents=%d window=%d workspace=%s sandbox=%s permission=%s rules=%d",
         provider.name,
         len(snapshot),
         len(skills),
         "on" if plans is not None else "off",
         "on" if remembering is not None else "off",
         len(subagents) if subagents is not None else 0,
-        "on" if ensemble is not None and tools is None else "off",
         budget.context_tokens,
         config.workspace,
         _sandbox_state(binding),
@@ -1377,7 +1279,6 @@ def build_app(
         sandbox=binding,
         permission=gate,
         memory=remembering,
-        ensemble=ensemble if tools is None else None,
         skill_env=checking,
         telemetry=observing,
     )
@@ -1467,14 +1368,6 @@ async def open_app(
     ``sandbox_required`` is set. *on_sandbox_change* receives every
     sandbox state change.
 
-    Then the ensemble layer is opened where the sandbox put ``bash``: GPUs
-    are detected and the execution environment self-checked, and
-    ``run_skill`` is mounted if it passes — see
-    :func:`~omicsclaw.entry.ensemble.open_ensemble`, which may raise
-    :exc:`~omicsclaw.entry.config.AppConfigError` when
-    :attr:`AppConfig.ensemble` is explicitly on. With *tools* given, no
-    runner is opened.
-
     The memory database :func:`build_app` opened is then swept: expired
     entries are deleted and ``MEMORY.md`` is rebuilt from what survives,
     so the first prompt of the process carries the memories that are
@@ -1492,9 +1385,6 @@ async def open_app(
     sandbox = await open_sandbox(config, on_change=on_sandbox_change)
     try:
         skills = build_skill_index(config)
-        ensemble = (
-            await open_ensemble(config, skills, sandbox) if tools is None else None
-        )
         if servers.is_empty:
             return await _swept(
                 build_app(
@@ -1505,7 +1395,6 @@ async def open_app(
                     sandbox=sandbox,
                     telemetry=telemetry,
                     skills=skills,
-                    ensemble=ensemble,
                 )
             )
 
@@ -1529,7 +1418,6 @@ async def open_app(
                     sandbox=sandbox,
                     telemetry=telemetry,
                     skills=skills,
-                    ensemble=ensemble,
                 )
             )
         except BaseException:
@@ -1551,11 +1439,7 @@ async def _swept(app: AgentApp) -> AgentApp:
     """
     try:
         await prepare_memory(app.memory)
-        await log_skill_env(
-            app.skill_env,
-            app.config,
-            ensemble_python=app.ensemble.executor.python if app.ensemble is not None else None,
-        )
+        await log_skill_env(app.skill_env, app.config)
     except BaseException:
         if app.memory is not None:
             app.memory.close()

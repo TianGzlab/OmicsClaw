@@ -149,13 +149,13 @@ def test_a_refusal_through_the_gate_builds_nothing(tmp_path):
 
 @pytest.fixture
 def offline(monkeypatch):
-    from tests.entry.test_ensemble_golden import _Offline
+    from tests.entry.test_golden_deployment import _Offline
 
     monkeypatch.setattr(assembly, "provider_from_env", lambda provider, model: _Offline())
 
 
 def test_with_install_the_mounted_list_gains_one_gated_tool(tmp_path, offline):
-    config = AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS, ensemble=False,
+    config = AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS,
                        skill_env=SkillEnvMode.INSTALL, skill_env_dir=tmp_path / "envs")
     app = assembly.build_app(config)
     try:

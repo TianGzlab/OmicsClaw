@@ -3,8 +3,8 @@
 ``skill_env`` is ``off``, ``probe`` (the default) or ``install``; the last is
 covered by ``test_install_wiring.py``. Neither ``off`` nor ``probe`` changes the system prompt
 or the tool definitions — the note rides on ``use_skill``'s *result* — so the
-golden files written for the ensemble ablation (``tests/entry/golden/
-ensemble_off_*``) describe both. ``off`` leaves ``use_skill``'s output
+golden files of the fixed deployment (``tests/entry/golden/deployment_*``)
+describe both. ``off`` leaves ``use_skill``'s output
 byte-identical; read-only mode gets no note, because ``bash`` is refused
 there anyway. An unreadable registry only degrades the note in ``probe``
 mode.
@@ -27,7 +27,7 @@ from omicsclaw.entry.skill_env import build_skill_env, log_skill_env
 from omicsclaw.permission import PermissionMode
 from omicsclaw.skillenv.probe import LocalProbeRunner, SandboxProbeRunner
 from omicsclaw.tools.builtin.bash import CommandOutcome
-from tests.entry.test_ensemble_golden import (
+from tests.entry.test_golden_deployment import (
     PROMPT_FILE,
     TOOLS_FILE,
     dump_tools,
@@ -41,7 +41,7 @@ from .conftest import FIXTURE_SKILLS, FIXTURES
 
 @pytest.fixture
 def offline(monkeypatch):
-    from tests.entry.test_ensemble_golden import _Offline
+    from tests.entry.test_golden_deployment import _Offline
 
     monkeypatch.setattr(assembly, "provider_from_env", lambda provider, model: _Offline())
 
@@ -75,7 +75,7 @@ def test_other_values_are_refused(raw, tmp_path):
 def test_install_is_accepted_and_starts(tmp_path, offline):
     """Plan 0061 P2 lifted the P1 refusal; no package-source setting is needed (version 7.2, Q26 void)."""
     config = resolve_app_config(["--skill-env", "install", "--skills-dir", str(FIXTURE_SKILLS),
-                                 "--skill-env-dir", str(tmp_path / "envs"), "--ensemble", "false"],
+                                 "--skill-env-dir", str(tmp_path / "envs")],
                                 {}, workspace=tmp_path)
     assert config.skill_env is SkillEnvMode.INSTALL
     app = assembly.build_app(config)
@@ -90,7 +90,7 @@ def test_install_is_accepted_and_starts(tmp_path, offline):
 
 @pytest.mark.parametrize("mode", [SkillEnvMode.OFF, SkillEnvMode.PROBE])
 def test_prompt_and_tools_equal_the_golden_deployment(tmp_path, offline, mode):
-    app = assembly.build_app(golden_config(tmp_path, ensemble=False, skill_env=mode))
+    app = assembly.build_app(golden_config(tmp_path, skill_env=mode))
     try:
         assert normalised_prompt(app, tmp_path) == PROMPT_FILE.read_text(encoding="utf-8")
         assert dump_tools(serialised_tools(app.registry.available_tools())) == TOOLS_FILE.read_text(
@@ -106,7 +106,7 @@ def _use_skill(app) -> str:
 
 
 def _config(tmp_path: Path, **overrides) -> AppConfig:
-    return AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS, ensemble=False, **overrides)
+    return AppConfig(workspace=tmp_path, skills_dir=FIXTURE_SKILLS, **overrides)
 
 
 def test_off_leaves_use_skill_byte_identical(tmp_path, offline):
@@ -188,7 +188,7 @@ def test_an_unreadable_registry_degrades_the_note_in_probe_mode(tmp_path, caplog
     target = root / "demo" / "demo-skill"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text((FIXTURE_SKILLS / "demo" / "demo-skill" / "SKILL.md").read_text())
-    config = AppConfig(workspace=tmp_path, skills_dir=root, ensemble=False)
+    config = AppConfig(workspace=tmp_path, skills_dir=root)
     skills = assembly.build_skill_index(config)
     with caplog.at_level(logging.WARNING, logger="omicsclaw.entry.skill_env"):
         binding = build_skill_env(config, skills, SandboxBinding())
@@ -212,7 +212,7 @@ def test_an_unreadable_registry_is_kept_when_the_probe_fails(tmp_path):
     target = root / "demo" / "demo-skill"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text((FIXTURE_SKILLS / "demo" / "demo-skill" / "SKILL.md").read_text())
-    config = AppConfig(workspace=tmp_path, skills_dir=root, ensemble=False)
+    config = AppConfig(workspace=tmp_path, skills_dir=root)
     skills = assembly.build_skill_index(config)
     binding = build_skill_env(config, skills, SandboxBinding())
     binding = type(binding)(**{**{f: getattr(binding, f) for f in binding.__dataclass_fields__},
@@ -232,7 +232,7 @@ def test_the_startup_line_names_mode_location_and_python(tmp_path, caplog):
     config = _config(tmp_path)
     binding = build_skill_env(config, assembly.build_skill_index(config), SandboxBinding())
     with caplog.at_level(logging.INFO, logger="omicsclaw.entry.skill_env"):
-        asyncio.run(log_skill_env(binding, config, ensemble_python=None))
+        asyncio.run(log_skill_env(binding, config))
     messages = [r.getMessage() for r in caplog.records]
     assert any(m.startswith("skill_env=probe location=local python=/") for m in messages)
 
@@ -245,10 +245,9 @@ def test_a_different_bash_python_is_warned_about(tmp_path, caplog):
     binding = type(binding)(**{**{f: getattr(binding, f) for f in binding.__dataclass_fields__},
                                "runner": SandboxProbeRunner(environment), "location": "local"})
     with caplog.at_level(logging.INFO, logger="omicsclaw.entry.skill_env"):
-        asyncio.run(log_skill_env(binding, config, ensemble_python="/third/bin/python"))
+        asyncio.run(log_skill_env(binding, config))
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("/elsewhere/bin/python" in w and sys.executable in w for w in warnings)
-    assert any("/third/bin/python" in w for w in warnings)
 
 
 def test_matching_interpreters_are_not_warned_about(tmp_path, caplog):
@@ -259,5 +258,5 @@ def test_matching_interpreters_are_not_warned_about(tmp_path, caplog):
     binding = type(binding)(**{**{f: getattr(binding, f) for f in binding.__dataclass_fields__},
                                "runner": SandboxProbeRunner(environment), "location": "local"})
     with caplog.at_level(logging.INFO, logger="omicsclaw.entry.skill_env"):
-        asyncio.run(log_skill_env(binding, config, ensemble_python=None))
+        asyncio.run(log_skill_env(binding, config))
     assert not [r for r in caplog.records if r.levelno == logging.WARNING]

@@ -164,10 +164,6 @@ OmicsClaw/
 │   ├── entry/          Composition root, sessions, turns, events, approval,
 │   │                   plus the cli/, desktop/ and channel/ facades.
 │   ├── launch/         `oc` argv grammar; picks a surface and builds the app.
-│   ├── ensemble/       `run_skill`: supervised, scored skill trials in parallel
-│   │                   on a shared GPU/memory/CPU pool; `tuning.yaml` loader,
-│   │                   metric panels (metrics/), ground truth kept apart
-│   │                   (evaluation.py). Imports schema, tools, skills only.
 │   ├── skillenv/       Which packages under a skill's `## Dependencies` the
 │   │                   `python` bash runs can import; the note `use_skill`
 │   │                   appends (`skill_env=probe`, the default; `off`
@@ -178,8 +174,6 @@ OmicsClaw/
 │   ├── common/         Framework-side helpers: report reading/validation,
 │   │                   checksums, runtime_env, workspace. Skills no longer
 │   │                   import it; they use skills/_sdk/.
-│   ├── runtime/        Only consensus/, workflow/ and output_styles.py remain.
-│   │                   Kept for a later migration; consensus.run is broken.
 │   ├── remote/         SSH remote execution. Partly imports: schemas, auth,
 │   │                   storage and routers/{connections,sessions} do (with
 │   │                   fastapi installed); routers/{env,jobs,datasets,
@@ -215,14 +209,7 @@ OmicsClaw/
 └── AGENTS.md           This file
 ```
 
-**Three packages are kept but do not import**: `routing`,
-`surfaces/desktop` and `runtime/workflow` all reach `omicsclaw.skill` or
-`omicsclaw.providers`, which the rebuild deleted. Their source is intact
-and readable, which is the point of keeping them — but never cite one as
-working prior art without importing it first.
-
-`autoagent/` is **gone**: deleted whole with its tests. Runtime parameter
-tuning now lives in `omicsclaw/ensemble/tuning/`. The `omicsclaw.autoagent`
+`autoagent/` is **gone**: deleted whole with its tests. The `omicsclaw.autoagent`
 imports and "autoagent" references left in `omicsclaw/surfaces/desktop/`
 (chiefly `server.py`) no longer point at anything.
 
@@ -241,20 +228,15 @@ survives only in `git log`.
 > using only the names in each module's `__all__` (frozen by
 > `tests/sdk/test_public_surface.py`). Skill code never imports `omicsclaw`,
 > and `omicsclaw` never imports `skills`: they meet through files
-> (`SKILL.md`, `tuning.yaml`, the result.json schema `RESULT_SCHEMA` in
-> `skills/_sdk/result.py`), and `tests/sdk/` pins both sides. The named
-> exceptions, listed in `tests/sdk/test_boundary.py`: the four consensus
-> shells (`sc_consensus_clustering.py`, `sc_consensus_integration.py`,
-> `sc_consensus_pseudotime.py`, `consensus_domains.py`) and
-> `skills/spatial/consensus-interpret/_llm.py`, which plan 0058 replaces.
-> The framework side has none. `_sdk` imports
+> (`SKILL.md` and the result.json schema `RESULT_SCHEMA` in
+> `skills/_sdk/result.py`), and `tests/sdk/` pins both sides.
+> `tests/sdk/test_boundary.py` lists no exceptions on either side. `_sdk` imports
 > nothing from any `skills/<domain>/`, and a domain `_lib` may import only its
 > own domain's `_lib` and `skills._sdk`. Every skill script puts the checkout
 > on `sys.path` with the same block, anchored on `skills/_sdk/__init__.py`
 > (see `templates/skill/replace_me.py`).
 > Framework control-plane credentials are removed where the framework starts
-> a process (`bash`'s local shell, the ensemble `LocalExecutor`), never in
-> skill code.
+> a process (`bash`'s local shell), never in skill code.
 
 ## Skill Architecture
 
@@ -328,68 +310,18 @@ The base environment is never changed. Things to know:
   asks every time; "always allow" writes `install_skill_deps(<skill>)`).
 - Overlay directories can be deleted at any time. A changed base gets a new
   key and a new overlay; the old one is never reused or removed by OmicsClaw.
-- `run_skill` never installs anything: trials run under `ensemble_python`,
-  and each non-frozen trial records its interpreter and declared package
-  versions in `trial.json` under `provenance.environment`.
 
-### `tuning.yaml` and `run_skill`
+### Sandbox
 
-A skill that can be run as a comparable trial carries a `tuning.yaml`
-beside its `SKILL.md` (only `spatial-domains` does today). It is the
-machine-readable search space: the primary script, how the result is read
-(label table, id and label columns, processed h5ad), the analysis panel
-that scores it, per-method resources (`gpu: none|preferred|required`,
-`memory_gb`, `cpus`, `timeout_s`) and every tunable parameter with its
-type, closed range or choices, default, `log`, `priority`, `active_when`
-predicates and cross-parameter `constraints`. It does **not** add keys to
-the `SKILL.md` frontmatter and does not bring back `skill.yaml`.
-`omicsclaw/ensemble/space.py` validates it (errors name the field path),
-and `tests/ensemble/test_tuning_matches_argparse.py` compares every file
-with the script's real argparse — change a flag or a default in the
-script and that test fails until the YAML follows. Ranges are hard
-limits, every active default is rendered explicitly, and no range may be
-derived from a dataset's ground truth.
-
-`run_skill(skill, method, input, params, run_id, timeout_s)` runs one
-method as one trial under `<workspace>/ensemble_runs/<run_id>/<method>/tNNNN/`:
-the script under `_supervise.py` (time and PSS-memory limits on the whole
-process group), then the panel in a second supervised process. It is
-`AUTO` and `concurrency_safe`, so several calls in one turn run in
-parallel, limited by one resource pool per process — **the pool is not
-shared across processes**: two `oc` processes on one machine will
-oversubscribe the GPUs. A trial keeps `trial.json`, `labels.csv.gz`,
-`metrics.json`, `supervisor.json`, `run.log` and `output/result.json`;
-only each method's best trial keeps its processed h5ad
-(`--ensemble-keep-all true` keeps everything). User-facing analyses are
-still run with `bash` as the skill's `SKILL.md` describes.
-
-**One call can take hours, queueing included.** The call pauses the
-engine's per-tool timeout and bounds itself instead:
-`T_call = 300 s input hashing + 300 s input description + ensemble_max_queue_s +
-ensemble_max_trial_s + 120 s scoring + 60 s` (15,180 s, about 4.2 h, by default), and a turn of N parallel calls is bounded by the
-same `T_call`, not N times it. A deployment `--turn-timeout` shorter than
-`T_call` cancels trials still running (logged at start-up); a benchmark
-leaves it unset or at least `T_call`. `--ensemble false` removes the tool
-and leaves the prompt and every other tool definition byte-identical
-(`tests/entry/golden/`); left unset, a failed start-up self-check of the
-execution environment only warns and leaves the tool out, while
-`--ensemble true` makes it refuse start-up. `OMICSCLAW_ENSEMBLE_PYTHON`
-names the interpreter that has the skill dependencies (scanpy, igraph,
-the method packages).
-
-**Sandbox.** Trials run where `bash` runs. With the sandbox on, the
-repository's `omicsclaw/` and `skills/` are mounted read-only at their
-host paths whether or not the ensemble is on (so `bash` and `run_skill`
-see the same code); the repository root is not. An existing
+With the sandbox on, the repository's `omicsclaw/` and `skills/` are
+mounted read-only at their host paths, so `bash` runs the skill code of
+this checkout; the repository root is not mounted. An existing
 `<workspace>/.env` is covered by `/dev/null` and `<workspace>/.omicsclaw/`
 by an empty tmpfs inside the container, with the sandbox's own exchange
 directory `.omicsclaw/sandbox` mounted back so `bash` still works. The
-container defaults now suit several concurrent analyses and apply to
-`bash` as well: memory `auto` (80% of `MemTotal`), `/tmp` 64g, `/dev/shm`
-128g, pids 65536, `nofile` 65536, CPUs uncapped, GPUs only with
-`--sandbox-gpus`. The trial pool hands out the container memory minus
-tmpfs, shm and `ensemble_reserved_gb` (64); `bash` is not counted against
-the pool, so it must stay inside that reserve.
+container defaults suit several concurrent analyses: memory `auto` (80% of
+`MemTotal`), `/tmp` 64g, `/dev/shm` 128g, pids 65536, `nofile` 65536, CPUs
+uncapped, GPUs only with `--sandbox-gpus`.
 
 ### Reaching a skill's instructions
 
@@ -515,10 +447,8 @@ python -m pytest tests/schema tests/provider tests/engine tests/tools \
 # 4982 passed, 12 skipped   <- measured 2026-09-21; see the note below
 ```
 
-Treat that as the regression signal. `tests/` also still holds suites for
-the kept-but-not-importable packages (`tests/runtime/`, `tests/bot/`);
-those do not collect and are not a signal about your change either way.
-The old CLI's suites were deleted with `omicsclaw/surfaces/cli/`.
+Treat that as the regression signal. The old CLI's suites were deleted
+with `omicsclaw/surfaces/cli/`.
 
 > **Several sessions write this tree at once.** Before reading a red suite
 > as evidence about your own change, check `git status` for files you did

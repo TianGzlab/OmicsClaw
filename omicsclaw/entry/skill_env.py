@@ -4,10 +4,7 @@
 callback ``use_skill`` awaits to append its environment note, probing where
 ``bash`` runs, and — with ``skill_env=install`` and ``bash`` on this machine —
 the ``install_skill_deps`` tool. :func:`log_skill_env` writes the start-up line and warns when
-``bash``'s ``python``, this process's interpreter and the ensemble
-interpreter are not the same program. :func:`describe_trial_environment`
-builds the callback a ``run_skill`` runner uses to record the interpreter and
-declared package versions of each trial.
+``bash``'s ``python`` and this process's interpreter are not the same program.
 """
 
 from __future__ import annotations
@@ -19,7 +16,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from omicsclaw.permission import PermissionMode
 from omicsclaw.skillenv import (
@@ -31,15 +28,12 @@ from omicsclaw.skillenv import (
     SandboxContext,
     SandboxProbeRunner,
     parse_dependencies,
-    parse_probe,
-    probe_argv,
     probe_plan,
     read_registry,
     render_annotation,
     run_probe,
 )
 from omicsclaw.skillenv.overlay import InstallLimits, OverlayBuilder, default_root, find_overlays
-from omicsclaw.skillenv.probe import PROBE_TIMEOUT_S
 from omicsclaw.skillenv.tool import install_skill_deps_tool
 from omicsclaw.skills import Skill, SkillIndex
 from omicsclaw.skills.use_skill import Annotator
@@ -50,11 +44,7 @@ from .config import AppConfig, AppConfigError, SkillEnvMode, SkillsIndex
 from .project import STEP_RUNNER
 from .sandbox import SandboxBinding
 
-if TYPE_CHECKING:
-    from omicsclaw.ensemble.execution import CommandExecutor
-    from omicsclaw.ensemble.runner import EnvironmentDescriber
-
-__all__ = ["SkillEnvBinding", "build_skill_env", "describe_trial_environment", "log_skill_env"]
+__all__ = ["SkillEnvBinding", "build_skill_env", "log_skill_env"]
 
 _log = logging.getLogger(__name__)
 
@@ -195,19 +185,13 @@ def _annotator(binding: SkillEnvBinding) -> Annotator:
     return annotate
 
 
-async def log_skill_env(
-    binding: SkillEnvBinding | None,
-    config: AppConfig,
-    *,
-    ensemble_python: str | None,
-) -> None:
+async def log_skill_env(binding: SkillEnvBinding | None, config: AppConfig) -> None:
     """Log ``skill_env=… location=… python=…`` and warn about differing interpreters.
 
     The ``python`` is the one the probe finds where ``bash`` runs. It is
     compared with this process's interpreter when ``bash`` runs on this
-    machine, and with *ensemble_python* when that is an absolute path.
-    In read-only mode inside a sandbox nothing is run and the python is
-    reported as unchecked. Never raises.
+    machine. In read-only mode inside a sandbox nothing is run and the
+    python is reported as unchecked. Never raises.
     """
     if binding is None:
         return
@@ -225,75 +209,7 @@ async def log_skill_env(
         _log.warning(
             "bash runs %s but this process runs %s; skills run with the former", python, sys.executable
         )
-    if ensemble_python and os.path.isabs(ensemble_python) and not _same_program(python, ensemble_python):
-        _log.warning(
-            "bash runs %s but run_skill trials run %s; they may see different packages",
-            python,
-            ensemble_python,
-        )
 
 
 def _same_program(a: str, b: str) -> bool:
     return os.path.realpath(a) == os.path.realpath(b)
-
-
-def describe_trial_environment(skills: SkillIndex) -> "EnvironmentDescriber":
-    """The callback a runner awaits to describe the environment one trial runs in.
-
-    The dependency registry is read once, here; when it cannot be read every
-    name resolves by the fallback rule. The callback runs the environment
-    probe as an argument vector through ``executor.capture`` — starting with
-    ``executor.python``, in the skill's directory, with the environment the
-    trial inherits — and returns ``executable``, ``version``, ``prefix``,
-    ``packages`` (each declared distribution to its installed version, or
-    ``None``) and ``missing`` (declared names whose module the interpreter
-    cannot import). R packages are left out. A skill whose ``## Dependencies``
-    cannot be read is described with no packages and a ``declared_error``.
-    A probe that fails returns ``{"error": …}``; the callback does not raise
-    for that.
-    """
-    try:
-        registry = read_registry(skills.root / "_sdk" / "deps.py")
-    except RegistryFormatError:
-        registry = {}
-
-    async def describe(executor: "CommandExecutor", skill_name: str) -> dict[str, Any]:
-        skill = skills.get(skill_name)
-        names: tuple[str, ...] = ()
-        declared_error = ""
-        if skill is None:
-            declared_error = f"{skill_name} is not in the skill index"
-        else:
-            try:
-                names = parse_dependencies(skills.get_full_content(skill_name), source=skill.path)
-            except DependencyFormatError as exc:
-                declared_error = str(exc)
-        plan = probe_plan(names, registry)
-        dists = tuple(dict.fromkeys(d for r in plan.probed for d in r.distributions))
-        directory = str(skill.directory) if skill is not None else str(skills.root)
-        outcome = await executor.capture(
-            probe_argv(executor.python, plan.imports, dists, directory),
-            cwd=Path(directory),
-            timeout=PROBE_TIMEOUT_S,
-        )
-        if outcome.timed_out or outcome.exit_code != 0:
-            tail = outcome.output.strip().splitlines()[-1:] or [""]
-            how = "timed out" if outcome.timed_out else f"exited with status {outcome.exit_code}"
-            return {"error": f"the environment probe {how}: {tail[0][:200]}"}
-        try:
-            probed = parse_probe(outcome.output)
-        except ProbeError as exc:
-            return {"error": str(exc)}
-        absent = set(probed.missing)
-        described: dict[str, Any] = {
-            "executable": probed.executable,
-            "version": probed.version,
-            "prefix": probed.prefix,
-            "packages": {dist: probed.versions.get(dist) for dist in dists},
-            "missing": [r.name for r in plan.probed if r.module in absent],
-        }
-        if declared_error:
-            described["declared_error"] = declared_error
-        return described
-
-    return describe

@@ -364,7 +364,7 @@ provider 与模型：读仓库根的 `.env` 合并 `os.environ`，经 `resolve_c
 冒烟实测（2026-09-30，deepseek-v4-flash，2 条种子各 1 次）：2 条都判为 `correct`（都靠第一次 `use_skill`，6 轮内没有执行脚本），8 次模型调用，输入 116,186 token（缓存命中 95,616），输出 3,134，约 35 秒。完整的 26 × 3 由 owner 手动触发。
 
 局限：
-- 种子只覆盖 90 个 skill 里的 22 个，query 全是英文。
+- 种子只覆盖 89 个 skill 里的 22 个，query 全是英文。
 - 输入是 0 字节占位，模型读它会看到空文件；`Input:` 行是 eval 加的。
 - 只判选择和少数参数，不判回答质量；换模型的结果不能直接比。
 - 3 次试验只能分出 0、33%、67%、100% 四档，不做置信区间。
@@ -372,7 +372,6 @@ provider 与模型：读仓库根的 `.env` 合并 `os.environ`，经 `resolve_c
 - SDK 客户端在 `hermetic_env` 里才构造，SDK 自己读环境变量的回退（代理、base_url 一类）在清过的环境里看不到。
 - `HOME` 换成临时目录后，`pip --user` 装的包对 `--help` 和 `probe` 不可见。
 - 严格 help 用仓库相对路径时，`cwd` 是工作区，脚本找不到，模型得到一条错误观测。
-- 工具清单来自 `build_app`，没有生产里 `open_app` 挂的 `run_skill`。
 
 ---
 
@@ -402,12 +401,12 @@ provider 与模型：读仓库根的 `.env` 合并 `os.environ`，经 `resolve_c
 
 门控规则：所有 hard 断言通过，用例才算通过；任何一条用例失败，eval job 就失败。soft 断言只进警告列表。
 
-unit-tests job 跑一份目录白名单：框架层的 `engine`、`entry`、`provider`、`tools`、`context`、`permission`、`hooks`、`memory`、`planning`、`observability`、`schema`、`skills`、`subagent`、`sandbox`、`skillenv`、`mcp`、`sdk`、`evals`，加上 `tests/launch`、`tests/attachments` 和顶层的 `tests/test_*.py`。`tests/ensemble` 暂不进 CI，`skills/*/tests` 也不进。白名单里已知失败的测试列在 `tests/ci_known_failures.txt`，每行格式是 `<node id> | <原因> [| env]`，由 `tests/conftest.py` 标成 xfail：
+unit-tests job 跑一份目录白名单：框架层的 `engine`、`entry`、`provider`、`tools`、`context`、`permission`、`hooks`、`memory`、`planning`、`observability`、`schema`、`skills`、`subagent`、`sandbox`、`skillenv`、`mcp`、`sdk`、`evals`，加上 `tests/launch`、`tests/attachments` 和顶层的 `tests/test_*.py`。`skills/*/tests` 不进 CI。白名单里已知失败的测试列在 `tests/ci_known_failures.txt`，每行格式是 `<node id> | <原因> [| env]`，由 `tests/conftest.py` 标成 xfail：
 
 - 普通条目是 `strict=True`。测试修好后会以 XPASS 让运行变红，逼着把它从清单里删掉，所以清单只会变短。
 - 带 `env` 的条目只在部分环境失败（例如缺 scanpy），是非 strict 的。它们修好后不会自动报警，需要人工清理。
 
-目前清单里有 3 条 strict、3 条 env。2026-09-30 在模拟 CI 的 venv（job 的整张 pip 列表加 fastapi httpx uvicorn）里把整个白名单跑了一次：6847 passed、42 skipped、6 xfailed，没有 XPASS，用时约 350 秒。白名单外的旧测试已按计划 0068 清理：依赖已删模块的测试删掉，`tests/runtime/consensus` 只留 8 个测纯计算模块、能通过的文件。
+目前清单里有 3 条 strict、3 条 env。2026-09-30 在模拟 CI 的 venv（job 的整张 pip 列表加 fastapi httpx uvicorn）里把整个白名单跑了一次：6847 passed、42 skipped、6 xfailed，没有 XPASS，用时约 350 秒。白名单外的旧测试已按计划 0068 清理：依赖已删模块的测试删掉，`tests/runtime/consensus` 当时留下的 8 个文件已于 2026-10-02 随 consensus 运行时一起删除。
 
 job 装了 fastapi、httpx 和 uvicorn，desktop HTTP 的测试（`tests/entry/test_desktop_*.py`，约 560 条）随 job 运行。`tests/launch/test_surfaces.py` 以前装了 fastapi 会起服务挂住，现在由 `no_web_server` fixture 挡住。两个 `setup-python` 步骤的 pip 缓存按 `pyproject.toml` 计算缓存键。
 
@@ -441,15 +440,14 @@ eval 这边用 Runner 验证可观测层接到了生产装配上。`tests/evals/
 ## 5. 已知限制
 
 - 真实模型路由 eval（§2.4）只手动本地运行，还没有 nightly，也没有提交进仓库的基线。它只判选没选对 skill，不判回答质量，局限见 §2.4。完整的 26 × 3 运行还没做过，只做过 2 条种子的冒烟。
-- skill 的科学正确性不在这里测。它归 skill 自己的测试和 ensemble benchmark。
+- skill 的科学正确性不在这里测，它归 skill 自己的测试。
 - 打桩只认 `python <skill 目录>/<script>.py` 这一种调用形式。`cd <skill 目录> && python x.py`、`bash -c '…'`、`python -X utf8 …` 识别不了：脚本化用例的命令是作者写的，不受影响；真实模型 eval 里这类写法被审批策略拒绝，记为 `unmatched_skill_command`，出现多少次看报告。需要大段工具输出的用例改用预置文件加 `read_file`。
 - `bash._locally` 是私有函数，打桩依赖这个名字。`tests/evals/test_stubs.py` 有钉子测试，改名时会先失败。
 - 模型调用的重试退避基数是 1 秒，Runner 不调小它，所以 `transient_error_retried` 会真的等这 1 秒。
 - 两个压缩用例的 `trigger_tokens` 是按脚本实测估出来的，改了脚本或 token 估算器要重估。系统提示变长只影响 `B`，超过 `3G` 时报 `headroom_infeasible`；压缩提前写回时报 `headroom_missed`。没有自动标定。
 - `eval.yml` 只在本地模拟验证过（job2 故意改坏一条用例看退出码与 Step Summary；job1 的整个白名单在模拟 CI 的 venv 里跑过一次），还没在 GitHub Actions 上真跑过。
 - 仓库里有 30 多个测试文件各自实现假 provider，还没迁移到 `ScriptedProvider`。新测试应当用共享实现。
-- `skills/*/tests` 和 `tests/ensemble` 不在 CI 里跑。前者要 scanpy 等重依赖，只能在装齐依赖的本地环境里跑；后者延后进 CI。
-- `sc-consensus-clustering`、`sc-consensus-integration`、`sc-consensus-pseudotime`、`consensus-domains` 的脚本依赖不可导入的 `omicsclaw.runtime.consensus.run`，目前移出了 index（`SKILL.md` 改名为 `SKILL.md.disabled`），它们各自的 skill 测试仍然失败。
+- `skills/*/tests` 不在 CI 里跑：它们要 scanpy 等重依赖，只能在装齐依赖的本地环境里跑。
 
 ---
 
