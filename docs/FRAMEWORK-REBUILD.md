@@ -28,6 +28,27 @@ a workspace writer replacing the review and receipt together. They do not
 rehash every scientific output; the runner's existing replay and validation
 checks still apply.
 
+Verification on the reliability branch, against baseline `57ad6d83`:
+
+- The CI unit-job directories and marker filter: 7,024 passed, 26 skipped,
+  98 deselected, 3 known xfails and 3 environment-dependent xpasses, 397.56 s.
+- After the buffered-stream fix and shared cleanup extraction: provider,
+  engine, subagent and both new application-level suites, 846 passed and
+  2 skipped, 9.10 s. The three agreed public entry tests plus the two CI
+  fixture suites passed 88 tests under Python 3.11, 10.39 s.
+- Independent Spec review: no findings, including a separate `TERM=dumb`
+  run of all three public entry suites (52 passed). Independent Standards
+  review: one P3 duplicated-cleanup finding, fixed by sharing the provider
+  helper and then independently rechecked; no remaining findings.
+
+One exploratory notebook run accidentally included scientific examples in
+the framework environment. It was stopped after six missing-backend failures
+(including igraph and scrublet), 315 passes and 2 skips. The corrected
+non-scientific selection passed 346 tests with 1 skip and 31 deselected.
+No backend was installed to hide those environment gaps. Live-model and
+real-container checks were not rerun; this checkout has no Docker or Podman.
+This branch has not been pushed as part of these checks.
+
 The following dated rebuild account is historical.
 
 **Last updated: 2026-09-20. Steps 1 through 7 are complete; step 6.11

@@ -25,8 +25,6 @@ somewhere far from the call that caused it.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -42,7 +40,7 @@ from omicsclaw.schema import (
 )
 
 from ._accumulator import ToolCallAccumulators
-from ._deadline import RequestDeadline
+from ._deadline import RequestDeadline, close_stream as _close_stream
 from .base import Completion, ProviderError
 from .config import ProviderConfig
 
@@ -404,27 +402,6 @@ def _accumulate_tool_call(calls: ToolCallAccumulators, fragment: Any) -> None:
         _text(_field(function, "name", "")),
     )
     calls.append_arguments(index, _text(_field(function, "arguments", "")))
-
-
-async def _close_stream(stream: Any, timeout: float = 1.0) -> None:
-    """Trap 9. Release the HTTP connection whatever ended the turn.
-
-    A failure to close is swallowed: the stream is already gone, and
-    turning that into an exception would replace a completed answer with
-    an error. ``CancelledError`` is a ``BaseException`` and so passes
-    through untouched, which is what makes this safe to run from a
-    ``finally`` reached by cancellation.
-    """
-    close = getattr(stream, "close", None)
-    if close is None:
-        return
-    try:
-        result = close()
-        if inspect.isawaitable(result):
-            async with asyncio.timeout(min(timeout, 1.0)):
-                await result
-    except Exception:
-        pass
 
 
 class OpenAIProvider:

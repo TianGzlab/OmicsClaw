@@ -33,8 +33,6 @@ it; everything else in this module runs on the standard library.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from enum import StrEnum
@@ -50,7 +48,7 @@ from omicsclaw.schema import (
 )
 
 from ._accumulator import ToolCallAccumulators
-from ._deadline import RequestDeadline
+from ._deadline import RequestDeadline, close_stream as _close_stream
 from ._model_limits import bare_model_name
 from .base import Completion, ProviderError
 from .config import ProviderConfig
@@ -586,26 +584,6 @@ def _build_async_client(config: ProviderConfig) -> Any:
     if config.base_url:
         kwargs["base_url"] = config.base_url
     return sdk.AsyncAnthropic(**kwargs)
-
-
-async def _close_stream(stream: Any, timeout: float = 1.0) -> None:
-    """Release the SDK stream, tolerating a client that has no ``close``.
-
-    Failures are swallowed on purpose: this runs from a ``finally``, and
-    an exception raised while closing would replace whatever caused the
-    close — including a cancellation — with a much less informative one.
-    """
-    closer = getattr(stream, "close", None)
-    if closer is None:
-        return
-    try:
-        result = closer()
-        if inspect.isawaitable(result):
-            async with asyncio.timeout(min(timeout, 1.0)):
-                await result
-    except Exception:
-        # Deliberately broad and deliberately silent; see the docstring.
-        pass
 
 
 class AnthropicProvider:
