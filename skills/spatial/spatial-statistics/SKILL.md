@@ -45,12 +45,14 @@ Run one spatial analysis in place and return the same AnnData.
 Gene analyses read X (log-normalized expression); cluster and network
 analyses read labels, coordinates and spatial_connectivities. Existing
 spatial graphs are reused unless force_graph_rebuild=True.
+Bivariate Moran's backend cannot be seeded: results vary between runs.
 
 :param adata: Spatial AnnData; cluster-aware methods require categorical labels.
 :param analysis_type: CLI default neighborhood_enrichment; also ripley,
     co_occurrence, moran, geary, local_moran, getis_ord, bivariate_moran,
     network_properties or spatial_centrality.
 :param random_state: Permutation/simulation seed, matching CLI default 123.
+    Ignored by bivariate_moran; its run_info records this limitation.
 :param parameters: Method keyword options from references/parameters.md;
     omitted values retain backend wrapper defaults. Unknown options raise.
 :returns: The same AnnData with JSON-encoded diagnostics and result tables.

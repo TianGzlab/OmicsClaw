@@ -19,6 +19,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
 import numpy as np
@@ -274,7 +275,7 @@ def _prepare_stalign_image(
 
 def _compute_stalign_signal(
     ref_adata, src_adata, common_genes: list[str],
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, dict]:
     """Compute per-spot expression signal for STalign rasterization.
 
     STalign's official API accepts coordinates + a **signal matrix**
@@ -294,6 +295,7 @@ def _compute_stalign_signal(
     ref_X = _to_dense(ref_adata[:, common_genes].X)
     src_X = _to_dense(src_adata[:, common_genes].X)
 
+    diagnostic = {"signal_type": "PC1"}
     try:
         from sklearn.decomposition import PCA
         # Fit PCA on the reference, transform both
@@ -313,8 +315,9 @@ def _compute_stalign_signal(
         logger.warning("PCA failed (%s), falling back to total-count signal", exc)
         ref_signal = ref_X.sum(axis=1).astype(np.float32)
         src_signal = src_X.sum(axis=1).astype(np.float32)
+        diagnostic = {"signal_type": "total_counts", "fallback_reason": f"PCA failed: {exc}"}
 
-    return ref_signal, src_signal
+    return ref_signal, src_signal, diagnostic
 
 
 def run_stalign(
@@ -402,6 +405,7 @@ def run_stalign(
 
     # --- Signal: expression-based (PC1) or uniform ------------------------
     n_common_genes = 0
+    signal_info = {"signal_type": "uniform"}
     if use_expression:
         common_genes = _find_common_genes([ref_adata, src_adata])
         n_common_genes = len(common_genes)
@@ -412,13 +416,22 @@ def run_stalign(
             )
             ref_intensity = np.ones(len(ref_coords), dtype=np.float32)
             src_intensity = np.ones(len(src_coords), dtype=np.float32)
+            signal_info["fallback_reason"] = f"Only {n_common_genes} common genes; PC1 requires at least 10"
         else:
-            ref_intensity, src_intensity = _compute_stalign_signal(
+            ref_intensity, src_intensity, signal_info = _compute_stalign_signal(
                 ref_adata, src_adata, common_genes,
             )
     else:
         ref_intensity = np.ones(len(ref_coords), dtype=np.float32)
         src_intensity = np.ones(len(src_coords), dtype=np.float32)
+
+    fallback = {}
+    if "fallback_reason" in signal_info:
+        fallback = {"requested_method": "stalign_PC1",
+                    "executed_method": f"stalign_{signal_info['signal_type']}",
+                    "fallback_reason": signal_info["fallback_reason"]}
+        warnings.warn(f"STalign uses {signal_info['signal_type']}: {fallback['fallback_reason']}",
+                      RuntimeWarning, stacklevel=2)
 
     # --- Rasterize to images for LDDMM -----------------------------------
     ref_grid, ref_image = _prepare_stalign_image(ref_coords, ref_intensity, image_size)
@@ -486,6 +499,7 @@ def run_stalign(
 
     return {
         "method": "stalign",
+        **fallback,
         "reference_slice": str(ref),
         "n_slices": 2,
         "slices": [str(s) for s in slices_list],
@@ -497,7 +511,7 @@ def run_stalign(
             "niter": niter,
             "a": a,
             "use_expression": use_expression,
-            "signal_type": "PC1" if use_expression and n_common_genes >= 10 else "uniform",
+            "signal_type": signal_info["signal_type"],
             "device": str(device),
         },
         "effective_params": _prefixed_params(

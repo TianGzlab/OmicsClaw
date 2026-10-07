@@ -34,11 +34,42 @@ write_output(library.results(adata), "tables/enrichment_results.csv")
 The executable example uses explicit synthetic marker sets and checks their
 known group enrichment.
 
+For local libraries use `sets = read_input("data/sets.gmt", reader=library.read_gene_sets)`,
+then `library.enrich(adata, gene_sets=sets)`. `read_input` records the file hash.
+`library.fetch_gene_sets("KEGG_2021_Human")` explicitly accesses the network.
+Cache that mapping as JSON before a repeatable analysis, then load the cached
+file with `read_input` and this reader. Computation accepts built-in sources or mappings.
+
 ## API
 
 <!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-### `enrich(adata, *, method='enrichr', groupby='leiden', source='omicsclaw_core', species='human', gene_sets=None, gene_set=None, gene_set_file=None, fdr_threshold=0.05, n_top_terms=20, random_state=123, **parameters)`
+### `read_gene_sets(path)`
+
+Read a local GMT or JSON gene-set library without writing files.
+
+In a step call read_input(path, reader=library.read_gene_sets) to record
+the input file hash and resolve the path relative to the project root.
+
+:param path: Local GMT or JSON path supplied by read_input or the CLI.
+:returns: Term-to-gene mapping retaining its local source metadata.
+:raises FileNotFoundError: The local file is absent.
+:raises ValueError: The format or JSON structure is invalid.
+
+### `fetch_gene_sets(source, *, species='human')`
+
+Fetch a remote Enrichr library; this call requires network access.
+
+Cache the mapping as JSON, then use read_input(path, reader=library.read_gene_sets)
+for repeatable analysis steps. Fetching alone does not record a file hash.
+
+:param source: Enrichr library name or an alias in references/parameters.md.
+:param species: Default human; mouse is also supported.
+:returns: Term-to-gene mapping retaining requested and resolved library names.
+:raises ValueError: Species or remote source is invalid or unavailable.
+:raises ImportError: gseapy is unavailable; use install_skill_deps.
+
+### `enrich(adata, *, method='enrichr', groupby='leiden', source='omicsclaw_core', species='human', gene_sets=None, gene_set=None, fdr_threshold=0.05, n_top_terms=20, random_state=123, **parameters)`
 
 Enrich group markers or score group means and return the same AnnData.
 
@@ -48,18 +79,17 @@ scores group means, then copies each group's score to its observations.
 :param adata: Log-normalized expression and group labels; modified in place.
 :param method: CLI default enrichr; gsea or ssgsea also supported.
 :param groupby: CLI default leiden; obs column defining groups.
-:param source: CLI default omicsclaw_core, a small local signature library.
+:param source: CLI default omicsclaw_core; only built-in libraries are resolved here.
 :param species: CLI default human; mouse changes the built-in symbols.
-:param gene_sets: Explicit mapping of term to gene names; None resolves source.
-:param gene_set: Optional remote library name overriding source.
-:param gene_set_file: Optional local GMT/JSON path; record it with read_input.
+:param gene_sets: Already-read term-to-gene mapping; None selects the built-in source.
+:param gene_set: Optional built-in library alias overriding source.
 :param fdr_threshold: CLI default 0.05 adjusted significance cutoff.
 :param n_top_terms: CLI default 20 reported terms or attached score columns.
 :param random_state: CLI default 123 for GSEA and ssGSEA backend randomness.
 :param parameters: Method-specific CLI options in references/parameters.md.
 :returns: The same AnnData, with canonical enrichment_results in uns.
 :raises ValueError: Groups, gene sets or numeric thresholds are invalid.
-:raises ImportError: A requested remote library needs gseapy; use install_skill_deps.
+:raises TypeError: A file path is passed; use read_gene_sets first.
 
 ### `results(adata, *, significant_only=False)`
 
@@ -103,7 +133,7 @@ Defaults include 100 GSEA permutations and seed 123. See
 
 - `run_info()` records warnings and the executed method if GSEApy falls back
   to hypergeometric, mean-rank permutation or descriptive mean scoring.
-- `enrich` raises when a requested remote library cannot be resolved.
+- `fetch_gene_sets` raises when a requested remote library cannot be resolved.
 - `uns['enrichment_score_columns']` lists attached ssGSEA columns.
 - `results(significant_only=True)` excludes rows without p values.
 - `enrich` requires group labels; automatic Leiden clustering belongs to the CLI.

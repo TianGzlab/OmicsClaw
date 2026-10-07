@@ -1050,7 +1050,6 @@ def main():
     library = load_skill(SKILL_NAME)
     library.identify(
         adata, method=args.method, refine=args.refine,
-        random_state=42 if args.method in {"stagate", "graphst", "cellcharter"} else 0,
         resolution=args.resolution,
         spatial_weight=args.spatial_weight,
         n_domains=args.n_domains,  # Safe variable
@@ -1073,6 +1072,7 @@ def main():
 
     summary = library.run_info(adata, keep=False)
     summary.pop("random_state", None)
+    summary.pop("pca_random_state", None)
 
     params = {"method": args.method, "resolution": args.resolution,
               "spatial_weight": args.spatial_weight, "refine": args.refine}

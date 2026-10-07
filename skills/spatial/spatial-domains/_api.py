@@ -16,7 +16,7 @@ _RUN_KEY = "omicsclaw_spatial_domains_run"
 
 def identify(adata, *, method: str = "leiden", resolution: float = 1.0,
              spatial_weight: float = 0.3, refine: bool = False,
-             random_state: int = 0, **parameters):
+             random_state: int | None = None, **parameters):
     """Identify domains in place and return the same AnnData.
 
     Reads log-normalized X, X_pca and spatial coordinates; graph methods reuse
@@ -28,8 +28,9 @@ def identify(adata, *, method: str = "leiden", resolution: float = 1.0,
     :param resolution: Graph-clustering resolution, CLI default 1.0.
     :param spatial_weight: Spatial graph weight for Leiden/Louvain, CLI default 0.3.
     :param refine: False by default; True smooths labels using spatial KNN.
-    :param random_state: Seed for PCA, graph clustering and supported backend seeds;
-        0 for graph methods. The neural CLI wrappers historically use 42.
+    :param random_state: None preserves CLI defaults: backend seed 42 for STAGATE,
+        GraphST and CellCharter, otherwise 0; PCA uses 0. An explicit integer
+        overrides both PCA and supported backend seeds. Existing PCA is reused.
     :param parameters: Backend options listed in references/parameters.md;
         fixed-K methods use n_domains=7 unless supplied.
     :returns: The same AnnData with spatial_domain and JSON run diagnostics.
@@ -38,6 +39,9 @@ def identify(adata, *, method: str = "leiden", resolution: float = 1.0,
     """
     if method not in SUPPORTED_METHODS:
         raise ValueError(f"Unknown method {method!r}")
+    pca_random_state = 0 if random_state is None else random_state
+    if random_state is None:
+        random_state = 42 if method in {"stagate", "graphst", "cellcharter"} else 0
     known = {"data_type"}
     for name in SUPPORTED_METHODS:
         known.update(inspect.signature(getattr(_backends, f"identify_domains_{name}")).parameters)
@@ -48,8 +52,9 @@ def identify(adata, *, method: str = "leiden", resolution: float = 1.0,
         raise TypeError("Use random_state to select the backend seed")
     if not np.isfinite(resolution) or resolution <= 0 or not 0 <= spatial_weight <= 1:
         raise ValueError("resolution must be positive and spatial_weight in [0, 1]")
-    if "X_pca" not in adata.obsm:
-        sc.pp.pca(adata, random_state=random_state)
+    computed_pca = "X_pca" not in adata.obsm
+    if computed_pca:
+        sc.pp.pca(adata, random_state=pca_random_state)
     if method in {"leiden", "louvain"} and "neighbors" not in adata.uns:
         sc.pp.neighbors(adata, n_neighbors=parameters.get("n_neighbors", 15),
                         n_pcs=min(parameters.get("n_pcs", 50), 30), random_state=random_state)
@@ -70,12 +75,15 @@ def identify(adata, *, method: str = "leiden", resolution: float = 1.0,
         summary["n_domains"] = int(adata.obs["spatial_domain"].nunique())
         summary["refined"] = True
     summary["random_state"] = random_state
+    summary["pca_random_state"] = pca_random_state if computed_pca else None
     adata.uns[_RUN_KEY] = json.dumps(summary, default=lambda value: value.item())
     return adata
 
 
 def run_info(adata, *, keep: bool = True) -> dict:
-    """Read the method, domain sizes and refinement status.
+    """Read the method, domain sizes, refinement status and effective seeds.
+
+    pca_random_state is None when identify reused existing PCA coordinates.
 
     :param adata: AnnData returned by identify.
     :param keep: True retains diagnostics; False removes them before CLI serialization.

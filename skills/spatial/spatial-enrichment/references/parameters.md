@@ -11,6 +11,12 @@ default GSEA/ssGSEA seed; an explicit `gsea_seed` or `ssgsea_seed` takes priorit
 Pass `gene_sets={term: [genes]}` for an in-memory library. File/report flags
 stay in the CLI.
 
+`read_input(path, reader=library.read_gene_sets)` loads local GMT/JSON and records its
+hash. `fetch_gene_sets(source, species="human")` explicitly fetches a remote
+library; cache its mapping as JSON for replay. `enrich` resolves only built-in
+sources or consumes a supplied mapping. The CLI retains `--gene-set-file`,
+`--gene-set` and hosted `--source` values, reading them before computation.
+
 ## Allowed extra CLI flags
 
 - `--de-corr-method`

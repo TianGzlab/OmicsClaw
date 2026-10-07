@@ -161,7 +161,10 @@ jobs:
       - name: Test public spatial APIs
         run: pytest skills/spatial/*/tests/test_api.py -p no:cacheprovider
       - name: Run spatial examples and replay in fresh kernels
-        run: pytest tests/sdk/notebook/test_skill_examples.py -m skill_example_spatial -p no:cacheprovider
+        run: >-
+          pytest tests/sdk/notebook/test_skill_examples.py
+          skills/spatial/spatial-enrichment/tests/test_reader_step.py
+          -m skill_example_spatial -p no:cacheprovider
 
   skill-examples-extended:
     # Runs on every PR, but repository owners must not select it as a required check.

@@ -40,7 +40,7 @@ Run [examples/example_step.py](examples/example_step.py) through the step runner
 
 <!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-### `identify(adata, *, method: str='leiden', resolution: float=1.0, spatial_weight: float=0.3, refine: bool=False, random_state: int=0, **parameters)`
+### `identify(adata, *, method: str='leiden', resolution: float=1.0, spatial_weight: float=0.3, refine: bool=False, random_state: int | None=None, **parameters)`
 
 Identify domains in place and return the same AnnData.
 
@@ -53,8 +53,9 @@ between runs because their training wrappers do not expose every RNG.
 :param resolution: Graph-clustering resolution, CLI default 1.0.
 :param spatial_weight: Spatial graph weight for Leiden/Louvain, CLI default 0.3.
 :param refine: False by default; True smooths labels using spatial KNN.
-:param random_state: Seed for PCA, graph clustering and supported backend seeds;
-    0 for graph methods. The neural CLI wrappers historically use 42.
+:param random_state: None preserves CLI defaults: backend seed 42 for STAGATE,
+    GraphST and CellCharter, otherwise 0; PCA uses 0. An explicit integer
+    overrides both PCA and supported backend seeds. Existing PCA is reused.
 :param parameters: Backend options listed in references/parameters.md;
     fixed-K methods use n_domains=7 unless supplied.
 :returns: The same AnnData with spatial_domain and JSON run diagnostics.
@@ -63,7 +64,9 @@ between runs because their training wrappers do not expose every RNG.
 
 ### `run_info(adata, *, keep: bool=True) -> dict`
 
-Read the method, domain sizes and refinement status.
+Read the method, domain sizes, refinement status and effective seeds.
+
+pca_random_state is None when identify reused existing PCA coordinates.
 
 :param adata: AnnData returned by identify.
 :param keep: True retains diagnostics; False removes them before CLI serialization.

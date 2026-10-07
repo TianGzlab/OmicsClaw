@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 import pandas as pd
 from skills.spatial._lib.statistics import ANALYSIS_REGISTRY
 from skills.spatial._lib.inference_result import store_info, read_info
@@ -16,12 +17,14 @@ def analyze(adata, *, analysis_type: str = "neighborhood_enrichment", random_sta
     Gene analyses read X (log-normalized expression); cluster and network
     analyses read labels, coordinates and spatial_connectivities. Existing
     spatial graphs are reused unless force_graph_rebuild=True.
+    Bivariate Moran's backend cannot be seeded: results vary between runs.
 
     :param adata: Spatial AnnData; cluster-aware methods require categorical labels.
     :param analysis_type: CLI default neighborhood_enrichment; also ripley,
         co_occurrence, moran, geary, local_moran, getis_ord, bivariate_moran,
         network_properties or spatial_centrality.
     :param random_state: Permutation/simulation seed, matching CLI default 123.
+        Ignored by bivariate_moran; its run_info records this limitation.
     :param parameters: Method keyword options from references/parameters.md;
         omitted values retain backend wrapper defaults. Unknown options raise.
     :returns: The same AnnData with JSON-encoded diagnostics and result tables.
@@ -45,6 +48,11 @@ def analyze(adata, *, analysis_type: str = "neighborhood_enrichment", random_sta
         raise ImportError(f"{exc}; use install_skill_deps for spatial-statistics") from exc
     summary["n_cells"] = int(adata.n_obs)
     summary["n_features"] = int(adata.n_vars)
+    if analysis_type == "bivariate_moran":
+        note = "esda Moran_BV has no seed parameter; results vary between runs."
+        summary.update(requested_random_state=random_state, effective_random_state=None,
+                       seed_supported=False, reproducibility_note=note)
+        warnings.warn(note, RuntimeWarning, stacklevel=2)
     store_info(adata, _RUN_KEY, summary)
     return adata
 

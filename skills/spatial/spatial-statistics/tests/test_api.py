@@ -39,3 +39,17 @@ def test_getis_ord_accepts_float32_spatial_graph():
     api.analyze(data, analysis_type="getis_ord", genes=["marker"], n_perms=9, getis_star=False)
     assert np.isfinite(data.obs["getis_ord_marker"]).all()
     assert data.obs["getis_ord_pval_marker"].between(0, 1).all()
+
+
+def test_bivariate_moran_discloses_unsupported_seed():
+    rng = np.random.default_rng(0)
+    data = AnnData(rng.normal(size=(40, 2)), var=pd.DataFrame(index=["a", "b"]))
+    data.obsm["spatial"] = rng.uniform(size=(40, 2))
+    api = load_skill("spatial-statistics")
+    with pytest.warns(RuntimeWarning, match="results vary between runs"):
+        api.analyze(data, analysis_type="bivariate_moran", genes=["a", "b"], n_perms=9, random_state=7)
+    info = api.run_info(data)
+    assert info["requested_random_state"] == 7
+    assert info["effective_random_state"] is None
+    assert info["seed_supported"] is False
+    assert "Moran_BV" in info["reproducibility_note"]

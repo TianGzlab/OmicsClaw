@@ -54,3 +54,43 @@ def test_public_registration_and_shift_table():
 def test_single_slice_is_rejected():
     with pytest.raises(ValueError, match="two slices"):
         load_skill("spatial-register").register(slices()[:2].copy(), slice_key="slice")
+
+
+@pytest.mark.parametrize(("n_genes", "executed"), [(2, "uniform"), (12, "total_counts")])
+def test_stalign_reports_the_signal_it_actually_used(monkeypatch, n_genes, executed):
+    """Exercise signal preparation while replacing only the optional solver boundary."""
+    import sys
+    import types
+    from sklearn.decomposition import PCA
+    from skills.spatial._lib import register as backend
+
+    torch = types.ModuleType("torch")
+    torch.float32 = np.float32
+    torch.tensor = lambda value, dtype: np.asarray(value, dtype=dtype)
+    torch.linspace = lambda start, end, steps, dtype: np.linspace(start, end, steps, dtype=dtype)
+    torch.device = str
+    torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+    torch.Tensor = type("UnusedTensor", (), {})
+    solver = types.ModuleType("STalign.STalign")
+    solver.LDDMM = lambda **kwargs: dict(A=1, v=1, xv=1)
+    solver.transform_points_source_to_target = lambda xv, v, a, points: points
+    package = types.ModuleType("STalign")
+    package.STalign = solver
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "STalign", package)
+    monkeypatch.setitem(sys.modules, "STalign.STalign", solver)
+    monkeypatch.setattr(backend, "require", lambda *args, **kwargs: None)
+    if n_genes >= 10:
+        def fail_pca(*args, **kwargs):
+            raise ValueError("degenerate expression")
+        monkeypatch.setattr(PCA, "fit_transform", fail_pca)
+    data = slices()
+    data = ad.AnnData(np.ones((data.n_obs, n_genes)), obs=data.obs.copy(), obsm=dict(data.obsm))
+    api = load_skill("spatial-register")
+    with pytest.warns(RuntimeWarning, match=executed):
+        api.register(data, method="stalign", use_expression=True, image_size=8, niter=1)
+    info = api.run_info(data)
+    assert info["stalign_params"]["signal_type"] == executed
+    assert info["requested_method"] == "stalign_PC1"
+    assert info["executed_method"] == f"stalign_{executed}"
+    assert info["fallback_reason"]

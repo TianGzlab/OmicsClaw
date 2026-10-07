@@ -225,6 +225,9 @@ def _looks_like_demo_genes(var_names: pd.Index | list[str]) -> bool:
     return sum(bool(re.fullmatch(r"Gene_\d{3}", gene)) for gene in genes) >= max(5, len(genes) // 2)
 
 
+BUILTIN_SOURCES = frozenset({'omicsclaw_core', 'builtin', 'omicsclaw_builtin', 'omicsclaw_demo'})
+
+
 def _resolve_gene_sets(
     *,
     source: str,
@@ -1024,8 +1027,9 @@ def run_enrichment(
             gene_set_file=gene_set_file, var_names=adata.var_names,
         )
     else:
-        gene_set_meta = dict(requested_source='provided', resolved_source='provided',
-                             library_mode='provided', warnings=[])
+        gene_set_meta = getattr(gene_sets, 'metadata', None) or dict(
+            requested_source='provided', resolved_source='provided',
+            library_mode='provided', warnings=[])
     gene_sets = _canonicalize_gene_sets(gene_sets, universe=adata.var_names)
     if not gene_sets:
         raise ValueError(
@@ -1117,7 +1121,7 @@ def run_enrichment(
         "groupby": groupby,
         "species": species,
         "gene_set": gene_set,
-        "gene_set_file": gene_set_file,
+        "gene_set_file": gene_set_meta.get('gene_set_file', gene_set_file),
         "de_method": de_method,
         "de_corr_method": de_corr_method,
         "ranking_metric": method_meta.get("ranking_metric"),

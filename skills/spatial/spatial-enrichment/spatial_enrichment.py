@@ -36,6 +36,7 @@ from skills._sdk.report import (
 from skills._sdk.result import write_result_json
 from skills.spatial._lib.adata_utils import get_spatial_key, store_analysis_metadata
 from skills.spatial._lib.enrichment import (
+    BUILTIN_SOURCES,
     METHOD_PARAM_DEFAULTS,
     SUPPORTED_METHODS,
     VALID_DE_CORR_METHODS,
@@ -1534,14 +1535,20 @@ def main():
     params, method_kwargs = _collect_run_configuration(args)
     from skills._sdk.notebook import load_skill
     library = load_skill(SKILL_NAME)
+    selected_source = args.gene_set or args.source
+    gene_sets = None
+    if args.gene_set_file:
+        gene_sets = library.read_gene_sets(args.gene_set_file)
+    elif selected_source not in BUILTIN_SOURCES:
+        gene_sets = library.fetch_gene_sets(selected_source, species=args.species)
     library.enrich(
         adata,
         method=args.method,
         groupby=args.groupby,
         source=args.source,
         species=args.species,
-        gene_set=args.gene_set,
-        gene_set_file=args.gene_set_file,
+        gene_set=args.gene_set if gene_sets is None else None,
+        gene_sets=gene_sets,
         fdr_threshold=args.fdr_threshold,
         n_top_terms=args.n_top_terms,
         de_method=args.de_method,
@@ -1549,6 +1556,8 @@ def main():
         **method_kwargs,
     )
     summary = library.run_info(adata, keep=False)
+    summary.update(gene_set=args.gene_set, gene_set_file=args.gene_set_file,
+                   requested_source=selected_source)
 
     gallery_context = _prepare_enrichment_gallery_context(adata, summary)
     generate_figures(adata, output_dir, summary, gallery_context=gallery_context)
