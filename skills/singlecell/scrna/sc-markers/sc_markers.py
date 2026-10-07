@@ -28,6 +28,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -37,7 +38,6 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib import markers as sc_markers_utils
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
     get_matrix_contract,
@@ -140,34 +140,6 @@ def _resolve_groupby(adata, requested: str | None) -> str:
     if not candidates:
         raise ValueError('No cluster/cell-type grouping column available for marker discovery.')
     return candidates[0]
-
-
-def _build_cluster_summary(markers: pd.DataFrame, *, n_top: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if markers.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    frame = markers.copy()
-    effect_col = 'logfoldchanges' if 'logfoldchanges' in frame.columns and pd.to_numeric(frame['logfoldchanges'], errors='coerce').notna().any() else 'scores'
-    sort_cols = []
-    ascending = []
-    if 'pvals_adj' in frame.columns and pd.to_numeric(frame['pvals_adj'], errors='coerce').notna().any():
-        sort_cols.append('pvals_adj')
-        ascending.append(True)
-    sort_cols.append(effect_col)
-    ascending.append(False)
-    frame = frame.sort_values(sort_cols, ascending=ascending)
-    top_df = frame.groupby('group', sort=False, observed=False).head(n_top).copy()
-    summary_df = (
-        frame.groupby('group', dropna=False, observed=False)
-        .agg(
-            n_markers=('names', 'count'),
-            top_gene=('names', 'first'),
-            top_effect=(effect_col, 'max'),
-            median_effect=(effect_col, 'median'),
-        )
-        .reset_index()
-    )
-    summary_df['effect_metric'] = effect_col
-    return summary_df, top_df
 
 
 def _write_figure_data(output_dir: Path, *, markers: pd.DataFrame, top_markers: pd.DataFrame, cluster_summary: pd.DataFrame) -> dict[str, str]:
@@ -338,27 +310,15 @@ def main():
     )
 
     resolved_groupby = _resolve_groupby(adata, args.groupby)
-    if method == 'cosg':
-        markers = sc_markers_utils.find_cosg_markers(
-            adata,
-            cluster_key=resolved_groupby,
-            n_genes=args.n_genes if args.n_genes is not None else 50,
-            mu=args.mu,
-            use_raw=False,
-        )
-    else:
-        markers = sc_markers_utils.find_all_cluster_markers(
-            adata,
-            cluster_key=resolved_groupby,
-            method=method,
-            n_genes=args.n_genes,
-            min_in_group_fraction=args.min_in_group_fraction,
-            min_fold_change=args.min_fold_change,
-            max_out_group_fraction=args.max_out_group_fraction,
-            use_raw=False,
-        )
-
-    cluster_summary_df, top_markers_df = _build_cluster_summary(markers, n_top=args.n_top)
+    api = load_skill(SKILL_NAME)
+    markers = api.find_markers(
+        adata, groupby=resolved_groupby, method=method, n_genes=args.n_genes,
+        min_in_group_fraction=args.min_in_group_fraction,
+        min_fold_change=args.min_fold_change,
+        max_out_group_fraction=args.max_out_group_fraction, mu=args.mu,
+    )
+    cluster_summary_df = api.cluster_summary(markers)
+    top_markers_df = api.top_markers(markers, n_top=args.n_top)
     summary = {
         'method': method,
         'groupby': resolved_groupby,
@@ -406,6 +366,7 @@ def main():
 
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ''
     result_data = {
+        'run_info': api.run_info(markers),
         'params': params,
         'input_contract': input_contract,
         'matrix_contract': matrix_contract,

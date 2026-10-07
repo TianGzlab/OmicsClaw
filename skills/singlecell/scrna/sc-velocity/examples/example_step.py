@@ -1,0 +1,22 @@
+# %% [markdown]
+# Fit velocities to simulated splicing kinetics, not proportionally copied count layers.
+# Reads velocity_simulation. Calls sc-velocity: velocity and output helpers.
+
+# %%
+import numpy as np
+import scanpy as sc
+from skills._sdk.notebook import load_demo, load_skill, write_output
+
+velocity = load_skill("sc-velocity")
+adata = velocity.velocity(load_demo("velocity_simulation"), n_jobs=1, random_state=0)
+sc.tl.umap(adata, random_state=0)
+
+# %%
+write_output(velocity.velocity_summary(adata), "tables/velocity_summary.csv")
+write_output(velocity.top_velocity_genes(adata), "tables/top_velocity_genes.csv")
+write_output(velocity.stream_figure(adata), "figures/velocity_stream.png")
+write_output(adata, "intermediate/adata_velocity.h5ad")
+diagnostics = velocity.velocity_diagnostics(adata)
+assert not diagnostics["degenerate"]
+assert diagnostics["n_velocity_genes"] > 0
+assert np.isfinite(adata.layers["velocity"]).all()

@@ -1,8 +1,10 @@
 """REPLACE_SKILL_NAME's function library: what a step calls through ``load_skill``.
 
 Replace the placeholder below with the skill's real computations. Functions
-here compute and return objects; reading and writing files belongs to the
-step (``read_input``/``write_output``) or to the CLI script.
+return objects; the step owns I/O through ``read_input``/``write_output``.
+A ``read_*`` adapter may read files when passed as ``reader=`` to
+``read_input``. Import optional backends inside the method that uses them.
+See this directory's README for seeds, fallbacks and R data exchange.
 """
 
 from __future__ import annotations

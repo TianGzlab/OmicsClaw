@@ -19,4 +19,4 @@ def _load_module():
 
 def test_methods_are_registered():
     module = _load_module()
-    assert set(module.METHOD_REGISTRY) == {"ora", "gsea"}
+    assert set(module.METHOD_REGISTRY) == {"ora", "gsea", "gsea_r", "gsva_r"}

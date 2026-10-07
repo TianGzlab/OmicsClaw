@@ -1,46 +1,16 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── auc_matrix.csv
-│   ├── cell_metadata.csv
-│   ├── gene_expression.csv
-│   ├── regulon_summary.csv
-│   └── top_adjacencies.csv
-└── figures/
-    ├── r_regulon_cor.png
-    └── r_regulon_violin.png
-```
+The function library returns adjacency tables, regulon mappings, score
+tables and figures; it writes no files. `infer_adjacencies` uses the supplied
+TF list, and `run_info` names the actual inference method and any fallback.
+`score_regulons(..., method="mean")` computes target-gene mean expression;
+it is not AUCell. Full AUCell scoring requires its optional backend.
 
-## File contents
-
-- `tables/auc_matrix.csv` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `tables/cell_metadata.csv` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `tables/gene_expression.csv` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `tables/regulon_summary.csv` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `tables/top_adjacencies.csv` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `figures/r_regulon_cor.png` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `figures/r_regulon_violin.png` — written by `sc_grn.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_grn.py`.
-- `commands.sh` — written by `sc_grn.py`.
-- `manifest.json` — written by `sc_grn.py`.
-- `processed.h5ad` — written by `sc_grn.py`.
-- `requirements.txt` — written by `sc_grn.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-### Demo-only outputs
-
-- `demo_tf_list.txt` — generated only on `--demo`.
-
-## Notes
-
-Auto-generated from `sc_grn.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The CLI writes `processed.h5ad`, `tables/grn_adjacencies.csv`,
+`tables/grn_regulons.csv`, `tables/grn_auc_matrix.csv`,
+`tables/grn_regulon_targets.csv`, `report.md` and `result.json`.
+The historical `auc_matrix` filename and `regulon_*` obs names are kept
+for compatibility even for mean scores; read
+`result.json.data.scoring_method` before interpreting them.
+Plot-source CSVs are under `figure_data/`; R figures are optional.
+The demo writes its own TF list only when no caller-supplied list is used.

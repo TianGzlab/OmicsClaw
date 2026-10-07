@@ -56,6 +56,7 @@ def preprocess(
     adata,
     *,
     method: str = "scanpy",
+    apply_filters: bool = True,
     min_genes: int = 200,
     min_cells: int = 3,
     max_mt_pct: float = 20.0,
@@ -77,7 +78,7 @@ def preprocess(
 
     The input is first brought into the OmicsClaw scRNA contract (counts in
     ``layers['counts']``, a counts snapshot in ``raw``) and QC metrics are added
-    when missing. Cells and genes are then filtered by the thresholds below,
+    when missing. With apply_filters=True, cells and genes are filtered by the thresholds below,
     and doublets are dropped when ``predicted_doublet`` or ``doublet_score``
     from sc-doublet-detection are in ``obs``. Finally the chosen method
     normalises ``X``, flags ``var['highly_variable']`` and writes
@@ -87,6 +88,8 @@ def preprocess(
         ``"pearson_residuals"`` (analytic Pearson residuals for HVG and PCA; ``X``
         stays log-normalised), ``"seurat"`` (Seurat LogNormalize in R) or
         ``"sctransform"`` (Seurat SCTransform in R).
+    :param apply_filters: Apply cell, gene and doublet filtering. Default True.
+        Set False after sc-filter to preserve its retained cells and genes.
     :param min_genes: Drop cells with fewer detected genes. Default 200, the
         scanpy and Seurat tutorial value; lower it for low-depth data.
     :param min_cells: Drop genes detected in fewer cells. Default 3, the tutorial value.
@@ -110,7 +113,7 @@ def preprocess(
         ``doublet_score`` is present. Default 0.25.
     :param preserve_var_names: Keep the input's gene identifiers instead of the
         symbols chosen during standardisation. Default ``False``.
-    :returns: A new AnnData: filtered, normalised ``X``, ``layers['counts']``, ``raw``
+    :returns: A new AnnData with normalised ``X``, ``layers['counts']``, ``raw``
         counts snapshot, ``var['highly_variable']``, ``obsm['X_pca']``, ``uns['pca']``.
     :raises ValueError: an unknown method, or input with no count-like matrix.
     :raises RuntimeError: the R methods fail, or their R packages are missing.
@@ -121,6 +124,7 @@ def preprocess(
         n_top_hvg = 3000 if method == "sctransform" else 2000
     effective = {
         "method": method,
+        "apply_filters": apply_filters,
         "min_genes": min_genes,
         "min_cells": min_cells,
         "max_mt_pct": max_mt_pct,
@@ -152,7 +156,7 @@ def preprocess(
             adata,
             workflow=method,
             min_genes=0,
-            min_cells=1,
+            min_cells=1 if apply_filters else 0,
             max_mt_pct=100.0,
             n_top_hvg=int(n_top_hvg),
             n_pcs=int(n_pcs),
@@ -322,14 +326,22 @@ def _prepare_input(adata, *, effective_params: dict):
             raise ValueError("feature axis changed during input canonicalization")
         canonical_adata.var_names = original_var_names
         canonical_adata.uns["omicsclaw_input_contract"]["preserved_var_names"] = True
-    filtered_adata, filter_summary, filter_params = sc_qc_utils.apply_threshold_filtering(
-        canonical_adata,
-        min_genes=int(effective_params["min_genes"]),
-        min_cells=int(effective_params["min_cells"]),
-        max_mt_percent=float(effective_params["max_mt_pct"]),
-        filter_doublets=bool(effective_params.get("remove_doublets", True)),
-        doublet_score_threshold=float(effective_params.get("doublet_score_threshold", 0.25)),
-    )
+    if effective_params.get("apply_filters", True):
+        filtered_adata, filter_summary, filter_params = sc_qc_utils.apply_threshold_filtering(
+            canonical_adata,
+            min_genes=int(effective_params["min_genes"]),
+            min_cells=int(effective_params["min_cells"]),
+            max_mt_percent=float(effective_params["max_mt_pct"]),
+            filter_doublets=bool(effective_params.get("remove_doublets", True)),
+            doublet_score_threshold=float(effective_params.get("doublet_score_threshold", 0.25)),
+        )
+    else:
+        filtered_adata = canonical_adata
+        filter_summary = sc_qc_utils.summarize_filter_statistics(
+            canonical_adata, canonical_adata, filter_stats={},
+        )
+        filter_summary["filters_applied"] = False
+        filter_params = {}
     filter_summary["qc_metrics_reused"] = bool(had_qc_metrics)
     filter_summary["input_preparation"] = {
         "expression_source": prepared_input.expression_source,

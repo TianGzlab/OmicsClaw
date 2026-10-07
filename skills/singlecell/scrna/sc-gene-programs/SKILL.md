@@ -26,57 +26,71 @@ factors) plus a per-cell usage matrix. Two methods:
 - `nmf` — sklearn NMF, single run.
 
 Output: `tables/program_usage.csv` (cells × K), `tables/program_weights.csv`
-(genes × K), `tables/top_program_genes.csv` (top-N genes per program).
+(programs × genes), `tables/top_program_genes.csv` (top-N genes per program).
 
 For per-cluster marker discovery use `sc-markers`; for TF → target
 regulons use `sc-grn`; for per-cell pathway scores against curated
 gene sets use `sc-pathway-scoring`.
 
+## Use in an analysis step
+
+Use `load_skill` from the notebook SDK; write returned objects with
+`write_output`. This runnable example is also in `examples/example_step.py`.
+The CLI remains available for standalone reports and galleries.
+
+```python
+# Extract six NMF programs from the log-normalized PBMC68k snapshot.
+# Reads pbmc68k_reduced.
+# Calls sc-gene-programs: find_programs, top_program_genes, usage_figure.
+
+from skills._sdk.notebook import load_demo, load_skill, write_output
+
+programs = load_skill('sc-gene-programs')
+adata = load_demo('pbmc68k_reduced').raw.to_adata()
+
+result = programs.find_programs(adata, method='nmf')
+top = programs.top_program_genes(result, n=10)
+write_output(result, 'intermediate/programs.h5ad')
+write_output(top, 'tables/top_program_genes.csv')
+write_output(programs.usage_figure(result), 'figures/program_usage.png')
+
+assert result.obsm['X_gene_programs'].shape == (adata.n_obs, 6)
+assert (result.obsm['X_gene_programs'] >= 0).all()
+assert top['program'].nunique() == 6
+assert set(top.gene).issubset(adata.var_names)
+```
+
 ## Inputs & Outputs
 
-**Inputs**
+Input is a non-negative AnnData expression matrix; `layer` selects another
+matrix. PCA and neighbors are not required. `find_programs` returns a copy
+with `obsm["X_gene_programs"]` and tables exposed by the API helpers.
 
-- Modalities: scrna
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-
-**Outputs**
-
-- `tables/cell_metadata.csv`
-- `tables/gene_expression.csv`
-- `tables/program_correlation.csv`
-- `tables/program_tpm.csv`
-- `tables/program_usage.csv`
-- `tables/program_weights.csv`
-- `tables/top_program_genes.csv`
-- `figures/mean_program_usage.png`
-- `figures/program_correlation.png`
-- `figures/r_feature_cor.png`
-- `figures/r_feature_violin.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obsm`: `X_gene_programs`
+The CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`tables/program_usage.csv` (cells × programs),
+`tables/program_weights.csv` (programs × genes), and
+`tables/top_program_genes.csv`. cNMF additionally writes
+`tables/program_tpm.csv`. Gallery figures are `mean_program_usage.png`
+and, for multiple programs, `program_correlation.png`. Figure source
+tables, including program correlations, live under `figure_data/`.
 
 ## Flow
 
-1. Auto-fallback check: try `import cnmf`; if it fails, silently switch `--method` to `nmf`.
+1. Auto-fallback check: try `import cnmf`; if it fails, switch to `nmf` and record the fallback.
 2. Load AnnData (`--input`) or build a demo.
 3. Preflight: pick source matrix per `--layer` (auto-prefer `layers["counts"]` for cnmf when `--layer` is unset); reject negative values; warn if `n_genes < 50` or running NMF on raw counts without `--layer counts`.
-4. Run cNMF (consensus NMF with `--n-iter` runs) or sklearn NMF (single run, `--seed`).
+4. Run cNMF (consensus NMF with `--n-iter` iterations per factorization) or sklearn NMF (single run, `--seed`).
 5. Build top-genes-per-program table; compute per-program correlation matrix.
 6. Detect degenerate output → record diagnostics; do NOT raise.
 7. Save tables, figures, `processed.h5ad`, `report.md`, `result.json`.
 
 ## Gotchas
 
-- **`cnmf` silently auto-falls back to `nmf` if cnmf is not installed.** `sc_gene_programs.py` catches `ImportError` from `import cnmf`, logs a warning, sets `args.method = "nmf"` (so `summary["method"]` already reflects the post-fallback value). `summary["backend"]` records the same. Inspect either before quoting "we used cNMF".
-- **Negative values reject the run.** `sc_gene_programs.py` raises `SystemExit("NMF/cNMF requires non-negative input, but the data matrix contains negative values. This usually means the data has been z-score scaled. ...")` with a multi-option fix message. Most common cause: feeding a `sc.pp.scale`-d AnnData where `.X` is mean-centred. Pass `--layer counts` or re-run `sc-preprocessing` without scaling.
-- **`cnmf` auto-prefers `layers["counts"]`; nmf doesn't.** `sc_gene_programs.py` switches to `layers["counts"]` for cnmf if `--layer` is unset and the layer exists. nmf without `--layer` uses `.X` directly. If your raw counts live elsewhere, pass `--layer <name>` explicitly to avoid silent fallback to `.X`.
-- **Missing `--layer` value also `SystemExit`s.** `sc_gene_programs.py` raises `SystemExit("Layer '<name>' not found in adata.layers. Available layers: <list>. ...")` when an explicit `--layer` doesn't resolve. Wrappers expecting `ValueError` need to catch `SystemExit`.
-- **`--input` mandatory unless `--demo`.** `sc_gene_programs.py` raises `SystemExit("Provide --input or use --demo")`.
-- **Degenerate output is a soft fail.** When the factorisation collapses to fewer effective programs than `--n-programs`, `sc_gene_programs.py` records `summary["degenerate_output"] = True` and lists `degenerate_issues` — but the script returns 0. Always inspect `result.json["n_programs"]` (the *effective* count) before chaining downstream.
+- `run_info(result)` records requested and executed methods and the reason when missing cNMF falls back to sklearn NMF. CLI `result.json["summary"]["backend"]` reports the executed backend.
+- CLI preflight rejects negative input. The API retains the existing solver's negative-to-zero clipping; use a non-negative matrix for interpretable `program_weights`.
+- cNMF prefers `layers["counts"]` when `layer` is unset; NMF uses X. A missing cNMF backend falls back to NMF's matrix selection.
+- `n_iter` / `--n-iter` is the maximum number of iterations per factorization, not the number of consensus replicates. `run_info` includes the cNMF replicate count when used.
+- CLI `result.json["summary"]["degenerate_output"]` reports collapsed programs without making the run fail. Inspect the flag and `degenerate_issues` before using the tables.
 
 ## Key CLI
 
@@ -107,3 +121,39 @@ python skills/singlecell/scrna/sc-gene-programs/sc_gene_programs.py \
 Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `cnmf`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scikit-learn`, `scipy`
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `find_programs(adata, *, method: str='cnmf', n_programs: int=6, n_iter: int=400, layer: str | None=None, top_genes: int=30, random_state: int=0)`
+
+Return a copy with per-cell usage in obsm['X_gene_programs'].
+
+cNMF uses counts when available; missing cNMF falls back to sklearn NMF,
+recorded by run_info. NMF uses X unless layer is set. Negative values are
+clipped to zero by the existing solver. n_iter limits each factorization's
+iterations, not the number of cNMF replicates. Both methods use random_state.
+Program weights and ranked genes are available through the table helpers.
+
+### `program_weights(adata) -> pd.DataFrame`
+
+Return program-by-gene weights from find_programs.
+
+### `top_program_genes(adata, *, n: int | None=None) -> pd.DataFrame`
+
+Return ranked genes and weights; n optionally limits genes per program.
+
+### `program_correlation(adata) -> pd.DataFrame`
+
+Return Pearson correlations between per-cell program usages.
+
+### `usage_figure(adata)`
+
+Return a heatmap figure of cells by program usage, without writing files.
+
+### `run_info(adata) -> dict`
+
+Return requested and executed methods, fallback reason and solver diagnostics.
+
+<!-- api:end -->

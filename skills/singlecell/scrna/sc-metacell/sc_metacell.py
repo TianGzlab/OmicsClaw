@@ -35,7 +35,8 @@ from skills.singlecell._lib.adata_utils import (
     store_analysis_metadata,
 )
 from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
-from skills.singlecell._lib.metacell import make_demo_metacell_adata, run_kmeans_metacells, run_seacells_metacells
+from skills.singlecell._lib.metacell import make_demo_metacell_adata
+from skills._sdk.notebook import load_skill
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -324,14 +325,6 @@ def main() -> int:
     figures_dir.mkdir(exist_ok=True)
     tables_dir.mkdir(exist_ok=True)
 
-    # -- Auto-fallback: if seacells is requested but not installed, use kmeans --
-    if args.method == "seacells":
-        try:
-            import SEACells  # noqa: F401
-        except ImportError:
-            logger.warning("SEACells package not installed. Falling back to --method kmeans.")
-            args.method = "kmeans"
-
     # -- Load data --
     if args.demo:
         adata = make_demo_metacell_adata(seed=args.seed)
@@ -358,27 +351,16 @@ def main() -> int:
     )
 
     # -- Run method --
-    if args.method == "seacells":
-        madata, labels, _model = run_seacells_metacells(
-            adata,
-            use_rep=args.use_rep,
-            n_metacells=args.n_metacells,
-            min_iter=args.min_iter,
-            max_iter=args.max_iter,
-            celltype_key=args.celltype_key,
-        )
-        executed = "seacells"
-    else:
-        madata, labels = run_kmeans_metacells(
-            adata,
-            use_rep=args.use_rep,
-            n_metacells=args.n_metacells,
-            seed=args.seed,
-        )
-        executed = "kmeans"
-
-    # -- Assign labels to original object --
-    adata.obs["metacell"] = labels.reindex(adata.obs_names).astype(str)
+    library = load_skill("sc-metacell")
+    madata = library.metacells(
+        adata, method=args.method, use_rep=args.use_rep, n_metacells=args.n_metacells,
+        min_iter=args.min_iter, max_iter=args.max_iter, celltype_key=args.celltype_key,
+        n_neighbors=args.n_neighbors, n_pcs=args.n_pcs, random_state=args.seed,
+    )
+    method_info = library.run_info(madata)
+    executed = args.method = method_info["executed_method"]
+    if method_info["fallback_reason"]:
+        logger.warning(method_info["fallback_reason"])
 
     # -- Degenerate output check --
     diagnostics = _check_degenerate(madata, adata.obs["metacell"])
@@ -477,6 +459,7 @@ def main() -> int:
     # -- result.json --
     result_data = {
         "params": params,
+        "run_info": method_info,
         "input_contract": adata.uns.get("omicsclaw_input_contract", {}),
         "matrix_contract": matrix_contract,
         "metacell_diagnostics": diagnostics,

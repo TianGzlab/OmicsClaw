@@ -17,6 +17,7 @@
 - `--no-gpu`
 - `--r-enhanced`
 - `--scanorama-knn`
+- `--seed` (default 0; Harmony, Scanorama, scVI/scANVI and Python UMAP)
 - `--simba-k`
 - `--simba-n-components`
 - `--simba-n-top-genes`

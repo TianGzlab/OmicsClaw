@@ -17,6 +17,8 @@ import json
 import os
 import re
 import signal
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -40,6 +42,7 @@ class StepOutcome:
     error: dict | None = None
     stream: str = ""
     notes: list[str] = field(default_factory=list)
+    r_session: dict | None = None
 
 
 class StepRunner(Protocol):
@@ -216,3 +219,128 @@ def _reset(notebook: Any, pristine: dict) -> None:
     fresh = nbformat.from_dict(pristine)
     notebook.cells = fresh.cells
     notebook.metadata = fresh.metadata
+
+
+def rscript_executable() -> str | None:
+    """Locate Rscript using the same precedence as skill R methods."""
+    from skills._sdk.r_script_runner import _preferred_rscript_executable
+
+    return shutil.which(_preferred_rscript_executable())
+
+
+def rscript_environment(executable: str, env: Mapping[str, str]) -> dict[str, str]:
+    """Select existing R libraries without creating directories in the installation."""
+    values = dict(env)
+    prefix = Path(executable).absolute().parent.parent
+    libraries = prefix / "lib" / "R" / "omicsclaw-library"
+    if libraries.is_dir():
+        existing = values.get("R_LIBS_USER", "")
+        values["R_LIBS_USER"] = os.pathsep.join(filter(None, (str(libraries), existing)))
+    python = prefix / "bin" / "python"
+    values.setdefault("RETICULATE_PYTHON", str(python) if python.is_file() else sys.executable)
+    values.setdefault("PYTHON_BIN", values["RETICULATE_PYTHON"])
+    values.setdefault("RETICULATE_USE_MANAGED_VENV", "no")
+    return values
+
+
+class RscriptRunner:
+    """Execute percent-format R cells in one isolated Rscript process."""
+
+    def __init__(self, rscript: str | None = None) -> None:
+        self.rscript = rscript or rscript_executable()
+        self._process: subprocess.Popen | None = None
+
+    def kill(self) -> None:
+        """Stop the R process and the children in its process group."""
+        process = self._process
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            process.wait()
+
+    def run(self, notebook: Any, *, env: Mapping[str, str], cwd: Path) -> StepOutcome:
+        from nbformat import v4
+
+        if not self.rscript:
+            raise FileNotFoundError("Rscript is not installed")
+        started = time.perf_counter()
+        with tempfile.TemporaryDirectory(prefix="omicsclaw-rstep-") as directory:
+            scratch = Path(directory)
+            for number, cell in enumerate(notebook.cells, start=1):
+                if cell.cell_type == "code":
+                    (scratch / f"cell_{number:06d}.R").write_text(cell.source, encoding="utf-8")
+            command = [self.rscript, "--no-init-file", "--no-save", "--no-restore",
+                       str(Path(__file__).with_name("_rdriver.R")), str(scratch)]
+            interrupted = False
+            try:
+                self._process = subprocess.Popen(
+                    command, cwd=cwd, env=rscript_environment(self.rscript, env),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    start_new_session=True,
+                )
+                output, _ = self._process.communicate()
+                returncode = self._process.returncode
+            except KeyboardInterrupt:
+                self.kill()
+                if self._process is None:
+                    raise
+                output, _ = self._process.communicate()
+                returncode = self._process.returncode
+                interrupted = True
+            except BaseException:
+                self.kill()
+                if self._process is not None:
+                    self._process.wait()
+                raise
+            finally:
+                self._process = None
+            current = None
+            preamble = []
+            streams: dict[int, list[str]] = {}
+            for line in output.splitlines(keepends=True):
+                marker = re.fullmatch(r"##omicsclaw-cell (\d+)##\s*", line)
+                if marker:
+                    current = int(marker.group(1))
+                    streams.setdefault(current, [])
+                elif current is not None:
+                    streams[current].append(line)
+                else:
+                    preamble.append(line)
+            for number, lines in streams.items():
+                cell = notebook.cells[number - 1]
+                cell.execution_count = list(streams).index(number) + 1
+                cell.outputs = [v4.new_output("stream", name="stdout", text="".join(lines))] if lines else []
+            error = None
+            error_file = scratch / "error.tsv"
+            if error_file.exists():
+                number, name, message = error_file.read_text().rstrip("\n").split("\t", 2)
+                error = {"cell": int(number), "ename": name, "evalue": message, "traceback": ""}
+                notebook.cells[int(number) - 1].outputs.append(v4.new_output(
+                    "error", ename=name, evalue=message, traceback=[f"{name}: {message}"],
+                ))
+            elif interrupted:
+                error = {"cell": current, "ename": "KeyboardInterrupt",
+                         "evalue": "R step interrupted", "traceback": ""}
+                if current is not None:
+                    notebook.cells[current - 1].outputs.append(v4.new_output(
+                        "error", ename=error["ename"], evalue=error["evalue"], traceback=[],
+                    ))
+            elif returncode:
+                error = {"cell": current, "ename": "RscriptError",
+                         "evalue": f"Rscript exited with status {returncode}", "traceback": ""}
+            session = {"rscript": self.rscript, "r_version": "unknown", "packages": {}}
+            session_file = scratch / "session.tsv"
+            if session_file.exists():
+                for line in session_file.read_text().splitlines():
+                    name, version = line.split("\t", 1)
+                    if name == "R":
+                        session["r_version"] = version
+                    else:
+                        session["packages"][name] = version
+            return StepOutcome(
+                status="failed" if error else "ok", notebook=notebook,
+                seconds=time.perf_counter() - started, error=error,
+                stream="".join(preamble) + stream_text(notebook), r_session=session,
+            )

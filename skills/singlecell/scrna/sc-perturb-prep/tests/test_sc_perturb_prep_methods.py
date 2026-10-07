@@ -4,6 +4,7 @@ from pathlib import Path
 
 MODULE_TEXT = (Path(__file__).resolve().parent.parent / "sc_perturb_prep.py").read_text(encoding="utf-8")
 SKILL_TEXT = (Path(__file__).resolve().parent.parent / "SKILL.md").read_text(encoding="utf-8")
+API_TEXT = (Path(__file__).resolve().parent.parent / "_api.py").read_text(encoding="utf-8")
 
 
 def test_mapping_tsv_flags_are_exposed():
@@ -19,7 +20,7 @@ def test_output_is_processed_h5ad():
 
 def test_contract_metadata_via_canonicalize():
     """Must write contract metadata via canonicalize_singlecell_adata."""
-    assert "canonicalize_singlecell_adata" in MODULE_TEXT
+    assert "canonicalize_singlecell_adata" in API_TEXT
     assert "omicsclaw_matrix_contract" in MODULE_TEXT
 
 

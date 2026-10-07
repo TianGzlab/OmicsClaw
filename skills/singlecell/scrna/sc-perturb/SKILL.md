@@ -15,95 +15,89 @@ tags:
 
 # sc-perturb
 
-## When to use
-
-The user has a scRNA AnnData from a CRISPR perturbation screen
-(Perturb-seq style) where each cell already carries a perturbation
-label in `obs[--pert-key]` plus a control category. The skill runs
-pertpy's Mixscape workflow to:
-
-1. Compute a per-cell perturbation signature (subtracts the matched
-   control profile in `obsm["X_pca"]`).
-2. Classify cells as `KO` / `NT` / `NP` (non-perturbed / escapers).
-3. Report responder vs non-responder structure per perturbation +
-   `--split-by` group.
-
-Single backend: `mixscape` (forward-compatible CLI choice). For
-attaching guide labels to expression first, use `sc-perturb-prep`. For
-predicting perturbation effects on **unperturbed** data, use
-`sc-in-silico-perturbation`.
-
-## Inputs & Outputs
-
-**Inputs**
-
-- Modalities: scrna
-- File types: `.h5ad`
-
-**Outputs**
-
-- `tables/cell_metadata.csv`
-- `tables/cell_type_counts.csv`
-- `tables/mixscape_cell_classes.csv`
-- `tables/mixscape_class_counts.csv`
-- `tables/mixscape_global_class_counts.csv`
-- `tables/mixscape_global_classes.csv`
-- `figures/mixscape_global_classes.png`
-- `figures/r_perturbation_barplot.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `mixscape_class`, `mixscape_class_global`, `mixscape_class_p_<lower(perturbation_type)>`
-
-## Flow
-
-1. Load AnnData (`--input`) or generate demo Perturb-seq data.
-2. Validate `obs[--pert-key]` exists and `--control` is a real category in that column.
-3. Warn-and-disable `--split-by` if the column is absent (does NOT raise).
-4. Compute `obsm["X_pca"]` if missing (auto-runs `sc.pp.pca`).
-5. Run `pertpy.tools.Mixscape` (perturbation signature + KO/NT/NP classification).
-6. Detect degenerate output (e.g., everything classified as `NP`) and write troubleshooting hints.
-7. Save `processed.h5ad`, tables, figure, `report.md`, `result.json`.
-
-## Gotchas
-
-- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb.py` raises `SystemExit("Provide --input or use --demo")`; raises `SystemExit("Perturbation column '<key>' not found in adata.obs. ...")` with multi-option fix hints; raises `SystemExit("Control label '<label>' not found in adata.obs['<key>']. Available labels: <list>")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
-- **`--split-by` missing is a soft warning, not a fail.** When `--split-by` (default `replicate`) doesn't exist in `obs`, `sc_perturb.py` logs a warning and silently disables the split. The Mixscape run continues without replicate awareness — `result.json["params"]["split_by"]` will reflect the disablement.
-- **PCA is computed automatically when missing.** `sc_perturb.py` calls `sc.pp.pca(adata)` if `obsm["X_pca"]` is absent — no upstream `sc-preprocessing` strictly required, but the implicit PCA uses defaults (no batch correction, no HVG). For real screens prefer running `sc-preprocessing` first so the PCA reflects HVG-selected normalised data.
-- **Degenerate output (everything `NP`) is a soft fail.** `sc_perturb.py` defines `_detect_degenerate_output` which records diagnostics and writes troubleshooting hints to `report.md`; the script does NOT raise. Always inspect `result.json["n_classes"]` — if it's 1, Mixscape didn't separate populations and the run is uninformative.
-- **`--method mixscape` is the only choice.** `sc_perturb.py` argparse `choices=["mixscape"]`. `--method` exists for forward-compatibility; today any other value is rejected by argparse before the script runs.
+Classify observed Perturb-seq cells with pertpy Mixscape. Guide labels and a
+non-targeting control group must already exist; otherwise use `sc-perturb-prep`.
+This is not an in-silico knockout predictor.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic Perturb-seq)
-python skills/singlecell/scrna/sc-perturb/sc_perturb.py --demo --output /tmp/sc_perturb_demo
-
-# Default: input has standard column names (perturbation / NT)
-python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
-  --input perturb_prep_output/processed.h5ad --output results/
-
-# Custom column / control names
-python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
-  --input data.h5ad --output results/ \
-  --pert-key guide_target --control non-targeting --split-by donor
-
-# Tune Mixscape DE thresholds
-python skills/singlecell/scrna/sc-perturb/sc_perturb.py \
-  --input data.h5ad --output results/ \
-  --logfc-threshold 0.5 --pval-cutoff 0.01 --n-neighbors 30
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py --demo --seed 0 --output /tmp/sc_perturb_demo
+python skills/singlecell/scrna/sc-perturb/sc_perturb.py --input prepared.h5ad --pert-key perturbation --control NT --split-by replicate --seed 0 --output results/perturb
 ```
 
-## See also
+`mixscape` (`--method mixscape`) is the only method. Tune `--n-neighbors`,
+`--logfc-threshold`, `--pval-cutoff` and `--perturbation-type KO|OE` explicitly.
 
-- `references/parameters.md` — every CLI flag, Mixscape tunables
-- `references/methodology.md` — Mixscape signature subtraction; KO/NT/NP semantics
-- `references/output_contract.md` — `obs["mixscape_class"]` / `obs["mixscape_class_global"]` schema + table layouts
-- Adjacent skills: `sc-perturb-prep` (upstream — attaches guide labels to the expression object), `sc-de` (downstream — DE between perturbed and control), `sc-in-silico-perturbation` (parallel — predicts perturbation effects WITHOUT a real screen), `sc-preprocessing` (upstream — produces an HVG-aware PCA preferable to the auto-PCA inside this skill)
+## Workflow
+
+Upstream: `sc-perturb-prep`, or an AnnData with verified screen labels. Validate
+labels, supply/compute PCA, build perturbation signatures, then classify cells.
+Both pertpy stages receive `--seed` (API `random_state`, default 0).
+Downstream: `sc-de` or `sc-enrichment` after reviewing target-level calls.
+
+## Matrix Contract
+
+Uses normalized expression. Count-like X is saved in `layers['counts']` and
+log-normalized. Existing `X_pca` is reused; otherwise PCA is computed before the
+legacy normalization step. Prefer an upstream PCA on appropriate normalized
+features for real screens. The API leaves its input unchanged.
+
+## Inputs & Outputs
+
+Input: `.h5ad` with a perturbation column, control label and optional split key.
+The CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`reproducibility/commands.sh`, `tables/mixscape_cell_classes.csv`,
+`tables/mixscape_class_counts.csv`, `tables/mixscape_global_class_counts.csv`
+and `figures/mixscape_global_classes.png`. Plot data and their manifest are in
+`figure_data/`; R-enhanced figures are optional.
+
+## Gotchas
+
+- `result.json` → `data.params.split_by` records the CLI's resolved split key. A missing CLI split column warns and disables splitting; the API instead raises unless you pass `split_by=None`.
+- `tables/mixscape_global_class_counts.csv` must contain biological signal before you interpret a run. Exit 0 alone does not establish an effect; the example asserts KO detection in both known-effect groups.
+- `tables/mixscape_cell_classes.csv` preserves target-specific and global classes plus `mixscape_class_p_ko` (or `_oe`). Posterior probabilities are not experimental validation.
+- For pertpy 1.0.3, split-based signatures use controls within each split rather than nearest-neighbour selection. `n_neighbors` affects the `split_by=None` path.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `mixscape(adata, *, pert_key='perturbation', control='NT', split_by='replicate', n_neighbors=20, logfc_threshold=0.25, pval_cutoff=0.05, perturbation_type='KO', random_state=0)`
+
+Return an AnnData copy with Mixscape classes and posterior probabilities.
+
+Uses normalized expression, preserving count-like X in layers['counts']
+before log-normalization. split_by=None selects nearest-neighbour controls.
+Both pertpy stages receive random_state; a missing control or split column
+raises ValueError. Requires pertpy (validated with 1.0.3 and sklearn 1.7.2).
+
+### `run_info(adata)`
+
+Return method, seed and output-column names as a small diagnostic dictionary.
+
+### `class_counts(adata)`
+
+Return class and n_cells columns for target-specific Mixscape labels.
+
+### `global_class_counts(adata)`
+
+Return global_class and n_cells columns for control, KO/OE and NP cells.
+
+### `global_class_figure(adata)`
+
+Return a Figure of global Mixscape cell counts without saving files.
+
+<!-- api:end -->
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
+`anndata`, `matplotlib`, `numpy`, `pandas`, `pertpy`, `scanpy`, `scipy`, `scikit-learn`, `filelock`
 
-`anndata`, `matplotlib`, `numpy`, `packaging`, `pandas`, `pertpy`, `scanpy`, `scipy`
+The Python 3.11 CPU example is verified with `pertpy==1.0.3`,
+`scikit-learn==1.7.2`, `anndata==0.11.4`, `statsmodels==0.14.6` and
+`filelock==4.0.12`. statsmodels 0.15 removed a private import used by this pertpy
+release. It also needs filelock
+at import time but omits it from dependency metadata. Its dependencies include
+JAX; use the separate extended environment. blitzgsea may need pip's isolated
+source build, which the production wheels-only installer does not perform.

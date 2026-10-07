@@ -43,18 +43,12 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills.singlecell._lib.adata_utils import (
-    canonicalize_singlecell_adata,
-    ensure_input_contract,
-    infer_qc_species,
-    infer_x_matrix_kind,
-    propagate_singlecell_contracts,
     store_analysis_metadata,
 )
-from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib import qc as sc_qc_utils
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_filter
 from skills.singlecell._lib.viz import (
     plot_filter_metric_comparison,
@@ -126,43 +120,8 @@ def build_public_params(args) -> dict:
     }
 
 
-def _build_filter_summary_table(summary: dict, params: dict) -> pd.DataFrame:
-    records = [
-        {"metric": "workflow", "value": "threshold_filtering"},
-        {"metric": "n_cells_before", "value": int(summary.get("n_cells_before", 0))},
-        {"metric": "n_cells_after", "value": int(summary.get("n_cells_after", 0))},
-        {"metric": "cells_retained_pct", "value": summary.get("cells_retained_pct")},
-        {"metric": "n_genes_before", "value": int(summary.get("n_genes_before", 0))},
-        {"metric": "n_genes_after", "value": int(summary.get("n_genes_after", 0))},
-        {"metric": "genes_retained_pct", "value": summary.get("genes_retained_pct")},
-        {"metric": "min_genes", "value": params.get("min_genes")},
-        {"metric": "max_genes", "value": params.get("max_genes")},
-        {"metric": "min_counts", "value": params.get("min_counts")},
-        {"metric": "max_counts", "value": params.get("max_counts")},
-        {"metric": "max_mt_percent", "value": params.get("max_mt_percent")},
-        {"metric": "min_cells", "value": params.get("min_cells")},
-        {"metric": "tissue", "value": params.get("tissue")},
-        {"metric": "qc_metrics_reused", "value": bool(summary.get("qc_metrics_reused", False))},
-    ]
-    return pd.DataFrame(records)
-
-
-def _build_filter_stats_table(summary: dict) -> pd.DataFrame:
-    return pd.DataFrame(
-        [{"metric": str(key), "value": int(value)} for key, value in summary.get("filter_stats", {}).items()]
-    )
-
-
-def _build_retention_table(summary: dict) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {"feature": "Cells", "before": int(summary.get("n_cells_before", 0)), "after": int(summary.get("n_cells_after", 0))},
-            {"feature": "Genes", "before": int(summary.get("n_genes_before", 0)), "after": int(summary.get("n_genes_after", 0))},
-        ]
-    )
-
-
 def _prepare_filter_gallery_context(adata_before, adata_after, summary: dict, params: dict, output_dir: Path) -> dict:
+    api = load_skill(SKILL_NAME)
     metric_columns = [column for column in ("n_genes_by_counts", "total_counts", "pct_counts_mt") if column in adata_before.obs.columns]
     before_qc = adata_before.obs.loc[:, metric_columns].copy() if metric_columns else pd.DataFrame()
     after_qc = adata_after.obs.loc[:, metric_columns].copy() if metric_columns else pd.DataFrame()
@@ -177,7 +136,7 @@ def _prepare_filter_gallery_context(adata_before, adata_after, summary: dict, pa
         "min_counts_removed": "Below min counts",
         "max_counts_removed": "Above max counts",
         "mt_removed": "Above MT threshold",
-        "outliers_removed": "Existing outlier flag",
+        "outliers_flagged": "Existing outlier flag",
         "doublets_removed": "Doublet (sc-doublet-detection)",
     }
     reason_df = pd.DataFrame(
@@ -194,9 +153,9 @@ def _prepare_filter_gallery_context(adata_before, adata_after, summary: dict, pa
         "after_qc_df": after_qc,
         "state_df": state_df.reset_index(drop=True),
         "reason_df": reason_df,
-        "filter_summary_df": _build_filter_summary_table(summary, params),
-        "filter_stats_df": _build_filter_stats_table(summary),
-        "retention_df": _build_retention_table(summary),
+        "filter_summary_df": api.filter_summary(adata_after),
+        "filter_stats_df": api.filter_stats_table(adata_after),
+        "retention_df": api.retention_table(adata_after),
         "thresholds": {
             "min_genes": params.get("min_genes"),
             "max_genes": params.get("max_genes"),
@@ -440,7 +399,7 @@ def write_filter_report(output_dir: Path, summary: dict, params: dict, input_fil
         body_lines.append("- **Doublet removal**: disabled (--no-remove-doublets)")
 
     # Filter breakdown
-    body_lines.extend(["", "## Cells Removed By Filter\n"])
+    body_lines.extend(["", "## Filter counts\n"])
     for key, value in summary.get('filter_stats', {}).items():
         label = key.replace('_removed', '').replace('_', ' ').title()
         body_lines.append(f"- **{label}**: {value:,}")
@@ -597,67 +556,25 @@ def main():
         logger,
     )
 
-    species = infer_qc_species(adata)
-    original_x_kind = infer_x_matrix_kind(adata)
     had_qc_metrics = {
         "n_genes_by_counts",
         "total_counts",
         "pct_counts_mt",
     }.issubset(set(adata.obs.columns))
-    if had_qc_metrics and original_x_kind == "normalized_expression":
-        working_adata = adata.copy()
-        input_contract = ensure_input_contract(
-            working_adata,
-            source_path=input_file,
-            standardized=bool(working_adata.uns.get("omicsclaw_input_contract", {}).get("standardized", False)),
-        )
-        prepared_input = None
-    else:
-        working_adata, prepared_input, input_contract = canonicalize_singlecell_adata(
-            adata,
-            species=species,
-            standardizer_skill=SKILL_NAME,
-        )
     if not had_qc_metrics:
         print()
         print("[i] No QC metrics found. Computing automatically.")
         print("  Tip: Run sc-qc first for detailed QC visualization.")
         print()
-    working_adata = sc_qc_utils.ensure_qc_metrics(working_adata, species=species, inplace=True)
-    adata_before = working_adata.copy()
-
     params = build_public_params(args)
-    adata_filtered, summary, effective_params = sc_qc_utils.apply_threshold_filtering(
-        working_adata,
-        min_genes=args.min_genes,
-        max_genes=args.max_genes,
-        min_counts=args.min_counts,
-        max_counts=args.max_counts,
-        max_mt_percent=args.max_mt_percent,
-        min_cells=args.min_cells,
-        tissue=args.tissue,
-        filter_doublets=args.remove_doublets,
-        doublet_score_threshold=args.doublet_score_threshold,
-    )
-    summary["workflow"] = "threshold_filtering"
-    summary["qc_metrics_reused"] = bool(had_qc_metrics)
-    summary["input_preparation"] = {
-        "expression_source": prepared_input.expression_source if prepared_input is not None else "existing_object_state",
-        "gene_name_source": prepared_input.gene_name_source if prepared_input is not None else "existing_var_names",
-        "warnings": prepared_input.warnings if prepared_input is not None else [],
-        "species": species,
-    }
-    if "counts" in adata_filtered.layers:
-        raw_snapshot = adata_filtered.copy()
-        raw_snapshot.X = adata_filtered.layers["counts"].copy()
-        adata_filtered.raw = raw_snapshot
-    input_contract, matrix_contract = propagate_singlecell_contracts(
-        working_adata,
-        adata_filtered,
-        producer_skill=SKILL_NAME,
-        x_kind=original_x_kind if original_x_kind in {"raw_counts", "normalized_expression"} else "raw_counts",
-        raw_kind="raw_counts_snapshot" if adata_filtered.raw is not None else None,
-    )
+    api = load_skill(SKILL_NAME)
+    adata_filtered = api.filter_cells(adata, **params)
+    info = api.run_info(adata_filtered)
+    summary = info["summary"]
+    effective_params = info["effective_params"]
+    input_contract, matrix_contract = info["input_contract"], info["matrix_contract"]
+    adata_before = adata.copy()
+    adata_before.obs = api.filter_state_table(adata, adata_filtered).drop(columns="state")
 
     # Generate figures
     logger.info("Generating figures...")
@@ -679,6 +596,7 @@ def main():
 
     # Save filtered data
     output_h5ad = output_dir / "processed.h5ad"
+    api.run_info(adata_filtered, keep=False)
     store_analysis_metadata(adata_filtered, SKILL_NAME, "threshold_filtering", effective_params)
     from skills.singlecell._lib.export import save_h5ad
     save_h5ad(adata_filtered, output_h5ad)

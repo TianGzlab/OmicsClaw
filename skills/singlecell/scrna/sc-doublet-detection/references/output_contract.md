@@ -1,60 +1,25 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── input.h5ad
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── cell_metadata.csv
-│   ├── doublet_calls.csv
-│   ├── doublet_summary.csv
-│   ├── doubletfinder_results.csv
-│   ├── embedding_points.csv
-│   ├── group_summary.csv
-│   ├── scdblfinder_results.csv
-│   ├── scds_results.csv
-│   └── summary.csv
-└── figures/
-    ├── embedding_doublet_calls.png
-    ├── embedding_doublet_scores.png
-    ├── embedding_doublet_vs_group.png
-    ├── r_embedding_discrete.png
-    ├── r_embedding_feature.png
-    └── r_feature_violin.png
-```
+The CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`tables/doublet_calls.csv`, `tables/summary.csv` and
+`reproducibility/{commands.sh,requirements.txt}`.
 
-## File contents
+`processed.h5ad` keeps all cells and adds `doublet_score`,
+`predicted_doublet` and `doublet_classification` to `obs`.
+`doublet_calls.csv` has one row per cell; `summary.csv` has singlet and
+doublet counts and percentages. `tables/group_summary.csv` is conditional
+on an available comparison group.
 
-- `tables/cell_metadata.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/doublet_calls.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/doublet_summary.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/doubletfinder_results.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/embedding_points.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/group_summary.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/scdblfinder_results.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/scds_results.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `tables/summary.csv` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/embedding_doublet_calls.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/embedding_doublet_scores.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/embedding_doublet_vs_group.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/r_embedding_discrete.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/r_embedding_feature.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `figures/r_feature_violin.png` — written by `sc_doublet.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_doublet.py`.
-- `commands.sh` — written by `sc_doublet.py`.
-- `input.h5ad` — written by `sc_doublet.py`.
-- `manifest.json` — written by `sc_doublet.py`.
-- `processed.h5ad` — written by `sc_doublet.py`.
-- `requirements.txt` — written by `sc_doublet.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+`figures/doublet_score_distribution.png` is the score histogram. Embedding
+plots require an existing or successfully computed preview embedding.
+The corresponding tables live in `figure_data/`, with a manifest.
+Successful optional R renders live in `figures/r_enhanced/`.
 
-## Notes
+`result.json["summary"]` records `requested_method`, `executed_method`,
+`fallback_used` and `fallback_reason`. The API exposes these through
+`run_info`; for scds, inspect `requested_scds_mode` and
+`executed_scds_mode` as well.
 
-Auto-generated from `sc_doublet.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The API writes no files. Its table and Figure helpers return objects for
+`write_output`. Temporary R input matrices and method-specific result
+CSVs are removed after the call.

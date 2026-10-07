@@ -31,6 +31,21 @@ def test_steps_run_by_name_with_variants_and_validate_last(tmp_path):
     assert [p.name for p in module.ignored_files()] == ["notes.py"]
 
 
+def test_mixed_steps_keep_validate_last_and_report_r_name_collisions(tmp_path):
+    module = Module(root=tmp_path, number=1, slug="mixed")
+    module.analysis_dir.mkdir(parents=True)
+    for name in ("01_export.py", "02_model.R", "03_validate.py", "04_plot.R"):
+        (module.analysis_dir / name).write_text("")
+    assert [p.name for p in module.steps()] == ["01_export.py", "02_model.R", "04_plot.R", "03_validate.py"]
+    assert module.layout_problems() == []
+    for name in ("02_model.py", "04_plot.r", "05_validate.R"):
+        (module.analysis_dir / name).write_text("")
+    problems = "\n".join(module.layout_problems())
+    assert "02_model" in problems and "same stem" in problems
+    assert "04_plot.r" in problems and "uppercase" in problems
+    assert "05_validate.R" in problems and "Python" in problems
+
+
 def test_resolve_target_accepts_module_dirs_step_files_and_bare_names(tmp_path):
     (tmp_path / "analysis" / "03_clustering").mkdir(parents=True)
     assert resolve_target(tmp_path, "analysis/03_clustering")[0].name == "03_clustering"

@@ -20,6 +20,7 @@ from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills._sdk.r_script_runner import RScriptRunner
 from skills.singlecell._lib.adata_utils import get_matrix_contract, matrix_looks_count_like
 from skills.singlecell._lib.pseudobulk import aggregate_to_pseudobulk, run_deseq2_analysis
+from skills.singlecell._lib.r_exchange import write_matrix_exchange
 
 __all__ = [
     "rank_genes",
@@ -338,11 +339,10 @@ def _run_de_mast(adata, *, groupby: str, group1: str | None, group2: str | None)
     expression_source = "adata.X"
     with tempfile.TemporaryDirectory(prefix="omicsclaw_mast_") as tmpdir:
         tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
+        input_dir = write_matrix_exchange(export, tmpdir / "input", obs_columns=[resolved_groupby])
         output_dir = tmpdir / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        export.write_h5ad(input_h5ad)
-        args = [str(input_h5ad), str(output_dir), resolved_groupby]
+        args = [str(input_dir), str(output_dir), resolved_groupby]
         if group1:
             args.append(group1)
         if group2:

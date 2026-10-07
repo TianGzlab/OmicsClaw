@@ -7,6 +7,8 @@ expression_matrix_tsv <- args[[1]]
 gene_sets_gmt <- args[[2]]
 output_dir <- args[[3]]
 auc_max_rank <- as.integer(args[[4]])
+random_state <- if (length(args) >= 5) as.integer(args[[5]]) else 42L
+set.seed(random_state)
 
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 

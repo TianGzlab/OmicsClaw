@@ -5,5 +5,6 @@ SKILL_TEXT = (Path(__file__).resolve().parent.parent / "SKILL.md").read_text(enc
 
 def test_methods_are_exposed():
     assert 'choices=["seacells", "kmeans"]' in MODULE_TEXT
-    assert 'Current Methods' in SKILL_TEXT
-    assert '`seacells`' in SKILL_TEXT
+    assert 'Methods and parameters' in SKILL_TEXT
+    assert 'SEACells' in SKILL_TEXT
+    assert 'not sample-aware' in SKILL_TEXT

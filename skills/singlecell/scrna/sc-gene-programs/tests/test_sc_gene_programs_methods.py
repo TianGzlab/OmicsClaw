@@ -5,5 +5,5 @@ SKILL_TEXT = (Path(__file__).resolve().parent.parent / "SKILL.md").read_text(enc
 
 def test_methods_are_exposed():
     assert 'choices=["cnmf", "nmf"]' in MODULE_TEXT
-    assert 'Current Methods' in SKILL_TEXT
+    assert '## API' in SKILL_TEXT
     assert '`cnmf`' in SKILL_TEXT

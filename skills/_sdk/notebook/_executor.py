@@ -15,15 +15,15 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from skills._sdk.notebook import _brief, _hashing, _layout, _ledger, _manifest, _watchdog
+from skills._sdk.notebook import _brief, _hashing, _io, _layout, _ledger, _manifest, _watchdog
 from skills._sdk.notebook._layout import LayoutError, Module
 from skills._sdk.notebook._lock import LockBusy, hold
 from skills._sdk.notebook._percent import PercentError, to_notebook
-from skills._sdk.notebook._runners import PythonKernelRunner, StepOutcome, StepRunner, missing_kernel_packages
+from skills._sdk.notebook._runners import PythonKernelRunner, RscriptRunner, StepOutcome, StepRunner, missing_kernel_packages
 from skills._sdk.notebook.contract import ENVIRONMENT
 
 EXIT_OK = 0
@@ -83,7 +83,11 @@ def format_step(module: Module, result: StepResult) -> str:
     """The text block the runner prints for one step run, at most ``SEGMENT_LIMIT`` characters."""
     run, outcome = result.run, result.outcome
     info = run.start.get("interpreter") or {}
-    head = f"[{module.name}] {result.step.name}  {outcome.status}  {outcome.seconds:.1f} s  {_short_python(info)}"
+    runtime = _short_python(info)
+    if run.start.get("kind") == "r":
+        session = run.r_sessions[-1] if run.r_sessions else {}
+        runtime = f"Rscript={session.get('rscript', 'unknown')} ({session.get('r_version', 'unknown')})"
+    head = f"[{module.name}] {result.step.name}  {outcome.status}  {outcome.seconds:.1f} s  {runtime}"
     lines = [head]
     if result.reason:
         lines.append(f"  why:      {result.reason}")
@@ -139,7 +143,27 @@ def _step_env(module: Module, step: Path, ledger_path: Path) -> dict[str, str]:
     env["PYTHONPATH"] = str(_layout.CHECKOUT) + (os.pathsep + existing if existing else "")
     env[ENVIRONMENT["step_file"]] = str(step)
     env[ENVIRONMENT["step_ledger"]] = str(ledger_path)
+    env[ENVIRONMENT["step_io"]] = str(ledger_path.with_suffix(".io.tsv"))
+    env[ENVIRONMENT["sdk_dir"]] = str(Path(__file__).resolve().parents[1])
     return env
+
+
+def _record_r_io(module: Module, step: Path, ledger: _ledger.Ledger) -> None:
+    """Hash the R step's IO journal after it exits, while the activity lock is held."""
+    path = ledger.path.with_suffix(".io.tsv")
+    if not path.exists():
+        return
+    ctx = _io.StepContext(step, module.root, module, ledger)
+    for line in path.read_text(encoding="utf-8").splitlines():
+        kind, recorded, via = line.split("\t", 2)
+        if kind == "input":
+            _io.record_input(ctx, Path(recorded), via=via)
+        elif kind == "output":
+            target = _io.check_output_path(module, recorded)
+            ledger.append("output", path=target.relative_to(module.results_dir).as_posix(),
+                          sha256=_hashing.sha256_path(target),
+                          bytes=_hashing.size_of(target), kind=via)
+    path.unlink()
 
 
 def _write_notebook(path: Path, notebook: object) -> None:
@@ -162,11 +186,12 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
     notebook_rel = f"notebooks/{step.stem}.ipynb"
     log_rel = f"logs/{step.stem}.log"
     started = time.perf_counter()
+    kind = "r" if step.suffix == ".R" else "python"
     with _watchdog.ACTIVITY.lock:
         ledger.append(
             "run_start",
             step=step.name,
-            kind="python",
+            kind=kind,
             mode=mode,
             step_sha256=step_sha,
             previous_sha256=previous[-1].step_sha256 if previous else None,
@@ -180,7 +205,7 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
         )
     try:
         text = step.read_text(encoding="utf-8")
-        notebook = to_notebook(text, step={"file": step.name, "sha256": step_sha, "run_id": run_id})
+        notebook = to_notebook(text, step={"file": step.name, "sha256": step_sha, "run_id": run_id}, language=kind)
     except UnicodeDecodeError as exc:
         outcome = StepOutcome(status="failed", notebook=None, seconds=time.perf_counter() - started, error={
             "cell": None, "ename": "UnicodeDecodeError",
@@ -196,6 +221,18 @@ def execute_step(module: Module, step: Path, *, mode: str, runner: StepRunner, i
     if outcome.error:
         error = {key: outcome.error.get(key) for key in ("cell", "ename", "evalue")}
     with _watchdog.ACTIVITY.lock:
+        if kind == "r":
+            try:
+                _record_r_io(module, step, ledger)
+            except (OSError, ValueError) as exc:
+                outcome.status = "failed"
+                outcome.notes.append(f"could not record R IO: {exc}")
+                if outcome.error is None:
+                    outcome.error = {"cell": None, "ename": "RJournalError", "evalue": str(exc), "traceback": ""}
+                    error = {key: outcome.error[key] for key in ("cell", "ename", "evalue")}
+                outcome.stream += f"\nRJournalError: {exc}\n"
+            if outcome.r_session:
+                ledger.append("r_session", **outcome.r_session)
         if outcome.notebook is not None:
             _write_notebook(module.results_dir / notebook_rel, outcome.notebook)
         else:
@@ -256,7 +293,21 @@ def stitch(module: Module, manifest: dict) -> Path:
         except Exception:  # an unreadable notebook should not stop the stitch
             combined.cells.append(v4.new_markdown_cell(f"The notebook {path.name} could not be read."))
             continue
-        combined.cells.extend(step_notebook.cells)
+        if entry.get("kind") == "r":
+            runtime = (manifest.get("rscript") or {}).get("version", "unknown")
+            combined.cells.append(v4.new_markdown_cell(f"R step, Rscript {runtime}"))
+            for cell in step_notebook.cells:
+                if cell.cell_type == "code":
+                    from skills._sdk.notebook._runners import stream_text
+
+                    outputs = stream_text(v4.new_notebook(cells=[cell]))
+                    combined.cells.append(v4.new_markdown_cell(
+                        f"```r\n{cell.source}\n```\n\n```text\n{outputs}\n```"
+                    ))
+                else:
+                    combined.cells.append(cell)
+        else:
+            combined.cells.extend(step_notebook.cells)
     combined.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
     combined.metadata["language_info"] = {"name": "python"}
     combined.metadata["omicsclaw"] = {"module": module.name}
@@ -269,9 +320,9 @@ def _check_runnable(module: Module, out: Out) -> int | None:
     if not module.analysis_dir.is_dir():
         out(f"no module at analysis/{module.name}; create one with `new <slug>`")
         return EXIT_USAGE
-    r_files = module.r_files()
-    if r_files:
-        out("R steps are not supported yet: " + ", ".join(p.relative_to(module.root).as_posix() for p in r_files))
+    problems = module.layout_problems()
+    if problems:
+        out("invalid step layout:\n" + "\n".join(problems))
         return EXIT_USAGE
     return _frozen(module, out)
 
@@ -301,7 +352,25 @@ def _locked(module: Module, busy: LockBusy, out: Out) -> int:
     return EXIT_LOCKED
 
 
+def _rscript_check(steps: Sequence[Path], runners: Mapping[str, StepRunner], out: Out) -> int | None:
+    if any(step.suffix == ".R" for step in steps):
+        if isinstance(runners["r"], RscriptRunner) and not runners["r"].rscript:
+            out("Rscript not found; searched CONDA_PREFIX/bin/Rscript, "
+                f"{sys.prefix}/bin/Rscript and PATH. Install R in the environment or sandbox image.")
+            return EXIT_USAGE
+    return None
+
+
+def _rscript_warning(module: Module, manifest: dict, runners: Mapping[str, StepRunner]) -> str | None:
+    recorded = (manifest.get("rscript") or {}).get("path")
+    current = getattr(runners["r"], "rscript", None)
+    if recorded and current and os.path.realpath(recorded) != os.path.realpath(current):
+        return f"warning: module {module.name} Rscript changed from {recorded} to {current}"
+    return None
+
+
 def run_targets(root: Path, targets: Sequence[str], *, force: bool = False, runner: StepRunner | None = None,
+                runners: Mapping[str, StepRunner] | None = None,
                 wait: float = 0.0, out: Out = _print) -> int:
     """``run``: run the stale steps of each target module, or the named step files."""
     try:
@@ -309,10 +378,10 @@ def run_targets(root: Path, targets: Sequence[str], *, force: bool = False, runn
     except LayoutError as exc:
         out(str(exc))
         return EXIT_USAGE
-    problem = _kernel_check(runner, out)
+    problem = _kernel_check(runner or (runners or {}).get("python"), out)
     if problem is not None:
         return problem
-    step_runner = runner or PythonKernelRunner()
+    selected = {"python": runner or PythonKernelRunner(), "r": RscriptRunner(), **(runners or {})}
     grouped: dict[str, tuple[Module, list[Path] | None]] = {}
     for module, step in resolved:
         current = grouped.get(module.name)
@@ -324,27 +393,27 @@ def run_targets(root: Path, targets: Sequence[str], *, force: bool = False, runn
             current[1].append(step)
     worst = EXIT_OK
     for module, steps in grouped.values():
-        code = run_module(module, steps, force=force, runner=step_runner, wait=wait, out=out)
+        code = run_module(module, steps, force=force, runners=selected, wait=wait, out=out)
         worst = max(worst, code)
     return worst
 
 
-def run_module(module: Module, steps: list[Path] | None, *, force: bool, runner: StepRunner,
+def run_module(module: Module, steps: list[Path] | None, *, force: bool, runners: Mapping[str, StepRunner],
                wait: float = 0.0, out: Out = _print) -> int:
     problem = _check_runnable(module, out)
     if problem is not None:
         return problem
     if steps is not None:
         for step in steps:
-            if step.suffix in {".R", ".r"}:
-                out(f"R steps are not supported yet: {step.name}")
-                return EXIT_USAGE
             if not step.is_file():
                 out(f"no step file {step.relative_to(module.root).as_posix()}")
                 return EXIT_USAGE
+    problem = _rscript_check(module.steps() if steps is None else steps, runners, out)
+    if problem is not None:
+        return problem
     try:
         with hold(module.lock_path, command="run", wait=wait):
-            return _run_locked(module, steps, force=force, runner=runner, out=out)
+            return _run_locked(module, steps, force=force, runners=runners, out=out)
     except LockBusy as busy:
         return _locked(module, busy, out)
 
@@ -353,12 +422,15 @@ def _interpreter_warning(module: Module, recorded: str | None, current: str) -> 
     return f"warning: module {module.name} was run with {recorded}; this run uses {current}"
 
 
-def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner: StepRunner, out: Out) -> int:
+def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runners: Mapping[str, StepRunner], out: Out) -> int:
     # Checked again under the lock: an `accept` this run waited for may have frozen the module.
     problem = _frozen(module, out)
     if problem is not None:
         return problem
     previous = _manifest.load(module)
+    r_warning = _rscript_warning(module, previous or {}, runners)
+    if r_warning:
+        out(r_warning)
     interpreter = _manifest.interpreter_info()
     recorded = (previous or {}).get("interpreter")
     changed_from = None
@@ -378,7 +450,7 @@ def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner
             out(f"[{module.name}] {step.name}  up to date")
             continue
         reason = "forced" if state.state == "ok" else state.reason
-        result = execute_step(module, step, mode="run", runner=runner, interpreter=interpreter,
+        result = execute_step(module, step, mode="run", runner=runners["r" if step.suffix == ".R" else "python"], interpreter=interpreter,
                               changed_from=changed_from, reason=reason)
         ran += 1
         out(format_step(module, result))
@@ -397,6 +469,8 @@ def _run_locked(module: Module, steps: list[Path] | None, *, force: bool, runner
         out(f"[{module.name}] module notebook: {notebook.relative_to(module.root).as_posix()}")
     if changed_from:
         out(_interpreter_warning(module, changed_from, interpreter["path"]))
+    if r_warning:
+        out(r_warning)
     return code
 
 
@@ -421,6 +495,8 @@ def status(root: Path, target: str | None = None, *, out: Out = _print) -> int:
         if manifest["status"] != "accepted" and manifest.get("revisions"):
             label += " (revising)"
         out(f"{module.name}  {label}")
+        for problem in module.layout_problems():
+            out(f"  invalid layout: {problem}")
         for entry in manifest["steps"]:
             state = entry["state"]
             detail = state if state == "ok" else f"{state.replace('_', ' ')}: {entry['reason']}"
@@ -494,6 +570,7 @@ def _output_files(module: Module) -> dict[str, str]:
 
 
 def replay(root: Path, target: str, *, new_interpreter: str | None = None, runner: StepRunner | None = None,
+           runners: Mapping[str, StepRunner] | None = None,
            wait: float = 0.0, out: Out = _print) -> int:
     """``replay``: rerun every step of a module in fresh kernels, validate last, and record the result.
 
@@ -518,21 +595,28 @@ def replay(root: Path, target: str, *, new_interpreter: str | None = None, runne
             f"found {len(validate)}"
         )
         return EXIT_USAGE
-    problem = _kernel_check(runner, out)
+    problem = _kernel_check(runner or (runners or {}).get("python"), out)
+    if problem is not None:
+        return problem
+    selected = {"python": runner or PythonKernelRunner(), "r": RscriptRunner(), **(runners or {})}
+    problem = _rscript_check(module.steps(), selected, out)
     if problem is not None:
         return problem
     try:
         with hold(module.lock_path, command="replay", wait=wait):
-            return _replay_locked(module, new_interpreter, runner or PythonKernelRunner(), out)
+            return _replay_locked(module, new_interpreter, selected, out)
     except LockBusy as busy:
         return _locked(module, busy, out)
 
 
-def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunner, out: Out) -> int:
+def _replay_locked(module: Module, new_interpreter: str | None, runners: Mapping[str, StepRunner], out: Out) -> int:
     problem = _frozen(module, out)
     if problem is not None:
         return problem
     previous = _manifest.load(module) or {}
+    r_warning = _rscript_warning(module, previous, runners)
+    if r_warning:
+        out(r_warning)
     interpreter = _manifest.interpreter_info()
     recorded = previous.get("interpreter")
     changed_from = None
@@ -562,7 +646,7 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
     status_value = "ok"
     runs: list[tuple[Path, _ledger.RunRecord]] = []
     for index, step in enumerate(steps):
-        result = execute_step(module, step, mode="replay", runner=runner, interpreter=interpreter,
+        result = execute_step(module, step, mode="replay", runner=runners["r" if step.suffix == ".R" else "python"], interpreter=interpreter,
                               changed_from=changed_from, reason="replay")
         runs.append((step, result.run))
         out(format_step(module, result))
@@ -589,6 +673,8 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
     stitch(module, manifest)
     if status_value != "ok":
         out(f"[{module.name}] replay failed; status: {manifest['status'].upper()}")
+        if r_warning:
+            out(r_warning)
         return EXIT_FAILED
     out(f"[{module.name}] replay ok: {len(steps)} steps, validate last")
     try:
@@ -603,4 +689,6 @@ def _replay_locked(module: Module, new_interpreter: str | None, runner: StepRunn
     if changed_from:
         out(f"  interpreter: {interpreter['path']} (was {changed_from}; reason: {new_interpreter})")
     out(f"  status: {manifest['status'].upper()}")
+    if r_warning:
+        out(r_warning)
     return EXIT_OK

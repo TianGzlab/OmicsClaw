@@ -25,9 +25,14 @@ EXAMPLES = sorted(
     p for p in (REPO / "skills").rglob("examples/example_step.py")
     if (p.parent.parent / "_api.py").is_file()
 )
+EXAMPLES = [
+    pytest.param(example, marks=pytest.mark.skill_example_extended, id=example.parent.parent.name)
+    if example.parent.parent.name == "sc-perturb" else pytest.param(example, id=example.parent.parent.name)
+    for example in EXAMPLES
+]
 
 
-@pytest.mark.parametrize("example", EXAMPLES, ids=lambda p: p.parent.parent.name)
+@pytest.mark.parametrize("example", EXAMPLES)
 def test_the_example_step_runs(example, tmp_path):
     skill = example.parent.parent.name
     root = tmp_path / "project"

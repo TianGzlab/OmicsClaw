@@ -404,8 +404,11 @@ testpaths = [
     "skills/singlecell/scrna/sc-fastq-qc/tests",
     "skills/singlecell/scrna/sc-count/tests",
     "skills/singlecell/scrna/sc-velocity-prep/tests",
+    "skills/singlecell/scrna/sc-standardize-input/tests",
+    "skills/singlecell/scrna/sc-ambient-removal/tests",
 ]
 markers = [
+    "cli_subprocess: starts a skill CLI subprocess (excluded from the skill-examples unit-test step)",
     "slow: tests requiring full optional deps or significant runtime (excluded by default)",
     "requires_torch: tests requiring PyTorch (SpaGCN, Cell2Location, scVI)",
     "requires_r: tests requiring R (Rscript on PATH)",
@@ -413,6 +416,7 @@ markers = [
     "eval: real-LLM evals (network and API key required); manual or nightly, never gates a PR (excluded by default)",
     "scripted_eval: deterministic scripted agent evals (hermetic, no network); run on every PR by the eval job",
     "skill_example: runs a pilot skill's examples/example_step.py through the step runner on demo data (excluded by default; CI job skill-examples)",
+    "skill_example_extended: runs the real CPU pertpy example in its pinned extended CI environment",
 ]
 filterwarnings = [
     "ignore::FutureWarning",

@@ -1,54 +1,29 @@
-## Output Structure
+## Function outputs
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── cell_metadata.csv
-│   ├── filter_reasons.csv
-│   ├── filter_state.csv
-│   ├── filter_stats.csv
-│   ├── filter_summary.csv
-│   ├── gene_expression.csv
-│   └── retention_summary.csv
-└── figures/
-    ├── filter_comparison.png
-    ├── filter_reason_summary.png
-    ├── filter_state_scatter.png
-    ├── filter_summary.png
-    ├── filter_thresholds.png
-    └── r_feature_violin.png
-```
+`filter_cells` returns a new AnnData; the table functions return DataFrames,
+and `filter_figure` returns a matplotlib Figure. Files are written by the step.
 
-## File contents
+## CLI outputs
 
-- `tables/cell_metadata.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/filter_reasons.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/filter_state.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/filter_stats.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/filter_summary.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/gene_expression.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `tables/retention_summary.csv` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/filter_comparison.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/filter_reason_summary.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/filter_state_scatter.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/filter_summary.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/filter_thresholds.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `figures/r_feature_violin.png` — written by `sc_filter.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_filter.py`.
-- `commands.sh` — written by `sc_filter.py`.
-- `manifest.json` — written by `sc_filter.py`.
-- `processed.h5ad` — written by `sc_filter.py`.
-- `requirements.txt` — written by `sc_filter.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+The CLI writes:
 
-## Notes
+- `processed.h5ad`: retained cells and genes, counts layer and raw snapshot
+  when counts are available, and input/matrix contracts.
+- `report.md` and `result.json`: retention summary, effective thresholds and
+  input preparation. `summary.filter_stats.outliers_flagged` counts existing
+  outlier flags; those flags alone do not remove cells.
+- `tables/filter_stats.csv`: metric/value rows for threshold failures and flags.
+- `tables/filter_summary.csv`: metric/value rows for retention and effective thresholds.
+- `tables/retention_summary.csv`: Cells/Genes rows with before/after counts.
+- `figure_data/filter_summary.csv`, `filter_stats.csv`, `retention_summary.csv`,
+  `filter_state.csv`, `filter_reasons.csv`, and `manifest.json`.
+- `figure_data/gene_expression.csv` when numeric QC metrics are available;
+  its columns are `cell_id`, `gene` (a QC metric name) and `expression`.
+- `reproducibility/commands.sh` and `reproducibility/requirements.txt`.
 
-Auto-generated from `sc_filter.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The gallery renders `figures/filter_comparison.png`, `filter_summary.png`,
+`filter_thresholds.png`, `filter_state_scatter.png`, and
+`filter_reason_summary.png` when their required metrics and data are present.
+The figure-data manifest records each plot's status.
+With `--r-enhanced` and a working R plotting stack, the CLI can also write
+`figures/r_enhanced/r_feature_violin.png`.

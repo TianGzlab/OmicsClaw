@@ -23,6 +23,21 @@ from skills._sdk.notebook._layout import MODULE_RE, Module, module_from_name
 from skills._sdk.notebook.contract import ENVIRONMENT, LAYOUT
 
 DEMOS = {
+    "perturbseq_synthetic": {
+        "files": ["data/perturbseq_synthetic.h5ad"],
+        "generator": "perturbseq_synthetic",
+        "about": "180 synthetic Perturb-seq cells, two strong expression shifts and matched NT controls; not biological measurements",
+    },
+    "velocity_simulation": {
+        "files": ["data/velocity_simulation.h5ad"],
+        "generator": "velocity_simulation",
+        "about": "Seeded scVelo kinetic simulation with spliced/unspliced layers; not biological measurements",
+    },
+    "atac_synthetic": {
+        "files": ["data/atac_synthetic.h5ad"],
+        "generator": "atac_synthetic",
+        "about": "180 synthetic ATAC cells, 2,000 peaks; three groups with distinct peak blocks",
+    },
     "pbmc3k_raw": {
         "files": ["data/pbmc3k_raw.h5ad", "examples/pbmc3k.h5ad"],
         "download": "pbmc3k",
@@ -33,13 +48,18 @@ DEMOS = {
         "download": "pbmc3k_processed",
         "about": "10x PBMC 3k after scanpy's tutorial: log-normalised, PCA, UMAP, louvain labels",
     },
+    "multisample_synthetic": {
+        "files": ["data/multisample_synthetic.h5ad"],
+        "generator": "multisample_synthetic",
+        "about": "Eight synthetic samples, three cell types; Enriched is threefold higher in treated samples",
+    },
     "pbmc68k_reduced": {
         "files": ["data/pbmc68k_reduced.h5ad"],
         "download": "pbmc68k_reduced",
         "about": "700-cell subsample of 10x PBMC 68k bundled with scanpy, processed",
     },
 }
-"""Registered demo datasets: candidate files under the checkout, and the scanpy loader that downloads them."""
+"""Demo files and either a scanpy download name or a function name in ``_demos``."""
 
 
 @dataclass(frozen=True)
@@ -66,7 +86,7 @@ def step_context(*, notice: bool = True) -> StepContext:
     """Work out the running step from the environment or ``sys.argv[0]``."""
     named = os.environ.get(ENVIRONMENT["step_file"], "").strip()
     raw = named or (sys.argv[0] if sys.argv and sys.argv[0] else "")
-    step = Path(os.path.abspath(raw)) if raw and raw.endswith(".py") else None
+    step = Path(os.path.abspath(raw)) if raw and Path(raw).suffix in {".py", ".R"} else None
     root = module = None
     if step is not None and step.parent.parent.name == "analysis" and MODULE_RE.match(step.parent.name):
         root = step.parent.parent.parent
@@ -328,28 +348,44 @@ def _download_demo(name: str) -> Path:
     return target
 
 
+def _generate_demo(name: str) -> Path:
+    from skills._sdk.notebook import _demos
+
+    cache = demo_cache_dir()
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / f"{name}.h5ad"
+    temporary = cache / f".tmp-{secrets.token_hex(4)}-{name}.h5ad"
+    try:
+        getattr(_demos, DEMOS[name]["generator"])().write_h5ad(temporary)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def load_demo(name: str) -> Any:
     """Load a registered demo dataset as AnnData and record it as an input of the step.
 
     The file is looked for, in order: <name>.h5ad in $OMICSCLAW_DEMO_DIR;
     the checkout's data/ and examples/; <name>.h5ad in
     $XDG_CACHE_HOME/omicsclaw/demo/ (~/.cache/omicsclaw/demo/ when unset).
-    When none has it, scanpy downloads it into that cache.
+    When none has it, scanpy downloads it or the registered generator builds
+    it. Both save an .h5ad in that cache before it is read and hashed.
 
     :raises LookupError: *name* is not a registered demo dataset.
     :raises RuntimeError: the file is in none of the places looked at and
-        cannot be downloaded.
+        cannot be downloaded or generated.
     """
     if name not in DEMOS:
         raise LookupError(f"no demo dataset named {name!r}; registered: {', '.join(sorted(DEMOS))}")
     path = next((p for p in demo_candidates(name) if p.is_file()), None)
     if path is None:
         try:
-            path = _download_demo(name)
+            path = _generate_demo(name) if "generator" in DEMOS[name] else _download_demo(name)
         except Exception as exc:  # network errors come in many types
             places = "\n  ".join(str(p) for p in demo_candidates(name))
             raise RuntimeError(
-                f"demo dataset {name!r} is not available and could not be downloaded ({exc}). "
+                f"demo dataset {name!r} is not available and could not be created ({exc}). "
                 f"Put {name}.h5ad in one of:\n  {places}\n"
                 f"or point {ENVIRONMENT['demo_dir']} at a folder holding it."
             ) from exc

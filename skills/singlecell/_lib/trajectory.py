@@ -667,6 +667,7 @@ def run_velocity_analysis(
     mode: str = "stochastic",
     n_jobs: int = 4,
     copy: bool = False,
+    random_state: int | None = None,
 ) -> dict[str, Any] | None:
     """Run scVelo RNA velocity analysis.
 
@@ -680,6 +681,9 @@ def run_velocity_analysis(
         Number of parallel jobs
     copy : bool
         Whether to copy adata before modification
+    random_state : int or None
+        Build seeded neighbors before moments when supplied; None retains
+        the existing caller's neighbor behavior.
 
     Returns
     -------
@@ -770,6 +774,9 @@ def run_velocity_analysis(
     # Compute moments with shape-aware parameters for very small datasets.
     n_pcs = min(30, max(1, int(min(adata.n_obs - 1, adata.n_vars - 1))))
     n_neighbors = min(30, max(1, int(adata.n_obs - 1)))
+    if random_state is not None:
+        import scanpy as sc
+        sc.pp.neighbors(adata, n_pcs=n_pcs, n_neighbors=n_neighbors, random_state=random_state)
     scv.pp.moments(adata, n_pcs=n_pcs, n_neighbors=n_neighbors)
 
     # Recover dynamics

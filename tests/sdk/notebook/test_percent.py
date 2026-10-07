@@ -78,3 +78,10 @@ def test_to_notebook_sets_kernel_and_step_metadata():
     assert nb.metadata["omicsclaw"]["step"] == {"file": "01_a.py", "sha256": "ab", "run_id": "r"}
     assert [c.cell_type for c in nb.cells] == ["markdown", "code"]
     assert nb.cells[1].source == "x = 1"
+
+
+def test_r_notebook_preserves_negation_and_uses_the_r_kernel():
+    nb = to_notebook("# %% [markdown]\n# R check\n# %%\n!FALSE\n", step={"file": "01_check.R"}, language="r")
+    assert nb.cells[1].source == "!FALSE"
+    assert nb.metadata.kernelspec == {"name": "ir", "display_name": "R", "language": "R"}
+    assert nb.metadata.language_info.name == "R"

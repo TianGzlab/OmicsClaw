@@ -93,18 +93,20 @@ def _check_code(cell: Cell, first_line: int) -> None:
         )
 
 
-def parse_cells(text: str) -> list[Cell]:
+def parse_cells(text: str, *, language: str = "python") -> list[Cell]:
     """Split a step file into cells.
 
     :raises PercentError: an unknown cell tag, a magic or shell line, or
         code inside a markdown cell.
     """
+    if language not in {"python", "r"}:
+        raise ValueError(f"unsupported step language: {language}")
     cells: list[Cell] = []
     current = Cell(kind="code", source="", line=1)
     body_start = 1
 
     def close(cell: Cell, start: int) -> None:
-        if cell.kind == "code":
+        if cell.kind == "code" and language == "python":
             _check_code(cell, start)
         trimmed = _trim(cell.lines)
         if not trimmed:
@@ -143,20 +145,23 @@ def parse_cells(text: str) -> list[Cell]:
     return cells
 
 
-def to_notebook(text: str, *, step: dict[str, Any]) -> Any:
+def to_notebook(text: str, *, step: dict[str, Any], language: str = "python") -> Any:
     """The notebook node for a step file; *step* goes into ``metadata.omicsclaw.step``."""
     import nbformat
     from nbformat import v4
 
     nb = v4.new_notebook()
-    for cell in parse_cells(text):
+    for cell in parse_cells(text, language=language):
         metadata = {"title": cell.title} if cell.title else {}
         if cell.kind == "markdown":
             nb.cells.append(v4.new_markdown_cell(cell.source, metadata=metadata))
         else:
             nb.cells.append(v4.new_code_cell(cell.source, metadata=metadata))
-    nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-    nb.metadata["language_info"] = {"name": "python"}
+    nb.metadata["kernelspec"] = (
+        {"name": "ir", "display_name": "R", "language": "R"} if language == "r"
+        else {"name": "python3", "display_name": "Python 3", "language": "python"}
+    )
+    nb.metadata["language_info"] = {"name": "R" if language == "r" else "python"}
     nb.metadata["omicsclaw"] = {"step": dict(step)}
     nbformat.validate(nb)
     return nb

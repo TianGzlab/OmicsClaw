@@ -37,31 +37,49 @@ For *bulk-style* condition-vs-control GSEA / ORA on a DE table use
 `sc-enrichment`. For de-novo gene-program discovery use
 `sc-gene-programs`.
 
+## Use in an analysis step
+
+Use `load_skill` from the notebook SDK; write returned objects with
+`write_output`. This runnable example is also in `examples/example_step.py`.
+The CLI remains available for standalone reports and galleries.
+
+```python
+# Score PBMC lineage gene sets with the Python AUCell implementation.
+# Reads pbmc3k_processed and uses its log-normalized raw snapshot.
+# Calls sc-pathway-scoring: score_gene_sets, group_scores, score_distribution_figure.
+
+from skills._sdk.notebook import load_demo, load_skill, write_output
+
+pathways = load_skill('sc-pathway-scoring')
+adata = load_demo('pbmc3k_processed').raw.to_adata()
+gene_sets = {
+    'B_cell': ['MS4A1', 'CD79A', 'CD79B', 'CD74', 'HLA-DRA'],
+    'T_cell': ['CD3D', 'CD3E', 'CD3G', 'TRAC', 'IL7R'],
+    'Myeloid': ['LYZ', 'S100A8', 'S100A9', 'FCN1', 'CTSS'],
+}
+
+scores = pathways.score_gene_sets(adata, gene_sets, method='aucell_py')
+write_output(scores, 'tables/pathway_scores.csv')
+write_output(pathways.group_scores(adata, scores, groupby='louvain'), 'tables/group_scores.csv')
+write_output(pathways.score_distribution_figure(scores), 'figures/score_distribution.png')
+
+assert scores.index.equals(adata.obs_names)
+assert set(scores.columns) == set(gene_sets)
+assert scores.max().max() > 0
+assert scores.min().min() >= 0
+```
+
 ## Inputs & Outputs
 
-**Inputs**
+Input is an AnnData and gene sets keyed by name. The CLI reads H5AD plus a
+GMT file or an Enrichr library. Python scoring returns a cell-by-set
+DataFrame; `attach_scores` returns a copy with `obs["enrich__..."]` columns.
 
-- Modalities: scrna
-- File types: `.h5ad`
-
-**Outputs**
-
-- `tables/aucell_scores.csv`
-- `tables/cell_metadata.csv`
-- `tables/enrichment_scores.csv`
-- `tables/expression_matrix.tsv`
-- `tables/gene_expression.csv`
-- `tables/gene_set_overlap.csv`
-- `tables/group_high_fraction.csv`
-- `tables/group_mean_scores.csv`
-- `tables/top_pathway_scores_long.csv`
-- `tables/top_pathways.csv`
-- `figures/r_pathway_violin.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`)
+The CLI writes `processed.h5ad`, `report.md`, `result.json`, and
+`tables/enrichment_scores.csv`, `gene_set_overlap.csv`, `top_pathways.csv`.
+Grouped runs also write `group_mean_scores.csv` and
+`group_high_fraction.csv`. Plot source tables live under `figure_data/`,
+not `tables/`. R exchange matrices and AUCell CSVs are temporary.
 
 ## Flow
 
@@ -78,13 +96,13 @@ For *bulk-style* condition-vs-control GSEA / ORA on a DE table use
 
 ## Gotchas
 
-- **Zero-overlap between gene sets and input features is a hard fail.** `sc_pathway_scoring.py` raises `ValueError(f"No valid gene sets were parsed from {gene_sets_path}")` for malformed GMT files; raises `ValueError("No gene sets had any overlap with the input features, so no enrichment scores could be computed.")` and raises `ValueError("None of the supplied gene-set members matched the input features. ...")` when the merged overlap table sums to 0. Run `sc-standardize-input` upstream if gene names need canonicalisation, or pass `--gene-sets` with matching ID space.
-- **`score_genes_py` requires `.X` to be normalised expression.** `sc_pathway_scoring.py` raises `ValueError("`score_genes_py` requires normalized expression in `adata.X`. Run `sc-preprocessing` first.")`. The other two methods (`aucell_r`, `aucell_py`) use rank-based scoring and are tolerant of raw counts.
-- **`--gene-set-db` library lookup can fail in three ways (gseapy / Python side).** `sc_pathway_scoring.py` raises `ImportError("--gene-set-db requires gseapy. ...")` when gseapy isn't installed; raises `RuntimeError("Failed to download or resolve gene-set library ...")` on a network / unknown-library failure; raises `ValueError("Gene-set library ... returned no gene sets ...")` when gseapy returns an empty dict. All three are pre-AUCell — fix gseapy or supply a local `--gene-sets` GMT.
-- **`aucell_r` R environment is validated separately (R side).** `sc_pathway_scoring.py` calls `validate_r_environment(required_r_packages=["AUCell", "GSEABase"])` which raises if the R bridge is missing AUCell / GSEABase. After the R subprocess returns, `run_aucell` raises `ValueError("AUCell output is missing the required 'Cell' column")` when the R-Python data round-trip drops the cell index.
-- **One of `--gene-sets` or `--gene-set-db` is required.** `sc_pathway_scoring.py` raises `ValueError("--input required when not using --demo")`; raises `ValueError("--gene-sets or --gene-set-db is required unless --demo is used")` when both are unset on a real run. Library aliases are: `hallmark`, `kegg`, `reactome`, `go_bp` — others are passed through to the EnrichR library API.
-- **`--gene-sets` file existence is checked, format is not pre-validated.** `sc_pathway_scoring.py` raises `FileNotFoundError(f"Gene set file not found: {gene_sets_path}")` for a missing path. Empty / malformed GMT survives this check and triggers `ValueError(f"No valid gene sets were parsed from {gene_sets_path}")` later.
-- **`obs` is mutated: one column per gene set.** When the run completes, `processed.h5ad` has new `obs` columns (one per gene set name). For large libraries (e.g., `MSigDB_Hallmark_2020` has 50 sets, KEGG_2021 has 320) this can dramatically bloat `obs`. Filter or namespace the gene sets if downstream tools struggle.
+- `run_info(scores)["skipped_gene_sets"]` lists sets with no matching features. Inspect `tables/gene_set_overlap.csv` before interpreting scores; all-unmatched Python input raises.
+- `score_gene_sets(..., method="score_genes_py")` requires normalized X. AUCell ranks expression and can also use counts.
+- `load_gene_sets` downloads named libraries through gseapy. Local GMT/JSON avoids network access. This skill's mouse `kegg` alias is `KEGG_2021_Mouse`, intentionally separate from sc-enrichment's aliases.
+- `aucell_r` needs AUCell and GSEABase. Its temporary result must contain a `Cell` column; otherwise the API raises instead of misaligning rows.
+- API scoring uses seed 42 by default. The CLI preserves its historical `score_genes_py` seed 0; its AUCell seed defaults to 42. Set `random_state=0` for API/CLI score_genes comparisons.
+- `processed.h5ad` adds an `enrich__` obs column per gene set. `attach_scores` copies its input; `score_gene_sets` leaves it unchanged.
+- CLI `--demo` slices the first 60 feature names into four arbitrary sets. They exercise the pipeline, not biological pathways. The step below uses named PBMC lineage genes.
 
 ## Key CLI
 
@@ -120,3 +138,55 @@ python skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py \
 Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `gseapy`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `seaborn`
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `score_gene_sets(adata, gene_sets, *, method: str='aucell_r', auc_max_rank: int | None=None, auc_threshold: float=0.05, ctrl_size: int=50, n_bins: int=25, random_state: int=42) -> pd.DataFrame`
+
+Return cell-by-gene-set scores without changing adata.
+
+aucell_py ranks X, breaking ties with random_state; auc_threshold is the
+fraction of ranked genes used. score_genes_py requires normalized X and
+uses Scanpy control genes. aucell_r requires AUCell/GSEABase and uses
+normalized X or an aligned raw matrix. R exchange files are temporary.
+Gene sets with no matched features are skipped; all-unmatched input fails.
+API seeds default to 42. The historical score_genes CLI uses seed 0.
+
+### `load_gene_sets(source, *, species: str='human') -> dict[str, list[str]]`
+
+Read a GMT or JSON file, or download an Enrichr library.
+
+Aliases belong to this skill: mouse KEGG resolves to KEGG_2021_Mouse.
+Named libraries require gseapy and network access; local files do not.
+
+### `attach_scores(adata, scores: pd.DataFrame)`
+
+Return a copy with enrich__ columns and the scoring run record in uns.
+
+### `gene_set_overlap(adata, gene_sets) -> pd.DataFrame`
+
+Return matched feature counts and identifiers for every requested gene set.
+
+### `group_scores(adata, scores: pd.DataFrame, *, groupby: str) -> pd.DataFrame`
+
+Return mean scores per obs group, retaining every scored gene set.
+
+### `top_pathways(scores: pd.DataFrame, *, n: int=20) -> pd.DataFrame`
+
+Rank gene sets by mean absolute cell score, breaking ties by name.
+
+### `score_summary(adata, scores_df: pd.DataFrame, *, groupby: str | None, top_pathways: int) -> dict[str, object]`
+
+Return top pathways, grouped means, high fractions and long-form scores.
+
+### `score_distribution_figure(scores: pd.DataFrame)`
+
+Return a boxplot of per-cell scores without writing files.
+
+### `run_info(result) -> dict`
+
+Return the scoring method, seed, feature source and skipped sets.
+
+<!-- api:end -->

@@ -1,38 +1,10 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── processed.h5ad
-├── tables/
-│   ├── assignment_status_counts.csv
-│   ├── cell_metadata.csv
-│   ├── dropped_multi_guide_cells.csv
-│   ├── feature_type_summary.csv
-│   ├── perturbation_assignments.csv
-│   └── perturbation_counts.csv
-└── figures/
-    └── perturbation_counts.png
-```
+The current file inventory and conditional outputs are listed in
+[`SKILL.md`](../SKILL.md#inputs--outputs). The `_api.py` functions return AnnData,
+tables or Figures; they do not write reports or user output directories.
+`examples/example_step.py` saves returned objects with `write_output`.
 
-## File contents
-
-- `tables/assignment_status_counts.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `tables/cell_metadata.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `tables/dropped_multi_guide_cells.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `tables/feature_type_summary.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `tables/perturbation_assignments.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `tables/perturbation_counts.csv` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `figures/perturbation_counts.png` — written by `sc_perturb_prep.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_perturb_prep.py`.
-- `commands.sh` — written by `sc_perturb_prep.py`.
-- `processed.h5ad` — written by `sc_perturb_prep.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-## Notes
-
-Auto-generated from `sc_perturb_prep.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+See the generated API section for argument defaults and return semantics.
+CLI filenames are retained where their meaning remains valid; intentional
+statistical/naming corrections are explained in the skill's Gotchas section.

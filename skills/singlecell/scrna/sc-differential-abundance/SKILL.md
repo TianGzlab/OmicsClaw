@@ -31,39 +31,48 @@ conditions?"* — distinct from per-cell DE. Four methods:
 For per-cell **expression** changes between conditions, use `sc-de`.
 For ranking *what* defines a cluster, use `sc-markers`.
 
+## Use in an analysis step
+
+Use `load_skill` from the notebook SDK; write returned objects with
+`write_output`. This runnable example is also in `examples/example_step.py`.
+The CLI remains available for standalone reports and galleries.
+
+```python
+# Recover a threefold change in a synthetic cell type using independent samples.
+# Reads multisample_synthetic: four control and four treated samples.
+# Calls sc-differential-abundance: test_abundance, composition, proportion_figure.
+
+from skills._sdk.notebook import load_demo, load_skill, write_output
+
+abundance = load_skill('sc-differential-abundance')
+adata = load_demo('multisample_synthetic')
+
+table = abundance.test_abundance(adata, method='simple')
+counts, proportions = abundance.composition(adata, sample_key='sample',
+    condition_key='condition', celltype_key='cell_type')
+write_output(table, 'tables/abundance.csv')
+write_output(counts, 'tables/sample_counts.csv')
+write_output(abundance.proportion_figure(proportions), 'figures/sample_proportions.png')
+
+enriched = table.set_index('cell_type').loc['Enriched']
+assert enriched['significant']
+assert enriched['log2fc_group_b_over_a'] > 1
+assert counts.shape == (8, 3)
+```
+
 ## Inputs & Outputs
 
-**Inputs**
+Input is an AnnData with sample, condition and cell-type columns. Each
+sample must have one condition. The Python API returns composition tables
+or a method-specific result DataFrame; it does not change the input.
 
-- Modalities: scrna
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
-
-**Outputs**
-
-- `tables/cell_meta.csv`
-- `tables/cell_metadata.csv`
-- `tables/condition_mean_proportions.csv`
-- `tables/milo_nhood_results.csv`
-- `tables/proportion_test_results.csv`
-- `tables/sample_by_celltype_counts.csv`
-- `tables/sample_by_celltype_proportions.csv`
-- `tables/sccoda_effects.csv`
-- `tables/simple_da_results.csv`
-- `figures/milo_logfc_barplot.png`
-- `figures/proportion_test_r_no_results.png`
-- `figures/r_cell_barplot.png`
-- `figures/r_cell_density.png`
-- `figures/r_embedding_discrete.png`
-- `figures/r_proportion_test.png`
-- `figures/sample_celltype_proportions.png`
-- `figures/sccoda_log2fc_barplot.png`
-- `analysis_summary.txt`
-- `annotated_input.h5ad`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`)
+The CLI writes `processed.h5ad`, `annotated_input.h5ad`, `report.md`,
+`result.json`, and these common tables:
+`sample_by_celltype_counts.csv`, `sample_by_celltype_proportions.csv`,
+`condition_mean_proportions.csv`. The selected method adds
+`simple_da_results.csv`, `milo_nhood_results.csv`, `sccoda_effects.csv`,
+or a nonempty `proportion_test_results.csv`. Figures depend on the method
+and available results. R exchange files are temporary.
 
 ## Flow
 
@@ -76,12 +85,12 @@ For ranking *what* defines a cluster, use `sc-markers`.
 
 ## Gotchas
 
-- **Preflight failure raises `SystemExit(1)`, not `ValueError`.** `sc_differential_abundance.py` prints the missing-column / under-replication problems and exits the process. Common cases: `condition` / `sample` / `cell_type` columns missing, or `<2` samples per condition for `milo` / `sccoda`. Pass the actual obs column names (`--sample-key donor`, `--cell-type-key annotation`).
-- **`--input` missing without `--demo` raises `SystemExit`, not `ValueError`.** `sc_differential_abundance.py` does `raise SystemExit("Provide --input or use --demo")`. Wrappers expecting standard `ValueError` need to catch `SystemExit` here.
-- **`milo` / `sccoda` need pertpy installed.** Both methods route through `run_milo_da` / `run_sccoda_da` in `skills/singlecell/_lib/differential_abundance.py`; the pertpy import is lazy and surfaces as `ImportError` at call time when pertpy is absent. `simple` and `proportion_test_r` run without pertpy.
-- **`proportion_test_r` requires a working R install but no pertpy.** `sc_differential_abundance.py` raises `FileNotFoundError(f"R script not found: {r_script}")` if the bundled R helper is missing from the install — typically when the package was installed without the R extra.
-- **`result.json` count keys are *additive* per method, not exclusive.** All four methods write `result.json["n_cell_types"]` (set at the universal summary initialiser, `sc_differential_abundance.py`); `milo` additionally writes `n_nhoods`, `sccoda` additionally writes `n_effect_rows`, `proportion_test_r` overwrites `n_cell_types` from its `clusters` column. Downstream tools that just need "how many things were tested" can read `n_cell_types` universally.
-- **`--reference-cell-type` is `sccoda`-only.** Other methods ignore the value silently. Default `"automatic"` lets scCODA pick.
+- `run_info(table)["executed_method"]` distinguishes pertpy Milo from the internal `milo_like` fallback. The fallback reason includes the failed import; it is not the same method as official Milo.
+- The CLI demo has only two samples per condition. Its simple/Milo-like Mann-Whitney tests cannot reach p < 0.05. The step uses `multisample_synthetic`, with four samples per condition and a known enriched cell type.
+- `proportion_test_r` permutes cell labels, ignoring sample identity, and uses the existing R seed 42. It requires R; failures propagate from `test_abundance` rather than being reported as empty successful output.
+- `--min-count` is accepted by the CLI but has no effect. The API does not expose that unused option.
+- `run_info(table)` records seeds. `random_state` controls pertpy and newly computed neighbors; standalone scCODA retains its sampler defaults and reports no effective seed.
+- CLI preflight exits on missing metadata or insufficient replication. The API raises `ValueError` for missing values or a sample assigned to multiple conditions; `composition` and `condition_proportions` use sample-level denominators.
 
 ## Key CLI
 
@@ -118,3 +127,40 @@ python skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundan
 Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `pertpy`, `scanpy`, `sccoda`, `scipy`, `seaborn`, `statsmodels`
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `composition(adata, *, sample_key: str, celltype_key: str, condition_key: str)`
+
+Return sample-by-cell-type counts and row-normalized proportions.
+
+Each sample must belong to one condition. No cells or counts are changed.
+
+### `condition_proportions(adata, *, sample_key: str, celltype_key: str, condition_key: str) -> pd.DataFrame`
+
+Return condition means of per-sample proportions, weighting samples equally.
+
+### `test_abundance(adata, *, method: str='milo', sample_key: str='sample', condition_key: str='condition', celltype_key: str='cell_type', contrast: str | None=None, reference_cell_type: str='automatic', fdr: float=0.05, prop: float=0.1, n_neighbors: int=30, n_permutations: int=1000, random_state: int=0) -> pd.DataFrame`
+
+Return differential-abundance results without changing adata.
+
+simple tests sample proportions with two-sided Mann-Whitney and BH.
+milo uses pertpy, or the existing milo_like neighborhood screen when its
+import fails; run_info names the executed backend and reason. scCODA uses
+pertpy or the installed standalone sccoda backend. random_state controls
+pertpy and newly computed neighbors; standalone sccoda retains its sampler
+defaults. proportion_test_r uses the existing fixed R seed 42 and permutes
+cells, ignoring sample identity; its failures propagate instead of returning
+an empty success result. This function does not apply a minimum-count filter.
+
+### `proportion_figure(proportions: pd.DataFrame)`
+
+Return a sample-by-cell-type proportion heatmap without writing files.
+
+### `run_info(table: pd.DataFrame) -> dict`
+
+Return the requested method, executed backend, fallback reason and seed.
+
+<!-- api:end -->

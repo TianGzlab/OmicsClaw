@@ -3,7 +3,7 @@
 The 28 shared ``.R`` files moved from ``omicsclaw/r_scripts`` to
 ``skills/_sdk/r_scripts``. Skills take the directory only under the alias
 ``_SDK_R_SCRIPTS_DIR`` so it can never overwrite a skill's own variable of
-the same name — ``sc_enrichment.py`` has both its own ``rscripts/`` and the
+the same name — sc-enrichment's library has both its own ``rscripts/`` and the
 shared directory, and the two must stay distinct.
 """
 
@@ -38,7 +38,7 @@ def _load(path):
 
 
 def test_sc_enrichment_keeps_both_directories():
-    script = SCRNA / "sc-enrichment" / "sc_enrichment.py"
+    script = SCRNA / "sc-enrichment" / "_api.py"
     module = _load(script)
     assert module.R_SCRIPTS_DIR == script.parent / "rscripts"
     assert module.R_SCRIPTS_PROJECT_DIR == SHARED
@@ -47,8 +47,8 @@ def test_sc_enrichment_keeps_both_directories():
 @pytest.mark.parametrize(
     "script",
     [
-        SCRNA / "sc-pseudotime" / "sc_pseudotime.py",
-        SCRNA / "sc-differential-abundance" / "sc_differential_abundance.py",
+        SCRNA / "sc-pseudotime" / "_api.py",
+        SCRNA / "sc-differential-abundance" / "_api.py",
     ],
     ids=lambda p: p.name,
 )

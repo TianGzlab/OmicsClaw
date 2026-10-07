@@ -1,11 +1,11 @@
 #!/usr/bin/env Rscript
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) {
-    cat("Usage: Rscript sc_mast_de.R <h5ad_file> <output_dir> <groupby> [group1] [group2]\n")
+    cat("Usage: Rscript sc_mast_de.R <input_dir> <output_dir> <groupby> [group1] [group2]\n")
     quit(status = 1)
 }
 
-h5ad_file  <- args[1]
+input_dir  <- args[1]
 output_dir <- args[2]
 groupby    <- args[3]
 group1     <- if (length(args) >= 4) args[4] else ""
@@ -14,7 +14,7 @@ group2     <- if (length(args) >= 5) args[5] else ""
 suppressPackageStartupMessages({
     library(MAST)
     library(SingleCellExperiment)
-    library(zellkonverter)
+    library(Matrix)
 })
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
@@ -36,17 +36,15 @@ run_one <- function(expr_mat, meta, label, comparison_label) {
 }
 
 tryCatch({
-    sce <- readH5AD(h5ad_file)
-    meta <- as.data.frame(SummarizedExperiment::colData(sce))
+    counts <- as(Matrix::readMM(file.path(input_dir, "matrix.mtx")), "CsparseMatrix")
+    rownames(counts) <- read.delim(file.path(input_dir, "features.tsv"), header = FALSE,
+                                  colClasses = "character", quote = "")[[1]]
+    colnames(counts) <- read.delim(file.path(input_dir, "barcodes.tsv"), header = FALSE,
+                                  colClasses = "character", quote = "")[[1]]
+    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE)
+    stopifnot(identical(rownames(meta), colnames(counts)))
     if (!groupby %in% colnames(meta)) stop(sprintf("Column '%s' not found in metadata", groupby))
-
-    expr_mat <- SummarizedExperiment::assay(sce, "X")
-    if (nrow(expr_mat) == nrow(meta)) {
-        expr_mat <- t(expr_mat)
-    }
-    if (is(expr_mat, "sparseMatrix")) expr_mat <- as.matrix(expr_mat)
-    rownames(expr_mat) <- rownames(sce)
-    colnames(expr_mat) <- colnames(sce)
+    expr_mat <- as.matrix(counts)
 
     results <- list()
     if (nzchar(group1) && nzchar(group2)) {

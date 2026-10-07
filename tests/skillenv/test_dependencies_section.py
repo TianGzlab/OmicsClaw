@@ -3,9 +3,8 @@
 The section's prose may change freely; the contract is that it holds exactly
 one line of back-quoted, comma-separated PyPI-style names. That line is what
 the environment check reads, and the character set is also the input check
-before any name reaches a shell command. At the time of writing the 94
-sections name 64 distinct packages (63 before ``cellcharter`` was declared
-for ``spatial-domains`` in P0b).
+before any name reaches a shell command. The tests below pin the number of
+indexed skills and distinct dependency names.
 """
 
 from __future__ import annotations
@@ -22,8 +21,8 @@ _HEAD = "# x\n\nSome text.\n\n## Dependencies\n\n"
 _PROSE = "Python packages this skill's script needs.\n\n"
 
 
-def test_there_are_89_skill_files():
-    assert len(SKILL_FILES) == 89
+def test_there_are_88_skill_files():
+    assert len(SKILL_FILES) == 88
 
 
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)
@@ -32,13 +31,14 @@ def test_every_package_line_parses(path):
     assert names and len(set(names)) == len(names)
 
 
-def test_the_declared_names_number_65():
+def test_the_declared_names_number_66():
     names = {
         name
         for path in SKILL_FILES
         for name in parse_dependencies(path.read_text(encoding="utf-8"), source=path)
     }
-    assert len(names) == 65
+    # Migration removes h5py/packaging and declares filelock/joblib/psutil.
+    assert len(names) == 66
     assert "cellcharter" in names
 
 

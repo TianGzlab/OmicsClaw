@@ -13,13 +13,28 @@ tags:
 
 # sc-fastq-qc
 
+## Use from a step
+
+This is CLI_ONLY: it reads FASTQ files and optionally starts FastQC/MultiQC.
+
+```python
+from skills._sdk.notebook import run_cli
+
+run_cli("sc-fastq-qc", "--input", "data/sample_R1.fastq.gz",
+        "--read2", "data/sample_R2.fastq.gz",
+        inputs=["data/sample_R1.fastq.gz", "data/sample_R2.fastq.gz"])
+```
+
+The demo renders synthetic summary tables; it does not read FASTQ or test
+the external tools. There is no `_api.py` for this skill.
+
 ## When to use
 
 The user has raw scRNA-seq FASTQ files (one or more, or a directory of
 samples) and wants per-file / per-sample / per-base quality summaries
-before running `sc-count` or `cellranger`.  Uses FastQC + MultiQC when
-those tools are installed; falls back to a stable Python-only summary
-otherwise so the skill always returns something useful.
+before running `sc-count` or `cellranger`. Python summaries always run.
+FastQC and MultiQC add reports when installed; a tool that is present but
+fails is a hard error, not a fallback to a successful Python-only run.
 
 ## Inputs & Outputs
 
@@ -27,61 +42,53 @@ otherwise so the skill always returns something useful.
 
 - Input kinds: `file`, `directory`
 - Modalities: scrna
-- File types: `.fastq`, `.fq`
+- File types: `.fastq`, `.fq`, and their `.gz` variants
 - FASTQ structure: valid first record
 - Directory layouts (any): `fastq-collection`
 
 **Outputs**
 
-- `tables/Summary.csv`
-- `tables/barcodes.tsv`
 - `tables/fastq_per_base_quality.csv`
 - `tables/fastq_per_file_summary.csv`
 - `tables/fastq_per_sample_summary.csv`
-- `tables/features.tsv`
-- `tables/genes.tsv`
-- `tables/metrics_summary.csv`
 - `figures/fastq_file_quality.png`
 - `figures/fastq_q30_summary.png`
 - `figures/fastq_read_structure.png`
 - `figures/per_base_quality.png`
-- `3M-february-2018.txt`
-- `737K-august-2016.txt`
-- `Aligned.sortedByCoord.out.bam`
-- `multiqc_report.html`
-- `possorted_genome_bam.bam`
-- `web_summary.html`
+- `figures/manifest.json`, `figure_data/manifest.json`, plot-data CSV files
+- `reproducibility/commands.sh`, `reproducibility/requirements.txt`
+- Optional external reports under `artifacts/fastqc/` and `artifacts/multiqc/`
 - `report.md`
 - `result.json`
 
 ## Flow
 
-1. Discover FASTQ files from `--input` (single file or directory).
-2. If `fastqc` is on `$PATH`, run it; if `multiqc` is on `$PATH`, run that too.
-3. In parallel run a Python-only fallback that samples up to `--max-reads` per FASTQ for Phred / GC / adapter / length.
-4. Merge tool output + fallback into per-file / per-sample / per-base tables.
-5. Render quality + adapter / GC diagnostic figures.
-6. Emit `report.md` + `result.json`.
+1. Discover FASTQ files and choose one sample (`--sample` disambiguates a directory).
+2. Summarize the first `--max-reads` records per file in Python.
+3. Run FastQC when present, then MultiQC when both tools are present.
+4. Render four figures from the Python summaries; external HTML is separate.
+5. Write three tables, `report.md` and `result.json`.
 
 ## Gotchas
 
-- **`--max-reads 20000` (default) caps the Python-fallback path only.** When FastQC is available the full FASTQ is processed; when not, only the first 20K reads per file are sampled.  Sampling depth is recorded per file in `tables/fastq_per_file_summary.csv`; bump `--max-reads` if a FASTQ has high variance across the file.
+- **`--max-reads 20000` caps Python summaries only.** `tables/fastq_per_file_summary.csv` records sampled depth. FastQC processes the full files. This is a prefix sample, not random sampling.
 - **`--r-enhanced` is accepted but produces no R plots.** This skill emits Python figures only.  Pass freely, expect no R Enhanced output.
-- **Per-figure `status: "rendered"` is local, not global.** The `result.json` carries a `status` field per figure (e.g. `figures.per_base_quality.status == "rendered"`).  All four panels are emitted unconditionally (`sc_fastq_qc.py`), so absence of an entry typically means upstream tool failure rather than a configuration choice — inspect `summary.warnings` before assuming a panel was suppressed.
+- `figures/manifest.json` records per-figure status; `result.json` lists external tool availability and commands under `data.external_tools`.
+- `_lib/upstream.py:choose_fastq_sample` rejects ambiguous multi-sample directories. Run once per sample with `--sample`; one invocation does not batch every sample.
 
 ## Key CLI
 
 ```bash
-# Demo (built-in synthetic FASTQ)
+# Demo (synthetic summary tables, no FASTQ or external tools)
 python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py --demo --output /tmp/sc_fastq_qc_demo
 
 # Single-file with paired-end
 python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
   --input sample_R1.fastq.gz --read2 sample_R2.fastq.gz --output results/
 
-# Directory of samples, deeper sampling for the Python fallback
+# Choose a sample and increase Python sampling depth
 python skills/singlecell/scrna/sc-fastq-qc/sc_fastq_qc.py \
-  --input fastq_dir/ --output results/ --max-reads 100000 --threads 8
+  --input fastq_dir/ --sample sample_A --output results/ --max-reads 100000 --threads 8
 ```
 
 ## See also

@@ -24,3 +24,5 @@
 ## Per-method parameter hints
 
 _No method-specific tuning hints._
+
+`--seed` (default 0) is passed to R set.seed for scTenifoldKnk.

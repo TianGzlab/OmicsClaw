@@ -117,6 +117,16 @@ def test_the_contract_names_the_checks_module_the_runner_ships():
     assert f"`{checks.__name__}`" in text
 
 
+def test_the_contract_names_the_shipped_r_helpers_and_environment():
+    text = (REPO / "OMICSCLAW.md").read_text(encoding="utf-8")
+    assert (REPO / "skills/_sdk/notebook/step.R").is_file()
+    assert '"notebook", "step.R"' in text
+    assert contract.ENVIRONMENT["sdk_dir"] in text
+    r_source = (REPO / "skills/_sdk/notebook/step.R").read_text(encoding="utf-8")
+    assert contract.ENVIRONMENT["step_io"] in r_source
+    assert contract.ENVIRONMENT["step_file"] in r_source
+
+
 def test_the_eval_reads_the_ledger_the_runner_writes():
     from omicsclaw.evals import ledger
 

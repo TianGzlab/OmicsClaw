@@ -40,6 +40,15 @@ def test_load_demo_lists_the_registered_datasets(capsys):
         assert f"{demo}: {info['about']}" in text
 
 
+def test_demo_reference_distinguishes_downloads_and_generators(monkeypatch):
+    monkeypatch.setitem(DEMOS, "test_generated", {
+        "files": [], "generator": "test_generated", "about": "Temporary test data",
+    })
+    text = _reference.render("load_demo")
+    assert "pbmc3k_raw: " in text and "[download: scanpy.datasets.pbmc3k]" in text
+    assert "test_generated: Temporary test data [generator: test_generated]" in text
+
+
 def test_an_unknown_name_lists_the_known_ones(capsys):
     assert run.main(["reference", "write_outputs"]) == 2
     text = capsys.readouterr().out
@@ -50,3 +59,14 @@ def test_an_unknown_name_lists_the_known_ones(capsys):
 def test_the_whole_reference_prints(capsys):
     assert run.main(["reference"]) == 0
     assert capsys.readouterr().out.strip() == _reference.render()
+
+
+def test_reference_includes_r_io_from_the_shipped_comments():
+    from pathlib import Path
+
+    text = _reference.render()
+    assert "R steps" in text and "Rscript analysis/<NN_slug>/<step>.R" in text
+    comments = Path(_reference.__file__).with_name("step.R").read_text()
+    for line in comments.splitlines():
+        if line.startswith("#' "):
+            assert line[3:] in text

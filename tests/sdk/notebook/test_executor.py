@@ -164,11 +164,59 @@ def test_an_interpreter_change_warns_and_is_recorded(project):
     assert json.loads(manifest_path.read_text())["interpreter"]["path"] == sys.executable
 
 
-def test_an_r_file_in_the_module_is_refused(project):
+def test_a_lowercase_r_file_in_the_module_is_refused(project):
     module = _two_steps(project)
-    (project.root / "analysis" / module / "03_plot.R").write_text("x <- 1\n")
+    (project.root / "analysis" / module / "03_plot.r").write_text("x <- 1\n")
     assert project.run(f"analysis/{module}") == 2
-    assert "R steps are not supported yet" in project.text
+    assert "uppercase .R" in project.text
+
+
+def test_missing_rscript_is_an_actionable_usage_error_for_run_and_replay(project, monkeypatch, tmp_path):
+    module = _two_steps(project)
+    project.step(module, "03_r.R", "x <- 1\n")
+    project.step(module, "04_validate.py", "assert True\n")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("CONDA_PREFIX", str(tmp_path))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    for command in (project.run, project.replay):
+        assert command(module) == 2
+        assert "Rscript not found" in project.text
+        assert "CONDA_PREFIX/bin/Rscript" in project.text and "PATH" in project.text
+
+
+def test_invalid_r_layout_is_reported_before_any_step_runs(project):
+    module = _two_steps(project)
+    project.step(module, "03_same.py", "raise AssertionError('must not run')\n")
+    project.step(module, "03_same.R", "stop('must not run')\n")
+    project.step(module, "04_validate.R", "TRUE\n")
+    for command in (project.run, project.replay):
+        assert command(module) == 2
+        assert "same stem" in project.text and "validate step must be Python" in project.text
+    assert "same stem" in project.status(module)
+
+
+def test_a_mixed_module_dispatches_to_the_two_injected_runners(project):
+    from skills._sdk.notebook._runners import StepOutcome
+
+    seen = []
+
+    class RecordingRunner:
+        def __init__(self, kind):
+            self.kind = kind
+
+        def run(self, notebook, *, env, cwd):
+            step = Path(env["OMICSCLAW_STEP_FILE"]).name
+            seen.append((self.kind, step))
+            return StepOutcome(status="ok", notebook=notebook, seconds=0)
+
+    module = project.new("mixed")
+    for name in ("01_first.py", "02_model.R", "03_validate.py", "04_plot.R"):
+        project.step(module, name, "# %%\n# recorded without execution\n")
+    runners = {kind: RecordingRunner(kind) for kind in ("python", "r")}
+    assert _executor.run_targets(project.root, [module], runners=runners, out=project.out) == 0
+    assert seen == [("python", "01_first.py"), ("r", "02_model.R"), ("r", "04_plot.R"), ("python", "03_validate.py")]
+    manifest = project.manifest(module)
+    assert [step["kind"] for step in manifest["steps"]] == ["python", "r", "r", "python"]
 
 
 def test_a_busy_module_lock_exits_3(project):

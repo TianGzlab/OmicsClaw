@@ -22,9 +22,109 @@ and suspects ambient RNA from cell-free droplets is inflating per-cell
 expression — typical for 10X data with high droplet density.  Three
 backends share the CLI: `simple` (a deterministic ambient-profile
 subtraction, default), `cellbender` (Python, requires GPU for sensible
-runtime), and `soupx` (R via rpy2; needs raw + filtered matrices).
+runtime), and `soupx` (Rscript; needs raw + filtered matrices).
 Doublets are a different problem — use `sc-doublet-detection` for
 multiplet barcodes.
+
+## Use from a step
+
+```python
+ambient = load_skill("sc-ambient-removal")
+adata = ambient.remove_ambient(read_input("counts.h5ad"), contamination=0.05)
+write_output(ambient.correction_summary(adata), "tables/correction_summary.csv")
+write_output(ambient.correction_figure(adata), "figures/counts_comparison.png")
+write_output(adata, "intermediate/adata_corrected.h5ad")
+```
+
+With raw droplets, use `remove_ambient_soupx(filtered, raw=raw_droplets)`.
+CellBender remains CLI-only because it uses an external process and files.
+The simple-method example is in `examples/example_step.py`.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `remove_ambient(adata, *, contamination: float=0.05)`
+
+Subtract a mean ambient profile from count-like expression in place.
+
+Select layers['counts'], aligned raw or X; retain that matrix in
+layers['counts'] and replace X with nonnegative corrected values. The
+mean cell profile is only an approximation when empty droplets are absent.
+
+:param adata: AnnData with a count-like expression matrix.
+:param contamination: Fraction to subtract before clipping at zero, in [0, 1).
+    Default 0.05, matching the CLI.
+:returns: The same AnnData; run_info reports the matrix source and reduction.
+:raises ValueError: No count-like matrix exists or contamination is invalid.
+
+### `remove_ambient_soupx(adata, *, raw)`
+
+Return SoupX-corrected cells, using raw droplet counts to estimate ambient RNA.
+
+Both objects select counts from layers['counts'], aligned raw or X and
+exchange temporary 10x matrices with R. This backend does not expose a
+seed through its wrapper; results vary between runs. Errors propagate.
+
+:param adata: AnnData containing the filtered cells.
+:param raw: AnnData containing raw droplets, with matching feature names.
+:returns: A new AnnData aligned to SoupX's retained cells and genes, with
+    original counts in layers['counts'] and corrected X.
+:raises RuntimeError: R, Seurat or SoupX is unavailable, or the method fails.
+:raises ValueError: Counts are missing or the result cannot be aligned.
+
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read JSON correction diagnostics from adata.uns.
+
+:param adata: AnnData returned by a correction function.
+:param keep: False removes the diagnostics after reading; default True.
+:returns: Matrix source, method and before/after count summaries.
+
+### `correction_summary(adata) -> pd.DataFrame`
+
+Return the recorded count reduction as a one-row table.
+
+:param adata: AnnData returned by a correction function.
+:returns: Mean counts, reduction_pct, contamination_estimate and method.
+
+### `counts_comparison_table(adata) -> pd.DataFrame`
+
+Compare per-cell original counts in layers['counts'] with corrected X.
+
+:param adata: AnnData returned by a correction function.
+:returns: cell_id, counts_before and counts_after in observation order.
+
+### `ambient_profile_table(adata) -> pd.DataFrame`
+
+Return the mean original-count profile used by simple subtraction.
+
+:param adata: Corrected AnnData with original counts in layers['counts'].
+:returns: gene and fraction columns. This is not SoupX's estimated profile.
+
+### `correction_figure(adata)`
+
+Plot original versus corrected counts per cell and return the Figure.
+
+:param adata: AnnData returned by a correction function.
+:returns: A matplotlib Figure for write_output.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+`remove_ambient` selects counts from `layers["counts"]`, aligned `raw`, then
+`X`, saves them in `layers["counts"]` and replaces `X` in place. The
+`contamination=0.05` default retains the CLI's fixed subtraction fraction;
+it is not an estimated biological contamination rate. The profile is the
+mean across input cells, an approximation when no empty droplets exist.
+This path is deterministic and needs no optional backend.
+
+`remove_ambient_soupx` requires R, Seurat and SoupX. It exchanges compressed
+10x matrices in a temporary directory and returns a new, aligned AnnData.
+Its wrapper exposes no seed, so results may vary. Unlike the compatibility
+CLI, the API propagates backend errors; it does not fall back to simple
+subtraction. `run_info` records the method, count source and reduction.
 
 ## Inputs & Outputs
 
@@ -36,22 +136,12 @@ multiplet barcodes.
 
 **Outputs**
 
-- `tables/cell_metadata.csv`
-- `tables/cellbender_output_cell_barcodes.csv`
-- `tables/cellbender_output_metrics.csv`
-- `tables/cells.csv`
-- `tables/corrected_counts.csv`
-- `tables/correction_summary.csv`
-- `tables/gene_expression.csv`
-- `tables/genes.csv`
 - `figures/barcode_rank.png`
 - `figures/count_distribution.png`
 - `figures/counts_comparison.png`
-- `figures/r_ambient_violin.png`
-- `README.md`
-- `analysis_summary.txt`
-- `cellbender_output_report.html`
-- `contamination.json`
+- `figure_data/` and its manifest, including correction summary and gene expression
+- `figures/r_enhanced/` only for successful `--r-enhanced` renders
+- `cellbender_output/` only when CellBender runs; files depend on its backend output
 - `processed.h5ad`
 - `report.md`
 - `result.json`
@@ -68,7 +158,9 @@ multiplet barcodes.
 
 ## Gotchas
 
-- **Unavailable backend silently falls back to `simple`.** `sc_ambient.py` logs `"Requested method '%s' is unavailable (...). Falling back to simple subtraction."` when CellBender is not installed or SoupX cannot reach R/rpy2.  After every non-`simple` run, confirm `result.json["summary"]["method_used"]` matches what you passed via `--method` — the flag is a request, not a guarantee.
+- The CLI can fall back to `simple` when a backend or its inputs are missing.
+  Check `result.json["summary"]["executed_method"]` and `fallback_reason`.
+  The SoupX API instead raises on failure.
 - **`--contamination` is bounded to `[0, 1)` (left-inclusive).** `sc_ambient.py` checks `0 <= float(args.contamination) < 1` and raises `ValueError("--contamination must be between 0 and 1 (for example 0.05).")` otherwise.  `0` is allowed (degenerate no-op); `1` and `5.0` (the common typo for `0.05`) both fail loudly.
 - **`--expected-cells` must be a positive integer.** `sc_ambient.py` raises `ValueError`.  Zero or negative values fail loudly here rather than producing a degenerate run.
 - **SoupX without both `--raw-matrix-dir` and `--filtered-matrix-dir` silently falls back to `simple`.** `sc_ambient.py` logs `"SoupX requires --raw-matrix-dir and --filtered-matrix-dir. Falling back to simple subtraction."` and continues with the simple path.  `result.json` records the fallback in `summary["fallback_reason"]`; CellBender uses just the filtered matrix and the simple path uses neither.
@@ -82,7 +174,7 @@ python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py --demo --output 
 # CellBender on a 10X-filtered AnnData
 python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \
   --input filtered.h5ad --output results/ \
-  --method cellbender --expected-cells 8000 --contamination 0.05
+  --method cellbender --raw-h5 raw_feature_bc_matrix.h5 --expected-cells 8000
 
 # SoupX with explicit raw + filtered matrices
 python skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py \

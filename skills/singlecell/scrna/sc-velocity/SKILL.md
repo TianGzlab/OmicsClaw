@@ -17,104 +17,124 @@ tags:
 
 # sc-velocity
 
-## When to use
+## Use from a step
 
-The user has a scRNA AnnData with `layers["spliced"]` and
-`layers["unspliced"]` already populated (typically from
-`sc-velocity-prep` running `velocyto` / `STARsolo` / `kb-python`) and
-wants per-cell velocity vectors, magnitude maps, and optional latent
-time. Three scVelo modes:
+```python
+velocity = load_skill("sc-velocity")
+adata = velocity.velocity(read_input("velocity_ready.h5ad"), mode="stochastic",
+                          n_jobs=4, random_state=0)
+write_output(velocity.velocity_summary(adata), "tables/velocity_summary.csv")
+write_output(velocity.top_velocity_genes(adata), "tables/top_velocity_genes.csv")
+write_output(adata, "intermediate/adata_velocity.h5ad")
+```
 
-- `scvelo_stochastic` (default) — fast, robust to noise.
-- `scvelo_dynamical` — full splicing-kinetics model + latent time
-  (slower, more interpretable).
-- `scvelo_steady_state` — simplest approximation, fastest.
+The function modifies the input, including scVelo gene filtering.
+`examples/example_step.py` uses `velocity_simulation`, a seeded kinetic
+simulation with spliced/unspliced layers. The old CLI demo is retained only
+for compatibility and does not establish biological velocity.
 
-For ordering cells along a trajectory without splicing kinetics use
-`sc-pseudotime`. To **generate** the spliced/unspliced layers from raw
-FASTQs / cellranger output, run `sc-velocity-prep` first.
+## API
 
-## Inputs & Outputs
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Inputs**
+### `velocity(adata, *, mode: str='stochastic', n_jobs: int=4, random_state: int=0)`
 
-- Modalities: scrna
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
+Compute scVelo velocity in place, including its gene filtering.
 
-**Outputs**
+Both spliced and unspliced count layers are required. The shared method
+filters/normalizes expression, explicitly constructs seeded neighbors,
+computes moments, velocity and its graph, and attempts latent time in
+dynamical mode. It can remove genes from every aligned matrix.
 
-- `tables/cell_metadata.csv`
-- `tables/top_velocity_genes.csv`
-- `tables/velocity_cells.csv`
-- `tables/velocity_summary.csv`
-- `figures/latent_time_distribution.png`
-- `figures/latent_time_umap.png`
-- `figures/r_embedding_discrete.png`
-- `figures/r_embedding_feature.png`
-- `figures/r_velocity.png`
-- `figures/velocity_magnitude_distribution.png`
-- `figures/velocity_magnitude_umap.png`
-- `figures/velocity_stream.png`
-- `figures/velocity_top_genes.png`
-- `adata_with_velocity.h5ad`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `layers`: `velocity`
-- When `--method` is `scvelo_dynamical`:
-  - AnnData additionally guarantees `obs`: `latent_time`
-  - Produces artifact `singlecell.latent_time` as `processed.h5ad` (`h5ad`)
+:param mode: stochastic (default), steady_state or dynamical.
+:param n_jobs: Dynamics worker budget, default 4; the shared small-data
+    branch uses one worker. Graph workers follow scVelo's own settings.
+:param random_state: Neighbor seed, default 0.
+:returns: The same AnnData. Inspect velocity_diagnostics before interpretation.
+:raises ValueError: Layers, mode or worker budget are invalid.
+:raises ImportError: scvelo is unavailable.
 
-## Flow
+### `run_info(adata, *, keep: bool=True) -> dict`
 
-1. Load AnnData (`--input`) or build a synthetic demo with spliced / unspliced layers.
-2. Preflight `requires_layers=("spliced", "unspliced")` for the chosen method.
-3. Run scVelo: filter & normalise → moments → velocity (mode-specific) → velocity graph.
-4. If `scvelo_dynamical`: also compute latent time and gene-level dynamics.
-5. Detect degenerate output (zero velocity genes / all-NaN) and emit a multi-action fix message in `result.json["suggested_actions"]` — does NOT raise.
-6. Render figures, write tables, save `processed.h5ad`, `report.md`, `result.json`.
+Read the mode and seed record; keep=False removes it from uns.
+
+### `velocity_diagnostics(adata) -> dict`
+
+Return zero/NaN and expressed-velocity-gene checks, not fit validation.
+
+The shared backend can substitute an identity graph after graph failure
+or a uniform latent-time sequence after latent-time failure. Consult its
+warnings; finite velocities do not validate those substituted outputs.
+Inputs with fewer than five cells or genes use its legacy arithmetic
+toy fallback, which is not a fitted kinetics model.
+
+### `velocity_summary(adata) -> pd.DataFrame`
+
+Return method, dimensions and latent-time availability as metric/value rows.
+
+### `velocity_cells_table(adata) -> pd.DataFrame`
+
+Return cell_id, optional UMAP coordinates, velocity magnitude and latent time.
+
+### `top_velocity_genes(adata, *, n_top: int=40) -> pd.DataFrame`
+
+Rank genes by mean absolute velocity and retain their signed mean.
+
+### `stream_figure(adata, *, basis: str='umap')`
+
+Return a scVelo stream Figure; X_<basis> must already be present.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Modes are `stochastic` (default), `steady_state` and `dynamical`.
+The shared backend filters and normalizes expression, computes moments,
+velocity and its graph, and attempts latent time for dynamical mode.
+`random_state=0` explicitly seeds the neighbor graph before moments.
+`n_jobs=4` controls dynamics; the legacy small-data branch uses one worker
+and graph workers follow scVelo's settings.
+
+The API never terminates its caller. The compatibility CLI drains its own
+loky workers and remaining descendants before exiting; it no longer kills
+the process group that may contain a notebook kernel.
 
 ## Gotchas
 
-- **Missing `spliced` / `unspliced` layers fail at preflight.** The METHOD_REGISTRY entries at `sc_velocity.py` declare `requires_layers=("spliced", "unspliced")`; the shared preflight aborts before scVelo runs. Generate the layers with `sc-velocity-prep` (`--method velocyto`, `starsolo`, or `kb-python`) first.
-- **Degenerate velocity is a soft fail, not an exception.** When scVelo can't fit a meaningful kinetics model, `sc_velocity.py` records `result.json["degenerate"]=True`, `n_velocity_genes=0`, `all_zero_velocity=True` and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_velocity_genes"]` before consuming the `velocity` layer downstream (e.g., before passing to `sc-pseudotime --method cellrank --cellrank-use-velocity`).
-- **`--method` accepts both METHOD_REGISTRY names and `_MODE_ALIAS_MAP` keys.** `sc_velocity.py` builds `choices` as the union — passing a legacy alias (e.g., `--mode stochastic`) silently maps to `scvelo_stochastic`. The actual mode used is recorded in `result.json["mode"]`.
-- **`scvelo_dynamical` is the only mode that produces `latent_time`.** `sc_velocity.py` writes `result.json["latent_time_range"]` only when `obs["latent_time"]` is populated. Stochastic / steady-state modes return velocity but no latent time — `figures/latent_time_umap.png` won't be written.
-- **`--input` is mandatory unless `--demo` (parser.error, exit code 2).** `sc_velocity.py` calls `parser.error("--input required when not using --demo")`. Once `--input` is provided, `main` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
-- **All scVelo backends require the `scvelo` Python package.** All 3 METHOD_REGISTRY entries declare `dependencies=("scvelo",)`. The shared dependency manager raises `ImportError` if scvelo isn't installed.
+- `_api.py:14` (`velocity`): scvelo 0.3.4's stochastic fit fails with NumPy 2.4
+  when its least-squares code assigns a one-element array to a scalar.
+  The tested CI combination is scvelo 0.3.4 with NumPy 2.0.2.
+- `velocity` can remove genes from X and all aligned layers (`_api.py:14`).
+- Inspect `velocity_diagnostics(adata)`, not just the presence of a velocity layer.
+  It detects zero/NaN output, not biological validity (`_api.py:49`).
+- The shared legacy backend can substitute an identity graph after graph
+  failure or uniform latent time after latent-time failure. Those are
+  placeholders, not recovered trajectories; check warnings (`_api.py:14`).
+- Fewer than five cells or genes use a legacy arithmetic toy fallback, not
+  a fitted kinetic model. Do not interpret it as RNA velocity (`_api.py:14`).
+- Only dynamical mode attempts latent time. `stream_figure` requires an
+  existing display embedding such as X_umap (`_api.py:118`).
+- Generate real splicing layers with `sc-velocity-prep`; copied or scaled
+  expression layers do not supply the required kinetic signal (`_api.py:14`).
+
+## Inputs & Outputs
+
+Input AnnData must contain `layers["spliced"]` and `layers["unspliced"]`.
+The API returns the annotated object and table/Figure helpers.
+
+CLI files include `processed.h5ad`, its `adata_with_velocity.h5ad` alias,
+`tables/velocity_summary.csv`, `tables/velocity_cells.csv`,
+`tables/top_velocity_genes.csv`, `report.md`, `result.json`, plots and
+figure-data manifests. Latent-time plots depend on that obs column;
+R-enhanced plots are optional.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic spliced/unspliced)
 python skills/singlecell/scrna/sc-velocity/sc_velocity.py --demo --output /tmp/sc_velocity_demo
-
-# Default stochastic on real velocity-prepped data
-python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
-  --input velocity_ready.h5ad --output results/
-
-# Dynamical (full kinetics + latent time)
-python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
-  --input velocity_ready.h5ad --output results/ \
-  --method scvelo_dynamical --n-jobs 8
-
-# Steady-state (fastest approximation)
-python skills/singlecell/scrna/sc-velocity/sc_velocity.py \
-  --input velocity_ready.h5ad --output results/ \
-  --method scvelo_steady_state
+python skills/singlecell/scrna/sc-velocity/sc_velocity.py --input velocity_ready.h5ad --mode stochastic --output results/
 ```
-
-## See also
-
-- `references/parameters.md` — every CLI flag, per-mode notes
-- `references/methodology.md` — when each scVelo mode wins; degenerate-output checklist
-- `references/output_contract.md` — `layers["velocity"]` / `obs["latent_time"]` schema
-- Adjacent skills: `sc-velocity-prep` (upstream — produces `layers["spliced"]` / `layers["unspliced"]`), `sc-pseudotime` (parallel — graph-based trajectory ordering, can consume velocity via `--cellrank-use-velocity`), `sc-clustering` (upstream — provides `obsm["X_umap"]` for the stream plot)
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`anndata`, `cellrank`, `matplotlib`, `numpy`, `palantir`, `pandas`, `pyVIA`, `scanpy`, `scikit-learn`, `scipy`, `scvelo`, `seaborn`
+`anndata`, `joblib`, `matplotlib`, `numpy`, `pandas`, `psutil`, `scanpy`, `scikit-learn`, `scipy`, `scvelo`, `seaborn`

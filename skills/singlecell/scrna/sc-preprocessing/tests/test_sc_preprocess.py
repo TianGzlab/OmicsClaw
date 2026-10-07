@@ -20,6 +20,7 @@ def tmp_output(tmp_path):
     return tmp_path / "sc_preprocess_out"
 
 
+@pytest.mark.cli_subprocess
 def test_demo_mode(tmp_output):
     """sc-preprocessing --demo should run without error."""
     result = subprocess.run(
@@ -44,6 +45,7 @@ def test_demo_mode(tmp_output):
     assert not (tmp_output / "reproducibility" / "environment.txt").exists()
 
 
+@pytest.mark.cli_subprocess
 def test_demo_report_content(tmp_output):
     """Report should contain expected sections."""
     subprocess.run(
@@ -59,6 +61,7 @@ def test_demo_report_content(tmp_output):
     assert "Disclaimer" in report
 
 
+@pytest.mark.cli_subprocess
 def test_demo_result_json(tmp_output):
     """result.json should contain expected keys."""
     subprocess.run(
@@ -155,6 +158,7 @@ def _has_seurat_r_stack() -> bool:
 
 
 @pytest.mark.skipif(not _has_seurat_r_stack(), reason="R Seurat preprocessing stack not installed")
+@pytest.mark.cli_subprocess
 def test_demo_mode_seurat(tmp_output):
     """sc-preprocessing --method seurat should run when the R stack is available."""
     result = subprocess.run(

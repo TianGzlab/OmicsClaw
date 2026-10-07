@@ -8,10 +8,8 @@ import json
 import logging
 import shlex
 import sys
-import tempfile
 from pathlib import Path
 
-import h5py
 
 import matplotlib
 
@@ -36,12 +34,7 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills._sdk.deps import validate_r_environment
-from skills._sdk.r_script_runner import RScriptRunner
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
-from skills._sdk import deps as sc_dep_manager
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib import qc as sc_qc_utils
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
     get_matrix_contract,
@@ -127,262 +120,12 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-
-
 def _build_count_like_export_adata(adata):
     matrix, source, warnings = select_count_like_expression_source(adata, preferred_layer="counts")
     export = sc.AnnData(X=matrix.copy(), obs=adata.obs.copy(), var=adata.var.copy())
     export.obs_names = adata.obs_names.copy()
     export.var_names = adata.var_names.copy()
     return export, source, warnings
-
-
-def _run_r_doublet_script(
-    adata,
-    *,
-    script_name: str,
-    output_csv: str,
-    required_packages: list[str],
-    expected_doublet_rate: float,
-    extra_args: list[str] | None = None,
-):
-    validate_r_environment(required_r_packages=required_packages)
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
-    export, source, _ = _build_count_like_export_adata(adata)
-
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_doublet_r_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
-        output_dir = tmpdir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        export.write_h5ad(input_h5ad)
-        with h5py.File(input_h5ad, "a") as handle:
-            if "layers" in handle and len(handle["layers"].keys()) == 0:
-                del handle["layers"]
-        runner.run_script(
-            script_name,
-            args=[str(input_h5ad), str(output_dir), str(expected_doublet_rate), *(extra_args or [])],
-            expected_outputs=[output_csv],
-            output_dir=output_dir,
-        )
-        df = pd.read_csv(output_dir / output_csv, index_col=0)
-
-    return df, source
-
-
-def run_doubletfinder(adata, *, expected_doublet_rate: float):
-    return _run_r_doublet_script(
-        adata,
-        script_name="sc_doubletfinder.R",
-        output_csv="doubletfinder_results.csv",
-        expected_doublet_rate=expected_doublet_rate,
-        required_packages=["Seurat", "DoubletFinder", "SingleCellExperiment", "zellkonverter"],
-    )
-
-
-def run_scdblfinder(adata, *, expected_doublet_rate: float):
-    return _run_r_doublet_script(
-        adata,
-        script_name="sc_scdblfinder.R",
-        output_csv="scdblfinder_results.csv",
-        expected_doublet_rate=expected_doublet_rate,
-        required_packages=["scDblFinder", "SingleCellExperiment", "zellkonverter"],
-    )
-
-
-def _normalize_r_result(result, *, fallback_source: str = "unknown") -> tuple[pd.DataFrame, str]:
-    """Accept either ``df`` or ``(df, source)`` from R-wrapper helpers."""
-    if isinstance(result, tuple) and len(result) == 2:
-        df, source = result
-        return df, str(source)
-    return result, fallback_source
-
-
-def run_scds(adata, *, expected_doublet_rate: float, mode: str):
-    return _run_r_doublet_script(
-        adata,
-        script_name="sc_scds.R",
-        output_csv="scds_results.csv",
-        expected_doublet_rate=expected_doublet_rate,
-        required_packages=["scds", "SingleCellExperiment", "zellkonverter"],
-        extra_args=[mode],
-    )
-
-
-def _copy_doublet_columns(source_adata, target_adata) -> None:
-    for key in ("doublet_score", "predicted_doublet", "doublet_classification"):
-        if key in source_adata.obs.columns:
-            target_adata.obs[key] = source_adata.obs[key].values
-
-
-def detect_doublets_scrublet(
-    adata,
-    *,
-    expected_doublet_rate: float,
-    threshold: float | None,
-    batch_key: str | None,
-) -> dict:
-    export, expression_source, _ = _build_count_like_export_adata(adata)
-    export = sc_qc_utils.run_scrublet_detection(
-        export,
-        batch_key=batch_key,
-        expected_doublet_rate=expected_doublet_rate,
-        auto_rate=False,
-    )
-    export.obs["doublet_classification"] = np.where(export.obs["predicted_doublet"], "Doublet", "Singlet")
-    if threshold is not None:
-        export.obs["predicted_doublet"] = export.obs["doublet_score"] > threshold
-        export.obs["doublet_classification"] = np.where(export.obs["predicted_doublet"], "Doublet", "Singlet")
-
-    _copy_doublet_columns(export, adata)
-    n_doublets = int(adata.obs["predicted_doublet"].sum())
-    return {
-        "method": "scrublet",
-        "requested_method": "scrublet",
-        "executed_method": "scrublet",
-        "fallback_used": False,
-        "fallback_reason": None,
-        "n_doublets": n_doublets,
-        "doublet_rate": float(n_doublets / max(adata.n_obs, 1)),
-        "expected_rate": expected_doublet_rate,
-        "expression_source": expression_source,
-        "batch_key": batch_key,
-    }
-
-
-def detect_doublets_doubletdetection(
-    adata,
-    *,
-    n_iters: int,
-    standard_scaling: bool,
-    random_state: int = 0,
-) -> dict:
-    doubletdetection = sc_dep_manager.require("doubletdetection", feature="doublet detection")
-    export, expression_source, _ = _build_count_like_export_adata(adata)
-    clf = doubletdetection.BoostClassifier(
-        n_iters=n_iters,
-        clustering_algorithm="leiden",
-        standard_scaling=standard_scaling,
-        random_state=random_state,
-        verbose=False,
-        n_jobs=1,
-    )
-    clf_fit = clf.fit(export.X)
-    scores = np.asarray(clf_fit.doublet_score()).ravel()
-    labels = np.asarray(clf_fit.predict()).ravel()
-    predicted = labels.astype(int) != 0
-
-    adata.obs["doublet_score"] = scores
-    adata.obs["predicted_doublet"] = predicted
-    adata.obs["doublet_classification"] = np.where(predicted, "Doublet", "Singlet")
-    n_doublets = int(predicted.sum())
-    return {
-        "method": "doubletdetection",
-        "requested_method": "doubletdetection",
-        "executed_method": "doubletdetection",
-        "fallback_used": False,
-        "fallback_reason": None,
-        "n_doublets": n_doublets,
-        "doublet_rate": float(n_doublets / max(adata.n_obs, 1)),
-        "expression_source": expression_source,
-    }
-
-
-def _apply_r_results(adata, df: pd.DataFrame) -> None:
-    df = df.reindex(adata.obs_names)
-    adata.obs["doublet_score"] = pd.to_numeric(df["doublet_score"], errors="coerce").values
-    classification = df["classification"].fillna("Singlet").astype(str).str.strip()
-    adata.obs["doublet_classification"] = classification.str.capitalize().values
-    adata.obs["predicted_doublet"] = df["predicted_doublet"].fillna(False).astype(bool).values
-
-
-def detect_doublets_doubletfinder(adata, *, expected_doublet_rate: float) -> dict:
-    try:
-        df, expression_source = _normalize_r_result(
-            run_doubletfinder(adata, expected_doublet_rate=expected_doublet_rate),
-            fallback_source="unknown",
-        )
-        executed_method = "doubletfinder"
-        fallback_reason = None
-    except Exception as exc:
-        logger.warning("DoubletFinder runtime failed (%s). Falling back to scDblFinder.", exc)
-        df, expression_source = _normalize_r_result(
-            run_scdblfinder(adata, expected_doublet_rate=expected_doublet_rate),
-            fallback_source="unknown",
-        )
-        executed_method = "scdblfinder"
-        fallback_reason = f"DoubletFinder runtime failed and wrapper fell back to scDblFinder: {exc}"
-
-    _apply_r_results(adata, df)
-    n_doublets = int(adata.obs["predicted_doublet"].sum())
-    return {
-        "method": executed_method,
-        "requested_method": "doubletfinder",
-        "executed_method": executed_method,
-        "fallback_used": fallback_reason is not None,
-        "fallback_reason": fallback_reason,
-        "n_doublets": n_doublets,
-        "doublet_rate": float(n_doublets / max(adata.n_obs, 1)),
-        "expected_rate": expected_doublet_rate,
-        "expression_source": expression_source,
-    }
-
-
-def detect_doublets_scdblfinder(adata, *, expected_doublet_rate: float) -> dict:
-    df, expression_source = _normalize_r_result(
-        run_scdblfinder(adata, expected_doublet_rate=expected_doublet_rate),
-        fallback_source="unknown",
-    )
-    _apply_r_results(adata, df)
-    n_doublets = int(adata.obs["predicted_doublet"].sum())
-    return {
-        "method": "scdblfinder",
-        "requested_method": "scdblfinder",
-        "executed_method": "scdblfinder",
-        "fallback_used": False,
-        "fallback_reason": None,
-        "n_doublets": n_doublets,
-        "doublet_rate": float(n_doublets / max(adata.n_obs, 1)),
-        "expected_rate": expected_doublet_rate,
-        "expression_source": expression_source,
-    }
-
-
-def detect_doublets_scds(adata, *, expected_doublet_rate: float, mode: str) -> dict:
-    requested_mode = str(mode)
-    executed_mode = requested_mode
-    fallback_reason = None
-    try:
-        df, expression_source = _normalize_r_result(
-            run_scds(adata, expected_doublet_rate=expected_doublet_rate, mode=requested_mode),
-            fallback_source="unknown",
-        )
-    except Exception as exc:
-        if requested_mode == "cxds":
-            raise
-        logger.warning("scds runtime failed for mode=%s (%s). Falling back to cxds.", requested_mode, exc)
-        df, expression_source = _normalize_r_result(
-            run_scds(adata, expected_doublet_rate=expected_doublet_rate, mode="cxds"),
-            fallback_source="unknown",
-        )
-        executed_mode = "cxds"
-        fallback_reason = f"scds mode `{requested_mode}` failed and wrapper fell back to `cxds`: {exc}"
-    _apply_r_results(adata, df)
-    n_doublets = int(adata.obs["predicted_doublet"].sum())
-    return {
-        "method": "scds",
-        "requested_method": "scds",
-        "executed_method": "scds",
-        "fallback_used": fallback_reason is not None,
-        "fallback_reason": fallback_reason,
-        "n_doublets": n_doublets,
-        "doublet_rate": float(n_doublets / max(adata.n_obs, 1)),
-        "expected_rate": expected_doublet_rate,
-        "expression_source": expression_source,
-        "requested_scds_mode": requested_mode,
-        "executed_scds_mode": executed_mode,
-    }
 
 
 def _candidate_embeddings(adata) -> list[str]:
@@ -782,30 +525,6 @@ def _build_public_params(args, method: str, summary: dict) -> dict:
     return params
 
 
-def _dispatch_detection(adata, args, method: str) -> dict:
-    if method == "scrublet":
-        return detect_doublets_scrublet(
-            adata,
-            expected_doublet_rate=args.expected_doublet_rate,
-            threshold=args.threshold,
-            batch_key=args.batch_key,
-        )
-    if method == "doubletdetection":
-        return detect_doublets_doubletdetection(
-            adata,
-            n_iters=args.doubletdetection_n_iters,
-            standard_scaling=bool(args.doubletdetection_standard_scaling),
-            random_state=args.random_state,
-        )
-    if method == "doubletfinder":
-        return detect_doublets_doubletfinder(adata, expected_doublet_rate=args.expected_doublet_rate)
-    if method == "scdblfinder":
-        return detect_doublets_scdblfinder(adata, expected_doublet_rate=args.expected_doublet_rate)
-    if method == "scds":
-        return detect_doublets_scds(adata, expected_doublet_rate=args.expected_doublet_rate, mode=args.scds_mode)
-    raise ValueError(f"Unsupported method: {method}")
-
-
 def get_demo_data():
     adata, _ = sc_io.load_repo_demo_data("pbmc3k_raw")
     return adata
@@ -827,6 +546,8 @@ def _render_r_enhanced(output_dir, figure_data_dir, r_enhanced):
 
 
 def main():
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
     parser = argparse.ArgumentParser(description="Single-Cell Doublet Detection")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -843,7 +564,7 @@ def main():
     )
     parser.add_argument("--scds-mode", choices=["hybrid", "cxds", "bcds"], default="cxds")
     parser.add_argument("--random-state", type=int, default=0,
-                        help="Random seed for DoubletDetection (default: 0)")
+                        help="Random seed for the selected backend (default: 0)")
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
 
@@ -875,7 +596,14 @@ def main():
         logger,
     )
 
-    summary = _dispatch_detection(adata, args, method)
+    library.detect_doublets(
+        adata, method=method, expected_doublet_rate=args.expected_doublet_rate,
+        threshold=args.threshold, batch_key=args.batch_key,
+        n_iters=args.doubletdetection_n_iters,
+        standard_scaling=bool(args.doubletdetection_standard_scaling),
+        scds_mode=args.scds_mode, random_state=args.random_state,
+    )
+    summary = library.run_info(adata, keep=False)
     summary.setdefault("requested_method", method)
     summary.setdefault("executed_method", summary.get("method", method))
     summary.setdefault("fallback_used", summary["requested_method"] != summary["executed_method"])

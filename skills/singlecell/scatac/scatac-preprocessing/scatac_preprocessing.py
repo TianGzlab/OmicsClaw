@@ -26,8 +26,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
-from sklearn.decomposition import TruncatedSVD
-from sklearn.preprocessing import StandardScaler
 
 _SDK_ANCHOR = next(
     (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
@@ -37,6 +35,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -112,164 +111,6 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _matrix_data_view(matrix) -> np.ndarray:
-    if sp.issparse(matrix):
-        return matrix.data
-    return np.asarray(matrix).ravel()
-
-
-def _validate_input_matrix(adata) -> None:
-    if adata.X is None:
-        raise ValueError("Input AnnData has no matrix in `adata.X`.")
-
-    data = _matrix_data_view(adata.X)
-    if data.size == 0:
-        raise ValueError("Input matrix is empty.")
-    if np.any(data < 0):
-        raise ValueError("scATAC preprocessing requires a non-negative accessibility matrix.")
-
-    fractional = np.abs(data - np.round(data)) > 1e-6
-    if np.any(fractional):
-        logger.warning(
-            "Input matrix contains non-integer values. Continuing, but TF-IDF + LSI "
-            "is intended for raw-count-like or binary accessibility matrices."
-        )
-
-
-def _compute_qc_metrics(adata) -> None:
-    counts = adata.X
-    total_counts = np.asarray(counts.sum(axis=1)).ravel()
-    n_peaks_by_counts = np.asarray((counts > 0).sum(axis=1)).ravel()
-    fraction_accessible = n_peaks_by_counts / max(int(adata.n_vars), 1)
-
-    adata.obs["total_counts"] = total_counts.astype(float)
-    adata.obs["n_peaks_by_counts"] = n_peaks_by_counts.astype(int)
-    adata.obs["fraction_accessible"] = fraction_accessible.astype(float)
-
-
-def _filter_cells_and_peaks(adata, *, min_peaks: int, min_cells: int):
-    _compute_qc_metrics(adata)
-    keep_cells = adata.obs["n_peaks_by_counts"] >= min_peaks
-    if int(keep_cells.sum()) == 0:
-        raise RuntimeError("All cells were removed by `min_peaks`. Lower the threshold.")
-    adata = adata[keep_cells.to_numpy(), :].copy()
-
-    keep_peaks = np.asarray((adata.X > 0).sum(axis=0)).ravel() >= min_cells
-    if int(keep_peaks.sum()) == 0:
-        raise RuntimeError("All peaks were removed by `min_cells`. Lower the threshold.")
-    adata = adata[:, keep_peaks].copy()
-    _compute_qc_metrics(adata)
-    return adata
-
-
-def _select_top_peaks(adata, *, n_top_peaks: int):
-    total_counts = np.asarray(adata.X.sum(axis=0)).ravel()
-    n_cells_by_counts = np.asarray((adata.X > 0).sum(axis=0)).ravel()
-    adata.var["total_counts"] = total_counts.astype(float)
-    adata.var["n_cells_by_counts"] = n_cells_by_counts.astype(int)
-
-    preprocess_state = adata.uns.setdefault("scatac_preprocess", {})
-    preprocess_state["n_peaks_after_filter"] = int(adata.n_vars)
-
-    if n_top_peaks >= int(adata.n_vars):
-        adata.var["selected_for_lsi"] = True
-        preprocess_state["n_selected_peaks"] = int(adata.n_vars)
-        return adata
-
-    order = np.argsort(-total_counts, kind="mergesort")
-    keep = np.sort(order[:n_top_peaks])
-    adata = adata[:, keep].copy()
-    adata.var["selected_for_lsi"] = True
-    preprocess_state["n_selected_peaks"] = int(adata.n_vars)
-    return adata
-
-
-def _tfidf_normalize(matrix, *, scale_factor: float):
-    matrix = matrix.tocsr().astype(np.float32)
-
-    cell_sums = np.asarray(matrix.sum(axis=1)).ravel()
-    cell_sums[cell_sums == 0] = 1.0
-    tf = matrix.multiply((1.0 / cell_sums)[:, None])
-
-    peak_presence = np.asarray((matrix > 0).sum(axis=0)).ravel().astype(np.float32)
-    peak_presence[peak_presence == 0] = 1.0
-    idf = matrix.shape[0] / peak_presence
-
-    tfidf = tf.multiply(idf)
-    if scale_factor != 1.0:
-        tfidf = tfidf.multiply(scale_factor)
-    tfidf.data = np.log1p(tfidf.data)
-    return tfidf.tocsr()
-
-
-def preprocess_tfidf_lsi(
-    adata,
-    *,
-    min_peaks: int = 200,
-    min_cells: int = 5,
-    n_top_peaks: int = 10000,
-    tfidf_scale_factor: float = 10000.0,
-    n_lsi: int = 30,
-    n_neighbors: int = 15,
-    leiden_resolution: float = 0.8,
-):
-    """Implementation-aligned scATAC preprocessing pipeline."""
-    logger.info("Input: %d cells x %d peaks", adata.n_obs, adata.n_vars)
-    _validate_input_matrix(adata)
-
-    adata = _filter_cells_and_peaks(
-        adata,
-        min_peaks=min_peaks,
-        min_cells=min_cells,
-    )
-    adata = _select_top_peaks(adata, n_top_peaks=n_top_peaks)
-
-    adata.layers["counts"] = adata.X.copy()
-    adata.raw = adata.copy()
-    adata.X = _tfidf_normalize(adata.layers["counts"], scale_factor=tfidf_scale_factor)
-
-    max_components = min(int(n_lsi), int(adata.n_obs) - 1, int(adata.n_vars) - 1)
-    if max_components < 2:
-        raise RuntimeError("Not enough cells or peaks remain to compute a stable LSI embedding.")
-
-    svd = TruncatedSVD(n_components=max_components, random_state=0)
-    lsi = svd.fit_transform(adata.X)
-
-    if bool(METHOD_PARAM_DEFAULTS["tfidf_lsi"]["scale_lsi_embeddings"]):
-        lsi = StandardScaler().fit_transform(lsi)
-
-    adata.obsm["X_lsi"] = lsi
-    adata.varm["LSI"] = svd.components_.T
-    variance_ratio = np.asarray(svd.explained_variance_ratio_, dtype=float)
-    singular_values = np.asarray(svd.singular_values_, dtype=float)
-
-    graph_start_idx = 1 if max_components > 1 else 0
-    graph_rep = lsi[:, graph_start_idx:]
-    if graph_rep.shape[1] == 0:
-        graph_start_idx = 0
-        graph_rep = lsi
-    adata.obsm["X_lsi_graph"] = graph_rep
-    adata.uns["lsi"] = {
-        "variance_ratio": variance_ratio,
-        "singular_values": singular_values,
-        "skip_first_component": bool(graph_start_idx == 1),
-        "graph_component_start": int(graph_start_idx + 1),
-        "graph_component_count": int(graph_rep.shape[1]),
-    }
-
-    sc.pp.neighbors(adata, use_rep="X_lsi_graph", n_neighbors=n_neighbors)
-    sc.tl.umap(adata)
-    sc.tl.leiden(
-        adata,
-        resolution=leiden_resolution,
-        key_added="leiden",
-        flavor="igraph",
-        directed=False,
-        n_iterations=2,
-    )
-    adata.obs["leiden"] = adata.obs["leiden"].astype(str).astype("category")
-    adata.obs["preprocess_method"] = "tfidf_lsi"
-    return adata
 
 
 def build_effective_params(method: str, args) -> dict:
@@ -291,20 +132,6 @@ def build_public_params(effective_params: dict) -> dict:
     return {key: effective_params[key] for key in PUBLIC_PARAM_KEYS if key in effective_params}
 
 
-def _build_cluster_summary_table(summary: dict) -> pd.DataFrame:
-    cluster_counts = summary.get("cluster_counts", {})
-    n_cells = max(int(summary.get("n_cells", 0)), 1)
-    rows = [
-        {
-            "cluster": str(cluster),
-            "n_cells": int(count),
-            "proportion_pct": round(int(count) / n_cells * 100, 2),
-        }
-        for cluster, count in cluster_counts.items()
-    ]
-    if not rows:
-        return pd.DataFrame(columns=["cluster", "n_cells", "proportion_pct"])
-    return pd.DataFrame(rows).sort_values(["n_cells", "cluster"], ascending=[False, True]).reset_index(drop=True)
 
 
 def _build_preprocess_summary_table(summary: dict, effective_params: dict) -> pd.DataFrame:
@@ -326,31 +153,8 @@ def _build_preprocess_summary_table(summary: dict, effective_params: dict) -> pd
     return pd.DataFrame(records)
 
 
-def _build_peak_summary_table(adata, n_top: int = 50) -> pd.DataFrame:
-    if "total_counts" not in adata.var.columns:
-        return pd.DataFrame(columns=["peak", "total_counts", "n_cells_by_counts"])
-
-    peak_df = adata.var.copy()
-    peak_df["peak"] = peak_df.index.astype(str)
-    peak_df = peak_df.sort_values(
-        ["total_counts", "n_cells_by_counts", "peak"],
-        ascending=[False, False, True],
-    )
-    keep_cols = ["peak", "total_counts", "n_cells_by_counts"]
-    return peak_df.loc[:, keep_cols].head(n_top).reset_index(drop=True)
 
 
-def _build_lsi_variance_table(adata) -> pd.DataFrame:
-    if "lsi" not in adata.uns or "variance_ratio" not in adata.uns["lsi"]:
-        return pd.DataFrame(columns=["component", "variance_ratio", "cumulative_variance_ratio"])
-    variance_ratio = np.asarray(adata.uns["lsi"]["variance_ratio"], dtype=float)
-    return pd.DataFrame(
-        {
-            "component": np.arange(1, len(variance_ratio) + 1),
-            "variance_ratio": variance_ratio,
-            "cumulative_variance_ratio": np.cumsum(variance_ratio),
-        }
-    )
 
 
 def _build_umap_points_table(adata, cluster_key: str) -> pd.DataFrame:
@@ -367,28 +171,22 @@ def _build_umap_points_table(adata, cluster_key: str) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-def _build_qc_metrics_table(adata) -> pd.DataFrame:
-    qc_cols = [column for column in ("n_peaks_by_counts", "total_counts", "fraction_accessible") if column in adata.obs.columns]
-    if not qc_cols:
-        return pd.DataFrame(columns=["cell_id"])
-    qc_df = adata.obs.loc[:, qc_cols].copy()
-    qc_df.insert(0, "cell_id", adata.obs_names.astype(str))
-    return qc_df.reset_index(drop=True)
 
 
 def _prepare_scatac_gallery_context(adata, summary: dict, effective_params: dict, output_dir: Path) -> dict:
+    library = load_skill(SKILL_NAME)
     cluster_key = str(summary.get("cluster_key", "leiden"))
     qc_metric_cols = [column for column in ("n_peaks_by_counts", "total_counts", "fraction_accessible") if column in adata.obs.columns]
     return {
         "output_dir": Path(output_dir),
         "cluster_key": cluster_key,
         "qc_metric_cols": qc_metric_cols,
-        "cluster_summary_df": _build_cluster_summary_table(summary),
+        "cluster_summary_df": library.cluster_summary(adata),
         "preprocess_summary_df": _build_preprocess_summary_table(summary, effective_params),
-        "peak_summary_df": _build_peak_summary_table(adata),
-        "lsi_variance_df": _build_lsi_variance_table(adata),
+        "peak_summary_df": library.peak_summary(adata),
+        "lsi_variance_df": library.lsi_variance_table(adata),
         "umap_points_df": _build_umap_points_table(adata, cluster_key),
-        "qc_metrics_df": _build_qc_metrics_table(adata),
+        "qc_metrics_df": library.qc_metrics_table(adata),
     }
 
 
@@ -812,14 +610,17 @@ def main():
     else:
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
-        adata = sc_io.smart_load(args.input_path)
+        path = Path(args.input_path)
+        adata = (load_skill(SKILL_NAME).read_10x_peaks(path)
+                 if path.is_dir() or path.suffix.lower() in {".h5", ".hdf5"}
+                 else sc_io.smart_load(args.input_path))
         input_file = args.input_path
 
     method = validate_method_choice(args.method, METHOD_REGISTRY)
     effective_params = build_effective_params(method, args)
     public_params = build_public_params(effective_params)
 
-    adata = preprocess_tfidf_lsi(
+    adata = load_skill(SKILL_NAME).preprocess(
         adata,
         min_peaks=int(effective_params["min_peaks"]),
         min_cells=int(effective_params["min_cells"]),

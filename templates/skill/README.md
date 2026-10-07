@@ -43,15 +43,19 @@ names in `__all__` are reachable, and every call is recorded in the step's
 ledger. The leading underscore keeps the file out of the guards that count
 main scripts. The rules:
 
-- Compute only. No file reads or writes, no logging configuration, no global
-  state: steps read with `read_input` and write with `write_output`, and the
-  CLI does its own I/O. A method that needs temporary files for R makes them
-  with `tempfile` inside the function.
+- Compute and return objects. Steps read with `read_input` and write with
+  `write_output`; the CLI owns its I/O. A `read_*` function may take a `Path`
+  and read files without writing any. Its docstring tells the caller to pass
+  it as `reader=` to `read_input`, so the input is recorded. External counting
+  tools stay in CLI skills.
 - The first parameter is the data object (`adata` for single-cell); every
   other parameter is keyword-only, with the CLI's default. A function that
   modifies an AnnData does it in place and returns the same object (say so
   when it returns a new one). Tables are `DataFrame`s, figures matplotlib
-  `Figure`s. Random processes take an explicit `random_state`.
+  `Figure`s. Random processes take a keyword-only `random_state`, using the
+  CLI's seed or 0 when it had none. Pass it to every backend that accepts a
+  seed. If the backend cannot be seeded, say "results vary between runs" in
+  its docstring and leave that method out of parity recording.
 - Diagnostics a run produces (what was filtered, which matrix was used, a
   fallback) go into `adata.uns` as a JSON string, read back by a public
   `run_info(adata, *, keep=True)`; the CLI calls it with `keep=False` so
@@ -60,8 +64,29 @@ main scripts. The rules:
   saying what it does; `:param name:` for each parameter with its meaning,
   where the default comes from and when to change it; `:returns:` and
   `:raises:`.
-- Import the domain `_lib` and `skills._sdk` only: never `omicsclaw`, never
-  another skill.
+- Internal imports are limited to the domain's `_lib` and `skills._sdk`;
+  neither `omicsclaw` nor another skill is an allowed dependency.
+- Import optional backends such as scvi, liana and scvelo inside their method
+  functions. Top-level scientific imports are limited to the skill's base
+  dependencies: anndata, numpy, pandas, scanpy and scipy. A missing backend
+  raises `ImportError` naming the package and suggesting `install_skill_deps`.
+  List it under `## Dependencies`.
+- A fallback to another real method warns and records `requested_method`,
+  `executed_method` and `fallback_reason` in `run_info`. Missing user data
+  raises an error; do not replace it with fabricated gene sets or TF lists.
+  A CLI may catch a library error and run a fallback, recorded in `result.json`.
+- R methods use `RScriptRunner` inside a `tempfile` directory. Exchange counts
+  as Matrix Market with `barcodes.tsv`, `features.tsv` and needed metadata in
+  `obs.csv`. R reads them with `Matrix::readMM` and `read.csv`. Keep new R
+  scripts in the skill's `rscripts/`; the shared SDK script set is frozen.
+- Leave environment settings, logging setup and other global state unchanged
+  at import time. CLI-specific setup belongs in the CLI shell.
+- Provide one to three common plotting functions returning `Figure` objects;
+  implement them in `_api.py`. The CLI gallery may keep using the domain's
+  visualization helpers.
+- Document whether each AnnData function reads `X`, `layers["counts"]` or
+  `.raw`. For log-normalised expression in a `pbmc3k_processed` example, use
+  `adata.raw.to_adata()`. Console messages use ASCII.
 - The CLI script loads its own library with `load_skill(SKILL_NAME)` inside
   `main()` and keeps argparse, the report, the figure gallery and
   `result.json`. The template's `replace_me.py` finds its library by folder

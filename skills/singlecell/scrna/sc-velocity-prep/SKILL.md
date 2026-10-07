@@ -11,10 +11,25 @@ tags:
 - velocyto
 - starsolo
 - spliced-unspliced
-- kb-python
 ---
 
 # sc-velocity-prep
+
+## Use from a step
+
+This is CLI_ONLY: it runs external preparation tools or imports their files.
+
+```python
+from skills._sdk.notebook import run_cli
+
+run_cli("sc-velocity-prep", "--input", "data/velocity.loom",
+        "--base-h5ad", "data/clustered.h5ad",
+        inputs=["data/velocity.loom", "data/clustered.h5ad"])
+```
+
+The demo splits PBMC3k counts into fixed 82% spliced, 14% unspliced and
+4% ambiguous layers. It checks packaging, not velocity biology or external
+tool installation. There is no `_api.py` for this skill.
 
 ## When to use
 
@@ -47,30 +62,20 @@ scRNA preprocessing use `sc-preprocessing`.
 
 **Outputs**
 
-- `tables/Summary.csv`
-- `tables/barcodes.tsv`
-- `tables/cell_metadata.csv`
-- `tables/features.tsv`
-- `tables/genes.tsv`
-- `tables/metrics_summary.csv`
 - `tables/top_velocity_genes.csv`
 - `tables/velocity_layer_summary.csv`
 - `figures/velocity_gene_balance.png`
 - `figures/velocity_layer_fraction.png`
 - `figures/velocity_layer_summary.png`
 - `figures/velocity_top_genes_stacked.png`
-- `3M-february-2018.txt`
-- `737K-august-2016.txt`
-- `Aligned.sortedByCoord.out.bam`
-- `analysis_summary.txt`
-- `multiqc_report.html`
-- `possorted_genome_bam.bam`
 - `processed.h5ad`
 - `velocity_input.h5ad`
-- `web_summary.html`
+- `figures/manifest.json`, `figure_data/manifest.json`, plot-data CSV files
+- `reproducibility/commands.sh`, `reproducibility/requirements.txt`
+- Conditional backend artifacts under `artifacts/`; imported loom/STARsolo inputs do not create new BAM files.
 - `report.md`
 - `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `layers`: `spliced`, `unspliced`, `ambiguous`
+- Processed AnnData — `spliced`, `unspliced` layers; `ambiguous` only when supplied by the source
 
 ## Flow
 
@@ -89,11 +94,13 @@ scRNA preprocessing use `sc-preprocessing`.
 - **STARsolo Velocyto matrix loader has a fallback for index-name quirks.** `sc_velocity_prep.py` is documented as "with a local fallback for index-name quirks"; `_load_starsolo_velocyto_dir_safe` raises `FileNotFoundError(f"Could not locate STARsolo Velocyto matrices under: {path}")` when nothing matches even with the fallback. Common when STARsolo finished partial / was killed mid-run.
 - **`--input` mandatory unless `--demo` (parser.error, exit code 2).** `sc_velocity_prep.py` calls `parser.error("--input required when not using --demo")`. Once provided, `main` raises `FileNotFoundError(f"Input path not found: {input_path}")` for a missing path.
 - **`--method` choices are exactly `velocyto` / `starsolo`.** `sc_velocity_prep.py` declares the choices via argparse; `kb-python` is mentioned in upstream-prep docstrings but is not a valid `--method` value here. Use the dedicated kb-python tooling outside OmicsClaw if you need that path.
+- `sc_velocity_prep.py:main` defaults to eight threads. Reference directories named in error messages are suggestions, not shipped assets. Verify the `velocyto` command can import before a long BAM run; migration preflight found `undefined symbol: __log10_finite` in the installed copy despite its presence on PATH.
+- `sc_velocity_prep.py:main` writes a new `.raw` snapshot and records `.X` as raw counts even when `--base-h5ad` contains normalized `.X`. `_lib/upstream.py:merge_velocity_layers` also replaces `layers["counts"]` with the velocity input's counts (the sum of its available splicing layers for imported data). Inspect this existing contract mismatch before treating the merged object's `.X` or `.raw` as counts; the spliced/unspliced layers remain separate.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic loom; does NOT exercise velocyto / STARsolo)
+# Demo (proportional PBMC3k layers; no velocyto / STARsolo)
 python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --demo --output /tmp/sc_velo_prep_demo
 
 # velocyto from a Cell Ranger run (BAM-backed)

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.cli_subprocess
+
 VELOCITY_PREP_SCRIPT = Path(__file__).resolve().parents[2] / "sc-velocity-prep" / "sc_velocity_prep.py"
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_velocity.py"
 

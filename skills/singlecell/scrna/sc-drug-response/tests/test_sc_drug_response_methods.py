@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from anndata import AnnData
+from skills._sdk.notebook import load_skill
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -28,8 +30,18 @@ def _load_script(name: str, path: Path):
 
 
 dr = _load_script("sc_drug_response", Path(__file__).resolve().parent.parent / "sc_drug_response.py")
+api = load_skill('sc-drug-response')
 
 
+def expression():
+    genes = sorted({gene for targets in api.builtin_drug_targets().values() for gene in targets})
+    result = AnnData(np.random.default_rng(0).random((20, len(genes))))
+    result.var_names = genes
+    result.obs['cluster'] = ['A'] * 10 + ['B'] * 10
+    return result
+
+
+@pytest.mark.demo
 class TestDemoDataGeneration:
     """Test synthetic demo data generation."""
 
@@ -58,65 +70,55 @@ class TestSimpleCorrelation:
     """Test simple_correlation method."""
 
     def test_produces_scores(self):
-        adata = dr._generate_demo_data()
-        scores = dr.run_simple_correlation(adata, "cluster", n_drugs=10)
+        adata = expression()
+        scores = api.score_drug_targets(adata, cluster_key="cluster")
         assert not scores.empty
         assert "Drug" in scores.columns
         assert "Cluster" in scores.columns
-        assert "Score" in scores.columns
+        assert "mean_target_expression" in scores.columns
         assert "Rank" in scores.columns
 
     def test_scores_have_all_clusters(self):
-        adata = dr._generate_demo_data()
-        scores = dr.run_simple_correlation(adata, "cluster", n_drugs=10)
+        adata = expression()
+        scores = api.score_drug_targets(adata, cluster_key="cluster")
         expected_clusters = set(adata.obs["cluster"].unique().astype(str))
         actual_clusters = set(scores["Cluster"].unique())
         assert actual_clusters == expected_clusters
 
     def test_scores_are_numeric(self):
-        adata = dr._generate_demo_data()
-        scores = dr.run_simple_correlation(adata, "cluster", n_drugs=5)
-        assert scores["Score"].dtype in (np.float64, np.float32, float)
-        assert not scores["Score"].isna().any()
+        adata = expression()
+        scores = api.score_drug_targets(adata, cluster_key="cluster")
+        assert scores["mean_target_expression"].dtype in (np.float64, np.float32, float)
+        assert not scores["mean_target_expression"].isna().any()
 
     def test_ranks_are_correct(self):
-        adata = dr._generate_demo_data()
-        scores = dr.run_simple_correlation(adata, "cluster", n_drugs=10)
+        adata = expression()
+        scores = api.score_drug_targets(adata, cluster_key="cluster")
         # Within each cluster, rank 1 should have the highest score
         for cluster in scores["Cluster"].unique():
             cluster_df = scores[scores["Cluster"] == cluster]
-            max_score_idx = cluster_df["Score"].idxmax()
+            max_score_idx = cluster_df["mean_target_expression"].idxmax()
             assert cluster_df.loc[max_score_idx, "Rank"] == 1
 
     def test_empty_when_no_gene_overlap(self):
         """When no target genes are in the data, result should be empty."""
-        adata = dr._generate_demo_data()
+        adata = expression()
         # Replace all gene names with non-matching names
         adata.var_names = [f"FAKE_GENE_{i}" for i in range(adata.n_vars)]
-        scores = dr.run_simple_correlation(adata, "cluster", n_drugs=10)
+        scores = api.score_drug_targets(adata, cluster_key="cluster")
         assert scores.empty
 
 
-class TestSpeciesDetection:
-    """Test species auto-detection."""
-
-    def test_detect_human(self):
-        genes = ["BRCA1", "TP53", "EGFR", "KRAS", "MYC"] * 100
-        assert dr._detect_species_hint(genes) == "human"
-
-    def test_detect_mouse(self):
-        genes = ["Brca1", "Tp53", "Egfr", "Kras", "Myc"] * 100
-        assert dr._detect_species_hint(genes) == "mouse"
-
-    def test_adapt_gene_case_mouse(self):
-        adapted = dr._adapt_gene_case(["BRCA1", "TP53"], "mouse")
-        assert adapted == ["Brca1", "Tp53"]
-
-    def test_adapt_gene_case_human(self):
-        adapted = dr._adapt_gene_case(["BRCA1", "TP53"], "human")
-        assert adapted == ["BRCA1", "TP53"]
+@pytest.mark.parametrize('genes', [['BRCA1', 'TP53'], ['Brca1', 'Tp53'], ['brca1', 'tp53']])
+def test_gene_case_matching_through_public_score(genes):
+    adata = AnnData(np.ones((4, 2)))
+    adata.var_names = genes
+    table = api.score_drug_targets(adata, drug_targets={'example': ['BRCA1', 'TP53']})
+    assert table.loc[0, 'TargetGenes'] == 2
+    assert table.loc[0, 'mean_target_expression'] == 1.
 
 
+@pytest.mark.demo
 class TestDemoCadrresScores:
     """Test synthetic CaDRReS score generation."""
 
@@ -143,7 +145,7 @@ class TestPreflightCadrres:
             dr.preflight_cadrres(tmp_path, "gdsc")
 
     def test_missing_model_shows_instructions(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="git clone"):
+        with pytest.raises(FileNotFoundError, match="not bundled"):
             dr.preflight_cadrres(tmp_path, "gdsc")
 
 
@@ -151,7 +153,7 @@ class TestPreflightData:
     """Test data preflight checks."""
 
     def test_missing_cluster_key_raises(self):
-        adata = dr._generate_demo_data()
+        adata = expression()
         with pytest.raises(ValueError, match="not found"):
             dr.preflight_data(adata, "nonexistent_key")
 
@@ -187,6 +189,8 @@ class TestVisualization:
         assert dr.plot_drug_cluster_heatmap(empty, tmp_path) is None
 
 
+@pytest.mark.demo
+@pytest.mark.cli_subprocess
 class TestEndToEnd:
     """End-to-end test via CLI entry point."""
 
@@ -220,3 +224,9 @@ class TestEndToEnd:
             rj = json.load(f)
         assert rj["skill"] == "sc-drug-response"
         assert rj["summary"]["n_drugs_scored"] > 0
+        from skills._sdk import report
+        report_text = (out_dir / 'report.md').read_text()
+        assert report.DISCLAIMER in report_text
+        assert 'not correlation or predicted sensitivity' in report_text
+        table = pd.read_csv(out_dir / 'tables/drug_rankings.csv')
+        assert 'mean_target_expression' in table and 'Score' not in table

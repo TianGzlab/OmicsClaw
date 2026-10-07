@@ -50,6 +50,7 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
@@ -734,80 +735,13 @@ def main():
 
     # Run velocity analysis
     logger.info(f"Running velocity analysis (mode={mode})...")
-    velocity_result = sc_traj.run_velocity_analysis(
-        adata,
-        mode=mode,
-        n_jobs=args.n_jobs,
-    )
+    library = load_skill("sc-velocity")
+    library.velocity(adata, mode=mode, n_jobs=args.n_jobs, random_state=0)
 
-    if velocity_result is None:
-        logger.error("Velocity analysis failed")
-        sys.exit(1)
-
-    # ---------------------------------------------------------------------------
-    # Degenerate output detection
-    # ---------------------------------------------------------------------------
-    velocity_diagnostics: dict = {}
-    is_degenerate = False
-
-    if "velocity" in adata.layers:
-        vel = adata.layers["velocity"]
-        if hasattr(vel, "toarray"):
-            vel = vel.toarray()
-        vel = np.asarray(vel, dtype=np.float32)
-
-        all_zero = np.allclose(vel, 0)
-        nan_frac = float(np.isnan(vel).sum()) / max(vel.size, 1)
-        n_velocity_genes = int((np.abs(vel).sum(axis=0) > 0).sum())
-
-        velocity_diagnostics["all_zero_velocity"] = bool(all_zero)
-        velocity_diagnostics["nan_fraction"] = round(nan_frac, 4)
-        velocity_diagnostics["n_velocity_genes"] = n_velocity_genes
-        velocity_diagnostics["n_total_genes"] = int(adata.n_vars)
-
-        if all_zero or nan_frac > 0.5 or n_velocity_genes == 0:
-            is_degenerate = True
-            velocity_diagnostics["degenerate"] = True
-            velocity_diagnostics["suggested_actions"] = [
-                "Check that spliced/unspliced layers contain real count data (not all zeros)",
-                "Try dynamical mode: --method scvelo_dynamical",
-                "Ensure input has been preprocessed: sc-preprocessing -> sc-velocity-prep -> sc-velocity",
-                "Re-run sc-velocity-prep with real BAM/loom data instead of synthetic layers",
-            ]
-            logger.warning("Degenerate velocity output detected (all_zero=%s, nan_frac=%.2f, velocity_genes=%d)",
-                           all_zero, nan_frac, n_velocity_genes)
-            print()
-            print("  *** WARNING: Velocity output appears degenerate. ***")
-            if all_zero:
-                print("  All velocity vectors are zero - scVelo could not estimate meaningful velocity.")
-            if nan_frac > 0.5:
-                print(f"  {nan_frac*100:.0f}% of velocity values are NaN - fitting may have failed.")
-            if n_velocity_genes == 0:
-                print("  No genes have non-zero velocity - the spliced/unspliced signal may be too weak.")
-            print()
-            print("  How to fix:")
-            print("    Option 1 - Use real spliced/unspliced data from velocyto or STARsolo:")
-            print("      python skills/singlecell/scrna/sc-velocity-prep/sc_velocity_prep.py --input <cellranger_dir> --method velocyto --gtf <genes.gtf> --output <dir>")
-            print("    Option 2 - Try the dynamical model which may recover more signal:")
-            print("      python skills/singlecell/scrna/sc-velocity/sc_velocity.py --input <data.h5ad> --method scvelo_dynamical --output <dir>")
-            print("    Option 3 - Check upstream preprocessing (normalize, HVG, PCA, neighbors):")
-            print("      python skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py --input <data.h5ad> --output <dir>")
-            print()
-        else:
-            velocity_diagnostics["degenerate"] = False
-    else:
-        is_degenerate = True
-        velocity_diagnostics = {
-            "degenerate": True,
-            "all_zero_velocity": True,
-            "nan_fraction": 1.0,
-            "n_velocity_genes": 0,
-            "n_total_genes": int(adata.n_vars),
-            "suggested_actions": [
-                "Velocity layer was not created — check scVelo logs above for errors",
-                "Ensure spliced/unspliced layers have sufficient signal",
-            ],
-        }
+    velocity_diagnostics = library.velocity_diagnostics(adata)
+    is_degenerate = velocity_diagnostics["degenerate"]
+    if is_degenerate:
+        logger.warning("Degenerate velocity output: %s", velocity_diagnostics)
 
     # Summary
     has_latent_time = "latent_time" in adata.obs.columns
@@ -891,7 +825,7 @@ def main():
     }
 
     # R Enhanced figures (only when --r-enhanced flag is set)
-    # NOTE: Must run BEFORE the os.killpg self-termination at module level.
+    # Render before CLI-owned worker cleanup and process exit.
     r_enhanced_figures = _render_r_enhanced(
         output_dir=output_dir,
         figure_data_dir=output_dir / "figure_data",
@@ -916,16 +850,43 @@ def main():
     print(f"  - sc-cytotrace:  python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --input {output_dir}/processed.h5ad --output <dir>")
 
 
+def _close_cli_workers() -> None:
+    """Release this CLI's workers before bypassing third-party exit hooks."""
+    import psutil
+    from joblib.externals.loky import get_reusable_executor
+
+    process = psutil.Process()
+    descendants = process.children(recursive=True)
+    try:
+        get_reusable_executor().shutdown(wait=True, kill_workers=True)
+    except Exception as exc:
+        logger.warning("loky shutdown failed: %s", exc)
+    descendants.extend(process.children(recursive=True))
+    unique = {}
+    for child in descendants:
+        try:
+            unique[(child.pid, child.create_time())] = child
+        except psutil.NoSuchProcess:
+            pass
+    descendants = list(unique.values())
+    for child in reversed(descendants):
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    _, live = psutil.wait_procs(descendants, timeout=3)
+    for child in live:
+        try:
+            child.kill()
+        except psutil.NoSuchProcess:
+            pass
+    psutil.wait_procs(live, timeout=3)
+
+
 if __name__ == "__main__":
+    import os
     main()
-    # TensorFlow (loaded transitively) spawns hundreds of threads that block
-    # on futex during interpreter shutdown, and loky workers inherit pipe FDs
-    # that prevent the parent subprocess.run from seeing EOF.  Kill the
-    # entire process group to force a clean exit.
-    import os, sys, signal
     sys.stdout.flush()
     sys.stderr.flush()
-    try:
-        os.killpg(os.getpgid(os.getpid()), signal.SIGKILL)
-    except Exception:
-        os._exit(0)
+    _close_cli_workers()
+    os._exit(0)

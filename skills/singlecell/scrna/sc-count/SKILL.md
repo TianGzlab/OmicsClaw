@@ -16,12 +16,31 @@ tags:
 
 # sc-count
 
+## Use from a step
+
+This is CLI_ONLY: counting needs external tools and reference indexes.
+
+```python
+from skills._sdk.notebook import run_cli
+
+run_cli("sc-count", "--input", "data/sample_R1.fastq.gz",
+        "--read2", "data/sample_R2.fastq.gz", "--method", "starsolo",
+        "--reference", "/refs/star", "--chemistry", "10xv3",
+        "--whitelist", "/refs/barcodes.tsv",
+        inputs=["data/sample_R1.fastq.gz", "data/sample_R2.fastq.gz",
+                "/refs/barcodes.tsv"])
+```
+
+Record the reference index version in the module README as well. The demo
+standardizes PBMC3k raw counts; it does not align or count reads. There is
+no `_api.py` for this skill.
+
 ## When to use
 
 The user has FASTQ files (or pre-existing tool output directories) and
 wants per-cell counts in OmicsClaw's canonical AnnData contract.  Four
 backends share one CLI: `cellranger`, `starsolo`, `simpleaf`,
-`kb-python`.  When passed an already-counted directory the skill
+`kb_python`. When passed a matching already-counted directory the skill
 re-canonicalises rather than re-counts.  Pairs with `sc-fastq-qc`
 upstream (read QC) and `sc-multi-count` downstream (merging multiple
 samples).
@@ -32,39 +51,23 @@ samples).
 
 - Input kinds: `file`, `directory`
 - Modalities: scrna
-- File types: `.fastq`, `.fq`, `.h5ad`
+- File types: `.fastq`, `.fq`, compressed FASTQ, and backend-specific `.h5ad`
 - FASTQ structure: valid first record; `paired` layout
 - Directory layouts (any): `paired-fastq`, `tenx-matrix`, `cellranger-output`, `starsolo-output`, `pseudoalign-output`
 
 **Outputs**
 
-- `tables/Summary.csv`
 - `tables/backend_summary.csv`
 - `tables/barcode_metrics.csv`
-- `tables/barcodes.tsv`
-- `tables/cell_metadata.csv`
 - `tables/count_summary.csv`
-- `tables/features.tsv`
-- `tables/genes.tsv`
-- `tables/metrics_summary.csv`
-- `tables/simpleaf_t2g.tsv`
 - `figures/barcode_rank.png`
 - `figures/count_complexity_scatter.png`
 - `figures/count_distributions.png`
-- `3M-february-2018.txt`
-- `737K-august-2016.txt`
-- `Aligned.sortedByCoord.out.bam`
-- `analysis_summary.txt`
-- `cells_x_genes.barcodes.txt`
-- `cells_x_genes.genes.txt`
-- `multiqc_report.html`
-- `possorted_genome_bam.bam`
 - `processed.h5ad`
-- `quants_mat_cols.txt`
-- `quants_mat_rows.txt`
-- `simpleaf_index.json`
 - `standardized_input.h5ad`
-- `web_summary.html`
+- `figures/manifest.json`, `figure_data/manifest.json`, plot-data CSV files
+- `reproducibility/commands.sh`, `reproducibility/requirements.txt`
+- Backend-specific files under `artifacts/` only when counting runs; BAM and HTML are not guaranteed.
 - `report.md`
 - `result.json`
 - Processed AnnData (`saves_h5ad`)
@@ -83,12 +86,14 @@ samples).
 - **Missing input path → hard fail.** `sc_count.py` raises `FileNotFoundError(f"Input path not found: {input_path}")`.  Common when the FASTQ dir is on a network mount that has not been resolved at run time.
 - **STARsolo requires explicit chemistry.** `sc_count.py` raises `ValueError("STARsolo runs require an explicit `--chemistry` value such as `10xv3`.")` when chemistry is left at the `auto` default.  STARsolo currently supports `10xv2`, `10xv3`, and `10xv4`; pass one of those.
 - **Backend prerequisites are validated up front.** `sc_count.py` raises `ValueError` for missing `--reference` (CellRanger/STARsolo/simpleaf), missing `--t2g` (kb-python), or unsupported `--chemistry` for STARsolo.  No silent fallback to a different backend — pick a feasible one before invoking.
-- **Re-canonicalising-existing-output is detected by directory shape, not a flag.** If `--input` points at a CellRanger output dir (e.g. one with `outs/raw_feature_bc_matrix/`), the skill skips counting and just imports the matrix.  No flag separates the two paths; verify by inspecting `result.json["data"]["execution"]` (empty list = re-canonicalise; populated = backend invoked) or by reading `tables/backend_summary.csv` (lists the backend metrics only when the backend ran).
+- **Choose the backend matching the existing output.** `sc_count.py:main` detects directory shape within the selected `--method`. `result.json["data"]["execution"]` is empty when no backend ran. `tables/backend_summary.csv` is always written and can be empty; imported output may already contain backend metrics.
+- `sc_count.py:_recommended_reference_dir` names suggested reference locations, not bundled indexes. Supply references yourself. The simpleaf backend needs a configured `ALEVIN_FRY_HOME`; the installed simpleaf 0.24.0 failed without it during migration preflight. The demo does not validate external-tool setup.
+- `sc_count.py:main` defaults to eight threads. A directory containing several FASTQ samples needs `--sample`.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic FASTQ + CellRanger-shaped output)
+# Demo (standardizes PBMC3k counts; no counting backend)
 python skills/singlecell/scrna/sc-count/sc_count.py --demo --output /tmp/sc_count_demo
 
 # CellRanger over FASTQ
@@ -99,7 +104,7 @@ python skills/singlecell/scrna/sc-count/sc_count.py \
 # STARsolo (requires explicit chemistry)
 python skills/singlecell/scrna/sc-count/sc_count.py \
   --input fastq_dir/ --output results/ \
-  --reference star_genome_dir --chemistry 10xv3 --whitelist barcodes.tsv
+  --method starsolo --reference star_genome_dir --chemistry 10xv3 --whitelist barcodes.tsv
 
 # Re-canonicalise an existing CellRanger output directory
 python skills/singlecell/scrna/sc-count/sc_count.py \

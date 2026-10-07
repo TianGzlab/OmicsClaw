@@ -23,6 +23,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -42,8 +43,6 @@ from skills.singlecell._lib.adata_utils import (
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gene_programs import (
     make_demo_gene_program_adata,
-    run_cnmf_programs,
-    run_nmf_programs,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -206,7 +205,7 @@ def _check_degenerate(usage_df: pd.DataFrame, weights_df: pd.DataFrame, top_df: 
 # Figures
 # ---------------------------------------------------------------------------
 
-def _render_figures(output_dir: Path, usage_df: pd.DataFrame) -> list[str]:
+def _render_figures(output_dir: Path, usage_df: pd.DataFrame, correlation_df: pd.DataFrame) -> list[str]:
     """Render gallery figures. Returns list of figure file names."""
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
@@ -229,7 +228,7 @@ def _render_figures(output_dir: Path, usage_df: pd.DataFrame) -> list[str]:
     # 2. Program correlation heatmap
     if usage_df.shape[1] > 1:
         fig, ax = plt.subplots(figsize=(6, 5))
-        corr = usage_df.corr()
+        corr = correlation_df
         im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
         ax.set_xticks(range(len(corr.columns)))
         ax.set_yticks(range(len(corr.columns)))
@@ -264,6 +263,7 @@ def _write_figure_data(
     output_dir: Path,
     usage_df: pd.DataFrame,
     top_df: pd.DataFrame,
+    correlation_df: pd.DataFrame,
 ) -> dict[str, str]:
     fd_dir = output_dir / "figure_data"
     fd_dir.mkdir(parents=True, exist_ok=True)
@@ -277,7 +277,7 @@ def _write_figure_data(
     top_df.to_csv(fd_dir / files["top_program_genes"], index=False)
 
     if not usage_df.empty and usage_df.shape[1] > 1:
-        corr = usage_df.corr()
+        corr = correlation_df
         files["program_correlation"] = "program_correlation.csv"
         corr.to_csv(fd_dir / files["program_correlation"])
 
@@ -401,6 +401,8 @@ def main() -> int:
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
 
+    requested_method = args.method
+
     # ---- Auto-fallback: if cnmf is requested but not installed, use nmf ----
     if args.method == "cnmf":
         try:
@@ -427,30 +429,19 @@ def main() -> int:
     # ---- Ensure input contract ----
     ensure_input_contract(adata, source_path=input_path)
 
-    # ---- Run method ----
-    if args.method == "cnmf":
-        result = run_cnmf_programs(
-            adata,
-            n_programs=args.n_programs,
-            seed=args.seed,
-            max_iter=args.n_iter,
-            layer=args.layer,
-            top_genes=args.top_genes,
-        )
-    else:
-        result = run_nmf_programs(
-            adata,
-            n_programs=args.n_programs,
-            seed=args.seed,
-            max_iter=args.n_iter,
-            layer=args.layer,
-            top_genes=args.top_genes,
-        )
-
-    usage_df = result["usage"]
-    weights_df = result["weights"]
-    top_df = result["top_genes"]
-    spectra_tpm_df = result.get("spectra_tpm")
+    api = load_skill(SKILL_NAME)
+    adata = api.find_programs(
+        adata, method=requested_method, n_programs=args.n_programs,
+        random_state=args.seed, n_iter=args.n_iter, layer=args.layer,
+        top_genes=args.top_genes,
+    )
+    result = api.run_info(adata)
+    args.method = result["executed_method"]
+    usage_df = pd.DataFrame(adata.obsm["X_gene_programs"], index=adata.obs_names,
+                            columns=adata.uns["gene_programs"]["program_names"])
+    weights_df = api.program_weights(adata)
+    top_df = api.top_program_genes(adata)
+    spectra_tpm_df = adata.uns.get("gene_program_tpm")
 
     # ---- Degenerate output detection ----
     diagnostics = _check_degenerate(usage_df, weights_df, top_df)
@@ -488,11 +479,12 @@ def main() -> int:
         table_files["program_tpm"] = "tables/program_tpm.csv"
 
     # ---- Figures ----
-    figure_names = _render_figures(output_dir, usage_df)
+    correlation_df = api.program_correlation(adata)
+    figure_names = _render_figures(output_dir, usage_df, correlation_df)
     _write_figure_manifest(output_dir, figure_names)
 
     # ---- Figure data ----
-    figure_data_files = _write_figure_data(output_dir, usage_df, top_df)
+    figure_data_files = _write_figure_data(output_dir, usage_df, top_df, correlation_df)
 
     # ---- Contracts & metadata ----
     params = {
@@ -520,6 +512,8 @@ def main() -> int:
 
     # ---- Save processed.h5ad ----
     output_h5ad = output_dir / "processed.h5ad"
+    for key in ("gene_program_weights", "gene_program_top_genes", "gene_program_tpm", "omicsclaw_sc_gene_programs_run"):
+        adata.uns.pop(key, None)
     save_h5ad(adata, output_h5ad)
     logger.info("Saved processed object to %s", output_h5ad)
 

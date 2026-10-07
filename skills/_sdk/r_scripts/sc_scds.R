@@ -2,16 +2,16 @@
 # OmicsClaw: scds doublet detection
 #
 # Usage:
-#   Rscript sc_scds.R <h5ad_file> <output_dir> [expected_doublet_rate] [mode]
+#   Rscript sc_scds.R <input_dir> <output_dir> [expected_doublet_rate] [mode] [random_state]
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 2) {
-    cat("Usage: Rscript sc_scds.R <h5ad_file> <output_dir> [expected_doublet_rate] [mode]\n")
+    cat("Usage: Rscript sc_scds.R <input_dir> <output_dir> [expected_doublet_rate] [mode] [random_state]\n")
     quit(status = 1)
 }
 
-h5ad_file <- args[1]
+input_dir <- args[1]
 output_dir <- args[2]
 expected_rate <- if (length(args) >= 3) as.numeric(args[3]) else 0.06
 mode <- if (length(args) >= 4) as.character(args[4]) else "hybrid"
@@ -20,16 +20,23 @@ mode <- match.arg(mode, choices = c("hybrid", "cxds", "bcds"))
 suppressPackageStartupMessages({
     library(scds)
     library(SingleCellExperiment)
-    library(zellkonverter)
+    library(Matrix)
 })
 
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 tryCatch({
-    cat(sprintf("Loading data from %s...\n", h5ad_file))
-    sce <- readH5AD(h5ad_file)
-    SummarizedExperiment::assay(sce, "counts") <- round(SummarizedExperiment::assay(sce, "X"))
+    cat(sprintf("Loading data from %s...\n", input_dir))
+    counts <- as(Matrix::readMM(file.path(input_dir, "matrix.mtx")), "CsparseMatrix")
+    rownames(counts) <- read.delim(file.path(input_dir, "features.tsv"), header = FALSE,
+                                  colClasses = "character", quote = "")[[1]]
+    colnames(counts) <- read.delim(file.path(input_dir, "barcodes.tsv"), header = FALSE,
+                                  colClasses = "character", quote = "")[[1]]
+    meta <- read.csv(file.path(input_dir, "obs.csv"), row.names = 1, check.names = FALSE)
+    stopifnot(identical(rownames(meta), colnames(counts)))
+    sce <- SingleCellExperiment(assays = list(counts = round(counts)), colData = meta)
 
+    set.seed(if (length(args) >= 5) as.integer(args[5]) else 0)
     cat(sprintf("Running scds (%s)...\n", mode))
     if (mode == "cxds") {
         sce <- scds::cxds(sce, verb = FALSE)

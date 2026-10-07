@@ -14,95 +14,98 @@ tags:
 
 # sc-in-silico-perturbation
 
-## When to use
+Explore descriptive gene associations or run the optional scTenifoldKnk R
+method. The default `grn_ko` name is retained for CLI compatibility; its Pearson
+edge-removal score is not a causal knockout simulation or a significance test.
 
-The user has an unperturbed scRNA AnnData (no real CRISPR screen) and
-wants to predict which genes / pathways would be affected if a target
-gene were knocked out. Two methods:
+## Method Selection Table
 
-- `grn_ko` (default) — Python-native: builds a correlation-based GRN
-  on top variable genes, propagates the KO signal, ranks differential
-  regulation. No R required.
-- `sctenifoldknk` — R-backed scTenifoldKnk pipeline (manifold alignment
-  KO). Requires `Rscript` + the `scTenifoldKnk` R package.
-
-For **real** Perturb-seq / CRISPR screen data use `sc-perturb` (Mixscape
-classification) and upstream `sc-perturb-prep`. For drug-target /
-sensitivity prediction use `sc-drug-response`.
-
-## Inputs & Outputs
-
-**Inputs**
-
-- Modalities: scrna
-- File types: `.h5ad`
-
-**Outputs**
-
-- `tables/cell_metadata.csv`
-- `tables/de_top_markers.csv`
-- `tables/diff_regulation.csv`
-- `tables/matrix.csv`
-- `tables/tenifold_diff_regulation.csv`
-- `figures/pvalue_distribution.png`
-- `figures/r_isp_volcano.png`
-- `figures/top_perturbed_genes.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `var`: `perturbation_dr_score`, `perturbation_p_adj`, `perturbation_FC`
-
-## Flow
-
-1. Load AnnData (`--input`) or generate demo data with `G10` as the default KO gene.
-2. Preflight `--ko-gene` is in `var_names` (`SystemExit(1)` with sample-genes hint if not).
-3. Warn if `layers["counts"]` is missing (uses `.X` for GRN), if `n_obs < 50`, or `n_vars < 20`.
-4. For `sctenifoldknk`: check `Rscript` is on PATH; SystemExit(1) with install hint if not.
-5. Detect species hint (UPPER → human, Title → mouse) from `var_names` casing.
-6. Run the chosen backend; for Python `grn_ko` build the correlation GRN at `--corr-threshold` and propagate the KO.
-7. Detect degenerate output (no significant regulation) → record diagnostics; do NOT raise.
-8. Save `processed.h5ad`, tables, figures, `report.md`, `result.json`.
-
-## Gotchas
-
-- **All preflight failures `raise SystemExit(1)`, not `ValueError`.** `sc_in_silico_perturbation.py` raises `SystemExit(1)` when `--ko-gene` is not in `var_names` (after printing a multi-option fix message including the first 5 sample genes); raises `SystemExit(1)` when `sctenifoldknk` is selected but `Rscript` isn't on PATH; raises `SystemExit("Provide --input or use --demo")` when neither is given. Wrappers expecting `ValueError` need to catch `SystemExit`.
-- **`grn_ko` is forgiving on data quality — only warnings.** When `layers["counts"]` is absent / `n_obs < 50` / `n_vars < 20`, the script logs warnings and continues (`sc_in_silico_perturbation.py`). The GRN built from `.X` (instead of raw counts) is still scored, but the result is a "best-effort" — check `result.json["preflight_warnings"]` before quoting it.
-- **`--ko-gene` default is `G10`.** `sc_in_silico_perturbation.py` defaults to a synthetic gene name. On real data without specifying `--ko-gene`, the preflight will reject the run unless the data happens to contain `G10`.
-- **Degenerate output is a soft fail.** When the GRN finds no significantly regulated genes, `sc_in_silico_perturbation.py` records `diagnostics["n_significant"] = 0` and the report's degenerate-block fix-suggestion list is written by `_write_report` — but the script returns 0. Always check `result.json["n_significant"]` before consuming the regulated-gene table.
-- **`sctenifoldknk` does its own validation.** Once `Rscript` is found, the R-side script runs and may fail with R-specific errors not captured by the Python preflight. Check the stderr of the run and `tables/tenifold_diff_regulation.csv` existence after.
-- **`--input` mandatory unless `--demo`.** `sc_in_silico_perturbation.py` raises `SystemExit("Provide --input or use --demo")`.
+| Method | What it returns | Requirement |
+|---|---|---|
+| `grn_ko` | Absolute correlation edge-removal scores; no p-values | Python science stack |
+| `sctenifoldknk` | R scTenifoldKnk differential-regulation table | Rscript + scTenifoldKnk |
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic GRN with G10 as KO target)
 python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --demo --output /tmp/sc_iko_demo
-
-# Default GRN-based KO on real data (must specify --ko-gene)
-python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
-  --input clustered.h5ad --output results/ --ko-gene EGFR
-
-# Tighter GRN (more stringent correlation threshold)
-python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
-  --input clustered.h5ad --output results/ \
-  --ko-gene EGFR --corr-threshold 0.1 --n-top-genes 3000
-
-# scTenifoldKnk (R-backed)
-python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py \
-  --input clustered.h5ad --output results/ \
-  --method sctenifoldknk --ko-gene EGFR --n-cores 4
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --input expression.h5ad --ko-gene TP53 --n-top-genes 2000 --output results/associations
+python skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py --input expression.h5ad --method sctenifoldknk --ko-gene TP53 --seed 0 --n-cores 1 --output results/tenifold
 ```
 
-## See also
+`--corr-threshold` is an inactive legacy argument; it never thresholded the
+correlation matrix. The API intentionally does not expose it.
 
-- `references/parameters.md` — every CLI flag, GRN tunables
-- `references/methodology.md` — `grn_ko` correlation-GRN math vs scTenifoldKnk manifold alignment
-- `references/output_contract.md` — `tables/diff_regulation.csv` column schema
-- Adjacent skills: `sc-perturb` / `sc-perturb-prep` (parallel — REAL Perturb-seq data, NOT in-silico), `sc-drug-response` (parallel — drug-target sensitivity prediction, NOT genetic KO), `sc-grn` (parallel — explicit GRN construction; this skill builds one internally for `grn_ko`), `sc-clustering` / `sc-cell-annotation` (upstream — produces the labelled AnnData; KO predictions are more interpretable per-cluster)
+## Workflow
+
+Preflight checks the target gene. `grn_ko` selects high-variance genes plus the
+target, computes Pearson correlations, zeros the target row/column and averages
+absolute changes by gene. The target's own score summarizes all its removed
+edges; other genes lose one edge. R uses the existing temporary CSV bridge and
+sets `set.seed` before fitting. No backend is silently substituted.
+
+## Matrix Contract
+
+Reads raw_counts from `layers['counts']` when present, otherwise X. Inputs are
+unchanged by the API; returned table metadata records the chosen source.
+CLI `processed.h5ad` carries `omicsclaw_input_contract` and
+`omicsclaw_matrix_contract`. Use `sc-perturb` for an actual perturbation screen.
+
+## Inputs & Outputs
+
+Input: expression `.h5ad` with `--ko-gene` in `var_names`.
+The CLI writes `processed.h5ad`, `tables/diff_regulation.csv`, `report.md`,
+`result.json`, `figures/top_perturbed_genes.png`, and figure/plot-data manifests.
+The default table has `gene`, `dr_score`, `wt_ko_corr`; only `perturbation_dr_score`
+is added to `var`. R additionally writes `tables/tenifold_diff_regulation.csv`
+and may produce a p-value histogram and statistical `var` columns. R-enhanced
+volcano plots require R statistical output; they are not made for correlation scores.
+
+## Gotchas
+
+- `tables/diff_regulation.csv` no longer contains fabricated `p_value`, `p.adj`, `z_score` or an `FC` alias for the default method. Scores are sorted descending; they do not measure treatment effects.
+- `result.json` → `summary.n_significant` exists only for R results with adjusted p-values. No significant-gene count is inferred from correlation scores.
+- `--ko-gene G10` is a synthetic-demo default; the API raises when the chosen gene is absent.
+- `tables/tenifold_diff_regulation.csv` is produced only if scTenifoldKnk succeeds. The R package is not installed by this skill.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `knockout_correlation(adata, *, ko_gene, n_top_genes=2000)`
+
+Return descriptive edge-removal scores, not a causal knockout simulation.
+
+Select the most variable genes plus ko_gene, compute Pearson correlations
+from layers['counts'] (or X), and average absolute changes after zeroing the
+target row and column. Returns gene, dr_score and wt_ko_corr, with no p-values.
+The target's own score includes all its removed edges and is not comparable
+to another gene's single removed edge. The input AnnData is unchanged.
+
+### `sctenifoldknk(adata, *, ko_gene, qc=False, qc_min_lib_size=0, qc_min_cells=10, n_net=2, n_cells=100, n_comp=3, q=0.8, td_k=2, ma_dim=2, n_cores=1, random_state=0)`
+
+Return scTenifoldKnk diffRegulation through a temporary CSV bridge.
+
+Uses layers['counts'] or X without changing the input. Requires Rscript and
+the scTenifoldKnk R package; missing packages and R failures propagate.
+random_state is passed to R set.seed before fitting the network.
+
+### `run_info(table)`
+
+Return method, matrix source and interpretation from a returned result table.
+
+### `top_perturbed_genes(table, *, n_top=15)`
+
+Return top correlation scores, or lowest adjusted p-values for scTenifoldKnk.
+
+### `perturbed_genes_figure(table, *, n_top=15)`
+
+Return a Figure of descriptive edge scores or R differential-regulation FC.
+
+<!-- api:end -->
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`
 
-`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`, `statsmodels`
+The R method additionally requires the scTenifoldKnk R package.

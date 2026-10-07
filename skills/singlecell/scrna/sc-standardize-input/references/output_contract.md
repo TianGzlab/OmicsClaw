@@ -1,27 +1,13 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── processed.h5ad
-├── requirements.txt
-└── tables/
-    └── cell_metadata.csv
-```
+The CLI writes `processed.h5ad`, `report.md`, `result.json` and
+`reproducibility/{commands.sh,requirements.txt}`. It does not write tables
+or plots.
 
-## File contents
+The standardized AnnData contains the selected counts in `X`,
+`layers["counts"]` and `raw`. Its `uns` contains the input and matrix
+contracts. `result.json["summary"]` reports the expression source, species,
+feature-name source and warnings.
 
-- `tables/cell_metadata.csv` — written by `sc_standardize_input.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_standardize_input.py`.
-- `commands.sh` — written by `sc_standardize_input.py`.
-- `processed.h5ad` — written by `sc_standardize_input.py`.
-- `requirements.txt` — written by `sc_standardize_input.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
-
-## Notes
-
-Auto-generated from `sc_standardize_input.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The API returns a new AnnData without writing files. Use `run_info` to
+read its JSON diagnostics and `write_output` to save the object.

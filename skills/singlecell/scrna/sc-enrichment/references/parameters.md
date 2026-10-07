@@ -43,7 +43,7 @@
 | `gene_set_from_markers` | `—` |
 | `marker_group` | `—` |
 | `marker_top_n` | `—` |
-| `engine` | `auto` |
+| `engine` | `python` |
 | `groupby` | `—` |
 | `ranking_method` | `wilcoxon` |
 
@@ -82,7 +82,7 @@
 | `gene_set_from_markers` | `—` |
 | `marker_group` | `—` |
 | `marker_top_n` | `—` |
-| `engine` | `auto` |
+| `engine` | `python` |
 | `groupby` | `—` |
 | `ranking_method` | `wilcoxon` |
 

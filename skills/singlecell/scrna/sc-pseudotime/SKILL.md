@@ -19,117 +19,138 @@ tags:
 
 # sc-pseudotime
 
-## When to use
+## Use from a step
 
-The user has a clustered, normalised scRNA AnnData and wants a
-trajectory / pseudotime ordering across the cells. Six methods:
+```python
+trajectory = load_skill("sc-pseudotime")
+result = trajectory.pseudotime(read_input("clustered.h5ad"), cluster_key="leiden",
+                                use_rep="X_pca", root_cluster="0")
+write_output(trajectory.pseudotime_table(result), "tables/pseudotime.csv")
+write_output(trajectory.trajectory_genes(result), "tables/trajectory_genes.csv")
+write_output(trajectory.pseudotime_figure(result), "figures/pseudotime.png")
+write_output(result, "intermediate/adata_pseudotime.h5ad")
+```
 
-- `dpt` (default) — diffusion pseudotime (Scanpy native).
-- `palantir` — Palantir waypoint-based pseudotime + fate probabilities.
-- `via` — VIA, scalable lineage with branching.
-- `cellrank` — CellRank macrostates + fate probabilities (optionally
-  velocity-coupled with `--cellrank-use-velocity`).
-- `slingshot_r` — R-backed Slingshot lineage curves.
-- `monocle3_r` — R-backed Monocle3 trajectory graph.
+The input is not changed. The PBMC example in `examples/example_step.py`
+demonstrates the API; PBMC labels do not validate a differentiation trajectory.
 
-Required: a normalised AnnData with a cluster column (`leiden` by
-default) and a low-D representation (`obsm["X_pca"]` / `X_harmony` /
-etc.). For per-cluster marker ranking use `sc-markers`; for velocity
-vector fields (kinetics, not ordering) use `sc-velocity`.
+## API
 
-## Inputs & Outputs
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-**Inputs**
+### `pseudotime(adata, *, method: str='dpt', cluster_key: str='leiden', use_rep: str | None=None, root_cluster: str | None=None, root_cell: str | int | None=None, end_clusters: list[str] | None=None, n_neighbors: int=15, n_pcs: int=50, n_dcs: int=10, palantir_knn: int=30, palantir_n_components: int=10, palantir_num_waypoints: int=1200, palantir_max_iterations: int=25, palantir_seed: int | None=None, via_knn: int=30, via_seed: int | None=None, cellrank_n_states: int=3, cellrank_schur_components: int=20, cellrank_frac_to_keep: float=0.3, cellrank_use_velocity: bool=False, random_state: int=20)`
 
-- Modalities: scrna
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
+Return a copy with pseudotime and backend diagnostics.
 
-**Outputs**
+The default representation prefers X_pca; UMAP remains the preferred
+display embedding, not the default inference graph. This function does
+not disable numba JIT. Roots express an analysis assumption, not a
+direction inferred from the pseudotime values.
 
-- `tables/cell_metadata.csv`
-- `tables/fate_probabilities.csv`
-- `tables/gene_expression.csv`
-- `tables/monocle3_pseudotime.csv`
-- `tables/monocle3_trajectory.csv`
-- `tables/pseudotime_cells.csv`
-- `tables/pseudotime_points.csv`
-- `tables/slingshot_branches.csv`
-- `tables/slingshot_curves.csv`
-- `tables/slingshot_pseudotime.csv`
-- `tables/trajectory_genes.csv`
-- `tables/trajectory_summary.csv`
-- `figures/monocle3_trajectory_graph.png`
-- `figures/r_cell_density.png`
-- `figures/r_embedding_discrete.png`
-- `figures/r_embedding_feature.png`
-- `figures/r_pseudotime_dynamic.png`
-- `figures/r_pseudotime_heatmap.png`
-- `figures/r_pseudotime_lineage.png`
-- `analysis_summary.txt`
-- `input.h5ad`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `pseudotime`; `obsm`: `trajectory_fate_probabilities`
+:param method: dpt, palantir, via, cellrank, slingshot_r or monocle3_r.
+:param cluster_key: Existing obs grouping column; default leiden.
+:param use_rep: Existing obsm representation; None prefers X_pca.
+:param root_cluster: Optional root group for the selected backend.
+:param root_cell: Optional obs name or integer position.
+:param end_clusters: Optional Slingshot terminal groups.
+:param n_neighbors: DPT/CellRank neighbors; default 15.
+:param n_pcs: PCs for those neighbors; default 50.
+:param n_dcs: Diffusion components used for DPT; default 10.
+:param palantir_knn: Palantir neighbors, default 30.
+:param palantir_n_components: Palantir diffusion components, default 10.
+:param palantir_num_waypoints: Palantir waypoints, default 1200.
+:param palantir_max_iterations: Palantir iterations, default 25.
+:param palantir_seed: Overrides random_state for Palantir; default None.
+:param via_knn: VIA neighbors, default 30.
+:param via_seed: Overrides random_state for VIA; default None.
+:param cellrank_n_states: CellRank states, default 3.
+:param cellrank_schur_components: CellRank Schur components, default 20.
+:param cellrank_frac_to_keep: CellRank state-cell fraction, default 0.3.
+:param cellrank_use_velocity: Couple CellRank to existing velocity; default False.
+:param random_state: Palantir/VIA seed, default 20. DPT retains Scanpy's
+    deterministic defaults; R wrappers do not expose a seed.
+:returns: New AnnData with obs['pseudotime']; run_info names the backend
+    and original pseudotime column. R curves remain available separately.
+:raises ValueError: The method, grouping, expression contract or embedding is invalid.
+:raises ImportError: An optional backend is missing.
 
-## Flow
+### `run_info(adata, *, keep: bool=True) -> dict`
 
-1. Load AnnData (`--input`) or auto-build a demo with the largest cluster as the root.
-2. Validate `cluster_key` exists; require `X = normalized_expression`.
-3. Resolve representation (`--use-rep`) — auto-pick from `obsm` if unset.
-4. Resolve root cell from `--root-cluster` or `--root-cell` (integer index or `obs_name`).
-5. Dispatch to the method-specific runner; the R-backed methods exec via `RScriptRunner` against the bundled R scripts.
-6. Build trajectory-gene correlations (`--n-genes`, `--corr-method`).
-7. Save `processed.h5ad`, tables, figures, `report.md`, `result.json` (incl. `backend`, `n_clusters`, `n_trajectory_genes`).
+Read method, root and representation diagnostics; keep=False removes the record.
+
+### `trajectory_genes(adata, *, n_genes: int=50, method: str='pearson') -> pd.DataFrame`
+
+Rank genes by correlation with pseudotime; method is pearson or spearman.
+
+### `pseudotime_table(adata) -> pd.DataFrame`
+
+Return cell, display coordinates, group and pseudotime columns.
+
+### `fate_probability_table(adata) -> pd.DataFrame`
+
+Return backend fate probabilities averaged by group, or an empty table.
+
+### `trajectory_curves(adata) -> pd.DataFrame`
+
+Return retained R trajectory curves, or an empty table for Python methods.
+
+### `pseudotime_figure(adata)`
+
+Return a matplotlib Figure colored by pseudotime on the display embedding.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+Six methods remain available: DPT, Palantir, VIA, CellRank, Slingshot R and
+Monocle3 R. DPT uses Scanpy. Other methods require their named backend;
+missing packages raise errors rather than selecting a different method.
+
+`use_rep=None` now prefers X_pca, consistent with preflight. UMAP is still
+preferred for display, not the inference graph. Root cells accept obs names
+or integer positions. Root and terminal choices are biological assumptions
+the caller must justify.
+
+Neighbor/component defaults retain the CLI behavior: 15 neighbors,
+50 PCs and 10 DPT components. Palantir defaults to 30 neighbors, 10 diffusion
+components, 1200 waypoints and 25 iterations; VIA uses 30 neighbors.
+`random_state=20` supplies the Palantir/VIA seed unless their explicit
+overrides are given. DPT retains Scanpy's deterministic defaults.
 
 ## Gotchas
 
-- **Hard-fails when `.X` isn't normalised.** `sc_pseudotime.py` raises `ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")` based on the matrix-contract metadata. If you skipped `sc-preprocessing`, the contract check rejects the run before any pseudotime work happens.
-- **No suitable representation → hard fail.** `sc_pseudotime.py` raises `ValueError("Embedding `<rep>` was not found in adata.obsm.")` for an explicit-but-missing `--use-rep`; raises `ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")` when no embedding key resolves.
-- **`cluster_key` validated twice.** `sc_pseudotime.py` raises `ValueError("`<key>` was not found in adata.obs.")` for the top-level `--cluster-key`. Default is `leiden`; pass `--cluster-key louvain` (or whatever you have) explicitly.
-- **`--root-cell` accepts obs_name OR integer index.** `sc_pseudotime.py` raises `ValueError("`--root-cell <x>` was not found. Provide a valid obs_name or integer cell index.")` if neither resolves. The integer path lets you avoid copy-pasting a long barcode.
-- **R-backed methods need a working R env.** `sc_pseudotime.py` raises `ImportError("Slingshot R dependencies are missing: <list>")` (slingshot / SingleCellExperiment / zellkonverter); raises the same shape for Monocle3 (monocle3 / SingleCellExperiment / zellkonverter). Both messages append the full `suggest_r_install(...)` install hint.
-- **`result.json["backend"]` records the actually-used backend.** `sc_pseudotime.py` (dpt) / `_run_palantir` (palantir) / `_run_via` (via) / `_run_cellrank` (cellrank) / `_run_slingshot_r` (slingshot_r) / `_run_monocle3_r` (monocle3_r) write the literal backend label. Useful when `--method` was an alias or fell through any future fallback.
-- **`--input` is `parser.error`, not a Python `ValueError`.** `sc_pseudotime.py` calls `parser.error("--input is required unless --demo is used")` which exits with code 2 — caller wrappers expecting `SystemExit(1)` or `ValueError` need to handle code 2 separately. Once `--input` is given, `main` raises `FileNotFoundError(f"Input file not found: {input_path}")` for a bad path.
+- The API does not set `NUMBA_DISABLE_JIT`; the compatibility CLI retains
+  its existing setting (`sc_pseudotime.py:15`).
+- `run_info` reports the chosen representation and root. Check finite
+  `obs["pseudotime"]` values; disconnected graphs can produce infinity (`_api.py:183`).
+- Existing matrix contracts must identify normalized expression. Root choice
+  does not prove direction or causality (`_api.py:28`).
+- R wrappers still exchange temporary H5AD, requiring zellkonverter and its
+  R/Python setup. This migration does not convert them to MTX. Slingshot and
+  Monocle3 have separate explicit package checks (`_api.py:482`, `_api.py:556`).
+- VIA applies its existing NumPy compatibility aliases only when invoked (`_api.py:230`).
+- `fate_probability_table` is a group mean, not per-cell fate probabilities;
+  the per-cell matrix is `obsm["trajectory_fate_probabilities"]` (`_api.py:204`).
+
+## Inputs & Outputs
+
+The API needs normalized expression, an obs grouping and an obsm representation.
+It returns an annotated copy plus table/Figure helpers. R curves can be read
+through `trajectory_curves`.
+
+CLI files include `processed.h5ad`, `tables/pseudotime_cells.csv`,
+`tables/trajectory_genes.csv`, `tables/trajectory_summary.csv`,
+`report.md` and `result.json`. Fate-probability and curve tables are
+conditional on backend output. Figures and figure-data manifests describe
+the plots actually produced.
 
 ## Key CLI
 
 ```bash
-# Demo (auto-chooses largest cluster as root)
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --demo --output /tmp/sc_pt_demo
-
-# DPT with explicit root cluster
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input clustered.h5ad --output results/ \
-  --cluster-key leiden --root-cluster "0" --use-rep X_pca
-
-# Palantir with custom waypoints + seed
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input clustered.h5ad --output results/ \
-  --method palantir --root-cell ATCACG-1 \
-  --palantir-num-waypoints 1500 --palantir-seed 42
-
-# CellRank coupled with velocity (requires layers from sc-velocity)
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input velocity.h5ad --output results/ \
-  --method cellrank --cellrank-use-velocity --cellrank-n-states 5
-
-# Slingshot R lineage curves
-python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py \
-  --input clustered.h5ad --output results/ \
-  --method slingshot_r --cluster-key leiden --root-cluster "0"
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --demo --use-rep X_pca --output /tmp/sc_pt_demo
+python skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py --input clustered.h5ad --cluster-key leiden --root-cluster 0 --use-rep X_pca --output results/
 ```
 
-## See also
-
-- `references/parameters.md` — every CLI flag, per-method tunables
-- `references/methodology.md` — method selection guide; root-cell heuristics
-- `references/output_contract.md` — `obs["pseudotime"]` / `obsm["trajectory_fate_probabilities"]` schema
-- Adjacent skills: `sc-clustering` (upstream — produces `obs["leiden"]` + `obsm["X_*"]`), `sc-preprocessing` (upstream — required for normalised `.X`), `sc-velocity` (parallel — kinetics-based ordering, can feed CellRank), `sc-markers` (parallel — cluster-level marker ranking, NOT trajectory)
-
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `cellrank`, `matplotlib`, `numpy`, `palantir`, `pandas`, `pyVIA`, `scanpy`, `scipy`, `scvelo`, `seaborn`

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.cli_subprocess, pytest.mark.demo]
+
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_integrate.py"
 
 

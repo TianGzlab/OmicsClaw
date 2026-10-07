@@ -105,7 +105,7 @@ def _clip(text: str, limit: int = LINE_CHARS) -> str:
 
 def _first_cell(step: Path) -> str | None:
     try:
-        cells = parse_cells(step.read_text(encoding="utf-8"))
+        cells = parse_cells(step.read_text(encoding="utf-8"), language="r" if step.suffix == ".R" else "python")
     except (OSError, UnicodeDecodeError, PercentError):
         return None
     for cell in cells:
@@ -201,7 +201,15 @@ def _step_lines(module: Module, step: Path, run: _ledger.RunRecord, detail: Deta
     clis = list(dict.fromkeys(
         _clip(f"{c['skill']} (CLI: {' '.join(str(a) for a in c.get('argv') or [])})", 240) for c in run.skill_clis
     ))
-    lines.append("Recorded calls: " + ("; ".join(calls + clis) if calls or clis else "none"))
+    lines.append("Recorded calls: " + ("; ".join(calls + clis) if calls or clis else
+                                      "none (R step)" if step.suffix == ".R" else "none"))
+    if run.r_sessions:
+        session = run.r_sessions[-1]
+        packages = list((session.get("packages") or {}).items())
+        shown = ", ".join(f"{name}={version}" for name, version in packages[:8])
+        if len(packages) > 8:
+            shown += f", ... ({len(packages) - 8} more)"
+        lines.append(f"R step: Rscript {session.get('r_version', 'unknown')}; packages: {shown or 'none'}")
     called = {(c["skill"], c["function"]) for c in run.skill_calls}
     words = _words(cell)
     unnamed = sorted({f"{s}.{f}" for s, f in called if f not in words})

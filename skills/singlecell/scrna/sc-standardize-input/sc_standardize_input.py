@@ -34,11 +34,7 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import (
-    canonicalize_singlecell_adata,
-    infer_qc_species,
-    store_analysis_metadata,
-)
+from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib.export import save_h5ad
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -75,14 +71,6 @@ def _write_reproducibility(output_dir: Path, input_file: str | None, *, demo_mod
     except Exception:
         lines = requirements
     (repro_dir / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _build_standardized_adata(adata, *, species: str):
-    return canonicalize_singlecell_adata(
-        adata,
-        species=species,
-        standardizer_skill=SKILL_NAME,
-    )
 
 
 def _detect_diagnostics(summary: dict) -> dict:
@@ -247,6 +235,8 @@ def _write_report(output_dir: Path, summary: dict, input_file: str | None, diagn
 
 
 def main() -> None:
+    from skills._sdk.notebook import load_skill
+    library = load_skill(SKILL_NAME)
     parser = argparse.ArgumentParser(description="Standardize single-cell input into the OmicsClaw canonical AnnData contract")
     parser.add_argument("--input", dest="input_path", help="Input AnnData or count-like matrix path")
     parser.add_argument("--output", dest="output_dir", required=True, help="Output directory")
@@ -293,7 +283,7 @@ def main() -> None:
     logger.info("Input: %d cells x %d genes", adata.n_obs, adata.n_vars)
 
     # Species auto-detection
-    species_auto_detected = infer_qc_species(adata, default="human")
+    species_auto_detected = library.infer_species(adata)
     if args.species == "auto":
         species = species_auto_detected
         logger.info("Auto-detected species: %s", species)
@@ -329,7 +319,8 @@ def main() -> None:
         print()
 
     try:
-        standardized, prepared, contract = _build_standardized_adata(adata, species=species)
+        standardized = library.standardize(adata, species=species)
+        contract = standardized.uns["omicsclaw_input_contract"]
     except ValueError as exc:
         # Enhance the error message with actionable guidance
         print()
@@ -345,26 +336,8 @@ def main() -> None:
         print()
         raise
 
-    matrix_contract = {
-        "X": "raw_counts",
-        "raw": "raw_counts_snapshot",
-        "layers": {"counts": "raw_counts"},
-        "producer_skill": SKILL_NAME,
-    }
-    standardized.uns["omicsclaw_matrix_contract"] = matrix_contract
-
-    summary = {
-        "method": METHOD_NAME,
-        "n_cells": int(standardized.n_obs),
-        "n_genes": int(standardized.n_vars),
-        "species": species,
-        "species_auto_detected": species_auto_detected,
-        "expression_source": prepared.expression_source,
-        "gene_name_source": prepared.gene_name_source,
-        "warnings": prepared.warnings,
-        "counts_layer_present": "counts" in standardized.layers,
-        "input_contract_version": contract.get("version", ""),
-    }
+    matrix_contract = standardized.uns["omicsclaw_matrix_contract"]
+    summary = library.run_info(standardized, keep=False)
 
     # Detect degenerate output and build diagnostics
     diagnostics = _detect_diagnostics(summary)

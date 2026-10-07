@@ -34,7 +34,7 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 - **spatial** (17 skills — Spatial Transcriptomics)
   Spatial transcriptomics for Visium/Xenium/MERFISH/Slide-seq: QC, domain detection, SVG, deconvolution, cell communication, trajectories, CNV.
   Key skills: spatial-preprocess, spatial-domains, spatial-de, spatial-deconv, spatial-communication
-- **singlecell** (31 skills — Single-Cell Omics)
+- **singlecell** (30 skills — Single-Cell Omics)
   scRNA-seq + scATAC-seq: FASTQ→counts, QC, filter, doublet removal, normalize→HVG→PCA→UMAP→cluster, annotation, DE, trajectory, velocity, GRN, CCC.
   Key skills: sc-preprocessing, sc-cell-annotation, sc-de, sc-batch-integration, sc-pseudotime
 - **genomics** (10 skills — Genomics)
@@ -58,7 +58,7 @@ When the user asks an analysis question, match it to a skill and act. OmicsClaw 
 | Domain | Skills | Full index |
 |---|---|---|
 | Spatial Transcriptomics | 17 | [`skills/spatial/INDEX.md`](skills/spatial/INDEX.md) |
-| Single-Cell Omics | 31 | [`skills/singlecell/INDEX.md`](skills/singlecell/INDEX.md) |
+| Single-Cell Omics | 30 | [`skills/singlecell/INDEX.md`](skills/singlecell/INDEX.md) |
 | Genomics | 10 | [`skills/genomics/INDEX.md`](skills/genomics/INDEX.md) |
 | Proteomics | 8 | [`skills/proteomics/INDEX.md`](skills/proteomics/INDEX.md) |
 | Metabolomics | 8 | [`skills/metabolomics/INDEX.md`](skills/metabolomics/INDEX.md) |
@@ -86,9 +86,9 @@ A **module** is one analysis stage whose figures and tables can be reported on t
 
 ### Writing a step
 
-A **step** is one file in `analysis/<NN_slug>/` named `<k>_<name>.py`, for example `02_cluster.py`. A letter after the number marks a variant (`02b_cluster_louvain.py`). Steps run in name order. Every module has one `<k>_validate.py` step, which runs last and asserts what the report relies on with the checks in `skills._sdk.notebook.checks`: expected columns exist, tables are non-empty, counts are in range, a counts table agrees with the labels it counts, and the figures the report cites exist.
+A **step** is one file in `analysis/<NN_slug>/` named `<k>_<name>.py` or `<k>_<name>.R`, for example `02_cluster.py`. A letter after the number marks a variant (`02b_cluster_louvain.py`). Steps run in name order. Every module has one `<k>_validate.py` step, which runs last and asserts what the report relies on with the checks in `skills._sdk.notebook.checks`: expected columns exist, tables are non-empty, counts are in range, a counts table agrees with the labels it counts, and the figures the report cites exist.
 
-A step is a plain Python file split into cells by `# %%` lines. `# %% [markdown]` starts a prose cell whose lines begin with `# `. Open each step with a markdown cell that says what it does, what it reads and which skill functions it calls.
+A Python step is a plain Python file split into cells by `# %%` lines. `# %% [markdown]` starts a prose cell whose lines begin with `# `. Open each step with a markdown cell that says what it does, what it reads and which skill functions it calls.
 
 ```python
 # %% [markdown]
@@ -113,7 +113,8 @@ write_output(clustering.cluster_summary(adata), "tables/cluster_summary.csv")
 - When a skill's SKILL.md has an `## API` section, call its functions through `load_skill(name)`. Where a skill function covers what the step does, call it; when you write the code yourself, give the reason in a markdown cell.
 - A skill without an `## API` section has a CLI: call it from a step with `run_cli(name, "--input", <path>, <flags from its SKILL.md>, inputs=[<path>])`. Its output lands in `results/<NN_slug>/intermediate/<name>/`.
 - Every value the skill does not give you, such as a threshold, a resolution or a cutoff, appears in the step with its reason.
-- Keep steps plain Python, with no `%` or `!` lines, so each file also runs as `python <file>` from the project root. Fix random seeds (`random_state`) so reruns give the same numbers.
+- Keep Python steps plain Python, with no `%` or `!` lines, so each file also runs as `python <file>` from the project root. Fix random seeds (`random_state`) so reruns give the same numbers.
+- Use an R step (`<k>_<name>.R`, uppercase suffix) when the user asks for R or no skill function covers an R-only method. Start with `source(file.path(Sys.getenv("OMICSCLAW_SDK_DIR"), "notebook", "step.R"))`, then use `read_input()` and `write_output()` with the same path rules as Python. Exchange tables as CSV, matrices as Matrix Market plus barcode/feature CSV, and R objects as RDS. R steps use the same percent cells; their opening markdown names the method and the reason for using R. They record IO and R package versions, not skill calls. Call a skill's R method from its Python API, not by running its R scripts directly. Keep the validate step in Python, and never give a `.py` and `.R` step the same stem.
 - `load_demo(name)` loads a demo dataset inside a step when the user has no data.
 - Before your first step in a session, and whenever you need a detail of these functions, run the step runner's `reference` (or `reference <function>`): it prints, for each step function and validate check, what it accepts, the paths it takes, its default readers and writers, where `load_demo` looks and where `run_cli` puts its output.
 
@@ -139,7 +140,7 @@ A step is **stale** when its file changed, or a file it read changed, since its 
 
 1. `replay` the module. Done when every step, the validate step included, reports `ok`.
 2. Write `results/<NN_slug>/M<NN>_<slug>_REPORT.md`: what was done, the key numbers with the tables they come from, the figures, and the disclaimer.
-3. Delegate "Review module <NN_slug>" to the `module-reviewer` sub-agent and save its reply unchanged to `results/<NN_slug>/reviews/<YYYY-MM-DD>_review.md`. On `VERDICT: REVISE`, fix the findings and go back to step 1. Skip the review only when the user asks you to.
+3. Delegate "Review module <NN_slug>" to the `module-reviewer` sub-agent and save its reply unchanged to `results/<NN_slug>/reviews/<YYYY-MM-DD>_review.md`. The first line must be exactly `VERDICT: APPROVE` or `VERDICT: REVISE`; if it is not, ask the reviewer to resend its verdict first instead of editing its reply. On `VERDICT: REVISE`, fix the findings and go back to step 1. Skip the review only when the user asks you to.
 4. Show the user the report and the verdict. When the user says the module is accepted, run `accept analysis/<NN_slug> --review <review file>`, or `--skip-review "<the user's words>"` when they asked to skip the review.
 
 To change an accepted module, tell the user first, then run `revise`; it keeps the accepted results in `results/<NN_slug>/baseline/`. To set a superseded module aside, ask the user, then pack `analysis/<NN_slug>/` and `results/<NN_slug>/` into one `tar.gz` under `results/_archive/`.
@@ -162,7 +163,7 @@ changed.
 ## Finding a skill
 
 Skills are disclosed **progressively**. The system prompt carries one
-`- name: description` line per skill — about 8k tokens over all 89,
+`- name: description` line per skill — about 8k tokens over all 88,
 against ~125k if the bodies were injected. The bodies stay on disk until
 something asks for one.
 
@@ -181,9 +182,13 @@ If the catalogue is not in your prompt (`--skills-index off`, or
 
 ## Demo Data
 
-Inside a step, `load_demo("pbmc3k_raw")` and the other registered datasets
-(`pbmc3k_processed`, `pbmc68k_reduced`) load demo data; most skill CLIs also
-accept `--demo`. Shared demo inputs for the CLIs live in `examples/`.
+Inside a step, `load_demo` reads `pbmc3k_raw`, `pbmc3k_processed` or
+`pbmc68k_reduced`, and the seeded generators `multisample_synthetic`,
+`perturbseq_synthetic`, `atac_synthetic` and `velocity_simulation`.
+Generated data is cached and hashed like file-backed input; it tests
+computation against planted structure, not biological validity. Most skill
+CLIs also accept `--demo`; their fixtures may differ from the step examples.
+Shared CLI demo inputs live in `examples/`.
 
 | File | Use with |
 |---|---|

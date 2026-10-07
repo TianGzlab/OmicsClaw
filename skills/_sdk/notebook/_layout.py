@@ -96,6 +96,20 @@ class Module:
             return []
         return sorted(p for p in self.analysis_dir.iterdir() if p.is_file() and p.suffix in {".R", ".r"})
 
+    def layout_problems(self) -> list[str]:
+        """Step names that would overlap output paths or bypass Python validation."""
+        problems = []
+        for path in self.r_files():
+            if path.suffix == ".r":
+                problems.append(f"{path.name}: R steps use the uppercase .R suffix")
+            elif not STEP_RE.fullmatch(path.name):
+                problems.append(f"{path.name}: expected <k>_<name>.R")
+            elif re.fullmatch(r"\d{2}[a-z]?_validate\.R", path.name):
+                problems.append(f"{path.name}: the validate step must be Python (.py)")
+            if path.suffix == ".R" and path.with_suffix(".py").is_file():
+                problems.append(f"{path.stem}: .py and .R steps cannot have the same stem")
+        return problems
+
     def ignored_files(self) -> list[Path]:
         """Python files in the module whose names are not step names."""
         if not self.analysis_dir.is_dir():

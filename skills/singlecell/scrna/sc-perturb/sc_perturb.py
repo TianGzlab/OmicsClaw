@@ -24,6 +24,9 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
+
+_api = load_skill("sc-perturb")
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -199,6 +202,7 @@ def _write_reproducibility(output_dir: Path, args: argparse.Namespace, input_pat
     if args.perturbation_type != "KO":
         command_parts.extend(["--perturbation-type", args.perturbation_type])
 
+    command_parts.extend(["--seed", str(args.seed)])
     command = " ".join(shlex.quote(part) for part in command_parts)
     (repro_dir / "commands.sh").write_text(f"#!/bin/bash\n{command}\n", encoding="utf-8")
 
@@ -263,23 +267,16 @@ def main() -> int:
         )
         args.split_by = None
 
-    if "X_pca" not in adata.obsm:
-        logger.info("Computing PCA (X_pca not found in input).")
-        sc.pp.pca(adata)
-
-    result = run_mixscape_workflow(
-        adata,
-        pert_key=args.pert_key,
-        control=args.control,
+    adata = _api.mixscape(
+        adata, pert_key=args.pert_key, control=args.control,
         split_by=args.split_by if args.split_by else None,
-        n_neighbors=args.n_neighbors,
-        logfc_threshold=args.logfc_threshold,
-        pval_cutoff=args.pval_cutoff,
-        perturbation_type=args.perturbation_type,
+        n_neighbors=args.n_neighbors, logfc_threshold=args.logfc_threshold,
+        pval_cutoff=args.pval_cutoff, perturbation_type=args.perturbation_type,
+        random_state=args.seed,
     )
-
-    class_counts = result["class_counts"]
-    global_counts = result["global_counts"]
+    result = _api.run_info(adata)
+    class_counts = _api.class_counts(adata)
+    global_counts = _api.global_class_counts(adata)
     class_counts.to_csv(tables_dir / "mixscape_class_counts.csv", index=False)
     global_counts.to_csv(tables_dir / "mixscape_global_class_counts.csv", index=False)
 
@@ -313,10 +310,7 @@ def main() -> int:
         __import__("json").dumps(manifest, indent=2), encoding="utf-8"
     )
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    global_counts.plot.bar(x="global_class", y="n_cells", ax=ax, color="#1f78b4")
-    ax.set_title("Mixscape global classes")
-    fig.tight_layout()
+    fig = _api.global_class_figure(adata)
     fig.savefig(figures_dir / "mixscape_global_classes.png", dpi=200)
     plt.close(fig)
 
@@ -374,6 +368,7 @@ def main() -> int:
             "logfc_threshold": args.logfc_threshold,
             "pval_cutoff": args.pval_cutoff,
             "perturbation_type": args.perturbation_type,
+            "random_state": args.seed,
         },
     )
 
@@ -396,6 +391,7 @@ def main() -> int:
         "logfc_threshold": args.logfc_threshold,
         "pval_cutoff": args.pval_cutoff,
         "perturbation_type": args.perturbation_type,
+        "random_state": args.seed,
     }
 
     data_payload: dict = {

@@ -14,92 +14,96 @@ tags:
 
 # sc-cytotrace
 
-## When to use
+## Use from a step
 
-The user has a normalised (or raw-count) scRNA AnnData and wants a
-single per-cell **differentiation potency** score (0 = differentiated,
-1 = stem/totipotent), plus a 6-bin categorical label
-(`Differentiated`, `Mostly Differentiated`, ..., `Totipotent`). The
-implementation uses the CytoTRACE-simple proxy: gene-expression
-complexity (number of genes detected per cell), KNN-smoothed and rank-
-normalised. Single backend: `cytotrace_simple`.
+```python
+potency = load_skill("sc-cytotrace")
+adata = potency.cytotrace(read_input("expression.h5ad"), layer="counts")
+write_output(potency.potency_table(adata), "tables/potency.csv")
+write_output(potency.potency_figure(adata), "figures/potency.png")
+write_output(adata, "intermediate/adata_potency.h5ad")
+```
 
-Output goes into `obs["cytotrace_score"]`, `obs["cytotrace_potency"]`,
-`obs["cytotrace_gene_count"]`. For trajectory ordering use
-`sc-pseudotime`; for cell-type labels use `sc-cell-annotation`.
+The function annotates the input in place. The PBMC example in
+`examples/example_step.py` demonstrates the call, not biological differentiation.
 
-## Inputs & Outputs
+## API
 
-**Inputs**
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-- Modalities: scrna
-- File types: `.h5ad`
-- Requires a preprocessed AnnData (`X` normalised, PCA/neighbours present)
+### `cytotrace(adata, *, n_neighbors: int=30, layer: str | None=None)`
 
-**Outputs**
+Annotate a complexity-based potency proxy in place, preserving X.
 
-- `tables/cell_metadata.csv`
-- `tables/cytotrace_embedding.csv`
-- `tables/cytotrace_scores.csv`
-- `figures/potency_composition.png`
-- `figures/potency_umap.png`
-- `figures/r_cell_density.png`
-- `figures/r_cytotrace_boxplot.png`
-- `figures/r_embedding_discrete.png`
-- `figures/r_embedding_feature.png`
-- `figures/score_distribution.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `cytotrace_score`, `cytotrace_potency`, `cytotrace_gene_count`
+This is CytoTRACE-simple, not the published CytoTRACE or CytoTRACE 2.
+It counts positive expression, smooths rank scores, ranks them again
+and bins them into six relative categories. Existing neighbors are reused.
 
-## Flow
+:param adata: AnnData with expression and optionally PCA/neighbors.
+:param n_neighbors: Neighbors to construct when absent; default 30.
+:param layer: Expression layer for gene detection; None uses X.
+    Use counts or unscaled log expression, not centered/scaled X.
+:returns: The same AnnData with cytotrace_score, cytotrace_gene_count
+    and cytotrace_potency in obs; run_info returns diagnostics.
+:raises ValueError: The input is empty, a layer is missing, or neighbors < 1.
 
-1. Load AnnData; preflight requires `.X` to be `normalized_expression` OR `raw_counts` (matrix-contract check).
-2. Compute per-cell gene-count complexity (number of detected genes).
-3. Rank-normalise gene counts; KNN-smooth across `--n-neighbors` neighbours.
-4. Min-max rescale to `[0, 1]` → `cytotrace_score`.
-5. Bin score into 6 potency categories; record counts per category.
-6. Detect degenerate output (≤ 1 unique category) → write `result.json["suggested_actions"]`; do NOT raise.
-7. Render figures, save tables, `processed.h5ad`, `report.md`, `result.json`.
+### `run_info(adata, *, keep: bool=True) -> dict`
+
+Read JSON potency diagnostics; keep=False removes them from uns.
+
+### `potency_table(adata) -> pd.DataFrame`
+
+Return per-cell score, category and detected-gene count, indexed by cell.
+
+### `potency_composition(adata) -> pd.DataFrame`
+
+Return counts for the six relative potency bins; they are not cell-type calls.
+
+### `potency_figure(adata)`
+
+Return a matplotlib Figure showing the potency score distribution.
+
+<!-- api:end -->
+
+## Methods and parameters
+
+CytoTRACE-simple counts positive expression, rank-normalizes that complexity,
+smooths on a neighbor graph, ranks again and assigns six relative bins.
+It is not the published CytoTRACE or CytoTRACE 2 model.
+
+`n_neighbors=30` retains the CLI default and is used only if a neighbor graph
+must be built. `layer=None` uses X; specify a counts layer or unscaled
+log-normalized expression. Computation is deterministic for a fixed graph.
 
 ## Gotchas
 
-- **Single backend only.** `sc_cytotrace.py` argparse `choices=["cytotrace_simple"]` — there is no full CytoTRACE 2 / R-backed path here. `main` raises `ValueError(f"Unknown method: {args.method}")` if the registry diverges.
-- **Score is a *proxy* via gene complexity, not the original CytoTRACE algorithm.** `sc_cytotrace.py` documents the simplified pipeline (gene_count → rank → smooth → minmax → 6 bins). Don't quote scores as identical to published CytoTRACE — they're correlated but not numerically equivalent.
-- **Degenerate output is a soft fail.** When all cells land in 1 potency bin (e.g., uniformly low complexity), `sc_cytotrace.py` records `result.json["n_potency_categories"] ≤ 1`, sets `degenerate=True`, and writes `suggested_actions: [...]` — but the script returns 0. Always check `result.json["n_potency_categories"]` before interpreting the score.
-- **`--input` mandatory unless `--demo`.** `sc_cytotrace.py` raises `ValueError("--input required when not using --demo")`.
-- **The skill OVERWRITES existing `obs["cytotrace_*"]` columns.** `sc_cytotrace.py` directly assigns into `obs`. Save the input AnnData first if you need to compare two CytoTRACE runs (e.g., before/after filtering).
+- The second rank transform makes the six `cytotrace_potency` bins approximately
+  equal-sized when scores have no ties. Labels such as Totipotent are names
+  of these bins, not evidence that those cells are biologically totipotent (`_api.py:112`).
+- Positive values in centered/scaled X do not count detected genes. Use
+  `layer="counts"` or an unscaled matrix; inspect `potency_table` (`_api.py:72`).
+- Existing neighbors are reused regardless of `n_neighbors`. The CLI's
+  processed PBMC demo has scaled X and is retained only for compatibility (`_api.py:80`).
+- `run_info(adata)["degenerate"]` marks at most one occupied category. It
+  does not raise; the CLI mirrors this under `result.json["summary"]`.
+
+## Inputs & Outputs
+
+Input is AnnData with expression, optionally PCA and neighbors. The API adds
+`cytotrace_score`, `cytotrace_potency` and `cytotrace_gene_count` to obs and
+returns tables/Figures without writing files.
+
+The CLI writes `processed.h5ad`, `tables/cytotrace_scores.csv`, `report.md`,
+`result.json`, `figure_data/cytotrace_embedding.csv` and potency/distribution
+plots under `figures/`. R-enhanced plots are optional.
 
 ## Key CLI
 
 ```bash
-# Demo
 python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --demo --output /tmp/sc_cytotrace_demo
-
-# Default on a normalised AnnData
-python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
-  --input clustered.h5ad --output results/
-
-# Tighter KNN smoothing for sparse data
-python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
-  --input clustered.h5ad --output results/ --n-neighbors 50
-
-# With R-enhanced ggplot figures
-python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py \
-  --input clustered.h5ad --output results/ --r-enhanced
+python skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py --input normalized.h5ad --n-neighbors 30 --output results/
 ```
 
-## See also
-
-- `references/parameters.md` — every CLI flag, smoothing notes
-- `references/methodology.md` — gene-count proxy vs original CytoTRACE; bin thresholds
-- `references/output_contract.md` — `obs["cytotrace_score"]` / `cytotrace_potency` schema
-- Adjacent skills: `sc-pseudotime` (parallel — graph-based trajectory ordering, complementary to potency), `sc-clustering` (upstream — provides UMAP for the potency-on-UMAP plot), `sc-cell-annotation` (parallel — predicts discrete cell-type labels rather than continuous potency)
-
 ## Dependencies
-
-Python packages this skill's script needs. They are not installed for you — check before a long run.
 
 `anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`

@@ -553,7 +553,7 @@ def run_fastqc(inputs: list[Path], output_dir: str | Path, *, threads: int = 4) 
     outdir = Path(output_dir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
     command = ["fastqc", "--quiet", "--threads", str(max(int(threads), 1)), "--outdir", str(outdir)]
-    command.extend(str(path) for path in inputs)
+    command.extend(str(path.resolve()) for path in inputs)
     return run_command(command, cwd=outdir.parent)
 
 

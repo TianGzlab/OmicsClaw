@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # sc_gsva_r.R — GSVA group-level pathway scoring via GSVA R package
 #
-# CLI: Rscript sc_gsva_r.R <group_expr_csv> <output_dir> [species] [db] [gsva_method] [group_by]
+# CLI: Rscript sc_gsva_r.R <group_expr_csv> <output_dir> [species] [db] [gsva_method] [group_by] [min_size] [max_size] [gene_sets_gmt]
 #
 # group_expr_csv: rows = cell type groups, cols = genes. First column is group name.
 # Output:
@@ -26,6 +26,7 @@ gsva_method    <- if (length(args) >= 5) args[5] else "gsva"
 group_by       <- if (length(args) >= 6) args[6] else "group"
 min_gs_size    <- as.integer(if (length(args) >= 7) args[7] else 5)
 max_gs_size    <- as.integer(if (length(args) >= 8) args[8] else 500)
+gene_sets_gmt  <- if (length(args) >= 9) args[9] else ""
 
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
@@ -69,7 +70,13 @@ tryCatch({
   # --- 2. Build gene sets ---
   gene_sets <- NULL
 
-  if (db == "GO_BP") {
+  if (nzchar(gene_sets_gmt)) {
+    records <- strsplit(readLines(gene_sets_gmt, warn = FALSE), "\t", fixed = TRUE)
+    records <- records[lengths(records) >= 3]
+    gene_sets <- setNames(lapply(records, function(row) intersect(toupper(row[-c(1, 2)]), gene_universe)),
+                         vapply(records, function(row) row[1], character(1)))
+    gene_sets <- gene_sets[lengths(gene_sets) >= min_gs_size & lengths(gene_sets) <= max_gs_size]
+  } else if (db == "GO_BP") {
     tryCatch({
       suppressPackageStartupMessages({
         library(AnnotationDbi)
@@ -132,19 +139,8 @@ tryCatch({
     })
   }
 
-  # --- 3. Demo fallback: synthetic gene sets ---
   if (is.null(gene_sets) || length(gene_sets) == 0) {
-    cat("INFO: No real gene sets found; using synthetic demo pathways.\n")
-    n_genes <- length(gene_universe)
-    if (n_genes < 10) {
-      write_empty_result("Too few genes for GSVA (< 10)")
-      quit(status = 0)
-    }
-    n_sets <- min(10, floor(n_genes / 5))
-    gene_sets <- lapply(seq_len(n_sets), function(i) {
-      sample(gene_universe, min(20, n_genes))
-    })
-    names(gene_sets) <- paste0("DEMO_PATHWAY_", seq_len(n_sets))
+    stop("No valid gene sets: check gene identifiers, annotation packages and size limits.")
   }
 
   # --- 4. Cap gene sets for speed ---

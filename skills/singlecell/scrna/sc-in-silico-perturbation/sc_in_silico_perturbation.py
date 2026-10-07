@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Single-cell in-silico perturbation analysis.
+"""Descriptive correlation edge scores or the optional R scTenifoldKnk method.
 
-Methods
--------
-- ``grn_ko`` (Python, default): correlation-based GRN knockout simulation.
-  Builds a gene-gene correlation network from the WT expression matrix,
-  zeroes the knocked-out gene's edges, computes a differential regulation
-  score, and ranks perturbed genes.
-- ``sctenifoldknk`` (R): official scTenifoldKnk pipeline via Rscript.
+The default grn_ko CLI name is retained for compatibility. Its score is not a
+causal knockout simulation and it does not provide calibrated significance.
 """
 
 from __future__ import annotations
@@ -16,7 +11,6 @@ import argparse
 import json
 import logging
 import sys
-import tempfile
 from pathlib import Path
 
 import matplotlib
@@ -34,6 +28,9 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
+
+_api = load_skill("sc-in-silico-perturbation")
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -42,10 +39,11 @@ from skills._sdk.result import write_result_json
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     ensure_input_contract,
+    infer_x_matrix_kind,
     propagate_singlecell_contracts,
     store_analysis_metadata,
 )
-from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
+from skills.singlecell._lib.export import save_h5ad
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -98,8 +96,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--n-top-genes", type=int, default=2000,
                     help="Number of HVGs used for GRN (grn_ko)")
     p.add_argument("--corr-threshold", type=float, default=0.05,
-                    help="Absolute Pearson correlation threshold for GRN edges (grn_ko)")
+                    help="Deprecated compatibility argument; the descriptive score does not threshold edges")
     # -- R method params --
+    p.add_argument("--seed", type=int, default=0, help="R scTenifoldKnk random seed")
     p.add_argument("--qc", action="store_true")
     p.add_argument("--qc-min-lib-size", type=int, default=0)
     p.add_argument("--qc-min-cells", type=int, default=10)
@@ -223,151 +222,6 @@ def _preflight_matrix(adata, *, ko_gene: str, method: str) -> list[str]:
 # Python method: GRN knockout
 # ---------------------------------------------------------------------------
 
-def _run_grn_ko(adata, *, ko_gene: str, n_top_genes: int, corr_threshold: float) -> pd.DataFrame:
-    """Lightweight Python GRN-based virtual knockout.
-
-    1. Select HVGs (including the KO gene).
-    2. Build a Pearson correlation network on the raw count matrix.
-    3. Zero the KO gene's edges (simulate knockout).
-    4. Score differential regulation as |corr_wt - corr_ko| aggregated per gene.
-    5. Rank and return a DataFrame.
-    """
-    import scipy.stats as stats
-
-    # Use counts if available, else X
-    mat = adata.layers["counts"] if "counts" in adata.layers else adata.X
-    if hasattr(mat, "toarray"):
-        mat = mat.toarray()
-    mat = np.array(mat, dtype=np.float64)
-
-    gene_names = np.array(adata.var_names)
-
-    # Select top variable genes, always including the KO gene
-    gene_var = mat.var(axis=0)
-    ko_idx = int(np.where(gene_names == ko_gene)[0][0])
-
-    n_select = min(n_top_genes, len(gene_names))
-    top_idx = np.argsort(gene_var)[::-1][:n_select]
-    if ko_idx not in top_idx:
-        top_idx = np.append(top_idx, ko_idx)
-    top_idx = np.sort(top_idx)
-
-    sub_mat = mat[:, top_idx]
-    sub_genes = gene_names[top_idx]
-    ko_local = int(np.where(sub_genes == ko_gene)[0][0])
-
-    logger.info("GRN construction on %d genes x %d cells", len(sub_genes), adata.n_obs)
-
-    # Build WT correlation matrix
-    corr_wt = np.corrcoef(sub_mat.T)
-    corr_wt = np.nan_to_num(corr_wt, nan=0.0)
-
-    # KO: zero the row and column of the KO gene
-    corr_ko = corr_wt.copy()
-    corr_ko[ko_local, :] = 0.0
-    corr_ko[:, ko_local] = 0.0
-
-    # Differential regulation score: mean absolute difference per gene
-    diff = np.abs(corr_wt - corr_ko)
-    dr_score = diff.mean(axis=1)
-
-    # Statistical test: compare WT vs KO edge distributions per gene
-    # Use a simple z-score based on the KO gene's contribution
-    wt_edges = np.abs(corr_wt[ko_local, :])
-    n_genes_sel = len(sub_genes)
-
-    results = []
-    for i, g in enumerate(sub_genes):
-        fc = dr_score[i]
-        # p-value: fraction of random permutations that would give higher score
-        # Approximate with a normal distribution
-        if dr_score.std() > 0:
-            z = (fc - dr_score.mean()) / dr_score.std()
-            p_val = 2 * (1 - stats.norm.cdf(abs(z)))
-        else:
-            p_val = 1.0
-        results.append({
-            "gene": g,
-            "dr_score": float(fc),
-            "wt_ko_corr": float(wt_edges[i]),
-            "z_score": float(z) if dr_score.std() > 0 else 0.0,
-            "p_value": float(p_val),
-        })
-
-    result_df = pd.DataFrame(results)
-    # Adjust p-values (BH)
-    from statsmodels.stats.multitest import multipletests
-    _, padj, _, _ = multipletests(result_df["p_value"].values, method="fdr_bh")
-    result_df["p.adj"] = padj
-    result_df["FC"] = result_df["dr_score"]  # compatibility with plot
-    result_df = result_df.sort_values("p.adj").reset_index(drop=True)
-
-    return result_df
-
-# ---------------------------------------------------------------------------
-# R method: scTenifoldKnk (unchanged)
-# ---------------------------------------------------------------------------
-
-def _load_expression_matrix_for_r(adata) -> pd.DataFrame:
-    """Convert AnnData to a genes-x-cells DataFrame for R."""
-    matrix = adata.layers["counts"] if "counts" in adata.layers else adata.X
-    if hasattr(matrix, "toarray"):
-        matrix = matrix.toarray()
-    return pd.DataFrame(
-        matrix.T,
-        index=adata.var_names.astype(str),
-        columns=adata.obs_names.astype(str),
-    )
-
-
-def _run_sctenifoldknk(df: pd.DataFrame, args: argparse.Namespace, output_dir: Path) -> pd.DataFrame:
-    """Run scTenifoldKnk via Rscript."""
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_tenifold_") as tmpdir:
-        matrix_path = Path(tmpdir) / "matrix.csv"
-        r_script_path = Path(tmpdir) / "run_sctenifoldknk.R"
-        output_csv = Path(tmpdir) / "diff_regulation.csv"
-        df.to_csv(matrix_path)
-
-        r_script = f"""
-suppressPackageStartupMessages(library(scTenifoldKnk))
-mat <- as.matrix(read.csv("{matrix_path.as_posix()}", row.names=1, check.names=FALSE))
-out <- scTenifoldKnk(
-  countMatrix = mat,
-  gKO = "{args.ko_gene}",
-  qc = {str(args.qc).upper()},
-  qc_minLSize = {args.qc_min_lib_size},
-  qc_minCells = {args.qc_min_cells},
-  nc_nNet = {args.n_net},
-  nc_nCells = {args.n_cells},
-  nc_nComp = {args.n_comp},
-  nc_q = {args.q},
-  td_K = {args.td_k},
-  ma_nDim = {args.ma_dim},
-  nCores = {args.n_cores}
-)
-write.csv(out$diffRegulation, "{output_csv.as_posix()}", row.names=FALSE, quote=FALSE)
-"""
-        r_script_path.write_text(r_script, encoding="utf-8")
-
-        import os
-        import subprocess
-
-        r_env = os.environ.copy()
-        user_r_lib = str(Path.home() / "R" / "x86_64-pc-linux-gnu-library" / "4.1")
-        current_r_libs = r_env.get("R_LIBS_USER", "")
-        r_env["R_LIBS_USER"] = (
-            user_r_lib if not current_r_libs else f"{user_r_lib}:{current_r_libs}"
-        )
-
-        subprocess.run(["Rscript", str(r_script_path)], check=True, env=r_env)
-        result = pd.read_csv(output_csv)
-        result.to_csv(output_dir / "tables" / "tenifold_diff_regulation.csv", index=False)
-        return result
-
-# ---------------------------------------------------------------------------
-# Degenerate output detection
-# ---------------------------------------------------------------------------
-
 def _check_degenerate(diff_df: pd.DataFrame, *, ko_gene: str) -> dict:
     """Detect degenerate perturbation results."""
     diagnostics: dict = {
@@ -384,7 +238,10 @@ def _check_degenerate(diff_df: pd.DataFrame, *, ko_gene: str) -> dict:
         ]
         return diagnostics
 
-    n_sig = int((diff_df["p.adj"] <= 0.05).sum()) if "p.adj" in diff_df.columns else 0
+    if "p.adj" not in diff_df.columns:
+        diagnostics["interpretation"] = "Descriptive correlation score; no significance test was performed."
+        return diagnostics
+    n_sig = int((diff_df["p.adj"] <= 0.05).sum())
     if n_sig == 0:
         diagnostics["degenerate"] = True
         diagnostics["reason"] = "no_significant_genes"
@@ -430,6 +287,8 @@ def _write_figure_data(output_dir: Path, diff_df: pd.DataFrame) -> dict[str, str
         # Write de_top_markers.csv alias for plot_de_volcano renderer.
         # Maps ISP columns to expected DE column schema.
         try:
+            if "p.adj" not in diff_df.columns:
+                raise ValueError("Correlation scores are not differential-expression tests")
             alias_df = diff_df.copy()
             # Rename to scanpy-style DE columns expected by de.R
             col_map = {}
@@ -479,7 +338,7 @@ def _write_report(
         f"- Method: `{summary.get('method')}`",
         f"- KO gene: `{params.get('ko_gene')}`",
         f"- Differentially regulated genes reported: `{summary.get('n_genes', 'NA')}`",
-        f"- Significant genes (`p.adj <= 0.05`): `{summary.get('n_significant', 'NA')}`",
+        f"- Significant genes (R method only): `{summary.get('n_significant', 'not tested')}`",
         "",
     ]
 
@@ -492,9 +351,9 @@ def _write_report(
     body.extend([
         "## Interpretation",
         "",
-        "- The analysis builds a gene regulatory network from the wild-type expression data,",
-        "  then simulates the effect of knocking out the target gene by removing its edges.",
-        "- Differentially regulated genes are ranked by their perturbation score.",
+        "- `grn_ko` is a descriptive Pearson-correlation edge-removal score, not a causal KO simulation.",
+        "- It does not test significance; no p-values or adjusted p-values are reported.",
+        "- `sctenifoldknk` runs the separate R network method and preserves its statistical output.",
         "- Inspect the top genes in `tables/diff_regulation.csv`.",
     ])
 
@@ -539,6 +398,7 @@ def main() -> int:
         if args.method == "sctenifoldknk":
             # R path uses a DataFrame directly
             matrix_df = _make_demo_matrix()
+            adata = sc.AnnData(matrix_df.T)
         else:
             adata = _make_demo_adata()
         input_path = None
@@ -558,20 +418,18 @@ def main() -> int:
         )
 
     # -- Run method --
-    executed_method: str
+    assert adata is not None
     if args.method == "sctenifoldknk":
-        if adata is not None:
-            matrix_df = _load_expression_matrix_for_r(adata)
-        diff_df = _run_sctenifoldknk(matrix_df, args, output_dir)  # type: ignore[possibly-undefined]
+        diff_df = _api.sctenifoldknk(
+            adata, ko_gene=args.ko_gene, qc=args.qc, qc_min_lib_size=args.qc_min_lib_size,
+            qc_min_cells=args.qc_min_cells, n_net=args.n_net, n_cells=args.n_cells,
+            n_comp=args.n_comp, q=args.q, td_k=args.td_k, ma_dim=args.ma_dim,
+            n_cores=args.n_cores, random_state=args.seed,
+        )
+        diff_df.to_csv(tables_dir / "tenifold_diff_regulation.csv", index=False)
         executed_method = "sctenifoldknk"
     else:
-        assert adata is not None
-        diff_df = _run_grn_ko(
-            adata,
-            ko_gene=args.ko_gene,
-            n_top_genes=args.n_top_genes,
-            corr_threshold=args.corr_threshold,
-        )
+        diff_df = _api.knockout_correlation(adata, ko_gene=args.ko_gene, n_top_genes=args.n_top_genes)
         executed_method = "grn_ko"
 
     # -- Save results table --
@@ -590,14 +448,8 @@ def main() -> int:
 
     # -- Figures --
     figure_files: list[str] = []
-    if not diff_df.empty and "FC" in diff_df.columns:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        top = diff_df.sort_values("p.adj").head(15)
-        ax.barh(top["gene"].astype(str), top["FC"].astype(float), color="#b2182b")
-        ax.axvline(0, color="black", linestyle="--", linewidth=0.8)
-        ax.set_xlabel("Perturbation score")
-        ax.set_title(f"Top virtual-knockout perturbed genes (KO: {args.ko_gene})")
-        fig.tight_layout()
+    if not diff_df.empty:
+        fig = _api.perturbed_genes_figure(diff_df)
         fig.savefig(figures_dir / "top_perturbed_genes.png", dpi=200)
         plt.close(fig)
         figure_files.append("top_perturbed_genes.png")
@@ -627,9 +479,10 @@ def main() -> int:
         "method": executed_method,
         "ko_gene": args.ko_gene,
         "n_genes": int(len(diff_df)),
-        "n_significant": n_sig,
         "input_mode": "demo" if args.demo else "h5ad",
     }
+    if "p.adj" in diff_df:
+        summary["n_significant"] = n_sig
     params = {
         "ko_gene": args.ko_gene,
         "method": args.method,
@@ -648,6 +501,7 @@ def main() -> int:
             "td_k": args.td_k,
             "ma_dim": args.ma_dim,
             "n_cores": args.n_cores,
+            "random_state": args.seed,
         })
 
     # -- Contracts & processed.h5ad (Python path only) --
@@ -665,7 +519,7 @@ def main() -> int:
             adata,
             adata,
             producer_skill=SKILL_NAME,
-            x_kind="raw_counts",
+            x_kind=infer_x_matrix_kind(adata),
         )
 
         output_h5ad = output_dir / "processed.h5ad"
@@ -691,7 +545,7 @@ def main() -> int:
     result_data["next_steps"] = [
         {"skill": "sc-enrichment", "reason": "Pathway enrichment on predicted perturbation effects", "priority": "optional"},
     ]
-    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced)
+    r_enhanced_figures = _render_r_enhanced(output_dir, output_dir / "figure_data", args.r_enhanced and "p.adj" in diff_df)
     result_data["r_enhanced_figures"] = r_enhanced_figures
     write_result_json(
         output_dir,

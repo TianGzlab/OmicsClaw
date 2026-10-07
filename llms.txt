@@ -25,7 +25,7 @@ All processing happens locally. No genetic or spatial data leaves the machine.
 Generated from the `SKILL.md` headers. There are no CLI aliases: a skill
 is named by its `name:` and invoked at the script path below.
 
-### Single-Cell Omics (31 skills)
+### Single-Cell Omics (30 skills)
 
 | Skill | Directory |
 |---|---|
@@ -46,7 +46,6 @@ is named by its `name:` and invoked at the script path below.
 | `sc-gene-programs` | `skills/singlecell/scrna/sc-gene-programs/` |
 | `sc-grn` | `skills/singlecell/scrna/sc-grn/` |
 | `sc-in-silico-perturbation` | `skills/singlecell/scrna/sc-in-silico-perturbation/` |
-| `sc-integrate-cluster` | `skills/singlecell/scrna/sc-integrate-cluster/` |
 | `sc-markers` | `skills/singlecell/scrna/sc-markers/` |
 | `sc-metacell` | `skills/singlecell/scrna/sc-metacell/` |
 | `sc-multi-count` | `skills/singlecell/scrna/sc-multi-count/` |

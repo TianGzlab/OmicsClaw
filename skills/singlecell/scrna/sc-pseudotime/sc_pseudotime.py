@@ -45,9 +45,7 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
-from skills._sdk.r_dependency_manager import check_r_tier, suggest_r_install
-from skills._sdk.r_script_runner import RScriptRunner
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+from skills._sdk.notebook import load_skill
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import trajectory as sc_traj
 from skills.singlecell._lib.adata_utils import (
@@ -75,7 +73,6 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-pseudotime"
 SKILL_VERSION = "0.5.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py"
-R_SCRIPTS_DIR = _SDK_R_SCRIPTS_DIR
 
 # R Enhanced renderers for this skill.
 # Key   = renderer name registered in viz/r/registry.R R_PLOT_REGISTRY
@@ -225,29 +222,6 @@ METHOD_PARAM_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _prepare_via_runtime() -> None:
-    compat_aliases = {
-        "bool8": np.bool_,
-        "object0": np.object_,
-        "int0": np.intp,
-        "uint0": np.uintp,
-        "uint": np.uint64,
-        "float_": np.float64,
-        "longfloat": np.longdouble,
-        "singlecomplex": np.complex64,
-        "complex_": np.complex128,
-        "cfloat": np.complex128,
-        "clongfloat": np.clongdouble,
-        "longcomplex": np.clongdouble,
-        "void0": np.void,
-        "bytes0": np.bytes_,
-        "str0": np.str_,
-        "string_": np.bytes_,
-        "unicode_": np.str_,
-    }
-    for alias, target in compat_aliases.items():
-        if not hasattr(np, alias):
-            setattr(np, alias, target)
 
 
 def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
@@ -270,47 +244,6 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
 
 
 
-def _candidate_reps(adata) -> list[str]:
-    preferred = [key for key in ("X_umap", "X_harmony", "X_scvi", "X_scanvi", "X_scanorama", "X_pca") if key in adata.obsm]
-    if preferred:
-        return preferred
-    return [str(key) for key in adata.obsm.keys() if str(key).startswith("X_") and str(key) not in {"X_umap", "X_tsne", "X_diffmap"}]
-
-
-def _candidate_display_embeddings(adata) -> list[str]:
-    preferred = [key for key in ("X_umap", "X_tsne", "X_phate", "X_diffmap", "X_pca") if key in adata.obsm]
-    return preferred or [str(key) for key in adata.obsm.keys() if str(key).startswith("X_")]
-
-
-def _resolve_use_rep(adata, requested: str | None) -> str:
-    if requested:
-        if requested not in adata.obsm:
-            raise ValueError(f"Embedding `{requested}` was not found in adata.obsm.")
-        return requested
-    candidates = _candidate_reps(adata)
-    if not candidates:
-        raise ValueError("No suitable representation was found. Run `sc-preprocessing` or `sc-batch-integration` first.")
-    return candidates[0]
-
-
-def _resolve_display_embedding(adata, use_rep: str) -> str:
-    candidates = _candidate_display_embeddings(adata)
-    return candidates[0] if candidates else use_rep
-
-
-def _resolve_root_cell(adata, root_cell: str | None) -> int | None:
-    if root_cell is None:
-        return None
-    token = str(root_cell).strip()
-    if token == "":
-        return None
-    if token in set(adata.obs_names.astype(str)):
-        return int(np.where(adata.obs_names.astype(str) == token)[0][0])
-    if token.isdigit():
-        idx = int(token)
-        if 0 <= idx < adata.n_obs:
-            return idx
-    raise ValueError(f"`--root-cell {root_cell}` was not found. Provide a valid obs_name or integer cell index.")
 
 
 def _parse_end_clusters(end_clusters: str | None) -> list[str] | None:
@@ -357,11 +290,6 @@ def _prepare_input_adata(input_path: Path):
     return adata
 
 
-def _ensure_neighbors_for_rep(adata, *, use_rep: str, n_neighbors: int, n_pcs: int) -> None:
-    if use_rep == "X_pca":
-        sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
-    else:
-        sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep=use_rep)
 
 
 def _build_pseudotime_points_table(adata, *, pseudotime_key: str, cluster_key: str, display_key: str) -> pd.DataFrame:
@@ -584,321 +512,6 @@ def _write_reproducibility(output_dir: Path, *, params: dict, input_file: str | 
     _write_repro_requirements(repro_dir, packages)
 
 
-def _run_dpt(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-    root_cell_idx: int | None,
-    n_neighbors: int,
-    n_pcs: int,
-    n_dcs: int,
-) -> tuple[object, dict]:
-    _ensure_neighbors_for_rep(adata, use_rep=use_rep, n_neighbors=n_neighbors, n_pcs=n_pcs)
-    sc_traj.run_paga_analysis(adata, cluster_key=cluster_key, n_neighbors=n_neighbors)
-    diffmap_result = sc_traj.run_diffusion_map(adata, n_comps=max(15, n_dcs + 5), n_dcs=n_dcs)
-    dpt_result = sc_traj.run_dpt_pseudotime(
-        adata,
-        root_cell_indices=[root_cell_idx] if root_cell_idx is not None else None,
-        root_cluster=root_cluster,
-        cluster_key=cluster_key,
-        n_dcs=n_dcs,
-    )
-    summary = {
-        "backend": "dpt",
-        "pseudotime_key": "dpt_pseudotime",
-        "root_cell": int(dpt_result["root_cells"][0]) if dpt_result["root_cells"] else None,
-        "root_cell_name": str(adata.obs_names[int(dpt_result["root_cells"][0])]) if dpt_result["root_cells"] else None,
-        "n_diffusion_components": int(diffmap_result["diffmap"].shape[1]),
-    }
-    return adata, summary
-
-
-def _run_palantir(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-    root_cell_idx: int | None,
-    palantir_knn: int,
-    palantir_n_components: int,
-    palantir_num_waypoints: int,
-    palantir_max_iterations: int,
-    palantir_seed: int,
-) -> tuple[object, dict]:
-    early_cell = sc_traj.resolve_palantir_early_cell(
-        adata,
-        root_cell=root_cell_idx,
-        root_cluster=root_cluster,
-        cluster_key=cluster_key,
-        use_rep=use_rep,
-    )
-    result = sc_traj.run_palantir_pseudotime(
-        adata,
-        early_cell=early_cell,
-        use_rep=use_rep,
-        knn=palantir_knn,
-        n_components=palantir_n_components,
-        num_waypoints=palantir_num_waypoints,
-        max_iterations=palantir_max_iterations,
-        seed=palantir_seed,
-    )
-    if "palantir_fate_probabilities" in adata.obsm:
-        adata.obsm["trajectory_fate_probabilities"] = np.asarray(adata.obsm["palantir_fate_probabilities"], dtype=float)
-    summary = {
-        "backend": "palantir",
-        "pseudotime_key": "palantir_pseudotime",
-        "root_cell": int(np.where(adata.obs_names.astype(str) == str(early_cell))[0][0]),
-        "root_cell_name": str(early_cell),
-        "mean_entropy": float(np.nanmean(result["entropy"])) if result.get("entropy") is not None else None,
-        "n_terminal_states": int(result["fate_probabilities"].shape[1]) if result.get("fate_probabilities") is not None else 0,
-        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
-    }
-    return adata, summary
-
-
-def _run_via(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-    root_cell_idx: int | None,
-    via_knn: int,
-    via_seed: int,
-    n_dcs: int,
-) -> tuple[object, dict]:
-    result = sc_traj.run_via_pseudotime(
-        adata,
-        root_cell=root_cell_idx,
-        root_cluster=root_cluster,
-        cluster_key=cluster_key,
-        use_rep=use_rep,
-        knn=via_knn,
-        n_components=max(2, n_dcs),
-        seed=via_seed,
-    )
-    if "via_fate_probabilities" in adata.obsm:
-        adata.obsm["trajectory_fate_probabilities"] = np.asarray(adata.obsm["via_fate_probabilities"], dtype=float)
-    summary = {
-        "backend": result.get("method", "via"),
-        "pseudotime_key": "via_pseudotime",
-        "root_cell": int(result["root_cell"]),
-        "root_cell_name": str(result["root_cell_name"]),
-        "n_terminal_states": int(len(result.get("terminal_clusters", []))),
-        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
-    }
-    return adata, summary
-
-
-def _run_cellrank(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-    root_cell_idx: int | None,
-    n_neighbors: int,
-    n_pcs: int,
-    n_dcs: int,
-    cellrank_n_states: int,
-    cellrank_schur_components: int,
-    cellrank_frac_to_keep: float,
-    cellrank_use_velocity: bool,
-) -> tuple[object, dict]:
-    _ensure_neighbors_for_rep(adata, use_rep=use_rep, n_neighbors=n_neighbors, n_pcs=n_pcs)
-    result = sc_traj.run_cellrank_pseudotime(
-        adata,
-        root_cell=root_cell_idx,
-        root_cluster=root_cluster,
-        cluster_key=cluster_key,
-        n_states=cellrank_n_states,
-        schur_components=cellrank_schur_components,
-        frac_to_keep=cellrank_frac_to_keep,
-        use_velocity=cellrank_use_velocity,
-        n_dcs=n_dcs,
-    )
-    if result.get("fate_probabilities") is not None:
-        adata.obsm["trajectory_fate_probabilities"] = np.asarray(result["fate_probabilities"], dtype=float)
-    summary = {
-        "backend": "cellrank",
-        "pseudotime_key": "dpt_pseudotime",
-        "root_cell": result.get("root_cell"),
-        "root_cell_name": result.get("root_cell_name"),
-        "n_terminal_states": int(len(result.get("terminal_states", []))),
-        "n_macrostates": int(result.get("n_macrostates", 0)),
-        "kernel_mode": result.get("kernel_mode"),
-        "fate_obsm_key": "trajectory_fate_probabilities" if "trajectory_fate_probabilities" in adata.obsm else None,
-    }
-    return adata, summary
-
-
-def _run_slingshot_r(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-    end_clusters: list[str] | None,
-) -> tuple[object, dict, pd.DataFrame]:
-    required = ["slingshot", "SingleCellExperiment", "zellkonverter"]
-    installed, missing = check_r_tier("singlecell-pseudotime")
-    del installed  # quiet lint
-    missing_required = [pkg for pkg in required if pkg in missing]
-    if missing_required:
-        raise ImportError(
-            "Slingshot R dependencies are missing: "
-            + ", ".join(missing_required)
-            + "\nInstall with:\n"
-            + suggest_r_install(missing_required)
-        )
-
-    runner = RScriptRunner(scripts_dir=R_SCRIPTS_DIR, timeout=7200)
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_slingshot_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
-        output_dir = tmpdir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        save_h5ad(adata, input_h5ad, compression=None)
-        runner.run_script(
-            "sc_slingshot_pseudotime.R",
-            args=[
-                str(input_h5ad),
-                str(output_dir),
-                cluster_key,
-                use_rep,
-                root_cluster or "",
-                ",".join(end_clusters or []),
-            ],
-            expected_outputs=["slingshot_pseudotime.csv", "slingshot_branches.csv", "slingshot_curves.csv"],
-            output_dir=output_dir,
-        )
-        pseudotime_df = pd.read_csv(output_dir / "slingshot_pseudotime.csv")
-        branch_df = pd.read_csv(output_dir / "slingshot_branches.csv")
-        curves_df = pd.read_csv(output_dir / "slingshot_curves.csv")
-
-    pseudotime_df["cell_id"] = pseudotime_df["cell_id"].astype(str)
-    pseudotime_df = pseudotime_df.drop_duplicates(subset="cell_id", keep="first")
-    pseudotime_df = pseudotime_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
-    adata.obs["slingshot_pseudotime"] = pd.to_numeric(pseudotime_df["slingshot_pseudotime"], errors="coerce").to_numpy()
-    for col in pseudotime_df.columns:
-        if col == "slingshot_pseudotime":
-            continue
-        adata.obs[f"slingshot_{col}"] = pd.to_numeric(pseudotime_df[col], errors="coerce").to_numpy()
-
-    branch_df["cell_id"] = branch_df["cell_id"].astype(str)
-    branch_df = branch_df.drop_duplicates(subset="cell_id", keep="first")
-    branch_df = branch_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
-    for col in branch_df.columns:
-        adata.obs[f"slingshot_branch_{col}"] = branch_df[col].astype(str).to_numpy()
-
-    adata.uns["slingshot_trajectory"] = {
-        "use_rep": use_rep,
-        "cluster_key": cluster_key,
-        "start_cluster": root_cluster,
-        "end_clusters": end_clusters or [],
-        "n_lineages": int(max(1, len([col for col in pseudotime_df.columns if col != "slingshot_pseudotime"]))),
-    }
-    summary = {
-        "backend": "slingshot_r",
-        "pseudotime_key": "slingshot_pseudotime",
-        "root_cell": None,
-        "root_cell_name": None,
-        "n_lineages": int(max(1, len([col for col in pseudotime_df.columns if col != "slingshot_pseudotime"]))),
-    }
-    return adata, summary, curves_df
-
-
-def _run_monocle3_r(
-    adata,
-    *,
-    use_rep: str,
-    cluster_key: str,
-    root_cluster: str | None,
-) -> tuple[object, dict, pd.DataFrame]:
-    """Run Monocle3 principal graph pseudotime via R bridge."""
-    import warnings
-
-    required = ["monocle3", "SingleCellExperiment", "zellkonverter"]
-    installed, missing = check_r_tier("singlecell-pseudotime")
-    del installed
-    missing_required = [pkg for pkg in required if pkg in missing]
-    if missing_required:
-        raise ImportError(
-            "Monocle3 R dependencies are missing: "
-            + ", ".join(missing_required)
-            + "\nInstall with:\n"
-            + suggest_r_install(missing_required)
-        )
-
-    runner = RScriptRunner(scripts_dir=R_SCRIPTS_DIR, timeout=2400)
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_monocle3_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
-        output_sub = tmpdir / "output"
-        output_sub.mkdir(parents=True, exist_ok=True)
-        save_h5ad(adata, input_h5ad, compression=None)
-
-        r_cluster_key = cluster_key
-        r_use_rep = use_rep if use_rep else "X_umap"
-        r_root_cluster = root_cluster or "auto"
-        r_root_pr_nodes = "auto"
-
-        runner.run_script(
-            "sc_monocle3_r.R",
-            args=[
-                str(input_h5ad),
-                str(output_sub),
-                r_cluster_key,
-                r_use_rep,
-                r_root_cluster,
-                r_root_pr_nodes,
-            ],
-            expected_outputs=["monocle3_pseudotime.csv"],
-            output_dir=output_sub,
-        )
-
-        pt_csv = output_sub / "monocle3_pseudotime.csv"
-        traj_csv = output_sub / "monocle3_trajectory.csv"
-
-        pt_df = pd.read_csv(pt_csv) if pt_csv.exists() else pd.DataFrame()
-        traj_df = pd.read_csv(traj_csv) if traj_csv.exists() else pd.DataFrame()
-
-    n_with_pt = 0
-    if not pt_df.empty and "monocle3_pseudotime" in pt_df.columns:
-        pt_df["cell_id"] = pt_df["cell_id"].astype(str)
-        pt_df = pt_df.drop_duplicates(subset="cell_id", keep="first")
-        pt_df_indexed = pt_df.set_index("cell_id").reindex(adata.obs_names.astype(str))
-
-        adata.obs["monocle3_pseudotime"] = pd.to_numeric(
-            pt_df_indexed["monocle3_pseudotime"], errors="coerce"
-        ).to_numpy()
-        if "monocle3_cluster" in pt_df_indexed.columns:
-            adata.obs["monocle3_cluster"] = (
-                pt_df_indexed["monocle3_cluster"].astype(str).to_numpy()
-            )
-        if "monocle3_partition" in pt_df_indexed.columns:
-            adata.obs["monocle3_partition"] = (
-                pt_df_indexed["monocle3_partition"].astype(str).to_numpy()
-            )
-        n_with_pt = int(adata.obs["monocle3_pseudotime"].notna().sum())
-    else:
-        warnings.warn("Monocle3 pseudotime CSV was empty or missing expected columns")
-        adata.obs["monocle3_pseudotime"] = np.nan
-
-    if not traj_df.empty:
-        adata.uns["monocle3_trajectory"] = traj_df.to_dict(orient="list")
-
-    summary = {
-        "backend": "monocle3_r",
-        "pseudotime_key": "monocle3_pseudotime",
-        "root_cell": None,
-        "root_cell_name": None,
-        "n_cells_with_pseudotime": n_with_pt,
-    }
-    return adata, summary, traj_df
 
 
 def _render_figures(
@@ -1102,9 +715,7 @@ def main() -> None:
         input_file = str(input_path)
     logger.info("Input object: %s cells x %s genes", adata.n_obs, adata.n_vars)
 
-    if args.method == "via":
-        _prepare_via_runtime()
-    method = validate_method_choice(args.method, METHOD_REGISTRY)
+    method = args.method
     apply_preflight(
         preflight_sc_pseudotime(
             adata,
@@ -1126,10 +737,27 @@ def main() -> None:
     if x_kind != "normalized_expression":
         raise ValueError("`sc-pseudotime` expects normalized expression. Run `sc-preprocessing` first.")
 
-    use_rep = _resolve_use_rep(adata, args.use_rep)
-    display_embedding = _resolve_display_embedding(adata, use_rep)
-    root_cell_idx = _resolve_root_cell(adata, args.root_cell)
-    end_clusters = _parse_end_clusters(args.end_clusters)
+    library = load_skill("sc-pseudotime")
+    working = library.pseudotime(
+        adata, method=method, cluster_key=args.cluster_key, use_rep=args.use_rep,
+        root_cluster=args.root_cluster, root_cell=args.root_cell,
+        end_clusters=_parse_end_clusters(args.end_clusters),
+        n_neighbors=args.n_neighbors, n_pcs=args.n_pcs, n_dcs=args.n_dcs,
+        palantir_knn=args.palantir_knn, palantir_n_components=args.palantir_n_components,
+        palantir_num_waypoints=args.palantir_num_waypoints,
+        palantir_max_iterations=args.palantir_max_iterations, palantir_seed=args.palantir_seed,
+        via_knn=args.via_knn, via_seed=args.via_seed, cellrank_n_states=args.cellrank_n_states,
+        cellrank_schur_components=args.cellrank_schur_components,
+        cellrank_frac_to_keep=args.cellrank_frac_to_keep,
+        cellrank_use_velocity=bool(args.cellrank_use_velocity),
+    )
+    diagnostics = library.run_info(working)
+    use_rep = diagnostics["use_rep"]
+    display_embedding = diagnostics["display_embedding"]
+    method_summary = {key: value for key, value in diagnostics.items()
+                      if key not in {"method", "cluster_key", "use_rep", "display_embedding", "root_cluster"}}
+    curves_df = library.trajectory_curves(working)
+    pseudotime_key = str(method_summary["pseudotime_key"])
     logger.info("Running %s with cluster_key=%s, use_rep=%s, display_embedding=%s", method, args.cluster_key, use_rep, display_embedding)
 
     params = dict(METHOD_PARAM_DEFAULTS[method])
@@ -1160,97 +788,9 @@ def main() -> None:
         }
     )
 
-    working = adata.copy()
-    curves_df = pd.DataFrame()
-    method_summary: dict[str, object]
-    if method == "dpt":
-        logger.info("Starting DPT workflow...")
-        working, method_summary = _run_dpt(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-            root_cell_idx=root_cell_idx,
-            n_neighbors=args.n_neighbors,
-            n_pcs=args.n_pcs,
-            n_dcs=args.n_dcs,
-        )
-    elif method == "palantir":
-        logger.info("Starting Palantir workflow...")
-        working, method_summary = _run_palantir(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-            root_cell_idx=root_cell_idx,
-            palantir_knn=args.palantir_knn,
-            palantir_n_components=args.palantir_n_components,
-            palantir_num_waypoints=args.palantir_num_waypoints,
-            palantir_max_iterations=args.palantir_max_iterations,
-            palantir_seed=args.palantir_seed,
-        )
-    elif method == "via":
-        logger.info("Starting VIA workflow...")
-        working, method_summary = _run_via(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-            root_cell_idx=root_cell_idx,
-            via_knn=args.via_knn,
-            via_seed=args.via_seed,
-            n_dcs=args.n_dcs,
-        )
-    elif method == "cellrank":
-        logger.info("Starting CellRank workflow...")
-        working, method_summary = _run_cellrank(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-            root_cell_idx=root_cell_idx,
-            n_neighbors=args.n_neighbors,
-            n_pcs=args.n_pcs,
-            n_dcs=args.n_dcs,
-            cellrank_n_states=args.cellrank_n_states,
-            cellrank_schur_components=args.cellrank_schur_components,
-            cellrank_frac_to_keep=args.cellrank_frac_to_keep,
-            cellrank_use_velocity=bool(args.cellrank_use_velocity),
-        )
-    elif method == "monocle3_r":
-        logger.info("Starting Monocle3 R workflow...")
-        working, method_summary, curves_df = _run_monocle3_r(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-        )
-    else:
-        logger.info("Starting Slingshot R workflow...")
-        working, method_summary, curves_df = _run_slingshot_r(
-            working,
-            use_rep=use_rep,
-            cluster_key=args.cluster_key,
-            root_cluster=args.root_cluster,
-            end_clusters=end_clusters,
-        )
 
-    pseudotime_key = str(method_summary["pseudotime_key"])
-    working.obs["pseudotime"] = pd.to_numeric(working.obs[pseudotime_key], errors="coerce")
-    working.uns["omicsclaw_pseudotime"] = {
-        "method": method,
-        "pseudotime_key": pseudotime_key,
-        "display_embedding": display_embedding,
-        "use_rep": use_rep,
-        "cluster_key": args.cluster_key,
-        "root_cluster": args.root_cluster,
-        "root_cell": method_summary.get("root_cell"),
-        "root_cell_name": method_summary.get("root_cell_name"),
-    }
-
-    trajectory_genes = sc_traj.find_trajectory_genes(
+    trajectory_genes = library.trajectory_genes(
         working,
-        pseudotime_key=pseudotime_key,
         n_genes=args.n_genes,
         method=args.corr_method,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,7 @@ def _read_mapping_table(mapping_path: str | Path, sep: str | None = None) -> pd.
 
 
 def load_sgrna_mapping(
-    mapping_path: str | Path,
+    mapping_path: str | Path | pd.DataFrame,
     *,
     barcode_column: str | None = None,
     sgrna_column: str | None = None,
@@ -129,7 +130,7 @@ def load_sgrna_mapping(
     sep: str | None = None,
 ) -> pd.DataFrame:
     """Load a cell-barcode to sgRNA mapping table into a standard schema."""
-    df = _read_mapping_table(mapping_path, sep=sep)
+    df = mapping_path.copy() if isinstance(mapping_path, pd.DataFrame) else _read_mapping_table(mapping_path, sep=sep)
     if df.shape[1] < 2:
         raise ValueError("Mapping table must contain at least barcode and sgRNA columns.")
 
@@ -189,7 +190,12 @@ def collapse_sgrna_assignments(
     if mapping_df.empty:
         raise ValueError("Mapping table is empty after loading.")
 
-    control_patterns_upper = tuple(str(pattern).strip().upper() for pattern in control_patterns if str(pattern).strip())
+    # Token boundaries keep WNT3, NTRK1 and NT5E from matching the control NT.
+    control_regexes = []
+    for pattern in control_patterns:
+        tokens = re.findall(r"[A-Z0-9]+", str(pattern).upper())
+        if tokens:
+            control_regexes.append(re.compile(r"(?<![A-Z0-9])" + r"[^A-Z0-9]+".join(map(re.escape, tokens)) + r"(?![A-Z0-9])"))
     assigned_rows: list[dict[str, Any]] = []
     dropped_rows: list[dict[str, Any]] = []
 
@@ -206,8 +212,8 @@ def collapse_sgrna_assignments(
         target_gene = targets[0] if targets else ""
         is_control = False
         if sgrnas:
-            joined = " ".join(sgrnas + ([target_gene] if target_gene else [])).upper()
-            is_control = any(token in joined for token in control_patterns_upper)
+            labels = sgrnas + targets
+            is_control = any(pattern.search(label.upper()) for label in labels for pattern in control_regexes)
 
         record = {
             "barcode": str(barcode),
@@ -290,23 +296,23 @@ def run_mixscape_workflow(
     logfc_threshold: float = 0.25,
     pval_cutoff: float = 0.05,
     perturbation_type: str = "KO",
+    random_state: int = 0,
 ) -> dict[str, Any]:
     import inspect
 
     import pertpy as pt
-    from packaging.version import Version
 
     matrix_source = prepare_perturbation_matrix(adata)
     mixscape = pt.tl.Mixscape()
 
     # pertpy < 0.9 does not support ref_selection_mode in perturbation_signature
-    _pt_version = Version(pt.__version__)
     _ps_sig = inspect.signature(mixscape.perturbation_signature)
     _ps_kwargs: dict = dict(
         pert_key=pert_key,
         control=control,
         split_by=split_by,
         n_neighbors=n_neighbors,
+        random_state=random_state,
     )
     if "ref_selection_mode" in _ps_sig.parameters:
         _ps_kwargs["ref_selection_mode"] = "split_by" if split_by else "nn"
@@ -323,6 +329,7 @@ def run_mixscape_workflow(
         logfc_threshold=logfc_threshold,
         pval_cutoff=pval_cutoff,
         perturbation_type=perturbation_type,
+        random_state=random_state,
     )
 
     class_col = "mixscape_class"
@@ -339,6 +346,7 @@ def run_mixscape_workflow(
         "class_column": class_col,
         "global_class_column": global_col,
         "probability_column": prob_col,
+        "random_state": int(random_state),
     }
     return {
         "method": "mixscape",

@@ -35,7 +35,7 @@ def _load_module(name: str, relative_path: str):
 def test_scanvi_fallback_records_requested_and_executed_method(monkeypatch):
     module = _load_module(
         "sc_integrate_contract_test",
-        "skills/singlecell/scrna/sc-batch-integration/sc_integrate.py",
+        "skills/singlecell/scrna/sc-batch-integration/_api.py",
     )
     adata = ad.AnnData(
         X=np.ones((2, 2)),
@@ -43,12 +43,34 @@ def test_scanvi_fallback_records_requested_and_executed_method(monkeypatch):
         var=pd.DataFrame(index=["g1", "g2"]),
     )
 
-    def fake_integrate_scvi(_adata, **_kwargs):
-        return {"method": "scvi", "embedding_key": "X_scvi", "n_batches": 2}
+    class Model:
+        history = {}
 
-    monkeypatch.setattr(module, "integrate_scvi", fake_integrate_scvi)
+        @staticmethod
+        def setup_anndata(*args, **kwargs):
+            pass
 
-    summary = module.integrate_scanvi(adata, batch_key="batch")
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def train(self, **kwargs):
+            pass
+
+        def get_latent_representation(self):
+            return np.ones((2, 2))
+
+    from skills._sdk import deps
+    deps._try_import.cache_clear()
+    monkeypatch.setitem(sys.modules, "scvi", types.SimpleNamespace(
+        settings=types.SimpleNamespace(seed=None), model=types.SimpleNamespace(SCVI=Model)))
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(cuda=types.SimpleNamespace()))
+    adata.var["highly_variable"] = True
+    adata.layers["counts"] = adata.X.copy()
+    try:
+        result = module.integrate(adata, method="scanvi", batch_key="batch", use_gpu=False)
+    finally:
+        deps._try_import.cache_clear()
+    summary = module.run_info(result)["summary"]
 
     assert summary["requested_method"] == "scanvi"
     assert summary["executed_method"] == "scvi"
@@ -59,7 +81,7 @@ def test_scanvi_fallback_records_requested_and_executed_method(monkeypatch):
 def test_doubletfinder_fallback_records_requested_and_executed_method(monkeypatch):
     module = _load_module(
         "sc_doublet_contract_test",
-        "skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py",
+        "skills/singlecell/scrna/sc-doublet-detection/_api.py",
     )
     adata = ad.AnnData(
         X=np.ones((2, 2)),
@@ -92,7 +114,7 @@ def test_doubletfinder_fallback_records_requested_and_executed_method(monkeypatc
 def test_builtin_communication_marks_non_statistical_significance():
     module = _load_module(
         "sc_communication_contract_test",
-        "skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py",
+        "skills/singlecell/scrna/sc-cell-communication/_api.py",
     )
     adata = ad.AnnData(
         X=np.array([[3.0, 2.0], [1.0, 4.0]]),
@@ -100,18 +122,19 @@ def test_builtin_communication_marks_non_statistical_significance():
         var=pd.DataFrame(index=["TGFB1", "TGFBR1"]),
     )
 
-    summary = module.run_communication(
+    table = module.communicate(
         adata,
         method="builtin",
         cell_type_key="cell_type",
         species="human",
     )
 
+    summary = module.run_info(table)
     assert summary["requested_method"] == "builtin"
     assert summary["executed_method"] == "builtin"
     assert summary["n_significant"] == 0
     assert summary["pvalue_available"] is False
-    assert summary["lr_df"]["pvalue"].isna().all()
+    assert table["pvalue"].isna().all()
     assert "leave pvalue empty" in summary["significance_semantics"]
 
 
@@ -130,5 +153,5 @@ def test_de_runtime_dependency_validation_uses_expected_r_stacks(monkeypatch):
     module._validate_runtime_dependencies("mast")
     module._validate_runtime_dependencies("deseq2_r")
 
-    assert ("MAST", "SingleCellExperiment", "zellkonverter") in seen
+    assert ("MAST", "SingleCellExperiment", "Matrix") in seen
     assert ("DESeq2", "SingleCellExperiment", "zellkonverter") in seen

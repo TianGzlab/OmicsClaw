@@ -99,6 +99,7 @@ class RunRecord:
     skill_calls: list[dict] = field(default_factory=list)
     skill_clis: list[dict] = field(default_factory=list)
     stub_missing: list[dict] = field(default_factory=list)
+    r_sessions: list[dict] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -127,6 +128,7 @@ def read_run(path: str | os.PathLike) -> RunRecord:
         "skill_call": record.skill_calls,
         "skill_cli": record.skill_clis,
         "stub_target_missing": record.stub_missing,
+        "r_session": record.r_sessions,
     }
     for event in read_events(path):
         kind = event.get("event")

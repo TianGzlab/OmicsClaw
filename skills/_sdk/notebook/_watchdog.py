@@ -20,9 +20,11 @@ lock.
 from __future__ import annotations
 
 import os
+import signal
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,19 @@ class Activity:
 
 
 ACTIVITY = Activity()
+
+
+@contextmanager
+def termination_handler():
+    """Route foreground SIGTERM through cleanup without interrupting a ledger lock."""
+    def terminate(signum, frame):
+        threading.Thread(target=stop, args=("received SIGTERM",), daemon=True).start()
+
+    previous = signal.signal(signal.SIGTERM, terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _say(text: str) -> None:

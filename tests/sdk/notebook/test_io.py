@@ -218,6 +218,40 @@ def test_load_demo_rejects_an_unknown_name():
         load_demo("pbmc4k")
 
 
+def test_generated_demo_is_cached_and_recorded_as_a_file(step, tmp_path, monkeypatch):
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    from skills._sdk.notebook import _demos
+
+    def generate():
+        return anndata.AnnData(np.random.default_rng(0).poisson(2, (4, 3)).astype("float32"))
+
+    monkeypatch.setitem(_io.DEMOS, "test_generated", {
+        "files": [], "generator": "test_generated", "about": "A temporary test dataset",
+    })
+    monkeypatch.setattr(_demos, "test_generated", generate, raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("OMICSCLAW_DEMO_DIR", raising=False)
+    _, ledger = step
+    first = load_demo("test_generated")
+    path = tmp_path / "cache" / "omicsclaw" / "demo" / "test_generated.h5ad"
+    event = _events(ledger, "input")[-1]
+    assert event["path"] == str(path)
+    assert event["sha256"] == _hashing.sha256_file(path)
+    assert event["via"] == "load_demo" and not event["outside_contract"]
+    np.testing.assert_array_equal(anndata.read_h5ad(path).X, first.X)
+    np.testing.assert_array_equal(first.X, generate().X)
+
+    def unavailable():
+        raise AssertionError("a cached dataset must not be generated again")
+
+    monkeypatch.setattr(_demos, "test_generated", unavailable)
+    second = load_demo("test_generated")
+    np.testing.assert_array_equal(first.X, second.X)
+    assert _events(ledger, "input")[-1]["sha256"] == event["sha256"]
+
+
 def test_read_input_of_a_missing_file(step):
     with pytest.raises(FileNotFoundError):
         read_input("data/missing.csv")

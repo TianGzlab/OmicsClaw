@@ -445,6 +445,8 @@ docker ps --all --quiet --filter label=omicsclaw.sandbox=1
 
 执行器的状态（记账、manifest、锁）都写在 `results/<NN_slug>/provenance/` 下，它在读写挂载的工作区里，宿主机看得到；`.omicsclaw/` 在容器里被 1 MB 的 tmpfs 盖住，执行器不读也不写它。模块锁用 `fcntl.flock`，容器与宿主机共用内核和 inode，两边互斥；网络文件系统和 Docker Desktop 的 macOS 文件共享不保证这一点。容器里取不到 `.git`，记账里 skill 的 `git` 字段记为 `null`，只保留内容哈希。
 
+模块有 `.R` 步骤时，镜像还要提供 Rscript 和步骤用到的 R 包。找不到 Rscript 时，执行器列出查找位置并以退出码 2 结束；它不会安装 R 包，也不会在 R 安装目录创建库。Python overlay 不改变 R 步骤使用的基础环境 Rscript。真实只读容器验收仍待有 Docker 的机器补测。
+
 步骤里的 `load_demo` 按 `$OMICSCLAW_DEMO_DIR`、仓库的 `data/` 与 `examples/`、`$XDG_CACHE_HOME/omicsclaw/demo/` 的顺序找 demo 数据，都找不到时才用 scanpy 下载。沙箱默认没有网络，仓库的 `data/` 也不挂进容器，所以要事先把 `pbmc3k_raw.h5ad` 等文件放进一个目录，用 `sandbox_mounts` 挂进去，再让 `OMICSCLAW_DEMO_DIR` 指向挂载点：`docker exec` 不传宿主机的环境变量，这个变量要在镜像里设好，或者写在执行器命令的前面（`OMICSCLAW_DEMO_DIR=<挂载点> python -m skills._sdk.notebook run ...`）。找不到时报错信息会列出这几个位置。
 
 ## 14. 已知限制

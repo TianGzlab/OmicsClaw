@@ -1,40 +1,27 @@
-## Output Structure
+## Function outputs
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── cell_metadata.csv
-│   ├── cluster_summary.csv
-│   ├── markers_all.csv
-│   └── markers_top.csv
-└── figures/
-    ├── r_feature_violin.png
-    └── r_marker_heatmap.png
-```
+`find_markers` returns a DataFrame and leaves the input AnnData unchanged.
+`run_info(table)` reads the record in its attrs, including any fallback to an
+unfiltered ranking. Save that record separately before exporting CSV.
 
-## File contents
+## CLI outputs
 
-- `tables/cell_metadata.csv` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `tables/cluster_summary.csv` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `tables/markers_all.csv` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `tables/markers_top.csv` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `figures/r_feature_violin.png` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `figures/r_marker_heatmap.png` — written by `sc_markers.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_markers.py`.
-- `commands.sh` — written by `sc_markers.py`.
-- `manifest.json` — written by `sc_markers.py`.
-- `processed.h5ad` — written by `sc_markers.py`.
-- `requirements.txt` — written by `sc_markers.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+- `tables/markers_all.csv`: group, names, scores and method-dependent effect,
+  p-value and expression-fraction columns. COSG includes `pvals` and `pvals_adj`
+  with NaN values because it supplies no p-values.
+- `tables/markers_top.csv`: up to `--n-top` rows per group, ordered by adjusted
+  p-value then effect, or by score for COSG.
+- `tables/cluster_summary.csv`: group, n_markers, top_gene, top_effect,
+  median_effect and effect_metric.
+- `figure_data/`: copies of those three tables and `manifest.json`.
+- `processed.h5ad`: the input expression object with analysis and matrix
+  contracts; `rank_genes_groups` and `rank_genes_groups_filtered` are removed.
+- `report.md` and `result.json`; the latter includes `data.run_info`.
+- `reproducibility/commands.sh` and `reproducibility/requirements.txt`.
 
-## Notes
-
-Auto-generated from `sc_markers.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The Python gallery can write `figures/markers_heatmap.png`,
+`markers_dotplot.png`, `marker_effect_summary.png`, `marker_cluster_summary.png`
+and `marker_fraction_scatter.png`. Each plot depends on its required genes,
+groups or fraction columns being available.
+With `--r-enhanced` and a working R plotting stack, the CLI can also write
+`figures/r_enhanced/r_marker_heatmap.png` and `r_feature_violin.png`.

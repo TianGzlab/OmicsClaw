@@ -26,7 +26,7 @@ __all__ = ["LAYOUT", "MANIFEST_SCHEMA", "LEDGER_EVENTS", "ENVIRONMENT"]
 
 LAYOUT = {
     "module_dir": r"^(\d{2})_([a-z0-9][a-z0-9_]*)$",
-    "step_file": r"^(\d{2})([a-z]?)_([a-z0-9][a-z0-9_]*)\.py$",
+    "step_file": r"^(\d{2})([a-z]?)_([a-z0-9][a-z0-9_]*)\.(py|R)$",
     "validate_step": r"^\d{2}[a-z]?_validate\.py$",
     "report": "M{nn}_{slug}_REPORT.md",
     "output_dirs": ["figures", "tables", "intermediate", "logs"],
@@ -43,6 +43,8 @@ ENVIRONMENT = {
     "step_ledger": "OMICSCLAW_STEP_LEDGER",
     "skill_stubs": "OMICSCLAW_SKILL_STUBS",
     "demo_dir": "OMICSCLAW_DEMO_DIR",
+    "step_io": "OMICSCLAW_STEP_IO",
+    "sdk_dir": "OMICSCLAW_SDK_DIR",
 }
 
 LEDGER_EVENTS = {
@@ -55,6 +57,7 @@ LEDGER_EVENTS = {
     "output": ["path", "sha256", "bytes", "kind"],
     "stub_target_missing": ["skill", "names", "reason"],
     "run_end": ["status", "seconds", "error", "notebook", "log"],
+    "r_session": ["rscript", "r_version", "packages"],
 }
 
 MANIFEST_SCHEMA = {
@@ -63,14 +66,16 @@ MANIFEST_SCHEMA = {
         "schema": "int", "module": "str", "number": "int", "slug": "str", "status": "str",
         "frozen": "bool", "interpreter": "dict", "steps": "list", "validate_step": "str",
         "replay": "dict", "review": "dict", "review_history": "list", "accepted": "dict", "revisions": "list",
-        "report": "str",
+        "report": "str", "rscript": "dict",
     },
-    "nullable": ["interpreter", "validate_step", "replay", "review", "accepted"],
+    "nullable": ["interpreter", "validate_step", "replay", "review", "accepted", "rscript"],
     "status_values": ["draft", "replayed", "reviewed", "accepted"],
     "step_keys": ["file", "kind", "sha256", "state", "reason", "last_run", "history", "inputs",
                   "outputs", "skills"],
     "step_states": ["ok", "stale", "failed", "never_run"],
     "interpreter_keys": ["path", "prefix", "version", "overlay"],
+    "rscript_keys": ["path", "version"],
+    "step_kinds": ["python", "r"],
     "replay_keys": ["at", "status", "interpreter", "new_interpreter_reason", "step_sha256",
                     "changed_outputs", "orphan_outputs"],
     "review_history_keys": ["file", "original", "verdict", "sha256", "archived_at"],

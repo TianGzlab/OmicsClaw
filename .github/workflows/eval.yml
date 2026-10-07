@@ -59,13 +59,13 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      # The unit-test job's packages plus what the pilot skills compute with.
-      - run: pip install -e . pytest numpy "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel "scanpy[leiden]" umap-learn
+      # scVelo 0.3.4's scalar conversion fails under NumPy 2.4; use the tested version.
+      - run: pip install -e . pytest "numpy==2.0.2" "pandas>=2.0,<3.0" scipy scikit-learn matplotlib seaborn networkx PyYAML requests "anndata==0.11.4" h5py rich nbformat nbclient ipykernel "scanpy[leiden]" umap-learn "harmonypy==0.0.10" "scrublet==0.2.3" "statsmodels==0.14.6" "scvelo==0.3.4"
       # load_demo looks in OMICSCLAW_DEMO_DIR first; fill it once and keep it between runs.
       - uses: actions/cache@v4
         with:
           path: .demo-data
-          key: demo-data-pbmc3k-v1
+          key: demo-data-pbmc3k-v2
       - name: Fetch the demo datasets
         run: |
           python - <<'PY'
@@ -82,7 +82,87 @@ jobs:
                       adata.write_h5ad(folder / f"{name}.h5ad")
           PY
       - name: Run each skill's example step through the step runner
-        run: pytest tests/sdk/notebook/test_skill_examples.py -m skill_example -p no:cacheprovider
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m "skill_example and not skill_example_extended" -p no:cacheprovider
+      - name: Run migrated skill tests without CLI subprocesses
+        run: >-
+          pytest
+          skills/singlecell/scrna/sc-qc/tests
+          skills/singlecell/scrna/sc-preprocessing/tests
+          skills/singlecell/scrna/sc-clustering/tests
+          skills/singlecell/scrna/sc-cell-annotation/tests
+          skills/singlecell/scrna/sc-de/tests
+          skills/singlecell/scrna/sc-filter/tests
+          skills/singlecell/scrna/sc-markers/tests
+          skills/singlecell/scrna/sc-batch-integration/tests
+          skills/singlecell/scrna/sc-enrichment/tests
+          skills/singlecell/scrna/sc-standardize-input/tests
+          skills/singlecell/scrna/sc-doublet-detection/tests
+          skills/singlecell/scrna/sc-ambient-removal/tests
+          skills/singlecell/scrna/sc-pathway-scoring/tests
+          skills/singlecell/scrna/sc-gene-programs/tests
+          skills/singlecell/scrna/sc-differential-abundance/tests
+          skills/singlecell/scrna/sc-cell-communication/tests
+          skills/singlecell/scrna/sc-cytotrace/tests
+          skills/singlecell/scrna/sc-metacell/tests
+          skills/singlecell/scrna/sc-pseudotime/tests
+          skills/singlecell/scrna/sc-velocity/tests
+          skills/singlecell/scrna/sc-grn/tests
+          skills/singlecell/scrna/sc-perturb-prep/tests
+          skills/singlecell/scrna/sc-in-silico-perturbation/tests
+          skills/singlecell/scrna/sc-drug-response/tests
+          skills/singlecell/scrna/sc-perturb/tests
+          skills/singlecell/scrna/sc-multi-count/tests
+          skills/singlecell/scatac/scatac-preprocessing/tests
+          skills/singlecell/scrna/sc-fastq-qc/tests/test_fastqc_paths.py
+          -m "not demo and not slow and not cli_subprocess"
+          -p no:cacheprovider
+      - name: Install base R for step execution tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends r-base-core
+      - name: Run R step tests
+        run: |
+          Rscript --version
+          pytest tests/sdk/notebook/test_rscript.py -m requires_r -p no:cacheprovider
+
+  skill-examples-extended:
+    # Runs on every PR, but repository owners must not select it as a required check.
+    name: Skill examples (extended CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JAX_PLATFORMS: cpu
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMBA_NUM_THREADS: "1"
+      OMICSCLAW_DEMO_DIR: ${{ github.workspace }}/.demo-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/workflows/eval.yml
+      - run: python -m pip install --upgrade pip
+      # pertpy 1.0.3 is the Python 3.11 release; sklearn 1.8+ changes its GMM API.
+      # blitzgsea has no wheel: allow pip's normal isolated source build here.
+      # This development job does not change install_skill_deps' wheels-only policy.
+      - run: pip install -e . pytest nbformat nbclient ipykernel "anndata==0.11.4" "pandas<3" "scanpy[leiden]" "pertpy==1.0.3" "scikit-learn==1.7.2" "statsmodels==0.14.6" "filelock==4.0.12"
+      - run: pip check
+      - name: Require the real CPU backend and reject CUDA dependencies
+        run: |
+          python - <<'PY'
+          from importlib.metadata import distributions, version
+          import jax
+          import pertpy
+          assert version("pertpy") == "1.0.3"
+          assert version("scikit-learn") == "1.7.2"
+          assert version("anndata") == "0.11.4"
+          assert all(device.platform == "cpu" for device in jax.devices())
+          names = {dist.metadata["Name"].lower() for dist in distributions()}
+          assert not any(name.startswith("nvidia-") or "cuda" in name for name in names)
+          PY
+      - name: Run the seeded Mixscape example; no optional-backend skip
+        run: pytest tests/sdk/notebook/test_skill_examples.py -m skill_example_extended -p no:cacheprovider
 
   eval:
     name: Scripted eval suite (gate)

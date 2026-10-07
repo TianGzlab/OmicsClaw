@@ -7,7 +7,6 @@ import argparse
 import json
 import logging
 import shlex
-import tempfile
 import sys
 from pathlib import Path
 
@@ -17,7 +16,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
-import scipy.sparse as sp
 
 _SDK_ANCHOR = next(
     (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
@@ -42,7 +40,6 @@ from skills.singlecell._lib.adata_utils import (
     get_input_contract,
     get_matrix_contract,
     record_matrix_contract,
-    select_count_like_expression_source,
     store_analysis_metadata,
 )
 from skills.singlecell._lib.export import save_h5ad
@@ -51,9 +48,7 @@ from skills.singlecell._lib.method_config import (
     check_method_available,
 )
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_ambient_removal
-from skills._sdk.deps import validate_r_environment
-from skills._sdk.r_script_runner import RScriptRunner
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
+from skills._sdk.notebook import load_skill
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -121,17 +116,6 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
         dependencies=("scanpy",),
     ),
 }
-
-
-def _get_count_like_matrix(adata):
-    try:
-        return select_count_like_expression_source(adata, preferred_layer="counts")
-    except ValueError as exc:
-        raise ValueError(
-            "Ambient RNA removal requires a raw count-like matrix. "
-            "Provide `adata.layers['counts']`, aligned `adata.raw`, or count-like `adata.X`. "
-            "If the file provenance is unclear, run `python skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py --input <file> --output <dir>` first."
-        ) from exc
 
 
 def _validate_inputs(args: argparse.Namespace) -> None:
@@ -296,27 +280,6 @@ def _select_runtime_input(
         "or use method-specific assets such as `--raw-h5` for CellBender or "
         "`--filtered-matrix-dir` for SoupX."
     )
-
-
-def run_soupx(raw_matrix_dir: str, filtered_matrix_dir: str):
-    validate_r_environment(required_r_packages=["Seurat", "SoupX"])
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_soupx_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        output_dir = tmpdir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        runner.run_script(
-            "sc_soupx.R",
-            args=[raw_matrix_dir, filtered_matrix_dir, str(output_dir)],
-            expected_outputs=["corrected_counts.csv", "cells.csv", "genes.csv", "contamination.json"],
-            output_dir=output_dir,
-        )
-        corrected = pd.read_csv(output_dir / "corrected_counts.csv", index_col=0)
-        cells = pd.read_csv(output_dir / "cells.csv")["cell"].astype(str).tolist()
-        genes = pd.read_csv(output_dir / "genes.csv")["gene"].astype(str).tolist()
-        contamination = json.loads((output_dir / "contamination.json").read_text(encoding="utf-8"))["contamination"]
-    return corrected.T.to_numpy(dtype=np.float32), cells, genes, contamination
 
 
 def _sum_counts_per_barcode(adata) -> np.ndarray:
@@ -731,6 +694,7 @@ def _write_figure_data(output_dir: Path, adata_before, adata_after, *, summary: 
 
 
 def main():
+    library = load_skill("sc-ambient-removal")
     parser = argparse.ArgumentParser(description="Single-Cell Ambient RNA Removal")
     parser.add_argument("--input", dest="input_path")
     parser.add_argument("--output", dest="output_dir", required=True)
@@ -842,11 +806,13 @@ def main():
         filtered_dir = Path(args.filtered_matrix_dir) if args.filtered_matrix_dir else None
         if raw_dir and filtered_dir and raw_dir.exists() and filtered_dir.exists():
             try:
-                corrected_matrix, cells, genes, contamination_estimate = run_soupx(
-                    raw_matrix_dir=str(raw_dir),
-                    filtered_matrix_dir=str(filtered_dir),
+                raw = sc.read_10x_mtx(raw_dir, var_names="gene_symbols", cache=False)
+                filtered = sc.read_10x_mtx(filtered_dir, var_names="gene_symbols", cache=False)
+                corrected = library.remove_ambient_soupx(filtered, raw=raw)
+                contamination_estimate = library.run_info(corrected, keep=False)["contamination_estimate"]
+                adata = apply_soupx_result(
+                    adata, corrected.X, corrected.obs_names, corrected.var_names, contamination_estimate,
                 )
-                adata = apply_soupx_result(adata, corrected_matrix, cells, genes, contamination_estimate)
             except Exception as exc:
                 logger.warning("SoupX failed (%s). Falling back to simple subtraction.", exc)
                 fallback_reason = (
@@ -864,39 +830,10 @@ def main():
 
     if method == "simple":
         logger.info("Applying simple ambient subtraction (contamination=%s)", args.contamination)
-        count_matrix, expression_source, count_warnings = _get_count_like_matrix(adata)
-        simple_expression_source = expression_source
-        simple_input_warnings.extend(count_warnings)
-        ambient_profile = np.array(count_matrix.mean(axis=0)).flatten()
-        ambient_profile = ambient_profile / max(ambient_profile.sum(), 1e-8)
-        # Use chunk-wise sparse arithmetic to avoid OOM on large raw/unfiltered matrices.
-        # The correction is: corrected[i,j] = max(0, X[i,j] - contamination * sum(X[i,:]) * ambient_profile[j])
-        # Processing in row-chunks keeps peak memory proportional to chunk_size * n_genes, not n_cells * n_genes.
-        if sp.issparse(count_matrix):
-            csr = count_matrix.tocsr().astype(np.float32)
-            n_cells, n_genes = csr.shape
-            chunk_size = max(1, min(50_000, n_cells))
-            corrected_chunks: list[sp.csr_matrix] = []
-            ambient_profile_f32 = ambient_profile.astype(np.float32)
-            for start in range(0, n_cells, chunk_size):
-                chunk = csr[start : start + chunk_size].toarray()  # shape: (chunk, n_genes) — safe size
-                cell_totals_chunk = chunk.sum(axis=1, keepdims=True)
-                chunk -= args.contamination * cell_totals_chunk * ambient_profile_f32[np.newaxis, :]
-                np.maximum(chunk, 0, out=chunk)
-                corrected_chunks.append(sp.csr_matrix(chunk, dtype=np.float32))
-                del chunk
-            corrected_sparse = sp.vstack(corrected_chunks, format="csr")
-            del corrected_chunks
-            adata.layers["counts"] = count_matrix.copy()
-            adata.X = corrected_sparse
-        else:
-            corrected = np.asarray(count_matrix, dtype=np.float32).copy()
-            cell_totals = corrected.sum(axis=1, keepdims=True)
-            corrected = corrected - (args.contamination * cell_totals * ambient_profile[np.newaxis, :])
-            corrected = np.maximum(corrected, 0)
-            adata.layers["counts"] = count_matrix.copy()
-            adata.X = corrected.astype(np.float32)
-        adata.uns["ambient_correction"] = {"method": "simple", "contamination_fraction": args.contamination, "expression_source": expression_source}
+        library.remove_ambient(adata, contamination=args.contamination)
+        diagnostics = library.run_info(adata, keep=False)
+        simple_expression_source = diagnostics["expression_source"]
+        simple_input_warnings.extend(diagnostics["warnings"])
         contamination_estimate = args.contamination
 
     mean_after = np.array(adata.X.sum(axis=1)).flatten().mean()

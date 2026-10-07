@@ -20,7 +20,7 @@ pytestmark = pytest.mark.slow
 def test_every_skill_script_answers_help(tmp_path):
     python = base_python()
     scripts = main_scripts()
-    assert len(scripts) == 89
+    assert len(scripts) == 88
 
     def probe(script):
         return rel(script), run_help(python, script, tmp_path).returncode

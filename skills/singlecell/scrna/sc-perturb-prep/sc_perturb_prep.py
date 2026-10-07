@@ -31,13 +31,13 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import canonicalize_singlecell_adata, store_analysis_metadata
+from skills.singlecell._lib.adata_utils import store_analysis_metadata
+from skills._sdk.notebook import load_skill
+
+_api = load_skill("sc-perturb-prep")
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.perturbation import (
     DEFAULT_CONTROL_PATTERNS,
-    annotate_perturbation_obs,
-    collapse_sgrna_assignments,
-    keep_gene_expression_features,
     load_sgrna_mapping,
     make_demo_perturb_adata,
     make_demo_perturb_mapping,
@@ -224,33 +224,20 @@ def main() -> int:
         input_file = args.input
         input_checksum = sha256_file(args.input) if Path(args.input).is_file() else ""
 
-    feature_filtered, feature_summary = keep_gene_expression_features(adata)
     control_patterns = tuple(token.strip() for token in args.control_patterns.split(",") if token.strip())
-    assigned_df, dropped_df = collapse_sgrna_assignments(
-        mapping_df,
-        delimiter=args.delimiter,
-        gene_position=args.gene_position,
-        control_patterns=control_patterns,
-        control_label=args.control_label,
+    mapping_df = _api.standardize_mapping(mapping_df)
+    assigned_df, dropped_df = _api.collapse_assignments(
+        mapping_df, delimiter=args.delimiter, gene_position=args.gene_position,
+        control_patterns=control_patterns, control_label=args.control_label,
         drop_multi_guide=not args.keep_multi_guide,
     )
-    prepared_adata = annotate_perturbation_obs(
-        feature_filtered,
-        assigned_df,
-        pert_key=args.pert_key,
-        sgrna_key=args.sgrna_key,
-        target_key=args.target_key,
+    standardized = _api.attach_assignments(
+        adata, assigned_df, pert_key=args.pert_key, sgrna_key=args.sgrna_key,
+        target_key=args.target_key, species=args.species,
     )
-    standardized, prepared, contract = canonicalize_singlecell_adata(
-        prepared_adata,
-        species=args.species,
-        standardizer_skill=SKILL_NAME,
-    )
-    standardized.obs[args.pert_key] = prepared_adata.obs[args.pert_key].astype(str).values
-    standardized.obs[args.sgrna_key] = prepared_adata.obs[args.sgrna_key].astype(str).values
-    standardized.obs[args.target_key] = prepared_adata.obs[args.target_key].astype(str).values
-    standardized.obs["assignment_status"] = prepared_adata.obs["assignment_status"].astype(str).values
-    standardized.obs["n_sgrnas"] = prepared_adata.obs["n_sgrnas"].astype(int).values
+    prep_info = _api.run_info(standardized)
+    feature_summary = prep_info
+    contract = prep_info["input_contract"]
 
     store_analysis_metadata(
         standardized,
@@ -272,18 +259,18 @@ def main() -> int:
         "n_cells_multi_guide_dropped": int((dropped_df["assignment_status"] == "multi_guide").sum()) if not dropped_df.empty and "assignment_status" in dropped_df.columns else 0,
         "n_non_gene_features_removed": int(feature_summary["n_non_gene_features_removed"]),
         "feature_types": feature_summary["feature_types"],
-        "expression_source": prepared.expression_source,
-        "gene_name_source": prepared.gene_name_source,
+        "expression_source": prep_info["expression_source"],
+        "gene_name_source": prep_info["gene_name_source"],
         "input_contract": contract,
     }
 
     assignments_export = standardized.obs[[args.pert_key, args.sgrna_key, args.target_key, "assignment_status", "n_sgrnas"]].copy()
     assignments_export.to_csv(tables_dir / "perturbation_assignments.csv")
 
-    status_counts = standardized.obs["assignment_status"].astype(str).value_counts().rename_axis("assignment_status").reset_index(name="n_cells")
+    status_counts = _api.assignment_summary(standardized)
     status_counts.to_csv(tables_dir / "assignment_status_counts.csv", index=False)
 
-    perturb_counts = standardized.obs[args.pert_key].astype(str).value_counts().rename_axis("perturbation").reset_index(name="n_cells")
+    perturb_counts = _api.perturbation_counts(standardized, pert_key=args.pert_key)
     perturb_counts.to_csv(tables_dir / "perturbation_counts.csv", index=False)
 
     if not dropped_df.empty:
@@ -306,12 +293,7 @@ def main() -> int:
     status_counts.to_csv(figure_data_dir / "assignment_status_counts.csv", index=False)
 
     if not perturb_counts.empty:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        perturb_counts.head(20).plot.bar(x="perturbation", y="n_cells", ax=ax, color="#1f78b4")
-        ax.set_title("Cells per perturbation")
-        ax.set_xlabel("Perturbation")
-        ax.set_ylabel("Cells")
-        fig.tight_layout()
+        fig = _api.perturbation_counts_figure(standardized, pert_key=args.pert_key)
         fig.savefig(figures_dir / "perturbation_counts.png", dpi=200)
         plt.close(fig)
 
@@ -369,7 +351,7 @@ def main() -> int:
         "n_sgrnas": int(standardized.obs[args.sgrna_key].astype(str).nunique()),
         "n_non_gene_features_removed": int(feature_summary["n_non_gene_features_removed"]),
         "feature_types_detected": feature_summary["feature_types"],
-        "expression_source": prepared.expression_source,
+        "expression_source": prep_info["expression_source"],
     }
     params = {
         "pert_key": args.pert_key,

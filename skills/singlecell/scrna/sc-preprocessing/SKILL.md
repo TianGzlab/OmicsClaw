@@ -44,17 +44,22 @@ write_output(adata, "intermediate/adata_preprocessed.h5ad")
 
 A complete step that runs on demo data: `examples/example_step.py`.
 
+If the input already passed through `sc-filter`, use
+`preprocess(adata, apply_filters=False)`. This preserves that step's retained
+cells and genes, including its doublet decision, while normalization, HVG
+selection and PCA still run.
+
 ## API
 
 <!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
 
-### `preprocess(adata, *, method: str='scanpy', min_genes: int=200, min_cells: int=3, max_mt_pct: float=20.0, n_top_hvg: int | None=None, n_pcs: int=50, normalization_target_sum: float=10000.0, scanpy_hvg_flavor: str='seurat', pearson_hvg_flavor: str='seurat_v3', pearson_theta: float=100.0, seurat_normalize_method: str='LogNormalize', seurat_scale_factor: float=10000.0, seurat_hvg_method: str='vst', sctransform_regress_mt: bool=True, remove_doublets: bool=True, doublet_score_threshold: float=0.25, preserve_var_names: bool=False)`
+### `preprocess(adata, *, method: str='scanpy', apply_filters: bool=True, min_genes: int=200, min_cells: int=3, max_mt_pct: float=20.0, n_top_hvg: int | None=None, n_pcs: int=50, normalization_target_sum: float=10000.0, scanpy_hvg_flavor: str='seurat', pearson_hvg_flavor: str='seurat_v3', pearson_theta: float=100.0, seurat_normalize_method: str='LogNormalize', seurat_scale_factor: float=10000.0, seurat_hvg_method: str='vst', sctransform_regress_mt: bool=True, remove_doublets: bool=True, doublet_score_threshold: float=0.25, preserve_var_names: bool=False)`
 
 Filter cells and genes, normalise, select highly variable genes and run PCA.
 
 The input is first brought into the OmicsClaw scRNA contract (counts in
 ``layers['counts']``, a counts snapshot in ``raw``) and QC metrics are added
-when missing. Cells and genes are then filtered by the thresholds below,
+when missing. With apply_filters=True, cells and genes are filtered by the thresholds below,
 and doublets are dropped when ``predicted_doublet`` or ``doublet_score``
 from sc-doublet-detection are in ``obs``. Finally the chosen method
 normalises ``X``, flags ``var['highly_variable']`` and writes
@@ -64,6 +69,8 @@ normalises ``X``, flags ``var['highly_variable']`` and writes
     ``"pearson_residuals"`` (analytic Pearson residuals for HVG and PCA; ``X``
     stays log-normalised), ``"seurat"`` (Seurat LogNormalize in R) or
     ``"sctransform"`` (Seurat SCTransform in R).
+:param apply_filters: Apply cell, gene and doublet filtering. Default True.
+    Set False after sc-filter to preserve its retained cells and genes.
 :param min_genes: Drop cells with fewer detected genes. Default 200, the
     scanpy and Seurat tutorial value; lower it for low-depth data.
 :param min_cells: Drop genes detected in fewer cells. Default 3, the tutorial value.
@@ -87,7 +94,7 @@ normalises ``X``, flags ``var['highly_variable']`` and writes
     ``doublet_score`` is present. Default 0.25.
 :param preserve_var_names: Keep the input's gene identifiers instead of the
     symbols chosen during standardisation. Default ``False``.
-:returns: A new AnnData: filtered, normalised ``X``, ``layers['counts']``, ``raw``
+:returns: A new AnnData with normalised ``X``, ``layers['counts']``, ``raw``
     counts snapshot, ``var['highly_variable']``, ``obsm['X_pca']``, ``uns['pca']``.
 :raises ValueError: an unknown method, or input with no count-like matrix.
 :raises RuntimeError: the R methods fail, or their R packages are missing.

@@ -179,7 +179,7 @@ def step_entry(module: Module, state: StepState) -> dict:
     latest = state.latest
     return {
         "file": state.path.name,
-        "kind": "python",
+        "kind": latest.start.get("kind", "python") if latest else ("r" if state.path.suffix == ".R" else "python"),
         "sha256": state.sha256,
         "state": state.state,
         "reason": state.reason,
@@ -290,6 +290,8 @@ def build(module: Module, previous: dict | None = None, **updates: Any) -> dict:
     validate = module.validate_steps()
     review_files = reviews(module)
     newest = review_files[-1] if review_files else None
+    sessions = [session for state in states for run in state.runs for session in run.r_sessions]
+    latest_r = max(sessions, key=lambda session: session.get("at", "")) if sessions else None
     manifest = {
         "schema": MANIFEST_SCHEMA["schema"],
         "module": module.name,
@@ -298,6 +300,7 @@ def build(module: Module, previous: dict | None = None, **updates: Any) -> dict:
         "status": "draft",
         "frozen": bool(base.get("frozen", False)),
         "interpreter": base.get("interpreter"),
+        "rscript": {"path": latest_r["rscript"], "version": latest_r["r_version"]} if latest_r else base.get("rscript"),
         "steps": [step_entry(module, state) for state in states],
         "validate_step": validate[0].name if len(validate) == 1 else None,
         "replay": base.get("replay"),

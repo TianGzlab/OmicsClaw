@@ -127,7 +127,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
 
 def _validate_runtime_dependencies(method: str) -> None:
     if method == "mast":
-        validate_r_environment(required_r_packages=["MAST", "SingleCellExperiment", "zellkonverter"])
+        validate_r_environment(required_r_packages=["MAST", "SingleCellExperiment", "Matrix"])
     elif method == "deseq2_r":
         validate_r_environment(required_r_packages=["DESeq2", "SingleCellExperiment", "zellkonverter"])
 

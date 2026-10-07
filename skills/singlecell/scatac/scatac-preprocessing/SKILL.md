@@ -17,9 +17,25 @@ tags:
 
 # scatac-preprocessing
 
+## Use from a step
+
+```python
+from skills._sdk.notebook import load_skill, read_input, write_output
+
+atac = load_skill("scatac-preprocessing")
+adata = read_input("data/peaks.h5", reader=atac.read_10x_peaks)
+adata = atac.preprocess(adata, random_state=0)
+write_output(adata, "intermediate/accessibility.h5ad")
+write_output(atac.cluster_summary(adata), "tables/clusters.csv")
+```
+
+For H5AD use `read_input` without a reader. The API returns a copy and does
+not write files. `examples/example_step.py` recovers three planted groups
+from `load_demo("atac_synthetic")`; that tests computation, not biological validity.
+
 ## When to use
 
-The user has a peak × cell scATAC AnnData (raw-count-like accessibility
+The user has a cell × peak scATAC AnnData (raw-count-like accessibility
 matrix in `.X`) and wants the standard "filter → TF-IDF → LSI → graph →
 UMAP → Leiden" pipeline in one shot. Currently a single backend:
 `tfidf_lsi` (Signac-style). The skill stops at clustered UMAP — no
@@ -36,31 +52,27 @@ multi-sample integration. For scRNA preprocessing use `sc-preprocessing`.
 
 **Outputs**
 
-- `tables/cell_metadata.csv`
 - `tables/cluster_summary.csv`
 - `tables/lsi_variance_ratio.csv`
 - `tables/peak_summary.csv`
 - `tables/preprocess_summary.csv`
 - `tables/qc_metrics_per_cell.csv`
 - `tables/umap_points.csv`
-- `figures/clustering_comparison.png`
-- `figures/feature_umap.png`
+- `figures/umap_leiden.png`
 - `figures/lsi_variance.png`
-- `figures/pca_loadings.png`
-- `figures/pca_scatter.png`
-- `figures/pca_variance.png`
 - `figures/qc_violin.png`
 - `figures/top_accessible_peaks.png`
-- `analysis_summary.txt`
 - `processed.h5ad`
 - `report.md`
 - `result.json`
+- `figures/manifest.json`, `figure_data/manifest.json`, plot-data CSV files
+- `reproducibility/commands.sh`, `reproducibility/requirements.txt`
 - Processed AnnData (`saves_h5ad`) — adds `obs`: `leiden`; `obsm`: `X_lsi`, `X_umap`; `layers`: `counts`
 - AnnData processing state after success: `preprocessed`
 
 ## Flow
 
-1. Load the peak × cell input via the shared `smart_load` (AnnData / 10x H5 / loom / CSV / 10x dir).
+1. Read cell × peak counts. The 10x reader uses `gex_only=False` and keeps Peaks in multiome inputs; other CLI formats use `smart_load`.
 2. Validate `.X` is present, non-empty, non-negative.
 3. Compute per-cell `n_peaks_by_counts` / `total_counts`; filter cells by `--min-peaks` and peaks by `--min-cells`.
 4. Retain the globally most accessible peaks up to `--n-top-peaks`.
@@ -70,12 +82,14 @@ multi-sample integration. For scRNA preprocessing use `sc-preprocessing`.
 
 ## Gotchas
 
-- **Filtering can wipe everything.** `scatac_preprocessing.py` raises `RuntimeError("All cells were removed by `min_peaks`. Lower the threshold.")` and raises `RuntimeError("All peaks were removed by `min_cells`. Lower the threshold.")` — both are hard fails. Inspect `n_peaks_by_counts` distribution before tightening these thresholds; `--min-peaks 200` (default) assumes a typical 10x scATAC depth.
-- **LSI hard-fails on a degenerate matrix.** `scatac_preprocessing.py` raises `RuntimeError("Not enough cells or peaks remain to compute a stable LSI embedding.")` when the matrix is too sparse / small after filtering. Either lower QC thresholds or feed a richer dataset.
-- **Input must be non-negative count-like in `.X`.** `scatac_preprocessing.py` raises `ValueError("Input AnnData has no matrix in adata.X.")`; raises `ValueError("Input matrix is empty.")`; raises `ValueError("scATAC preprocessing requires a non-negative accessibility matrix.")`. Already-TF-IDF-transformed data will fail the non-negativity check.
-- **`processed.h5ad` keeps only retained peaks.** `scatac_preprocessing.py` does `adata = adata[:, keep].copy()` — `var` is filtered to the top `n_top_peaks` accessible. The original peak universe is **not** preserved in `X` (the deleted peaks are gone). Snapshot the input before running if you need the full peak space later.
+- **Filtering can wipe everything.** `_api.py:preprocess` raises if `min_peaks` removes every cell or `min_cells` removes every peak. Inspect `n_peaks_by_counts` before tightening thresholds; the CLI defaults to `--min-peaks 200`.
+- **LSI needs enough cells and peaks.** `_api.py:preprocess` raises when fewer than two LSI components can be computed after filtering.
+- **Input must be non-negative count-like in `.X`.** `_api.py:preprocess` rejects missing, empty or negative matrices. Non-integer values only warn: TF-IDF values are usually non-negative and may pass this check, but preprocessing them again is not valid.
+- **`processed.h5ad` keeps only retained peaks.** `_api.py:preprocess` selects the top `n_top_peaks` by total accessibility. Keep the input if you need the full peak space later.
 - **`--input` mandatory unless `--demo`.** `scatac_preprocessing.py` raises `ValueError("--input required when not using --demo")`.
 - **Single backend only.** `scatac_preprocessing.py` raises `ValueError(f"Unknown preprocessing method '{method}'")` for anything other than `tfidf_lsi`. The `--method` flag exists for forward compatibility; today it's effectively a no-op.
+- `_api.py:qc_metrics_table` reports QC metrics calculated before selecting top peaks. Those totals can exceed the sums in the returned, peak-filtered `.X` or counts layer.
+- `_api.py:read_10x_peaks` reads counts, not fragments or BAM. It raises when a multiome input contains no Peaks features; it never falls back to gene expression.
 
 ## Key CLI
 
@@ -98,6 +112,54 @@ python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
   --n-lsi 40 --n-neighbors 20 --leiden-resolution 1.0
 ```
 
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `preprocess(adata, *, min_peaks=200, min_cells=5, n_top_peaks=10000, tfidf_scale_factor=10000.0, n_lsi=30, n_neighbors=15, leiden_resolution=0.8, random_state=0)`
+
+Return a filtered copy of .X accessibility counts with TF-IDF, LSI and Leiden.
+
+Cells need min_peaks detected peaks; peaks need min_cells cells. Keep at
+most n_top_peaks, ranked by total counts. Counts remain in layers['counts']
+and .raw on retained peaks; .X becomes log1p TF-IDF. LSI uses scaled SVD
+components, excluding the first component from the neighbor graph. UMAP
+and Leiden use that graph. All stochastic operations use random_state.
+No file is written and the input is not modified.
+
+### `read_10x_peaks(path)`
+
+Read 10x H5 or MTX peak counts; pass it as reader= to read_input.
+
+Use gex_only=False, then keep Peaks when feature_types is present. No
+gene-expression filtering is applied to a peak-only matrix lacking it.
+
+### `qc_metrics_table(adata)`
+
+Return cell identifiers and the QC metrics computed before top-peak selection.
+
+### `peak_summary(adata, *, n_top=50)`
+
+Return retained peaks ranked by total counts and number of cells.
+
+### `lsi_variance_table(adata)`
+
+Return variance ratios and their cumulative sum for every fitted LSI component.
+
+### `cluster_summary(adata, *, cluster_key='leiden')`
+
+Return cell counts and percentages for labels in obs[cluster_key].
+
+### `umap_figure(adata, *, cluster_key='leiden')`
+
+Return a cluster-colored Figure from obsm['X_umap']; do not write a file.
+
+### `run_info(adata)`
+
+Return the TF-IDF/LSI parameters recorded on the output AnnData.
+
+<!-- api:end -->
+
 ## See also
 
 - `references/parameters.md` — every CLI flag, per-method tunables
@@ -109,4 +171,4 @@ python skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py \
 
 Python packages this skill's script needs. They are not installed for you — check before a long run.
 
-`anndata`, `matplotlib`, `numpy`, `pandas`, `phate`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`
+`anndata`, `igraph`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scikit-learn`, `scipy`, `seaborn`

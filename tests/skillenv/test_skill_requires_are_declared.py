@@ -1,7 +1,7 @@
 """Every optional backend a skill's code asks for is declared by that skill (plan 0061 case 7).
 
 For each skill, the string arguments of dependency-API calls in its main
-scripts and in the ``skills.<domain>._lib`` modules those scripts import
+scripts, ``_api.py``, and the ``skills.<domain>._lib`` modules they import
 directly are collected with plan 0062's F29 rule: ``require``,
 ``is_available``, ``install_hint`` and ``get_dependency`` taken from
 ``skills._sdk.deps``, attribute calls on a ``skills._sdk.deps`` alias, and
@@ -110,14 +110,15 @@ def undeclared() -> dict[tuple[str, str], set[str]]:
             resolve(name, registry).key or name
             for name in parse_dependencies(skill_md.read_text(encoding="utf-8"), source=skill_md)
         }
-        for script in sorted(p for p in directory.glob("*.py") if not p.name.startswith("_")):
+        for script in sorted(p for p in directory.glob("*.py")
+                             if not p.name.startswith("_") or p.name == "_api.py"):
             for source in {script} | _lib_modules(script):
                 where = source.relative_to(REPO).as_posix()
                 if where in EXCLUDED_MODULES:
                     continue
                 for name in _call_names(source):
-                    key = resolve(name, registry).key
-                    if key is not None and key not in declared:
+                    key = resolve(name, registry).key or name
+                    if key not in declared:
                         out.setdefault((directory.name, key), set()).add(where)
     return out
 
@@ -152,6 +153,26 @@ def test_an_aliased_deps_module_is_collected(tmp_path):
         encoding="utf-8",
     )
     assert _call_names(source) == {"louvain", "gseapy"}
+
+
+def test_scan_includes_api_and_its_direct_domain_helpers(tmp_path, monkeypatch):
+    monkeypatch.setitem(undeclared.__globals__, "REPO", tmp_path)
+    directory = tmp_path / "skills" / "singlecell" / "test-skill"
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text("## Dependencies\n\n`numpy`\n")
+    (directory / "_api.py").write_text(
+        "from skills._sdk.deps import require\n"
+        "from skills.singlecell._lib.helper import compute\n"
+        "def analyze():\n    require('scanpy')\n    require('not-declared')\n"
+    )
+    helper = tmp_path / "skills" / "singlecell" / "_lib" / "helper.py"
+    helper.parent.mkdir()
+    helper.write_text("from skills._sdk.deps import require\nrequire('scrublet')\n")
+    assert undeclared() == {
+        ("test-skill", "scanpy"): {"skills/singlecell/test-skill/_api.py"},
+        ("test-skill", "not-declared"): {"skills/singlecell/test-skill/_api.py"},
+        ("test-skill", "scrublet"): {"skills/singlecell/_lib/helper.py"},
+    }
 
 
 @pytest.mark.parametrize("skill", ["spatial-domains"])

@@ -14,6 +14,7 @@ from skills._sdk.r_script_runner import RScriptRunner
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_pathway_scoring.py"
 R_SCRIPTS_DIR = SKILL_SCRIPT.parent / "rscripts"
+pytestmark = pytest.mark.cli_subprocess
 
 
 def _aucell_stack_available() -> bool:

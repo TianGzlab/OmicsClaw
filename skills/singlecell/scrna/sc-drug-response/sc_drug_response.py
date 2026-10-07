@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-cell drug response prediction (CaDRReS, simple_correlation)."""
+"""Drug-associated expression means and optional CaDRReS model output."""
 
 from __future__ import annotations
 
@@ -33,6 +33,9 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
+
+_api = load_skill("sc-drug-response")
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -62,25 +65,8 @@ SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-drug-response/sc_drug_response.py"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "omicsclaw" / "drug_response"
 DEFAULT_N_DRUGS = 10
 
-# Known drug target gene sets (simplified correlation approach)
-# Each drug maps to a set of target / sensitivity-associated genes.
-_BUILTIN_DRUG_TARGETS: dict[str, list[str]] = {
-    "Cisplatin": ["ERCC1", "XPA", "BRCA1", "MLH1", "MSH2"],
-    "Paclitaxel": ["TUBB", "TUBB3", "MAP4", "STMN1", "BCL2"],
-    "Doxorubicin": ["TOP2A", "TOP2B", "ABCB1", "TP53", "BCL2"],
-    "5-Fluorouracil": ["TYMS", "DPYD", "UMPS", "TK1", "RRM1"],
-    "Gemcitabine": ["RRM1", "RRM2", "DCK", "CDA", "SLC29A1"],
-    "Sorafenib": ["RAF1", "BRAF", "VEGFA", "KDR", "FLT4"],
-    "Erlotinib": ["EGFR", "ERBB2", "ERBB3", "AKT1", "KRAS"],
-    "Imatinib": ["ABL1", "BCR", "KIT", "PDGFRA", "PDGFRB"],
-    "Temozolomide": ["MGMT", "MLH1", "MSH2", "MSH6", "ALKBH2"],
-    "Olaparib": ["BRCA1", "BRCA2", "PARP1", "RAD51", "ATM"],
-    "Vemurafenib": ["BRAF", "CRAF", "MAP2K1", "MAP2K2", "MAPK1"],
-    "Lapatinib": ["EGFR", "ERBB2", "AKT1", "PIK3CA", "PTEN"],
-    "Methotrexate": ["DHFR", "FPGS", "GGH", "SLC19A1", "TYMS"],
-    "Venetoclax": ["BCL2", "BCL2L1", "MCL1", "BAX", "BAK1"],
-    "Trametinib": ["MAP2K1", "MAP2K2", "MAPK1", "MAPK3", "BRAF"],
-}
+# Illustrative sets include targets and response/resistance-associated genes.
+_BUILTIN_DRUG_TARGETS = _api.builtin_drug_targets()
 
 METHOD_REGISTRY: dict[str, MethodConfig] = {
     "cadrres": MethodConfig(
@@ -90,7 +76,7 @@ METHOD_REGISTRY: dict[str, MethodConfig] = {
     ),
     "simple_correlation": MethodConfig(
         name="simple_correlation",
-        description="Gene expression correlation with known drug target genes (no external model needed)",
+        description="Mean expression of drug-associated genes; not a sensitivity prediction",
         dependencies=("scanpy", "numpy", "pandas"),
     ),
 }
@@ -108,38 +94,11 @@ CADRRES_MODEL_FILES = {
     ],
 }
 
-CADRRES_DOWNLOAD_INSTRUCTIONS = """\
-  CaDRReS-Sc model files are required for the 'cadrres' method.
-
-  How to obtain them:
-    1. Clone the CaDRReS-Sc repository:
-       git clone https://github.com/CSB5/CaDRReS-Sc.git
-
-    2. Download the pre-trained models:
-       wget https://github.com/CSB5/CaDRReS-Sc/releases/download/v1.0/CaDRReS-Sc-model.tar.gz
-       tar -xzf CaDRReS-Sc-model.tar.gz -C ~/.cache/omicsclaw/drug_response/
-
-    3. Download GDSC bulk expression data:
-       wget https://github.com/CSB5/CaDRReS-Sc/releases/download/v1.0/GDSC_exp.tsv.gz
-       mv GDSC_exp.tsv.gz ~/.cache/omicsclaw/drug_response/
-
-  Expected directory layout:
-    ~/.cache/omicsclaw/drug_response/
-      cadrres-wo-sample-bias_param_dict_all_genes.pickle  (GDSC)
-      cadrres-wo-sample-bias_param_dict_prism.pickle      (PRISM)
-      masked_drugs.csv
-      GDSC_exp.tsv.gz
-
-  Then run:
-    python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \\
-      --input <preprocessed.h5ad> --output <dir> \\
-      --method cadrres --model-dir ~/.cache/omicsclaw/drug_response/ \\
-      --drug-db gdsc
-
-  Alternative (no model needed):
-    python skills/singlecell/scrna/sc-drug-response/sc_drug_response.py \\
-      --input <preprocessed.h5ad> --output <dir> \\
-      --method simple_correlation
+CADRRES_DOWNLOAD_INSTRUCTIONS = """CaDRReS models are not bundled.
+Supply trusted local pretrained models with --model-dir and a CaDRReS-Sc
+checkout beside that directory. The previously listed release download URLs
+are unavailable; this skill does not download models or claim a verified source.
+Without models, --method simple_correlation reports only mean gene expression.
 """
 
 
@@ -267,164 +226,19 @@ def _generate_demo_data() -> anndata.AnnData:
 
 # ── simple_correlation method ─────────────────────────────────────────────
 
-def _detect_species_hint(var_names) -> str:
-    """Detect human vs mouse from gene naming convention."""
-    sample = list(var_names[:500])
-    if not sample:
-        return "unknown"
-    upper_ratio = sum(1 for g in sample if g == g.upper()) / len(sample)
-    if upper_ratio > 0.7:
-        return "human"
-    title_ratio = sum(1 for g in sample if g != g.upper() and g[0].isupper()) / len(sample)
-    if title_ratio > 0.5:
-        return "mouse"
-    return "unknown"
+def run_simple_correlation(adata, cluster_key, n_drugs, drug_targets=None):
+    """Compatibility wrapper returning descriptive mean target expression."""
+    return _api.score_drug_targets(adata, cluster_key=cluster_key, drug_targets=drug_targets)
 
 
-def _adapt_gene_case(gene_list: list[str], species: str) -> list[str]:
-    """Adapt gene names to species convention."""
-    if species == "mouse":
-        return [g.capitalize() for g in gene_list]
-    return gene_list  # human / unknown: keep UPPER
+def run_cadrres(adata, cluster_key, model_dir, drug_db, n_drugs):
+    """Compatibility wrapper for the model-backed API."""
+    return _api.cadrres(adata, cluster_key=cluster_key, model_dir=model_dir,
+                       drug_db=drug_db, n_drugs=n_drugs)
 
 
-def run_simple_correlation(
-    adata: anndata.AnnData,
-    cluster_key: str,
-    n_drugs: int,
-    drug_targets: dict[str, list[str]] | None = None,
-) -> pd.DataFrame:
-    """Score drug sensitivity per cluster using target gene expression correlation.
-
-    Returns a DataFrame with columns: Drug, Cluster, Score, Rank.
-    """
-    if drug_targets is None:
-        drug_targets = dict(_BUILTIN_DRUG_TARGETS)
-
-    species = _detect_species_hint(adata.var_names)
-    logger.info("Detected species hint: %s", species)
-
-    clusters = sorted(adata.obs[cluster_key].unique())
-    records: list[dict[str, Any]] = []
-
-    for drug_name, targets in drug_targets.items():
-        adapted = _adapt_gene_case(targets, species)
-        available = [g for g in adapted if g in adata.var_names]
-        if not available:
-            # Try case-insensitive rescue
-            lower_map = {v.lower(): v for v in adata.var_names}
-            available = [lower_map[g.lower()] for g in targets if g.lower() in lower_map]
-        overlap_pct = len(available) / len(targets) * 100 if targets else 0
-        if not available:
-            logger.debug("Drug %s: 0/%d target genes found, skipping", drug_name, len(targets))
-            continue
-        if overlap_pct < 40:
-            logger.warning(
-                "Drug %s: only %.0f%% target genes found (%d/%d). Score may be unreliable.",
-                drug_name, overlap_pct, len(available), len(targets),
-            )
-
-        for cluster in clusters:
-            mask = adata.obs[cluster_key] == cluster
-            if mask.sum() == 0:
-                continue
-            # Mean expression of target genes in this cluster
-            expr = adata[mask, available].X
-            if hasattr(expr, "toarray"):
-                expr = expr.toarray()
-            mean_expr = float(np.mean(expr))
-            records.append({
-                "Drug": drug_name,
-                "Cluster": str(cluster),
-                "Score": round(mean_expr, 4),
-                "TargetGenes": len(available),
-                "TotalTargets": len(targets),
-                "OverlapPct": round(overlap_pct, 1),
-            })
-
-    if not records:
-        return pd.DataFrame(columns=["Drug", "Cluster", "Score", "Rank", "TargetGenes", "TotalTargets", "OverlapPct"])
-
-    df = pd.DataFrame(records)
-    # Rank drugs within each cluster (higher score = higher sensitivity)
-    df["Rank"] = df.groupby("Cluster")["Score"].rank(ascending=False, method="min").astype(int)
-    df = df.sort_values(["Cluster", "Rank"])
-
-    return df
-
-
-def run_cadrres(
-    adata: anndata.AnnData,
-    cluster_key: str,
-    model_dir: Path,
-    drug_db: str,
-    n_drugs: int,
-) -> pd.DataFrame:
-    """Run CaDRReS-Sc drug response prediction.
-
-    Requires pretrained model files in model_dir.
-    """
-    # This is the real-mode path. We defer to omicverse's Drug_Response class
-    # or the CaDRReS-Sc library directly.
-    try:
-        from omicverse.single._scdrug import Drug_Response
-    except ImportError:
-        raise ImportError(
-            "CaDRReS method requires omicverse with CaDRReS-Sc support.\n"
-            "Install: pip install omicverse\n"
-            "And clone: git clone https://github.com/CSB5/CaDRReS-Sc.git\n\n"
-            "Alternative (no external model needed):\n"
-            "  --method simple_correlation"
-        )
-
-    # Prepare adata with louvain labels expected by Drug_Response
-    adata_copy = adata.copy()
-    if "louvain" not in adata_copy.obs.columns:
-        adata_copy.obs["louvain"] = adata_copy.obs[cluster_key].astype(str)
-
-    # Find CaDRReS-Sc script path
-    cadrres_script = model_dir.parent / "CaDRReS-Sc"
-    if not cadrres_script.exists():
-        cadrres_script = Path.home() / "CaDRReS-Sc"
-    if not cadrres_script.exists():
-        raise FileNotFoundError(
-            f"CaDRReS-Sc script directory not found.\n"
-            f"Searched: {model_dir.parent / 'CaDRReS-Sc'}, {Path.home() / 'CaDRReS-Sc'}\n\n"
-            + CADRRES_DOWNLOAD_INSTRUCTIONS
-        )
-
-    dr = Drug_Response(
-        adata=adata_copy,
-        scriptpath=str(cadrres_script),
-        modelpath=str(model_dir) + "/",
-        output=str(model_dir / "_tmp_output"),
-        model=drug_db.upper(),
-        clusters="All",
-        n_drugs=n_drugs,
-    )
-
-    # Convert CaDRReS output to standard DataFrame format
-    if drug_db.lower() == "gdsc":
-        pred_file = model_dir / "_tmp_output" / "IC50_prediction.csv"
-    else:
-        pred_file = model_dir / "_tmp_output" / "PRISM_prediction.csv"
-
-    if pred_file.exists():
-        pred_df = pd.read_csv(pred_file, header=[0, 1], index_col=0)
-        records = []
-        for cluster in pred_df.index:
-            for col in pred_df.columns:
-                drug_name = col[1] if isinstance(col, tuple) else col
-                records.append({
-                    "Drug": str(drug_name),
-                    "Cluster": str(cluster),
-                    "Score": round(float(pred_df.loc[cluster, col]), 4),
-                })
-        df = pd.DataFrame(records)
-        df["Rank"] = df.groupby("Cluster")["Score"].rank(ascending=False, method="min").astype(int)
-        return df.sort_values(["Cluster", "Rank"])
-
-    return pd.DataFrame(columns=["Drug", "Cluster", "Score", "Rank"])
+def _score_column(table):
+    return "mean_target_expression" if "mean_target_expression" in table else "Score"
 
 
 # ── Visualization ─────────────────────────────────────────────────────────
@@ -447,7 +261,7 @@ def plot_drug_sensitivity_umap(
     output_dir: Path,
     top_n: int = 4,
 ) -> list[Path]:
-    """Overlay top drug sensitivity scores on UMAP."""
+    """Overlay group-level expression means or model scores on UMAP."""
     paths: list[Path] = []
     if "X_umap" not in adata.obsm:
         logger.warning("No UMAP embedding found, skipping UMAP overlay plots.")
@@ -455,7 +269,7 @@ def plot_drug_sensitivity_umap(
 
     # Get top drugs by mean score across clusters
     top_drugs = (
-        drug_scores.groupby("Drug")["Score"]
+        drug_scores.groupby("Drug")[_score_column(drug_scores)]
         .mean()
         .sort_values(ascending=False)
         .head(top_n)
@@ -463,7 +277,7 @@ def plot_drug_sensitivity_umap(
     )
 
     for drug in top_drugs:
-        drug_data = drug_scores[drug_scores["Drug"] == drug].set_index("Cluster")["Score"]
+        drug_data = drug_scores[drug_scores["Drug"] == drug].set_index("Cluster")[_score_column(drug_scores)]
         adata.obs[f"drug_{drug}"] = adata.obs[cluster_key].astype(str).map(drug_data).fillna(0).astype(float)
 
     n_plots = len(top_drugs)
@@ -489,9 +303,9 @@ def plot_drug_sensitivity_umap(
         ax.set_ylabel("UMAP2")
         ax.set_xticks([])
         ax.set_yticks([])
-        plt.colorbar(scatter, ax=ax, shrink=0.6, label="Sensitivity Score")
+        plt.colorbar(scatter, ax=ax, shrink=0.6, label=_score_column(drug_scores))
 
-    fig.suptitle("Drug Sensitivity on UMAP", fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle("Drug-associated expression / model scores", fontsize=14, fontweight="bold", y=1.02)
     fig.tight_layout()
     paths.append(_save_fig(fig, output_dir, "drug_sensitivity_umap.png"))
 
@@ -509,12 +323,12 @@ def plot_top_drugs_bar(
     output_dir: Path,
     n_drugs: int = 10,
 ) -> Path | None:
-    """Bar chart of top N drugs by mean sensitivity score."""
+    """Bar chart of the top N gene sets or model outputs by group mean."""
     if drug_scores.empty:
         return None
 
     top = (
-        drug_scores.groupby("Drug")["Score"]
+        drug_scores.groupby("Drug")[_score_column(drug_scores)]
         .mean()
         .sort_values(ascending=False)
         .head(n_drugs)
@@ -525,7 +339,7 @@ def plot_top_drugs_bar(
     bars = ax.barh(range(len(top)), top.values, color=colors, edgecolor="white", linewidth=0.5)
     ax.set_yticks(range(len(top)))
     ax.set_yticklabels(top.index, fontsize=10)
-    ax.set_xlabel("Mean Sensitivity Score", fontsize=12)
+    ax.set_xlabel(_score_column(drug_scores), fontsize=12)
     ax.set_title(f"Top {len(top)} Predicted Drug Responses", fontsize=13, fontweight="bold")
     ax.invert_yaxis()
 
@@ -545,12 +359,12 @@ def plot_drug_cluster_heatmap(
     output_dir: Path,
     n_drugs: int = 15,
 ) -> Path | None:
-    """Heatmap of drug sensitivity scores across clusters."""
+    """Heatmap of drug-associated expression or model output across clusters."""
     if drug_scores.empty:
         return None
 
     # Select top drugs by variance across clusters
-    pivot = drug_scores.pivot_table(index="Drug", columns="Cluster", values="Score", aggfunc="mean")
+    pivot = drug_scores.pivot_table(index="Drug", columns="Cluster", values=_score_column(drug_scores), aggfunc="mean")
     if pivot.shape[0] > n_drugs:
         var_rank = pivot.var(axis=1).sort_values(ascending=False)
         pivot = pivot.loc[var_rank.head(n_drugs).index]
@@ -561,13 +375,13 @@ def plot_drug_cluster_heatmap(
         cmap="YlOrRd",
         linewidths=0.5,
         linecolor="white",
-        cbar_kws={"shrink": 0.6, "label": "Sensitivity Score"},
+        cbar_kws={"shrink": 0.6, "label": _score_column(drug_scores)},
         ax=ax,
         annot=True,
         fmt=".2f",
         annot_kws={"fontsize": 8},
     )
-    ax.set_title("Drug Sensitivity Across Clusters", fontsize=13, fontweight="bold")
+    ax.set_title("Drug-associated expression / model scores", fontsize=13, fontweight="bold")
     ax.set_xlabel("Cluster", fontsize=11)
     ax.set_ylabel("Drug", fontsize=11)
     ax.tick_params(axis="both", labelsize=9)
@@ -588,12 +402,15 @@ def write_report(
 ) -> None:
     """Write analysis report in Markdown."""
     header = generate_report_header(
-        title="Single-Cell Drug Response Prediction",
+        title="Single-Cell Drug-Associated Expression / Model Scores",
         skill_name=SKILL_NAME,
     )
 
     lines: list[str] = []
     lines.append(f"## Method: {method}\n")
+    lines.append("simple_correlation reports mean_target_expression, not correlation or predicted sensitivity. Higher expression does not imply therapeutic benefit.\n")
+    if params.get('synthetic_model_demo'):
+        lines.append('This CaDRReS demo uses synthetic plumbing scores; no pretrained model was run.\n')
     lines.append(f"- Cells analyzed: {summary.get('n_cells', 'N/A')}")
     lines.append(f"- Clusters: {summary.get('n_clusters', 'N/A')}")
     lines.append(f"- Drugs scored: {summary.get('n_drugs_scored', 0)}")
@@ -603,7 +420,7 @@ def write_report(
     if not drug_scores.empty:
         lines.append("## Top Drugs (by mean score across clusters)\n")
         top = (
-            drug_scores.groupby("Drug")["Score"]
+            drug_scores.groupby("Drug")[_score_column(drug_scores)]
             .mean()
             .sort_values(ascending=False)
             .head(10)
@@ -615,7 +432,7 @@ def write_report(
         lines.append("")
 
     lines.append("## Output Files\n")
-    lines.append("- `processed.h5ad` — AnnData with drug sensitivity scores in `.obs`")
+    lines.append("- `processed.h5ad` — AnnData with group-level values in legacy `drug_score_*` columns")
     lines.append("- `tables/drug_rankings.csv` — Full drug ranking table")
     lines.append("- `figures/top_drugs_bar.png` — Top drug bar chart")
     lines.append("- `figures/drug_cluster_heatmap.png` — Drug-cluster heatmap")
@@ -644,12 +461,7 @@ def write_report(
         ])
 
     lines.append("")
-    lines.append("## Disclaimer\n")
-    lines.append(
-        "*SpatialClaw is a research and educational tool for spatial transcriptomics analysis. "
-        "It is not a medical device and does not provide clinical diagnoses. "
-        "Consult a domain expert before making decisions based on these results.*"
-    )
+    # generate_report_footer includes the SDK DISCLAIMER verbatim.
 
     report = header + "\n".join(lines) + "\n" + generate_report_footer()
     (output_dir / "report.md").write_text(report, encoding="utf-8")
@@ -755,6 +567,7 @@ def main() -> None:
         "n_drugs": args.n_drugs,
         "cluster_key": cluster_key,
         "model_dir": str(args.model_dir),
+        "synthetic_model_demo": bool(demo_mode and method == "cadrres"),
     }
 
     # ── Run method ──
@@ -764,7 +577,7 @@ def main() -> None:
             drug_scores = run_cadrres(adata, cluster_key, args.model_dir, args.drug_db, args.n_drugs)
         else:
             # Demo mode for CaDRReS: generate synthetic scores
-            logger.info("CaDRReS demo mode: generating synthetic drug sensitivity scores.")
+            logger.info("CaDRReS demo mode: synthetic plumbing scores, not model predictions.")
             drug_scores = _generate_demo_cadrres_scores(adata, cluster_key, args.drug_db, args.n_drugs)
     elif method == "simple_correlation":
         drug_scores = run_simple_correlation(adata, cluster_key, args.n_drugs)
@@ -772,10 +585,10 @@ def main() -> None:
         raise ValueError(f"Unknown method: {method}")
 
     # ── Degenerate output detection ──
-    degenerate = drug_scores.empty or drug_scores["Score"].isna().all()
+    degenerate = drug_scores.empty or drug_scores[_score_column(drug_scores)].isna().all()
     if degenerate:
         print()
-        print("  *** NO DRUGS WERE SCORED - drug response prediction did not produce results. ***")
+        print("  *** NO DRUG-ASSOCIATED GENE SETS OR MODEL OUTPUTS WERE SCORED. ***")
         print("  This usually means none of the drug target genes were found in your expression data.")
         print()
         print("  How to fix:")
@@ -791,14 +604,14 @@ def main() -> None:
     if not drug_scores.empty:
         # Add top drug scores per cell (mapped from cluster)
         top_drugs_list = (
-            drug_scores.groupby("Drug")["Score"]
+            drug_scores.groupby("Drug")[_score_column(drug_scores)]
             .mean()
             .sort_values(ascending=False)
             .head(args.n_drugs)
             .index.tolist()
         )
         for drug in top_drugs_list:
-            drug_data = drug_scores[drug_scores["Drug"] == drug].set_index("Cluster")["Score"]
+            drug_data = drug_scores[drug_scores["Drug"] == drug].set_index("Cluster")[_score_column(drug_scores)]
             col_name = f"drug_score_{drug.replace(' ', '_').replace('-', '_')}"
             adata.obs[col_name] = (
                 adata.obs[cluster_key].astype(str).map(drug_data).fillna(0).astype(float)
@@ -887,8 +700,8 @@ def main() -> None:
     print(f"  Method: {method}")
     print(f"  Drugs scored: {n_drugs_scored}")
     if not drug_scores.empty:
-        top_drug = drug_scores.groupby("Drug")["Score"].mean().idxmax()
-        print(f"  Top predicted drug: {top_drug}")
+        top_drug = drug_scores.groupby("Drug")[_score_column(drug_scores)].mean().idxmax()
+        print(f"  Highest-scoring gene set/model output: {top_drug}")
 
     # --- Next-step guidance ---
     print()

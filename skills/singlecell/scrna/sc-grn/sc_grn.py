@@ -51,6 +51,7 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills.singlecell._lib.viz_utils import save_figure
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib import grn as sc_grn_utils
@@ -419,7 +420,8 @@ def write_grn_report(
         "### cisTarget",
         "cisTarget performs motif enrichment analysis to identify direct TF targets",
         "by matching regulatory sequences to known TF binding motifs.\n",
-        "### AUCell",
+        "### Regulon scores",
+        "The full pipeline uses AUCell; the simplified path uses mean target expression, not AUCell.",
         "AUCell calculates the activity of each regulon in each cell by computing",
         "the area under the recovery curve of gene expression rankings.\n",
         "",
@@ -445,7 +447,7 @@ def write_grn_report(
         "- `tables/grn_adjacencies.csv` -- All TF-target adjacencies",
         "- `tables/grn_regulons.csv` -- Regulon summary",
         "- `tables/grn_regulon_targets.csv` -- TF-target pairs",
-        "- `tables/grn_auc_matrix.csv` -- AUCell activity scores",
+        "- `tables/grn_auc_matrix.csv` -- regulon scores; see `data.scoring_method` in result.json",
         "- `figures/regulon_activity_umap.png` -- Regulon activity on UMAP",
         "- `figures/regulon_heatmap.png` -- Regulon activity heatmap",
         "- `figures/regulon_network.png` -- Network diagram",
@@ -595,116 +597,29 @@ def create_demo_tf_list(output_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def run_demo_mode(adata, output_dir: Path, params: dict) -> dict | None:
-    """Run GRN analysis in demo mode (GRNBoost2 or correlation fallback)."""
-    logger.warning("=" * 60)
-    logger.warning("Demo mode: Running GRN inference")
-    logger.warning("For full analysis, provide database files:")
-    logger.warning("  --tf-list <file> --db <glob> --motif <file>")
-    logger.warning("=" * 60)
-
-    adjacencies = None
-    regulons = []
-    auc_matrix = pd.DataFrame(index=adata.obs_names)
-    used_fallback = False
-    fallback_reason = None
-
-    # Prepare expression matrix
-    ex_matrix = sc_grn_utils.prepare_expression_matrix(adata)
-
-    # Create demo TF list
-    tf_file = create_demo_tf_list(output_dir)
-    tf_list = sc_grn_utils.load_tf_list(tf_file)
-
-    # Filter TFs to those in data
-    tf_list = [tf for tf in tf_list if tf in adata.var_names]
-    logger.info(f"Using {len(tf_list)} TFs from demo list")
-
-    if len(tf_list) == 0:
-        logger.warning("No TFs from the demo list found in data gene names.")
-        logger.warning("Gene name sample: %s", list(adata.var_names[:10]))
-        return None
-
-    # Try GRNBoost2 first, then fallback to correlation
+    """Run the compatibility simplified path with the supplied or demo TFs."""
+    library = load_skill("sc-grn")
+    tf_file = Path(params["tf_list"]) if params.get("tf_list") else create_demo_tf_list(output_dir)
+    tfs = sc_grn_utils.load_tf_list(tf_file)
     try:
-        adjacencies = sc_grn_utils.run_grnboost2(
-            ex_matrix,
-            tf_list,
-            seed=42,
-            n_jobs=params.get("n_jobs", 4),
+        adjacencies = library.infer_adjacencies(
+            adata, tfs=tfs, method="grnboost2", n_top=params.get("n_top_targets", 50),
+            n_jobs=params.get("n_jobs", 4), random_state=params.get("seed", 42),
         )
-    except ImportError:
-        logger.warning("arboreto not installed, using correlation-based GRN")
-        used_fallback = True
-        fallback_reason = "arboreto package not installed"
-        adjacencies = None
-    except Exception as e:
-        logger.warning(f"GRNBoost2 failed: {e}")
-        logger.info("Falling back to correlation-based GRN inference...")
-        used_fallback = True
-        fallback_reason = f"GRNBoost2 error: {e}"
-        adjacencies = None
-
-    # Fallback to correlation-based GRN if GRNBoost2 failed
-    if adjacencies is None or len(adjacencies) == 0:
-        used_fallback = True
-        if fallback_reason is None:
-            fallback_reason = "GRNBoost2 returned empty results"
-        try:
-            adjacencies = sc_grn_utils.run_correlation_grn(
-                ex_matrix,
-                tf_list,
-                method="spearman",
-                n_top=params.get("n_top_targets", 50),
-            )
-            logger.info("Using correlation-based GRN results")
-        except Exception as e:
-            logger.error(f"Correlation-based GRN also failed: {e}")
+        info = library.run_info(adjacencies)
+        regulons = library.regulons_from_adjacencies(adjacencies, n_top=params.get("n_top_targets", 50))
+        if not regulons:
             return None
-
-    if used_fallback:
-        logger.warning("FALLBACK: Used correlation-based GRN instead of GRNBoost2. Reason: %s", fallback_reason)
-        print(f"\n  Note: Fell back to correlation-based GRN. Reason: {fallback_reason}")
-        print("  For better results, install arboreto: pip install arboreto")
-
-    # Create simple regulons from adjacencies
-    for tf in tf_list:
-        tf_adj = adjacencies[adjacencies["TF"] == tf].nlargest(params.get("n_top_targets", 50), "importance")
-        if len(tf_adj) > 0:
-            regulons.append({
-                "tf": tf,
-                "targets": tf_adj["target"].tolist(),
-                "n_targets": len(tf_adj),
-                "motif_nes": None,
-            })
-
-    # Compute pseudo-AUC scores (using top targets)
-    logger.info("Computing pseudo-activity scores...")
-    for r in regulons:
-        target_mask = adata.var_names.isin(r["targets"])
-        if target_mask.sum() > 0:
-            if hasattr(adata.X, "toarray"):
-                expr = adata.X[:, target_mask].toarray()
-            else:
-                expr = adata.X[:, target_mask]
-            # Mean expression of targets
-            auc_matrix[r["tf"]] = expr.mean(axis=1)
-
-    if len(regulons) == 0:
-        logger.error("No regulons identified")
+        scores = library.score_regulons(adata, regulons, method="mean")
+    except Exception as exc:
+        logger.error("Simplified GRN failed: %s", exc)
         return None
-
-    return {
-        "adjacencies": adjacencies,
-        "regulons": regulons,
-        "auc_matrix": auc_matrix,
-        "used_fallback": used_fallback,
-        "fallback_reason": fallback_reason,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+    if info["fallback_used"]:
+        logger.warning("Used correlation instead of GRNBoost2: %s", info["fallback_reason"])
+    logger.info("Simplified activity is mean target expression, not AUCell.")
+    return {"adjacencies": adjacencies, "regulons": regulons, "auc_matrix": scores,
+            "used_fallback": info["fallback_used"], "fallback_reason": info["fallback_reason"],
+            "scoring_method": "mean"}
 
 def main():
     parser = argparse.ArgumentParser(description="Single-Cell Gene Regulatory Network Analysis")
@@ -782,15 +697,21 @@ def main():
         # Full pySCENIC workflow
         logger.info("Running full pySCENIC workflow...")
         try:
-            result = sc_grn_utils.run_complete_grn_workflow(
-                adata,
-                tf_list_file=args.tf_list,
-                database_glob=args.database_glob,
-                motif_annotations_file=args.motif_annotations,
-                n_top_targets=args.n_top_targets,
-                n_jobs=args.n_jobs,
-                seed=args.seed,
+            library = load_skill("sc-grn")
+            adjacency = library.infer_adjacencies(
+                adata, tfs=sc_grn_utils.load_tf_list(args.tf_list), method="grnboost2",
+                random_state=args.seed, n_top=args.n_top_targets, n_jobs=args.n_jobs,
             )
+            if library.run_info(adjacency)["fallback_used"]:
+                raise RuntimeError(library.run_info(adjacency)["fallback_reason"])
+            regulons = library.prune_regulons(
+                adjacency, database_glob=args.database_glob, motif_annotations=args.motif_annotations,
+                n_top=args.n_top_targets, n_jobs=args.n_jobs,
+            )
+            scores = library.score_regulons(adata, regulons, method="aucell",
+                                            random_state=args.seed, n_jobs=args.n_jobs)
+            result = {"adjacencies": adjacency, "regulons": regulons, "auc_matrix": scores,
+                      "scoring_method": "aucell"}
         except Exception as e:
             logger.error(f"Full workflow failed: {e}")
             logger.info("Falling back to GRNBoost2 only...")
@@ -849,7 +770,7 @@ def main():
     if degenerate_diag is not None:
         _print_degenerate_guidance(degenerate_diag)
 
-    # Add AUC scores to adata
+    # Preserve the CLI's score-column names for either scoring method.
     for col in auc_matrix.columns:
         adata.obs[f"regulon_{col}"] = auc_matrix[col].values
 
@@ -947,6 +868,7 @@ def main():
     # Result.json
     checksum = sha256_file(input_file) if input_file and Path(input_file).exists() else ""
     result_data = {
+        "scoring_method": result.get("scoring_method", "aucell"),
         "params": params,
         "output_files": {
             "processed_h5ad": "processed.h5ad",

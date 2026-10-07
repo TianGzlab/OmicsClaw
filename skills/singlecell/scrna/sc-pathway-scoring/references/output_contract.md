@@ -1,50 +1,29 @@
-## Output Structure
+# Outputs
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── aucell_scores.csv
-│   ├── cell_metadata.csv
-│   ├── enrichment_scores.csv
-│   ├── expression_matrix.tsv
-│   ├── gene_expression.csv
-│   ├── gene_set_overlap.csv
-│   ├── group_high_fraction.csv
-│   ├── group_mean_scores.csv
-│   ├── top_pathway_scores_long.csv
-│   └── top_pathways.csv
-└── figures/
-    └── r_pathway_violin.png
-```
+The Python API returns in-memory objects and figures. It does not create a
+report directory. Examples persist selected objects with `write_output`.
 
-## File contents
+The standalone CLI writes `processed.h5ad`, `report.md` and `result.json`.
+Its plots are under `figures/`; plot source tables are under `figure_data/`.
+R exchange files live in temporary directories, not under `tables/`.
 
-- `tables/aucell_scores.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/cell_metadata.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/enrichment_scores.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/expression_matrix.tsv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/gene_expression.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/gene_set_overlap.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/group_high_fraction.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/group_mean_scores.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/top_pathway_scores_long.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `tables/top_pathways.csv` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `figures/r_pathway_violin.png` — written by `sc_pathway_scoring.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_pathway_scoring.py`.
-- `commands.sh` — written by `sc_pathway_scoring.py`.
-- `manifest.json` — written by `sc_pathway_scoring.py`.
-- `processed.h5ad` — written by `sc_pathway_scoring.py`.
-- `requirements.txt` — written by `sc_pathway_scoring.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-## Notes
+- `tables/enrichment_scores.csv`: `Cell` plus one score column per matched gene set.
+- `tables/gene_set_overlap.csv`: requested and matched gene counts, chosen feature-label source and example matched identifiers.
+- `tables/top_pathways.csv`: `gene_set`, `mean_score`, `mean_abs_score`, ranked by absolute mean then name.
+- `tables/group_mean_scores.csv`: group-by-pathway means, only with a valid grouping column.
+- `tables/group_high_fraction.csv`: per-group fractions above each pathway's overall median, only with a valid grouping column.
 
-Auto-generated from `sc_pathway_scoring.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+`processed.h5ad` contains `enrich__...` obs columns and the
+`uns["sc_pathway_scoring"]` label map. R's `aucell_scores.csv` and its
+expression TSV are temporary. `top_pathway_scores_long.csv`,
+`gene_expression.csv` and cell metadata are plot source data, not additional
+analysis tables. R-enhanced figures require `--r-enhanced`.
+
+## Diagnostics
+
+`run_info(scores)` reports method, seed, expression source, feature-label
+source and skipped sets. CLI `result.json["summary"]` reports the method,
+requested/scored set counts and those sources. The synthetic CLI gene sets
+have no biological meaning; the step example uses PBMC lineage genes.

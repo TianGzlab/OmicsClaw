@@ -140,13 +140,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "new":
         return _executor.new_module(Path.cwd(), args.slug)
     if args.command == "run":
-        _watchdog.watch_parent(*STARTED_UNDER)
-        return _executor.run_targets(_root(args.targets[0]), args.targets, force=args.force, wait=args.wait)
+        with _watchdog.termination_handler():
+            _watchdog.watch_parent(*STARTED_UNDER)
+            return _executor.run_targets(_root(args.targets[0]), args.targets, force=args.force, wait=args.wait)
     if args.command == "status":
         return _executor.status(_root(args.target), args.target)
     if args.command == "replay":
-        _watchdog.watch_parent(*STARTED_UNDER)
-        return _executor.replay(_root(args.target), args.target, new_interpreter=args.new_interpreter, wait=args.wait)
+        with _watchdog.termination_handler():
+            _watchdog.watch_parent(*STARTED_UNDER)
+            return _executor.replay(_root(args.target), args.target, new_interpreter=args.new_interpreter, wait=args.wait)
     if args.command == "accept":
         return _acceptance.accept(_root(args.target), args.target, review=args.review,
                                   skip_review=args.skip_review, wait=args.wait)

@@ -39,9 +39,9 @@ from skills._sdk.result import (
     load_result_json,
     write_result_json,
 )
+from skills._sdk.notebook import load_skill
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
-from skills.singlecell._lib.upstream import standardize_count_adata
 from skills.singlecell._lib.viz import (
     plot_barcode_rank,
     plot_count_complexity_scatter,
@@ -83,71 +83,8 @@ def _demo_adata():
 
 
 # ---------------------------------------------------------------------------
-# Merge logic
-# ---------------------------------------------------------------------------
-
-def _load_and_tag(h5ad_path: Path, sample_id: str | None = None) -> anndata.AnnData:
-    """Load one h5ad and tag with sample_id."""
-    import scanpy as sc
-
-    adata = sc.read_h5ad(h5ad_path)
-    if sample_id is None:
-        sample_id = h5ad_path.stem.replace("processed", "").strip("_") or h5ad_path.parent.name
-    if "sample_id" not in adata.obs.columns:
-        adata.obs["sample_id"] = sample_id
-    # Prefix barcodes to avoid collisions
-    adata.obs_names = [f"{sample_id}_{bc}" for bc in adata.obs_names]
-    adata.obs_names_make_unique()
-    return adata
-
-
-def _merge_samples(adatas: list[anndata.AnnData]) -> anndata.AnnData:
-    """Concatenate sample AnnData objects with outer join on genes."""
-    combined = anndata.concat(adatas, join="outer")
-    combined.obs_names_make_unique()
-    # Fill NaN from outer join with zeros (count data)
-    if hasattr(combined.X, "toarray"):
-        # sparse: NaN not possible, already zero-filled
-        pass
-    else:
-        combined.X = np.nan_to_num(combined.X, nan=0.0)
-    combined.obs["sample_id"] = combined.obs["sample_id"].astype(str)
-    return combined
-
-
-# ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
-
-def _barcode_metrics_df(adata) -> pd.DataFrame:
-    matrix = adata.X
-    total_counts = np.asarray(matrix.sum(axis=1)).ravel()
-    detected_genes = np.asarray((matrix > 0).sum(axis=1)).ravel()
-    return (
-        pd.DataFrame(
-            {
-                "barcode": adata.obs_names.astype(str),
-                "sample_id": adata.obs["sample_id"].values,
-                "total_counts": total_counts,
-                "detected_genes": detected_genes,
-            }
-        )
-        .sort_values("total_counts", ascending=False)
-        .reset_index(drop=True)
-    )
-
-
-def _per_sample_summary(barcode_df: pd.DataFrame) -> pd.DataFrame:
-    return (
-        barcode_df.groupby("sample_id", dropna=False)
-        .agg(
-            n_cells=("barcode", "count"),
-            median_counts=("total_counts", "median"),
-            median_genes=("detected_genes", "median"),
-            total_umis=("total_counts", "sum"),
-        )
-        .reset_index()
-    )
 
 
 def _write_figure_data_manifest(output_dir: Path, manifest: dict) -> None:
@@ -332,9 +269,11 @@ def main() -> None:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    library = load_skill(SKILL_NAME)
 
     if args.demo:
-        combined, _parts, input_file = _demo_adata()
+        _combined, parts, input_file = _demo_adata()
+        standardized = library.merge_samples(parts)
     else:
         if len(args.input_paths) < 2:
             parser.error("At least two --input paths required when not using --demo.")
@@ -345,6 +284,7 @@ def main() -> None:
                 f"number of --input ({len(args.input_paths)})."
             )
         adatas = []
+        resolved_ids = []
         for path_str, sid in zip(args.input_paths, sample_ids):
             path = Path(path_str)
             if not path.exists():
@@ -355,22 +295,19 @@ def main() -> None:
                     "--input sample1/processed.h5ad --input sample2/processed.h5ad "
                     "--output merged/"
                 )
-            adatas.append(_load_and_tag(path, sample_id=sid))
-        combined = _merge_samples(adatas)
+            import scanpy as sc
+
+            adatas.append(sc.read_h5ad(path))
+            resolved_ids.append(sid if sid is not None else path.stem.replace("processed", "").strip("_") or path.parent.name)
+        standardized = library.merge_samples(adatas, sample_ids=resolved_ids)
         input_file = None
 
-    # Standardize
-    standardized, contract = standardize_count_adata(
-        combined,
-        skill_name=SKILL_NAME,
-        method="merge",
-        source_label="multi_sample_merge",
-        warnings=[],
-    )
+    contract = dict(standardized.uns["omicsclaw_input_contract"])
+    contract["matrix_contract"] = standardized.uns["omicsclaw_matrix_contract"]
 
     # Metrics
-    barcode_metrics = _barcode_metrics_df(standardized)
-    per_sample = _per_sample_summary(barcode_metrics)
+    barcode_metrics = library.barcode_metrics(standardized)
+    per_sample = library.per_sample_summary(standardized)
 
     # Tables
     table_files = _export_tables(output_dir, barcode_metrics, per_sample)

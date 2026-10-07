@@ -29,7 +29,7 @@ Core rules:
 
 ## Project Overview
 
-OmicsClaw is a multi-omics analysis platform supporting 94 skills
+OmicsClaw is a multi-omics analysis platform supporting 88 skills
 across 7 domains: spatial transcriptomics, single-cell omics, genomics,
 proteomics, metabolomics, bulk RNA-seq, and literature. Each
 skill is a self-contained module that performs a specific analysis task via CLI
@@ -188,7 +188,7 @@ OmicsClaw/
 │                       wire-contract tests diff against. Does not import.
 │                       surfaces/cli/ was deleted once entry/cli/ was
 │                       covered on its own; see git log for it.
-├── skills/             94 skills across 7 domains, each a SKILL.md plus scripts
+├── skills/             88 skills across 7 domains, each a SKILL.md plus scripts
 │   ├── spatial/ singlecell/ genomics/ proteomics/ metabolomics/ bulkrna/
 │   ├── literature/
 │   ├── _sdk/           Mechanical helpers every skill shares: result.json and
@@ -268,6 +268,14 @@ read them. The dependency list they mirrored now lives in the body, as
 
 ### Running a skill
 
+The 27 computational single-cell skills expose `_api.py` through
+`skills._sdk.notebook.load_skill`. Their CLIs keep reports and file writes;
+the function libraries return data or Figures. Each ships an executable
+`examples/example_step.py` and an API section generated from its public
+functions. `sc-count`, `sc-velocity-prep` and `sc-fastq-qc` stay CLI-only;
+steps call them through `run_cli`. See `templates/skill/README.md` for the
+library contract and `OMICSCLAW.md` for Python/R module execution.
+
 `oc run <skill>` is gone. A skill script is now invoked **directly**, by a
 person or by the agent through `bash`:
 
@@ -326,7 +334,7 @@ uncapped, GPUs only with `--sandbox-gpus`.
 ### Reaching a skill's instructions
 
 The model chooses. The system prompt carries one `- name: description`
-line per skill (~8.4k tokens over 94, against ~124k for the bodies), and
+line per skill instead of the full bodies, and
 `use_skill` fetches one body on demand. The tool also returns the skill's
 **directory**, which is how the model finds the script beside a body that
 rarely names its own path.
@@ -404,7 +412,7 @@ skill. Nothing enforces any of them today.
 
 1. `cp -r templates/skill skills/<domain>/<your-skill-name>`, then rename
    and fill the placeholders.
-2. Write the `SKILL.md` frontmatter by hand: `name` (unique across all 94 —
+2. Write the `SKILL.md` frontmatter by hand: `name` (unique across all 88 —
    a duplicate is skipped, not merged), `description` (say when to **load**
    it *and* when to **skip** it, naming the skill to use instead; the model
    routes on this line alone), and optionally `trigger` / `tags`.

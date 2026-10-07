@@ -1,58 +1,23 @@
-## Output Structure
+# Output contract
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── README.md
-├── analysis_summary.txt
-├── cellbender_output_report.html
-├── commands.sh
-├── contamination.json
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── cell_metadata.csv
-│   ├── cellbender_output_cell_barcodes.csv
-│   ├── cellbender_output_metrics.csv
-│   ├── cells.csv
-│   ├── corrected_counts.csv
-│   ├── correction_summary.csv
-│   ├── gene_expression.csv
-│   └── genes.csv
-└── figures/
-    ├── barcode_rank.png
-    ├── count_distribution.png
-    ├── counts_comparison.png
-    └── r_ambient_violin.png
-```
+The CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`reproducibility/{commands.sh,requirements.txt}`, diagnostic plots under
+`figures/` and reusable plot tables under `figure_data/`.
+Each plot directory has a manifest. Optional R plots are written under
+`figures/r_enhanced/` only when rendering succeeds.
 
-## File contents
+Simple subtraction preserves the selected original counts in
+`layers["counts"]`, replaces `X` with nonnegative corrected counts and
+records parameters under `uns["ambient_correction"]`. SoupX records its
+contamination estimate under `uns["soupx"]`. CellBender may retain its
+backend files under `cellbender_output/`; the available files are listed
+in `result.json["data"]["output_bundle"]`.
 
-- `tables/cell_metadata.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/cellbender_output_cell_barcodes.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/cellbender_output_metrics.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/cells.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/corrected_counts.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/correction_summary.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/gene_expression.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `tables/genes.csv` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `figures/barcode_rank.png` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `figures/count_distribution.png` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `figures/counts_comparison.png` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `figures/r_ambient_violin.png` — written by `sc_ambient.py` (or its imported `_lib/` helpers).
-- `README.md` — written by `sc_ambient.py`.
-- `analysis_summary.txt` — written by `sc_ambient.py`.
-- `cellbender_output_report.html` — written by `sc_ambient.py`.
-- `commands.sh` — written by `sc_ambient.py`.
-- `contamination.json` — written by `sc_ambient.py`.
-- `manifest.json` — written by `sc_ambient.py`.
-- `processed.h5ad` — written by `sc_ambient.py`.
-- `requirements.txt` — written by `sc_ambient.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+The CLI's `result.json["summary"]` includes `requested_method`,
+`executed_method`, `fallback_used`, `fallback_reason` and count-reduction
+statistics. Do not infer the executed method from the CLI argument.
 
-## Notes
-
-Auto-generated from `sc_ambient.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The API writes no files. `correction_summary`, `counts_comparison_table`
+and `ambient_profile_table` return tables; `correction_figure` returns a
+Figure. Use `write_output` for each artifact. The profile helper describes
+the simple mean-count profile, not SoupX's estimated ambient profile.

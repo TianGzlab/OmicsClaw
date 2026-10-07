@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # sc_gsea_r.R — clusterProfiler GSEA via fgsea backend
 #
-# CLI: Rscript sc_gsea_r.R <de_csv> <output_dir> [species] [db] [score_type] [min_size] [max_size]
+# CLI: Rscript sc_gsea_r.R <de_csv> <output_dir> [species] [db] [score_type] [min_size] [max_size] [seed]
 #
 # de_csv columns: gene, avg_log2FC, and a group column (auto-detected)
 # Output: gsea_r_results.csv with columns:
@@ -21,6 +21,7 @@ db          <- if (length(args) >= 4) args[4] else "GO_BP"
 score_type  <- if (length(args) >= 5) args[5] else "std"
 min_gs_size <- as.integer(if (length(args) >= 6) args[6] else 10)
 max_gs_size <- as.integer(if (length(args) >= 7) args[7] else 500)
+gsea_seed <- as.integer(if (length(args) >= 8) args[8] else 123)
 
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
@@ -232,6 +233,7 @@ tryCatch({
     }
 
     tryCatch({
+      set.seed(gsea_seed)
       if (use_gse_kegg) {
         # KEGG pathway — use gseKEGG which handles ID conversion internally
         kegg_organism <- if (species == "Mus_musculus") "mmu" else "hsa"
@@ -255,6 +257,7 @@ tryCatch({
         entrez_ranks <- sort(setNames(ranks[valid], unname(gene2entrez[valid])),
                              decreasing = TRUE)
         res <- clusterProfiler::gseKEGG(
+          seed        = FALSE,
           geneList    = entrez_ranks,
           organism    = kegg_organism,
           minGSSize   = min_gs_size,
@@ -265,6 +268,7 @@ tryCatch({
         )
       } else if (!is.null(term2gene) && nrow(term2gene) > 0) {
         res <- clusterProfiler::GSEA(
+          seed       = FALSE,
           geneList   = ranks,
           TERM2GENE  = term2gene,
           minGSSize  = min_gs_size,
@@ -311,66 +315,8 @@ tryCatch({
               row.names = FALSE, quote = TRUE)
     cat(sprintf("INFO: Wrote %d total enrichment results.\n", nrow(combined)))
   } else {
-    cat("INFO: No enrichment results from any group.\n")
+    stop("No enrichment results: check gene identifiers, annotation packages and gene-set size limits.")
 
-    # --- Demo fallback: synthetic gene sets ---
-    if (nrow(de_df) > 0) {
-      cat("INFO: Attempting demo fallback with synthetic gene sets.\n")
-      synthetic_genes <- toupper(unique(de_df[[gene_col]]))[1:min(50, length(unique(de_df[[gene_col]])))]
-      n_genes <- length(synthetic_genes)
-      if (n_genes >= 10) {
-        # Create 5 synthetic pathways
-        n_per_term <- ceiling(n_genes / 5)
-        synthetic_t2g <- data.frame(
-          TERM = rep(paste0("DEMO_PATHWAY_", 1:5), each = n_per_term)[1:n_genes],
-          GENE = synthetic_genes,
-          stringsAsFactors = FALSE
-        )
-
-        # Try GSEA with synthetic gene sets on the first group
-        first_grp <- groups[1]
-        grp_df <- de_df[de_df[[group_col]] == first_grp, ]
-        grp_df <- grp_df %>%
-          group_by(.data[[gene_col]]) %>%
-          slice_max(abs(.data[[score_col]]), n = 1, with_ties = FALSE) %>%
-          ungroup()
-        ranks <- sort(setNames(grp_df[[score_col]], grp_df[[gene_col]]),
-                      decreasing = TRUE)
-
-        tryCatch({
-          res <- clusterProfiler::GSEA(
-            geneList   = ranks,
-            TERM2GENE  = synthetic_t2g,
-            minGSSize  = min_gs_size,
-            maxGSSize  = max_gs_size,
-            pvalueCutoff = 1.0,
-            scoreType  = score_type,
-            by         = "fgsea",
-            verbose    = FALSE
-          )
-          if (!is.null(res) && nrow(as.data.frame(res)) > 0) {
-            result_df <- as.data.frame(res)
-            result_df$Group    <- first_grp
-            result_df$Database <- "DEMO"
-            keep_cols <- intersect(RESULT_COLS, colnames(result_df))
-            result_df <- result_df[, keep_cols, drop = FALSE]
-            write.csv(result_df, file.path(output_dir, "gsea_r_results.csv"),
-                      row.names = FALSE, quote = TRUE)
-            cat(sprintf("INFO: Demo fallback produced %d enriched terms.\n", nrow(result_df)))
-          } else {
-            write_empty_result()
-          }
-        }, error = function(e) {
-          cat(sprintf("WARNING: Demo fallback GSEA also failed: %s\n", conditionMessage(e)),
-              file = stderr())
-          write_empty_result()
-        })
-      } else {
-        write_empty_result()
-      }
-    } else {
-      write_empty_result()
-    }
   }
 
 }, error = function(e) {

@@ -86,6 +86,7 @@ for (grp in groups) {
     names(gene_list) <- as.character(df_sub$gene)
     gene_list <- sort(gene_list, decreasing = TRUE)
     gene_list <- gene_list[!duplicated(names(gene_list))]
+    set.seed(seed)
     gsea_res <- tryCatch(
       clusterProfiler::GSEA(
         geneList = gene_list,
@@ -94,7 +95,7 @@ for (grp in groups) {
         maxGSSize = max_size,
         pvalueCutoff = 1,
         pAdjustMethod = "BH",
-        seed = TRUE,
+        seed = FALSE,
         by = "fgsea",
         verbose = FALSE,
         eps = 0

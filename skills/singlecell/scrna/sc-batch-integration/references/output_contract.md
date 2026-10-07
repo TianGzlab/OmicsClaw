@@ -1,56 +1,21 @@
-## Output Structure
+# Batch integration outputs
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── commands.sh
-├── input.h5ad
-├── manifest.json
-├── processed.h5ad
-├── requirements.txt
-├── tables/
-│   ├── batch_mixing_matrix.csv
-│   ├── batch_sizes.csv
-│   ├── cell_metadata.csv
-│   ├── cluster_sizes.csv
-│   ├── embedding.csv
-│   ├── integration_metrics.csv
-│   ├── integration_summary.csv
-│   ├── obs.csv
-│   ├── umap.csv
-│   └── umap_points.csv
-└── figures/
-    ├── batch_mixing_heatmap.png
-    ├── integration_metrics.png
-    └── r_embedding_discrete.png
-```
+The CLI writes `processed.h5ad`, `report.md`, `result.json` and
+`reproducibility/commands.sh` plus `requirements.txt` in that same directory.
+It does not copy its input to the output directory.
 
-## File contents
+Non-empty tables in `tables/` are `integration_summary.csv`, `batch_sizes.csv`,
+`integration_metrics.csv`, and, when labels exist, `cluster_sizes.csv` and
+`batch_mixing_matrix.csv`. Metrics unavailable in the current environment are
+omitted. Per-cell plot coordinates are `figure_data/umap_points.csv`.
+`figure_data/manifest.json` lists the plot tables and render status.
 
-- `tables/batch_mixing_matrix.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/batch_sizes.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/cell_metadata.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/cluster_sizes.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/embedding.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/integration_metrics.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/integration_summary.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/obs.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/umap.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `tables/umap_points.csv` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `figures/batch_mixing_heatmap.png` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `figures/integration_metrics.png` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `figures/r_embedding_discrete.png` — written by `sc_integrate.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_integrate.py`.
-- `commands.sh` — written by `sc_integrate.py`.
-- `input.h5ad` — written by `sc_integrate.py`.
-- `manifest.json` — written by `sc_integrate.py`.
-- `processed.h5ad` — written by `sc_integrate.py`.
-- `requirements.txt` — written by `sc_integrate.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+Figures include `umap_<batch_key>.png`, `integration_metrics.png`, and, with
+labels, `umap_<label_key>.png` and `batch_mixing_heatmap.png`.
+`--r-enhanced` optionally adds `figures/r_embedding_discrete.png`.
 
-## Notes
-
-Auto-generated from `sc_integrate.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+The H5AD contains the method's `X_<method>` representation, except BBKNN,
+which changes the graph while retaining `X_pca`. The CLI also stores UMAP.
+The function library leaves neighbours and UMAP to the caller (BBKNN's graph
+is intrinsic to that method). `run_info` contains requested/executed methods
+and fallback details; the CLI removes this temporary summary before saving.

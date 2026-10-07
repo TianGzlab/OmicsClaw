@@ -34,9 +34,9 @@ Subdomain nesting is also supported (e.g., `singlecell/scrna/sc-qc/sc_qc.py`).
 
 ### Step 2: Write SKILL.md
 
-`SKILL.md` is the **single source of truth** and is hand-written end to end.
-There is no `skill.yaml` machine contract and no generator: both belonged to
-the retired skill system and were deleted with it.
+`SKILL.md` is hand-maintained, except for a function library's generated
+`## API` section. There is no `skill.yaml` machine contract; its catalogue
+generators belonged to the retired skill system.
 
 **The frontmatter.** `omicsclaw/skills/` reads exactly four keys; anything
 else you put there is inert.
@@ -81,6 +81,25 @@ it these sections:
 
 Start from `templates/skill/SKILL.md`, which carries this checklist inline.
 
+
+### Function-library skills
+
+The 27 computational single-cell skills expose `_api.py`; their CLI handles
+arguments, reports and file output. Start from `templates/skill/README.md`
+for this pattern. Keep `__all__` explicit, import optional backends inside
+the functions that need them, and return objects rather than writing files.
+The body starts with a worked `load_skill` step and includes an executable
+`examples/example_step.py`. Regenerate its API documentation with:
+
+```bash
+python skills/_sdk/notebook/run.py api <skill-name> --write
+```
+
+Test public behaviour directly; mark tests starting a skill CLI as
+`cli_subprocess`. CI runs lightweight examples and non-CLI tests separately
+from the CPU-only pertpy example. Raw-input skills `sc-count`,
+`sc-velocity-prep` and `sc-fastq-qc` stay CLI-only and use `run_cli` in steps.
+Python/R step authoring and module acceptance are defined in `OMICSCLAW.md`.
 
 ### Step 3: Implement the script
 
@@ -192,9 +211,9 @@ Then import at the top level of your script:
 from skills.<domain>._lib.your_module import run_analysis
 ```
 
-**Why this matters:** The `skill_search()` tool (used by the research pipeline's coding-agent) performs AST scanning to discover callable functions. It specifically extracts functions imported from `_lib` and marks them as **core functions** (`▶`), displayed prominently to the coding-agent. Functions defined directly in your script are shown as helpers.
-
-If your domain doesn't have `_lib` yet, that's fine — all functions defined in your script will still be discovered and shown to agents.
+Use `_lib` for helpers shared within the domain. For migrated skills, the
+public interface is `_api.py` and its generated `## API` section, not AST
+discovery of CLI functions.
 
 ### Step 5: Write tests
 
@@ -273,8 +292,8 @@ skills/<domain>/<name>/                 → load_skills() walks the tree recursi
 ```
 
 **Progressive disclosure is why the description matters so much.** The
-bodies are ~124k tokens over 94 skills; the index is ~8.4k. Only the index
-is in the prompt, so your `description:` is the entire basis on which the
+bodies are loaded on demand. Only the 88-skill index
+is in the prompt, so your `description:` is the basis on which the
 model decides whether to open your skill at all.
 
 ---
@@ -360,10 +379,11 @@ script needs — including optional backends reached transitively through
 
 These used to be a `requires:` frontmatter key, generated and checked by
 `scripts/audit_skill_requires.py`. That script, the key and the `skill.yaml`
-it read were deleted with the old skill system, so **the list is now
-hand-maintained and nothing verifies it**. It is documentation for an agent
-about to run your script, not an install manifest — nothing installs from
-it, and a gap costs a confusing `ImportError` rather than a failed build.
+it read were deleted with the old skill system. The list is hand-maintained;
+`tests/skillenv/test_skill_requires_are_declared.py` checks the script,
+`_api.py` and directly imported domain helpers for declared backends. With
+`skill_env=install`, it also limits which packages the approval-gated
+`install_skill_deps` tool may install into an overlay.
 
 **When you add an algorithm/backend to a skill:**
 1. Register it in `DEPENDENCIES` in `skills/_sdk/deps.py`, keyed by its PyPI
@@ -380,7 +400,7 @@ it, and a gap costs a confusing `ImportError` rather than a failed build.
 ### Keeping the prompt index small
 
 Only `name` and `description` reach the system prompt, once per skill, on
-every turn — about 8.4k tokens over 94 skills against ~124k for the bodies.
+every turn; the full bodies are fetched only when needed.
 That ratio is the whole point of the design, and a description that grows
 into a paragraph spends context on every conversation whether or not your
 skill is used.

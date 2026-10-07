@@ -7,7 +7,6 @@ import argparse
 import json
 import logging
 import shlex
-import tempfile
 import sys
 from pathlib import Path
 
@@ -36,16 +35,15 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills.singlecell._lib import io as sc_io
-from skills.singlecell._lib.adata_utils import ensure_pca, store_analysis_metadata
+from skills.singlecell._lib.adata_utils import store_analysis_metadata
 from skills.singlecell._lib import dimred as sc_dimred_utils
-from skills.singlecell._lib import integration as sc_integration_utils
+from skills._sdk.notebook import load_skill
+
+_api = load_skill("sc-batch-integration")
 from skills.singlecell._lib.export import save_h5ad
 from skills.singlecell._lib.gallery import PlotSpec, VisualizationRecipe, render_plot_specs
 from skills.singlecell._lib.method_config import MethodConfig, validate_method_choice, check_data_requirements
 from skills.singlecell._lib.preflight import apply_preflight, preflight_sc_batch_integration
-from skills._sdk.deps import validate_r_environment
-from skills._sdk.r_script_runner import RScriptRunner
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -160,273 +158,14 @@ def _write_repro_requirements(repro_dir: Path, packages: list[str]) -> None:
 
 
 
-def integrate_harmony(adata, batch_key="batch", **kwargs):
-    adata = sc_integration_utils.run_harmony_integration(
-        adata,
-        batch_key=batch_key,
-        theta=float(kwargs.get("theta", 2.0)),
-        n_pcs=int(kwargs.get("n_pcs", 50)),
-    )
-    sc.pp.neighbors(adata, use_rep="X_harmony")
-    sc.tl.umap(adata)
-    return {"method": "harmony", "embedding_key": "X_harmony", "n_batches": int(adata.obs[batch_key].nunique())}
 
 
-def integrate_scvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwargs):
-    adata = sc_integration_utils.run_scvi_integration(
-        adata,
-        batch_key=batch_key,
-        max_epochs=n_epochs or 400,
-        use_gpu=use_gpu,
-        n_latent=int(kwargs.get("n_latent", 30)),
-    )
-    sc.pp.neighbors(adata, use_rep="X_scvi")
-    sc.tl.umap(adata)
-    return {"method": "scvi", "embedding_key": "X_scvi", "n_batches": int(adata.obs[batch_key].nunique())}
 
 
-def integrate_scanvi(adata, batch_key="batch", n_epochs=None, use_gpu=True, **kwargs):
-    labels_key = kwargs.get("labels_key") or next(
-        (key for key in ("cell_type", "leiden", "louvain", "seurat_clusters") if key in adata.obs.columns),
-        None,
-    )
-    if labels_key is None:
-        logger.warning("scANVI requires labels; falling back to scVI latent integration")
-        result = integrate_scvi(adata, batch_key=batch_key, n_epochs=n_epochs, use_gpu=use_gpu, **kwargs)
-        result["requested_method"] = "scanvi"
-        result["executed_method"] = "scvi"
-        result["fallback_used"] = True
-        result["fallback_reason"] = "scanvi requires existing labels in adata.obs such as 'cell_type' or 'leiden'"
-        return result
-    adata = sc_integration_utils.run_scanvi_integration(
-        adata,
-        batch_key=batch_key,
-        labels_key=labels_key,
-        max_epochs=n_epochs or 200,
-        use_gpu=use_gpu,
-        n_latent=int(kwargs.get("n_latent", 30)),
-    )
-    sc.pp.neighbors(adata, use_rep="X_scanvi")
-    sc.tl.umap(adata)
-    return {"method": "scanvi", "embedding_key": "X_scanvi", "n_batches": int(adata.obs[batch_key].nunique())}
 
 
-def integrate_bbknn(adata, batch_key="batch", **kwargs):
-    import bbknn
-
-    ensure_pca(adata)
-    logger.info("Running BBKNN on %d batches", adata.obs[batch_key].nunique())
-    bbknn.bbknn(
-        adata,
-        batch_key=batch_key,
-        neighbors_within_batch=int(kwargs.get("neighbors_within_batch", 3)),
-    )
-    sc.tl.umap(adata)
-    return {"method": "bbknn", "embedding_key": "X_pca", "n_batches": int(adata.obs[batch_key].nunique())}
 
 
-def _check_simba_available() -> bool:
-    """Check if the simba package is importable."""
-    try:
-        import simba  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def integrate_simba(adata, batch_key="batch", **kwargs):
-    """SIMBA batch integration via graph embedding and PBG training.
-
-    SIMBA learns a unified graph representation across batches using
-    PyTorch-BigGraph (PBG) and produces a corrected low-dimensional
-    embedding in ``adata.obsm['X_simba']``.
-
-    Requires the ``simba`` Python package.
-    """
-    if not _check_simba_available():
-        raise ImportError(
-            "SIMBA integration requires the 'simba' package.\n"
-            "\n"
-            "How to install:\n"
-            "  Option 1: pip install simba\n"
-            "  Option 2: conda install -c bioconda simba\n"
-            "  Option 3 (from source): pip install git+https://github.com/huidongchen/simba\n"
-            "\n"
-            "You may also need: pip install git+https://github.com/pinellolab/simba_pbg\n"
-            "\n"
-            "If SIMBA has dependency conflicts with your environment, consider\n"
-            "using an alternative method:\n"
-            "  --method harmony  (lightweight, no extra deps)\n"
-            "  --method scanorama  (panoramic stitching)"
-        )
-
-    import simba as si
-
-    n_top_genes = int(kwargs.get("n_top_genes", 3000))
-    n_components = int(kwargs.get("n_components", 15))
-    k = int(kwargs.get("k", 15))
-    num_workers = int(kwargs.get("num_workers", 4))
-
-    logger.info("Running SIMBA integration on %d batches", adata.obs[batch_key].nunique())
-
-    # Ensure batch column is categorical
-    adata.obs[batch_key] = adata.obs[batch_key].astype("category")
-    batches = adata.obs[batch_key].cat.categories.tolist()
-
-    # Per-batch preprocessing
-    adata_dict = {}
-    for batch in batches:
-        batch_adata = adata[adata.obs[batch_key] == batch].copy()
-        si.pp.filter_genes(batch_adata, min_n_cells=3)
-        si.pp.cal_qc_rna(batch_adata)
-        si.pp.normalize(batch_adata, method="lib_size")
-        si.pp.log_transform(batch_adata)
-        si.pp.select_variable_genes(batch_adata, n_top_genes=n_top_genes)
-        si.tl.discretize(batch_adata, n_bins=5)
-        adata_dict[batch] = batch_adata
-
-    # Find largest batch as reference
-    batch_sizes = {b: adata_dict[b].n_obs for b in batches}
-    ref_batch = max(batch_sizes, key=batch_sizes.get)
-
-    # Infer inter-batch edges
-    edge_dict = {}
-    for batch in batches:
-        if batch == ref_batch:
-            continue
-        edge_dict[batch] = si.tl.infer_edges(
-            adata_dict[ref_batch], adata_dict[batch],
-            n_components=n_components, k=k,
-        )
-
-    # Generate graph
-    si.tl.gen_graph(
-        list_CG=[adata_dict[b] for b in batches],
-        list_CC=[edge_dict[b] for b in batches if b != ref_batch],
-        copy=False,
-        dirname="graph0",
-    )
-
-    # Train PBG model
-    dict_config = si.settings.pbg_params.copy()
-    dict_config["workers"] = num_workers
-    si.tl.pbg_train(pbg_params=dict_config, auto_wd=True, save_wd=True, output="model")
-
-    # Load and embed
-    si.load_graph_stats()
-    si.load_pbg_config()
-    dict_adata = si.read_embedding()
-
-    # Merge embeddings
-    dict_adata2 = {k: v for k, v in dict_adata.items() if k != "G"}
-    embed_sizes = {k: v.shape[0] for k, v in dict_adata2.items()}
-    max_label = max(embed_sizes, key=embed_sizes.get)
-    adata_ref = dict_adata2[max_label]
-    list_query = [v for k, v in dict_adata2.items() if k != max_label]
-    adata_all = si.tl.embed(adata_ref=adata_ref, list_adata_query=list_query, use_precomputed=False)
-
-    # Map embeddings back
-    cell_idx = [c for c in adata_all.obs.index if c in adata.obs.index]
-    adata = adata[cell_idx].copy()
-    adata.obsm["X_simba"] = adata_all[cell_idx].to_df().values
-
-    sc.pp.neighbors(adata, use_rep="X_simba")
-    sc.tl.umap(adata)
-    return {"method": "simba", "embedding_key": "X_simba", "n_batches": int(adata.obs[batch_key].nunique())}
-
-
-def integrate_scanorama(adata, batch_key="batch", **kwargs):
-    import scanorama
-
-    logger.info("Running Scanorama on %d batches", adata.obs[batch_key].nunique())
-    batches = []
-    for batch in adata.obs[batch_key].unique():
-        batches.append(adata[adata.obs[batch_key] == batch].copy())
-    corrected = scanorama.correct_scanpy(
-        batches,
-        return_dimred=True,
-        knn=int(kwargs.get("knn", 20)),
-    )
-    embedding_frames = []
-    for corrected_batch in corrected:
-        embedding = corrected_batch.obsm.get("X_scanorama")
-        if embedding is None:
-            raise RuntimeError("Scanorama did not produce 'X_scanorama' embeddings")
-        frame = pd.DataFrame(embedding, index=corrected_batch.obs_names)
-        embedding_frames.append(frame)
-    combined = pd.concat(embedding_frames, axis=0)
-    combined = combined.loc[adata.obs_names]
-    adata.obsm["X_scanorama"] = combined.to_numpy(dtype=float)
-    sc.pp.neighbors(adata, use_rep="X_scanorama")
-    sc.tl.umap(adata)
-    return {"method": "scanorama", "embedding_key": "X_scanorama", "n_batches": int(adata.obs[batch_key].nunique())}
-
-
-def _build_r_integration_export_adata(adata):
-    if "counts" in adata.layers:
-        matrix = adata.layers["counts"]
-    elif adata.raw is not None and adata.raw.shape == adata.shape:
-        matrix = adata.raw.X
-    else:
-        matrix = adata.X
-    export = sc.AnnData(X=matrix.copy(), obs=adata.obs.copy(), var=adata.var.copy())
-    export.obs_names = adata.obs_names.copy()
-    export.var_names = adata.var_names.copy()
-    return export
-
-
-def integrate_r_method(adata, *, method: str, batch_key: str, n_features: int = 2000, n_pcs: int = 30):
-    if method == "fastmnn":
-        required_packages = ["batchelor", "SingleCellExperiment", "zellkonverter"]
-    else:
-        required_packages = ["Seurat", "SingleCellExperiment", "zellkonverter"]
-    validate_r_environment(required_r_packages=required_packages)
-    scripts_dir = _SDK_R_SCRIPTS_DIR
-    runner = RScriptRunner(scripts_dir=scripts_dir, timeout=1800)
-    export = _build_r_integration_export_adata(adata)
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_sc_integrate_r_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        input_h5ad = tmpdir / "input.h5ad"
-        output_dir = tmpdir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        export.write_h5ad(input_h5ad)
-        expected = ["embedding.csv", "obs.csv"] if method == "fastmnn" else ["embedding.csv", "umap.csv", "obs.csv"]
-        runner.run_script(
-            "sc_seurat_integrate.R",
-            args=[str(input_h5ad), str(output_dir), method, batch_key, str(n_features), str(n_pcs)],
-            expected_outputs=expected,
-            output_dir=output_dir,
-        )
-        embedding = pd.read_csv(output_dir / "embedding.csv", index_col=0)
-        obs_df = pd.read_csv(output_dir / "obs.csv", index_col=0)
-        obs_df.index = obs_df.index.astype(str)
-        ordered = [cell for cell in adata.obs_names if str(cell) in obs_df.index and str(cell) in embedding.index.astype(str)]
-        if not ordered:
-            raise RuntimeError(f"R integration method '{method}' returned no overlapping cells")
-        embedding.index = embedding.index.astype(str)
-        adata = adata[ordered].copy()
-        adata.obs = adata.obs.join(obs_df, how="left", rsuffix="_r")
-        key = f"X_{method}"
-        adata.obsm[key] = embedding.loc[ordered].to_numpy(dtype=float)
-        if method != "fastmnn":
-            umap_df = pd.read_csv(output_dir / "umap.csv", index_col=0)
-            umap_df.index = umap_df.index.astype(str)
-            adata.obsm["X_umap"] = umap_df.loc[ordered].to_numpy(dtype=float)
-        else:
-            sc.pp.neighbors(adata, use_rep=key)
-            sc.tl.umap(adata)
-        sc.pp.neighbors(adata, use_rep=key)
-        return adata, {"method": method, "embedding_key": key, "n_batches": int(adata.obs[batch_key].nunique())}
-
-
-_METHOD_DISPATCH = {
-    "harmony": integrate_harmony,
-    "scvi": integrate_scvi,
-    "scanvi": integrate_scanvi,
-    "bbknn": integrate_bbknn,
-    "scanorama": integrate_scanorama,
-    "simba": integrate_simba,
-}
 
 
 def _preferred_label_key(adata) -> str | None:
@@ -435,17 +174,6 @@ def _preferred_label_key(adata) -> str | None:
             return candidate
     return None
 
-
-def _build_batch_sizes_table(adata, batch_key: str) -> pd.DataFrame:
-    return (
-        adata.obs[batch_key]
-        .astype(str)
-        .value_counts()
-        .rename_axis(batch_key)
-        .reset_index(name="n_cells")
-        .sort_values("n_cells", ascending=False)
-        .reset_index(drop=True)
-    )
 
 
 def _build_cluster_sizes_table(adata, label_key: str | None) -> pd.DataFrame:
@@ -461,17 +189,6 @@ def _build_cluster_sizes_table(adata, label_key: str | None) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-
-def _build_batch_mixing_table(adata, batch_key: str, label_key: str | None) -> pd.DataFrame:
-    if not label_key or label_key not in adata.obs.columns:
-        return pd.DataFrame()
-    mix = pd.crosstab(
-        adata.obs[label_key].astype(str),
-        adata.obs[batch_key].astype(str),
-        normalize="index",
-    )
-    mix.index.name = label_key
-    return mix.reset_index()
 
 
 def _build_umap_points_table(adata, batch_key: str, label_key: str | None) -> pd.DataFrame:
@@ -492,49 +209,6 @@ def _build_umap_points_table(adata, batch_key: str, label_key: str | None) -> pd
     return pd.DataFrame(payload)
 
 
-def _build_integration_metrics_table(adata, batch_key: str, label_key: str | None, embedding_key: str) -> pd.DataFrame:
-    metrics = {
-        "embedding_key": embedding_key,
-        "n_batches": int(adata.obs[batch_key].nunique()),
-    }
-    if label_key and label_key in adata.obs.columns:
-        metrics["label_key"] = label_key
-        metrics["n_labels"] = int(adata.obs[label_key].nunique())
-    try:
-        lisi_df = sc_integration_utils.compute_lisi_scores(
-            adata,
-            batch_key=batch_key,
-            label_key=label_key if label_key in adata.obs.columns else None,
-            use_rep=embedding_key,
-            verbose=False,
-        )
-        adata.obs["ilisi"] = lisi_df["ilisi"].values
-        metrics["mean_ilisi"] = float(lisi_df["ilisi"].mean())
-        metrics["median_ilisi"] = float(lisi_df["ilisi"].median())
-        if "clisi" in lisi_df.columns:
-            adata.obs["clisi"] = lisi_df["clisi"].values
-            metrics["mean_clisi"] = float(lisi_df["clisi"].mean())
-            metrics["median_clisi"] = float(lisi_df["clisi"].median())
-    except Exception as exc:
-        logger.warning("LISI diagnostics unavailable: %s", exc)
-
-    try:
-        if not label_key or label_key not in adata.obs.columns:
-            raise ValueError("No stable label column available yet; skip label-based ASW diagnostics.")
-        asw = sc_integration_utils.compute_asw_scores(
-            adata,
-            batch_key=batch_key,
-            label_key=label_key,
-            use_rep=embedding_key,
-            verbose=False,
-        )
-        metrics["batch_asw"] = float(asw["batch_asw"])
-        metrics["celltype_asw"] = float(asw["celltype_asw"])
-    except Exception as exc:
-        logger.warning("ASW diagnostics unavailable: %s", exc)
-
-    return pd.DataFrame([metrics])
-
 
 def _prepare_integration_gallery_context(adata, summary: dict, params: dict, output_dir: Path) -> dict:
     batch_key = params["batch_key"]
@@ -543,11 +217,11 @@ def _prepare_integration_gallery_context(adata, summary: dict, params: dict, out
         "output_dir": Path(output_dir),
         "batch_key": batch_key,
         "label_key": label_key,
-        "batch_sizes_df": _build_batch_sizes_table(adata, batch_key),
+        "batch_sizes_df": _api.batch_sizes_table(adata, batch_key=batch_key),
         "cluster_sizes_df": _build_cluster_sizes_table(adata, label_key),
-        "batch_mixing_df": _build_batch_mixing_table(adata, batch_key, label_key),
+        "batch_mixing_df": _api.batch_mixing_table(adata, batch_key=batch_key, label_key=label_key),
         "umap_points_df": _build_umap_points_table(adata, batch_key, label_key),
-        "integration_metrics_df": _build_integration_metrics_table(adata, batch_key, label_key, summary["embedding_key"]),
+        "integration_metrics_df": _api.integration_metrics(adata, batch_key=batch_key, label_key=label_key, embedding_key=summary["embedding_key"]),
         "integration_summary_df": pd.DataFrame(
             [
                 {"metric": "method", "value": summary.get("method")},
@@ -840,6 +514,7 @@ def write_reproducibility(output_dir: Path, params: dict, *, demo_mode: bool = F
     )
     command += f" --method {shlex.quote(str(params['method']))}"
     command += f" --batch-key {shlex.quote(str(params['batch_key']))}"
+    command += f" --seed {params.get('seed', 0)}"
     for key, value in params.items():
         if key in {"method", "batch_key"} or value is None or value == "":
             continue
@@ -878,6 +553,7 @@ def main():
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--method", choices=list(METHOD_REGISTRY.keys()), default=DEFAULT_METHOD)
     parser.add_argument("--batch-key", default="batch")
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n-epochs", type=int, default=None)
     parser.add_argument("--no-gpu", action="store_true")
     parser.add_argument("--n-latent", type=int, default=None)
@@ -914,7 +590,7 @@ def main():
                     adata.obs[label_key] = aligned.astype(str)
         except Exception as exc:
             logger.warning("Demo labels unavailable for scanvi-style validation: %s", exc)
-        adata.obs[args.batch_key] = np.random.choice(["batch1", "batch2"], adata.n_obs)
+        adata.obs[args.batch_key] = np.random.default_rng(args.seed).choice(["batch1", "batch2"], adata.n_obs)
         input_file = None
     else:
         if not args.input_path:
@@ -952,39 +628,29 @@ def main():
     )
     cfg = METHOD_REGISTRY[method]
     check_data_requirements(adata, cfg)
-    sc_integration_utils.setup_for_integration(adata, batch_key=args.batch_key, inplace=True)
-
-    kwargs = {"batch_key": args.batch_key}
-    if cfg.supports_gpu:
-        kwargs["use_gpu"] = not bool(effective_params.get("no_gpu", False))
-    if method in {"scvi", "scanvi"}:
-        kwargs["n_epochs"] = int(effective_params["n_epochs"])
-        kwargs["n_latent"] = int(effective_params["n_latent"])
-    if method == "scanvi" and effective_params.get("labels_key"):
-        kwargs["labels_key"] = str(effective_params["labels_key"])
-    if method == "harmony":
-        kwargs["theta"] = float(effective_params["harmony_theta"])
-        kwargs["n_pcs"] = int(effective_params["integration_pcs"])
-    if method == "bbknn":
-        kwargs["neighbors_within_batch"] = int(effective_params["bbknn_neighbors_within_batch"])
-    if method == "scanorama":
-        kwargs["knn"] = int(effective_params["scanorama_knn"])
-    if method == "simba":
-        kwargs["n_top_genes"] = int(effective_params["simba_n_top_genes"])
-        kwargs["n_components"] = int(effective_params["simba_n_components"])
-        kwargs["k"] = int(effective_params["simba_k"])
-        kwargs["num_workers"] = int(effective_params["simba_num_workers"])
-
-    if method in {"fastmnn", "seurat_cca", "seurat_rpca"}:
-        adata, summary = integrate_r_method(
-            adata,
-            method=method,
-            batch_key=args.batch_key,
-            n_features=int(effective_params["integration_features"]),
-            n_pcs=int(effective_params["integration_pcs"]),
-        )
+    adata = _api.integrate(
+        adata, method=method, batch_key=args.batch_key, random_state=args.seed,
+        harmony_theta=float(effective_params.get("harmony_theta", 2.0)),
+        n_pcs=int(effective_params.get("integration_pcs", 50)),
+        n_epochs=effective_params.get("n_epochs"), n_latent=int(effective_params.get("n_latent", 30)),
+        use_gpu=not bool(effective_params.get("no_gpu", False)), labels_key=effective_params.get("labels_key"),
+        bbknn_neighbors_within_batch=int(effective_params.get("bbknn_neighbors_within_batch", 3)),
+        scanorama_knn=int(effective_params.get("scanorama_knn", 20)),
+        integration_features=int(effective_params.get("integration_features", 2000)),
+        integration_pcs=int(effective_params.get("integration_pcs", 30)),
+        simba_n_top_genes=int(effective_params.get("simba_n_top_genes", 3000)),
+        simba_n_components=int(effective_params.get("simba_n_components", 15)),
+        simba_k=int(effective_params.get("simba_k", 15)),
+        simba_num_workers=int(effective_params.get("simba_num_workers", 4)),
+    )
+    summary = _api.run_info(adata, keep=False)["summary"]
+    if method != "bbknn":
+        sc.pp.neighbors(adata, use_rep=summary["embedding_key"])
+    legacy_umap = adata.uns.pop("_omicsclaw_legacy_integration_umap", None)
+    if legacy_umap is not None:
+        adata.obsm["X_umap"] = legacy_umap
     else:
-        summary = _METHOD_DISPATCH[method](adata, **kwargs)
+        sc.tl.umap(adata, random_state=args.seed)
 
     summary.setdefault("requested_method", method)
     summary.setdefault("executed_method", summary.get("method", method))
@@ -994,6 +660,7 @@ def main():
     summary["recommended_use_rep"] = summary.get("embedding_key")
     params = {
         **effective_params,
+        "seed": args.seed,
         "requested_method": summary["requested_method"],
         "executed_method": summary["executed_method"],
         "counts_layer": "counts" if "counts" in adata.layers else None,

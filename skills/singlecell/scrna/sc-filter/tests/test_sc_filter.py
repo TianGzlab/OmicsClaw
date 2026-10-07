@@ -10,6 +10,9 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
+
+pytestmark = pytest.mark.cli_subprocess
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_filter.py"
 

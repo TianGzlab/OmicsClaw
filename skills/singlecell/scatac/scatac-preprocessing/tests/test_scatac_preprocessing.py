@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "scatac_preprocessing.py"
+pytestmark = pytest.mark.cli_subprocess
 
 
 @pytest.fixture

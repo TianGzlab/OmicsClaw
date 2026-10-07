@@ -29,12 +29,12 @@
 OmicsClaw is an AI agent for multi-omics analysis. You describe the analysis
 you want; the model picks a skill, reads its instructions and runs its Python,
 R or command-line tools in your own environment, on your machine or on a
-server. It ships 89 skills in seven domains, and the same agent answers in the
+server. It ships 88 skills in seven domains, and the same agent answers in the
 terminal, in the desktop app and on chat platforms.
 
 ## What's new
 
-- The agent now analyses in project modules: it writes step files that call skills' function libraries, the step runner executes them in fresh kernels and records every input, output and skill call, and a module is accepted only after a replay, a read-only review and your confirmation; five single-cell skills have libraries so far ([0070](docs/plans/0070-notebook-skill-runtime.md)).
+- All 27 computational single-cell skills now have function libraries, three raw-input skills remain CLI-only, and project modules can mix Python and R steps with IO tracking, replay and review before acceptance ([0074](docs/plans/0074-singlecell-skill-migration.md)).
 - A real-model routing eval (`tests/evals/live/`, run by hand) measures whether the model picks the right skill for 26 seed requests, the CI unit-test job now also runs the launch shell, attachments, top-level and desktop HTTP tests, and the four consensus skills whose scripts could not start have since been deleted ([0068](docs/plans/0068-eval-hardening.md), [0070](docs/plans/0070-notebook-skill-runtime.md)).
 - The agent framework has been rebuilt around three entry points, `oc cli`, `oc desktop` and `oc channel`, and the old `oc interactive`, `oc tui`, `oc onboard` and `oc run` commands are gone ([rebuild status](docs/FRAMEWORK-REBUILD.md)).
 - The Desktop App works with the rebuilt backend, including remote mode over SSH and setting up a model from the App ([0064](docs/plans/0064-desktop-app-alignment.md), [0065](docs/plans/0065-desktop-management-pages-and-retirement.md), [0066](docs/plans/0066-desktop-remote-mode.md)).
@@ -142,7 +142,7 @@ library. The dependency lists are [`environment.yml`](environment.yml) and
 
 ## Domains
 
-89 skills in seven domains. `make list` prints the current index.
+88 skills in seven domains. `make list` prints the current index.
 
 | Domain | Skills | Examples | Guide |
 |---|---|---|---|

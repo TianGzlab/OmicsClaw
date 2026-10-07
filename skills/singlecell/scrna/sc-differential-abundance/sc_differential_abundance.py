@@ -38,6 +38,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -52,14 +53,9 @@ from skills.singlecell._lib.adata_utils import (
     propagate_singlecell_contracts,
     store_analysis_metadata,
 )
-from skills._sdk.r_script_runner import R_SCRIPTS_DIR as _SDK_R_SCRIPTS_DIR
 from skills.singlecell._lib.export import save_h5ad, write_h5ad_aliases
 from skills.singlecell._lib.differential_abundance import (
-    build_composition_summary,
     make_demo_da_adata,
-    run_milo_da,
-    run_sccoda_da,
-    run_simple_da,
     save_heatmap,
 )
 
@@ -69,7 +65,6 @@ logger = logging.getLogger(__name__)
 SKILL_NAME = "sc-differential-abundance"
 SKILL_VERSION = "0.2.0"
 SCRIPT_REL_PATH = "skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py"
-R_SCRIPTS_DIR = _SDK_R_SCRIPTS_DIR
 
 # R Enhanced renderers for this skill.
 # Key   = renderer name registered in viz/r/registry.R R_PLOT_REGISTRY
@@ -378,64 +373,6 @@ def _write_reproducibility(output_dir: Path, params: dict, input_file: str | Non
 # proportion_test_r (R bridge)
 # ---------------------------------------------------------------------------
 
-def _run_proportion_test_r(adata, condition_key: str, cell_type_key: str, output_dir: Path, params: dict) -> dict:
-    """Run base-R Monte Carlo permutation test via RScriptRunner."""
-    import warnings
-    from skills._sdk.r_script_runner import RScriptRunner, RScriptError
-
-    r_script = R_SCRIPTS_DIR / "sc_proportion_test_r.R"
-    if not r_script.exists():
-        raise FileNotFoundError(f"R script not found: {r_script}")
-
-    r_work_dir = output_dir / "r_work"
-    r_work_dir.mkdir(parents=True, exist_ok=True)
-
-    # Export cell metadata for R (cell_id + relevant columns only)
-    meta_cols = [cell_type_key, condition_key]
-    meta_df = adata.obs[meta_cols].copy().reset_index()
-    meta_df.columns = ["cell_id"] + meta_cols
-    meta_csv = r_work_dir / "cell_meta.csv"
-    meta_df.to_csv(meta_csv, index=False)
-
-    comparison = params.get("contrast", None) or "auto"
-    n_perm = str(params.get("n_permutations", 1000))
-
-    runner = RScriptRunner(timeout=300)
-    result_csv = r_work_dir / "proportion_test_results.csv"
-    r_success = True
-    try:
-        runner.run_script(
-            r_script,
-            args=[str(meta_csv), str(r_work_dir), cell_type_key,
-                  condition_key, comparison, n_perm],
-            expected_outputs=["proportion_test_results.csv"],
-            output_dir=r_work_dir,
-        )
-    except (RScriptError, FileNotFoundError) as exc:
-        warnings.warn(f"proportion_test_r R script failed: {exc}")
-        r_success = False
-
-    result_df = pd.DataFrame()
-    if r_success and result_csv.exists():
-        try:
-            result_df = pd.read_csv(result_csv)
-        except Exception as exc:
-            warnings.warn(f"Could not read proportion_test_r results: {exc}")
-
-    # Store in adata.uns
-    if not result_df.empty:
-        adata.uns["proportion_test_r_results"] = result_df.to_dict(orient="list")
-
-    return {
-        "method": "proportion_test_r",
-        "backend": "base_R",
-        "r_success": r_success,
-        "n_comparisons": int(result_df["comparison"].nunique()) if not result_df.empty else 0,
-        "n_cell_types": int(result_df["clusters"].nunique()) if not result_df.empty else 0,
-        "n_significant": int((result_df["FDR"] < 0.05).sum()) if not result_df.empty and "FDR" in result_df.columns else 0,
-    }
-
-
 def _plot_proportion_test_r(result_df: pd.DataFrame, output_dir: Path) -> list[dict]:
     """Generate lollipop plot with bootstrap CI error bars from R output."""
     figures_dir = output_dir / "figures"
@@ -557,6 +494,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    api = load_skill(SKILL_NAME)
 
     # -- Parameter validation --
     from skills.singlecell._lib.param_validators import ParamValidator
@@ -606,12 +544,19 @@ def main() -> int:
         raise SystemExit(1)
 
     # ---- Composition summary ----
-    counts, props, mean_props = build_composition_summary(
+    counts, props = api.composition(
         adata,
         sample_key=args.sample_key,
         condition_key=args.condition_key,
         celltype_key=args.cell_type_key,
     )
+    mean_props = api.condition_proportions(adata, sample_key=args.sample_key,
+        condition_key=args.condition_key, celltype_key=args.cell_type_key)
+    da_table = api.test_abundance(adata, method=args.method, sample_key=args.sample_key,
+        condition_key=args.condition_key, celltype_key=args.cell_type_key,
+        contrast=args.contrast, reference_cell_type=args.reference_cell_type, fdr=args.fdr,
+        prop=args.prop, n_neighbors=args.n_neighbors, n_permutations=args.n_permutations)
+    da_info = api.run_info(da_table)
     counts.to_csv(tables_dir / "sample_by_celltype_counts.csv")
     props.to_csv(tables_dir / "sample_by_celltype_proportions.csv")
     mean_props.to_csv(tables_dir / "condition_mean_proportions.csv")
@@ -642,14 +587,7 @@ def main() -> int:
     }
 
     if args.method == "simple":
-        da = run_simple_da(
-            adata,
-            sample_key=args.sample_key,
-            condition_key=args.condition_key,
-            celltype_key=args.cell_type_key,
-            contrast=args.contrast,
-            fdr=args.fdr,
-        )
+        da = da_table
         da.to_csv(tables_dir / "simple_da_results.csv", index=False)
         result_tables["simple_da_results"] = "tables/simple_da_results.csv"
         summary.update({
@@ -658,16 +596,8 @@ def main() -> int:
         })
 
     elif args.method == "milo":
-        mdata, nhood = run_milo_da(
-            adata,
-            sample_key=args.sample_key,
-            condition_key=args.condition_key,
-            celltype_key=args.cell_type_key,
-            prop=args.prop,
-            n_neighbors=args.n_neighbors,
-            contrast=args.contrast,
-        )
-        summary["backend"] = _extract_backend(mdata, args.method)
+        nhood = da_table
+        summary["backend"] = da_info["executed_method"]
         nhood.to_csv(tables_dir / "milo_nhood_results.csv", index=False)
         result_tables["milo_nhood_results"] = "tables/milo_nhood_results.csv"
 
@@ -702,12 +632,13 @@ def main() -> int:
         })
 
     elif args.method == "proportion_test_r":
-        prop_params = {
-            "contrast": args.contrast,
-            "n_permutations": args.n_permutations,
-        }
-        prop_summary = _run_proportion_test_r(adata, args.condition_key, args.cell_type_key, output_dir, prop_params)
-        result_df = pd.DataFrame(adata.uns.get("proportion_test_r_results", {}))
+        result_df = da_table
+        prop_summary = {"method": "proportion_test_r", "backend": "base_R", "r_success": True,
+            "n_comparisons": int(result_df["comparison"].nunique()) if not result_df.empty else 0,
+            "n_cell_types": int(result_df["clusters"].nunique()) if not result_df.empty else 0,
+            "n_significant": int((result_df["FDR"] < 0.05).sum()) if not result_df.empty else 0}
+        if not result_df.empty:
+            adata.uns["proportion_test_r_results"] = result_df.to_dict(orient="list")
         if not result_df.empty:
             result_df.to_csv(tables_dir / "proportion_test_results.csv", index=False)
             result_tables["proportion_test_results"] = "tables/proportion_test_results.csv"
@@ -720,15 +651,8 @@ def main() -> int:
         summary.update(prop_summary)
 
     else:  # sccoda
-        mdata, effect_df = run_sccoda_da(
-            adata,
-            sample_key=args.sample_key,
-            condition_key=args.condition_key,
-            celltype_key=args.cell_type_key,
-            reference_cell_type=args.reference_cell_type,
-            fdr=args.fdr,
-        )
-        summary["backend"] = _extract_backend(mdata, args.method)
+        effect_df = da_table
+        summary["backend"] = da_info["executed_method"]
         effect_df.to_csv(tables_dir / "sccoda_effects.csv", index=False)
         result_tables["sccoda_effects"] = "tables/sccoda_effects.csv"
 

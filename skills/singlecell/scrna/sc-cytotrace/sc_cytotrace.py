@@ -21,7 +21,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy import sparse
-from scipy.stats import rankdata
 
 _SDK_ANCHOR = next(
     (p for p in Path(__file__).resolve().parents if (p / "skills" / "_sdk" / "__init__.py").is_file()),
@@ -31,6 +30,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -149,150 +149,6 @@ def preflight_sc_cytotrace(
 # ---------------------------------------------------------------------------
 
 
-def _compute_gene_counts(adata) -> np.ndarray:
-    """Count the number of detected genes per cell (genes with expression > 0)."""
-    X = adata.X
-    if sparse.issparse(X):
-        return np.asarray((X > 0).sum(axis=1)).ravel().astype(float)
-    return np.asarray((X > 0).sum(axis=1)).ravel().astype(float)
-
-
-def _knn_smooth(values: np.ndarray, adata, n_neighbors: int = 30) -> np.ndarray:
-    """Smooth values using KNN from the neighbor graph.
-
-    If a neighbor graph already exists it is reused; otherwise one is built
-    from ``X_pca`` or ``X``.
-    """
-    if "neighbors" not in adata.uns:
-        if "X_pca" in adata.obsm:
-            sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep="X_pca")
-        else:
-            sc.pp.neighbors(adata, n_neighbors=n_neighbors)
-
-    connectivities = adata.obsp.get("connectivities")
-    if connectivities is None:
-        logger.warning("No connectivities found; skipping KNN smoothing.")
-        return values
-
-    # Row-normalize the connectivities
-    if sparse.issparse(connectivities):
-        row_sums = np.asarray(connectivities.sum(axis=1)).ravel()
-        row_sums[row_sums == 0] = 1.0
-        # Diagonal (self) + neighbors
-        smoothed = np.asarray(connectivities.dot(values.reshape(-1, 1))).ravel()
-        smoothed = (smoothed + values) / (row_sums + 1)
-    else:
-        row_sums = connectivities.sum(axis=1)
-        row_sums[row_sums == 0] = 1.0
-        smoothed = (connectivities @ values + values) / (row_sums + 1)
-
-    return smoothed
-
-
-def run_cytotrace_simple(
-    adata,
-    *,
-    n_neighbors: int = 30,
-) -> dict:
-    """CytoTRACE-simple: gene expression complexity as a potency proxy.
-
-    Steps:
-    1. Count genes detected per cell (gene_count).
-    2. Rank-normalize to [0, 1] to produce the CytoTRACE score.
-    3. Smooth with KNN graph.
-    4. Bin into 6 potency categories.
-
-    Parameters
-    ----------
-    adata
-        AnnData object (normalized or raw counts).
-    n_neighbors
-        Number of neighbors for KNN smoothing.
-
-    Returns
-    -------
-    Summary dictionary with method info and score statistics.
-    """
-    logger.info("Running cytotrace_simple on %d cells x %d genes", adata.n_obs, adata.n_vars)
-
-    # Step 1: Gene detection counts
-    gene_counts = _compute_gene_counts(adata)
-    logger.info(
-        "Gene detection range: %d - %d (mean %.1f)",
-        int(gene_counts.min()),
-        int(gene_counts.max()),
-        gene_counts.mean(),
-    )
-
-    # Step 2: Rank-normalize to [0, 1]
-    ranked = rankdata(gene_counts)
-    raw_score = (ranked - ranked.min()) / max(ranked.max() - ranked.min(), 1)
-
-    # Step 3: KNN smoothing
-    smoothed_score = _knn_smooth(raw_score, adata, n_neighbors=n_neighbors)
-
-    # Re-normalize after smoothing
-    smoothed_ranked = rankdata(smoothed_score)
-    cytotrace_score = (smoothed_ranked - smoothed_ranked.min()) / max(
-        smoothed_ranked.max() - smoothed_ranked.min(), 1
-    )
-
-    # Step 4: Potency binning
-    potency = pd.cut(
-        cytotrace_score,
-        bins=POTENCY_BINS,
-        labels=POTENCY_LABELS,
-        include_lowest=True,
-    )
-
-    # Store in adata
-    adata.obs["cytotrace_score"] = cytotrace_score
-    adata.obs["cytotrace_potency"] = potency
-    adata.obs["cytotrace_gene_count"] = gene_counts.astype(int)
-
-    # Potency composition
-    potency_counts = adata.obs["cytotrace_potency"].value_counts().to_dict()
-
-    # Check for degenerate output
-    unique_potency = adata.obs["cytotrace_potency"].nunique()
-    degenerate = unique_potency <= 1
-
-    summary = {
-        "method": "cytotrace_simple",
-        "n_cells": int(adata.n_obs),
-        "n_genes": int(adata.n_vars),
-        "n_neighbors": n_neighbors,
-        "score_mean": float(np.mean(cytotrace_score)),
-        "score_std": float(np.std(cytotrace_score)),
-        "score_min": float(np.min(cytotrace_score)),
-        "score_max": float(np.max(cytotrace_score)),
-        "potency_counts": {str(k): int(v) for k, v in potency_counts.items()},
-        "n_potency_categories": unique_potency,
-        "degenerate": degenerate,
-    }
-
-    if degenerate:
-        summary["suggested_actions"] = [
-            "The dataset may have too few cells or insufficient gene expression diversity.",
-            "Try preprocessing with sc-preprocessing first.",
-            "Consider using the full cytotrace2 method with pretrained models.",
-        ]
-        logger.warning(
-            "  *** DEGENERATE OUTPUT: Only %d potency category detected. ***\n"
-            "  This usually means the gene expression complexity is too uniform.\n"
-            "  How to fix:\n"
-            "    Option 1 — Ensure the data has been properly preprocessed (sc-preprocessing).\n"
-            "    Option 2 — Check if the data has sufficient gene diversity (>1000 genes).\n",
-            unique_potency,
-        )
-
-    logger.info("CytoTRACE-simple complete: %d potency categories", unique_potency)
-    return summary
-
-
-# ---------------------------------------------------------------------------
-# Visualization
-# ---------------------------------------------------------------------------
 
 
 def _ensure_umap(adata) -> None:
@@ -578,10 +434,9 @@ def main():
     )
 
     # Run analysis
-    if args.method == "cytotrace_simple":
-        summary = run_cytotrace_simple(adata, n_neighbors=args.n_neighbors)
-    else:
-        raise ValueError(f"Unknown method: {args.method}")
+    library = load_skill("sc-cytotrace")
+    library.cytotrace(adata, n_neighbors=args.n_neighbors)
+    summary = library.run_info(adata, keep=False)
 
     # Propagate contracts
     input_contract, matrix_contract = propagate_singlecell_contracts(

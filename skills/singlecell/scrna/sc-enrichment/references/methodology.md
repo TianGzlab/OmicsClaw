@@ -90,7 +90,7 @@ micromamba install -p <your_conda_prefix> -y \
 
 Human explanation:
 
-- `engine=python` needs the Python extra only
+- `engine=python` is the default and needs no R packages; local ORA also runs without gseapy
 - `engine=r` additionally needs the R `clusterProfiler/enrichplot` stack
 - `engine=auto` prefers the R path when that stack is installed, and otherwise
   falls back to the Python implementation

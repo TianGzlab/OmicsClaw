@@ -1,62 +1,33 @@
-## Output Structure
+# Outputs
 
-```
-output_directory/
-├── report.md
-├── result.json
-├── analysis_summary.txt
-├── annotated_input.h5ad
-├── commands.sh
-├── manifest.json
-├── processed.h5ad
-├── tables/
-│   ├── cell_meta.csv
-│   ├── cell_metadata.csv
-│   ├── condition_mean_proportions.csv
-│   ├── milo_nhood_results.csv
-│   ├── proportion_test_results.csv
-│   ├── sample_by_celltype_counts.csv
-│   ├── sample_by_celltype_proportions.csv
-│   ├── sccoda_effects.csv
-│   └── simple_da_results.csv
-└── figures/
-    ├── milo_logfc_barplot.png
-    ├── proportion_test_r_no_results.png
-    ├── r_cell_barplot.png
-    ├── r_cell_density.png
-    ├── r_embedding_discrete.png
-    ├── r_proportion_test.png
-    ├── sample_celltype_proportions.png
-    └── sccoda_log2fc_barplot.png
-```
+The Python API returns in-memory objects and figures. It does not create a
+report directory. Examples persist selected objects with `write_output`.
 
-## File contents
+The standalone CLI writes `processed.h5ad`, `report.md` and `result.json`.
+Its plots are under `figures/`; plot source tables are under `figure_data/`.
+R exchange files live in temporary directories, not under `tables/`.
 
-- `tables/cell_meta.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/cell_metadata.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/condition_mean_proportions.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/milo_nhood_results.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/proportion_test_results.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/sample_by_celltype_counts.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/sample_by_celltype_proportions.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/sccoda_effects.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `tables/simple_da_results.csv` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/milo_logfc_barplot.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/proportion_test_r_no_results.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/r_cell_barplot.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/r_cell_density.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/r_embedding_discrete.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/r_proportion_test.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/sample_celltype_proportions.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `figures/sccoda_log2fc_barplot.png` — written by `sc_differential_abundance.py` (or its imported `_lib/` helpers).
-- `analysis_summary.txt` — written by `sc_differential_abundance.py`.
-- `annotated_input.h5ad` — written by `sc_differential_abundance.py`.
-- `commands.sh` — written by `sc_differential_abundance.py`.
-- `manifest.json` — written by `sc_differential_abundance.py`.
-- `processed.h5ad` — written by `sc_differential_abundance.py`.
-- `report.md` — Markdown summary written by the common report helper.
-- `result.json` — standardised result envelope (`summary` + `data` keys).
+## Tables
 
-## Notes
+All methods write sample-by-cell-type counts and proportions, plus
+condition means, under `tables/sample_by_celltype_counts.csv`,
+`tables/sample_by_celltype_proportions.csv` and
+`tables/condition_mean_proportions.csv`.
 
-Auto-generated from `sc_differential_abundance.py` (and the `_lib/` modules it imports) string literals; refine manually with method semantics if needed.
+Only the selected method writes its result table:
+
+- `simple_da_results.csv`: cell type, contrast, group means, log2 fold change, U statistic, p-value, BH-adjusted p-value and significance flag.
+- `milo_nhood_results.csv`: neighborhood statistics. Columns depend on official Milo versus the internal Milo-like backend; `backend` identifies the calculation.
+- `sccoda_effects.csv`: the selected scCODA backend's effect table.
+- `proportion_test_results.csv`: nonempty R permutation results with observed log2 difference, FDR and bootstrap intervals.
+
+The CLI also writes `annotated_input.h5ad`. Plots depend on the method and
+nonempty usable columns; R-enhanced plots require `--r-enhanced`.
+
+## Diagnostics
+
+`run_info(table)` distinguishes official Milo from `milo_like`, and
+pertpy scCODA from standalone scCODA. It records fallback reasons and
+effective seed limitations. CLI `result.json["summary"]["backend"]` names
+the executed backend. R permutation errors now propagate; an empty
+successful result is not substituted for a failed R process.

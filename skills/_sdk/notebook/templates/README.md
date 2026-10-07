@@ -21,4 +21,5 @@
 ## Running outside OmicsClaw
 
     PYTHONPATH=<checkout> python analysis/<NN_slug>/<step>.py      # one step, from the project root
+    OMICSCLAW_SDK_DIR=<checkout>/skills/_sdk Rscript analysis/<NN_slug>/<step>.R
     python <checkout>/skills/_sdk/notebook/run.py replay analysis/<NN_slug>

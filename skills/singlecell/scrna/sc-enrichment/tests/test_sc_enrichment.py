@@ -10,6 +10,8 @@ from pathlib import Path
 import anndata as ad
 import pytest
 
+pytestmark = [pytest.mark.cli_subprocess, pytest.mark.demo]
+
 SKILL_SCRIPT = Path(__file__).resolve().parent.parent / "sc_enrichment.py"
 MARKERS_SCRIPT = Path(__file__).resolve().parents[2] / "sc-markers" / "sc_markers.py"
 

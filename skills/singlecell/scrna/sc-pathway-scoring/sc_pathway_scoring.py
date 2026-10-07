@@ -7,7 +7,6 @@ import argparse
 import json
 import logging
 import sys
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +20,7 @@ if _SDK_ANCHOR is not None and str(_SDK_ANCHOR) not in sys.path:
     sys.path.insert(0, str(_SDK_ANCHOR))
 
 from skills._sdk.checksums import sha256_file
+from skills._sdk.notebook import load_skill
 from skills._sdk.report import (
     generate_report_footer,
     generate_report_header,
@@ -30,7 +30,6 @@ from skills._sdk.result import (
     write_result_json,
 )
 from skills._sdk.deps import validate_r_environment
-from skills._sdk.r_script_runner import RScriptRunner
 from skills.singlecell._lib import io as sc_io
 from skills.singlecell._lib.adata_utils import (
     GENE_SYMBOL_CANDIDATE_COLUMNS,
@@ -158,80 +157,7 @@ def _slugify_gene_set_name(name: str) -> str:
     return slug or "gene_set"
 
 
-def _read_gene_sets_gmt(gene_sets_path: Path) -> dict[str, list[str]]:
-    gene_sets: dict[str, list[str]] = {}
-    for raw_line in gene_sets_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        name = str(parts[0]).strip()
-        members = [str(member).strip() for member in parts[2:] if str(member).strip()]
-        if name and members:
-            gene_sets[name] = members
-    if not gene_sets:
-        raise ValueError(f"No valid gene sets were parsed from {gene_sets_path}")
-    return gene_sets
 
-
-def _best_feature_label_mapping(adata, gene_sets: dict[str, list[str]]) -> tuple[str, pd.Index, dict[str, str]]:
-    gene_universe = {str(gene) for members in gene_sets.values() for gene in members}
-    candidates: list[tuple[str, pd.Index]] = [("var_names", pd.Index(adata.var_names.astype(str), dtype="object"))]
-    for column in GENE_SYMBOL_CANDIDATE_COLUMNS:
-        if column not in adata.var.columns:
-            continue
-        values = adata.var[column].fillna("").astype(str)
-        if values.eq("").all():
-            continue
-        candidates.append((f"var.{column}", pd.Index(values, dtype="object")))
-
-    best_source = "var_names"
-    best_index = candidates[0][1]
-    best_overlap = len(set(best_index) & gene_universe)
-
-    for source, labels in candidates[1:]:
-        overlap = len(set(labels) & gene_universe)
-        if overlap > best_overlap:
-            best_source = source
-            best_index = labels
-            best_overlap = overlap
-
-    mapping: dict[str, str] = {}
-    for feature_id, label in zip(adata.var_names.astype(str), best_index.astype(str)):
-        if not label or label in mapping:
-            continue
-        mapping[str(label)] = str(feature_id)
-    return best_source, best_index.astype(str), mapping
-
-
-def _build_gene_set_overlap_table(
-    adata,
-    gene_sets: dict[str, list[str]],
-    *,
-    feature_label_source: str,
-    feature_label_mapping: dict[str, str],
-) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for gene_set_name, members in gene_sets.items():
-        matched_feature_ids = [feature_label_mapping[gene] for gene in members if gene in feature_label_mapping]
-        rows.append(
-            {
-                "gene_set": gene_set_name,
-                "n_input_genes": int(len(members)),
-                "n_matched_genes": int(len(matched_feature_ids)),
-                "feature_label_source": feature_label_source,
-                "matched_feature_ids": ";".join(matched_feature_ids[:40]),
-                "matched_input_genes": ";".join([gene for gene in members if gene in feature_label_mapping][:40]),
-            }
-        )
-    overlap_df = pd.DataFrame(rows).sort_values(
-        ["n_matched_genes", "gene_set"],
-        ascending=[False, True],
-        kind="mergesort",
-    ).reset_index(drop=True)
-    return overlap_df
 
 
 def _resolve_groupby(adata, requested_groupby: str | None) -> tuple[str | None, list[str], str | None]:
@@ -271,36 +197,6 @@ def _ensure_matrix_contract_for_output(adata) -> None:
     )
 
 
-def _build_expression_export_adata(
-    adata,
-    *,
-    feature_labels: pd.Index,
-    prefer_x: bool,
-) -> tuple[sc.AnnData, str]:
-    if prefer_x or adata.raw is None or adata.raw.shape != adata.shape:
-        export = adata.copy()
-        export.var_names = pd.Index(feature_labels, dtype="object")
-        export.var_names_make_unique()
-        return export, "adata.X"
-
-    export = sc.AnnData(X=adata.raw.X.copy(), obs=adata.obs.copy(), var=adata.raw.var.copy())
-    export.obs_names = adata.obs_names.copy()
-    export.var_names = pd.Index(feature_labels, dtype="object")
-    export.var_names_make_unique()
-    return export, "adata.raw"
-
-
-def _write_expression_matrix_tsv(adata, output_path: Path) -> Path:
-    matrix = adata.X
-    if hasattr(matrix, "toarray"):
-        matrix = matrix.toarray()
-    expr_df = pd.DataFrame(
-        matrix.T,
-        index=adata.var_names.astype(str),
-        columns=adata.obs_names.astype(str),
-    )
-    expr_df.to_csv(output_path, sep="\t")
-    return output_path
 
 
 def _write_demo_gene_sets(adata, output_path: Path) -> Path:
@@ -351,318 +247,12 @@ def _write_gene_sets_gmt(gene_sets: dict[str, list[str]], output_path: Path) -> 
     return output_path
 
 
-def _fetch_gene_sets_from_library(gene_set_db: str, *, species: str) -> tuple[dict[str, list[str]], str]:
-    try:
-        import gseapy as gp
-    except ImportError as exc:  # pragma: no cover - handled by preflight too
-        raise ImportError(
-            "`--gene-set-db` requires `gseapy`. Install it before using built-in pathway libraries."
-        ) from exc
-
-    resolved = _resolve_gene_set_library_name(gene_set_db, species)
-    organism = _gseapy_organism(species)
-    try:
-        gene_sets = gp.get_library(name=resolved, organism=organism)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to download or resolve gene-set library `{resolved}` for organism `{organism}`. "
-            "Check network access, verify the library name, or provide a local `--gene-sets` GMT file instead."
-        ) from exc
-    if not gene_sets:
-        raise ValueError(
-            f"Gene-set library `{resolved}` returned no gene sets. Provide a different library key or a local GMT file."
-        )
-    return {str(name): [str(gene) for gene in genes] for name, genes in gene_sets.items()}, resolved
 
 
-def run_aucell(
-    adata,
-    *,
-    gene_sets_path: Path,
-    feature_labels: pd.Index,
-    auc_max_rank: int | None,
-) -> tuple[pd.DataFrame, str, int]:
-    validate_r_environment(required_r_packages=["AUCell", "GSEABase"])
-    runner = RScriptRunner(scripts_dir=R_SCRIPTS_DIR, timeout=7200)
-    prefer_x = matrix_kind_is_normalized(get_matrix_contract(adata).get("X")) or infer_x_matrix_kind(adata) == "normalized_expression"
-    export, source = _build_expression_export_adata(adata, feature_labels=feature_labels, prefer_x=prefer_x)
-    effective_auc_max_rank = int(auc_max_rank) if auc_max_rank is not None else max(1, int(round(export.n_vars * 0.05)))
-    with tempfile.TemporaryDirectory(prefix="omicsclaw_aucell_") as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        input_matrix = tmpdir_path / "expression_matrix.tsv"
-        output_dir = tmpdir_path / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        _write_expression_matrix_tsv(export, input_matrix)
-        runner.run_script(
-            "sc_aucell.R",
-            args=[str(input_matrix), str(gene_sets_path), str(output_dir), str(effective_auc_max_rank)],
-            expected_outputs=["aucell_scores.csv"],
-            output_dir=output_dir,
-        )
-        scores_df = pd.read_csv(output_dir / "aucell_scores.csv")
-    if "Cell" not in scores_df.columns:
-        raise ValueError("AUCell output is missing the required 'Cell' column")
-    return scores_df.set_index("Cell"), source, effective_auc_max_rank
 
 
-def run_score_genes_py(
-    adata,
-    *,
-    gene_sets: dict[str, list[str]],
-    feature_label_mapping: dict[str, str],
-    ctrl_size: int,
-    n_bins: int,
-) -> tuple[pd.DataFrame, list[str]]:
-    if not matrix_kind_is_normalized(get_matrix_contract(adata).get("X")) and infer_x_matrix_kind(adata) != "normalized_expression":
-        raise ValueError("`score_genes_py` requires normalized expression in `adata.X`. Run `sc-preprocessing` first.")
-
-    work = adata.copy()
-    scores_df = pd.DataFrame(index=work.obs_names.astype(str))
-    skipped: list[str] = []
-    for gene_set_name, members in gene_sets.items():
-        matched_feature_ids = [feature_label_mapping[gene] for gene in members if gene in feature_label_mapping]
-        if not matched_feature_ids:
-            skipped.append(gene_set_name)
-            continue
-        score_name = f"__temp_score__{_slugify_gene_set_name(gene_set_name)}"
-        sc.tl.score_genes(
-            work,
-            gene_list=matched_feature_ids,
-            score_name=score_name,
-            use_raw=False,
-            ctrl_size=min(max(int(ctrl_size), 1), max(len(matched_feature_ids), 1) * 5),
-            n_bins=max(int(n_bins), 1),
-            copy=False,
-        )
-        scores_df[gene_set_name] = pd.to_numeric(work.obs[score_name], errors="coerce")
-    if scores_df.empty:
-        raise ValueError("No gene sets had any overlap with the input features, so no enrichment scores could be computed.")
-    return scores_df, skipped
 
 
-def _rank_genes_per_cell(X, seed: int = 42) -> "np.ndarray":
-    """Rank genes per cell in descending expression order (0 = highest).
-
-    Pure numpy/scipy implementation adapted from omicverse AUCell.
-    Returns an integer rank matrix of shape (n_cells, n_genes).
-    """
-    import numpy as np
-    from scipy.sparse import issparse
-
-    rng = np.random.default_rng(seed)
-    n_cells, n_genes = X.shape
-
-    # Shuffle columns to break ties randomly
-    shuffle_order = rng.permutation(n_genes)
-
-    rank_matrix = np.empty((n_cells, n_genes), dtype=np.int32)
-    for i in range(n_cells):
-        if issparse(X):
-            row = X.getrow(i).toarray().ravel()
-        else:
-            row = np.asarray(X[i]).ravel()
-        shuffled_row = row[shuffle_order]
-        # argsort descending: highest expression gets rank 0
-        sort_idx = np.argsort(-shuffled_row, kind="mergesort")
-        ranks = np.empty(n_genes, dtype=np.int32)
-        ranks[sort_idx] = np.arange(n_genes, dtype=np.int32)
-        rank_matrix[i, shuffle_order] = ranks
-
-    return rank_matrix
-
-
-def _compute_auc_for_gene_set(
-    rank_matrix: "np.ndarray",
-    gene_indices: list[int],
-    auc_threshold: float,
-    n_genes: int,
-) -> "np.ndarray":
-    """Compute AUC of recovery curve for a single gene set across all cells.
-
-    For each cell, the recovery curve is built by walking through the ranked
-    gene list and accumulating hits from the gene set. The AUC is computed
-    up to the rank cutoff determined by auc_threshold.
-
-    Returns a 1D array of AUC values (one per cell).
-    """
-    import numpy as np
-
-    n_cells = rank_matrix.shape[0]
-    rank_cutoff = max(1, round(auc_threshold * n_genes))
-
-    # Maximum possible AUC (all gene-set genes ranked at top)
-    n_set = len(gene_indices)
-    if n_set == 0:
-        return np.zeros(n_cells, dtype=np.float64)
-
-    # For each cell, count how many gene-set genes have rank < rank_cutoff
-    # and compute recovery AUC
-    aucs = np.empty(n_cells, dtype=np.float64)
-    for cell_idx in range(n_cells):
-        # Get ranks of gene-set genes in this cell
-        gene_ranks = rank_matrix[cell_idx, gene_indices]
-        # Only consider genes within the rank cutoff
-        hits_within_cutoff = gene_ranks[gene_ranks < rank_cutoff]
-
-        if len(hits_within_cutoff) == 0:
-            aucs[cell_idx] = 0.0
-            continue
-
-        # Build recovery curve: at each position in the ranking,
-        # how many gene-set genes have been recovered
-        recovery = np.zeros(rank_cutoff, dtype=np.float64)
-        for rank in hits_within_cutoff:
-            recovery[rank] += 1.0
-        recovery = np.cumsum(recovery)
-
-        # Normalize by number of gene-set genes
-        recovery = recovery / n_set
-
-        # AUC = sum of recovery values / rank_cutoff (normalize to [0,1])
-        aucs[cell_idx] = float(np.sum(recovery)) / rank_cutoff
-
-    return aucs
-
-
-def run_aucell_py(
-    adata,
-    *,
-    gene_sets: dict[str, list[str]],
-    feature_label_mapping: dict[str, str],
-    auc_threshold: float = 0.05,
-    seed: int = 42,
-) -> tuple[pd.DataFrame, list[str]]:
-    """Pure Python AUCell implementation.
-
-    Adapted from omicverse's AUCell. Ranks genes per cell by expression,
-    then computes recovery curve AUC for each gene set.
-
-    Parameters
-    ----------
-    adata
-        AnnData with expression data.
-    gene_sets
-        Dict mapping gene-set name -> list of gene labels.
-    feature_label_mapping
-        Dict mapping gene label -> feature ID in adata.var_names.
-    auc_threshold
-        Fraction of ranked genome for AUC calculation (default 0.05).
-
-    Returns
-    -------
-    tuple[pd.DataFrame, list[str]]
-        Scores DataFrame (cells x gene_sets) and list of skipped gene sets.
-    """
-    import numpy as np
-
-    X = adata.X
-    n_cells, n_genes = X.shape
-
-    logger.info("AUCell (Python): ranking %d genes across %d cells ...", n_genes, n_cells)
-    rank_matrix = _rank_genes_per_cell(X, seed=seed)
-
-    # Build feature-name-to-index mapping
-    var_names = list(adata.var_names.astype(str))
-    var_to_idx = {name: idx for idx, name in enumerate(var_names)}
-
-    scores_df = pd.DataFrame(index=adata.obs_names.astype(str))
-    skipped: list[str] = []
-
-    for gene_set_name, members in gene_sets.items():
-        # Map gene labels to feature indices
-        matched_ids = [feature_label_mapping[gene] for gene in members if gene in feature_label_mapping]
-        gene_indices = [var_to_idx[fid] for fid in matched_ids if fid in var_to_idx]
-
-        if not gene_indices:
-            skipped.append(gene_set_name)
-            continue
-
-        aucs = _compute_auc_for_gene_set(rank_matrix, gene_indices, auc_threshold, n_genes)
-        scores_df[gene_set_name] = aucs
-
-    if scores_df.empty:
-        raise ValueError(
-            "No gene sets had any overlap with the input features. "
-            "AUCell (Python) cannot compute scores."
-        )
-
-    logger.info(
-        "AUCell (Python): scored %d gene sets (%d skipped).",
-        scores_df.shape[1], len(skipped),
-    )
-    return scores_df, skipped
-
-
-def attach_scores_to_adata(adata, scores_df: pd.DataFrame, *, method: str) -> list[str]:
-    aligned = scores_df.reindex(adata.obs_names.astype(str))
-    if aligned.isna().all().all():
-        raise ValueError("Gene-set scores could not be aligned back to adata.obs_names")
-    score_columns: list[str] = []
-    gene_set_labels: dict[str, str] = {}
-    for gene_set in aligned.columns:
-        obs_key = f"enrich__{_slugify_gene_set_name(gene_set)}"
-        adata.obs[obs_key] = pd.to_numeric(aligned[gene_set], errors="coerce")
-        score_columns.append(obs_key)
-        gene_set_labels[obs_key] = str(gene_set)
-    adata.uns["sc_pathway_scoring"] = {
-        "method": method,
-        "score_columns": score_columns,
-        "gene_sets": list(aligned.columns.astype(str)),
-        "score_column_labels": gene_set_labels,
-    }
-    return score_columns
-
-
-def summarize_scores(
-    adata,
-    scores_df: pd.DataFrame,
-    *,
-    groupby: str | None,
-    top_pathways: int,
-) -> dict[str, object]:
-    overall_mean = scores_df.mean(axis=0, numeric_only=True)
-    overall_abs = scores_df.abs().mean(axis=0, numeric_only=True)
-    top_df = (
-        pd.DataFrame({"gene_set": overall_mean.index.astype(str), "mean_score": overall_mean.values, "mean_abs_score": overall_abs.values})
-        .sort_values(["mean_abs_score", "gene_set"], ascending=[False, True], kind="mergesort")
-        .head(top_pathways)
-        .reset_index(drop=True)
-    )
-
-    group_means_df = pd.DataFrame()
-    group_high_fraction_df = pd.DataFrame()
-    long_df = pd.DataFrame()
-    if groupby and groupby in adata.obs.columns:
-        joined = scores_df.join(adata.obs[[groupby]])
-        group_means_df = joined.groupby(groupby, observed=False).mean(numeric_only=True)
-        threshold_map = scores_df.median(axis=0, numeric_only=True)
-        high_fraction = joined.copy()
-        for column in scores_df.columns:
-            high_fraction[column] = pd.to_numeric(joined[column], errors="coerce") > float(threshold_map[column])
-        group_high_fraction_df = high_fraction.groupby(groupby, observed=False).mean(numeric_only=True)
-        selected_terms = [term for term in top_df["gene_set"].astype(str).tolist() if term in group_means_df.columns]
-        if selected_terms:
-            group_means_df = group_means_df.loc[:, selected_terms]
-            group_high_fraction_df = group_high_fraction_df.loc[:, selected_terms]
-
-    top_gene_sets = top_df["gene_set"].astype(str).tolist()[: min(6, len(top_df))]
-    if top_gene_sets:
-        long_df = (
-            scores_df.loc[:, [gene_set for gene_set in top_gene_sets if gene_set in scores_df.columns]]
-            .stack()
-            .rename("score")
-            .reset_index()
-        )
-        long_df.columns = ["cell_id", "gene_set", "score"]
-        if groupby and groupby in adata.obs.columns:
-            long_df["group"] = adata.obs.loc[long_df["cell_id"], groupby].astype(str).to_numpy()
-
-    return {
-        "top_pathways_df": top_df,
-        "group_means_df": group_means_df,
-        "group_high_fraction_df": group_high_fraction_df,
-        "top_pathway_scores_long_df": long_df,
-    }
 
 
 def generate_figures(output_dir: Path, adata, summary: dict) -> list[str]:
@@ -836,6 +426,7 @@ def main() -> None:
                         help="Random seed for AUCell ranking (default: 42)")
     parser.add_argument("--r-enhanced", action="store_true", default=False, help="Generate R-enhanced figures via ggplot2 renderers")
     args = parser.parse_args()
+    api = load_skill(SKILL_NAME)
 
     # -- Parameter validation --
     from skills.singlecell._lib.param_validators import ParamValidator
@@ -856,7 +447,7 @@ def main() -> None:
         input_file = None
         gene_sets_path = _write_demo_gene_sets(adata, output_dir / "demo_gene_sets.gmt")
         gene_set_source = "demo_gmt"
-        gene_sets = _read_gene_sets_gmt(gene_sets_path)
+        gene_sets = api.load_gene_sets(gene_sets_path)
     else:
         if not args.input_path:
             raise ValueError("--input required when not using --demo")
@@ -869,9 +460,10 @@ def main() -> None:
             if not gene_sets_path.exists():
                 raise FileNotFoundError(f"Gene set file not found: {gene_sets_path}")
             gene_set_source = str(gene_sets_path)
-            gene_sets = _read_gene_sets_gmt(gene_sets_path)
+            gene_sets = api.load_gene_sets(gene_sets_path)
         else:
-            gene_sets, resolved_library = _fetch_gene_sets_from_library(args.gene_set_db, species=args.species)
+            gene_sets = api.load_gene_sets(args.gene_set_db, species=args.species)
+            resolved_library = _resolve_gene_set_library_name(args.gene_set_db, args.species)
             gene_sets_path = _write_gene_sets_gmt(
                 gene_sets,
                 output_dir / f"resolved_{_slugify_gene_set_name(resolved_library)}.gmt",
@@ -879,13 +471,8 @@ def main() -> None:
             gene_set_source = f"library:{resolved_library}"
 
     _ensure_matrix_contract_for_output(adata)
-    feature_label_source, feature_labels, feature_label_mapping = _best_feature_label_mapping(adata, gene_sets)
-    overlap_df = _build_gene_set_overlap_table(
-        adata,
-        gene_sets,
-        feature_label_source=feature_label_source,
-        feature_label_mapping=feature_label_mapping,
-    )
+    overlap_df = api.gene_set_overlap(adata, gene_sets)
+    feature_label_source = overlap_df["feature_label_source"].iloc[0]
     if overlap_df["n_matched_genes"].sum() <= 0:
         raise ValueError(
             "None of the supplied gene-set members matched the input features. Check gene identifiers or run a standardized object with consistent gene symbols."
@@ -932,36 +519,20 @@ def main() -> None:
     params.update(shared_params)
     params.update(method_params)
 
-    skipped_gene_sets: list[str] = []
-    effective_auc_max_rank: int | None = None
-    if method == "aucell_r":
-        scores_df, expression_source, effective_auc_max_rank = run_aucell(
-            adata,
-            gene_sets_path=gene_sets_path,
-            feature_labels=feature_labels,
-            auc_max_rank=args.aucell_auc_max_rank,
-        )
-    elif method == "aucell_py":
-        scores_df, skipped_gene_sets = run_aucell_py(
-            adata,
-            gene_sets=gene_sets,
-            feature_label_mapping=feature_label_mapping,
-            auc_threshold=args.aucell_py_auc_threshold,
-            seed=args.seed,
-        )
-        expression_source = "adata.X"
-    else:
-        scores_df, skipped_gene_sets = run_score_genes_py(
-            adata,
-            gene_sets=gene_sets,
-            feature_label_mapping=feature_label_mapping,
-            ctrl_size=args.score_genes_ctrl_size,
-            n_bins=args.score_genes_n_bins,
-        )
-        expression_source = "adata.X"
-
-    score_columns = attach_scores_to_adata(adata, scores_df, method=method)
-    table_summary = summarize_scores(adata, scores_df, groupby=resolved_groupby, top_pathways=args.top_pathways)
+    scores_df = api.score_gene_sets(
+        adata, gene_sets, method=method, auc_max_rank=args.aucell_auc_max_rank,
+        auc_threshold=args.aucell_py_auc_threshold, ctrl_size=args.score_genes_ctrl_size,
+        n_bins=args.score_genes_n_bins,
+        random_state=0 if method == "score_genes_py" else args.seed,
+    )
+    info = api.run_info(scores_df)
+    skipped_gene_sets = info["skipped_gene_sets"]
+    effective_auc_max_rank = info["effective_auc_max_rank"]
+    expression_source = info["expression_source"]
+    adata = api.attach_scores(adata, scores_df)
+    score_columns = adata.uns["sc_pathway_scoring"]["score_columns"]
+    adata.uns.pop("omicsclaw_sc_pathway_scoring_run", None)
+    table_summary = api.score_summary(adata, scores_df, groupby=resolved_groupby, top_pathways=args.top_pathways)
     summary = {
         "method": method,
         "n_cells": int(adata.n_obs),

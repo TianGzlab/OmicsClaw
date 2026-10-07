@@ -54,7 +54,10 @@ def entry(name: str) -> str:
     text = [_apidoc.signature(node), textwrap.indent(ast.get_docstring(node) or "", "    ")]
     if name == "load_demo":
         text.append("    Registered demo datasets:")
-        text.extend(f"      {demo}: {info['about']}" for demo, info in DEMOS.items())
+        for demo, info in DEMOS.items():
+            source = (f"generator: {info['generator']}" if "generator" in info
+                      else f"download: scanpy.datasets.{info['download']}")
+            text.append(f"      {demo}: {info['about']} [{source}]")
     return "\n".join(text)
 
 
@@ -70,4 +73,10 @@ def render(name: str | None = None) -> str:
     folders = ", ".join(f"{folder}/" for folder in LAYOUT["output_dirs"])
     parts = [HEADER.format(steps=", ".join(STEP_FUNCTIONS), checks=", ".join(checks.__all__), folders=folders)]
     parts.extend(entry(function) for function in names())
+    comments = Path(__file__).with_name("step.R").read_text(encoding="utf-8")
+    parts.append("R steps\n\n"
+                 'source(file.path(Sys.getenv("OMICSCLAW_SDK_DIR"), "notebook", "step.R"))\n'
+                 "Standalone, from the project root:\n"
+                 "OMICSCLAW_SDK_DIR=<checkout>/skills/_sdk Rscript analysis/<NN_slug>/<step>.R\n\n"
+                 + "\n".join(line[3:] for line in comments.splitlines() if line.startswith("#' ")))
     return "\n\n".join(parts)

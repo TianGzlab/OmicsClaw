@@ -15,99 +15,95 @@ tags:
 
 # sc-perturb-prep
 
-## When to use
-
-The user has Perturb-seq expression data (10x h5 / matrix dir / h5ad)
-**and** an upstream barcode-to-sgRNA mapping table (TSV / CSV from
-demultiplex / cellranger / cellbender output) and needs them merged
-into a single AnnData with:
-
-- `obs[--pert-key]` (default `perturbation`) — canonical perturbation label
-- `obs[--sgrna-key]` (default `sgRNA`) — guide identifier
-- `obs[--target-key]` (default `target_gene`) — inferred target gene
-- `obs["assignment_status"]` — `single_guide` / `multi_guide` / `unassigned`
-- `obs["n_sgrnas"]` — count per cell
-
-Single backend: `mapping_tsv`. Then chain to `sc-perturb` for Mixscape
-classification. This skill does NOT infer guide identities from FASTQ
-— bring an upstream assignment table.
-
-## Inputs & Outputs
-
-**Inputs**
-
-- Input kinds: `file`, `directory`
-- Modalities: scrna
-- File types: `.h5ad`, `.h5`, `.loom`, `.tsv`, `.csv`
-
-**Outputs**
-
-- `tables/assignment_status_counts.csv`
-- `tables/cell_metadata.csv`
-- `tables/dropped_multi_guide_cells.csv`
-- `tables/feature_type_summary.csv`
-- `tables/perturbation_assignments.csv`
-- `tables/perturbation_counts.csv`
-- `figures/perturbation_counts.png`
-- `analysis_summary.txt`
-- `processed.h5ad`
-- `report.md`
-- `result.json`
-- Processed AnnData (`saves_h5ad`) — adds `obs`: `perturbation`, `sgRNA`, `target_gene`, `assignment_status`, `n_sgrnas`
-
-## Flow
-
-1. Load expression input via `smart_load`; load mapping via `load_sgrna_mapping` (auto-detect `--sep` if unset).
-2. Strip non-gene features from `var` (e.g., 10x guide / antibody capture rows).
-3. Collapse mapping rows per cell: tag `single_guide` / `multi_guide` / `unassigned` based on row count.
-4. Drop `multi_guide` cells unless `--keep-multi-guide` is set.
-5. Match each sgRNA against `--control-patterns` (`,`-separated, includes default NT-style patterns); rewrite matches to `--control-label` (default `NT`).
-6. Infer target gene from sgRNA ID via `--delimiter` + `--gene-position`, OR use `--target-column` from the mapping if provided.
-7. Save standardised AnnData, tables, figure, `report.md`, `result.json`.
-
-## Gotchas
-
-- **All preflight failures `raise SystemExit`, not `ValueError`.** `sc_perturb_prep.py` raises `SystemExit("Provide --input or use --demo")`; raises `SystemExit("Perturbation preparation requires --mapping-file for real inputs. Generate barcode-to-guide assignments upstream first.")` when `--mapping-file` is missing on a real (non-demo) run. Wrappers expecting standard `ValueError` need to catch `SystemExit`.
-- **`multi_guide` cells are DROPPED by default.** Step 4 in the flow filters them out unless `--keep-multi-guide` is passed. `result.json["n_cells_multi_guide_dropped"]` records the count. If your screen has high MOI on purpose (combinatorial perturbations), `--keep-multi-guide` is mandatory.
-- **Target gene is *inferred* by default, not read from mapping.** Without `--target-column`, the script splits the sgRNA ID by `--delimiter` (default `_`) and takes token at `--gene-position` (default `0`). For sgRNA IDs like `EGFR_sg1` this gives `EGFR`; for non-standard formats (`sg-EGFR-1`, `EGFR.sg1`) you must pass `--delimiter` accordingly or supply `--target-column`.
-- **Control matching is pattern-based, not exact.** `--control-patterns` (default from `DEFAULT_CONTROL_PATTERNS`) is a comma-separated list — any sgRNA whose ID **contains** one of the patterns is rewritten to `--control-label` (default `NT`). False positives are possible if a real guide's ID contains a control-pattern substring; review `tables/perturbation_assignments.csv` after the run.
-- **Non-gene features in `var` are silently removed only when `var["feature_types"]` exists.** `sc_perturb_prep.py` calls `keep_gene_expression_features(adata)`; the helper early-returns the unchanged AnnData if `feature_types` isn't a `var` column (typical for user-loaded h5ads). When it IS present (e.g., 10x cellranger output), antibody-capture / guide-capture rows are stripped silently and `result.json["n_non_gene_features_removed"]` records the count. A `0` value means either the column was absent or there were no non-gene rows to remove.
+Attach an upstream barcode-to-guide table to expression data. This is the
+`mapping_tsv` method, not a FASTQ guide caller. It needs no pertpy installation.
 
 ## Key CLI
 
 ```bash
-# Demo (synthetic expression + mapping)
 python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py --demo --output /tmp/sc_perturb_prep_demo
-
-# Real run with auto-detected mapping columns + delimiter
-python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
-  --input cellranger/raw_feature_bc_matrix.h5 \
-  --mapping-file guide_assignments.tsv \
-  --output results/
-
-# Custom column names + non-default delimiter
-python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
-  --input expression.h5ad \
-  --mapping-file mapping.csv \
-  --barcode-column cell_id --sgrna-column guide_id --target-column gene \
-  --sep ',' --delimiter '-' --gene-position 1 \
-  --output results/
-
-# Keep combinatorial multi-guide cells (high-MOI screens)
-python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py \
-  --input expression.h5ad --mapping-file mapping.tsv \
-  --keep-multi-guide --output results/
+python skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py --input expression.h5ad --mapping-file mapping.tsv --output results/prep
 ```
 
-## See also
+Mapping columns are inferred from common names, or selected with
+`--barcode-column`, `--sgrna-column`, and `--target-column`. Without target
+values, `--delimiter _ --gene-position 0` extracts the target from a guide ID.
+Pass `--keep-multi-guide` only when retaining multi-guide cells is intended.
 
-- `references/parameters.md` — every CLI flag, mapping-file conventions
-- `references/methodology.md` — assignment status semantics; control-pattern matching
-- `references/output_contract.md` — `obs["perturbation"]` / `obs["sgRNA"]` / `obs["target_gene"]` / `obs["assignment_status"]` schema
-- Adjacent skills: `sc-count` / `sc-multi-count` (upstream — produces the expression matrix; the mapping comes from cellranger / demuxlet output), `sc-perturb` (downstream — Mixscape classification on the standardised AnnData), `sc-de` (alternative downstream — direct DE between perturbed and control without Mixscape)
+## Workflow
+
+Upstream: expression counts and guide calls from the same cells. Standardize
+mapping columns, collapse guides per barcode, match assigned cells, retain
+gene-expression features and canonicalize the matrix. Downstream: use
+`sc-perturb` for observed perturbation signatures, or `sc-preprocessing` for
+clustering. The API returns objects; the example step writes them explicitly.
+
+## Matrix Contract
+
+Raw counts are preferred; canonicalization can recover counts from a layer or
+raw snapshot. Inspect `omicsclaw_matrix_contract` and `run_info` for the actual
+expression source. A normalized matrix is not evidence of raw counts.
+
+## Inputs & Outputs
+
+Input: `.h5ad`, 10x H5 or a matrix directory, plus mapping TSV/CSV for real runs.
+The CLI writes `processed.h5ad`, `report.md`, `result.json`,
+`reproducibility/commands.sh`, `tables/perturbation_assignments.csv`,
+`tables/assignment_status_counts.csv`, `tables/perturbation_counts.csv`,
+`tables/feature_type_summary.csv` and `figures/perturbation_counts.png`.
+`tables/dropped_multi_guide_cells.csv` is written only when rows were dropped.
+Plot data are also written under `figure_data/`.
+
+## Gotchas
+
+- `tables/perturbation_assignments.csv` uses status `assigned`, `control` or retained `multi_guide`; dropped rows do not appear in the output AnnData.
+- Control tokens match whole words separated by punctuation: `NT_sg1` is a control, while `WNT3_sg1`, `NTRK1_sg1` and `NT5E_sg1` are not. Review `tables/perturbation_assignments.csv` after choosing custom patterns.
+- `result.json` → `summary.n_cells_multi_guide_dropped` counts dropped multi-guide cells. No matching barcodes raises `ValueError` in the API.
+- `tables/feature_type_summary.csv` describes the input feature types. Filtering needs `var['feature_types']`; absent labels cannot identify guide or antibody features.
+
+## API
+
+<!-- api:begin generated from _api.py; regenerate with run.py api <skill dir> --write -->
+
+### `standardize_mapping(table, *, barcode_column=None, sgrna_column=None, target_column=None)`
+
+Return barcode, sgRNA and target_gene columns from a pandas table.
+
+Column names may be supplied explicitly. Missing target genes are inferred
+later from guide names; duplicate rows and empty barcode/guide rows are removed.
+
+### `collapse_assignments(mapping, *, delimiter='_', gene_position=0, control_patterns=('NT', 'NTC', 'NON-TARGET', 'NON_TARGET', 'NEGATIVE_CONTROL', 'NEG_CTRL'), control_label='NT', drop_multi_guide=True)`
+
+Return (assigned, dropped) tables with one row per barcode.
+
+Controls match whole tokens, not substrings of gene names. Multiple guides
+are dropped by default; retained multi-guide cells keep their status.
+
+### `attach_assignments(adata, assignments, *, pert_key='perturbation', sgrna_key='sgRNA', target_key='target_gene', species='human')`
+
+Return a gene-expression AnnData with assignments on matching cells.
+
+The input is unchanged. Gene features and the expression matrix are
+canonicalized using the single-cell input contract; no pertpy is needed.
+
+### `run_info(adata)`
+
+Return a copy of preparation counts, feature types and input provenance.
+
+### `assignment_summary(adata)`
+
+Return assignment_status and n_cells columns for the retained cells.
+
+### `perturbation_counts(adata, *, pert_key='perturbation')`
+
+Return perturbation and n_cells columns, ordered by decreasing cell count.
+
+### `perturbation_counts_figure(adata, *, pert_key='perturbation', n_top=20)`
+
+Return a Figure of cell counts for up to n_top perturbations; save it separately.
+
+<!-- api:end -->
 
 ## Dependencies
 
-Python packages this skill's script needs. They are not installed for you — check before a long run.
-
-`anndata`, `matplotlib`, `numpy`, `packaging`, `pandas`, `pertpy`, `scanpy`, `scipy`
+`anndata`, `matplotlib`, `numpy`, `pandas`, `scanpy`, `scipy`

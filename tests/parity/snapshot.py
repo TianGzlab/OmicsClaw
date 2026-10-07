@@ -17,14 +17,18 @@ that recorded them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,22 +36,172 @@ REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).resolve().parent / "golden"
 RTOL = 1e-6
 
-SCRIPTS = {
-    "sc-qc": "skills/singlecell/scrna/sc-qc/sc_qc.py",
-    "sc-preprocessing": "skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py",
-    "sc-clustering": "skills/singlecell/scrna/sc-clustering/sc_cluster.py",
-    "sc-cell-annotation": "skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py",
-    "sc-de": "skills/singlecell/scrna/sc-de/sc_de.py",
+@dataclass(frozen=True)
+class Case:
+    """CLI arguments, reasoned exclusions and an optional fixed-input writer.
+
+    Exclusion keys name a snapshot file, ``file.csv:column``, a
+    ``summary.json:key.path`` or ``figures/filename``. An input writer
+    receives a Path and writes one reproducible .h5ad there.
+    """
+
+    args: tuple[str, ...]
+    exclude: dict[str, str] = field(default_factory=dict)
+    input: Callable[[Path], None] | None = None
+
+
+@dataclass(frozen=True)
+class Skill:
+    script: str
+    api_runner: str | None
+    cases: dict[str, Case]
+    legacy_sigkill: bool = False
+
+def _integration_input(path: Path) -> None:
+    """Use the old demo's preprocessing with one seeded batch assignment."""
+    import numpy as np
+    import scanpy as sc
+    from skills.singlecell._lib.io import load_repo_demo_data
+
+    adata, _ = load_repo_demo_data("pbmc3k_raw")
+    adata.layers["counts"] = adata.X.copy()
+    sc.pp.normalize_total(adata)
+    sc.pp.log1p(adata)
+    adata.raw = adata.copy()
+    sc.pp.highly_variable_genes(adata, n_top_genes=2000, layer="counts", flavor="seurat_v3")
+    sc.pp.pca(adata)
+    processed, _ = load_repo_demo_data("pbmc3k_processed")
+    adata.obs["louvain"] = processed.obs.reindex(adata.obs_names)["louvain"].astype(str)
+    adata.obs["batch"] = np.random.default_rng(0).choice(["batch1", "batch2"], adata.n_obs)
+    adata.write_h5ad(path)
+
+
+def _drug_response_input(path: Path) -> None:
+    """PBMC expression with two explicit comparison groups for the old CLI."""
+    from skills.singlecell._lib.io import load_repo_demo_data
+
+    adata, _ = load_repo_demo_data('pbmc3k_processed')
+    adata = adata.raw.to_adata()
+    adata.obs['comparison_group'] = adata.obs['louvain'].astype(str).map(
+        lambda value: 'T_cell' if 'T' in value else 'other')
+    adata.write_h5ad(path)
+
+
+_CORRELATION_CORRECTIONS = {
+    'tables/diff_regulation.csv': 'Remove fabricated p-values/z/FC and sort by dr_score; retained dr_score/wt_ko_corr are checked by gene in test_perturbation_numeric_parity.py.',
+    'figures/pvalue_distribution.png': 'No calibrated p-values exist for correlation edge-removal scores.',
+    'summary.json:n_significant': 'No significance test is performed by the descriptive Python method.',
+}
+_DRUG_EXPRESSION_RENAME = {
+    'tables/drug_rankings.csv:Score': 'Rename the descriptive mean to mean_target_expression; keyed values checked in test_perturbation_numeric_parity.py.',
+    'tables/drug_rankings.csv:mean_target_expression': 'The same expression mean under its truthful name, not a response prediction.',
 }
 
-CASES = {
-    "sc-qc": {"default": ["--demo"], "mouse": ["--demo", "--species", "mouse"]},
-    "sc-preprocessing": {"default": ["--demo"], "pearson": ["--demo", "--method", "pearson_residuals"]},
-    "sc-clustering": {"default": ["--demo"], "louvain": ["--demo", "--cluster-method", "louvain"]},
-    "sc-cell-annotation": {"default": ["--demo"], "knnpredict": ["--demo", "--method", "knnpredict"]},
-    "sc-de": {"default": ["--demo"], "ttest": ["--demo", "--method", "t-test"]},
+
+REGISTRY = {
+    'sc-perturb-prep': Skill('skills/singlecell/scrna/sc-perturb-prep/sc_perturb_prep.py', 'api_sc_perturb_prep', {
+        'default': Case(('--demo',)), 'keep_multi': Case(('--demo', '--keep-multi-guide')),
+    }),
+    'sc-perturb': Skill('skills/singlecell/scrna/sc-perturb/sc_perturb.py', 'api_sc_perturb', {
+        'default': Case(('--demo',)), 'high_threshold': Case(('--demo', '--logfc-threshold', '2')),
+    }),
+    'sc-in-silico-perturbation': Skill('skills/singlecell/scrna/sc-in-silico-perturbation/sc_in_silico_perturbation.py', 'api_sc_in_silico_perturbation', {
+        'default': Case(('--demo',), exclude=_CORRELATION_CORRECTIONS),
+        'top500': Case(('--demo', '--n-top-genes', '500'), exclude=_CORRELATION_CORRECTIONS),
+    }),
+    'sc-drug-response': Skill('skills/singlecell/scrna/sc-drug-response/sc_drug_response.py', 'api_sc_drug_response', {
+        'default': Case(('--demo',), exclude=_DRUG_EXPRESSION_RENAME),
+        'two_groups': Case(('--cluster-key', 'comparison_group'), exclude=_DRUG_EXPRESSION_RENAME, input=_drug_response_input),
+    }),
+    "sc-cytotrace": Skill("skills/singlecell/scrna/sc-cytotrace/sc_cytotrace.py", "api_sc_cytotrace", {
+        "default": Case(("--demo",)), "neighbors15": Case(("--demo", "--n-neighbors", "15")),
+    }),
+    "sc-metacell": Skill("skills/singlecell/scrna/sc-metacell/sc_metacell.py", "api_sc_metacell", {
+        "default": Case(("--demo", "--method", "kmeans")),
+        "twenty": Case(("--demo", "--method", "kmeans", "--n-metacells", "20")),
+    }),
+    "sc-pseudotime": Skill("skills/singlecell/scrna/sc-pseudotime/sc_pseudotime.py", "api_sc_pseudotime", {
+        "default": Case(("--demo", "--use-rep", "X_pca")),
+        "palantir": Case(("--demo", "--use-rep", "X_pca", "--method", "palantir")),
+    }),
+    "sc-velocity": Skill("skills/singlecell/scrna/sc-velocity/sc_velocity.py", "api_sc_velocity", {
+        "default": Case(("--demo",)), "steady_state": Case(("--demo", "--mode", "steady_state")),
+    }, legacy_sigkill=True),
+    "sc-grn": Skill("skills/singlecell/scrna/sc-grn/sc_grn.py", "api_sc_grn", {
+        "default": Case(("--demo",)), "simplified": Case(("--demo", "--allow-simplified-grn")),
+    }),
+    "sc-pathway-scoring": Skill("skills/singlecell/scrna/sc-pathway-scoring/sc_pathway_scoring.py", "api_sc_pathway_scoring", {
+        "aucell_py": Case(("--demo", "--method", "aucell_py")),
+        "score_genes_py": Case(("--demo", "--method", "score_genes_py")),
+    }),
+    "sc-gene-programs": Skill("skills/singlecell/scrna/sc-gene-programs/sc_gene_programs.py", "api_sc_gene_programs", {
+        "default": Case(("--demo", "--method", "nmf")),
+        "four": Case(("--demo", "--method", "nmf", "--n-programs", "4")),
+    }),
+    "sc-differential-abundance": Skill("skills/singlecell/scrna/sc-differential-abundance/sc_differential_abundance.py", "api_sc_differential_abundance", {
+        "simple": Case(("--demo", "--method", "simple")),
+        "milo": Case(("--demo", "--method", "milo")),
+    }),
+    "sc-cell-communication": Skill("skills/singlecell/scrna/sc-cell-communication/sc_cell_communication.py", "api_sc_cell_communication", {
+        "builtin": Case(("--demo",)),
+        "liana": Case(("--demo", "--method", "liana"), exclude={
+            "tables/lr_interactions.csv:pvalue": "LIANA specificity_rank is not a p-value; now NaN.",
+            "tables/lr_interactions.csv:specificity_rank": "Preserve the original rank under its correct name.",
+            "tables/top_interactions.csv:pvalue": "LIANA specificity_rank is not a p-value; now NaN.",
+            "tables/top_interactions.csv:specificity_rank": "Preserve the original rank under its correct name.",
+            "summary.json:n_significant": "Consensus ranks are no longer counted as significant p-values.",
+            "summary.json:pvalue_available": "LIANA consensus output does not provide p-values.",
+            "summary.json:significance_semantics": "New explanation of LIANA rank semantics.",
+            "summary.json:random_state": "Record LIANA's unchanged default seed 1337 explicitly.",
+        }),
+    }),
+    "sc-multi-count": Skill("skills/singlecell/scrna/sc-multi-count/sc_multi_count.py", "api_sc_multi_count", {
+        "default": Case(("--demo",)),
+        "labels": Case(("--demo", "--sample-id", "control", "--sample-id", "treated")),
+    }),
+    "scatac-preprocessing": Skill("skills/singlecell/scatac/scatac-preprocessing/scatac_preprocessing.py", "api_scatac_preprocessing", {
+        "default": Case(("--demo",)), "lsi20": Case(("--demo", "--n-lsi", "20")),
+    }),
+    "sc-batch-integration": Skill("skills/singlecell/scrna/sc-batch-integration/sc_integrate.py", "api_sc_batch_integration", {
+        "harmony": Case(("--method", "harmony"), input=_integration_input),
+        "scanorama": Case(("--method", "scanorama"), input=_integration_input),
+    }),
+    "sc-enrichment": Skill("skills/singlecell/scrna/sc-enrichment/sc_enrichment.py", "api_sc_enrichment", {
+        "default": Case(("--demo", "--engine", "python")),
+        "gsea": Case(("--demo", "--engine", "python", "--method", "gsea")),
+    }),
+    "sc-standardize-input": Skill("skills/singlecell/scrna/sc-standardize-input/sc_standardize_input.py", "api_sc_standardize_input", {
+        "default": Case(("--demo",)), "human": Case(("--demo", "--species", "human")),
+    }),
+    "sc-doublet-detection": Skill("skills/singlecell/scrna/sc-doublet-detection/sc_doublet.py", "api_sc_doublet_detection", {
+        "default": Case(("--demo",)), "doubletdetection": Case(("--demo", "--method", "doubletdetection")),
+    }),
+    "sc-ambient-removal": Skill("skills/singlecell/scrna/sc-ambient-removal/sc_ambient.py", "api_sc_ambient_removal", {
+        "default": Case(("--demo",)), "tenth": Case(("--demo", "--contamination", "0.1")),
+    }),
+    "sc-qc": Skill("skills/singlecell/scrna/sc-qc/sc_qc.py", "api_sc_qc", {
+        "default": Case(("--demo",)), "mouse": Case(("--demo", "--species", "mouse")),
+    }),
+    "sc-preprocessing": Skill("skills/singlecell/scrna/sc-preprocessing/sc_preprocess.py", "api_sc_preprocessing", {
+        "default": Case(("--demo",)), "pearson": Case(("--demo", "--method", "pearson_residuals")),
+    }),
+    "sc-clustering": Skill("skills/singlecell/scrna/sc-clustering/sc_cluster.py", "api_sc_clustering", {
+        "default": Case(("--demo",)), "louvain": Case(("--demo", "--cluster-method", "louvain")),
+    }),
+    "sc-cell-annotation": Skill("skills/singlecell/scrna/sc-cell-annotation/sc_annotate.py", "api_sc_cell_annotation", {
+        "default": Case(("--demo",)), "knnpredict": Case(("--demo", "--method", "knnpredict")),
+    }),
+    "sc-de": Skill("skills/singlecell/scrna/sc-de/sc_de.py", "api_sc_de", {
+        "default": Case(("--demo",)), "ttest": Case(("--demo", "--method", "t-test")),
+    }),
+    "sc-filter": Skill("skills/singlecell/scrna/sc-filter/sc_filter.py", "api_sc_filter", {
+        "default": Case(("--demo",)), "pbmc": Case(("--demo", "--tissue", "pbmc")),
+    }),
+    "sc-markers": Skill("skills/singlecell/scrna/sc-markers/sc_markers.py", "api_sc_markers", {
+        "default": Case(("--demo",)), "ttest": Case(("--demo", "--method", "t-test")),
+    }),
 }
-"""Each pilot skill's demo defaults plus one Python-method variant."""
+"""One entry per skill; the first five keep their original pilot cases."""
 
 _DROPPED_SUMMARY_KEYS = {"completed_at", "elapsed_seconds", "runtime_seconds", "output_dir", "output_h5ad",
                          "input_file", "standardized_at"}
@@ -68,13 +222,89 @@ def child_env() -> dict[str, str]:
     return env
 
 
-def run_cli(skill: str, case: str, output: Path, *, python: str | None = None) -> subprocess.CompletedProcess:
+def case_input(skill: str, case: str, scratch: Path) -> Path | None:
+    """Use the recorded input, or generate it once for a new recording."""
+    entry = REGISTRY[skill].cases[case]
+    if entry.input is None:
+        return None
+    recorded = golden_dir(skill, case) / "input.h5ad"
+    if recorded.is_file():
+        meta = json.loads((recorded.parent / "meta.json").read_text())
+        if hashlib.sha256(recorded.read_bytes()).hexdigest() != meta["input_sha256"]:
+            raise ValueError(f"recorded input changed: {recorded}")
+        return recorded
+    scratch.mkdir(parents=True, exist_ok=True)
+    target = scratch / "input.h5ad"
+    entry.input(target)
+    return target
+
+
+def run_cli(skill: str, case: str, output: Path, *, python: str | None = None,
+            input_path: Path | None = None) -> subprocess.CompletedProcess:
     """Run *skill*'s CLI for *case* into *output* with the given interpreter (default: this one)."""
     env = child_env()
+    entry = REGISTRY[skill]
+    source = input_path or case_input(skill, case, output.parent / "input")
+    args = list(entry.cases[case].args)
+    if source is not None:
+        args += ["--input", str(source)]
     return subprocess.run(
-        [python or sys.executable, str(REPO / SCRIPTS[skill]), *CASES[skill][case], "--output", str(output)],
-        cwd=REPO, env=env, capture_output=True, text=True, timeout=3600,
+        [python or sys.executable, str(REPO / entry.script), *args, "--output", str(output)],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=3600, start_new_session=True,
     )
+
+
+def recording_succeeded(skill: str, proc: subprocess.CompletedProcess, output: Path) -> bool:
+    """Accept the old velocity CLI's self-kill only after its outputs are complete.
+
+    This exception is for baseline recording. Regression runs require exit 0.
+    Recording uses a new temporary output directory for each invocation.
+    """
+    if proc.returncode == 0:
+        return True
+    if skill != "sc-velocity" or not REGISTRY[skill].legacy_sigkill or proc.returncode != -signal.SIGKILL:
+        return False
+    import anndata
+    import pandas as pd
+    from skills._sdk.result import RESULT_SCHEMA
+
+    try:
+        result = json.loads((output / "result.json").read_text())
+        types = {"str": str, "dict": dict}
+        if any(not isinstance(result.get(key), types[kind]) for key, kind in RESULT_SCHEMA["required"].items()):
+            return False
+        if any(not result[key] for key in RESULT_SCHEMA["non_empty"]):
+            return False
+        if result["skill"] != skill or result.get("status", "ok") != "ok":
+            return False
+        if result["data"]["output_h5ad"] != "processed.h5ad":
+            return False
+        outputs = result["data"]["output_files"]
+        for value in [outputs["processed_h5ad"], *outputs["compatibility_aliases"]]:
+            path = Path(value)
+            if not path.is_absolute():
+                path = output / path
+            path.resolve().relative_to(output.resolve())
+            if not path.is_file() or path.stat().st_size == 0:
+                return False
+        adata = anndata.read_h5ad(output / "processed.h5ad")
+        if adata.shape != (result["summary"]["n_cells"], result["summary"]["n_genes"]):
+            return False
+        for name in ("velocity_summary.csv", "velocity_cells.csv", "top_velocity_genes.csv"):
+            table = pd.read_csv(output / "tables" / name)
+            if name == "velocity_cells.csv" and len(table) != adata.n_obs:
+                return False
+        if not (output / "report.md").read_text().strip():
+            return False
+        manifest = json.loads((output / "figures" / "manifest.json").read_text())
+        for plot in manifest["plots"]:
+            path = output / "figures" / plot["filename"]
+            path.resolve().relative_to(output.resolve())
+            if not path.is_file() or path.stat().st_size == 0:
+                return False
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return True
 
 
 def _clean_summary(value):
@@ -141,6 +371,8 @@ def extract(output: Path, target: Path) -> None:
 def _close(a, b) -> bool:
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
+    if isinstance(a, int) and isinstance(b, int):
+        return a == b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
             return True
@@ -168,7 +400,8 @@ def compare_values(expected, actual, where: str) -> list[str]:
     return [] if _close(expected, actual) else [f"{where}: {expected!r} != {actual!r}"]
 
 
-def compare_frames(expected, actual, where: str) -> list[str]:
+def compare_frames(expected, actual, where: str, *, structure_only: bool = False,
+                   column_rtol: dict[str, float] | None = None) -> list[str]:
     """Value-by-value differences between two tables: same columns and rows, floats within ``RTOL``."""
     import numpy as np
     from pandas.api import types
@@ -180,58 +413,105 @@ def compare_frames(expected, actual, where: str) -> list[str]:
     problems = []
     for column in expected.columns:
         left, right = expected[column], actual[column]
+        if structure_only:
+            if types.is_numeric_dtype(left) != types.is_numeric_dtype(right):
+                problems.append(f"{where}.{column}: numeric and non-numeric")
+            elif not types.is_numeric_dtype(left) and set(left.astype(str)) != set(right.astype(str)):
+                problems.append(f"{where}.{column}: label sets differ")
+            continue
         if types.is_float_dtype(left) or types.is_float_dtype(right):
             if not (types.is_numeric_dtype(left) and types.is_numeric_dtype(right)):
                 problems.append(f"{where}.{column}: numeric and non-numeric")
                 continue
-            if not np.allclose(left.to_numpy(float), right.to_numpy(float), rtol=RTOL, atol=0.0, equal_nan=True):
-                bad = int((~np.isclose(left.to_numpy(float), right.to_numpy(float), rtol=RTOL, atol=0.0,
+            rtol = (column_rtol or {}).get(column, RTOL)
+            if not np.allclose(left.to_numpy(float), right.to_numpy(float), rtol=rtol, atol=0.0, equal_nan=True):
+                bad = int((~np.isclose(left.to_numpy(float), right.to_numpy(float), rtol=rtol, atol=0.0,
                                        equal_nan=True)).sum())
-                problems.append(f"{where}.{column}: {bad} values differ beyond rtol {RTOL}")
+                problems.append(f"{where}.{column}: {bad} values differ beyond rtol {rtol}")
         elif not (left.astype(str).to_numpy() == right.astype(str).to_numpy()).all():
             bad = int((left.astype(str).to_numpy() != right.astype(str).to_numpy()).sum())
             problems.append(f"{where}.{column}: {bad} values differ")
     return problems
 
 
-def compare_labels(expected, actual, where: str) -> list[str]:
+def compare_labels(expected, actual, where: str, *, structure_only: bool = False) -> list[str]:
     """Differences between two ``obs_name -> label`` series."""
     if set(expected.index) != set(actual.index):
         return [f"{where}: cells differ ({len(set(expected.index) ^ set(actual.index))} not shared)"]
     actual = actual.reindex(expected.index)
+    if structure_only:
+        return [f"{where}: label sets differ"] if set(expected.astype(str)) != set(actual.astype(str)) else []
     bad = int((expected.astype(str).to_numpy() != actual.astype(str).to_numpy()).sum())
     return [f"{where}: {bad} labels differ"] if bad else []
 
 
-def compare(golden: Path, snapshot: Path) -> list[str]:
+def _structure(value):
+    if isinstance(value, dict):
+        return {key: _structure(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_structure(item) for item in value]
+    return "number" if isinstance(value, (int, float)) and not isinstance(value, bool) else type(value).__name__
+
+
+def compare(golden: Path, snapshot: Path, *, exclude: dict[str, str] | None = None,
+            structure_only: bool = False) -> list[str]:
     """Every difference between a recorded snapshot and a new one."""
     import pandas as pd
 
+    exclude = exclude or {}
+    if any(not reason.strip() for reason in exclude.values()):
+        raise ValueError("each parity exclusion needs a reason")
     problems: list[str] = []
     for name in ("summary.json", "figures.json", "obsm.json"):
+        if name in exclude:
+            continue
         left, right = golden / name, snapshot / name
         if left.exists() != right.exists():
             problems.append(f"{name}: present in only one snapshot")
         elif left.exists():
-            problems += compare_values(json.loads(left.read_text()), json.loads(right.read_text()), name)
+            left_value, right_value = json.loads(left.read_text()), json.loads(right.read_text())
+            if name == "figures.json":
+                left_value, right_value = ([item for item in value if f"figures/{item}" not in exclude]
+                                           for value in (left_value, right_value))
+            else:
+                for key in exclude:
+                    if key.startswith(f"{name}:"):
+                        parts = key.split(":", 1)[1].split(".")
+                        for value in (left_value, right_value):
+                            for part in parts[:-1]:
+                                value = value.get(part, {}) if isinstance(value, dict) else {}
+                            if isinstance(value, dict):
+                                value.pop(parts[-1], None)
+            if structure_only and name == "summary.json":
+                left_value, right_value = _structure(left_value), _structure(right_value)
+            problems += compare_values(left_value, right_value, name)
     for folder in ("tables", "obs_labels"):
         expected = {p.relative_to(golden / folder).as_posix() for p in (golden / folder).rglob("*.csv")} \
             if (golden / folder).is_dir() else set()
         actual = {p.relative_to(snapshot / folder).as_posix() for p in (snapshot / folder).rglob("*.csv")} \
             if (snapshot / folder).is_dir() else set()
+        expected = {name for name in expected if f"{folder}/{name}" not in exclude}
+        actual = {name for name in actual if f"{folder}/{name}" not in exclude}
         if expected != actual:
             problems.append(f"{folder}: files differ: missing {sorted(expected - actual)}, extra {sorted(actual - expected)}")
         for relative in sorted(expected & actual):
             left = pd.read_csv(golden / folder / relative)
             right = pd.read_csv(snapshot / folder / relative)
+            columns = [key.split(":", 1)[1] for key in exclude if key.startswith(f"{folder}/{relative}:")]
+            left, right = (frame.drop(columns=columns, errors="ignore") for frame in (left, right))
             if folder == "obs_labels":
                 problems += compare_labels(left.set_index("obs_name")["label"], right.set_index("obs_name")["label"],
-                                           f"{folder}/{relative}")
+                                           f"{folder}/{relative}", structure_only=structure_only)
             else:
-                problems += compare_frames(left, right, f"{folder}/{relative}")
+                problems += compare_frames(left, right, f"{folder}/{relative}", structure_only=structure_only)
     left, right = golden / "obs_numeric.csv", snapshot / "obs_numeric.csv"
+    if "obs_numeric.csv" in exclude:
+        return problems
     if left.exists() and right.exists():
-        problems += compare_frames(pd.read_csv(left), pd.read_csv(right), "obs_numeric.csv")
+        columns = [key.split(":", 1)[1] for key in exclude if key.startswith("obs_numeric.csv:")]
+        problems += compare_frames(pd.read_csv(left).drop(columns=columns, errors="ignore"),
+                                   pd.read_csv(right).drop(columns=columns, errors="ignore"), "obs_numeric.csv",
+                                   structure_only=structure_only)
     elif left.exists() != right.exists():
         problems.append("obs_numeric.csv: present in only one snapshot")
     return problems
@@ -242,7 +522,14 @@ def compare_output(skill: str, case: str, output: Path) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="parity-") as scratch:
         snapshot = Path(scratch) / "snapshot"
         extract(output, snapshot)
-        return compare(golden_dir(skill, case), snapshot)
+        return compare(golden_dir(skill, case), snapshot, **comparison_options(skill, case))
+
+
+def comparison_options(skill: str, case: str) -> dict:
+    meta_path = golden_dir(skill, case) / "meta.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+    return {"exclude": REGISTRY[skill].cases[case].exclude,
+            "structure_only": meta.get("deterministic") is False}
 
 
 def _git_commit() -> str | None:
@@ -254,21 +541,37 @@ def _git_commit() -> str | None:
 
 
 def record(skill: str, case: str) -> Path:
-    """Run the CLI for *case* and store its snapshot in the golden folder."""
+    """Record two CLI runs and mark value differences as nondeterministic."""
     with tempfile.TemporaryDirectory(prefix=f"parity-{skill}-") as scratch:
-        output = Path(scratch) / "out"
-        proc = run_cli(skill, case, output)
-        if proc.returncode != 0:
-            raise SystemExit(f"{skill} {case} failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
+        scratch = Path(scratch)
+        source = case_input(skill, case, scratch / "input")
+        snapshots = []
+        for number in range(2):
+            output = scratch / f"out-{number}"
+            proc = run_cli(skill, case, output, input_path=source)
+            if not recording_succeeded(skill, proc, output):
+                raise SystemExit(f"{skill} {case} failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
+            path = scratch / f"snapshot-{number}"
+            extract(output, path)
+            snapshots.append(path)
+        differences = compare(*snapshots, exclude=REGISTRY[skill].cases[case].exclude)
         target = golden_dir(skill, case)
-        extract(output, target)
+        input_hash = hashlib.sha256(source.read_bytes()).hexdigest() if source else None
+        if source is not None:
+            shutil.copy2(source, snapshots[0] / "input.h5ad")
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(snapshots[0], target)
     from importlib.metadata import version
 
     meta = {
-        "skill": skill, "case": case, "args": CASES[skill][case], "python": sys.executable,
+        "skill": skill, "case": case, "args": REGISTRY[skill].cases[case].args, "python": sys.executable,
         "python_version": platform.python_version(), "git_commit": _git_commit(),
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "versions": {name: version(name) for name in ("scanpy", "anndata", "numpy", "pandas")},
+        "runs": 2, "deterministic": not differences, "repeat_differences": differences,
+        "uncertainty_reason": "; ".join(differences) if differences else None,
+        "input_sha256": input_hash, "exclude": REGISTRY[skill].cases[case].exclude,
     }
     (target / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     return target
@@ -278,15 +581,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tests.parity.snapshot")
     commands = parser.add_subparsers(dest="command", required=True)
     rec = commands.add_parser("record")
-    rec.add_argument("skill", choices=sorted(CASES))
+    rec.add_argument("skill", choices=sorted(REGISTRY))
     rec.add_argument("--case", required=True)
     cmp_ = commands.add_parser("compare")
-    cmp_.add_argument("skill", choices=sorted(CASES))
+    cmp_.add_argument("skill", choices=sorted(REGISTRY))
     cmp_.add_argument("--case", required=True)
     cmp_.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
-    if args.case not in CASES[args.skill]:
-        parser.error(f"{args.skill} has cases {sorted(CASES[args.skill])}")
+    if args.case not in REGISTRY[args.skill].cases:
+        parser.error(f"{args.skill} has cases {sorted(REGISTRY[args.skill].cases)}")
     if args.command == "record":
         print(record(args.skill, args.case))
         return 0

@@ -28,11 +28,11 @@
 
 OmicsClaw 是一个做多组学分析的 AI agent。你用自然语言说明要做的分析，模型挑选合适的
 skill，读它的说明，再在你自己的环境里（本机或服务器）运行其中的 Python、R 或命令行工具。
-仓库自带 7 个领域共 89 个 skill；终端、桌面 App 和聊天平台背后是同一个 agent。
+仓库自带 7 个领域共 88 个 skill；终端、桌面 App 和聊天平台背后是同一个 agent。
 
 ## 最新动态
 
-- agent 现在在课题模块里做分析：它写调用 skill 函数库的步骤文件，步骤执行器在新的 kernel 里运行这些步骤，记下每个输入、输出和 skill 调用；一个模块要经过重放、只读审查和你的确认才算验收。目前有 5 个单细胞 skill 带函数库（[0070](docs/plans/0070-notebook-skill-runtime.md)）。
+- 27 个计算型单细胞 skill 均有函数库，3 个原始输入处理 skill 保留 CLI，课题模块可混合 Python 和 R 步骤，记录读写并经过重放、审查和用户确认后验收（[0074](docs/plans/0074-singlecell-skill-migration.md)）。
 - agent 框架已经重写，入口改为 `oc cli`、`oc desktop` 和 `oc channel` 三个，`oc interactive`、`oc tui`、`oc onboard`、`oc run` 等旧命令已移除（[重写进展](docs/FRAMEWORK-REBUILD.md)）。
 - 桌面 App 已能连接重写后的后端，支持经 SSH 的远程模式，也能在 App 里配置模型（[0064](docs/plans/0064-desktop-app-alignment.md)、[0065](docs/plans/0065-desktop-management-pages-and-retirement.md)、[0066](docs/plans/0066-desktop-remote-mode.md)）。
 - agent 会告诉你当前环境缺哪些 skill 需要的包；设置 `OMICSCLAW_SKILL_ENV=install` 后，它可以在你批准后把这些包装进独立的 overlay 环境，基础环境保持不变（[0061](docs/plans/0061-adaptive-env-provisioning.md)）。
@@ -126,7 +126,7 @@ HTTP 接口约定见 [`docs/core-features/surfaces.md`](docs/core-features/surfa
 
 ## 领域
 
-7 个领域共 89 个 skill，`make list` 可以打印当前索引。
+7 个领域共 88 个 skill，`make list` 可以打印当前索引。
 
 | 领域 | skill 数 | 示例 | 指南 |
 |---|---|---|---|
