@@ -127,6 +127,14 @@ Thumbs.db
 *.mzML
 *.mzXML
 
+# Small, hand-worked fixtures used by the genomics APIs and replay examples.
+!skills/genomics/genomics-alignment/data/example.sam
+!skills/genomics/genomics-phasing/data/example.vcf
+!skills/genomics/genomics-qc/data/example.fastq
+!skills/genomics/genomics-sv-detection/data/example.vcf
+!skills/genomics/genomics-variant-calling/data/example.vcf
+!skills/genomics/genomics-vcf-operations/data/example.vcf
+
 # R
 *.Rhistory
 *.RData

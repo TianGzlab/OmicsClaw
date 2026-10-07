@@ -18,11 +18,11 @@ def read_info(data, *, keep=True):
     return value
 
 
-def require_columns(data, columns):
+def require_columns(data, columns, *, allow_empty=False):
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame")
     missing = set(columns) - set(data.columns)
     if missing:
         raise ValueError("Missing columns: " + ", ".join(sorted(missing)))
-    if data.empty:
+    if data.empty and not allow_empty:
         raise ValueError("Input contains no records")

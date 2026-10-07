@@ -21,12 +21,14 @@ def read_records(path: str | Path) -> pd.DataFrame:
 def analyze(data: pd.DataFrame) -> pd.DataFrame:
     """Compute phasing summaries and return a new table, leaving data unchanged.
 
+    A header-only VCF yields an empty table with zero-valued summary metrics.
+
     :param data: Records containing chrom, pos, gt, is_phased, is_het, phase_set.
 
     :returns: Result table with diagnostics and summary in attrs['run_info'].
-    :raises ValueError: Required columns are absent or records are empty or invalid.
+    :raises ValueError: Required columns are absent or records are invalid.
     """
-    require_columns(data, ["chrom","pos","gt","is_phased","is_het","phase_set"])
+    require_columns(data, ["chrom","pos","gt","is_phased","is_het","phase_set"], allow_empty=True)
     result = data.copy(deep=True)
     summary = core.compute_phasing_stats(result.to_dict("records"), core.group_blocks(result))
     return attach_info(result, summary, method="phasing")

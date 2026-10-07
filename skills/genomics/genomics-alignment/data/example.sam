@@ -1,0 +1,7 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:chr1	LN:1000
+r1	3	chr1	10	40	4M	=	100	94	ACGT	IIII
+r1	19	chr1	100	40	4M	=	10	-94	ACGT	IIII
+r2	4	*	0	0	*	*	0	0	GGNN	5555
+r3	1024	chr1	200	20	4M	*	0	0	ATAT	????
+r4	256	chr1	300	10	4M	*	0	0	ATAT	????

@@ -54,10 +54,12 @@ Read records through read_input(path, reader=library.read_records).
 
 Compute phasing summaries and return a new table, leaving data unchanged.
 
+A header-only VCF yields an empty table with zero-valued summary metrics.
+
 :param data: Records containing chrom, pos, gt, is_phased, is_het, phase_set.
 
 :returns: Result table with diagnostics and summary in attrs['run_info'].
-:raises ValueError: Required columns are absent or records are empty or invalid.
+:raises ValueError: Required columns are absent or records are invalid.
 
 ### `run_info(data: pd.DataFrame, *, keep: bool=True) -> dict`
 
