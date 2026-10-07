@@ -17,12 +17,15 @@ class RequestDeadline:
         self.provider = provider
         self.at = asyncio.get_running_loop().time() + seconds
 
-    @asynccontextmanager
-    async def wait(self) -> AsyncIterator[None]:
+    def _check(self) -> None:
         if asyncio.get_running_loop().time() >= self.at:
             raise ProviderDeadlineExceeded(
                 f"request deadline exceeded ({self.seconds:g}s)", provider=self.provider,
             )
+
+    @asynccontextmanager
+    async def wait(self) -> AsyncIterator[None]:
+        self._check()
         timer = asyncio.timeout_at(self.at)
         try:
             async with timer:
@@ -41,6 +44,8 @@ class RequestDeadline:
                 async with self.wait():
                     item = await anext(iterator)
             except StopAsyncIteration:
+                # Synchronous EOF can arrive before the loop runs its timeout callback.
+                self._check()
                 return
             # Never leave a timer armed while control belongs to the consumer.
             yield item

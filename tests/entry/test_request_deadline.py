@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -98,6 +99,49 @@ def test_buffered_stream_chunks_do_not_bypass_the_deadline(tmp_path, monkeypatch
             await asyncio.wait_for(handle.wait(), 1)
             assert handle.terminal == "failed"
             assert "deadline" in str(handle.error).lower()
+        finally:
+            await app.aclose()
+
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("backend", ["openai", "anthropic"])
+def test_stream_ending_after_a_blocked_loop_still_exceeds_the_deadline(tmp_path, monkeypatch, backend):
+    class Stream:
+        closed = False
+
+        async def __aiter__(self):
+            yield {"choices": []} if backend == "openai" else {"type": "ping"}
+            # The SDK reaches EOF before the event loop can run its timeout callback.
+            time.sleep(0.06)
+
+        async def close(self):
+            self.closed = True
+
+    stream = Stream()
+
+    async def create(**kwargs):
+        return stream
+
+    endpoint = SimpleNamespace(create=create)
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(
+        AsyncOpenAI=lambda **kwargs: SimpleNamespace(chat=SimpleNamespace(completions=endpoint)),
+        Timeout=lambda *args, **kwargs: None,
+    ))
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(
+        AsyncAnthropic=lambda **kwargs: SimpleNamespace(messages=endpoint),
+    ))
+    adapter = OpenAIProvider if backend == "openai" else AnthropicProvider
+    provider = adapter(ProviderConfig(provider=backend, model="test", timeout_seconds=0.02))
+
+    async def drive():
+        app = attach_sessions(build_app(AppConfig(workspace=tmp_path, memory=False), provider=provider, tools=[]))
+        try:
+            handle = await app.sessions.submit("late-eof", "hi")
+            await asyncio.wait_for(handle.wait(), 1)
+            assert handle.terminal == "failed"
+            assert "deadline" in str(handle.error).lower()
+            assert stream.closed
         finally:
             await app.aclose()
 

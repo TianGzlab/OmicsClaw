@@ -10,7 +10,9 @@ SDK retries, first response and streaming. `ProviderDeadlineExceeded` ends
 the request without an engine retry. Stream cleanup has a separate allowance
 of at most one second (or the request timeout if shorter). Cancellation still
 propagates. This is an async IO deadline; it cannot interrupt synchronous
-code that blocks the event loop. Failed or cancelled exchanges retain the
+code that blocks the event loop. Once control returns, stream EOF is checked
+against the deadline too; a delayed timeout callback cannot turn a late EOF
+into success. Failed or cancelled exchanges retain the
 existing session-history behavior: their partial conversation is discarded,
 and completed tool side effects are not rolled back. Automatic resume of
 partial exchanges is not implemented by this change.

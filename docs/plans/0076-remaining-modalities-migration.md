@@ -43,7 +43,7 @@
 
 ### 环境与阶段证据
 
-基础 conda 环境未修改。Python 科学测试使用 `/opt/conda/envs/OmicsClaw/bin/python`；示例使用独立 venv `/tmp/omicsclaw-0075-ci.huDrtZ/venv/bin/python`，R 后端通过显式 `CONDA_PREFIX` 指向已有科学环境。新增 CI job 从 `environment.yml` 的同名 conda 包安装 R/WGCNA/sva/survival/DESeq2，实际远端 CI 尚未运行。
+基础 conda 环境未修改。初轮 Python 科学测试使用 `/opt/conda/envs/OmicsClaw/bin/python`；示例使用独立 venv `/tmp/omicsclaw-0075-ci.huDrtZ/venv/bin/python`，R 后端通过显式 `CONDA_PREFIX` 指向已有科学环境。新增 CI job 从 `environment.yml` 的同名 conda 包安装 R/WGCNA/sva/survival/DESeq2。远端和干净 checkout 的补验收见下节。
 
 - 审核修复后，全批旧 CLI/API 对比 121 passed、3 skipped，202.24 秒。跳过项是旧 WGCNA 无成功基线对应的 CLI/API 两项，以及 XCMS 无 API 一项。61 个实际基线均核验为 `f97f38c1`、两次确定性录制，没有整个案例仅作结构比较。
 - 最终 41 个新示例全部经 step runner 和 fresh-kernel replay 通过，243.88 秒，核对输出文件、表格哈希及重放状态。
@@ -98,4 +98,26 @@ CONDA_PREFIX=/opt/conda/envs/OmicsClaw OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 
   --import-mode=importlib -m 'not slow and not skill_example' -q -o addopts=""
 ```
 
-工作分支为 `feat/remaining-modalities-migration`，本轮尚未合并或推送。远端 CI、实时 MyGene/STRING/DOI/PubMed 和真实 PDF/GEO 下载未作端到端验收。另一会话的演示文稿和 CHANGELOG 条目保留，不纳入此次提交。
+迁移已合并到 `main` 并推送，交付提交为 `8d8ad9ef`。实时 MyGene/STRING/DOI/PubMed 和真实 PDF/GEO 下载仍未作端到端验收。另一会话的演示文稿和 CHANGELOG 条目保留，不纳入此次提交。
+
+## 远端 CI 和干净 checkout 补验收
+
+2026-10-07，用户要求补齐远端 CI 和干净 checkout 验收，修复基线为 `8d8ad9ef`。原工作区同时有演示文稿和 Desktop 修改；本次在独立 worktree 实施，只从提交创建验收 checkout。
+
+### 发现与修复
+
+- [初轮远端 CI](https://github.com/zhou-1314/OmicsClaw/actions/runs/37611272965) 有两个失败 job。五域测试的八个失败源于六个合成基因组示例被 `*.vcf`、`*.sam`、`*.fastq` 忽略；单测的一个失败源于 phasing API 拒绝合法的零记录 VCF，破坏原 CLI 空表输出契约。
+- `6df935ca` 提交六个小型合成示例，并为其增加精确路径例外，真实数据的忽略规则不变。phasing 计算允许带完整列名的空表；其他计算和空表绘图仍拒绝空输入。干净 checkout 先复现缺文件和旧 CLI 的失败，新 API 空输入回归也先失败，再修复。
+- [修复后的远端 CI](https://github.com/zhou-1314/OmicsClaw/actions/runs/37616083907) 中，五域、单细胞、空间和 extended CPU job 全部通过。单测暴露另一个请求超时竞态：同步 EOF 超过截止时间时，事件循环可能尚未调度超时回调，session 因而误判成功。OpenAI、Anthropic 两条路径的确定性用例均先失败；流结束前补充时间核对后，provider、engine 和 deadline 共 712 项通过。
+- 新 venv 的完整本地单测还暴露 CLI 测试依赖外部 API 的问题。错误路径改用本机 HTTP 401，仍验证 REPL 存活、单次请求非零退出和无 traceback；仅观察首启配置提示的用例直接退出，不发模型请求。46 项 launch/configuration 测试通过。未新增 skip、xfail 或放宽断言。
+
+### 干净 checkout 证据
+
+从 `6df935ca` 新建 `/tmp/omicsclaw-ci-acceptance.NPluim/verify`，运行前后 `git status --porcelain --untracked-files=all` 均为空。新建不继承系统包的 venv `/tmp/omicsclaw-ci-acceptance.NPluim/venv`，将此 checkout 安装为 editable，并核对 `omicsclaw.__file__` 和 `skills._sdk.__file__` 均指向该 checkout。未复制原工作区的忽略文件、`.env`、golden 或演示文稿。`pip check` 无冲突；R 使用已有 `/opt/conda/envs/OmicsClaw`，基础环境未修改。
+
+- 五域按 CI 的路径和 marker 选择：215 passed、45 deselected，327.72 秒，无跳过。
+- 41 个示例执行及 fresh-kernel replay：41 passed、46 deselected，239.24 秒。
+- Scripted eval：29 passed，14.00 秒。
+- 完整单测首次在外部 API 错误路径超时，未作为通过证据。修复 EOF 竞态和 CLI 测试隔离后，需要从最终提交再跑完整单测和远端 CI。
+
+Python 3.11.15；NumPy 2.0.2、pandas 2.3.3、AnnData 0.12.11、SciPy 1.17.1、scikit-learn 1.9.1、nbclient 0.11.0、gseapy 1.2.1。完整环境快照和命令输出保留在 `/tmp/omicsclaw-ci-acceptance.NPluim/`，远端的独立安装及测试记录见上述 Actions 链接。

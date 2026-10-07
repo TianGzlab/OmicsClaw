@@ -29,6 +29,8 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 
 import pytest
 
@@ -164,28 +166,53 @@ def _bare_environment(tmp_path: pathlib.Path) -> dict[str, str]:
     }
 
 
-def _run_without_a_backend(
+def _run_with_rejected_request(
     tmp_path: pathlib.Path, arguments: list[str], stdin: str = ""
 ) -> subprocess.CompletedProcess[str]:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    return subprocess.run(
-        [sys.executable, "-m", "omicsclaw.launch", "cli", "--workspace",
-         str(workspace)] + arguments,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        cwd=str(_REPO_ROOT),
-        env=_bare_environment(tmp_path),
-        timeout=180,
-    )
+    class RejectRequest(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"message":"test backend rejected credentials"}}')
+
+        def log_message(self, *args):
+            pass
+
+    with HTTPServer(("127.0.0.1", 0), RejectRequest) as backend:
+        worker = Thread(target=backend.serve_forever, daemon=True)
+        worker.start()
+        env = _bare_environment(tmp_path)
+        env.update({
+            "LLM_PROVIDER": "custom",
+            "LLM_BASE_URL": f"http://127.0.0.1:{backend.server_port}/v1",
+            "OMICSCLAW_LLM_MAX_RETRIES": "0",
+            "OMICSCLAW_LLM_TIMEOUT_SECONDS": "2",
+            "OMICSCLAW_LLM_CONNECT_TIMEOUT_SECONDS": "1",
+        })
+        try:
+            return subprocess.run(
+                [sys.executable, "-m", "omicsclaw.launch", "cli", "--workspace",
+                 str(workspace)] + arguments,
+                input=stdin,
+                capture_output=True,
+                text=True,
+                cwd=str(_REPO_ROOT),
+                env=env,
+                timeout=30,
+            )
+        finally:
+            backend.shutdown()
+            worker.join(timeout=5)
 
 
-def test_the_repl_survives_a_backend_it_cannot_reach(tmp_path):
+def test_the_repl_survives_a_backend_that_rejects_its_request(tmp_path):
     """Plan 0037 §8-4 (a): the failure a first-time user meets.
 
-    There is no API key and no network here, so the exchange cannot
-    succeed —— and that is the point. What is being accepted is that the
+    A local HTTP backend rejects authentication, so the exchange cannot
+    succeed. What is being accepted is that the
     *command* is sound when the *deployment* is not: the banner prints,
     the exchange reports ``ProviderError`` in one line, the loop reaches
     end of input and exits ``0``, and at no point does a Python
@@ -195,7 +222,7 @@ def test_the_repl_survives_a_backend_it_cannot_reach(tmp_path):
     failed exchange inside a session is not a failed session —— the
     one-shot path below is where a failure is the outcome.
     """
-    result = _run_without_a_backend(tmp_path, [], stdin="hello\n")
+    result = _run_with_rejected_request(tmp_path, [], stdin="hello\n")
     printed = result.stdout + result.stderr
 
     assert result.returncode == 0, printed
@@ -211,7 +238,7 @@ def test_one_exchange_that_cannot_run_is_a_failed_exchange(tmp_path):
     able to tell "the model answered" from "nothing reached a model",
     and the only channel it has is the exit code.
     """
-    result = _run_without_a_backend(tmp_path, ["--", "--prompt", "hello"])
+    result = _run_with_rejected_request(tmp_path, ["--", "--prompt", "hello"])
     printed = result.stdout + result.stderr
 
     assert result.returncode == 1, printed

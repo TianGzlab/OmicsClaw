@@ -362,7 +362,7 @@ def test_the_flag_is_off_unless_it_is_given():
 def _start_repl(
     tmp_path: pathlib.Path, dotenv: str
 ) -> subprocess.CompletedProcess[str]:
-    """``oc cli`` with one line of input and no backend it can reach."""
+    """Start and exit ``oc cli`` to observe its configuration hint."""
     (tmp_path / ".env").write_text(dotenv, encoding="utf-8")
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
@@ -371,7 +371,7 @@ def _start_repl(
             sys.executable, "-m", "omicsclaw.launch", "cli",
             "--workspace", str(workspace),
         ],
-        input="hello\n",
+        input="/exit\n",
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
@@ -391,8 +391,7 @@ def test_a_first_run_with_no_key_is_told_what_to_type(tmp_path):
 
     A user who has never read the usage cannot guess the flag, and the
     deployment that most needs it is the one that has nothing configured
-    —— so that deployment is handed the whole command, on stderr, before
-    it spends several seconds failing to reach a model.
+    so that deployment is handed the whole command on stderr at startup.
     """
     result = _start_repl(tmp_path, "# nothing configured\n")
 
